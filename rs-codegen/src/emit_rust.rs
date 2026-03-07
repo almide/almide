@@ -1,0 +1,618 @@
+use crate::ast::*;
+
+struct Emitter {
+    out: String,
+    indent: usize,
+    /// Track if we're inside an effect function (for ? operator)
+    in_effect: bool,
+}
+
+impl Emitter {
+    fn new() -> Self {
+        Self { out: String::new(), indent: 0, in_effect: false }
+    }
+
+    fn emit_indent(&mut self) {
+        for _ in 0..self.indent {
+            self.out.push_str("    ");
+        }
+    }
+
+    fn emitln(&mut self, s: &str) {
+        self.emit_indent();
+        self.out.push_str(s);
+        self.out.push('\n');
+    }
+
+    fn emit_program(&mut self, prog: &Program) {
+        self.emitln("#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut)]");
+        self.emitln("");
+        self.emit_runtime();
+        self.emitln("");
+
+        for decl in &prog.decls {
+            self.emit_decl(decl);
+            self.emitln("");
+        }
+
+        let has_main = prog.decls.iter().any(|d| matches!(d, Decl::Fn { name, .. } if name == "main"));
+        if has_main {
+            self.emitln("fn main() {");
+            self.indent += 1;
+            self.emitln("let args: Vec<String> = std::env::args().collect();");
+            self.emitln("if let Err(e) = almide_main(&args) {");
+            self.indent += 1;
+            self.emitln("eprintln!(\"{}\", e);");
+            self.emitln("std::process::exit(1);");
+            self.indent -= 1;
+            self.emitln("}");
+            self.indent -= 1;
+            self.emitln("}");
+        }
+    }
+
+    fn emit_runtime(&mut self) {
+        // Inline runtime functions at top level
+        self.emitln("fn almide_concat_str(a: &str, b: &str) -> String { format!(\"{}{}\", a, b) }");
+        self.emitln("fn almide_concat_vec<T: Clone>(a: &[T], b: &[T]) -> Vec<T> { let mut r = a.to_vec(); r.extend_from_slice(b); r }");
+        self.emitln("");
+        // Generic concat: tries String first via Any, fallback to Vec
+        // For simplicity, we'll use specific concat calls in codegen
+    }
+
+    fn emit_decl(&mut self, decl: &Decl) {
+        match decl {
+            Decl::Module { path } => {
+                self.emitln(&format!("// module: {}", path.join(".")));
+            }
+            Decl::Import { path, .. } => {
+                self.emitln(&format!("// import: {}", path.join(".")));
+            }
+            Decl::Type { name, ty, deriving } => {
+                self.emit_type_decl(name, ty, deriving);
+            }
+            Decl::Fn { name, params, return_type, body, effect, .. } => {
+                self.emit_fn_decl(name, params, return_type, body, effect.unwrap_or(false));
+            }
+            Decl::Impl { trait_, for_, methods } => {
+                self.emitln(&format!("// impl {} for {}", trait_, for_));
+                for m in methods {
+                    self.emit_decl(m);
+                }
+            }
+            Decl::Test { name, body } => {
+                self.emitln("#[test]");
+                let safe_name = name.replace(' ', "_").replace('-', "_");
+                self.emitln(&format!("fn test_{}() {{", safe_name));
+                self.indent += 1;
+                let expr = self.gen_expr(body);
+                self.emitln(&format!("{};", expr));
+                self.indent -= 1;
+                self.emitln("}");
+            }
+            _ => {}
+        }
+    }
+
+    fn emit_type_decl(&mut self, name: &str, ty: &TypeExpr, _deriving: &Option<Vec<String>>) {
+        match ty {
+            TypeExpr::Record { fields } => {
+                self.emitln("#[derive(Debug, Clone, PartialEq)]");
+                self.emitln(&format!("struct {} {{", name));
+                self.indent += 1;
+                for f in fields {
+                    let ty_str = self.gen_type(&f.ty);
+                    self.emitln(&format!("{}: {},", f.name, ty_str));
+                }
+                self.indent -= 1;
+                self.emitln("}");
+            }
+            TypeExpr::Simple { .. } | TypeExpr::Generic { .. } => {
+                let ty_str = self.gen_type(ty);
+                self.emitln(&format!("type {} = {};", name, ty_str));
+            }
+            TypeExpr::Newtype { inner } => {
+                let ty_str = self.gen_type(inner);
+                self.emitln(&format!("struct {}({});", name, ty_str));
+            }
+            _ => {
+                self.emitln(&format!("// type {} (unsupported)", name));
+            }
+        }
+    }
+
+    fn emit_fn_decl(&mut self, name: &str, params: &[Param], ret_type: &TypeExpr, body: &Expr, is_effect: bool) {
+        let fn_name = if name == "main" { "almide_main" } else { name };
+        let ret_str = self.gen_type(ret_type);
+        let is_unit_ret = ret_str == "()";
+
+        let actual_ret = if is_effect {
+            if is_unit_ret { "Result<(), String>".to_string() }
+            else { format!("Result<{}, String>", ret_str) }
+        } else {
+            ret_str.clone()
+        };
+
+        let params_str: Vec<String> = params.iter()
+            .filter(|p| p.name != "self")
+            .map(|p| {
+                let ty = self.gen_type(&p.ty);
+                let ty_ref = match &p.ty {
+                    TypeExpr::Simple { name } if name == "String" => "&str".to_string(),
+                    TypeExpr::Generic { name, args } if name == "List" => {
+                        let inner = self.gen_type(&args[0]);
+                        format!("&[{}]", inner)
+                    }
+                    _ => ty,
+                };
+                format!("{}: {}", p.name, ty_ref)
+            })
+            .collect();
+
+        self.emitln(&format!("fn {}({}) -> {} {{", fn_name, params_str.join(", "), actual_ret));
+        self.indent += 1;
+
+        let prev_effect = self.in_effect;
+        self.in_effect = is_effect;
+
+        match body {
+            Expr::Block { stmts, expr: final_expr } => {
+                self.emit_stmts(stmts);
+                if is_effect {
+                    if let Some(fe) = final_expr {
+                        if is_unit_ret {
+                            let e = self.gen_expr(fe);
+                            self.emitln(&format!("{};", e));
+                            self.emitln("Ok(())");
+                        } else {
+                            let e = self.gen_expr(fe);
+                            self.emitln(&format!("Ok({})", e));
+                        }
+                    } else {
+                        self.emitln("Ok(())");
+                    }
+                } else {
+                    if let Some(fe) = final_expr {
+                        let e = self.gen_expr(fe);
+                        self.emitln(&e);
+                    }
+                }
+            }
+            _ => {
+                let expr = self.gen_expr(body);
+                if is_effect {
+                    self.emitln(&format!("Ok({})", expr));
+                } else {
+                    self.emitln(&expr);
+                }
+            }
+        }
+
+        self.in_effect = prev_effect;
+        self.indent -= 1;
+        self.emitln("}");
+    }
+
+    fn emit_stmts(&mut self, stmts: &[Stmt]) {
+        for stmt in stmts {
+            let s = self.gen_stmt(stmt);
+            self.emitln(&s);
+        }
+    }
+
+    fn gen_type(&self, ty: &TypeExpr) -> String {
+        match ty {
+            TypeExpr::Simple { name } => match name.as_str() {
+                "Int" => "i64".to_string(),
+                "Float" => "f64".to_string(),
+                "String" => "String".to_string(),
+                "Bool" => "bool".to_string(),
+                "Unit" => "()".to_string(),
+                other => other.to_string(),
+            },
+            TypeExpr::Generic { name, args } => match name.as_str() {
+                "List" => format!("Vec<{}>", self.gen_type(&args[0])),
+                "Option" => format!("Option<{}>", self.gen_type(&args[0])),
+                "Result" => format!("Result<{}, String>", self.gen_type(&args[0])),
+                "Map" => format!("HashMap<{}, {}>", self.gen_type(&args[0]), self.gen_type(&args[1])),
+                other => format!("{}<{}>", other, args.iter().map(|a| self.gen_type(a)).collect::<Vec<_>>().join(", ")),
+            },
+            TypeExpr::Record { fields } => {
+                let fs: Vec<String> = fields.iter().map(|f| format!("{}: {}", f.name, self.gen_type(&f.ty))).collect();
+                format!("{{ {} }}", fs.join(", "))
+            }
+            TypeExpr::Fn { params, ret } => {
+                let ps: Vec<String> = params.iter().map(|p| self.gen_type(p)).collect();
+                format!("fn({}) -> {}", ps.join(", "), self.gen_type(ret))
+            }
+            TypeExpr::Newtype { inner } => self.gen_type(inner),
+        }
+    }
+
+    fn gen_expr(&self, expr: &Expr) -> String {
+        match expr {
+            Expr::Int { raw, .. } => {
+                // All integers as u128 for BigInt compatibility, or i64 for small
+                if let Ok(n) = raw.parse::<u128>() {
+                    if n > i64::MAX as u128 {
+                        format!("{}u128", raw)
+                    } else {
+                        format!("{}i64", raw)
+                    }
+                } else {
+                    raw.clone()
+                }
+            }
+            Expr::Float { value } => format!("{:?}f64", value),
+            Expr::String { value } => format!("{:?}.to_string()", value),
+            Expr::Bool { value } => format!("{}", value),
+            Expr::Ident { name } => name.clone(),
+            Expr::TypeName { name } => name.clone(),
+            Expr::Unit => "()".to_string(),
+            Expr::None => "None".to_string(),
+            Expr::Some { expr } => format!("Some({})", self.gen_expr(expr)),
+            Expr::Ok { expr } => format!("Ok({})", self.gen_expr(expr)),
+            Expr::Err { expr } => {
+                let msg = self.gen_expr(expr);
+                format!("return Err({}.to_string())", msg)
+            }
+
+            Expr::List { elements } => {
+                let elems: Vec<String> = elements.iter().map(|e| self.gen_expr(e)).collect();
+                format!("vec![{}]", elems.join(", "))
+            }
+            Expr::Record { fields } => {
+                let fs: Vec<String> = fields.iter().map(|f| format!("{}: {}", f.name, self.gen_expr(&f.value))).collect();
+                format!("{{ {} }}", fs.join(", "))
+            }
+
+            Expr::Binary { op, left, right } => self.gen_binary(op, left, right),
+            Expr::Unary { op, operand } => {
+                let o = self.gen_expr(operand);
+                match op.as_str() {
+                    "not" => format!("!({})", o),
+                    _ => format!("{}{}", op, o),
+                }
+            }
+
+            Expr::If { cond, then, else_ } => {
+                let c = self.gen_expr(cond);
+                let t = self.gen_expr(then);
+                let e = self.gen_expr(else_);
+                format!("if {} {{ {} }} else {{ {} }}", c, t, e)
+            }
+
+            Expr::Call { callee, args } => self.gen_call(callee, args),
+
+            Expr::Member { object, field } => {
+                let obj = self.gen_expr(object);
+                format!("{}.{}", obj, field)
+            }
+
+            Expr::Pipe { left, right } => {
+                let l = self.gen_expr(left);
+                match right.as_ref() {
+                    Expr::Call { callee, args } => {
+                        let callee_str = self.gen_expr(callee);
+                        let mut all_args = vec![l];
+                        all_args.extend(args.iter().map(|a| self.gen_expr(a)));
+                        format!("{}({})", callee_str, all_args.join(", "))
+                    }
+                    _ => {
+                        let r = self.gen_expr(right);
+                        format!("{}({})", r, l)
+                    }
+                }
+            }
+
+            Expr::Lambda { params, body } => {
+                let ps: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
+                let b = self.gen_expr(body);
+                format!("|{}| {{ {} }}", ps.join(", "), b)
+            }
+
+            Expr::Match { subject, arms } => self.gen_match(subject, arms),
+
+            Expr::Block { stmts, expr } => self.gen_block(stmts, expr.as_deref()),
+            Expr::DoBlock { stmts, expr } => self.gen_do_block(stmts, expr.as_deref()),
+
+            Expr::Paren { expr } => format!("({})", self.gen_expr(expr)),
+            Expr::Try { expr } => {
+                // In effect fn: use ?, otherwise just eval
+                if self.in_effect {
+                    format!("({}?)", self.gen_expr(expr))
+                } else {
+                    self.gen_expr(expr)
+                }
+            }
+            Expr::Hole => "todo!()".to_string(),
+            Expr::Todo { message } => format!("todo!(\"{}\")", message),
+            Expr::Placeholder => "_".to_string(),
+
+            _ => format!("todo!(/* unsupported */)")
+        }
+    }
+
+    fn gen_binary(&self, op: &str, left: &Expr, right: &Expr) -> String {
+        let l = self.gen_expr(left);
+        let r = self.gen_expr(right);
+        match op {
+            "++" => {
+                // Use format! for string concat (most common in Almide)
+                // When left is a vec operation, use almide_concat_vec
+                format!("almide_concat_str(&{}, &{})", l, r)
+            }
+            "==" => format!("({} == {})", l, r),
+            "!=" => format!("({} != {})", l, r),
+            "and" => format!("({} && {})", l, r),
+            "or" => format!("({} || {})", l, r),
+            "/" => format!("({} / {})", l, r),
+            "^" => format!("(({} as u128) ^ ({} as u128))", l, r),
+            "*" => format!("(({} as u128) * ({} as u128))", l, r),
+            "%" => format!("(({} as u128) % ({} as u128))", l, r),
+            "<" | ">" | "<=" | ">=" => format!("({} {} {})", l, op, r),
+            "+" => format!("({} + {})", l, r),
+            "-" => format!("({} - {})", l, r),
+            _ => format!("({} {} {})", l, op, r),
+        }
+    }
+
+    fn gen_call(&self, callee: &Expr, args: &[Expr]) -> String {
+        // Handle module calls
+        if let Expr::Member { object, field } = callee {
+            if let Expr::Ident { name: module } = object.as_ref() {
+                return self.gen_module_call(module, field, args);
+            }
+        }
+
+        // Handle built-in functions
+        if let Expr::Ident { name } = callee {
+            match name.as_str() {
+                "println" => {
+                    let arg = self.gen_expr(&args[0]);
+                    return format!("println!(\"{{}}\", {})", arg);
+                }
+                "eprintln" => {
+                    let arg = self.gen_expr(&args[0]);
+                    return format!("eprintln!(\"{{}}\", {})", arg);
+                }
+                "err" => {
+                    let msg = self.gen_expr(&args[0]);
+                    return format!("return Err(({}).to_string())", msg);
+                }
+                "assert_eq" => {
+                    let a = self.gen_expr(&args[0]);
+                    let b = self.gen_expr(&args[1]);
+                    return format!("assert_eq!({}, {})", a, b);
+                }
+                "assert" => {
+                    let a = self.gen_expr(&args[0]);
+                    return format!("assert!({})", a);
+                }
+                "unwrap_or" => {
+                    let a = self.gen_expr(&args[0]);
+                    let b = self.gen_expr(&args[1]);
+                    return format!("({}).unwrap_or({})", a, b);
+                }
+                _ => {}
+            }
+        }
+
+        let callee_str = self.gen_expr(callee);
+        let args_str: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
+        format!("{}({})", callee_str, args_str.join(", "))
+    }
+
+    fn gen_module_call(&self, module: &str, func: &str, args: &[Expr]) -> String {
+        let args_str: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
+        match module {
+            "fs" => match func {
+                "read_text" => format!("std::fs::read_to_string(&*{}).map_err(|e| e.to_string())?", args_str[0]),
+                "write" => format!("std::fs::write(&*{}, &*{}).map_err(|e| e.to_string())?", args_str[0], args_str[1]),
+                "write_bytes" => format!("std::fs::write(&*{}, &{}).map_err(|e| e.to_string())?", args_str[0], args_str[1]),
+                "read_bytes" => format!("std::fs::read(&*{}).map_err(|e| e.to_string())?", args_str[0]),
+                "exists?" | "exists_q" => format!("std::path::Path::new(&*{}).exists()", args_str[0]),
+                "mkdir_p" => format!("std::fs::create_dir_all(&*{}).map_err(|e| e.to_string())?", args_str[0]),
+                "append" => format!("{{ let prev = std::fs::read_to_string(&*{}).unwrap_or_default(); std::fs::write(&*{}, format!(\"{{}}{{}}\", prev, {})).map_err(|e| e.to_string())?; }}", args_str[0], args_str[0], args_str[1]),
+                _ => format!("/* fs.{} */ todo!()", func),
+            },
+            "string" => match func {
+                "trim" => format!("({}).trim().to_string()", args_str[0]),
+                "split" => format!("({}).split(&*{}).map(|s| s.to_string()).collect::<Vec<String>>()", args_str[0], args_str[1]),
+                "join" => format!("({}).join(&*{})", args_str[0], args_str[1]),
+                "len" => format!("(({}).len() as i64)", args_str[0]),
+                "contains" => format!("({}).contains(&*{})", args_str[0], args_str[1]),
+                "starts_with?" | "starts_with_q" | "starts_with" => format!("({}).starts_with(&*{})", args_str[0], args_str[1]),
+                "ends_with?" | "ends_with_q" | "ends_with" => format!("({}).ends_with(&*{})", args_str[0], args_str[1]),
+                "slice" => {
+                    if args_str.len() == 3 {
+                        format!("({}).chars().skip({} as usize).take(({} - {}) as usize).collect::<String>()", args_str[0], args_str[1], args_str[2], args_str[1])
+                    } else {
+                        format!("({}).chars().skip({} as usize).collect::<String>()", args_str[0], args_str[1])
+                    }
+                }
+                "pad_left" => format!("format!(\"{{:0>width$}}\", {}, width = {} as usize)", args_str[0], args_str[1]),
+                "to_bytes" => format!("({}).as_bytes().iter().map(|&b| b as i64).collect::<Vec<i64>>()", args_str[0]),
+                "to_upper" => format!("({}).to_uppercase()", args_str[0]),
+                "to_lower" => format!("({}).to_lowercase()", args_str[0]),
+                "to_int" => format!("({}).parse::<i64>().map_err(|e| e.to_string())?", args_str[0]),
+                "replace" => format!("({}).replace(&*{}, &*{})", args_str[0], args_str[1], args_str[2]),
+                "char_at" => format!("({}).chars().nth({} as usize).map(|c| c.to_string())", args_str[0], args_str[1]),
+                _ => format!("/* string.{} */ todo!()", func),
+            },
+            "list" => {
+                // For list operations, inline the lambda body directly to avoid type annotation issues
+                let inline_lambda = |lambda_arg: &Expr, arity: usize| -> (Vec<String>, String) {
+                    if let Expr::Lambda { params, body } = lambda_arg {
+                        let names: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
+                        let body_str = self.gen_expr(body);
+                        (names, body_str)
+                    } else {
+                        let f = self.gen_expr(lambda_arg);
+                        if arity == 1 {
+                            (vec!["__x".to_string()], format!("({})((__x).clone())", f))
+                        } else {
+                            (vec!["__a".to_string(), "__b".to_string()], format!("({})(__a, __b.clone())", f))
+                        }
+                    }
+                };
+                match func {
+                    "len" => format!("(({}).len() as i64)", args_str[0]),
+                    "get" => format!("({}).get({} as usize).cloned()", args_str[0], args_str[1]),
+                    "sort" => format!("{{ let mut v = ({}).to_vec(); v.sort(); v }}", args_str[0]),
+                    "contains" => format!("({}).contains(&{})", args_str[0], args_str[1]),
+                    "each" => {
+                        let (names, body) = inline_lambda(&args[1], 1);
+                        format!("{{ for {} in ({}).iter() {{ {} ; }} }}", names[0], args_str[0], body)
+                    }
+                    "map" => {
+                        let (names, body) = inline_lambda(&args[1], 1);
+                        format!("({}).iter().map(|{}| {{ {} }}).collect::<Vec<_>>()", args_str[0], names[0], body)
+                    }
+                    "filter" => {
+                        let (names, body) = inline_lambda(&args[1], 1);
+                        format!("({}).iter().filter(|{}| {{ {} }}).cloned().collect::<Vec<_>>()", args_str[0], names[0], body)
+                    }
+                    "find" => {
+                        let (names, body) = inline_lambda(&args[1], 1);
+                        format!("({}).iter().find(|{}| {{ {} }}).cloned()", args_str[0], names[0], body)
+                    }
+                    "fold" => {
+                        let (names, body) = inline_lambda(&args[2], 2);
+                        format!("({}).iter().fold({}, |{}, {}| {{ {} }})", args_str[0], args_str[1], names[0], names[1], body)
+                    }
+                    _ => format!("/* list.{} */ todo!()", func),
+                }
+            },
+            "int" => match func {
+                "to_hex" => format!("format!(\"{{:x}}\", {} as u64)", args_str[0]),
+                "to_string" => format!("({}).to_string()", args_str[0]),
+                _ => format!("/* int.{} */ todo!()", func),
+            },
+            "env" => match func {
+                "unix_timestamp" => {
+                    "(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64)".to_string()
+                }
+                "args" => "std::env::args().collect::<Vec<String>>()".to_string(),
+                _ => format!("/* env.{} */ todo!()", func),
+            },
+            _ => {
+                format!("{}::{}({})", module, func, args_str.join(", "))
+            }
+        }
+    }
+
+    fn gen_match(&self, subject: &Expr, arms: &[MatchArm]) -> String {
+        let subj = self.gen_expr(subject);
+        let mut lines = vec![format!("match {} {{", subj)];
+        for arm in arms {
+            let pat = self.gen_pattern(&arm.pattern);
+            let guard = arm.guard.as_ref().map(|g| format!(" if {}", self.gen_expr(g))).unwrap_or_default();
+            let body = self.gen_expr(&arm.body);
+            lines.push(format!("    {}{} => {{ {} }}", pat, guard, body));
+        }
+        lines.push("}".to_string());
+        lines.join("\n")
+    }
+
+    fn gen_pattern(&self, pat: &Pattern) -> String {
+        match pat {
+            Pattern::Wildcard => "_".to_string(),
+            Pattern::Ident { name } => name.clone(),
+            Pattern::Literal { value } => self.gen_expr(value),
+            Pattern::None => "None".to_string(),
+            Pattern::Some { inner } => format!("Some({})", self.gen_pattern(inner)),
+            Pattern::Ok { inner } => format!("Ok({})", self.gen_pattern(inner)),
+            Pattern::Err { inner } => format!("Err({})", self.gen_pattern(inner)),
+            Pattern::Constructor { name, args } => {
+                if args.is_empty() {
+                    name.clone()
+                } else {
+                    let ps: Vec<String> = args.iter().map(|p| self.gen_pattern(p)).collect();
+                    format!("{}({})", name, ps.join(", "))
+                }
+            }
+            Pattern::RecordPattern { name, fields } => {
+                let fs: Vec<String> = fields.iter().map(|f| {
+                    if let Some(p) = &f.pattern {
+                        format!("{}: {}", f.name, self.gen_pattern(p))
+                    } else {
+                        f.name.clone()
+                    }
+                }).collect();
+                format!("{} {{ {} }}", name, fs.join(", "))
+            }
+        }
+    }
+
+    fn gen_block(&self, stmts: &[Stmt], final_expr: Option<&Expr>) -> String {
+        let mut lines = vec!["{".to_string()];
+        for stmt in stmts {
+            lines.push(format!("    {}", self.gen_stmt(stmt)));
+        }
+        if let Some(expr) = final_expr {
+            lines.push(format!("    {}", self.gen_expr(expr)));
+        }
+        lines.push("}".to_string());
+        lines.join("\n")
+    }
+
+    fn gen_do_block(&self, stmts: &[Stmt], final_expr: Option<&Expr>) -> String {
+        let has_guard = stmts.iter().any(|s| matches!(s, Stmt::Guard { .. }));
+        if has_guard {
+            let mut lines = vec!["loop {".to_string()];
+            for stmt in stmts {
+                match stmt {
+                    Stmt::Guard { cond, else_ } => {
+                        let c = self.gen_expr(cond);
+                        if matches!(else_, Expr::Unit) {
+                            lines.push(format!("    if !({}) {{ break; }}", c));
+                        } else {
+                            let e = self.gen_expr(else_);
+                            lines.push(format!("    if !({}) {{ return {}; }}", c, e));
+                        }
+                    }
+                    _ => lines.push(format!("    {}", self.gen_stmt(stmt))),
+                }
+            }
+            if let Some(expr) = final_expr {
+                lines.push(format!("    {};", self.gen_expr(expr)));
+            }
+            lines.push("}".to_string());
+            lines.join("\n")
+        } else {
+            self.gen_block(stmts, final_expr)
+        }
+    }
+
+    fn gen_stmt(&self, stmt: &Stmt) -> String {
+        match stmt {
+            Stmt::Let { name, value, .. } => {
+                format!("let {} = {};", name, self.gen_expr(value))
+            }
+            Stmt::LetDestructure { fields, value } => {
+                format!("let ({}) = {};", fields.join(", "), self.gen_expr(value))
+            }
+            Stmt::Var { name, value, .. } => {
+                format!("let mut {} = {};", name, self.gen_expr(value))
+            }
+            Stmt::Assign { name, value } => {
+                format!("{} = {};", name, self.gen_expr(value))
+            }
+            Stmt::Guard { cond, else_ } => {
+                let c = self.gen_expr(cond);
+                let e = self.gen_expr(else_);
+                format!("if !({}) {{ return {}; }}", c, e)
+            }
+            Stmt::Expr { expr } => {
+                format!("{};", self.gen_expr(expr))
+            }
+        }
+    }
+}
+
+pub fn emit(program: &Program) -> String {
+    let mut emitter = Emitter::new();
+    emitter.emit_program(program);
+    emitter.out
+}
