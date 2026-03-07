@@ -109,9 +109,16 @@ impl Parser {
             return self.parse_test_decl();
         }
         let tok = self.current();
+        let hint = match tok.value.as_str() {
+            "class" | "struct" => "\n  Hint: Use 'type Name = { field: Type, ... }' for record types, or 'type Name = | Case1 | Case2' for variants.",
+            "def" | "func" | "function" => "\n  Hint: Use 'fn name(...) -> Type = expr' or 'effect fn name(...) -> Result[T, E] = expr'.",
+            "while" | "for" | "loop" => "\n  Hint: Almide has no top-level loops. Define a function with 'fn' or 'effect fn'.",
+            "const" | "val" => "\n  Hint: Use 'let' for immutable bindings, 'var' for mutable ones (inside functions).",
+            _ => "",
+        };
         Err(format!(
-            "Expected top-level declaration at line {}:{} (got {:?} '{}')",
-            tok.line, tok.col, tok.token_type, tok.value
+            "Expected top-level declaration (fn, effect fn, type, trait, impl, test) at line {}:{} (got {:?} '{}'){}",
+            tok.line, tok.col, tok.token_type, tok.value, hint
         ))
     }
 
@@ -1016,6 +1023,25 @@ impl Parser {
             return Ok(Expr::TypeName { name });
         }
 
+        // Reject known invalid keywords/identifiers with helpful hints
+        if self.check(TokenType::Ident) {
+            let rejected_hint = match tok.value.as_str() {
+                "while" | "loop" => Some("Almide has no 'while' or 'loop'. Use 'do { guard COND else ok(()) ... }' for loops."),
+                "return" => Some("Almide has no 'return'. The last expression in a block is the return value. Use 'guard ... else' for early returns."),
+                "print" => Some("Use 'println(s)' instead of 'print'. There is no 'print' function in Almide."),
+                "null" | "nil" => Some("Almide has no null. Use Option[T] with 'some(v)' / 'none'."),
+                "throw" => Some("Almide has no exceptions. Use Result[T, E] with 'ok(v)' / 'err(e)'."),
+                "catch" | "except" => Some("Almide has no try/catch. Use 'match' on Result values instead."),
+                _ => None,
+            };
+            if let Some(hint) = rejected_hint {
+                return Err(format!(
+                    "'{}' is not valid in Almide at line {}:{}\n  Hint: {}",
+                    tok.value, tok.line, tok.col, hint
+                ));
+            }
+        }
+
         // Identifier (with ? or !)
         if self.check(TokenType::Ident) || self.check(TokenType::IdentQ) {
             let name = tok.value.clone();
@@ -1023,9 +1049,20 @@ impl Parser {
             return Ok(Expr::Ident { name });
         }
 
+        let hint = match tok.value.as_str() {
+            "while" | "loop" => "\n  Hint: Almide has no 'while' or 'loop'. Use 'do { guard COND else ok(()) ... }' for loops.",
+            "for" => "\n  Hint: Use 'list.each(xs, fn(x) => ...)' or 'do { guard ... }' instead of 'for'.",
+            "return" => "\n  Hint: Almide has no 'return'. The last expression in a block is the return value. Use 'guard ... else' for early returns.",
+            "null" | "nil" | "None" => "\n  Hint: Almide has no null. Use Option[T] with 'some(v)' / 'none'.",
+            "throw" => "\n  Hint: Almide has no exceptions. Use Result[T, E] with 'ok(v)' / 'err(e)'.",
+            "catch" | "except" => "\n  Hint: Almide has no try/catch. Use 'match' on Result values instead.",
+            "class" | "struct" => "\n  Hint: Use 'type Name = { field: Type, ... }' for record types.",
+            "print" => "\n  Hint: Use 'println(s)' instead of 'print'. There is no 'print' function in Almide.",
+            _ => "",
+        };
         Err(format!(
-            "Expected expression at line {}:{} (got {:?} '{}')",
-            tok.line, tok.col, tok.token_type, tok.value
+            "Expected expression at line {}:{} (got {:?} '{}'){}",
+            tok.line, tok.col, tok.token_type, tok.value, hint
         ))
     }
 
@@ -1438,12 +1475,32 @@ impl Parser {
     fn expect(&mut self, token_type: TokenType) -> Result<&Token, String> {
         if !self.check(token_type.clone()) {
             let tok = self.current();
-            return Err(format!(
+            let hint = self.hint_for_expected(&token_type, tok);
+            let mut msg = format!(
                 "Expected {:?} at line {}:{} (got {:?} '{}')",
                 token_type, tok.line, tok.col, tok.token_type, tok.value
-            ));
+            );
+            if !hint.is_empty() {
+                msg.push_str(&format!("\n  Hint: {}", hint));
+            }
+            return Err(msg);
         }
         Ok(self.advance())
+    }
+
+    fn hint_for_expected(&self, expected: &TokenType, got: &Token) -> String {
+        match (expected, &got.token_type, got.value.as_str()) {
+            (TokenType::Else, _, _) => {
+                "if expressions MUST have an else branch. Use 'guard ... else' for early returns instead.".into()
+            }
+            (TokenType::RParen, TokenType::LAngle, _) => {
+                "Use [] for generics, not <>. Example: List[String], Result[T, E]".into()
+            }
+            (TokenType::Then, _, _) => {
+                "if requires 'then'. Write: if condition then expr else expr".into()
+            }
+            _ => String::new(),
+        }
     }
 
     fn expect_ident(&mut self) -> Result<String, String> {
@@ -1451,9 +1508,14 @@ impl Parser {
             return Ok(self.advance_and_get_value());
         }
         let tok = self.current();
+        let hint = match (&tok.token_type, tok.value.as_str()) {
+            (TokenType::Underscore, _) => "\n  Hint: '_' can only be used in match patterns, not as a variable name.",
+            (TokenType::Test, _) => "\n  Hint: 'test' is a reserved keyword.",
+            _ => "",
+        };
         Err(format!(
-            "Expected identifier at line {}:{} (got {:?} '{}')",
-            tok.line, tok.col, tok.token_type, tok.value
+            "Expected identifier at line {}:{} (got {:?} '{}'){}",
+            tok.line, tok.col, tok.token_type, tok.value, hint
         ))
     }
 

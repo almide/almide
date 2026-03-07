@@ -618,9 +618,28 @@ impl Emitter {
         }
     }
 
+    fn has_string_literal_in_option_pattern(arms: &[MatchArm]) -> bool {
+        fn check_pattern(pat: &Pattern) -> bool {
+            match pat {
+                Pattern::Some { inner } | Pattern::Ok { inner } | Pattern::Err { inner } => {
+                    check_pattern(inner)
+                }
+                Pattern::Literal { value } => matches!(&**value, Expr::String { .. }),
+                _ => false,
+            }
+        }
+        arms.iter().any(|arm| check_pattern(&arm.pattern))
+    }
+
     fn gen_match(&self, subject: &Expr, arms: &[MatchArm]) -> String {
         let subj = self.gen_expr(subject);
-        let mut lines = vec![format!("match {} {{", subj)];
+        let needs_deref = Self::has_string_literal_in_option_pattern(arms);
+        let subj_expr = if needs_deref {
+            format!("{}.as_deref()", subj)
+        } else {
+            subj
+        };
+        let mut lines = vec![format!("match {} {{", subj_expr)];
         for arm in arms {
             let pat = self.gen_pattern(&arm.pattern);
             let guard = arm.guard.as_ref().map(|g| format!(" if {}", self.gen_expr(g))).unwrap_or_default();
@@ -635,7 +654,7 @@ impl Emitter {
         match pat {
             Pattern::Wildcard => "_".to_string(),
             Pattern::Ident { name } => name.clone(),
-            Pattern::Literal { value } => self.gen_expr(value),
+            Pattern::Literal { value } => self.gen_pattern_literal(value),
             Pattern::None => "None".to_string(),
             Pattern::Some { inner } => format!("Some({})", self.gen_pattern(inner)),
             Pattern::Ok { inner } => format!("Ok({})", self.gen_pattern(inner)),
@@ -658,6 +677,16 @@ impl Emitter {
                 }).collect();
                 format!("{} {{ {} }}", name, fs.join(", "))
             }
+        }
+    }
+
+    fn gen_pattern_literal(&self, expr: &Expr) -> String {
+        match expr {
+            Expr::String { value } => format!("\"{}\"", value),
+            Expr::Int { value, .. } => format!("{}i64", value),
+            Expr::Float { value } => value.to_string(),
+            Expr::Bool { value } => value.to_string(),
+            _ => self.gen_expr(expr),
         }
     }
 

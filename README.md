@@ -13,13 +13,33 @@ Almide is not a language for humans to write freely — it is a language for AI 
 - **Repairable** — Compiler diagnostics guide toward a unique fix
 - **Compact** — High semantic density, low syntactic noise
 
+## What Almide Eliminates
+
+Most design decisions are **subtractive** — reducing the space of valid programs so the AI converges faster.
+
+| Removed | Almide alternative | Why |
+|---------|-------------------|-----|
+| `null` / `nil` | `Option[T]` | Eliminates null-check hallucination |
+| Exceptions / `throw` / `try-catch` | `Result[T, E]` | Error path is always visible in types |
+| `<>` generics | `[]` generics | No ambiguity with comparison operators |
+| `while` / `for` / `loop` | `do { guard ... else ... }` | Single loop construct, break condition is explicit |
+| `return` | Last expression is the value | No early-return confusion |
+| Multiple lambda forms | `fn(x) => expr` only | One syntax, no alternatives |
+| Implicit side effects | `effect fn` | Callability is restricted by effect, narrowing completions |
+| Semicolons | Newline-separated | No semicolon insertion ambiguity |
+| Operator overloading | None | Operators have fixed meaning |
+| Implicit conversions | None | Every conversion is explicit |
+| `if` without `else` | `guard ... else` | Forces exhaustive handling, eliminates dangling-else |
+
+The compiler actively **rejects** common patterns from other languages (`while`, `return`, `print`, `class`, `null`) with targeted hints directing toward the Almide equivalent.
+
 ## Features
 
 - `Result[T, E]` / `Option[T]` — No exceptions, no null
-- `effect fn` — Side effects are visible in function signatures
+- `effect fn` — Side effects narrow the set of callable functions at each point
 - `[]` for generics — No `<>` ambiguity with comparison operators
 - `do` blocks — Automatic error propagation and loop construct
-- UFCS — `f(x, y)` and `x.f(y)` are equivalent
+- UFCS — `f(x, y)` and `x.f(y)` are equivalent; canonical form is function style
 - `guard ... else` — Flat early returns instead of nested if-else
 - `_` holes and `todo()` — Type-checked incomplete code
 - Single lambda syntax — `fn(x) => expr`, no alternatives
@@ -90,17 +110,18 @@ deno run --allow-all output.ts
 
 ## Benchmark
 
-Tested with the [MiniGit benchmark](https://github.com/mame/ai-coding-lang-bench) (11 tests, 10 trials).
-
-An LLM with **zero prior knowledge** of Almide, given only the CHEATSHEET as reference, achieved:
+Tested with the [MiniGit benchmark](https://github.com/mame/ai-coding-lang-bench) — a task where Claude Code implements a mini version control system from a spec, with zero prior knowledge of the language.
 
 | Metric | Result |
 |--------|--------|
-| Pass rate | **10/10 (100%)** |
-| All tests passed | **11/11 per trial** |
-| Avg LOC | ~170 |
+| Tests passed (v1+v2) | **41/41 (100%)** |
+| Pass rate | **3/3 trials** |
 
-For comparison, existing languages scored: Ruby 90%, TypeScript 80%, Go 50%.
+All 15 benchmark languages achieved near-100% correctness. Almide's result confirms that an LLM can write correct code in a **completely unknown language** given only a ~340-line cheatsheet — validating the core thesis that predictable syntax and explicit semantics reduce generation errors.
+
+### Trade-offs
+
+Almide is slower than established languages in generation time. This is expected — the LLM has zero training data for Almide and must rely entirely on the cheatsheet. The speed gap measures **familiarity**, not language quality. As training data grows, this gap is expected to narrow.
 
 ## License
 
