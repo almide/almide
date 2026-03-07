@@ -191,8 +191,11 @@ function genFnDecl(decl: Extract<Decl, { kind: "fn" }>): string {
   const retType = decl.returnType ? `: ${genTypeExpr(decl.returnType)}` : "";
   const body = genExpr(decl.body);
 
-  if (decl.body.kind === "block" || decl.body.kind === "do_block") {
+  if (decl.body.kind === "block") {
     return `${async_}function ${name}(${params})${retType} ${body}`;
+  }
+  if (decl.body.kind === "do_block") {
+    return `${async_}function ${name}(${params})${retType} {\n${body}\n}`;
   }
   return `${async_}function ${name}(${params})${retType} {\n  return ${body};\n}`;
 }
@@ -420,20 +423,33 @@ function isUnitExpr(e: Expr): boolean {
 }
 
 function genDoBlock(stmts: Stmt[], finalExpr: Expr | undefined, indent = 0): string {
+  // Check if this is a loop (has any guard) or auto-propagation block
+  const hasGuard = stmts.some(s => s.kind === "guard");
   const ind = "  ".repeat(indent + 1);
   const lines: string[] = [];
   for (const stmt of stmts) {
-    if (stmt.kind === "guard" && isUnitExpr(stmt.else_)) {
+    if (hasGuard && stmt.kind === "guard") {
       const cond = genExpr(stmt.cond);
-      lines.push(ind + `if (!(${cond})) { break; }`);
+      if (isUnitExpr(stmt.else_)) {
+        lines.push(ind + `if (!(${cond})) { break; }`);
+      } else {
+        lines.push(ind + `if (!(${cond})) { return ${genExpr(stmt.else_)}; }`);
+      }
     } else {
       lines.push(ind + genStmt(stmt, indent + 1));
     }
   }
-  if (finalExpr) {
-    lines.push(ind + genExpr(finalExpr) + ";");
+  if (hasGuard) {
+    if (finalExpr) {
+      lines.push(ind + genExpr(finalExpr) + ";");
+    }
+    return `while (true) {\n${lines.join("\n")}\n${"  ".repeat(indent)}}`;
   }
-  return `while (true) {\n${lines.join("\n")}\n${"  ".repeat(indent)}}`;
+  // Auto-propagation block: just a block, return final expr
+  if (finalExpr) {
+    lines.push(ind + `return ${genExpr(finalExpr)};`);
+  }
+  return `{\n${lines.join("\n")}\n${"  ".repeat(indent)}}`;
 }
 
 function genStmt(stmt: Stmt, indent = 0): string {
