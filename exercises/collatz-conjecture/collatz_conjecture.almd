@@ -1,0 +1,43 @@
+module collatz_conjecture
+
+import string
+import list
+
+// Calculate the number of steps to reach 1 using the Collatz conjecture
+// If n is even: n / 2
+// If n is odd: 3 * n + 1
+// Return err for non-positive numbers
+fn steps(n: Int) -> Result[Int, String] = {
+  guard n > 0 else err("Only positive integers are allowed");
+  var current = n;
+  var count = 0;
+  do {
+    guard current != 1 else ok(count);
+    if current % 2 == 0 then current = current / 2 else current = 3 * current + 1;
+    count = count + 1
+  }
+}
+
+test "zero steps for one" {
+  assert_eq(steps(1), ok(0))
+}
+
+test "divide if even" {
+  assert_eq(steps(16), ok(4))
+}
+
+test "even and odd steps" {
+  assert_eq(steps(12), ok(9))
+}
+
+test "large number of even and odd steps" {
+  assert_eq(steps(1000000), ok(152))
+}
+
+test "zero is an error" {
+  assert_eq(steps(0), err("Only positive integers are allowed"))
+}
+
+test "negative value is an error" {
+  assert_eq(steps(-15), err("Only positive integers are allowed"))
+}

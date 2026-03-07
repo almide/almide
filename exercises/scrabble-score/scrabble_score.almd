@@ -1,0 +1,98 @@
+module scrabble_score
+
+import string
+import list
+
+fn letter_score(c: Int) -> Int = {
+  // Normalize to uppercase: if c >= 97 and c <= 122, subtract 32
+  let upper = if c >= 97 and c <= 122 then c - 32 else c;
+  // A=65,B=66,C=67,D=68,E=69,F=70,G=71,H=72,I=73,J=74,K=75,L=76,M=77
+  // N=78,O=79,P=80,Q=81,R=82,S=83,T=84,U=85,V=86,W=87,X=88,Y=89,Z=90
+  match upper {
+    65 => 1,  // A
+    66 => 3,  // B
+    67 => 3,  // C
+    68 => 2,  // D
+    69 => 1,  // E
+    70 => 4,  // F
+    71 => 2,  // G
+    72 => 4,  // H
+    73 => 1,  // I
+    74 => 8,  // J
+    75 => 5,  // K
+    76 => 1,  // L
+    77 => 3,  // M
+    78 => 1,  // N
+    79 => 1,  // O
+    80 => 3,  // P
+    81 => 10, // Q
+    82 => 1,  // R
+    83 => 1,  // S
+    84 => 1,  // T
+    85 => 1,  // U
+    86 => 4,  // V
+    87 => 4,  // W
+    88 => 8,  // X
+    89 => 4,  // Y
+    90 => 10, // Z
+    _ => 0,
+  }
+}
+
+// Calculate the Scrabble score for a word
+// Letter values:
+// A,E,I,O,U,L,N,R,S,T = 1
+// D,G = 2
+// B,C,M,P = 3
+// F,H,V,W,Y = 4
+// K = 5
+// J,X = 8
+// Q,Z = 10
+fn score(word: String) -> Int = {
+  let bytes = string.to_bytes(word);
+  list.fold(bytes, 0, fn(acc, b) => acc + letter_score(b))
+}
+
+test "lowercase letter" {
+  assert_eq(score("a"), 1)
+}
+
+test "uppercase letter" {
+  assert_eq(score("A"), 1)
+}
+
+test "valuable letter" {
+  assert_eq(score("f"), 4)
+}
+
+test "short word" {
+  assert_eq(score("at"), 2)
+}
+
+test "short valuable word" {
+  assert_eq(score("zoo"), 12)
+}
+
+test "medium word" {
+  assert_eq(score("street"), 6)
+}
+
+test "medium valuable word" {
+  assert_eq(score("quirky"), 22)
+}
+
+test "long mixed-case word" {
+  assert_eq(score("OxyphenButazone"), 41)
+}
+
+test "english-like word" {
+  assert_eq(score("pinball"), 11)
+}
+
+test "empty input" {
+  assert_eq(score(""), 0)
+}
+
+test "entire alphabet" {
+  assert_eq(score("abcdefghijklmnopqrstuvwxyz"), 87)
+}

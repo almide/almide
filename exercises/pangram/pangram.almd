@@ -1,0 +1,78 @@
+module pangram
+
+import string
+import list
+
+// Determine if a sentence is a pangram (contains every letter a-z at least once)
+fn has_letter?(sentence: String, lower: String, upper: String) -> Bool = {
+  if string.contains(sentence, lower) or string.contains(sentence, upper) then true else false
+}
+
+fn pangram?(sentence: String) -> Bool = {
+  has_letter?(sentence, "a", "A") and
+  has_letter?(sentence, "b", "B") and
+  has_letter?(sentence, "c", "C") and
+  has_letter?(sentence, "d", "D") and
+  has_letter?(sentence, "e", "E") and
+  has_letter?(sentence, "f", "F") and
+  has_letter?(sentence, "g", "G") and
+  has_letter?(sentence, "h", "H") and
+  has_letter?(sentence, "i", "I") and
+  has_letter?(sentence, "j", "J") and
+  has_letter?(sentence, "k", "K") and
+  has_letter?(sentence, "l", "L") and
+  has_letter?(sentence, "m", "M") and
+  has_letter?(sentence, "n", "N") and
+  has_letter?(sentence, "o", "O") and
+  has_letter?(sentence, "p", "P") and
+  has_letter?(sentence, "q", "Q") and
+  has_letter?(sentence, "r", "R") and
+  has_letter?(sentence, "s", "S") and
+  has_letter?(sentence, "t", "T") and
+  has_letter?(sentence, "u", "U") and
+  has_letter?(sentence, "v", "V") and
+  has_letter?(sentence, "w", "W") and
+  has_letter?(sentence, "x", "X") and
+  has_letter?(sentence, "y", "Y") and
+  has_letter?(sentence, "z", "Z")
+}
+
+test "empty sentence" {
+  assert_eq(pangram?(""), false)
+}
+
+test "perfect lower case" {
+  assert_eq(pangram?("abcdefghijklmnopqrstuvwxyz"), true)
+}
+
+test "only lower case" {
+  assert_eq(pangram?("the quick brown fox jumps over the lazy dog"), true)
+}
+
+test "missing the letter x" {
+  assert_eq(pangram?("a quick movement of the enemy will jeopardize five gunboats"), false)
+}
+
+test "missing the letter h" {
+  assert_eq(pangram?("five boxing wizards jump quickly at my request"), false)
+}
+
+test "with underscores" {
+  assert_eq(pangram?("the_quick_brown_fox_jumps_over_the_lazy_dog"), true)
+}
+
+test "with numbers" {
+  assert_eq(pangram?("the 1 quick brown fox jumps over the 2 lazy dogs"), true)
+}
+
+test "missing letters replaced by numbers" {
+  assert_eq(pangram?("7h3 qu1ck brown fox jumps ov3r 7h3 lazy dog"), false)
+}
+
+test "mixed case and punctuation" {
+  assert_eq(pangram?("\"Five quacking Zephyrs jolt my wax bed.\""), true)
+}
+
+test "case insensitive" {
+  assert_eq(pangram?("the quick brown fox jumps over with lazy FX"), false)
+}

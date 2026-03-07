@@ -1,0 +1,102 @@
+module roman_numerals
+
+import string
+import list
+
+// Convert a number (1-3999) to its Roman numeral representation
+fn roman(n: Int) -> String = {
+  var remaining = n;
+  var result = "";
+
+  do { guard remaining >= 1000 else ok(()); remaining = remaining - 1000; result = result ++ "M" };
+  do { guard remaining >= 900 else ok(()); remaining = remaining - 900; result = result ++ "CM" };
+  do { guard remaining >= 500 else ok(()); remaining = remaining - 500; result = result ++ "D" };
+  do { guard remaining >= 400 else ok(()); remaining = remaining - 400; result = result ++ "CD" };
+  do { guard remaining >= 100 else ok(()); remaining = remaining - 100; result = result ++ "C" };
+  do { guard remaining >= 90 else ok(()); remaining = remaining - 90; result = result ++ "XC" };
+  do { guard remaining >= 50 else ok(()); remaining = remaining - 50; result = result ++ "L" };
+  do { guard remaining >= 40 else ok(()); remaining = remaining - 40; result = result ++ "XL" };
+  do { guard remaining >= 10 else ok(()); remaining = remaining - 10; result = result ++ "X" };
+  do { guard remaining >= 9 else ok(()); remaining = remaining - 9; result = result ++ "IX" };
+  do { guard remaining >= 5 else ok(()); remaining = remaining - 5; result = result ++ "V" };
+  do { guard remaining >= 4 else ok(()); remaining = remaining - 4; result = result ++ "IV" };
+  do { guard remaining >= 1 else ok(()); remaining = remaining - 1; result = result ++ "I" };
+
+  result
+}
+
+test "1 is I" {
+  assert_eq(roman(1), "I")
+}
+
+test "2 is II" {
+  assert_eq(roman(2), "II")
+}
+
+test "3 is III" {
+  assert_eq(roman(3), "III")
+}
+
+test "4 is IV" {
+  assert_eq(roman(4), "IV")
+}
+
+test "5 is V" {
+  assert_eq(roman(5), "V")
+}
+
+test "6 is VI" {
+  assert_eq(roman(6), "VI")
+}
+
+test "9 is IX" {
+  assert_eq(roman(9), "IX")
+}
+
+test "27 is XXVII" {
+  assert_eq(roman(27), "XXVII")
+}
+
+test "48 is XLVIII" {
+  assert_eq(roman(48), "XLVIII")
+}
+
+test "59 is LIX" {
+  assert_eq(roman(59), "LIX")
+}
+
+test "93 is XCIII" {
+  assert_eq(roman(93), "XCIII")
+}
+
+test "141 is CXLI" {
+  assert_eq(roman(141), "CXLI")
+}
+
+test "163 is CLXIII" {
+  assert_eq(roman(163), "CLXIII")
+}
+
+test "402 is CDII" {
+  assert_eq(roman(402), "CDII")
+}
+
+test "575 is DLXXV" {
+  assert_eq(roman(575), "DLXXV")
+}
+
+test "911 is CMXI" {
+  assert_eq(roman(911), "CMXI")
+}
+
+test "1024 is MXXIV" {
+  assert_eq(roman(1024), "MXXIV")
+}
+
+test "3000 is MMM" {
+  assert_eq(roman(3000), "MMM")
+}
+
+test "3999 is MMMCMXCIX" {
+  assert_eq(roman(3999), "MMMCMXCIX")
+}

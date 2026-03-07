@@ -1,0 +1,102 @@
+module isogram
+
+import string
+import list
+
+// Convert uppercase byte to lowercase byte, pass others through
+fn to_lower_byte(b: Int) -> Int =
+  if b >= 65 and b <= 90 then b + 32 else b
+
+// Determine if a word is an isogram (no repeating letters, case-insensitive)
+// Hyphens and spaces are allowed and don't count as letters
+fn isogram?(word: String) -> Bool = {
+  let bytes = string.to_bytes(word);
+  let letters = list.filter(
+    list.map(bytes, fn(b) => to_lower_byte(b)),
+    fn(b) => b != 45 and b != 32
+  );
+  let len = list.len(letters);
+  var i = 0;
+  var result = true;
+  do {
+    guard i < len else ok(());
+    guard result else ok(());
+    let current = list.get(letters, i);
+    match current {
+      some(c) => {
+        var j = i + 1;
+        do {
+          guard j < len else ok(());
+          guard result else ok(());
+          let other = list.get(letters, j);
+          match other {
+            some(o) => {
+              if c == o then {
+                result = false
+              } else {
+                ok(())
+              }
+            },
+            none => ok(()),
+          };
+          j = j + 1
+        }
+      },
+      none => ok(()),
+    };
+    i = i + 1
+  };
+  result
+}
+
+test "empty string" {
+  assert_eq(isogram?(""), true)
+}
+
+test "isogram with only lower case characters" {
+  assert_eq(isogram?("isogram"), true)
+}
+
+test "word with one duplicated character" {
+  assert_eq(isogram?("eleven"), false)
+}
+
+test "word with one duplicated character from end" {
+  assert_eq(isogram?("zzyzx"), false)
+}
+
+test "longest reported english isogram" {
+  assert_eq(isogram?("subdermatoglyphic"), true)
+}
+
+test "word with duplicated character in mixed case" {
+  assert_eq(isogram?("Alphabet"), false)
+}
+
+test "word with duplicated character in mixed case lowercase first" {
+  assert_eq(isogram?("alphAbet"), false)
+}
+
+test "hypothetical isogrammic word with hyphen" {
+  assert_eq(isogram?("thumbscrew-japingly"), true)
+}
+
+test "hypothetical word with duplicated character following hyphen" {
+  assert_eq(isogram?("thumbscrew-jappingly"), false)
+}
+
+test "isogram with duplicated hyphen" {
+  assert_eq(isogram?("six-year-old"), true)
+}
+
+test "made-up name that is an isogram" {
+  assert_eq(isogram?("Emily Jung Schwartzkopf"), true)
+}
+
+test "duplicated character in the middle" {
+  assert_eq(isogram?("accentor"), false)
+}
+
+test "same first and last characters" {
+  assert_eq(isogram?("angola"), false)
+}

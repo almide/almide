@@ -1,0 +1,138 @@
+module bob
+
+import string
+import list
+
+// Bob answers based on what you say:
+// "Sure." - if you ask a question (ends with ?)
+// "Whoa, chill out!" - if you yell (all letters uppercase, at least one letter)
+// "Calm down, I know what I'm doing!" - if you yell a question
+// "Fine. Be that way!" - if you say nothing (empty or whitespace)
+// "Whatever." - anything else
+
+fn has_letters?(s: String) -> Bool = {
+  let bytes = string.to_bytes(s);
+  list.find(bytes, fn(b) => (b >= 65 and b <= 90) or (b >= 97 and b <= 122)) != none
+}
+
+fn is_yelling?(s: String) -> Bool = {
+  let bytes = string.to_bytes(s);
+  let letters = list.filter(bytes, fn(b) => (b >= 65 and b <= 90) or (b >= 97 and b <= 122));
+  let uppers = list.filter(letters, fn(b) => b >= 65 and b <= 90);
+  list.len(letters) > 0 and list.len(uppers) == list.len(letters)
+}
+
+fn is_question?(s: String) -> Bool = {
+  let trimmed = string.trim(s);
+  let len = string.len(trimmed);
+  string.slice(trimmed, len - 1, len) == "?"
+}
+
+fn response(hey_bob: String) -> String = {
+  let trimmed = string.trim(hey_bob);
+  if string.len(trimmed) == 0 then "Fine. Be that way!"
+  else if is_yelling?(trimmed) and is_question?(trimmed) then "Calm down, I know what I'm doing!"
+  else if is_yelling?(trimmed) then "Whoa, chill out!"
+  else if is_question?(trimmed) then "Sure."
+  else "Whatever."
+}
+
+test "stating something" {
+  assert_eq(response("Tom-ay-to, tom-ah-to."), "Whatever.")
+}
+
+test "shouting" {
+  assert_eq(response("WATCH OUT!"), "Whoa, chill out!")
+}
+
+test "shouting gibberish" {
+  assert_eq(response("FCECGC"), "Whoa, chill out!")
+}
+
+test "asking a question" {
+  assert_eq(response("Does this celi charger work?"), "Sure.")
+}
+
+test "asking a numeric question" {
+  assert_eq(response("You are, what, like 15?"), "Sure.")
+}
+
+test "asking gibberish" {
+  assert_eq(response("fffbbcbeab?"), "Sure.")
+}
+
+test "talking forcefully" {
+  assert_eq(response("Hi there!"), "Whatever.")
+}
+
+test "using acronyms in regular speech" {
+  assert_eq(response("It's OK if you don't want to go work for NASA."), "Whatever.")
+}
+
+test "forceful question" {
+  assert_eq(response("WHAT IS YOUR PROBLEM?"), "Calm down, I know what I'm doing!")
+}
+
+test "shouting numbers" {
+  assert_eq(response("1, 2, 3 GO!"), "Whoa, chill out!")
+}
+
+test "no letters" {
+  assert_eq(response("1, 2, 3"), "Whatever.")
+}
+
+test "question with no letters" {
+  assert_eq(response("4?"), "Sure.")
+}
+
+test "shouting with special characters" {
+  assert_eq(response("ZOMG THE %#@! IS SOUNDING!"), "Whoa, chill out!")
+}
+
+test "shouting with no exclamation mark" {
+  assert_eq(response("I HATE THE DMV"), "Whoa, chill out!")
+}
+
+test "statement containing question mark" {
+  assert_eq(response("Ending with ? hmm"), "Whatever.")
+}
+
+test "non-letters with question" {
+  assert_eq(response(":) ?"), "Sure.")
+}
+
+test "prattling on" {
+  assert_eq(response("Wait! Hang on. Are you going to be OK?"), "Sure.")
+}
+
+test "silence" {
+  assert_eq(response(""), "Fine. Be that way!")
+}
+
+test "prolonged silence" {
+  assert_eq(response("          "), "Fine. Be that way!")
+}
+
+test "alternate silence" {
+  assert_eq(response("	 	"), "Fine. Be that way!")
+}
+
+test "multiple line question" {
+  assert_eq(response("Does this celi charger work?\nYou need to believe"), "Whatever.")
+}
+
+test "starting with whitespace" {
+  assert_eq(response("         hmmmmm"), "Whatever.")
+}
+
+test "ending with whitespace" {
+  assert_eq(response("Okay if like my  spacebar  quite a bit?   "), "Sure.")
+}
+
+test "other whitespace" {
+  assert_eq(response("\n\t \t\n"), "Fine. Be that way!")
+}
+
+test "non-question ending with whitespace" {
+  assert_eq(response("This is a statement ending with whitespace      "), "Whatever.")
+}
