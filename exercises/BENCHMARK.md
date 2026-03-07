@@ -1,0 +1,109 @@
+# Almide LLM Benchmark Results
+
+## Overview
+
+Can an LLM write correct Almide code with **zero prior knowledge**, using only the [CHEATSHEET.md](../CHEATSHEET.md)?
+
+We tested this by having an LLM agent (Claude) solve 13 Exercism-style exercises from scratch, given only the CHEATSHEET as reference. The same exercises were also solved in Python for comparison.
+
+## Results
+
+### Almide (CHEATSHEET only, zero knowledge)
+
+| Exercise | Tests | Passed | Failed | Notes |
+|---|---|---|---|---|
+| affine-cipher | 16 | 16 | 0 | |
+| bob | 25 | 25 | 0 | |
+| collatz-conjecture | 6 | 6 | 0 | |
+| grade-report | 30 | 30 | 0 | Multi-function error propagation |
+| hamming | 9 | 9 | 0 | |
+| isbn-verifier | 14 | 12 | 2 | Result erasure + fold accumulator limitation |
+| isogram | 13 | 13 | 0 | |
+| pangram | 10 | 10 | 0 | |
+| phone-number | 14 | 14 | 0 | |
+| pipeline | 36 | 36 | 0 | `do` block auto error propagation |
+| raindrops | 18 | 18 | 0 | |
+| roman-numerals | 19 | 19 | 0 | |
+| scrabble-score | 11 | 11 | 0 | |
+| **Total** | **221** | **219** | **2** | **99.1%** |
+
+### Python (baseline comparison)
+
+| Exercise | Tests | Passed | Notes |
+|---|---|---|---|
+| affine-cipher | 16 | 16 | |
+| bob | 25 | 25 | |
+| collatz-conjecture | 6 | 6 | |
+| grade-report | 30 | 30 | |
+| hamming | 9 | 9 | |
+| isbn-verifier | 14 | 14 | |
+| isogram | 13 | 13 | |
+| pangram | 10 | 10 | |
+| phone-number | 14 | 14 | |
+| pipeline | 36 | 36 | |
+| raindrops | 18 | 18 | |
+| roman-numerals | 19 | 19 | |
+| scrabble-score | 11 | 11 | |
+| **Total** | **221** | **221** | **100%** |
+
+## Methodology
+
+1. **Exercise design**: Each exercise provides function signatures with `= _` (hole stubs) and test cases. The LLM must implement all functions.
+2. **Almide agent**: Given ONLY `CHEATSHEET.md` — no other documentation, no examples of Almide code, no access to the transpiler source.
+3. **Python agent**: Standard Python knowledge, no special constraints.
+4. **Test runner**: Almide files are transpiled to TypeScript via `src/almide.ts` and tested with `deno test`. Python files are tested with `pytest`.
+5. **Single attempt**: Each exercise was solved in one pass without retries or feedback loops.
+
+## Key Findings
+
+### The CHEATSHEET is sufficient
+An LLM can write correct Almide code from zero knowledge using only a 340-line quick reference. 219/221 tests pass (99.1%).
+
+### Known limitation: Result erasure + fold accumulator
+The 2 failing tests in isbn-verifier involve using `err()` as a fold accumulator value. Due to Result erasure (where `err(e)` compiles to `throw`), error values cannot be accumulated inside `list.fold`. This is a fundamental design trade-off of the erasure approach.
+
+### Almide advantages visible in complex exercises
+
+**`do` block auto error propagation** (pipeline exercise):
+```
+fn run_pipeline(input: String) -> Result[String, String] = do {
+  let pairs = parse_pairs(input)       // auto-unwrap Result
+  let pairs2 = validate_keys(pairs)    // error → propagate
+  let pairs3 = validate_values(pairs2) // error → propagate
+  let pairs4 = transform(pairs3)       // error → propagate
+  format_output(pairs4)
+}
+```
+vs Python (implicit exception propagation, no type-level error contract):
+```python
+def run_pipeline(text):
+    pairs = parse_pairs(text)
+    pairs = validate_keys(pairs)
+    pairs = validate_values(pairs)
+    pairs = transform(pairs)
+    return format_output(pairs)
+```
+
+**`match` with `err(e)` pattern** (grade-report exercise):
+```
+match parse_student(line) {
+  ok(student) => { ... },
+  err(e) => err("line " ++ line_num ++ ": " ++ e),  // catch and re-wrap
+}
+```
+
+### Current stdlib limitations
+The LLM had to manually implement `parse_int` (string→integer via byte arithmetic) and `to_upper` (uppercase via alphabet lookup) in multiple exercises. Adding `string.to_int` and `string.to_upper` to the stdlib would significantly reduce boilerplate.
+
+## Running the benchmark
+
+```bash
+# Run a single exercise
+bash exercises/run_exercise.sh exercises/pipeline/pipeline.almd
+
+# Run all exercises
+for f in exercises/*/*.almd; do
+  echo "=== $(basename $(dirname $f)) ==="
+  bash exercises/run_exercise.sh "$f"
+done
+```
