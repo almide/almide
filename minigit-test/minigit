@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-deno run --allow-read --allow-write --allow-env "$SCRIPT_DIR/minigit_gen.ts" "$@"
