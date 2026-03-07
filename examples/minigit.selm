@@ -1,0 +1,220 @@
+module minigit
+
+import fs
+import env
+import string
+import list
+
+// ---- Types ----
+
+type Repository = {
+  root: Path,
+}
+
+type MiniGitError =
+  | AlreadyInitialized
+  | NotARepository
+  | FileNotFound(String)
+  | NothingToCommit
+  | Io(IoError)
+  deriving From
+
+// ---- Hash ----
+
+fn minihash(bytes: List[Int]) -> String = {
+  var h: Int = 1469598103934665603
+  list.each(bytes, fn(b) => {
+    h = h ^ b
+    h = (h * 1099511628211) % 18446744073709551616
+  })
+  string.pad_left(int.to_hex(h), 16, "0")
+}
+
+fn hash_file(path: Path) -> Result[String, IoError] = {
+  let bytes = try fs.read_bytes(path)
+  ok(minihash(bytes))
+}
+
+// ---- Repository ----
+
+fn repo_path() -> Path = ".minigit"
+
+fn objects_path() -> Path = ".minigit/objects"
+
+fn commits_path() -> Path = ".minigit/commits"
+
+fn index_path() -> Path = ".minigit/index"
+
+fn head_path() -> Path = ".minigit/HEAD"
+
+// ---- Commands ----
+
+effect fn init() -> Result[Unit, MiniGitError] = {
+  guard not fs.exists?(repo_path()) else {
+    println("Repository already initialized")
+    ok(())
+  }
+  try fs.mkdir_p(objects_path())
+  try fs.mkdir_p(commits_path())
+  try fs.write(index_path(), "")
+  try fs.write(head_path(), "")
+  ok(())
+}
+
+effect fn add(filename: String) -> Result[Unit, MiniGitError] = {
+  guard fs.exists?(filename) else err(FileNotFound(filename))
+  let hash = try hash_file(filename)
+  let blob_path = "${objects_path()}/${hash}"
+  let content = try fs.read_bytes(filename)
+  try fs.write_bytes(blob_path, content)
+  let index = try read_index()
+  guard not list.contains(index, filename) else ok(())
+  try fs.append(index_path(), "${filename}\n")
+  ok(())
+}
+
+effect fn commit(message: String) -> Result[Unit, MiniGitError] = {
+  let index = try read_index()
+  guard list.len(index) > 0 else err(NothingToCommit)
+
+  let sorted_files = list.sort(index)
+  let head = try fs.read_text(head_path())
+  let parent = if string.trim(head) == "" then "NONE" else string.trim(head)
+  let timestamp = env.unix_timestamp()
+
+  let file_entries = sorted_files
+    |> list.map(_, fn(f) => {
+      let hash = try hash_file(f)
+      "${f} ${hash}"
+    })
+
+  let commit_content = string.join([
+    "parent: ${parent}",
+    "timestamp: ${timestamp}",
+    "message: ${message}",
+    "files:",
+  ] ++ file_entries, "\n")
+
+  let commit_hash = minihash(string.to_bytes(commit_content))
+  let commit_path = "${commits_path()}/${commit_hash}"
+  try fs.write(commit_path, commit_content)
+  try fs.write(head_path(), commit_hash)
+  try fs.write(index_path(), "")
+
+  println("Committed ${commit_hash}")
+  ok(())
+}
+
+effect fn log() -> Result[Unit, MiniGitError] = {
+  let head = try fs.read_text(head_path())
+  guard string.trim(head) != "" else {
+    println("No commits")
+    ok(())
+  }
+
+  var current = string.trim(head)
+  do {
+    guard current != "" and current != "NONE" else ok(())
+    let commit_path = "${commits_path()}/${current}"
+    let content = fs.read_text(commit_path)
+    let { parent, timestamp, message } = parse_commit(content)
+    println("commit ${current}")
+    println("Date: ${timestamp}")
+    println("Message: ${message}")
+    println("")
+    current = parent
+  }
+}
+
+// ---- Helpers ----
+
+effect fn read_index() -> Result[List[String], IoError] = {
+  let content = try fs.read_text(index_path())
+  let lines = content
+    |> string.trim
+    |> string.split(_, "\n")
+    |> list.filter(_, fn(s) => s != "")
+  ok(lines)
+}
+
+type CommitInfo = {
+  parent: String,
+  timestamp: String,
+  message: String,
+}
+
+fn parse_commit(content: String) -> CommitInfo = {
+  let lines = string.split(content, "\n")
+  let parent = extract_field(lines, "parent: ", 8, "NONE")
+  let timestamp = extract_field(lines, "timestamp: ", 11, "0")
+  let message = extract_field(lines, "message: ", 9, "")
+  { parent: parent, timestamp: timestamp, message: message }
+}
+
+fn extract_field(lines: List[String], prefix: String, skip: Int, default_val: String) -> String = {
+  let found = list.find(lines, fn(l) => string.starts_with?(l, prefix))
+  match found {
+    some(line) => string.slice(line, skip),
+    none => default_val,
+  }
+}
+
+// ---- Main ----
+
+effect fn main(args: List[String]) -> Result[Unit, MiniGitError] = {
+  let cmd = list.get(args, 1)
+  match cmd {
+    some("init") => init(),
+    some("add") => {
+      let file = list.get(args, 2)
+      match file {
+        some(f) => add(f),
+        none => err(FileNotFound("no file specified")),
+      }
+    },
+    some("commit") => {
+      guard list.get(args, 2) == some("-m") else err(NothingToCommit)
+      let msg = list.get(args, 3)
+      match msg {
+        some(m) => commit(m),
+        none => err(NothingToCommit),
+      }
+    },
+    some("log") => log(),
+    some(other) => {
+      println("Unknown command: ${other}")
+      ok(())
+    },
+    none => {
+      println("Usage: minigit <command>")
+      ok(())
+    },
+  }
+}
+
+// ---- Tests ----
+
+test "minihash produces 16-char hex" {
+  let hash = minihash(string.to_bytes("hello"))
+  assert_eq(string.len(hash), 16)
+}
+
+test "minihash is deterministic" {
+  let h1 = minihash(string.to_bytes("test"))
+  let h2 = minihash(string.to_bytes("test"))
+  assert_eq(h1, h2)
+}
+
+test "minihash differs for different input" {
+  let h1 = minihash(string.to_bytes("aaa"))
+  let h2 = minihash(string.to_bytes("bbb"))
+  assert_ne(h1, h2)
+}
+
+test "parse_commit extracts fields" {
+  let content = "parent: NONE\ntimestamp: 1234567890\nmessage: initial\nfiles:\nfoo.txt abc123"
+  let info = parse_commit(content)
+  assert_eq(info.parent, "NONE")
+  assert_eq(info.timestamp, "1234567890")
+  assert_eq(info.message, "initial")
+}
