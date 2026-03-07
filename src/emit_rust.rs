@@ -244,14 +244,6 @@ impl Emitter {
         }
     }
 
-    /// Generate expression for comparison context — avoid String/&String mismatch
-    fn gen_expr_for_cmp(&self, expr: &Expr) -> String {
-        match expr {
-            Expr::String { value } => format!("{:?}", value), // &str literal, works with String ==
-            _ => self.gen_expr(expr),
-        }
-    }
-
     /// Generate expression as function argument — clone Idents to avoid move
     fn gen_arg(&self, expr: &Expr) -> String {
         match expr {
@@ -419,29 +411,6 @@ impl Emitter {
             Expr::Paren { expr: inner } => self.is_bigint_expr(inner),
             _ => false,
         }
-    }
-
-    fn is_list_expr(&self, expr: &Expr) -> bool {
-        match expr {
-            Expr::List { .. } => true,
-            Expr::Call { callee, .. } => {
-                // list.* calls return lists
-                if let Expr::Member { object, field } = callee.as_ref() {
-                    if let Expr::Ident { name } = object.as_ref() {
-                        return matches!(name.as_str(), "list");
-                    }
-                }
-                false
-            }
-            Expr::Binary { op, left, right } if op == "++" => {
-                self.is_list_expr(left) || self.is_list_expr(right)
-            }
-            _ => false,
-        }
-    }
-
-    fn is_list_concat(&self, left: &Expr, right: &Expr) -> bool {
-        self.is_list_expr(left) || self.is_list_expr(right)
     }
 
     fn gen_binary(&self, op: &str, left: &Expr, right: &Expr) -> String {

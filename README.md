@@ -68,17 +68,24 @@ test "greet succeeds" {
 
 ## How It Works
 
-Almide source (`.almd`) is transpiled to TypeScript and runs on [Deno](https://deno.land/).
+Almide source (`.almd`) is compiled by a pure-Rust compiler with multi-target code generation.
 
 ```
-.almd → Lexer → Parser → AST → CodeGen → .ts (Deno)
+.almd → Lexer → Parser → AST → CodeGen → .rs (Rust) or .ts (Deno)
 ```
 
 ### Usage
 
 ```bash
-deno run --allow-read src/almide.ts input.almd > output.ts
-deno run --allow-read --allow-write --allow-env output.ts
+cargo build --release
+
+# Compile to Rust (default)
+./target/release/almide input.almd > output.rs
+rustc output.rs -o output
+
+# Compile to TypeScript
+./target/release/almide input.almd --target ts > output.ts
+deno run --allow-all output.ts
 ```
 
 ## Benchmark
