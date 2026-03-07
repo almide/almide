@@ -59,7 +59,7 @@ We tested this by having an LLM agent (Claude) solve 14 Exercism-style exercises
 ## Key Findings
 
 ### The CHEATSHEET is sufficient
-An LLM can write correct Almide code from zero knowledge using only a 340-line quick reference. 219/221 tests pass (99.1%).
+An LLM can write correct Almide code from zero knowledge using only a 340-line quick reference. 246/248 tests pass (99.2%).
 
 ### Known limitation: Result erasure + fold accumulator
 The 2 failing tests in isbn-verifier involve using `err()` as a fold accumulator value. Due to Result erasure (where `err(e)` compiles to `throw`), error values cannot be accumulated inside `list.fold`. This is a fundamental design trade-off of the erasure approach.
@@ -113,6 +113,9 @@ def merge_and_save(paths, output):
     save_config(output, merged)     # IOError? Unknown
     return len(merged)
 ```
+
+### Result erasure constraint on test patterns
+Due to Result erasure, `let result = fn_returning_err(); match result { ... }` does not work — the error throws at assignment before `match` runs. Instead, match directly on the call: `match fn_returning_err() { ok(v) => ..., err(e) => ... }`. Similarly, use `assert_eq(expr, err("msg"))` to test error cases.
 
 ### stdlib note
 `string.to_int`, `string.to_upper`, `string.to_lower` are now in the stdlib, reducing boilerplate from earlier exercises.
