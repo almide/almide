@@ -243,7 +243,7 @@ The runtime calls `main(args)` where `args` includes the program name at index 0
 ## Operators (precedence high→low)
 `. ()` > `not -` > `* / % ^` > `+ - ++` > `== != < > <= >=` > `and` > `or` > `|>`
 
-`^` is XOR (integer), `++` is list concatenation.
+`^` is XOR (integer), `++` is concatenation (list or string).
 
 ## UFCS
 `f(x, y)` ≡ `x.f(y)` — compiler resolves automatically.
@@ -260,7 +260,7 @@ The runtime calls `main(args)` where `args` includes the program name at index 0
 `list.len(xs)`, `list.get(xs, i)` → `Option[T]`, `list.sort(xs)`, `list.contains(xs, x)`, `list.each(xs, f)`, `list.map(xs, f)`, `list.filter(xs, f)`, `list.find(xs, f)`, `list.fold(xs, init, f)`
 
 ### int
-`int.to_hex(n)` — takes 64-bit Int, returns hex String
+`int.to_string(n)` — Int to decimal String, `int.to_hex(n)` — Int to hex String
 
 ### env
 `env.unix_timestamp()` → Int, `env.args()` → `List[String]`

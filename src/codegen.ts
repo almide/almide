@@ -10,7 +10,7 @@ const __fs = {
   read_text(p: string): string { return Deno.readTextFileSync(p); },
   read_bytes(p: string): Uint8Array { return Deno.readFileSync(p); },
   write(p: string, s: string): void { Deno.writeTextFileSync(p, s); },
-  write_bytes(p: string, b: Uint8Array): void { Deno.writeFileSync(p, b); },
+  write_bytes(p: string, b: Uint8Array | number[]): void { Deno.writeFileSync(p, b instanceof Uint8Array ? b : new Uint8Array(b)); },
   append(p: string, s: string): void { Deno.writeTextFileSync(p, Deno.readTextFileSync(p) + s); },
   mkdir_p(p: string): void { Deno.mkdirSync(p, { recursive: true }); },
   exists_q(p: string): boolean { try { Deno.statSync(p); return true; } catch { return false; } },
@@ -23,7 +23,7 @@ const __string = {
   pad_left(s: string, n: number, ch: string): string { return s.padStart(n, ch); },
   starts_with(s: string, prefix: string): boolean { return s.startsWith(prefix); },
   slice(s: string, start: number, end?: number): string { return end !== undefined ? s.slice(start, end) : s.slice(start); },
-  to_bytes(s: string): Uint8Array { return new TextEncoder().encode(s); },
+  to_bytes(s: string): number[] { return Array.from(new TextEncoder().encode(s)); },
   contains(s: string, sub: string): boolean { return s.includes(sub); },
   starts_with_q(s: string, prefix: string): boolean { return s.startsWith(prefix); },
 };
@@ -40,6 +40,7 @@ const __list = {
 };
 const __int = {
   to_hex(n: bigint): string { return (n >= 0n ? n : n + (1n << 64n)).toString(16); },
+  to_string(n: number): string { return String(n); },
 };
 const __env = {
   unix_timestamp(): number { return Math.floor(Date.now() / 1000); },
@@ -65,10 +66,30 @@ function __bigop(op: string, a: any, b: any): any {
 }
 function println(s: string): void { console.log(s); }
 function eprintln(s: string): void { console.error(s); }
-function assert_eq<T>(a: T, b: T): void { if (a !== b) throw new Error(\`assert_eq: \${a} !== \${b}\`); }
+function __deep_eq(a: any, b: any): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) { if (!__deep_eq(a[i], b[i])) return false; }
+    return true;
+  }
+  if (a && b && typeof a === "object" && typeof b === "object") {
+    const ka = Object.keys(a), kb = Object.keys(b);
+    if (ka.length !== kb.length) return false;
+    for (const k of ka) { if (!__deep_eq(a[k], b[k])) return false; }
+    return true;
+  }
+  return false;
+}
+function assert_eq<T>(a: T, b: T): void { if (!__deep_eq(a, b)) throw new Error(\`assert_eq: \${JSON.stringify(a)} !== \${JSON.stringify(b)}\`); }
 function assert_ne<T>(a: T, b: T): void { if (a === b) throw new Error(\`assert_ne: \${a} === \${b}\`); }
 function assert(c: boolean): void { if (!c) throw new Error("assertion failed"); }
 function unwrap_or<T>(x: T | null, d: T): T { return x !== null ? x : d; }
+function __concat(a: any, b: any): any { return typeof a === "string" ? a + b : [...a, ...b]; }
+function __assert_throws(fn: () => any, expectedMsg: string): void {
+  try { fn(); throw new Error("Expected error but succeeded with: " + fn); }
+  catch (e) { if (e instanceof Error && e.message === expectedMsg) return; throw e; }
+}
 // ---- End Runtime ----
 `;
 
@@ -167,12 +188,13 @@ function genFnDecl(decl: Extract<Decl, { kind: "fn" }>): string {
     .filter(p => p.name !== "self")
     .map(p => `${sanitizeName(p.name)}: ${genTypeExpr(p.type)}`)
     .join(", ");
+  const retType = decl.returnType ? `: ${genTypeExpr(decl.returnType)}` : "";
   const body = genExpr(decl.body);
 
   if (decl.body.kind === "block" || decl.body.kind === "do_block") {
-    return `${async_}function ${name}(${params}) ${body}`;
+    return `${async_}function ${name}(${params})${retType} ${body}`;
   }
-  return `${async_}function ${name}(${params}) {\n  return ${body};\n}`;
+  return `${async_}function ${name}(${params})${retType} {\n  return ${body};\n}`;
 }
 
 function genImplDecl(decl: Extract<Decl, { kind: "impl" }>): string {
@@ -287,8 +309,23 @@ function genErr(expr: Expr): string {
   return `(() => { throw new Error(String(${genExpr(expr)})); })()`;
 }
 
+function genErrMessage(expr: Expr): string {
+  if (expr.kind === "string") return JSON.stringify(expr.value);
+  if (expr.kind === "call" && expr.callee.kind === "type_name") {
+    return `${JSON.stringify(pascalToMessage(expr.callee.name))} + ": " + ${genExpr(expr.args[0])}`;
+  }
+  if (expr.kind === "type_name") return JSON.stringify(pascalToMessage(expr.name));
+  return `String(${genExpr(expr)})`;
+}
+
 function genCall(expr: Extract<Expr, { kind: "call" }>): string {
   const callee = genExpr(expr.callee);
+  // Special case: assert_eq(x, err(e)) or assert_eq(err(e), x)
+  if (callee === "assert_eq" && expr.args.length === 2) {
+    const [a, b] = expr.args;
+    if (b.kind === "err") return `__assert_throws(() => ${genExpr(a)}, ${genErrMessage(b.expr)})`;
+    if (a.kind === "err") return `__assert_throws(() => ${genExpr(b)}, ${genErrMessage(a.expr)})`;
+  }
   const args = expr.args.map(genExpr);
   if (expr.namedArgs && expr.namedArgs.length > 0) {
     const named = expr.namedArgs.map(a => `${a.name}: ${genExpr(a.value)}`);
@@ -326,12 +363,13 @@ function genBinary(expr: Extract<Expr, { kind: "binary" }>): string {
   switch (expr.op) {
     case "and": return `(${left} && ${right})`;
     case "or": return `(${left} || ${right})`;
-    case "==": return `(${left} === ${right})`;
-    case "!=": return `(${left} !== ${right})`;
-    case "++": return `[...${left}, ...${right}]`;
+    case "==": return `__deep_eq(${left}, ${right})`;
+    case "!=": return `!__deep_eq(${left}, ${right})`;
+    case "++": return `__concat(${left}, ${right})`;
     case "^": return `__bigop("^", ${left}, ${right})`;
     case "*": return `__bigop("*", ${left}, ${right})`;
     case "%": return `__bigop("%", ${left}, ${right})`;
+    case "/": return `Math.trunc(${left} / ${right})`;
     default: return `(${left} ${expr.op} ${right})`;
   }
 }
@@ -430,6 +468,46 @@ function genStmt(stmt: Stmt, indent = 0): string {
 function genMatch(expr: Extract<Expr, { kind: "match" }>): string {
   const subject = genExpr(expr.subject);
   const tmp = `__m`;
+  // Check if any arm has an err pattern — if so, wrap subject in try-catch
+  const errArm = expr.arms.find(a => a.pattern.kind === "err");
+  if (errArm) {
+    // Result erasure: subject may throw (err). Wrap only subject eval in try-catch,
+    // then process ok arms outside try to avoid catching their throws.
+    const okArms = expr.arms.filter(a => a.pattern.kind !== "err");
+    const errInner = errArm.pattern.kind === "err" ? errArm.pattern.inner : null;
+    const errBodyStr = (errArm.body.kind === "block" || errArm.body.kind === "do_block")
+      ? `(() => ${genExpr(errArm.body)})()`
+      : genExpr(errArm.body);
+    const errBinding = (errInner && errInner.kind === "ident") ? errInner.name : null;
+    const catchReturn = errBinding
+      ? `const ${errBinding} = __e instanceof Error ? __e.message : String(__e); return ${errBodyStr};`
+      : `return ${errBodyStr};`;
+    const lines = [`(() => { let ${tmp}; try { ${tmp} = ${subject}; } catch (__e) { ${catchReturn} }`];
+    for (const arm of okArms) {
+      const { cond, bindings } = genPatternCond(tmp, arm.pattern);
+      const bindStr = bindings.map(b => `    const ${b.name} = ${b.expr};`).join("\n");
+      const bodyStr = (arm.body.kind === "block" || arm.body.kind === "do_block")
+        ? `(() => ${genExpr(arm.body)})()`
+        : genExpr(arm.body);
+      if (arm.guard) {
+        const guardStr = genExpr(arm.guard);
+        if (bindStr) {
+          lines.push(`  { ${bindStr}\n    if (${cond} && ${guardStr}) return ${bodyStr}; }`);
+        } else {
+          lines.push(`  if (${cond} && ${guardStr}) return ${bodyStr};`);
+        }
+      } else {
+        if (bindStr) {
+          lines.push(`  if (${cond}) { ${bindStr}\n    return ${bodyStr}; }`);
+        } else {
+          lines.push(`  if (${cond}) return ${bodyStr};`);
+        }
+      }
+    }
+    lines.push(`  throw new Error("match exhausted");`);
+    lines.push(`})()`);
+    return lines.join("\n");
+  }
   const lines = [`((${tmp}) => {`];
   for (const arm of expr.arms) {
     const { cond, bindings } = genPatternCond(tmp, arm.pattern);

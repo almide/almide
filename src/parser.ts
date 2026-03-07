@@ -561,8 +561,27 @@ export class Parser {
     while (this.check(TokenType.PipeArrow)) {
       this.advance();
       this.skipNewlines();
-      const right = this.parseOr();
-      left = { kind: "pipe", left, right };
+      // Support |> match { ... } — desugar to match(left) { ... }
+      if (this.check(TokenType.Match) && this.peekAt(1)?.type === TokenType.LBrace) {
+        this.advance(); // consume 'match'
+        this.skipNewlines();
+        this.expect(TokenType.LBrace);
+        this.skipNewlines();
+        const arms: MatchArm[] = [];
+        while (!this.check(TokenType.RBrace)) {
+          arms.push(this.parseMatchArm());
+          this.skipNewlines();
+          if (this.check(TokenType.Comma)) {
+            this.advance();
+            this.skipNewlines();
+          }
+        }
+        this.expect(TokenType.RBrace);
+        left = { kind: "match", subject: left, arms };
+      } else {
+        const right = this.parseOr();
+        left = { kind: "pipe", left, right };
+      }
     }
     return left;
   }
@@ -677,6 +696,7 @@ export class Parser {
   private parseCallArgs(): { args: Expr[]; namedArgs?: FieldInit[] } {
     const args: Expr[] = [];
     const namedArgs: FieldInit[] = [];
+    this.skipNewlines();
     if (this.check(TokenType.RParen)) return { args };
 
     this.parseOneCallArg(args, namedArgs);
@@ -686,6 +706,7 @@ export class Parser {
       if (this.check(TokenType.RParen)) break;
       this.parseOneCallArg(args, namedArgs);
     }
+    this.skipNewlines();
     return { args, namedArgs: namedArgs.length > 0 ? namedArgs : undefined };
   }
 
@@ -888,18 +909,30 @@ export class Parser {
     this.skipNewlines();
     this.expect(TokenType.Then);
     this.skipNewlines();
-    const then = this.parseExpr();
+    const then = this.parseIfBranch();
     this.skipNewlines();
     this.expect(TokenType.Else);
     this.skipNewlines();
-    const else_ = this.parseExpr();
+    const else_ = this.parseIfBranch();
     return { kind: "if", cond, then, else_ };
+  }
+
+  // Parse an if branch: either an expression or an assignment (ident = expr) wrapped in a block
+  private parseIfBranch(): Expr {
+    if (this.check(TokenType.Ident) && this.peekAt(1)?.type === TokenType.Eq) {
+      const name = this.advance().value;
+      this.advance(); // skip =
+      this.skipNewlines();
+      const value = this.parseExpr();
+      return { kind: "block", stmts: [{ kind: "assign", name, value }], expr: undefined } as any;
+    }
+    return this.parseExpr();
   }
 
   private parseMatchExpr(): Expr {
     this.expect(TokenType.Match);
     this.skipNewlines();
-    const subject = this.parsePostfix();
+    const subject = this.parseOr();
     this.skipNewlines();
     this.expect(TokenType.LBrace);
     this.skipNewlines();
