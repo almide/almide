@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./almide.png" alt="Almide" width="280">
+  <img src="./assets/almide.png" alt="Almide" width="280">
 </p>
 
 <p align="center">A programming language designed for LLM code generation.</p>
