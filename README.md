@@ -1,8 +1,8 @@
-# Selmite
+# Almide
 
 A programming language designed for LLM code generation.
 
-Selmite is not a language for humans to write freely — it is a language for AI to converge correctly. Every design decision minimizes the set of valid next tokens at each generation step, reducing hallucination and syntax errors.
+Almide is not a language for humans to write freely — it is a language for AI to converge correctly. Every design decision minimizes the set of valid next tokens at each generation step, reducing hallucination and syntax errors.
 
 ## Key Design Principles
 
@@ -57,7 +57,7 @@ test "greet succeeds" {
 
 ## File Extension
 
-`.selm`
+`.almd`
 
 ## Documentation
 
@@ -66,16 +66,16 @@ test "greet succeeds" {
 
 ## How It Works
 
-Selmite source (`.selm`) is transpiled to TypeScript and runs on [Deno](https://deno.land/).
+Almide source (`.almd`) is transpiled to TypeScript and runs on [Deno](https://deno.land/).
 
 ```
-.selm → Lexer → Parser → AST → CodeGen → .ts (Deno)
+.almd → Lexer → Parser → AST → CodeGen → .ts (Deno)
 ```
 
 ### Usage
 
 ```bash
-deno run --allow-read src/selmite.ts input.selm > output.ts
+deno run --allow-read src/almide.ts input.almd > output.ts
 deno run --allow-read --allow-write --allow-env output.ts
 ```
 
@@ -83,7 +83,7 @@ deno run --allow-read --allow-write --allow-env output.ts
 
 Tested with the [MiniGit benchmark](https://github.com/mame/ai-coding-lang-bench) (11 tests, 10 trials).
 
-An LLM with **zero prior knowledge** of Selmite, given only the CHEATSHEET as reference, achieved:
+An LLM with **zero prior knowledge** of Almide, given only the CHEATSHEET as reference, achieved:
 
 | Metric | Result |
 |--------|--------|

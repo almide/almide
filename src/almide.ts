@@ -1,5 +1,5 @@
-// Selmite compiler CLI
-// Usage: deno run --allow-read src/selmite.ts <file.selm>
+// Almide compiler CLI
+// Usage: deno run --allow-read src/almide.ts <file.almd>
 
 import { Lexer } from "./lexer.ts";
 import { Parser } from "./parser.ts";
@@ -7,7 +7,7 @@ import { generate } from "./codegen.ts";
 
 const file = Deno.args[0];
 if (!file) {
-  console.error("Usage: selmite <file.selm>");
+  console.error("Usage: almide <file.almd>");
   Deno.exit(1);
 }
 

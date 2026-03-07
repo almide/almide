@@ -1,4 +1,4 @@
-# Selmite Language Specification v0.6
+# Almide Language Specification v0.6
 
 **"Not a language for writing freely, but a language for converging correctly."**
 

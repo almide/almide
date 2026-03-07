@@ -1,6 +1,6 @@
-# Selmite Quick Reference (for AI code generation)
+# Almide Quick Reference (for AI code generation)
 
-File extension: `.selm`
+File extension: `.almd`
 
 ## File structure
 ```

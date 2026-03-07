@@ -1,10 +1,10 @@
-// Selmite AST → TypeScript (Deno) code generator
+// Almide AST → TypeScript (Deno) code generator
 import type {
   Program, Decl, Stmt, Expr, Pattern, MatchArm,
   FieldInit, TypeExpr,
 } from "./ast.ts";
 
-const RUNTIME = `// ---- Selmite Runtime ----
+const RUNTIME = `// ---- Almide Runtime ----
 const __fs = {
   exists(p: string): boolean { try { Deno.statSync(p); return true; } catch { return false; } },
   read_text(p: string): string { return Deno.readTextFileSync(p); },
@@ -298,7 +298,7 @@ function genCall(expr: Extract<Expr, { kind: "call" }>): string {
   return `${callee}(${args.join(", ")})`;
 }
 
-// Map selmite module.function calls to runtime
+// Map almide module.function calls to runtime
 function resolveIdent(name: string): string {
   const sanitized = sanitizeName(name);
   return sanitized;
