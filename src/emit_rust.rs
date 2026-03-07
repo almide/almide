@@ -27,16 +27,19 @@ impl Emitter {
     }
 
     fn emit_program(&mut self, prog: &Program) {
-        // Collect effect function names
+        // Collect effect function names (skip those that already return Result)
         for decl in &prog.decls {
-            if let Decl::Fn { name, effect, .. } = decl {
+            if let Decl::Fn { name, effect, return_type, .. } = decl {
                 if effect.unwrap_or(false) {
-                    self.effect_fns.push(name.clone());
+                    let ret_str = self.gen_type(return_type);
+                    if !ret_str.starts_with("Result<") {
+                        self.effect_fns.push(name.clone());
+                    }
                 }
             }
         }
 
-        self.emitln("#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut)]");
+        self.emitln("#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use)]");
         self.emitln("");
         self.emit_runtime();
         self.emitln("");
@@ -137,6 +140,34 @@ impl Emitter {
                 let ty_str = self.gen_type(inner);
                 self.emitln(&format!("struct {}({});", name, ty_str));
             }
+            TypeExpr::Variant { cases } => {
+                self.emitln("#[derive(Debug, Clone, PartialEq)]");
+                self.emitln(&format!("enum {} {{", name));
+                self.indent += 1;
+                for case in cases {
+                    match case {
+                        VariantCase::Unit { name: cname } => {
+                            self.emitln(&format!("{},", cname));
+                        }
+                        VariantCase::Tuple { name: cname, fields } => {
+                            let fs: Vec<String> = fields.iter().map(|f| self.gen_type(f)).collect();
+                            self.emitln(&format!("{}({}),", cname, fs.join(", ")));
+                        }
+                        VariantCase::Record { name: cname, fields } => {
+                            let fs: Vec<String> = fields.iter().map(|f| format!("{}: {}", f.name, self.gen_type(&f.ty))).collect();
+                            self.emitln(&format!("{} {{ {} }},", cname, fs.join(", ")));
+                        }
+                    }
+                }
+                self.indent -= 1;
+                self.emitln("}");
+                // impl Display for error types (so they work with .to_string())
+                self.emitln(&format!("impl std::fmt::Display for {} {{", name));
+                self.emitln(&format!("    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {{ write!(f, \"{{:?}}\", self) }}"));
+                self.emitln("}");
+                // Allow using variant names without prefix
+                self.emitln(&format!("use {}::*;", name));
+            }
             _ => {
                 self.emitln(&format!("// type {} (unsupported)", name));
             }
@@ -149,8 +180,14 @@ impl Emitter {
         let is_unit_ret = ret_str == "()";
 
         let actual_ret = if is_effect {
-            if is_unit_ret { "Result<(), String>".to_string() }
-            else { format!("Result<{}, String>", ret_str) }
+            if ret_str.starts_with("Result<") {
+                // Already a Result type, don't double-wrap
+                ret_str.clone()
+            } else if is_unit_ret {
+                "Result<(), String>".to_string()
+            } else {
+                format!("Result<{}, String>", ret_str)
+            }
         } else {
             ret_str.clone()
         };
@@ -172,8 +209,15 @@ impl Emitter {
         match body {
             Expr::Block { stmts, expr: final_expr } => {
                 self.emit_stmts(stmts);
+                let ret_is_result = ret_str.starts_with("Result<");
                 if is_effect {
-                    if let Some(fe) = final_expr {
+                    if ret_is_result {
+                        // Return type is already Result, don't wrap in Ok()
+                        if let Some(fe) = final_expr {
+                            let e = self.gen_expr(fe);
+                            self.emitln(&e);
+                        }
+                    } else if let Some(fe) = final_expr {
                         if is_unit_ret {
                             let e = self.gen_expr(fe);
                             self.emitln(&format!("{};", e));
@@ -222,6 +266,8 @@ impl Emitter {
                 "String" => "String".to_string(),
                 "Bool" => "bool".to_string(),
                 "Unit" => "()".to_string(),
+                "IoError" => "String".to_string(),
+                "Path" => "String".to_string(),
                 other => other.to_string(),
             },
             TypeExpr::Generic { name, args } => match name.as_str() {
@@ -420,28 +466,29 @@ impl Emitter {
                 let r = self.gen_arg(right);
                 format!("AlmideConcat::concat({}, {})", l, r)
             }
-            "^" | "*" | "%" => {
+            "^" | "%" => {
                 let left_big = self.is_bigint_expr(left);
                 let right_big = self.is_bigint_expr(right);
                 let needs_wrapping = left_big || right_big;
                 if needs_wrapping {
-                    // % 2^64 is a no-op in u64 wrapping arithmetic
                     if op == "%" && self.is_pow2_64(right) {
                         let inner = self.gen_expr_u64_wrapping(left);
                         return format!("(({}) as i64)", inner);
                     }
                     let l = self.gen_expr_u64_wrapping(left);
                     let r = self.gen_expr_u64_wrapping(right);
-                    let inner = match op {
-                        "*" => format!("(({}).wrapping_mul({}))", l, r),
-                        _ => format!("(({}) {} ({}))", l, op, r),
-                    };
-                    format!("(({}) as i64)", inner)
+                    format!("(({} {} {}) as i64)", l, op, r)
                 } else {
                     let l = self.gen_expr(left);
                     let r = self.gen_expr(right);
                     format!("({} {} {})", l, op, r)
                 }
+            }
+            "*" => {
+                // All integer multiplication uses wrapping to match Almide semantics
+                let l = self.gen_expr(left);
+                let r = self.gen_expr(right);
+                format!("(({}).wrapping_mul({}))", l, r)
             }
             "==" => {
                 let l = self.gen_expr(left);
@@ -702,19 +749,31 @@ impl Emitter {
         lines.join("\n")
     }
 
+    fn is_ok_unit(&self, expr: &Expr) -> bool {
+        matches!(expr, Expr::Ok { expr } if matches!(expr.as_ref(), Expr::Unit))
+    }
+
     fn gen_do_block(&self, stmts: &[Stmt], final_expr: Option<&Expr>) -> String {
         let has_guard = stmts.iter().any(|s| matches!(s, Stmt::Guard { .. }));
         if has_guard {
-            let mut lines = vec!["loop {".to_string()];
+            // Check if any guard uses ok(()) as else branch (indicates Result context)
+            let has_ok_unit_guard = stmts.iter().any(|s| {
+                if let Stmt::Guard { else_, .. } = s { self.is_ok_unit(else_) } else { false }
+            });
+            let mut lines = vec!["{ loop {".to_string()];
             for stmt in stmts {
                 match stmt {
                     Stmt::Guard { cond, else_ } => {
                         let c = self.gen_expr(cond);
-                        if matches!(else_, Expr::Unit) {
+                        if matches!(else_, Expr::Unit) || self.is_ok_unit(else_) {
                             lines.push(format!("    if !({}) {{ break; }}", c));
                         } else {
                             let e = self.gen_expr(else_);
-                            lines.push(format!("    if !({}) {{ return {}; }}", c, e));
+                            if e.contains("return ") {
+                                lines.push(format!("    if !({}) {{ {}; }}", c, e));
+                            } else {
+                                lines.push(format!("    if !({}) {{ return {}; }}", c, e));
+                            }
                         }
                     }
                     _ => lines.push(format!("    {}", self.gen_stmt(stmt))),
@@ -724,6 +783,12 @@ impl Emitter {
                 lines.push(format!("    {};", self.gen_expr(expr)));
             }
             lines.push("}".to_string());
+            // After the loop, provide the appropriate trailing value
+            if has_ok_unit_guard && self.in_effect {
+                lines.push("Ok::<(), String>(()) }".to_string());
+            } else {
+                lines.push("}".to_string());
+            }
             lines.join("\n")
         } else {
             self.gen_block(stmts, final_expr)
@@ -757,7 +822,11 @@ impl Emitter {
             Stmt::Guard { cond, else_ } => {
                 let c = self.gen_expr(cond);
                 let e = self.gen_expr(else_);
-                format!("if !({}) {{ return {}; }}", c, e)
+                if e.contains("return ") {
+                    format!("if !({}) {{ {}; }}", c, e)
+                } else {
+                    format!("if !({}) {{ return {}; }}", c, e)
+                }
             }
             Stmt::Expr { expr } => {
                 format!("{};", self.gen_expr(expr))
