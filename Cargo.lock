@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "almide-rs"
+name = "almide"
 version = "0.1.0"
 dependencies = [
  "serde",

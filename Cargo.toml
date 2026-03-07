@@ -1,5 +1,5 @@
 [package]
-name = "almide-rs"
+name = "almide"
 version = "0.1.0"
 edition = "2024"
 
