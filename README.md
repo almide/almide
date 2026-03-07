@@ -1,6 +1,10 @@
-# Almide
+<p align="center">
+  <img src="./almide.png" alt="Almide" width="200">
+</p>
 
-A programming language designed for LLM code generation.
+<h1 align="center">Almide</h1>
+
+<p align="center">A programming language designed for LLM code generation.</p>
 
 Almide is not a language for humans to write freely — it is a language for AI to converge correctly. Every design decision minimizes the set of valid next tokens at each generation step, reducing hallucination and syntax errors.
 
