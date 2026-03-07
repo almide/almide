@@ -406,6 +406,24 @@ function genPipe(expr: Extract<Expr, { kind: "pipe" }>): string {
 function genBlock(stmts: Stmt[], finalExpr: Expr | undefined, indent = 0): string {
   const ind = "  ".repeat(indent + 1);
   const lines: string[] = [];
+
+  // Detect pattern: let x = expr; match x { ..., err(e) => ... }
+  // Inline expr into match subject so try-catch in genMatch catches the throw
+  if (finalExpr && finalExpr.kind === "match" && stmts.length > 0) {
+    const lastStmt = stmts[stmts.length - 1];
+    if (lastStmt.kind === "let" &&
+        finalExpr.subject.kind === "ident" &&
+        finalExpr.subject.name === lastStmt.name &&
+        finalExpr.arms.some(a => a.pattern.kind === "err")) {
+      for (let i = 0; i < stmts.length - 1; i++) {
+        lines.push(ind + genStmt(stmts[i], indent + 1));
+      }
+      const inlinedExpr: Expr = { ...finalExpr, subject: lastStmt.value };
+      lines.push(ind + "return " + genExpr(inlinedExpr) + ";");
+      return `{\n${lines.join("\n")}\n${"  ".repeat(indent)}}`;
+    }
+  }
+
   for (const stmt of stmts) {
     lines.push(ind + genStmt(stmt, indent + 1));
   }

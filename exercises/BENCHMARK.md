@@ -18,7 +18,7 @@ We tested this by having an LLM agent (Claude) solve 14 Exercism-style exercises
 | config-merger | 27 | 27 | 0 | `effect fn` + file I/O error propagation |
 | grade-report | 30 | 30 | 0 | Multi-function error propagation |
 | hamming | 9 | 9 | 0 | |
-| isbn-verifier | 14 | 12 | 2 | Result erasure + fold accumulator limitation |
+| isbn-verifier | 14 | 14 | 0 | |
 | isogram | 13 | 13 | 0 | |
 | pangram | 10 | 10 | 0 | |
 | phone-number | 14 | 14 | 0 | |
@@ -26,7 +26,7 @@ We tested this by having an LLM agent (Claude) solve 14 Exercism-style exercises
 | raindrops | 18 | 18 | 0 | |
 | roman-numerals | 19 | 19 | 0 | |
 | scrabble-score | 11 | 11 | 0 | |
-| **Total** | **248** | **246** | **2** | **99.2%** |
+| **Total** | **248** | **248** | **0** | **100%** |
 
 ### Python (baseline comparison)
 
@@ -59,10 +59,10 @@ We tested this by having an LLM agent (Claude) solve 14 Exercism-style exercises
 ## Key Findings
 
 ### The CHEATSHEET is sufficient
-An LLM can write correct Almide code from zero knowledge using only a 340-line quick reference. 246/248 tests pass (99.2%).
+An LLM can write correct Almide code from zero knowledge using only a 340-line quick reference. 248/248 tests pass (100%).
 
-### Known limitation: Result erasure + fold accumulator
-The 2 failing tests in isbn-verifier involve using `err()` as a fold accumulator value. Due to Result erasure (where `err(e)` compiles to `throw`), error values cannot be accumulated inside `list.fold`. This is a fundamental design trade-off of the erasure approach.
+### Result erasure + fold: resolved
+The `let result = list.fold(...); match result { err(_) => ... }` pattern previously failed because `err()` in the fold callback throws out of `Array.reduce`, preventing assignment. This was fixed by detecting the `let x = expr; match x { err(...) => ... }` pattern in codegen and inlining the expression into the match subject, so the try-catch wrapper catches the throw correctly.
 
 ### Almide advantages visible in complex exercises
 
@@ -114,8 +114,8 @@ def merge_and_save(paths, output):
     return len(merged)
 ```
 
-### Result erasure constraint on test patterns
-Due to Result erasure, `let result = fn_returning_err(); match result { ... }` does not work — the error throws at assignment before `match` runs. Instead, match directly on the call: `match fn_returning_err() { ok(v) => ..., err(e) => ... }`. Similarly, use `assert_eq(expr, err("msg"))` to test error cases.
+### Result erasure: codegen auto-inlining
+The codegen now detects `let x = expr; match x { ..., err(e) => ... }` and automatically inlines `expr` into the match subject, wrapping it in try-catch. This means both direct matching (`match fn() { err(e) => ... }`) and the let-then-match pattern work correctly. Use `assert_eq(expr, err("msg"))` to test error cases.
 
 ### stdlib note
 `string.to_int`, `string.to_upper`, `string.to_lower` are now in the stdlib, reducing boilerplate from earlier exercises.

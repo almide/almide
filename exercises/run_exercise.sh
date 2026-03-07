@@ -20,4 +20,4 @@ if ! deno run --allow-read "$PROJECT_DIR/src/almide.ts" "$ALMD" > "$TMPFILE" 2>/
 fi
 
 # Run tests
-deno test "$TMPFILE" 2>&1
+deno test --allow-write --allow-read "$TMPFILE" 2>&1
