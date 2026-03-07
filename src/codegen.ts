@@ -26,6 +26,12 @@ const __string = {
   to_bytes(s: string): number[] { return Array.from(new TextEncoder().encode(s)); },
   contains(s: string, sub: string): boolean { return s.includes(sub); },
   starts_with_q(s: string, prefix: string): boolean { return s.startsWith(prefix); },
+  ends_with_q(s: string, suffix: string): boolean { return s.endsWith(suffix); },
+  to_upper(s: string): string { return s.toUpperCase(); },
+  to_lower(s: string): string { return s.toLowerCase(); },
+  to_int(s: string): number { const n = parseInt(s, 10); if (isNaN(n)) throw new Error("invalid integer: " + s); return n; },
+  replace(s: string, from: string, to: string): string { return s.split(from).join(to); },
+  char_at(s: string, i: number): string | null { return i < s.length ? s[i] : null; },
 };
 const __list = {
   len<T>(xs: T[]): number { return xs.length; },
