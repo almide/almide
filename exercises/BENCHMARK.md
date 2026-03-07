@@ -4,7 +4,7 @@
 
 Can an LLM write correct Almide code with **zero prior knowledge**, using only the [CHEATSHEET.md](../CHEATSHEET.md)?
 
-We tested this by having an LLM agent (Claude) solve 13 Exercism-style exercises from scratch, given only the CHEATSHEET as reference. The same exercises were also solved in Python for comparison.
+We tested this by having an LLM agent (Claude) solve 14 Exercism-style exercises from scratch, given only the CHEATSHEET as reference. The same exercises were also solved in Python for comparison.
 
 ## Results
 
@@ -15,6 +15,7 @@ We tested this by having an LLM agent (Claude) solve 13 Exercism-style exercises
 | affine-cipher | 16 | 16 | 0 | |
 | bob | 25 | 25 | 0 | |
 | collatz-conjecture | 6 | 6 | 0 | |
+| config-merger | 27 | 27 | 0 | `effect fn` + file I/O error propagation |
 | grade-report | 30 | 30 | 0 | Multi-function error propagation |
 | hamming | 9 | 9 | 0 | |
 | isbn-verifier | 14 | 12 | 2 | Result erasure + fold accumulator limitation |
@@ -25,7 +26,7 @@ We tested this by having an LLM agent (Claude) solve 13 Exercism-style exercises
 | raindrops | 18 | 18 | 0 | |
 | roman-numerals | 19 | 19 | 0 | |
 | scrabble-score | 11 | 11 | 0 | |
-| **Total** | **221** | **219** | **2** | **99.1%** |
+| **Total** | **248** | **246** | **2** | **99.2%** |
 
 ### Python (baseline comparison)
 
@@ -34,6 +35,7 @@ We tested this by having an LLM agent (Claude) solve 13 Exercism-style exercises
 | affine-cipher | 16 | 16 | |
 | bob | 25 | 25 | |
 | collatz-conjecture | 6 | 6 | |
+| config-merger | 27 | 27 | |
 | grade-report | 30 | 30 | |
 | hamming | 9 | 9 | |
 | isbn-verifier | 14 | 14 | |
@@ -44,7 +46,7 @@ We tested this by having an LLM agent (Claude) solve 13 Exercism-style exercises
 | raindrops | 18 | 18 | |
 | roman-numerals | 19 | 19 | |
 | scrabble-score | 11 | 11 | |
-| **Total** | **221** | **221** | **100%** |
+| **Total** | **248** | **248** | **100%** |
 
 ## Methodology
 
@@ -92,8 +94,28 @@ match parse_student(line) {
 }
 ```
 
-### Current stdlib limitations
-The LLM had to manually implement `parse_int` (string→integer via byte arithmetic) and `to_upper` (uppercase via alphabet lookup) in multiple exercises. Adding `string.to_int` and `string.to_upper` to the stdlib would significantly reduce boilerplate.
+**`effect fn` with file I/O error propagation** (config-merger exercise):
+```
+effect fn merge_and_save(paths: List[String], output: String) -> Result[Int, String] = {
+  match merge_files(paths) {       // file read errors propagate automatically
+    err(e) => err(e),
+    ok(pairs) => {
+      save_config(output, pairs);  // file write errors propagate
+      ok(list.len(pairs))
+    }
+  }
+}
+```
+vs Python (exceptions are implicit, no type-level contract):
+```python
+def merge_and_save(paths, output):
+    merged = merge_files(paths)     # FileNotFoundError? ValueError? Unknown
+    save_config(output, merged)     # IOError? Unknown
+    return len(merged)
+```
+
+### stdlib note
+`string.to_int`, `string.to_upper`, `string.to_lower` are now in the stdlib, reducing boilerplate from earlier exercises.
 
 ## Running the benchmark
 
