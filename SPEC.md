@@ -1,72 +1,72 @@
 # Selmite Language Specification v0.6
 
-**"自由に書くための言語ではなく、正しく収束するための言語"**
+**"Not a language for writing freely, but a language for converging correctly."**
 
 ---
 
-## 0. 設計哲学
+## 0. Design Philosophy
 
-### 核心命題
+### Core Thesis
 
-LLM向け言語設計の本質は、表現力の最大化ではなく、**各生成ステップにおける有効候補集合の最小化**にある。
+The essence of language design for LLMs is not maximizing expressiveness, but **minimizing the set of valid candidates at each generation step**.
 
-### 4本柱
+### Four Pillars
 
-| 原則 | 定義 |
+| Principle | Definition |
 |---|---|
-| **Predictable** | コードの続きを生成するとき「次に来る正しい構文・API・意味」が狭く絞れる |
-| **Local** | ある箇所を理解・修正するために必要な情報が、できるだけ近くにある |
-| **Repairable** | 誤りが起きても、コンパイラ・ランタイム・型系が少ない手数で一意に近い修正候補を返せる |
-| **Compact** | 意味密度が高く、記法のノイズが少ない。厳格でも長くならない |
+| **Predictable** | When generating the continuation of code, the "next valid syntax, API, and semantics" can be narrowed down tightly |
+| **Local** | The information needed to understand or modify a given location is as close as possible |
+| **Repairable** | When errors occur, the compiler, runtime, and type system can return near-unique fix candidates in few steps |
+| **Compact** | High semantic density with low syntactic noise. Strict yet concise |
 
-### 設計憲法 7条
+### 7 Design Principles
 
-1. **正準性** -- 同じ意味を表す主要な書き方は、原則1つにする
-2. **表面意味** -- 副作用、失敗可能性、欠損可能性、可変性は、構文か型に現れなければならない
-3. **局所推論** -- 関数や式の意味は、近くの構文だけで大半が分かるべきである
-4. **段階的完成** -- 未完成コードは合法であり、型付きの穴を埋めながら前進できるべきである
-5. **修復優先** -- コンパイラは拒絶器ではなく修復器であるべきで、診断は構造化される
-6. **語彙節約** -- 標準ライブラリは小さく、一貫した語彙だけを持つ
-7. **魔法の禁止** -- 実行時に意味が変わる機構、文脈依存DSL、暗黙型変換を原則禁止する
+1. **Canonicity** -- There should be, in principle, only one primary way to express the same meaning
+2. **Surface Semantics** -- Side effects, fallibility, optionality, and mutability must appear in the syntax or type
+3. **Local Reasoning** -- The meaning of a function or expression should be largely understandable from nearby syntax alone
+4. **Incremental Completion** -- Incomplete code is legal; one can make progress by filling typed holes
+5. **Repair-First** -- The compiler should be a repair tool, not a rejection tool; diagnostics are structured
+6. **Vocabulary Economy** -- The standard library is small and has only a consistent vocabulary
+7. **No Magic** -- Mechanisms that change meaning at runtime, context-dependent DSLs, and implicit type conversions are prohibited in principle
 
-### トレードオフ（意図的に犠牲にするもの）
+### Trade-offs (Intentionally Sacrificed)
 
-- 熟練者の記述自由度
-- 文化的な"言語らしさ"
-- DSLの気持ちよさ
-- メタプログラミングの爆発力
-- 極端な型表現力
-- 短さのための省略美
+- Writing freedom for experts
+- Cultural "language feel"
+- Ergonomic DSLs
+- Explosive metaprogramming power
+- Extreme type expressiveness
+- Abbreviation aesthetics for brevity
 
-**狙い: 高い簡潔さ + 低い自由度**
+**Goal: High conciseness + Low freedom**
 
 ---
 
-## 1. 字句仕様
+## 1. Lexical Specification
 
-### 1.1 識別子
+### 1.1 Identifiers
 
 ```
 Identifier ::= [a-z_][a-zA-Z0-9_]*
 ```
 
-末尾に `?` を1つだけ許す:
+A single trailing `?` is allowed:
 
 ```
 Name ::= Identifier | Identifier "?"
 ```
 
-意味規則（static rule で強制）:
-- `name?` -- **Bool predicate 専用**（戻り値型は必ず Bool）
+Semantic rules (enforced by static rule):
+- `name?` -- **Bool predicate only** (return type must be Bool)
 
-### 1.2 型名
+### 1.2 Type Names
 
 ```
 TypeName ::= [A-Z][a-zA-Z0-9]*
 TypeConstructor ::= TypeName
 ```
 
-### 1.3 リテラル
+### 1.3 Literals
 
 ```
 IntLiteral       ::= [0-9]+
@@ -76,9 +76,9 @@ InterpolatedStr  ::= '"' ( char | "${" Expr "}" )* '"'
 BoolLiteral      ::= "true" | "false"
 ```
 
-欠損値リテラル `null` は**存在しない**。欠損は `none`（`Option[T]` の構築子）で表現する。
+There is **no** null literal for missing values. Absence is represented by `none` (a constructor of `Option[T]`).
 
-### 1.4 予約語
+### 1.4 Reserved Words
 
 ```
 module import type trait impl for fn let var
@@ -89,37 +89,37 @@ todo unsafe effect deriving test
 async await guard newtype
 ```
 
-将来予約: `strict`, `where`
+Reserved for future use: `strict`, `where`
 
 ---
 
-## 2. 文の区切り
+## 2. Statement Separators
 
-**改行が文の区切り。** セミコロンは1行に複数文を書く場合のみ使用。
+**Newlines separate statements.** Semicolons are used only to place multiple statements on a single line.
 
 ```
 let x = 1
 let y = 2
-let z = x + y    // 改行で区切り
+let z = x + y    // newline as separator
 
-let a = 1; let b = 2   // 1行に複数文はセミコロン
+let a = 1; let b = 2   // semicolon for multiple statements on one line
 ```
 
-### 2.1 行継続ルール
+### 2.1 Line Continuation Rules
 
-以下の場合、改行は無視され次行に継続する:
+In the following cases, a newline is ignored and the statement continues on the next line:
 
-**行末が以下のトークンの場合:**
-- 二項演算子: `+`, `-`, `*`, `/`, `%`, `++`, `==`, `!=`, `<=`, `>=`, `<`, `>`, `and`, `or`, `|>`
-- 区切り: `,`, `.`, `:`
-- 開き括弧: `(`, `{`, `[`
-- 矢印: `->`, `=>`
-- 代入: `=`
-- キーワード: `if`, `then`, `else`, `match`, `try`, `do`, `not`, `|`
+**When the line ends with one of the following tokens:**
+- Binary operators: `+`, `-`, `*`, `/`, `%`, `++`, `==`, `!=`, `<=`, `>=`, `<`, `>`, `and`, `or`, `|>`
+- Delimiters: `,`, `.`, `:`
+- Opening brackets: `(`, `{`, `[`
+- Arrows: `->`, `=>`
+- Assignment: `=`
+- Keywords: `if`, `then`, `else`, `match`, `try`, `do`, `not`, `|`
 
-**次行が以下のトークンで始まる場合:**
-- `.` (メソッドチェーン)
-- `|>` (パイプ)
+**When the next line starts with one of the following tokens:**
+- `.` (method chaining)
+- `|>` (pipe)
 
 ```
 let result = items
@@ -134,7 +134,7 @@ text
 
 ---
 
-## 3. 構文カテゴリ
+## 3. Syntactic Categories
 
 ```
 Program   ::= ModuleDecl ImportDecl* TopDecl*
@@ -167,16 +167,16 @@ Expr      ::= Literal
 
 ---
 
-## 4. モジュールと import
+## 4. Modules and Imports
 
-### 4.1 モジュール宣言
+### 4.1 Module Declaration
 
 ```
 ModuleDecl ::= "module" ModulePath
 ModulePath ::= Identifier ( "." Identifier )*
 ```
 
-### 4.2 import 宣言
+### 4.2 Import Declaration
 
 ```
 ImportDecl ::= "import" ImportPath
@@ -185,34 +185,34 @@ ImportDecl ::= "import" ImportPath
 NameList ::= Name ( "," Name )*
 ```
 
-例:
+Examples:
 ```
 import fs
 import json
 import collections.{List, Map}
 ```
 
-**禁止: wildcard import。** `import fs.*` はコンパイルエラー。
+**Prohibited: wildcard imports.** `import fs.*` is a compile error.
 
-選択的 import は許可する。「何を持ち込んだか」がコード上に見えるため、LLMの名前解決を助ける。
+Selective imports are allowed. Because "what was brought in" is visible in the code, it helps LLM name resolution.
 
-### 4.3 prelude は極小
+### 4.3 Minimal Prelude
 
-暗黙 import は真に基本的な型だけ:
+Only truly fundamental types are implicitly imported:
 - `Int`, `Float`, `Bool`, `String`, `Unit`
 - `Option`, `Result`, `List`
 - `some`, `none`, `ok`, `err`
 - `true`, `false`
 
-`map`, `filter` などの関数はコレクション型のメソッドとしてのみ提供し、グローバル関数として浮遊させない。
+Functions like `map` and `filter` are provided only as methods on collection types and do not float as global functions.
 
 ---
 
-## 5. 型宣言
+## 5. Type Declarations
 
-### 5.1 ジェネリクス — `[]` 記法
+### 5.1 Generics -- `[]` Notation
 
-**型引数には `[]` を使用する。** `<>` は比較演算子専用。
+**Type arguments use `[]`.** `<>` is reserved exclusively for comparison operators.
 
 ```
 GenericParams ::= "[" TypeParam ( "," TypeParam )* "]"
@@ -220,15 +220,15 @@ TypeParam     ::= TypeName ( ":" TraitBound )?
 TraitBound    ::= TypeName ( "+" TypeName )*
 ```
 
-根拠: `<>` は比較演算子と構文的に衝突し、パーサーが文脈依存の曖昧性解決を必要とする。`[]` は常にジェネリクスを意味し、曖昧性がゼロ。`>>` の分割問題も発生しない。
+Rationale: `<>` syntactically conflicts with comparison operators, requiring the parser to perform context-dependent ambiguity resolution. `[]` always means generics, with zero ambiguity. The `>>` splitting problem also does not arise.
 
 ```
-// 曖昧性なし
+// No ambiguity
 Result[List[Map[String, Int]], Error]
 fn map[U](self, f: fn(T) -> U) -> List[U]
 ```
 
-### 5.2 レコード型
+### 5.2 Record Types
 
 ```
 TypeDecl   ::= "type" TypeName GenericParams? "=" TypeExpr DerivingClause?
@@ -238,7 +238,7 @@ FieldTypeList ::= FieldType ( "," FieldType )*
 FieldType  ::= Identifier ":" TypeExpr
 ```
 
-例:
+Examples:
 ```
 type User = {
   id: Int,
@@ -251,7 +251,7 @@ type Pair[A, B] = {
 }
 ```
 
-### 5.3 バリアント型
+### 5.3 Variant Types
 
 ```
 VariantType  ::= VariantCase ( "|" VariantCase )*
@@ -262,7 +262,7 @@ VariantCase  ::= TypeConstructor
 TypeExprList ::= TypeExpr ( "," TypeExpr )*
 ```
 
-例:
+Examples:
 ```
 type Token =
   | Word(String)
@@ -275,7 +275,7 @@ type Shape =
   | Point
 ```
 
-バリアントは**0引数、タプル形式（位置引数）、レコード形式（名前付き）**の3形態を許す。
+Variants allow **three forms: zero-argument, tuple-style (positional arguments), and record-style (named fields)**.
 
 ### 5.4 deriving
 
@@ -283,7 +283,7 @@ type Shape =
 DerivingClause ::= "deriving" TypeName ( "," TypeName )*
 ```
 
-バリアント型の `From` trait 実装を自動導出する。`Name(Type)` 形式のケースから `From[Type]` を機械的に生成。
+Automatically derives `From` trait implementations for variant types. Mechanically generates `From[Type]` from cases of the form `Name(Type)`.
 
 ```
 type ConfigError =
@@ -292,13 +292,13 @@ type ConfigError =
   | Decode(DecodeError)
   deriving From
 
-// 上記は以下と等価:
+// The above is equivalent to:
 // impl From[IoError] for ConfigError { fn from(e: IoError) -> ConfigError = Io(e) }
 // impl From[ParseError] for ConfigError { fn from(e: ParseError) -> ConfigError = Parse(e) }
 // impl From[DecodeError] for ConfigError { fn from(e: DecodeError) -> ConfigError = Decode(e) }
 ```
 
-根拠: `impl From` の手書きはコピペエラーの温床。LLMが3つの微妙に異なるブロックを正確に生成するのは無駄なリスク。
+Rationale: Handwriting `impl From` is a breeding ground for copy-paste errors. Having an LLM accurately generate three subtly different blocks is needless risk.
 
 ### 5.5 newtype
 
@@ -306,26 +306,26 @@ type ConfigError =
 TypeExpr ::= ... | "newtype" TypeExpr
 ```
 
-同じ構造だが型的に区別される新しい型を作る:
+Creates a new type that has the same structure but is distinct at the type level:
 
 ```
 type UserId = newtype Int
 type Email = newtype String
 ```
 
-- `UserId` と `Int` は暗黙に変換されない
-- ラップ: `UserId(42)` / アンラップ: `id.value`
-- ランタイムコストはゼロ（コンパイル時のみの区別）
-- IDや単位の取り違えを型で防止する
+- `UserId` and `Int` are not implicitly convertible
+- Wrap: `UserId(42)` / Unwrap: `id.value`
+- Zero runtime cost (distinction exists only at compile time)
+- Prevents mix-ups of IDs and units at the type level
 
-### 5.6 型適用
+### 5.6 Type Application
 
 ```
 SimpleType ::= TypeName
              | TypeName "[" TypeExprList "]"
 ```
 
-例:
+Examples:
 ```
 List[String]
 Result[User, ParseError]
@@ -334,7 +334,7 @@ Map[String, List[Int]]
 
 ---
 
-## 6. Trait（最小の抽象化機構）
+## 6. Traits (Minimal Abstraction Mechanism)
 
 ```
 TraitDecl ::= "trait" TypeName GenericParams? "{" TraitMethodList "}"
@@ -342,7 +342,7 @@ TraitMethodList ::= ( TraitMethod )*
 TraitMethod ::= "effect"? "fn" Name GenericParams? "(" ParamList ")" "->" TypeExpr
 ```
 
-例:
+Examples:
 ```
 trait Iterable[T] {
   fn map[U](self, f: fn(T) -> U) -> Self[U]
@@ -365,7 +365,7 @@ trait Storage[T] {
 ImplDecl ::= "impl" TypeName GenericParams? "for" TypeName "{" FnDecl* "}"
 ```
 
-例:
+Examples:
 ```
 impl Iterable[T] for List[T] {
   fn map[U](self, f: fn(T) -> U) -> List[U] = _  // builtin
@@ -373,56 +373,56 @@ impl Iterable[T] for List[T] {
 }
 ```
 
-### 制約
+### Constraints
 
-- trait にはメソッドシグネチャのみ（デフォルト実装なし、v0.1では）
-- trait 継承なし（v0.1では）
-- 孤児ルール: 自分のクレート内でしか impl を書けない
+- Traits contain only method signatures (no default implementations in v0.1)
+- No trait inheritance (in v0.1)
+- Orphan rule: `impl` can only be written within your own crate
 
 ---
 
-## 7. 基本型環境
+## 7. Basic Type Environment
 
-### プリミティブ
+### Primitives
 
 ```
 Int, Float, Bool, String, Bytes, Path, Unit
 ```
 
-### コレクション
+### Collections
 
 ```
 List[T], Map[K, V], Set[T]
 ```
 
-### エフェクト表現
+### Effect Representation
 
 ```
 Option[T], Result[T, E]
 ```
 
-### 境界型
+### Boundary Types
 
 ```
 Json, Value
 ```
 
-- 外部入力の受け口としては使用可
-- domain logic に持ち込む前に `decode[T]` を要求
-- core domain 型として `Json` を公開すると linter warning
+- May be used as receivers for external input
+- Requires `decode[T]` before bringing into domain logic
+- Using `Json` as a core domain type triggers a linter warning
 
-### 構築子
+### Constructors
 
 ```
 some(x)  : Option[T]
-none     : Option[T]    // 型は文脈から推論
+none     : Option[T]    // type inferred from context
 ok(x)    : Result[T, E]
 err(x)   : Result[T, E]
 ```
 
 ---
 
-## 8. 関数宣言
+## 8. Function Declarations
 
 ```
 FnDecl ::= "pub"? "async"? "effect"? "fn" Name GenericParams? "(" ParamList? ")" "->" TypeExpr "=" Expr
@@ -431,18 +431,18 @@ ParamList ::= Param ( "," Param )*
 Param     ::= Identifier ":" TypeExpr
 ```
 
-修飾子の順序: `pub? async? effect? fn`
+Modifier order: `pub? async? effect? fn`
 
-原則:
-- **引数型は必須**
-- **戻り値型は必須**
-- 本体は式
-- **副作用を持つ関数は `effect fn` で宣言する**
-- **非同期関数は `async fn` で宣言する（`effect` を暗黙に含む）**
+Principles:
+- **Argument types are required**
+- **Return type is required**
+- The body is an expression
+- **Functions with side effects are declared with `effect fn`**
+- **Async functions are declared with `async fn` (implicitly includes `effect`)**
 
-### 8.1 `effect fn` — 副作用の明示
+### 8.1 `effect fn` -- Explicit Side Effects
 
-`effect` キーワードが関数宣言の前に付くと、その関数は副作用を持つことを示す。
+When the `effect` keyword precedes a function declaration, it indicates that the function has side effects.
 
 ```
 fn tracked?(index: Index, path: Path) -> Bool =
@@ -457,15 +457,15 @@ effect fn add(index: Index, file: Path) -> Result[Index, IoError] =
   }
 ```
 
-根拠: v0.2 の `!` サフィックス（`read_text!`）は関数名にメタ情報を埋め込むため、宣言側と呼び出し側の両方で管理が必要だった。`effect fn` にすることで:
-- 関数名は純粋な識別子になる（lexer が単純化）
-- 副作用は宣言のキーワードで表現（型情報に近い位置）
-- 呼び出し側は普通に呼ぶだけ
-- コンパイラが `effect fn` から非 `effect fn` の呼び出しを検出すればよい
+Rationale: The `!` suffix from v0.2 (`read_text!`) embedded meta-information in the function name, requiring management on both the declaration and call sides. By using `effect fn`:
+- Function names become pure identifiers (simplifying the lexer)
+- Side effects are expressed via a keyword in the declaration (close to type information)
+- Call sites simply call the function normally
+- The compiler only needs to detect calls from non-`effect fn` to `effect fn`
 
 ---
 
-## 9. 文
+## 9. Statements
 
 ### 9.1 let / var
 
@@ -476,27 +476,27 @@ VarStmt ::= "var" Identifier TypeAnnotation? "=" Expr
 TypeAnnotation ::= ":" TypeExpr
 ```
 
-- `let` は**不変**
-- `var` は**可変**
-- ローカル変数は型注釈省略可。公開API・モジュール境界・フィールドは明示。
+- `let` is **immutable**
+- `var` is **mutable**
+- Local variables may omit type annotations. Public APIs, module boundaries, and fields require explicit types.
 
-#### 分割束縛
+#### Destructuring Bindings
 
-レコードからフィールドを取り出す:
+Extract fields from a record:
 
 ```
 let { name, age } = user
 ```
 
-等価コード:
+Equivalent code:
 ```
 let name = user.name
 let age = user.age
 ```
 
-- `var` 版は提供しない（不変束縛のみ）
-- ネストした分割は不可（1レベルのみ）
-- リネームは不可（フィールド名がそのまま変数名になる）
+- No `var` version is provided (immutable bindings only)
+- Nested destructuring is not allowed (one level only)
+- Renaming is not allowed (field names become variable names directly)
 
 ### 9.2 guard
 
@@ -504,7 +504,7 @@ let age = user.age
 GuardStmt ::= "guard" Expr "else" Expr
 ```
 
-前提条件のチェックと早期脱出。条件が偽のとき、else節の式が返される。
+Precondition checking with early exit. When the condition is false, the expression in the else clause is returned.
 
 ```
 fn f(x: Int) -> Result[Int, Error] = {
@@ -513,26 +513,26 @@ fn f(x: Int) -> Result[Int, Error] = {
 }
 ```
 
-- ブロック内でのみ使用可能
-- else 節は通常 `err(...)` で早期リターン
-- if-else のネストを平坦化し、前提条件を先に書ける
+- Can only be used within a block
+- The else clause typically returns early with `err(...)`
+- Flattens if-else nesting, allowing preconditions to be written first
 
-### 9.3 再代入
+### 9.3 Reassignment
 
 ```
 AssignStmt ::= Identifier "=" Expr
 ```
 
-`var` で束縛された識別子にしか許されない（static rule）。
+Only allowed for identifiers bound with `var` (static rule).
 
-### 9.4 ブロック
+### 9.4 Blocks
 
 ```
 BlockExpr ::= "{" StmtList "}"
 StmtList  ::= ( Stmt NEWLINE )* Stmt?
 ```
 
-最後の文が式なら、その値がブロック値になる。
+If the last statement is an expression, its value becomes the block value.
 
 ```
 {
@@ -544,25 +544,25 @@ StmtList  ::= ( Stmt NEWLINE )* Stmt?
 
 ---
 
-## 10. 式
+## 10. Expressions
 
-### 10.1 if 式
+### 10.1 if Expression
 
 ```
 IfExpr ::= "if" Expr "then" Expr "else" Expr
 ```
 
-- **条件式は必ず `Bool`。truthiness は禁止。**
+- **The condition must be `Bool`. Truthiness is prohibited.**
 
 ```
 let msg = if x > 0 then "positive" else "non-positive"
 
-// コンパイルエラー:
-if x then ...         // Int は Bool でない
-if list then ...      // List は Bool でない
+// Compile error:
+if x then ...         // Int is not Bool
+if list then ...      // List is not Bool
 ```
 
-### 10.2 match 式
+### 10.2 match Expression
 
 ```
 MatchExpr    ::= "match" Expr "{" MatchArmList "}"
@@ -571,9 +571,9 @@ MatchArm     ::= Pattern Guard? "=>" Expr
 Guard        ::= "if" Expr
 ```
 
-**match は網羅的でなければならない**（exhaustive check は typechecker の責務）。
+**match must be exhaustive** (exhaustiveness checking is the typechecker's responsibility).
 
-ガード付きの例:
+Example with guards:
 ```
 match value {
   ok(n) if n > 100 => "big",
@@ -582,9 +582,9 @@ match value {
 }
 ```
 
-ガードは `if` の後に Bool 式を取る。ガード条件が false の場合、次のアームに進む。ネストした if/match を平坦化でき、LLM が生成するコードの構造を単純に保つ。
+Guards take a Bool expression after `if`. When the guard condition is false, the next arm is tried. This flattens nested if/match and keeps the structure of LLM-generated code simple.
 
-### 10.3 パターン
+### 10.3 Patterns
 
 ```
 Pattern ::= "_"
@@ -603,7 +603,7 @@ FieldPatternList ::= FieldPattern ( "," FieldPattern )*
 FieldPattern     ::= Identifier ":" Pattern | Identifier
 ```
 
-例:
+Examples:
 ```
 match shape {
   Circle(r) => 3.14 * r * r,
@@ -617,13 +617,13 @@ match result {
 }
 ```
 
-### 10.4 ラムダ
+### 10.4 Lambdas
 
 ```
 LambdaExpr ::= "fn" "(" LambdaParamList? ")" "=>" Expr
 ```
 
-**1種類だけ。短縮記法は禁止。**
+**Only one form. Shorthand notations are prohibited.**
 
 ```
 fn(x) => x + 1
@@ -631,66 +631,66 @@ fn(x: Int, y: Int) => x + y
 items.map(fn(x) => x * 2)
 ```
 
-### 10.5 名前付き引数
+### 10.5 Named Arguments
 
 ```
 CallExpr ::= Expr "(" CallArgList ")"
 CallArg  ::= Expr | Identifier ":" Expr
 ```
 
-呼び出し側で引数に名前を付けられる。宣言側の変更は不要。
+Arguments can be named at the call site. No changes to the declaration side are needed.
 
 ```
-// 位置引数（従来通り）
+// Positional arguments (as before)
 create_user("alice", 30, true)
 
-// 名前付き引数（順序自由、自己文書化）
+// Named arguments (order-independent, self-documenting)
 create_user(name: "alice", age: 30, active: true)
 
-// 混在OK（位置引数の後に名前付き）
+// Mixed OK (named arguments after positional ones)
 create_user("alice", age: 30, active: true)
 ```
 
-根拠: LLMが最も間違えるのは「同じ型の引数が3つ以上あるとき」。`f(true, false, true)` のような呼び出しは、名前なしでは意味が不明。名前付きなら位置を間違えても名前で正しく対応する。
+Rationale: What LLMs get wrong most often is "when there are three or more arguments of the same type." A call like `f(true, false, true)` is meaningless without names. With names, even if the position is wrong, the names ensure correct correspondence.
 
-### 10.6 文字列補間
+### 10.6 String Interpolation
 
 ```
 let name = "world"
 let msg = "hello ${name}, 1+1=${1 + 1}"
 ```
 
-LLMが最も頻繁に書くのはメッセージの組み立て。正準形を1つ与えることで `+` 結合や `format` 関数のブレを排除する。
+Message construction is the most frequent thing LLMs write. Providing one canonical form eliminates drift between `+` concatenation and `format` functions.
 
-### 10.7 レコード式とスプレッド
+### 10.7 Record Expressions and Spread
 
 ```
 RecordExpr ::= "{" FieldInitList "}"
              | "{" "..." Expr "," FieldInitList "}"
 
 FieldInit ::= Identifier ":" Expr
-            | Identifier                 // 短縮: { name } は { name: name } と同等
+            | Identifier                 // shorthand: { name } is equivalent to { name: name }
 ```
 
-例:
+Examples:
 ```
 let alice = { name: "alice", age: 30 }
-let bob = { ...alice, name: "bob" }      // age は alice から引き継ぐ
+let bob = { ...alice, name: "bob" }      // age is inherited from alice
 ```
 
-### 10.8 リスト式
+### 10.8 List Expressions
 
 ```
 ListExpr ::= "[" ExprList? "]"
 ```
 
-### 10.9 パイプ
+### 10.9 Pipe
 
 ```
 PipeExpr ::= Expr "|>" Expr
 ```
 
-例:
+Examples:
 ```
 text
   |> string.trim
@@ -698,75 +698,75 @@ text
   |> list.map(fn(s) => string.trim(s))
 ```
 
-メソッドチェーンと関数呼び出しの2つの書き方が混在する問題を、パイプで正準化する。`x |> f` は `f(x)` と同等。
+Canonicalizes the problem of mixing method chaining and function calls using pipes. `x |> f` is equivalent to `f(x)`.
 
-#### プレースホルダー `_`
+#### Placeholder `_`
 
-パイプの右辺で多引数関数を使う場合、`_` で左辺の値を挿入する位置を指定できる:
+When using multi-argument functions on the right side of a pipe, `_` specifies where the left-hand value is inserted:
 
 ```
 text |> split(_, ",")           // split(text, ",")
 xs |> filter(_, fn(x) => x > 0)  // filter(xs, fn(x) => x > 0)
 ```
 
-- `_` は呼び出し引数内でのみプレースホルダーとして機能
-- 1つの呼び出しに複数の `_` は不可（コンパイルエラー）
-- `_` がない場合は従来通り `x |> f` → `f(x)`
+- `_` functions as a placeholder only within call arguments
+- Multiple `_` in a single call is not allowed (compile error)
+- When there is no `_`, the conventional `x |> f` -> `f(x)` applies
 
-### 10.10 UFCS（Uniform Function Call Syntax）
+### 10.10 UFCS (Uniform Function Call Syntax)
 
-**`f(x, y)` と `x.f(y)` は等価。** コンパイラが自動的に解決する。
+**`f(x, y)` and `x.f(y)` are equivalent.** The compiler resolves this automatically.
 
 ```
-// 以下は全て同じ意味
+// The following are all the same
 string.trim(text)
 text.trim()
 
-// 以下も同じ
+// These are also the same
 string.split(text, ",")
 text.split(",")
 ```
 
-#### 解決ルール
+#### Resolution Rules
 
-`x.f(args...)` が呼ばれたとき:
+When `x.f(args...)` is called:
 
-1. `x` の型にメソッド `f` があればそれを呼ぶ
-2. なければ、スコープ内の関数 `f(x, args...)` を探す
-3. どちらも見つからなければコンパイルエラー
+1. If the type of `x` has a method `f`, call it
+2. Otherwise, look for a function `f(x, args...)` in scope
+3. If neither is found, it is a compile error
 
-#### 根拠
+#### Rationale
 
-LLMが最も頻繁に迷う判断の一つが「これはメソッド呼び出しか関数呼び出しか」。UFCSにより:
-- `string.trim(text)` と `text.trim()` のどちらで書いても正しい
-- パイプ `text |> string.trim` も引き続き有効
-- 正準形の選択肢が増えるように見えるが、**どれを書いても同じ意味になる**ため、間違いが存在しなくなる
-- trait メソッドと自由関数の境界が消え、「この関数はどこに定義されている？」を気にせず書ける
+One of the most frequent points of confusion for LLMs is "is this a method call or a function call?" With UFCS:
+- Both `string.trim(text)` and `text.trim()` are correct
+- The pipe `text |> string.trim` remains valid as well
+- It may appear that canonical form options increase, but since **all forms mean the same thing**, mistakes cease to exist
+- The boundary between trait methods and free functions disappears, so you can write without worrying about "where is this function defined?"
 
-### 10.11 do ブロック（Result/Option の自動 try 伝播）
+### 10.11 do Block (Automatic try Propagation for Result/Option)
 
 ```
 DoExpr ::= "do" BlockExpr
 ```
 
-`do` ブロック内では、`Result[T, E]` や `Option[T]` を返す式に対して自動的に `try` が適用される。
+Inside a `do` block, `try` is automatically applied to expressions that return `Result[T, E]` or `Option[T]`.
 
 ```
 effect fn load(path: Path) -> Result[Config, ConfigError] =
   do {
-    let text = fs.read_text(path)        // 自動 try: Result[String, IoError]
-    let raw = json.parse(text)           // 自動 try: Result[Json, ParseError]
-    decode[Config](raw)                  // 自動 try: Result[Config, DecodeError]
+    let text = fs.read_text(path)        // auto try: Result[String, IoError]
+    let raw = json.parse(text)           // auto try: Result[Json, ParseError]
+    decode[Config](raw)                  // auto try: Result[Config, DecodeError]
   }
 ```
 
-`do` の型推論ルール:
-- ブロックの戻り型が `Result[T, E]` のとき、ブロック内の式が `Result[U, E]` なら自動的に unwrap して `U` を束縛
-- エラー型が異なる場合、`From` trait による変換を試み、変換できなければコンパイルエラー
+Type inference rules for `do`:
+- When the block's return type is `Result[T, E]`, if an expression in the block is `Result[U, E]`, it is automatically unwrapped and `U` is bound
+- If the error types differ, conversion via the `From` trait is attempted; if conversion is not possible, it is a compile error
 
-これが **Result 冗長問題の解決策**。`try` を手書きするか `do` で自動化するかの二択を与え、正準形は2つだが意味は明確に分かれる:
-- `try`: 1つの式だけ unwrap したい
-- `do`: ブロック全体を Result 文脈で書きたい
+This is **the solution to the Result verbosity problem**. It offers the choice of handwriting `try` or automating with `do`, yielding two canonical forms with clearly separated semantics:
+- `try`: unwrap just one expression
+- `do`: write an entire block in a Result context
 
 ### 10.12 hole / todo / try
 
@@ -776,11 +776,11 @@ TodoExpr ::= "todo" "(" StringLiteral ")"
 TryExpr  ::= "try" Expr
 ```
 
-**この3つはこの言語の中核。**
+**These three are at the core of this language.**
 
 ---
 
-## 11. 演算子
+## 11. Operators
 
 ```
 UnaryOp  ::= "-" | "not"
@@ -790,39 +790,39 @@ BinaryOp ::= "+" | "-" | "*" | "/" | "%" | "++"
             | "|>"
 ```
 
-`++` は**リスト/文字列の結合専用**。`+` のオーバーロードで文字列結合をするとLLMが混乱するため分離。
+`++` is **exclusively for list/string concatenation**. String concatenation via `+` overloading confuses LLMs, so it is separated.
 
-### 優先順位
+### Precedence
 
 1. unary (`-`, `not`)
 2. `*` `/` `%`
 3. `+` `-` `++`
-4. 比較 (`==`, `!=`, `<`, `<=`, `>`, `>=`)
+4. comparison (`==`, `!=`, `<`, `<=`, `>`, `>=`)
 5. `and`
 6. `or`
 7. `|>`
 
-- 代入は演算子ではなく文
-- operator overloading は原則禁止（組み込み型のみ）
-- 迷ったら括弧を書く
+- Assignment is a statement, not an operator
+- Operator overloading is prohibited in principle (built-in types only)
+- When in doubt, use parentheses
 
 ---
 
-## 12. エラーモデル
+## 12. Error Model
 
-### 12.1 三層のエラー戦略
+### 12.1 Three-Layer Error Strategy
 
-| 層 | 機構 | 用途 |
+| Layer | Mechanism | Use Case |
 |---|---|---|
-| **通常失敗** | `Result[T, E]` | parse, validate, I/O, lookup |
-| **プログラマエラー** | `panic` | 到達不能、不変条件違反 |
-| **テスト用** | `expect` | テスト内の簡易 unwrap |
+| **Normal failure** | `Result[T, E]` | parse, validate, I/O, lookup |
+| **Programmer error** | `panic` | unreachable, invariant violations |
+| **Testing** | `expect` | simple unwrap within tests |
 
-例外は**存在しない**。`throw` / `catch` はない。
+Exceptions **do not exist**. There is no `throw` / `catch`.
 
-### 12.2 try の typing rule
+### 12.2 Typing Rule for try
 
-#### Result に対する try
+#### try on Result
 
 ```
 Γ ⊢ e : Result[T, E]
@@ -831,7 +831,7 @@ current_return_type = Result[R, E]
 Γ ⊢ try e : T
 ```
 
-#### Option に対する try
+#### try on Option
 
 ```
 Γ ⊢ e : Option[T]
@@ -840,17 +840,17 @@ current_return_type = Option[R]
 Γ ⊢ try e : T
 ```
 
-#### 混用禁止
+#### No Mixing
 
-`Result` を返す関数内で `Option` に `try` を使う自動変換はしない。明示変換を書く:
+There is no automatic conversion for using `try` on an `Option` inside a function that returns `Result`. Write an explicit conversion:
 
 ```
 let value = try opt.ok_or(MyError("missing"))
 ```
 
-### 12.3 エラー変換
+### 12.3 Error Conversion
 
-エラー型の変換は明示的に行う。ただし `do` ブロック + `From` trait + `deriving` で軽量化:
+Error type conversion is done explicitly. However, it is made lightweight with `do` blocks + `From` trait + `deriving`:
 
 ```
 trait From[T] {
@@ -862,7 +862,7 @@ type AppError =
   | Parse(ParseError)
   deriving From
 
-// do ブロック内でエラー型が異なる場合、From が実装されていれば自動変換
+// Inside a do block, when error types differ, automatic conversion via From if implemented
 effect fn load(path: Path) -> Result[Config, AppError] =
   do {
     let text = fs.read_text(path)    // IoError -> AppError via From
@@ -873,9 +873,9 @@ effect fn load(path: Path) -> Result[Config, AppError] =
 
 ---
 
-## 13. Hole と未完成コード
+## 13. Holes and Incomplete Code
 
-**この言語の核心機能。**
+**This is a core feature of the language.**
 
 ### 13.1 Hole
 
@@ -889,27 +889,25 @@ fn parse(text: String) -> Ast = _
 fn optimize(ast: Ast) -> Ast = todo("implement constant folding")
 ```
 
-### 13.3 typing rule
+### 13.3 Typing Rule
 
 ```
 expected_type = T
 -------------------
-Γ ⊢ _ : T          // hole: 型検査は通すが最終成果物ではエラー
+Γ ⊢ _ : T          // hole: passes type checking but errors in final artifacts
 
 expected_type = T
 -------------------
-Γ ⊢ todo(msg) : T  // todo: 同上、ただしメッセージを保持
+Γ ⊢ todo(msg) : T  // todo: same as above, but retains a message
 ```
 
-### 13.4 コンパイラの義務
+### 13.4 Compiler Obligation
 
-hole を見つけたら:
-- 期待型 T
-- スコープ内の利用可能な変数とその型
-- 期待型を返せる関数候補
-- 候補式のテンプレート
-
-を構造化して返す。
+When a hole is found, the compiler must return in a structured format:
+- Expected type T
+- Available variables in scope and their types
+- Function candidates that can return the expected type
+- Template candidate expressions
 
 ```json
 {
@@ -929,31 +927,31 @@ hole を見つけたら:
 
 ---
 
-## 14. エフェクト設計
+## 14. Effect Design
 
-### 14.1 `effect fn` — コンパイルエラーで強制
+### 14.1 `effect fn` -- Enforced via Compile Error
 
-非 `effect` 関数から `effect fn` を呼ぶと **warning ではなくエラー**。
+Calling an `effect fn` from a non-`effect` function results in **an error, not a warning**.
 
 ```
 fn pure_fn(x: Int) -> Int =
-  read(some_path)    // コンパイルエラー: effect fn を non-effect fn から呼び出せない
+  read(some_path)    // Compile error: cannot call effect fn from non-effect fn
 ```
 
-warning だと無視されてエフェクト境界が形骸化する。エラーにすることで、副作用の境界が言語レベルで保証される。
+Warnings get ignored, causing the effect boundary to become meaningless. By making it an error, the side-effect boundary is guaranteed at the language level.
 
-### 14.2 unsafe ブロック
+### 14.2 unsafe Block
 
-本当にエフェクト境界を無視したいときは明示的に:
+When you truly need to bypass the effect boundary, do so explicitly:
 
 ```
 fn technically_pure(x: Int) -> Int =
-  unsafe { read(cache_path) }    // 明示的に安全性を破る
+  unsafe { read(cache_path) }    // explicitly breaking safety
 ```
 
-`unsafe` の存在が「ここは危険」を表面化する。
+The presence of `unsafe` surfaces "here be danger."
 
-### 14.3 標準ライブラリの規約
+### 14.3 Standard Library Conventions
 
 ```
 effect fn now() -> Timestamp
@@ -963,7 +961,7 @@ effect fn write(path: Path, data: String) -> Result[Unit, IoError]
 effect fn random_int(min: Int, max: Int) -> Int
 ```
 
-I/O, clock, env, net, randomness は全部 `effect fn`。
+I/O, clock, env, net, and randomness are all `effect fn`.
 
 ---
 
@@ -971,14 +969,14 @@ I/O, clock, env, net, randomness は全部 `effect fn`。
 
 ### 15.1 async fn
 
-`async fn` は非同期関数を宣言する。**`async` は `effect` を暗黙に含む**（全ての非同期操作はI/Oを伴うため）。
+`async fn` declares an asynchronous function. **`async` implicitly includes `effect`** (since all async operations involve I/O).
 
 ```
 async fn fetch(url: String) -> Result[String, HttpError] = _
 async fn fetch_json[T](url: String) -> Result[T, HttpError] = _
 ```
 
-`async fn` の戻り値型は内側の型を書く。実際のランタイム戻り値は `Async[Result[String, HttpError]]` だが、型注釈では `Result[String, HttpError]` と書く。
+The return type of `async fn` is written as the inner type. The actual runtime return value is `Async[Result[String, HttpError]]`, but the type annotation is written as `Result[String, HttpError]`.
 
 ### 15.2 await
 
@@ -986,7 +984,7 @@ async fn fetch_json[T](url: String) -> Result[T, HttpError] = _
 AwaitExpr ::= "await" Expr
 ```
 
-`await` は `Async[T]` を解除して `T` を取り出す。`try` と同様のプレフィクス演算子で、`async fn` 内でのみ使用可能。
+`await` unwraps `Async[T]` to extract `T`. It is a prefix operator similar to `try`, usable only within `async fn`.
 
 ```
 async fn load(url: String) -> Result[Config, AppError] = {
@@ -997,42 +995,42 @@ async fn load(url: String) -> Result[Config, AppError] = {
 }
 ```
 
-### 15.3 do ブロックとの組み合わせ
+### 15.3 Combining with do Blocks
 
-`do` ブロック内で `await` と暗黙 `try` を組み合わせる:
+Combine `await` and implicit `try` inside a `do` block:
 
 ```
 async fn load(url: String) -> Result[Config, AppError] =
   do {
-    let text = await fetch(url)     // await で Async 解除, do で Result 自動 try
-    let config = parse(text)        // do で Result 自動 try
+    let text = await fetch(url)     // await unwraps Async, do auto-tries Result
+    let config = parse(text)        // do auto-tries Result
     config
   }
 ```
 
-**`await` は明示、`try` は `do` が暗黙化。** この分離が重要:
-- どの行が非同期かは `await` で見える（局所推論）
-- エラー処理は `do` が一括で担う（ノイズ削減）
+**`await` is explicit, `try` is made implicit by `do`.** This separation is important:
+- Which lines are async is visible via `await` (local reasoning)
+- Error handling is handled in bulk by `do` (noise reduction)
 
-### 15.4 構造化並行性
+### 15.4 Structured Concurrency
 
-非構造化な `spawn` / `join` は**禁止**。並行実行は組み込みのコンビネータのみ:
+Unstructured `spawn` / `join` are **prohibited**. Concurrent execution uses only built-in combinators:
 
 ```
-// 全タスクを並列実行して全結果を待つ
+// Execute all tasks in parallel and await all results
 async fn parallel[T](tasks: List[Async[T]]) -> List[T]
 
-// 最初に完了したタスクの結果を返す
+// Return the result of the first task to complete
 async fn race[T](tasks: List[Async[T]]) -> T
 
-// タイムアウト付き実行
+// Execute with a timeout
 async fn timeout[T](ms: Int, task: Async[T]) -> Result[T, TimeoutError]
 
-// スリープ
+// Sleep
 async fn sleep(ms: Int) -> Unit
 ```
 
-例:
+Examples:
 ```
 async fn load_all(urls: List[String]) -> Result[List[String], HttpError] =
   do {
@@ -1059,25 +1057,25 @@ current_fn is async
 Γ ⊢ await e : T
 ```
 
-`await` を非 `async fn` 内で使用するとコンパイルエラー。`async fn` を非 `async fn` / 非 `effect fn` から呼ぶとコンパイルエラー。
+Using `await` inside a non-`async fn` is a compile error. Calling an `async fn` from a non-`async fn` or non-`effect fn` is a compile error.
 
-### 15.6 根拠
+### 15.6 Rationale
 
-- `async` が `effect` を含むため、修飾子は最大2種類（`async fn` or `effect fn`）。「`async effect fn` と書くべきか？」の迷いは `async` が `effect` を含むことで解消
-- 構造化並行性により、リソースリークやデッドロックのリスクを言語レベルで排除
-- `do` + `await` の組み合わせにより、非同期エラー処理コードが同期コードとほぼ同形になる
+- Since `async` includes `effect`, there are at most two modifier types (`async fn` or `effect fn`). The confusion of "should I write `async effect fn`?" is resolved by `async` including `effect`
+- Structured concurrency eliminates risks of resource leaks and deadlocks at the language level
+- The combination of `do` + `await` makes async error-handling code nearly identical in shape to synchronous code
 
 ---
 
-## 16. テスト
+## 16. Testing
 
-### 16.1 test 宣言
+### 16.1 test Declaration
 
 ```
 TestDecl ::= "test" StringLiteral BlockExpr
 ```
 
-テストは**トップレベル宣言**として関数と同じファイルに書く。テスト専用ファイルに分離する必要はない。
+Tests are written as **top-level declarations** in the same file as functions. There is no need to separate them into test-only files.
 
 ```
 fn add(x: Int, y: Int) -> Int = x + y
@@ -1092,27 +1090,27 @@ test "negative addition" {
 }
 ```
 
-### 16.2 アサーション関数
+### 16.2 Assertion Functions
 
-テストブロック内で使用可能な組み込み関数:
+Built-in functions available within test blocks:
 
 ```
-assert(cond: Bool)                    // cond が false なら失敗
-assert_eq(actual: T, expected: T)     // actual != expected なら失敗
-assert_ne(actual: T, expected: T)     // actual == expected なら失敗
+assert(cond: Bool)                    // fails if cond is false
+assert_eq(actual: T, expected: T)     // fails if actual != expected
+assert_ne(actual: T, expected: T)     // fails if actual == expected
 ```
 
-### 16.3 根拠
+### 16.3 Rationale
 
-- LLMが最も頻繁に生成するのはテストコード。書き方が1つに定まることで、生成分布が収束する
-- テストが関数の隣にあることで、LLMが関数の意図を理解しやすい（局所推論）
-- `test "name" { ... }` は構造が単純で、LLMがテンプレートとして学習しやすい
+- Test code is the most frequently generated output from LLMs. Having a single canonical way to write tests makes the generation distribution converge
+- Having tests next to functions makes it easier for LLMs to understand the function's intent (local reasoning)
+- `test "name" { ... }` has a simple structure that LLMs can easily learn as a template
 
 ---
 
-## 17. 命名規則
+## 17. Naming Conventions
 
-### ? は Bool predicate 専用
+### ? is for Bool Predicates Only
 
 ```
 fn empty?(xs: List[Int]) -> Bool = xs.len == 0
@@ -1120,40 +1118,40 @@ fn tracked?(index: Index, path: Path) -> Bool = ...
 fn exists?(path: Path) -> Bool = ...
 ```
 
-`?` が付いた関数の戻り値が `Bool` でなければコンパイルエラー。
+A function with `?` whose return type is not `Bool` is a compile error.
 
-### 破壊更新
+### Destructive Updates
 
-| 非破壊（新しい値を返す） | 破壊（in-place、`effect fn`） |
+| Non-destructive (returns a new value) | Destructive (in-place, `effect fn`) |
 |---|---|
 | `fn push(list, item) -> List[T]` | `effect fn push(list, item) -> Unit` |
 | `fn sort(list) -> List[T]` | `effect fn sort(list) -> Unit` |
 
 ---
 
-## 18. 標準ライブラリ
+## 18. Standard Library
 
-### 18.1 コレクション API（trait ベース・命名固定・別名禁止）
+### 18.1 Collection API (Trait-Based, Fixed Naming, No Aliases)
 
-全コレクション型で統一:
+Unified across all collection types:
 
-| 操作 | シグネチャ | 備考 |
+| Operation | Signature | Description |
 |---|---|---|
-| `map` | `fn[U](self, fn(T) -> U) -> Self[U]` | 変換 |
-| `filter` | `fn(self, fn(T) -> Bool) -> Self[T]` | 絞り込み |
-| `fold` | `fn[U](self, U, fn(U, T) -> U) -> U` | 累積 |
-| `any` | `fn(self, fn(T) -> Bool) -> Bool` | 任意要素条件 |
-| `all` | `fn(self, fn(T) -> Bool) -> Bool` | 全要素条件 |
-| `len` | `fn(self) -> Int` | 長さ |
-| `contains` | `fn(self, T) -> Bool` | 存在判定 |
-| `find` | `fn(self, fn(T) -> Bool) -> Option[T]` | 検索 |
-| `get` | `fn(self, key) -> Option[T]` | キー取得 |
-| `first` | `fn(self) -> Option[T]` | 先頭 |
-| `last` | `fn(self) -> Option[T]` | 末尾 |
+| `map` | `fn[U](self, fn(T) -> U) -> Self[U]` | Transform |
+| `filter` | `fn(self, fn(T) -> Bool) -> Self[T]` | Filter |
+| `fold` | `fn[U](self, U, fn(U, T) -> U) -> U` | Accumulate |
+| `any` | `fn(self, fn(T) -> Bool) -> Bool` | Any element satisfies condition |
+| `all` | `fn(self, fn(T) -> Bool) -> Bool` | All elements satisfy condition |
+| `len` | `fn(self) -> Int` | Length |
+| `contains` | `fn(self, T) -> Bool` | Existence check |
+| `find` | `fn(self, fn(T) -> Bool) -> Option[T]` | Search |
+| `get` | `fn(self, key) -> Option[T]` | Key lookup |
+| `first` | `fn(self) -> Option[T]` | First element |
+| `last` | `fn(self) -> Option[T]` | Last element |
 
-**`collect`, `select`, `inject`, `pluck` 等は存在しない。**
+**`collect`, `select`, `inject`, `pluck`, etc. do not exist.**
 
-### 18.2 Result / Option のメソッド
+### 18.2 Result / Option Methods
 
 ```
 // Result[T, E]
@@ -1173,10 +1171,10 @@ fn is_some?(self) -> Bool
 fn is_none?(self) -> Bool
 ```
 
-### 18.3 文字列操作
+### 18.3 String Operations
 
 ```
-// string モジュール
+// string module
 fn trim(s: String) -> String
 fn split(s: String, sep: String) -> List[String]
 fn join(parts: List[String], sep: String) -> String
@@ -1189,45 +1187,45 @@ fn to_int(s: String) -> Option[Int]
 fn to_float(s: String) -> Option[Float]
 ```
 
-### 18.4 中核モジュール
+### 18.4 Core Modules
 
-| モジュール | 対象 |
+| Module | Purpose |
 |---|---|
-| `string` | 文字列操作 |
-| `path` | パス操作 |
-| `fs` | ファイル I/O（全て `effect fn`） |
-| `json` | JSON パース・生成 |
-| `http` | HTTP 通信（全て `effect fn`） |
-| `time` | 時刻（`now` 等は `effect fn`） |
-| `env` | 環境変数（全て `effect fn`） |
+| `string` | String operations |
+| `path` | Path operations |
+| `fs` | File I/O (all `effect fn`) |
+| `json` | JSON parsing and generation |
+| `http` | HTTP communication (all `effect fn`) |
+| `time` | Time (`now`, etc. are `effect fn`) |
+| `env` | Environment variables (all `effect fn`) |
 
 ---
 
-## 19. 禁止事項
+## 19. Prohibitions
 
-| # | 禁止 | 理由 |
+| # | Prohibited | Reason |
 |---|---|---|
-| 1 | 暗黙型変換 | LLMが型を混ぜる |
-| 2 | truthiness | 条件式は Bool のみ |
-| 3 | monkey patch / open class | 実行時の意味変更はLLMに不可視 |
-| 4 | operator overloading | 演算子の意味が型で変わると読めない |
-| 5 | 例外 (throw/catch) | フローが不可視 |
-| 6 | 複数ラムダ記法 | 生成分布が散る |
-| 7 | 内部DSL | 文脈依存が強い |
-| 8 | wildcard import | 名前の出所が不明 |
-| 9 | null | `Option[T]` に統一 |
-| 10 | API 別名 | 語彙増加 = 幻覚増加 |
-| 11 | `<>` ジェネリクス | 比較演算子と曖昧。`[]` を使う |
+| 1 | Implicit type conversion | LLMs mix up types |
+| 2 | Truthiness | Conditions must be Bool only |
+| 3 | Monkey patching / open classes | Runtime semantic changes are invisible to LLMs |
+| 4 | Operator overloading | Operator meaning changing by type is unreadable |
+| 5 | Exceptions (throw/catch) | Control flow is invisible |
+| 6 | Multiple lambda notations | Generation distribution disperses |
+| 7 | Internal DSLs | Strong context dependence |
+| 8 | Wildcard imports | Source of names is unknown |
+| 9 | null | Unified under `Option[T]` |
+| 10 | API aliases | More vocabulary = more hallucinations |
+| 11 | `<>` generics | Ambiguous with comparison operators. Use `[]` |
 
 ---
 
-## 20. コンパイラの責務
+## 20. Compiler Responsibilities
 
-### 20.1 1エラー1本質
+### 20.1 One Error, One Root Cause
 
-派生エラーの連鎖を抑制。根本原因を1つ示す。
+Suppress cascading derived errors. Present a single root cause.
 
-### 20.2 構造化エラー出力
+### 20.2 Structured Error Output
 
 ```json
 {
@@ -1239,77 +1237,77 @@ fn to_float(s: String) -> Option[Float]
 }
 ```
 
-### 20.3 自動修正候補
+### 20.3 Auto-Fix Candidates
 
-- 不足 import の候補提示
-- 型変換候補
-- match 網羅漏れの自動生成
-- `effect` 漏れの指摘
-- `do` ブロック提案（`try` が3つ以上連続する場合）
+- Suggest missing imports
+- Type conversion candidates
+- Auto-generate missing match arms
+- Point out missing `effect`
+- Suggest `do` blocks (when 3 or more `try` expressions appear consecutively)
 
-### 20.4 公式 formatter（言語に組み込み）
+### 20.4 Official Formatter (Built into the Language)
 
-- 1 AST に対して整形結果は1つ
-- import 順序はアルファベット固定
-- trailing comma あり
-- 長い call chain / pipe chain の改行規則は固定
+- One AST yields exactly one formatted output
+- Import order is fixed to alphabetical
+- Trailing commas are included
+- Line-breaking rules for long call chains / pipe chains are fixed
 
-これは LLM の diff stability に直結する。
+This directly impacts LLM diff stability.
 
 ---
 
 ## 21. Linter
 
-style 警察ではなく**生成安定化装置**。
+Not a style police, but a **generation stabilization device**.
 
-| ルール | 内容 |
+| Rule | Description |
 |---|---|
-| effect-leak | 非 `effect fn` から `effect fn` 呼び出し（エラー） |
-| unused-result | `Result` を無視 |
-| unsafe-unwrap | `Option` を unsafe に潰す |
-| long-chain | chain が5段以上 |
-| ambiguous-name | 1文字変数（ラムダ引数以外） |
-| missing-annotation | 公開関数の型省略 |
-| json-in-core | core domain で `Json` 型を使用 |
+| effect-leak | Calling `effect fn` from non-`effect fn` (error) |
+| unused-result | Ignoring a `Result` |
+| unsafe-unwrap | Unsafely collapsing an `Option` |
+| long-chain | Chain exceeds 5 levels |
+| ambiguous-name | Single-character variables (except lambda arguments) |
+| missing-annotation | Type omission in public functions |
+| json-in-core | Using `Json` type in core domain |
 
 ---
 
-## 22. 段階的厳格化
+## 22. Gradual Strictness
 
 ```
 module repo.index
-strict types      // 全ての型注釈を必須にする
-strict effects    // effect の伝播を完全にチェック
+strict types      // make all type annotations required
+strict effects    // fully check effect propagation
 ```
 
-プロジェクト設定で:
+In project configuration:
 ```
 [strictness]
-core = "all"      // 全 strict
-app = "medium"    // types のみ strict
-script = "light"  // strict なし
+core = "all"      // fully strict
+app = "medium"    // types only strict
+script = "light"  // no strictness
 ```
 
 ---
 
-## 23. escape hatch
+## 23. Escape Hatch
 
-危険な機能は `unsafe` ブロックに隔離:
+Dangerous features are isolated in `unsafe` blocks:
 
 ```
 unsafe {
-  // ここでは effect ルールを無視できる
-  // ここでは型検査を一部スキップできる
+  // effect rules can be ignored here
+  // some type checks can be skipped here
 }
 ```
 
-`unsafe` の存在が「ここは通常のルールを破っている」を表面化する。
+The presence of `unsafe` surfaces "normal rules are being broken here."
 
 ---
 
 ## 24. Typing Rules
 
-### 変数
+### Variables
 
 ```
 Γ(x) = T
@@ -1333,7 +1331,7 @@ unsafe {
 Γ ⊢ if c then t else e : T
 ```
 
-### 関数
+### Functions
 
 ```
 Γ, x1:T1, ..., xn:Tn ⊢ body : R
@@ -1341,7 +1339,7 @@ unsafe {
 Γ ⊢ fn f(x1:T1,...,xn:Tn) -> R = body
 ```
 
-### Option / Result 構築子
+### Option / Result Constructors
 
 ```
 Γ ⊢ e : T                         Γ ⊢ e : T
@@ -1381,7 +1379,7 @@ return_type = Option[R]
 Γ ⊢ try e : T
 ```
 
-### do ブロック
+### do Block
 
 ```
 return_type = Result[R, E]
@@ -1390,7 +1388,7 @@ return_type = Result[R, E]
 Γ ⊢ do { block } : Result[R, E]
 ```
 
-`do` ブロック内で `Result[T, E]` 型の式は暗黙に unwrap され `T` として束縛される。エラー型 `E` が異なる場合、`From` trait による変換を試み、変換できなければコンパイルエラー。
+Inside a `do` block, expressions of type `Result[T, E]` are implicitly unwrapped and bound as `T`. If the error type `E` differs, conversion via the `From` trait is attempted; if conversion is not possible, it is a compile error.
 
 ### hole / todo
 
@@ -1444,7 +1442,7 @@ return_type = R
 
 ---
 
-## 25. 完全サンプル
+## 25. Complete Example
 
 ```
 module repo.config
@@ -1497,82 +1495,82 @@ test "with_description updates correctly" {
 }
 ```
 
-ここに現れる性質:
-- 失敗は `Result`、例外なし
-- 副作用は `effect fn` で可視化、コンパイラが強制
-- `do` ブロックで Result のノイズを最小化
-- `deriving From` で型安全なエラー変換をボイラープレートなしで実現
-- `...` スプレッドで immutable レコード更新
-- 文字列補間で正準的なメッセージ組み立て
-- `?` は Bool predicate のみ、意味が一意
-- `[]` ジェネリクスで構文的曖昧性ゼロ
-- 改行区切りで自然な見た目
-- 型境界が全て見える
-- テストが関数のすぐ隣にある（局所推論）
-- match guard でパターンマッチが平坦に書ける
-- UFCS でメソッド/関数の区別が不要
+Properties exhibited here:
+- Failures use `Result`, no exceptions
+- Side effects are visible via `effect fn`, enforced by the compiler
+- `do` blocks minimize Result noise
+- `deriving From` achieves type-safe error conversion without boilerplate
+- `...` spread for immutable record updates
+- String interpolation for canonical message construction
+- `?` is for Bool predicates only, meaning is unambiguous
+- `[]` generics with zero syntactic ambiguity
+- Newline-separated for a natural appearance
+- All type boundaries are visible
+- Tests are right next to functions (local reasoning)
+- Match guards allow flat pattern matching
+- UFCS eliminates the method/function distinction
 
 ---
 
-## 26. 変更履歴
+## 26. Changelog
 
-### v0.5 → v0.6
+### v0.5 -> v0.6
 
-| 変更 | 理由 |
+| Change | Reason |
 |---|---|
-| 分割束縛 (`let { name, age } = user`) | レコードフィールドの取り出しを簡潔に。`user.name` の繰り返しを排除 |
-| `newtype` (`type UserId = newtype Int`) | 同構造だが型的に区別。IDや単位の取り違えを防止 |
-| パイプのプレースホルダー (`x \|> f(_, y)`) | 多引数関数をパイプで使用可能に。ラムダ不要 |
-| `guard` 文 (`guard cond else expr`) | 前提条件チェックの平坦化。if-else のネスト削減 |
+| Destructuring bindings (`let { name, age } = user`) | Concise extraction of record fields. Eliminates repetitive `user.name` |
+| `newtype` (`type UserId = newtype Int`) | Same structure but type-level distinction. Prevents mix-ups of IDs and units |
+| Pipe placeholder (`x \|> f(_, y)`) | Enables multi-argument functions in pipes. No lambda needed |
+| `guard` statement (`guard cond else expr`) | Flattens precondition checks. Reduces if-else nesting |
 
-### v0.4 → v0.5
+### v0.4 -> v0.5
 
-| 変更 | 理由 |
+| Change | Reason |
 |---|---|
-| 名前付き引数 (`f(name: "alice")`) | 位置引数の入れ違いを排除。自己文書化 |
-| `async fn` / `await` | 非同期処理を `effect fn` と一貫した形で導入 |
-| 構造化並行性 (`parallel`, `race`, `timeout`) | `spawn`/`join` を禁止し、安全な並行パターンのみ提供 |
+| Named arguments (`f(name: "alice")`) | Eliminates positional argument mix-ups. Self-documenting |
+| `async fn` / `await` | Introduces async processing in a form consistent with `effect fn` |
+| Structured concurrency (`parallel`, `race`, `timeout`) | Prohibits `spawn`/`join`, providing only safe concurrency patterns |
 
-### v0.3 → v0.4
+### v0.3 -> v0.4
 
-| 変更 | 理由 |
+| Change | Reason |
 |---|---|
-| Match guard (`pattern if cond => expr`) | ネストした if/match を平坦化。パターンマッチの表現力向上 |
-| UFCS (`f(x, y)` ≡ `x.f(y)`) | メソッド vs 関数の判断を排除。どちらで書いても正しい |
-| `test "name" { ... }` 構文 | テストの書き方を一意に。関数の隣に書ける局所性 |
+| Match guard (`pattern if cond => expr`) | Flattens nested if/match. Increases pattern matching expressiveness |
+| UFCS (`f(x, y)` = `x.f(y)`) | Eliminates the method vs. function decision. Both are correct |
+| `test "name" { ... }` syntax | Unifies test writing. Locality of writing tests next to functions |
 
-### v0.2 → v0.3
+### v0.2 -> v0.3
 
-| 変更 | 理由 |
+| Change | Reason |
 |---|---|
-| `<>` → `[]` ジェネリクス | 比較演算子との曖昧性排除。`>>` 分割問題の消滅 |
-| `fn name!()` → `effect fn name()` | 関数名からメタ情報を分離。lexer/parser の単純化 |
-| `deriving` 追加 | `impl From` ボイラープレートの排除。コピペエラー防止 |
-| 行継続ルール明文化 | `.` `\|>` 開始行の暗黙ルールを仕様化 |
+| `<>` -> `[]` generics | Eliminates ambiguity with comparison operators. Eliminates the `>>` splitting problem |
+| `fn name!()` -> `effect fn name()` | Separates meta-information from function names. Simplifies lexer/parser |
+| Added `deriving` | Eliminates `impl From` boilerplate. Prevents copy-paste errors |
+| Codified line continuation rules | Formalized the implicit rules for lines starting with `.` `\|>` |
 
 ---
 
-## 27. v0.7 への検討事項
+## 27. Items Under Consideration for v0.7
 
-- ジェネリクスの variance 規則
-- trait のデフォルト実装
-- stream の基本型
-- モジュールの可視性制御（`pub fn` / `fn`）
+- Variance rules for generics
+- Default implementations for traits
+- Basic stream type
+- Module visibility control (`pub fn` / `fn`)
 
 ---
 
-## 28. 評価指標
+## 28. Evaluation Metrics
 
-| 指標 | 定義 |
+| Metric | Definition |
 |---|---|
-| **Pass@1** | 1回の生成でコンパイル + テストを通る率 |
-| **Repair Turns** | 最初の失敗から最終成功までの修正回数 |
-| **Token Cost** | 成功までの総入出力トークン数 |
-| **API Hallucination Rate** | 存在しないAPI・誤ったシグネチャの出現率 |
-| **Edit Breakage Rate** | 既存コード修正で要求外の振る舞いを壊した率 |
-| **Diagnostic Utilization Gain** | 構造化診断あり/なしでの修復性能差 |
+| **Pass@1** | Rate of passing compilation + tests on the first generation |
+| **Repair Turns** | Number of fix iterations from first failure to final success |
+| **Token Cost** | Total input/output tokens until success |
+| **API Hallucination Rate** | Rate of nonexistent APIs or incorrect signatures appearing |
+| **Edit Breakage Rate** | Rate of breaking unrelated behavior when modifying existing code |
+| **Diagnostic Utilization Gain** | Performance difference in repair with/without structured diagnostics |
 
-比較対象:
+Comparison targets:
 - Python / Ruby / TypeScript / Go baseline
 - Python strict profile / Ruby canonical profile / TypeScript reduced profile
-- この言語
+- This language
