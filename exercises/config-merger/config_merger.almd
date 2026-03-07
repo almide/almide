@@ -1,0 +1,297 @@
+module config_merger
+
+import fs
+import string
+import list
+
+// Config file merger exercise
+// Demonstrates effect fn with file I/O and error propagation via do blocks
+//
+// Config format: "key=value" lines (# comments, blank lines ignored)
+// Merge rule: later files override earlier files for same key
+// Validation: keys must be non-empty, no duplicate keys within a single file
+
+// Parse a config string into key-value pairs
+// Skip blank lines and lines starting with #
+// Errors: "line N: missing '='", "line N: empty key", "line N: duplicate key: KEY"
+fn parse_config(content: String) -> Result[List[List[String]], String] = {
+  if string.len(content) == 0 then ok([])
+  else {
+    let lines = string.split(content, "\n");
+    let indexed = list.fold(lines, [], fn(acc, line) => {
+      let idx = list.len(acc) + 1;
+      acc ++ [[int.to_string(idx), line]]
+    });
+    list.fold(indexed, ok([]), fn(acc, entry) => {
+      match acc {
+        err(e) => err(e),
+        ok(pairs) => {
+          let line_num = match list.get(entry, 0) { some(v) => v, none => "0" };
+          let line = match list.get(entry, 1) { some(v) => v, none => "" };
+          let trimmed = string.trim(line);
+          if trimmed == "" then ok(pairs)
+          else if string.starts_with?(trimmed, "#") then ok(pairs)
+          else if string.contains(trimmed, "=") then {
+            let parts = string.split(trimmed, "=");
+            let key = match list.get(parts, 0) { some(v) => v, none => "" };
+            if key == "" then err("line ${line_num}: empty key")
+            else {
+              let indexed_parts = list.fold(parts, [], fn(a, p) => a ++ [[int.to_string(list.len(a)), p]]);
+              let rest = list.filter(indexed_parts, fn(ip) => {
+                match list.get(ip, 0) { some(v) => v != "0", none => false }
+              });
+              let rest_vals = list.map(rest, fn(ip) => match list.get(ip, 1) { some(v) => v, none => "" });
+              let value = string.join(rest_vals, "=");
+              let existing_keys = list.map(pairs, fn(p) => match list.get(p, 0) { some(v) => v, none => "" });
+              if list.contains(existing_keys, key) then err("line ${line_num}: duplicate key: ${key}")
+              else ok(pairs ++ [[key, value]])
+            }
+          }
+          else err("line ${line_num}: missing '='")
+        }
+      }
+    })
+  }
+}
+
+// Merge two parsed configs: entries in `overlay` override `base` for matching keys
+// Non-matching keys from both are preserved. Order: base keys first, then new overlay keys
+fn merge_configs(base: List[List[String]], overlay: List[List[String]]) -> List[List[String]] = {
+  let overlay_keys = list.map(overlay, fn(p) => match list.get(p, 0) { some(v) => v, none => "" });
+  let merged_base = list.map(base, fn(pair) => {
+    let key = match list.get(pair, 0) { some(v) => v, none => "" };
+    if list.contains(overlay_keys, key) then {
+      match list.find(overlay, fn(op) => match list.get(op, 0) { some(v) => v == key, none => false }) {
+        some(found) => found,
+        none => pair
+      }
+    } else pair
+  });
+  let base_keys = list.map(base, fn(p) => match list.get(p, 0) { some(v) => v, none => "" });
+  let new_overlay = list.filter(overlay, fn(p) => {
+    let key = match list.get(p, 0) { some(v) => v, none => "" };
+    not list.contains(base_keys, key)
+  });
+  merged_base ++ new_overlay
+}
+
+// Serialize config pairs back to string format (key=value lines)
+fn serialize_config(pairs: List[List[String]]) -> String = {
+  let lines = list.map(pairs, fn(pair) => {
+    let key = match list.get(pair, 0) { some(v) => v, none => "" };
+    let value = match list.get(pair, 1) { some(v) => v, none => "" };
+    key ++ "=" ++ value
+  });
+  string.join(lines, "\n")
+}
+
+// Read and parse a config file
+// Errors: file read errors propagate, parse errors prefixed with filename
+effect fn load_config(path: String) -> Result[List[List[String]], String] = {
+  match parse_config(fs.read_text(path)) {
+    ok(pairs) => ok(pairs),
+    err(e) => err("${path}: ${e}")
+  }
+}
+
+// Write config pairs to a file
+effect fn save_config(path: String, pairs: List[List[String]]) -> Result[Unit, String] = {
+  let content = serialize_config(pairs);
+  fs.write(path, content);
+  ok(())
+}
+
+// Load multiple config files and merge them in order (left to right)
+// First file is base, each subsequent file overlays on top
+// Errors propagate with filename context
+effect fn merge_files(paths: List[String]) -> Result[List[List[String]], String] = {
+  let empty = merge_configs([], []);
+  list.fold(paths, empty, fn(base, path) => {
+    match parse_config(fs.read_text(path)) {
+      err(e) => err("${path}: ${e}"),
+      ok(overlay) => merge_configs(base, overlay)
+    }
+  })
+}
+
+// Full pipeline: load configs from paths, merge, save to output path
+// Returns number of keys in final config
+effect fn merge_and_save(paths: List[String], output: String) -> Result[Int, String] = {
+  match merge_files(paths) {
+    err(e) => err(e),
+    ok(pairs) => {
+      save_config(output, pairs);
+      ok(list.len(pairs))
+    }
+  }
+}
+
+// Lookup a key in config pairs, returns Option
+fn lookup(pairs: List[List[String]], key: String) -> Option[String] = {
+  match list.find(pairs, fn(pair) => match list.get(pair, 0) { some(v) => v == key, none => false }) {
+    some(pair) => match list.get(pair, 1) { some(v) => some(v), none => none },
+    none => none
+  }
+}
+
+// Filter config pairs by key prefix (e.g. "db_" returns all db_* keys)
+fn filter_by_prefix(pairs: List[List[String]], prefix: String) -> List[List[String]] = {
+  list.filter(pairs, fn(pair) => {
+    let key = match list.get(pair, 0) { some(v) => v, none => "" };
+    string.starts_with?(key, prefix)
+  })
+}
+
+test "parse basic config" {
+  let content = "host=localhost\nport=8080"
+  assert_eq(parse_config(content), ok([["host", "localhost"], ["port", "8080"]]))
+}
+
+test "parse with comments and blanks" {
+  let content = "# this is a comment\n\nhost=localhost\n# another comment\nport=8080"
+  assert_eq(parse_config(content), ok([["host", "localhost"], ["port", "8080"]]))
+}
+
+test "parse empty string" {
+  assert_eq(parse_config(""), ok([]))
+}
+
+test "parse only comments" {
+  assert_eq(parse_config("# comment\n# another"), ok([]))
+}
+
+test "parse missing equals" {
+  assert_eq(parse_config("host=ok\nbadline"), err("line 2: missing '='"))
+}
+
+test "parse empty key" {
+  assert_eq(parse_config("=value"), err("line 1: empty key"))
+}
+
+test "parse duplicate key" {
+  assert_eq(parse_config("host=a\nhost=b"), err("line 2: duplicate key: host"))
+}
+
+test "parse value with equals" {
+  let content = "formula=a=b+c"
+  assert_eq(parse_config(content), ok([["formula", "a=b+c"]]))
+}
+
+test "merge no overlap" {
+  let base = [["host", "localhost"]]
+  let overlay = [["port", "8080"]]
+  assert_eq(merge_configs(base, overlay), [["host", "localhost"], ["port", "8080"]])
+}
+
+test "merge with override" {
+  let base = [["host", "localhost"], ["port", "3000"]]
+  let overlay = [["port", "8080"]]
+  assert_eq(merge_configs(base, overlay), [["host", "localhost"], ["port", "8080"]])
+}
+
+test "merge empty base" {
+  let overlay = [["port", "8080"]]
+  assert_eq(merge_configs([], overlay), [["port", "8080"]])
+}
+
+test "merge empty overlay" {
+  let base = [["host", "localhost"]]
+  assert_eq(merge_configs(base, []), [["host", "localhost"]])
+}
+
+test "serialize config" {
+  let pairs = [["host", "localhost"], ["port", "8080"]]
+  assert_eq(serialize_config(pairs), "host=localhost\nport=8080")
+}
+
+test "serialize empty" {
+  assert_eq(serialize_config([]), "")
+}
+
+test "lookup found" {
+  let pairs = [["host", "localhost"], ["port", "8080"]]
+  assert_eq(lookup(pairs, "port"), some("8080"))
+}
+
+test "lookup not found" {
+  let pairs = [["host", "localhost"]]
+  assert_eq(lookup(pairs, "port"), none)
+}
+
+test "filter by prefix" {
+  let pairs = [["db_host", "localhost"], ["db_port", "5432"], ["app_port", "8080"]]
+  assert_eq(filter_by_prefix(pairs, "db_"), [["db_host", "localhost"], ["db_port", "5432"]])
+}
+
+test "filter by prefix no match" {
+  let pairs = [["app_port", "8080"]]
+  assert_eq(filter_by_prefix(pairs, "db_"), [])
+}
+
+test "load and parse config file" {
+  fs.write("/tmp/almide_test_base.conf", "host=localhost\nport=3000")
+  let result = load_config("/tmp/almide_test_base.conf")
+  assert_eq(result, ok([["host", "localhost"], ["port", "3000"]]))
+}
+
+test "load config file not found" {
+  assert(match load_config("/tmp/almide_test_nonexistent_file.conf") { err(_e) => true, _ => false })
+}
+
+test "load config with parse error" {
+  fs.write("/tmp/almide_test_bad.conf", "good=ok\nbadline")
+  assert_eq(load_config("/tmp/almide_test_bad.conf"), err("/tmp/almide_test_bad.conf: line 2: missing '='"))
+}
+
+test "save config file" {
+  let pairs = [["host", "localhost"], ["port", "8080"]]
+  save_config("/tmp/almide_test_output.conf", pairs)
+  let content = fs.read_text("/tmp/almide_test_output.conf")
+  assert_eq(content, "host=localhost\nport=8080")
+}
+
+test "merge two files" {
+  fs.write("/tmp/almide_test_m1.conf", "host=localhost\nport=3000")
+  fs.write("/tmp/almide_test_m2.conf", "port=8080\ndebug=true")
+  let result = merge_files(["/tmp/almide_test_m1.conf", "/tmp/almide_test_m2.conf"])
+  assert_eq(result, ok([["host", "localhost"], ["port", "8080"], ["debug", "true"]]))
+}
+
+test "merge three files" {
+  fs.write("/tmp/almide_test_t1.conf", "host=a\nport=1")
+  fs.write("/tmp/almide_test_t2.conf", "port=2\nmode=dev")
+  fs.write("/tmp/almide_test_t3.conf", "mode=prod\nlog=true")
+  let result = merge_files([
+    "/tmp/almide_test_t1.conf",
+    "/tmp/almide_test_t2.conf",
+    "/tmp/almide_test_t3.conf"
+  ])
+  assert_eq(result, ok([["host", "a"], ["port", "2"], ["mode", "prod"], ["log", "true"]]))
+}
+
+test "merge files error propagation" {
+  fs.write("/tmp/almide_test_e1.conf", "ok=yes")
+  fs.write("/tmp/almide_test_e2.conf", "badline")
+  assert_eq(merge_files(["/tmp/almide_test_e1.conf", "/tmp/almide_test_e2.conf"]), err("/tmp/almide_test_e2.conf: line 1: missing '='"))
+}
+
+test "merge and save full pipeline" {
+  fs.write("/tmp/almide_test_p1.conf", "host=localhost\nport=3000")
+  fs.write("/tmp/almide_test_p2.conf", "port=8080\ndebug=true")
+  let result = merge_and_save(
+    ["/tmp/almide_test_p1.conf", "/tmp/almide_test_p2.conf"],
+    "/tmp/almide_test_merged.conf"
+  )
+  assert_eq(result, ok(3))
+  let content = fs.read_text("/tmp/almide_test_merged.conf")
+  assert_eq(content, "host=localhost\nport=8080\ndebug=true")
+}
+
+test "merge and save error propagation" {
+  fs.write("/tmp/almide_test_ep1.conf", "ok=yes")
+  assert(match merge_and_save(
+    ["/tmp/almide_test_ep1.conf", "/tmp/almide_test_nonexistent_file.conf"],
+    "/tmp/almide_test_should_not_exist.conf"
+  ) { err(_e) => true, _ => false })
+  assert_eq(fs.exists?("/tmp/almide_test_should_not_exist.conf"), false)
+}
