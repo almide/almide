@@ -1,8 +1,8 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 // Almide AST types — mirrors src/ast.ts
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TypeExpr {
     Simple { name: String },
@@ -10,16 +10,31 @@ pub enum TypeExpr {
     Record { fields: Vec<FieldType> },
     Fn { params: Vec<TypeExpr>, ret: Box<TypeExpr> },
     Newtype { inner: Box<TypeExpr> },
+    Variant { cases: Vec<VariantCase> },
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum VariantCase {
+    Unit { name: String },
+    Tuple { name: String, fields: Vec<TypeExpr> },
+    Record { name: String, fields: Vec<FieldType> },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FieldType {
     pub name: String,
     #[serde(rename = "type")]
     pub ty: TypeExpr,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenericParam {
+    pub name: String,
+    pub bounds: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Pattern {
     Wildcard,
@@ -33,13 +48,13 @@ pub enum Pattern {
     Err { inner: Box<Pattern> },
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FieldPattern {
     pub name: String,
     pub pattern: Option<Pattern>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Expr {
     Int { value: serde_json::Value, raw: String },
@@ -75,27 +90,27 @@ pub enum Expr {
     Err { expr: Box<Expr> },
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FieldInit {
     pub name: String,
     pub value: Expr,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MatchArm {
     pub pattern: Pattern,
     pub guard: Option<Expr>,
     pub body: Expr,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LambdaParam {
     pub name: String,
     #[serde(rename = "type")]
     pub ty: Option<TypeExpr>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Stmt {
     Let { name: String, #[serde(rename = "type")] ty: Option<TypeExpr>, value: Expr },
@@ -106,14 +121,14 @@ pub enum Stmt {
     Expr { expr: Expr },
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Param {
     pub name: String,
     #[serde(rename = "type")]
     pub ty: TypeExpr,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Decl {
     Module { path: Vec<String> },
@@ -133,7 +148,7 @@ pub enum Decl {
     Test { name: String, body: Expr },
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Program {
     pub module: Option<Decl>,
     pub imports: Vec<Decl>,

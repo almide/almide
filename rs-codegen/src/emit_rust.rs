@@ -5,11 +5,13 @@ struct Emitter {
     indent: usize,
     /// Track if we're inside an effect function (for ? operator)
     in_effect: bool,
+    /// Names of effect functions in the program
+    effect_fns: Vec<String>,
 }
 
 impl Emitter {
     fn new() -> Self {
-        Self { out: String::new(), indent: 0, in_effect: false }
+        Self { out: String::new(), indent: 0, in_effect: false, effect_fns: Vec::new() }
     }
 
     fn emit_indent(&mut self) {
@@ -25,6 +27,15 @@ impl Emitter {
     }
 
     fn emit_program(&mut self, prog: &Program) {
+        // Collect effect function names
+        for decl in &prog.decls {
+            if let Decl::Fn { name, effect, .. } = decl {
+                if effect.unwrap_or(false) {
+                    self.effect_fns.push(name.clone());
+                }
+            }
+        }
+
         self.emitln("#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut)]");
         self.emitln("");
         self.emit_runtime();
@@ -40,7 +51,7 @@ impl Emitter {
             self.emitln("fn main() {");
             self.indent += 1;
             self.emitln("let args: Vec<String> = std::env::args().collect();");
-            self.emitln("if let Err(e) = almide_main(&args) {");
+            self.emitln("if let Err(e) = almide_main(args) {");
             self.indent += 1;
             self.emitln("eprintln!(\"{}\", e);");
             self.emitln("std::process::exit(1);");
@@ -52,12 +63,23 @@ impl Emitter {
     }
 
     fn emit_runtime(&mut self) {
-        // Inline runtime functions at top level
-        self.emitln("fn almide_concat_str(a: &str, b: &str) -> String { format!(\"{}{}\", a, b) }");
-        self.emitln("fn almide_concat_vec<T: Clone>(a: &[T], b: &[T]) -> Vec<T> { let mut r = a.to_vec(); r.extend_from_slice(b); r }");
+        self.emitln("trait AlmideConcat<Rhs> { type Output; fn concat(self, rhs: Rhs) -> Self::Output; }");
+        self.emitln("impl AlmideConcat<String> for String { type Output = String; fn concat(self, rhs: String) -> String { format!(\"{}{}\", self, rhs) } }");
+        self.emitln("impl AlmideConcat<&str> for String { type Output = String; fn concat(self, rhs: &str) -> String { format!(\"{}{}\", self, rhs) } }");
+        self.emitln("impl AlmideConcat<String> for &str { type Output = String; fn concat(self, rhs: String) -> String { format!(\"{}{}\", self, rhs) } }");
+        self.emitln("impl AlmideConcat<&str> for &str { type Output = String; fn concat(self, rhs: &str) -> String { format!(\"{}{}\", self, rhs) } }");
+        self.emitln("impl<T: Clone> AlmideConcat<Vec<T>> for Vec<T> { type Output = Vec<T>; fn concat(self, rhs: Vec<T>) -> Vec<T> { let mut r = self; r.extend(rhs); r } }");
+        // Use trait for comparison to handle String/&String/i64 uniformly
+        self.emitln("trait AlmideAsRef<T: ?Sized> { fn as_cmp(&self) -> &T; }");
+        self.emitln("impl AlmideAsRef<str> for String { fn as_cmp(&self) -> &str { self.as_str() } }");
+        self.emitln("impl AlmideAsRef<str> for &String { fn as_cmp(&self) -> &str { self.as_str() } }");
+        self.emitln("impl AlmideAsRef<str> for &str { fn as_cmp(&self) -> &str { self } }");
+        self.emitln("impl AlmideAsRef<i64> for i64 { fn as_cmp(&self) -> &i64 { self } }");
+        self.emitln("impl AlmideAsRef<i64> for &i64 { fn as_cmp(&self) -> &i64 { self } }");
+        self.emitln("impl AlmideAsRef<bool> for bool { fn as_cmp(&self) -> &bool { self } }");
+        self.emitln("macro_rules! almide_eq { ($a:expr, $b:expr) => { ($a).as_cmp() == ($b).as_cmp() }; }");
+        self.emitln("macro_rules! almide_ne { ($a:expr, $b:expr) => { ($a).as_cmp() != ($b).as_cmp() }; }");
         self.emitln("");
-        // Generic concat: tries String first via Any, fallback to Vec
-        // For simplicity, we'll use specific concat calls in codegen
     }
 
     fn emit_decl(&mut self, decl: &Decl) {
@@ -137,15 +159,7 @@ impl Emitter {
             .filter(|p| p.name != "self")
             .map(|p| {
                 let ty = self.gen_type(&p.ty);
-                let ty_ref = match &p.ty {
-                    TypeExpr::Simple { name } if name == "String" => "&str".to_string(),
-                    TypeExpr::Generic { name, args } if name == "List" => {
-                        let inner = self.gen_type(&args[0]);
-                        format!("&[{}]", inner)
-                    }
-                    _ => ty,
-                };
-                format!("{}: {}", p.name, ty_ref)
+                format!("{}: {}", p.name, ty)
             })
             .collect();
 
@@ -226,13 +240,29 @@ impl Emitter {
                 format!("fn({}) -> {}", ps.join(", "), self.gen_type(ret))
             }
             TypeExpr::Newtype { inner } => self.gen_type(inner),
+            TypeExpr::Variant { cases: _ } => "/* variant */".to_string(),
+        }
+    }
+
+    /// Generate expression for comparison context — avoid String/&String mismatch
+    fn gen_expr_for_cmp(&self, expr: &Expr) -> String {
+        match expr {
+            Expr::String { value } => format!("{:?}", value), // &str literal, works with String ==
+            _ => self.gen_expr(expr),
+        }
+    }
+
+    /// Generate expression as function argument — clone Idents to avoid move
+    fn gen_arg(&self, expr: &Expr) -> String {
+        match expr {
+            Expr::Ident { .. } => format!("{}.clone()", self.gen_expr(expr)),
+            _ => self.gen_expr(expr),
         }
     }
 
     fn gen_expr(&self, expr: &Expr) -> String {
         match expr {
             Expr::Int { raw, .. } => {
-                // All integers as u128 for BigInt compatibility, or i64 for small
                 if let Ok(n) = raw.parse::<u128>() {
                     if n > i64::MAX as u128 {
                         format!("{}u128", raw)
@@ -333,27 +363,130 @@ impl Emitter {
         }
     }
 
+    /// Generate expression in u64 wrapping context (for hash/BigInt arithmetic)
+    /// Almide's % 2^64 pattern maps to u64 wrapping arithmetic
+    fn gen_expr_u64_wrapping(&self, expr: &Expr) -> String {
+        match expr {
+            Expr::Binary { op, left, right } if op == "^" || op == "*" || op == "%" => {
+                // Check if % 2^64 — this is a no-op in u64 arithmetic
+                if op == "%" && self.is_pow2_64(right) {
+                    return self.gen_expr_u64_wrapping(left);
+                }
+                let l = self.gen_expr_u64_wrapping(left);
+                let r = self.gen_expr_u64_wrapping(right);
+                match op.as_str() {
+                    "*" => format!("(({}).wrapping_mul({}))", l, r),
+                    "^" => format!("(({}) ^ ({}))", l, r),
+                    "%" => format!("(({}) % ({}))", l, r),
+                    _ => format!("(({}) {} ({}))", l, op, r),
+                }
+            }
+            Expr::Paren { expr: inner } => self.gen_expr_u64_wrapping(inner),
+            Expr::Int { raw, .. } => {
+                if let Ok(n) = raw.parse::<u128>() {
+                    if n > u64::MAX as u128 {
+                        format!("{}u64", n % (u64::MAX as u128 + 1))
+                    } else {
+                        format!("{}u64", raw)
+                    }
+                } else {
+                    raw.clone()
+                }
+            }
+            _ => {
+                let e = self.gen_expr(expr);
+                format!("(({}) as u64)", e)
+            }
+        }
+    }
+
+    fn is_pow2_64(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Int { raw, .. } => raw == "18446744073709551616",
+            Expr::Paren { expr: inner } => self.is_pow2_64(inner),
+            _ => false,
+        }
+    }
+
+    fn is_bigint_expr(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Int { raw, .. } => {
+                if let Ok(n) = raw.parse::<u128>() { n > i64::MAX as u128 } else { false }
+            }
+            Expr::Binary { op, left, right } if op == "^" || op == "*" || op == "%" => {
+                self.is_bigint_expr(left) || self.is_bigint_expr(right)
+            }
+            Expr::Paren { expr: inner } => self.is_bigint_expr(inner),
+            _ => false,
+        }
+    }
+
+    fn is_list_expr(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::List { .. } => true,
+            Expr::Call { callee, .. } => {
+                // list.* calls return lists
+                if let Expr::Member { object, field } = callee.as_ref() {
+                    if let Expr::Ident { name } = object.as_ref() {
+                        return matches!(name.as_str(), "list");
+                    }
+                }
+                false
+            }
+            Expr::Binary { op, left, right } if op == "++" => {
+                self.is_list_expr(left) || self.is_list_expr(right)
+            }
+            _ => false,
+        }
+    }
+
+    fn is_list_concat(&self, left: &Expr, right: &Expr) -> bool {
+        self.is_list_expr(left) || self.is_list_expr(right)
+    }
+
     fn gen_binary(&self, op: &str, left: &Expr, right: &Expr) -> String {
-        let l = self.gen_expr(left);
-        let r = self.gen_expr(right);
         match op {
             "++" => {
-                // Use format! for string concat (most common in Almide)
-                // When left is a vec operation, use almide_concat_vec
-                format!("almide_concat_str(&{}, &{})", l, r)
+                let l = self.gen_arg(left);
+                let r = self.gen_arg(right);
+                format!("AlmideConcat::concat({}, {})", l, r)
             }
-            "==" => format!("({} == {})", l, r),
-            "!=" => format!("({} != {})", l, r),
-            "and" => format!("({} && {})", l, r),
-            "or" => format!("({} || {})", l, r),
-            "/" => format!("({} / {})", l, r),
-            "^" => format!("(({} as u128) ^ ({} as u128))", l, r),
-            "*" => format!("(({} as u128) * ({} as u128))", l, r),
-            "%" => format!("(({} as u128) % ({} as u128))", l, r),
-            "<" | ">" | "<=" | ">=" => format!("({} {} {})", l, op, r),
-            "+" => format!("({} + {})", l, r),
-            "-" => format!("({} - {})", l, r),
-            _ => format!("({} {} {})", l, op, r),
+            "^" | "*" | "%" => {
+                let left_big = self.is_bigint_expr(left);
+                let right_big = self.is_bigint_expr(right);
+                let needs_wrapping = left_big || right_big;
+                if needs_wrapping {
+                    // % 2^64 is a no-op in u64 wrapping arithmetic
+                    if op == "%" && self.is_pow2_64(right) {
+                        let inner = self.gen_expr_u64_wrapping(left);
+                        return format!("(({}) as i64)", inner);
+                    }
+                    let l = self.gen_expr_u64_wrapping(left);
+                    let r = self.gen_expr_u64_wrapping(right);
+                    let inner = match op {
+                        "*" => format!("(({}).wrapping_mul({}))", l, r),
+                        _ => format!("(({}) {} ({}))", l, op, r),
+                    };
+                    format!("(({}) as i64)", inner)
+                } else {
+                    let l = self.gen_expr(left);
+                    let r = self.gen_expr(right);
+                    format!("({} {} {})", l, op, r)
+                }
+            }
+            "==" => {
+                let l = self.gen_expr(left);
+                let r = self.gen_expr(right);
+                format!("almide_eq!({}, {})", l, r)
+            }
+            "!=" => {
+                let l = self.gen_expr(left);
+                let r = self.gen_expr(right);
+                format!("almide_ne!({}, {})", l, r)
+            }
+            "and" => { let l = self.gen_expr(left); let r = self.gen_expr(right); format!("({} && {})", l, r) }
+            "or" => { let l = self.gen_expr(left); let r = self.gen_expr(right); format!("({} || {})", l, r) }
+            _ => { let l = self.gen_expr(left); let r = self.gen_expr(right); format!("({} {} {})", l, op, r) }
         }
     }
 
@@ -399,8 +532,17 @@ impl Emitter {
         }
 
         let callee_str = self.gen_expr(callee);
-        let args_str: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
-        format!("{}({})", callee_str, args_str.join(", "))
+        let args_str: Vec<String> = args.iter().map(|a| self.gen_arg(a)).collect();
+        let call = format!("{}({})", callee_str, args_str.join(", "));
+        // Auto-propagate ? for effect fn calls within effect context
+        if self.in_effect {
+            if let Expr::Ident { name } = callee {
+                if self.effect_fns.contains(name) {
+                    return format!("{}?", call);
+                }
+            }
+        }
+        call
     }
 
     fn gen_module_call(&self, module: &str, func: &str, args: &[Expr]) -> String {
@@ -467,11 +609,16 @@ impl Emitter {
                     }
                     "map" => {
                         let (names, body) = inline_lambda(&args[1], 1);
-                        format!("({}).iter().map(|{}| {{ {} }}).collect::<Vec<_>>()", args_str[0], names[0], body)
+                        // If in effect context and body contains ?, use try_collect pattern
+                        if self.in_effect && body.contains("?") {
+                            format!("({}).clone().into_iter().map(|{}| -> Result<_, String> {{ Ok({{ {} }}) }}).collect::<Result<Vec<_>, _>>()?", args_str[0], names[0], body)
+                        } else {
+                            format!("({}).clone().into_iter().map(|{}| {{ {} }}).collect::<Vec<_>>()", args_str[0], names[0], body)
+                        }
                     }
                     "filter" => {
                         let (names, body) = inline_lambda(&args[1], 1);
-                        format!("({}).iter().filter(|{}| {{ {} }}).cloned().collect::<Vec<_>>()", args_str[0], names[0], body)
+                        format!("{{ let mut __v = ({}).clone(); __v.retain(|{}| {{ {} }}); __v }}", args_str[0], names[0], body)
                     }
                     "find" => {
                         let (names, body) = inline_lambda(&args[1], 1);
@@ -479,7 +626,7 @@ impl Emitter {
                     }
                     "fold" => {
                         let (names, body) = inline_lambda(&args[2], 2);
-                        format!("({}).iter().fold({}, |{}, {}| {{ {} }})", args_str[0], args_str[1], names[0], names[1], body)
+                        format!("({}).clone().into_iter().fold({}, |{}, {}| {{ {} }})", args_str[0], args_str[1], names[0], names[1], body)
                     }
                     _ => format!("/* list.{} */ todo!()", func),
                 }
@@ -588,7 +735,17 @@ impl Emitter {
     fn gen_stmt(&self, stmt: &Stmt) -> String {
         match stmt {
             Stmt::Let { name, value, .. } => {
-                format!("let {} = {};", name, self.gen_expr(value))
+                // Use gen_arg to clone Ident values, preventing move issues
+                let val = match value {
+                    Expr::If { cond, then, else_ } => {
+                        let c = self.gen_expr(cond);
+                        let t = self.gen_arg(then);
+                        let e = self.gen_arg(else_);
+                        format!("if {} {{ {} }} else {{ {} }}", c, t, e)
+                    }
+                    _ => self.gen_expr(value),
+                };
+                format!("let {} = {};", name, val)
             }
             Stmt::LetDestructure { fields, value } => {
                 format!("let ({}) = {};", fields.join(", "), self.gen_expr(value))
