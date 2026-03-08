@@ -206,21 +206,41 @@ fn main() {
         return;
     }
 
-    // almide run file.almd [-- args...]
-    if args.len() >= 3 && args[1] == "run" {
-        let file = &args[2];
+    // almide run [file.almd] [-- args...]
+    if args.len() >= 2 && args[1] == "run" {
+        let (file, arg_start) = if args.len() >= 3 && !args[2].starts_with('-') {
+            (args[2].clone(), 3)
+        } else if std::path::Path::new("almide.toml").exists() && std::path::Path::new("src/main.almd").exists() {
+            ("src/main.almd".to_string(), 2)
+        } else {
+            eprintln!("No file specified and no almide.toml found.");
+            eprintln!("Run 'almide init' to create a project, or specify a file: almide run <file.almd>");
+            std::process::exit(1);
+        };
         let program_args: Vec<String> = if let Some(pos) = args.iter().position(|a| a == "--") {
             args[pos + 1..].to_vec()
         } else {
-            args[3..].iter().filter(|a| a.as_str() != "--no-check").cloned().collect()
+            args[arg_start..].iter().filter(|a| a.as_str() != "--no-check").cloned().collect()
         };
-        cmd_run(file, &program_args, no_check);
+        cmd_run(&file, &program_args, no_check);
         return;
     }
 
-    // almide build file.almd [-o output] [--target wasm]
-    if args.len() >= 3 && args[1] == "build" {
-        let file = &args[2];
+    // almide build [file.almd] [-o output] [--target wasm]
+    if args.len() >= 2 && args[1] == "build" {
+        let file = if args.len() >= 3 && !args[2].starts_with('-') {
+            args[2].clone()
+        } else {
+            // Look for almide.toml → src/main.almd
+            if std::path::Path::new("almide.toml").exists() && std::path::Path::new("src/main.almd").exists() {
+                "src/main.almd".to_string()
+            } else {
+                eprintln!("No file specified and no almide.toml found.");
+                eprintln!("Run 'almide init' to create a project, or specify a file: almide build <file.almd>");
+                std::process::exit(1);
+            }
+        };
+        let file = &file;
         let build_target = args.iter()
             .position(|a| a == "--target")
             .and_then(|i| args.get(i + 1))
@@ -230,6 +250,14 @@ fn main() {
 
         let default_output = if is_wasm {
             format!("{}.wasm", file.strip_suffix(".almd").unwrap_or("a.out"))
+        } else if std::path::Path::new("almide.toml").exists() {
+            // Read package name from almide.toml
+            let toml_content = std::fs::read_to_string("almide.toml").unwrap_or_default();
+            toml_content.lines()
+                .find(|l| l.starts_with("name"))
+                .and_then(|l| l.split('=').nth(1))
+                .map(|s| s.trim().trim_matches('"').to_string())
+                .unwrap_or_else(|| file.strip_suffix(".almd").unwrap_or("a.out").to_string())
         } else {
             file.strip_suffix(".almd").unwrap_or("a.out").to_string()
         };
