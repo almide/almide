@@ -33,17 +33,10 @@ impl TsEmitter {
     }
 
     pub(crate) fn map_module(name: &str) -> String {
-        match name {
-            "fs" => "__fs".to_string(),
-            "string" => "__string".to_string(),
-            "list" => "__list".to_string(),
-            "int" => "__int".to_string(),
-            "float" => "__float".to_string(),
-            "map" => "__map".to_string(),
-            "json" => "__json".to_string(),
-            "path" => "__path".to_string(),
-            "env" => "__env".to_string(),
-            other => other.to_string(),
+        if crate::stdlib::is_stdlib_module(name) {
+            format!("__{}", name)
+        } else {
+            name.to_string()
         }
     }
 

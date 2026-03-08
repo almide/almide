@@ -1,7 +1,9 @@
+mod compounds;
 mod declarations;
 mod expressions;
 mod helpers;
 mod patterns;
+mod primary;
 mod statements;
 mod types;
 

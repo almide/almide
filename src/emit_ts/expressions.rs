@@ -117,27 +117,15 @@ impl TsEmitter {
         }
     }
 
-    fn resolve_ufcs_module(method: &str) -> Option<&'static str> {
-        match method {
-            // string methods
-            "trim" | "split" | "join" | "pad_left" | "starts_with" | "starts_with_qm_"
-            | "ends_with_qm_" | "slice" | "to_bytes" | "contains" | "to_upper" | "to_lower"
-            | "to_int" | "replace" | "char_at" | "lines" => Some("__string"),
-            // list methods
-            "get" | "get_or" | "sort" | "reverse" | "each" | "map" | "filter" | "find" | "fold" | "any" | "all" => Some("__list"),
-            // int methods
-            "to_string" | "to_hex" => Some("__int"),
-            // map methods
-            "keys" | "values" | "entries" => Some("__map"),
-            _ => None,
-        }
+    fn resolve_ufcs_module(method: &str) -> Option<String> {
+        crate::stdlib::resolve_ufcs_module(method).map(|m| Self::map_module(m))
     }
 
     pub(crate) fn gen_call(&self, callee: &Expr, args: &[Expr]) -> String {
         // UFCS: expr.method(args) => __module.method(expr, args)
         if let Expr::Member { object, field } = callee {
             if let Expr::Ident { name } = object.as_ref() {
-                let is_module = matches!(name.as_str(), "string" | "list" | "int" | "float" | "fs" | "env" | "map");
+                let is_module = crate::stdlib::is_stdlib_module(name);
                 if !is_module {
                     // UFCS: non-module receiver
                     if let Some(module) = Self::resolve_ufcs_module(field) {
@@ -156,13 +144,13 @@ impl TsEmitter {
                 }
             } else {
                 // Non-ident object (e.g. call result, member chain)
-                let module_name = if let Expr::Member { object: inner_obj, .. } = object.as_ref() {
+                let is_module_chain = if let Expr::Member { object: inner_obj, .. } = object.as_ref() {
                     if let Expr::Ident { name } = inner_obj.as_ref() {
-                        matches!(name.as_str(), "string" | "list" | "int" | "float" | "fs" | "env")
+                        crate::stdlib::is_stdlib_module(name)
                     } else { false }
                 } else { false };
 
-                if !module_name {
+                if !is_module_chain {
                     if let Some(module) = Self::resolve_ufcs_module(field) {
                         let obj_str = self.gen_expr(object);
                         let mut all_args = vec![obj_str];

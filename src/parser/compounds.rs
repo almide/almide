@@ -1,0 +1,240 @@
+use crate::lexer::TokenType;
+use crate::ast::*;
+use super::Parser;
+
+impl Parser {
+    pub(crate) fn parse_if_expr(&mut self) -> Result<Expr, String> {
+        self.expect(TokenType::If)?;
+        self.skip_newlines();
+        let cond = self.parse_expr()?;
+        self.skip_newlines();
+        self.expect(TokenType::Then)?;
+        self.skip_newlines();
+        let then = self.parse_if_branch()?;
+        self.skip_newlines();
+        self.expect(TokenType::Else)?;
+        self.skip_newlines();
+        let else_ = self.parse_if_branch()?;
+        Ok(Expr::If {
+            cond: Box::new(cond),
+            then: Box::new(then),
+            else_: Box::new(else_),
+        })
+    }
+
+    fn parse_if_branch(&mut self) -> Result<Expr, String> {
+        if self.check(TokenType::Ident) && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Eq) {
+            let name = self.advance_and_get_value();
+            self.advance();
+            self.skip_newlines();
+            let value = self.parse_expr()?;
+            return Ok(Expr::Block {
+                stmts: vec![Stmt::Assign { name, value }],
+                expr: None,
+            });
+        }
+        self.parse_expr()
+    }
+
+    pub(crate) fn parse_match_expr(&mut self) -> Result<Expr, String> {
+        self.expect(TokenType::Match)?;
+        self.skip_newlines();
+        let subject = self.parse_or()?;
+        self.skip_newlines();
+        self.expect(TokenType::LBrace)?;
+        self.skip_newlines();
+        let mut arms = Vec::new();
+        while !self.check(TokenType::RBrace) {
+            arms.push(self.parse_match_arm()?);
+            self.skip_newlines();
+            if self.check(TokenType::Comma) {
+                self.advance();
+                self.skip_newlines();
+            }
+        }
+        self.expect(TokenType::RBrace)?;
+        Ok(Expr::Match {
+            subject: Box::new(subject),
+            arms,
+        })
+    }
+
+    pub(crate) fn parse_match_arm(&mut self) -> Result<MatchArm, String> {
+        let pattern = self.parse_pattern()?;
+        let mut guard: Option<Expr> = None;
+        if self.check(TokenType::If) {
+            self.advance();
+            guard = Some(self.parse_expr()?);
+        }
+        self.expect(TokenType::FatArrow)?;
+        self.skip_newlines();
+        let body = self.parse_expr()?;
+        Ok(MatchArm { pattern, guard, body })
+    }
+
+    pub(crate) fn parse_lambda(&mut self) -> Result<Expr, String> {
+        self.expect(TokenType::Fn)?;
+        self.expect(TokenType::LParen)?;
+        let mut params = Vec::new();
+        if !self.check(TokenType::RParen) {
+            params.push(self.parse_lambda_param()?);
+            while self.check(TokenType::Comma) {
+                self.advance();
+                params.push(self.parse_lambda_param()?);
+            }
+        }
+        self.expect(TokenType::RParen)?;
+        self.expect(TokenType::FatArrow)?;
+        self.skip_newlines();
+        let body = self.parse_expr()?;
+        Ok(Expr::Lambda {
+            params,
+            body: Box::new(body),
+        })
+    }
+
+    fn parse_lambda_param(&mut self) -> Result<LambdaParam, String> {
+        let name = self.expect_ident()?;
+        let mut ty: Option<TypeExpr> = None;
+        if self.check(TokenType::Colon) {
+            self.advance();
+            ty = Some(self.parse_type_expr()?);
+        }
+        Ok(LambdaParam { name, ty })
+    }
+
+    pub(crate) fn parse_do_block(&mut self) -> Result<Expr, String> {
+        self.expect(TokenType::LBrace)?;
+        self.skip_newlines();
+        let mut stmts = Vec::new();
+        let mut final_expr: Option<Box<Expr>> = None;
+        while !self.check(TokenType::RBrace) {
+            let stmt = self.parse_stmt()?;
+            self.skip_newlines();
+            if self.check(TokenType::Semicolon) {
+                self.advance();
+                self.skip_newlines();
+            }
+            if self.check(TokenType::RBrace) {
+                if let Stmt::Expr { expr } = stmt {
+                    final_expr = Some(Box::new(expr));
+                } else {
+                    stmts.push(stmt);
+                }
+            } else {
+                stmts.push(stmt);
+            }
+        }
+        self.expect(TokenType::RBrace)?;
+        Ok(Expr::DoBlock {
+            stmts,
+            expr: final_expr,
+        })
+    }
+
+    pub(crate) fn parse_brace_expr(&mut self) -> Result<Expr, String> {
+        self.expect(TokenType::LBrace)?;
+        self.skip_newlines();
+        if self.check(TokenType::RBrace) {
+            self.advance();
+            return Ok(Expr::Record { fields: Vec::new() });
+        }
+        if self.check(TokenType::DotDotDot) {
+            self.advance();
+            let base = self.parse_expr()?;
+            let mut fields = Vec::new();
+            while self.check(TokenType::Comma) {
+                self.advance();
+                self.skip_newlines();
+                if self.check(TokenType::RBrace) {
+                    break;
+                }
+                let field_name = self.expect_ident()?;
+                self.expect(TokenType::Colon)?;
+                self.skip_newlines();
+                let field_value = self.parse_expr()?;
+                fields.push(FieldInit {
+                    name: field_name,
+                    value: field_value,
+                });
+            }
+            self.skip_newlines();
+            self.expect(TokenType::RBrace)?;
+            return Ok(Expr::SpreadRecord {
+                base: Box::new(base),
+                fields,
+            });
+        }
+        if (self.check(TokenType::Ident) || self.check(TokenType::IdentQ))
+            && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Colon)
+        {
+            let mut fields = Vec::new();
+            while !self.check(TokenType::RBrace) {
+                self.skip_newlines();
+                let field_name = self.expect_any_name()?;
+                if self.check(TokenType::Colon) {
+                    self.advance();
+                    self.skip_newlines();
+                    let field_value = self.parse_expr()?;
+                    fields.push(FieldInit {
+                        name: field_name.clone(),
+                        value: field_value,
+                    });
+                } else {
+                    fields.push(FieldInit {
+                        name: field_name.clone(),
+                        value: Expr::Ident { name: field_name },
+                    });
+                }
+                self.skip_newlines();
+                if self.check(TokenType::Comma) {
+                    self.advance();
+                    self.skip_newlines();
+                }
+            }
+            self.expect(TokenType::RBrace)?;
+            return Ok(Expr::Record { fields });
+        }
+
+        let mut stmts = Vec::new();
+        let mut final_expr: Option<Box<Expr>> = None;
+        while !self.check(TokenType::RBrace) {
+            let stmt = self.parse_stmt()?;
+            self.skip_newlines();
+            if self.check(TokenType::Semicolon) {
+                self.advance();
+                self.skip_newlines();
+            }
+            if self.check(TokenType::RBrace) {
+                if let Stmt::Expr { expr } = stmt {
+                    final_expr = Some(Box::new(expr));
+                } else {
+                    stmts.push(stmt);
+                }
+            } else {
+                stmts.push(stmt);
+            }
+        }
+        self.expect(TokenType::RBrace)?;
+        Ok(Expr::Block {
+            stmts,
+            expr: final_expr,
+        })
+    }
+
+    pub(crate) fn parse_list_expr(&mut self) -> Result<Expr, String> {
+        self.expect(TokenType::LBracket)?;
+        self.skip_newlines();
+        let mut elements = Vec::new();
+        while !self.check(TokenType::RBracket) {
+            elements.push(self.parse_expr()?);
+            self.skip_newlines();
+            if self.check(TokenType::Comma) {
+                self.advance();
+                self.skip_newlines();
+            }
+        }
+        self.expect(TokenType::RBracket)?;
+        Ok(Expr::List { elements })
+    }
+}
