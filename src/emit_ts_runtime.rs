@@ -102,6 +102,14 @@ const __json = {
 const __env = {
   unix_timestamp(): number { return Math.floor(Date.now() / 1000); },
   args(): string[] { return Deno.args; },
+  get(name: string): string | null { const v = Deno.env.get(name); return v !== undefined ? v : null; },
+  set(name: string, value: string): void { Deno.env.set(name, value); },
+  cwd(): string { return Deno.cwd(); },
+};
+const __process = {
+  exec(cmd: string, args: string[]): string { const p = new Deno.Command(cmd, { args, stdout: "piped", stderr: "piped" }); const out = p.outputSync(); if (out.success) { return new TextDecoder().decode(out.stdout); } else { throw new Error(new TextDecoder().decode(out.stderr)); } },
+  exit(code: number): void { Deno.exit(code); },
+  stdin_lines(): string[] { const buf = new Uint8Array(1024 * 1024); const n = Deno.stdin.readSync(buf); return n ? new TextDecoder().decode(buf.subarray(0, n)).split("\n").filter(l => l.length > 0) : []; },
 };
 function __bigop(op: string, a: any, b: any): any {
   if (typeof a === "bigint" || typeof b === "bigint") {
@@ -275,6 +283,14 @@ const __json = {
 const __env = {
   unix_timestamp() { return Math.floor(Date.now() / 1000); },
   args() { return process.argv.slice(2); },
+  get(name) { const v = process.env[name]; return v !== undefined ? v : null; },
+  set(name, value) { process.env[name] = value; },
+  cwd() { return process.cwd(); },
+};
+const __process = {
+  exec(cmd, args) { const { execFileSync } = require("child_process"); try { return execFileSync(cmd, args, { encoding: "utf-8" }); } catch (e) { throw new Error(e.stderr || e.message); } },
+  exit(code) { process.exit(code); },
+  stdin_lines() { return require("fs").readFileSync(0, "utf-8").split("\n").filter(l => l.length > 0); },
 };
 function __bigop(op, a, b) {
   if (typeof a === "bigint" || typeof b === "bigint") {

@@ -2,6 +2,7 @@ module env_process_test
 
 import env
 import process
+import string
 
 test "env.get returns none for unset var" {
   assert_eq(env.get("ALMIDE_TEST_UNSET_VAR_12345"), none)
