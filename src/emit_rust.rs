@@ -626,7 +626,7 @@ impl Emitter {
                 } else {
                     let l = self.gen_expr(left);
                     let r = self.gen_expr(right);
-                    format!("(({}).wrapping_mul({}))", l, r)
+                    format!("({} * {})", l, r)
                 }
             }
             "==" => {
@@ -662,7 +662,7 @@ impl Emitter {
         // Handle module calls
         if let Expr::Member { object, field } = callee {
             if let Expr::Ident { name: module } = object.as_ref() {
-                let is_stdlib = matches!(module.as_str(), "string" | "list" | "int" | "fs" | "env" | "map");
+                let is_stdlib = matches!(module.as_str(), "string" | "list" | "int" | "float" | "fs" | "env" | "map");
                 let is_user_module = self.user_modules.contains(module);
                 if is_stdlib || is_user_module {
                     return self.gen_module_call(module, field, args);
@@ -848,6 +848,17 @@ impl Emitter {
                 "to_hex" => format!("format!(\"{{:x}}\", {} as u64)", args_str[0]),
                 "to_string" => format!("({}).to_string()", args_str[0]),
                 _ => format!("/* int.{} */ todo!()", func),
+            },
+            "float" => match func {
+                "to_string" => format!("({}).to_string()", args_str[0]),
+                "to_int" => format!("(({}) as i64)", args_str[0]),
+                "round" => format!("({}).round()", args_str[0]),
+                "floor" => format!("({}).floor()", args_str[0]),
+                "ceil" => format!("({}).ceil()", args_str[0]),
+                "abs" => format!("({}).abs()", args_str[0]),
+                "sqrt" => format!("({}).sqrt()", args_str[0]),
+                "parse" => format!("({}).parse::<f64>().map_err(|e| e.to_string())?", args_str[0]),
+                _ => format!("/* float.{} */ todo!()", func),
             },
             "env" => match func {
                 "unix_timestamp" => {

@@ -866,6 +866,15 @@ impl Checker {
             // int
             ("int", "to_string") => FnSig { params: vec![(s("n"), Ty::Int)], ret: Ty::String, is_effect: false },
             ("int", "to_hex") => FnSig { params: vec![(s("n"), Ty::Int)], ret: Ty::String, is_effect: false },
+            // float
+            ("float", "to_string") => FnSig { params: vec![(s("n"), Ty::Float)], ret: Ty::String, is_effect: false },
+            ("float", "to_int") => FnSig { params: vec![(s("n"), Ty::Float)], ret: Ty::Int, is_effect: false },
+            ("float", "round") => FnSig { params: vec![(s("n"), Ty::Float)], ret: Ty::Float, is_effect: false },
+            ("float", "floor") => FnSig { params: vec![(s("n"), Ty::Float)], ret: Ty::Float, is_effect: false },
+            ("float", "ceil") => FnSig { params: vec![(s("n"), Ty::Float)], ret: Ty::Float, is_effect: false },
+            ("float", "abs") => FnSig { params: vec![(s("n"), Ty::Float)], ret: Ty::Float, is_effect: false },
+            ("float", "sqrt") => FnSig { params: vec![(s("n"), Ty::Float)], ret: Ty::Float, is_effect: false },
+            ("float", "parse") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::Result(Box::new(Ty::Float), Box::new(Ty::String)), is_effect: false },
             // env
             ("env", "unix_timestamp") => FnSig { params: vec![], ret: Ty::Int, is_effect: true },
             ("env", "args") => FnSig { params: vec![], ret: Ty::List(Box::new(Ty::String)), is_effect: true },
