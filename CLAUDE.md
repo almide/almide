@@ -11,50 +11,66 @@
 
 Almide is a programming language (.almd files) compiled via a pure-Rust compiler with multi-target codegen.
 
-- `src/lexer.rs` — Lexer (source → tokens)
-- `src/parser.rs` — Parser (tokens → AST)
-- `src/ast.rs` — AST type definitions
-- `src/emit_rust.rs` — Rust code generation
-- `src/emit_ts.rs` — TypeScript code generation (Deno runtime)
-- `src/main.rs` — CLI entry point
-- `CHEATSHEET.md` — Language quick reference (used by LLM agents to write Almide)
-- `exercises/` — Exercism-style benchmark exercises with tests
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full compiler pipeline and module map.
+
+### Module Structure
+
+```
+src/
+├── main.rs              CLI dispatch, compile pipeline
+├── cli.rs               Commands: run, build, test, check, fmt, clean, init
+├── ast.rs               AST types (Program, Decl, Expr, Stmt, TypeExpr)
+├── lexer.rs             Tokenizer
+├── parser/              Recursive descent parser (7 files)
+├── resolve.rs           Import resolution
+├── check/               Type checker (5 files)
+├── types.rs             Internal type system (Ty, TypeEnv, FnSig)
+├── diagnostic.rs        Error reporting with file/line and hints
+├── stdlib.rs            Centralized stdlib definitions
+├── emit_common.rs       Shared codegen utilities
+├── emit_rust/           Rust code generation (5 files)
+├── emit_ts/             TypeScript code generation (4 files)
+├── emit_ts_runtime.rs   Embedded JS/TS runtime
+├── fmt.rs               Code formatter (AST → source)
+└── project.rs           almide.toml, dependency management
+```
 
 ## Building & Usage
 
 ```bash
 cargo build --release
 
-# Compile to Rust (default)
-almide input.almd > output.rs
-rustc output.rs -o output
-
-# Compile to TypeScript
-almide input.almd --target ts > output.ts
-deno run --allow-all output.ts
-
-# Emit AST as JSON
-almide input.almd --emit-ast
+almide run app.almd              # Compile + execute
+almide build app.almd -o app     # Build binary
+almide build app.almd --target wasm  # Build WASM
+almide test                      # Run tests/ directory
+almide check app.almd            # Type check only
+almide fmt app.almd              # Format source
+almide clean                     # Clear dependency cache
+almide app.almd --target rust    # Emit Rust source
+almide app.almd --target ts      # Emit TypeScript source
+almide app.almd --emit-ast       # Emit AST as JSON
 ```
 
 ## Testing Rules
 
-Changes to the compiler MUST be verified against **all targets**:
+Changes to the compiler MUST be verified against **all exercises**:
 
-1. **Rust target**: `almide run test.almd` (compile to Rust → rustc → execute)
-2. **TypeScript target**: `almide test.almd --target ts | deno run --allow-all -`
-3. **JavaScript target**: Verify JS runtime in `emit_ts.rs` (`RUNTIME_JS`) matches Deno runtime (`RUNTIME`)
+```bash
+for f in exercises/*/*.almd; do almide run "$f"; done
+```
 
 When adding or modifying stdlib functions:
-- Add to **both** `emit_rust.rs` AND `emit_ts.rs` (both RUNTIME and RUNTIME_JS)
-- Add to UFCS resolution (`resolve_ufcs_module`) in both emitters
-- Add to module recognition (`is_module` check) if new module
-- Test with a `.almd` file that exercises the new function
+- Add type signature to `src/stdlib.rs`
+- Add Rust codegen to `src/emit_rust/calls.rs`
+- Add TS codegen to `src/emit_ts/expressions.rs` (if applicable)
+- Add UFCS mapping to `stdlib.rs` `resolve_ufcs_module` (if method-callable)
+- Write a test in `exercises/stdlib-test/`
 
-When modifying codegen (emit_rust.rs / emit_ts.rs):
+When modifying codegen:
 - Test ownership: variables used after `for...in` must still work
 - Test effect fn: `fs.read_text()` inside effect fn must compile without manual `?`
-- Test that generated Rust compiles without warnings (except unused macros)
+- Test that generated Rust compiles without warnings
 
 ## Key Design Decisions
 
@@ -62,5 +78,6 @@ When modifying codegen (emit_rust.rs / emit_ts.rs):
 - **Result erasure (TS)**: `ok(x)` → `x`, `err(e)` → `throw new Error(e)`
 - **Effect fn (Rust)**: `effect fn` → `Result<T, String>`, auto `?` propagation
 - **`==`/`!=`**: Deep equality in TS (`__deep_eq`), `almide_eq!` macro in Rust
-- **`++`**: Concatenation for both strings and lists (polymorphic in both targets)
+- **`++`**: Concatenation for both strings and lists
 - **`do` block**: With guard → loop. Without guard → auto error propagation block.
+- **Diagnostics**: Every error includes file:line, context, and actionable hint

@@ -107,6 +107,10 @@ almide run app.almd              # Compile + execute
 almide run app.almd -- arg1      # With arguments
 almide build app.almd -o app     # Build standalone binary
 almide build app.almd --target wasm  # Build WebAssembly (WASI)
+almide test                      # Run tests/ directory
+almide check app.almd            # Type check only (no compilation)
+almide fmt app.almd              # Format source code
+almide clean                     # Clear dependency cache
 almide app.almd --target rust    # Emit Rust source
 almide app.almd --target ts      # Emit TypeScript source
 ```
@@ -149,10 +153,12 @@ Almide compiles to Rust, then to native machine code. The generated binaries are
 
 ## Documentation
 
+- [ARCHITECTURE.md](./ARCHITECTURE.md) — Compiler pipeline, module map, design decisions
 - [SPEC.md](./SPEC.md) — Full language specification
 - [docs/GRAMMAR.md](./docs/GRAMMAR.md) — EBNF grammar + stdlib reference
 - [CHEATSHEET.md](./CHEATSHEET.md) — Quick reference for AI code generation
 - [docs/DESIGN.md](./docs/DESIGN.md) — Design philosophy and trade-offs
+- [roadmap/](./roadmap/) — Language evolution plans
 
 ## Contributing
 
