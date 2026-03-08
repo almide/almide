@@ -53,6 +53,8 @@ impl Emitter {
         if has_main {
             self.emitln("fn main() {");
             self.indent += 1;
+            self.emitln("let t = std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {");
+            self.indent += 1;
             self.emitln("let args: Vec<String> = std::env::args().collect();");
             self.emitln("if let Err(e) = almide_main(args) {");
             self.indent += 1;
@@ -60,6 +62,9 @@ impl Emitter {
             self.emitln("std::process::exit(1);");
             self.indent -= 1;
             self.emitln("}");
+            self.indent -= 1;
+            self.emitln("}).unwrap();");
+            self.emitln("t.join().unwrap();");
             self.indent -= 1;
             self.emitln("}");
         }

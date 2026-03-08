@@ -67,6 +67,7 @@ pub enum TokenType {
     FatArrow,
     Eq,
     EqEq,
+    Bang,
     BangEq,
     LtEq,
     GtEq,
@@ -155,6 +156,7 @@ fn is_continuation_token(tt: &TokenType) -> bool {
             | TokenType::FatArrow
             | TokenType::Eq
             | TokenType::EqEq
+            | TokenType::Bang
             | TokenType::BangEq
             | TokenType::LtEq
             | TokenType::GtEq
@@ -532,6 +534,7 @@ impl Lexer {
             '%' => Some(TokenType::Percent),
             '|' => Some(TokenType::Pipe),
             '^' => Some(TokenType::Caret),
+            '!' => Some(TokenType::Bang),
             '_' => Some(TokenType::Underscore),
             _ => Option::None,
         };

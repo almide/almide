@@ -6,6 +6,21 @@ mod parser;
 
 use std::process::Command;
 
+fn find_rustc() -> String {
+    // Try PATH first
+    if Command::new("rustc").arg("--version").output().is_ok() {
+        return "rustc".to_string();
+    }
+    // Fallback: ~/.cargo/bin/rustc
+    if let Some(home) = std::env::var_os("HOME") {
+        let cargo_rustc = std::path::PathBuf::from(home).join(".cargo/bin/rustc");
+        if cargo_rustc.exists() {
+            return cargo_rustc.to_string_lossy().to_string();
+        }
+    }
+    "rustc".to_string()
+}
+
 fn compile(file: &str) -> String {
     let input = std::fs::read_to_string(file)
         .unwrap_or_else(|e| { eprintln!("Error reading {}: {}", file, e); std::process::exit(1); });
@@ -34,11 +49,12 @@ fn cmd_run(file: &str, program_args: &[String]) {
 
     std::fs::write(&rs_path, &rs_code).unwrap();
 
-    let rustc = Command::new("rustc")
+    let rustc = Command::new(&find_rustc())
         .arg(&rs_path)
         .arg("-o")
         .arg(&bin_path)
         .arg("-C").arg("overflow-checks=no")
+        .arg("-C").arg("opt-level=1")
         .output()
         .unwrap_or_else(|e| { eprintln!("Failed to run rustc: {}", e); std::process::exit(1); });
 
@@ -48,7 +64,9 @@ fn cmd_run(file: &str, program_args: &[String]) {
         std::process::exit(1);
     }
 
+    // Set larger stack size to avoid overflow with recursive code
     let status = Command::new(&bin_path)
+        .env("RUST_MIN_STACK", "8388608")
         .args(program_args)
         .status()
         .unwrap_or_else(|e| { eprintln!("Failed to execute: {}", e); std::process::exit(1); });
@@ -87,7 +105,7 @@ fn main() {
         let tmp_rs = format!("{}.rs", output);
         std::fs::write(&tmp_rs, &rs_code).unwrap();
 
-        let rustc = Command::new("rustc")
+        let rustc = Command::new(&find_rustc())
             .arg(&tmp_rs)
             .arg("-o")
             .arg(output)

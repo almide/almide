@@ -1023,6 +1023,14 @@ impl Parser {
             return Ok(Expr::TypeName { name });
         }
 
+        // Reject '!' with helpful hint
+        if self.check(TokenType::Bang) {
+            return Err(format!(
+                "'!' is not valid in Almide at line {}:{}\n  Hint: Use 'not x' for boolean negation, not '!x'.",
+                tok.line, tok.col
+            ));
+        }
+
         // Reject known invalid keywords/identifiers with helpful hints
         if self.check(TokenType::Ident) {
             let rejected_hint = match tok.value.as_str() {
