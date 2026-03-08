@@ -1,7 +1,7 @@
 /// CLI command implementations.
 
 use std::process::Command;
-use crate::{compile, compile_with_options, parse_file, find_rustc, emit_rust, emit_ts, check, diagnostic, resolve};
+use crate::{compile, compile_with_options, parse_file, find_rustc, emit_rust, emit_ts, check, diagnostic, resolve, fmt, project};
 
 pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool) -> i32 {
     let rs_code = compile(file, no_check);
@@ -182,12 +182,14 @@ pub fn cmd_build(args: &[String], no_check: bool) {
 
 pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, no_check: bool) {
     let program = parse_file(file);
+    let source_text = std::fs::read_to_string(file).unwrap_or_default();
 
     let resolved = resolve::resolve_imports(file, &program)
         .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
 
     if !no_check && !emit_ast {
         let mut checker = check::Checker::new();
+        checker.set_source(file, &source_text);
         for (name, mod_prog) in &resolved.modules {
             checker.register_module(name, mod_prog);
         }
@@ -197,13 +199,13 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, no_check: bool) {
             .collect();
         if !errors.is_empty() {
             for d in &errors {
-                eprintln!("{}", d.display());
+                eprintln!("{}", d.display_with_source(&source_text));
             }
             eprintln!("\n{} error(s) found", errors.len());
             std::process::exit(1);
         }
         for d in diagnostics.iter().filter(|d| d.level == diagnostic::Level::Warning) {
-            eprintln!("{}", d.display());
+            eprintln!("{}", d.display_with_source(&source_text));
         }
     }
 
@@ -219,5 +221,74 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, no_check: bool) {
             other => { eprintln!("Unknown target: {}. Use rust, ts, or js.", other); std::process::exit(1); }
         };
         print!("{}", code);
+    }
+}
+
+pub fn cmd_check(file: &str) {
+    let program = parse_file(file);
+    let source_text = std::fs::read_to_string(file).unwrap_or_default();
+
+    let dep_paths: Vec<(String, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
+        if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
+            project::fetch_all_deps(&proj)
+                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); })
+                .into_iter().collect()
+        } else {
+            vec![]
+        }
+    } else {
+        vec![]
+    };
+
+    let resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
+        .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+
+    let mut checker = check::Checker::new();
+    checker.set_source(file, &source_text);
+    for (name, mod_prog) in &resolved.modules {
+        checker.register_module(name, mod_prog);
+    }
+    let diagnostics = checker.check_program(&program);
+
+    for d in diagnostics.iter().filter(|d| d.level == diagnostic::Level::Warning) {
+        eprintln!("{}", d.display_with_source(&source_text));
+    }
+
+    let errors: Vec<_> = diagnostics.iter()
+        .filter(|d| d.level == diagnostic::Level::Error)
+        .collect();
+    if !errors.is_empty() {
+        for d in &errors {
+            eprintln!("{}", d.display_with_source(&source_text));
+        }
+        eprintln!("\n{} error(s) found", errors.len());
+        std::process::exit(1);
+    }
+
+    eprintln!("No errors found");
+}
+
+pub fn cmd_fmt(files: &[String], write_back: bool) {
+    for file in files {
+        let program = parse_file(file);
+        let formatted = fmt::format_program(&program);
+        if write_back {
+            std::fs::write(file, &formatted)
+                .unwrap_or_else(|e| { eprintln!("Failed to write {}: {}", file, e); std::process::exit(1); });
+            eprintln!("Formatted {}", file);
+        } else {
+            print!("{}", formatted);
+        }
+    }
+}
+
+pub fn cmd_clean() {
+    let cache = project::cache_dir();
+    if cache.exists() {
+        std::fs::remove_dir_all(&cache)
+            .unwrap_or_else(|e| { eprintln!("Failed to clean cache: {}", e); std::process::exit(1); });
+        eprintln!("Cleaned {}", cache.display());
+    } else {
+        eprintln!("Cache directory does not exist: {}", cache.display());
     }
 }

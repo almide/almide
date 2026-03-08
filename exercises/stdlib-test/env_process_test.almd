@@ -1,0 +1,31 @@
+module env_process_test
+
+import env
+import process
+
+test "env.get returns none for unset var" {
+  assert_eq(env.get("ALMIDE_TEST_UNSET_VAR_12345"), none)
+}
+
+test "env.set and env.get roundtrip" {
+  env.set("ALMIDE_TEST_VAR", "hello_almide")
+  assert_eq(env.get("ALMIDE_TEST_VAR"), some("hello_almide"))
+}
+
+test "env.cwd returns a path" {
+  let cwd = env.cwd()
+  assert(string.len(cwd) > 0)
+}
+
+test "process.exec runs a command" {
+  let output = process.exec("echo", ["hello"])
+  assert_eq(output, ok("hello\n"))
+}
+
+test "process.exec fails on bad command" {
+  let result = match process.exec("nonexistent_command_12345", []) {
+    ok(_) => false,
+    err(_) => true
+  }
+  assert(result)
+}

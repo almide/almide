@@ -5,7 +5,7 @@
 use crate::types::{Ty, FnSig};
 
 /// All built-in stdlib module names.
-pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "path", "http"];
+pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "path", "http", "process"];
 
 /// Check if a module name is a stdlib module.
 pub fn is_stdlib_module(name: &str) -> bool {
@@ -142,6 +142,14 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         // ── env ──
         ("env", "unix_timestamp") => FnSig { params: vec![], ret: Ty::Int, is_effect: true },
         ("env", "args") => FnSig { params: vec![], ret: Ty::List(Box::new(Ty::String)), is_effect: true },
+        ("env", "get") => FnSig { params: vec![(s("name"), Ty::String)], ret: Ty::Option(Box::new(Ty::String)), is_effect: true },
+        ("env", "set") => FnSig { params: vec![(s("name"), Ty::String), (s("value"), Ty::String)], ret: Ty::Unit, is_effect: true },
+        ("env", "cwd") => FnSig { params: vec![], ret: Ty::Result(Box::new(Ty::String), Box::new(Ty::String)), is_effect: true },
+
+        // ── process ──
+        ("process", "exec") => FnSig { params: vec![(s("cmd"), Ty::String), (s("args"), Ty::List(Box::new(Ty::String)))], ret: Ty::Result(Box::new(Ty::String), Box::new(Ty::String)), is_effect: true },
+        ("process", "exit") => FnSig { params: vec![(s("code"), Ty::Int)], ret: Ty::Unit, is_effect: true },
+        ("process", "stdin_lines") => FnSig { params: vec![], ret: Ty::Result(Box::new(Ty::List(Box::new(Ty::String))), Box::new(Ty::String)), is_effect: true },
 
         // ── fs ──
         ("fs", "read_text") => FnSig { params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::String), Box::new(io_err())), is_effect: true },

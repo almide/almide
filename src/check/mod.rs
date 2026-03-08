@@ -14,6 +14,9 @@ use crate::types::{Ty, TypeEnv, FnSig, VariantCase, VariantPayload};
 pub struct Checker {
     pub env: TypeEnv,
     pub diagnostics: Vec<Diagnostic>,
+    pub source_file: Option<String>,
+    pub source_text: Option<String>,
+    current_decl_line: Option<usize>,
 }
 
 pub(crate) fn err(msg: impl Into<String>, hint: impl Into<String>, ctx: impl Into<String>) -> Diagnostic {
@@ -25,9 +28,57 @@ impl Checker {
         let mut c = Checker {
             env: TypeEnv::new(),
             diagnostics: Vec::new(),
+            source_file: None,
+            source_text: None,
+            current_decl_line: None,
         };
         c.register_stdlib();
         c
+    }
+
+    pub fn set_source(&mut self, file: &str, text: &str) {
+        self.source_file = Some(file.to_string());
+        self.source_text = Some(text.to_string());
+    }
+
+    /// Find the line number of a declaration by searching the source text.
+    fn find_decl_line(&self, decl: &ast::Decl) -> Option<usize> {
+        let source = self.source_text.as_ref()?;
+        match decl {
+            ast::Decl::Fn { name, effect, .. } => {
+                let prefix = if effect.unwrap_or(false) { "effect fn " } else { "fn " };
+                let pattern = format!("{}{}", prefix, name);
+                for (i, line) in source.lines().enumerate() {
+                    let trimmed = line.trim();
+                    if trimmed.contains(&pattern) {
+                        return Some(i + 1);
+                    }
+                }
+                None
+            }
+            ast::Decl::Test { name, .. } => {
+                let pattern = format!("test \"{}\"", name);
+                for (i, line) in source.lines().enumerate() {
+                    if line.contains(&pattern) {
+                        return Some(i + 1);
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    pub(crate) fn push_diagnostic(&mut self, mut d: Diagnostic) {
+        if let Some(ref file) = self.source_file {
+            if d.file.is_none() {
+                d.file = Some(file.clone());
+            }
+        }
+        if d.line.is_none() {
+            d.line = self.current_decl_line;
+        }
+        self.diagnostics.push(d);
     }
 
     /// Register function and type declarations into the environment.
@@ -87,6 +138,7 @@ impl Checker {
     }
 
     pub(crate) fn check_decl(&mut self, decl: &ast::Decl) {
+        self.current_decl_line = self.find_decl_line(decl);
         match decl {
             ast::Decl::Fn { name, params, return_type, body, effect, .. } => {
                 self.env.push_scope();
@@ -110,7 +162,7 @@ impl Checker {
                     ret_ty.clone()
                 };
                 if !body_ty.compatible(&effective_ret) && !body_ty.compatible(&ret_ty) {
-                    self.diagnostics.push(err(
+                    self.push_diagnostic(err(
                         format!("function '{}' declared to return {} but body has type {}", name, ret_ty.display(), body_ty.display()),
                         "Change the return type or fix the body expression",
                         format!("fn {}", name),

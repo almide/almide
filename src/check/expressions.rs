@@ -45,7 +45,7 @@ impl Checker {
                 for (i, elem) in elements.iter().enumerate().skip(1) {
                     let et = self.check_expr(elem);
                     if !first_ty.compatible(&et) {
-                        self.diagnostics.push(err(
+                        self.push_diagnostic(err(
                             format!("list element at index {} has type {} but expected {}", i, et.display(), first_ty.display()),
                             "All list elements must have the same type", "list literal",
                         ));
@@ -67,7 +67,7 @@ impl Checker {
             ast::Expr::If { cond, then, else_ } => {
                 let ct = self.check_expr(cond);
                 if !ct.compatible(&Ty::Bool) {
-                    self.diagnostics.push(err(
+                    self.push_diagnostic(err(
                         format!("if condition has type {} but expected Bool", ct.display()),
                         "The condition must be a Bool expression", "if expression",
                     ));
@@ -75,7 +75,7 @@ impl Checker {
                 let tt = self.check_expr(then);
                 let et = self.check_expr(else_);
                 if !tt.compatible(&et) {
-                    self.diagnostics.push(err(
+                    self.push_diagnostic(err(
                         format!("if branches have different types: then is {}, else is {}", tt.display(), et.display()),
                         "Both branches must have the same type", "if expression",
                     ));
@@ -92,7 +92,7 @@ impl Checker {
                     if let Some(ref guard) = arm.guard {
                         let gt = self.check_expr(guard);
                         if !gt.compatible(&Ty::Bool) {
-                            self.diagnostics.push(err(
+                            self.push_diagnostic(err(
                                 format!("match guard has type {} but expected Bool", gt.display()),
                                 "Guard conditions must be Bool", "match arm",
                             ));
@@ -107,7 +107,7 @@ impl Checker {
                                 _ => false,
                             };
                         if !compat {
-                            self.diagnostics.push(err(
+                            self.push_diagnostic(err(
                                 format!("match arm has type {} but previous arms have type {}", at.display(), prev.display()),
                                 "All match arms must have the same type", "match expression",
                             ));
@@ -150,7 +150,7 @@ impl Checker {
                     Ty::Map(k, _) => *k.clone(),
                     _ if matches!(it, Ty::Unknown) => Ty::Unknown,
                     _ => {
-                        self.diagnostics.push(err(
+                        self.push_diagnostic(err(
                             format!("cannot iterate over type {}", it.display()),
                             "for...in requires a List or Map",
                             format!("for {} in ...", var),
@@ -205,7 +205,7 @@ impl Checker {
                 match op.as_str() {
                     "not" => {
                         if !ot.compatible(&Ty::Bool) {
-                            self.diagnostics.push(err(
+                            self.push_diagnostic(err(
                                 format!("'not' expects Bool but got {}", ot.display()),
                                 "Use 'not' only with Bool values", "unary not",
                             ));
@@ -214,7 +214,7 @@ impl Checker {
                     }
                     "-" => {
                         if !ot.compatible(&Ty::Int) && !ot.compatible(&Ty::Float) {
-                            self.diagnostics.push(err(
+                            self.push_diagnostic(err(
                                 format!("unary '-' expects Int or Float but got {}", ot.display()),
                                 "Negation only works on numbers", "unary minus",
                             ));
@@ -233,7 +233,7 @@ impl Checker {
                     Ty::Result(ok, _) => *ok.clone(),
                     Ty::Unknown => Ty::Unknown,
                     _ => {
-                        self.diagnostics.push(err(
+                        self.push_diagnostic(err(
                             format!("'try' expects a Result but got {}", it.display()),
                             "Use 'try' only on expressions that return Result[T, E]", "try expression",
                         ));

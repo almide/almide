@@ -32,13 +32,13 @@ impl Checker {
         match name {
             "println" | "eprintln" => {
                 if arg_tys.len() != 1 {
-                    self.diagnostics.push(err(
+                    self.push_diagnostic(err(
                         format!("{}() takes exactly 1 argument but got {}", name, arg_tys.len()),
                         format!("Use {}(\"message\")", name),
                         format!("{}()", name),
                     ));
                 } else if !arg_tys[0].compatible(&Ty::String) {
-                    self.diagnostics.push(err(
+                    self.push_diagnostic(err(
                         format!("{}() requires String but got {}", name, arg_tys[0].display()),
                         "Use int.to_string(n) to convert to String first",
                         format!("{}()", name),
@@ -48,7 +48,7 @@ impl Checker {
             }
             "assert" => {
                 if arg_tys.len() == 1 && !arg_tys[0].compatible(&Ty::Bool) {
-                    self.diagnostics.push(err(
+                    self.push_diagnostic(err(
                         format!("assert() requires Bool but got {}", arg_tys[0].display()),
                         "Pass a boolean condition to assert()", "assert()",
                     ));
@@ -64,7 +64,7 @@ impl Checker {
 
         if let Some(sig) = self.env.functions.get(name).cloned() {
             if sig.is_effect && !self.env.in_effect {
-                self.diagnostics.push(err(
+                self.push_diagnostic(err(
                     format!("cannot call effect function '{}' from a pure function", name),
                     "Mark the calling function as 'effect fn' to allow side effects",
                     format!("call to {}()", name),
@@ -72,7 +72,7 @@ impl Checker {
             }
             if arg_tys.len() != sig.params.len() {
                 let expected = sig.format_params();
-                self.diagnostics.push(err(
+                self.push_diagnostic(err(
                     format!("function '{}' expects {} argument(s) but got {}", name, sig.params.len(), arg_tys.len()),
                     format!("Expected: {}({})", name, expected),
                     format!("call to {}()", name),
@@ -80,7 +80,7 @@ impl Checker {
             } else {
                 for (i, ((pname, pty), aty)) in sig.params.iter().zip(arg_tys.iter()).enumerate() {
                     if !pty.compatible(aty) {
-                        self.diagnostics.push(err(
+                        self.push_diagnostic(err(
                             format!("argument '{}' (position {}) expects {} but got {}", pname, i + 1, pty.display(), aty.display()),
                             format!("Pass a value of type {}", pty.display()),
                             format!("call to {}()", name),
@@ -109,7 +109,7 @@ impl Checker {
             match &case.payload {
                 VariantPayload::Unit => {
                     if !arg_tys.is_empty() {
-                        self.diagnostics.push(err(
+                        self.push_diagnostic(err(
                             format!("constructor '{}' takes no arguments but got {}", name, arg_tys.len()),
                             format!("Use {} without parentheses", name),
                             format!("constructor {}", name),
@@ -119,7 +119,7 @@ impl Checker {
                 VariantPayload::Tuple(expected) => {
                     if arg_tys.len() != expected.len() {
                         let exp = expected.iter().map(|t| t.display()).collect::<Vec<_>>().join(", ");
-                        self.diagnostics.push(err(
+                        self.push_diagnostic(err(
                             format!("constructor '{}' expects {} argument(s) but got {}", name, expected.len(), arg_tys.len()),
                             format!("{}({})", name, exp),
                             format!("constructor {}", name),
@@ -138,7 +138,7 @@ impl Checker {
             let min_params = stdlib::min_params(module, func).unwrap_or(sig.params.len());
             if arg_tys.len() < min_params || arg_tys.len() > sig.params.len() {
                 let usage = sig.format_params();
-                self.diagnostics.push(err(
+                self.push_diagnostic(err(
                     format!("{}.{}() expects {} argument(s) but got {}", module, func, sig.params.len(), arg_tys.len()),
                     format!("Usage: {}.{}({})", module, func, usage),
                     format!("{}.{}()", module, func),
@@ -146,7 +146,7 @@ impl Checker {
             } else {
                 for (i, ((pname, pty), aty)) in sig.params.iter().zip(arg_tys.iter()).enumerate() {
                     if !pty.compatible(aty) {
-                        self.diagnostics.push(err(
+                        self.push_diagnostic(err(
                             format!("{}.{}() argument '{}' (position {}) expects {} but got {}", module, func, pname, i + 1, pty.display(), aty.display()),
                             format!("Pass a value of type {}", pty.display()),
                             format!("{}.{}()", module, func),
@@ -155,7 +155,7 @@ impl Checker {
                 }
             }
             if sig.is_effect && !self.env.in_effect {
-                self.diagnostics.push(err(
+                self.push_diagnostic(err(
                     format!("{}.{}() is an effect function and cannot be called from a pure function", module, func),
                     "Mark the calling function as 'effect fn'",
                     format!("{}.{}()", module, func),
@@ -176,7 +176,7 @@ impl Checker {
             if let Some(sig) = self.env.functions.get(&key).cloned() {
                 if arg_tys.len() != sig.params.len() {
                     let usage = sig.format_params();
-                    self.diagnostics.push(err(
+                    self.push_diagnostic(err(
                         format!("{}.{}() expects {} argument(s) but got {}", module, func, sig.params.len(), arg_tys.len()),
                         format!("Usage: {}.{}({})", module, func, usage),
                         format!("{}.{}()", module, func),
@@ -184,7 +184,7 @@ impl Checker {
                 } else {
                     for (i, ((pname, pty), aty)) in sig.params.iter().zip(arg_tys.iter()).enumerate() {
                         if !pty.compatible(aty) {
-                            self.diagnostics.push(err(
+                            self.push_diagnostic(err(
                                 format!("{}.{}() argument '{}' (position {}) expects {} but got {}", module, func, pname, i + 1, pty.display(), aty.display()),
                                 format!("Pass a value of type {}", pty.display()),
                                 format!("{}.{}()", module, func),
@@ -193,7 +193,7 @@ impl Checker {
                     }
                 }
                 if sig.is_effect && !self.env.in_effect {
-                    self.diagnostics.push(err(
+                    self.push_diagnostic(err(
                         format!("{}.{}() is an effect function and cannot be called from a pure function", module, func),
                         "Mark the calling function as 'effect fn'",
                         format!("{}.{}()", module, func),
@@ -221,7 +221,7 @@ impl Checker {
                     if name == field { return ty.clone(); }
                 }
                 let avail = fields.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ");
-                self.diagnostics.push(err(
+                self.push_diagnostic(err(
                     format!("record has no field '{}'", field),
                     format!("Available fields: {}", avail),
                     format!("field access .{}", field),

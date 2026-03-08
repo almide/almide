@@ -286,7 +286,7 @@ impl Emitter {
     }
 
     fn emit_fn_decl(&mut self, name: &str, params: &[Param], ret_type: &TypeExpr, body: &Expr, is_effect: bool, is_async: bool) {
-        let fn_name = if name == "main" { "almide_main".to_string() } else { name.replace('?', "_qm_") };
+        let fn_name = if name == "main" { "almide_main".to_string() } else { crate::emit_common::sanitize(name) };
         let ret_str = self.gen_type(ret_type);
         let is_unit_ret = ret_str == "()";
 

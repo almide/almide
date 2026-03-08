@@ -57,7 +57,7 @@ impl Emitter {
                 }
             }
             Expr::Bool { value } => format!("{}", value),
-            Expr::Ident { name } => name.replace('?', "_qm_"),
+            Expr::Ident { name } => crate::emit_common::sanitize(name),
             Expr::TypeName { name } => name.clone(),
             Expr::Unit => "()".to_string(),
             Expr::None => "None".to_string(),

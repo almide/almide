@@ -234,7 +234,16 @@ impl Emitter {
                     "(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64)".to_string()
                 }
                 "args" => "std::env::args().collect::<Vec<String>>()".to_string(),
+                "get" => format!("std::env::var(&*{}).ok()", args_str[0]),
+                "set" => format!("std::env::set_var(&*{}, &*{})", args_str[0], args_str[1]),
+                "cwd" => "std::env::current_dir().map(|p| p.to_string_lossy().to_string()).map_err(|e| e.to_string())?".to_string(),
                 _ => format!("/* env.{} */ todo!()", func),
+            },
+            "process" => match func {
+                "exec" => format!("match std::process::Command::new(&*{}).args({{ let __a: Vec<String> = {}; __a }}.iter().map(|s| s.as_str())).output() {{ Ok(__out) => if __out.status.success() {{ Ok(String::from_utf8_lossy(&__out.stdout).to_string()) }} else {{ Err(String::from_utf8_lossy(&__out.stderr).to_string()) }}, Err(e) => Err(e.to_string()) }}", args_str[0], args_str[1]),
+                "exit" => format!("std::process::exit({} as i32)", args_str[0]),
+                "stdin_lines" => "{{ use std::io::BufRead; std::io::stdin().lock().lines().collect::<Result<Vec<String>, _>>().map_err(|e| e.to_string())? }}".to_string(),
+                _ => format!("/* process.{} */ todo!()", func),
             },
             "json" => match func {
                 "parse" => format!("almide_json_parse(&{})?", args_str[0]),

@@ -16,7 +16,7 @@ impl Checker {
                 else if (left.compatible(&Ty::Float) || left.compatible(&Ty::Int))
                     && (right.compatible(&Ty::Float) || right.compatible(&Ty::Int)) { Ty::Float }
                 else {
-                    self.diagnostics.push(err(
+                    self.push_diagnostic(err(
                         format!("operator '{}' requires numeric types but got {} and {}", op, left.display(), right.display()),
                         "Use Int or Float values with arithmetic operators",
                         format!("operator '{}'", op),
@@ -27,7 +27,7 @@ impl Checker {
             "^" => {
                 if left.compatible(&Ty::Int) && right.compatible(&Ty::Int) { Ty::Int }
                 else {
-                    self.diagnostics.push(err(
+                    self.push_diagnostic(err(
                         format!("'^' (XOR) requires Int but got {} and {}", left.display(), right.display()),
                         "XOR only works on Int values", "operator '^'",
                     ));
@@ -38,7 +38,7 @@ impl Checker {
                 if left.compatible(&Ty::String) && right.compatible(&Ty::String) { Ty::String }
                 else if matches!(left, Ty::List(_)) && left.compatible(right) { left.clone() }
                 else {
-                    self.diagnostics.push(err(
+                    self.push_diagnostic(err(
                         format!("'++' requires String or List but got {} and {}", left.display(), right.display()),
                         "Use '++' for String or List concatenation", "operator '++'",
                     ));
@@ -48,14 +48,14 @@ impl Checker {
             "==" | "!=" | "<" | ">" | "<=" | ">=" => Ty::Bool,
             "and" | "or" => {
                 if !left.compatible(&Ty::Bool) {
-                    self.diagnostics.push(err(
+                    self.push_diagnostic(err(
                         format!("'{}' requires Bool but left side is {}", op, left.display()),
                         "Use Bool values with logical operators",
                         format!("operator '{}'", op),
                     ));
                 }
                 if !right.compatible(&Ty::Bool) {
-                    self.diagnostics.push(err(
+                    self.push_diagnostic(err(
                         format!("'{}' requires Bool but right side is {}", op, right.display()),
                         "Use Bool values with logical operators",
                         format!("operator '{}'", op),

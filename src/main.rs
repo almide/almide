@@ -2,7 +2,9 @@ mod ast;
 mod check;
 mod cli;
 mod diagnostic;
+mod emit_common;
 mod emit_rust;
+mod fmt;
 mod emit_ts;
 mod emit_ts_runtime;
 mod lexer;
@@ -65,7 +67,9 @@ fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::Em
         .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
 
     if !no_check {
+        let source_text = std::fs::read_to_string(file).unwrap_or_default();
         let mut checker = check::Checker::new();
+        checker.set_source(file, &source_text);
         for (name, mod_prog) in &resolved.modules {
             checker.register_module(name, mod_prog);
         }
@@ -75,13 +79,13 @@ fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::Em
             .collect();
         if !errors.is_empty() {
             for d in &errors {
-                eprintln!("{}", d.display());
+                eprintln!("{}", d.display_with_source(&source_text));
             }
             eprintln!("\n{} error(s) found", errors.len());
             std::process::exit(1);
         }
         for d in diagnostics.iter().filter(|d| d.level == diagnostic::Level::Warning) {
-            eprintln!("{}", d.display());
+            eprintln!("{}", d.display_with_source(&source_text));
         }
     }
 
@@ -177,6 +181,38 @@ fn main() {
         return;
     }
 
+    if args.len() >= 2 && args[1] == "check" {
+        let file = if args.len() >= 3 && !args[2].starts_with('-') {
+            args[2].clone()
+        } else if std::path::Path::new("almide.toml").exists() && std::path::Path::new("src/main.almd").exists() {
+            "src/main.almd".to_string()
+        } else {
+            eprintln!("No file specified and no almide.toml found.");
+            std::process::exit(1);
+        };
+        cli::cmd_check(&file);
+        return;
+    }
+
+    if args.len() >= 2 && args[1] == "fmt" {
+        let write_back = !args.iter().any(|a| a == "--dry-run");
+        let fmt_files: Vec<String> = args.iter().skip(2)
+            .filter(|a| !a.starts_with("--"))
+            .cloned()
+            .collect();
+        if fmt_files.is_empty() {
+            eprintln!("Usage: almide fmt <file.almd> [files...] [--dry-run]");
+            std::process::exit(1);
+        }
+        cli::cmd_fmt(&fmt_files, write_back);
+        return;
+    }
+
+    if args.len() >= 2 && args[1] == "clean" {
+        cli::cmd_clean();
+        return;
+    }
+
     // Legacy: almide file.almd [--target rust|ts] [--emit-ast]
     let files: Vec<&str> = args.iter().skip(1)
         .filter(|a| !a.starts_with("--"))
@@ -188,6 +224,9 @@ fn main() {
         eprintln!("       almide run <file.almd> [args...]");
         eprintln!("       almide build <file.almd> [-o output] [--target wasm]");
         eprintln!("       almide test [file.almd]");
+        eprintln!("       almide check [file.almd]");
+        eprintln!("       almide fmt <file.almd> [--dry-run]");
+        eprintln!("       almide clean");
         eprintln!("       almide <file.almd> [--target rust|ts] [--emit-ast]");
         std::process::exit(1);
     }

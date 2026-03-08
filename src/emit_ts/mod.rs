@@ -29,7 +29,7 @@ impl TsEmitter {
     }
 
     pub(crate) fn sanitize(name: &str) -> String {
-        name.replace('?', "_qm_")
+        crate::emit_common::sanitize(name)
     }
 
     pub(crate) fn map_module(name: &str) -> String {
