@@ -662,7 +662,7 @@ impl Emitter {
             "trim" | "split" | "join" | "pad_left" | "starts_with" | "starts_with_qm_"
             | "ends_with_qm_" | "slice" | "to_bytes" | "contains" | "to_upper" | "to_lower"
             | "to_int" | "replace" | "char_at" | "lines" => Some("string"),
-            "get" | "get_or" | "sort" | "each" | "map" | "filter" | "find" | "fold" => Some("list"),
+            "get" | "get_or" | "sort" | "reverse" | "each" | "map" | "filter" | "find" | "fold" | "any" | "all" => Some("list"),
             "to_string" | "to_hex" => Some("int"),
             "len" => Some("list"),
             "keys" | "values" | "entries" => Some("map"),
@@ -753,6 +753,9 @@ impl Emitter {
                 "exists?" | "exists_qm_" => format!("std::path::Path::new(&*{}).exists()", args_str[0]),
                 "mkdir_p" => format!("std::fs::create_dir_all(&*{}).map_err(|e| e.to_string())?", args_str[0]),
                 "append" => format!("{{ let prev = std::fs::read_to_string(&*{}).unwrap_or_default(); std::fs::write(&*{}, format!(\"{{}}{{}}\", prev, {})).map_err(|e| e.to_string())?; }}", args_str[0], args_str[0], args_str[1]),
+                "read_lines" => format!("{{ let s = std::fs::read_to_string(&*{}).map_err(|e| e.to_string())?; s.split('\\n').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect::<Vec<String>>() }}", args_str[0]),
+                "remove" => format!("std::fs::remove_file(&*{}).map_err(|e| e.to_string())?", args_str[0]),
+                "list_dir" => format!("{{ let mut v: Vec<String> = std::fs::read_dir(&*{}).map_err(|e| e.to_string())?.filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().to_string())).collect(); v.sort(); v }}", args_str[0]),
                 _ => format!("/* fs.{} */ todo!()", func),
             },
             "string" => match func {
@@ -801,6 +804,15 @@ impl Emitter {
                     "get" => format!("({}).get({} as usize).cloned()", args_str[0], args_str[1]),
                     "get_or" => format!("({}).get({} as usize).cloned().unwrap_or({})", args_str[0], args_str[1], args_str[2]),
                     "sort" => format!("{{ let mut v = ({}).to_vec(); v.sort(); v }}", args_str[0]),
+                    "reverse" => format!("{{ let mut v = ({}).to_vec(); v.reverse(); v }}", args_str[0]),
+                    "any" => {
+                        let (names, body) = inline_lambda(&args[1], 1);
+                        format!("({}).iter().any(|{}| {{ {} }})", args_str[0], names[0], body)
+                    }
+                    "all" => {
+                        let (names, body) = inline_lambda(&args[1], 1);
+                        format!("({}).iter().all(|{}| {{ {} }})", args_str[0], names[0], body)
+                    }
                     "contains" => format!("({}).contains(&{})", args_str[0], args_str[1]),
                     "each" => {
                         let (names, body) = inline_lambda(&args[1], 1);
@@ -833,6 +845,7 @@ impl Emitter {
             "map" => match func {
                 "new" => "HashMap::new()".to_string(),
                 "get" => format!("({}).get(&{}).cloned()", args_str[0], args_str[1]),
+                "get_or" => format!("({}).get(&{}).cloned().unwrap_or({})", args_str[0], args_str[1], args_str[2]),
                 "set" => format!("{{ let mut m = ({}).clone(); m.insert({}, {}); m }}", args_str[0], args_str[1], args_str[2]),
                 "contains" => format!("({}).contains_key(&{})", args_str[0], args_str[1]),
                 "remove" => format!("{{ let mut m = ({}).clone(); m.remove(&{}); m }}", args_str[0], args_str[1]),

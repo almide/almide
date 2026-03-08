@@ -10,6 +10,9 @@ const __fs = {
   append(p: string, s: string): void { Deno.writeTextFileSync(p, Deno.readTextFileSync(p) + s); },
   mkdir_p(p: string): void { Deno.mkdirSync(p, { recursive: true }); },
   exists_qm_(p: string): boolean { try { Deno.statSync(p); return true; } catch { return false; } },
+  read_lines(p: string): string[] { return Deno.readTextFileSync(p).split("\n").filter(l => l.length > 0); },
+  remove(p: string): void { Deno.removeSync(p); },
+  list_dir(p: string): string[] { return [...Deno.readDirSync(p)].map(e => e.name).sort(); },
 };
 const __string = {
   trim(s: string): string { return s.trim(); },
@@ -35,6 +38,9 @@ const __list = {
   get<T>(xs: T[], i: number): T | null { return i < xs.length ? xs[i] : null; },
   get_or<T>(xs: T[], i: number, d: T): T { return i < xs.length ? xs[i] : d; },
   sort<T>(xs: T[]): T[] { return [...xs].sort(); },
+  reverse<T>(xs: T[]): T[] { return [...xs].reverse(); },
+  any<T>(xs: T[], f: (x: T) => boolean): boolean { return xs.some(f); },
+  all<T>(xs: T[], f: (x: T) => boolean): boolean { return xs.every(f); },
   contains<T>(xs: T[], x: T): boolean { return xs.includes(x); },
   each<T>(xs: T[], f: (x: T) => void): void { xs.forEach(f); },
   map<T, U>(xs: T[], f: (x: T) => U): U[] { return xs.map(f); },
@@ -45,6 +51,7 @@ const __list = {
 const __map = {
   new_<K, V>(): Map<K, V> { return new Map(); },
   get<K, V>(m: Map<K, V>, k: K): V | null { return m.has(k) ? m.get(k)! : null; },
+  get_or<K, V>(m: Map<K, V>, k: K, d: V): V { return m.has(k) ? m.get(k)! : d; },
   set<K, V>(m: Map<K, V>, k: K, v: V): Map<K, V> { const r = new Map(m); r.set(k, v); return r; },
   contains<K, V>(m: Map<K, V>, k: K): boolean { return m.has(k); },
   remove<K, V>(m: Map<K, V>, k: K): Map<K, V> { const r = new Map(m); r.delete(k); return r; },
@@ -138,6 +145,9 @@ const __fs = {
   append(p, s) { require("fs").appendFileSync(p, s); },
   mkdir_p(p) { require("fs").mkdirSync(p, { recursive: true }); },
   exists_qm_(p) { const fs = require("fs"); try { fs.statSync(p); return true; } catch { return false; } },
+  read_lines(p) { return require("fs").readFileSync(p, "utf-8").split("\n").filter(l => l.length > 0); },
+  remove(p) { require("fs").unlinkSync(p); },
+  list_dir(p) { return require("fs").readdirSync(p).sort(); },
 };
 const __string = {
   trim(s) { return s.trim(); },
@@ -163,12 +173,28 @@ const __list = {
   get(xs, i) { return i < xs.length ? xs[i] : null; },
   get_or(xs, i, d) { return i < xs.length ? xs[i] : d; },
   sort(xs) { return [...xs].sort(); },
+  reverse(xs) { return [...xs].reverse(); },
+  any(xs, f) { return xs.some(f); },
+  all(xs, f) { return xs.every(f); },
   contains(xs, x) { return xs.includes(x); },
   each(xs, f) { xs.forEach(f); },
   map(xs, f) { return xs.map(f); },
   filter(xs, f) { return xs.filter(f); },
   find(xs, f) { return xs.find(f) ?? null; },
   fold(xs, init, f) { return xs.reduce(f, init); },
+};
+const __map = {
+  new_() { return new Map(); },
+  get(m, k) { return m.has(k) ? m.get(k) : null; },
+  get_or(m, k, d) { return m.has(k) ? m.get(k) : d; },
+  set(m, k, v) { const r = new Map(m); r.set(k, v); return r; },
+  contains(m, k) { return m.has(k); },
+  remove(m, k) { const r = new Map(m); r.delete(k); return r; },
+  keys(m) { return [...m.keys()].sort(); },
+  values(m) { return [...m.values()]; },
+  len(m) { return m.size; },
+  entries(m) { return [...m.entries()]; },
+  from_list(xs, f) { const r = new Map(); for (const x of xs) { const [k, v] = f(x); r.set(k, v); } return r; },
 };
 const __int = {
   to_hex(n) { return (typeof n === "bigint" ? (n >= 0n ? n : n + (1n << 64n)).toString(16) : n.toString(16)); },
@@ -610,7 +636,7 @@ impl TsEmitter {
             | "ends_with_qm_" | "slice" | "to_bytes" | "contains" | "to_upper" | "to_lower"
             | "to_int" | "replace" | "char_at" | "lines" => Some("__string"),
             // list methods
-            "get" | "get_or" | "sort" | "each" | "map" | "filter" | "find" | "fold" => Some("__list"),
+            "get" | "get_or" | "sort" | "reverse" | "each" | "map" | "filter" | "find" | "fold" | "any" | "all" => Some("__list"),
             // int methods
             "to_string" | "to_hex" => Some("__int"),
             // map methods

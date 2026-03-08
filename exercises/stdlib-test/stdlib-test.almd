@@ -280,6 +280,35 @@ test "match with option" {
 // match with result needs type annotation, tested in effect fn context
 
 // ============================================================
+// list: reverse, any, all
+// ============================================================
+
+test "list.reverse" {
+  assert_eq(list.reverse([1, 2, 3]), [3, 2, 1])
+  assert_eq(list.reverse(["a"]), ["a"])
+}
+
+test "list.any" {
+  assert(list.any([1, 2, 3], fn(x) => x == 2))
+  assert(not list.any([1, 2, 3], fn(x) => x == 5))
+}
+
+test "list.all" {
+  assert(list.all([2, 4, 6], fn(x) => x % 2 == 0))
+  assert(not list.all([2, 3, 6], fn(x) => x % 2 == 0))
+}
+
+// ============================================================
+// map.get_or
+// ============================================================
+
+test "map.get_or" {
+  let m = map.set(map.new(), "key", "val")
+  assert_eq(map.get_or(m, "key", "default"), "val")
+  assert_eq(map.get_or(m, "missing", "default"), "default")
+}
+
+// ============================================================
 // hash function (large int wrapping)
 // ============================================================
 
