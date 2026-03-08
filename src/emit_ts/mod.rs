@@ -7,11 +7,12 @@ use crate::ast::*;
 pub(crate) struct TsEmitter {
     pub(crate) out: String,
     pub(crate) js_mode: bool,
+    pub(crate) user_modules: Vec<String>,
 }
 
 impl TsEmitter {
     fn new() -> Self {
-        Self { out: String::new(), js_mode: false }
+        Self { out: String::new(), js_mode: false, user_modules: Vec::new() }
     }
 
     // Helpers
@@ -32,8 +33,11 @@ impl TsEmitter {
         crate::emit_common::sanitize(name)
     }
 
-    pub(crate) fn map_module(name: &str) -> String {
-        if crate::stdlib::is_stdlib_module(name) {
+    pub(crate) fn map_module(&self, name: &str) -> String {
+        // User modules take priority over stdlib
+        if self.user_modules.contains(&name.to_string()) {
+            name.to_string()
+        } else if crate::stdlib::is_stdlib_module(name) {
             format!("__{}", name)
         } else {
             name.to_string()

@@ -11,15 +11,12 @@ impl TsEmitter {
         }
         self.out.push('\n');
 
-        // Emit imported modules as namespace objects
+        // Register and emit imported modules as namespace objects
+        for (mod_name, _) in modules {
+            self.user_modules.push(mod_name.clone());
+        }
         for (mod_name, mod_prog) in modules {
             self.emit_user_module(mod_name, mod_prog);
-        }
-
-        if let Some(module) = &prog.module {
-            if let Decl::Module { path, .. } = module {
-                self.out.push_str(&format!("// module: {}\n", path.join(".")));
-            }
         }
 
         let mut has_main = false;
@@ -61,9 +58,11 @@ impl TsEmitter {
             }
         }
 
-        // Export all functions
+        // Export non-local functions
         let fn_names: Vec<&str> = prog.decls.iter().filter_map(|d| {
-            if let Decl::Fn { name, .. } = d { Some(name.as_str()) } else { None }
+            if let Decl::Fn { name, visibility, .. } = d {
+                if *visibility != Visibility::Local { Some(name.as_str()) } else { None }
+            } else { None }
         }).collect();
         self.out.push_str(&format!("  return {{ {} }};\n", fn_names.join(", ")));
         self.out.push_str("})();\n\n");

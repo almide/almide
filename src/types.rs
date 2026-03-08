@@ -75,6 +75,8 @@ pub struct TypeEnv {
     pub used_modules: std::collections::HashSet<std::string::String>,
     /// Maps import name ("json") to qualified name ("json_v2") for versioned deps
     pub module_aliases: std::collections::HashMap<std::string::String, std::string::String>,
+    /// Symbols that are local (file-private) in their module: "module.func" -> true
+    pub local_symbols: std::collections::HashSet<std::string::String>,
     /// Temporarily suppress auto-unwrap of Result (for match on ok/err)
     pub skip_auto_unwrap: bool,
 }
@@ -161,6 +163,7 @@ impl TypeEnv {
             used_vars: std::collections::HashSet::new(),
             used_modules: std::collections::HashSet::new(),
             module_aliases: std::collections::HashMap::new(),
+            local_symbols: std::collections::HashSet::new(),
             skip_auto_unwrap: false,
         }
     }

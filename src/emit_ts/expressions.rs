@@ -68,8 +68,13 @@ impl TsEmitter {
             }
             Expr::Call { callee, args, .. } => self.gen_call(callee, args),
             Expr::Member { object, field, .. } => {
-                let obj = self.gen_expr(object);
-                format!("{}.{}", Self::map_module(&obj), Self::sanitize(field))
+                if let Expr::Ident { name, .. } = object.as_ref() {
+                    let mapped = self.map_module(name);
+                    format!("{}.{}", mapped, Self::sanitize(field))
+                } else {
+                    let obj = self.gen_expr(object);
+                    format!("{}.{}", obj, Self::sanitize(field))
+                }
             }
             Expr::Pipe { left, right, .. } => self.gen_pipe(left, right),
             Expr::If { cond, then, else_, .. } => {
@@ -171,14 +176,16 @@ impl TsEmitter {
     }
 
     fn resolve_ufcs_module(method: &str) -> Option<String> {
-        crate::stdlib::resolve_ufcs_module(method).map(|m| Self::map_module(m))
+        // UFCS is only for stdlib modules, so always prefix with __
+        crate::stdlib::resolve_ufcs_module(method).map(|m| format!("__{}", m))
     }
 
     pub(crate) fn gen_call(&self, callee: &Expr, args: &[Expr]) -> String {
         // UFCS: expr.method(args) => __module.method(expr, args)
         if let Expr::Member { object, field, .. } = callee {
             if let Expr::Ident { name, .. } = object.as_ref() {
-                let is_module = crate::stdlib::is_stdlib_module(name);
+                let is_user_module = self.user_modules.contains(&name.to_string());
+                let is_module = is_user_module || crate::stdlib::is_stdlib_module(name);
                 if !is_module {
                     // UFCS: non-module receiver
                     if let Some(module) = Self::resolve_ufcs_module(field) {

@@ -231,17 +231,29 @@ pub struct Param {
     pub ty: TypeExpr,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Visibility {
+    Public,   // default — anyone can access
+    Mod,      // same project only, not external packages
+    Local,    // this file only
+}
+
+impl Default for Visibility {
+    fn default() -> Self { Visibility::Public }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Decl {
     Module { path: Vec<String>, #[serde(skip)] span: Option<Span> },
-    Import { path: Vec<String>, names: Option<Vec<String>>, #[serde(skip)] span: Option<Span> },
-    Type { name: String, #[serde(rename = "type")] ty: TypeExpr, deriving: Option<Vec<String>>, #[serde(default)] local: Option<bool>, #[serde(skip)] span: Option<Span> },
+    Import { path: Vec<String>, names: Option<Vec<String>>, alias: Option<String>, #[serde(skip)] span: Option<Span> },
+    Type { name: String, #[serde(rename = "type")] ty: TypeExpr, deriving: Option<Vec<String>>, #[serde(default)] visibility: Visibility, #[serde(skip)] span: Option<Span> },
     Fn {
         name: String,
         #[serde(default)] effect: Option<bool>,
         #[serde(default)] r#async: Option<bool>,
-        #[serde(default)] local: Option<bool>,
+        #[serde(default)] visibility: Visibility,
         params: Vec<Param>,
         #[serde(rename = "returnType")] return_type: TypeExpr,
         body: Expr,

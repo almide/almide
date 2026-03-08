@@ -27,12 +27,12 @@ impl Emitter {
         // Handle module calls
         if let Expr::Member { object, field, .. } = callee {
             if let Expr::Ident { name: module, .. } = object.as_ref() {
-                let is_stdlib = stdlib::is_stdlib_module(module);
                 let resolved_mod = self.module_aliases.get(module.as_str())
                     .cloned()
                     .unwrap_or_else(|| module.to_string());
                 let is_user_module = self.user_modules.contains(&resolved_mod);
-                if is_stdlib || is_user_module {
+                let is_stdlib = !is_user_module && stdlib::is_stdlib_module(module);
+                if is_user_module || is_stdlib {
                     return self.gen_module_call(module, field, args);
                 }
             }
@@ -125,6 +125,17 @@ impl Emitter {
 
     pub(crate) fn gen_module_call(&self, module: &str, func: &str, args: &[Expr]) -> String {
         let args_str: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
+        // User modules take priority over stdlib (e.g. user's "math" module shadows stdlib "math")
+        let resolved_mod = self.module_aliases.get(module)
+            .cloned()
+            .unwrap_or_else(|| module.to_string());
+        if self.user_modules.contains(&resolved_mod) {
+            let call = format!("{}::{}({})", resolved_mod, func, args_str.join(", "));
+            if self.in_effect && (self.effect_fns.contains(&func.to_string()) || self.result_fns.contains(&func.to_string())) {
+                return format!("{}?", call);
+            }
+            return call;
+        }
         match module {
             "fs" => match func {
                 "read_text" => format!("std::fs::read_to_string(&*{}).map_err(AlmideIoError::from)?", args_str[0]),

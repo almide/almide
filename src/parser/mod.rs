@@ -37,10 +37,10 @@ impl Parser {
 
         let mut pending = self.skip_newlines_collect_comments();
 
-        // Module declaration (optional)
+        // Legacy module declaration (ignored, package identity comes from almide.toml)
         if self.check(TokenType::Module) {
             program.comment_map.push(std::mem::take(&mut pending));
-            program.module = Some(self.parse_module_decl()?);
+            let _ = self.parse_module_decl()?; // parse but discard
             pending = self.skip_newlines_collect_comments();
         }
 
@@ -94,7 +94,7 @@ impl Parser {
             let tt = &self.current().token_type;
             match tt {
                 TokenType::EOF => break,
-                TokenType::Fn | TokenType::Effect | TokenType::Async | TokenType::Pub | TokenType::Local
+                TokenType::Fn | TokenType::Effect | TokenType::Async | TokenType::Pub | TokenType::Local | TokenType::Mod
                 | TokenType::Type | TokenType::Trait | TokenType::Impl
                 | TokenType::Test | TokenType::Strict => {
                     // Check if this is at the start of a line (after newline)
@@ -106,7 +106,7 @@ impl Parser {
                     // After newline, check if next token starts a declaration
                     let next_tt = &self.current().token_type;
                     if matches!(next_tt,
-                        TokenType::Fn | TokenType::Effect | TokenType::Async | TokenType::Pub | TokenType::Local
+                        TokenType::Fn | TokenType::Effect | TokenType::Async | TokenType::Pub | TokenType::Local | TokenType::Mod
                         | TokenType::Type | TokenType::Trait | TokenType::Impl
                         | TokenType::Test | TokenType::Strict | TokenType::EOF
                     ) {

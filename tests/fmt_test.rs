@@ -47,8 +47,7 @@ fn fmt_match() {
 
 #[test]
 fn fmt_preserves_module_and_imports() {
-    let out = roundtrip("module app\nimport fs\nimport http\nfn f() -> Int = 1");
-    assert!(out.starts_with("module app\n"));
+    let out = roundtrip("import fs\nimport http\nfn f() -> Int = 1");
     assert!(out.contains("import fs\n"));
     assert!(out.contains("import http\n"));
 }

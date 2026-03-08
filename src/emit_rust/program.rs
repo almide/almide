@@ -112,8 +112,7 @@ impl Emitter {
 
         for decl in &prog.decls {
             match decl {
-                Decl::Fn { name: fn_name, params, return_type, body, effect, r#async, local, .. } => {
-                    let is_local = local.unwrap_or(false);
+                Decl::Fn { name: fn_name, params, return_type, body, effect, r#async, visibility, .. } => {
                     let is_effect = effect.unwrap_or(false);
                     let is_async = r#async.unwrap_or(false);
                     let params_str: Vec<String> = params.iter()
@@ -131,7 +130,11 @@ impl Emitter {
                         ret_str.clone()
                     };
 
-                    let vis = if is_local { "" } else { "pub " };
+                    let vis = match visibility {
+                        Visibility::Public => "pub ",
+                        Visibility::Mod => "pub(crate) ",
+                        Visibility::Local => "",
+                    };
                     let async_prefix = if is_async { &format!("{}async ", vis) } else { vis };
                     self.emitln(&format!("{}fn {}({}) -> {} {{", async_prefix, fn_name, params_str.join(", "), actual_ret));
                     self.indent += 1;
@@ -157,11 +160,17 @@ impl Emitter {
                     self.emitln("}");
                     self.emitln("");
                 }
-                Decl::Type { name: type_name, ty, deriving, local, .. } => {
-                    let is_local = local.unwrap_or(false);
-                    if !is_local {
-                        self.emit_indent();
-                        self.out.push_str("pub ");
+                Decl::Type { name: type_name, ty, deriving, visibility, .. } => {
+                    match visibility {
+                        Visibility::Public => {
+                            self.emit_indent();
+                            self.out.push_str("pub ");
+                        }
+                        Visibility::Mod => {
+                            self.emit_indent();
+                            self.out.push_str("pub(crate) ");
+                        }
+                        Visibility::Local => {}
                     }
                     self.emit_type_decl(type_name, ty, deriving);
                 }

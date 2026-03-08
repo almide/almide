@@ -70,13 +70,22 @@ impl Checker {
     /// Register function and type declarations into the environment.
     /// When `prefix` is Some, keys are prefixed (e.g. "module.func") for imported modules.
     /// When `prefix` is None, registers as local declarations with variant constructors and effect tracking.
-    fn register_decls(&mut self, decls: &[ast::Decl], prefix: Option<&str>) {
+    fn register_decls(&mut self, decls: &[ast::Decl], prefix: Option<&str>, is_external: bool) {
         for decl in decls {
             match decl {
-                ast::Decl::Fn { name, params, return_type, effect, r#async, local, .. } => {
-                    // Skip local functions when registering imported modules
-                    if prefix.is_some() && local.unwrap_or(false) {
-                        continue;
+                ast::Decl::Fn { name, params, return_type, effect, r#async, visibility, .. } => {
+                    if prefix.is_some() {
+                        let hidden = match visibility {
+                            ast::Visibility::Local => true,
+                            ast::Visibility::Mod => is_external,
+                            ast::Visibility::Public => false,
+                        };
+                        if hidden {
+                            if let Some(p) = prefix {
+                                self.env.local_symbols.insert(format!("{}.{}", p, name));
+                            }
+                            continue;
+                        }
                     }
                     let param_tys: Vec<(String, Ty)> = params.iter()
                         .map(|p| (p.name.clone(), self.resolve_type_expr(&p.ty)))
@@ -92,10 +101,19 @@ impl Checker {
                     }
                     self.env.functions.insert(key, FnSig { params: param_tys, ret, is_effect });
                 }
-                ast::Decl::Type { name, ty, local, .. } => {
-                    // Skip local types when registering imported modules
-                    if prefix.is_some() && local.unwrap_or(false) {
-                        continue;
+                ast::Decl::Type { name, ty, visibility, .. } => {
+                    if prefix.is_some() {
+                        let hidden = match visibility {
+                            ast::Visibility::Local => true,
+                            ast::Visibility::Mod => is_external,
+                            ast::Visibility::Public => false,
+                        };
+                        if hidden {
+                            if let Some(p) = prefix {
+                                self.env.local_symbols.insert(format!("{}.{}", p, name));
+                            }
+                            continue;
+                        }
                     }
                     let mut resolved = self.resolve_type_expr(ty);
                     if prefix.is_none() {
@@ -119,33 +137,43 @@ impl Checker {
 
     /// Register an imported module's exported functions and types.
     pub fn register_module(&mut self, mod_name: &str, prog: &ast::Program, pkg_id: Option<&crate::project::PkgId>) {
+        let is_external = pkg_id.is_some();
         if let Some(pid) = pkg_id {
             let internal_name = pid.mod_name();
             self.env.user_modules.insert(internal_name.clone());
             self.env.module_aliases.insert(mod_name.to_string(), internal_name.clone());
-            self.register_decls(&prog.decls, Some(&internal_name));
+            self.register_decls(&prog.decls, Some(&internal_name), is_external);
         } else {
             self.env.user_modules.insert(mod_name.to_string());
-            self.register_decls(&prog.decls, Some(mod_name));
+            self.register_decls(&prog.decls, Some(mod_name), is_external);
         }
     }
 
     pub fn check_program(&mut self, prog: &mut ast::Program) -> Vec<Diagnostic> {
-        self.register_decls(&prog.decls, None);
+        self.register_decls(&prog.decls, None, false);
         for decl in prog.decls.iter_mut() {
             self.check_decl(decl);
         }
 
         // Warn about unused imports
         for imp in &prog.imports {
-            if let ast::Decl::Import { path, .. } = imp {
-                let mod_name = &path[0];
-                if !self.env.used_modules.contains(mod_name) {
-                    let line = self.find_import_line(mod_name);
+            if let ast::Decl::Import { path, alias, .. } = imp {
+                // For self imports, the accessible name is the alias or the last path segment
+                let is_self_import = path.first().map(|s| s.as_str()) == Some("self");
+                let accessible_name = if let Some(a) = alias {
+                    a.as_str()
+                } else if is_self_import && path.len() >= 2 {
+                    path.last().unwrap().as_str()
+                } else {
+                    path[0].as_str()
+                };
+                let display_path = path.join(".");
+                if !self.env.used_modules.contains(accessible_name) {
+                    let line = self.find_import_line_by_path(&display_path);
                     let mut d = Diagnostic::warning(
-                        format!("unused import '{}'", mod_name),
-                        format!("Remove 'import {}' if it is not needed", mod_name),
-                        format!("import {}", mod_name),
+                        format!("unused import '{}'", display_path),
+                        format!("Remove 'import {}' if it is not needed", display_path),
+                        format!("import {}", display_path),
                     );
                     if let Some(ref file) = self.source_file {
                         d.file = Some(file.clone());
@@ -177,11 +205,12 @@ impl Checker {
         }
     }
 
-    fn find_import_line(&self, mod_name: &str) -> Option<usize> {
+    fn find_import_line_by_path(&self, path: &str) -> Option<usize> {
         let source = self.source_text.as_ref()?;
-        let pattern = format!("import {}", mod_name);
+        let pattern = format!("import {}", path);
         for (i, line) in source.lines().enumerate() {
-            if line.trim() == pattern {
+            let trimmed = line.trim();
+            if trimmed == pattern || trimmed.starts_with(&format!("{} ", pattern)) {
                 return Some(i + 1);
             }
         }

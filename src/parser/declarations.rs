@@ -30,10 +30,18 @@ impl Parser {
                 names.push(self.expect_any_name()?);
             }
             self.expect(TokenType::RBrace)?;
-            return Ok(Decl::Import { path, names: Some(names), span: Some(span) });
+            return Ok(Decl::Import { path, names: Some(names), alias: None, span: Some(span) });
         }
 
-        Ok(Decl::Import { path, names: None, span: Some(span) })
+        // `as` alias: import self.http.client as c
+        let alias = if self.check_ident("as") {
+            self.advance();
+            Some(self.expect_ident()?)
+        } else {
+            None
+        };
+
+        Ok(Decl::Import { path, names: None, alias, span: Some(span) })
     }
 
     fn parse_module_path(&mut self) -> Result<Vec<String>, String> {
@@ -58,9 +66,9 @@ impl Parser {
         if self.check(TokenType::Impl) {
             return self.parse_impl_decl();
         }
-        if self.check(TokenType::Fn) || self.check(TokenType::Pub) || self.check(TokenType::Effect) || self.check(TokenType::Async) || self.check(TokenType::Local) {
-            // local can precede both fn and type
-            if self.check(TokenType::Local) && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Type) {
+        if self.check(TokenType::Fn) || self.check(TokenType::Pub) || self.check(TokenType::Effect) || self.check(TokenType::Async) || self.check(TokenType::Local) || self.check(TokenType::Mod) {
+            // local/mod can precede both fn and type
+            if (self.check(TokenType::Local) || self.check(TokenType::Mod)) && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Type) {
                 return self.parse_type_decl();
             }
             return self.parse_fn_decl();
@@ -87,11 +95,7 @@ impl Parser {
 
     fn parse_type_decl(&mut self) -> Result<Decl, String> {
         let span = self.current_span();
-        let mut local = false;
-        if self.check(TokenType::Local) {
-            self.advance();
-            local = true;
-        }
+        let visibility = self.parse_visibility();
         self.expect(TokenType::Type)?;
         let name = self.expect_type_name()?;
         let _generics = self.try_parse_generic_params()?;
@@ -110,7 +114,7 @@ impl Parser {
             }
             deriving = Some(d);
         }
-        Ok(Decl::Type { name, ty, deriving, local: if local { Some(true) } else { None }, span: Some(span) })
+        Ok(Decl::Type { name, ty, deriving, visibility, span: Some(span) })
     }
 
     fn parse_trait_decl(&mut self) -> Result<Decl, String> {
@@ -204,13 +208,9 @@ impl Parser {
     pub(crate) fn parse_fn_decl(&mut self) -> Result<Decl, String> {
         let span = self.current_span();
         if self.check(TokenType::Pub) {
-            self.advance();
+            self.advance(); // pub is default, just consume it
         }
-        let mut local = false;
-        if self.check(TokenType::Local) {
-            self.advance();
-            local = true;
-        }
+        let visibility = self.parse_visibility();
         let mut async_ = false;
         if self.check(TokenType::Async) {
             self.advance();
@@ -283,7 +283,7 @@ impl Parser {
             name,
             r#async: if async_ { Some(true) } else { None },
             effect: if effect { Some(true) } else { None },
-            local: if local { Some(true) } else { None },
+            visibility,
             params,
             return_type,
             body,
@@ -305,6 +305,18 @@ impl Parser {
         self.expect(TokenType::String)?;
         let body = self.parse_brace_expr()?;
         Ok(Decl::Test { name, body, span: Some(span) })
+    }
+
+    fn parse_visibility(&mut self) -> Visibility {
+        if self.check(TokenType::Local) {
+            self.advance();
+            Visibility::Local
+        } else if self.check(TokenType::Mod) {
+            self.advance();
+            Visibility::Mod
+        } else {
+            Visibility::Public
+        }
     }
 
     pub(crate) fn parse_param_list(&mut self) -> Result<Vec<Param>, String> {

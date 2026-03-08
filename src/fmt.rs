@@ -24,12 +24,6 @@ pub fn format_program(program: &Program) -> String {
         *idx += 1;
     };
 
-    // Module declaration
-    if let Some(Decl::Module { path, .. }) = &program.module {
-        emit_comments(&mut out, &mut cm_idx);
-        out.push_str(&format!("module {}\n", path.join(".")));
-    }
-
     // Imports
     if !program.imports.is_empty() {
         if !out.is_empty() {
@@ -37,11 +31,14 @@ pub fn format_program(program: &Program) -> String {
         }
         for imp in &program.imports {
             emit_comments(&mut out, &mut cm_idx);
-            if let Decl::Import { path, names, .. } = imp {
+            if let Decl::Import { path, names, alias, .. } = imp {
                 out.push_str("import ");
                 out.push_str(&path.join("."));
                 if let Some(names) = names {
                     out.push_str(&format!(" ({})", names.join(", ")));
+                }
+                if let Some(a) = alias {
+                    out.push_str(&format!(" as {}", a));
                 }
                 out.push('\n');
             }
@@ -76,17 +73,26 @@ fn format_decl(out: &mut String, decl: &Decl, depth: usize) {
         Decl::Module { path, .. } => {
             out.push_str(&format!("{}module {}", ind, path.join(".")));
         }
-        Decl::Import { path, names, .. } => {
+        Decl::Import { path, names, alias, .. } => {
             out.push_str(&format!("{}import {}", ind, path.join(".")));
             if let Some(names) = names {
                 out.push_str(&format!(" ({})", names.join(", ")));
+            }
+            if let Some(a) = alias {
+                out.push_str(&format!(" as {}", a));
             }
         }
         Decl::Strict { mode, .. } => {
             out.push_str(&format!("{}strict \"{}\"", ind, mode));
         }
-        Decl::Type { name, ty, deriving, .. } => {
-            out.push_str(&format!("{}type {} = ", ind, name));
+        Decl::Type { name, ty, deriving, visibility, .. } => {
+            out.push_str(&ind);
+            match visibility {
+                Visibility::Local => out.push_str("local "),
+                Visibility::Mod => out.push_str("mod "),
+                Visibility::Public => {}
+            }
+            out.push_str(&format!("type {} = ", name));
             format_type_expr(out, ty, depth);
             if let Some(derives) = deriving {
                 if !derives.is_empty() {
@@ -94,8 +100,13 @@ fn format_decl(out: &mut String, decl: &Decl, depth: usize) {
                 }
             }
         }
-        Decl::Fn { name, effect, r#async, params, return_type, body, .. } => {
+        Decl::Fn { name, effect, r#async, visibility, params, return_type, body, .. } => {
             out.push_str(&ind);
+            match visibility {
+                Visibility::Local => out.push_str("local "),
+                Visibility::Mod => out.push_str("mod "),
+                Visibility::Public => {}
+            }
             if matches!(effect, Some(true)) {
                 out.push_str("effect ");
             }

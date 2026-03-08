@@ -183,6 +183,15 @@ impl Checker {
         // Check user-defined modules
         if self.env.user_modules.contains(&resolved_module) {
             let key = format!("{}.{}", resolved_module, func);
+            // Check if the function is hidden by visibility (local or mod)
+            if self.env.local_symbols.contains(&key) {
+                self.push_diagnostic(err(
+                    format!("function '{}' is not accessible from module '{}'", func, module),
+                    format!("'{}' has restricted visibility and cannot be accessed from here", func),
+                    format!("{}.{}()", module, func),
+                ));
+                return Ty::Unknown;
+            }
             if let Some(sig) = self.env.functions.get(&key).cloned() {
                 if arg_tys.len() != sig.params.len() {
                     let usage = sig.format_params();

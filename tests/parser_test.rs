@@ -18,18 +18,15 @@ fn parse_expr(input: &str) -> Expr {
 
 #[test]
 fn parse_module() {
-    let prog = parse("module app");
-    assert!(prog.module.is_some());
-    if let Some(Decl::Module { path, .. }) = &prog.module {
-        assert_eq!(path, &["app"]);
-    } else {
-        panic!("expected module decl");
-    }
+    // module declaration is parsed but discarded (package identity comes from almide.toml)
+    let prog = parse("module app\nfn f() -> Int = 1");
+    assert!(prog.module.is_none()); // discarded
+    assert_eq!(prog.decls.len(), 1); // fn still parsed
 }
 
 #[test]
 fn parse_import() {
-    let prog = parse("module app\nimport fs");
+    let prog = parse("import fs");
     assert_eq!(prog.imports.len(), 1);
     if let Decl::Import { path, .. } = &prog.imports[0] {
         assert_eq!(path, &["fs"]);
