@@ -200,7 +200,7 @@ impl Emitter {
             }
             Decl::Test { name, body } => {
                 self.emitln("#[test]");
-                let safe_name = name.replace(' ', "_").replace('-', "_");
+                let safe_name = name.chars().map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' }).collect::<String>();
                 self.emitln(&format!("fn test_{}() {{", safe_name));
                 self.indent += 1;
                 let expr = self.gen_expr(body);

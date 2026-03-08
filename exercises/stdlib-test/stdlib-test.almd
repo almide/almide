@@ -1,0 +1,297 @@
+module stdlib_test
+
+import fs
+import string
+import list
+import map
+import int
+import env
+
+// ============================================================
+// string module
+// ============================================================
+
+test "string.lines splits and filters empty" {
+  let lines = string.lines("hello\nworld\n\nfoo\n")
+  assert_eq(list.len(lines), 3)
+  assert_eq(list.get_or(lines, 0, ""), "hello")
+  assert_eq(list.get_or(lines, 1, ""), "world")
+  assert_eq(list.get_or(lines, 2, ""), "foo")
+}
+
+test "string.lines empty string" {
+  assert_eq(list.len(string.lines("")), 0)
+}
+
+test "string.trim" {
+  assert_eq(string.trim("  hello  "), "hello")
+  assert_eq(string.trim("\n\t "), "")
+}
+
+test "string.split and join roundtrip" {
+  let parts = string.split("a,b,c", ",")
+  assert_eq(list.len(parts), 3)
+  assert_eq(string.join(parts, ","), "a,b,c")
+}
+
+test "string.contains and starts/ends_with" {
+  assert(string.contains("hello world", "world"))
+  assert(not string.contains("hello", "xyz"))
+  assert(string.starts_with?("hello", "hel"))
+  assert(string.ends_with?("hello", "llo"))
+}
+
+test "string.slice" {
+  assert_eq(string.slice("hello", 1), "ello")
+}
+
+test "string.replace" {
+  assert_eq(string.replace("foo bar foo", "foo", "baz"), "baz bar baz")
+}
+
+test "string.pad_left" {
+  assert_eq(string.pad_left("ff", 8, "0"), "000000ff")
+}
+
+// string.to_int returns Result, cannot use in non-effect test block
+// tested via effect fn in exercises/stdlib-effect-test/
+
+test "string.len" {
+  assert_eq(string.len("hello"), 5)
+  assert_eq(string.len(""), 0)
+}
+
+test "string.to_upper and to_lower" {
+  assert_eq(string.to_upper("hello"), "HELLO")
+  assert_eq(string.to_lower("HELLO"), "hello")
+}
+
+test "string.char_at" {
+  assert_eq(string.char_at("abc", 0), some("a"))
+  assert_eq(string.char_at("abc", 5), none)
+}
+
+test "string.to_bytes" {
+  let bytes = string.to_bytes("AB")
+  assert_eq(list.len(bytes), 2)
+  assert_eq(list.get_or(bytes, 0, 0), 65)
+  assert_eq(list.get_or(bytes, 1, 0), 66)
+}
+
+// ============================================================
+// list module
+// ============================================================
+
+test "list.get and get_or" {
+  let xs = ["a", "b", "c"]
+  assert_eq(list.get(xs, 0), some("a"))
+  assert_eq(list.get(xs, 5), none)
+  assert_eq(list.get_or(xs, 1, "default"), "b")
+  assert_eq(list.get_or(xs, 5, "default"), "default")
+}
+
+test "list.len" {
+  assert_eq(list.len([1, 2, 3]), 3)
+}
+
+test "list.sort" {
+  assert_eq(list.sort(["c", "a", "b"]), ["a", "b", "c"])
+  assert_eq(list.sort([3, 1, 2]), [1, 2, 3])
+}
+
+test "list.contains" {
+  assert(list.contains([1, 2, 3], 2))
+  assert(not list.contains([1, 2, 3], 5))
+}
+
+test "list.map" {
+  let xs = [1, 2, 3]
+  let doubled = list.map(xs, fn(x) => x * 2)
+  assert_eq(doubled, [2, 4, 6])
+}
+
+test "list.filter" {
+  let xs = [1, 2, 3, 4, 5]
+  let evens = list.filter(xs, fn(x) => x % 2 == 0)
+  assert_eq(evens, [2, 4])
+}
+
+test "list.find" {
+  let xs = ["a", "bb", "ccc"]
+  assert_eq(list.find(xs, fn(x) => string.len(x) > 1), some("bb"))
+  assert_eq(list.find(xs, fn(x) => string.len(x) > 10), none)
+}
+
+test "list.fold" {
+  let sum = list.fold([1, 2, 3, 4], 0, fn(acc, x) => acc + x)
+  assert_eq(sum, 10)
+}
+
+test "list concat with ++" {
+  assert_eq([1, 2] ++ [3, 4], [1, 2, 3, 4])
+  assert_eq([] ++ [1], [1])
+}
+
+// ============================================================
+// map module
+// ============================================================
+
+test "map.new and set and get" {
+  let m = map.set(map.set(map.new(), "a", 1), "b", 2)
+  assert_eq(map.get(m, "a"), some(1))
+  assert_eq(map.get(m, "b"), some(2))
+  assert_eq(map.get(m, "c"), none)
+}
+
+test "map.contains" {
+  let m = map.set(map.new(), "key", "val")
+  assert(map.contains(m, "key"))
+  assert(not map.contains(m, "missing"))
+}
+
+test "map.remove" {
+  let m = map.set(map.set(map.new(), "a", 1), "b", 2)
+  let m2 = map.remove(m, "a")
+  assert_eq(map.get(m2, "a"), none)
+  assert_eq(map.get(m2, "b"), some(2))
+}
+
+test "map.keys sorted" {
+  let m = map.set(map.set(map.set(map.new(), "c", 3), "a", 1), "b", 2)
+  assert_eq(map.keys(m), ["a", "b", "c"])
+}
+
+test "map.len" {
+  let m = map.set(map.set(map.new(), "a", 1), "b", 2)
+  assert_eq(map.len(m), 2)
+}
+
+test "map get_or pattern with match" {
+  let m = map.set(map.new(), "key", "val")
+  let v = match map.get(m, "key") { some(v) => v, none => "default" }
+  assert_eq(v, "val")
+  let v2 = match map.get(m, "missing") { some(v) => v, none => "default" }
+  assert_eq(v2, "default")
+}
+
+// ============================================================
+// int module
+// ============================================================
+
+test "int.to_string" {
+  assert_eq(int.to_string(42), "42")
+  assert_eq(int.to_string(-1), "-1")
+  assert_eq(int.to_string(0), "0")
+}
+
+test "int.to_hex" {
+  assert_eq(int.to_hex(255), "ff")
+  assert_eq(int.to_hex(0), "0")
+}
+
+// ============================================================
+// operators
+// ============================================================
+
+test "string concat" {
+  assert_eq("hello" ++ " " ++ "world", "hello world")
+}
+
+test "string interpolation" {
+  let name = "world"
+  assert_eq("hello ${name}", "hello world")
+}
+
+test "xor operator" {
+  assert_eq(5 ^ 3, 6)
+  assert_eq(0 ^ 0, 0)
+}
+
+test "boolean operators" {
+  assert(true and true)
+  assert(not (true and false))
+  assert(true or false)
+  assert(not false)
+}
+
+test "comparison operators" {
+  assert(1 < 2)
+  assert(2 > 1)
+  assert(1 <= 1)
+  assert(1 >= 1)
+  assert(1 == 1)
+  assert(1 != 2)
+}
+
+// ============================================================
+// for...in (ownership safety)
+// ============================================================
+
+test "for...in does not consume list" {
+  let xs = [1, 2, 3]
+  var sum = 0
+  for x in xs {
+    sum = sum + x
+  }
+  assert_eq(sum, 6)
+  assert_eq(list.len(xs), 3)
+}
+
+test "nested for...in" {
+  let xs = [1, 2]
+  let ys = [10, 20]
+  var total = 0
+  for x in xs {
+    for y in ys {
+      total = total + x * y
+    }
+  }
+  assert_eq(total, 90)
+}
+
+test "for...in with map.keys" {
+  let m = map.set(map.set(map.new(), "a", 1), "b", 2)
+  var count = 0
+  for k in map.keys(m) {
+    count = count + 1
+  }
+  assert_eq(count, 2)
+  assert_eq(map.len(m), 2)
+}
+
+// ============================================================
+// control flow
+// ============================================================
+
+test "if then else" {
+  let x = if true then 1 else 2
+  assert_eq(x, 1)
+  let y = if false then 1 else 2
+  assert_eq(y, 2)
+}
+
+test "match with option" {
+  let x = match some(42) { some(v) => v, none => 0 }
+  assert_eq(x, 42)
+  let y = match none { some(v) => v, none => 0 }
+  assert_eq(y, 0)
+}
+
+// match with result needs type annotation, tested in effect fn context
+
+// ============================================================
+// hash function (large int wrapping)
+// ============================================================
+
+test "large int wrapping in hash" {
+  let data = string.to_bytes("test hash\n")
+  let h = list.fold(data, 1469598103934665603, fn(h, b) => (h ^ b) * 1099511628211)
+  let hex = string.pad_left(int.to_hex(h), 16, "0")
+  assert_eq(string.len(hex), 16)
+}
+
+test "hash deterministic" {
+  let h1 = list.fold(string.to_bytes("hello"), 1469598103934665603, fn(h, b) => (h ^ b) * 1099511628211)
+  let h2 = list.fold(string.to_bytes("hello"), 1469598103934665603, fn(h, b) => (h ^ b) * 1099511628211)
+  assert_eq(h1, h2)
+}
