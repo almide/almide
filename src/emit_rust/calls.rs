@@ -275,10 +275,13 @@ impl Emitter {
             "http" => match func {
                 "serve" => {
                     let (names, body) = self.inline_lambda(&args[1], 1);
-                    format!("almide_http_serve({}, |{}| -> Result<AlmideHttpResponse, String> {{ Ok({{ {} }}) }})?", args_str[0], names[0], body)
+                    format!("almide_http_serve({}, |{}| -> Result<AlmideHttpResponse, String> {{ Ok({{ {} }}) }})", args_str[0], names[0], body)
                 }
                 "response" => format!("AlmideHttpResponse::new({}, {}.to_string())", args_str[0], args_str[1]),
                 "json" => format!("AlmideHttpResponse::json({}, {}.to_string())", args_str[0], args_str[1]),
+                "with_headers" => format!("AlmideHttpResponse::with_headers({}, {}.to_string(), {})", args_str[0], args_str[1], args_str[2]),
+                "get" => format!("almide_http_get(&{})?", args_str[0]),
+                "post" => format!("almide_http_post(&{}, &{})?", args_str[0], args_str[1]),
                 _ => format!("/* http.{} */ todo!()", func),
             },
             _ => {
