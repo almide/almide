@@ -44,6 +44,10 @@ fn parse_file(file: &str) -> ast::Program {
 }
 
 fn compile(file: &str, no_check: bool) -> String {
+    compile_with_options(file, no_check, &emit_rust::EmitOptions::default())
+}
+
+fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::EmitOptions) -> String {
     let program = parse_file(file);
 
     // Fetch dependencies from almide.toml if present
@@ -86,7 +90,7 @@ fn compile(file: &str, no_check: bool) -> String {
         }
     }
 
-    emit_rust::emit(&program, &resolved.modules)
+    emit_rust::emit_with_options(&program, &resolved.modules, emit_options)
 }
 
 fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool) -> i32 {
@@ -334,28 +338,8 @@ fn main() {
             .map(|s| s.to_string())
             .unwrap_or(default_output);
 
-        let mut rs_code = compile(file, no_check);
-
-        // WASM: replace thread-based main with direct main (threads unsupported in WASI)
-        if is_wasm {
-            // Replace the thread::Builder wrapper with a direct call
-            let thread_main = "fn main() {\n    let t = std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {";
-            let thread_end = "    }).unwrap();\n    t.join().unwrap();\n}";
-            if rs_code.contains(thread_main) {
-                // Extract the body between spawn(|| { ... }).unwrap()
-                if let Some(start) = rs_code.find(thread_main) {
-                    if let Some(end) = rs_code.find(thread_end) {
-                        let body = &rs_code[start + thread_main.len()..end];
-                        // De-indent body by one level (remove leading 8 spaces → 4 spaces)
-                        let body_lines: Vec<String> = body.lines()
-                            .map(|l| if l.starts_with("        ") { l[4..].to_string() } else { l.to_string() })
-                            .collect();
-                        let new_main = format!("fn main() {{\n{}}}", body_lines.join("\n"));
-                        rs_code = format!("{}{}", &rs_code[..start], new_main);
-                    }
-                }
-            }
-        }
+        let emit_options = emit_rust::EmitOptions { no_thread_wrap: is_wasm };
+        let rs_code = compile_with_options(file, no_check, &emit_options);
 
         let tmp_rs = format!("{}.rs", output.strip_suffix(".wasm").unwrap_or(&output));
         std::fs::write(&tmp_rs, &rs_code).unwrap();

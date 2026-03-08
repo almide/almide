@@ -52,27 +52,37 @@ impl Emitter {
 
             self.emitln("fn main() {");
             self.indent += 1;
-            self.emitln("let t = std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {");
-            self.indent += 1;
-            if has_args {
-                self.emitln("let args: Vec<String> = std::env::args().collect();");
-            }
-            let call = if has_args { "almide_main(args)" } else { "almide_main()" };
-            if returns_result {
-                self.emitln(&format!("if let Err(e) = {} {{", call));
-                self.indent += 1;
-                self.emitln("eprintln!(\"{}\", e);");
-                self.emitln("std::process::exit(1);");
-                self.indent -= 1;
-                self.emitln("}");
+
+            if self.no_thread_wrap {
+                self.emit_main_body(has_args, returns_result);
             } else {
-                self.emitln(&format!("{};", call));
+                self.emitln("let t = std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {");
+                self.indent += 1;
+                self.emit_main_body(has_args, returns_result);
+                self.indent -= 1;
+                self.emitln("}).unwrap();");
+                self.emitln("t.join().unwrap();");
             }
-            self.indent -= 1;
-            self.emitln("}).unwrap();");
-            self.emitln("t.join().unwrap();");
+
             self.indent -= 1;
             self.emitln("}");
+        }
+    }
+
+    fn emit_main_body(&mut self, has_args: bool, returns_result: bool) {
+        if has_args {
+            self.emitln("let args: Vec<String> = std::env::args().collect();");
+        }
+        let call = if has_args { "almide_main(args)" } else { "almide_main()" };
+        if returns_result {
+            self.emitln(&format!("if let Err(e) = {} {{", call));
+            self.indent += 1;
+            self.emitln("eprintln!(\"{}\", e);");
+            self.emitln("std::process::exit(1);");
+            self.indent -= 1;
+            self.emitln("}");
+        } else {
+            self.emitln(&format!("{};", call));
         }
     }
 

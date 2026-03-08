@@ -7,6 +7,17 @@ use crate::ast::*;
 
 pub(crate) const JSON_RUNTIME: &str = include_str!("json_runtime.txt");
 
+pub struct EmitOptions {
+    /// Skip thread wrapper around main (for WASM targets where threads are unavailable)
+    pub no_thread_wrap: bool,
+}
+
+impl Default for EmitOptions {
+    fn default() -> Self {
+        Self { no_thread_wrap: false }
+    }
+}
+
 pub(crate) struct Emitter {
     pub(crate) out: String,
     pub(crate) indent: usize,
@@ -22,11 +33,13 @@ pub(crate) struct Emitter {
     pub(crate) user_modules: Vec<String>,
     /// Track if we're inside a test function
     pub(crate) in_test: bool,
+    /// Skip thread wrapper around main
+    pub(crate) no_thread_wrap: bool,
 }
 
 impl Emitter {
-    fn new() -> Self {
-        Self { out: String::new(), indent: 0, in_effect: false, effect_fns: Vec::new(), result_fns: Vec::new(), in_do_block: std::cell::Cell::new(false), user_modules: Vec::new(), in_test: false }
+    fn new(options: &EmitOptions) -> Self {
+        Self { out: String::new(), indent: 0, in_effect: false, effect_fns: Vec::new(), result_fns: Vec::new(), in_do_block: std::cell::Cell::new(false), user_modules: Vec::new(), in_test: false, no_thread_wrap: options.no_thread_wrap }
     }
 
     pub(crate) fn emit_indent(&mut self) {
@@ -43,7 +56,11 @@ impl Emitter {
 }
 
 pub fn emit(program: &Program, modules: &[(String, Program)]) -> String {
-    let mut emitter = Emitter::new();
+    emit_with_options(program, modules, &EmitOptions::default())
+}
+
+pub fn emit_with_options(program: &Program, modules: &[(String, Program)], options: &EmitOptions) -> String {
+    let mut emitter = Emitter::new(options);
     emitter.emit_program(program, modules);
     emitter.out
 }
