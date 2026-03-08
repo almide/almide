@@ -146,6 +146,16 @@ const __random = {
   choice<T>(xs: T[]): T | null { return xs.length > 0 ? xs[Math.floor(Math.random() * xs.length)] : null; },
   shuffle<T>(xs: T[]): T[] { const a = [...xs]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; },
 };
+const __regex = {
+  match_qm_(pat: string, s: string): boolean { return new RegExp(pat).test(s); },
+  full_match_qm_(pat: string, s: string): boolean { return new RegExp(`^(?:${pat})$`).test(s); },
+  find(pat: string, s: string): string | null { const m = s.match(new RegExp(pat)); return m ? m[0] : null; },
+  find_all(pat: string, s: string): string[] { const m = s.match(new RegExp(pat, 'g')); return m ? [...m] : []; },
+  replace(pat: string, s: string, rep: string): string { return s.replace(new RegExp(pat, 'g'), rep); },
+  replace_first(pat: string, s: string, rep: string): string { return s.replace(new RegExp(pat), rep); },
+  split(pat: string, s: string): string[] { return s.split(new RegExp(pat)); },
+  captures(pat: string, s: string): string[] | null { const m = s.match(new RegExp(pat)); return m && m.length > 1 ? m.slice(1) : null; },
+};
 const __time = {
   now(): number { return Math.floor(Date.now() / 1000); },
   millis(): number { return Date.now(); },
@@ -364,6 +374,16 @@ const __random = {
   float() { return Math.random(); },
   choice(xs) { return xs.length > 0 ? xs[Math.floor(Math.random() * xs.length)] : null; },
   shuffle(xs) { const a = [...xs]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; },
+};
+const __regex = {
+  match_qm_(pat, s) { return new RegExp(pat).test(s); },
+  full_match_qm_(pat, s) { return new RegExp(`^(?:${pat})$`).test(s); },
+  find(pat, s) { const m = s.match(new RegExp(pat)); return m ? m[0] : null; },
+  find_all(pat, s) { const m = s.match(new RegExp(pat, 'g')); return m ? [...m] : []; },
+  replace(pat, s, rep) { return s.replace(new RegExp(pat, 'g'), rep); },
+  replace_first(pat, s, rep) { return s.replace(new RegExp(pat), rep); },
+  split(pat, s) { return s.split(new RegExp(pat)); },
+  captures(pat, s) { const m = s.match(new RegExp(pat)); return m && m.length > 1 ? m.slice(1) : null; },
 };
 const __time = {
   now() { return Math.floor(Date.now() / 1000); },

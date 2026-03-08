@@ -5,7 +5,7 @@
 use crate::types::{Ty, FnSig};
 
 /// All built-in stdlib module names.
-pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "path", "http", "process", "math", "random", "time"];
+pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "path", "http", "process", "math", "random", "time", "regex"];
 
 /// Check if a module name is a stdlib module.
 pub fn is_stdlib_module(name: &str) -> bool {
@@ -218,6 +218,16 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         ("time", "weekday") => FnSig { params: vec![(s("ts"), Ty::Int)], ret: Ty::Int, is_effect: false },
         ("time", "to_iso") => FnSig { params: vec![(s("ts"), Ty::Int)], ret: Ty::String, is_effect: false },
         ("time", "from_parts") => FnSig { params: vec![(s("y"), Ty::Int), (s("m"), Ty::Int), (s("d"), Ty::Int), (s("h"), Ty::Int), (s("min"), Ty::Int), (s("s"), Ty::Int)], ret: Ty::Int, is_effect: false },
+
+        // ── regex ──
+        ("regex", "match?") => FnSig { params: vec![(s("pat"), Ty::String), (s("s"), Ty::String)], ret: Ty::Bool, is_effect: false },
+        ("regex", "full_match?") => FnSig { params: vec![(s("pat"), Ty::String), (s("s"), Ty::String)], ret: Ty::Bool, is_effect: false },
+        ("regex", "find") => FnSig { params: vec![(s("pat"), Ty::String), (s("s"), Ty::String)], ret: Ty::Option(Box::new(Ty::String)), is_effect: false },
+        ("regex", "find_all") => FnSig { params: vec![(s("pat"), Ty::String), (s("s"), Ty::String)], ret: Ty::List(Box::new(Ty::String)), is_effect: false },
+        ("regex", "replace") => FnSig { params: vec![(s("pat"), Ty::String), (s("s"), Ty::String), (s("rep"), Ty::String)], ret: Ty::String, is_effect: false },
+        ("regex", "replace_first") => FnSig { params: vec![(s("pat"), Ty::String), (s("s"), Ty::String), (s("rep"), Ty::String)], ret: Ty::String, is_effect: false },
+        ("regex", "split") => FnSig { params: vec![(s("pat"), Ty::String), (s("s"), Ty::String)], ret: Ty::List(Box::new(Ty::String)), is_effect: false },
+        ("regex", "captures") => FnSig { params: vec![(s("pat"), Ty::String), (s("s"), Ty::String)], ret: Ty::Option(Box::new(Ty::List(Box::new(Ty::String)))), is_effect: false },
 
         _ => return None,
     };

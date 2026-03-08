@@ -325,6 +325,17 @@ impl Emitter {
                 "shuffle" => format!("{{ let mut __v = ({}).clone(); let __n = __v.len(); for __i in (1..__n).rev() {{ let mut __buf = [0u8; 8]; std::fs::File::open(\"/dev/urandom\").and_then(|mut f| {{ use std::io::Read; f.read_exact(&mut __buf) }}).unwrap(); let __j = (u64::from_le_bytes(__buf) as usize) % (__i + 1); __v.swap(__i, __j); }} __v }}", args_str[0]),
                 _ => format!("/* random.{} */ todo!()", func),
             },
+            "regex" => match func {
+                "match?" | "match_qm_" => format!("almide_regex_is_match(&{}, &{})", args_str[0], args_str[1]),
+                "full_match?" | "full_match_qm_" => format!("almide_regex_full_match(&{}, &{})", args_str[0], args_str[1]),
+                "find" => format!("almide_regex_find(&{}, &{})", args_str[0], args_str[1]),
+                "find_all" => format!("almide_regex_find_all(&{}, &{})", args_str[0], args_str[1]),
+                "replace" => format!("almide_regex_replace(&{}, &{}, &{})", args_str[0], args_str[1], args_str[2]),
+                "replace_first" => format!("almide_regex_replace_first(&{}, &{}, &{})", args_str[0], args_str[1], args_str[2]),
+                "split" => format!("almide_regex_split(&{}, &{})", args_str[0], args_str[1]),
+                "captures" => format!("almide_regex_captures(&{}, &{})", args_str[0], args_str[1]),
+                _ => format!("/* regex.{} */ todo!()", func),
+            },
             "time" => match func {
                 "now" => "(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64)".to_string(),
                 "millis" => "(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64)".to_string(),
