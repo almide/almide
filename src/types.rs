@@ -15,6 +15,7 @@ pub enum Ty {
     Record { fields: Vec<(std::string::String, Ty)> },
     Variant { name: std::string::String, cases: Vec<VariantCase> },
     Fn { params: Vec<Ty>, ret: Box<Ty> },
+    Tuple(Vec<Ty>),
     Named(std::string::String),
     /// Error recovery — unifies with everything to prevent cascade errors
     Unknown,
@@ -88,6 +89,10 @@ impl Ty {
             Ty::Fn { params, ret } => {
                 let ps: Vec<_> = params.iter().map(|t| t.display()).collect();
                 format!("fn({}) -> {}", ps.join(", "), ret.display())
+            }
+            Ty::Tuple(tys) => {
+                let ts: Vec<_> = tys.iter().map(|t| t.display()).collect();
+                format!("({})", ts.join(", "))
             }
             Ty::Named(n) => n.clone(),
             Ty::Unknown => "Unknown".into(),

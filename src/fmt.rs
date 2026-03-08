@@ -243,6 +243,14 @@ fn format_expr(out: &mut String, expr: &Expr, depth: usize) {
             format_expr(out, inner, depth);
             out.push(')');
         }
+        Expr::Tuple { elements } => {
+            out.push('(');
+            for (i, e) in elements.iter().enumerate() {
+                if i > 0 { out.push_str(", "); }
+                format_expr(out, e, depth);
+            }
+            out.push(')');
+        }
 
         Expr::List { elements } => {
             if elements.is_empty() {
@@ -424,9 +432,15 @@ fn format_expr(out: &mut String, expr: &Expr, depth: usize) {
             out.push('}');
         }
 
-        Expr::ForIn { var, iterable, body } => {
+        Expr::ForIn { var, var_tuple, iterable, body } => {
             out.push_str("for ");
-            out.push_str(var);
+            if let Some(names) = var_tuple {
+                out.push('(');
+                out.push_str(&names.join(", "));
+                out.push(')');
+            } else {
+                out.push_str(var);
+            }
             out.push_str(" in ");
             format_expr(out, iterable, depth);
             out.push_str(" {\n");
@@ -573,6 +587,7 @@ fn is_short_expr(expr: &Expr) -> bool {
         Expr::String { value } => value.len() < 40,
         Expr::Some { expr } | Expr::Ok { expr } | Expr::Err { expr }
         | Expr::Paren { expr } => is_short_expr(expr),
+        Expr::Tuple { elements } => elements.len() <= 4 && elements.iter().all(is_short_expr),
         Expr::Call { args, .. } => args.len() <= 2 && args.iter().all(is_short_expr),
         Expr::Binary { left, right, .. } => is_short_expr(left) && is_short_expr(right),
         Expr::Unary { operand, .. } => is_short_expr(operand),

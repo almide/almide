@@ -564,3 +564,49 @@ test "list UFCS take and drop" {
 test "list UFCS unique" {
   assert_eq([1, 1, 2, 2, 3].unique(), [1, 2, 3])
 }
+
+// ============================================================
+// tuples
+// ============================================================
+
+test "tuple literal" {
+  let t = (1, "hello")
+  assert_eq(t, (1, "hello"))
+}
+
+test "tuple 3 elements" {
+  let t = (1, 2, 3)
+  assert_eq(t, (1, 2, 3))
+}
+
+// ============================================================
+// for...in tuple destructuring
+// ============================================================
+
+test "for...in with enumerate destructuring" {
+  let items = ["a", "b", "c"]
+  var result = ""
+  for (i, x) in list.enumerate(items) {
+    result = result ++ int.to_string(i) ++ x
+  }
+  assert_eq(result, "0a1b2c")
+}
+
+test "for...in with zip destructuring" {
+  let xs = [1, 2, 3]
+  let ys = [10, 20, 30]
+  var total = 0
+  for (a, b) in list.zip(xs, ys) {
+    total = total + a + b
+  }
+  assert_eq(total, 66)
+}
+
+test "for...in with map entries destructuring" {
+  let m = map.set(map.set(map.new(), "x", 1), "y", 2)
+  var sum = 0
+  for (k, v) in map.entries(m) {
+    sum = sum + v
+  }
+  assert_eq(sum, 3)
+}

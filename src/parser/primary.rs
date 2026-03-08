@@ -97,7 +97,19 @@ impl Parser {
         }
         if self.check(TokenType::For) {
             self.advance();
-            let var_name = self.expect_ident()?;
+            // Support `for (a, b) in ...` tuple destructuring
+            let (var_name, var_tuple) = if self.check(TokenType::LParen) {
+                self.advance();
+                let mut names = vec![self.expect_ident()?];
+                while self.check(TokenType::Comma) {
+                    self.advance();
+                    names.push(self.expect_ident()?);
+                }
+                self.expect(TokenType::RParen)?;
+                (names[0].clone(), Some(names))
+            } else {
+                (self.expect_ident()?, None)
+            };
             self.expect(TokenType::In)?;
             let iterable = self.parse_expr()?;
             self.expect(TokenType::LBrace)?;
@@ -114,6 +126,7 @@ impl Parser {
             self.expect(TokenType::RBrace)?;
             return Ok(Expr::ForIn {
                 var: var_name,
+                var_tuple,
                 iterable: Box::new(iterable),
                 body: stmts,
             });
@@ -134,9 +147,20 @@ impl Parser {
                 self.advance();
                 return Ok(Expr::Unit);
             }
-            let expr = self.parse_expr()?;
+            let first = self.parse_expr()?;
+            if self.check(TokenType::Comma) {
+                // Tuple: (a, b, ...)
+                let mut elements = vec![first];
+                while self.check(TokenType::Comma) {
+                    self.advance();
+                    if self.check(TokenType::RParen) { break; } // trailing comma
+                    elements.push(self.parse_expr()?);
+                }
+                self.expect(TokenType::RParen)?;
+                return Ok(Expr::Tuple { elements });
+            }
             self.expect(TokenType::RParen)?;
-            return Ok(Expr::Paren { expr: Box::new(expr) });
+            return Ok(Expr::Paren { expr: Box::new(first) });
         }
         if self.check(TokenType::TypeName) {
             let name = tok.value.clone();

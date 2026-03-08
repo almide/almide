@@ -65,12 +65,17 @@ impl TsEmitter {
             Expr::DoBlock { stmts, expr: final_expr } => {
                 self.gen_do_block(stmts, final_expr.as_deref(), 0)
             }
-            Expr::ForIn { var, iterable, body } => {
+            Expr::ForIn { var, var_tuple, iterable, body } => {
                 let iter_str = self.gen_expr(iterable);
                 let stmts_str: Vec<String> = body.iter()
                     .map(|s| format!("  {}", self.gen_stmt(s)))
                     .collect();
-                format!("for (const {} of {}) {{\n{}\n}}", Self::sanitize(var), iter_str, stmts_str.join("\n"))
+                let binding = if let Some(names) = var_tuple {
+                    format!("[{}]", names.iter().map(|n| Self::sanitize(n)).collect::<Vec<_>>().join(", "))
+                } else {
+                    Self::sanitize(var)
+                };
+                format!("for (const {} of {}) {{\n{}\n}}", binding, iter_str, stmts_str.join("\n"))
             }
             Expr::Lambda { params, body } => {
                 let ps: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
@@ -85,6 +90,10 @@ impl TsEmitter {
                 }
             }
             Expr::Paren { expr } => format!("({})", self.gen_expr(expr)),
+            Expr::Tuple { elements } => {
+                let parts: Vec<String> = elements.iter().map(|e| self.gen_expr(e)).collect();
+                format!("[{}]", parts.join(", "))
+            }
             Expr::Try { expr } => self.gen_expr(expr),
             Expr::Await { expr } => format!("await {}", self.gen_expr(expr)),
             Expr::Hole => if self.js_mode { "null /* hole */".to_string() } else { "null as any /* hole */".to_string() },

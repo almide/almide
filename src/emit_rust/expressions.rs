@@ -146,15 +146,24 @@ impl Emitter {
 
             Expr::Block { stmts, expr } => self.gen_block(stmts, expr.as_deref()),
             Expr::DoBlock { stmts, expr } => self.gen_do_block(stmts, expr.as_deref()),
-            Expr::ForIn { var, iterable, body } => {
+            Expr::ForIn { var, var_tuple, iterable, body } => {
                 let iter_str = self.gen_expr(iterable);
                 let stmts_str: Vec<String> = body.iter()
                     .map(|s| format!("  {}", self.gen_stmt(s)))
                     .collect();
-                format!("for {var} in ({iter_str}).clone() {{\n{}\n}}", stmts_str.join("\n"))
+                let binding = if let Some(names) = var_tuple {
+                    format!("({})", names.join(", "))
+                } else {
+                    var.clone()
+                };
+                format!("for {binding} in ({iter_str}).clone() {{\n{}\n}}", stmts_str.join("\n"))
             }
 
             Expr::Paren { expr } => format!("({})", self.gen_expr(expr)),
+            Expr::Tuple { elements } => {
+                let parts: Vec<String> = elements.iter().map(|e| self.gen_expr(e)).collect();
+                format!("({})", parts.join(", "))
+            }
             Expr::Try { expr } => {
                 // In effect fn: use ?, otherwise just eval
                 if self.in_effect {

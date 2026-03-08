@@ -142,7 +142,7 @@ impl Checker {
                 Ty::Unknown
             }
 
-            ast::Expr::ForIn { var, iterable, body } => {
+            ast::Expr::ForIn { var, var_tuple, iterable, body } => {
                 let it = self.check_expr(iterable);
                 self.env.push_scope();
                 let elem_ty = match &it {
@@ -158,7 +158,24 @@ impl Checker {
                         Ty::Unknown
                     }
                 };
-                self.env.define_var(var, elem_ty);
+                if let Some(names) = var_tuple {
+                    // Tuple destructuring: define each name
+                    match &elem_ty {
+                        Ty::Tuple(tys) => {
+                            for (i, name) in names.iter().enumerate() {
+                                let ty = tys.get(i).cloned().unwrap_or(Ty::Unknown);
+                                self.env.define_var(name, ty);
+                            }
+                        }
+                        _ => {
+                            for name in names {
+                                self.env.define_var(name, Ty::Unknown);
+                            }
+                        }
+                    }
+                } else {
+                    self.env.define_var(var, elem_ty);
+                }
                 for s in body { self.check_stmt(s); }
                 self.env.pop_scope();
                 Ty::Unit
@@ -226,6 +243,10 @@ impl Checker {
             }
 
             ast::Expr::Paren { expr: inner } => self.check_expr(inner),
+            ast::Expr::Tuple { elements } => {
+                let tys: Vec<Ty> = elements.iter().map(|e| self.check_expr(e)).collect();
+                Ty::Tuple(tys)
+            }
 
             ast::Expr::Try { expr: inner } => {
                 let it = self.check_expr(inner);
