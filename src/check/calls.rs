@@ -88,7 +88,13 @@ impl Checker {
                     }
                 }
             }
-            return sig.ret.clone();
+            let ret = sig.ret.clone();
+            if self.env.in_effect {
+                if let Ty::Result(ok_ty, _) = &ret {
+                    return *ok_ty.clone();
+                }
+            }
+            return ret;
         }
 
         if self.env.constructors.contains_key(name) {
@@ -193,7 +199,14 @@ impl Checker {
                         format!("{}.{}()", module, func),
                     ));
                 }
-                return sig.ret.clone();
+                let ret = sig.ret.clone();
+                // In effect context, auto-unwrap Result (same as stdlib)
+                if self.env.in_effect {
+                    if let Ty::Result(ok_ty, _) = &ret {
+                        return *ok_ty.clone();
+                    }
+                }
+                return ret;
             }
         }
 
