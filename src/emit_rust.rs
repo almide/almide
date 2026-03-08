@@ -518,11 +518,39 @@ impl Emitter {
         }
     }
 
+    fn resolve_ufcs_module(method: &str) -> Option<&'static str> {
+        match method {
+            "trim" | "split" | "join" | "pad_left" | "starts_with" | "starts_with_q"
+            | "ends_with_q" | "slice" | "to_bytes" | "contains" | "to_upper" | "to_lower"
+            | "to_int" | "replace" | "char_at" => Some("string"),
+            "get" | "sort" | "each" | "map" | "filter" | "find" | "fold" => Some("list"),
+            "to_string" | "to_hex" => Some("int"),
+            "len" => Some("list"),
+            _ => None,
+        }
+    }
+
     fn gen_call(&self, callee: &Expr, args: &[Expr]) -> String {
         // Handle module calls
         if let Expr::Member { object, field } = callee {
             if let Expr::Ident { name: module } = object.as_ref() {
-                return self.gen_module_call(module, field, args);
+                let is_module = matches!(module.as_str(), "string" | "list" | "int" | "fs" | "env");
+                if is_module {
+                    return self.gen_module_call(module, field, args);
+                }
+                // UFCS: variable.method(args) => module.method(variable, args)
+                if let Some(resolved) = Self::resolve_ufcs_module(field) {
+                    let mut new_args = vec![Expr::Ident { name: module.clone() }];
+                    new_args.extend(args.iter().cloned());
+                    return self.gen_module_call(resolved, field, &new_args);
+                }
+            } else {
+                // Non-ident receiver: expr.method(args) => module.method(expr, args)
+                if let Some(resolved) = Self::resolve_ufcs_module(field) {
+                    let mut new_args = vec![object.as_ref().clone()];
+                    new_args.extend(args.iter().cloned());
+                    return self.gen_module_call(resolved, field, &new_args);
+                }
             }
         }
 

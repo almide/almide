@@ -473,7 +473,69 @@ impl TsEmitter {
         }
     }
 
+    fn resolve_ufcs_module(method: &str) -> Option<&'static str> {
+        match method {
+            // string methods
+            "trim" | "split" | "join" | "pad_left" | "starts_with" | "starts_with_q"
+            | "ends_with_q" | "slice" | "to_bytes" | "contains" | "to_upper" | "to_lower"
+            | "to_int" | "replace" | "char_at" => Some("__string"),
+            // list methods
+            "get" | "sort" | "each" | "map" | "filter" | "find" | "fold" => Some("__list"),
+            // int methods
+            "to_string" | "to_hex" => Some("__int"),
+            // len / contains are ambiguous — prioritize based on context
+            // "len" and "contains" exist in both string and list; handled separately
+            _ => None,
+        }
+    }
+
     fn gen_call(&self, callee: &Expr, args: &[Expr]) -> String {
+        // UFCS: expr.method(args) => __module.method(expr, args)
+        if let Expr::Member { object, field } = callee {
+            if let Expr::Ident { name } = object.as_ref() {
+                let is_module = matches!(name.as_str(), "string" | "list" | "int" | "fs" | "env");
+                if !is_module {
+                    // UFCS: non-module receiver
+                    if let Some(module) = Self::resolve_ufcs_module(field) {
+                        let obj_str = self.gen_expr(object);
+                        let mut all_args = vec![obj_str];
+                        all_args.extend(args.iter().map(|a| self.gen_expr(a)));
+                        return format!("{}.{}({})", module, Self::sanitize(field), all_args.join(", "));
+                    }
+                    // len/contains: try both, default to list for identifiers
+                    if field == "len" || field == "contains" {
+                        let obj_str = self.gen_expr(object);
+                        let mut all_args = vec![obj_str];
+                        all_args.extend(args.iter().map(|a| self.gen_expr(a)));
+                        // Use list by default for ident receivers; string.len works the same way
+                        return format!("__list.{}({})", Self::sanitize(field), all_args.join(", "));
+                    }
+                }
+            } else {
+                // Non-ident object (e.g. call result, member chain)
+                let module_name = if let Expr::Member { object: inner_obj, .. } = object.as_ref() {
+                    if let Expr::Ident { name } = inner_obj.as_ref() {
+                        matches!(name.as_str(), "string" | "list" | "int" | "fs" | "env")
+                    } else { false }
+                } else { false };
+
+                if !module_name {
+                    if let Some(module) = Self::resolve_ufcs_module(field) {
+                        let obj_str = self.gen_expr(object);
+                        let mut all_args = vec![obj_str];
+                        all_args.extend(args.iter().map(|a| self.gen_expr(a)));
+                        return format!("{}.{}({})", module, Self::sanitize(field), all_args.join(", "));
+                    }
+                    if field == "len" || field == "contains" {
+                        let obj_str = self.gen_expr(object);
+                        let mut all_args = vec![obj_str];
+                        all_args.extend(args.iter().map(|a| self.gen_expr(a)));
+                        return format!("__list.{}({})", Self::sanitize(field), all_args.join(", "));
+                    }
+                }
+            }
+        }
+
         let callee_str = self.gen_expr(callee);
         // Special case: assert_eq(x, err(e))
         if callee_str == "assert_eq" && args.len() == 2 {
