@@ -153,6 +153,48 @@ impl Show for Color {
 
 ---
 
+---
+
+## String Handling
+
+### Heredoc
+
+Multi-line strings without escape noise. Useful for SQL, HTML, JSON templates, etc.
+
+```almide
+let query = """
+  SELECT *
+  FROM users
+  WHERE id = ${user_id}
+"""
+
+let html = """
+  <html>
+    <body>${content}</body>
+  </html>
+"""
+```
+
+- `"""..."""` syntax (consistent with Python/Kotlin/Swift)
+- Leading whitespace stripped based on indentation of closing `"""`
+- Interpolation `${expr}` works the same as in regular strings
+
+### Implementation Steps
+
+- [ ] Lexer: recognize `"""` as heredoc token, capture raw content with indentation
+- [ ] Lexer: strip common leading whitespace (dedent)
+- [ ] Parser: reuse existing interpolation logic for `${expr}` inside heredocs
+- [ ] Rust emitter: emit as `format!(...)` (same as regular interpolated strings)
+- [ ] TS emitter: emit as template literals `` `...` ``
+
+### Design Notes
+
+- Indentation stripping follows the closing `"""` column (same as Kotlin trimIndent)
+- No need for separate raw heredoc — use `r"""..."""` if escape-free is needed
+- Single-line `"..."` with `${expr}` already works; heredoc is purely for multi-line ergonomics
+
+---
+
 ## Other
 
 - [ ] Package registry (to be considered in the future)
