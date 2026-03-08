@@ -74,7 +74,7 @@ fn compile(file: &str, no_check: bool) -> String {
     emit_rust::emit(&program, &resolved.modules)
 }
 
-fn cmd_run(file: &str, program_args: &[String], no_check: bool) {
+fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool) -> i32 {
     let rs_code = compile(file, no_check);
 
     let tmp_dir = std::env::temp_dir().join("almide-run");
@@ -103,17 +103,20 @@ fn cmd_run(file: &str, program_args: &[String], no_check: bool) {
     if !rustc.status.success() {
         let stderr = String::from_utf8_lossy(&rustc.stderr);
         eprintln!("Compile error:\n{}", stderr);
-        std::process::exit(1);
+        return 1;
     }
 
-    // Set larger stack size to avoid overflow with recursive code
     let status = Command::new(&bin_path)
         .env("RUST_MIN_STACK", "8388608")
         .args(program_args)
         .status()
         .unwrap_or_else(|e| { eprintln!("Failed to execute: {}", e); std::process::exit(1); });
 
-    std::process::exit(status.code().unwrap_or(1));
+    status.code().unwrap_or(1)
+}
+
+fn cmd_run(file: &str, program_args: &[String], no_check: bool) {
+    std::process::exit(cmd_run_inner(file, program_args, no_check));
 }
 
 fn cmd_init() {
@@ -164,10 +167,19 @@ fn cmd_test(file: &str, no_check: bool) {
         std::process::exit(1);
     }
 
+    let mut failed = 0;
     for test_file in &test_files {
         eprintln!("Running {}", test_file);
-        cmd_run(test_file, &[], no_check);
+        let code = cmd_run_inner(test_file, &[], no_check);
+        if code != 0 {
+            failed += 1;
+        }
     }
+    if failed > 0 {
+        eprintln!("\n{}/{} test file(s) failed", failed, test_files.len());
+        std::process::exit(1);
+    }
+    eprintln!("\nAll {} test file(s) passed", test_files.len());
 }
 
 fn main() {
