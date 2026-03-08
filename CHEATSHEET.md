@@ -267,10 +267,10 @@ The runtime calls `main(args)` where `args` includes the program name at index 0
 `fs.read_text(path)`, `fs.read_bytes(path)`, `fs.write(path, content)`, `fs.write_bytes(path, bytes)`, `fs.append(path, content)`, `fs.mkdir_p(path)`, `fs.exists?(path)` → Bool (no `try` needed)
 
 ### string
-`string.trim(s)`, `string.split(s, sep)`, `string.join(list, sep)`, `string.len(s)`, `string.pad_left(s, n, ch)`, `string.starts_with?(s, prefix)`, `string.ends_with?(s, suffix)`, `string.slice(s, start)`, `string.slice(s, start, end)`, `string.to_bytes(s)`, `string.contains(s, sub)`, `string.to_upper(s)`, `string.to_lower(s)`, `string.to_int(s)` → `Result[Int, String]`, `string.replace(s, from, to)`, `string.char_at(s, i)` → `Option[String]`
+`string.trim(s)`, `string.split(s, sep)`, `string.join(list, sep)`, `string.len(s)`, `string.lines(s)` → `List[String]` (split by newline, skip empty), `string.pad_left(s, n, ch)`, `string.starts_with?(s, prefix)`, `string.ends_with?(s, suffix)`, `string.slice(s, start)`, `string.slice(s, start, end)`, `string.to_bytes(s)`, `string.contains(s, sub)`, `string.to_upper(s)`, `string.to_lower(s)`, `string.to_int(s)` → `Result[Int, String]`, `string.replace(s, from, to)`, `string.char_at(s, i)` → `Option[String]`
 
 ### list
-`list.len(xs)`, `list.get(xs, i)` → `Option[T]`, `list.sort(xs)`, `list.contains(xs, x)`, `list.each(xs, f)`, `list.map(xs, f)`, `list.filter(xs, f)`, `list.find(xs, f)`, `list.fold(xs, init, f)`
+`list.len(xs)`, `list.get(xs, i)` → `Option[T]`, `list.get_or(xs, i, default)` → `T`, `list.sort(xs)`, `list.contains(xs, x)`, `list.each(xs, f)`, `list.map(xs, f)`, `list.filter(xs, f)`, `list.find(xs, f)`, `list.fold(xs, init, f)`
 
 ### map
 `map.new()` → empty `Map[K, V]`, `map.get(m, key)` → `Option[V]`, `map.set(m, key, value)` → `Map[K, V]`, `map.contains(m, key)` → `Bool`, `map.remove(m, key)` → `Map[K, V]`, `map.keys(m)` → `List[K]` (sorted), `map.values(m)` → `List[V]`, `map.len(m)` → `Int`, `map.entries(m)` → `List[(K, V)]`, `map.from_list(xs, fn(x) => (k, v))` → `Map[K, V]`

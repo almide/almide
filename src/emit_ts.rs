@@ -28,10 +28,12 @@ const __string = {
   to_int(s: string): number { const n = parseInt(s, 10); if (isNaN(n)) throw new Error("invalid integer: " + s); return n; },
   replace(s: string, from: string, to: string): string { return s.split(from).join(to); },
   char_at(s: string, i: number): string | null { return i < s.length ? s[i] : null; },
+  lines(s: string): string[] { return s.split("\n").filter(l => l.length > 0); },
 };
 const __list = {
   len<T>(xs: T[]): number { return xs.length; },
   get<T>(xs: T[], i: number): T | null { return i < xs.length ? xs[i] : null; },
+  get_or<T>(xs: T[], i: number, d: T): T { return i < xs.length ? xs[i] : d; },
   sort<T>(xs: T[]): T[] { return [...xs].sort(); },
   contains<T>(xs: T[], x: T): boolean { return xs.includes(x); },
   each<T>(xs: T[], f: (x: T) => void): void { xs.forEach(f); },
@@ -135,10 +137,12 @@ const __string = {
   to_int(s) { const n = parseInt(s, 10); if (isNaN(n)) throw new Error("invalid integer: " + s); return n; },
   replace(s, from, to) { return s.split(from).join(to); },
   char_at(s, i) { return i < s.length ? s[i] : null; },
+  lines(s) { return s.split("\n").filter(l => l.length > 0); },
 };
 const __list = {
   len(xs) { return xs.length; },
   get(xs, i) { return i < xs.length ? xs[i] : null; },
+  get_or(xs, i, d) { return i < xs.length ? xs[i] : d; },
   sort(xs) { return [...xs].sort(); },
   contains(xs, x) { return xs.includes(x); },
   each(xs, f) { xs.forEach(f); },
@@ -535,9 +539,9 @@ impl TsEmitter {
             // string methods
             "trim" | "split" | "join" | "pad_left" | "starts_with" | "starts_with_qm_"
             | "ends_with_qm_" | "slice" | "to_bytes" | "contains" | "to_upper" | "to_lower"
-            | "to_int" | "replace" | "char_at" => Some("__string"),
+            | "to_int" | "replace" | "char_at" | "lines" => Some("__string"),
             // list methods
-            "get" | "sort" | "each" | "map" | "filter" | "find" | "fold" => Some("__list"),
+            "get" | "get_or" | "sort" | "each" | "map" | "filter" | "find" | "fold" => Some("__list"),
             // int methods
             "to_string" | "to_hex" => Some("__int"),
             // map methods

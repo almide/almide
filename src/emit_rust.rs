@@ -554,8 +554,8 @@ impl Emitter {
         match method {
             "trim" | "split" | "join" | "pad_left" | "starts_with" | "starts_with_qm_"
             | "ends_with_qm_" | "slice" | "to_bytes" | "contains" | "to_upper" | "to_lower"
-            | "to_int" | "replace" | "char_at" => Some("string"),
-            "get" | "sort" | "each" | "map" | "filter" | "find" | "fold" => Some("list"),
+            | "to_int" | "replace" | "char_at" | "lines" => Some("string"),
+            "get" | "get_or" | "sort" | "each" | "map" | "filter" | "find" | "fold" => Some("list"),
             "to_string" | "to_hex" => Some("int"),
             "len" => Some("list"),
             "keys" | "values" | "entries" => Some("map"),
@@ -669,6 +669,7 @@ impl Emitter {
                 "to_int" => format!("({}).parse::<i64>().map_err(|e| e.to_string())?", args_str[0]),
                 "replace" => format!("({}).replace(&*{}, &*{})", args_str[0], args_str[1], args_str[2]),
                 "char_at" => format!("({}).chars().nth({} as usize).map(|c| c.to_string())", args_str[0], args_str[1]),
+                "lines" => format!("({}).split('\\n').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect::<Vec<String>>()", args_str[0]),
                 _ => format!("/* string.{} */ todo!()", func),
             },
             "list" => {
@@ -690,6 +691,7 @@ impl Emitter {
                 match func {
                     "len" => format!("(({}).len() as i64)", args_str[0]),
                     "get" => format!("({}).get({} as usize).cloned()", args_str[0], args_str[1]),
+                    "get_or" => format!("({}).get({} as usize).cloned().unwrap_or({})", args_str[0], args_str[1], args_str[2]),
                     "sort" => format!("{{ let mut v = ({}).to_vec(); v.sort(); v }}", args_str[0]),
                     "contains" => format!("({}).contains(&{})", args_str[0], args_str[1]),
                     "each" => {
