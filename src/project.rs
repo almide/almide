@@ -162,34 +162,62 @@ pub fn fetch_dep(dep: &Dependency) -> Result<PathBuf, String> {
     Ok(dep_dir)
 }
 
-/// Fetch all dependencies and return their source paths.
+/// Fetch all dependencies recursively and return their source paths.
 /// Uses the dependency's almide.toml `name` as the module name (not the repo name).
+/// Transitive dependencies (dep's deps) are also fetched.
 pub fn fetch_all_deps(project: &Project) -> Result<HashMap<String, PathBuf>, String> {
     let mut paths = HashMap::new();
-    for dep in &project.dependencies {
+    let mut visited = std::collections::HashSet::new();
+    fetch_deps_recursive(&project.dependencies, &mut paths, &mut visited)?;
+    Ok(paths)
+}
+
+fn fetch_deps_recursive(
+    deps: &[Dependency],
+    paths: &mut HashMap<String, PathBuf>,
+    visited: &mut std::collections::HashSet<String>,
+) -> Result<(), String> {
+    for dep in deps {
+        if visited.contains(&dep.git) {
+            continue;
+        }
+        visited.insert(dep.git.clone());
+
         let path = fetch_dep(dep)?;
 
-        // Read the dependency's almide.toml to get its package name
-        let module_name = {
-            let dep_toml = path.join("almide.toml");
-            if dep_toml.exists() {
-                parse_toml(&dep_toml)
-                    .map(|p| p.package.name)
-                    .unwrap_or_else(|_| dep.name.clone())
+        // Read the dependency's almide.toml to get its package name and transitive deps
+        let dep_toml = path.join("almide.toml");
+        if dep_toml.exists() {
+            if let Ok(dep_project) = parse_toml(&dep_toml) {
+                let module_name = dep_project.package.name;
+                let src_dir = path.join("src");
+                if src_dir.is_dir() {
+                    paths.insert(module_name, src_dir);
+                } else {
+                    paths.insert(module_name, path.clone());
+                }
+                // Recurse into transitive dependencies
+                if !dep_project.dependencies.is_empty() {
+                    fetch_deps_recursive(&dep_project.dependencies, paths, visited)?;
+                }
             } else {
-                dep.name.clone()
+                let src_dir = path.join("src");
+                if src_dir.is_dir() {
+                    paths.insert(dep.name.clone(), src_dir);
+                } else {
+                    paths.insert(dep.name.clone(), path);
+                }
             }
-        };
-
-        // Look for src/ directory first, then root
-        let src_dir = path.join("src");
-        if src_dir.is_dir() {
-            paths.insert(module_name, src_dir);
         } else {
-            paths.insert(module_name, path);
+            let src_dir = path.join("src");
+            if src_dir.is_dir() {
+                paths.insert(dep.name.clone(), src_dir);
+            } else {
+                paths.insert(dep.name.clone(), path);
+            }
         }
     }
-    Ok(paths)
+    Ok(())
 }
 
 /// Resolve a short package specifier to a full git URL and optional tag.

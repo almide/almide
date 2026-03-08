@@ -264,7 +264,13 @@ impl Emitter {
                 _ => format!("/* path.{} */ todo!()", func),
             },
             _ => {
-                format!("{}::{}({})", module, func, args_str.join(", "))
+                let call = format!("{}::{}({})", module, func, args_str.join(", "));
+                // Auto-propagate ? for user module effect/Result functions
+                if self.in_effect && (self.effect_fns.contains(&func.to_string()) || self.result_fns.contains(&func.to_string())) {
+                    format!("{}?", call)
+                } else {
+                    call
+                }
             }
         }
     }
