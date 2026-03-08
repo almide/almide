@@ -121,6 +121,14 @@ for key in map.keys(config) {
 ```
 **Prefer `for...in` over `do { guard ... }` for iterating lists.**
 
+### Range
+```
+0..5            // [0, 1, 2, 3, 4]  (exclusive end)
+1..=5           // [1, 2, 3, 4, 5]  (inclusive end)
+for i in 0..n { ... }    // optimized: no list allocation
+let xs = list.map(0..10, fn(i) => i * i)   // range as List[Int]
+```
+
 ### Do block (loop + auto-propagation)
 ```
 // As loop with dynamic condition: use guard to break
