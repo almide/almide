@@ -15,6 +15,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/almide/almide/actions/workflows/ci.yml"><img src="https://github.com/almide/almide/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
@@ -95,18 +96,19 @@ test "greet succeeds" {
 
 ## How It Works
 
-Almide source (`.almd`) is compiled by a pure-Rust compiler to Rust or TypeScript, then executed natively.
+Almide source (`.almd`) is compiled by a pure-Rust compiler to Rust, TypeScript, or WebAssembly.
 
 ```
-.almd → Lexer → Parser → AST → CodeGen → .rs (Rust) or .ts (Deno)
+.almd → Lexer → Parser → AST → CodeGen → .rs / .ts / .wasm
 ```
 
 ```bash
-almide run app.almd            # Compile + execute
-almide run app.almd -- arg1    # With arguments
-almide build app.almd -o app   # Build standalone binary
-almide app.almd --target rust  # Emit Rust source
-almide app.almd --target ts    # Emit TypeScript source
+almide run app.almd              # Compile + execute
+almide run app.almd -- arg1      # With arguments
+almide build app.almd -o app     # Build standalone binary
+almide build app.almd --target wasm  # Build WebAssembly (WASI)
+almide app.almd --target rust    # Emit Rust source
+almide app.almd --target ts      # Emit TypeScript source
 ```
 
 ## Benchmark
