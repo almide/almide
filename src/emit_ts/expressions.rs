@@ -65,8 +65,16 @@ impl TsEmitter {
             Expr::DoBlock { stmts, expr: final_expr } => {
                 self.gen_do_block(stmts, final_expr.as_deref(), 0)
             }
+            Expr::Range { start, end, inclusive } => {
+                let s = self.gen_expr(start);
+                let e = self.gen_expr(end);
+                if *inclusive {
+                    format!("Array.from({{length: ({e}) - ({s}) + 1}}, (_, i) => ({s}) + i)")
+                } else {
+                    format!("Array.from({{length: ({e}) - ({s})}}, (_, i) => ({s}) + i)")
+                }
+            }
             Expr::ForIn { var, var_tuple, iterable, body } => {
-                let iter_str = self.gen_expr(iterable);
                 let stmts_str: Vec<String> = body.iter()
                     .map(|s| format!("  {}", self.gen_stmt(s)))
                     .collect();
@@ -75,7 +83,16 @@ impl TsEmitter {
                 } else {
                     Self::sanitize(var)
                 };
-                format!("for (const {} of {}) {{\n{}\n}}", binding, iter_str, stmts_str.join("\n"))
+                // Optimize: for i in start..end → C-style for loop
+                if let Expr::Range { start, end, inclusive } = iterable.as_ref() {
+                    let s = self.gen_expr(start);
+                    let e = self.gen_expr(end);
+                    let cmp = if *inclusive { "<=" } else { "<" };
+                    format!("for (let {} = {}; {} {} {}; {}++) {{\n{}\n}}", binding, s, binding, cmp, e, binding, stmts_str.join("\n"))
+                } else {
+                    let iter_str = self.gen_expr(iterable);
+                    format!("for (const {} of {}) {{\n{}\n}}", binding, iter_str, stmts_str.join("\n"))
+                }
             }
             Expr::Lambda { params, body } => {
                 let ps: Vec<String> = params.iter().map(|p| p.name.clone()).collect();

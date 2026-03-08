@@ -73,7 +73,7 @@ impl Parser {
     }
 
     fn parse_comparison(&mut self) -> Result<Expr, String> {
-        let mut left = self.parse_add_sub()?;
+        let mut left = self.parse_range()?;
         while self.check(TokenType::EqEq)
             || self.check(TokenType::BangEq)
             || self.check(TokenType::LAngle)
@@ -90,6 +90,31 @@ impl Parser {
                 left: Box::new(left),
                 right: Box::new(right),
             };
+        }
+        Ok(left)
+    }
+
+    fn parse_range(&mut self) -> Result<Expr, String> {
+        let left = self.parse_add_sub()?;
+        if self.check(TokenType::DotDot) {
+            self.advance();
+            self.skip_newlines();
+            let right = self.parse_add_sub()?;
+            return Ok(Expr::Range {
+                start: Box::new(left),
+                end: Box::new(right),
+                inclusive: false,
+            });
+        }
+        if self.check(TokenType::DotDotEq) {
+            self.advance();
+            self.skip_newlines();
+            let right = self.parse_add_sub()?;
+            return Ok(Expr::Range {
+                start: Box::new(left),
+                end: Box::new(right),
+                inclusive: true,
+            });
         }
         Ok(left)
     }

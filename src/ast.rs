@@ -84,6 +84,7 @@ pub enum Expr {
     Unary { op: String, operand: Box<Expr> },
     Paren { expr: Box<Expr> },
     Tuple { elements: Vec<Expr> },
+    Range { start: Box<Expr>, end: Box<Expr>, inclusive: bool },
     Placeholder,
     Unit,
     None,

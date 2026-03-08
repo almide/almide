@@ -432,6 +432,16 @@ fn format_expr(out: &mut String, expr: &Expr, depth: usize) {
             out.push('}');
         }
 
+        Expr::Range { start, end, inclusive } => {
+            format_expr(out, start, depth);
+            if *inclusive {
+                out.push_str("..=");
+            } else {
+                out.push_str("..");
+            }
+            format_expr(out, end, depth);
+        }
+
         Expr::ForIn { var, var_tuple, iterable, body } => {
             out.push_str("for ");
             if let Some(names) = var_tuple {

@@ -146,8 +146,17 @@ impl Emitter {
 
             Expr::Block { stmts, expr } => self.gen_block(stmts, expr.as_deref()),
             Expr::DoBlock { stmts, expr } => self.gen_do_block(stmts, expr.as_deref()),
+            Expr::Range { start, end, inclusive } => {
+                let s = self.gen_expr(start);
+                let e = self.gen_expr(end);
+                if *inclusive {
+                    format!("({s}..={e}).collect::<Vec<i64>>()")
+                } else {
+                    format!("({s}..{e}).collect::<Vec<i64>>()")
+                }
+            }
+
             Expr::ForIn { var, var_tuple, iterable, body } => {
-                let iter_str = self.gen_expr(iterable);
                 let stmts_str: Vec<String> = body.iter()
                     .map(|s| format!("  {}", self.gen_stmt(s)))
                     .collect();
@@ -156,7 +165,20 @@ impl Emitter {
                 } else {
                     var.clone()
                 };
-                format!("for {binding} in ({iter_str}).clone() {{\n{}\n}}", stmts_str.join("\n"))
+                // Optimize: for i in start..end → native Rust range (no collect)
+                if let Expr::Range { start, end, inclusive } = iterable.as_ref() {
+                    let s = self.gen_expr(start);
+                    let e = self.gen_expr(end);
+                    let range = if *inclusive {
+                        format!("{s}..={e}")
+                    } else {
+                        format!("{s}..{e}")
+                    };
+                    format!("for {binding} in {range} {{\n{}\n}}", stmts_str.join("\n"))
+                } else {
+                    let iter_str = self.gen_expr(iterable);
+                    format!("for {binding} in ({iter_str}).clone() {{\n{}\n}}", stmts_str.join("\n"))
+                }
             }
 
             Expr::Paren { expr } => format!("({})", self.gen_expr(expr)),

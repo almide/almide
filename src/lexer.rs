@@ -82,6 +82,8 @@ pub enum TokenType {
     PipeArrow,
     Caret,
     Underscore,
+    DotDot,
+    DotDotEq,
     DotDotDot,
 
     // Special
@@ -181,6 +183,8 @@ fn is_continuation_token(tt: &TokenType) -> bool {
             | TokenType::Await
             | TokenType::Do
             | TokenType::Guard
+            | TokenType::DotDot
+            | TokenType::DotDotEq
     )
 }
 
@@ -524,10 +528,24 @@ impl Lexer {
         let c2 = self.peek(1);
         let c3 = self.peek(2);
 
-        // Three-char: ...
+        // Three-char: ... and ..=
         if c == '.' && c2 == '.' && c3 == '.' {
             self.add_token(TokenType::DotDotDot, "...".to_string());
             self.advance();
+            self.advance();
+            self.advance();
+            return true;
+        }
+        if c == '.' && c2 == '.' && c3 == '=' {
+            self.add_token(TokenType::DotDotEq, "..=".to_string());
+            self.advance();
+            self.advance();
+            self.advance();
+            return true;
+        }
+        // Two-char: ..
+        if c == '.' && c2 == '.' {
+            self.add_token(TokenType::DotDot, "..".to_string());
             self.advance();
             self.advance();
             return true;

@@ -149,6 +149,26 @@ impl Checker {
                 Ty::Unknown
             }
 
+            ast::Expr::Range { start, end, .. } => {
+                let st = self.check_expr(start);
+                let et = self.check_expr(end);
+                if !matches!(st, Ty::Int | Ty::Unknown) {
+                    self.push_diagnostic(err(
+                        format!("range start must be Int, got {}", st.display()),
+                        "range requires Int operands",
+                        "start..end".to_string(),
+                    ));
+                }
+                if !matches!(et, Ty::Int | Ty::Unknown) {
+                    self.push_diagnostic(err(
+                        format!("range end must be Int, got {}", et.display()),
+                        "range requires Int operands",
+                        "start..end".to_string(),
+                    ));
+                }
+                Ty::List(Box::new(Ty::Int))
+            }
+
             ast::Expr::ForIn { var, var_tuple, iterable, body } => {
                 let it = self.check_expr(iterable);
                 self.env.push_scope();
@@ -159,7 +179,7 @@ impl Checker {
                     _ => {
                         self.push_diagnostic(err(
                             format!("cannot iterate over type {}", it.display()),
-                            "for...in requires a List or Map",
+                            "for...in requires a List, Map, or Range",
                             format!("for {} in ...", var),
                         ));
                         Ty::Unknown
