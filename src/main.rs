@@ -207,31 +207,37 @@ fn main() {
 
     let no_check = args.iter().any(|a| a == "--no-check");
 
-    // almide add <name> --git <url> [--tag <tag>]
-    if args.len() >= 4 && args[1] == "add" {
-        let name = &args[2];
-        let git = args.iter().position(|a| a == "--git")
-            .and_then(|i| args.get(i + 1))
-            .map(|s| s.as_str());
-        let tag = args.iter().position(|a| a == "--tag")
-            .and_then(|i| args.get(i + 1))
-            .map(|s| s.as_str());
-        if let Some(git_url) = git {
-            project::add_dep_to_toml(name, git_url, tag)
-                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
-            // Fetch immediately
-            let dep = project::Dependency {
-                name: name.to_string(),
-                git: git_url.to_string(),
-                tag: tag.map(|s| s.to_string()),
-                branch: None,
-            };
-            project::fetch_dep(&dep)
-                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+    // almide add <spec>
+    // Examples:
+    //   almide add fizzbuzz                           → github.com/almide/fizzbuzz
+    //   almide add O6lvl4/almide-fizzbuzz@v0.1.0      → github.com/O6lvl4/almide-fizzbuzz, tag v0.1.0
+    //   almide add github.com/org/repo                → full URL
+    //   almide add gitlab.com/org/repo                → other hosts
+    //   almide add fizzbuzz --git <url> [--tag <tag>]  → explicit (legacy)
+    if args.len() >= 3 && args[1] == "add" {
+        let spec = &args[2];
+        let (name, git_url, tag) = if args.iter().any(|a| a == "--git") {
+            // Legacy explicit mode
+            let git = args.iter().position(|a| a == "--git")
+                .and_then(|i| args.get(i + 1))
+                .unwrap_or_else(|| { eprintln!("--git requires a URL"); std::process::exit(1); });
+            let tag = args.iter().position(|a| a == "--tag")
+                .and_then(|i| args.get(i + 1))
+                .map(|s| s.to_string());
+            (spec.to_string(), git.to_string(), tag)
         } else {
-            eprintln!("Usage: almide add <name> --git <url> [--tag <tag>]");
-            std::process::exit(1);
-        }
+            project::resolve_package_spec(spec)
+        };
+        project::add_dep_to_toml(&name, &git_url, tag.as_deref())
+            .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+        let dep = project::Dependency {
+            name: name.clone(),
+            git: git_url,
+            tag,
+            branch: None,
+        };
+        project::fetch_dep(&dep)
+            .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
         return;
     }
 

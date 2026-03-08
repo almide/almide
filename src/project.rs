@@ -162,20 +162,75 @@ pub fn fetch_dep(dep: &Dependency) -> Result<PathBuf, String> {
     Ok(dep_dir)
 }
 
-/// Fetch all dependencies and return their source paths
+/// Fetch all dependencies and return their source paths.
+/// Uses the dependency's almide.toml `name` as the module name (not the repo name).
 pub fn fetch_all_deps(project: &Project) -> Result<HashMap<String, PathBuf>, String> {
     let mut paths = HashMap::new();
     for dep in &project.dependencies {
         let path = fetch_dep(dep)?;
+
+        // Read the dependency's almide.toml to get its package name
+        let module_name = {
+            let dep_toml = path.join("almide.toml");
+            if dep_toml.exists() {
+                parse_toml(&dep_toml)
+                    .map(|p| p.package.name)
+                    .unwrap_or_else(|_| dep.name.clone())
+            } else {
+                dep.name.clone()
+            }
+        };
+
         // Look for src/ directory first, then root
         let src_dir = path.join("src");
         if src_dir.is_dir() {
-            paths.insert(dep.name.clone(), src_dir);
+            paths.insert(module_name, src_dir);
         } else {
-            paths.insert(dep.name.clone(), path);
+            paths.insert(module_name, path);
         }
     }
     Ok(paths)
+}
+
+/// Resolve a short package specifier to a full git URL and optional tag.
+///
+/// Rules:
+///   "github.com/org/repo"       → https://github.com/org/repo
+///   "gitlab.com/org/repo"       → https://gitlab.com/org/repo
+///   "org/repo"                  → https://github.com/org/repo
+///   "name"                      → https://github.com/almide/name
+///
+/// @version suffix is split into tag:
+///   "fizzbuzz@v0.1.0"           → (url, Some("v0.1.0"))
+pub fn resolve_package_spec(spec: &str) -> (String, String, Option<String>) {
+    // Split @version
+    let (path, tag) = if let Some(pos) = spec.rfind('@') {
+        (&spec[..pos], Some(spec[pos + 1..].to_string()))
+    } else {
+        (spec, None)
+    };
+
+    let parts: Vec<&str> = path.split('/').collect();
+    let (git_url, name) = match parts.len() {
+        1 => {
+            // "fizzbuzz" → github.com/almide/fizzbuzz
+            (format!("https://github.com/almide/{}", parts[0]), parts[0].to_string())
+        }
+        2 => {
+            // "org/repo" → github.com/org/repo
+            (format!("https://github.com/{}/{}", parts[0], parts[1]), parts[1].to_string())
+        }
+        _ if parts[0].contains('.') => {
+            // "github.com/org/repo" or "gitlab.com/org/repo"
+            let name = parts.last().unwrap().to_string();
+            (format!("https://{}", path), name)
+        }
+        _ => {
+            (format!("https://github.com/{}", path), parts.last().unwrap().to_string())
+        }
+    };
+
+    (name, git_url, tag)
 }
 
 /// Add a dependency to almide.toml
