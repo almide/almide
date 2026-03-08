@@ -4,5 +4,5 @@ import unicodedata
 
 msg = open(sys.argv[1]).read()
 if any(unicodedata.east_asian_width(c) in ('W', 'F') for c in msg):
-    print("ERROR: Commit message contains Japanese characters. Please write in English.")
+    print("ERROR: Commit message must be in English only. Please rewrite in English.")
     sys.exit(1)
