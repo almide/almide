@@ -171,6 +171,14 @@ const __time = {
   to_iso(ts: number): string { const [y, m, d, h, mi, s] = __time._parts(ts); return `${String(y).padStart(4,"0")}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}T${String(h).padStart(2,"0")}:${String(mi).padStart(2,"0")}:${String(s).padStart(2,"0")}Z`; },
   from_parts(y: number, m: number, d: number, h: number, min: number, s: number): number { return Math.floor(Date.UTC(y, m - 1, d, h, min, s) / 1000); },
 };
+const __http = {
+  async serve(port: number, handler: (req: any) => any): Promise<void> { const server = Deno.serve({ port }, async (request: Request) => { const url = new URL(request.url); const method = request.method; const path = url.pathname; const body = method === "POST" || method === "PUT" ? await request.text() : ""; const headers: Record<string, string> = {}; request.headers.forEach((v: string, k: string) => { headers[k] = v; }); const req = { method, path, body, headers }; const res = handler(req); return new Response(res.body, { status: res.status, headers: res.headers || {} }); }); },
+  response(status: number, body: string): any { return { status, body, headers: { "content-type": "text/plain" } }; },
+  json(status: number, body: string): any { return { status, body, headers: { "content-type": "application/json" } }; },
+  with_headers(status: number, body: string, headers: any): any { const h: Record<string, string> = {}; if (headers instanceof Map) { headers.forEach((v: string, k: string) => { h[k] = v; }); } else { Object.assign(h, headers); } return { status, body, headers: h }; },
+  async get(url: string): Promise<string> { const r = await fetch(url); if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); },
+  async post(url: string, body: string): Promise<string> { const r = await fetch(url, { method: "POST", body, headers: { "content-type": "application/json" } }); if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); },
+};
 function __bigop(op: string, a: any, b: any): any {
   if (typeof a === "bigint" || typeof b === "bigint") {
     const ba = typeof a === "bigint" ? a : BigInt(a);
@@ -215,9 +223,9 @@ function __deep_eq(a: any, b: any): boolean {
   }
   return false;
 }
-function assert_eq<T>(a: T, b: T): void { if (!__deep_eq(a, b)) throw new Error(`assert_eq: ${JSON.stringify(a)} !== ${JSON.stringify(b)}`); }
-function assert_ne<T>(a: T, b: T): void { if (a === b) throw new Error(`assert_ne: ${a} === ${b}`); }
-function assert(c: boolean): void { if (!c) throw new Error("assertion failed"); }
+function assert_eq<T>(a: T, b: T, msg?: string): void { if (!__deep_eq(a, b)) { const m = msg ? msg + ": " : ""; throw new Error(`${m}assert_eq failed\n  expected: ${JSON.stringify(b)}\n       got: ${JSON.stringify(a)}`); } }
+function assert_ne<T>(a: T, b: T, msg?: string): void { if (__deep_eq(a, b)) { const m = msg ? msg + ": " : ""; throw new Error(`${m}assert_ne failed\n  both are: ${JSON.stringify(a)}`); } }
+function assert(c: boolean, msg?: string): void { if (!c) throw new Error(msg ? msg : "assertion failed"); }
 function unwrap_or<T>(x: T | null, d: T): T { return x !== null ? x : d; }
 function __concat(a: any, b: any): any { return typeof a === "string" ? a + b : [...a, ...b]; }
 function __assert_throws(fn: () => any, expectedMsg: string): void {
@@ -400,6 +408,14 @@ const __time = {
   to_iso(ts) { const [y, m, d, h, mi, s] = __time._parts(ts); return `${String(y).padStart(4,"0")}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}T${String(h).padStart(2,"0")}:${String(mi).padStart(2,"0")}:${String(s).padStart(2,"0")}Z`; },
   from_parts(y, m, d, h, min, s) { return Math.floor(Date.UTC(y, m - 1, d, h, min, s) / 1000); },
 };
+const __http = {
+  async serve(port, handler) { const http = require("http"); const server = http.createServer(async (req, res) => { let body = ""; req.on("data", (c) => { body += c; }); req.on("end", () => { const r = handler({ method: req.method, path: req.url, body, headers: req.headers || {} }); const headers = r.headers || {}; res.writeHead(r.status, headers); res.end(r.body); }); }); server.listen(port); },
+  response(status, body) { return { status, body, headers: { "content-type": "text/plain" } }; },
+  json(status, body) { return { status, body, headers: { "content-type": "application/json" } }; },
+  with_headers(status, body, headers) { const h = {}; if (headers instanceof Map) { headers.forEach((v, k) => { h[k] = v; }); } else { Object.assign(h, headers); } return { status, body, headers: h }; },
+  async get(url) { return new Promise((resolve, reject) => { const m = url.startsWith("https") ? require("https") : require("http"); m.get(url, (r) => { let d = ""; r.on("data", (c) => d += c); r.on("end", () => r.statusCode >= 400 ? reject(new Error("HTTP " + r.statusCode)) : resolve(d)); }).on("error", reject); }); },
+  async post(url, body) { return new Promise((resolve, reject) => { const u = new URL(url); const m = u.protocol === "https:" ? require("https") : require("http"); const req = m.request({ hostname: u.hostname, port: u.port, path: u.pathname + u.search, method: "POST", headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body) } }, (r) => { let d = ""; r.on("data", (c) => d += c); r.on("end", () => r.statusCode >= 400 ? reject(new Error("HTTP " + r.statusCode)) : resolve(d)); }); req.on("error", reject); req.write(body); req.end(); }); },
+};
 function __bigop(op, a, b) {
   if (typeof a === "bigint" || typeof b === "bigint") {
     const ba = typeof a === "bigint" ? a : BigInt(a);
@@ -444,9 +460,9 @@ function __deep_eq(a, b) {
   }
   return false;
 }
-function assert_eq(a, b) { if (!__deep_eq(a, b)) throw new Error("assert_eq: " + JSON.stringify(a) + " !== " + JSON.stringify(b)); }
-function assert_ne(a, b) { if (a === b) throw new Error("assert_ne: " + a + " === " + b); }
-function assert(c) { if (!c) throw new Error("assertion failed"); }
+function assert_eq(a, b, msg) { if (!__deep_eq(a, b)) { var m = msg ? msg + ": " : ""; throw new Error(m + "assert_eq failed\n  expected: " + JSON.stringify(b) + "\n       got: " + JSON.stringify(a)); } }
+function assert_ne(a, b, msg) { if (__deep_eq(a, b)) { var m = msg ? msg + ": " : ""; throw new Error(m + "assert_ne failed\n  both are: " + JSON.stringify(a)); } }
+function assert(c, msg) { if (!c) throw new Error(msg ? msg : "assertion failed"); }
 function unwrap_or(x, d) { return x !== null ? x : d; }
 function __concat(a, b) { return typeof a === "string" ? a + b : [...a, ...b]; }
 function __assert_throws(fn, expectedMsg) {
