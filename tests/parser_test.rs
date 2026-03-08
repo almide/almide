@@ -20,7 +20,7 @@ fn parse_expr(input: &str) -> Expr {
 fn parse_module() {
     let prog = parse("module app");
     assert!(prog.module.is_some());
-    if let Some(Decl::Module { path }) = &prog.module {
+    if let Some(Decl::Module { path, .. }) = &prog.module {
         assert_eq!(path, &["app"]);
     } else {
         panic!("expected module decl");
@@ -183,7 +183,7 @@ fn parse_pipe() {
 #[test]
 fn parse_tuple_expr() {
     let expr = parse_expr("(1, 2, 3)");
-    if let Expr::Tuple { elements } = &expr {
+    if let Expr::Tuple { elements, .. } = &expr {
         assert_eq!(elements.len(), 3);
     } else {
         panic!("expected tuple, got {:?}", expr);
@@ -219,7 +219,7 @@ fn parse_string_interpolation() {
 #[test]
 fn parse_list_literal() {
     let expr = parse_expr("[1, 2, 3]");
-    if let Expr::List { elements } = &expr {
+    if let Expr::List { elements, .. } = &expr {
         assert_eq!(elements.len(), 3);
     } else {
         panic!("expected list");
@@ -229,7 +229,7 @@ fn parse_list_literal() {
 #[test]
 fn parse_record_literal() {
     let expr = parse_expr("{ name: \"Alice\", age: 30 }");
-    if let Expr::Record { fields } = &expr {
+    if let Expr::Record { fields, .. } = &expr {
         assert_eq!(fields.len(), 2);
         assert_eq!(fields[0].name, "name");
         assert_eq!(fields[1].name, "age");
@@ -305,7 +305,7 @@ fn parse_binary_operators() {
 #[test]
 fn parse_unit_literal() {
     let expr = parse_expr("()");
-    assert!(matches!(expr, Expr::Unit));
+    assert!(matches!(expr, Expr::Unit { .. }));
 }
 
 #[test]
@@ -314,4 +314,70 @@ fn parse_ok_err() {
     assert!(matches!(ok, Expr::Ok { .. }));
     let err = parse_expr("err(\"bad\")");
     assert!(matches!(err, Expr::Err { .. }));
+}
+
+// ---- Multi-error recovery ----
+
+#[test]
+fn parse_recovers_from_errors() {
+    let input = "module app\nfn good() -> Int = 1\nfn bad( -> Int = 2\nfn also_good() -> Int = 3";
+    let tokens = Lexer::tokenize(input);
+    let mut parser = Parser::new(tokens);
+    let prog = parser.parse().expect("should return partial program");
+    // Should have recovered and parsed at least 2 good declarations
+    assert!(prog.decls.len() >= 2, "expected at least 2 decls, got {}", prog.decls.len());
+    // Should have collected errors
+    assert!(!parser.errors.is_empty(), "expected parse errors to be collected");
+}
+
+#[test]
+fn parse_multiple_errors() {
+    let input = "module app\nfn a( -> Int = 1\nfn b( -> Int = 2\nfn c() -> Int = 3";
+    let tokens = Lexer::tokenize(input);
+    let mut parser = Parser::new(tokens);
+    let prog = parser.parse().expect("should return partial program");
+    // Should have collected 2 errors
+    assert!(parser.errors.len() >= 2, "expected at least 2 errors, got {}", parser.errors.len());
+    // Should still parse the valid declaration
+    assert!(!prog.decls.is_empty(), "expected at least 1 valid decl");
+}
+
+#[test]
+fn parse_no_errors_for_valid_program() {
+    let tokens = Lexer::tokenize("module app\nfn a() -> Int = 1\nfn b() -> Int = 2");
+    let mut parser = Parser::new(tokens);
+    let _prog = parser.parse().expect("parse failed");
+    assert!(parser.errors.is_empty());
+}
+
+// ---- Span information ----
+
+#[test]
+fn decl_spans_are_present() {
+    let prog = parse("module app\nimport fs\nfn add(a: Int, b: Int) -> Int = a + b\ntype Color =\n  | Red\n  | Blue\ntest \"basic\" {\n  assert(true)\n}");
+    // module
+    if let Some(Decl::Module { span, .. }) = &prog.module {
+        let s = span.expect("module should have span");
+        assert_eq!(s.line, 1);
+    }
+    // import
+    if let Decl::Import { span, .. } = &prog.imports[0] {
+        let s = span.expect("import should have span");
+        assert_eq!(s.line, 2);
+    }
+    // fn
+    if let Decl::Fn { span, .. } = &prog.decls[0] {
+        let s = span.expect("fn should have span");
+        assert_eq!(s.line, 3);
+    }
+    // type
+    if let Decl::Type { span, .. } = &prog.decls[1] {
+        let s = span.expect("type should have span");
+        assert_eq!(s.line, 4);
+    }
+    // test
+    if let Decl::Test { span, .. } = &prog.decls[2] {
+        let s = span.expect("test should have span");
+        assert_eq!(s.line, 7);
+    }
 }

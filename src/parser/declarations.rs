@@ -6,12 +6,14 @@ impl Parser {
     // ---- Module & Import ----
 
     pub(crate) fn parse_module_decl(&mut self) -> Result<Decl, String> {
+        let span = self.current_span();
         self.expect(TokenType::Module)?;
         let path = self.parse_module_path()?;
-        Ok(Decl::Module { path })
+        Ok(Decl::Module { path, span: Some(span) })
     }
 
     pub(crate) fn parse_import_decl(&mut self) -> Result<Decl, String> {
+        let span = self.current_span();
         self.expect(TokenType::Import)?;
         let path = self.parse_module_path()?;
 
@@ -28,10 +30,10 @@ impl Parser {
                 names.push(self.expect_any_name()?);
             }
             self.expect(TokenType::RBrace)?;
-            return Ok(Decl::Import { path, names: Some(names) });
+            return Ok(Decl::Import { path, names: Some(names), span: Some(span) });
         }
 
-        Ok(Decl::Import { path, names: None })
+        Ok(Decl::Import { path, names: None, span: Some(span) })
     }
 
     fn parse_module_path(&mut self) -> Result<Vec<String>, String> {
@@ -80,6 +82,7 @@ impl Parser {
     }
 
     fn parse_type_decl(&mut self) -> Result<Decl, String> {
+        let span = self.current_span();
         self.expect(TokenType::Type)?;
         let name = self.expect_type_name()?;
         let _generics = self.try_parse_generic_params()?;
@@ -98,10 +101,11 @@ impl Parser {
             }
             deriving = Some(d);
         }
-        Ok(Decl::Type { name, ty, deriving })
+        Ok(Decl::Type { name, ty, deriving, span: Some(span) })
     }
 
     fn parse_trait_decl(&mut self) -> Result<Decl, String> {
+        let span = self.current_span();
         self.expect(TokenType::Trait)?;
         let name = self.expect_type_name()?;
         let _generics = self.try_parse_generic_params()?;
@@ -113,7 +117,7 @@ impl Parser {
             self.skip_newlines();
         }
         self.expect(TokenType::RBrace)?;
-        Ok(Decl::Trait { name, methods })
+        Ok(Decl::Trait { name, methods, span: Some(span) })
     }
 
     fn parse_trait_method(&mut self) -> Result<serde_json::Value, String> {
@@ -163,6 +167,7 @@ impl Parser {
     }
 
     fn parse_impl_decl(&mut self) -> Result<Decl, String> {
+        let span = self.current_span();
         self.expect(TokenType::Impl)?;
         let trait_name = self.expect_type_name()?;
         let _generics = self.try_parse_generic_params()?;
@@ -183,10 +188,12 @@ impl Parser {
             trait_: trait_name,
             for_: for_name,
             methods,
+            span: Some(span),
         })
     }
 
     pub(crate) fn parse_fn_decl(&mut self) -> Result<Decl, String> {
+        let span = self.current_span();
         if self.check(TokenType::Pub) {
             self.advance();
         }
@@ -216,12 +223,12 @@ impl Parser {
             TypeExpr::Generic { name, .. } if name == "Result"
         );
         if effect && returns_result {
-            if let Expr::Block { ref stmts, ref expr } = body {
+            if let Expr::Block { ref stmts, ref expr, .. } = body {
                 let (effective_stmts, effective_expr) = if expr.is_none() && !stmts.is_empty() {
                     // Find last non-comment stmt
                     let last_non_comment = stmts.iter().rposition(|s| !matches!(s, Stmt::Comment { .. }));
                     if let Some(idx) = last_non_comment {
-                        if let Stmt::Expr { expr: last_expr } = &stmts[idx] {
+                        if let Stmt::Expr { expr: last_expr, .. } = &stmts[idx] {
                             let mut remaining = stmts[..idx].to_vec();
                             remaining.extend_from_slice(&stmts[idx+1..]);
                             (remaining, Some(Box::new(last_expr.clone())))
@@ -236,21 +243,23 @@ impl Parser {
                 };
                 let needs_ok = match &effective_expr {
                     None => true,
-                    Some(e) => matches!(e.as_ref(), Expr::Unit),
+                    Some(e) => matches!(e.as_ref(), Expr::Unit { .. }),
                 };
                 if needs_ok {
                     let mut new_stmts = effective_stmts;
                     if let Some(trailing) = effective_expr {
-                        new_stmts.push(Stmt::Expr { expr: *trailing });
+                        new_stmts.push(Stmt::Expr { expr: *trailing, span: None });
                     }
                     body = Expr::Block {
                         stmts: new_stmts,
-                        expr: Some(Box::new(Expr::Ok { expr: Box::new(Expr::Unit) })),
+                        expr: Some(Box::new(Expr::Ok { expr: Box::new(Expr::Unit { span: None, resolved_type: None }), span: None, resolved_type: None })),
+                        span: None, resolved_type: None,
                     };
                 } else if expr.is_none() {
                     body = Expr::Block {
                         stmts: effective_stmts,
                         expr: effective_expr,
+                        span: None, resolved_type: None,
                     };
                 }
             }
@@ -263,21 +272,24 @@ impl Parser {
             params,
             return_type,
             body,
+            span: Some(span),
         })
     }
 
     fn parse_strict_decl(&mut self) -> Result<Decl, String> {
+        let span = self.current_span();
         self.expect(TokenType::Strict)?;
         let mode = self.expect_ident()?;
-        Ok(Decl::Strict { mode })
+        Ok(Decl::Strict { mode, span: Some(span) })
     }
 
     fn parse_test_decl(&mut self) -> Result<Decl, String> {
+        let span = self.current_span();
         self.expect(TokenType::Test)?;
         let name = self.current().value.clone();
         self.expect(TokenType::String)?;
         let body = self.parse_brace_expr()?;
-        Ok(Decl::Test { name, body })
+        Ok(Decl::Test { name, body, span: Some(span) })
     }
 
     pub(crate) fn parse_param_list(&mut self) -> Result<Vec<Param>, String> {

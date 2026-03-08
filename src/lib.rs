@@ -1,9 +1,11 @@
 pub mod ast;
+pub mod check;
 pub mod emit_common;
 pub mod emit_ts;
 pub mod emit_ts_runtime;
 pub mod lexer;
 pub mod parser;
+pub mod project;
 pub mod stdlib;
 pub mod types;
 pub mod diagnostic;

@@ -1,7 +1,13 @@
 use crate::lexer::{Token, TokenType};
+use crate::ast::Span;
 use super::Parser;
 
 impl Parser {
+    pub(crate) fn current_span(&self) -> Span {
+        let tok = self.current();
+        Span { line: tok.line, col: tok.col }
+    }
+
     pub(crate) fn current(&self) -> &Token {
         if self.pos < self.tokens.len() {
             &self.tokens[self.pos]

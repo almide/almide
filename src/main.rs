@@ -52,7 +52,7 @@ fn compile(file: &str, no_check: bool) -> String {
 }
 
 fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::EmitOptions) -> String {
-    let program = parse_file(file);
+    let mut program = parse_file(file);
 
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
@@ -78,7 +78,7 @@ fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::Em
         for (name, mod_prog, pkg_id) in &resolved.modules {
             checker.register_module(name, mod_prog, pkg_id.as_ref());
         }
-        let diagnostics = checker.check_program(&program);
+        let diagnostics = checker.check_program(&mut program);
         let errors: Vec<_> = diagnostics.iter()
             .filter(|d| d.level == diagnostic::Level::Error)
             .collect();
@@ -158,8 +158,22 @@ fn main() {
     }
 
     if args.len() >= 2 && args[1] == "test" {
-        let file = if args.len() >= 3 { &args[2] } else { "" };
-        cli::cmd_test(file, no_check);
+        let mut file = "";
+        let mut run_filter = None;
+        let mut i = 2;
+        while i < args.len() {
+            if args[i] == "-run" || args[i] == "--run" {
+                if i + 1 < args.len() {
+                    run_filter = Some(args[i + 1].clone());
+                    i += 2;
+                    continue;
+                }
+            } else if !args[i].starts_with('-') && file.is_empty() {
+                file = &args[i];
+            }
+            i += 1;
+        }
+        cli::cmd_test(file, no_check, run_filter.as_deref());
         return;
     }
 

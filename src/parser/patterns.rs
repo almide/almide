@@ -54,15 +54,17 @@ impl Parser {
             return Ok(Pattern::Literal { value: Box::new(expr) });
         }
         if self.check(TokenType::True) {
+            let span = Some(self.current_span());
             self.advance();
             return Ok(Pattern::Literal {
-                value: Box::new(Expr::Bool { value: true }),
+                value: Box::new(Expr::Bool { value: true, span, resolved_type: None }),
             });
         }
         if self.check(TokenType::False) {
+            let span = Some(self.current_span());
             self.advance();
             return Ok(Pattern::Literal {
-                value: Box::new(Expr::Bool { value: false }),
+                value: Box::new(Expr::Bool { value: false, span, resolved_type: None }),
             });
         }
         if self.check(TokenType::TypeName) {

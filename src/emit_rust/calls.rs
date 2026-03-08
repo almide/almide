@@ -9,7 +9,7 @@ impl Emitter {
 
     /// Extract lambda parameter names and body code from a lambda expression or function reference.
     pub(crate) fn inline_lambda(&self, lambda_arg: &Expr, arity: usize) -> (Vec<String>, String) {
-        if let Expr::Lambda { params, body } = lambda_arg {
+        if let Expr::Lambda { params, body, .. } = lambda_arg {
             let names: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
             let body_str = self.gen_expr(body);
             (names, body_str)
@@ -25,8 +25,8 @@ impl Emitter {
 
     pub(crate) fn gen_call(&self, callee: &Expr, args: &[Expr]) -> String {
         // Handle module calls
-        if let Expr::Member { object, field } = callee {
-            if let Expr::Ident { name: module } = object.as_ref() {
+        if let Expr::Member { object, field, .. } = callee {
+            if let Expr::Ident { name: module, .. } = object.as_ref() {
                 let is_stdlib = stdlib::is_stdlib_module(module);
                 let resolved_mod = self.module_aliases.get(module.as_str())
                     .cloned()
@@ -45,7 +45,7 @@ impl Emitter {
         }
 
         // Handle built-in functions
-        if let Expr::Ident { name } = callee {
+        if let Expr::Ident { name, .. } = callee {
             match name.as_str() {
                 "println" => {
                     let arg = self.gen_expr(&args[0]);
@@ -62,17 +62,34 @@ impl Emitter {
                 "assert_eq" => {
                     let a = self.gen_expr(&args[0]);
                     let b = self.gen_expr(&args[1]);
+                    let msg = if args.len() >= 3 { Some(self.gen_expr(&args[2])) } else { None };
                     // If one side is an empty list, use .is_empty() check instead
-                    if matches!(&args[1], Expr::List { elements } if elements.is_empty()) {
+                    if matches!(&args[1], Expr::List { elements, .. } if elements.is_empty()) {
                         return format!("assert!(({}).is_empty(), \"expected empty list but got {{:?}}\", {})", a, a);
                     }
-                    if matches!(&args[0], Expr::List { elements } if elements.is_empty()) {
+                    if matches!(&args[0], Expr::List { elements, .. } if elements.is_empty()) {
                         return format!("assert!(({}).is_empty(), \"expected empty list but got {{:?}}\", {})", b, b);
+                    }
+                    if let Some(m) = msg {
+                        return format!("assert_eq!({}, {}, \"{{}}\", {})", a, b, m);
                     }
                     return format!("assert_eq!({}, {})", a, b);
                 }
+                "assert_ne" => {
+                    let a = self.gen_expr(&args[0]);
+                    let b = self.gen_expr(&args[1]);
+                    let msg = if args.len() >= 3 { Some(self.gen_expr(&args[2])) } else { None };
+                    if let Some(m) = msg {
+                        return format!("assert_ne!({}, {}, \"{{}}\", {})", a, b, m);
+                    }
+                    return format!("assert_ne!({}, {})", a, b);
+                }
                 "assert" => {
                     let a = self.gen_expr(&args[0]);
+                    let msg = if args.len() >= 2 { Some(self.gen_expr(&args[1])) } else { None };
+                    if let Some(m) = msg {
+                        return format!("assert!({}, \"{{}}\", {})", a, m);
+                    }
                     return format!("assert!({})", a);
                 }
                 "unwrap_or" => {
@@ -89,7 +106,7 @@ impl Emitter {
         let call = format!("{}({})", callee_str, args_str.join(", "));
         // Auto-propagate ? for effect fn calls within effect context (not in tests, not suppressed)
         if self.in_effect && !self.in_test && !self.skip_auto_q.get() {
-            if let Expr::Ident { name } = callee {
+            if let Expr::Ident { name, .. } = callee {
                 if self.effect_fns.contains(name) {
                     return format!("{}?", call);
                 }
@@ -97,7 +114,7 @@ impl Emitter {
         }
         // In do blocks, auto-unwrap calls to Result-returning functions
         if self.in_do_block.get() {
-            if let Expr::Ident { name } = callee {
+            if let Expr::Ident { name, .. } = callee {
                 if self.result_fns.contains(name) || self.effect_fns.contains(name) {
                     return format!("{}?", call);
                 }

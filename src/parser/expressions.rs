@@ -10,6 +10,7 @@ impl Parser {
     fn parse_pipe(&mut self) -> Result<Expr, String> {
         let mut left = self.parse_or()?;
         while self.check(TokenType::PipeArrow) {
+            let span = Some(self.current_span());
             self.advance();
             self.skip_newlines();
             if self.check(TokenType::Match) && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::LBrace) {
@@ -30,12 +31,16 @@ impl Parser {
                 left = Expr::Match {
                     subject: Box::new(left),
                     arms,
+                    span,
+                    resolved_type: None,
                 };
             } else {
                 let right = self.parse_or()?;
                 left = Expr::Pipe {
                     left: Box::new(left),
                     right: Box::new(right),
+                    span,
+                    resolved_type: None,
                 };
             }
         }
@@ -45,6 +50,7 @@ impl Parser {
     pub(crate) fn parse_or(&mut self) -> Result<Expr, String> {
         let mut left = self.parse_and()?;
         while self.check(TokenType::Or) {
+            let span = Some(self.current_span());
             self.advance();
             self.skip_newlines();
             let right = self.parse_and()?;
@@ -52,6 +58,8 @@ impl Parser {
                 op: "or".to_string(),
                 left: Box::new(left),
                 right: Box::new(right),
+                span,
+                resolved_type: None,
             };
         }
         Ok(left)
@@ -60,6 +68,7 @@ impl Parser {
     fn parse_and(&mut self) -> Result<Expr, String> {
         let mut left = self.parse_comparison()?;
         while self.check(TokenType::And) {
+            let span = Some(self.current_span());
             self.advance();
             self.skip_newlines();
             let right = self.parse_comparison()?;
@@ -67,6 +76,8 @@ impl Parser {
                 op: "and".to_string(),
                 left: Box::new(left),
                 right: Box::new(right),
+                span,
+                resolved_type: None,
             };
         }
         Ok(left)
@@ -81,6 +92,7 @@ impl Parser {
             || self.check(TokenType::LtEq)
             || self.check(TokenType::GtEq)
         {
+            let span = Some(self.current_span());
             let op = self.current().value.clone();
             self.advance();
             self.skip_newlines();
@@ -89,6 +101,8 @@ impl Parser {
                 op,
                 left: Box::new(left),
                 right: Box::new(right),
+                span,
+                resolved_type: None,
             };
         }
         Ok(left)
@@ -97,6 +111,7 @@ impl Parser {
     fn parse_range(&mut self) -> Result<Expr, String> {
         let left = self.parse_add_sub()?;
         if self.check(TokenType::DotDot) {
+            let span = Some(self.current_span());
             self.advance();
             self.skip_newlines();
             let right = self.parse_add_sub()?;
@@ -104,9 +119,12 @@ impl Parser {
                 start: Box::new(left),
                 end: Box::new(right),
                 inclusive: false,
+                span,
+                resolved_type: None,
             });
         }
         if self.check(TokenType::DotDotEq) {
+            let span = Some(self.current_span());
             self.advance();
             self.skip_newlines();
             let right = self.parse_add_sub()?;
@@ -114,6 +132,8 @@ impl Parser {
                 start: Box::new(left),
                 end: Box::new(right),
                 inclusive: true,
+                span,
+                resolved_type: None,
             });
         }
         Ok(left)
@@ -122,6 +142,7 @@ impl Parser {
     fn parse_add_sub(&mut self) -> Result<Expr, String> {
         let mut left = self.parse_mul_div()?;
         while self.check(TokenType::Plus) || self.check(TokenType::Minus) || self.check(TokenType::PlusPlus) {
+            let span = Some(self.current_span());
             let op = self.current().value.clone();
             self.advance();
             self.skip_newlines();
@@ -130,6 +151,8 @@ impl Parser {
                 op,
                 left: Box::new(left),
                 right: Box::new(right),
+                span,
+                resolved_type: None,
             };
         }
         Ok(left)
@@ -138,6 +161,7 @@ impl Parser {
     fn parse_mul_div(&mut self) -> Result<Expr, String> {
         let mut left = self.parse_unary()?;
         while self.check(TokenType::Star) || self.check(TokenType::Slash) || self.check(TokenType::Percent) || self.check(TokenType::Caret) {
+            let span = Some(self.current_span());
             let op = self.current().value.clone();
             self.advance();
             self.skip_newlines();
@@ -146,6 +170,8 @@ impl Parser {
                 op,
                 left: Box::new(left),
                 right: Box::new(right),
+                span,
+                resolved_type: None,
             };
         }
         Ok(left)
@@ -153,19 +179,25 @@ impl Parser {
 
     fn parse_unary(&mut self) -> Result<Expr, String> {
         if self.check(TokenType::Minus) {
+            let span = Some(self.current_span());
             self.advance();
             let operand = self.parse_unary()?;
             return Ok(Expr::Unary {
                 op: "-".to_string(),
                 operand: Box::new(operand),
+                span,
+                resolved_type: None,
             });
         }
         if self.check(TokenType::Not) {
+            let span = Some(self.current_span());
             self.advance();
             let operand = self.parse_unary()?;
             return Ok(Expr::Unary {
                 op: "not".to_string(),
                 operand: Box::new(operand),
+                span,
+                resolved_type: None,
             });
         }
         self.parse_postfix()
@@ -175,19 +207,25 @@ impl Parser {
         let mut expr = self.parse_primary()?;
         loop {
             if self.check(TokenType::Dot) {
+                let span = Some(self.current_span());
                 self.advance();
                 let field = self.expect_any_name()?;
                 expr = Expr::Member {
                     object: Box::new(expr),
                     field,
+                    span,
+                    resolved_type: None,
                 };
             } else if self.check(TokenType::LParen) {
+                let span = Some(self.current_span());
                 self.advance();
                 let args = self.parse_call_args()?;
                 self.expect(TokenType::RParen)?;
                 expr = Expr::Call {
                     callee: Box::new(expr),
                     args,
+                    span,
+                    resolved_type: None,
                 };
             } else {
                 break;
@@ -217,8 +255,9 @@ impl Parser {
 
     fn parse_one_call_arg(&mut self, args: &mut Vec<Expr>) -> Result<(), String> {
         if self.check(TokenType::Underscore) {
+            let span = Some(self.current_span());
             self.advance();
-            args.push(Expr::Placeholder);
+            args.push(Expr::Placeholder { span, resolved_type: None });
             return Ok(());
         }
         if self.check(TokenType::Ident) && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Colon) {

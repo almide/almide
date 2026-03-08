@@ -3,9 +3,23 @@ use crate::types::{Ty, VariantPayload};
 use super::{Checker, err};
 
 impl Checker {
-    pub(crate) fn check_stmt(&mut self, stmt: &ast::Stmt) {
+    pub(crate) fn check_stmt(&mut self, stmt: &mut ast::Stmt) {
+        // Update current line from statement span for better error positions
+        let stmt_line = match stmt {
+            ast::Stmt::Let { span, .. }
+            | ast::Stmt::LetDestructure { span, .. }
+            | ast::Stmt::Var { span, .. }
+            | ast::Stmt::Assign { span, .. }
+            | ast::Stmt::Guard { span, .. }
+            | ast::Stmt::Expr { span, .. } => span.map(|s| s.line),
+            ast::Stmt::Comment { .. } => None,
+        };
+        let prev_line = self.current_decl_line;
+        if let Some(line) = stmt_line {
+            self.current_decl_line = Some(line);
+        }
         match stmt {
-            ast::Stmt::Let { name, ty, value } => {
+            ast::Stmt::Let { name, ty, value, .. } => {
                 let vt = self.check_expr(value);
                 let vt = if self.env.in_do_block {
                     match vt {
@@ -26,7 +40,7 @@ impl Checker {
                 } else { vt };
                 self.env.define_var(name, dt);
             }
-            ast::Stmt::Var { name, ty, value } => {
+            ast::Stmt::Var { name, ty, value, .. } => {
                 let vt = self.check_expr(value);
                 let dt = if let Some(te) = ty {
                     let t = self.resolve_type_expr(te);
@@ -41,12 +55,12 @@ impl Checker {
                 } else { vt };
                 self.env.define_var(name, dt);
             }
-            ast::Stmt::LetDestructure { fields, value } => {
+            ast::Stmt::LetDestructure { fields, value, .. } => {
                 let vt = self.check_expr(value);
                 let resolved = self.env.resolve_named(&vt);
                 match &resolved {
                     Ty::Record { fields: rec_fields } => {
-                        for fname in fields {
+                        for fname in &**fields {
                             let ft = rec_fields.iter().find(|(n, _)| n == fname)
                                 .map(|(_, t)| t.clone())
                                 .unwrap_or_else(|| {
@@ -72,7 +86,7 @@ impl Checker {
                     }
                 }
             }
-            ast::Stmt::Assign { name, value } => {
+            ast::Stmt::Assign { name, value, .. } => {
                 let vt = self.check_expr(value);
                 if let Some(var_ty) = self.env.lookup_var(name).cloned() {
                     if !var_ty.compatible(&vt) {
@@ -84,7 +98,7 @@ impl Checker {
                     }
                 }
             }
-            ast::Stmt::Guard { cond, else_ } => {
+            ast::Stmt::Guard { cond, else_, .. } => {
                 let ct = self.check_expr(cond);
                 if !ct.compatible(&Ty::Bool) {
                     self.push_diagnostic(err(
@@ -94,9 +108,10 @@ impl Checker {
                 }
                 self.check_expr(else_);
             }
-            ast::Stmt::Expr { expr } => { self.check_expr(expr); }
+            ast::Stmt::Expr { expr, .. } => { self.check_expr(expr); }
             ast::Stmt::Comment { .. } => {}
         }
+        self.current_decl_line = prev_line;
     }
 
     pub(crate) fn check_pattern(&mut self, pattern: &ast::Pattern, subject_ty: &Ty) {

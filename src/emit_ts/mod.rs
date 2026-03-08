@@ -22,8 +22,8 @@ impl TsEmitter {
 
     pub(crate) fn is_unit(expr: &Expr) -> bool {
         match expr {
-            Expr::Unit => true,
-            Expr::Ok { expr } | Expr::Some { expr } => matches!(expr.as_ref(), Expr::Unit),
+            Expr::Unit { .. } => true,
+            Expr::Ok { expr, .. } | Expr::Some { expr, .. } => matches!(expr.as_ref(), Expr::Unit { .. }),
             _ => false,
         }
     }

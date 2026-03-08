@@ -41,31 +41,17 @@ impl Checker {
         self.source_text = Some(text.to_string());
     }
 
-    /// Find the line number of a declaration by searching the source text.
-    fn find_decl_line(&self, decl: &ast::Decl) -> Option<usize> {
-        let source = self.source_text.as_ref()?;
+    /// Extract the line number from a declaration's span.
+    fn decl_line(&self, decl: &ast::Decl) -> Option<usize> {
         match decl {
-            ast::Decl::Fn { name, effect, .. } => {
-                let prefix = if effect.unwrap_or(false) { "effect fn " } else { "fn " };
-                let pattern = format!("{}{}", prefix, name);
-                for (i, line) in source.lines().enumerate() {
-                    let trimmed = line.trim();
-                    if trimmed.contains(&pattern) {
-                        return Some(i + 1);
-                    }
-                }
-                None
-            }
-            ast::Decl::Test { name, .. } => {
-                let pattern = format!("test \"{}\"", name);
-                for (i, line) in source.lines().enumerate() {
-                    if line.contains(&pattern) {
-                        return Some(i + 1);
-                    }
-                }
-                None
-            }
-            _ => None,
+            ast::Decl::Fn { span, .. }
+            | ast::Decl::Test { span, .. }
+            | ast::Decl::Type { span, .. }
+            | ast::Decl::Module { span, .. }
+            | ast::Decl::Import { span, .. }
+            | ast::Decl::Trait { span, .. }
+            | ast::Decl::Impl { span, .. }
+            | ast::Decl::Strict { span, .. } => span.map(|s| s.line),
         }
     }
 
@@ -136,9 +122,9 @@ impl Checker {
         }
     }
 
-    pub fn check_program(&mut self, prog: &ast::Program) -> Vec<Diagnostic> {
+    pub fn check_program(&mut self, prog: &mut ast::Program) -> Vec<Diagnostic> {
         self.register_decls(&prog.decls, None);
-        for decl in &prog.decls {
+        for decl in prog.decls.iter_mut() {
             self.check_decl(decl);
         }
 
@@ -194,8 +180,8 @@ impl Checker {
         None
     }
 
-    pub(crate) fn check_decl(&mut self, decl: &ast::Decl) {
-        self.current_decl_line = self.find_decl_line(decl);
+    pub(crate) fn check_decl(&mut self, decl: &mut ast::Decl) {
+        self.current_decl_line = self.decl_line(decl);
         match decl {
             ast::Decl::Fn { name, params, return_type, body, effect, .. } => {
                 self.env.push_scope();
@@ -363,8 +349,8 @@ impl Checker {
             ast::Pattern::Literal { value } => {
                 // For Bool exhaustiveness: track true/false literals
                 match value.as_ref() {
-                    ast::Expr::Bool { value: true } => { covered.insert("true".to_string()); }
-                    ast::Expr::Bool { value: false } => { covered.insert("false".to_string()); }
+                    ast::Expr::Bool { value: true, .. } => { covered.insert("true".to_string()); }
+                    ast::Expr::Bool { value: false, .. } => { covered.insert("false".to_string()); }
                     _ => {}
                 }
             }

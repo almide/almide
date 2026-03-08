@@ -90,10 +90,10 @@ impl Emitter {
 
     fn gen_pattern_literal(&self, expr: &Expr) -> String {
         match expr {
-            Expr::String { value } => format!("\"{}\"", value),
+            Expr::String { value, .. } => format!("\"{}\"", value),
             Expr::Int { raw, .. } => format!("{}i64", raw),
-            Expr::Float { value } => value.to_string(),
-            Expr::Bool { value } => value.to_string(),
+            Expr::Float { value, .. } => value.to_string(),
+            Expr::Bool { value, .. } => value.to_string(),
             _ => self.gen_expr(expr),
         }
     }
@@ -111,7 +111,7 @@ impl Emitter {
     }
 
     fn is_ok_unit(&self, expr: &Expr) -> bool {
-        matches!(expr, Expr::Ok { expr } if matches!(expr.as_ref(), Expr::Unit))
+        matches!(expr, Expr::Ok { expr, .. } if matches!(expr.as_ref(), Expr::Unit { .. }))
     }
 
     pub(crate) fn gen_do_block(&self, stmts: &[Stmt], final_expr: Option<&Expr>) -> String {
@@ -124,9 +124,9 @@ impl Emitter {
             let mut lines = vec!["{ loop {".to_string()];
             for stmt in stmts {
                 match stmt {
-                    Stmt::Guard { cond, else_ } => {
+                    Stmt::Guard { cond, else_, .. } => {
                         let c = self.gen_expr(cond);
-                        if matches!(else_, Expr::Unit) || self.is_ok_unit(else_) {
+                        if matches!(else_, Expr::Unit { .. }) || self.is_ok_unit(else_) {
                             lines.push(format!("    if !({}) {{ break; }}", c));
                         } else {
                             let e = self.gen_expr(else_);
@@ -181,7 +181,7 @@ impl Emitter {
             Stmt::Let { name, value, .. } => {
                 // Use gen_arg to clone Ident values, preventing move issues
                 let val = match value {
-                    Expr::If { cond, then, else_ } => {
+                    Expr::If { cond, then, else_, .. } => {
                         let c = self.gen_expr(cond);
                         let t = self.gen_arg(then);
                         let e = self.gen_arg(else_);
@@ -191,16 +191,16 @@ impl Emitter {
                 };
                 format!("let {} = {};", name, val)
             }
-            Stmt::LetDestructure { fields, value } => {
+            Stmt::LetDestructure { fields, value, .. } => {
                 format!("let ({}) = {};", fields.join(", "), self.gen_expr(value))
             }
             Stmt::Var { name, value, .. } => {
                 format!("let mut {} = {};", name, self.gen_expr(value))
             }
-            Stmt::Assign { name, value } => {
+            Stmt::Assign { name, value, .. } => {
                 format!("{} = {};", name, self.gen_expr(value))
             }
-            Stmt::Guard { cond, else_ } => {
+            Stmt::Guard { cond, else_, .. } => {
                 let c = self.gen_expr(cond);
                 let e = self.gen_expr(else_);
                 if e.contains("return ") {
@@ -209,7 +209,7 @@ impl Emitter {
                     format!("if !({}) {{ return {}; }}", c, e)
                 }
             }
-            Stmt::Expr { expr } => {
+            Stmt::Expr { expr, .. } => {
                 format!("{};", self.gen_expr(expr))
             }
             Stmt::Comment { text } => {

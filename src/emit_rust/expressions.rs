@@ -16,9 +16,9 @@ impl Emitter {
                     raw.clone()
                 }
             }
-            Expr::Float { value } => format!("{:?}f64", value),
-            Expr::String { value } => format!("{:?}.to_string()", value),
-            Expr::InterpolatedString { value } => {
+            Expr::Float { value, .. } => format!("{:?}f64", value),
+            Expr::String { value, .. } => format!("{:?}.to_string()", value),
+            Expr::InterpolatedString { value, .. } => {
                 // Convert ${expr} to Rust format!("{}", expr) style
                 let mut fmt = String::new();
                 let mut args = Vec::new();
@@ -56,25 +56,25 @@ impl Emitter {
                     format!("format!(\"{}\", {})", fmt, args.join(", "))
                 }
             }
-            Expr::Bool { value } => format!("{}", value),
-            Expr::Ident { name } => crate::emit_common::sanitize(name),
-            Expr::TypeName { name } => name.clone(),
-            Expr::Unit => "()".to_string(),
-            Expr::None => "None".to_string(),
-            Expr::Some { expr } => format!("Some({})", self.gen_expr(expr)),
-            Expr::Ok { expr } => {
+            Expr::Bool { value, .. } => format!("{}", value),
+            Expr::Ident { name, .. } => crate::emit_common::sanitize(name),
+            Expr::TypeName { name, .. } => name.clone(),
+            Expr::Unit { .. } => "()".to_string(),
+            Expr::None { .. } => "None".to_string(),
+            Expr::Some { expr, .. } => format!("Some({})", self.gen_expr(expr)),
+            Expr::Ok { expr, .. } => {
                 if self.in_do_block.get() {
                     // In do blocks, ok(expr) just unwraps to expr (since do auto-wraps in Ok)
                     self.gen_expr(expr)
                 } else if self.in_effect {
                     format!("Ok({})", self.gen_expr(expr))
-                } else if matches!(expr.as_ref(), Expr::Unit) {
+                } else if matches!(expr.as_ref(), Expr::Unit { .. }) {
                     "()".to_string()
                 } else {
                     format!("Ok({})", self.gen_expr(expr))
                 }
             }
-            Expr::Err { expr } => {
+            Expr::Err { expr, .. } => {
                 let msg = self.gen_expr(expr);
                 let needs_to_string = matches!(expr.as_ref(),
                     Expr::String { .. } | Expr::InterpolatedString { .. });
@@ -90,17 +90,17 @@ impl Emitter {
                 }
             }
 
-            Expr::List { elements } => {
+            Expr::List { elements, .. } => {
                 let elems: Vec<String> = elements.iter().map(|e| self.gen_expr(e)).collect();
                 format!("vec![{}]", elems.join(", "))
             }
-            Expr::Record { fields } => {
+            Expr::Record { fields, .. } => {
                 let fs: Vec<String> = fields.iter().map(|f| format!("{}: {}", f.name, self.gen_expr(&f.value))).collect();
                 format!("{{ {} }}", fs.join(", "))
             }
 
-            Expr::Binary { op, left, right } => self.gen_binary(op, left, right),
-            Expr::Unary { op, operand } => {
+            Expr::Binary { op, left, right, .. } => self.gen_binary(op, left, right),
+            Expr::Unary { op, operand, .. } => {
                 let o = self.gen_expr(operand);
                 match op.as_str() {
                     "not" => format!("!({})", o),
@@ -108,24 +108,24 @@ impl Emitter {
                 }
             }
 
-            Expr::If { cond, then, else_ } => {
+            Expr::If { cond, then, else_, .. } => {
                 let c = self.gen_expr(cond);
                 let t = self.gen_expr(then);
                 let e = self.gen_expr(else_);
                 format!("if {} {{ {} }} else {{ {} }}", c, t, e)
             }
 
-            Expr::Call { callee, args } => self.gen_call(callee, args),
+            Expr::Call { callee, args, .. } => self.gen_call(callee, args),
 
-            Expr::Member { object, field } => {
+            Expr::Member { object, field, .. } => {
                 let obj = self.gen_expr(object);
                 format!("{}.{}", obj, field)
             }
 
-            Expr::Pipe { left, right } => {
+            Expr::Pipe { left, right, .. } => {
                 let l = self.gen_expr(left);
                 match right.as_ref() {
-                    Expr::Call { callee, args } => {
+                    Expr::Call { callee, args, .. } => {
                         // Reconstruct as a full call with pipe-left as first arg
                         let mut all_args = Vec::new();
                         all_args.push(left.as_ref().clone());
@@ -133,6 +133,8 @@ impl Emitter {
                         let full_call = Expr::Call {
                             callee: callee.clone(),
                             args: all_args,
+                            span: None,
+                            resolved_type: None,
                         };
                         self.gen_expr(&full_call)
                     }
@@ -143,17 +145,17 @@ impl Emitter {
                 }
             }
 
-            Expr::Lambda { params, body } => {
+            Expr::Lambda { params, body, .. } => {
                 let ps: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
                 let b = self.gen_expr(body);
                 format!("|{}| {{ {} }}", ps.join(", "), b)
             }
 
-            Expr::Match { subject, arms } => self.gen_match(subject, arms),
+            Expr::Match { subject, arms, .. } => self.gen_match(subject, arms),
 
-            Expr::Block { stmts, expr } => self.gen_block(stmts, expr.as_deref()),
-            Expr::DoBlock { stmts, expr } => self.gen_do_block(stmts, expr.as_deref()),
-            Expr::Range { start, end, inclusive } => {
+            Expr::Block { stmts, expr, .. } => self.gen_block(stmts, expr.as_deref()),
+            Expr::DoBlock { stmts, expr, .. } => self.gen_do_block(stmts, expr.as_deref()),
+            Expr::Range { start, end, inclusive, .. } => {
                 let s = self.gen_expr(start);
                 let e = self.gen_expr(end);
                 if *inclusive {
@@ -163,7 +165,7 @@ impl Emitter {
                 }
             }
 
-            Expr::ForIn { var, var_tuple, iterable, body } => {
+            Expr::ForIn { var, var_tuple, iterable, body, .. } => {
                 let stmts_str: Vec<String> = body.iter()
                     .map(|s| format!("  {}", self.gen_stmt(s)))
                     .collect();
@@ -173,7 +175,7 @@ impl Emitter {
                     var.clone()
                 };
                 // Optimize: for i in start..end → native Rust range (no collect)
-                if let Expr::Range { start, end, inclusive } = iterable.as_ref() {
+                if let Expr::Range { start, end, inclusive, .. } = iterable.as_ref() {
                     let s = self.gen_expr(start);
                     let e = self.gen_expr(end);
                     let range = if *inclusive {
@@ -188,12 +190,12 @@ impl Emitter {
                 }
             }
 
-            Expr::Paren { expr } => format!("({})", self.gen_expr(expr)),
-            Expr::Tuple { elements } => {
+            Expr::Paren { expr, .. } => format!("({})", self.gen_expr(expr)),
+            Expr::Tuple { elements, .. } => {
                 let parts: Vec<String> = elements.iter().map(|e| self.gen_expr(e)).collect();
                 format!("({})", parts.join(", "))
             }
-            Expr::Try { expr } => {
+            Expr::Try { expr, .. } => {
                 // In effect fn: use ?, otherwise just eval
                 if self.in_effect {
                     format!("({}?)", self.gen_expr(expr))
@@ -201,7 +203,7 @@ impl Emitter {
                     self.gen_expr(expr)
                 }
             }
-            Expr::Await { expr } => {
+            Expr::Await { expr, .. } => {
                 // In Rust, await async futures using block_on
                 let inner = self.gen_expr(expr);
                 if self.in_effect {
@@ -210,9 +212,9 @@ impl Emitter {
                     format!("almide_block_on({})", inner)
                 }
             }
-            Expr::Hole => "todo!()".to_string(),
-            Expr::Todo { message } => format!("todo!(\"{}\")", message),
-            Expr::Placeholder => "_".to_string(),
+            Expr::Hole { .. } => "todo!()".to_string(),
+            Expr::Todo { message, .. } => format!("todo!(\"{}\")", message),
+            Expr::Placeholder { .. } => "_".to_string(),
 
             _ => format!("todo!(/* unsupported */)")
         }
@@ -222,14 +224,14 @@ impl Emitter {
     pub(crate) fn gen_expr_as_float(&self, expr: &Expr) -> String {
         match expr {
             Expr::Int { raw, .. } => format!("({} as f64)", raw),
-            Expr::Float { value } => format!("{:?}f64", value),
-            Expr::Binary { op, left, right }
+            Expr::Float { value, .. } => format!("{:?}f64", value),
+            Expr::Binary { op, left, right, .. }
                 if matches!(op.as_str(), "+" | "-" | "*" | "/" | "%" | "^") =>
             {
                 // Recursively generate in float context
                 self.gen_binary_float(op, left, right)
             }
-            Expr::Paren { expr: inner } => format!("({})", self.gen_expr_as_float(inner)),
+            Expr::Paren { expr: inner, .. } => format!("({})", self.gen_expr_as_float(inner)),
             _ => {
                 let e = self.gen_expr(expr);
                 // `as f64` is a no-op if already f64, safe to always add
@@ -242,12 +244,12 @@ impl Emitter {
     pub(crate) fn expr_has_float(&self, expr: &Expr) -> bool {
         match expr {
             Expr::Float { .. } => true,
-            Expr::Binary { left, right, op }
+            Expr::Binary { left, right, op, .. }
                 if matches!(op.as_str(), "+" | "-" | "*" | "/" | "%" | "^") =>
             {
                 self.expr_has_float(left) || self.expr_has_float(right)
             }
-            Expr::Paren { expr: inner } => self.expr_has_float(inner),
+            Expr::Paren { expr: inner, .. } => self.expr_has_float(inner),
             Expr::Unary { operand, .. } => self.expr_has_float(operand),
             _ => false,
         }
@@ -269,7 +271,7 @@ impl Emitter {
     /// Almide's % 2^64 pattern maps to u64 wrapping arithmetic
     pub(crate) fn gen_expr_u64_wrapping(&self, expr: &Expr) -> String {
         match expr {
-            Expr::Binary { op, left, right } if op == "^" || op == "*" || op == "%" => {
+            Expr::Binary { op, left, right, .. } if op == "^" || op == "*" || op == "%" => {
                 // Check if % 2^64 — this is a no-op in u64 arithmetic
                 if op == "%" && self.is_pow2_64(right) {
                     return self.gen_expr_u64_wrapping(left);
@@ -283,7 +285,7 @@ impl Emitter {
                     _ => format!("(({}) {} ({}))", l, op, r),
                 }
             }
-            Expr::Paren { expr: inner } => self.gen_expr_u64_wrapping(inner),
+            Expr::Paren { expr: inner, .. } => self.gen_expr_u64_wrapping(inner),
             Expr::Int { raw, .. } => {
                 if let Ok(n) = raw.parse::<u128>() {
                     if n > u64::MAX as u128 {
@@ -305,7 +307,7 @@ impl Emitter {
     pub(crate) fn is_pow2_64(&self, expr: &Expr) -> bool {
         match expr {
             Expr::Int { raw, .. } => raw == "18446744073709551616",
-            Expr::Paren { expr: inner } => self.is_pow2_64(inner),
+            Expr::Paren { expr: inner, .. } => self.is_pow2_64(inner),
             _ => false,
         }
     }
@@ -315,10 +317,10 @@ impl Emitter {
             Expr::Int { raw, .. } => {
                 if let Ok(n) = raw.parse::<u128>() { n > i64::MAX as u128 } else { false }
             }
-            Expr::Binary { op, left, right } if op == "^" || op == "*" || op == "%" => {
+            Expr::Binary { op, left, right, .. } if op == "^" || op == "*" || op == "%" => {
                 self.is_bigint_expr(left) || self.is_bigint_expr(right)
             }
-            Expr::Paren { expr: inner } => self.is_bigint_expr(inner),
+            Expr::Paren { expr: inner, .. } => self.is_bigint_expr(inner),
             _ => false,
         }
     }

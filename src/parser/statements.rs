@@ -21,11 +21,13 @@ impl Parser {
             return self.parse_assign_stmt();
         }
 
+        let span = self.current_span();
         let expr = self.parse_expr()?;
-        Ok(Stmt::Expr { expr })
+        Ok(Stmt::Expr { expr, span: Some(span) })
     }
 
     fn parse_let_stmt(&mut self) -> Result<Stmt, String> {
+        let span = self.current_span();
         self.expect(TokenType::Let)?;
 
         if self.check(TokenType::LBrace) {
@@ -42,7 +44,7 @@ impl Parser {
             self.expect(TokenType::Eq)?;
             self.skip_newlines();
             let value = self.parse_expr()?;
-            return Ok(Stmt::LetDestructure { fields, value });
+            return Ok(Stmt::LetDestructure { fields, value, span: Some(span) });
         }
 
         let name = self.expect_ident()?;
@@ -54,10 +56,11 @@ impl Parser {
         self.expect(TokenType::Eq)?;
         self.skip_newlines();
         let value = self.parse_expr()?;
-        Ok(Stmt::Let { name, ty, value })
+        Ok(Stmt::Let { name, ty, value, span: Some(span) })
     }
 
     fn parse_var_stmt(&mut self) -> Result<Stmt, String> {
+        let span = self.current_span();
         self.expect(TokenType::Var)?;
         let name = self.expect_ident()?;
         let mut ty: Option<TypeExpr> = None;
@@ -68,24 +71,26 @@ impl Parser {
         self.expect(TokenType::Eq)?;
         self.skip_newlines();
         let value = self.parse_expr()?;
-        Ok(Stmt::Var { name, ty, value })
+        Ok(Stmt::Var { name, ty, value, span: Some(span) })
     }
 
     fn parse_guard_stmt(&mut self) -> Result<Stmt, String> {
+        let span = self.current_span();
         self.expect(TokenType::Guard)?;
         let cond = self.parse_expr()?;
         self.expect(TokenType::Else)?;
         self.skip_newlines();
         let else_ = self.parse_expr()?;
-        Ok(Stmt::Guard { cond, else_ })
+        Ok(Stmt::Guard { cond, else_, span: Some(span) })
     }
 
     fn parse_assign_stmt(&mut self) -> Result<Stmt, String> {
+        let span = self.current_span();
         let name = self.current().value.clone();
         self.advance();
         self.expect(TokenType::Eq)?;
         self.skip_newlines();
         let value = self.parse_expr()?;
-        Ok(Stmt::Assign { name, value })
+        Ok(Stmt::Assign { name, value, span: Some(span) })
     }
 }

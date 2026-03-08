@@ -75,7 +75,7 @@ pub fn cmd_init() {
     eprintln!("  tests/");
 }
 
-pub fn cmd_test(file: &str, no_check: bool) {
+pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
     let test_files: Vec<String> = if !file.is_empty() {
         vec![file.to_string()]
     } else if std::path::Path::new("tests").is_dir() {
@@ -97,10 +97,16 @@ pub fn cmd_test(file: &str, no_check: bool) {
         std::process::exit(1);
     }
 
+    let mut program_args: Vec<String> = Vec::new();
+    if let Some(filter) = run_filter {
+        // Pass filter to rustc test binary
+        program_args.push(filter.to_string());
+    }
+
     let mut failed = 0;
     for test_file in &test_files {
         eprintln!("Running {}", test_file);
-        let code = cmd_run_inner(test_file, &[], no_check);
+        let code = cmd_run_inner(test_file, &program_args, no_check);
         if code != 0 {
             failed += 1;
         }
@@ -181,7 +187,7 @@ pub fn cmd_build(args: &[String], no_check: bool) {
 }
 
 pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, no_check: bool) {
-    let program = parse_file(file);
+    let mut program = parse_file(file);
     let source_text = std::fs::read_to_string(file).unwrap_or_default();
 
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
@@ -207,7 +213,7 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, no_check: bool) {
         for (name, mod_prog, pkg_id) in &resolved.modules {
             checker.register_module(name, mod_prog, pkg_id.as_ref());
         }
-        let diagnostics = checker.check_program(&program);
+        let diagnostics = checker.check_program(&mut program);
         let errors: Vec<_> = diagnostics.iter()
             .filter(|d| d.level == diagnostic::Level::Error)
             .collect();
@@ -250,7 +256,7 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, no_check: bool) {
 }
 
 pub fn cmd_check(file: &str) {
-    let program = parse_file(file);
+    let mut program = parse_file(file);
     let source_text = std::fs::read_to_string(file).unwrap_or_default();
 
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
@@ -275,7 +281,7 @@ pub fn cmd_check(file: &str) {
     for (name, mod_prog, pkg_id) in &resolved.modules {
         checker.register_module(name, mod_prog, pkg_id.as_ref());
     }
-    let diagnostics = checker.check_program(&program);
+    let diagnostics = checker.check_program(&mut program);
 
     for d in diagnostics.iter().filter(|d| d.level == diagnostic::Level::Warning) {
         eprintln!("{}", d.display_with_source(&source_text));

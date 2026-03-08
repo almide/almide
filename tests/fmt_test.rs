@@ -76,3 +76,32 @@ fn fmt_tuple_pattern() {
     let out = roundtrip("module app\nfn f(p: (Int, Int)) -> Int = match p {\n  (a, b) => a + b\n}");
     assert!(out.contains("(a, b) =>"));
 }
+
+// ---- Comment preservation ----
+
+#[test]
+fn fmt_top_level_comments() {
+    let out = roundtrip("// file header\nmodule app\n// a utility\nfn f() -> Int = 1");
+    assert!(out.contains("// file header"));
+    assert!(out.contains("// a utility"));
+}
+
+#[test]
+fn fmt_inline_block_comments() {
+    let out = roundtrip("module app\nfn f() -> Int = {\n  // step 1\n  let x = 1\n  // step 2\n  x + 1\n}");
+    assert!(out.contains("// step 1"));
+    assert!(out.contains("// step 2"));
+}
+
+#[test]
+fn fmt_match_arm_comments() {
+    let out = roundtrip("module app\nfn f(x: Option[Int]) -> Int = match x {\n  // handle value\n  some(v) => v\n  // handle empty\n  none => 0\n}");
+    assert!(out.contains("// handle value"));
+    assert!(out.contains("// handle empty"));
+}
+
+#[test]
+fn fmt_for_in_comments() {
+    let out = roundtrip("module app\neffect fn main(_a: List[String]) -> Result[Unit, String] = {\n  for x in xs {\n    // process item\n    println(x)\n  }\n  ok(())\n}");
+    assert!(out.contains("// process item"));
+}

@@ -4,20 +4,20 @@ use crate::stdlib;
 use super::{Checker, err};
 
 impl Checker {
-    pub(crate) fn check_call(&mut self, callee: &ast::Expr, args: &[ast::Expr]) -> Ty {
-        let arg_tys: Vec<Ty> = args.iter().map(|a| self.check_expr(a)).collect();
+    pub(crate) fn check_call(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr]) -> Ty {
+        let arg_tys: Vec<Ty> = args.iter_mut().map(|a| self.check_expr(a)).collect();
 
-        if let ast::Expr::Member { object, field } = callee {
-            if let ast::Expr::Ident { name: module } = object.as_ref() {
+        if let ast::Expr::Member { object, field, .. } = callee {
+            if let ast::Expr::Ident { name: module, .. } = object.as_ref() {
                 return self.check_module_call(module, field, &arg_tys);
             }
         }
 
-        if let ast::Expr::Ident { name } = callee {
+        if let ast::Expr::Ident { name, .. } = callee {
             return self.check_direct_call(name, &arg_tys);
         }
 
-        if let ast::Expr::TypeName { name } = callee {
+        if let ast::Expr::TypeName { name, .. } = callee {
             return self.check_constructor_call(name, &arg_tys);
         }
 

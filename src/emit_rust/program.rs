@@ -156,7 +156,7 @@ impl Emitter {
                     self.emitln("}");
                     self.emitln("");
                 }
-                Decl::Type { name: type_name, ty, deriving } => {
+                Decl::Type { name: type_name, ty, deriving, .. } => {
                     // Emit type with pub
                     self.emit_indent();
                     self.out.push_str("pub ");
@@ -207,25 +207,25 @@ impl Emitter {
 
     pub(crate) fn emit_decl(&mut self, decl: &Decl) {
         match decl {
-            Decl::Module { path } => {
+            Decl::Module { path, .. } => {
                 self.emitln(&format!("// module: {}", path.join(".")));
             }
             Decl::Import { path, .. } => {
                 self.emitln(&format!("// import: {}", path.join(".")));
             }
-            Decl::Type { name, ty, deriving } => {
+            Decl::Type { name, ty, deriving, .. } => {
                 self.emit_type_decl(name, ty, deriving);
             }
             Decl::Fn { name, params, return_type, body, effect, r#async, .. } => {
                 self.emit_fn_decl(name, params, return_type, body, effect.unwrap_or(false), r#async.unwrap_or(false));
             }
-            Decl::Impl { trait_, for_, methods } => {
+            Decl::Impl { trait_, for_, methods, .. } => {
                 self.emitln(&format!("// impl {} for {}", trait_, for_));
                 for m in methods {
                     self.emit_decl(m);
                 }
             }
-            Decl::Test { name, body } => {
+            Decl::Test { name, body, .. } => {
                 self.emitln("#[test]");
                 let safe_name = name.chars().map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' }).collect::<String>();
                 let prev_effect = self.in_effect;
@@ -356,7 +356,7 @@ impl Emitter {
         self.in_effect = is_effect || ret_str.starts_with("Result<");
 
         match body {
-            Expr::Block { stmts, expr: final_expr } => {
+            Expr::Block { stmts, expr: final_expr, .. } => {
                 self.emit_stmts(stmts);
                 let ret_is_result = ret_str.starts_with("Result<");
                 if is_effect {

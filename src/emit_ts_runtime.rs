@@ -88,6 +88,7 @@ const __float = {
   abs(n: number): number { return Math.abs(n); },
   sqrt(n: number): number { return Math.sqrt(n); },
   parse(s: string): number { const n = parseFloat(s); if (isNaN(n)) throw new Error("invalid float: " + s); return n; },
+  from_int(n: number): number { return n; },
 };
 const __path = {
   join(base: string, child: string): string { return base.replace(/\/+$/, "") + "/" + child; },
@@ -325,6 +326,7 @@ const __float = {
   abs(n) { return Math.abs(n); },
   sqrt(n) { return Math.sqrt(n); },
   parse(s) { const n = parseFloat(s); if (isNaN(n)) throw new Error("invalid float: " + s); return n; },
+  from_int(n) { return n; },
 };
 const __path = {
   join(base, child) { return base.replace(/\/+$/, "") + "/" + child; },

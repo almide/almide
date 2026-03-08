@@ -17,7 +17,7 @@ impl TsEmitter {
         }
 
         if let Some(module) = &prog.module {
-            if let Decl::Module { path } = module {
+            if let Decl::Module { path, .. } = module {
                 self.out.push_str(&format!("// module: {}\n", path.join(".")));
             }
         }
@@ -71,7 +71,7 @@ impl TsEmitter {
 
     pub(crate) fn gen_decl(&self, decl: &Decl) -> String {
         match decl {
-            Decl::Module { path } => format!("// module: {}", path.join(".")),
+            Decl::Module { path, .. } => format!("// module: {}", path.join(".")),
             Decl::Import { path, .. } => format!("// import: {}", path.join(".")),
             Decl::Type { name, ty, .. } => {
                 if self.js_mode {
@@ -89,14 +89,14 @@ impl TsEmitter {
                 self.gen_fn_decl(name, params, return_type, body, r#async.unwrap_or(false))
             }
             Decl::Trait { name, .. } => format!("// trait {}", name),
-            Decl::Impl { trait_, for_, methods } => {
+            Decl::Impl { trait_, for_, methods, .. } => {
                 let mut lines = vec![format!("// impl {} for {}", trait_, for_)];
                 for m in methods {
                     lines.push(self.gen_decl(m));
                 }
                 lines.join("\n")
             }
-            Decl::Test { name, body } => {
+            Decl::Test { name, body, .. } => {
                 let body_str = self.gen_expr(body);
                 if self.js_mode {
                     let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
@@ -110,7 +110,7 @@ impl TsEmitter {
                     format!("Deno.test({}, () => {});", Self::json_string(name), body_str)
                 }
             }
-            Decl::Strict { mode } => format!("// strict {}", mode),
+            Decl::Strict { mode, .. } => format!("// strict {}", mode),
         }
     }
 

@@ -162,8 +162,8 @@ impl TsEmitter {
 
         // Detect let-match inlining pattern for Result erasure
         if let Some(fe) = final_expr {
-            if let Expr::Match { subject, arms } = fe {
-                if let Expr::Ident { name: subj_name } = subject.as_ref() {
+            if let Expr::Match { subject, arms, .. } = fe {
+                if let Expr::Ident { name: subj_name, .. } = subject.as_ref() {
                     if !stmts.is_empty() {
                         if let Stmt::Let { name: last_name, value, .. } = &stmts[stmts.len() - 1] {
                             if last_name == subj_name && arms.iter().any(|a| matches!(&a.pattern, Pattern::Err { .. })) {
@@ -186,7 +186,7 @@ impl TsEmitter {
         }
         if let Some(fe) = final_expr {
             match fe {
-                Expr::DoBlock { stmts: ds, expr: de } => {
+                Expr::DoBlock { stmts: ds, expr: de, .. } => {
                     lines.push(format!("{}{}", ind, self.gen_do_block(ds, de.as_deref(), indent + 1)));
                 }
                 _ => {
@@ -204,7 +204,7 @@ impl TsEmitter {
 
         for stmt in stmts {
             if has_guard {
-                if let Stmt::Guard { cond, else_ } = stmt {
+                if let Stmt::Guard { cond, else_, .. } = stmt {
                     let c = self.gen_expr(cond);
                     if Self::is_unit(else_) {
                         lines.push(format!("{}if (!({})) {{ break; }}", ind, c));
@@ -235,20 +235,20 @@ impl TsEmitter {
             Stmt::Let { name, value, .. } => {
                 format!("const {} = {};", Self::sanitize(name), self.gen_expr(value))
             }
-            Stmt::LetDestructure { fields, value } => {
+            Stmt::LetDestructure { fields, value, .. } => {
                 format!("const {{ {} }} = {};", fields.join(", "), self.gen_expr(value))
             }
             Stmt::Var { name, value, .. } => {
                 format!("let {} = {};", Self::sanitize(name), self.gen_expr(value))
             }
-            Stmt::Assign { name, value } => {
+            Stmt::Assign { name, value, .. } => {
                 format!("{} = {};", Self::sanitize(name), self.gen_expr(value))
             }
-            Stmt::Guard { cond, else_ } => {
+            Stmt::Guard { cond, else_, .. } => {
                 let c = self.gen_expr(cond);
                 self.gen_guard_stmt(&c, else_)
             }
-            Stmt::Expr { expr } => {
+            Stmt::Expr { expr, .. } => {
                 format!("{};", self.gen_expr(expr))
             }
             Stmt::Comment { text } => {
@@ -259,7 +259,7 @@ impl TsEmitter {
 
     fn gen_guard_stmt(&self, cond: &str, else_: &Expr) -> String {
         match else_ {
-            Expr::Block { stmts, expr } | Expr::DoBlock { stmts, expr } => {
+            Expr::Block { stmts, expr, .. } | Expr::DoBlock { stmts, expr, .. } => {
                 let body_stmts: Vec<String> = stmts.iter()
                     .map(|s| format!("  {}", self.gen_stmt(s)))
                     .collect();

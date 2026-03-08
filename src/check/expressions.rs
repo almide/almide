@@ -1,19 +1,51 @@
-use crate::ast;
+use crate::ast::{self, ResolvedType};
 use crate::types::Ty;
 use super::{Checker, err};
 
+fn ty_to_resolved(ty: &Ty) -> ResolvedType {
+    match ty {
+        Ty::Int => ResolvedType::Int,
+        Ty::Float => ResolvedType::Float,
+        Ty::String => ResolvedType::String,
+        Ty::Bool => ResolvedType::Bool,
+        Ty::Unit => ResolvedType::Unit,
+        Ty::List(_) => ResolvedType::List,
+        Ty::Option(_) => ResolvedType::Option,
+        Ty::Result(_, _) => ResolvedType::Result,
+        Ty::Map(_, _) => ResolvedType::Record,
+        Ty::Record { .. } => ResolvedType::Record,
+        Ty::Variant { .. } => ResolvedType::Variant,
+        Ty::Fn { .. } => ResolvedType::Fn,
+        Ty::Tuple(_) => ResolvedType::Tuple,
+        Ty::Named(_) => ResolvedType::Named,
+        Ty::Unknown => ResolvedType::Unknown,
+    }
+}
+
 impl Checker {
-    pub(crate) fn check_expr(&mut self, expr: &ast::Expr) -> Ty {
+    pub(crate) fn check_expr(&mut self, expr: &mut ast::Expr) -> Ty {
+        // Update current line from expression span for precise error positions
+        let prev_line = self.current_decl_line;
+        if let Some(span) = expr.span() {
+            self.current_decl_line = Some(span.line);
+        }
+        let ty = self.check_expr_inner(expr);
+        expr.set_resolved_type(ty_to_resolved(&ty));
+        self.current_decl_line = prev_line;
+        ty
+    }
+
+    fn check_expr_inner(&mut self, expr: &mut ast::Expr) -> Ty {
         match expr {
             ast::Expr::Int { .. } => Ty::Int,
             ast::Expr::Float { .. } => Ty::Float,
             ast::Expr::String { .. } | ast::Expr::InterpolatedString { .. } => Ty::String,
             ast::Expr::Bool { .. } => Ty::Bool,
-            ast::Expr::Unit => Ty::Unit,
-            ast::Expr::None => Ty::Option(Box::new(Ty::Unknown)),
-            ast::Expr::Hole | ast::Expr::Todo { .. } | ast::Expr::Placeholder => Ty::Unknown,
-            ast::Expr::Some { expr: inner } => Ty::Option(Box::new(self.check_expr(inner))),
-            ast::Expr::Ok { expr: inner } => {
+            ast::Expr::Unit { .. } => Ty::Unit,
+            ast::Expr::None { .. } => Ty::Option(Box::new(Ty::Unknown)),
+            ast::Expr::Hole { .. } | ast::Expr::Todo { .. } | ast::Expr::Placeholder { .. } => Ty::Unknown,
+            ast::Expr::Some { expr: inner, .. } => Ty::Option(Box::new(self.check_expr(inner))),
+            ast::Expr::Ok { expr: inner, .. } => {
                 let inner_ty = self.check_expr(inner);
                 if !self.env.in_effect && matches!(inner_ty, Ty::Unit) {
                     Ty::Unit
@@ -21,9 +53,9 @@ impl Checker {
                     Ty::Result(Box::new(inner_ty), Box::new(Ty::Unknown))
                 }
             }
-            ast::Expr::Err { expr: inner } => Ty::Result(Box::new(Ty::Unknown), Box::new(self.check_expr(inner))),
+            ast::Expr::Err { expr: inner, .. } => Ty::Result(Box::new(Ty::Unknown), Box::new(self.check_expr(inner))),
 
-            ast::Expr::Ident { name } => {
+            ast::Expr::Ident { name, .. } => {
                 if let Some(ty) = self.env.lookup_var(name).cloned() {
                     self.env.used_vars.insert(name.clone());
                     return ty;
@@ -37,15 +69,15 @@ impl Checker {
                 Ty::Unknown
             }
 
-            ast::Expr::TypeName { name } => {
+            ast::Expr::TypeName { name, .. } => {
                 if self.env.constructors.contains_key(name) { return Ty::Unknown; }
                 Ty::Named(name.clone())
             }
 
-            ast::Expr::List { elements } => {
+            ast::Expr::List { elements, .. } => {
                 if elements.is_empty() { return Ty::List(Box::new(Ty::Unknown)); }
-                let first_ty = self.check_expr(&elements[0]);
-                for (i, elem) in elements.iter().enumerate().skip(1) {
+                let first_ty = self.check_expr(&mut elements[0]);
+                for (i, elem) in elements.iter_mut().enumerate().skip(1) {
                     let et = self.check_expr(elem);
                     if !first_ty.compatible(&et) {
                         self.push_diagnostic(err(
@@ -57,17 +89,17 @@ impl Checker {
                 Ty::List(Box::new(first_ty))
             }
 
-            ast::Expr::Record { fields } => Ty::Record {
-                fields: fields.iter().map(|f| (f.name.clone(), self.check_expr(&f.value))).collect(),
+            ast::Expr::Record { fields, .. } => Ty::Record {
+                fields: fields.iter_mut().map(|f| (f.name.clone(), self.check_expr(&mut f.value))).collect(),
             },
 
-            ast::Expr::SpreadRecord { base, fields } => {
+            ast::Expr::SpreadRecord { base, fields, .. } => {
                 let bt = self.check_expr(base);
-                for f in fields { self.check_expr(&f.value); }
+                for f in fields.iter_mut() { self.check_expr(&mut f.value); }
                 bt
             }
 
-            ast::Expr::If { cond, then, else_ } => {
+            ast::Expr::If { cond, then, else_, .. } => {
                 let ct = self.check_expr(cond);
                 if !ct.compatible(&Ty::Bool) {
                     self.push_diagnostic(err(
@@ -86,7 +118,7 @@ impl Checker {
                 tt
             }
 
-            ast::Expr::Match { subject, arms } => {
+            ast::Expr::Match { subject, arms, .. } => {
                 // Suppress auto-unwrap when matching on ok/err (caller handles Result explicitly)
                 let has_result_arms = arms.iter().any(|a| matches!(&a.pattern, ast::Pattern::Ok { .. } | ast::Pattern::Err { .. }));
                 let prev_skip = self.env.skip_auto_unwrap;
@@ -96,10 +128,10 @@ impl Checker {
                 let st = self.check_expr(subject);
                 self.env.skip_auto_unwrap = prev_skip;
                 let mut result_ty: Option<Ty> = None;
-                for arm in arms {
+                for arm in arms.iter_mut() {
                     self.env.push_scope();
                     self.check_pattern(&arm.pattern, &st);
-                    if let Some(ref guard) = arm.guard {
+                    if let Some(ref mut guard) = arm.guard {
                         let gt = self.check_expr(guard);
                         if !gt.compatible(&Ty::Bool) {
                             self.push_diagnostic(err(
@@ -108,7 +140,7 @@ impl Checker {
                             ));
                         }
                     }
-                    let at = self.check_expr(&arm.body);
+                    let at = self.check_expr(&mut arm.body);
                     if let Some(ref mut prev) = result_ty {
                         let compat = prev.compatible(&at)
                             || match (prev.clone(), &at) {
@@ -135,21 +167,21 @@ impl Checker {
                 result_ty.unwrap_or(Ty::Unknown)
             }
 
-            ast::Expr::Block { stmts, expr } => {
+            ast::Expr::Block { stmts, expr, .. } => {
                 self.env.push_scope();
-                for s in stmts { self.check_stmt(s); }
-                let ty = expr.as_ref().map(|e| self.check_expr(e)).unwrap_or(Ty::Unit);
+                for s in stmts.iter_mut() { self.check_stmt(s); }
+                let ty = expr.as_mut().map(|e| self.check_expr(e)).unwrap_or(Ty::Unit);
                 self.warn_unused_vars_in_scope("block");
                 self.env.pop_scope();
                 ty
             }
 
-            ast::Expr::DoBlock { stmts, expr } => {
+            ast::Expr::DoBlock { stmts, expr, .. } => {
                 self.env.push_scope();
                 let prev_do = self.env.in_do_block;
                 self.env.in_do_block = true;
-                for s in stmts { self.check_stmt(s); }
-                let _ty = expr.as_ref().map(|e| self.check_expr(e)).unwrap_or(Ty::Unit);
+                for s in stmts.iter_mut() { self.check_stmt(s); }
+                let _ty = expr.as_mut().map(|e| self.check_expr(e)).unwrap_or(Ty::Unit);
                 self.warn_unused_vars_in_scope("do block");
                 self.env.in_do_block = prev_do;
                 self.env.pop_scope();
@@ -176,7 +208,7 @@ impl Checker {
                 Ty::List(Box::new(Ty::Int))
             }
 
-            ast::Expr::ForIn { var, var_tuple, iterable, body } => {
+            ast::Expr::ForIn { var, var_tuple, iterable, body, .. } => {
                 let it = self.check_expr(iterable);
                 self.env.push_scope();
                 let elem_ty = match &it {
@@ -210,12 +242,12 @@ impl Checker {
                 } else {
                     self.env.define_var(var, elem_ty);
                 }
-                for s in body { self.check_stmt(s); }
+                for s in body.iter_mut() { self.check_stmt(s); }
                 self.env.pop_scope();
                 Ty::Unit
             }
 
-            ast::Expr::Lambda { params, body } => {
+            ast::Expr::Lambda { params, body, .. } => {
                 self.env.push_scope();
                 let pts: Vec<Ty> = params.iter().map(|p| {
                     let ty = p.ty.as_ref().map(|te| self.resolve_type_expr(te)).unwrap_or(Ty::Unknown);
@@ -227,11 +259,11 @@ impl Checker {
                 Ty::Fn { params: pts, ret: Box::new(ret) }
             }
 
-            ast::Expr::Call { callee, args } => self.check_call(callee, args),
+            ast::Expr::Call { callee, args, .. } => self.check_call(callee, args),
 
-            ast::Expr::Member { object, field } => {
+            ast::Expr::Member { object, field, .. } => {
                 // Track module usage for unused import detection
-                if let ast::Expr::Ident { name } = object.as_ref() {
+                if let ast::Expr::Ident { name, .. } = object.as_ref() {
                     if crate::stdlib::is_stdlib_module(name) || self.env.user_modules.contains(name) {
                         self.env.used_modules.insert(name.clone());
                     }
@@ -240,24 +272,24 @@ impl Checker {
                 self.check_member_access(&ot, field)
             }
 
-            ast::Expr::Pipe { left, right } => {
+            ast::Expr::Pipe { left, right, .. } => {
                 let _left_ty = self.check_expr(left);
-                if let ast::Expr::Call { callee, args } = right.as_ref() {
+                if let ast::Expr::Call { callee, args, .. } = right.as_mut() {
                     let mut all_args = vec![left.as_ref().clone()];
                     all_args.extend(args.iter().cloned());
-                    self.check_call(callee, &all_args)
+                    self.check_call(callee, &mut all_args)
                 } else {
                     self.check_expr(right)
                 }
             }
 
-            ast::Expr::Binary { op, left, right } => {
+            ast::Expr::Binary { op, left, right, .. } => {
                 let lt = self.check_expr(left);
                 let rt = self.check_expr(right);
                 self.check_binary_op(op, &lt, &rt)
             }
 
-            ast::Expr::Unary { op, operand } => {
+            ast::Expr::Unary { op, operand, .. } => {
                 let ot = self.check_expr(operand);
                 match op.as_str() {
                     "not" => {
@@ -282,13 +314,13 @@ impl Checker {
                 }
             }
 
-            ast::Expr::Paren { expr: inner } => self.check_expr(inner),
-            ast::Expr::Tuple { elements } => {
-                let tys: Vec<Ty> = elements.iter().map(|e| self.check_expr(e)).collect();
+            ast::Expr::Paren { expr: inner, .. } => self.check_expr(inner),
+            ast::Expr::Tuple { elements, .. } => {
+                let tys: Vec<Ty> = elements.iter_mut().map(|e| self.check_expr(e)).collect();
                 Ty::Tuple(tys)
             }
 
-            ast::Expr::Try { expr: inner } => {
+            ast::Expr::Try { expr: inner, .. } => {
                 let it = self.check_expr(inner);
                 match &it {
                     Ty::Result(ok, _) => *ok.clone(),
@@ -303,7 +335,7 @@ impl Checker {
                 }
             }
 
-            ast::Expr::Await { expr: inner } => {
+            ast::Expr::Await { expr: inner, .. } => {
                 let it = self.check_expr(inner);
                 match &it {
                     Ty::Result(ok, _) => *ok.clone(),

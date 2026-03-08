@@ -5,6 +5,7 @@ use super::Parser;
 impl Parser {
     pub(crate) fn parse_primary(&mut self) -> Result<Expr, String> {
         let tok = self.current().clone();
+        let span = Some(Span { line: tok.line, col: tok.col });
 
         if self.check(TokenType::Int) {
             self.advance();
@@ -16,57 +17,59 @@ impl Parser {
                         .unwrap_or_else(|| serde_json::Number::from(0)),
                 ),
                 raw: tok.value.clone(),
+                span,
+                resolved_type: None,
             });
         }
         if self.check(TokenType::Float) {
             self.advance();
             let v: f64 = tok.value.parse().unwrap_or(0.0);
-            return Ok(Expr::Float { value: v });
+            return Ok(Expr::Float { value: v, span, resolved_type: None });
         }
         if self.check(TokenType::String) {
             self.advance();
-            return Ok(Expr::String { value: tok.value.clone() });
+            return Ok(Expr::String { value: tok.value.clone(), span, resolved_type: None });
         }
         if self.check(TokenType::InterpolatedString) {
             self.advance();
-            return Ok(Expr::InterpolatedString { value: tok.value.clone() });
+            return Ok(Expr::InterpolatedString { value: tok.value.clone(), span, resolved_type: None });
         }
         if self.check(TokenType::True) {
             self.advance();
-            return Ok(Expr::Bool { value: true });
+            return Ok(Expr::Bool { value: true, span, resolved_type: None });
         }
         if self.check(TokenType::False) {
             self.advance();
-            return Ok(Expr::Bool { value: false });
+            return Ok(Expr::Bool { value: false, span, resolved_type: None });
         }
         if self.check(TokenType::Underscore) {
             self.advance();
-            return Ok(Expr::Hole);
+            return Ok(Expr::Hole { span, resolved_type: None });
         }
         if self.check(TokenType::None) {
             self.advance();
-            return Ok(Expr::None);
+            return Ok(Expr::None { span, resolved_type: None });
         }
         if self.check(TokenType::Some) {
             self.advance();
             self.expect(TokenType::LParen)?;
             let expr = self.parse_expr()?;
             self.expect(TokenType::RParen)?;
-            return Ok(Expr::Some { expr: Box::new(expr) });
+            return Ok(Expr::Some { expr: Box::new(expr), span, resolved_type: None });
         }
         if self.check(TokenType::Ok) {
             self.advance();
             self.expect(TokenType::LParen)?;
             let expr = self.parse_expr()?;
             self.expect(TokenType::RParen)?;
-            return Ok(Expr::Ok { expr: Box::new(expr) });
+            return Ok(Expr::Ok { expr: Box::new(expr), span, resolved_type: None });
         }
         if self.check(TokenType::Err) {
             self.advance();
             self.expect(TokenType::LParen)?;
             let expr = self.parse_expr()?;
             self.expect(TokenType::RParen)?;
-            return Ok(Expr::Err { expr: Box::new(expr) });
+            return Ok(Expr::Err { expr: Box::new(expr), span, resolved_type: None });
         }
         if self.check(TokenType::Todo) {
             self.advance();
@@ -74,17 +77,17 @@ impl Parser {
             let msg = self.current().value.clone();
             self.expect(TokenType::String)?;
             self.expect(TokenType::RParen)?;
-            return Ok(Expr::Todo { message: msg });
+            return Ok(Expr::Todo { message: msg, span, resolved_type: None });
         }
         if self.check(TokenType::Try) {
             self.advance();
             let expr = self.parse_postfix()?;
-            return Ok(Expr::Try { expr: Box::new(expr) });
+            return Ok(Expr::Try { expr: Box::new(expr), span, resolved_type: None });
         }
         if self.check(TokenType::Await) {
             self.advance();
             let expr = self.parse_postfix()?;
-            return Ok(Expr::Await { expr: Box::new(expr) });
+            return Ok(Expr::Await { expr: Box::new(expr), span, resolved_type: None });
         }
         if self.check(TokenType::If) {
             return self.parse_if_expr();
@@ -113,14 +116,14 @@ impl Parser {
             self.expect(TokenType::In)?;
             let iterable = self.parse_expr()?;
             self.expect(TokenType::LBrace)?;
-            self.skip_newlines();
             let mut stmts = Vec::new();
+            self.skip_newlines_into_stmts(&mut stmts);
             while !self.check(TokenType::RBrace) {
                 stmts.push(self.parse_stmt()?);
-                self.skip_newlines();
+                self.skip_newlines_into_stmts(&mut stmts);
                 if self.check(TokenType::Semicolon) {
                     self.advance();
-                    self.skip_newlines();
+                    self.skip_newlines_into_stmts(&mut stmts);
                 }
             }
             self.expect(TokenType::RBrace)?;
@@ -129,6 +132,8 @@ impl Parser {
                 var_tuple,
                 iterable: Box::new(iterable),
                 body: stmts,
+                span,
+                resolved_type: None,
             });
         }
         if self.check(TokenType::Do) {
@@ -145,7 +150,7 @@ impl Parser {
             self.advance();
             if self.check(TokenType::RParen) {
                 self.advance();
-                return Ok(Expr::Unit);
+                return Ok(Expr::Unit { span, resolved_type: None });
             }
             let first = self.parse_expr()?;
             if self.check(TokenType::Comma) {
@@ -157,10 +162,10 @@ impl Parser {
                     elements.push(self.parse_expr()?);
                 }
                 self.expect(TokenType::RParen)?;
-                return Ok(Expr::Tuple { elements });
+                return Ok(Expr::Tuple { elements, span, resolved_type: None });
             }
             self.expect(TokenType::RParen)?;
-            return Ok(Expr::Paren { expr: Box::new(first) });
+            return Ok(Expr::Paren { expr: Box::new(first), span, resolved_type: None });
         }
         if self.check(TokenType::TypeName) {
             let name = tok.value.clone();
@@ -172,22 +177,26 @@ impl Parser {
                     let args = self.parse_call_args()?;
                     self.expect(TokenType::RParen)?;
                     return Ok(Expr::Call {
-                        callee: Box::new(Expr::TypeName { name }),
+                        callee: Box::new(Expr::TypeName { name, span, resolved_type: None }),
                         args,
+                        span,
+                        resolved_type: None,
                     });
                 }
-                return Ok(Expr::TypeName { name });
+                return Ok(Expr::TypeName { name, span, resolved_type: None });
             }
             if self.check(TokenType::LParen) {
                 self.advance();
                 let args = self.parse_call_args()?;
                 self.expect(TokenType::RParen)?;
                 return Ok(Expr::Call {
-                    callee: Box::new(Expr::TypeName { name }),
+                    callee: Box::new(Expr::TypeName { name, span, resolved_type: None }),
                     args,
+                    span,
+                    resolved_type: None,
                 });
             }
-            return Ok(Expr::TypeName { name });
+            return Ok(Expr::TypeName { name, span, resolved_type: None });
         }
         if self.check(TokenType::Bang) {
             return Err(format!(
@@ -215,7 +224,7 @@ impl Parser {
         if self.check(TokenType::Ident) || self.check(TokenType::IdentQ) {
             let name = tok.value.clone();
             self.advance();
-            return Ok(Expr::Ident { name });
+            return Ok(Expr::Ident { name, span, resolved_type: None });
         }
 
         let hint = match tok.value.as_str() {
