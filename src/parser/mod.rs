@@ -31,30 +31,40 @@ impl Parser {
             module: None,
             imports: Vec::new(),
             decls: Vec::new(),
+            comment_map: Vec::new(),
         };
 
-        self.skip_newlines();
+        let mut pending = self.skip_newlines_collect_comments();
 
         // Module declaration (optional)
         if self.check(TokenType::Module) {
+            program.comment_map.push(std::mem::take(&mut pending));
             program.module = Some(self.parse_module_decl()?);
-            self.skip_newlines();
+            pending = self.skip_newlines_collect_comments();
         }
 
         // Import declarations
         while self.check(TokenType::Import) {
+            program.comment_map.push(std::mem::take(&mut pending));
             program.imports.push(self.parse_import_decl()?);
-            self.skip_newlines();
+            pending = self.skip_newlines_collect_comments();
         }
 
         // Top-level declarations
         while !self.check(TokenType::EOF) {
-            self.skip_newlines();
+            let more = self.skip_newlines_collect_comments();
+            pending.extend(more);
             if self.check(TokenType::EOF) {
                 break;
             }
+            program.comment_map.push(std::mem::take(&mut pending));
             program.decls.push(self.parse_top_decl()?);
-            self.skip_newlines();
+            pending = self.skip_newlines_collect_comments();
+        }
+
+        // Trailing comments (after last decl)
+        if !pending.is_empty() {
+            program.comment_map.push(pending);
         }
 
         Ok(program)

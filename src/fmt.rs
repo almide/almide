@@ -1,8 +1,8 @@
 /// Almide code formatter: AST → formatted source code.
 ///
-/// Limitation: comments are discarded during lexing and not preserved in the AST,
-/// so formatting will strip comments. A future improvement would add comment
-/// nodes to the AST.
+/// Top-level comments (before module, imports, and declarations) are preserved
+/// via the `comment_map` field on `Program`. Inline comments within function
+/// bodies are not yet preserved.
 
 use crate::ast::*;
 
@@ -10,9 +10,23 @@ const INDENT: &str = "  ";
 
 pub fn format_program(program: &Program) -> String {
     let mut out = String::new();
+    let cm = &program.comment_map;
+    let mut cm_idx = 0;
+
+    // Helper: emit comments at current index
+    let emit_comments = |out: &mut String, idx: &mut usize| {
+        if let Some(comments) = cm.get(*idx) {
+            for c in comments {
+                out.push_str(c);
+                out.push('\n');
+            }
+        }
+        *idx += 1;
+    };
 
     // Module declaration
     if let Some(Decl::Module { path }) = &program.module {
+        emit_comments(&mut out, &mut cm_idx);
         out.push_str(&format!("module {}\n", path.join(".")));
     }
 
@@ -22,6 +36,7 @@ pub fn format_program(program: &Program) -> String {
             out.push('\n');
         }
         for imp in &program.imports {
+            emit_comments(&mut out, &mut cm_idx);
             if let Decl::Import { path, names } = imp {
                 out.push_str("import ");
                 out.push_str(&path.join("."));
@@ -36,8 +51,20 @@ pub fn format_program(program: &Program) -> String {
     // Declarations
     for decl in &program.decls {
         out.push('\n');
+        emit_comments(&mut out, &mut cm_idx);
         format_decl(&mut out, decl, 0);
         out.push('\n');
+    }
+
+    // Trailing comments
+    if let Some(comments) = cm.get(cm_idx) {
+        if !comments.is_empty() {
+            out.push('\n');
+            for c in comments {
+                out.push_str(c);
+                out.push('\n');
+            }
+        }
     }
 
     out

@@ -154,4 +154,10 @@ pub struct Program {
     pub module: Option<Decl>,
     pub imports: Vec<Decl>,
     pub decls: Vec<Decl>,
+    /// Leading comments for each section:
+    /// - index 0: comments before module/first import
+    /// - index 1..=imports.len(): comments before each import (1-indexed)
+    /// - remaining: comments before each decl
+    #[serde(skip)]
+    pub comment_map: Vec<Vec<String>>,
 }

@@ -85,6 +85,7 @@ pub enum TokenType {
     DotDotDot,
 
     // Special
+    Comment,
     Newline,
     EOF,
 }
@@ -270,10 +271,20 @@ impl Lexer {
             if ch == ' ' || ch == '\t' || ch == '\r' {
                 self.advance();
             } else if ch == '/' && self.peek(1) == '/' {
-                // Line comment
+                // Line comment — emit as Comment token
+                let start_line = self.line;
+                let start_col = self.col;
+                let mut text = String::new();
                 while self.pos < self.chars.len() && self.chars[self.pos] != '\n' {
+                    text.push(self.chars[self.pos]);
                     self.advance();
                 }
+                self.tokens.push(Token {
+                    token_type: TokenType::Comment,
+                    value: text,
+                    line: start_line,
+                    col: start_col,
+                });
             } else {
                 break;
             }

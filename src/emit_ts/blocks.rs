@@ -31,7 +31,9 @@ impl TsEmitter {
             for arm in &ok_arms {
                 self.emit_match_arm(&mut lines, tmp, arm);
             }
-            lines.push("  throw new Error(\"match exhausted\");".to_string());
+            if !ok_arms.last().map_or(false, |a| a.guard.is_none() && Self::is_unconditional_pattern(&a.pattern)) {
+                lines.push("  throw new Error(\"match exhausted\");".to_string());
+            }
             lines.push("})()".to_string());
             return lines.join("\n");
         }
@@ -40,9 +42,16 @@ impl TsEmitter {
         for arm in arms {
             self.emit_match_arm(&mut lines, tmp, arm);
         }
-        lines.push("  throw new Error(\"match exhausted\");".to_string());
+        if !arms.last().map_or(false, |a| a.guard.is_none() && Self::is_unconditional_pattern(&a.pattern)) {
+            lines.push("  throw new Error(\"match exhausted\");".to_string());
+        }
         lines.push(format!("}})({})", subj));
         lines.join("\n")
+    }
+
+    fn is_unconditional_pattern(pattern: &Pattern) -> bool {
+        matches!(pattern, Pattern::Wildcard | Pattern::Ident { .. })
+            || matches!(pattern, Pattern::Ok { inner } if Self::is_unconditional_pattern(inner))
     }
 
     fn emit_match_arm(&self, lines: &mut Vec<String>, tmp: &str, arm: &MatchArm) {
@@ -64,6 +73,12 @@ impl TsEmitter {
             } else {
                 lines.push(format!("  if ({} && {}) return {};", cond, guard_str, body_str));
             }
+        } else if cond == "true" && bind_str.is_empty() {
+            // Unconditional match (wildcard / ok(_)) — no need for if(true)
+            lines.push(format!("  return {};", body_str));
+        } else if cond == "true" && !bind_str.is_empty() {
+            // Wildcard with bindings — always matches
+            lines.push(format!("  {{ {}\n    return {}; }}", bind_str, body_str));
         } else if !bind_str.is_empty() {
             lines.push(format!("  if ({}) {{ {}\n    return {}; }}", cond, bind_str, body_str));
         } else {

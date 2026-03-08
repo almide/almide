@@ -142,8 +142,20 @@ impl Parser {
     }
 
     pub(crate) fn skip_newlines(&mut self) {
-        while self.check(TokenType::Newline) {
+        while self.check(TokenType::Newline) || self.check(TokenType::Comment) {
             self.advance();
         }
+    }
+
+    /// Skip newlines and collect any Comment tokens encountered.
+    pub(crate) fn skip_newlines_collect_comments(&mut self) -> Vec<String> {
+        let mut comments = Vec::new();
+        while self.check(TokenType::Newline) || self.check(TokenType::Comment) {
+            if self.check(TokenType::Comment) {
+                comments.push(self.current().value.clone());
+            }
+            self.advance();
+        }
+        comments
     }
 }

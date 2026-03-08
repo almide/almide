@@ -243,18 +243,6 @@ const __float = {
   sqrt(n) { return Math.sqrt(n); },
   parse(s) { const n = parseFloat(s); if (isNaN(n)) throw new Error("invalid float: " + s); return n; },
 };
-const __map = {
-  new_() { return new Map(); },
-  get(m, k) { return m.has(k) ? m.get(k) : null; },
-  set(m, k, v) { const r = new Map(m); r.set(k, v); return r; },
-  contains(m, k) { return m.has(k); },
-  remove(m, k) { const r = new Map(m); r.delete(k); return r; },
-  keys(m) { return [...m.keys()].sort(); },
-  values(m) { return [...m.values()]; },
-  len(m) { return m.size; },
-  entries(m) { return [...m.entries()].map(([k, v]) => [k, v]); },
-  from_list(xs, f) { const r = new Map(); for (const x of xs) { const [k, v] = f(x); r.set(k, v); } return r; },
-};
 const __path = {
   join(base, child) { return base.replace(/\/+$/, "") + "/" + child; },
   dirname(p) { const i = p.lastIndexOf("/"); return i >= 0 ? p.substring(0, i) : "."; },
