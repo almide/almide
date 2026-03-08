@@ -71,6 +71,8 @@ pub struct TypeEnv {
     pub used_vars: std::collections::HashSet<std::string::String>,
     /// Track used modules (for unused import warnings)
     pub used_modules: std::collections::HashSet<std::string::String>,
+    /// Maps import name ("json") to qualified name ("json_v2") for versioned deps
+    pub module_aliases: std::collections::HashMap<std::string::String, std::string::String>,
 }
 
 impl Ty {
@@ -150,6 +152,7 @@ impl TypeEnv {
             in_do_block: false,
             used_vars: std::collections::HashSet::new(),
             used_modules: std::collections::HashSet::new(),
+            module_aliases: std::collections::HashMap::new(),
         }
     }
 

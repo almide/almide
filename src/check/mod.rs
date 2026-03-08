@@ -124,9 +124,16 @@ impl Checker {
     }
 
     /// Register an imported module's exported functions and types.
-    pub fn register_module(&mut self, mod_name: &str, prog: &ast::Program) {
-        self.env.user_modules.insert(mod_name.to_string());
-        self.register_decls(&prog.decls, Some(mod_name));
+    pub fn register_module(&mut self, mod_name: &str, prog: &ast::Program, pkg_id: Option<&crate::project::PkgId>) {
+        if let Some(pid) = pkg_id {
+            let internal_name = pid.mod_name();
+            self.env.user_modules.insert(internal_name.clone());
+            self.env.module_aliases.insert(mod_name.to_string(), internal_name.clone());
+            self.register_decls(&prog.decls, Some(&internal_name));
+        } else {
+            self.env.user_modules.insert(mod_name.to_string());
+            self.register_decls(&prog.decls, Some(mod_name));
+        }
     }
 
     pub fn check_program(&mut self, prog: &ast::Program) -> Vec<Diagnostic> {

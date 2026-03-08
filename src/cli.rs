@@ -190,8 +190,8 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, no_check: bool) {
     if !no_check && !emit_ast {
         let mut checker = check::Checker::new();
         checker.set_source(file, &source_text);
-        for (name, mod_prog) in &resolved.modules {
-            checker.register_module(name, mod_prog);
+        for (name, mod_prog, pkg_id) in &resolved.modules {
+            checker.register_module(name, mod_prog, pkg_id.as_ref());
         }
         let diagnostics = checker.check_program(&program);
         let errors: Vec<_> = diagnostics.iter()
@@ -216,8 +216,19 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, no_check: bool) {
     } else {
         let code = match target {
             "rust" | "rs" => emit_rust::emit(&program, &resolved.modules),
-            "ts" | "typescript" => emit_ts::emit_with_modules(&program, &resolved.modules),
-            "js" | "javascript" => emit_ts::emit_js_with_modules(&program, &resolved.modules),
+            "ts" | "typescript" => {
+                // Convert to legacy format for emit_ts (no PkgId support)
+                let legacy_modules: Vec<(String, crate::ast::Program)> = resolved.modules.iter()
+                    .map(|(n, p, _)| (n.clone(), p.clone()))
+                    .collect();
+                emit_ts::emit_with_modules(&program, &legacy_modules)
+            }
+            "js" | "javascript" => {
+                let legacy_modules: Vec<(String, crate::ast::Program)> = resolved.modules.iter()
+                    .map(|(n, p, _)| (n.clone(), p.clone()))
+                    .collect();
+                emit_ts::emit_js_with_modules(&program, &legacy_modules)
+            }
             other => { eprintln!("Unknown target: {}. Use rust, ts, or js.", other); std::process::exit(1); }
         };
         print!("{}", code);
@@ -228,11 +239,13 @@ pub fn cmd_check(file: &str) {
     let program = parse_file(file);
     let source_text = std::fs::read_to_string(file).unwrap_or_default();
 
-    let dep_paths: Vec<(String, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
+    let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
             project::fetch_all_deps(&proj)
                 .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); })
-                .into_iter().collect()
+                .into_iter()
+                .map(|fd| (fd.pkg_id, fd.source_dir))
+                .collect()
         } else {
             vec![]
         }
@@ -245,8 +258,8 @@ pub fn cmd_check(file: &str) {
 
     let mut checker = check::Checker::new();
     checker.set_source(file, &source_text);
-    for (name, mod_prog) in &resolved.modules {
-        checker.register_module(name, mod_prog);
+    for (name, mod_prog, pkg_id) in &resolved.modules {
+        checker.register_module(name, mod_prog, pkg_id.as_ref());
     }
     let diagnostics = checker.check_program(&program);
 

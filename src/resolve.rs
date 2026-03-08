@@ -5,12 +5,14 @@ use std::collections::HashSet;
 use crate::ast;
 use crate::lexer;
 use crate::parser;
+use crate::project;
 
 use crate::stdlib;
 
 pub struct ResolvedModules {
     /// Modules in dependency order (leaves first).
-    pub modules: Vec<(String, ast::Program)>,
+    /// Third element is the PkgId (None for local modules).
+    pub modules: Vec<(String, ast::Program, Option<project::PkgId>)>,
 }
 
 pub fn resolve_imports(source_file: &str, program: &ast::Program) -> Result<ResolvedModules, String> {
@@ -20,10 +22,10 @@ pub fn resolve_imports(source_file: &str, program: &ast::Program) -> Result<Reso
 pub fn resolve_imports_with_deps(
     source_file: &str,
     program: &ast::Program,
-    dep_paths: &[(String, PathBuf)],
+    dep_paths: &[(project::PkgId, PathBuf)],
 ) -> Result<ResolvedModules, String> {
     let base_dir = Path::new(source_file).parent().unwrap_or(Path::new("."));
-    let mut loaded: Vec<(String, ast::Program)> = Vec::new();
+    let mut loaded: Vec<(String, ast::Program, Option<project::PkgId>)> = Vec::new();
     let mut loaded_names: HashSet<String> = HashSet::new();
     let mut loading: HashSet<String> = HashSet::new();
 
@@ -43,8 +45,8 @@ pub fn resolve_imports_with_deps(
 fn load_module(
     name: &str,
     base_dir: &Path,
-    dep_paths: &[(String, PathBuf)],
-    loaded: &mut Vec<(String, ast::Program)>,
+    dep_paths: &[(project::PkgId, PathBuf)],
+    loaded: &mut Vec<(String, ast::Program, Option<project::PkgId>)>,
     loaded_names: &mut HashSet<String>,
     loading: &mut HashSet<String>,
 ) -> Result<(), String> {
@@ -56,7 +58,7 @@ fn load_module(
     }
     loading.insert(name.to_string());
 
-    let file_path = find_module_file(name, base_dir, dep_paths)?;
+    let (file_path, pkg_id) = find_module_file(name, base_dir, dep_paths)?;
     let source = std::fs::read_to_string(&file_path)
         .map_err(|e| format!("error reading module '{}': {}", name, e))?;
 
@@ -65,7 +67,7 @@ fn load_module(
     let program = parser.parse()
         .map_err(|e| format!("parse error in module '{}': {}", name, e))?;
 
-    // Recursively resolve this module's imports (depth-first → leaves first)
+    // Recursively resolve this module's imports (depth-first -> leaves first)
     for import in &program.imports {
         if let ast::Decl::Import { path, .. } = import {
             let dep_name = &path[0];
@@ -77,11 +79,11 @@ fn load_module(
 
     loading.remove(name);
     loaded_names.insert(name.to_string());
-    loaded.push((name.to_string(), program));
+    loaded.push((name.to_string(), program, pkg_id));
     Ok(())
 }
 
-fn find_module_file(name: &str, base_dir: &Path, dep_paths: &[(String, PathBuf)]) -> Result<PathBuf, String> {
+fn find_module_file(name: &str, base_dir: &Path, dep_paths: &[(project::PkgId, PathBuf)]) -> Result<(PathBuf, Option<project::PkgId>), String> {
     // 1. Check local files
     let local_candidates = [
         base_dir.join(format!("{}.almd", name)),
@@ -89,13 +91,13 @@ fn find_module_file(name: &str, base_dir: &Path, dep_paths: &[(String, PathBuf)]
     ];
     for path in &local_candidates {
         if path.exists() {
-            return Ok(path.clone());
+            return Ok((path.clone(), None));
         }
     }
 
-    // 2. Check dependency paths
-    for (dep_name, dep_dir) in dep_paths {
-        if dep_name == name {
+    // 2. Check dependency paths (match by pkg_id.name)
+    for (pkg_id, dep_dir) in dep_paths {
+        if pkg_id.name == name {
             let dep_candidates = [
                 dep_dir.join(format!("{}.almd", name)),
                 dep_dir.join("lib.almd"),
@@ -103,7 +105,7 @@ fn find_module_file(name: &str, base_dir: &Path, dep_paths: &[(String, PathBuf)]
             ];
             for path in &dep_candidates {
                 if path.exists() {
-                    return Ok(path.clone());
+                    return Ok((path.clone(), Some(pkg_id.clone())));
                 }
             }
         }

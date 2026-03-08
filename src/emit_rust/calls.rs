@@ -28,7 +28,10 @@ impl Emitter {
         if let Expr::Member { object, field } = callee {
             if let Expr::Ident { name: module } = object.as_ref() {
                 let is_stdlib = stdlib::is_stdlib_module(module);
-                let is_user_module = self.user_modules.contains(module);
+                let resolved_mod = self.module_aliases.get(module.as_str())
+                    .cloned()
+                    .unwrap_or_else(|| module.to_string());
+                let is_user_module = self.user_modules.contains(&resolved_mod);
                 if is_stdlib || is_user_module {
                     return self.gen_module_call(module, field, args);
                 }
@@ -352,7 +355,10 @@ impl Emitter {
                 _ => format!("/* time.{} */ todo!()", func),
             },
             _ => {
-                let call = format!("{}::{}({})", module, func, args_str.join(", "));
+                let resolved = self.module_aliases.get(module)
+                    .cloned()
+                    .unwrap_or_else(|| module.to_string());
+                let call = format!("{}::{}({})", resolved, func, args_str.join(", "));
                 // Auto-propagate ? for user module effect/Result functions
                 if self.in_effect && (self.effect_fns.contains(&func.to_string()) || self.result_fns.contains(&func.to_string())) {
                     format!("{}?", call)

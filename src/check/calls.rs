@@ -134,8 +134,13 @@ impl Checker {
     }
 
     fn check_module_call(&mut self, module: &str, func: &str, arg_tys: &[Ty]) -> Ty {
-        // Track module usage for unused import detection
-        if stdlib::is_stdlib_module(module) || self.env.user_modules.contains(module) {
+        // Resolve module name through aliases (e.g. "json" -> "json_v2")
+        let resolved_module = self.env.module_aliases.get(module)
+            .cloned()
+            .unwrap_or_else(|| module.to_string());
+
+        // Track module usage for unused import detection (use original name)
+        if stdlib::is_stdlib_module(module) || self.env.user_modules.contains(&resolved_module) {
             self.env.used_modules.insert(module.to_string());
         }
         if let Some(sig) = stdlib::lookup_sig(module, func) {
@@ -175,8 +180,8 @@ impl Checker {
         }
 
         // Check user-defined modules
-        if self.env.user_modules.contains(module) {
-            let key = format!("{}.{}", module, func);
+        if self.env.user_modules.contains(&resolved_module) {
+            let key = format!("{}.{}", resolved_module, func);
             if let Some(sig) = self.env.functions.get(&key).cloned() {
                 if arg_tys.len() != sig.params.len() {
                     let usage = sig.format_params();

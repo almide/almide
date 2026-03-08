@@ -54,11 +54,13 @@ fn compile(file: &str, no_check: bool) -> String {
 fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::EmitOptions) -> String {
     let program = parse_file(file);
 
-    let dep_paths: Vec<(String, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
+    let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
             project::fetch_all_deps(&proj)
                 .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); })
-                .into_iter().collect()
+                .into_iter()
+                .map(|fd| (fd.pkg_id, fd.source_dir))
+                .collect()
         } else {
             vec![]
         }
@@ -73,8 +75,8 @@ fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::Em
         let source_text = std::fs::read_to_string(file).unwrap_or_default();
         let mut checker = check::Checker::new();
         checker.set_source(file, &source_text);
-        for (name, mod_prog) in &resolved.modules {
-            checker.register_module(name, mod_prog);
+        for (name, mod_prog, pkg_id) in &resolved.modules {
+            checker.register_module(name, mod_prog, pkg_id.as_ref());
         }
         let diagnostics = checker.check_program(&program);
         let errors: Vec<_> = diagnostics.iter()
@@ -125,6 +127,7 @@ fn main() {
             git: git_url,
             tag,
             branch: None,
+            version: None,
         };
         project::fetch_dep(&dep)
             .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });

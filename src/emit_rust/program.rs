@@ -23,12 +23,21 @@ impl Emitter {
         }
     }
 
-    pub(crate) fn emit_program(&mut self, prog: &Program, modules: &[(String, Program)]) {
+    pub(crate) fn emit_program(&mut self, prog: &Program, modules: &[(String, Program, Option<crate::project::PkgId>)]) {
         self.collect_fn_info(&prog.decls);
-        for (_, mod_prog) in modules {
+        for (_, mod_prog, _) in modules {
             self.collect_fn_info(&mod_prog.decls);
         }
-        self.user_modules = modules.iter().map(|(n, _)| n.clone()).collect();
+        // Build module_aliases and user_modules from PkgId info
+        for (name, _, pkg_id) in modules {
+            if let Some(pid) = pkg_id {
+                let versioned = pid.mod_name();
+                self.module_aliases.insert(name.clone(), versioned.clone());
+                self.user_modules.push(versioned);
+            } else {
+                self.user_modules.push(name.clone());
+            }
+        }
 
         self.emitln("#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use)]");
         self.emitln("");
@@ -36,8 +45,8 @@ impl Emitter {
         self.emitln("");
 
         // Emit imported modules as `mod name { ... }`
-        for (mod_name, mod_prog) in modules {
-            self.emit_user_module(mod_name, mod_prog);
+        for (mod_name, mod_prog, pkg_id) in modules {
+            self.emit_user_module(mod_name, mod_prog, pkg_id.as_ref());
             self.emitln("");
         }
 
@@ -89,8 +98,13 @@ impl Emitter {
         }
     }
 
-    fn emit_user_module(&mut self, name: &str, prog: &Program) {
-        self.emitln(&format!("mod {} {{", name));
+    fn emit_user_module(&mut self, name: &str, prog: &Program, pkg_id: Option<&crate::project::PkgId>) {
+        let mod_name = if let Some(pid) = pkg_id {
+            pid.mod_name()
+        } else {
+            name.to_string()
+        };
+        self.emitln(&format!("mod {} {{", mod_name));
         self.indent += 1;
         self.emitln("use super::*;");
         self.emitln("");
