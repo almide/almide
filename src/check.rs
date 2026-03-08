@@ -531,7 +531,12 @@ impl Checker {
 
     fn check_module_call(&mut self, module: &str, func: &str, arg_tys: &[Ty]) -> Ty {
         if let Some(sig) = self.lookup_stdlib(module, func) {
-            if arg_tys.len() != sig.params.len() {
+            // Some stdlib functions have optional trailing params
+            let min_params = match (module, func) {
+                ("string", "slice") => sig.params.len() - 1,
+                _ => sig.params.len(),
+            };
+            if arg_tys.len() < min_params || arg_tys.len() > sig.params.len() {
                 let usage = sig.params.iter().map(|(n, t)| format!("{}: {}", n, t.display())).collect::<Vec<_>>().join(", ");
                 self.diagnostics.push(err_s(
                     format!("{}.{}() expects {} argument(s) but got {}", module, func, sig.params.len(), arg_tys.len()),
@@ -841,7 +846,7 @@ impl Checker {
             ("string", "to_int") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::Result(Box::new(Ty::Int), Box::new(Ty::String)), is_effect: false },
             ("string", "to_bytes") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::List(Box::new(Ty::Int)), is_effect: false },
             ("string", "char_at") => FnSig { params: vec![(s("s"), Ty::String), (s("i"), Ty::Int)], ret: Ty::Option(Box::new(Ty::String)), is_effect: false },
-            ("string", "slice") => FnSig { params: vec![(s("s"), Ty::String), (s("start"), Ty::Int)], ret: Ty::String, is_effect: false },
+            ("string", "slice") => FnSig { params: vec![(s("s"), Ty::String), (s("start"), Ty::Int), (s("end"), Ty::Int)], ret: Ty::String, is_effect: false },
             // list
             ("list", "len") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::Int, is_effect: false },
             ("list", "get") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("i"), Ty::Int)], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: false },

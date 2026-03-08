@@ -29,7 +29,7 @@ impl Emitter {
     }
 
     fn emit_program(&mut self, prog: &Program, modules: &[(String, Program)]) {
-        // Collect effect function names (skip those that already return Result)
+        // Collect effect function names (auto-wrapped: effect fn without explicit Result return)
         for decl in &prog.decls {
             if let Decl::Fn { name, effect, return_type, .. } = decl {
                 if effect.unwrap_or(false) {
@@ -177,16 +177,8 @@ impl Emitter {
         self.emitln("impl AlmideConcat<String> for &str { type Output = String; fn concat(self, rhs: String) -> String { format!(\"{}{}\", self, rhs) } }");
         self.emitln("impl AlmideConcat<&str> for &str { type Output = String; fn concat(self, rhs: &str) -> String { format!(\"{}{}\", self, rhs) } }");
         self.emitln("impl<T: Clone> AlmideConcat<Vec<T>> for Vec<T> { type Output = Vec<T>; fn concat(self, rhs: Vec<T>) -> Vec<T> { let mut r = self; r.extend(rhs); r } }");
-        // Use trait for comparison to handle String/&String/i64 uniformly
-        self.emitln("trait AlmideAsRef<T: ?Sized> { fn as_cmp(&self) -> &T; }");
-        self.emitln("impl AlmideAsRef<str> for String { fn as_cmp(&self) -> &str { self.as_str() } }");
-        self.emitln("impl AlmideAsRef<str> for &String { fn as_cmp(&self) -> &str { self.as_str() } }");
-        self.emitln("impl AlmideAsRef<str> for &str { fn as_cmp(&self) -> &str { self } }");
-        self.emitln("impl AlmideAsRef<i64> for i64 { fn as_cmp(&self) -> &i64 { self } }");
-        self.emitln("impl AlmideAsRef<i64> for &i64 { fn as_cmp(&self) -> &i64 { self } }");
-        self.emitln("impl AlmideAsRef<bool> for bool { fn as_cmp(&self) -> &bool { self } }");
-        self.emitln("macro_rules! almide_eq { ($a:expr, $b:expr) => { ($a).as_cmp() == ($b).as_cmp() }; }");
-        self.emitln("macro_rules! almide_ne { ($a:expr, $b:expr) => { ($a).as_cmp() != ($b).as_cmp() }; }");
+        self.emitln("macro_rules! almide_eq { ($a:expr, $b:expr) => { ($a) == ($b) }; }");
+        self.emitln("macro_rules! almide_ne { ($a:expr, $b:expr) => { ($a) != ($b) }; }");
         self.emitln("");
     }
 
@@ -309,7 +301,8 @@ impl Emitter {
         self.indent += 1;
 
         let prev_effect = self.in_effect;
-        self.in_effect = is_effect;
+        // Treat fn as effect if explicitly marked OR if it returns Result
+        self.in_effect = is_effect || ret_str.starts_with("Result<");
 
         match body {
             Expr::Block { stmts, expr: final_expr } => {
@@ -435,7 +428,14 @@ impl Emitter {
                             expr_str.push(ch);
                         }
                         fmt.push_str("{}");
-                        args.push(expr_str);
+                        // Parse the interpolated expression and re-emit as Rust
+                        let tokens = crate::lexer::Lexer::tokenize(&expr_str);
+                        let mut parser = crate::parser::Parser::new(tokens);
+                        if let Ok(parsed_expr) = parser.parse_single_expr() {
+                            args.push(self.gen_expr(&parsed_expr));
+                        } else {
+                            args.push(expr_str);
+                        }
                     } else if c == '{' {
                         fmt.push_str("{{");
                     } else if c == '}' {
@@ -456,10 +456,22 @@ impl Emitter {
             Expr::Unit => "()".to_string(),
             Expr::None => "None".to_string(),
             Expr::Some { expr } => format!("Some({})", self.gen_expr(expr)),
-            Expr::Ok { expr } => format!("Ok({})", self.gen_expr(expr)),
+            Expr::Ok { expr } => {
+                if self.in_effect {
+                    format!("Ok({})", self.gen_expr(expr))
+                } else if matches!(expr.as_ref(), Expr::Unit) {
+                    "()".to_string()
+                } else {
+                    format!("Ok({})", self.gen_expr(expr))
+                }
+            }
             Expr::Err { expr } => {
                 let msg = self.gen_expr(expr);
-                format!("return Err({}.to_string())", msg)
+                if self.in_effect {
+                    format!("return Err({}.to_string())", msg)
+                } else {
+                    format!("Err({}.to_string())", msg)
+                }
             }
 
             Expr::List { elements } => {
@@ -498,10 +510,15 @@ impl Emitter {
                 let l = self.gen_expr(left);
                 match right.as_ref() {
                     Expr::Call { callee, args } => {
-                        let callee_str = self.gen_expr(callee);
-                        let mut all_args = vec![l];
-                        all_args.extend(args.iter().map(|a| self.gen_expr(a)));
-                        format!("{}({})", callee_str, all_args.join(", "))
+                        // Reconstruct as a full call with pipe-left as first arg
+                        let mut all_args = Vec::new();
+                        all_args.push(left.as_ref().clone());
+                        all_args.extend(args.iter().cloned());
+                        let full_call = Expr::Call {
+                            callee: callee.clone(),
+                            args: all_args,
+                        };
+                        self.gen_expr(&full_call)
                     }
                     _ => {
                         let r = self.gen_expr(right);
@@ -829,15 +846,22 @@ impl Emitter {
                     }
                     "filter" => {
                         let (names, body) = inline_lambda(&args[1], 1);
-                        format!("{{ let mut __v = ({}).clone(); __v.retain(|{}| {{ {} }}); __v }}", args_str[0], names[0], body)
+                        format!("({}).clone().into_iter().filter(|{}| {{ let {} = {}.clone(); {} }}).collect::<Vec<_>>()", args_str[0], names[0], names[0], names[0], body)
                     }
                     "find" => {
                         let (names, body) = inline_lambda(&args[1], 1);
-                        format!("({}).iter().find(|{}| {{ {} }}).cloned()", args_str[0], names[0], body)
+                        format!("({}).clone().into_iter().find(|{}| {{ let {} = {}.clone(); {} }})", args_str[0], names[0], names[0], names[0], body)
                     }
                     "fold" => {
                         let (names, body) = inline_lambda(&args[2], 2);
-                        format!("({}).clone().into_iter().fold({}, |{}, {}| {{ {} }})", args_str[0], args_str[1], names[0], names[1], body)
+                        // Add type annotation on accumulator if it's a Result (Rust can't infer)
+                        let init = &args_str[1];
+                        let acc_typed = if init.starts_with("Ok(") || init.starts_with("Err(") {
+                            format!("{}: Result<_, String>", names[0])
+                        } else {
+                            names[0].clone()
+                        };
+                        format!("({}).clone().into_iter().fold({}, |{}, {}| {{ {} }})", args_str[0], init, acc_typed, names[1], body)
                     }
                     _ => format!("/* list.{} */ todo!()", func),
                 }
@@ -963,7 +987,7 @@ impl Emitter {
     fn gen_pattern_literal(&self, expr: &Expr) -> String {
         match expr {
             Expr::String { value } => format!("\"{}\"", value),
-            Expr::Int { value, .. } => format!("{}i64", value),
+            Expr::Int { raw, .. } => format!("{}i64", raw),
             Expr::Float { value } => value.to_string(),
             Expr::Bool { value } => value.to_string(),
             _ => self.gen_expr(expr),

@@ -11,6 +11,10 @@ impl Parser {
         Parser { tokens, pos: 0 }
     }
 
+    pub fn parse_single_expr(&mut self) -> Result<Expr, String> {
+        self.parse_expr()
+    }
+
     pub fn parse(&mut self) -> Result<Program, String> {
         let mut program = Program {
             module: None,

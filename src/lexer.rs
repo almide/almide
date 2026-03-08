@@ -114,9 +114,13 @@ fn build_keyword_map() -> HashMap<&'static str, TokenType> {
     m.insert("else", TokenType::Else);
     m.insert("match", TokenType::Match);
     m.insert("ok", TokenType::Ok);
+    m.insert("Ok", TokenType::Ok);
     m.insert("err", TokenType::Err);
+    m.insert("Err", TokenType::Err);
     m.insert("some", TokenType::Some);
+    m.insert("Some", TokenType::Some);
     m.insert("none", TokenType::None);
+    m.insert("None", TokenType::None);
     m.insert("try", TokenType::Try);
     m.insert("do", TokenType::Do);
     m.insert("todo", TokenType::Todo);
@@ -464,8 +468,11 @@ impl Lexer {
             self.advance();
         }
 
+        let keywords = build_keyword_map();
+        let token_type = keywords.get(value.as_str()).cloned().unwrap_or(TokenType::TypeName);
+
         self.tokens.push(Token {
-            token_type: TokenType::TypeName,
+            token_type,
             value,
             line: start_line,
             col: start_col,
