@@ -7,6 +7,7 @@ use crate::ast::*;
 
 pub(crate) const JSON_RUNTIME: &str = include_str!("json_runtime.txt");
 pub(crate) const HTTP_RUNTIME: &str = include_str!("http_runtime.txt");
+pub(crate) const TIME_RUNTIME: &str = include_str!("time_runtime.txt");
 
 pub struct EmitOptions {
     /// Skip thread wrapper around main (for WASM targets where threads are unavailable)

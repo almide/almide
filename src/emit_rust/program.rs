@@ -2,6 +2,7 @@ use crate::ast::*;
 use super::Emitter;
 use super::JSON_RUNTIME;
 use super::HTTP_RUNTIME;
+use super::TIME_RUNTIME;
 
 impl Emitter {
     /// Scan declarations to classify effect/result functions (single pass).
@@ -179,6 +180,8 @@ impl Emitter {
         self.out.push_str(JSON_RUNTIME);
         self.emitln("");
         self.out.push_str(HTTP_RUNTIME);
+        self.emitln("");
+        self.out.push_str(TIME_RUNTIME);
         self.emitln("");
     }
 

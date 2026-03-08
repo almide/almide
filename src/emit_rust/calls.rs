@@ -327,7 +327,17 @@ impl Emitter {
             },
             "time" => match func {
                 "now" => "(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64)".to_string(),
+                "millis" => "(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64)".to_string(),
                 "sleep" => format!("std::thread::sleep(std::time::Duration::from_millis({} as u64))", args_str[0]),
+                "year" => format!("almide_time_parts({}).0", args_str[0]),
+                "month" => format!("almide_time_parts({}).1", args_str[0]),
+                "day" => format!("almide_time_parts({}).2", args_str[0]),
+                "hour" => format!("almide_time_parts({}).3", args_str[0]),
+                "minute" => format!("almide_time_parts({}).4", args_str[0]),
+                "second" => format!("almide_time_parts({}).5", args_str[0]),
+                "weekday" => format!("almide_time_weekday({})", args_str[0]),
+                "to_iso" => format!("almide_time_to_iso({})", args_str[0]),
+                "from_parts" => format!("almide_time_from_parts({}, {}, {}, {}, {}, {})", args_str[0], args_str[1], args_str[2], args_str[3], args_str[4], args_str[5]),
                 _ => format!("/* time.{} */ todo!()", func),
             },
             _ => {

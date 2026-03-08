@@ -207,7 +207,17 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
 
         // ── time ──
         ("time", "now") => FnSig { params: vec![], ret: Ty::Int, is_effect: true },
+        ("time", "millis") => FnSig { params: vec![], ret: Ty::Int, is_effect: true },
         ("time", "sleep") => FnSig { params: vec![(s("ms"), Ty::Int)], ret: Ty::Unit, is_effect: true },
+        ("time", "year") => FnSig { params: vec![(s("ts"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("time", "month") => FnSig { params: vec![(s("ts"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("time", "day") => FnSig { params: vec![(s("ts"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("time", "hour") => FnSig { params: vec![(s("ts"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("time", "minute") => FnSig { params: vec![(s("ts"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("time", "second") => FnSig { params: vec![(s("ts"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("time", "weekday") => FnSig { params: vec![(s("ts"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("time", "to_iso") => FnSig { params: vec![(s("ts"), Ty::Int)], ret: Ty::String, is_effect: false },
+        ("time", "from_parts") => FnSig { params: vec![(s("y"), Ty::Int), (s("m"), Ty::Int), (s("d"), Ty::Int), (s("h"), Ty::Int), (s("min"), Ty::Int), (s("s"), Ty::Int)], ret: Ty::Int, is_effect: false },
 
         _ => return None,
     };
