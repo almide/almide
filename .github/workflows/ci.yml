@@ -79,6 +79,45 @@ jobs:
             echo "FMT OK: $almd"
           done
 
+      - name: Install Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: TypeScript runtime test
+        run: |
+          failed=0
+          for dir in pangram bob raindrops collatz-conjecture stdlib-test; do
+            almd=$(ls exercises/$dir/*.almd 2>/dev/null | head -1)
+            if [ -z "$almd" ]; then continue; fi
+            ./target/release/almide "$almd" --target ts > /tmp/ts_test.ts
+            if deno run --allow-all /tmp/ts_test.ts 2>&1; then
+              echo "TS OK: $dir"
+            else
+              echo "TS FAIL: $dir"
+              failed=$((failed + 1))
+            fi
+          done
+          echo "TS Results: $failed failed"
+          [ $failed -eq 0 ]
+
+      - name: JavaScript runtime test
+        run: |
+          failed=0
+          for dir in pangram bob raindrops collatz-conjecture; do
+            almd=$(ls exercises/$dir/*.almd 2>/dev/null | head -1)
+            if [ -z "$almd" ]; then continue; fi
+            ./target/release/almide "$almd" --target js > /tmp/js_test.js
+            if node /tmp/js_test.js 2>&1; then
+              echo "JS OK: $dir"
+            else
+              echo "JS FAIL: $dir"
+              failed=$((failed + 1))
+            fi
+          done
+          echo "JS Results: $failed failed"
+          [ $failed -eq 0 ]
+
   wasm:
     name: WASM Build & Test
     runs-on: ubuntu-latest

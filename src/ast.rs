@@ -120,6 +120,7 @@ pub enum Stmt {
     Assign { name: String, value: Expr },
     Guard { cond: Expr, else_: Expr },
     Expr { expr: Expr },
+    Comment { text: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

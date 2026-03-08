@@ -95,6 +95,7 @@ impl Checker {
                 self.check_expr(else_);
             }
             ast::Stmt::Expr { expr } => { self.check_expr(expr); }
+            ast::Stmt::Comment { .. } => {}
         }
     }
 

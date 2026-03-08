@@ -197,6 +197,9 @@ impl Emitter {
             Stmt::Expr { expr } => {
                 format!("{};", self.gen_expr(expr))
             }
+            Stmt::Comment { text } => {
+                text.clone()
+            }
         }
     }
 }

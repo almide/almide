@@ -502,6 +502,12 @@ fn format_stmt(out: &mut String, stmt: &Stmt, depth: usize) {
             out.push_str(&ind);
             format_expr(out, expr, depth);
         }
+        Stmt::Comment { text } => {
+            out.push_str(&ind);
+            out.push_str(text);
+            out.push('\n');
+            return;
+        }
     }
     out.push_str(";\n");
 }

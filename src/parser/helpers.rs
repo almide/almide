@@ -147,6 +147,16 @@ impl Parser {
         }
     }
 
+    /// Skip newlines, collecting Comment tokens as Stmt::Comment into a Vec.
+    pub(crate) fn skip_newlines_into_stmts(&mut self, stmts: &mut Vec<crate::ast::Stmt>) {
+        while self.check(TokenType::Newline) || self.check(TokenType::Comment) {
+            if self.check(TokenType::Comment) {
+                stmts.push(crate::ast::Stmt::Comment { text: self.current().value.clone() });
+            }
+            self.advance();
+        }
+    }
+
     /// Skip newlines and collect any Comment tokens encountered.
     pub(crate) fn skip_newlines_collect_comments(&mut self) -> Vec<String> {
         let mut comments = Vec::new();

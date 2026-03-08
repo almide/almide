@@ -105,15 +105,16 @@ impl Parser {
 
     pub(crate) fn parse_do_block(&mut self) -> Result<Expr, String> {
         self.expect(TokenType::LBrace)?;
-        self.skip_newlines();
         let mut stmts = Vec::new();
+        self.skip_newlines_into_stmts(&mut stmts);
         let mut final_expr: Option<Box<Expr>> = None;
         while !self.check(TokenType::RBrace) {
             let stmt = self.parse_stmt()?;
-            self.skip_newlines();
+            let mut trailing = Vec::new();
+            self.skip_newlines_into_stmts(&mut trailing);
             if self.check(TokenType::Semicolon) {
                 self.advance();
-                self.skip_newlines();
+                self.skip_newlines_into_stmts(&mut trailing);
             }
             if self.check(TokenType::RBrace) {
                 if let Stmt::Expr { expr } = stmt {
@@ -121,8 +122,10 @@ impl Parser {
                 } else {
                     stmts.push(stmt);
                 }
+                stmts.extend(trailing);
             } else {
                 stmts.push(stmt);
+                stmts.extend(trailing);
             }
         }
         self.expect(TokenType::RBrace)?;
@@ -134,7 +137,8 @@ impl Parser {
 
     pub(crate) fn parse_brace_expr(&mut self) -> Result<Expr, String> {
         self.expect(TokenType::LBrace)?;
-        self.skip_newlines();
+        let mut initial_comments = Vec::new();
+        self.skip_newlines_into_stmts(&mut initial_comments);
         if self.check(TokenType::RBrace) {
             self.advance();
             return Ok(Expr::Record { fields: Vec::new() });
@@ -196,14 +200,15 @@ impl Parser {
             return Ok(Expr::Record { fields });
         }
 
-        let mut stmts = Vec::new();
+        let mut stmts = initial_comments;
         let mut final_expr: Option<Box<Expr>> = None;
         while !self.check(TokenType::RBrace) {
             let stmt = self.parse_stmt()?;
-            self.skip_newlines();
+            let mut trailing = Vec::new();
+            self.skip_newlines_into_stmts(&mut trailing);
             if self.check(TokenType::Semicolon) {
                 self.advance();
-                self.skip_newlines();
+                self.skip_newlines_into_stmts(&mut trailing);
             }
             if self.check(TokenType::RBrace) {
                 if let Stmt::Expr { expr } = stmt {
@@ -211,8 +216,10 @@ impl Parser {
                 } else {
                     stmts.push(stmt);
                 }
+                stmts.extend(trailing);
             } else {
                 stmts.push(stmt);
+                stmts.extend(trailing);
             }
         }
         self.expect(TokenType::RBrace)?;
