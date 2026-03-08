@@ -388,6 +388,13 @@ impl Emitter {
 
             Expr::Block { stmts, expr } => self.gen_block(stmts, expr.as_deref()),
             Expr::DoBlock { stmts, expr } => self.gen_do_block(stmts, expr.as_deref()),
+            Expr::ForIn { var, iterable, body } => {
+                let iter_str = self.gen_expr(iterable);
+                let stmts_str: Vec<String> = body.iter()
+                    .map(|s| format!("  {}", self.gen_stmt(s)))
+                    .collect();
+                format!("for {} in {} {{\n{}\n}}", var, iter_str, stmts_str.join("\n"))
+            }
 
             Expr::Paren { expr } => format!("({})", self.gen_expr(expr)),
             Expr::Try { expr } => {

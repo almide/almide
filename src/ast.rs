@@ -74,6 +74,7 @@ pub enum Expr {
     Match { subject: Box<Expr>, arms: Vec<MatchArm> },
     Block { stmts: Vec<Stmt>, expr: Option<Box<Expr>> },
     DoBlock { stmts: Vec<Stmt>, expr: Option<Box<Expr>> },
+    ForIn { var: String, iterable: Box<Expr>, body: Vec<Stmt> },
     Lambda { params: Vec<LambdaParam>, body: Box<Expr> },
     Hole,
     Todo { message: String },

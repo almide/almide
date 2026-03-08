@@ -20,6 +20,7 @@ pub enum TokenType {
     Trait,
     Impl,
     For,
+    In,
     Fn,
     Let,
     Var,
@@ -104,6 +105,7 @@ fn build_keyword_map() -> HashMap<&'static str, TokenType> {
     m.insert("trait", TokenType::Trait);
     m.insert("impl", TokenType::Impl);
     m.insert("for", TokenType::For);
+    m.insert("in", TokenType::In);
     m.insert("fn", TokenType::Fn);
     m.insert("let", TokenType::Let);
     m.insert("var", TokenType::Var);

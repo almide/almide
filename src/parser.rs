@@ -260,7 +260,29 @@ impl Parser {
         let return_type = self.parse_type_expr()?;
         self.expect(TokenType::Eq)?;
         self.skip_newlines();
-        let body = self.parse_expr()?;
+        let mut body = self.parse_expr()?;
+
+        // Implicit ok(()) for effect fn: auto-append ok(()) when body block
+        // doesn't end with an explicit ok/err expression
+        if effect {
+            if let Expr::Block { ref stmts, ref expr } = body {
+                let needs_ok = match expr {
+                    None => true,
+                    Some(e) => matches!(e.as_ref(), Expr::ForIn { .. } | Expr::DoBlock { .. }),
+                };
+                if needs_ok {
+                    let mut new_stmts = stmts.clone();
+                    if let Some(trailing) = expr {
+                        new_stmts.push(Stmt::Expr { expr: *trailing.clone() });
+                    }
+                    body = Expr::Block {
+                        stmts: new_stmts,
+                        expr: Some(Box::new(Expr::Ok { expr: Box::new(Expr::Unit) })),
+                    };
+                }
+            }
+        }
+
         Ok(Decl::Fn {
             name,
             r#async: if async_ { Some(true) } else { None },
@@ -959,6 +981,31 @@ impl Parser {
         // Lambda: fn(...) => expr
         if self.check(TokenType::Fn) && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::LParen) {
             return self.parse_lambda();
+        }
+
+        // For...in loop
+        if self.check(TokenType::For) {
+            self.advance();
+            let var_name = self.expect_ident()?;
+            self.expect(TokenType::In)?;
+            let iterable = self.parse_expr()?;
+            self.expect(TokenType::LBrace)?;
+            self.skip_newlines();
+            let mut stmts = Vec::new();
+            while !self.check(TokenType::RBrace) {
+                stmts.push(self.parse_stmt()?);
+                self.skip_newlines();
+                if self.check(TokenType::Semicolon) {
+                    self.advance();
+                    self.skip_newlines();
+                }
+            }
+            self.expect(TokenType::RBrace)?;
+            return Ok(Expr::ForIn {
+                var: var_name,
+                iterable: Box::new(iterable),
+                body: stmts,
+            });
         }
 
         // Do block

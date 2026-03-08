@@ -421,6 +421,13 @@ impl TsEmitter {
             Expr::DoBlock { stmts, expr: final_expr } => {
                 self.gen_do_block(stmts, final_expr.as_deref(), 0)
             }
+            Expr::ForIn { var, iterable, body } => {
+                let iter_str = self.gen_expr(iterable);
+                let stmts_str: Vec<String> = body.iter()
+                    .map(|s| format!("  {}", self.gen_stmt(s)))
+                    .collect();
+                format!("for (const {} of {}) {{\n{}\n}}", Self::sanitize(var), iter_str, stmts_str.join("\n"))
+            }
             Expr::Lambda { params, body } => {
                 let ps: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
                 format!("(({}) => {})", ps.join(", "), self.gen_expr(body))
