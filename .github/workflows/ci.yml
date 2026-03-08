@@ -49,6 +49,9 @@ jobs:
           ./target/release/almide exercises/pangram/pangram.almd --emit-ast > /dev/null
           echo "AST emit OK"
 
+      - name: Run stdlib test suite
+        run: ./target/release/almide run exercises/stdlib-test/stdlib-test.almd
+
       - name: Run exercises
         run: |
           failed=0
