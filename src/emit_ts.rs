@@ -75,6 +75,24 @@ const __float = {
   sqrt(n: number): number { return Math.sqrt(n); },
   parse(s: string): number { const n = parseFloat(s); if (isNaN(n)) throw new Error("invalid float: " + s); return n; },
 };
+const __json = {
+  parse(text: string): any { return JSON.parse(text); },
+  stringify(j: any): string { return JSON.stringify(j); },
+  get(j: any, key: string): any | null { return (j && typeof j === "object" && !Array.isArray(j) && key in j) ? j[key] : null; },
+  get_string(j: any, key: string): string | null { const v = __json.get(j, key); return typeof v === "string" ? v : null; },
+  get_int(j: any, key: string): number | null { const v = __json.get(j, key); return typeof v === "number" ? v : null; },
+  get_bool(j: any, key: string): boolean | null { const v = __json.get(j, key); return typeof v === "boolean" ? v : null; },
+  get_array(j: any, key: string): any[] | null { const v = __json.get(j, key); return Array.isArray(v) ? v : null; },
+  keys(j: any): string[] { return (j && typeof j === "object" && !Array.isArray(j)) ? Object.keys(j).sort() : []; },
+  to_string(j: any): string | null { return typeof j === "string" ? j : null; },
+  to_int(j: any): number | null { return typeof j === "number" ? j : null; },
+  from_string(s: string): any { return s; },
+  from_int(n: number): any { return n; },
+  from_bool(b: boolean): any { return b; },
+  null_(): any { return null; },
+  array(items: any[]): any { return items; },
+  from_map(m: any): any { if (m instanceof Map) { const o: any = {}; m.forEach((v: any, k: string) => { o[k] = v; }); return o; } return m; },
+};
 const __env = {
   unix_timestamp(): number { return Math.floor(Date.now() / 1000); },
   args(): string[] { return Deno.args; },
@@ -1058,6 +1076,7 @@ impl TsEmitter {
             "int" => "__int".to_string(),
             "float" => "__float".to_string(),
             "map" => "__map".to_string(),
+            "json" => "__json".to_string(),
             "env" => "__env".to_string(),
             other => other.to_string(),
         }

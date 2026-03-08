@@ -1,6 +1,207 @@
 use crate::ast::*;
 use crate::stdlib;
 
+const JSON_RUNTIME: &str = r#"
+#[derive(Debug, Clone, PartialEq)]
+enum AlmideJson {
+    JNull,
+    JBool(bool),
+    JInt(i64),
+    JStr(String),
+    JArray(Vec<AlmideJson>),
+    JObject(HashMap<String, AlmideJson>),
+}
+use AlmideJson::*;
+
+impl std::fmt::Display for AlmideJson {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", almide_json_stringify(self))
+    }
+}
+
+fn almide_json_parse(input: &str) -> Result<AlmideJson, String> {
+    let b = input.as_bytes();
+    let (val, pos) = jparse_value(b, jskip_ws(b, 0))?;
+    let pos = jskip_ws(b, pos);
+    if pos != b.len() { return Err(format!("trailing data at position {}", pos)); }
+    Ok(val)
+}
+
+fn jskip_ws(b: &[u8], mut i: usize) -> usize {
+    while i < b.len() && matches!(b[i], b' ' | b'\t' | b'\n' | b'\r') { i += 1; }
+    i
+}
+
+fn jparse_value(b: &[u8], i: usize) -> Result<(AlmideJson, usize), String> {
+    if i >= b.len() { return Err("unexpected end of input".into()); }
+    match b[i] {
+        b'"' => jparse_string(b, i),
+        b'{' => jparse_object(b, i),
+        b'[' => jparse_array(b, i),
+        b't' => { if b.get(i..i+4) == Some(b"true") { Ok((JBool(true), i+4)) } else { Err(format!("invalid value at {}", i)) } }
+        b'f' => { if b.get(i..i+5) == Some(b"false") { Ok((JBool(false), i+5)) } else { Err(format!("invalid value at {}", i)) } }
+        b'n' => { if b.get(i..i+4) == Some(b"null") { Ok((JNull, i+4)) } else { Err(format!("invalid value at {}", i)) } }
+        b'-' | b'0'..=b'9' => jparse_number(b, i),
+        c => Err(format!("unexpected character '{}' at {}", c as char, i)),
+    }
+}
+
+fn jparse_string(b: &[u8], i: usize) -> Result<(AlmideJson, usize), String> {
+    let (s, pos) = jparse_string_raw(b, i)?;
+    Ok((JStr(s), pos))
+}
+
+fn jparse_string_raw(b: &[u8], mut i: usize) -> Result<(String, usize), String> {
+    if b.get(i) != Some(&b'"') { return Err("expected '\"'".into()); }
+    i += 1;
+    let mut s = String::new();
+    while i < b.len() {
+        match b[i] {
+            b'"' => return Ok((s, i + 1)),
+            b'\\' => {
+                i += 1;
+                if i >= b.len() { return Err("unexpected end in string escape".into()); }
+                match b[i] {
+                    b'"' => s.push('"'), b'\\' => s.push('\\'), b'/' => s.push('/'),
+                    b'n' => s.push('\n'), b'r' => s.push('\r'), b't' => s.push('\t'),
+                    b'u' => {
+                        if i + 4 >= b.len() { return Err("incomplete unicode escape".into()); }
+                        let hex = std::str::from_utf8(&b[i+1..i+5]).map_err(|_| "invalid unicode")?;
+                        let cp = u32::from_str_radix(hex, 16).map_err(|_| "invalid unicode")?;
+                        if let Some(c) = char::from_u32(cp) { s.push(c); } else { s.push('?'); }
+                        i += 4;
+                    }
+                    c => { s.push('\\'); s.push(c as char); }
+                }
+                i += 1;
+            }
+            c => { s.push(c as char); i += 1; }
+        }
+    }
+    Err("unterminated string".into())
+}
+
+fn jparse_number(b: &[u8], mut i: usize) -> Result<(AlmideJson, usize), String> {
+    let start = i;
+    if i < b.len() && b[i] == b'-' { i += 1; }
+    while i < b.len() && b[i].is_ascii_digit() { i += 1; }
+    // Skip fractional and exponent parts (treat as integer by truncation)
+    if i < b.len() && b[i] == b'.' {
+        i += 1;
+        while i < b.len() && b[i].is_ascii_digit() { i += 1; }
+    }
+    if i < b.len() && (b[i] == b'e' || b[i] == b'E') {
+        i += 1;
+        if i < b.len() && (b[i] == b'+' || b[i] == b'-') { i += 1; }
+        while i < b.len() && b[i].is_ascii_digit() { i += 1; }
+    }
+    let s = std::str::from_utf8(&b[start..i]).map_err(|_| "invalid number")?;
+    if s.contains('.') || s.contains('e') || s.contains('E') {
+        let f: f64 = s.parse().map_err(|_| format!("invalid number: {}", s))?;
+        Ok((JInt(f as i64), i))
+    } else {
+        let n: i64 = s.parse().map_err(|_| format!("number out of range: {}", s))?;
+        Ok((JInt(n), i))
+    }
+}
+
+fn jparse_array(b: &[u8], mut i: usize) -> Result<(AlmideJson, usize), String> {
+    i += 1; // skip [
+    i = jskip_ws(b, i);
+    let mut items = Vec::new();
+    if i < b.len() && b[i] == b']' { return Ok((JArray(items), i + 1)); }
+    loop {
+        i = jskip_ws(b, i);
+        let (val, pos) = jparse_value(b, i)?;
+        items.push(val);
+        i = jskip_ws(b, pos);
+        if i >= b.len() { return Err("unterminated array".into()); }
+        if b[i] == b']' { return Ok((JArray(items), i + 1)); }
+        if b[i] != b',' { return Err(format!("expected ',' or ']' at {}", i)); }
+        i += 1;
+    }
+}
+
+fn jparse_object(b: &[u8], mut i: usize) -> Result<(AlmideJson, usize), String> {
+    i += 1; // skip {
+    i = jskip_ws(b, i);
+    let mut map = HashMap::new();
+    if i < b.len() && b[i] == b'}' { return Ok((JObject(map), i + 1)); }
+    loop {
+        i = jskip_ws(b, i);
+        let (key, pos) = jparse_string_raw(b, i)?;
+        i = jskip_ws(b, pos);
+        if i >= b.len() || b[i] != b':' { return Err(format!("expected ':' at {}", i)); }
+        i = jskip_ws(b, i + 1);
+        let (val, pos) = jparse_value(b, i)?;
+        map.insert(key, val);
+        i = jskip_ws(b, pos);
+        if i >= b.len() { return Err("unterminated object".into()); }
+        if b[i] == b'}' { return Ok((JObject(map), i + 1)); }
+        if b[i] != b',' { return Err(format!("expected ',' or '}}' at {}", i)); }
+        i += 1;
+    }
+}
+
+fn almide_json_stringify(j: &AlmideJson) -> String {
+    match j {
+        JNull => "null".into(),
+        JBool(b) => if *b { "true".into() } else { "false".into() },
+        JInt(n) => n.to_string(),
+        JStr(s) => {
+            let mut out = String::from('"');
+            for c in s.chars() {
+                match c {
+                    '"' => out.push_str("\\\""),
+                    '\\' => out.push_str("\\\\"),
+                    '\n' => out.push_str("\\n"),
+                    '\r' => out.push_str("\\r"),
+                    '\t' => out.push_str("\\t"),
+                    c => out.push(c),
+                }
+            }
+            out.push('"');
+            out
+        }
+        JArray(items) => {
+            let inner: Vec<String> = items.iter().map(|v| almide_json_stringify(v)).collect();
+            format!("[{}]", inner.join(","))
+        }
+        JObject(map) => {
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort();
+            let inner: Vec<String> = keys.iter().map(|k| format!("{}:{}", almide_json_stringify(&JStr(k.to_string())), almide_json_stringify(map.get(*k).unwrap()))).collect();
+            format!("{{{}}}", inner.join(","))
+        }
+    }
+}
+
+fn almide_json_get(j: &AlmideJson, key: &str) -> Option<AlmideJson> {
+    if let JObject(m) = j { m.get(key).cloned() } else { None }
+}
+fn almide_json_get_string(j: &AlmideJson, key: &str) -> Option<String> {
+    match almide_json_get(j, key) { Some(JStr(s)) => Some(s), _ => None }
+}
+fn almide_json_get_int(j: &AlmideJson, key: &str) -> Option<i64> {
+    match almide_json_get(j, key) { Some(JInt(n)) => Some(n), _ => None }
+}
+fn almide_json_get_bool(j: &AlmideJson, key: &str) -> Option<bool> {
+    match almide_json_get(j, key) { Some(JBool(b)) => Some(b), _ => None }
+}
+fn almide_json_get_array(j: &AlmideJson, key: &str) -> Option<Vec<AlmideJson>> {
+    match almide_json_get(j, key) { Some(JArray(a)) => Some(a), _ => None }
+}
+fn almide_json_keys(j: &AlmideJson) -> Vec<String> {
+    if let JObject(m) = j { let mut v: Vec<String> = m.keys().cloned().collect(); v.sort(); v } else { vec![] }
+}
+fn almide_json_to_string(j: &AlmideJson) -> Option<String> {
+    if let JStr(s) = j { Some(s.clone()) } else { None }
+}
+fn almide_json_to_int(j: &AlmideJson) -> Option<i64> {
+    if let JInt(n) = j { Some(*n) } else { None }
+}
+"#;
+
 struct Emitter {
     out: String,
     indent: usize,
@@ -205,6 +406,8 @@ impl Emitter {
         self.emitln("impl<T: Clone> AlmideConcat<Vec<T>> for Vec<T> { type Output = Vec<T>; fn concat(self, rhs: Vec<T>) -> Vec<T> { let mut r = self; r.extend(rhs); r } }");
         self.emitln("macro_rules! almide_eq { ($a:expr, $b:expr) => { ($a) == ($b) }; }");
         self.emitln("macro_rules! almide_ne { ($a:expr, $b:expr) => { ($a) != ($b) }; }");
+        self.emitln("");
+        self.out.push_str(JSON_RUNTIME);
         self.emitln("");
     }
 
@@ -421,6 +624,7 @@ impl Emitter {
                 "Unit" => "()".to_string(),
                 "IoError" => "String".to_string(),
                 "Path" => "String".to_string(),
+                "Json" => "AlmideJson".to_string(),
                 other => other.to_string(),
             },
             TypeExpr::Generic { name, args } => match name.as_str() {
@@ -972,6 +1176,25 @@ impl Emitter {
                 }
                 "args" => "std::env::args().collect::<Vec<String>>()".to_string(),
                 _ => format!("/* env.{} */ todo!()", func),
+            },
+            "json" => match func {
+                "parse" => format!("almide_json_parse(&{})?", args_str[0]),
+                "stringify" => format!("almide_json_stringify(&{})", args_str[0]),
+                "get" => format!("almide_json_get(&{}, &{})", args_str[0], args_str[1]),
+                "get_string" => format!("almide_json_get_string(&{}, &{})", args_str[0], args_str[1]),
+                "get_int" => format!("almide_json_get_int(&{}, &{})", args_str[0], args_str[1]),
+                "get_bool" => format!("almide_json_get_bool(&{}, &{})", args_str[0], args_str[1]),
+                "get_array" => format!("almide_json_get_array(&{}, &{})", args_str[0], args_str[1]),
+                "keys" => format!("almide_json_keys(&{})", args_str[0]),
+                "to_string" => format!("almide_json_to_string(&{})", args_str[0]),
+                "to_int" => format!("almide_json_to_int(&{})", args_str[0]),
+                "from_string" => format!("JStr({})", args_str[0]),
+                "from_int" => format!("JInt({})", args_str[0]),
+                "from_bool" => format!("JBool({})", args_str[0]),
+                "null" => "JNull".to_string(),
+                "array" => format!("JArray({})", args_str[0]),
+                "from_map" => format!("JObject({})", args_str[0]),
+                _ => format!("/* json.{} */ todo!()", func),
             },
             _ => {
                 format!("{}::{}({})", module, func, args_str.join(", "))

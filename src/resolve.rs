@@ -6,7 +6,7 @@ use crate::ast;
 use crate::lexer;
 use crate::parser;
 
-const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "env", "fs", "map"];
+const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "env", "fs", "map", "json"];
 
 pub struct ResolvedModules {
     /// Modules in dependency order (leaves first).

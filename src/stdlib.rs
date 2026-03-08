@@ -5,7 +5,7 @@
 use crate::types::{Ty, FnSig};
 
 /// All built-in stdlib module names.
-pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map"];
+pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json"];
 
 /// Check if a module name is a stdlib module.
 pub fn is_stdlib_module(name: &str) -> bool {
@@ -113,6 +113,24 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         ("float", "abs") => FnSig { params: vec![(s("n"), Ty::Float)], ret: Ty::Float, is_effect: false },
         ("float", "sqrt") => FnSig { params: vec![(s("n"), Ty::Float)], ret: Ty::Float, is_effect: false },
         ("float", "parse") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::Result(Box::new(Ty::Float), Box::new(Ty::String)), is_effect: false },
+
+        // ── json ──
+        ("json", "parse") => FnSig { params: vec![(s("text"), Ty::String)], ret: Ty::Result(Box::new(Ty::Named(s("Json"))), Box::new(Ty::String)), is_effect: false },
+        ("json", "stringify") => FnSig { params: vec![(s("j"), Ty::Named(s("Json")))], ret: Ty::String, is_effect: false },
+        ("json", "get") => FnSig { params: vec![(s("j"), Ty::Named(s("Json"))), (s("key"), Ty::String)], ret: Ty::Option(Box::new(Ty::Named(s("Json")))), is_effect: false },
+        ("json", "get_string") => FnSig { params: vec![(s("j"), Ty::Named(s("Json"))), (s("key"), Ty::String)], ret: Ty::Option(Box::new(Ty::String)), is_effect: false },
+        ("json", "get_int") => FnSig { params: vec![(s("j"), Ty::Named(s("Json"))), (s("key"), Ty::String)], ret: Ty::Option(Box::new(Ty::Int)), is_effect: false },
+        ("json", "get_bool") => FnSig { params: vec![(s("j"), Ty::Named(s("Json"))), (s("key"), Ty::String)], ret: Ty::Option(Box::new(Ty::Bool)), is_effect: false },
+        ("json", "get_array") => FnSig { params: vec![(s("j"), Ty::Named(s("Json"))), (s("key"), Ty::String)], ret: Ty::Option(Box::new(Ty::List(Box::new(Ty::Named(s("Json")))))), is_effect: false },
+        ("json", "keys") => FnSig { params: vec![(s("j"), Ty::Named(s("Json")))], ret: Ty::List(Box::new(Ty::String)), is_effect: false },
+        ("json", "to_string") => FnSig { params: vec![(s("j"), Ty::Named(s("Json")))], ret: Ty::Option(Box::new(Ty::String)), is_effect: false },
+        ("json", "to_int") => FnSig { params: vec![(s("j"), Ty::Named(s("Json")))], ret: Ty::Option(Box::new(Ty::Int)), is_effect: false },
+        ("json", "from_string") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::Named(s("Json")), is_effect: false },
+        ("json", "from_int") => FnSig { params: vec![(s("n"), Ty::Int)], ret: Ty::Named(s("Json")), is_effect: false },
+        ("json", "from_bool") => FnSig { params: vec![(s("b"), Ty::Bool)], ret: Ty::Named(s("Json")), is_effect: false },
+        ("json", "null") => FnSig { params: vec![], ret: Ty::Named(s("Json")), is_effect: false },
+        ("json", "array") => FnSig { params: vec![(s("items"), Ty::List(Box::new(Ty::Named(s("Json")))))], ret: Ty::Named(s("Json")), is_effect: false },
+        ("json", "from_map") => FnSig { params: vec![(s("m"), Ty::Map(Box::new(Ty::String), Box::new(Ty::Named(s("Json")))))], ret: Ty::Named(s("Json")), is_effect: false },
 
         // ── env ──
         ("env", "unix_timestamp") => FnSig { params: vec![], ret: Ty::Int, is_effect: true },
