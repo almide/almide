@@ -4,20 +4,21 @@
 
 <p align="center">A programming language designed for LLM code generation — optimized for AI proliferation.</p>
 
-Almide is not a language for humans to write freely — it is a language for AI to converge correctly. Every design decision minimizes the set of valid next tokens at each generation step, reducing hallucination and syntax errors.
+Almide is a language for AI to write code directly and efficiently. The design goal is that LLMs can express intent in the fewest tokens and with the least thinking, by providing the right abstractions and eliminating boilerplate.
 
 The core thesis: **if AI can write a language reliably, code proliferates → training data grows → AI writes it even better → modules multiply**. Almide is designed to start this flywheel.
 
 ## Key Design Principles
 
-- **Predictable** — At each point in code generation, the set of valid continuations is small
+- **Direct** — The right abstraction for each task, so AI writes intent, not workarounds
+- **Predictable** — One unambiguous way to express each concept, reducing token branching
 - **Local** — Understanding any piece of code requires only nearby context
 - **Repairable** — Compiler diagnostics guide toward a unique fix, not multiple possibilities
 - **Compact** — High semantic density, low syntactic noise
 
-## Ambiguity Elimination
+## Design Philosophy
 
-Almide is designed by **enumerating LLM failure modes and removing each one**. Every design decision is subtractive — reducing the space of valid programs so the AI converges faster.
+Almide optimizes for **minimal thinking tokens** — the less an LLM has to reason about workarounds, syntax alternatives, or missing abstractions, the faster and cheaper code generation becomes. This means both removing ambiguity *and* providing the right tools so the AI never has to improvise.
 
 ### Syntax Ambiguity Removed
 
@@ -26,7 +27,7 @@ Almide is designed by **enumerating LLM failure modes and removing each one**. E
 | Null handling | `null`, `nil`, `None`, `undefined` | `Option[T]` only | Eliminates null-check hallucination |
 | Error handling | `throw`, `try/catch`, `panic`, error codes | `Result[T, E]` only | Error path always visible in types |
 | Generics | `<T>` (ambiguous with `<` `>`) | `[T]` | No parser ambiguity with comparisons |
-| Loops | `while`, `for`, `loop`, `forEach`, recursion | `do { guard ... else ... }` | Single construct, break condition explicit |
+| Loops | `while`, `for`, `loop`, `forEach`, recursion | `for x in xs { }` + `do { guard ... }` | Iteration for collections, guard for dynamic conditions |
 | Early exit | `return`, `break`, `continue`, `throw` | Last expression + `guard ... else` | No early-return confusion |
 | Lambdas | `=>`, `->`, `lambda`, `fn`, `\x ->`, blocks | `fn(x) => expr` only | One syntax, zero alternatives |
 | Statement termination | `;`, optional `;`, ASI rules | Newline-separated | No insertion ambiguity |
@@ -39,14 +40,14 @@ Almide is designed by **enumerating LLM failure modes and removing each one**. E
 
 | Ambiguity source | What Almide does | Why it matters for LLMs |
 |---|---|---|
-| Name resolution | Core modules (`int`, `string`, `list`, `env`) are auto-imported; only `fs` requires explicit `import` | LLM never guesses at available names; core operations always work |
+| Name resolution | Core modules (`int`, `string`, `list`, `map`, `env`) are auto-imported; only `fs` requires explicit `import` | LLM never guesses at available names; core operations always work |
 | Type inference | Local only — annotations required on function signatures | No inference across distant definitions |
 | Overloading | None — each function name has exactly one definition | No ad-hoc dispatch resolution |
 | Implicit conversions | None — `int.to_string(n)`, never auto-coerce | Every conversion visible in source |
 | Trait/interface lookup | No traits, no implicit instances | No global instance search |
 | Method resolution | UFCS with canonical function form (`module.fn(args)`) | Module prefix makes resolution local |
 | Declaration order | Functions can reference each other freely | No forward-declaration confusion |
-| Import style | `import module` only — no `from`, no `*`, no aliasing. Core modules (`int`, `string`, `list`, `env`) are auto-imported; only `fs` needs explicit import | One import form, zero variation |
+| Import style | `import module` only — no `from`, no `*`, no aliasing. Core modules (`int`, `string`, `list`, `map`, `env`) are auto-imported; only `fs` needs explicit import | One import form, zero variation |
 
 ### The `effect` System as Generation Space Reducer
 
@@ -68,14 +69,14 @@ This means the LLM can generate code by looking only at the current function's s
 - The compiler does not need method lookup — it rewrites `x.f(y)` to `f(x, y)` at parse time
 - A future formatter will normalize to canonical form, eliminating style drift
 
-### `do` Blocks: One Construct, Context-Determined
+### Iteration: `for...in` + `do { guard }`
 
-`do { ... }` serves two roles: loop (when `guard` is present) and error propagation block. This is intentional:
+Two loop constructs, each with a clear purpose:
 
-- **With `guard`**: becomes a loop — `guard condition else break_expr` is the only way to exit
-- **Without `guard`**: becomes a sequential block with automatic `Result` propagation
-- The parser determines the role statically from the presence of `guard` — no runtime ambiguity
-- This replaces `while`, `for`, `loop`, `try`, and `do-notation` from other languages with one keyword
+- **`for x in xs { ... }`** — iterate over a collection. The natural choice for lists and map keys. Effect-compatible (I/O inside the loop body is fine).
+- **`do { guard ... else ... }`** — loop with dynamic break conditions (e.g., linked-list traversal, reading until EOF). `guard condition else break_expr` is the only way to exit.
+
+Benchmark data showed that forcing all iteration through `do { guard }` caused LLMs to write 5-8 extra lines of index management boilerplate. `for...in` eliminates this entirely.
 
 ## Compiler Diagnostics: Single Likely Fix
 
@@ -103,7 +104,7 @@ The standard library follows strict naming rules to minimize LLM guessing:
 
 | Convention | Rule | Example |
 |---|---|---|
-| Module prefix | Always explicit: `module.function()` | `string.len(s)`, `list.get(xs, i)` (core modules auto-imported) |
+| Module prefix | Always explicit: `module.function()` | `string.len(s)`, `list.get(xs, i)`, `map.get(m, k)` (core modules auto-imported) |
 | Predicate suffix | `?` for boolean-returning functions | `fs.exists?(path)`, `string.contains?(s, sub)` |
 | Return type consistency | Fallible lookups return `Option`, I/O returns `Result` | `list.get() -> Option`, `fs.read_text() -> String` (effect fn) |
 | No synonyms | One name per operation, no aliases | `len` not `length`/`size`/`count` |
@@ -116,7 +117,7 @@ These are intentional trade-offs — things we gave up to make LLM generation re
 
 | Sacrificed | Why |
 |---|---|
-| Expressiveness | Fewer syntax forms = fewer generation paths. A verbose but predictable program is better than a clever but ambiguous one. |
+| Raw expressiveness | Each concept has one idiomatic way to write it. Almide provides the right abstraction (e.g., `map`, `for...in`) but not multiple ways to achieve the same thing. |
 | Operator overloading | `+` always means integer addition or is not valid. No custom operators. |
 | Metaprogramming | No macros, no reflection, no code generation. The language surface is fixed. |
 | Ad-hoc polymorphism | No traits, no typeclasses. Functions are monomorphic. Generics are limited to built-in containers. |
@@ -125,7 +126,7 @@ These are intentional trade-offs — things we gave up to make LLM generation re
 | Syntax sugar variety | One way to write each construct. No shorthand forms, no alternative spellings. |
 | DSL capabilities | No operator definition, no custom syntax. Almide code always looks like Almide. |
 
-These are not missing features — they are **features removed to reduce the LLM's search space**.
+These are not missing features — they are **intentional constraints that keep the generation space focused**. The goal is not minimalism for its own sake, but ensuring each abstraction has one clear path.
 
 ## Quick Example
 
