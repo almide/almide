@@ -118,6 +118,19 @@ jobs:
           echo "JS Results: $failed failed"
           [ $failed -eq 0 ]
 
+  trigger-playground:
+    name: Trigger Playground Deploy
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch to playground
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.PLAYGROUND_DISPATCH_TOKEN }}
+          repository: almide/playground
+          event-type: compiler-updated
+
   wasm:
     name: WASM Build & Test
     runs-on: ubuntu-latest
