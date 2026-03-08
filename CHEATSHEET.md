@@ -108,9 +108,22 @@ items.map(fn(x) => x + 1)
 }
 ```
 
+### For...in loop
+```
+for x in xs {
+  println(x)
+}
+
+for key in map.keys(config) {
+  let val = match map.get(config, key) { some(v) => v, none => "" }
+  println(key ++ " = " ++ val)
+}
+```
+**Prefer `for...in` over `do { guard ... }` for iterating lists.**
+
 ### Do block (loop + auto-propagation)
 ```
-// As loop: use guard to break
+// As loop with dynamic condition: use guard to break
 do {
   guard current != "NONE" else ok(())   // break condition
   let data = fs.read_text(path)
@@ -124,7 +137,7 @@ do {
   decode(raw)                       // last expr is the result
 }
 ```
-**There is no `loop` or `while` keyword.** Use `do { ... }` with `guard ... else` for loops.
+**Use `for...in` for simple iteration. Use `do { guard ... }` only when you need dynamic break conditions (e.g., linked-list traversal).**
 
 ### Pipe
 ```
@@ -259,6 +272,9 @@ The runtime calls `main(args)` where `args` includes the program name at index 0
 ### list
 `list.len(xs)`, `list.get(xs, i)` → `Option[T]`, `list.sort(xs)`, `list.contains(xs, x)`, `list.each(xs, f)`, `list.map(xs, f)`, `list.filter(xs, f)`, `list.find(xs, f)`, `list.fold(xs, init, f)`
 
+### map
+`map.new()` → empty `Map[K, V]`, `map.get(m, key)` → `Option[V]`, `map.set(m, key, value)` → `Map[K, V]`, `map.contains(m, key)` → `Bool`, `map.remove(m, key)` → `Map[K, V]`, `map.keys(m)` → `List[K]` (sorted), `map.values(m)` → `List[V]`, `map.len(m)` → `Int`, `map.entries(m)` → `List[(K, V)]`, `map.from_list(xs, fn(x) => (k, v))` → `Map[K, V]`
+
 ### int
 `int.to_string(n)` — Int to decimal String, `int.to_hex(n)` — Int to hex String
 
@@ -275,9 +291,10 @@ The runtime calls `main(args)` where `args` includes the program name at index 0
 - No null — use `Option[T]`
 - No inheritance — use trait + impl
 - No macros, no operator overloading, no implicit conversions
-- Empty list = `[]` (no `list.new()` or `list.empty()`)
+- Empty list = `[]` (no `list.new()` or `list.empty()`), empty map = `map.new()`
 - `_` is ONLY for match wildcard patterns, never as a variable name
 - The stdlib functions listed above are exhaustive — no other functions exist
+- Use `for x in xs { ... }` for iteration, NOT `do { var i = 0; guard ... }`
 
 ## Complete example
 ```
@@ -300,17 +317,10 @@ effect fn greet(name: String) -> Result[Unit, AppError] = {
 }
 
 effect fn process_all(items: List[String]) -> Result[Unit, AppError] = {
-  var remaining = list.len(items)
-  do {
-    guard remaining > 0 else ok(())
-    let idx = list.len(items) - remaining
-    let item = match list.get(items, idx) {
-      some(v) => v,
-      none => "",
-    }
+  for item in items {
     println("Processing: ${item}")
-    remaining = remaining - 1
   }
+  ok(())
 }
 
 effect fn main(args: List[String]) -> Result[Unit, AppError] = {

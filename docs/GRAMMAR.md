@@ -8,7 +8,8 @@ type_decl   = "type" IDENT "=" "|" variant ("|" variant)* "deriving" "From"
 variant     = IDENT "(" type ("," type)* ")"
 fn_decl     = ["effect"] "fn" IDENT "(" params ")" "->" type "=" expr
 type        = "Int" | "String" | "Bool" | "Unit" | IDENT | IDENT "[" type ("," type)* "]"
-expr        = block | if_expr | match_expr | do_expr | guard | let | var | assign | binary | call | literal
+expr        = block | if_expr | match_expr | for_in | do_expr | guard | let | var | assign | binary | call | literal
+for_in      = "for" IDENT "in" expr "{" stmt* "}"  (* iterate over list/collection *)
 block       = "{" stmt* expr "}"
 if_expr     = "if" expr "then" expr "else" expr       (* else is MANDATORY *)
 match_expr  = "match" expr "{" arm ("," arm)* "}"
@@ -34,6 +35,8 @@ fs.read_text(path)->String  fs.write(path,s)  fs.mkdir_p(path)  fs.exists?(path)
 string.trim(s) split(s,d)->List join(xs,d) len(s)->Int pad_left(s,w,c) slice(s,start) to_bytes(s)->List[Int]
 list.get(xs,i)->Option  len(xs)->Int  sort(xs)  contains(xs,v)->Bool
 list.map(xs,fn(x)=>e)  filter(xs,fn(x)=>b)  fold(xs,init,fn(a,x)=>e)
+map.new()->Map  get(m,k)->Option  set(m,k,v)->Map  contains(m,k)->Bool
+map.remove(m,k)->Map  keys(m)->List  values(m)->List  len(m)->Int  entries(m)->List  from_list(xs,fn)
 int.to_string(n)  int.to_hex(n)
 env.unix_timestamp()->Int
 println(s)  (* no print, only println *)
@@ -41,9 +44,9 @@ println(s)  (* no print, only println *)
 
 ## Notes
 
-- `int`, `string`, `list`, and `env` are auto-imported — no `import` needed. Only `fs` requires explicit `import fs`.
-- No `while`, `for`, `return`, `class`, `null`, `!` — use Almide alternatives
+- `int`, `string`, `list`, `map`, and `env` are auto-imported — no `import` needed. Only `fs` requires explicit `import fs`.
+- No `while`, `return`, `class`, `null`, `!` — use Almide alternatives
+- `for x in xs { ... }` for iterating lists; `do { guard ... }` for dynamic break conditions
 - `if` always requires `else`
-- `do { ... }` is the only loop construct; use `guard ... else` to break
 - `effect fn` marks functions with side effects
 - All errors via `Result[T, E]`, all optionals via `Option[T]`
