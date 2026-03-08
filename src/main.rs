@@ -170,7 +170,17 @@ fn main() {
         let program_args: Vec<String> = if let Some(pos) = args.iter().position(|a| a == "--") {
             args[pos + 1..].to_vec()
         } else {
-            args[arg_start..].iter().filter(|a| a.as_str() != "--no-check").cloned().collect()
+            // Filter out compiler flags that shouldn't be passed to the program
+            let mut filtered = Vec::new();
+            let mut skip_next = false;
+            for a in &args[arg_start..] {
+                if skip_next { skip_next = false; continue; }
+                if a == "--no-check" { continue; }
+                if a == "--target" || a == "-o" { skip_next = true; continue; }
+                if a.starts_with("--target=") || a.starts_with("-o=") { continue; }
+                filtered.push(a.clone());
+            }
+            filtered
         };
         cli::cmd_run(&file, &program_args, no_check);
         return;
