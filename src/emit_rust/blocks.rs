@@ -21,8 +21,19 @@ impl Emitter {
         arms.iter().any(|arm| matches!(&arm.pattern, Pattern::Literal { value } if matches!(&**value, Expr::String { .. })))
     }
 
+    /// Check if arms contain ok/err patterns (indicating Result matching)
+    fn has_result_patterns(arms: &[MatchArm]) -> bool {
+        arms.iter().any(|arm| matches!(&arm.pattern, Pattern::Ok { .. } | Pattern::Err { .. }))
+    }
+
     pub(crate) fn gen_match(&self, subject: &Expr, arms: &[MatchArm]) -> String {
+        // Suppress auto-? when matching on ok/err (caller handles Result explicitly)
+        let prev = self.skip_auto_q.get();
+        if Self::has_result_patterns(arms) {
+            self.skip_auto_q.set(true);
+        }
         let subj = self.gen_expr(subject);
+        self.skip_auto_q.set(prev);
         let subj_expr = if Self::has_string_in_option_pattern(arms) {
             // match option { some("x") => ... } needs as_deref()
             format!("{}.as_deref()", subj)

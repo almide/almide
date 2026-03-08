@@ -9,6 +9,7 @@ pub(crate) const JSON_RUNTIME: &str = include_str!("json_runtime.txt");
 pub(crate) const HTTP_RUNTIME: &str = include_str!("http_runtime.txt");
 pub(crate) const TIME_RUNTIME: &str = include_str!("time_runtime.txt");
 pub(crate) const REGEX_RUNTIME: &str = include_str!("regex_runtime.txt");
+pub(crate) const IO_RUNTIME: &str = include_str!("io_runtime.txt");
 
 pub struct EmitOptions {
     /// Skip thread wrapper around main (for WASM targets where threads are unavailable)
@@ -40,11 +41,13 @@ pub(crate) struct Emitter {
     pub(crate) no_thread_wrap: bool,
     /// Maps import name to versioned mod name for diamond deps
     pub(crate) module_aliases: std::collections::HashMap<String, String>,
+    /// Temporarily suppress auto-? (e.g., when match subject has ok/err arms)
+    pub(crate) skip_auto_q: std::cell::Cell<bool>,
 }
 
 impl Emitter {
     fn new(options: &EmitOptions) -> Self {
-        Self { out: String::new(), indent: 0, in_effect: false, effect_fns: Vec::new(), result_fns: Vec::new(), in_do_block: std::cell::Cell::new(false), user_modules: Vec::new(), in_test: false, no_thread_wrap: options.no_thread_wrap, module_aliases: std::collections::HashMap::new() }
+        Self { out: String::new(), indent: 0, in_effect: false, effect_fns: Vec::new(), result_fns: Vec::new(), in_do_block: std::cell::Cell::new(false), user_modules: Vec::new(), in_test: false, no_thread_wrap: options.no_thread_wrap, module_aliases: std::collections::HashMap::new(), skip_auto_q: std::cell::Cell::new(false) }
     }
 
     pub(crate) fn emit_indent(&mut self) {

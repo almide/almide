@@ -87,14 +87,18 @@ impl Emitter {
         let callee_str = self.gen_expr(callee);
         let args_str: Vec<String> = args.iter().map(|a| self.gen_arg(a)).collect();
         let call = format!("{}({})", callee_str, args_str.join(", "));
-        // Auto-propagate ? for effect fn calls within effect context
-        if self.in_effect {
+        // Auto-propagate ? for effect fn calls within effect context (not in tests, not suppressed)
+        if self.in_effect && !self.in_test && !self.skip_auto_q.get() {
             if let Expr::Ident { name } = callee {
                 if self.effect_fns.contains(name) {
                     return format!("{}?", call);
                 }
-                // In do blocks, also auto-unwrap calls to Result-returning functions
-                if self.in_do_block.get() && self.result_fns.contains(name) {
+            }
+        }
+        // In do blocks, auto-unwrap calls to Result-returning functions
+        if self.in_do_block.get() {
+            if let Expr::Ident { name } = callee {
+                if self.result_fns.contains(name) || self.effect_fns.contains(name) {
                     return format!("{}?", call);
                 }
             }
@@ -106,16 +110,16 @@ impl Emitter {
         let args_str: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
         match module {
             "fs" => match func {
-                "read_text" => format!("std::fs::read_to_string(&*{}).map_err(|e| e.to_string())?", args_str[0]),
-                "write" => format!("std::fs::write(&*{}, &*{}).map_err(|e| e.to_string())?", args_str[0], args_str[1]),
-                "write_bytes" => format!("std::fs::write(&*{}, &{}).map_err(|e| e.to_string())?", args_str[0], args_str[1]),
-                "read_bytes" => format!("std::fs::read(&*{}).map_err(|e| e.to_string())?", args_str[0]),
+                "read_text" => format!("std::fs::read_to_string(&*{}).map_err(AlmideIoError::from)?", args_str[0]),
+                "write" => format!("std::fs::write(&*{}, &*{}).map_err(AlmideIoError::from)?", args_str[0], args_str[1]),
+                "write_bytes" => format!("std::fs::write(&*{}, &{}).map_err(AlmideIoError::from)?", args_str[0], args_str[1]),
+                "read_bytes" => format!("std::fs::read(&*{}).map_err(AlmideIoError::from)?", args_str[0]),
                 "exists?" | "exists_qm_" => format!("std::path::Path::new(&*{}).exists()", args_str[0]),
-                "mkdir_p" => format!("std::fs::create_dir_all(&*{}).map_err(|e| e.to_string())?", args_str[0]),
-                "append" => format!("{{ let prev = std::fs::read_to_string(&*{}).unwrap_or_default(); std::fs::write(&*{}, format!(\"{{}}{{}}\", prev, {})).map_err(|e| e.to_string())?; }}", args_str[0], args_str[0], args_str[1]),
-                "read_lines" => format!("{{ let s = std::fs::read_to_string(&*{}).map_err(|e| e.to_string())?; s.split('\\n').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect::<Vec<String>>() }}", args_str[0]),
-                "remove" => format!("std::fs::remove_file(&*{}).map_err(|e| e.to_string())?", args_str[0]),
-                "list_dir" => format!("{{ let mut v: Vec<String> = std::fs::read_dir(&*{}).map_err(|e| e.to_string())?.filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().to_string())).collect(); v.sort(); v }}", args_str[0]),
+                "mkdir_p" => format!("std::fs::create_dir_all(&*{}).map_err(AlmideIoError::from)?", args_str[0]),
+                "append" => format!("{{ let prev = std::fs::read_to_string(&*{}).unwrap_or_default(); std::fs::write(&*{}, format!(\"{{}}{{}}\", prev, {})).map_err(AlmideIoError::from)?; }}", args_str[0], args_str[0], args_str[1]),
+                "read_lines" => format!("{{ let s = std::fs::read_to_string(&*{}).map_err(AlmideIoError::from)?; s.split('\\n').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect::<Vec<String>>() }}", args_str[0]),
+                "remove" => format!("std::fs::remove_file(&*{}).map_err(AlmideIoError::from)?", args_str[0]),
+                "list_dir" => format!("{{ let mut v: Vec<String> = std::fs::read_dir(&*{}).map_err(AlmideIoError::from)?.filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().to_string())).collect(); v.sort(); v }}", args_str[0]),
                 _ => format!("/* fs.{} */ todo!()", func),
             },
             "string" => match func {

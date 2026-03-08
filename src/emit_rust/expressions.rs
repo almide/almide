@@ -76,10 +76,17 @@ impl Emitter {
             }
             Expr::Err { expr } => {
                 let msg = self.gen_expr(expr);
-                if self.in_effect && !self.in_test && !self.in_do_block.get() {
-                    format!("return Err({}.to_string())", msg)
+                let needs_to_string = matches!(expr.as_ref(),
+                    Expr::String { .. } | Expr::InterpolatedString { .. });
+                let val = if needs_to_string {
+                    format!("{}.to_string()", msg)
                 } else {
-                    format!("Err({}.to_string())", msg)
+                    msg
+                };
+                if self.in_effect && !self.in_test && !self.in_do_block.get() {
+                    format!("return Err({})", val)
+                } else {
+                    format!("Err({})", val)
                 }
             }
 

@@ -89,7 +89,7 @@ impl Checker {
                 }
             }
             let ret = sig.ret.clone();
-            if self.env.in_effect {
+            if self.env.in_effect && !self.env.in_test && !self.env.skip_auto_unwrap {
                 if let Ty::Result(ok_ty, _) = &ret {
                     return *ok_ty.clone();
                 }
@@ -171,6 +171,7 @@ impl Checker {
                 ));
             }
             let ret = sig.ret.clone();
+            // Stdlib calls always have hardcoded `?` in codegen, so always unwrap Result
             if self.env.in_effect {
                 if let Ty::Result(ok_ty, _) = &ret {
                     return *ok_ty.clone();

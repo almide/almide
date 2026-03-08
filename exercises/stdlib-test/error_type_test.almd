@@ -1,0 +1,44 @@
+module error_type_test
+
+type AppError = | Custom(String) | Io(IoError) deriving From
+
+// This effect fn uses fs operations that return Result[T, IoError].
+// The ? operator auto-converts IoError → AppError via deriving From.
+effect fn read_file(path: String) -> Result[String, AppError] = {
+  let text = fs.read_text(path)
+  ok(text)
+}
+
+// Test: successful write + read through AppError
+effect fn test_write_read() -> Result[Unit, AppError] = {
+  fs.write("__test_deriving_from.txt", "hello structured errors")
+  let text = fs.read_text("__test_deriving_from.txt")
+  assert_eq(text, "hello structured errors")
+  fs.remove("__test_deriving_from.txt")
+  ok(())
+}
+
+// Test: custom error variant works alongside io errors
+effect fn require_non_empty(path: String) -> Result[String, AppError] = {
+  let text = fs.read_text(path)
+  guard string.len(text) > 0 else err(Custom("file is empty"))
+  ok(text)
+}
+
+effect fn test_custom_error() -> Result[Unit, AppError] = {
+  fs.write("__test_empty.txt", "")
+  // This creates a file but it's empty, so require_non_empty should fail with Custom
+  fs.write("__test_nonempty.txt", "content")
+  let text = require_non_empty("__test_nonempty.txt")
+  assert_eq(text, "content")
+  fs.remove("__test_empty.txt")
+  fs.remove("__test_nonempty.txt")
+  ok(())
+}
+
+effect fn main(args: List[String]) -> Result[Unit, AppError] = {
+  test_write_read()
+  test_custom_error()
+  println("All structured error tests passed!")
+  ok(())
+}

@@ -87,7 +87,14 @@ impl Checker {
             }
 
             ast::Expr::Match { subject, arms } => {
+                // Suppress auto-unwrap when matching on ok/err (caller handles Result explicitly)
+                let has_result_arms = arms.iter().any(|a| matches!(&a.pattern, ast::Pattern::Ok { .. } | ast::Pattern::Err { .. }));
+                let prev_skip = self.env.skip_auto_unwrap;
+                if has_result_arms {
+                    self.env.skip_auto_unwrap = true;
+                }
                 let st = self.check_expr(subject);
+                self.env.skip_auto_unwrap = prev_skip;
                 let mut result_ty: Option<Ty> = None;
                 for arm in arms {
                     self.env.push_scope();

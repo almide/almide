@@ -4,6 +4,7 @@ use super::JSON_RUNTIME;
 use super::HTTP_RUNTIME;
 use super::TIME_RUNTIME;
 use super::REGEX_RUNTIME;
+use super::IO_RUNTIME;
 
 impl Emitter {
     /// Scan declarations to classify effect/result functions (single pass).
@@ -13,7 +14,7 @@ impl Emitter {
                 let is_effect = effect.unwrap_or(false);
                 let ret_str = self.gen_type(return_type);
                 let returns_result = ret_str.starts_with("Result<");
-                if is_effect && !returns_result {
+                if is_effect {
                     self.effect_fns.push(name.clone());
                 }
                 if returns_result || is_effect {
@@ -192,6 +193,8 @@ impl Emitter {
         self.emitln("    loop { match future.as_mut().poll(&mut cx) { Poll::Ready(val) => return val, Poll::Pending => std::thread::yield_now(), } }");
         self.emitln("}");
         self.emitln("");
+        self.out.push_str(IO_RUNTIME);
+        self.emitln("");
         self.out.push_str(JSON_RUNTIME);
         self.emitln("");
         self.out.push_str(HTTP_RUNTIME);
@@ -250,7 +253,7 @@ impl Emitter {
         }
     }
 
-    pub(crate) fn emit_type_decl(&mut self, name: &str, ty: &TypeExpr, _deriving: &Option<Vec<String>>) {
+    pub(crate) fn emit_type_decl(&mut self, name: &str, ty: &TypeExpr, deriving: &Option<Vec<String>>) {
         match ty {
             TypeExpr::Record { fields } => {
                 self.emitln("#[derive(Debug, Clone, PartialEq)]");
@@ -298,6 +301,19 @@ impl Emitter {
                 self.emitln("}");
                 // Allow using variant names without prefix
                 self.emitln(&format!("use {}::*;", name));
+                // deriving From: generate impl From<InnerType> for VariantType
+                if deriving.as_ref().map_or(false, |d| d.iter().any(|s| s == "From")) {
+                    for case in cases {
+                        if let VariantCase::Tuple { name: cname, fields } = case {
+                            if fields.len() == 1 {
+                                let inner_ty = self.gen_type(&fields[0]);
+                                self.emitln(&format!("impl From<{}> for {} {{", inner_ty, name));
+                                self.emitln(&format!("    fn from(e: {}) -> Self {{ {}::{}(e) }}", inner_ty, name, cname));
+                                self.emitln("}");
+                            }
+                        }
+                    }
+                }
             }
             _ => {
                 self.emitln(&format!("// type {} (unsupported)", name));
@@ -414,7 +430,7 @@ impl Emitter {
                 "String" => "String".to_string(),
                 "Bool" => "bool".to_string(),
                 "Unit" => "()".to_string(),
-                "IoError" => "String".to_string(),
+                "IoError" => "AlmideIoError".to_string(),
                 "Path" => "String".to_string(),
                 "Json" => "AlmideJson".to_string(),
                 "Request" => "AlmideHttpRequest".to_string(),
@@ -424,6 +440,7 @@ impl Emitter {
             TypeExpr::Generic { name, args } => match name.as_str() {
                 "List" => format!("Vec<{}>", self.gen_type(&args[0])),
                 "Option" => format!("Option<{}>", self.gen_type(&args[0])),
+                "Result" if args.len() >= 2 => format!("Result<{}, {}>", self.gen_type(&args[0]), self.gen_type(&args[1])),
                 "Result" => format!("Result<{}, String>", self.gen_type(&args[0])),
                 "Map" => format!("HashMap<{}, {}>", self.gen_type(&args[0]), self.gen_type(&args[1])),
                 other => format!("{}<{}>", other, args.iter().map(|a| self.gen_type(a)).collect::<Vec<_>>().join(", ")),
