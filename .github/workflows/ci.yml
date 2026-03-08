@@ -66,3 +66,54 @@ jobs:
             fi
           done
           exit $failed
+
+  wasm:
+    name: WASM Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust with wasm target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.89.0
+          targets: wasm32-wasip1
+
+      - name: Cache cargo registry & build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ubuntu-cargo-wasm-1.89.0-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ubuntu-cargo-wasm-1.89.0-
+
+      - name: Install wasmtime
+        run: |
+          curl https://wasmtime.dev/install.sh -sSf | bash
+          echo "$HOME/.wasmtime/bin" >> $GITHUB_PATH
+
+      - name: Build almide
+        run: cargo build --release
+
+      - name: WASM smoke test
+        run: |
+          ./target/release/almide build exercises/wasm-smoke/wasm-smoke.almd --target wasm -o /tmp/wasm-smoke.wasm
+          wasmtime /tmp/wasm-smoke.wasm
+
+      - name: WASM emit check - exercises
+        run: |
+          failed=0
+          for dir in pangram raindrops roman-numerals; do
+            almd=$(ls exercises/$dir/*.almd 2>/dev/null | head -1)
+            if [ -z "$almd" ]; then echo "SKIP: $dir"; continue; fi
+            if ./target/release/almide "$almd" --target rust > /dev/null 2>&1; then
+              echo "EMIT OK: $dir"
+            else
+              echo "EMIT FAIL: $dir"
+              failed=1
+            fi
+          done
+          exit $failed

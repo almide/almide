@@ -1,0 +1,28 @@
+module wasm_smoke
+
+fn fibonacci(n: Int) -> Int = {
+  if n <= 1 then n
+  else fibonacci(n - 1) + fibonacci(n - 2)
+}
+
+fn fizzbuzz(n: Int) -> String = {
+  if n % 15 == 0 then "FizzBuzz"
+  else if n % 3 == 0 then "Fizz"
+  else if n % 5 == 0 then "Buzz"
+  else int.to_string(n)
+}
+
+effect fn main(args: List[String]) -> Result[Unit, String] = {
+  let fib10 = fibonacci(10)
+  guard fib10 == 55 else err("fibonacci(10) should be 55")
+
+  let fb15 = fizzbuzz(15)
+  guard fb15 == "FizzBuzz" else err("fizzbuzz(15) should be FizzBuzz")
+
+  let names = ["Alice", "Bob", "Charlie"]
+  let upper = list.map(names, fn(s) => string.to_upper(s))
+  guard list.len(upper) == 3 else err("list length mismatch")
+
+  println("All WASM smoke tests passed.")
+  ok(())
+}

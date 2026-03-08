@@ -138,26 +138,65 @@ fn main() {
         return;
     }
 
-    // almide build file.almd [-o output]
+    // almide build file.almd [-o output] [--target wasm]
     if args.len() >= 3 && args[1] == "build" {
         let file = &args[2];
+        let build_target = args.iter()
+            .position(|a| a == "--target")
+            .and_then(|i| args.get(i + 1))
+            .map(|s| s.as_str());
+
+        let is_wasm = matches!(build_target, Some("wasm" | "wasm32" | "wasi"));
+
+        let default_output = if is_wasm {
+            format!("{}.wasm", file.strip_suffix(".almd").unwrap_or("a.out"))
+        } else {
+            file.strip_suffix(".almd").unwrap_or("a.out").to_string()
+        };
         let output = args.iter()
             .position(|a| a == "-o")
             .and_then(|i| args.get(i + 1))
-            .map(|s| s.as_str())
-            .unwrap_or_else(|| {
-                file.strip_suffix(".almd").unwrap_or("a.out")
-            });
+            .map(|s| s.to_string())
+            .unwrap_or(default_output);
 
-        let rs_code = compile(file, no_check);
-        let tmp_rs = format!("{}.rs", output);
+        let mut rs_code = compile(file, no_check);
+
+        // WASM: replace thread-based main with direct main (threads unsupported in WASI)
+        if is_wasm {
+            // Replace the thread::Builder wrapper with a direct call
+            let thread_main = "fn main() {\n    let t = std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {";
+            let thread_end = "    }).unwrap();\n    t.join().unwrap();\n}";
+            if rs_code.contains(thread_main) {
+                // Extract the body between spawn(|| { ... }).unwrap()
+                if let Some(start) = rs_code.find(thread_main) {
+                    if let Some(end) = rs_code.find(thread_end) {
+                        let body = &rs_code[start + thread_main.len()..end];
+                        // De-indent body by one level (remove leading 8 spaces → 4 spaces)
+                        let body_lines: Vec<String> = body.lines()
+                            .map(|l| if l.starts_with("        ") { l[4..].to_string() } else { l.to_string() })
+                            .collect();
+                        let new_main = format!("fn main() {{\n{}}}", body_lines.join("\n"));
+                        rs_code = format!("{}{}", &rs_code[..start], new_main);
+                    }
+                }
+            }
+        }
+
+        let tmp_rs = format!("{}.rs", output.strip_suffix(".wasm").unwrap_or(&output));
         std::fs::write(&tmp_rs, &rs_code).unwrap();
 
-        let rustc = Command::new(&find_rustc())
-            .arg(&tmp_rs)
+        let mut rustc_cmd = Command::new(&find_rustc());
+        rustc_cmd.arg(&tmp_rs)
             .arg("-o")
-            .arg(output)
-            .output()
+            .arg(&output);
+
+        if is_wasm {
+            rustc_cmd.arg("--target").arg("wasm32-wasip1")
+                .arg("-C").arg("opt-level=s")
+                .arg("-C").arg("lto=yes");
+        }
+
+        let rustc = rustc_cmd.output()
             .unwrap_or_else(|e| { eprintln!("Failed to run rustc: {}", e); std::process::exit(1); });
 
         let _ = std::fs::remove_file(&tmp_rs);
@@ -180,7 +219,7 @@ fn main() {
 
     if files.is_empty() {
         eprintln!("Usage: almide run <file.almd> [args...]");
-        eprintln!("       almide build <file.almd> [-o output]");
+        eprintln!("       almide build <file.almd> [-o output] [--target wasm]");
         eprintln!("       almide <file.almd> [--target rust|ts] [--emit-ast]");
         std::process::exit(1);
     }
