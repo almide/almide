@@ -95,17 +95,117 @@ function __assert_throws(fn: () => any, expectedMsg: string): void {
 // ---- End Runtime ----
 "#;
 
+const RUNTIME_JS: &str = r#"// ---- Almide Runtime (JS) ----
+const __fs = {
+  exists(p) { const fs = require("fs"); try { fs.statSync(p); return true; } catch { return false; } },
+  read_text(p) { return require("fs").readFileSync(p, "utf-8"); },
+  read_bytes(p) { return Array.from(require("fs").readFileSync(p)); },
+  write(p, s) { require("fs").writeFileSync(p, s); },
+  write_bytes(p, b) { require("fs").writeFileSync(p, Buffer.from(b)); },
+  append(p, s) { require("fs").appendFileSync(p, s); },
+  mkdir_p(p) { require("fs").mkdirSync(p, { recursive: true }); },
+  exists_q(p) { const fs = require("fs"); try { fs.statSync(p); return true; } catch { return false; } },
+};
+const __string = {
+  trim(s) { return s.trim(); },
+  split(s, sep) { return s.split(sep); },
+  join(arr, sep) { return arr.join(sep); },
+  len(s) { return s.length; },
+  pad_left(s, n, ch) { return s.padStart(n, ch); },
+  starts_with(s, prefix) { return s.startsWith(prefix); },
+  slice(s, start, end) { return end !== undefined ? s.slice(start, end) : s.slice(start); },
+  to_bytes(s) { return Array.from(new TextEncoder().encode(s)); },
+  contains(s, sub) { return s.includes(sub); },
+  starts_with_q(s, prefix) { return s.startsWith(prefix); },
+  ends_with_q(s, suffix) { return s.endsWith(suffix); },
+  to_upper(s) { return s.toUpperCase(); },
+  to_lower(s) { return s.toLowerCase(); },
+  to_int(s) { const n = parseInt(s, 10); if (isNaN(n)) throw new Error("invalid integer: " + s); return n; },
+  replace(s, from, to) { return s.split(from).join(to); },
+  char_at(s, i) { return i < s.length ? s[i] : null; },
+};
+const __list = {
+  len(xs) { return xs.length; },
+  get(xs, i) { return i < xs.length ? xs[i] : null; },
+  sort(xs) { return [...xs].sort(); },
+  contains(xs, x) { return xs.includes(x); },
+  each(xs, f) { xs.forEach(f); },
+  map(xs, f) { return xs.map(f); },
+  filter(xs, f) { return xs.filter(f); },
+  find(xs, f) { return xs.find(f) ?? null; },
+  fold(xs, init, f) { return xs.reduce(f, init); },
+};
+const __int = {
+  to_hex(n) { return (typeof n === "bigint" ? (n >= 0n ? n : n + (1n << 64n)).toString(16) : n.toString(16)); },
+  to_string(n) { return String(n); },
+};
+const __env = {
+  unix_timestamp() { return Math.floor(Date.now() / 1000); },
+  args() { return process.argv.slice(2); },
+};
+function __bigop(op, a, b) {
+  if (typeof a === "bigint" || typeof b === "bigint") {
+    const ba = typeof a === "bigint" ? a : BigInt(a);
+    const bb = typeof b === "bigint" ? b : BigInt(b);
+    switch(op) {
+      case "^": return ba ^ bb;
+      case "*": return ba * bb;
+      case "%": return ba % bb;
+      case "+": return ba + bb;
+      case "-": return ba - bb;
+      default: return ba;
+    }
+  }
+  switch(op) {
+    case "^": return a ^ b; case "*": return a * b; case "%": return a % b;
+    case "+": return a + b; case "-": return a - b; default: return a;
+  }
+}
+function println(s) { console.log(s); }
+function eprintln(s) { console.error(s); }
+function __deep_eq(a, b) {
+  if (a === b) return true;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) { if (!__deep_eq(a[i], b[i])) return false; }
+    return true;
+  }
+  if (a && b && typeof a === "object" && typeof b === "object") {
+    const ka = Object.keys(a), kb = Object.keys(b);
+    if (ka.length !== kb.length) return false;
+    for (const k of ka) { if (!__deep_eq(a[k], b[k])) return false; }
+    return true;
+  }
+  return false;
+}
+function assert_eq(a, b) { if (!__deep_eq(a, b)) throw new Error("assert_eq: " + JSON.stringify(a) + " !== " + JSON.stringify(b)); }
+function assert_ne(a, b) { if (a === b) throw new Error("assert_ne: " + a + " === " + b); }
+function assert(c) { if (!c) throw new Error("assertion failed"); }
+function unwrap_or(x, d) { return x !== null ? x : d; }
+function __concat(a, b) { return typeof a === "string" ? a + b : [...a, ...b]; }
+function __assert_throws(fn, expectedMsg) {
+  try { fn(); throw new Error("Expected error but succeeded with: " + fn); }
+  catch (e) { if (e instanceof Error && e.message === expectedMsg) return; throw e; }
+}
+// ---- End Runtime ----
+"#;
+
 struct TsEmitter {
     out: String,
+    js_mode: bool,
 }
 
 impl TsEmitter {
     fn new() -> Self {
-        Self { out: String::new() }
+        Self { out: String::new(), js_mode: false }
     }
 
     fn emit_program(&mut self, prog: &Program) {
-        self.out.push_str(RUNTIME);
+        if self.js_mode {
+            self.out.push_str(RUNTIME_JS);
+        } else {
+            self.out.push_str(RUNTIME);
+        }
         self.out.push('\n');
 
         if let Some(module) = &prog.module {
@@ -127,7 +227,11 @@ impl TsEmitter {
 
         if has_main {
             self.out.push_str("// ---- Entry Point ----\n");
-            self.out.push_str("try { main([\"minigit\", ...Deno.args]); } catch (e) { if (e instanceof Error) { eprintln(e.message); Deno.exit(1); } throw e; }\n");
+            if self.js_mode {
+                self.out.push_str("try { main([\"app\", ...process.argv.slice(2)]); } catch (e) { if (e instanceof Error) { console.error(e.message); process.exit(1); } throw e; }\n");
+            } else {
+                self.out.push_str("try { main([\"minigit\", ...Deno.args]); } catch (e) { if (e instanceof Error) { eprintln(e.message); Deno.exit(1); } throw e; }\n");
+            }
         }
     }
 
@@ -135,7 +239,13 @@ impl TsEmitter {
         match decl {
             Decl::Module { path } => format!("// module: {}", path.join(".")),
             Decl::Import { path, .. } => format!("// import: {}", path.join(".")),
-            Decl::Type { name, ty, .. } => self.gen_type_decl(name, ty),
+            Decl::Type { name, ty, .. } => {
+                if self.js_mode {
+                    format!("// type: {}", name)
+                } else {
+                    self.gen_type_decl(name, ty)
+                }
+            }
             Decl::Fn { name, params, return_type, body, r#async, .. } => {
                 self.gen_fn_decl(name, params, return_type, body, r#async.unwrap_or(false))
             }
@@ -149,7 +259,11 @@ impl TsEmitter {
             }
             Decl::Test { name, body } => {
                 let body_str = self.gen_expr(body);
-                format!("Deno.test({}, () => {});", Self::json_string(name), body_str)
+                if self.js_mode {
+                    format!("// test: {}\n(() => {})();", name, body_str)
+                } else {
+                    format!("Deno.test({}, () => {});", Self::json_string(name), body_str)
+                }
             }
             Decl::Strict { mode } => format!("// strict {}", mode),
         }
@@ -220,9 +334,15 @@ impl TsEmitter {
         let sname = Self::sanitize(name);
         let params_str: Vec<String> = params.iter()
             .filter(|p| p.name != "self")
-            .map(|p| format!("{}: {}", Self::sanitize(&p.name), self.gen_type_expr(&p.ty)))
+            .map(|p| {
+                if self.js_mode {
+                    Self::sanitize(&p.name)
+                } else {
+                    format!("{}: {}", Self::sanitize(&p.name), self.gen_type_expr(&p.ty))
+                }
+            })
             .collect();
-        let ret_str = format!(": {}", self.gen_type_expr(ret_type));
+        let ret_str = if self.js_mode { String::new() } else { format!(": {}", self.gen_type_expr(ret_type)) };
         let body_str = self.gen_expr(body);
 
         match body {
@@ -316,7 +436,7 @@ impl TsEmitter {
             Expr::Paren { expr } => format!("({})", self.gen_expr(expr)),
             Expr::Try { expr } => self.gen_expr(expr),
             Expr::Await { expr } => format!("await {}", self.gen_expr(expr)),
-            Expr::Hole => "null as any /* hole */".to_string(),
+            Expr::Hole => if self.js_mode { "null /* hole */".to_string() } else { "null as any /* hole */".to_string() },
             Expr::Todo { message } => format!("(() => {{ throw new Error({}); }})()", Self::json_string(message)),
             Expr::Placeholder => "__placeholder__".to_string(),
         }
@@ -714,6 +834,13 @@ impl TsEmitter {
 
 pub fn emit(program: &Program) -> String {
     let mut emitter = TsEmitter::new();
+    emitter.emit_program(program);
+    emitter.out
+}
+
+pub fn emit_js(program: &Program) -> String {
+    let mut emitter = TsEmitter::new();
+    emitter.js_mode = true;
     emitter.emit_program(program);
     emitter.out
 }

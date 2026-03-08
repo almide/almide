@@ -172,7 +172,8 @@ fn main() {
         let code = match target {
             "rust" | "rs" => emit_rust::emit(&program),
             "ts" | "typescript" => emit_ts::emit(&program),
-            other => { eprintln!("Unknown target: {}. Use rust or ts.", other); std::process::exit(1); }
+            "js" | "javascript" => emit_ts::emit_js(&program),
+            other => { eprintln!("Unknown target: {}. Use rust, ts, or js.", other); std::process::exit(1); }
         };
         print!("{}", code);
     }
