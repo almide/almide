@@ -1,0 +1,119 @@
+
+// ---- Almide HTTP Runtime ----
+
+#[derive(Debug, Clone)]
+struct AlmideHttpRequest {
+    method: String,
+    path: String,
+    headers: HashMap<String, String>,
+    body: String,
+}
+
+#[derive(Debug, Clone)]
+struct AlmideHttpResponse {
+    status: i64,
+    headers: HashMap<String, String>,
+    body: String,
+}
+
+impl AlmideHttpResponse {
+    fn new(status: i64, body: String) -> Self {
+        let mut headers = HashMap::new();
+        headers.insert("Content-Type".to_string(), "text/plain".to_string());
+        Self { status, headers, body }
+    }
+
+    fn json(status: i64, body: String) -> Self {
+        let mut headers = HashMap::new();
+        headers.insert("Content-Type".to_string(), "application/json".to_string());
+        Self { status, headers, body }
+    }
+
+    fn status_text(&self) -> &str {
+        match self.status {
+            200 => "OK", 201 => "Created", 204 => "No Content",
+            301 => "Moved Permanently", 302 => "Found", 304 => "Not Modified",
+            400 => "Bad Request", 401 => "Unauthorized", 403 => "Forbidden",
+            404 => "Not Found", 405 => "Method Not Allowed",
+            500 => "Internal Server Error", 502 => "Bad Gateway", 503 => "Service Unavailable",
+            _ => "OK",
+        }
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut out = format!("HTTP/1.1 {} {}\r\n", self.status, self.status_text());
+        out.push_str(&format!("Content-Length: {}\r\n", self.body.len()));
+        out.push_str("Connection: close\r\n");
+        for (k, v) in &self.headers {
+            out.push_str(&format!("{}: {}\r\n", k, v));
+        }
+        out.push_str("\r\n");
+        out.push_str(&self.body);
+        out.into_bytes()
+    }
+}
+
+fn almide_http_parse_request(raw: &str) -> Result<AlmideHttpRequest, String> {
+    let mut lines = raw.split("\r\n");
+    let request_line = lines.next().ok_or("empty request")?;
+    let parts: Vec<&str> = request_line.splitn(3, ' ').collect();
+    if parts.len() < 2 {
+        return Err("invalid request line".into());
+    }
+    let method = parts[0].to_string();
+    let path = parts[1].to_string();
+
+    let mut headers = HashMap::new();
+    let mut body_start = false;
+    let mut body = String::new();
+    for line in lines {
+        if body_start {
+            if !body.is_empty() { body.push('\n'); }
+            body.push_str(line);
+        } else if line.is_empty() {
+            body_start = true;
+        } else if let Some(pos) = line.find(':') {
+            let key = line[..pos].trim().to_string();
+            let val = line[pos+1..].trim().to_string();
+            headers.insert(key, val);
+        }
+    }
+
+    Ok(AlmideHttpRequest { method, path, headers, body })
+}
+
+fn almide_http_serve<F>(port: i64, handler: F) -> Result<(), String>
+where F: Fn(AlmideHttpRequest) -> AlmideHttpResponse + 'static
+{
+    use std::net::TcpListener;
+    use std::io::{Read, Write};
+
+    let addr = format!("0.0.0.0:{}", port);
+    let listener = TcpListener::bind(&addr).map_err(|e| format!("bind error: {}", e))?;
+    eprintln!("Listening on http://{}", addr);
+
+    for stream in listener.incoming() {
+        match stream {
+            Ok(mut stream) => {
+                let mut buf = vec![0u8; 8192];
+                let n = stream.read(&mut buf).unwrap_or(0);
+                if n == 0 { continue; }
+                let raw = String::from_utf8_lossy(&buf[..n]).to_string();
+                match almide_http_parse_request(&raw) {
+                    Ok(req) => {
+                        let resp = handler(req);
+                        let _ = stream.write_all(&resp.to_bytes());
+                    }
+                    Err(_) => {
+                        let resp = AlmideHttpResponse::new(400, "Bad Request".into());
+                        let _ = stream.write_all(&resp.to_bytes());
+                    }
+                }
+            }
+            Err(_) => continue,
+        }
+    }
+    Ok(())
+}
+
+// ---- End HTTP Runtime ----

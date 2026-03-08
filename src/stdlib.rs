@@ -5,7 +5,7 @@
 use crate::types::{Ty, FnSig};
 
 /// All built-in stdlib module names.
-pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "path"];
+pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "path", "http"];
 
 /// Check if a module name is a stdlib module.
 pub fn is_stdlib_module(name: &str) -> bool {

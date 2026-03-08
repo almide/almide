@@ -2,24 +2,33 @@ use crate::ast::*;
 use super::Emitter;
 
 impl Emitter {
-    fn has_string_literal_in_option_pattern(arms: &[MatchArm]) -> bool {
-        fn check_pattern(pat: &Pattern) -> bool {
+    /// Check if arms contain string literals inside Option/Result wrappers (some("x"), ok("x"))
+    fn has_string_in_option_pattern(arms: &[MatchArm]) -> bool {
+        fn check_inner(pat: &Pattern) -> bool {
             match pat {
                 Pattern::Some { inner } | Pattern::Ok { inner } | Pattern::Err { inner } => {
-                    check_pattern(inner)
+                    matches!(&**inner, Pattern::Literal { value } if matches!(&**value, Expr::String { .. }))
+                        || check_inner(inner)
                 }
-                Pattern::Literal { value } => matches!(&**value, Expr::String { .. }),
                 _ => false,
             }
         }
-        arms.iter().any(|arm| check_pattern(&arm.pattern))
+        arms.iter().any(|arm| check_inner(&arm.pattern))
+    }
+
+    /// Check if arms contain bare string literal patterns ("hello", "/")
+    fn has_bare_string_literal(arms: &[MatchArm]) -> bool {
+        arms.iter().any(|arm| matches!(&arm.pattern, Pattern::Literal { value } if matches!(&**value, Expr::String { .. })))
     }
 
     pub(crate) fn gen_match(&self, subject: &Expr, arms: &[MatchArm]) -> String {
         let subj = self.gen_expr(subject);
-        let needs_deref = Self::has_string_literal_in_option_pattern(arms);
-        let subj_expr = if needs_deref {
+        let subj_expr = if Self::has_string_in_option_pattern(arms) {
+            // match option { some("x") => ... } needs as_deref()
             format!("{}.as_deref()", subj)
+        } else if Self::has_bare_string_literal(arms) {
+            // match string { "/" => ... } needs as_str()
+            format!("{}.as_str()", subj)
         } else {
             subj
         };

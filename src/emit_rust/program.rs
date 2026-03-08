@@ -1,6 +1,7 @@
 use crate::ast::*;
 use super::Emitter;
 use super::JSON_RUNTIME;
+use super::HTTP_RUNTIME;
 
 impl Emitter {
     /// Scan declarations to classify effect/result functions (single pass).
@@ -163,6 +164,8 @@ impl Emitter {
         self.emitln("macro_rules! almide_ne { ($a:expr, $b:expr) => { ($a) != ($b) }; }");
         self.emitln("");
         self.out.push_str(JSON_RUNTIME);
+        self.emitln("");
+        self.out.push_str(HTTP_RUNTIME);
         self.emitln("");
     }
 
@@ -380,6 +383,8 @@ impl Emitter {
                 "IoError" => "String".to_string(),
                 "Path" => "String".to_string(),
                 "Json" => "AlmideJson".to_string(),
+                "Request" => "AlmideHttpRequest".to_string(),
+                "Response" => "AlmideHttpResponse".to_string(),
                 other => other.to_string(),
             },
             TypeExpr::Generic { name, args } => match name.as_str() {

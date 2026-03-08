@@ -263,6 +263,15 @@ impl Emitter {
                 "is_absolute?" | "is_absolute_qm_" => format!("std::path::Path::new(&*{}).is_absolute()", args_str[0]),
                 _ => format!("/* path.{} */ todo!()", func),
             },
+            "http" => match func {
+                "serve" => {
+                    let (names, body) = self.inline_lambda(&args[1], 1);
+                    format!("almide_http_serve({}, |{}| {{ {} }})?", args_str[0], names[0], body)
+                }
+                "response" => format!("AlmideHttpResponse::new({}, {}.to_string())", args_str[0], args_str[1]),
+                "json" => format!("AlmideHttpResponse::json({}, {}.to_string())", args_str[0], args_str[1]),
+                _ => format!("/* http.{} */ todo!()", func),
+            },
             _ => {
                 let call = format!("{}::{}({})", module, func, args_str.join(", "));
                 // Auto-propagate ? for user module effect/Result functions
