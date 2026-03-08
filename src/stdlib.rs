@@ -135,6 +135,7 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         ("float", "abs") => FnSig { params: vec![(s("n"), Ty::Float)], ret: Ty::Float, is_effect: false },
         ("float", "sqrt") => FnSig { params: vec![(s("n"), Ty::Float)], ret: Ty::Float, is_effect: false },
         ("float", "parse") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::Result(Box::new(Ty::Float), Box::new(Ty::String)), is_effect: false },
+        ("float", "from_int") => FnSig { params: vec![(s("n"), Ty::Int)], ret: Ty::Float, is_effect: false },
 
         // ── json ──
         ("json", "parse") => FnSig { params: vec![(s("text"), Ty::String)], ret: Ty::Result(Box::new(Ty::Named(s("Json"))), Box::new(Ty::String)), is_effect: false },

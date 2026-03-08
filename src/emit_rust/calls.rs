@@ -252,6 +252,7 @@ impl Emitter {
                 "abs" => format!("({}).abs()", args_str[0]),
                 "sqrt" => format!("({}).sqrt()", args_str[0]),
                 "parse" => format!("({}).parse::<f64>().map_err(|e| e.to_string())?", args_str[0]),
+                "from_int" => format!("({} as f64)", args_str[0]),
                 _ => format!("/* float.{} */ todo!()", func),
             },
             "env" => match func {
