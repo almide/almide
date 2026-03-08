@@ -205,11 +205,7 @@ cp target/release/almide ~/.local/bin/
 ## Benchmark
 
 <p align="center">
-  <img src="./assets/benchmark_total_time.png" alt="Benchmark: Time for Claude Code to Generate a Mini-Git" width="720">
-</p>
-
-<p align="center">
-  <img src="./assets/benchmark_total_cost.png" alt="Benchmark: Cost for Claude Code to Generate a Mini-Git" width="720">
+  <img src="./assets/benchmark.png" alt="MiniGit Benchmark: Almide vs 15 languages" width="720">
 </p>
 
 Tested with the [MiniGit benchmark](https://github.com/almide/benchmark) — a task where Claude Code implements a mini version control system from a spec (v1: basic commands, v2: advanced features), with 10 trials per language.
@@ -233,6 +229,7 @@ Tested with the [MiniGit benchmark](https://github.com/almide/benchmark) — a t
 | C | 155.8s±40.9s | $0.74 | 20/20 | 20/20 | 276+517 |
 | Haskell | 174.0s±44.2s | $0.74 | 19/20 | 20/20 | 119+224 |
 | Ruby/Steep | 186.6s±69.7s | $0.84 | 20/20 | 20/20 | 150+304 |
+| **Almide** | **376.1s±9.4s** | **$0.89** | **6/6** | **6/6** | **115+293** |
 
 ### Key Findings
 
