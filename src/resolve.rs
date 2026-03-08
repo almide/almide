@@ -14,6 +14,14 @@ pub struct ResolvedModules {
 }
 
 pub fn resolve_imports(source_file: &str, program: &ast::Program) -> Result<ResolvedModules, String> {
+    resolve_imports_with_deps(source_file, program, &[])
+}
+
+pub fn resolve_imports_with_deps(
+    source_file: &str,
+    program: &ast::Program,
+    dep_paths: &[(String, PathBuf)],
+) -> Result<ResolvedModules, String> {
     let base_dir = Path::new(source_file).parent().unwrap_or(Path::new("."));
     let mut loaded: Vec<(String, ast::Program)> = Vec::new();
     let mut loaded_names: HashSet<String> = HashSet::new();
@@ -25,7 +33,7 @@ pub fn resolve_imports(source_file: &str, program: &ast::Program) -> Result<Reso
             if STDLIB_MODULES.contains(&name.as_str()) {
                 continue;
             }
-            load_module(name, base_dir, &mut loaded, &mut loaded_names, &mut loading)?;
+            load_module(name, base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading)?;
         }
     }
 
@@ -35,6 +43,7 @@ pub fn resolve_imports(source_file: &str, program: &ast::Program) -> Result<Reso
 fn load_module(
     name: &str,
     base_dir: &Path,
+    dep_paths: &[(String, PathBuf)],
     loaded: &mut Vec<(String, ast::Program)>,
     loaded_names: &mut HashSet<String>,
     loading: &mut HashSet<String>,
@@ -47,7 +56,7 @@ fn load_module(
     }
     loading.insert(name.to_string());
 
-    let file_path = find_module_file(name, base_dir)?;
+    let file_path = find_module_file(name, base_dir, dep_paths)?;
     let source = std::fs::read_to_string(&file_path)
         .map_err(|e| format!("error reading module '{}': {}", name, e))?;
 
@@ -61,7 +70,7 @@ fn load_module(
         if let ast::Decl::Import { path, .. } = import {
             let dep_name = &path[0];
             if !STDLIB_MODULES.contains(&dep_name.as_str()) {
-                load_module(dep_name, base_dir, loaded, loaded_names, loading)?;
+                load_module(dep_name, base_dir, dep_paths, loaded, loaded_names, loading)?;
             }
         }
     }
@@ -72,22 +81,38 @@ fn load_module(
     Ok(())
 }
 
-fn find_module_file(name: &str, base_dir: &Path) -> Result<PathBuf, String> {
-    let candidates = [
+fn find_module_file(name: &str, base_dir: &Path, dep_paths: &[(String, PathBuf)]) -> Result<PathBuf, String> {
+    // 1. Check local files
+    let local_candidates = [
         base_dir.join(format!("{}.almd", name)),
         base_dir.join(name).join("mod.almd"),
     ];
-
-    for path in &candidates {
+    for path in &local_candidates {
         if path.exists() {
             return Ok(path.clone());
         }
     }
 
+    // 2. Check dependency paths
+    for (dep_name, dep_dir) in dep_paths {
+        if dep_name == name {
+            let dep_candidates = [
+                dep_dir.join(format!("{}.almd", name)),
+                dep_dir.join("lib.almd"),
+                dep_dir.join("mod.almd"),
+            ];
+            for path in &dep_candidates {
+                if path.exists() {
+                    return Ok(path.clone());
+                }
+            }
+        }
+    }
+
     Err(format!(
-        "module '{}' not found\n  searched: {}\n  hint: Create {}.almd in the same directory",
+        "module '{}' not found\n  searched: {}\n  hint: Create {}.almd in the same directory, or add to [dependencies] in almide.toml",
         name,
-        candidates.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "),
+        local_candidates.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "),
         name,
     ))
 }

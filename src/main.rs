@@ -6,6 +6,7 @@ mod emit_ts;
 mod emit_ts_runtime;
 mod lexer;
 mod parser;
+mod project;
 mod resolve;
 mod stdlib;
 mod types;
@@ -45,8 +46,21 @@ fn parse_file(file: &str) -> ast::Program {
 fn compile(file: &str, no_check: bool) -> String {
     let program = parse_file(file);
 
-    // Resolve imported modules
-    let resolved = resolve::resolve_imports(file, &program)
+    // Fetch dependencies from almide.toml if present
+    let dep_paths: Vec<(String, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
+        if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
+            project::fetch_all_deps(&proj)
+                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); })
+                .into_iter().collect()
+        } else {
+            vec![]
+        }
+    } else {
+        vec![]
+    };
+
+    // Resolve imported modules (local + dependencies)
+    let resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
         .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
 
     // Type check (unless --no-check)
@@ -192,6 +206,53 @@ fn main() {
     }
 
     let no_check = args.iter().any(|a| a == "--no-check");
+
+    // almide add <name> --git <url> [--tag <tag>]
+    if args.len() >= 4 && args[1] == "add" {
+        let name = &args[2];
+        let git = args.iter().position(|a| a == "--git")
+            .and_then(|i| args.get(i + 1))
+            .map(|s| s.as_str());
+        let tag = args.iter().position(|a| a == "--tag")
+            .and_then(|i| args.get(i + 1))
+            .map(|s| s.as_str());
+        if let Some(git_url) = git {
+            project::add_dep_to_toml(name, git_url, tag)
+                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+            // Fetch immediately
+            let dep = project::Dependency {
+                name: name.to_string(),
+                git: git_url.to_string(),
+                tag: tag.map(|s| s.to_string()),
+                branch: None,
+            };
+            project::fetch_dep(&dep)
+                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+        } else {
+            eprintln!("Usage: almide add <name> --git <url> [--tag <tag>]");
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    // almide deps
+    if args.len() >= 2 && args[1] == "deps" {
+        if std::path::Path::new("almide.toml").exists() {
+            let proj = project::parse_toml(std::path::Path::new("almide.toml"))
+                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+            if proj.dependencies.is_empty() {
+                println!("No dependencies");
+            } else {
+                for dep in &proj.dependencies {
+                    let ref_name = dep.tag.as_deref().or(dep.branch.as_deref()).unwrap_or("main");
+                    println!("{} = {} ({})", dep.name, dep.git, ref_name);
+                }
+            }
+        } else {
+            eprintln!("No almide.toml found");
+        }
+        return;
+    }
 
     // almide init
     if args.len() >= 2 && args[1] == "init" {
