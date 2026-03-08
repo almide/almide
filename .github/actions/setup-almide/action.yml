@@ -1,0 +1,74 @@
+name: "Setup almide"
+description: "Download and cache the almide binary from GitHub releases"
+
+inputs:
+  version:
+    description: "Version of almide to install (e.g. '0.1.0' or 'latest')"
+    required: false
+    default: "latest"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Determine version
+      id: version
+      shell: bash
+      run: |
+        if [ "${{ inputs.version }}" = "latest" ]; then
+          VERSION=$(gh api repos/almide/almide/releases/latest --jq '.tag_name' 2>/dev/null || echo "v0.1.0")
+        else
+          VERSION="v${{ inputs.version }}"
+        fi
+        echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+        echo "Installing almide ${VERSION}"
+      env:
+        GH_TOKEN: ${{ github.token }}
+
+    - name: Determine platform
+      id: platform
+      shell: bash
+      run: |
+        OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+        ARCH=$(uname -m)
+        case "$ARCH" in
+          x86_64)  ARCH="x86_64" ;;
+          aarch64|arm64) ARCH="aarch64" ;;
+        esac
+        echo "os=${OS}" >> "$GITHUB_OUTPUT"
+        echo "arch=${ARCH}" >> "$GITHUB_OUTPUT"
+        echo "asset=almide-${OS}-${ARCH}" >> "$GITHUB_OUTPUT"
+
+    - name: Cache almide binary
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.almide/bin
+        key: almide-${{ steps.version.outputs.version }}-${{ steps.platform.outputs.os }}-${{ steps.platform.outputs.arch }}
+
+    - name: Download almide
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        VERSION="${{ steps.version.outputs.version }}"
+        ASSET="${{ steps.platform.outputs.asset }}"
+        mkdir -p ~/.almide/bin
+
+        DOWNLOAD_URL="https://github.com/almide/almide/releases/download/${VERSION}/${ASSET}.tar.gz"
+        echo "Downloading ${DOWNLOAD_URL}"
+        curl -fsSL "${DOWNLOAD_URL}" | tar -xz -C ~/.almide/bin
+
+        # If the archive doesn't contain a tar.gz, try plain binary
+        if [ ! -f ~/.almide/bin/almide ]; then
+          curl -fsSL -o ~/.almide/bin/almide \
+            "https://github.com/almide/almide/releases/download/${VERSION}/${ASSET}"
+        fi
+
+        chmod +x ~/.almide/bin/almide
+
+    - name: Add to PATH
+      shell: bash
+      run: echo "${HOME}/.almide/bin" >> "$GITHUB_PATH"
+
+    - name: Verify installation
+      shell: bash
+      run: almide --help || echo "almide installed (no --help flag)"

@@ -140,6 +140,10 @@ The compiler rejects common patterns from other languages with targeted hints, r
 
 ## Benchmark
 
+<p align="center">
+  <img src="./assets/benchmark.svg" alt="Benchmark: Almide vs Python" width="720">
+</p>
+
 Tested with the [MiniGit benchmark](https://github.com/mizchi/ai-coding-lang-bench) — a task where Claude Code implements a mini version control system from a spec, with zero prior knowledge of the language.
 
 | Trial | Time | Turns | Tests | LOC |

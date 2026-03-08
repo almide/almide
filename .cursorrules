@@ -1,0 +1,80 @@
+You write Almide (.almd) code. Almide is a functional language with algebraic types, pattern matching, and explicit effects.
+
+## EBNF Grammar
+
+```ebnf
+program     = "module" IDENT import* decl*
+import      = "import" IDENT
+decl        = type_decl | fn_decl
+type_decl   = "type" IDENT "=" "|" variant ("|" variant)* "deriving" "From"
+variant     = IDENT "(" type ("," type)* ")"
+fn_decl     = ["effect"] "fn" IDENT "(" params ")" "->" type "=" expr
+type        = "Int" | "String" | "Bool" | "Unit" | IDENT | IDENT "[" type ("," type)* "]"
+expr        = block | if_expr | match_expr | do_expr | guard | let | var | assign | binary | call | literal
+block       = "{" stmt* expr "}"
+if_expr     = "if" expr "then" expr "else" expr
+match_expr  = "match" expr "{" arm ("," arm)* "}"
+arm         = pattern "=>" expr
+pattern     = "some" "(" pattern ")" | "none" | "ok" "(" pattern ")" | "err" "(" pattern ")" | IDENT | LITERAL | "_"
+do_expr     = "do" "{" (guard | stmt)* "}"
+guard       = "guard" expr "else" expr
+let         = "let" IDENT "=" expr
+var         = "var" IDENT "=" expr
+assign      = IDENT "=" expr
+binary      = expr OP expr
+call        = IDENT "(" args ")" | IDENT "." IDENT "(" args ")"
+lambda      = "fn" "(" params ")" "=>" expr
+literal     = INT | STRING | "true" | "false" | "ok" "(" expr ")" | "err" "(" expr ")"
+```
+
+Operators: `+ - * / % ^ == != < > <= >= ++ and or not`
+- `++` concatenates strings and lists
+- `^` is XOR
+- `not` is boolean negation (no `!` operator)
+- String interpolation: `"hello ${name}"`
+
+## Stdlib
+
+```
+fs.read_text(path)->String  fs.write(path,s)  fs.mkdir_p(path)  fs.exists?(path)->Bool  fs.append(path,s)
+string.trim(s)  string.split(s,d)->List  string.join(xs,d)  string.len(s)->Int
+string.pad_left(s,w,c)  string.slice(s,start)  string.slice(s,start,end)  string.to_bytes(s)->List[Int]
+string.contains(s,sub)->Bool
+list.get(xs,i)->Option  list.len(xs)->Int  list.sort(xs)  list.contains(xs,v)->Bool  list.find(xs,fn)->Option
+list.map(xs,fn(x)=>e)  list.filter(xs,fn(x)=>b)  list.fold(xs,init,fn(acc,x)=>e)
+int.to_string(n)  int.to_hex(n)
+env.unix_timestamp()->Int
+println(s)
+```
+
+## Tests
+
+```
+test "description" {
+  assert(bool_expr)
+  assert_eq(actual, expected)
+}
+```
+
+## Key Constraints
+
+- NO `while`, `for`, `return`, `class`, `null`, `nil`, `!`
+- `if` ALWAYS requires `else` -- no standalone `if` without `else`
+- `do { ... }` is the ONLY loop; use `guard expr else break_expr` inside to exit
+- `effect fn` marks functions with side effects (I/O, mutation outside local scope)
+- Errors use `Result[T, E]` with `ok(value)` / `err(value)` -- no exceptions
+- Optionals use `Option[T]` with `some(value)` / `none`
+- Use `match` for pattern matching on Result, Option, and custom types
+- `let` for immutable bindings, `var` for mutable (reassign with `=`)
+- Function names may end with `?` for boolean predicates (e.g., `is_valid?`)
+- Only `println` exists -- no `print`
+- Comments use `//`
+- Every file starts with `module <name>`
+
+## Idioms
+
+- Prefer `list.fold` over loops for accumulation
+- Prefer `list.map` / `list.filter` for transformations
+- Use `guard` for early validation: `guard condition else err("message")`
+- Chain Result operations in `do { ... }` blocks for automatic error propagation
+- Use `match` with `some(v)` / `none` when accessing list elements via `list.get`
