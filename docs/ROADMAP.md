@@ -181,11 +181,15 @@ let html = """
 
 ### Implementation Steps
 
-- [ ] Lexer: recognize `"""` as heredoc token, capture raw content with indentation
-- [ ] Lexer: strip common leading whitespace (dedent)
+- [ ] Lexer: recognize `"""` as heredoc open token; suppress newline-as-separator handling until closing `"""`
+- [ ] Lexer: capture raw content with indentation, strip common leading whitespace on close (dedent based on closing `"""` column)
 - [ ] Parser: reuse existing interpolation logic for `${expr}` inside heredocs
 - [ ] Rust emitter: emit as `format!(...)` (same as regular interpolated strings)
 - [ ] TS emitter: emit as template literals `` `...` ``
+
+### Key Lexer Concern
+
+Almide's lexer is newline-sensitive (newlines act as statement separators). Inside `"""..."""`, newlines must be treated as literal content, not as token delimiters. The lexer needs a `in_heredoc` flag that suppresses normal newline handling until the closing `"""` is encountered.
 
 ### Design Notes
 
