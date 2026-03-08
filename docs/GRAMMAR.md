@@ -31,11 +31,11 @@ literal     = INT | STRING | "true" | "false" | "ok" "(" expr ")" | "err" "(" ex
 ## Stdlib
 
 ```
-fs.read_text(path)->String  fs.write(path,s)  fs.mkdir_p(path)  fs.exists?(path)->Bool  fs.append(path,s)
+fs.read_text(path)->String  fs.read_lines(path)->List  fs.write(path,s)  fs.mkdir_p(path)  fs.exists?(path)->Bool  fs.append(path,s)  fs.remove(path)  fs.list_dir(path)->List
 string.trim(s) split(s,d)->List join(xs,d) len(s)->Int lines(s)->List pad_left(s,w,c) slice(s,start) to_bytes(s)->List[Int]
-list.get(xs,i)->Option  get_or(xs,i,default)->T  len(xs)->Int  sort(xs)  contains(xs,v)->Bool
-list.map(xs,fn(x)=>e)  filter(xs,fn(x)=>b)  fold(xs,init,fn(a,x)=>e)
-map.new()->Map  get(m,k)->Option  set(m,k,v)->Map  contains(m,k)->Bool
+list.get(xs,i)->Option  get_or(xs,i,default)->T  len(xs)->Int  sort(xs)  reverse(xs)  contains(xs,v)->Bool
+list.any(xs,fn(x)=>b)  all(xs,fn(x)=>b)  map(xs,fn(x)=>e)  filter(xs,fn(x)=>b)  fold(xs,init,fn(a,x)=>e)
+map.new()->Map  get(m,k)->Option  get_or(m,k,default)->V  set(m,k,v)->Map  contains(m,k)->Bool
 map.remove(m,k)->Map  keys(m)->List  values(m)->List  len(m)->Int  entries(m)->List  from_list(xs,fn)
 int.to_string(n)  int.to_hex(n)
 env.unix_timestamp()->Int
