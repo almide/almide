@@ -121,7 +121,7 @@ impl TsEmitter {
                 for case in cases {
                     match case {
                         VariantCase::Unit { name: cname } => {
-                            lines.push(format!("function {}() {{ return {{ tag: {} }}; }}", cname, Self::json_string(cname)));
+                            lines.push(format!("const {} = {{ tag: {} }};", cname, Self::json_string(cname)));
                         }
                         VariantCase::Tuple { name: cname, fields } => {
                             let params: Vec<String> = fields.iter().enumerate()
