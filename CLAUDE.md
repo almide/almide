@@ -6,6 +6,16 @@
 - No prefix (feat:, fix:, etc.)
 - Keep it to one concise line
 - Focus on what changed, not why
+- Japanese characters in commit messages are **blocked by a commit-msg hook**
+
+## Development Setup
+
+After cloning, install the git hooks:
+
+```bash
+brew install lefthook  # or: https://github.com/evilmartians/lefthook
+lefthook install
+```
 
 ## Project Overview
 
