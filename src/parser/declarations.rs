@@ -218,8 +218,16 @@ impl Parser {
         if effect && returns_result {
             if let Expr::Block { ref stmts, ref expr } = body {
                 let (effective_stmts, effective_expr) = if expr.is_none() && !stmts.is_empty() {
-                    if let Some(Stmt::Expr { expr: last_expr }) = stmts.last() {
-                        (stmts[..stmts.len()-1].to_vec(), Some(Box::new(last_expr.clone())))
+                    // Find last non-comment stmt
+                    let last_non_comment = stmts.iter().rposition(|s| !matches!(s, Stmt::Comment { .. }));
+                    if let Some(idx) = last_non_comment {
+                        if let Stmt::Expr { expr: last_expr } = &stmts[idx] {
+                            let mut remaining = stmts[..idx].to_vec();
+                            remaining.extend_from_slice(&stmts[idx+1..]);
+                            (remaining, Some(Box::new(last_expr.clone())))
+                        } else {
+                            (stmts.clone(), None)
+                        }
                     } else {
                         (stmts.clone(), None)
                     }
