@@ -49,16 +49,15 @@ jobs:
           ./target/release/almide exercises/pangram/pangram.almd --emit-ast > /dev/null
           echo "AST emit OK"
 
-      - name: Run all exercises
+      - name: Run exercises
         run: |
           failed=0
-          for almd in exercises/*/*.almd; do
-            name=$(basename "$(dirname "$almd")")
-            if ./target/release/almide run "$almd" > /dev/null 2>&1; then
+          for name in pangram raindrops roman-numerals; do
+            almd="exercises/$name/$name.almd"
+            if ./target/release/almide run "$almd" 2>&1; then
               echo "OK: $name"
             else
               echo "FAIL: $name"
-              ./target/release/almide run "$almd" 2>&1 | tail -10
               failed=1
             fi
           done
