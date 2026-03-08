@@ -70,6 +70,7 @@ test "description" {
 - Only `println` exists -- no `print`
 - Comments use `//`
 - Every file starts with `module <name>`
+- `int`, `string`, `list`, and `env` are auto-imported — no `import` needed. Only `fs` requires explicit `import fs`.
 
 ## Idioms
 

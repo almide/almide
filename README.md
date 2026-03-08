@@ -39,14 +39,14 @@ Almide is designed by **enumerating LLM failure modes and removing each one**. E
 
 | Ambiguity source | What Almide does | Why it matters for LLMs |
 |---|---|---|
-| Name resolution | All names require explicit `import`; no implicit prelude | LLM never guesses at available names |
+| Name resolution | Core modules (`int`, `string`, `list`, `env`) are auto-imported; only `fs` requires explicit `import` | LLM never guesses at available names; core operations always work |
 | Type inference | Local only — annotations required on function signatures | No inference across distant definitions |
 | Overloading | None — each function name has exactly one definition | No ad-hoc dispatch resolution |
 | Implicit conversions | None — `int.to_string(n)`, never auto-coerce | Every conversion visible in source |
 | Trait/interface lookup | No traits, no implicit instances | No global instance search |
 | Method resolution | UFCS with canonical function form (`module.fn(args)`) | Module prefix makes resolution local |
 | Declaration order | Functions can reference each other freely | No forward-declaration confusion |
-| Import style | `import module` only — no `from`, no `*`, no aliasing | One import form, zero variation |
+| Import style | `import module` only — no `from`, no `*`, no aliasing. Core modules (`int`, `string`, `list`, `env`) are auto-imported; only `fs` needs explicit import | One import form, zero variation |
 
 ### The `effect` System as Generation Space Reducer
 
@@ -103,7 +103,7 @@ The standard library follows strict naming rules to minimize LLM guessing:
 
 | Convention | Rule | Example |
 |---|---|---|
-| Module prefix | Always explicit: `module.function()` | `string.len(s)`, `list.get(xs, i)` |
+| Module prefix | Always explicit: `module.function()` | `string.len(s)`, `list.get(xs, i)` (core modules auto-imported) |
 | Predicate suffix | `?` for boolean-returning functions | `fs.exists?(path)`, `string.contains?(s, sub)` |
 | Return type consistency | Fallible lookups return `Option`, I/O returns `Result` | `list.get() -> Option`, `fs.read_text() -> String` (effect fn) |
 | No synonyms | One name per operation, no aliases | `len` not `length`/`size`/`count` |
@@ -133,8 +133,6 @@ These are not missing features — they are **features removed to reduce the LLM
 module app
 
 import fs
-import string
-import list
 
 type AppError =
   | NotFound(String)
@@ -229,7 +227,7 @@ We hypothesize that Almide achieves 100% pass rate because:
 1. **No syntax ambiguity** — The LLM never has to choose between equivalent forms (one loop, one lambda, one error style)
 2. **Explicit error handling** — `Result[T, E]` makes the error path visible in every function signature, preventing silent failures
 3. **Diagnostics as repair guides** — When the LLM writes `!x` or `while`, the compiler tells it exactly what to write instead, closing the fix-loop in one turn
-4. **Local reasoning sufficiency** — No implicit imports, no trait resolution, no overloading means the LLM can generate correct code from the function signature alone
+4. **Local reasoning sufficiency** — Core modules auto-imported, no trait resolution, no overloading means the LLM can generate correct code from the function signature alone
 5. **60-line grammar reference** — The entire language fits in a single context window with room to spare, unlike languages where stdlib documentation alone exceeds the context limit
 
 ### Proliferation Potential

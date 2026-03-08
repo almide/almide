@@ -41,6 +41,7 @@ println(s)  (* no print, only println *)
 
 ## Notes
 
+- `int`, `string`, `list`, and `env` are auto-imported — no `import` needed. Only `fs` requires explicit `import fs`.
 - No `while`, `for`, `return`, `class`, `null`, `!` — use Almide alternatives
 - `if` always requires `else`
 - `do { ... }` is the only loop construct; use `guard ... else` to break
