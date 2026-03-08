@@ -426,7 +426,7 @@ impl Emitter {
                 let stmts_str: Vec<String> = body.iter()
                     .map(|s| format!("  {}", self.gen_stmt(s)))
                     .collect();
-                format!("for {} in {} {{\n{}\n}}", var, iter_str, stmts_str.join("\n"))
+                format!("for {var} in ({iter_str}).clone() {{\n{}\n}}", stmts_str.join("\n"))
             }
 
             Expr::Paren { expr } => format!("({})", self.gen_expr(expr)),
