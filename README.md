@@ -2,9 +2,11 @@
   <img src="./assets/almide.png" alt="Almide" width="280">
 </p>
 
-<p align="center">A programming language designed for LLM code generation.</p>
+<p align="center">A programming language designed for LLM code generation — optimized for AI proliferation.</p>
 
 Almide is not a language for humans to write freely — it is a language for AI to converge correctly. Every design decision minimizes the set of valid next tokens at each generation step, reducing hallucination and syntax errors.
+
+The core thesis: **if AI can write a language reliably, code proliferates → training data grows → AI writes it even better → modules multiply**. Almide is designed to start this flywheel.
 
 ## Key Design Principles
 
@@ -83,12 +85,13 @@ test "greet succeeds" {
 
 ## Documentation
 
-- [CHEATSHEET.md](./CHEATSHEET.md) — Quick reference for AI code generation (~340 lines)
+- [docs/GRAMMAR.md](./docs/GRAMMAR.md) — EBNF grammar + stdlib reference (compact, for AI consumption)
+- [CHEATSHEET.md](./CHEATSHEET.md) — Quick reference for AI code generation
 - [SPEC.md](./SPEC.md) — Full language specification
 
 ## How It Works
 
-Almide source (`.almd`) is compiled by a pure-Rust compiler with multi-target code generation.
+Almide source (`.almd`) is compiled by a pure-Rust compiler to Rust or TypeScript, then executed natively.
 
 ```
 .almd → Lexer → Parser → AST → CodeGen → .rs (Rust) or .ts (Deno)
@@ -97,31 +100,68 @@ Almide source (`.almd`) is compiled by a pure-Rust compiler with multi-target co
 ### Usage
 
 ```bash
+# Run directly (compile + execute in one step)
+almide run app.almd
+
+# Run with arguments
+almide run app.almd -- arg1 arg2
+
+# Build a standalone binary
+almide build app.almd -o app
+
+# Emit Rust source
+almide app.almd --target rust
+
+# Emit TypeScript source
+almide app.almd --target ts
+```
+
+### Install
+
+```bash
 cargo build --release
+cp target/release/almide ~/.local/bin/
+```
 
-# Compile to Rust (default)
-./target/release/almide input.almd > output.rs
-rustc output.rs -o output
+## Compiler Diagnostics
 
-# Compile to TypeScript
-./target/release/almide input.almd --target ts > output.ts
-deno run --allow-all output.ts
+The compiler rejects common patterns from other languages with targeted hints, reducing AI fix-loops:
+
+```
+'!' is not valid in Almide
+  Hint: Use 'not x' for boolean negation, not '!x'.
+
+'while' is not valid in Almide
+  Hint: Use 'do { guard condition else break_expr }' for loops.
+
+'return' is not valid in Almide
+  Hint: Use the last expression as the return value, or 'guard ... else' for early exit.
 ```
 
 ## Benchmark
 
-Tested with the [MiniGit benchmark](https://github.com/mame/ai-coding-lang-bench) — a task where Claude Code implements a mini version control system from a spec, with zero prior knowledge of the language.
+Tested with the [MiniGit benchmark](https://github.com/mizchi/ai-coding-lang-bench) — a task where Claude Code implements a mini version control system from a spec, with zero prior knowledge of the language.
 
-| Metric | Result |
-|--------|--------|
-| Tests passed (v1+v2) | **41/41 (100%)** |
-| Pass rate | **3/3 trials** |
+| Trial | Time | Turns | Tests | LOC |
+|-------|------|-------|-------|-----|
+| 1 | 187s | 7 | 11/11 | 118 |
+| 2 | 115s | 11 | 11/11 | 129 |
+| 3 | 131s | 6 | 11/11 | 113 |
+| 4 | 139s | 7 | 11/11 | 124 |
+| 5 | 135s | 6 | 11/11 | 112 |
 
-All 15 benchmark languages achieved near-100% correctness. Almide's result confirms that an LLM can write correct code in a **completely unknown language** given only a ~340-line cheatsheet — validating the core thesis that predictable syntax and explicit semantics reduce generation errors.
+**Pass rate: 5/5 (100%)** — The AI converges to correct code every time, given only a ~60-line EBNF grammar reference.
 
-### Trade-offs
+### Proliferation Potential
 
-Almide is slower than established languages in generation time. This is expected — the LLM has zero training data for Almide and must rely entirely on the cheatsheet. The speed gap measures **familiarity**, not language quality. As training data grows, this gap is expected to narrow.
+The 100% pass rate across all trials demonstrates Almide's core value proposition: **reliability breeds proliferation**.
+
+- AI generates correct Almide code consistently → generated code becomes training data
+- Constrained syntax means generated code is uniform → training signal is clean
+- New modules can be AI-generated with the same reliability → ecosystem grows organically
+- Fewer syntax choices = faster convergence = lower cost per generation
+
+The generation time gap vs established languages (Python ~40s, Almide ~140s) reflects zero training data, not language quality. Each successful generation adds to the corpus, narrowing this gap over time.
 
 ## License
 
