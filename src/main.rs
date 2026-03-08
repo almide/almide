@@ -24,7 +24,7 @@ fn find_rustc() -> String {
     "rustc".to_string()
 }
 
-fn compile(file: &str, no_check: bool) -> String {
+fn compile(file: &str, do_check: bool) -> String {
     let input = std::fs::read_to_string(file)
         .unwrap_or_else(|e| { eprintln!("Error reading {}: {}", file, e); std::process::exit(1); });
 
@@ -38,8 +38,8 @@ fn compile(file: &str, no_check: bool) -> String {
             .unwrap_or_else(|e| { eprintln!("Parse error: {}", e); std::process::exit(1); })
     };
 
-    // Type check (unless --no-check)
-    if !no_check {
+    // Type check (only with --check)
+    if do_check {
         let mut checker = check::Checker::new();
         let diagnostics = checker.check_program(&program);
         let errors: Vec<_> = diagnostics.iter()
@@ -64,8 +64,8 @@ fn compile(file: &str, no_check: bool) -> String {
     emit_rust::emit(&program)
 }
 
-fn cmd_run(file: &str, program_args: &[String], no_check: bool) {
-    let rs_code = compile(file, no_check);
+fn cmd_run(file: &str, program_args: &[String], do_check: bool) {
+    let rs_code = compile(file, do_check);
 
     let tmp_dir = std::env::temp_dir().join("almide-run");
     std::fs::create_dir_all(&tmp_dir).unwrap();
@@ -114,7 +114,7 @@ fn main() {
         return;
     }
 
-    let no_check = args.iter().any(|a| a == "--no-check");
+    let do_check = args.iter().any(|a| a == "--check");
 
     // almide run file.almd [-- args...]
     if args.len() >= 3 && args[1] == "run" {
@@ -122,9 +122,9 @@ fn main() {
         let program_args: Vec<String> = if let Some(pos) = args.iter().position(|a| a == "--") {
             args[pos + 1..].to_vec()
         } else {
-            args[3..].iter().filter(|a| a.as_str() != "--no-check").cloned().collect()
+            args[3..].iter().filter(|a| a.as_str() != "--check").cloned().collect()
         };
-        cmd_run(file, &program_args, no_check);
+        cmd_run(file, &program_args, do_check);
         return;
     }
 
@@ -140,7 +140,7 @@ fn main() {
                 file.strip_suffix(".almd").unwrap_or("a.out")
             });
 
-        let rs_code = compile(file, no_check);
+        let rs_code = compile(file, do_check);
         let tmp_rs = format!("{}.rs", output);
         std::fs::write(&tmp_rs, &rs_code).unwrap();
 
@@ -198,8 +198,8 @@ fn main() {
             .unwrap_or_else(|e| { eprintln!("Parse error: {}", e); std::process::exit(1); })
     };
 
-    // Type check (unless --no-check or --emit-ast)
-    if !no_check && !emit_ast {
+    // Type check (only with --check, skip for --emit-ast)
+    if do_check && !emit_ast {
         let mut checker = check::Checker::new();
         let diagnostics = checker.check_program(&program);
         let errors: Vec<_> = diagnostics.iter()
