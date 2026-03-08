@@ -453,6 +453,10 @@ impl Emitter {
                 let ps: Vec<String> = params.iter().map(|p| self.gen_type(p)).collect();
                 format!("fn({}) -> {}", ps.join(", "), self.gen_type(ret))
             }
+            TypeExpr::Tuple { elements } => {
+                let ts: Vec<String> = elements.iter().map(|e| self.gen_type(e)).collect();
+                format!("({})", ts.join(", "))
+            }
             TypeExpr::Newtype { inner } => self.gen_type(inner),
             TypeExpr::Variant { cases: _ } => "/* variant */".to_string(),
         }

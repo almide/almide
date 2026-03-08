@@ -165,6 +165,14 @@ fn format_type_expr(out: &mut String, ty: &TypeExpr, _depth: usize) {
             out.push_str(") -> ");
             format_type_expr(out, ret, _depth);
         }
+        TypeExpr::Tuple { elements } => {
+            out.push('(');
+            for (i, e) in elements.iter().enumerate() {
+                if i > 0 { out.push_str(", "); }
+                format_type_expr(out, e, _depth);
+            }
+            out.push(')');
+        }
         TypeExpr::Newtype { inner } => {
             format_type_expr(out, inner, _depth);
         }
@@ -564,6 +572,14 @@ fn format_pattern(out: &mut String, pat: &Pattern) {
                 }
             }
             out.push_str(" }");
+        }
+        Pattern::Tuple { elements } => {
+            out.push('(');
+            for (i, e) in elements.iter().enumerate() {
+                if i > 0 { out.push_str(", "); }
+                format_pattern(out, e);
+            }
+            out.push(')');
         }
         Pattern::Some { inner } => {
             out.push_str("some(");

@@ -122,6 +122,20 @@ impl TsEmitter {
                     (conds.join(" && "), bindings)
                 }
             }
+            Pattern::Tuple { elements } => {
+                let mut conds = vec![];
+                let mut bindings = vec![];
+                for (i, elem) in elements.iter().enumerate() {
+                    let sub_expr = format!("{}[{}]", expr, i);
+                    let (sub_cond, sub_bindings) = self.gen_pattern_cond(&sub_expr, elem);
+                    if sub_cond != "true" {
+                        conds.push(sub_cond);
+                    }
+                    bindings.extend(sub_bindings);
+                }
+                let cond = if conds.is_empty() { "true".to_string() } else { conds.join(" && ") };
+                (cond, bindings)
+            }
             Pattern::RecordPattern { name, fields } => {
                 let mut conds = vec![format!("{}?.tag === {}", expr, Self::json_string(name))];
                 let mut bindings = vec![];

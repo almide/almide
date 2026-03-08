@@ -273,6 +273,9 @@ impl Checker {
                 params: params.iter().map(|p| self.resolve_type_expr(p)).collect(),
                 ret: Box::new(self.resolve_type_expr(ret)),
             },
+            ast::TypeExpr::Tuple { elements } => Ty::Tuple(
+                elements.iter().map(|e| self.resolve_type_expr(e)).collect(),
+            ),
             ast::TypeExpr::Newtype { inner } => self.resolve_type_expr(inner),
             ast::TypeExpr::Variant { cases } => {
                 let cs: Vec<VariantCase> = cases.iter().map(|c| match c {
@@ -365,6 +368,7 @@ impl Checker {
                     _ => {}
                 }
             }
+            ast::Pattern::Tuple { .. } => {}
             ast::Pattern::RecordPattern { name, .. } => {
                 covered.insert(name.clone());
             }

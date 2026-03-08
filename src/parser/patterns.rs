@@ -33,6 +33,22 @@ impl Parser {
             self.expect(TokenType::RParen)?;
             return Ok(Pattern::Err { inner: Box::new(inner) });
         }
+        if self.check(TokenType::LParen) {
+            self.advance();
+            let first = self.parse_pattern()?;
+            if self.check(TokenType::Comma) {
+                let mut elements = vec![first];
+                while self.check(TokenType::Comma) {
+                    self.advance();
+                    elements.push(self.parse_pattern()?);
+                }
+                self.expect(TokenType::RParen)?;
+                return Ok(Pattern::Tuple { elements });
+            }
+            // Single parenthesized pattern
+            self.expect(TokenType::RParen)?;
+            return Ok(first);
+        }
         if self.check(TokenType::Int) || self.check(TokenType::Float) || self.check(TokenType::String) {
             let expr = self.parse_primary()?;
             return Ok(Pattern::Literal { value: Box::new(expr) });

@@ -71,6 +71,10 @@ impl Emitter {
                     format!("{}({})", name, ps.join(", "))
                 }
             }
+            Pattern::Tuple { elements } => {
+                let ps: Vec<String> = elements.iter().map(|p| self.gen_pattern(p)).collect();
+                format!("({})", ps.join(", "))
+            }
             Pattern::RecordPattern { name, fields } => {
                 let fs: Vec<String> = fields.iter().map(|f| {
                     if let Some(p) = &f.pattern {

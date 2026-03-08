@@ -9,6 +9,7 @@ pub enum TypeExpr {
     Generic { name: String, args: Vec<TypeExpr> },
     Record { fields: Vec<FieldType> },
     Fn { params: Vec<TypeExpr>, ret: Box<TypeExpr> },
+    Tuple { elements: Vec<TypeExpr> },
     Newtype { inner: Box<TypeExpr> },
     Variant { cases: Vec<VariantCase> },
 }
@@ -42,6 +43,7 @@ pub enum Pattern {
     Literal { value: Box<Expr> },
     Constructor { name: String, args: Vec<Pattern> },
     RecordPattern { name: String, fields: Vec<FieldPattern> },
+    Tuple { elements: Vec<Pattern> },
     Some { inner: Box<Pattern> },
     None,
     Ok { inner: Box<Pattern> },

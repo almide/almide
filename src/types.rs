@@ -137,6 +137,9 @@ impl Ty {
                 f1.len() == f2.len()
                     && f1.iter().zip(f2.iter()).all(|((n1, t1), (n2, t2))| n1 == n2 && t1.compatible(t2))
             }
+            (Ty::Tuple(a), Ty::Tuple(b)) => {
+                a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.compatible(y))
+            }
             _ => false,
         }
     }

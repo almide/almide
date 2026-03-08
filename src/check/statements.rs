@@ -128,6 +128,15 @@ impl Checker {
                     for pat in args { self.check_pattern(pat, &Ty::Unknown); }
                 }
             }
+            ast::Pattern::Tuple { elements } => {
+                let tys = match subject_ty {
+                    Ty::Tuple(ts) => ts.clone(),
+                    _ => vec![Ty::Unknown; elements.len()],
+                };
+                for (pat, ty) in elements.iter().zip(tys.iter()) {
+                    self.check_pattern(pat, ty);
+                }
+            }
             ast::Pattern::RecordPattern { fields, .. } => {
                 for field in fields {
                     if let Some(ref pat) = field.pattern { self.check_pattern(pat, &Ty::Unknown); }

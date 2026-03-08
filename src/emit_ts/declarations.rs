@@ -99,7 +99,13 @@ impl TsEmitter {
             Decl::Test { name, body } => {
                 let body_str = self.gen_expr(body);
                 if self.js_mode {
-                    format!("// test: {}\n(() => {})();", name, body_str)
+                    let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
+                    format!(
+                        "try {{ (() => {})(); console.log(\"  test {} ... ok\"); }} catch(__e) {{ console.log(\"  test {} ... FAILED\"); console.log(\"    \" + __e.message.split(\"\\n\").join(\"\\n    \")); process.exitCode = 1; }}",
+                        body_str,
+                        escaped,
+                        escaped,
+                    )
                 } else {
                     format!("Deno.test({}, () => {});", Self::json_string(name), body_str)
                 }
@@ -178,6 +184,10 @@ impl TsEmitter {
                     .map(|(i, p)| format!("_{}: {}", i, self.gen_type_expr(p)))
                     .collect();
                 format!("({}) => {}", ps.join(", "), self.gen_type_expr(ret))
+            }
+            TypeExpr::Tuple { elements } => {
+                let ts: Vec<String> = elements.iter().map(|e| self.gen_type_expr(e)).collect();
+                format!("[{}]", ts.join(", "))
             }
             TypeExpr::Newtype { inner } => self.gen_type_expr(inner),
             TypeExpr::Variant { .. } => "any".to_string(),

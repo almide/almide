@@ -18,6 +18,9 @@ impl Parser {
         if self.check(TokenType::Fn) {
             return self.parse_fn_type();
         }
+        if self.check(TokenType::LParen) {
+            return self.parse_tuple_type();
+        }
 
         let name = self.expect_type_name()?;
         if self.check(TokenType::LBracket) {
@@ -47,6 +50,28 @@ impl Parser {
             return self.try_parse_inline_variant(name, Vec::new());
         }
         Ok(TypeExpr::Simple { name })
+    }
+
+    fn parse_tuple_type(&mut self) -> Result<TypeExpr, String> {
+        self.expect(TokenType::LParen)?;
+        if self.check(TokenType::RParen) {
+            self.advance();
+            return Ok(TypeExpr::Simple { name: "Unit".to_string() });
+        }
+        let first = self.parse_type_expr()?;
+        if self.check(TokenType::RParen) {
+            // (Type) — parenthesized, not a tuple
+            self.advance();
+            return Ok(first);
+        }
+        // (Type, Type, ...) — tuple
+        let mut elements = vec![first];
+        while self.check(TokenType::Comma) {
+            self.advance();
+            elements.push(self.parse_type_expr()?);
+        }
+        self.expect(TokenType::RParen)?;
+        Ok(TypeExpr::Tuple { elements })
     }
 
     fn parse_variant_type(&mut self) -> Result<TypeExpr, String> {
