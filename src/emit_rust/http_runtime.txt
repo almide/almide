@@ -83,7 +83,7 @@ fn almide_http_parse_request(raw: &str) -> Result<AlmideHttpRequest, String> {
 }
 
 fn almide_http_serve<F>(port: i64, handler: F) -> Result<(), String>
-where F: Fn(AlmideHttpRequest) -> AlmideHttpResponse + 'static
+where F: Fn(AlmideHttpRequest) -> Result<AlmideHttpResponse, String> + 'static
 {
     use std::net::TcpListener;
     use std::io::{Read, Write};
@@ -101,7 +101,10 @@ where F: Fn(AlmideHttpRequest) -> AlmideHttpResponse + 'static
                 let raw = String::from_utf8_lossy(&buf[..n]).to_string();
                 match almide_http_parse_request(&raw) {
                     Ok(req) => {
-                        let resp = handler(req);
+                        let resp = match handler(req) {
+                            Ok(r) => r,
+                            Err(e) => AlmideHttpResponse::new(500, format!("Internal Error: {}", e)),
+                        };
                         let _ = stream.write_all(&resp.to_bytes());
                     }
                     Err(_) => {

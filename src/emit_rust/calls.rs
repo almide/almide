@@ -266,7 +266,7 @@ impl Emitter {
             "http" => match func {
                 "serve" => {
                     let (names, body) = self.inline_lambda(&args[1], 1);
-                    format!("almide_http_serve({}, |{}| {{ {} }})?", args_str[0], names[0], body)
+                    format!("almide_http_serve({}, |{}| -> Result<AlmideHttpResponse, String> {{ Ok({{ {} }}) }})?", args_str[0], names[0], body)
                 }
                 "response" => format!("AlmideHttpResponse::new({}, {}.to_string())", args_str[0], args_str[1]),
                 "json" => format!("AlmideHttpResponse::json({}, {}.to_string())", args_str[0], args_str[1]),
