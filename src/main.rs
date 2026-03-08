@@ -3,6 +3,7 @@ mod check;
 mod diagnostic;
 mod emit_rust;
 mod emit_ts;
+mod emit_ts_runtime;
 mod lexer;
 mod parser;
 mod resolve;
@@ -267,7 +268,8 @@ fn main() {
         let mut rustc_cmd = Command::new(&find_rustc());
         rustc_cmd.arg(&tmp_rs)
             .arg("-o")
-            .arg(&output);
+            .arg(&output)
+            .arg("-C").arg("overflow-checks=no");
 
         if is_wasm {
             rustc_cmd.arg("--target").arg("wasm32-wasip1")

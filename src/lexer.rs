@@ -468,8 +468,7 @@ impl Lexer {
             self.advance();
         }
 
-        let keywords = build_keyword_map();
-        let token_type = keywords.get(value.as_str()).cloned().unwrap_or(TokenType::TypeName);
+        let token_type = self.keywords.get(value.as_str()).cloned().unwrap_or(TokenType::TypeName);
 
         self.tokens.push(Token {
             token_type,

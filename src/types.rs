@@ -40,6 +40,13 @@ pub struct FnSig {
     pub is_effect: bool,
 }
 
+impl FnSig {
+    /// Format parameter list as "name: Type, name: Type, ..."
+    pub fn format_params(&self) -> String {
+        self.params.iter().map(|(n, t)| format!("{}: {}", n, t.display())).collect::<Vec<_>>().join(", ")
+    }
+}
+
 pub struct TypeEnv {
     /// User-defined type declarations: name -> Ty
     pub types: std::collections::HashMap<std::string::String, Ty>,

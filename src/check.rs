@@ -505,7 +505,7 @@ impl Checker {
                 ));
             }
             if arg_tys.len() != sig.params.len() {
-                let expected = sig.params.iter().map(|(n, t)| format!("{}: {}", n, t.display())).collect::<Vec<_>>().join(", ");
+                let expected = sig.format_params();
                 self.diagnostics.push(err_s(
                     format!("function '{}' expects {} argument(s) but got {}", name, sig.params.len(), arg_tys.len()),
                     format!("Expected: {}({})", name, expected),
@@ -565,7 +565,7 @@ impl Checker {
         if let Some(sig) = self.lookup_stdlib(module, func) {
             let min_params = stdlib::min_params(module, func).unwrap_or(sig.params.len());
             if arg_tys.len() < min_params || arg_tys.len() > sig.params.len() {
-                let usage = sig.params.iter().map(|(n, t)| format!("{}: {}", n, t.display())).collect::<Vec<_>>().join(", ");
+                let usage = sig.format_params();
                 self.diagnostics.push(err_s(
                     format!("{}.{}() expects {} argument(s) but got {}", module, func, sig.params.len(), arg_tys.len()),
                     format!("Usage: {}.{}({})", module, func, usage),
@@ -605,7 +605,7 @@ impl Checker {
             let key = format!("{}.{}", module, func);
             if let Some(sig) = self.env.functions.get(&key).cloned() {
                 if arg_tys.len() != sig.params.len() {
-                    let usage = sig.params.iter().map(|(n, t)| format!("{}: {}", n, t.display())).collect::<Vec<_>>().join(", ");
+                    let usage = sig.format_params();
                     self.diagnostics.push(err_s(
                         format!("{}.{}() expects {} argument(s) but got {}", module, func, sig.params.len(), arg_tys.len()),
                         format!("Usage: {}.{}({})", module, func, usage),
