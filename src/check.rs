@@ -77,7 +77,18 @@ impl Checker {
                 self.env.current_ret = Some(ret_ty.clone());
                 self.env.in_effect = effect.unwrap_or(false);
                 let body_ty = self.check_expr(body);
-                if !body_ty.compatible(&ret_ty) {
+                // Effect fn: codegen auto-wraps body in Ok() and appends ? to calls,
+                // so body returning T is valid when declared return is Result[T, E].
+                let is_effect = effect.unwrap_or(false);
+                let effective_ret = if is_effect {
+                    match &ret_ty {
+                        Ty::Result(ok_ty, _) => *ok_ty.clone(),
+                        _ => ret_ty.clone(),
+                    }
+                } else {
+                    ret_ty.clone()
+                };
+                if !body_ty.compatible(&effective_ret) && !body_ty.compatible(&ret_ty) {
                     self.diagnostics.push(err_s(
                         format!("function '{}' declared to return {} but body has type {}", name, ret_ty.display(), body_ty.display()),
                         "Change the return type or fix the body expression".into(),
@@ -521,7 +532,15 @@ impl Checker {
                     format!("{}.{}()", module, func),
                 ));
             }
-            return sig.ret.clone();
+            // In effect fn context, codegen auto-appends `?` to Result-returning calls,
+            // so the effective return type is the Ok variant.
+            let ret = sig.ret.clone();
+            if self.env.in_effect {
+                if let Ty::Result(ok_ty, _) = &ret {
+                    return *ok_ty.clone();
+                }
+            }
+            return ret;
         }
         Ty::Unknown
     }
