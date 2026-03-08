@@ -324,3 +324,145 @@ test "hash deterministic" {
   let h2 = list.fold(string.to_bytes("hello"), 1469598103934665603, fn(h, b) => (h ^ b) * 1099511628211)
   assert_eq(h1, h2)
 }
+
+// ============================================================
+// string.chars
+// ============================================================
+
+test "string.chars basic" {
+  assert_eq(string.chars("abc"), ["a", "b", "c"])
+}
+
+test "string.chars empty" {
+  assert_eq(string.chars(""), [])
+}
+
+test "string.chars single" {
+  assert_eq(string.chars("x"), ["x"])
+}
+
+// ============================================================
+// string.index_of
+// ============================================================
+
+test "string.index_of found" {
+  assert_eq(string.index_of("hello world", "world"), some(6))
+}
+
+test "string.index_of not found" {
+  assert_eq(string.index_of("hello", "xyz"), none)
+}
+
+test "string.index_of at start" {
+  assert_eq(string.index_of("abc", "a"), some(0))
+}
+
+test "string.index_of empty needle" {
+  assert_eq(string.index_of("abc", ""), some(0))
+}
+
+// ============================================================
+// string.repeat
+// ============================================================
+
+test "string.repeat basic" {
+  assert_eq(string.repeat("ab", 3), "ababab")
+}
+
+test "string.repeat zero" {
+  assert_eq(string.repeat("x", 0), "")
+}
+
+test "string.repeat one" {
+  assert_eq(string.repeat("hi", 1), "hi")
+}
+
+// ============================================================
+// string.from_bytes
+// ============================================================
+
+test "string.from_bytes roundtrip" {
+  let s = "hello"
+  assert_eq(string.from_bytes(string.to_bytes(s)), s)
+}
+
+test "string.from_bytes empty" {
+  assert_eq(string.from_bytes([]), "")
+}
+
+// ============================================================
+// string.is_digit?
+// ============================================================
+
+test "string.is_digit? true" {
+  assert(string.is_digit?("0"))
+  assert(string.is_digit?("9"))
+  assert(string.is_digit?("42"))
+}
+
+test "string.is_digit? false" {
+  assert(not string.is_digit?("a"))
+  assert(not string.is_digit?(""))
+  assert(not string.is_digit?("1a"))
+}
+
+// ============================================================
+// string.is_alpha?
+// ============================================================
+
+test "string.is_alpha? true" {
+  assert(string.is_alpha?("a"))
+  assert(string.is_alpha?("Z"))
+  assert(string.is_alpha?("hello"))
+}
+
+test "string.is_alpha? false" {
+  assert(not string.is_alpha?("1"))
+  assert(not string.is_alpha?(""))
+  assert(not string.is_alpha?("a1"))
+}
+
+// ============================================================
+// string.is_alphanumeric?
+// ============================================================
+
+test "string.is_alphanumeric? true" {
+  assert(string.is_alphanumeric?("a1"))
+  assert(string.is_alphanumeric?("abc"))
+  assert(string.is_alphanumeric?("123"))
+}
+
+test "string.is_alphanumeric? false" {
+  assert(not string.is_alphanumeric?(""))
+  assert(not string.is_alphanumeric?("a-b"))
+  assert(not string.is_alphanumeric?(" "))
+}
+
+// ============================================================
+// string.is_whitespace?
+// ============================================================
+
+test "string.is_whitespace? true" {
+  assert(string.is_whitespace?(" "))
+  assert(string.is_whitespace?("\t"))
+  assert(string.is_whitespace?("  \t\n"))
+}
+
+test "string.is_whitespace? false" {
+  assert(not string.is_whitespace?(""))
+  assert(not string.is_whitespace?("a"))
+  assert(not string.is_whitespace?(" a "))
+}
+
+// ============================================================
+// UFCS for new string functions
+// ============================================================
+
+test "string UFCS chars" {
+  assert_eq("abc".chars(), ["a", "b", "c"])
+}
+
+test "string UFCS is_digit?" {
+  assert("5".is_digit?())
+  assert(not "x".is_digit?())
+}

@@ -31,6 +31,14 @@ const __string = {
   replace(s: string, from: string, to: string): string { return s.split(from).join(to); },
   char_at(s: string, i: number): string | null { return i < s.length ? s[i] : null; },
   lines(s: string): string[] { return s.split("\n").filter(l => l.length > 0); },
+  chars(s: string): string[] { return [...s]; },
+  index_of(s: string, needle: string): number | null { const i = s.indexOf(needle); return i >= 0 ? i : null; },
+  repeat(s: string, n: number): string { return s.repeat(n); },
+  from_bytes(bytes: number[]): string { return new TextDecoder().decode(new Uint8Array(bytes)); },
+  is_digit_qm_(s: string): boolean { return s.length > 0 && /^[0-9]+$/.test(s); },
+  is_alpha_qm_(s: string): boolean { return s.length > 0 && /^[a-zA-Z]+$/.test(s); },
+  is_alphanumeric_qm_(s: string): boolean { return s.length > 0 && /^[a-zA-Z0-9]+$/.test(s); },
+  is_whitespace_qm_(s: string): boolean { return s.length > 0 && /^\s+$/.test(s); },
 };
 const __list = {
   len<T>(xs: T[]): number { return xs.length; },
@@ -200,6 +208,14 @@ const __string = {
   replace(s, from, to) { return s.split(from).join(to); },
   char_at(s, i) { return i < s.length ? s[i] : null; },
   lines(s) { return s.split("\n").filter(l => l.length > 0); },
+  chars(s) { return [...s]; },
+  index_of(s, needle) { const i = s.indexOf(needle); return i >= 0 ? i : null; },
+  repeat(s, n) { return s.repeat(n); },
+  from_bytes(bytes) { return new TextDecoder().decode(new Uint8Array(bytes)); },
+  is_digit_qm_(s) { return s.length > 0 && /^[0-9]+$/.test(s); },
+  is_alpha_qm_(s) { return s.length > 0 && /^[a-zA-Z]+$/.test(s); },
+  is_alphanumeric_qm_(s) { return s.length > 0 && /^[a-zA-Z0-9]+$/.test(s); },
+  is_whitespace_qm_(s) { return s.length > 0 && /^\s+$/.test(s); },
 };
 const __list = {
   len(xs) { return xs.length; },

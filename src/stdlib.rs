@@ -20,7 +20,12 @@ pub fn resolve_ufcs_module(method: &str) -> Option<&'static str> {
         | "starts_with" | "starts_with_qm_" | "starts_with?"
         | "ends_with" | "ends_with_qm_" | "ends_with?"
         | "slice" | "to_bytes" | "contains" | "to_upper" | "to_lower"
-        | "to_int" | "replace" | "char_at" | "lines" => Some("string"),
+        | "to_int" | "replace" | "char_at" | "lines"
+        | "chars" | "index_of" | "repeat" | "from_bytes"
+        | "is_digit?" | "is_digit_qm_"
+        | "is_alpha?" | "is_alpha_qm_"
+        | "is_alphanumeric?" | "is_alphanumeric_qm_"
+        | "is_whitespace?" | "is_whitespace_qm_" => Some("string"),
 
         "get" | "get_or" | "sort" | "reverse"
         | "each" | "map" | "filter" | "find" | "fold"
@@ -71,6 +76,14 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         ("string", "char_at") => FnSig { params: vec![(s("s"), Ty::String), (s("i"), Ty::Int)], ret: Ty::Option(Box::new(Ty::String)), is_effect: false },
         ("string", "slice") => FnSig { params: vec![(s("s"), Ty::String), (s("start"), Ty::Int), (s("end"), Ty::Int)], ret: Ty::String, is_effect: false },
         ("string", "lines") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::List(Box::new(Ty::String)), is_effect: false },
+        ("string", "chars") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::List(Box::new(Ty::String)), is_effect: false },
+        ("string", "index_of") => FnSig { params: vec![(s("s"), Ty::String), (s("needle"), Ty::String)], ret: Ty::Option(Box::new(Ty::Int)), is_effect: false },
+        ("string", "repeat") => FnSig { params: vec![(s("s"), Ty::String), (s("n"), Ty::Int)], ret: Ty::String, is_effect: false },
+        ("string", "from_bytes") => FnSig { params: vec![(s("bytes"), Ty::List(Box::new(Ty::Int)))], ret: Ty::String, is_effect: false },
+        ("string", "is_digit?") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::Bool, is_effect: false },
+        ("string", "is_alpha?") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::Bool, is_effect: false },
+        ("string", "is_alphanumeric?") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::Bool, is_effect: false },
+        ("string", "is_whitespace?") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::Bool, is_effect: false },
 
         // ── list ──
         ("list", "len") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::Int, is_effect: false },
