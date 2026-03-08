@@ -2,6 +2,8 @@
   <img src="./assets/almide.svg" alt="Almide" width="280">
 </p>
 
+<h1 align="center">Almide</h1>
+
 <p align="center">A programming language designed for LLM code generation — optimized for AI proliferation.</p>
 
 Almide is a language for AI to write code directly and efficiently. The design goal is that LLMs can express intent in the fewest tokens and with the least thinking, by providing the right abstractions and eliminating boilerplate.
