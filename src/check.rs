@@ -190,7 +190,15 @@ impl Checker {
             ast::Expr::None => Ty::Option(Box::new(Ty::Unknown)),
             ast::Expr::Hole | ast::Expr::Todo { .. } | ast::Expr::Placeholder => Ty::Unknown,
             ast::Expr::Some { expr: inner } => Ty::Option(Box::new(self.check_expr(inner))),
-            ast::Expr::Ok { expr: inner } => Ty::Result(Box::new(self.check_expr(inner)), Box::new(Ty::Unknown)),
+            ast::Expr::Ok { expr: inner } => {
+                let inner_ty = self.check_expr(inner);
+                // In non-effect context, ok(()) is just Unit
+                if !self.env.in_effect && matches!(inner_ty, Ty::Unit) {
+                    Ty::Unit
+                } else {
+                    Ty::Result(Box::new(inner_ty), Box::new(Ty::Unknown))
+                }
+            }
             ast::Expr::Err { expr: inner } => Ty::Result(Box::new(Ty::Unknown), Box::new(self.check_expr(inner))),
 
             ast::Expr::Ident { name } => {
@@ -269,12 +277,24 @@ impl Checker {
                         }
                     }
                     let at = self.check_expr(&arm.body);
-                    if let Some(ref prev) = result_ty {
-                        if !prev.compatible(&at) {
+                    if let Some(ref mut prev) = result_ty {
+                        // Allow mixing Result and non-Result types in match arms
+                        // (e.g. err(e) => err(e), ok(x) => plain_value)
+                        let compat = prev.compatible(&at)
+                            || match (prev.clone(), &at) {
+                                (Ty::Result(ok_ty, _), non_result) if !matches!(non_result, Ty::Result(_, _)) => ok_ty.compatible(non_result),
+                                (_, Ty::Result(ok_ty, _)) if !matches!(prev.clone(), Ty::Result(_, _)) => prev.compatible(&ok_ty),
+                                _ => false,
+                            };
+                        if !compat {
                             self.diagnostics.push(err(
                                 format!("match arm has type {} but previous arms have type {}", at.display(), prev.display()),
                                 "All match arms must have the same type", "match expression",
                             ));
+                        }
+                        // Widen the result type to the more specific one
+                        if matches!(at, Ty::Result(_, _)) && !matches!(prev.clone(), Ty::Result(_, _)) {
+                            *prev = at;
                         }
                     } else {
                         result_ty = Some(at);
@@ -294,10 +314,14 @@ impl Checker {
 
             ast::Expr::DoBlock { stmts, expr } => {
                 self.env.push_scope();
+                let prev_do = self.env.in_do_block;
+                self.env.in_do_block = true;
                 for s in stmts { self.check_stmt(s); }
                 let ty = expr.as_ref().map(|e| self.check_expr(e)).unwrap_or(Ty::Unit);
+                self.env.in_do_block = prev_do;
                 self.env.pop_scope();
-                ty
+                // do blocks use guard for flow control, their actual type depends on context
+                Ty::Unknown
             }
 
             ast::Expr::ForIn { var, iterable, body } => {
@@ -342,8 +366,15 @@ impl Checker {
             }
 
             ast::Expr::Pipe { left, right } => {
-                self.check_expr(left);
-                self.check_expr(right)
+                let left_ty = self.check_expr(left);
+                // Pipe passes left as first arg to right's call
+                if let ast::Expr::Call { callee, args } = right.as_ref() {
+                    let mut all_args = vec![left.as_ref().clone()];
+                    all_args.extend(args.iter().cloned());
+                    self.check_call(callee, &all_args)
+                } else {
+                    self.check_expr(right)
+                }
             }
 
             ast::Expr::Binary { op, left, right } => {
@@ -697,6 +728,13 @@ impl Checker {
         match stmt {
             ast::Stmt::Let { name, ty, value } => {
                 let vt = self.check_expr(value);
+                // In do blocks, auto-unwrap Result types
+                let vt = if self.env.in_do_block {
+                    match vt {
+                        Ty::Result(ok, _) => *ok,
+                        other => other,
+                    }
+                } else { vt };
                 let dt = if let Some(te) = ty {
                     let t = self.resolve_type_expr(te);
                     if !t.compatible(&vt) {

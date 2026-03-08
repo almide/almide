@@ -273,18 +273,34 @@ impl Parser {
         );
         if effect && returns_result {
             if let Expr::Block { ref stmts, ref expr } = body {
-                let needs_ok = match expr {
+                // If expr is None but the last stmt is an expr stmt, promote it to final expr
+                let (effective_stmts, effective_expr) = if expr.is_none() && !stmts.is_empty() {
+                    if let Some(Stmt::Expr { expr: last_expr }) = stmts.last() {
+                        (stmts[..stmts.len()-1].to_vec(), Some(Box::new(last_expr.clone())))
+                    } else {
+                        (stmts.clone(), None)
+                    }
+                } else {
+                    (stmts.clone(), expr.clone())
+                };
+                let needs_ok = match &effective_expr {
                     None => true,
-                    Some(e) => !matches!(e.as_ref(), Expr::Ok { .. } | Expr::Err { .. }),
+                    Some(e) => matches!(e.as_ref(), Expr::Unit),
                 };
                 if needs_ok {
-                    let mut new_stmts = stmts.clone();
-                    if let Some(trailing) = expr {
-                        new_stmts.push(Stmt::Expr { expr: *trailing.clone() });
+                    let mut new_stmts = effective_stmts;
+                    if let Some(trailing) = effective_expr {
+                        new_stmts.push(Stmt::Expr { expr: *trailing });
                     }
                     body = Expr::Block {
                         stmts: new_stmts,
                         expr: Some(Box::new(Expr::Ok { expr: Box::new(Expr::Unit) })),
+                    };
+                } else if expr.is_none() {
+                    // Promote the last expr stmt to final expr
+                    body = Expr::Block {
+                        stmts: effective_stmts,
+                        expr: effective_expr,
                     };
                 }
             }

@@ -57,6 +57,8 @@ pub struct TypeEnv {
     pub constructors: std::collections::HashMap<std::string::String, (std::string::String, VariantCase)>,
     /// User-defined module names (for distinguishing from stdlib in module calls)
     pub user_modules: std::collections::HashSet<std::string::String>,
+    /// Whether we're inside a do block (for auto-unwrapping Result in let bindings)
+    pub in_do_block: bool,
 }
 
 impl Ty {
@@ -129,6 +131,7 @@ impl TypeEnv {
             effect_fns: std::collections::HashSet::new(),
             constructors: std::collections::HashMap::new(),
             user_modules: std::collections::HashSet::new(),
+            in_do_block: false,
         }
     }
 

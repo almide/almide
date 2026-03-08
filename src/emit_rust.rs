@@ -5,15 +5,21 @@ struct Emitter {
     indent: usize,
     /// Track if we're inside an effect function (for ? operator)
     in_effect: bool,
-    /// Names of effect functions in the program
+    /// Names of effect functions in the program (auto-wrapped, no explicit Result return)
     effect_fns: Vec<String>,
+    /// Names of all functions that return Result (for do-block auto-unwrap)
+    result_fns: Vec<String>,
+    /// Track if we're inside a do block (for auto-unwrap of Result calls)
+    in_do_block: std::cell::Cell<bool>,
     /// Names of user-defined modules (for module call dispatch)
     user_modules: Vec<String>,
+    /// Track if we're inside a test function
+    in_test: bool,
 }
 
 impl Emitter {
     fn new() -> Self {
-        Self { out: String::new(), indent: 0, in_effect: false, effect_fns: Vec::new(), user_modules: Vec::new() }
+        Self { out: String::new(), indent: 0, in_effect: false, effect_fns: Vec::new(), result_fns: Vec::new(), in_do_block: std::cell::Cell::new(false), user_modules: Vec::new(), in_test: false }
     }
 
     fn emit_indent(&mut self) {
@@ -49,6 +55,25 @@ impl Emitter {
                         if !ret_str.starts_with("Result<") {
                             self.effect_fns.push(name.clone());
                         }
+                    }
+                }
+            }
+        }
+        // Collect ALL functions that return Result (for do-block auto-unwrap)
+        for decl in &prog.decls {
+            if let Decl::Fn { name, return_type, effect, .. } = decl {
+                let ret_str = self.gen_type(return_type);
+                if ret_str.starts_with("Result<") || effect.unwrap_or(false) {
+                    self.result_fns.push(name.clone());
+                }
+            }
+        }
+        for (_, mod_prog) in modules {
+            for decl in &mod_prog.decls {
+                if let Decl::Fn { name, return_type, effect, .. } = decl {
+                    let ret_str = self.gen_type(return_type);
+                    if ret_str.starts_with("Result<") || effect.unwrap_or(false) {
+                        self.result_fns.push(name.clone());
                     }
                 }
             }
@@ -205,10 +230,24 @@ impl Emitter {
             Decl::Test { name, body } => {
                 self.emitln("#[test]");
                 let safe_name = name.chars().map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' }).collect::<String>();
-                self.emitln(&format!("fn test_{}() {{", safe_name));
-                self.indent += 1;
+                let prev_effect = self.in_effect;
+                let prev_test = self.in_test;
+                self.in_effect = true;
+                self.in_test = true;
                 let expr = self.gen_expr(body);
-                self.emitln(&format!("{};", expr));
+                let has_question = expr.contains("?");
+                if has_question {
+                    self.emitln(&format!("fn test_{}() -> Result<(), String> {{", safe_name));
+                    self.indent += 1;
+                    self.emitln(&format!("{};", expr));
+                    self.emitln("Ok(())");
+                } else {
+                    self.emitln(&format!("fn test_{}() {{", safe_name));
+                    self.indent += 1;
+                    self.emitln(&format!("{};", expr));
+                }
+                self.in_effect = prev_effect;
+                self.in_test = prev_test;
                 self.indent -= 1;
                 self.emitln("}");
             }
@@ -310,10 +349,19 @@ impl Emitter {
                 let ret_is_result = ret_str.starts_with("Result<");
                 if is_effect {
                     if ret_is_result {
-                        // Return type is already Result, don't wrap in Ok()
+                        // Return type is already Result - check if final expr already returns Result
                         if let Some(fe) = final_expr {
+                            let already_result = matches!(fe.as_ref(),
+                                Expr::Ok { .. } | Expr::Err { .. } | Expr::Match { .. } | Expr::If { .. }
+                            );
                             let e = self.gen_expr(fe);
-                            self.emitln(&e);
+                            if already_result {
+                                self.emitln(&e);
+                            } else {
+                                self.emitln(&format!("Ok({})", e));
+                            }
+                        } else {
+                            self.emitln("Ok(())");
                         }
                     } else if let Some(fe) = final_expr {
                         if is_unit_ret {
@@ -337,7 +385,13 @@ impl Emitter {
             _ => {
                 let expr = self.gen_expr(body);
                 if is_effect {
-                    self.emitln(&format!("Ok({})", expr));
+                    let ret_is_result = ret_str.starts_with("Result<");
+                    if ret_is_result {
+                        // Already returns Result, don't wrap
+                        self.emitln(&expr);
+                    } else {
+                        self.emitln(&format!("Ok({})", expr));
+                    }
                 } else {
                     self.emitln(&expr);
                 }
@@ -457,7 +511,10 @@ impl Emitter {
             Expr::None => "None".to_string(),
             Expr::Some { expr } => format!("Some({})", self.gen_expr(expr)),
             Expr::Ok { expr } => {
-                if self.in_effect {
+                if self.in_do_block.get() {
+                    // In do blocks, ok(expr) just unwraps to expr (since do auto-wraps in Ok)
+                    self.gen_expr(expr)
+                } else if self.in_effect {
                     format!("Ok({})", self.gen_expr(expr))
                 } else if matches!(expr.as_ref(), Expr::Unit) {
                     "()".to_string()
@@ -467,7 +524,7 @@ impl Emitter {
             }
             Expr::Err { expr } => {
                 let msg = self.gen_expr(expr);
-                if self.in_effect {
+                if self.in_effect && !self.in_test && !self.in_do_block.get() {
                     format!("return Err({}.to_string())", msg)
                 } else {
                     format!("Err({}.to_string())", msg)
@@ -646,17 +703,9 @@ impl Emitter {
                 }
             }
             "*" => {
-                let left_big = self.is_bigint_expr(left);
-                let right_big = self.is_bigint_expr(right);
-                if left_big || right_big {
-                    let l = self.gen_expr_u64_wrapping(left);
-                    let r = self.gen_expr_u64_wrapping(right);
-                    format!("(({}).wrapping_mul({}) as i64)", l, r)
-                } else {
-                    let l = self.gen_expr(left);
-                    let r = self.gen_expr(right);
-                    format!("({} * {})", l, r)
-                }
+                let l = self.gen_expr(left);
+                let r = self.gen_expr(right);
+                format!("(({}).wrapping_mul({}))", l, r)
             }
             "==" => {
                 let l = self.gen_expr(left);
@@ -730,6 +779,13 @@ impl Emitter {
                 "assert_eq" => {
                     let a = self.gen_expr(&args[0]);
                     let b = self.gen_expr(&args[1]);
+                    // If one side is an empty list, use .is_empty() check instead
+                    if matches!(&args[1], Expr::List { elements } if elements.is_empty()) {
+                        return format!("assert!(({}).is_empty(), \"expected empty list but got {{:?}}\", {})", a, a);
+                    }
+                    if matches!(&args[0], Expr::List { elements } if elements.is_empty()) {
+                        return format!("assert!(({}).is_empty(), \"expected empty list but got {{:?}}\", {})", b, b);
+                    }
                     return format!("assert_eq!({}, {})", a, b);
                 }
                 "assert" => {
@@ -752,6 +808,10 @@ impl Emitter {
         if self.in_effect {
             if let Expr::Ident { name } = callee {
                 if self.effect_fns.contains(name) {
+                    return format!("{}?", call);
+                }
+                // In do blocks, also auto-unwrap calls to Result-returning functions
+                if self.in_do_block.get() && self.result_fns.contains(name) {
                     return format!("{}?", call);
                 }
             }
@@ -777,7 +837,7 @@ impl Emitter {
             },
             "string" => match func {
                 "trim" => format!("({}).trim().to_string()", args_str[0]),
-                "split" => format!("({}).split(&*{}).map(|s| s.to_string()).collect::<Vec<String>>()", args_str[0], args_str[1]),
+                "split" => format!("{{ let __delim = &*{}; if __delim.is_empty() {{ ({}).chars().map(|c| c.to_string()).collect::<Vec<String>>() }} else {{ ({}).split(__delim).map(|s| s.to_string()).collect::<Vec<String>>() }} }}", args_str[1], args_str[0], args_str[0]),
                 "join" => format!("({}).join(&*{})", args_str[0], args_str[1]),
                 "len" => format!("(({}).len() as i64)", args_str[0]),
                 "contains" => format!("({}).contains(&*{})", args_str[0], args_str[1]),
@@ -824,16 +884,16 @@ impl Emitter {
                     "reverse" => format!("{{ let mut v = ({}).to_vec(); v.reverse(); v }}", args_str[0]),
                     "any" => {
                         let (names, body) = inline_lambda(&args[1], 1);
-                        format!("({}).iter().any(|{}| {{ {} }})", args_str[0], names[0], body)
+                        format!("({}).iter().any(|{}| {{ let {} = {}.clone(); {} }})", args_str[0], names[0], names[0], names[0], body)
                     }
                     "all" => {
                         let (names, body) = inline_lambda(&args[1], 1);
-                        format!("({}).iter().all(|{}| {{ {} }})", args_str[0], names[0], body)
+                        format!("({}).iter().all(|{}| {{ let {} = {}.clone(); {} }})", args_str[0], names[0], names[0], names[0], body)
                     }
                     "contains" => format!("({}).contains(&{})", args_str[0], args_str[1]),
                     "each" => {
                         let (names, body) = inline_lambda(&args[1], 1);
-                        format!("{{ for {} in ({}).iter() {{ {} ; }} }}", names[0], args_str[0], body)
+                        format!("{{ for {} in ({}).iter().cloned() {{ {} ; }} }}", names[0], args_str[0], body)
                     }
                     "map" => {
                         let (names, body) = inline_lambda(&args[1], 1);
@@ -854,14 +914,19 @@ impl Emitter {
                     }
                     "fold" => {
                         let (names, body) = inline_lambda(&args[2], 2);
-                        // Add type annotation on accumulator if it's a Result (Rust can't infer)
                         let init = &args_str[1];
-                        let acc_typed = if init.starts_with("Ok(") || init.starts_with("Err(") {
-                            format!("{}: Result<_, String>", names[0])
+                        // If body contains ?, use try_fold pattern
+                        if self.in_effect && body.contains("?") {
+                            format!("({}).clone().into_iter().try_fold({}, |{}, {}| -> Result<_, String> {{ Ok({{ {} }}) }})?", args_str[0], init, names[0], names[1], body)
                         } else {
-                            names[0].clone()
-                        };
-                        format!("({}).clone().into_iter().fold({}, |{}, {}| {{ {} }})", args_str[0], init, acc_typed, names[1], body)
+                            // Add type annotation on accumulator if it's a Result (Rust can't infer)
+                            let acc_typed = if init.starts_with("Ok(") || init.starts_with("Err(") {
+                                format!("{}: Result<_, String>", names[0])
+                            } else {
+                                names[0].clone()
+                            };
+                            format!("({}).clone().into_iter().fold({}, |{}, {}| {{ {} }})", args_str[0], init, acc_typed, names[1], body)
+                        }
                     }
                     _ => format!("/* list.{} */ todo!()", func),
                 }
@@ -1048,7 +1113,27 @@ impl Emitter {
             }
             lines.join("\n")
         } else {
-            self.gen_block(stmts, final_expr)
+            // In a do block inside a Result-returning function, enable auto-unwrap
+            let prev = self.in_do_block.get();
+            if self.in_effect {
+                self.in_do_block.set(true);
+            }
+            // Wrap the final expression in Ok() if we're in effect context
+            let result = if self.in_effect && final_expr.is_some() {
+                let expr = final_expr.unwrap();
+                let inner = self.gen_expr(expr);
+                let mut lines = vec!["{".to_string()];
+                for stmt in stmts {
+                    lines.push(format!("    {}", self.gen_stmt(stmt)));
+                }
+                lines.push(format!("    Ok({})", inner));
+                lines.push("}".to_string());
+                lines.join("\n")
+            } else {
+                self.gen_block(stmts, final_expr)
+            };
+            self.in_do_block.set(prev);
+            result
         }
     }
 
