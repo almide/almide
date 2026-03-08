@@ -303,6 +303,8 @@ The runtime calls `main(args)` where `args` includes the program name at index 0
 - `List.new()` → **WRONG**. Write `[]`. There is no `new()` for List
 - `string.length(s)` → **WRONG**. Write `string.len(s)`. No synonyms
 - `println(x)` where x is Int → **WRONG**. Write `println(int.to_string(x))`. No implicit conversion
+- `1 :: 2 :: []` → **WRONG**. Write `[1, 2]`. There is no cons operator `::`
+- `fn foo[T](x: T)` → **WRONG**. User-defined generic functions are not supported. Use concrete types
 
 ## Complete example
 ```
