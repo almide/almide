@@ -1,31 +1,31 @@
-# シンタックスシュガー・利便性
+# Syntax Sugar & Convenience
 
-## レンジリテラル
+## Range Literals
 ```almide
 let xs = 0..10        // [0, 1, 2, ..., 9]
 let ys = 0..=10       // [0, 1, 2, ..., 10]
 let zs = 10..0..-1    // [10, 9, 8, ..., 1]
 ```
 
-## リスト内包表記
+## List Comprehensions
 ```almide
 let evens = [x for x in 0..100 if x % 2 == 0]
 let pairs = [(x, y) for x in xs for y in ys]
 ```
 
-## デフォルト引数
+## Default Arguments
 ```almide
 fn greet(name: String, greeting: String = "Hello") -> String =
   "${greeting}, ${name}!"
 ```
 
-## 名前付き引数
+## Named Arguments
 ```almide
 http.response(status: 200, body: "OK")
 ```
 
-## パターンマッチの網羅性チェック
-variant型のmatchで全ケースを網羅しているかコンパイル時に検出。
+## Exhaustiveness Checking for Pattern Match
+Detects at compile time when a match on a variant type does not cover all cases.
 
 ```almide
 type Color = Red | Green | Blue
@@ -37,19 +37,19 @@ fn name(c: Color) -> String = match c {
 }
 ```
 
-## 文字列のraw記法
+## Raw String Literals
 ```almide
 let regex_pattern = r"^\d{3}-\d{4}$"
 let path = r"C:\Users\test"
 ```
 
-## ブロックコメント
+## Block Comments
 ```almide
 /*
-  複数行コメント
-  現状は // のみ
+  multi-line comment
+  currently only // is supported
 */
 ```
 
 ## Priority
-レンジリテラル > 網羅性チェック > ブロックコメント > リスト内包表記 > デフォルト引数 > raw文字列
+Range literals > exhaustiveness checking > block comments > list comprehensions > default arguments > raw strings

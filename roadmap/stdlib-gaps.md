@@ -1,23 +1,23 @@
-# 標準ライブラリ拡充ロードマップ
+# Standard Library Expansion Roadmap
 
-## 目的
-AI生成コードのボイラープレートを削減し、LOC・トークン数・生成時間を改善する。
+## Goal
+Reduce boilerplate in AI-generated code, improving LOC, token count, and generation time.
 
-## ベンチマーク分析結果
-minigit (3試行) と miniconf (1試行) のAI生成コードを分析した結果:
-- **文字分類**: AI が `is_digit`, `is_alpha` を毎回 60文字リストで自作（40-60 LOC）
-- **文字列の文字分解**: `list.filter(string.split(s, ""), ...)` パターンが10箇所以上
-- **マジックナンバーslice**: `string.slice(line, 8)` で "parent: " をスキップ等
-- **match get 冗長**: `match list.get(xs, i) { some(v) => v, none => "" }` が64箇所
-- **手動indexedループ**: `var i = 0; do { guard i < len; ... }` が5-7箇所
+## Benchmark Analysis
+Analysis of AI-generated code from minigit (3 runs) and miniconf (1 run):
+- **Character classification**: AI manually defines `is_digit`, `is_alpha` each time with 60-char lists (40–60 LOC)
+- **String character decomposition**: `list.filter(string.split(s, ""), ...)` pattern used 10+ times
+- **Magic number slice**: `string.slice(line, 8)` to skip "parent: " etc.
+- **Redundant match get**: `match list.get(xs, i) { some(v) => v, none => "" }` appears 64 times
+- **Manual indexed loops**: `var i = 0; do { guard i < len; ... }` appears 5–7 times
 
-## Phase 1: 文字列・文字操作（LOC -40〜60）
+## Phase 1: String & Character Operations (LOC -40~60)
 
 ### 1.1 string.chars
 ```almide
-string.chars("abc") → ["a", "b", "c"]   (* UTF-8文字単位の分解 *)
+string.chars("abc") → ["a", "b", "c"]   (* UTF-8 character decomposition *)
 ```
-- 現状 AI は `list.filter(string.split(s, ""), fn(c) => string.len(c) > 0)` で代替
+- Currently AI substitutes with `list.filter(string.split(s, ""), fn(c) => string.len(c) > 0)`
 - UFCS: `s.chars()`
 
 ### 1.2 string.index_of
@@ -25,7 +25,7 @@ string.chars("abc") → ["a", "b", "c"]   (* UTF-8文字単位の分解 *)
 string.index_of("hello world", "world") → some(6)
 string.index_of("hello", "xyz") → none
 ```
-- パーサー的なコードで頻出。`string.slice` と組み合わせて使う
+- Frequently needed in parser-like code. Used together with `string.slice`
 
 ### 1.3 string.repeat
 ```almide
@@ -36,27 +36,27 @@ string.repeat("ab", 3) → "ababab"
 ```almide
 string.from_bytes([104, 105]) → "hi"
 ```
-- `string.to_bytes` の逆
+- Inverse of `string.to_bytes`
 
-### 1.5 char 判定関数
+### 1.5 Character predicate functions
 ```almide
 string.is_digit?("3") → true       (* 0-9 *)
 string.is_alpha?("a") → true       (* a-zA-Z *)
 string.is_alphanumeric?("a") → true
 string.is_whitespace?(" ") → true  (* space, tab, newline *)
 ```
-- `string` モジュールに配置（charモジュールは作らない、単一文字Stringで判定）
-- AI が毎回 `["0","1",...,"9"]` を書くのを防ぐ
+- Placed in `string` module (no separate char module; single-char String is used)
+- Prevents AI from writing `["0","1",...,"9"]` every time
 - UFCS: `c.is_digit?()`
 
-## Phase 2: リスト操作拡充（LOC -20〜30）
+## Phase 2: List Operations (LOC -20~30)
 
 ### 2.1 list.enumerate
 ```almide
 list.enumerate(["a", "b", "c"]) → [(0, "a"), (1, "b"), (2, "c")]
 ```
-- 手動 `var i = 0` ループの削減
-- タプルとして `(Int, T)` を返す
+- Reduces manual `var i = 0` loops
+- Returns `(Int, T)` tuples
 
 ### 2.2 list.zip
 ```almide
@@ -78,16 +78,16 @@ list.drop([1, 2, 3, 4], 2) → [3, 4]
 ```almide
 list.sort_by(users, fn(u) => u.name)
 ```
-- 現状 `list.sort` は自然順序のみ
+- Current `list.sort` only supports natural order
 
 ### 2.6 list.unique
 ```almide
 list.unique([1, 2, 2, 3, 1]) → [1, 2, 3]
 ```
 
-## Phase 3: ユーティリティモジュール（新規）
+## Phase 3: Utility Modules (new)
 
-### 3.1 math モジュール
+### 3.1 math module
 ```almide
 import math
 
@@ -99,10 +99,10 @@ math.pi → 3.14159...
 math.e → 2.71828...
 math.sin(x) math.cos(x) math.log(x) math.exp(x) math.sqrt(x)
 ```
-- `math.min`/`math.max` は Int 版。Float 版は `float.min`/`float.max` にするか要検討
-- auto-import 対象外（`import math` 必要）
+- `math.min`/`math.max` are Int versions. Float versions via `float.min`/`float.max` (TBD)
+- Not auto-imported (`import math` required)
 
-### 3.2 random モジュール
+### 3.2 random module
 ```almide
 import random
 
@@ -111,22 +111,22 @@ random.float() → 0.7234          (* 0.0..1.0 *)
 random.choice(["a", "b", "c"]) → "b"
 random.shuffle([1, 2, 3]) → [3, 1, 2]
 ```
-- effect fn（非決定的）
-- Rust: `rand` crate 不使用、`getrandom` or 自前 xorshift
-- auto-import 対象外
+- effect fn (non-deterministic)
+- Rust: no `rand` crate, use `getrandom` or custom xorshift
+- Not auto-imported
 
-### 3.3 time モジュール
+### 3.3 time module
 ```almide
 import time
 
-time.now() → 1709913600          (* unix timestamp, env.unix_timestamp の移動 *)
+time.now() → 1709913600          (* unix timestamp, moved from env.unix_timestamp *)
 time.sleep(1000)                 (* ms *)
 ```
-- `env.unix_timestamp` との互換は alias で対応
+- Compatibility with `env.unix_timestamp` via alias
 
-## Phase 4: 正規表現（最大インパクト）
+## Phase 4: Regular Expressions (highest impact)
 
-### 4.1 regex モジュール
+### 4.1 regex module
 ```almide
 import regex
 
@@ -136,42 +136,42 @@ regex.find_all("[0-9]+", "a1b22c333") → ["1", "22", "333"]
 regex.replace("[0-9]+", "a1b2", "X") → "aXbX"
 regex.split("[,;]", "a,b;c") → ["a", "b", "c"]
 ```
-- Rust: 自前の基本正規表現エンジン（依存ゼロ方針）
-- 対応: `.` `*` `+` `?` `[]` `[^]` `\d` `\w` `\s` `^` `$` `|` `()`
-- 最も LOC 削減効果が高い（miniconf のパーサーコードが半減する可能性）
-- ただし実装コストも最大
+- Rust: custom basic regex engine (zero-dependency policy)
+- Supports: `.` `*` `+` `?` `[]` `[^]` `\d` `\w` `\s` `^` `$` `|` `()`
+- Highest potential LOC reduction (miniconf parser code could shrink by half)
+- Also the highest implementation cost
 
-## 実装順序
+## Implementation Order
 
 ```
-Phase 1 (string/char)  →  ベンチ計測  →  Phase 2 (list)  →  ベンチ計測  →  Phase 3/4
+Phase 1 (string/char)  →  benchmark  →  Phase 2 (list)  →  benchmark  →  Phase 3/4
 ```
 
-### Phase 1 の優先順
-1. `string.chars` — 即効性が高い（10箇所の `split+filter` 置換）
-2. `string.is_digit?` / `string.is_alpha?` — 文字分類ボイラープレート排除
-3. `string.index_of` — パーサーコード簡素化
-4. `string.repeat` — 低コスト、あると便利
-5. `string.from_bytes` — `to_bytes` の対称性
+### Phase 1 priority
+1. `string.chars` — immediate impact (replaces 10+ `split+filter` patterns)
+2. `string.is_digit?` / `string.is_alpha?` — eliminates character classification boilerplate
+3. `string.index_of` — simplifies parser code
+4. `string.repeat` — low cost, useful to have
+5. `string.from_bytes` — symmetry with `to_bytes`
 
-### 各 Phase の作業
-1. `stdlib.rs` に型シグネチャ追加
-2. `emit_rust/calls.rs` に Rust codegen 追加
-3. `emit_ts/expressions.rs` に TS codegen 追加（該当する場合）
-4. `stdlib.rs` の `resolve_ufcs_module` に UFCS 追加
-5. `exercises/stdlib-test/` にテスト追加
-6. 全 exercise 通過確認
+### Per-phase work
+1. Add type signatures to `stdlib.rs`
+2. Add Rust codegen to `emit_rust/calls.rs`
+3. Add TS codegen to `emit_ts/expressions.rs` (where applicable)
+4. Add UFCS to `resolve_ufcs_module` in `stdlib.rs`
+5. Add tests to `exercises/stdlib-test/`
+6. Verify all exercises pass
 
-### 見積もり LOC 削減効果
-| Phase | AI生成コード削減 | ベンチ影響 |
-|-------|-----------------|-----------|
-| Phase 1 | -40〜60 LOC/task | トークン -15〜20% |
-| Phase 2 | -20〜30 LOC/task | トークン -5〜10% |
-| Phase 3 | 新機能（削減ではなく拡張） | — |
-| Phase 4 | -50〜80 LOC/task | トークン -20〜30% |
+### Estimated LOC reduction
+| Phase | AI-generated code reduction | Benchmark impact |
+|-------|----------------------------|-----------------|
+| Phase 1 | -40~60 LOC/task | tokens -15~20% |
+| Phase 2 | -20~30 LOC/task | tokens -5~10% |
+| Phase 3 | new features (expansion, not reduction) | — |
+| Phase 4 | -50~80 LOC/task | tokens -20~30% |
 
-## 原則
-- auto-import: Phase 1, 2 は既存モジュール（string, list）への追加なので auto-import 済み
-- Phase 3, 4 は新モジュールなので `import` 必要
-- 依存ゼロ方針を維持（regex も自前実装）
-- 推測で足さない、ベンチで効果を計測してから次へ進む
+## Principles
+- Auto-import: Phase 1 and 2 add to existing modules (string, list), already auto-imported
+- Phase 3 and 4 are new modules requiring explicit `import`
+- Maintain zero-dependency policy (including custom regex implementation)
+- Do not add speculatively; measure benchmark impact before moving to the next phase

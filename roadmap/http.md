@@ -4,35 +4,35 @@
 Self-contained HTTP/1.1 server on std::net. Zero dependencies.
 
 ### What works
-- `http.serve(port, fn(req) => response)` — シングルスレッドサーバー
-- `http.response(status, body)` — テキストレスポンス
-- `http.json(status, body)` — JSONレスポンス
-- `req.path`, `req.method`, `req.headers`, `req.body` — リクエスト情報
-- match on `req.path` でルーティング
+- `http.serve(port, fn(req) => response)` — single-threaded server
+- `http.response(status, body)` — text response
+- `http.json(status, body)` — JSON response
+- `req.path`, `req.method`, `req.headers`, `req.body` — request fields
+- routing via match on `req.path`
 - Benchmark: 8,831 req/s (Go 5,887, Python 5,220)
 
 ### Known Limitations
-- シングルスレッド（並行リクエスト処理不可）
-- HTTP/1.1 only（HTTP/2未対応）
-- TLSなし（HTTPSはリバースプロキシ前提）
-- ハンドラー内でeffect fn呼べない（型チェッカー制約）
-- レスポンスヘッダーのカスタム設定不可
-- ボディの大きいリクエストで8KB制限
+- Single-threaded (cannot handle concurrent requests)
+- HTTP/1.1 only (no HTTP/2)
+- No TLS (HTTPS assumed to be handled by a reverse proxy)
+- Cannot call effect fn inside handler (type checker constraint)
+- Cannot set custom response headers
+- 8KB limit for large request bodies
 
-## Phase 1: 基本機能の完成
+## Phase 1: Core Feature Completion
 
-### 1.1 レスポンスヘッダー
+### 1.1 Response Headers
 ```almide
 http.response_with_headers(200, body, map.set(map.new(), "X-Custom", "value"))
 ```
 
-### 1.2 リクエストボディのサイズ上限撤廃
-Content-Length を読んで動的にバッファ確保。
+### 1.2 Remove Request Body Size Limit
+Read Content-Length and dynamically allocate buffer.
 
-### 1.3 ハンドラー内でのeffect fn対応
-ハンドラーをeffect対応にして、fs.read_textやenv.unix_timestamp等を使えるように。
+### 1.3 Effect fn Support in Handlers
+Make handlers effect-compatible so fs.read_text, env.unix_timestamp etc. can be called.
 
-### 1.4 HTTPメソッドのルーティング
+### 1.4 HTTP Method Routing
 ```almide
 http.serve(3000, fn(req) => {
   match req.method {
@@ -43,36 +43,34 @@ http.serve(3000, fn(req) => {
 })
 ```
 
-## Phase 2: パフォーマンス
+## Phase 2: Performance
 
-### 2.1 マルチスレッド対応
-`std::thread::spawn` でリクエストごとにスレッド生成。
-シングルスレッド比で 5-10x のスループット改善見込み。
+### 2.1 Multithreading
+Spawn a thread per request with `std::thread::spawn`.
+Expected 5–10x throughput improvement over single-threaded.
 
 ### 2.2 Connection: keep-alive
-同一TCP接続で複数リクエスト処理。
-ベンチマーク（ab -k）で大幅改善。
+Handle multiple requests over the same TCP connection.
+Large improvement expected in benchmarks (ab -k).
 
-### 2.3 async I/O（将来）
-epoll/kqueue ベースの非同期I/O。構造化並行性と統合。
+### 2.3 Async I/O (future)
+epoll/kqueue-based async I/O. Integrated with structured concurrency.
 
-## Phase 3: HTTP クライアント
+## Phase 3: HTTP Client
 
-### 3.1 基本クライアント
+### 3.1 Basic Client
 ```almide
 let body = await http.get("http://api.example.com/data")
 let resp = await http.post("http://api.example.com/data", json_body)
 ```
 
-### 3.2 HTTPS対応
-rustls または system TLS を使用。クライアント側のみ（サーバーはプロキシ前提）。
+### 3.2 HTTPS Support
+Use rustls or system TLS. Client-side only (server uses reverse proxy).
 
-## Phase 4: WASM対応
+## Phase 4: WASM / Edge Runtime Support
 
-## Phase 4: WASM / Edge Runtime 対応
-
-### 目標
-同じAlmideコードがネイティブでもWASMでも動く。
+### Goal
+The same Almide code runs on both native and WASM.
 
 ```almide
 import http
@@ -88,32 +86,32 @@ effect fn main(args: List[String]) -> Result[Unit, String] = {
 }
 ```
 
-- `almide build app.almd` → ネイティブバイナリ（std::net サーバーループ）
-- `almide build app.almd --target wasm` → WASM（ハンドラーexport、サーバーループなし）
+- `almide build app.almd` → native binary (std::net server loop)
+- `almide build app.almd --target wasm` → WASM (handler export, no server loop)
 
-### アーキテクチャ
+### Architecture
 
 ```
-ネイティブ:
+Native:
   main() → http.serve() → TcpListener loop → handler(req) → response
 
-WASM (Cloudflare Workers等):
-  ホスト → HTTP request → WASM export handle(req_ptr) → response_ptr → ホスト
+WASM (Cloudflare Workers etc.):
+  host → HTTP request → WASM export handle(req_ptr) → response_ptr → host
 ```
 
-### 実装ステップ
+### Implementation Steps
 
-#### 4.1 WASM向けHTTPランタイム分離
-- `http_runtime.txt` の `almide_http_serve` は `#[cfg(not(target_arch = "wasm32"))]` で囲む
-- WASM用に `#[cfg(target_arch = "wasm32")]` の別実装を用意
-- WASM版 `http.serve` はハンドラーをグローバルに保存して `#[no_mangle] pub extern "C" fn handle()` をexport
+#### 4.1 Isolate WASM HTTP Runtime
+- Wrap `almide_http_serve` in `http_runtime.txt` with `#[cfg(not(target_arch = "wasm32"))]`
+- Provide a separate `#[cfg(target_arch = "wasm32")]` implementation
+- WASM `http.serve` stores the handler globally and exports `#[no_mangle] pub extern "C" fn handle()`
 
-#### 4.2 WASM - ホスト間のデータ受け渡し
-- Request/Response を線形メモリ上でJSON としてやり取り（最もシンプル）
-- ホスト側がJSON文字列をメモリに書き込み → Almide側がパースしてハンドラー呼び出し → レスポンスJSON をメモリに書き込み → ホスト側が読み取り
+#### 4.2 WASM ↔ Host Data Exchange
+- Exchange Request/Response as JSON on linear memory (simplest approach)
+- Host writes JSON string to memory → Almide parses and calls handler → Almide writes response JSON to memory → host reads it
 
 ```rust
-// WASM export (生成コード)
+// WASM export (generated code)
 #[no_mangle]
 pub extern "C" fn handle(req_ptr: *const u8, req_len: usize) -> u64 {
     let req_json = unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(req_ptr, req_len)) };
@@ -128,12 +126,12 @@ pub extern "C" fn handle(req_ptr: *const u8, req_len: usize) -> u64 {
 }
 ```
 
-#### 4.3 Cloudflare Workers アダプター
-- `almide build --target cloudflare` で Workers 用の glue JS + WASM を生成
-- glue JS が `fetch` イベントを受けて WASM の `handle()` を呼ぶ
+#### 4.3 Cloudflare Workers Adapter
+- `almide build --target cloudflare` generates Workers glue JS + WASM
+- glue JS receives `fetch` events and calls WASM `handle()`
 
 ```javascript
-// 生成される glue code
+// generated glue code
 export default {
   async fetch(request) {
     const url = new URL(request.url);
@@ -154,10 +152,10 @@ export default {
 };
 ```
 
-#### 4.4 fetch API (WASM用HTTPクライアント)
-- WASM内からHTTPリクエストを発行するにはホストの `fetch` を呼ぶ必要がある
-- ホスト側に `host_fetch(url_ptr, url_len) -> (resp_ptr, resp_len)` をimport
-- `http.get("https://...")` は WASM ではこの host import を使う
+#### 4.4 fetch API (WASM HTTP Client)
+- Issuing HTTP requests from inside WASM requires calling the host's `fetch`
+- Host exposes `host_fetch(url_ptr, url_len) -> (resp_ptr, resp_len)` as an import
+- `http.get("https://...")` in WASM uses this host import
 
 ```rust
 #[cfg(target_arch = "wasm32")]
@@ -176,31 +174,31 @@ fn almide_http_get(url: &str) -> Result<String, String> {
 }
 ```
 
-#### 4.5 テスト
-- wasmtime でローカルテスト（host_fetch をモック）
-- Cloudflare Workers の `wrangler dev` で統合テスト
-- ネイティブとWASMで同じAlmideコードが動くことを確認
+#### 4.5 Testing
+- Local testing with wasmtime (mock host_fetch)
+- Integration testing with Cloudflare Workers `wrangler dev`
+- Confirm the same Almide code runs on both native and WASM
 
-### デプロイフロー（最終形）
+### Deployment Flow (end state)
 
 ```bash
 almide init
 almide add ...
-almide build                           # ネイティブバイナリ
+almide build                           # native binary
 almide build --target wasm             # WASI WASM
-almide build --target cloudflare       # Workers用 (WASM + glue JS)
-almide deploy --cloudflare             # 将来: 直接デプロイ
+almide build --target cloudflare       # Workers (WASM + glue JS)
+almide deploy --cloudflare             # future: direct deploy
 ```
 
-### 優先順位
-4.1 (ランタイム分離) → 4.2 (データ受け渡し) → 4.3 (Cloudflare) → 4.4 (fetch) → 4.5 (テスト)
+### Priority
+4.1 (runtime isolation) → 4.2 (data exchange) → 4.3 (Cloudflare) → 4.4 (fetch) → 4.5 (testing)
 
-### リスク
-- WASI HTTP proposal がまだ不安定（wasi-http 0.2）
-- Cloudflare Workers の WASM API が独自仕様
-- メモリ管理（線形メモリ上のJSON受け渡し）のパフォーマンス
-- ホストごとにアダプター必要（Cloudflare, Fastly, Deno Deploy, Vercel...）
+### Risks
+- WASI HTTP proposal is still unstable (wasi-http 0.2)
+- Cloudflare Workers WASM API is proprietary
+- Performance of JSON-over-linear-memory data exchange
+- Each host platform needs its own adapter (Cloudflare, Fastly, Deno Deploy, Vercel...)
 
-### 判断
-まず 4.1-4.2 でWASM HTTP の基盤を作り、4.3 で Cloudflare Workers 一点突破。
-他プラットフォームは需要に応じて追加。
+### Decision
+Build the WASM HTTP foundation with 4.1–4.2 first, then target Cloudflare Workers specifically with 4.3.
+Add other platforms based on demand.

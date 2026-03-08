@@ -1,10 +1,10 @@
-# 型システム拡張
+# Type System Extensions
 
-## ユーザー定義ジェネリクス
-現状はList[T]やOption[T]など組み込み型のみジェネリック。
+## User-Defined Generics
+Currently only built-in types like List[T] and Option[T] are generic.
 
 ```almide
-// 提案
+// proposed
 type Stack[T] = { items: List[T] }
 
 fn push[T](stack: Stack[T], item: T) -> Stack[T] = {
@@ -12,8 +12,8 @@ fn push[T](stack: Stack[T], item: T) -> Stack[T] = {
 }
 ```
 
-## Trait の本格実装
-lexer/parserにキーワードはあるが、型チェックとコード生成が不十分。
+## Full Trait Implementation
+Keywords exist in lexer/parser, but type checking and code generation are incomplete.
 
 ```almide
 trait Show {
@@ -25,31 +25,31 @@ impl Show for Point {
 }
 ```
 
-## Tuple型
-レコードだと名前が必要で冗長。
+## Tuple Types
+Records require names, which can be verbose.
 
 ```almide
-// 提案
+// proposed
 let pair: (Int, String) = (42, "hello")
 let (a, b) = pair
 ```
 
-## 構造化エラー型
-現状 Result[T, String] の String 固定で、エラーの種類分けが難しい。
+## Structured Error Types
+Currently Result[T, String] uses a fixed String error type, making it hard to distinguish error kinds.
 
 ```almide
-// 提案
+// proposed
 type AppError = NotFound(String) | Unauthorized | Internal(String)
 type AppResult[T] = Result[T, AppError]
 ```
-match armでエラー種別による分岐が可能になる。
+Enables branching by error type in match arms.
 
-## 型エイリアス
+## Type Aliases
 ```almide
 type UserId = Int
 type Config = Map[String, String]
 ```
-現状 newtype は存在するが限定的。
+Newtype exists currently but is limited in scope.
 
 ## Priority
-ユーザー定義ジェネリクス > 構造化エラー型 > Trait実装 > Tuple > 型エイリアス
+User-defined generics > structured error types > trait implementation > tuples > type aliases

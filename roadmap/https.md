@@ -1,47 +1,47 @@
 # HTTPS Client via System TLS
 
-## 方針
-TLS は自前実装しない。OS 標準の TLS ライブラリを `rustc -l` で直接リンク。
-cargo 不要、バイナリサイズ増加なし（動的リンク）。
+## Approach
+Do not implement TLS from scratch. Link directly to the OS standard TLS library using `rustc -l`.
+No cargo dependency, no binary size increase (dynamic linking).
 
-## アーキテクチャ
+## Architecture
 
 ```
 Almide code
   → http.get("https://...")
-  → 生成 Rust: almide_https_get(url)
+  → generated Rust: almide_https_get(url)
   → FFI: system TLS library
   → rustc -l framework=Security (macOS) / -l ssl -l crypto (Linux)
 ```
 
-## 実装ステップ
+## Implementation Steps
 
-### Step 1: URL パーサーの HTTPS 対応
-- `https://` スキームを認識
-- ポートデフォルト 443
+### Step 1: HTTPS Support in URL Parser
+- Recognize `https://` scheme
+- Default port 443
 
-### Step 2: macOS 実装 (Security.framework)
+### Step 2: macOS Implementation (Security.framework)
 - `SSLCreateContext` → `SSLSetIOFuncs` → `SSLHandshake`
-- CFNetwork の `CFReadStream` / `CFWriteStream` が簡単かも
-- もしくは macOS 標準の `URLSession` を FFI で呼ぶ
-- 証明書検証は OS に任せる（自前検証しない）
+- CFNetwork's `CFReadStream` / `CFWriteStream` may be simpler
+- Or call macOS standard `URLSession` via FFI
+- Delegate certificate verification to the OS (no custom verification)
 
-### Step 3: Linux 実装 (OpenSSL)
+### Step 3: Linux Implementation (OpenSSL)
 - `SSL_CTX_new` → `SSL_new` → `SSL_connect` → `SSL_read/write`
-- `extern "C"` で OpenSSL の関数を宣言
-- 証明書検証は OpenSSL のデフォルト設定に任せる
+- Declare OpenSSL functions with `extern "C"`
+- Delegate certificate verification to OpenSSL defaults
 
-### Step 4: 統合
-- コンパイル時に OS 検出（`#[cfg(target_os)]`）
-- macOS / Linux で異なる FFI を使い分け
-- `rustc` のリンクフラグを almide CLI で自動設定
+### Step 4: Integration
+- Detect OS at compile time (`#[cfg(target_os)]`)
+- Use different FFI depending on macOS / Linux
+- almide CLI automatically sets `rustc` link flags
 
-### Step 5: テスト
-- `https://httpbin.org/get` への GET テスト
-- 証明書エラーのハンドリング（自己署名証明書など）
-- HTTP / HTTPS 両方が同じ `http.get` API で動くことを確認
+### Step 5: Testing
+- GET test against `https://httpbin.org/get`
+- Certificate error handling (self-signed certs, etc.)
+- Confirm both HTTP and HTTPS work with the same `http.get` API
 
-## 生成コード例
+## Generated Code Example
 
 ```rust
 // macOS
@@ -57,7 +57,7 @@ fn almide_https_get(url: &str) -> Result<String, String> {
 }
 ```
 
-## rustc リンクフラグ
+## rustc Link Flags
 
 ```bash
 # macOS
@@ -67,17 +67,17 @@ rustc main.rs -l framework=Security -l framework=CoreFoundation
 rustc main.rs -l ssl -l crypto
 ```
 
-## almide CLI の変更
-- `almide build` / `almide run` で HTTPS 関数が使われてたら自動でリンクフラグ追加
-- WASM ターゲットでは HTTPS 未サポート（ホスト側が提供）
+## almide CLI Changes
+- `almide build` / `almide run` automatically add link flags when HTTPS functions are used
+- HTTPS not supported for WASM target (provided by the host)
 
-## リスク
-- OS 間の FFI 差異が大きい（macOS と Linux で別実装が必要）
-- Windows 未対応（将来 Schannel で対応可能）
-- OpenSSL のバージョン差異（1.1 vs 3.x）
+## Risks
+- Large FFI differences between OSes (separate implementations needed for macOS and Linux)
+- Windows not supported (future support possible via Schannel)
+- OpenSSL version differences (1.1 vs 3.x)
 
-## 代替案（フォールバック）
-System TLS が複雑すぎる場合、curl FFI へフォールバック：
+## Fallback Alternative
+If system TLS is too complex, fall back to curl FFI:
 ```rust
 fn almide_https_get(url: &str) -> Result<String, String> {
     let output = std::process::Command::new("curl")
@@ -86,8 +86,8 @@ fn almide_https_get(url: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 ```
-これなら全 OS で動く。パフォーマンスは劣るがセキュリティは確保。
+This works on all OSes. Performance is lower but security is maintained.
 
 ## Priority
 Step 1 → Step 4 (curl fallback) → Step 2 (macOS) → Step 3 (Linux)
-curl fallback を先に入れて動くようにし、system TLS は段階的に置換。
+Implement curl fallback first to get something working, then replace incrementally with system TLS.

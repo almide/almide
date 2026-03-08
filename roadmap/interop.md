@@ -1,31 +1,31 @@
-# 外部連携・インターオペラビリティ
+# External Interoperability
 
-## FFI（Foreign Function Interface）
-Rustライブラリを直接呼び出す仕組み。
+## FFI (Foreign Function Interface)
+A mechanism for calling Rust libraries directly.
 
 ```almide
-// 提案: extern宣言でRust関数をバインド
+// proposed: bind Rust functions with extern declarations
 extern "rust" fn crypto_hash(data: String) -> String
 
-// Cargo.tomlベースの依存追加と連携
+// integrates with Cargo.toml-based dependency management
 ```
 
-## JavaScript interop（TSターゲット）
-TS/JSの既存ライブラリを使えるようにする。
+## JavaScript Interop (TS target)
+Allow using existing TS/JS libraries.
 
 ```almide
-// 提案
+// proposed
 extern "js" fn fetch(url: String) -> String
 ```
 
-## WASM拡張
-- WASI preview 2 対応
-- ホストバインディング（Cloudflare Workers, Fastly Compute等）
-- コンポーネントモデル対応
+## WASM Extensions
+- WASI preview 2 support
+- Host bindings (Cloudflare Workers, Fastly Compute, etc.)
+- Component model support
 
 ## C ABI
-低レベルライブラリ（SQLite, OpenSSL等）を使うための仕組み。
-Rustのunsafe FFI経由で実現可能。
+A mechanism for using low-level libraries (SQLite, OpenSSL, etc.).
+Achievable via Rust's unsafe FFI.
 
 ## Priority
-FFI（Rust） > JS interop > WASM拡張 > C ABI
+FFI (Rust) > JS interop > WASM extensions > C ABI

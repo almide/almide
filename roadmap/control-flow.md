@@ -1,15 +1,15 @@
-# 制御フロー拡張
+# Control Flow Extensions
 
-## while ループ
-現状 `do { guard cond else ok(()); ... }` で代替しているが冗長。
+## while loop
+Currently `do { guard cond else ok(()); ... }` is used as a workaround, but it is verbose.
 
 ```almide
-// 提案
+// proposed
 while n > 0 {
   n = n - 1
 }
 
-// 現状の回避策
+// current workaround
 do {
   guard n > 0 else ok(())
   n = n - 1
@@ -17,7 +17,7 @@ do {
 ```
 
 ## break / continue
-for-in ループからの早期脱出ができない。
+Early exit from for-in loops is not supported.
 
 ```almide
 for x in items {
@@ -26,13 +26,13 @@ for x in items {
 }
 ```
 
-guardで部分的に代替可能だが、continueに相当するものがない。
+guard can partially substitute, but there is no equivalent to continue.
 
 ## early return
-関数本体が単一式なので、途中で返すにはguardかmatchのネストが必要。
+Since function bodies are single expressions, returning mid-way requires nested guards or match.
 
 ```almide
-// 提案
+// proposed
 fn find(items: List[Int], target: Int) -> Option[Int] = {
   for i in items {
     if i == target then return some(i)
@@ -42,13 +42,13 @@ fn find(items: List[Int], target: Int) -> Option[Int] = {
 ```
 
 ## for-range
-インデックスベースのループが冗長。
+Index-based loops are verbose.
 
 ```almide
-// 提案
+// proposed
 for i in 0..10 { ... }
 
-// 現状: list.fold + カウンタ or var + do ループ
+// current: list.fold + counter or var + do loop
 ```
 
 ## Priority

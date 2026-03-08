@@ -1,14 +1,14 @@
 # Almide Roadmap
 
-## モジュールシステム ✅ 実装完了
+## Module System ✅ Implemented
 
-### プロジェクト構造
+### Project Structure
 
 ```
 myapp/
   almide.toml
   src/
-    main.almd              # エントリポイント
+    main.almd              # entry point
     utils.almd             # import self.utils
     http/
       client.almd          # import self.http.client
@@ -28,70 +28,70 @@ version = "0.1.0"
 json = { git = "https://github.com/almide/json", tag = "v1.0.0" }
 ```
 
-パッケージ名は `almide.toml` で管理。ソースファイルに `module` 宣言は不要。
+Package identity is managed in `almide.toml`. No `module` declaration is needed in source files.
 
-### import 構文 ✅
+### import syntax ✅
 
 ```almide
 import self.utils              // utils.add(1, 2)
 import self.http.client        // client.get(url)
 import self.http.client as c   // c.get(url)
-import json                    // 外部依存 (almide.toml)
+import json                    // external dependency (almide.toml)
 ```
 
-- `self.xxx` = ローカルモジュール → `src/` 配下を解決
-- それ以外 = stdlib or 外部依存
-- `as` でエイリアス可能
-- ユーザーモジュールが stdlib と同名の場合、ユーザーモジュール優先
+- `self.xxx` = local module → resolved under `src/`
+- anything else = stdlib or external dependency
+- `as` alias supported
+- User modules take priority over stdlib when names conflict
 
-### モジュールファイルの対応 ✅
+### Module File Resolution ✅
 
-| import文 | 探す場所 |
+| import statement | resolved location |
 |---|---|
 | `import self.utils` | `src/utils.almd` |
 | `import self.http.client` | `src/http/client.almd` |
-| `import json` | 依存: almide.toml → `~/.almide/cache/` |
+| `import json` | dependency in almide.toml → `~/.almide/cache/` |
 
-### 3レベル可視性 ✅
+### 3-Level Visibility ✅
 
-| 書き方 | スコープ | Rust出力 |
+| Syntax | Scope | Rust output |
 |---|---|---|
-| `fn f()` | public（デフォルト） | `pub fn` |
-| `mod fn f()` | 同一プロジェクト内のみ | `pub(crate) fn` |
-| `local fn f()` | このファイル内のみ | `fn` (private) |
+| `fn f()` | public (default) | `pub fn` |
+| `mod fn f()` | same project only | `pub(crate) fn` |
+| `local fn f()` | this file only | `fn` (private) |
 
-- `type` にも同じ修飾子が使える
-- `pub` キーワードは後方互換で受け付ける（デフォルトがpubなので意味なし）
+- Same modifiers apply to `type` declarations
+- `pub` keyword is accepted for backward compatibility (no-op since default is already public)
 
-### テストリポジトリ
+### Test Repository
 
-- https://github.com/almide/mod-sample — visibility + self import の動作確認用
-
----
-
-## 残りの改善
-
-### checker で可視性エラーを出す ✅
-
-- [x] `local fn` を外部モジュールから呼んだとき checker 段階でエラー
-- [x] `mod fn` を外部パッケージから呼んだとき checker 段階でエラー（`is_external` フラグで判定）
-- [x] エラーメッセージ: 「function 'xxx' is not accessible from module 'yyy'」
+- https://github.com/almide/mod-sample — for verifying visibility + self import behavior
 
 ---
 
-## ユーザー定義ジェネリクス
+## Remaining Improvements
 
-現状 `List[T]`, `Option[T]`, `Result[T, E]` 等はコンパイラ組み込みだが、ユーザーが独自のジェネリック型・関数を定義できない。
+### Checker-level visibility errors ✅
 
-### 構文案
+- [x] Error at checker stage when `local fn` is called from an external module
+- [x] Error at checker stage when `mod fn` is called from an external package (determined by `is_external` flag)
+- [x] Error message: "function 'xxx' is not accessible from module 'yyy'"
+
+---
+
+## User-Defined Generics
+
+Currently `List[T]`, `Option[T]`, `Result[T, E]` etc. are compiler built-ins, but users cannot define their own generic types or functions.
+
+### Proposed Syntax
 
 ```almide
-// ジェネリック型
+// generic type
 type Stack[T] =
   | Empty
   | Push(T, Stack[T])
 
-// ジェネリック関数
+// generic function
 fn map[A, B](xs: List[A], f: fn(A) -> B) -> List[B] =
   match xs {
     [] => []
@@ -101,26 +101,26 @@ fn map[A, B](xs: List[A], f: fn(A) -> B) -> List[B] =
 fn identity[T](x: T) -> T = x
 ```
 
-### 実装ステップ
+### Implementation Steps
 
-- [ ] パーサー: `fn name[T, U](...) -> ...` のジェネリックパラメータ解析（パース自体は `try_parse_generic_params` で部分対応済み）
-- [ ] 型チェッカー: 型変数の導入、型推論（単一化ベース）
-- [ ] Rust emitter: `fn name<T, U>(...) -> ...` に変換
-- [ ] TS emitter: `function name<T, U>(...): ...` に変換（JSモードでは型消去）
+- [ ] Parser: parse generic parameters in `fn name[T, U](...) -> ...` (partial support exists in `try_parse_generic_params`)
+- [ ] Type checker: introduce type variables, type inference (unification-based)
+- [ ] Rust emitter: convert to `fn name<T, U>(...) -> ...`
+- [ ] TS emitter: convert to `function name<T, U>(...): ...` (type erasure in JS mode)
 
-### 設計判断
+### Design Decisions
 
-- 型パラメータは `[T]` 記法（almide既存の `List[T]` と一貫）
-- 型推論を基本とし、呼び出し側で明示的な型引数は不要にしたい
-- 型制約は trait 実装後に `fn sort[T: Ord](xs: List[T])` のような形で導入
+- Type parameters use `[T]` notation (consistent with existing `List[T]` in Almide)
+- Type inference is the primary approach; explicit type arguments at call sites are not required
+- Type constraints will be introduced after trait implementation, e.g. `fn sort[T: Ord](xs: List[T])`
 
 ---
 
 ## trait / impl
 
-パーサーは対応済み（`trait` / `impl` 宣言をパースしてASTに格納）。checker と emitter が未実装。
+Parser support is complete (`trait` / `impl` declarations are parsed and stored in AST). Checker and emitter are not yet implemented.
 
-### 構文（パーサー対応済み）
+### Syntax (parser-complete)
 
 ```almide
 trait Show {
@@ -136,23 +136,23 @@ impl Show for Color {
 }
 ```
 
-### 実装ステップ
+### Implementation Steps
 
-- [ ] checker: trait メソッドのシグネチャ登録、impl の型チェック
-- [ ] checker: impl が trait のメソッドを全て実装しているか検証
-- [ ] Rust emitter: `impl Trait for Type { ... }` をそのまま出力
-- [ ] TS emitter: trait を interface として出力、メソッド呼び出しをディスパッチ
-- [ ] `self` パラメータの扱い: UFCS（`show(color)` と `color.show()` 両方可能）
+- [ ] checker: register trait method signatures, type-check impl bodies
+- [ ] checker: verify that impl provides all methods required by the trait
+- [ ] Rust emitter: output `impl Trait for Type { ... }` directly
+- [ ] TS emitter: output traits as interfaces, dispatch method calls
+- [ ] `self` parameter handling: UFCS (both `show(color)` and `color.show()` work)
 
-### 設計メモ
+### Design Notes
 
-- Almide に class はない。trait + impl + パターンマッチが型の振る舞いを定義する方法
-- `self` は trait メソッドのレシーバ専用。class のインスタンス参照ではない
-- `import self.xxx` の `self` とは別の用途（文脈で区別可能: import 文 vs パラメータリスト）
-- deriving は既にパーサー対応済み（`type Color = ... deriving Show, Eq`）
+- Almide has no classes. trait + impl + pattern matching is how type behavior is defined
+- `self` is exclusively the receiver in trait methods, not a class instance reference
+- `self` in `import self.xxx` is a separate use (distinguishable by context: import statement vs parameter list)
+- `deriving` is already parser-complete (`type Color = ... deriving Show, Eq`)
 
 ---
 
-## その他
+## Other
 
-- [ ] パッケージレジストリ (将来検討)
+- [ ] Package registry (to be considered in the future)
