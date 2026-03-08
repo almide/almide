@@ -180,7 +180,7 @@ impl Emitter {
     }
 
     fn emit_fn_decl(&mut self, name: &str, params: &[Param], ret_type: &TypeExpr, body: &Expr, is_effect: bool) {
-        let fn_name = if name == "main" { "almide_main" } else { name };
+        let fn_name = if name == "main" { "almide_main".to_string() } else { name.replace('?', "_qm_") };
         let ret_str = self.gen_type(ret_type);
         let is_unit_ret = ret_str == "()";
 
@@ -318,8 +318,39 @@ impl Emitter {
             }
             Expr::Float { value } => format!("{:?}f64", value),
             Expr::String { value } => format!("{:?}.to_string()", value),
+            Expr::InterpolatedString { value } => {
+                // Convert ${expr} to Rust format!("{}", expr) style
+                let mut fmt = String::new();
+                let mut args = Vec::new();
+                let mut chars = value.chars().peekable();
+                while let Some(c) = chars.next() {
+                    if c == '$' && chars.peek() == Some(&'{') {
+                        chars.next(); // skip {
+                        let mut expr_str = String::new();
+                        let mut depth = 1;
+                        while let Some(ch) = chars.next() {
+                            if ch == '{' { depth += 1; }
+                            if ch == '}' { depth -= 1; if depth == 0 { break; } }
+                            expr_str.push(ch);
+                        }
+                        fmt.push_str("{}");
+                        args.push(expr_str);
+                    } else if c == '{' {
+                        fmt.push_str("{{");
+                    } else if c == '}' {
+                        fmt.push_str("}}");
+                    } else {
+                        fmt.push(c);
+                    }
+                }
+                if args.is_empty() {
+                    format!("\"{}\".to_string()", fmt)
+                } else {
+                    format!("format!(\"{}\", {})", fmt, args.join(", "))
+                }
+            }
             Expr::Bool { value } => format!("{}", value),
-            Expr::Ident { name } => name.clone(),
+            Expr::Ident { name } => name.replace('?', "_qm_"),
             Expr::TypeName { name } => name.clone(),
             Expr::Unit => "()".to_string(),
             Expr::None => "None".to_string(),
@@ -520,8 +551,8 @@ impl Emitter {
 
     fn resolve_ufcs_module(method: &str) -> Option<&'static str> {
         match method {
-            "trim" | "split" | "join" | "pad_left" | "starts_with" | "starts_with_q"
-            | "ends_with_q" | "slice" | "to_bytes" | "contains" | "to_upper" | "to_lower"
+            "trim" | "split" | "join" | "pad_left" | "starts_with" | "starts_with_qm_"
+            | "ends_with_qm_" | "slice" | "to_bytes" | "contains" | "to_upper" | "to_lower"
             | "to_int" | "replace" | "char_at" => Some("string"),
             "get" | "sort" | "each" | "map" | "filter" | "find" | "fold" => Some("list"),
             "to_string" | "to_hex" => Some("int"),
@@ -609,7 +640,7 @@ impl Emitter {
                 "write" => format!("std::fs::write(&*{}, &*{}).map_err(|e| e.to_string())?", args_str[0], args_str[1]),
                 "write_bytes" => format!("std::fs::write(&*{}, &{}).map_err(|e| e.to_string())?", args_str[0], args_str[1]),
                 "read_bytes" => format!("std::fs::read(&*{}).map_err(|e| e.to_string())?", args_str[0]),
-                "exists?" | "exists_q" => format!("std::path::Path::new(&*{}).exists()", args_str[0]),
+                "exists?" | "exists_qm_" => format!("std::path::Path::new(&*{}).exists()", args_str[0]),
                 "mkdir_p" => format!("std::fs::create_dir_all(&*{}).map_err(|e| e.to_string())?", args_str[0]),
                 "append" => format!("{{ let prev = std::fs::read_to_string(&*{}).unwrap_or_default(); std::fs::write(&*{}, format!(\"{{}}{{}}\", prev, {})).map_err(|e| e.to_string())?; }}", args_str[0], args_str[0], args_str[1]),
                 _ => format!("/* fs.{} */ todo!()", func),
@@ -620,8 +651,8 @@ impl Emitter {
                 "join" => format!("({}).join(&*{})", args_str[0], args_str[1]),
                 "len" => format!("(({}).len() as i64)", args_str[0]),
                 "contains" => format!("({}).contains(&*{})", args_str[0], args_str[1]),
-                "starts_with?" | "starts_with_q" | "starts_with" => format!("({}).starts_with(&*{})", args_str[0], args_str[1]),
-                "ends_with?" | "ends_with_q" | "ends_with" => format!("({}).ends_with(&*{})", args_str[0], args_str[1]),
+                "starts_with?" | "starts_with_qm_" | "starts_with" => format!("({}).starts_with(&*{})", args_str[0], args_str[1]),
+                "ends_with?" | "ends_with_qm_" | "ends_with" => format!("({}).ends_with(&*{})", args_str[0], args_str[1]),
                 "slice" => {
                     if args_str.len() == 3 {
                         format!("({}).chars().skip({} as usize).take(({} - {}) as usize).collect::<String>()", args_str[0], args_str[1], args_str[2], args_str[1])
@@ -748,7 +779,7 @@ impl Emitter {
             Pattern::Err { inner } => format!("Err({})", self.gen_pattern(inner)),
             Pattern::Constructor { name, args } => {
                 if args.is_empty() {
-                    name.clone()
+                    format!("{}()", name)
                 } else {
                     let ps: Vec<String> = args.iter().map(|p| self.gen_pattern(p)).collect();
                     format!("{}({})", name, ps.join(", "))

@@ -262,13 +262,16 @@ impl Parser {
         self.skip_newlines();
         let mut body = self.parse_expr()?;
 
-        // Implicit ok(()) for effect fn: auto-append ok(()) when body block
-        // doesn't end with an explicit ok/err expression
-        if effect {
+        // Implicit ok(()) for effect fn returning Result: auto-append ok(())
+        // when body block doesn't end with an explicit ok/err expression
+        let returns_result = matches!(&return_type,
+            TypeExpr::Generic { name, .. } if name == "Result"
+        );
+        if effect && returns_result {
             if let Expr::Block { ref stmts, ref expr } = body {
                 let needs_ok = match expr {
                     None => true,
-                    Some(e) => matches!(e.as_ref(), Expr::ForIn { .. } | Expr::DoBlock { .. }),
+                    Some(e) => !matches!(e.as_ref(), Expr::Ok { .. } | Expr::Err { .. }),
                 };
                 if needs_ok {
                     let mut new_stmts = stmts.clone();
