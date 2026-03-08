@@ -71,6 +71,7 @@ impl Emitter {
     }
 
     fn emit_runtime(&mut self) {
+        self.emitln("use std::collections::HashMap;");
         self.emitln("trait AlmideConcat<Rhs> { type Output; fn concat(self, rhs: Rhs) -> Self::Output; }");
         self.emitln("impl AlmideConcat<String> for String { type Output = String; fn concat(self, rhs: String) -> String { format!(\"{}{}\", self, rhs) } }");
         self.emitln("impl AlmideConcat<&str> for String { type Output = String; fn concat(self, rhs: &str) -> String { format!(\"{}{}\", self, rhs) } }");
@@ -557,6 +558,7 @@ impl Emitter {
             "get" | "sort" | "each" | "map" | "filter" | "find" | "fold" => Some("list"),
             "to_string" | "to_hex" => Some("int"),
             "len" => Some("list"),
+            "keys" | "values" | "entries" => Some("map"),
             _ => None,
         }
     }
@@ -565,7 +567,7 @@ impl Emitter {
         // Handle module calls
         if let Expr::Member { object, field } = callee {
             if let Expr::Ident { name: module } = object.as_ref() {
-                let is_module = matches!(module.as_str(), "string" | "list" | "int" | "fs" | "env");
+                let is_module = matches!(module.as_str(), "string" | "list" | "int" | "fs" | "env" | "map");
                 if is_module {
                     return self.gen_module_call(module, field, args);
                 }
@@ -717,6 +719,32 @@ impl Emitter {
                     }
                     _ => format!("/* list.{} */ todo!()", func),
                 }
+            },
+            "map" => match func {
+                "new" => "HashMap::new()".to_string(),
+                "get" => format!("({}).get(&{}).cloned()", args_str[0], args_str[1]),
+                "set" => format!("{{ let mut m = ({}).clone(); m.insert({}, {}); m }}", args_str[0], args_str[1], args_str[2]),
+                "contains" => format!("({}).contains_key(&{})", args_str[0], args_str[1]),
+                "remove" => format!("{{ let mut m = ({}).clone(); m.remove(&{}); m }}", args_str[0], args_str[1]),
+                "keys" => format!("{{ let mut v: Vec<_> = ({}).keys().cloned().collect(); v.sort(); v }}", args_str[0]),
+                "values" => format!("({}).values().cloned().collect::<Vec<_>>()", args_str[0]),
+                "len" => format!("(({}).len() as i64)", args_str[0]),
+                "entries" => format!("({}).iter().map(|(k, v)| (k.clone(), v.clone())).collect::<Vec<_>>()", args_str[0]),
+                "from_list" => {
+                    let inline_lambda = |lambda_arg: &Expr| -> (Vec<String>, String) {
+                        if let Expr::Lambda { params, body } = lambda_arg {
+                            let names: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
+                            let body_str = self.gen_expr(body);
+                            (names, body_str)
+                        } else {
+                            let f = self.gen_expr(lambda_arg);
+                            (vec!["__x".to_string()], format!("({})((__x).clone())", f))
+                        }
+                    };
+                    let (names, body) = inline_lambda(&args[1]);
+                    format!("({}).clone().into_iter().map(|{}| {{ {} }}).collect::<HashMap<_, _>>()", args_str[0], names[0], body)
+                }
+                _ => format!("/* map.{} */ todo!()", func),
             },
             "int" => match func {
                 "to_hex" => format!("format!(\"{{:x}}\", {} as u64)", args_str[0]),

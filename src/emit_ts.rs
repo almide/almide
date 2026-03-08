@@ -40,6 +40,18 @@ const __list = {
   find<T>(xs: T[], f: (x: T) => boolean): T | null { return xs.find(f) ?? null; },
   fold<T, U>(xs: T[], init: U, f: (acc: U, x: T) => U): U { return xs.reduce(f, init); },
 };
+const __map = {
+  new_<K, V>(): Map<K, V> { return new Map(); },
+  get<K, V>(m: Map<K, V>, k: K): V | null { return m.has(k) ? m.get(k)! : null; },
+  set<K, V>(m: Map<K, V>, k: K, v: V): Map<K, V> { const r = new Map(m); r.set(k, v); return r; },
+  contains<K, V>(m: Map<K, V>, k: K): boolean { return m.has(k); },
+  remove<K, V>(m: Map<K, V>, k: K): Map<K, V> { const r = new Map(m); r.delete(k); return r; },
+  keys<K, V>(m: Map<K, V>): K[] { return [...m.keys()].sort() as any; },
+  values<K, V>(m: Map<K, V>): V[] { return [...m.values()]; },
+  len<K, V>(m: Map<K, V>): number { return m.size; },
+  entries<K, V>(m: Map<K, V>): [K, V][] { return [...m.entries()]; },
+  from_list<T, K, V>(xs: T[], f: (x: T) => [K, V]): Map<K, V> { const r = new Map<K, V>(); for (const x of xs) { const [k, v] = f(x); r.set(k, v); } return r; },
+};
 const __int = {
   to_hex(n: bigint): string { return (n >= 0n ? n : n + (1n << 64n)).toString(16); },
   to_string(n: number): string { return String(n); },
@@ -138,6 +150,18 @@ const __list = {
 const __int = {
   to_hex(n) { return (typeof n === "bigint" ? (n >= 0n ? n : n + (1n << 64n)).toString(16) : n.toString(16)); },
   to_string(n) { return String(n); },
+};
+const __map = {
+  new_() { return new Map(); },
+  get(m, k) { return m.has(k) ? m.get(k) : null; },
+  set(m, k, v) { const r = new Map(m); r.set(k, v); return r; },
+  contains(m, k) { return m.has(k); },
+  remove(m, k) { const r = new Map(m); r.delete(k); return r; },
+  keys(m) { return [...m.keys()].sort(); },
+  values(m) { return [...m.values()]; },
+  len(m) { return m.size; },
+  entries(m) { return [...m.entries()].map(([k, v]) => [k, v]); },
+  from_list(xs, f) { const r = new Map(); for (const x of xs) { const [k, v] = f(x); r.set(k, v); } return r; },
 };
 const __env = {
   unix_timestamp() { return Math.floor(Date.now() / 1000); },
@@ -516,6 +540,8 @@ impl TsEmitter {
             "get" | "sort" | "each" | "map" | "filter" | "find" | "fold" => Some("__list"),
             // int methods
             "to_string" | "to_hex" => Some("__int"),
+            // map methods
+            "keys" | "values" | "entries" => Some("__map"),
             // len / contains are ambiguous — prioritize based on context
             // "len" and "contains" exist in both string and list; handled separately
             _ => None,
@@ -526,7 +552,7 @@ impl TsEmitter {
         // UFCS: expr.method(args) => __module.method(expr, args)
         if let Expr::Member { object, field } = callee {
             if let Expr::Ident { name } = object.as_ref() {
-                let is_module = matches!(name.as_str(), "string" | "list" | "int" | "fs" | "env");
+                let is_module = matches!(name.as_str(), "string" | "list" | "int" | "fs" | "env" | "map");
                 if !is_module {
                     // UFCS: non-module receiver
                     if let Some(module) = Self::resolve_ufcs_module(field) {
@@ -909,6 +935,7 @@ impl TsEmitter {
             "string" => "__string".to_string(),
             "list" => "__list".to_string(),
             "int" => "__int".to_string(),
+            "map" => "__map".to_string(),
             "env" => "__env".to_string(),
             other => other.to_string(),
         }
