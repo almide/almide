@@ -218,6 +218,53 @@ impl Emitter {
         }
     }
 
+    /// Generate expression ensuring f64 output (insert cast for Int expressions)
+    pub(crate) fn gen_expr_as_float(&self, expr: &Expr) -> String {
+        match expr {
+            Expr::Int { raw, .. } => format!("({} as f64)", raw),
+            Expr::Float { value } => format!("{:?}f64", value),
+            Expr::Binary { op, left, right }
+                if matches!(op.as_str(), "+" | "-" | "*" | "/" | "%" | "^") =>
+            {
+                // Recursively generate in float context
+                self.gen_binary_float(op, left, right)
+            }
+            Expr::Paren { expr: inner } => format!("({})", self.gen_expr_as_float(inner)),
+            _ => {
+                let e = self.gen_expr(expr);
+                // `as f64` is a no-op if already f64, safe to always add
+                format!("({} as f64)", e)
+            }
+        }
+    }
+
+    /// Check if an expression syntactically contains a Float literal
+    pub(crate) fn expr_has_float(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Float { .. } => true,
+            Expr::Binary { left, right, op }
+                if matches!(op.as_str(), "+" | "-" | "*" | "/" | "%" | "^") =>
+            {
+                self.expr_has_float(left) || self.expr_has_float(right)
+            }
+            Expr::Paren { expr: inner } => self.expr_has_float(inner),
+            Expr::Unary { operand, .. } => self.expr_has_float(operand),
+            _ => false,
+        }
+    }
+
+    /// Generate a binary arithmetic expression in float context
+    fn gen_binary_float(&self, op: &str, left: &Expr, right: &Expr) -> String {
+        if op == "^" {
+            let l = self.gen_expr_as_float(left);
+            let r = self.gen_expr_as_float(right);
+            return format!("({}.powf({}))", l, r);
+        }
+        let l = self.gen_expr_as_float(left);
+        let r = self.gen_expr_as_float(right);
+        format!("({} {} {})", l, op, r)
+    }
+
     /// Generate expression in u64 wrapping context (for hash/BigInt arithmetic)
     /// Almide's % 2^64 pattern maps to u64 wrapping arithmetic
     pub(crate) fn gen_expr_u64_wrapping(&self, expr: &Expr) -> String {
@@ -283,22 +330,43 @@ impl Emitter {
                 let r = self.gen_arg(right);
                 format!("AlmideConcat::concat({}, {})", l, r)
             }
-            "^" | "%" => {
+            "^" => {
+                // Float context → powf, bigint context → u64 XOR, otherwise → i64 XOR
+                if self.expr_has_float(left) || self.expr_has_float(right) {
+                    self.gen_binary_float("^", left, right)
+                } else {
+                    let left_big = self.is_bigint_expr(left);
+                    let right_big = self.is_bigint_expr(right);
+                    let needs_wrapping = left_big || right_big;
+                    if needs_wrapping {
+                        let l = self.gen_expr_u64_wrapping(left);
+                        let r = self.gen_expr_u64_wrapping(right);
+                        format!("(({} ^ {}) as i64)", l, r)
+                    } else {
+                        let l = self.gen_expr(left);
+                        let r = self.gen_expr(right);
+                        format!("({} ^ {})", l, r)
+                    }
+                }
+            }
+            "%" => {
                 let left_big = self.is_bigint_expr(left);
                 let right_big = self.is_bigint_expr(right);
                 let needs_wrapping = left_big || right_big;
                 if needs_wrapping {
-                    if op == "%" && self.is_pow2_64(right) {
+                    if self.is_pow2_64(right) {
                         let inner = self.gen_expr_u64_wrapping(left);
                         return format!("(({}) as i64)", inner);
                     }
                     let l = self.gen_expr_u64_wrapping(left);
                     let r = self.gen_expr_u64_wrapping(right);
-                    format!("(({} {} {}) as i64)", l, op, r)
+                    format!("(({} % {}) as i64)", l, r)
+                } else if self.expr_has_float(left) || self.expr_has_float(right) {
+                    self.gen_binary_float("%", left, right)
                 } else {
                     let l = self.gen_expr(left);
                     let r = self.gen_expr(right);
-                    format!("({} {} {})", l, op, r)
+                    format!("({} % {})", l, r)
                 }
             }
             "*" => {
@@ -306,8 +374,19 @@ impl Emitter {
                 let r = self.gen_expr(right);
                 if self.is_bigint_expr(left) || self.is_bigint_expr(right) {
                     format!("(({}).wrapping_mul({}))", l, r)
+                } else if self.expr_has_float(left) || self.expr_has_float(right) {
+                    self.gen_binary_float("*", left, right)
                 } else {
                     format!("({} * {})", l, r)
+                }
+            }
+            "+" | "-" | "/" => {
+                if self.expr_has_float(left) || self.expr_has_float(right) {
+                    self.gen_binary_float(op, left, right)
+                } else {
+                    let l = self.gen_expr(left);
+                    let r = self.gen_expr(right);
+                    format!("({} {} {})", l, op, r)
                 }
             }
             "==" => {
@@ -322,6 +401,17 @@ impl Emitter {
             }
             "and" => { let l = self.gen_expr(left); let r = self.gen_expr(right); format!("({} && {})", l, r) }
             "or" => { let l = self.gen_expr(left); let r = self.gen_expr(right); format!("({} || {})", l, r) }
+            "<" | ">" | "<=" | ">=" => {
+                if self.expr_has_float(left) || self.expr_has_float(right) {
+                    let l = self.gen_expr_as_float(left);
+                    let r = self.gen_expr_as_float(right);
+                    format!("({} {} {})", l, op, r)
+                } else {
+                    let l = self.gen_expr(left);
+                    let r = self.gen_expr(right);
+                    format!("({} {} {})", l, op, r)
+                }
+            }
             _ => { let l = self.gen_expr(left); let r = self.gen_expr(right); format!("({} {} {})", l, op, r) }
         }
     }

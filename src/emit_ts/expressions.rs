@@ -14,7 +14,34 @@ impl TsEmitter {
             }
             Expr::Float { value } => format!("{}", value),
             Expr::String { value } => Self::json_string(value),
-            Expr::InterpolatedString { value } => format!("`{}`", value),
+            Expr::InterpolatedString { value } => {
+                // Re-parse ${expr} segments and re-emit through gen_expr for module mapping
+                let mut result = String::from("`");
+                let mut chars = value.chars().peekable();
+                while let Some(c) = chars.next() {
+                    if c == '$' && chars.peek() == Some(&'{') {
+                        chars.next(); // skip {
+                        let mut expr_str = String::new();
+                        let mut depth = 1;
+                        while let Some(ch) = chars.next() {
+                            if ch == '{' { depth += 1; }
+                            if ch == '}' { depth -= 1; if depth == 0 { break; } }
+                            expr_str.push(ch);
+                        }
+                        let tokens = crate::lexer::Lexer::tokenize(&expr_str);
+                        let mut parser = crate::parser::Parser::new(tokens);
+                        if let Ok(parsed_expr) = parser.parse_single_expr() {
+                            result.push_str(&format!("${{{}}}", self.gen_expr(&parsed_expr)));
+                        } else {
+                            result.push_str(&format!("${{{}}}", expr_str));
+                        }
+                    } else {
+                        result.push(c);
+                    }
+                }
+                result.push('`');
+                result
+            }
             Expr::Bool { value } => format!("{}", value),
             Expr::Ident { name } => Self::sanitize(name),
             Expr::TypeName { name } => name.clone(),
@@ -233,7 +260,8 @@ impl TsEmitter {
             "==" => format!("__deep_eq({}, {})", l, r),
             "!=" => format!("!__deep_eq({}, {})", l, r),
             "++" => format!("__concat({}, {})", l, r),
-            "^" if !has_float => format!("__bigop(\"^\", {}, {})", l, r),
+            "^" if has_float => format!("Math.pow({}, {})", l, r),
+            "^" => format!("__bigop(\"^\", {}, {})", l, r),
             "*" if !has_float => format!("__bigop(\"*\", {}, {})", l, r),
             "%" if !has_float => format!("__bigop(\"%\", {}, {})", l, r),
             "/" if !has_float => format!("__div({}, {})", l, r),

@@ -25,11 +25,15 @@ impl Checker {
                 }
             }
             "^" => {
+                // Int ^ Int = XOR, Float ^ Float / Int ^ Float / Float ^ Int = pow
                 if left.compatible(&Ty::Int) && right.compatible(&Ty::Int) { Ty::Int }
+                else if (left.compatible(&Ty::Float) || left.compatible(&Ty::Int))
+                    && (right.compatible(&Ty::Float) || right.compatible(&Ty::Int)) { Ty::Float }
                 else {
                     self.push_diagnostic(err(
-                        format!("'^' (XOR) requires Int but got {} and {}", left.display(), right.display()),
-                        "XOR only works on Int values", "operator '^'",
+                        format!("'^' requires numeric types but got {} and {}", left.display(), right.display()),
+                        "Use Int values for XOR or Float values for exponentiation",
+                        "operator '^'",
                     ));
                     Ty::Unknown
                 }
