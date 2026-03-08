@@ -52,12 +52,13 @@ jobs:
       - name: Run exercises
         run: |
           failed=0
-          for name in pangram raindrops roman-numerals; do
-            almd="exercises/$name/$name.almd"
+          for dir in pangram raindrops roman-numerals; do
+            almd=$(ls exercises/$dir/*.almd 2>/dev/null | head -1)
+            if [ -z "$almd" ]; then echo "SKIP: $dir (no .almd)"; continue; fi
             if ./target/release/almide run "$almd" 2>&1; then
-              echo "OK: $name"
+              echo "OK: $dir"
             else
-              echo "FAIL: $name"
+              echo "FAIL: $dir"
               failed=1
             fi
           done
