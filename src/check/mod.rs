@@ -281,6 +281,86 @@ impl Checker {
         }
     }
 
+    /// Check whether a match expression covers all cases of the subject type.
+    /// Reports a warning with the specific missing cases.
+    pub(crate) fn check_match_exhaustiveness(&mut self, subject_ty: &Ty, arms: &[ast::MatchArm]) {
+        let resolved = self.env.resolve_named(subject_ty);
+
+        // Determine required cases from the subject type
+        let required_cases: Vec<String> = match &resolved {
+            Ty::Variant { cases, .. } => {
+                cases.iter().map(|c| c.name.clone()).collect()
+            }
+            Ty::Option(_) => vec!["some".to_string(), "none".to_string()],
+            Ty::Result(_, _) => vec!["ok".to_string(), "err".to_string()],
+            Ty::Bool => vec!["true".to_string(), "false".to_string()],
+            _ => return, // Not a finite enum-like type; skip check
+        };
+
+        if required_cases.is_empty() {
+            return;
+        }
+
+        // Collect covered cases from arms (arms with guards don't guarantee coverage)
+        let mut has_wildcard = false;
+        let mut covered: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        for arm in arms {
+            if arm.guard.is_some() {
+                continue; // Guarded arms don't guarantee coverage
+            }
+            self.collect_covered_cases(&arm.pattern, &mut covered, &mut has_wildcard);
+        }
+
+        if has_wildcard {
+            return; // Wildcard or variable binding covers everything
+        }
+
+        let missing: Vec<&String> = required_cases.iter()
+            .filter(|c| !covered.contains(*c))
+            .collect();
+
+        if !missing.is_empty() {
+            let missing_list = missing.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ");
+            let hint = if missing.len() == 1 {
+                format!("Add a '{}' arm, or use '_' as a catch-all", missing_list)
+            } else {
+                format!("Add arms for {}, or use '_' as a catch-all", missing_list)
+            };
+            self.push_diagnostic(Diagnostic::warning(
+                format!("non-exhaustive match: missing {}", missing_list),
+                hint,
+                "match expression",
+            ));
+        }
+    }
+
+    fn collect_covered_cases(&self, pattern: &ast::Pattern, covered: &mut std::collections::HashSet<String>, has_wildcard: &mut bool) {
+        match pattern {
+            ast::Pattern::Wildcard | ast::Pattern::Ident { .. } => {
+                *has_wildcard = true;
+            }
+            ast::Pattern::Constructor { name, .. } => {
+                covered.insert(name.clone());
+            }
+            ast::Pattern::Some { .. } => { covered.insert("some".to_string()); }
+            ast::Pattern::None => { covered.insert("none".to_string()); }
+            ast::Pattern::Ok { .. } => { covered.insert("ok".to_string()); }
+            ast::Pattern::Err { .. } => { covered.insert("err".to_string()); }
+            ast::Pattern::Literal { value } => {
+                // For Bool exhaustiveness: track true/false literals
+                match value.as_ref() {
+                    ast::Expr::Bool { value: true } => { covered.insert("true".to_string()); }
+                    ast::Expr::Bool { value: false } => { covered.insert("false".to_string()); }
+                    _ => {}
+                }
+            }
+            ast::Pattern::RecordPattern { name, .. } => {
+                covered.insert(name.clone());
+            }
+        }
+    }
+
     fn register_stdlib(&mut self) {
         for name in stdlib::builtin_effect_fns() {
             self.env.effect_fns.insert(name.to_string());

@@ -123,6 +123,8 @@ impl Checker {
                     }
                     self.env.pop_scope();
                 }
+                // Exhaustiveness check
+                self.check_match_exhaustiveness(&st, arms);
                 result_ty.unwrap_or(Ty::Unknown)
             }
 
