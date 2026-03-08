@@ -37,6 +37,25 @@ deno run --allow-all output.ts
 almide input.almd --emit-ast
 ```
 
+## Testing Rules
+
+Changes to the compiler MUST be verified against **all targets**:
+
+1. **Rust target**: `almide run test.almd` (compile to Rust → rustc → execute)
+2. **TypeScript target**: `almide test.almd --target ts | deno run --allow-all -`
+3. **JavaScript target**: Verify JS runtime in `emit_ts.rs` (`RUNTIME_JS`) matches Deno runtime (`RUNTIME`)
+
+When adding or modifying stdlib functions:
+- Add to **both** `emit_rust.rs` AND `emit_ts.rs` (both RUNTIME and RUNTIME_JS)
+- Add to UFCS resolution (`resolve_ufcs_module`) in both emitters
+- Add to module recognition (`is_module` check) if new module
+- Test with a `.almd` file that exercises the new function
+
+When modifying codegen (emit_rust.rs / emit_ts.rs):
+- Test ownership: variables used after `for...in` must still work
+- Test effect fn: `fs.read_text()` inside effect fn must compile without manual `?`
+- Test that generated Rust compiles without warnings (except unused macros)
+
 ## Key Design Decisions
 
 - **Multi-target**: Same AST emits to Rust or TypeScript via `--target rust|ts`
