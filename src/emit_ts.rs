@@ -58,6 +58,16 @@ const __int = {
   to_hex(n: bigint): string { return (n >= 0n ? n : n + (1n << 64n)).toString(16); },
   to_string(n: number): string { return String(n); },
 };
+const __float = {
+  to_string(n: number): string { return String(n); },
+  to_int(n: number): number { return Math.trunc(n); },
+  round(n: number): number { return Math.round(n); },
+  floor(n: number): number { return Math.floor(n); },
+  ceil(n: number): number { return Math.ceil(n); },
+  abs(n: number): number { return Math.abs(n); },
+  sqrt(n: number): number { return Math.sqrt(n); },
+  parse(s: string): number { const n = parseFloat(s); if (isNaN(n)) throw new Error("invalid float: " + s); return n; },
+};
 const __env = {
   unix_timestamp(): number { return Math.floor(Date.now() / 1000); },
   args(): string[] { return Deno.args; },
@@ -79,6 +89,15 @@ function __bigop(op: string, a: any, b: any): any {
     case "^": return a ^ b; case "*": return a * b; case "%": return a % b;
     case "+": return a + b; case "-": return a - b; default: return a;
   }
+}
+function __div(a: any, b: any): any {
+  if (typeof a === "bigint" || typeof b === "bigint") {
+    const ba = typeof a === "bigint" ? a : BigInt(a);
+    const bb = typeof b === "bigint" ? b : BigInt(b);
+    return ba / bb;
+  }
+  const r = a / b;
+  return (Number.isInteger(a) && Number.isInteger(b)) ? Math.trunc(r) : r;
 }
 function println(s: string): void { console.log(s); }
 function eprintln(s: string): void { console.error(s); }
@@ -155,6 +174,16 @@ const __int = {
   to_hex(n) { return (typeof n === "bigint" ? (n >= 0n ? n : n + (1n << 64n)).toString(16) : n.toString(16)); },
   to_string(n) { return String(n); },
 };
+const __float = {
+  to_string(n) { return String(n); },
+  to_int(n) { return Math.trunc(n); },
+  round(n) { return Math.round(n); },
+  floor(n) { return Math.floor(n); },
+  ceil(n) { return Math.ceil(n); },
+  abs(n) { return Math.abs(n); },
+  sqrt(n) { return Math.sqrt(n); },
+  parse(s) { const n = parseFloat(s); if (isNaN(n)) throw new Error("invalid float: " + s); return n; },
+};
 const __map = {
   new_() { return new Map(); },
   get(m, k) { return m.has(k) ? m.get(k) : null; },
@@ -188,6 +217,15 @@ function __bigop(op, a, b) {
     case "^": return a ^ b; case "*": return a * b; case "%": return a % b;
     case "+": return a + b; case "-": return a - b; default: return a;
   }
+}
+function __div(a, b) {
+  if (typeof a === "bigint" || typeof b === "bigint") {
+    const ba = typeof a === "bigint" ? a : BigInt(a);
+    const bb = typeof b === "bigint" ? b : BigInt(b);
+    return ba / bb;
+  }
+  const r = a / b;
+  return (Number.isInteger(a) && Number.isInteger(b)) ? Math.trunc(r) : r;
 }
 function println(s) { console.log(s); }
 function eprintln(s) { console.error(s); }
@@ -228,13 +266,18 @@ impl TsEmitter {
         Self { out: String::new(), js_mode: false }
     }
 
-    fn emit_program(&mut self, prog: &Program) {
+    fn emit_program(&mut self, prog: &Program, modules: &[(String, Program)]) {
         if self.js_mode {
             self.out.push_str(RUNTIME_JS);
         } else {
             self.out.push_str(RUNTIME);
         }
         self.out.push('\n');
+
+        // Emit imported modules as namespace objects
+        for (mod_name, mod_prog) in modules {
+            self.emit_user_module(mod_name, mod_prog);
+        }
 
         if let Some(module) = &prog.module {
             if let Decl::Module { path } = module {
@@ -261,6 +304,32 @@ impl TsEmitter {
                 self.out.push_str("try { main([\"minigit\", ...Deno.args]); } catch (e) { if (e instanceof Error) { eprintln(e.message); Deno.exit(1); } throw e; }\n");
             }
         }
+    }
+
+    fn emit_user_module(&mut self, name: &str, prog: &Program) {
+        self.out.push_str(&format!("// module: {}\n", name));
+        self.out.push_str(&format!("const {} = (() => {{\n", name));
+
+        for decl in &prog.decls {
+            match decl {
+                Decl::Fn { .. } => {
+                    self.out.push_str(&self.gen_decl(decl));
+                    self.out.push('\n');
+                }
+                Decl::Type { .. } => {
+                    self.out.push_str(&self.gen_decl(decl));
+                    self.out.push('\n');
+                }
+                _ => {}
+            }
+        }
+
+        // Export all functions
+        let fn_names: Vec<&str> = prog.decls.iter().filter_map(|d| {
+            if let Decl::Fn { name, .. } = d { Some(name.as_str()) } else { None }
+        }).collect();
+        self.out.push_str(&format!("  return {{ {} }};\n", fn_names.join(", ")));
+        self.out.push_str("})();\n\n");
     }
 
     fn gen_decl(&self, decl: &Decl) -> String {
@@ -556,7 +625,7 @@ impl TsEmitter {
         // UFCS: expr.method(args) => __module.method(expr, args)
         if let Expr::Member { object, field } = callee {
             if let Expr::Ident { name } = object.as_ref() {
-                let is_module = matches!(name.as_str(), "string" | "list" | "int" | "fs" | "env" | "map");
+                let is_module = matches!(name.as_str(), "string" | "list" | "int" | "float" | "fs" | "env" | "map");
                 if !is_module {
                     // UFCS: non-module receiver
                     if let Some(module) = Self::resolve_ufcs_module(field) {
@@ -578,7 +647,7 @@ impl TsEmitter {
                 // Non-ident object (e.g. call result, member chain)
                 let module_name = if let Expr::Member { object: inner_obj, .. } = object.as_ref() {
                     if let Expr::Ident { name } = inner_obj.as_ref() {
-                        matches!(name.as_str(), "string" | "list" | "int" | "fs" | "env")
+                        matches!(name.as_str(), "string" | "list" | "int" | "float" | "fs" | "env")
                     } else { false }
                 } else { false };
 
@@ -632,17 +701,39 @@ impl TsEmitter {
     fn gen_binary(&self, op: &str, left: &Expr, right: &Expr) -> String {
         let l = self.gen_expr(left);
         let r = self.gen_expr(right);
+        let has_float = Self::expr_has_float(left) || Self::expr_has_float(right);
         match op {
             "and" => format!("({} && {})", l, r),
             "or" => format!("({} || {})", l, r),
             "==" => format!("__deep_eq({}, {})", l, r),
             "!=" => format!("!__deep_eq({}, {})", l, r),
             "++" => format!("__concat({}, {})", l, r),
-            "^" => format!("__bigop(\"^\", {}, {})", l, r),
-            "*" => format!("__bigop(\"*\", {}, {})", l, r),
-            "%" => format!("__bigop(\"%\", {}, {})", l, r),
-            "/" => format!("Math.trunc({} / {})", l, r),
+            "^" if !has_float => format!("__bigop(\"^\", {}, {})", l, r),
+            "*" if !has_float => format!("__bigop(\"*\", {}, {})", l, r),
+            "%" if !has_float => format!("__bigop(\"%\", {}, {})", l, r),
+            "/" if !has_float => format!("__div({}, {})", l, r),
             _ => format!("({} {} {})", l, op, r),
+        }
+    }
+
+    /// Check if an expression involves Float values (heuristic for JS codegen).
+    fn expr_has_float(expr: &Expr) -> bool {
+        match expr {
+            Expr::Float { .. } => true,
+            Expr::Binary { left, right, .. } => {
+                Self::expr_has_float(left) || Self::expr_has_float(right)
+            }
+            Expr::Paren { expr: inner } => Self::expr_has_float(inner),
+            Expr::Call { callee, .. } => {
+                // float.xxx() calls return Float
+                if let Expr::Member { object, .. } = callee.as_ref() {
+                    if let Expr::Ident { name } = object.as_ref() {
+                        return name == "float";
+                    }
+                }
+                false
+            }
+            _ => false,
         }
     }
 
@@ -939,6 +1030,7 @@ impl TsEmitter {
             "string" => "__string".to_string(),
             "list" => "__list".to_string(),
             "int" => "__int".to_string(),
+            "float" => "__float".to_string(),
             "map" => "__map".to_string(),
             "env" => "__env".to_string(),
             other => other.to_string(),
@@ -966,14 +1058,22 @@ impl TsEmitter {
 }
 
 pub fn emit(program: &Program) -> String {
+    emit_with_modules(program, &[])
+}
+
+pub fn emit_with_modules(program: &Program, modules: &[(String, Program)]) -> String {
     let mut emitter = TsEmitter::new();
-    emitter.emit_program(program);
+    emitter.emit_program(program, modules);
     emitter.out
 }
 
 pub fn emit_js(program: &Program) -> String {
+    emit_js_with_modules(program, &[])
+}
+
+pub fn emit_js_with_modules(program: &Program, modules: &[(String, Program)]) -> String {
     let mut emitter = TsEmitter::new();
     emitter.js_mode = true;
-    emitter.emit_program(program);
+    emitter.emit_program(program, modules);
     emitter.out
 }

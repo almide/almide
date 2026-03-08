@@ -71,19 +71,31 @@ impl Emitter {
             self.emitln("");
         }
 
-        let has_main = prog.decls.iter().any(|d| matches!(d, Decl::Fn { name, .. } if name == "main"));
-        if has_main {
+        let main_decl = prog.decls.iter().find(|d| matches!(d, Decl::Fn { name, .. } if name == "main"));
+        if let Some(Decl::Fn { params, effect, return_type, .. }) = main_decl {
+            let has_args = !params.is_empty();
+            let is_effect = effect.unwrap_or(false);
+            let ret_str = self.gen_type(return_type);
+            let returns_result = ret_str.starts_with("Result<") || is_effect;
+
             self.emitln("fn main() {");
             self.indent += 1;
             self.emitln("let t = std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {");
             self.indent += 1;
-            self.emitln("let args: Vec<String> = std::env::args().collect();");
-            self.emitln("if let Err(e) = almide_main(args) {");
-            self.indent += 1;
-            self.emitln("eprintln!(\"{}\", e);");
-            self.emitln("std::process::exit(1);");
-            self.indent -= 1;
-            self.emitln("}");
+            if has_args {
+                self.emitln("let args: Vec<String> = std::env::args().collect();");
+            }
+            let call = if has_args { "almide_main(args)" } else { "almide_main()" };
+            if returns_result {
+                self.emitln(&format!("if let Err(e) = {} {{", call));
+                self.indent += 1;
+                self.emitln("eprintln!(\"{}\", e);");
+                self.emitln("std::process::exit(1);");
+                self.indent -= 1;
+                self.emitln("}");
+            } else {
+                self.emitln(&format!("{};", call));
+            }
             self.indent -= 1;
             self.emitln("}).unwrap();");
             self.emitln("t.join().unwrap();");
