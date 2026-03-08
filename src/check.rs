@@ -28,6 +28,30 @@ impl Checker {
         c
     }
 
+    /// Register an imported module's exported functions and types.
+    pub fn register_module(&mut self, mod_name: &str, prog: &ast::Program) {
+        self.env.user_modules.insert(mod_name.to_string());
+        for decl in &prog.decls {
+            match decl {
+                ast::Decl::Fn { name, params, return_type, effect, r#async, .. } => {
+                    let param_tys: Vec<(String, Ty)> = params.iter()
+                        .map(|p| (p.name.clone(), self.resolve_type_expr(&p.ty)))
+                        .collect();
+                    let ret = self.resolve_type_expr(return_type);
+                    let is_effect = effect.unwrap_or(false) || r#async.unwrap_or(false);
+                    let key = format!("{}.{}", mod_name, name);
+                    self.env.functions.insert(key, FnSig { params: param_tys, ret, is_effect });
+                }
+                ast::Decl::Type { name, ty, .. } => {
+                    let resolved = self.resolve_type_expr(ty);
+                    let key = format!("{}.{}", mod_name, name);
+                    self.env.types.insert(key, resolved);
+                }
+                _ => {}
+            }
+        }
+    }
+
     pub fn check_program(&mut self, prog: &ast::Program) -> Vec<Diagnostic> {
         self.collect_declarations(prog);
         for decl in &prog.decls {
@@ -542,6 +566,40 @@ impl Checker {
             }
             return ret;
         }
+
+        // Check user-defined modules
+        if self.env.user_modules.contains(module) {
+            let key = format!("{}.{}", module, func);
+            if let Some(sig) = self.env.functions.get(&key).cloned() {
+                if arg_tys.len() != sig.params.len() {
+                    let usage = sig.params.iter().map(|(n, t)| format!("{}: {}", n, t.display())).collect::<Vec<_>>().join(", ");
+                    self.diagnostics.push(err_s(
+                        format!("{}.{}() expects {} argument(s) but got {}", module, func, sig.params.len(), arg_tys.len()),
+                        format!("Usage: {}.{}({})", module, func, usage),
+                        format!("{}.{}()", module, func),
+                    ));
+                } else {
+                    for (i, ((pname, pty), aty)) in sig.params.iter().zip(arg_tys.iter()).enumerate() {
+                        if !pty.compatible(aty) {
+                            self.diagnostics.push(err_s(
+                                format!("{}.{}() argument '{}' (position {}) expects {} but got {}", module, func, pname, i + 1, pty.display(), aty.display()),
+                                format!("Pass a value of type {}", pty.display()),
+                                format!("{}.{}()", module, func),
+                            ));
+                        }
+                    }
+                }
+                if sig.is_effect && !self.env.in_effect {
+                    self.diagnostics.push(err_s(
+                        format!("{}.{}() is an effect function and cannot be called from a pure function", module, func),
+                        "Mark the calling function as 'effect fn'".into(),
+                        format!("{}.{}()", module, func),
+                    ));
+                }
+                return sig.ret.clone();
+            }
+        }
+
         Ty::Unknown
     }
 

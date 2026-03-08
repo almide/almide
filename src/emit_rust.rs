@@ -7,11 +7,13 @@ struct Emitter {
     in_effect: bool,
     /// Names of effect functions in the program
     effect_fns: Vec<String>,
+    /// Names of user-defined modules (for module call dispatch)
+    user_modules: Vec<String>,
 }
 
 impl Emitter {
     fn new() -> Self {
-        Self { out: String::new(), indent: 0, in_effect: false, effect_fns: Vec::new() }
+        Self { out: String::new(), indent: 0, in_effect: false, effect_fns: Vec::new(), user_modules: Vec::new() }
     }
 
     fn emit_indent(&mut self) {
@@ -26,7 +28,7 @@ impl Emitter {
         self.out.push('\n');
     }
 
-    fn emit_program(&mut self, prog: &Program) {
+    fn emit_program(&mut self, prog: &Program, modules: &[(String, Program)]) {
         // Collect effect function names (skip those that already return Result)
         for decl in &prog.decls {
             if let Decl::Fn { name, effect, return_type, .. } = decl {
@@ -38,11 +40,31 @@ impl Emitter {
                 }
             }
         }
+        // Also collect effect fns from imported modules
+        for (_, mod_prog) in modules {
+            for decl in &mod_prog.decls {
+                if let Decl::Fn { name, effect, return_type, .. } = decl {
+                    if effect.unwrap_or(false) {
+                        let ret_str = self.gen_type(return_type);
+                        if !ret_str.starts_with("Result<") {
+                            self.effect_fns.push(name.clone());
+                        }
+                    }
+                }
+            }
+        }
+        self.user_modules = modules.iter().map(|(n, _)| n.clone()).collect();
 
         self.emitln("#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use)]");
         self.emitln("");
         self.emit_runtime();
         self.emitln("");
+
+        // Emit imported modules as `mod name { ... }`
+        for (mod_name, mod_prog) in modules {
+            self.emit_user_module(mod_name, mod_prog);
+            self.emitln("");
+        }
 
         for decl in &prog.decls {
             self.emit_decl(decl);
@@ -68,6 +90,71 @@ impl Emitter {
             self.indent -= 1;
             self.emitln("}");
         }
+    }
+
+    fn emit_user_module(&mut self, name: &str, prog: &Program) {
+        self.emitln(&format!("mod {} {{", name));
+        self.indent += 1;
+        self.emitln("use super::*;");
+        self.emitln("");
+
+        for decl in &prog.decls {
+            match decl {
+                Decl::Fn { name: fn_name, params, return_type, body, effect, .. } => {
+                    // Emit with pub visibility
+                    let is_effect = effect.unwrap_or(false);
+                    let params_str: Vec<String> = params.iter()
+                        .map(|p| format!("{}: {}", p.name, self.gen_type(&p.ty)))
+                        .collect();
+                    let ret_str = self.gen_type(return_type);
+
+                    let actual_ret = if is_effect && !ret_str.starts_with("Result<") {
+                        if ret_str == "()" {
+                            "Result<(), String>".to_string()
+                        } else {
+                            format!("Result<{}, String>", ret_str)
+                        }
+                    } else {
+                        ret_str.clone()
+                    };
+
+                    self.emitln(&format!("pub fn {}({}) -> {} {{", fn_name, params_str.join(", "), actual_ret));
+                    self.indent += 1;
+                    let prev_effect = self.in_effect;
+                    self.in_effect = is_effect;
+                    let body_code = self.gen_expr(body);
+
+                    if is_effect {
+                        if ret_str.starts_with("Result<") {
+                            self.emitln(&body_code);
+                        } else if ret_str == "()" {
+                            self.emitln(&format!("{};", body_code));
+                            self.emitln("Ok(())");
+                        } else {
+                            self.emitln(&format!("Ok({})", body_code));
+                        }
+                    } else {
+                        self.emitln(&body_code);
+                    }
+
+                    self.in_effect = prev_effect;
+                    self.indent -= 1;
+                    self.emitln("}");
+                    self.emitln("");
+                }
+                Decl::Type { name: type_name, ty, deriving } => {
+                    // Emit type with pub
+                    self.emit_indent();
+                    self.out.push_str("pub ");
+                    // Remove the indent since emit_type_decl adds its own
+                    self.emit_type_decl(type_name, ty, deriving);
+                }
+                _ => {}
+            }
+        }
+
+        self.indent -= 1;
+        self.emitln("}");
     }
 
     fn emit_runtime(&mut self) {
@@ -575,8 +662,9 @@ impl Emitter {
         // Handle module calls
         if let Expr::Member { object, field } = callee {
             if let Expr::Ident { name: module } = object.as_ref() {
-                let is_module = matches!(module.as_str(), "string" | "list" | "int" | "fs" | "env" | "map");
-                if is_module {
+                let is_stdlib = matches!(module.as_str(), "string" | "list" | "int" | "fs" | "env" | "map");
+                let is_user_module = self.user_modules.contains(module);
+                if is_stdlib || is_user_module {
                     return self.gen_module_call(module, field, args);
                 }
                 // UFCS: variable.method(args) => module.method(variable, args)
@@ -944,8 +1032,8 @@ impl Emitter {
     }
 }
 
-pub fn emit(program: &Program) -> String {
+pub fn emit(program: &Program, modules: &[(String, Program)]) -> String {
     let mut emitter = Emitter::new();
-    emitter.emit_program(program);
+    emitter.emit_program(program, modules);
     emitter.out
 }

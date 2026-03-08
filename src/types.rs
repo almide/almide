@@ -55,6 +55,8 @@ pub struct TypeEnv {
     pub effect_fns: std::collections::HashSet<std::string::String>,
     /// Variant constructor name -> (variant type name, case info)
     pub constructors: std::collections::HashMap<std::string::String, (std::string::String, VariantCase)>,
+    /// User-defined module names (for distinguishing from stdlib in module calls)
+    pub user_modules: std::collections::HashSet<std::string::String>,
 }
 
 impl Ty {
@@ -126,6 +128,7 @@ impl TypeEnv {
             in_effect: false,
             effect_fns: std::collections::HashSet::new(),
             constructors: std::collections::HashMap::new(),
+            user_modules: std::collections::HashSet::new(),
         }
     }
 

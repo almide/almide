@@ -5,6 +5,7 @@ mod emit_rust;
 mod emit_ts;
 mod lexer;
 mod parser;
+mod resolve;
 mod types;
 
 use std::process::Command;
@@ -24,11 +25,11 @@ fn find_rustc() -> String {
     "rustc".to_string()
 }
 
-fn compile(file: &str, no_check: bool) -> String {
+fn parse_file(file: &str) -> ast::Program {
     let input = std::fs::read_to_string(file)
         .unwrap_or_else(|e| { eprintln!("Error reading {}: {}", file, e); std::process::exit(1); });
 
-    let program = if file.ends_with(".json") {
+    if file.ends_with(".json") {
         serde_json::from_str(&input)
             .unwrap_or_else(|e| { eprintln!("JSON parse error: {}", e); std::process::exit(1); })
     } else {
@@ -36,11 +37,23 @@ fn compile(file: &str, no_check: bool) -> String {
         let mut parser = parser::Parser::new(tokens);
         parser.parse()
             .unwrap_or_else(|e| { eprintln!("Parse error: {}", e); std::process::exit(1); })
-    };
+    }
+}
+
+fn compile(file: &str, no_check: bool) -> String {
+    let program = parse_file(file);
+
+    // Resolve imported modules
+    let resolved = resolve::resolve_imports(file, &program)
+        .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
 
     // Type check (unless --no-check)
     if !no_check {
         let mut checker = check::Checker::new();
+        // Register imported modules first
+        for (name, mod_prog) in &resolved.modules {
+            checker.register_module(name, mod_prog);
+        }
         let diagnostics = checker.check_program(&program);
         let errors: Vec<_> = diagnostics.iter()
             .filter(|d| d.level == diagnostic::Level::Error)
@@ -52,16 +65,12 @@ fn compile(file: &str, no_check: bool) -> String {
             eprintln!("\n{} error(s) found", errors.len());
             std::process::exit(1);
         }
-        // Print warnings but continue
-        let warnings: Vec<_> = diagnostics.iter()
-            .filter(|d| d.level == diagnostic::Level::Warning)
-            .collect();
-        for d in &warnings {
+        for d in diagnostics.iter().filter(|d| d.level == diagnostic::Level::Warning) {
             eprintln!("{}", d.display());
         }
     }
 
-    emit_rust::emit(&program)
+    emit_rust::emit(&program, &resolved.modules)
 }
 
 fn cmd_run(file: &str, program_args: &[String], no_check: bool) {
@@ -136,7 +145,6 @@ fn main() {
             .and_then(|i| args.get(i + 1))
             .map(|s| s.as_str())
             .unwrap_or_else(|| {
-                // Default: strip .almd extension
                 file.strip_suffix(".almd").unwrap_or("a.out")
             });
 
@@ -185,22 +193,18 @@ fn main() {
         .map(|s| s.as_str())
         .unwrap_or("rust");
 
-    let input = std::fs::read_to_string(file)
-        .unwrap_or_else(|e| { eprintln!("Error reading {}: {}", file, e); std::process::exit(1); });
+    let program = parse_file(file);
 
-    let program = if file.ends_with(".json") {
-        serde_json::from_str(&input)
-            .unwrap_or_else(|e| { eprintln!("JSON parse error: {}", e); std::process::exit(1); })
-    } else {
-        let tokens = lexer::Lexer::tokenize(&input);
-        let mut parser = parser::Parser::new(tokens);
-        parser.parse()
-            .unwrap_or_else(|e| { eprintln!("Parse error: {}", e); std::process::exit(1); })
-    };
+    // Resolve imports
+    let resolved = resolve::resolve_imports(file, &program)
+        .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
 
     // Type check (unless --no-check or --emit-ast)
     if !no_check && !emit_ast {
         let mut checker = check::Checker::new();
+        for (name, mod_prog) in &resolved.modules {
+            checker.register_module(name, mod_prog);
+        }
         let diagnostics = checker.check_program(&program);
         let errors: Vec<_> = diagnostics.iter()
             .filter(|d| d.level == diagnostic::Level::Error)
@@ -223,7 +227,7 @@ fn main() {
         println!("{}", json);
     } else {
         let code = match target {
-            "rust" | "rs" => emit_rust::emit(&program),
+            "rust" | "rs" => emit_rust::emit(&program, &resolved.modules),
             "ts" | "typescript" => emit_ts::emit(&program),
             "js" | "javascript" => emit_ts::emit_js(&program),
             other => { eprintln!("Unknown target: {}. Use rust, ts, or js.", other); std::process::exit(1); }
