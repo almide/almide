@@ -116,6 +116,60 @@ fn cmd_run(file: &str, program_args: &[String], no_check: bool) {
     std::process::exit(status.code().unwrap_or(1));
 }
 
+fn cmd_init() {
+    if std::path::Path::new("almide.toml").exists() {
+        eprintln!("almide.toml already exists");
+        std::process::exit(1);
+    }
+    let dir_name = std::env::current_dir()
+        .ok()
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+        .unwrap_or_else(|| "myapp".to_string());
+
+    let toml = format!("[package]\nname = \"{}\"\nversion = \"0.1.0\"\n", dir_name);
+
+    std::fs::write("almide.toml", toml).unwrap();
+    std::fs::create_dir_all("src").unwrap();
+    std::fs::create_dir_all("tests").unwrap();
+
+    if !std::path::Path::new("src/main.almd").exists() {
+        std::fs::write("src/main.almd", "module main\n\neffect fn main(args: List[String]) -> Result[Unit, String] = {\n  println(\"Hello, Almide!\")\n  ok(())\n}\n").unwrap();
+    }
+
+    eprintln!("Initialized project in ./");
+    eprintln!("  almide.toml");
+    eprintln!("  src/main.almd");
+    eprintln!("  tests/");
+}
+
+fn cmd_test(file: &str, no_check: bool) {
+    let test_files: Vec<String> = if !file.is_empty() {
+        vec![file.to_string()]
+    } else if std::path::Path::new("tests").is_dir() {
+        let mut files: Vec<String> = std::fs::read_dir("tests")
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path().to_string_lossy().to_string())
+            .filter(|f| f.ends_with(".almd"))
+            .collect();
+        files.sort();
+        files
+    } else {
+        eprintln!("No test files found. Create tests/*.almd or specify a file.");
+        std::process::exit(1);
+    };
+
+    if test_files.is_empty() {
+        eprintln!("No test files found in tests/");
+        std::process::exit(1);
+    }
+
+    for test_file in &test_files {
+        eprintln!("Running {}", test_file);
+        cmd_run(test_file, &[], no_check);
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
@@ -125,6 +179,19 @@ fn main() {
     }
 
     let no_check = args.iter().any(|a| a == "--no-check");
+
+    // almide init
+    if args.len() >= 2 && args[1] == "init" {
+        cmd_init();
+        return;
+    }
+
+    // almide test [file.almd]
+    if args.len() >= 2 && args[1] == "test" {
+        let file = if args.len() >= 3 { &args[2] } else { "" };
+        cmd_test(file, no_check);
+        return;
+    }
 
     // almide run file.almd [-- args...]
     if args.len() >= 3 && args[1] == "run" {
@@ -218,8 +285,10 @@ fn main() {
         .collect();
 
     if files.is_empty() {
-        eprintln!("Usage: almide run <file.almd> [args...]");
+        eprintln!("Usage: almide init");
+        eprintln!("       almide run <file.almd> [args...]");
         eprintln!("       almide build <file.almd> [-o output] [--target wasm]");
+        eprintln!("       almide test [file.almd]");
         eprintln!("       almide <file.almd> [--target rust|ts] [--emit-ast]");
         std::process::exit(1);
     }
