@@ -3,49 +3,27 @@ use super::Emitter;
 use super::JSON_RUNTIME;
 
 impl Emitter {
-    pub(crate) fn emit_program(&mut self, prog: &Program, modules: &[(String, Program)]) {
-        // Collect effect function names (auto-wrapped: effect fn without explicit Result return)
-        for decl in &prog.decls {
+    /// Scan declarations to classify effect/result functions (single pass).
+    fn collect_fn_info(&mut self, decls: &[Decl]) {
+        for decl in decls {
             if let Decl::Fn { name, effect, return_type, .. } = decl {
-                if effect.unwrap_or(false) {
-                    let ret_str = self.gen_type(return_type);
-                    if !ret_str.starts_with("Result<") {
-                        self.effect_fns.push(name.clone());
-                    }
-                }
-            }
-        }
-        // Also collect effect fns from imported modules
-        for (_, mod_prog) in modules {
-            for decl in &mod_prog.decls {
-                if let Decl::Fn { name, effect, return_type, .. } = decl {
-                    if effect.unwrap_or(false) {
-                        let ret_str = self.gen_type(return_type);
-                        if !ret_str.starts_with("Result<") {
-                            self.effect_fns.push(name.clone());
-                        }
-                    }
-                }
-            }
-        }
-        // Collect ALL functions that return Result (for do-block auto-unwrap)
-        for decl in &prog.decls {
-            if let Decl::Fn { name, return_type, effect, .. } = decl {
+                let is_effect = effect.unwrap_or(false);
                 let ret_str = self.gen_type(return_type);
-                if ret_str.starts_with("Result<") || effect.unwrap_or(false) {
+                let returns_result = ret_str.starts_with("Result<");
+                if is_effect && !returns_result {
+                    self.effect_fns.push(name.clone());
+                }
+                if returns_result || is_effect {
                     self.result_fns.push(name.clone());
                 }
             }
         }
+    }
+
+    pub(crate) fn emit_program(&mut self, prog: &Program, modules: &[(String, Program)]) {
+        self.collect_fn_info(&prog.decls);
         for (_, mod_prog) in modules {
-            for decl in &mod_prog.decls {
-                if let Decl::Fn { name, return_type, effect, .. } = decl {
-                    let ret_str = self.gen_type(return_type);
-                    if ret_str.starts_with("Result<") || effect.unwrap_or(false) {
-                        self.result_fns.push(name.clone());
-                    }
-                }
-            }
+            self.collect_fn_info(&mod_prog.decls);
         }
         self.user_modules = modules.iter().map(|(n, _)| n.clone()).collect();
 

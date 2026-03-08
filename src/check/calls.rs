@@ -1,0 +1,222 @@
+use crate::ast;
+use crate::types::{Ty, VariantPayload};
+use crate::stdlib;
+use super::{Checker, err, err_s};
+
+impl Checker {
+    pub(crate) fn check_call(&mut self, callee: &ast::Expr, args: &[ast::Expr]) -> Ty {
+        let arg_tys: Vec<Ty> = args.iter().map(|a| self.check_expr(a)).collect();
+
+        if let ast::Expr::Member { object, field } = callee {
+            if let ast::Expr::Ident { name: module } = object.as_ref() {
+                return self.check_module_call(module, field, &arg_tys);
+            }
+        }
+
+        if let ast::Expr::Ident { name } = callee {
+            return self.check_direct_call(name, &arg_tys);
+        }
+
+        if let ast::Expr::TypeName { name } = callee {
+            return self.check_constructor_call(name, &arg_tys);
+        }
+
+        let ct = self.check_expr(callee);
+        match &ct {
+            Ty::Fn { ret, .. } => *ret.clone(),
+            _ => Ty::Unknown,
+        }
+    }
+
+    fn check_direct_call(&mut self, name: &str, arg_tys: &[Ty]) -> Ty {
+        match name {
+            "println" | "eprintln" => {
+                if arg_tys.len() != 1 {
+                    self.diagnostics.push(err_s(
+                        format!("{}() takes exactly 1 argument but got {}", name, arg_tys.len()),
+                        format!("Use {}(\"message\")", name),
+                        format!("{}()", name),
+                    ));
+                } else if !arg_tys[0].compatible(&Ty::String) {
+                    self.diagnostics.push(err_s(
+                        format!("{}() requires String but got {}", name, arg_tys[0].display()),
+                        "Use int.to_string(n) to convert to String first".into(),
+                        format!("{}()", name),
+                    ));
+                }
+                return Ty::Unit;
+            }
+            "assert" => {
+                if arg_tys.len() == 1 && !arg_tys[0].compatible(&Ty::Bool) {
+                    self.diagnostics.push(err(
+                        format!("assert() requires Bool but got {}", arg_tys[0].display()),
+                        "Pass a boolean condition to assert()", "assert()",
+                    ));
+                }
+                return Ty::Unit;
+            }
+            "assert_eq" | "assert_ne" => return Ty::Unit,
+            "ok" => return Ty::Result(Box::new(arg_tys.first().cloned().unwrap_or(Ty::Unit)), Box::new(Ty::Unknown)),
+            "err" => return Ty::Result(Box::new(Ty::Unknown), Box::new(arg_tys.first().cloned().unwrap_or(Ty::Unknown))),
+            "some" => return Ty::Option(Box::new(arg_tys.first().cloned().unwrap_or(Ty::Unknown))),
+            _ => {}
+        }
+
+        if let Some(sig) = self.env.functions.get(name).cloned() {
+            if sig.is_effect && !self.env.in_effect {
+                self.diagnostics.push(err_s(
+                    format!("cannot call effect function '{}' from a pure function", name),
+                    "Mark the calling function as 'effect fn' to allow side effects".into(),
+                    format!("call to {}()", name),
+                ));
+            }
+            if arg_tys.len() != sig.params.len() {
+                let expected = sig.format_params();
+                self.diagnostics.push(err_s(
+                    format!("function '{}' expects {} argument(s) but got {}", name, sig.params.len(), arg_tys.len()),
+                    format!("Expected: {}({})", name, expected),
+                    format!("call to {}()", name),
+                ));
+            } else {
+                for (i, ((pname, pty), aty)) in sig.params.iter().zip(arg_tys.iter()).enumerate() {
+                    if !pty.compatible(aty) {
+                        self.diagnostics.push(err_s(
+                            format!("argument '{}' (position {}) expects {} but got {}", pname, i + 1, pty.display(), aty.display()),
+                            format!("Pass a value of type {}", pty.display()),
+                            format!("call to {}()", name),
+                        ));
+                    }
+                }
+            }
+            return sig.ret.clone();
+        }
+
+        if self.env.constructors.contains_key(name) {
+            return self.check_constructor_call(name, arg_tys);
+        }
+
+        Ty::Unknown
+    }
+
+    fn check_constructor_call(&mut self, name: &str, arg_tys: &[Ty]) -> Ty {
+        if let Some((type_name, case)) = self.env.constructors.get(name).cloned() {
+            match &case.payload {
+                VariantPayload::Unit => {
+                    if !arg_tys.is_empty() {
+                        self.diagnostics.push(err_s(
+                            format!("constructor '{}' takes no arguments but got {}", name, arg_tys.len()),
+                            format!("Use {} without parentheses", name),
+                            format!("constructor {}", name),
+                        ));
+                    }
+                }
+                VariantPayload::Tuple(expected) => {
+                    if arg_tys.len() != expected.len() {
+                        let exp = expected.iter().map(|t| t.display()).collect::<Vec<_>>().join(", ");
+                        self.diagnostics.push(err_s(
+                            format!("constructor '{}' expects {} argument(s) but got {}", name, expected.len(), arg_tys.len()),
+                            format!("{}({})", name, exp),
+                            format!("constructor {}", name),
+                        ));
+                    }
+                }
+                VariantPayload::Record(_) => {}
+            }
+            return Ty::Named(type_name);
+        }
+        Ty::Unknown
+    }
+
+    fn check_module_call(&mut self, module: &str, func: &str, arg_tys: &[Ty]) -> Ty {
+        if let Some(sig) = stdlib::lookup_sig(module, func) {
+            let min_params = stdlib::min_params(module, func).unwrap_or(sig.params.len());
+            if arg_tys.len() < min_params || arg_tys.len() > sig.params.len() {
+                let usage = sig.format_params();
+                self.diagnostics.push(err_s(
+                    format!("{}.{}() expects {} argument(s) but got {}", module, func, sig.params.len(), arg_tys.len()),
+                    format!("Usage: {}.{}({})", module, func, usage),
+                    format!("{}.{}()", module, func),
+                ));
+            } else {
+                for (i, ((pname, pty), aty)) in sig.params.iter().zip(arg_tys.iter()).enumerate() {
+                    if !pty.compatible(aty) {
+                        self.diagnostics.push(err_s(
+                            format!("{}.{}() argument '{}' (position {}) expects {} but got {}", module, func, pname, i + 1, pty.display(), aty.display()),
+                            format!("Pass a value of type {}", pty.display()),
+                            format!("{}.{}()", module, func),
+                        ));
+                    }
+                }
+            }
+            if sig.is_effect && !self.env.in_effect {
+                self.diagnostics.push(err_s(
+                    format!("{}.{}() is an effect function and cannot be called from a pure function", module, func),
+                    "Mark the calling function as 'effect fn'".into(),
+                    format!("{}.{}()", module, func),
+                ));
+            }
+            let ret = sig.ret.clone();
+            if self.env.in_effect {
+                if let Ty::Result(ok_ty, _) = &ret {
+                    return *ok_ty.clone();
+                }
+            }
+            return ret;
+        }
+
+        // Check user-defined modules
+        if self.env.user_modules.contains(module) {
+            let key = format!("{}.{}", module, func);
+            if let Some(sig) = self.env.functions.get(&key).cloned() {
+                if arg_tys.len() != sig.params.len() {
+                    let usage = sig.format_params();
+                    self.diagnostics.push(err_s(
+                        format!("{}.{}() expects {} argument(s) but got {}", module, func, sig.params.len(), arg_tys.len()),
+                        format!("Usage: {}.{}({})", module, func, usage),
+                        format!("{}.{}()", module, func),
+                    ));
+                } else {
+                    for (i, ((pname, pty), aty)) in sig.params.iter().zip(arg_tys.iter()).enumerate() {
+                        if !pty.compatible(aty) {
+                            self.diagnostics.push(err_s(
+                                format!("{}.{}() argument '{}' (position {}) expects {} but got {}", module, func, pname, i + 1, pty.display(), aty.display()),
+                                format!("Pass a value of type {}", pty.display()),
+                                format!("{}.{}()", module, func),
+                            ));
+                        }
+                    }
+                }
+                if sig.is_effect && !self.env.in_effect {
+                    self.diagnostics.push(err_s(
+                        format!("{}.{}() is an effect function and cannot be called from a pure function", module, func),
+                        "Mark the calling function as 'effect fn'".into(),
+                        format!("{}.{}()", module, func),
+                    ));
+                }
+                return sig.ret.clone();
+            }
+        }
+
+        Ty::Unknown
+    }
+
+    pub(crate) fn check_member_access(&mut self, obj_ty: &Ty, field: &str) -> Ty {
+        let resolved = self.env.resolve_named(obj_ty);
+        match &resolved {
+            Ty::Record { fields } => {
+                for (name, ty) in fields {
+                    if name == field { return ty.clone(); }
+                }
+                let avail = fields.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ");
+                self.diagnostics.push(err_s(
+                    format!("record has no field '{}'", field),
+                    format!("Available fields: {}", avail),
+                    format!("field access .{}", field),
+                ));
+                Ty::Unknown
+            }
+            Ty::Unknown => Ty::Unknown,
+            _ => Ty::Unknown,
+        }
+    }
+}

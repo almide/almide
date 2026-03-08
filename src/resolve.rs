@@ -6,7 +6,7 @@ use crate::ast;
 use crate::lexer;
 use crate::parser;
 
-const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "env", "fs", "map", "json", "path"];
+use crate::stdlib;
 
 pub struct ResolvedModules {
     /// Modules in dependency order (leaves first).
@@ -30,7 +30,7 @@ pub fn resolve_imports_with_deps(
     for import in &program.imports {
         if let ast::Decl::Import { path, .. } = import {
             let name = &path[0];
-            if STDLIB_MODULES.contains(&name.as_str()) {
+            if stdlib::is_stdlib_module(name) {
                 continue;
             }
             load_module(name, base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading)?;
@@ -69,7 +69,7 @@ fn load_module(
     for import in &program.imports {
         if let ast::Decl::Import { path, .. } = import {
             let dep_name = &path[0];
-            if !STDLIB_MODULES.contains(&dep_name.as_str()) {
+            if !stdlib::is_stdlib_module(dep_name) {
                 load_module(dep_name, base_dir, dep_paths, loaded, loaded_names, loading)?;
             }
         }
