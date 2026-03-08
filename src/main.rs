@@ -1,18 +1,21 @@
-mod ast;
+// Re-export library modules (shared with playground WASM crate)
+pub use almide::ast;
+pub use almide::diagnostic;
+pub use almide::emit_common;
+pub use almide::emit_ts;
+pub use almide::emit_ts_runtime;
+pub use almide::fmt;
+pub use almide::lexer;
+pub use almide::parser;
+pub use almide::stdlib;
+pub use almide::types;
+
+// CLI-only modules
 mod check;
 mod cli;
-mod diagnostic;
-mod emit_common;
 mod emit_rust;
-mod fmt;
-mod emit_ts;
-mod emit_ts_runtime;
-mod lexer;
-mod parser;
 mod project;
 mod resolve;
-mod stdlib;
-mod types;
 
 use std::process::Command;
 
