@@ -66,6 +66,9 @@ fn load_module(
     let mut parser = parser::Parser::new(tokens);
     let program = parser.parse()
         .map_err(|e| format!("parse error in module '{}': {}", name, e))?;
+    if !parser.errors.is_empty() {
+        return Err(format!("parse error in module '{}': {}", name, parser.errors.join("\n")));
+    }
 
     // Recursively resolve this module's imports (depth-first -> leaves first)
     for import in &program.imports {

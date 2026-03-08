@@ -42,8 +42,15 @@ fn parse_file(file: &str) -> ast::Program {
     } else {
         let tokens = lexer::Lexer::tokenize(&input);
         let mut parser = parser::Parser::new(tokens);
-        parser.parse()
-            .unwrap_or_else(|e| { eprintln!("Parse error: {}", e); std::process::exit(1); })
+        let prog = parser.parse()
+            .unwrap_or_else(|e| { eprintln!("Parse error: {}", e); std::process::exit(1); });
+        if !parser.errors.is_empty() {
+            for e in &parser.errors {
+                eprintln!("Parse error: {}", e);
+            }
+            std::process::exit(1);
+        }
+        prog
     }
 }
 
