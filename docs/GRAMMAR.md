@@ -1,7 +1,7 @@
 # Almide Grammar (EBNF)
 
 ```ebnf
-program     = "module" IDENT import* decl*
+program     = import* decl*
 import      = "import" IDENT
 decl        = type_decl | fn_decl
 type_decl   = "type" IDENT "=" "|" variant ("|" variant)* "deriving" "From"

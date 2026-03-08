@@ -38,7 +38,12 @@ async fn name(x: Type) -> Result[T, E] = expr        // async (implies effect)
 async effect fn name(x: Type) -> Result[T, E] = expr // explicit async+effect
 ```
 
-### Modifiers (order matters): `pub? async? effect? fn`
+### Visibility (optional prefix before fn/type)
+- `fn f()` — public (default)
+- `mod fn f()` — same project only (`pub(crate)` in Rust)
+- `local fn f()` — this file only (private)
+
+### Modifiers (order matters): `[local|mod]? async? effect? fn`
 
 ### Predicate: `fn empty?(xs: List[T]) -> Bool` (? suffix = Bool return only)
 

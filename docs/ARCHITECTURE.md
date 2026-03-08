@@ -50,7 +50,7 @@ src/
 ├── lexer.rs             Tokenizer — newline-sensitive, keywords, interpolated strings
 ├── parser/              Recursive descent parser
 │   ├── mod.rs           Parser struct, token navigation
-│   ├── declarations.rs  module, import, fn, type, test, trait, impl
+│   ├── declarations.rs  import, fn, type, test, trait, impl, visibility (pub/mod/local)
 │   ├── expressions.rs   Precedence climbing (pipe > or > and > compare > add > mul)
 │   ├── primary.rs       Literals, identifiers, error recovery hints
 │   ├── compounds.rs     if/match/lambda/do/block/list/for-in
