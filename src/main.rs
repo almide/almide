@@ -77,6 +77,11 @@ fn cmd_run(file: &str, program_args: &[String]) {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
+    if args.len() >= 2 && (args[1] == "--version" || args[1] == "-V") {
+        println!("almide {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+
     // almide run file.almd [-- args...]
     if args.len() >= 3 && args[1] == "run" {
         let file = &args[2];
