@@ -45,10 +45,10 @@ impl AlmideHttpResponse {
         }
     }
 
-    fn to_bytes(&self) -> Vec<u8> {
+    fn to_bytes(&self, keep_alive: bool) -> Vec<u8> {
         let mut out = format!("HTTP/1.1 {} {}\r\n", self.status, self.status_text());
         out.push_str(&format!("Content-Length: {}\r\n", self.body.len()));
-        out.push_str("Connection: close\r\n");
+        out.push_str(if keep_alive { "Connection: keep-alive\r\n" } else { "Connection: close\r\n" });
         for (k, v) in &self.headers {
             out.push_str(&format!("{}: {}\r\n", k, v));
         }
@@ -125,31 +125,44 @@ fn almide_http_parse_request(stream: &mut std::net::TcpStream) -> Result<AlmideH
 }
 
 fn almide_http_serve<F>(port: i64, handler: F) -> Result<(), String>
-where F: Fn(AlmideHttpRequest) -> Result<AlmideHttpResponse, String> + 'static
+where F: Fn(AlmideHttpRequest) -> Result<AlmideHttpResponse, String> + Send + Sync + 'static
 {
     use std::net::TcpListener;
     use std::io::Write;
+    use std::sync::Arc;
 
     let addr = format!("0.0.0.0:{}", port);
     let listener = TcpListener::bind(&addr).map_err(|e| format!("bind error: {}", e))?;
     eprintln!("Listening on http://{}", addr);
 
+    let handler = Arc::new(handler);
+
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
-                match almide_http_parse_request(&mut stream) {
-                    Ok(req) => {
-                        let resp = match handler(req) {
-                            Ok(r) => r,
-                            Err(e) => AlmideHttpResponse::new(500, format!("Internal Error: {}", e)),
-                        };
-                        let _ = stream.write_all(&resp.to_bytes());
+                let handler = Arc::clone(&handler);
+                std::thread::spawn(move || {
+                    use std::io::Write;
+                    loop {
+                        match almide_http_parse_request(&mut stream) {
+                            Ok(req) => {
+                                let conn = req.headers.get("Connection").or_else(|| req.headers.get("connection")).map(|v| v.as_str()).unwrap_or("close");
+                                let keep_alive = conn.eq_ignore_ascii_case("keep-alive");
+                                let resp = match handler(req) {
+                                    Ok(r) => r,
+                                    Err(e) => AlmideHttpResponse::new(500, format!("Internal Error: {}", e)),
+                                };
+                                let _ = stream.write_all(&resp.to_bytes(keep_alive));
+                                if !keep_alive { break; }
+                            }
+                            Err(_) => {
+                                let resp = AlmideHttpResponse::new(400, "Bad Request".into());
+                                let _ = stream.write_all(&resp.to_bytes(false));
+                                break;
+                            }
+                        }
                     }
-                    Err(_) => {
-                        let resp = AlmideHttpResponse::new(400, "Bad Request".into());
-                        let _ = stream.write_all(&resp.to_bytes());
-                    }
-                }
+                });
             }
             Err(_) => continue,
         }
