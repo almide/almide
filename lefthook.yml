@@ -1,0 +1,4 @@
+commit-msg:
+  scripts:
+    "no-japanese":
+      runner: python3
