@@ -95,9 +95,10 @@ impl Emitter {
 
         for decl in &prog.decls {
             match decl {
-                Decl::Fn { name: fn_name, params, return_type, body, effect, .. } => {
+                Decl::Fn { name: fn_name, params, return_type, body, effect, r#async, .. } => {
                     // Emit with pub visibility
                     let is_effect = effect.unwrap_or(false);
+                    let is_async = r#async.unwrap_or(false);
                     let params_str: Vec<String> = params.iter()
                         .map(|p| format!("{}: {}", p.name, self.gen_type(&p.ty)))
                         .collect();
@@ -113,7 +114,8 @@ impl Emitter {
                         ret_str.clone()
                     };
 
-                    self.emitln(&format!("pub fn {}({}) -> {} {{", fn_name, params_str.join(", "), actual_ret));
+                    let async_prefix = if is_async { "pub async " } else { "pub " };
+                    self.emitln(&format!("{}fn {}({}) -> {} {{", async_prefix, fn_name, params_str.join(", "), actual_ret));
                     self.indent += 1;
                     let prev_effect = self.in_effect;
                     self.in_effect = is_effect;
@@ -163,6 +165,17 @@ impl Emitter {
         self.emitln("macro_rules! almide_eq { ($a:expr, $b:expr) => { ($a) == ($b) }; }");
         self.emitln("macro_rules! almide_ne { ($a:expr, $b:expr) => { ($a) != ($b) }; }");
         self.emitln("");
+        // Minimal async runtime (block_on)
+        self.emitln("fn almide_block_on<F: std::future::Future>(future: F) -> F::Output {");
+        self.emitln("    use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};");
+        self.emitln("    use std::pin::Pin;");
+        self.emitln("    fn dummy_raw_waker() -> RawWaker { fn no_op(_: *const ()) {} fn clone(p: *const ()) -> RawWaker { RawWaker::new(p, &VTABLE) } static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, no_op, no_op, no_op); RawWaker::new(std::ptr::null(), &VTABLE) }");
+        self.emitln("    let waker = unsafe { Waker::from_raw(dummy_raw_waker()) };");
+        self.emitln("    let mut cx = Context::from_waker(&waker);");
+        self.emitln("    let mut future = Box::pin(future);");
+        self.emitln("    loop { match future.as_mut().poll(&mut cx) { Poll::Ready(val) => return val, Poll::Pending => std::thread::yield_now(), } }");
+        self.emitln("}");
+        self.emitln("");
         self.out.push_str(JSON_RUNTIME);
         self.emitln("");
         self.out.push_str(HTTP_RUNTIME);
@@ -180,8 +193,8 @@ impl Emitter {
             Decl::Type { name, ty, deriving } => {
                 self.emit_type_decl(name, ty, deriving);
             }
-            Decl::Fn { name, params, return_type, body, effect, .. } => {
-                self.emit_fn_decl(name, params, return_type, body, effect.unwrap_or(false));
+            Decl::Fn { name, params, return_type, body, effect, r#async, .. } => {
+                self.emit_fn_decl(name, params, return_type, body, effect.unwrap_or(false), r#async.unwrap_or(false));
             }
             Decl::Impl { trait_, for_, methods } => {
                 self.emitln(&format!("// impl {} for {}", trait_, for_));
@@ -272,7 +285,7 @@ impl Emitter {
         }
     }
 
-    fn emit_fn_decl(&mut self, name: &str, params: &[Param], ret_type: &TypeExpr, body: &Expr, is_effect: bool) {
+    fn emit_fn_decl(&mut self, name: &str, params: &[Param], ret_type: &TypeExpr, body: &Expr, is_effect: bool, is_async: bool) {
         let fn_name = if name == "main" { "almide_main".to_string() } else { name.replace('?', "_qm_") };
         let ret_str = self.gen_type(ret_type);
         let is_unit_ret = ret_str == "()";
@@ -298,7 +311,8 @@ impl Emitter {
             })
             .collect();
 
-        self.emitln(&format!("fn {}({}) -> {} {{", fn_name, params_str.join(", "), actual_ret));
+        let async_prefix = if is_async { "async " } else { "" };
+        self.emitln(&format!("{}fn {}({}) -> {} {{", async_prefix, fn_name, params_str.join(", "), actual_ret));
         self.indent += 1;
 
         let prev_effect = self.in_effect;

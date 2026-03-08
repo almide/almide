@@ -163,6 +163,15 @@ impl Emitter {
                     self.gen_expr(expr)
                 }
             }
+            Expr::Await { expr } => {
+                // In Rust, await async futures using block_on
+                let inner = self.gen_expr(expr);
+                if self.in_effect {
+                    format!("almide_block_on({})?", inner)
+                } else {
+                    format!("almide_block_on({})", inner)
+                }
+            }
             Expr::Hole => "todo!()".to_string(),
             Expr::Todo { message } => format!("todo!(\"{}\")", message),
             Expr::Placeholder => "_".to_string(),

@@ -22,7 +22,8 @@ pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool) -> i32
         .arg("-o")
         .arg(&bin_path)
         .arg("-C").arg("overflow-checks=no")
-        .arg("-C").arg("opt-level=1");
+        .arg("-C").arg("opt-level=1")
+        .arg("--edition").arg("2021");
     if is_test_only {
         rustc_cmd.arg("--test");
     }
@@ -156,7 +157,8 @@ pub fn cmd_build(args: &[String], no_check: bool) {
     rustc_cmd.arg(&tmp_rs)
         .arg("-o")
         .arg(&output)
-        .arg("-C").arg("overflow-checks=no");
+        .arg("-C").arg("overflow-checks=no")
+        .arg("--edition").arg("2021");
 
     if is_wasm {
         rustc_cmd.arg("--target").arg("wasm32-wasip1")
