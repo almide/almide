@@ -163,6 +163,14 @@ test "greet succeeds" {
 
 `.almd`
 
+## Playground
+
+Try Almide in your browser — no installation required:
+
+**[almide.github.io/playground](https://almide.github.io/playground/)**
+
+Write `.almd` code, compile to JavaScript via WebAssembly, and run it instantly. Includes AI code generation with Anthropic, OpenAI, and Gemini APIs.
+
 ## Documentation
 
 - [docs/GRAMMAR.md](./docs/GRAMMAR.md) — EBNF grammar + stdlib reference (compact, for AI consumption)
