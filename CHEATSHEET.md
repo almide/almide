@@ -296,6 +296,14 @@ The runtime calls `main(args)` where `args` includes the program name at index 0
 - The stdlib functions listed above are exhaustive — no other functions exist
 - Use `for x in xs { ... }` for iteration, NOT `do { var i = 0; guard ... }`
 
+## Common mistakes (DO NOT)
+- `list[1, 2, 3]` → **WRONG**. Write `[1, 2, 3]`. `list` is a module, not a type constructor
+- `each(xs, f)` → **WRONG**. Write `list.each(xs, f)`. All stdlib functions need module prefix
+- `map[K, V]` as a value → **WRONG**. Write `map.new()` to create an empty map
+- `List.new()` → **WRONG**. Write `[]`. There is no `new()` for List
+- `string.length(s)` → **WRONG**. Write `string.len(s)`. No synonyms
+- `println(x)` where x is Int → **WRONG**. Write `println(int.to_string(x))`. No implicit conversion
+
 ## Complete example
 ```
 module app
