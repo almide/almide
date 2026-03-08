@@ -5,7 +5,7 @@
 use crate::types::{Ty, FnSig};
 
 /// All built-in stdlib module names.
-pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "path", "http", "process"];
+pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "path", "http", "process", "math", "random", "time"];
 
 /// Check if a module name is a stdlib module.
 pub fn is_stdlib_module(name: &str) -> bool {
@@ -184,6 +184,30 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         ("fs", "read_lines") => FnSig { params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::List(Box::new(Ty::String))), Box::new(io_err())), is_effect: true },
         ("fs", "remove") => FnSig { params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::Unit), Box::new(io_err())), is_effect: true },
         ("fs", "list_dir") => FnSig { params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::List(Box::new(Ty::String))), Box::new(io_err())), is_effect: true },
+
+        // ── math ──
+        ("math", "min") => FnSig { params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("math", "max") => FnSig { params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("math", "abs") => FnSig { params: vec![(s("n"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("math", "pow") => FnSig { params: vec![(s("base"), Ty::Int), (s("exp"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("math", "pi") => FnSig { params: vec![], ret: Ty::Float, is_effect: false },
+        ("math", "e") => FnSig { params: vec![], ret: Ty::Float, is_effect: false },
+        ("math", "sin") => FnSig { params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
+        ("math", "cos") => FnSig { params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
+        ("math", "tan") => FnSig { params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
+        ("math", "log") => FnSig { params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
+        ("math", "exp") => FnSig { params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
+        ("math", "sqrt") => FnSig { params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
+
+        // ── random ──
+        ("random", "int") => FnSig { params: vec![(s("min"), Ty::Int), (s("max"), Ty::Int)], ret: Ty::Int, is_effect: true },
+        ("random", "float") => FnSig { params: vec![], ret: Ty::Float, is_effect: true },
+        ("random", "choice") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: true },
+        ("random", "shuffle") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: true },
+
+        // ── time ──
+        ("time", "now") => FnSig { params: vec![], ret: Ty::Int, is_effect: true },
+        ("time", "sleep") => FnSig { params: vec![(s("ms"), Ty::Int)], ret: Ty::Unit, is_effect: true },
 
         _ => return None,
     };

@@ -303,6 +303,33 @@ impl Emitter {
                 "post" => format!("almide_http_post(&{}, &{})?", args_str[0], args_str[1]),
                 _ => format!("/* http.{} */ todo!()", func),
             },
+            "math" => match func {
+                "min" => format!("std::cmp::min({}, {})", args_str[0], args_str[1]),
+                "max" => format!("std::cmp::max({}, {})", args_str[0], args_str[1]),
+                "abs" => format!("({}).abs()", args_str[0]),
+                "pow" => format!("({} as i64).wrapping_pow({} as u32)", args_str[0], args_str[1]),
+                "pi" => "std::f64::consts::PI".to_string(),
+                "e" => "std::f64::consts::E".to_string(),
+                "sin" => format!("({} as f64).sin()", args_str[0]),
+                "cos" => format!("({} as f64).cos()", args_str[0]),
+                "tan" => format!("({} as f64).tan()", args_str[0]),
+                "log" => format!("({} as f64).ln()", args_str[0]),
+                "exp" => format!("({} as f64).exp()", args_str[0]),
+                "sqrt" => format!("({} as f64).sqrt()", args_str[0]),
+                _ => format!("/* math.{} */ todo!()", func),
+            },
+            "random" => match func {
+                "int" => format!("{{ let __range = ({1} - {0} + 1) as u64; let mut __buf = [0u8; 8]; std::fs::File::open(\"/dev/urandom\").and_then(|mut f| {{ use std::io::Read; f.read_exact(&mut __buf) }}).unwrap(); let __r = u64::from_le_bytes(__buf) % __range; ({0} + __r as i64) }}", args_str[0], args_str[1]),
+                "float" => "{ let mut __buf = [0u8; 8]; std::fs::File::open(\"/dev/urandom\").and_then(|mut f| { use std::io::Read; f.read_exact(&mut __buf) }).unwrap(); (u64::from_le_bytes(__buf) as f64) / (u64::MAX as f64) }".to_string(),
+                "choice" => format!("{{ let __xs = &{}; if __xs.is_empty() {{ None }} else {{ let mut __buf = [0u8; 8]; std::fs::File::open(\"/dev/urandom\").and_then(|mut f| {{ use std::io::Read; f.read_exact(&mut __buf) }}).unwrap(); Some(__xs[(u64::from_le_bytes(__buf) as usize) % __xs.len()].clone()) }} }}", args_str[0]),
+                "shuffle" => format!("{{ let mut __v = ({}).clone(); let __n = __v.len(); for __i in (1..__n).rev() {{ let mut __buf = [0u8; 8]; std::fs::File::open(\"/dev/urandom\").and_then(|mut f| {{ use std::io::Read; f.read_exact(&mut __buf) }}).unwrap(); let __j = (u64::from_le_bytes(__buf) as usize) % (__i + 1); __v.swap(__i, __j); }} __v }}", args_str[0]),
+                _ => format!("/* random.{} */ todo!()", func),
+            },
+            "time" => match func {
+                "now" => "(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64)".to_string(),
+                "sleep" => format!("std::thread::sleep(std::time::Duration::from_millis({} as u64))", args_str[0]),
+                _ => format!("/* time.{} */ todo!()", func),
+            },
             _ => {
                 let call = format!("{}::{}({})", module, func, args_str.join(", "));
                 // Auto-propagate ? for user module effect/Result functions

@@ -126,6 +126,30 @@ const __process = {
   exit(code: number): void { Deno.exit(code); },
   stdin_lines(): string[] { const buf = new Uint8Array(1024 * 1024); const n = Deno.stdin.readSync(buf); return n ? new TextDecoder().decode(buf.subarray(0, n)).split("\n").filter(l => l.length > 0) : []; },
 };
+const __math = {
+  min(a: number, b: number): number { return Math.min(a, b); },
+  max(a: number, b: number): number { return Math.max(a, b); },
+  abs(n: number): number { return Math.abs(n); },
+  pow(base: number, exp: number): number { return Math.pow(base, exp); },
+  pi(): number { return Math.PI; },
+  e(): number { return Math.E; },
+  sin(x: number): number { return Math.sin(x); },
+  cos(x: number): number { return Math.cos(x); },
+  tan(x: number): number { return Math.tan(x); },
+  log(x: number): number { return Math.log(x); },
+  exp(x: number): number { return Math.exp(x); },
+  sqrt(x: number): number { return Math.sqrt(x); },
+};
+const __random = {
+  int(min: number, max: number): number { return Math.floor(Math.random() * (max - min + 1)) + min; },
+  float(): number { return Math.random(); },
+  choice<T>(xs: T[]): T | null { return xs.length > 0 ? xs[Math.floor(Math.random() * xs.length)] : null; },
+  shuffle<T>(xs: T[]): T[] { const a = [...xs]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; },
+};
+const __time = {
+  now(): number { return Math.floor(Date.now() / 1000); },
+  sleep(ms: number): void { /* Deno */ if (typeof Deno !== "undefined") { const end = Date.now() + ms; while (Date.now() < end) {} } },
+};
 function __bigop(op: string, a: any, b: any): any {
   if (typeof a === "bigint" || typeof b === "bigint") {
     const ba = typeof a === "bigint" ? a : BigInt(a);
@@ -309,6 +333,30 @@ const __process = {
   exec(cmd, args) { const { execFileSync } = require("child_process"); try { return execFileSync(cmd, args, { encoding: "utf-8" }); } catch (e) { const msg = e.stderr ? String(e.stderr) : e.message; throw new Error(msg || "command failed"); } },
   exit(code) { process.exit(code); },
   stdin_lines() { return require("fs").readFileSync(0, "utf-8").split("\n").filter(l => l.length > 0); },
+};
+const __math = {
+  min(a, b) { return Math.min(a, b); },
+  max(a, b) { return Math.max(a, b); },
+  abs(n) { return Math.abs(n); },
+  pow(base, exp) { return Math.pow(base, exp); },
+  pi() { return Math.PI; },
+  e() { return Math.E; },
+  sin(x) { return Math.sin(x); },
+  cos(x) { return Math.cos(x); },
+  tan(x) { return Math.tan(x); },
+  log(x) { return Math.log(x); },
+  exp(x) { return Math.exp(x); },
+  sqrt(x) { return Math.sqrt(x); },
+};
+const __random = {
+  int(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; },
+  float() { return Math.random(); },
+  choice(xs) { return xs.length > 0 ? xs[Math.floor(Math.random() * xs.length)] : null; },
+  shuffle(xs) { const a = [...xs]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; },
+};
+const __time = {
+  now() { return Math.floor(Date.now() / 1000); },
+  sleep(ms) { const end = Date.now() + ms; while (Date.now() < end) {} },
 };
 function __bigop(op, a, b) {
   if (typeof a === "bigint" || typeof b === "bigint") {
