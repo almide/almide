@@ -41,8 +41,6 @@ cp target/release/almide ~/.local/bin/
 ### Hello World
 
 ```
-module app
-
 effect fn main(args: List[String]) -> Result[Unit, String] = {
   println("Hello, world!")
   ok(())
@@ -66,8 +64,6 @@ For the full design rationale, see [Design Philosophy](./docs/DESIGN.md).
 ## Example
 
 ```
-module app
-
 import fs
 
 type AppError =
