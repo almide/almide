@@ -1,8 +1,11 @@
 mod ast;
+mod check;
+mod diagnostic;
 mod emit_rust;
 mod emit_ts;
 mod lexer;
 mod parser;
+mod types;
 
 use std::process::Command;
 
@@ -21,7 +24,7 @@ fn find_rustc() -> String {
     "rustc".to_string()
 }
 
-fn compile(file: &str) -> String {
+fn compile(file: &str, no_check: bool) -> String {
     let input = std::fs::read_to_string(file)
         .unwrap_or_else(|e| { eprintln!("Error reading {}: {}", file, e); std::process::exit(1); });
 
@@ -35,11 +38,34 @@ fn compile(file: &str) -> String {
             .unwrap_or_else(|e| { eprintln!("Parse error: {}", e); std::process::exit(1); })
     };
 
+    // Type check (unless --no-check)
+    if !no_check {
+        let mut checker = check::Checker::new();
+        let diagnostics = checker.check_program(&program);
+        let errors: Vec<_> = diagnostics.iter()
+            .filter(|d| d.level == diagnostic::Level::Error)
+            .collect();
+        if !errors.is_empty() {
+            for d in &errors {
+                eprintln!("{}", d.display());
+            }
+            eprintln!("\n{} error(s) found", errors.len());
+            std::process::exit(1);
+        }
+        // Print warnings but continue
+        let warnings: Vec<_> = diagnostics.iter()
+            .filter(|d| d.level == diagnostic::Level::Warning)
+            .collect();
+        for d in &warnings {
+            eprintln!("{}", d.display());
+        }
+    }
+
     emit_rust::emit(&program)
 }
 
-fn cmd_run(file: &str, program_args: &[String]) {
-    let rs_code = compile(file);
+fn cmd_run(file: &str, program_args: &[String], no_check: bool) {
+    let rs_code = compile(file, no_check);
 
     let tmp_dir = std::env::temp_dir().join("almide-run");
     std::fs::create_dir_all(&tmp_dir).unwrap();
@@ -88,15 +114,17 @@ fn main() {
         return;
     }
 
+    let no_check = args.iter().any(|a| a == "--no-check");
+
     // almide run file.almd [-- args...]
     if args.len() >= 3 && args[1] == "run" {
         let file = &args[2];
         let program_args: Vec<String> = if let Some(pos) = args.iter().position(|a| a == "--") {
             args[pos + 1..].to_vec()
         } else {
-            args[3..].to_vec()
+            args[3..].iter().filter(|a| a.as_str() != "--no-check").cloned().collect()
         };
-        cmd_run(file, &program_args);
+        cmd_run(file, &program_args, no_check);
         return;
     }
 
@@ -112,7 +140,7 @@ fn main() {
                 file.strip_suffix(".almd").unwrap_or("a.out")
             });
 
-        let rs_code = compile(file);
+        let rs_code = compile(file, no_check);
         let tmp_rs = format!("{}.rs", output);
         std::fs::write(&tmp_rs, &rs_code).unwrap();
 
@@ -169,6 +197,25 @@ fn main() {
         parser.parse()
             .unwrap_or_else(|e| { eprintln!("Parse error: {}", e); std::process::exit(1); })
     };
+
+    // Type check (unless --no-check or --emit-ast)
+    if !no_check && !emit_ast {
+        let mut checker = check::Checker::new();
+        let diagnostics = checker.check_program(&program);
+        let errors: Vec<_> = diagnostics.iter()
+            .filter(|d| d.level == diagnostic::Level::Error)
+            .collect();
+        if !errors.is_empty() {
+            for d in &errors {
+                eprintln!("{}", d.display());
+            }
+            eprintln!("\n{} error(s) found", errors.len());
+            std::process::exit(1);
+        }
+        for d in diagnostics.iter().filter(|d| d.level == diagnostic::Level::Warning) {
+            eprintln!("{}", d.display());
+        }
+    }
 
     if emit_ast {
         let json = serde_json::to_string_pretty(&program)

@@ -309,7 +309,8 @@ impl Emitter {
             Expr::Int { raw, .. } => {
                 if let Ok(n) = raw.parse::<u128>() {
                     if n > i64::MAX as u128 {
-                        format!("{}u128", raw)
+                        // Wrap to i64 — Almide Int is i64, large literals wrap automatically
+                        format!("{}i64", n as i64)
                     } else {
                         format!("{}i64", raw)
                     }
@@ -529,10 +530,17 @@ impl Emitter {
                 }
             }
             "*" => {
-                // All integer multiplication uses wrapping to match Almide semantics
-                let l = self.gen_expr(left);
-                let r = self.gen_expr(right);
-                format!("(({}).wrapping_mul({}))", l, r)
+                let left_big = self.is_bigint_expr(left);
+                let right_big = self.is_bigint_expr(right);
+                if left_big || right_big {
+                    let l = self.gen_expr_u64_wrapping(left);
+                    let r = self.gen_expr_u64_wrapping(right);
+                    format!("(({}).wrapping_mul({}) as i64)", l, r)
+                } else {
+                    let l = self.gen_expr(left);
+                    let r = self.gen_expr(right);
+                    format!("(({}).wrapping_mul({}))", l, r)
+                }
             }
             "==" => {
                 let l = self.gen_expr(left);
