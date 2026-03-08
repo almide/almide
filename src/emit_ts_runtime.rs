@@ -54,6 +54,13 @@ const __list = {
   filter<T>(xs: T[], f: (x: T) => boolean): T[] { return xs.filter(f); },
   find<T>(xs: T[], f: (x: T) => boolean): T | null { return xs.find(f) ?? null; },
   fold<T, U>(xs: T[], init: U, f: (acc: U, x: T) => U): U { return xs.reduce(f, init); },
+  enumerate<T>(xs: T[]): [number, T][] { return xs.map((x, i) => [i, x]); },
+  zip<T, U>(a: T[], b: U[]): [T, U][] { return a.slice(0, Math.min(a.length, b.length)).map((x, i) => [x, b[i]]); },
+  flatten<T>(xss: T[][]): T[] { return xss.flat(); },
+  take<T>(xs: T[], n: number): T[] { return xs.slice(0, n); },
+  drop<T>(xs: T[], n: number): T[] { return xs.slice(n); },
+  sort_by<T>(xs: T[], f: (x: T) => any): T[] { return [...xs].sort((a, b) => { const ka = f(a), kb = f(b); return ka < kb ? -1 : ka > kb ? 1 : 0; }); },
+  unique<T>(xs: T[]): T[] { const seen: T[] = []; return xs.filter(x => { if (seen.includes(x)) return false; seen.push(x); return true; }); },
 };
 const __map = {
   new_<K, V>(): Map<K, V> { return new Map(); },
@@ -231,6 +238,13 @@ const __list = {
   filter(xs, f) { return xs.filter(f); },
   find(xs, f) { return xs.find(f) ?? null; },
   fold(xs, init, f) { return xs.reduce(f, init); },
+  enumerate(xs) { return xs.map((x, i) => [i, x]); },
+  zip(a, b) { return a.slice(0, Math.min(a.length, b.length)).map((x, i) => [x, b[i]]); },
+  flatten(xss) { return xss.flat(); },
+  take(xs, n) { return xs.slice(0, n); },
+  drop(xs, n) { return xs.slice(n); },
+  sort_by(xs, f) { return [...xs].sort((a, b) => { const ka = f(a), kb = f(b); return ka < kb ? -1 : ka > kb ? 1 : 0; }); },
+  unique(xs) { const seen = []; return xs.filter(x => { if (seen.includes(x)) return false; seen.push(x); return true; }); },
 };
 const __map = {
   new_() { return new Map(); },

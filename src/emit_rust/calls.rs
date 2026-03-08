@@ -201,6 +201,16 @@ impl Emitter {
                             format!("({}).clone().into_iter().fold({}, |{}, {}| {{ {} }})", args_str[0], init, acc_typed, names[1], body)
                         }
                     }
+                    "enumerate" => format!("({}).clone().into_iter().enumerate().map(|(i, x)| (i as i64, x)).collect::<Vec<_>>()", args_str[0]),
+                    "zip" => format!("({}).clone().into_iter().zip(({}).clone().into_iter()).collect::<Vec<_>>()", args_str[0], args_str[1]),
+                    "flatten" => format!("({}).clone().into_iter().flatten().collect::<Vec<_>>()", args_str[0]),
+                    "take" => format!("({}).clone().into_iter().take({} as usize).collect::<Vec<_>>()", args_str[0], args_str[1]),
+                    "drop" => format!("({}).clone().into_iter().skip({} as usize).collect::<Vec<_>>()", args_str[0], args_str[1]),
+                    "sort_by" => {
+                        let (names, body) = self.inline_lambda(&args[1], 1);
+                        format!("{{ let mut v = ({}).to_vec(); v.sort_by(|__a, __b| {{ let {n} = __a.clone(); let __ka = {{ {body} }}; let {n} = __b.clone(); let __kb = {{ {body} }}; __ka.partial_cmp(&__kb).unwrap_or(std::cmp::Ordering::Equal) }}); v }}", args_str[0], n = names[0], body = body)
+                    }
+                    "unique" => format!("{{ let mut seen = Vec::new(); let mut out = Vec::new(); for x in ({}).iter() {{ if !seen.contains(x) {{ seen.push(x.clone()); out.push(x.clone()); }} }} out }}", args_str[0]),
                     _ => format!("/* list.{} */ todo!()", func),
                 }
             },

@@ -466,3 +466,101 @@ test "string UFCS is_digit?" {
   assert("5".is_digit?())
   assert(not "x".is_digit?())
 }
+
+// ============================================================
+// list.enumerate
+// ============================================================
+
+test "list.enumerate basic" {
+  let result = list.enumerate(["a", "b", "c"])
+  assert_eq(list.len(result), 3)
+}
+
+test "list.enumerate single" {
+  let result = list.enumerate(["x"])
+  assert_eq(list.len(result), 1)
+}
+
+// ============================================================
+// list.zip
+// ============================================================
+
+test "list.zip basic" {
+  let result = list.zip([1, 2, 3], [4, 5, 6])
+  assert_eq(list.len(result), 3)
+}
+
+test "list.zip different lengths" {
+  let result = list.zip([1, 2], [4, 5, 6])
+  assert_eq(list.len(result), 2)
+}
+
+// ============================================================
+// list.flatten
+// ============================================================
+
+test "list.flatten basic" {
+  assert_eq(list.flatten([[1, 2], [3], [4, 5]]), [1, 2, 3, 4, 5])
+}
+
+test "list.flatten empty inner" {
+  assert_eq(list.flatten([[1], [], [2]]), [1, 2])
+}
+
+// ============================================================
+// list.take / list.drop
+// ============================================================
+
+test "list.take basic" {
+  assert_eq(list.take([1, 2, 3, 4], 2), [1, 2])
+}
+
+test "list.take more than length" {
+  assert_eq(list.take([1, 2], 5), [1, 2])
+}
+
+test "list.drop basic" {
+  assert_eq(list.drop([1, 2, 3, 4], 2), [3, 4])
+}
+
+test "list.drop all" {
+  assert_eq(list.drop([1, 2], 5), [])
+}
+
+// ============================================================
+// list.sort_by
+// ============================================================
+
+test "list.sort_by string length" {
+  let result = list.sort_by(["bb", "a", "ccc"], fn(s) => string.len(s))
+  assert_eq(result, ["a", "bb", "ccc"])
+}
+
+// ============================================================
+// list.unique
+// ============================================================
+
+test "list.unique basic" {
+  assert_eq(list.unique([1, 2, 2, 3, 1]), [1, 2, 3])
+}
+
+test "list.unique preserves order" {
+  assert_eq(list.unique(["b", "a", "b", "c", "a"]), ["b", "a", "c"])
+}
+
+test "list.unique single" {
+  assert_eq(list.unique([1]), [1])
+}
+
+// ============================================================
+// UFCS for new list functions
+// ============================================================
+
+test "list UFCS take and drop" {
+  assert_eq([1, 2, 3, 4].take(2), [1, 2])
+  assert_eq([1, 2, 3, 4].drop(2), [3, 4])
+}
+
+test "list UFCS unique" {
+  assert_eq([1, 1, 2, 2, 3].unique(), [1, 2, 3])
+}

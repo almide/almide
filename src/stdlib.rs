@@ -29,7 +29,9 @@ pub fn resolve_ufcs_module(method: &str) -> Option<&'static str> {
 
         "get" | "get_or" | "sort" | "reverse"
         | "each" | "map" | "filter" | "find" | "fold"
-        | "any" | "all" | "len" => Some("list"),
+        | "any" | "all" | "len"
+        | "enumerate" | "zip" | "flatten" | "take" | "drop"
+        | "sort_by" | "unique" => Some("list"),
 
         "to_string" | "to_hex" => Some("int"),
 
@@ -99,6 +101,13 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         ("list", "fold") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("init"), Ty::Unknown), (s("f"), Ty::Fn { params: vec![Ty::Unknown, Ty::Unknown], ret: Box::new(Ty::Unknown) })], ret: Ty::Unknown, is_effect: false },
         ("list", "any") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Bool) })], ret: Ty::Bool, is_effect: false },
         ("list", "all") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Bool) })], ret: Ty::Bool, is_effect: false },
+        ("list", "enumerate") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "zip") => FnSig { params: vec![(s("a"), Ty::List(Box::new(Ty::Unknown))), (s("b"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "flatten") => FnSig { params: vec![(s("xss"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "take") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("n"), Ty::Int)], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "drop") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("n"), Ty::Int)], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "sort_by") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Unknown) })], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "unique") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
 
         // ── map ──
         ("map", "new") => FnSig { params: vec![], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)), is_effect: false },
