@@ -235,6 +235,12 @@ impl Lexer {
                 continue;
             }
 
+            // Raw string literal r"..."
+            if ch == 'r' && self.peek(1) == '"' {
+                self.read_raw_string();
+                continue;
+            }
+
             // Identifier or keyword (lowercase or _)
             if ch.is_ascii_lowercase() || ch == '_' {
                 // special case: _ alone is Underscore
@@ -389,6 +395,27 @@ impl Lexer {
         };
         self.tokens.push(Token {
             token_type,
+            value,
+            line: start_line,
+            col: start_col,
+        });
+    }
+
+    fn read_raw_string(&mut self) {
+        let start_line = self.line;
+        let start_col = self.col;
+        self.advance(); // skip 'r'
+        self.advance(); // skip '"'
+        let mut value = String::new();
+        while self.pos < self.chars.len() && self.chars[self.pos] != '"' {
+            value.push(self.chars[self.pos]);
+            self.advance();
+        }
+        if self.pos < self.chars.len() {
+            self.advance(); // skip closing "
+        }
+        self.tokens.push(Token {
+            token_type: TokenType::String,
             value,
             line: start_line,
             col: start_col,

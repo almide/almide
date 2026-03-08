@@ -7,9 +7,9 @@ import regex
 // ============================================================
 
 test "regex.match? finds digits" {
-  assert(regex.match?("\\d+", "abc123"))
-  assert(regex.match?("\\d+", "42"))
-  assert(not regex.match?("\\d+", "hello"))
+  assert(regex.match?(r"\d+", "abc123"))
+  assert(regex.match?(r"\d+", "42"))
+  assert(not regex.match?(r"\d+", "hello"))
 }
 
 test "regex.match? with character classes" {
@@ -30,16 +30,16 @@ test "regex.match? with dot and quantifiers" {
 // ============================================================
 
 test "regex.full_match? requires full string" {
-  assert(regex.full_match?("\\d+", "123"))
-  assert(not regex.full_match?("\\d+", "abc123"))
+  assert(regex.full_match?(r"\d+", "123"))
+  assert(not regex.full_match?(r"\d+", "abc123"))
   assert(regex.full_match?("[a-zA-Z_][a-zA-Z0-9_]*", "my_var_1"))
   assert(not regex.full_match?("[a-zA-Z_][a-zA-Z0-9_]*", "1bad"))
 }
 
 test "regex.full_match? integer validation" {
-  assert(regex.full_match?("-?\\d+", "42"))
-  assert(regex.full_match?("-?\\d+", "-7"))
-  assert(not regex.full_match?("-?\\d+", "abc"))
+  assert(regex.full_match?(r"-?\d+", "42"))
+  assert(regex.full_match?(r"-?\d+", "-7"))
+  assert(not regex.full_match?(r"-?\d+", "abc"))
 }
 
 // ============================================================
@@ -47,8 +47,8 @@ test "regex.full_match? integer validation" {
 // ============================================================
 
 test "regex.find returns first match" {
-  assert_eq(regex.find("\\d+", "abc123def456"), some("123"))
-  assert_eq(regex.find("\\d+", "hello"), none)
+  assert_eq(regex.find(r"\d+", "abc123def456"), some("123"))
+  assert_eq(regex.find(r"\d+", "hello"), none)
   assert_eq(regex.find("[a-z]+", "123abc456"), some("abc"))
 }
 
@@ -57,9 +57,9 @@ test "regex.find returns first match" {
 // ============================================================
 
 test "regex.find_all returns all matches" {
-  assert_eq(regex.find_all("\\d+", "a1b22c333"), ["1", "22", "333"])
+  assert_eq(regex.find_all(r"\d+", "a1b22c333"), ["1", "22", "333"])
   assert_eq(regex.find_all("[a-z]+", "1a2bb3ccc"), ["a", "bb", "ccc"])
-  assert_eq(regex.find_all("\\d+", "hello"), [])
+  assert_eq(regex.find_all(r"\d+", "hello"), [])
 }
 
 // ============================================================
@@ -67,8 +67,8 @@ test "regex.find_all returns all matches" {
 // ============================================================
 
 test "regex.replace replaces all" {
-  assert_eq(regex.replace("\\d+", "a1b2c3", "X"), "aXbXcX")
-  assert_eq(regex.replace("\\s+", "hello  world", " "), "hello world")
+  assert_eq(regex.replace(r"\d+", "a1b2c3", "X"), "aXbXcX")
+  assert_eq(regex.replace(r"\s+", "hello  world", " "), "hello world")
 }
 
 // ============================================================
@@ -76,7 +76,7 @@ test "regex.replace replaces all" {
 // ============================================================
 
 test "regex.replace_first replaces only first" {
-  assert_eq(regex.replace_first("\\d+", "a1b2c3", "X"), "aXb2c3")
+  assert_eq(regex.replace_first(r"\d+", "a1b2c3", "X"), "aXb2c3")
 }
 
 // ============================================================
@@ -85,7 +85,7 @@ test "regex.replace_first replaces only first" {
 
 test "regex.split by pattern" {
   assert_eq(regex.split("[,;]", "a,b;c"), ["a", "b", "c"])
-  assert_eq(regex.split("\\s+", "hello  world foo"), ["hello", "world", "foo"])
+  assert_eq(regex.split(r"\s+", "hello  world foo"), ["hello", "world", "foo"])
 }
 
 // ============================================================
@@ -93,9 +93,9 @@ test "regex.split by pattern" {
 // ============================================================
 
 test "regex.captures extracts groups" {
-  assert_eq(regex.captures("(\\w+)=(\\w+)", "key=val"), some(["key", "val"]))
-  assert_eq(regex.captures("(\\d+)-(\\d+)", "2024-01"), some(["2024", "01"]))
-  assert_eq(regex.captures("(\\w+)=(\\w+)", "!!!"), none)
+  assert_eq(regex.captures(r"(\w+)=(\w+)", "key=val"), some(["key", "val"]))
+  assert_eq(regex.captures(r"(\d+)-(\d+)", "2024-01"), some(["2024", "01"]))
+  assert_eq(regex.captures(r"(\w+)=(\w+)", "!!!"), none)
 }
 
 // ============================================================
@@ -113,10 +113,20 @@ test "regex.match? with alternation" {
 // ============================================================
 
 test "regex shorthand classes" {
-  assert(regex.match?("\\w+", "hello"))
-  assert(regex.match?("\\s", " "))
-  assert(not regex.match?("\\S", " "))
-  assert(regex.match?("\\D+", "abc"))
+  assert(regex.match?(r"\w+", "hello"))
+  assert(regex.match?(r"\s", " "))
+  assert(not regex.match?(r"\S", " "))
+  assert(regex.match?(r"\D+", "abc"))
+}
+
+// ============================================================
+// raw string literals
+// ============================================================
+
+test "raw strings preserve backslashes" {
+  assert_eq(r"\d+", "\\d+")
+  assert_eq(r"\n\t", "\\n\\t")
+  assert_eq(r"hello", "hello")
 }
 
 // ============================================================
@@ -124,8 +134,8 @@ test "regex shorthand classes" {
 // ============================================================
 
 test "regex validates section headers" {
-  assert(regex.full_match?("\\[([a-zA-Z_][a-zA-Z0-9_]*)\\]", "[server]"))
-  assert(regex.full_match?("\\[([a-zA-Z_][a-zA-Z0-9_]*)\\]", "[my_section_2]"))
-  assert(not regex.full_match?("\\[([a-zA-Z_][a-zA-Z0-9_]*)\\]", "[2bad]"))
-  assert(not regex.full_match?("\\[([a-zA-Z_][a-zA-Z0-9_]*)\\]", "server"))
+  assert(regex.full_match?(r"\[([a-zA-Z_][a-zA-Z0-9_]*)\]", "[server]"))
+  assert(regex.full_match?(r"\[([a-zA-Z_][a-zA-Z0-9_]*)\]", "[my_section_2]"))
+  assert(not regex.full_match?(r"\[([a-zA-Z_][a-zA-Z0-9_]*)\]", "[2bad]"))
+  assert(not regex.full_match?(r"\[([a-zA-Z_][a-zA-Z0-9_]*)\]", "server"))
 }
