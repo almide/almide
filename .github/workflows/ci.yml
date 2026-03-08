@@ -33,22 +33,28 @@ jobs:
       - name: Build almide
         run: cargo build --release
 
-      - name: Smoke test - parse and emit Rust
+      - name: Smoke test - emit targets
         run: |
           ./target/release/almide exercises/pangram/pangram.almd --target rust > /dev/null
           echo "Rust emit OK"
-
-      - name: Smoke test - parse and emit TypeScript
-        run: |
           ./target/release/almide exercises/pangram/pangram.almd --target ts > /dev/null
           echo "TypeScript emit OK"
-
-      - name: Smoke test - emit AST
-        run: |
+          ./target/release/almide exercises/pangram/pangram.almd --target js > /dev/null
+          echo "JavaScript emit OK"
           ./target/release/almide exercises/pangram/pangram.almd --emit-ast > /dev/null
           echo "AST emit OK"
 
-      - name: Smoke test - run exercise
+      - name: Run all exercises
         run: |
-          ./target/release/almide run exercises/pangram/pangram.almd
-          echo "Run OK"
+          failed=0
+          for almd in exercises/*/*.almd; do
+            name=$(basename "$(dirname "$almd")")
+            if ./target/release/almide run "$almd" > /dev/null 2>&1; then
+              echo "OK: $name"
+            else
+              echo "FAIL: $name"
+              ./target/release/almide run "$almd" 2>&1 | tail -10
+              failed=1
+            fi
+          done
+          exit $failed

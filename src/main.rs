@@ -49,13 +49,19 @@ fn cmd_run(file: &str, program_args: &[String]) {
 
     std::fs::write(&rs_path, &rs_code).unwrap();
 
-    let rustc = Command::new(&find_rustc())
-        .arg(&rs_path)
+    // Detect test-only files (no main function)
+    let is_test_only = !rs_code.contains("\nfn almide_main(") && !rs_code.contains("\nfn main(");
+
+    let mut rustc_cmd = Command::new(&find_rustc());
+    rustc_cmd.arg(&rs_path)
         .arg("-o")
         .arg(&bin_path)
         .arg("-C").arg("overflow-checks=no")
-        .arg("-C").arg("opt-level=1")
-        .output()
+        .arg("-C").arg("opt-level=1");
+    if is_test_only {
+        rustc_cmd.arg("--test");
+    }
+    let rustc = rustc_cmd.output()
         .unwrap_or_else(|e| { eprintln!("Failed to run rustc: {}", e); std::process::exit(1); });
 
     if !rustc.status.success() {
