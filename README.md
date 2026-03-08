@@ -8,15 +8,15 @@
 
 <p align="center">
   <a href="https://almide.github.io/playground/">Playground</a> ·
-  <a href="./SPEC.md">Specification</a> ·
+  <a href="./docs/SPEC.md">Specification</a> ·
   <a href="./docs/GRAMMAR.md">Grammar</a> ·
-  <a href="./CHEATSHEET.md">Cheatsheet</a> ·
+  <a href="./docs/CHEATSHEET.md">Cheatsheet</a> ·
   <a href="./docs/DESIGN.md">Design Philosophy</a>
 </p>
 
 <p align="center">
   <a href="https://github.com/almide/almide/actions/workflows/ci.yml"><img src="https://github.com/almide/almide/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-blue.svg" alt="License: MIT / Apache-2.0"></a>
 </p>
 
 ## What is Almide?
@@ -149,12 +149,12 @@ Almide compiles to Rust, then to native machine code. The generated binaries are
 
 ## Documentation
 
-- [ARCHITECTURE.md](./ARCHITECTURE.md) — Compiler pipeline, module map, design decisions
-- [SPEC.md](./SPEC.md) — Full language specification
+- [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — Compiler pipeline, module map, design decisions
+- [docs/SPEC.md](./docs/SPEC.md) — Full language specification
 - [docs/GRAMMAR.md](./docs/GRAMMAR.md) — EBNF grammar + stdlib reference
-- [CHEATSHEET.md](./CHEATSHEET.md) — Quick reference for AI code generation
+- [docs/CHEATSHEET.md](./docs/CHEATSHEET.md) — Quick reference for AI code generation
 - [docs/DESIGN.md](./docs/DESIGN.md) — Design philosophy and trade-offs
-- [roadmap/](./roadmap/) — Language evolution plans
+- [docs/ROADMAP.md](./docs/ROADMAP.md) — Language evolution plans
 
 ## Contributing
 
@@ -162,4 +162,4 @@ Contributions are welcome! Please open an issue or pull request on [GitHub](http
 
 ## License
 
-[MIT](./LICENSE)
+Licensed under either of [MIT](./LICENSE-MIT) or [Apache 2.0](./LICENSE-APACHE) at your option.
