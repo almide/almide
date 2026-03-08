@@ -6,6 +6,7 @@ mod emit_ts;
 mod lexer;
 mod parser;
 mod resolve;
+mod stdlib;
 mod types;
 
 use std::process::Command;

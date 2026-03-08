@@ -1,4 +1,5 @@
 use crate::ast::*;
+use crate::stdlib;
 
 struct Emitter {
     out: String,
@@ -724,23 +725,14 @@ impl Emitter {
     }
 
     fn resolve_ufcs_module(method: &str) -> Option<&'static str> {
-        match method {
-            "trim" | "split" | "join" | "pad_left" | "starts_with" | "starts_with_qm_"
-            | "ends_with_qm_" | "slice" | "to_bytes" | "contains" | "to_upper" | "to_lower"
-            | "to_int" | "replace" | "char_at" | "lines" => Some("string"),
-            "get" | "get_or" | "sort" | "reverse" | "each" | "map" | "filter" | "find" | "fold" | "any" | "all" => Some("list"),
-            "to_string" | "to_hex" => Some("int"),
-            "len" => Some("list"),
-            "keys" | "values" | "entries" => Some("map"),
-            _ => None,
-        }
+        stdlib::resolve_ufcs_module(method)
     }
 
     fn gen_call(&self, callee: &Expr, args: &[Expr]) -> String {
         // Handle module calls
         if let Expr::Member { object, field } = callee {
             if let Expr::Ident { name: module } = object.as_ref() {
-                let is_stdlib = matches!(module.as_str(), "string" | "list" | "int" | "float" | "fs" | "env" | "map");
+                let is_stdlib = stdlib::is_stdlib_module(module);
                 let is_user_module = self.user_modules.contains(module);
                 if is_stdlib || is_user_module {
                     return self.gen_module_call(module, field, args);
