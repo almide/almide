@@ -162,4 +162,4 @@ Contributions are welcome! Please open an issue or pull request on [GitHub](http
 
 ## License
 
-[MIT](./LICENSE)
+Licensed under either of [MIT](./LICENSE-MIT) or [Apache 2.0](./LICENSE-APACHE) at your option.
