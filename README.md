@@ -205,41 +205,51 @@ cp target/release/almide ~/.local/bin/
 ## Benchmark
 
 <p align="center">
-  <img src="./assets/benchmark.svg" alt="Benchmark: Almide vs Python" width="720">
+  <img src="./assets/benchmark_total_time.png" alt="Benchmark: Time for Claude Code to Generate a Mini-Git" width="720">
 </p>
 
-Tested with the [MiniGit benchmark](https://github.com/mizchi/ai-coding-lang-bench) — a task where Claude Code implements a mini version control system from a spec, with zero prior knowledge of the language.
+<p align="center">
+  <img src="./assets/benchmark_total_cost.png" alt="Benchmark: Cost for Claude Code to Generate a Mini-Git" width="720">
+</p>
 
-| Trial | Time | Turns | Tests | LOC |
-|-------|------|-------|-------|-----|
-| 1 | 187s | 7 | 11/11 | 118 |
-| 2 | 115s | 11 | 11/11 | 129 |
-| 3 | 131s | 6 | 11/11 | 113 |
-| 4 | 139s | 7 | 11/11 | 124 |
-| 5 | 135s | 6 | 11/11 | 112 |
+Tested with the [MiniGit benchmark](https://github.com/almide/benchmark) — a task where Claude Code implements a mini version control system from a spec (v1: basic commands, v2: advanced features), with 10 trials per language.
 
-**Pass rate: 5/5 (100%)** — The AI converges to correct code every time, given only a ~60-line EBNF grammar reference.
+### Results Summary (v1+v2 combined, 10 trials each)
 
-### Why It Works
+| Language | Total Time | Avg Cost | v1 Tests | v2 Tests | Avg LOC |
+|----------|-----------|----------|----------|----------|---------|
+| Ruby | 73.1s±4.2s | $0.36 | 20/20 | 20/20 | 107+219 |
+| Python | 74.6s±4.5s | $0.38 | 20/20 | 20/20 | 113+235 |
+| JavaScript | 81.1s±5.0s | $0.39 | 20/20 | 20/20 | 123+248 |
+| Go | 101.6s±37.0s | $0.50 | 20/20 | 20/20 | 143+324 |
+| Rust | 113.7s±54.8s | $0.54 | 19/20 | 19/20 | 139+303 |
+| Java | 115.4s±34.4s | $0.50 | 20/20 | 20/20 | 152+303 |
+| Python/mypy | 125.3s±19.0s | $0.57 | 20/20 | 20/20 | 171+326 |
+| OCaml | 128.1s±28.9s | $0.58 | 20/20 | 20/20 | 111+216 |
+| Perl | 130.2s±44.2s | $0.55 | 20/20 | 20/20 | 173+315 |
+| Scheme | 130.6s±39.9s | $0.60 | 20/20 | 20/20 | 171+310 |
+| TypeScript | 133.0s±29.4s | $0.62 | 20/20 | 20/20 | 149+310 |
+| Lua | 143.6s±43.0s | $0.58 | 20/20 | 20/20 | 226+398 |
+| C | 155.8s±40.9s | $0.74 | 20/20 | 20/20 | 276+517 |
+| Haskell | 174.0s±44.2s | $0.74 | 19/20 | 20/20 | 119+224 |
+| Ruby/Steep | 186.6s±69.7s | $0.84 | 20/20 | 20/20 | 150+304 |
 
-We hypothesize that Almide achieves 100% pass rate because:
+### Key Findings
 
-1. **No syntax ambiguity** — The LLM never has to choose between equivalent forms (one loop, one lambda, one error style)
-2. **Explicit error handling** — `Result[T, E]` makes the error path visible in every function signature, preventing silent failures
-3. **Diagnostics as repair guides** — When the LLM writes `!x` or `while`, the compiler tells it exactly what to write instead, closing the fix-loop in one turn
-4. **Local reasoning sufficiency** — Core modules auto-imported, no trait resolution, no overloading means the LLM can generate correct code from the function signature alone
-5. **60-line grammar reference** — The entire language fits in a single context window with room to spare, unlike languages where stdlib documentation alone exceeds the context limit
+1. **Dynamic languages are fastest** — Ruby, Python, JavaScript lead in speed and cost, likely due to abundant training data and no compilation overhead
+2. **Type systems add overhead** — Python/mypy vs Python (+68%), Ruby/Steep vs Ruby (+155%), TypeScript vs JavaScript (+64%) — the "type tax" is real
+3. **All languages achieve near-perfect pass rates** — Most hit 20/20 on both v1 and v2 tests
+4. **Cost correlates with time** — Faster languages use fewer tokens and cost less
+5. **LOC varies 2-5x** — C needs ~5x more lines than Ruby for the same task
 
-### Proliferation Potential
+### Why This Matters for Almide
 
-The 100% pass rate across all trials demonstrates Almide's core value proposition: **reliability breeds proliferation**.
+Almide targets the **TypeScript-to-Rust tier** (~100-150s) with key advantages:
 
-- AI generates correct Almide code consistently → generated code becomes training data
-- Constrained syntax means generated code is uniform → training signal is clean
-- New modules can be AI-generated with the same reliability → ecosystem grows organically
-- Fewer syntax choices = faster convergence = lower cost per generation
-
-The generation time gap vs established languages (Python ~40s, Almide ~140s) reflects zero training data, not language quality. Each successful generation adds to the corpus, narrowing this gap over time.
+- **Zero training data** — Unlike established languages with massive corpora, Almide has none. The time gap reflects data availability, not language quality
+- **100% test pass rate** in earlier 5-trial benchmarks — Almide's constrained syntax eliminates the ambiguity that causes failures
+- **Each successful generation adds to the corpus** — narrowing the gap over time
+- **Constrained syntax = clean training signal** — Generated code is uniform, making future training more effective
 
 ## License
 
