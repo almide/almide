@@ -1,5 +1,11 @@
 # Project Rules
 
+## Branch Strategy
+
+- **main** — protected. Never commit directly. Only accepts PRs from `develop`
+- **develop** — the working branch. All commits go here
+- Always confirm `git branch` before committing
+
 ## Git Commit Rules
 
 - Write commit messages in **English only**
