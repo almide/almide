@@ -8,9 +8,9 @@
 
 <p align="center">
   <a href="https://almide.github.io/playground/">Playground</a> ·
-  <a href="./SPEC.md">Specification</a> ·
+  <a href="./docs/SPEC.md">Specification</a> ·
   <a href="./docs/GRAMMAR.md">Grammar</a> ·
-  <a href="./CHEATSHEET.md">Cheatsheet</a> ·
+  <a href="./docs/CHEATSHEET.md">Cheatsheet</a> ·
   <a href="./docs/DESIGN.md">Design Philosophy</a>
 </p>
 
@@ -149,12 +149,12 @@ Almide compiles to Rust, then to native machine code. The generated binaries are
 
 ## Documentation
 
-- [ARCHITECTURE.md](./ARCHITECTURE.md) — Compiler pipeline, module map, design decisions
-- [SPEC.md](./SPEC.md) — Full language specification
+- [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — Compiler pipeline, module map, design decisions
+- [docs/SPEC.md](./docs/SPEC.md) — Full language specification
 - [docs/GRAMMAR.md](./docs/GRAMMAR.md) — EBNF grammar + stdlib reference
-- [CHEATSHEET.md](./CHEATSHEET.md) — Quick reference for AI code generation
+- [docs/CHEATSHEET.md](./docs/CHEATSHEET.md) — Quick reference for AI code generation
 - [docs/DESIGN.md](./docs/DESIGN.md) — Design philosophy and trade-offs
-- [roadmap/](./roadmap/) — Language evolution plans
+- [docs/ROADMAP.md](./docs/ROADMAP.md) — Language evolution plans
 
 ## Contributing
 

@@ -21,7 +21,7 @@ lefthook install
 
 Almide is a programming language (.almd files) compiled via a pure-Rust compiler with multi-target codegen.
 
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full compiler pipeline and module map.
+See [ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the full compiler pipeline and module map.
 
 ### Module Structure
 

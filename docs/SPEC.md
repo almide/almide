@@ -81,7 +81,7 @@ There is **no** null literal for missing values. Absence is represented by `none
 ### 1.4 Reserved Words
 
 ```
-module import type trait impl for fn let var
+import type trait impl for fn let var
 if then else match
 ok err some none
 try do
@@ -137,7 +137,7 @@ text
 ## 3. Syntactic Categories
 
 ```
-Program   ::= ModuleDecl ImportDecl* TopDecl*
+Program   ::= ImportDecl* TopDecl*
 
 TopDecl   ::= TypeDecl | TraitDecl | ImplDecl | FnDecl | TestDecl
 
@@ -169,14 +169,9 @@ Expr      ::= Literal
 
 ## 4. Modules and Imports
 
-### 4.1 Module Declaration
+Package identity is declared in `almide.toml` — no `module` declaration in source files.
 
-```
-ModuleDecl ::= "module" ModulePath
-ModulePath ::= Identifier ( "." Identifier )*
-```
-
-### 4.2 Import Declaration
+### 4.1 Import Declaration
 
 ```
 ImportDecl ::= "import" ImportPath
@@ -1275,7 +1270,6 @@ Not a style police, but a **generation stabilization device**.
 ## 22. Gradual Strictness
 
 ```
-module repo.index
 strict types      // make all type annotations required
 strict effects    // fully check effect propagation
 ```
@@ -1445,8 +1439,6 @@ return_type = R
 ## 25. Complete Example
 
 ```
-module repo.config
-
 import fs
 import json
 
@@ -1555,7 +1547,7 @@ Properties exhibited here:
 - Variance rules for generics
 - Default implementations for traits
 - Basic stream type
-- Module visibility control (`pub fn` / `fn`)
+- Variance rules for generics (already have `pub fn`, `mod fn`, `local fn`)
 
 ---
 

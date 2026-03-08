@@ -4,9 +4,7 @@ File extension: `.almd`
 
 ## File structure
 ```
-module <path.separated.by.dots>
 import <module>
-import <module>.{Name1, Name2}
 // declarations...
 ```
 
