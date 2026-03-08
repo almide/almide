@@ -134,6 +134,10 @@ impl Checker {
     }
 
     fn check_module_call(&mut self, module: &str, func: &str, arg_tys: &[Ty]) -> Ty {
+        // Track module usage for unused import detection
+        if stdlib::is_stdlib_module(module) || self.env.user_modules.contains(module) {
+            self.env.used_modules.insert(module.to_string());
+        }
         if let Some(sig) = stdlib::lookup_sig(module, func) {
             let min_params = stdlib::min_params(module, func).unwrap_or(sig.params.len());
             if arg_tys.len() < min_params || arg_tys.len() > sig.params.len() {

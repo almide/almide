@@ -67,6 +67,10 @@ pub struct TypeEnv {
     pub user_modules: std::collections::HashSet<std::string::String>,
     /// Whether we're inside a do block (for auto-unwrapping Result in let bindings)
     pub in_do_block: bool,
+    /// Track used variables (for unused variable warnings)
+    pub used_vars: std::collections::HashSet<std::string::String>,
+    /// Track used modules (for unused import warnings)
+    pub used_modules: std::collections::HashSet<std::string::String>,
 }
 
 impl Ty {
@@ -144,6 +148,8 @@ impl TypeEnv {
             constructors: std::collections::HashMap::new(),
             user_modules: std::collections::HashSet::new(),
             in_do_block: false,
+            used_vars: std::collections::HashSet::new(),
+            used_modules: std::collections::HashSet::new(),
         }
     }
 

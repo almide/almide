@@ -28,7 +28,6 @@ impl Diagnostic {
         }
     }
 
-    #[allow(dead_code)]
     pub fn warning(message: impl Into<String>, hint: impl Into<String>, context: impl Into<String>) -> Self {
         Diagnostic {
             level: Level::Warning,

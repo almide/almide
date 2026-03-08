@@ -134,7 +134,57 @@ impl Checker {
         for decl in &prog.decls {
             self.check_decl(decl);
         }
+
+        // Warn about unused imports
+        for imp in &prog.imports {
+            if let ast::Decl::Import { path, .. } = imp {
+                let mod_name = &path[0];
+                if !self.env.used_modules.contains(mod_name) {
+                    let line = self.find_import_line(mod_name);
+                    let mut d = Diagnostic::warning(
+                        format!("unused import '{}'", mod_name),
+                        format!("Remove 'import {}' if it is not needed", mod_name),
+                        format!("import {}", mod_name),
+                    );
+                    if let Some(ref file) = self.source_file {
+                        d.file = Some(file.clone());
+                    }
+                    d.line = line;
+                    self.diagnostics.push(d);
+                }
+            }
+        }
+
         self.diagnostics.clone()
+    }
+
+    pub(crate) fn warn_unused_vars_in_scope(&mut self, context: &str) {
+        let unused: Vec<String> = if let Some(scope) = self.env.scopes.last() {
+            scope.keys()
+                .filter(|v| !v.starts_with('_') && *v != "self" && !self.env.used_vars.contains(*v))
+                .cloned()
+                .collect()
+        } else {
+            vec![]
+        };
+        for var_name in unused {
+            self.push_diagnostic(Diagnostic::warning(
+                format!("unused variable '{}'", var_name),
+                format!("Prefix with '_' to suppress: _{}", var_name),
+                context.to_string(),
+            ));
+        }
+    }
+
+    fn find_import_line(&self, mod_name: &str) -> Option<usize> {
+        let source = self.source_text.as_ref()?;
+        let pattern = format!("import {}", mod_name);
+        for (i, line) in source.lines().enumerate() {
+            if line.trim() == pattern {
+                return Some(i + 1);
+            }
+        }
+        None
     }
 
     pub(crate) fn check_decl(&mut self, decl: &ast::Decl) {
@@ -142,9 +192,11 @@ impl Checker {
         match decl {
             ast::Decl::Fn { name, params, return_type, body, effect, .. } => {
                 self.env.push_scope();
+                let mut local_vars: Vec<String> = Vec::new();
                 for p in params {
                     let ty = self.resolve_type_expr(&p.ty);
                     self.env.define_var(&p.name, ty);
+                    local_vars.push(p.name.clone());
                 }
                 let ret_ty = self.resolve_type_expr(return_type);
                 let prev_ret = self.env.current_ret.take();
@@ -168,6 +220,8 @@ impl Checker {
                         format!("fn {}", name),
                     ));
                 }
+                // Warn about unused variables (skip _ prefixed)
+                self.warn_unused_vars_in_scope(&format!("fn {}", name));
                 self.env.current_ret = prev_ret;
                 self.env.in_effect = prev_effect;
                 self.env.pop_scope();

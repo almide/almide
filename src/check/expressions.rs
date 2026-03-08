@@ -24,7 +24,10 @@ impl Checker {
             ast::Expr::Err { expr: inner } => Ty::Result(Box::new(Ty::Unknown), Box::new(self.check_expr(inner))),
 
             ast::Expr::Ident { name } => {
-                if let Some(ty) = self.env.lookup_var(name) { return ty.clone(); }
+                if let Some(ty) = self.env.lookup_var(name).cloned() {
+                    self.env.used_vars.insert(name.clone());
+                    return ty;
+                }
                 if let Some(sig) = self.env.functions.get(name) {
                     return Ty::Fn { params: sig.params.iter().map(|(_, t)| t.clone()).collect(), ret: Box::new(sig.ret.clone()) };
                 }
@@ -127,6 +130,7 @@ impl Checker {
                 self.env.push_scope();
                 for s in stmts { self.check_stmt(s); }
                 let ty = expr.as_ref().map(|e| self.check_expr(e)).unwrap_or(Ty::Unit);
+                self.warn_unused_vars_in_scope("block");
                 self.env.pop_scope();
                 ty
             }
@@ -137,6 +141,7 @@ impl Checker {
                 self.env.in_do_block = true;
                 for s in stmts { self.check_stmt(s); }
                 let _ty = expr.as_ref().map(|e| self.check_expr(e)).unwrap_or(Ty::Unit);
+                self.warn_unused_vars_in_scope("do block");
                 self.env.in_do_block = prev_do;
                 self.env.pop_scope();
                 Ty::Unknown
@@ -196,6 +201,12 @@ impl Checker {
             ast::Expr::Call { callee, args } => self.check_call(callee, args),
 
             ast::Expr::Member { object, field } => {
+                // Track module usage for unused import detection
+                if let ast::Expr::Ident { name } = object.as_ref() {
+                    if crate::stdlib::is_stdlib_module(name) || self.env.user_modules.contains(name) {
+                        self.env.used_modules.insert(name.clone());
+                    }
+                }
                 let ot = self.check_expr(object);
                 self.check_member_access(&ot, field)
             }
