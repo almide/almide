@@ -184,7 +184,21 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, no_check: bool) {
     let program = parse_file(file);
     let source_text = std::fs::read_to_string(file).unwrap_or_default();
 
-    let resolved = resolve::resolve_imports(file, &program)
+    let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
+        if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
+            project::fetch_all_deps(&proj)
+                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); })
+                .into_iter()
+                .map(|fd| (fd.pkg_id, fd.source_dir))
+                .collect()
+        } else {
+            vec![]
+        }
+    } else {
+        vec![]
+    };
+
+    let resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
         .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
 
     if !no_check && !emit_ast {
