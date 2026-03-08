@@ -5,7 +5,7 @@
 use crate::types::{Ty, FnSig};
 
 /// All built-in stdlib module names.
-pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json"];
+pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "path"];
 
 /// Check if a module name is a stdlib module.
 pub fn is_stdlib_module(name: &str) -> bool {
@@ -131,6 +131,13 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         ("json", "null") => FnSig { params: vec![], ret: Ty::Named(s("Json")), is_effect: false },
         ("json", "array") => FnSig { params: vec![(s("items"), Ty::List(Box::new(Ty::Named(s("Json")))))], ret: Ty::Named(s("Json")), is_effect: false },
         ("json", "from_map") => FnSig { params: vec![(s("m"), Ty::Map(Box::new(Ty::String), Box::new(Ty::Named(s("Json")))))], ret: Ty::Named(s("Json")), is_effect: false },
+
+        // ── path ──
+        ("path", "join") => FnSig { params: vec![(s("base"), Ty::String), (s("child"), Ty::String)], ret: Ty::String, is_effect: false },
+        ("path", "dirname") => FnSig { params: vec![(s("p"), Ty::String)], ret: Ty::String, is_effect: false },
+        ("path", "basename") => FnSig { params: vec![(s("p"), Ty::String)], ret: Ty::String, is_effect: false },
+        ("path", "extension") => FnSig { params: vec![(s("p"), Ty::String)], ret: Ty::Option(Box::new(Ty::String)), is_effect: false },
+        ("path", "is_absolute?") => FnSig { params: vec![(s("p"), Ty::String)], ret: Ty::Bool, is_effect: false },
 
         // ── env ──
         ("env", "unix_timestamp") => FnSig { params: vec![], ret: Ty::Int, is_effect: true },

@@ -75,6 +75,13 @@ const __float = {
   sqrt(n: number): number { return Math.sqrt(n); },
   parse(s: string): number { const n = parseFloat(s); if (isNaN(n)) throw new Error("invalid float: " + s); return n; },
 };
+const __path = {
+  join(base: string, child: string): string { return base.replace(/\/+$/, "") + "/" + child; },
+  dirname(p: string): string { const i = p.lastIndexOf("/"); return i >= 0 ? p.substring(0, i) : "."; },
+  basename(p: string): string { const i = p.lastIndexOf("/"); return i >= 0 ? p.substring(i + 1) : p; },
+  extension(p: string): string | null { const b = __path.basename(p); const i = b.lastIndexOf("."); return i > 0 ? b.substring(i + 1) : null; },
+  is_absolute_qm_(p: string): boolean { return p.startsWith("/"); },
+};
 const __json = {
   parse(text: string): any { return JSON.parse(text); },
   stringify(j: any): string { return JSON.stringify(j); },
@@ -1077,6 +1084,7 @@ impl TsEmitter {
             "float" => "__float".to_string(),
             "map" => "__map".to_string(),
             "json" => "__json".to_string(),
+            "path" => "__path".to_string(),
             "env" => "__env".to_string(),
             other => other.to_string(),
         }

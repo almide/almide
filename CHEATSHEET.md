@@ -275,6 +275,12 @@ The runtime calls `main(args)` where `args` includes the program name at index 0
 ### map
 `map.new()` → empty `Map[K, V]`, `map.get(m, key)` → `Option[V]`, `map.get_or(m, key, default)` → `V`, `map.set(m, key, value)` → `Map[K, V]`, `map.contains(m, key)` → `Bool`, `map.remove(m, key)` → `Map[K, V]`, `map.keys(m)` → `List[K]` (sorted), `map.values(m)` → `List[V]`, `map.len(m)` → `Int`, `map.entries(m)` → `List[(K, V)]`, `map.from_list(xs, fn(x) => (k, v))` → `Map[K, V]`
 
+### json (requires `import json`)
+`json.parse(text)` → `Result[Json, String]`, `json.stringify(j)` → `String`, `json.get(j, key)` → `Option[Json]`, `json.get_string(j, key)` → `Option[String]`, `json.get_int(j, key)` → `Option[Int]`, `json.get_bool(j, key)` → `Option[Bool]`, `json.get_array(j, key)` → `Option[List[Json]]`, `json.keys(j)` → `List[String]`, `json.to_string(j)` → `Option[String]`, `json.to_int(j)` → `Option[Int]`, `json.from_string(s)`, `json.from_int(n)`, `json.from_bool(b)`, `json.null()`, `json.array(items)`, `json.from_map(m)`
+
+### path (auto-imported)
+`path.join(base, child)`, `path.dirname(p)`, `path.basename(p)`, `path.extension(p)` → `Option[String]`, `path.is_absolute?(p)` → `Bool`
+
 ### int
 `int.to_string(n)` — Int to decimal String, `int.to_hex(n)` — Int to hex String
 

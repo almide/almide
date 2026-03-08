@@ -37,6 +37,10 @@ list.get(xs,i)->Option  get_or(xs,i,default)->T  len(xs)->Int  sort(xs)  reverse
 list.any(xs,fn(x)=>b)  all(xs,fn(x)=>b)  map(xs,fn(x)=>e)  filter(xs,fn(x)=>b)  fold(xs,init,fn(a,x)=>e)
 map.new()->Map  get(m,k)->Option  get_or(m,k,default)->V  set(m,k,v)->Map  contains(m,k)->Bool
 map.remove(m,k)->Map  keys(m)->List  values(m)->List  len(m)->Int  entries(m)->List  from_list(xs,fn)
+json.parse(text)->Result[Json]  stringify(j)->String  get(j,k)->Option[Json]
+json.get_string(j,k)->Option  get_int(j,k)->Option  get_bool(j,k)->Option  get_array(j,k)->Option
+json.keys(j)->List  from_string(s)  from_int(n)  from_bool(b)  null()  array(xs)  from_map(m)
+path.join(base,child)  dirname(p)  basename(p)  extension(p)->Option  is_absolute?(p)->Bool
 int.to_string(n)  int.to_hex(n)
 env.unix_timestamp()->Int
 println(s)  (* no print, only println *)
@@ -44,7 +48,7 @@ println(s)  (* no print, only println *)
 
 ## Notes
 
-- `int`, `string`, `list`, `map`, and `env` are auto-imported — no `import` needed. Only `fs` requires explicit `import fs`.
+- `int`, `string`, `list`, `map`, `path`, and `env` are auto-imported — no `import` needed. `fs` and `json` require explicit import.
 - No `while`, `return`, `class`, `null`, `!` — use Almide alternatives
 - `for x in xs { ... }` for iterating lists; `do { guard ... }` for dynamic break conditions
 - `if` always requires `else`

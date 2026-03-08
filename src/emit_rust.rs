@@ -1196,6 +1196,14 @@ impl Emitter {
                 "from_map" => format!("JObject({})", args_str[0]),
                 _ => format!("/* json.{} */ todo!()", func),
             },
+            "path" => match func {
+                "join" => format!("{{ let p = std::path::Path::new(&*{}).join(&*{}); p.to_string_lossy().to_string() }}", args_str[0], args_str[1]),
+                "dirname" => format!("std::path::Path::new(&*{}).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default()", args_str[0]),
+                "basename" => format!("std::path::Path::new(&*{}).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default()", args_str[0]),
+                "extension" => format!("std::path::Path::new(&*{}).extension().map(|e| e.to_string_lossy().to_string())", args_str[0]),
+                "is_absolute?" | "is_absolute_qm_" => format!("std::path::Path::new(&*{}).is_absolute()", args_str[0]),
+                _ => format!("/* path.{} */ todo!()", func),
+            },
             _ => {
                 format!("{}::{}({})", module, func, args_str.join(", "))
             }
