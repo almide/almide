@@ -123,7 +123,7 @@ Tested with the [MiniGit benchmark](https://github.com/almide/benchmark) — Cla
 | Python | 74.6s | $0.38 | 40/40 |
 | TypeScript | 133.0s | $0.62 | 40/40 |
 | Rust | 113.7s | $0.54 | 38/40 |
-| **Almide** | **376.1s** | **$0.89** | **12/12** |
+| **Almide** | **206.3s** | **$0.59** | **88/88** |
 
 Almide's current speed gap reflects zero training data, not language quality. Each successful generation adds to the corpus, narrowing the gap over time. See [full results](https://github.com/almide/benchmark) for all 16 languages.
 
