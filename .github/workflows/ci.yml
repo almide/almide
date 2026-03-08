@@ -142,7 +142,12 @@ jobs:
           restore-keys: ubuntu-cargo-wasm-1.89.0-
 
       - name: Install wasmtime
-        uses: bytecodealliance/actions/install-wasmtime@v1
+        run: |
+          WASMTIME_VERSION=$(curl -s https://api.github.com/repos/bytecodealliance/wasmtime/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+          curl -LO "https://github.com/bytecodealliance/wasmtime/releases/download/${WASMTIME_VERSION}/wasmtime-${WASMTIME_VERSION}-x86_64-linux.tar.xz"
+          tar -xf wasmtime-*.tar.xz
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
 
       - name: Build almide
         run: cargo build --release
