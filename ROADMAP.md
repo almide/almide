@@ -77,8 +77,82 @@ import json                    // 外部依存 (almide.toml)
 - [x] `mod fn` を外部パッケージから呼んだとき checker 段階でエラー（`is_external` フラグで判定）
 - [x] エラーメッセージ: 「function 'xxx' is not accessible from module 'yyy'」
 
-### その他
+---
 
-- [ ] ユーザー定義ジェネリクス
-- [ ] trait / impl の実装
+## ユーザー定義ジェネリクス
+
+現状 `List[T]`, `Option[T]`, `Result[T, E]` 等はコンパイラ組み込みだが、ユーザーが独自のジェネリック型・関数を定義できない。
+
+### 構文案
+
+```almide
+// ジェネリック型
+type Stack[T] =
+  | Empty
+  | Push(T, Stack[T])
+
+// ジェネリック関数
+fn map[A, B](xs: List[A], f: fn(A) -> B) -> List[B] =
+  match xs {
+    [] => []
+    [head, ...tail] => [f(head)] ++ map(tail, f)
+  }
+
+fn identity[T](x: T) -> T = x
+```
+
+### 実装ステップ
+
+- [ ] パーサー: `fn name[T, U](...) -> ...` のジェネリックパラメータ解析（パース自体は `try_parse_generic_params` で部分対応済み）
+- [ ] 型チェッカー: 型変数の導入、型推論（単一化ベース）
+- [ ] Rust emitter: `fn name<T, U>(...) -> ...` に変換
+- [ ] TS emitter: `function name<T, U>(...): ...` に変換（JSモードでは型消去）
+
+### 設計判断
+
+- 型パラメータは `[T]` 記法（almide既存の `List[T]` と一貫）
+- 型推論を基本とし、呼び出し側で明示的な型引数は不要にしたい
+- 型制約は trait 実装後に `fn sort[T: Ord](xs: List[T])` のような形で導入
+
+---
+
+## trait / impl
+
+パーサーは対応済み（`trait` / `impl` 宣言をパースしてASTに格納）。checker と emitter が未実装。
+
+### 構文（パーサー対応済み）
+
+```almide
+trait Show {
+  fn show(self) -> String
+}
+
+impl Show for Color {
+  fn show(self) -> String = match self {
+    Red => "red"
+    Green => "green"
+    Blue => "blue"
+  }
+}
+```
+
+### 実装ステップ
+
+- [ ] checker: trait メソッドのシグネチャ登録、impl の型チェック
+- [ ] checker: impl が trait のメソッドを全て実装しているか検証
+- [ ] Rust emitter: `impl Trait for Type { ... }` をそのまま出力
+- [ ] TS emitter: trait を interface として出力、メソッド呼び出しをディスパッチ
+- [ ] `self` パラメータの扱い: UFCS（`show(color)` と `color.show()` 両方可能）
+
+### 設計メモ
+
+- Almide に class はない。trait + impl + パターンマッチが型の振る舞いを定義する方法
+- `self` は trait メソッドのレシーバ専用。class のインスタンス参照ではない
+- `import self.xxx` の `self` とは別の用途（文脈で区別可能: import 文 vs パラメータリスト）
+- deriving は既にパーサー対応済み（`type Color = ... deriving Show, Eq`）
+
+---
+
+## その他
+
 - [ ] パッケージレジストリ (将来検討)
