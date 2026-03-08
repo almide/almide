@@ -94,7 +94,7 @@ impl Parser {
             let tt = &self.current().token_type;
             match tt {
                 TokenType::EOF => break,
-                TokenType::Fn | TokenType::Effect | TokenType::Async | TokenType::Pub
+                TokenType::Fn | TokenType::Effect | TokenType::Async | TokenType::Pub | TokenType::Local
                 | TokenType::Type | TokenType::Trait | TokenType::Impl
                 | TokenType::Test | TokenType::Strict => {
                     // Check if this is at the start of a line (after newline)
@@ -106,7 +106,7 @@ impl Parser {
                     // After newline, check if next token starts a declaration
                     let next_tt = &self.current().token_type;
                     if matches!(next_tt,
-                        TokenType::Fn | TokenType::Effect | TokenType::Async | TokenType::Pub
+                        TokenType::Fn | TokenType::Effect | TokenType::Async | TokenType::Pub | TokenType::Local
                         | TokenType::Type | TokenType::Trait | TokenType::Impl
                         | TokenType::Test | TokenType::Strict | TokenType::EOF
                     ) {

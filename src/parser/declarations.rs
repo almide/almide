@@ -58,7 +58,11 @@ impl Parser {
         if self.check(TokenType::Impl) {
             return self.parse_impl_decl();
         }
-        if self.check(TokenType::Fn) || self.check(TokenType::Pub) || self.check(TokenType::Effect) || self.check(TokenType::Async) {
+        if self.check(TokenType::Fn) || self.check(TokenType::Pub) || self.check(TokenType::Effect) || self.check(TokenType::Async) || self.check(TokenType::Local) {
+            // local can precede both fn and type
+            if self.check(TokenType::Local) && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Type) {
+                return self.parse_type_decl();
+            }
             return self.parse_fn_decl();
         }
         if self.check(TokenType::Strict) {
@@ -83,6 +87,11 @@ impl Parser {
 
     fn parse_type_decl(&mut self) -> Result<Decl, String> {
         let span = self.current_span();
+        let mut local = false;
+        if self.check(TokenType::Local) {
+            self.advance();
+            local = true;
+        }
         self.expect(TokenType::Type)?;
         let name = self.expect_type_name()?;
         let _generics = self.try_parse_generic_params()?;
@@ -101,7 +110,7 @@ impl Parser {
             }
             deriving = Some(d);
         }
-        Ok(Decl::Type { name, ty, deriving, span: Some(span) })
+        Ok(Decl::Type { name, ty, deriving, local: if local { Some(true) } else { None }, span: Some(span) })
     }
 
     fn parse_trait_decl(&mut self) -> Result<Decl, String> {
@@ -197,6 +206,11 @@ impl Parser {
         if self.check(TokenType::Pub) {
             self.advance();
         }
+        let mut local = false;
+        if self.check(TokenType::Local) {
+            self.advance();
+            local = true;
+        }
         let mut async_ = false;
         if self.check(TokenType::Async) {
             self.advance();
@@ -269,6 +283,7 @@ impl Parser {
             name,
             r#async: if async_ { Some(true) } else { None },
             effect: if effect { Some(true) } else { None },
+            local: if local { Some(true) } else { None },
             params,
             return_type,
             body,

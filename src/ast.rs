@@ -236,11 +236,12 @@ pub struct Param {
 pub enum Decl {
     Module { path: Vec<String>, #[serde(skip)] span: Option<Span> },
     Import { path: Vec<String>, names: Option<Vec<String>>, #[serde(skip)] span: Option<Span> },
-    Type { name: String, #[serde(rename = "type")] ty: TypeExpr, deriving: Option<Vec<String>>, #[serde(skip)] span: Option<Span> },
+    Type { name: String, #[serde(rename = "type")] ty: TypeExpr, deriving: Option<Vec<String>>, #[serde(default)] local: Option<bool>, #[serde(skip)] span: Option<Span> },
     Fn {
         name: String,
         #[serde(default)] effect: Option<bool>,
         #[serde(default)] r#async: Option<bool>,
+        #[serde(default)] local: Option<bool>,
         params: Vec<Param>,
         #[serde(rename = "returnType")] return_type: TypeExpr,
         body: Expr,

@@ -73,7 +73,11 @@ impl Checker {
     fn register_decls(&mut self, decls: &[ast::Decl], prefix: Option<&str>) {
         for decl in decls {
             match decl {
-                ast::Decl::Fn { name, params, return_type, effect, r#async, .. } => {
+                ast::Decl::Fn { name, params, return_type, effect, r#async, local, .. } => {
+                    // Skip local functions when registering imported modules
+                    if prefix.is_some() && local.unwrap_or(false) {
+                        continue;
+                    }
                     let param_tys: Vec<(String, Ty)> = params.iter()
                         .map(|p| (p.name.clone(), self.resolve_type_expr(&p.ty)))
                         .collect();
@@ -88,7 +92,11 @@ impl Checker {
                     }
                     self.env.functions.insert(key, FnSig { params: param_tys, ret, is_effect });
                 }
-                ast::Decl::Type { name, ty, .. } => {
+                ast::Decl::Type { name, ty, local, .. } => {
+                    // Skip local types when registering imported modules
+                    if prefix.is_some() && local.unwrap_or(false) {
+                        continue;
+                    }
                     let mut resolved = self.resolve_type_expr(ty);
                     if prefix.is_none() {
                         if let Ty::Variant { name: ref mut vname, ref cases } = resolved {
