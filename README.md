@@ -8,6 +8,8 @@ Almide is a language for AI to write code directly and efficiently. The design g
 
 The core thesis: **if AI can write a language reliably, code proliferates → training data grows → AI writes it even better → modules multiply**. Almide is designed to start this flywheel.
 
+**[Try it in your browser →](https://almide.github.io/playground/)** — Write, compile, and run `.almd` code instantly via WebAssembly. No installation required.
+
 ## Key Design Principles
 
 - **Direct** — The right abstraction for each task, so AI writes intent, not workarounds
@@ -163,13 +165,6 @@ test "greet succeeds" {
 
 `.almd`
 
-## Playground
-
-Try Almide in your browser — no installation required:
-
-**[almide.github.io/playground](https://almide.github.io/playground/)**
-
-Write `.almd` code, compile to JavaScript via WebAssembly, and run it instantly. Includes AI code generation with Anthropic, OpenAI, and Gemini APIs.
 
 ## Documentation
 
