@@ -45,6 +45,7 @@ impl AlmideHttpResponse {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn to_bytes(&self, keep_alive: bool) -> Vec<u8> {
         let mut out = format!("HTTP/1.1 {} {}\r\n", self.status, self.status_text());
         out.push_str(&format!("Content-Length: {}\r\n", self.body.len()));
@@ -56,22 +57,38 @@ impl AlmideHttpResponse {
         out.push_str(&self.body);
         out.into_bytes()
     }
+
+    fn to_json(&self) -> String {
+        let mut headers_json = String::from("{");
+        let mut first = true;
+        for (k, v) in &self.headers {
+            if !first { headers_json.push(','); }
+            headers_json.push_str(&format!("\"{}\":\"{}\"", k, v));
+            first = false;
+        }
+        headers_json.push('}');
+        format!("{{\"status\":{},\"headers\":{},\"body\":{}}}", self.status, headers_json, almide_json_stringify(&JStr(self.body.clone())))
+    }
 }
 
+// =============================================
+// Native runtime (std::net, threads)
+// =============================================
+#[cfg(not(target_arch = "wasm32"))]
 fn almide_http_parse_request(stream: &mut std::net::TcpStream) -> Result<AlmideHttpRequest, String> {
     use std::io::Read;
-    // Read headers first (up to 8KB for headers)
     let mut header_buf = vec![0u8; 8192];
     let n = stream.read(&mut header_buf).map_err(|e| e.to_string())?;
     if n == 0 { return Err("empty request".into()); }
     let raw = String::from_utf8_lossy(&header_buf[..n]).to_string();
+    almide_http_parse_raw_request(&raw, Some((stream, &header_buf, n)))
+}
 
-    let mut lines = raw.split("\r\n");
-    let request_line = lines.next().ok_or("empty request")?;
+fn almide_http_parse_raw_request(raw: &str, stream_info: Option<(&mut std::net::TcpStream, &[u8], usize)>) -> Result<AlmideHttpRequest, String> {
+    let mut lines_iter = raw.split("\r\n");
+    let request_line = lines_iter.next().ok_or("empty request")?;
     let parts: Vec<&str> = request_line.splitn(3, ' ').collect();
-    if parts.len() < 2 {
-        return Err("invalid request line".into());
-    }
+    if parts.len() < 2 { return Err("invalid request line".into()); }
     let method = parts[0].to_string();
     let path = parts[1].to_string();
 
@@ -79,44 +96,44 @@ fn almide_http_parse_request(stream: &mut std::net::TcpStream) -> Result<AlmideH
     let mut header_end = false;
     let mut body_start_offset = 0;
     for line in raw.split("\r\n") {
-        if header_end {
-            break;
-        }
-        body_start_offset += line.len() + 2; // +2 for \r\n
+        if header_end { break; }
+        body_start_offset += line.len() + 2;
         if line.is_empty() {
             header_end = true;
         } else if let Some(pos) = line.find(':') {
-            let key = line[..pos].trim().to_string();
-            let val = line[pos+1..].trim().to_string();
-            headers.insert(key, val);
+            headers.insert(line[..pos].trim().to_string(), line[pos+1..].trim().to_string());
         }
     }
 
-    // Read body based on Content-Length
     let content_length: usize = headers.get("Content-Length")
         .or_else(|| headers.get("content-length"))
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
 
     let body = if content_length > 0 {
-        let already_read = n.saturating_sub(body_start_offset);
-        let mut body_bytes = Vec::new();
-        if body_start_offset < n {
-            body_bytes.extend_from_slice(&header_buf[body_start_offset..n]);
-        }
-        // Read remaining body if needed
-        let remaining = content_length.saturating_sub(already_read);
-        if remaining > 0 {
-            let mut rest = vec![0u8; remaining];
-            let mut total = 0;
-            while total < remaining {
-                let r = stream.read(&mut rest[total..]).map_err(|e| e.to_string())?;
-                if r == 0 { break; }
-                total += r;
+        if let Some((stream, header_buf, n)) = stream_info {
+            use std::io::Read;
+            let already_read = n.saturating_sub(body_start_offset);
+            let mut body_bytes = Vec::new();
+            if body_start_offset < n {
+                body_bytes.extend_from_slice(&header_buf[body_start_offset..n]);
             }
-            body_bytes.extend_from_slice(&rest[..total]);
+            let remaining = content_length.saturating_sub(already_read);
+            if remaining > 0 {
+                let mut rest = vec![0u8; remaining];
+                let mut total = 0;
+                while total < remaining {
+                    let r = stream.read(&mut rest[total..]).map_err(|e| e.to_string())?;
+                    if r == 0 { break; }
+                    total += r;
+                }
+                body_bytes.extend_from_slice(&rest[..total]);
+            }
+            String::from_utf8_lossy(&body_bytes[..content_length.min(body_bytes.len())]).to_string()
+        } else {
+            // No stream (WASM path) - body is already in raw after headers
+            raw[body_start_offset..].to_string()
         }
-        String::from_utf8_lossy(&body_bytes[..content_length.min(body_bytes.len())]).to_string()
     } else {
         String::new()
     };
@@ -124,6 +141,7 @@ fn almide_http_parse_request(stream: &mut std::net::TcpStream) -> Result<AlmideH
     Ok(AlmideHttpRequest { method, path, headers, body })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn almide_http_serve<F>(port: i64, handler: F) -> Result<(), String>
 where F: Fn(AlmideHttpRequest) -> Result<AlmideHttpResponse, String> + Send + Sync + 'static
 {
@@ -170,8 +188,96 @@ where F: Fn(AlmideHttpRequest) -> Result<AlmideHttpResponse, String> + Send + Sy
     Ok(())
 }
 
-// ---- HTTP Client ----
+// =============================================
+// WASM runtime (handler export)
+// =============================================
+#[cfg(target_arch = "wasm32")]
+use std::cell::RefCell;
 
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static WASM_HANDLER: RefCell<Option<Box<dyn Fn(AlmideHttpRequest) -> Result<AlmideHttpResponse, String>>>> = RefCell::new(None);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn almide_http_serve<F>(port: i64, handler: F) -> Result<(), String>
+where F: Fn(AlmideHttpRequest) -> Result<AlmideHttpResponse, String> + 'static
+{
+    let _ = port; // Port is ignored in WASM (host controls binding)
+    WASM_HANDLER.with(|h| {
+        *h.borrow_mut() = Some(Box::new(handler));
+    });
+    // In WASM, serve doesn't loop - the host calls handle() per request
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn almide_http_handle(req_ptr: *const u8, req_len: usize) -> u64 {
+    let req_json = unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(req_ptr, req_len)) };
+
+    // Parse request from JSON
+    let req = match almide_json_parse(req_json) {
+        Ok(json) => AlmideHttpRequest {
+            method: almide_json_get_string(&json, "method").unwrap_or_default(),
+            path: almide_json_get_string(&json, "path").unwrap_or_default(),
+            headers: {
+                let mut h = HashMap::new();
+                if let Some(JObject(m)) = almide_json_get(&json, "headers") {
+                    for (k, v) in m { if let JStr(s) = v { h.insert(k, s); } }
+                }
+                h
+            },
+            body: almide_json_get_string(&json, "body").unwrap_or_default(),
+        },
+        Err(_) => {
+            let resp = AlmideHttpResponse::new(400, "Bad Request".into());
+            let json = resp.to_json();
+            let ptr = json.as_ptr() as u64;
+            let len = json.len() as u64;
+            std::mem::forget(json);
+            return (ptr << 32) | len;
+        }
+    };
+
+    // Call handler
+    let resp = WASM_HANDLER.with(|h| {
+        let handler = h.borrow();
+        match handler.as_ref() {
+            Some(f) => match f(req) {
+                Ok(r) => r,
+                Err(e) => AlmideHttpResponse::new(500, format!("Internal Error: {}", e)),
+            },
+            None => AlmideHttpResponse::new(500, "No handler registered".into()),
+        }
+    });
+
+    let json = resp.to_json();
+    let ptr = json.as_ptr() as u64;
+    let len = json.len() as u64;
+    std::mem::forget(json);
+    (ptr << 32) | len
+}
+
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn almide_alloc(len: usize) -> *mut u8 {
+    let mut buf = Vec::with_capacity(len);
+    let ptr = buf.as_mut_ptr();
+    std::mem::forget(buf);
+    ptr
+}
+
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn almide_dealloc(ptr: *mut u8, len: usize) {
+    unsafe { drop(Vec::from_raw_parts(ptr, len, len)); }
+}
+
+// =============================================
+// HTTP Client
+// =============================================
+#[cfg(not(target_arch = "wasm32"))]
 fn almide_http_get(url: &str) -> Result<String, String> {
     if url.starts_with("https://") {
         return almide_https_curl(url, "GET", None);
@@ -181,6 +287,7 @@ fn almide_http_get(url: &str) -> Result<String, String> {
     almide_http_send(&host, port, &req)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn almide_http_post(url: &str, body: &str) -> Result<String, String> {
     if url.starts_with("https://") {
         return almide_https_curl(url, "POST", Some(body));
@@ -193,6 +300,7 @@ fn almide_http_post(url: &str, body: &str) -> Result<String, String> {
     almide_http_send(&host, port, &req)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn almide_https_curl(url: &str, method: &str, body: Option<&str>) -> Result<String, String> {
     let mut cmd = std::process::Command::new("curl");
     cmd.arg("-s").arg("-X").arg(method);
@@ -202,47 +310,66 @@ fn almide_https_curl(url: &str, method: &str, body: Option<&str>) -> Result<Stri
     cmd.arg(url);
     let output = cmd.output().map_err(|e| format!("curl not found: {}", e))?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        return Err(format!("HTTPS request failed: {}", stderr));
+        return Err(format!("HTTPS request failed: {}", String::from_utf8_lossy(&output.stderr)));
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn almide_http_parse_url(url: &str) -> Result<(String, u16, String), String> {
     let url = url.strip_prefix("http://").ok_or("Use http:// or https:// URLs")?;
-    let (host_port, path) = if let Some(pos) = url.find('/') {
-        (&url[..pos], &url[pos..])
-    } else {
-        (url, "/")
-    };
+    let (host_port, path) = if let Some(pos) = url.find('/') { (&url[..pos], &url[pos..]) } else { (url, "/") };
     let (host, port) = if let Some(pos) = host_port.find(':') {
-        let h = &host_port[..pos];
-        let p: u16 = host_port[pos+1..].parse().map_err(|_| "invalid port")?;
-        (h.to_string(), p)
+        (host_port[..pos].to_string(), host_port[pos+1..].parse().map_err(|_| "invalid port")?)
     } else {
         (host_port.to_string(), 80)
     };
     Ok((host, port, path.to_string()))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn almide_http_send(host: &str, port: u16, request: &str) -> Result<String, String> {
     use std::net::TcpStream;
     use std::io::{Read, Write};
-
-    let addr = format!("{}:{}", host, port);
-    let mut stream = TcpStream::connect(&addr).map_err(|e| format!("connect error: {}", e))?;
+    let mut stream = TcpStream::connect(format!("{}:{}", host, port)).map_err(|e| format!("connect error: {}", e))?;
     stream.write_all(request.as_bytes()).map_err(|e| format!("write error: {}", e))?;
-
     let mut response = Vec::new();
     stream.read_to_end(&mut response).map_err(|e| format!("read error: {}", e))?;
     let raw = String::from_utf8_lossy(&response).to_string();
+    if let Some(pos) = raw.find("\r\n\r\n") { Ok(raw[pos + 4..].to_string()) } else { Ok(raw) }
+}
 
-    // Extract body (after \r\n\r\n)
-    if let Some(pos) = raw.find("\r\n\r\n") {
-        Ok(raw[pos + 4..].to_string())
-    } else {
-        Ok(raw)
-    }
+// WASM HTTP client (host import)
+#[cfg(target_arch = "wasm32")]
+extern "C" {
+    fn host_http_fetch(url_ptr: *const u8, url_len: usize, method_ptr: *const u8, method_len: usize, body_ptr: *const u8, body_len: usize, resp_ptr: *mut *const u8, resp_len: *mut usize) -> i32;
+}
+
+#[cfg(target_arch = "wasm32")]
+fn almide_http_get(url: &str) -> Result<String, String> {
+    almide_wasm_fetch(url, "GET", "")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn almide_http_post(url: &str, body: &str) -> Result<String, String> {
+    almide_wasm_fetch(url, "POST", body)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn almide_wasm_fetch(url: &str, method: &str, body: &str) -> Result<String, String> {
+    let mut resp_ptr: *const u8 = std::ptr::null();
+    let mut resp_len: usize = 0;
+    let rc = unsafe {
+        host_http_fetch(
+            url.as_ptr(), url.len(),
+            method.as_ptr(), method.len(),
+            body.as_ptr(), body.len(),
+            &mut resp_ptr, &mut resp_len
+        )
+    };
+    if rc != 0 { return Err("fetch failed".into()); }
+    let bytes = unsafe { std::slice::from_raw_parts(resp_ptr, resp_len) };
+    Ok(String::from_utf8_lossy(bytes).to_string())
 }
 
 // ---- End HTTP Runtime ----

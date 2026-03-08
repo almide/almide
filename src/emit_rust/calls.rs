@@ -138,6 +138,14 @@ impl Emitter {
                 "replace" => format!("({}).replace(&*{}, &*{})", args_str[0], args_str[1], args_str[2]),
                 "char_at" => format!("({}).chars().nth({} as usize).map(|c| c.to_string())", args_str[0], args_str[1]),
                 "lines" => format!("({}).split('\\n').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect::<Vec<String>>()", args_str[0]),
+                "chars" => format!("({}).chars().map(|c| c.to_string()).collect::<Vec<String>>()", args_str[0]),
+                "index_of" => format!("({}).find(&*{}).map(|i| i as i64)", args_str[0], args_str[1]),
+                "repeat" => format!("({}).repeat({} as usize)", args_str[0], args_str[1]),
+                "from_bytes" => format!("{{ let __bytes: Vec<i64> = {}; String::from_utf8(__bytes.iter().map(|b| *b as u8).collect::<Vec<u8>>()).unwrap_or_default() }}", args_str[0]),
+                "is_digit?" | "is_digit_qm_" => format!("({}).chars().all(|c| c.is_ascii_digit()) && !({}).is_empty()", args_str[0], args_str[0]),
+                "is_alpha?" | "is_alpha_qm_" => format!("({}).chars().all(|c| c.is_ascii_alphabetic()) && !({}).is_empty()", args_str[0], args_str[0]),
+                "is_alphanumeric?" | "is_alphanumeric_qm_" => format!("({}).chars().all(|c| c.is_ascii_alphanumeric()) && !({}).is_empty()", args_str[0], args_str[0]),
+                "is_whitespace?" | "is_whitespace_qm_" => format!("({}).chars().all(|c| c.is_whitespace()) && !({}).is_empty()", args_str[0], args_str[0]),
                 _ => format!("/* string.{} */ todo!()", func),
             },
             "list" => {
@@ -275,7 +283,8 @@ impl Emitter {
             "http" => match func {
                 "serve" => {
                     let (names, body) = self.inline_lambda(&args[1], 1);
-                    format!("almide_http_serve({}, |{}| -> Result<AlmideHttpResponse, String> {{ Ok({{ {} }}) }})", args_str[0], names[0], body)
+                    // serve returns Result<(), String> which matches effect fn main's return type
+                    format!("{{ almide_http_serve({}, |{}| -> Result<AlmideHttpResponse, String> {{ Ok({{ {} }}) }})?; Ok(()) }}", args_str[0], names[0], body)
                 }
                 "response" => format!("AlmideHttpResponse::new({}, {}.to_string())", args_str[0], args_str[1]),
                 "json" => format!("AlmideHttpResponse::json({}, {}.to_string())", args_str[0], args_str[1]),
