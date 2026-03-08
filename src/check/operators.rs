@@ -1,5 +1,5 @@
 use crate::types::Ty;
-use super::{Checker, err, err_s};
+use super::{Checker, err};
 
 impl Checker {
     pub(crate) fn check_binary_op(&mut self, op: &str, left: &Ty, right: &Ty) -> Ty {
@@ -16,9 +16,9 @@ impl Checker {
                 else if (left.compatible(&Ty::Float) || left.compatible(&Ty::Int))
                     && (right.compatible(&Ty::Float) || right.compatible(&Ty::Int)) { Ty::Float }
                 else {
-                    self.diagnostics.push(err_s(
+                    self.diagnostics.push(err(
                         format!("operator '{}' requires numeric types but got {} and {}", op, left.display(), right.display()),
-                        "Use Int or Float values with arithmetic operators".into(),
+                        "Use Int or Float values with arithmetic operators",
                         format!("operator '{}'", op),
                     ));
                     Ty::Unknown
@@ -48,16 +48,16 @@ impl Checker {
             "==" | "!=" | "<" | ">" | "<=" | ">=" => Ty::Bool,
             "and" | "or" => {
                 if !left.compatible(&Ty::Bool) {
-                    self.diagnostics.push(err_s(
+                    self.diagnostics.push(err(
                         format!("'{}' requires Bool but left side is {}", op, left.display()),
-                        "Use Bool values with logical operators".into(),
+                        "Use Bool values with logical operators",
                         format!("operator '{}'", op),
                     ));
                 }
                 if !right.compatible(&Ty::Bool) {
-                    self.diagnostics.push(err_s(
+                    self.diagnostics.push(err(
                         format!("'{}' requires Bool but right side is {}", op, right.display()),
-                        "Use Bool values with logical operators".into(),
+                        "Use Bool values with logical operators",
                         format!("operator '{}'", op),
                     ));
                 }

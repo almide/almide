@@ -1,6 +1,6 @@
 use crate::ast;
 use crate::types::{Ty, VariantPayload};
-use super::{Checker, err, err_s};
+use super::{Checker, err};
 
 impl Checker {
     pub(crate) fn check_stmt(&mut self, stmt: &ast::Stmt) {
@@ -16,9 +16,9 @@ impl Checker {
                 let dt = if let Some(te) = ty {
                     let t = self.resolve_type_expr(te);
                     if !t.compatible(&vt) {
-                        self.diagnostics.push(err_s(
+                        self.diagnostics.push(err(
                             format!("cannot assign {} to variable '{}' of type {}", vt.display(), name, t.display()),
-                            "Change the type annotation or the value".into(),
+                            "Change the type annotation or the value",
                             format!("let {} = ...", name),
                         ));
                     }
@@ -31,9 +31,9 @@ impl Checker {
                 let dt = if let Some(te) = ty {
                     let t = self.resolve_type_expr(te);
                     if !t.compatible(&vt) {
-                        self.diagnostics.push(err_s(
+                        self.diagnostics.push(err(
                             format!("cannot assign {} to variable '{}' of type {}", vt.display(), name, t.display()),
-                            "Change the type annotation or the value".into(),
+                            "Change the type annotation or the value",
                             format!("var {} = ...", name),
                         ));
                     }
@@ -51,7 +51,7 @@ impl Checker {
                                 .map(|(_, t)| t.clone())
                                 .unwrap_or_else(|| {
                                     let avail = rec_fields.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ");
-                                    self.diagnostics.push(err_s(
+                                    self.diagnostics.push(err(
                                         format!("record has no field '{}'", fname),
                                         format!("Available fields: {}", avail),
                                         format!("let {{ {} }} = ...", fields.join(", ")),
@@ -63,9 +63,9 @@ impl Checker {
                     }
                     Ty::Unknown => { for f in fields { self.env.define_var(f, Ty::Unknown); } }
                     _ => {
-                        self.diagnostics.push(err_s(
+                        self.diagnostics.push(err(
                             format!("cannot destructure type {}", vt.display()),
-                            "Destructuring only works on record types".into(),
+                            "Destructuring only works on record types",
                             format!("let {{ {} }} = ...", fields.join(", ")),
                         ));
                         for f in fields { self.env.define_var(f, Ty::Unknown); }
@@ -76,9 +76,9 @@ impl Checker {
                 let vt = self.check_expr(value);
                 if let Some(var_ty) = self.env.lookup_var(name).cloned() {
                     if !var_ty.compatible(&vt) {
-                        self.diagnostics.push(err_s(
+                        self.diagnostics.push(err(
                             format!("cannot assign {} to variable '{}' of type {}", vt.display(), name, var_ty.display()),
-                            "Assignment must match the variable's declared type".into(),
+                            "Assignment must match the variable's declared type",
                             format!("{} = ...", name),
                         ));
                     }

@@ -1,6 +1,6 @@
 use crate::ast;
 use crate::types::Ty;
-use super::{Checker, err, err_s};
+use super::{Checker, err};
 
 impl Checker {
     pub(crate) fn check_expr(&mut self, expr: &ast::Expr) -> Ty {
@@ -150,9 +150,9 @@ impl Checker {
                     Ty::Map(k, _) => *k.clone(),
                     _ if matches!(it, Ty::Unknown) => Ty::Unknown,
                     _ => {
-                        self.diagnostics.push(err_s(
+                        self.diagnostics.push(err(
                             format!("cannot iterate over type {}", it.display()),
-                            "for...in requires a List or Map".into(),
+                            "for...in requires a List or Map",
                             format!("for {} in ...", var),
                         ));
                         Ty::Unknown

@@ -60,18 +60,10 @@ impl TsEmitter {
     }
 }
 
-pub fn emit(program: &Program) -> String {
-    emit_with_modules(program, &[])
-}
-
 pub fn emit_with_modules(program: &Program, modules: &[(String, Program)]) -> String {
     let mut emitter = TsEmitter::new();
     emitter.emit_program(program, modules);
     emitter.out
-}
-
-pub fn emit_js(program: &Program) -> String {
-    emit_js_with_modules(program, &[])
 }
 
 pub fn emit_js_with_modules(program: &Program, modules: &[(String, Program)]) -> String {

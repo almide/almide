@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::process::Command;
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Package {
     pub name: String,
     pub version: String,

@@ -16,12 +16,8 @@ pub struct Checker {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-pub(crate) fn err(msg: String, hint: &str, ctx: &str) -> Diagnostic {
+pub(crate) fn err(msg: impl Into<String>, hint: impl Into<String>, ctx: impl Into<String>) -> Diagnostic {
     Diagnostic::error(msg, hint, ctx)
-}
-
-pub(crate) fn err_s(msg: String, hint: String, ctx: String) -> Diagnostic {
-    Diagnostic::error_s(msg, hint, ctx)
 }
 
 impl Checker {
@@ -114,9 +110,9 @@ impl Checker {
                     ret_ty.clone()
                 };
                 if !body_ty.compatible(&effective_ret) && !body_ty.compatible(&ret_ty) {
-                    self.diagnostics.push(err_s(
+                    self.diagnostics.push(err(
                         format!("function '{}' declared to return {} but body has type {}", name, ret_ty.display(), body_ty.display()),
-                        "Change the return type or fix the body expression".into(),
+                        "Change the return type or fix the body expression",
                         format!("fn {}", name),
                     ));
                 }

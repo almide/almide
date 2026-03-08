@@ -15,30 +15,22 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
-    pub fn error(message: String, hint: &str, context: &str) -> Self {
+    pub fn error(message: impl Into<String>, hint: impl Into<String>, context: impl Into<String>) -> Self {
         Diagnostic {
             level: Level::Error,
-            message,
-            hint: hint.to_string(),
-            context: context.to_string(),
+            message: message.into(),
+            hint: hint.into(),
+            context: context.into(),
         }
     }
 
-    pub fn error_s(message: String, hint: String, context: String) -> Self {
-        Diagnostic {
-            level: Level::Error,
-            message,
-            hint,
-            context,
-        }
-    }
-
-    pub fn warning(message: String, hint: &str, context: &str) -> Self {
+    #[allow(dead_code)]
+    pub fn warning(message: impl Into<String>, hint: impl Into<String>, context: impl Into<String>) -> Self {
         Diagnostic {
             level: Level::Warning,
-            message,
-            hint: hint.to_string(),
-            context: context.to_string(),
+            message: message.into(),
+            hint: hint.into(),
+            context: context.into(),
         }
     }
 

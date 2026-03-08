@@ -208,22 +208,6 @@ impl Emitter {
         }
     }
 
-    pub(crate) fn expr_may_be_float(&self, expr: &Expr) -> bool {
-        match expr {
-            Expr::Float { .. } => true,
-            Expr::Paren { expr: inner } => self.expr_may_be_float(inner),
-            Expr::Binary { left, right, .. } => self.expr_may_be_float(left) || self.expr_may_be_float(right),
-            Expr::Call { callee, .. } => {
-                if let Expr::Ident { name } = callee.as_ref() {
-                    name.starts_with("float.")
-                } else {
-                    false
-                }
-            }
-            _ => false,
-        }
-    }
-
     pub(crate) fn is_pow2_64(&self, expr: &Expr) -> bool {
         match expr {
             Expr::Int { raw, .. } => raw == "18446744073709551616",
