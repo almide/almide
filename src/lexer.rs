@@ -88,6 +88,9 @@ pub enum TokenType {
     DotDotEq,
     DotDotDot,
 
+    // Annotations
+    At,
+
     // Special
     Comment,
     Newline,
@@ -737,6 +740,7 @@ impl Lexer {
             '|' => Some(TokenType::Pipe),
             '^' => Some(TokenType::Caret),
             '!' => Some(TokenType::Bang),
+            '@' => Some(TokenType::At),
             '_' => Some(TokenType::Underscore),
             _ => Option::None,
         };

@@ -100,7 +100,12 @@ fn format_decl(out: &mut String, decl: &Decl, depth: usize) {
                 }
             }
         }
-        Decl::Fn { name, effect, r#async, visibility, params, return_type, body, .. } => {
+        Decl::Fn { name, effect, r#async, visibility, params, return_type, body, extern_attrs, .. } => {
+            // Emit @extern annotations
+            for attr in extern_attrs {
+                out.push_str(&ind);
+                out.push_str(&format!("@extern({}, \"{}\", \"{}\")\n", attr.target, attr.module, attr.function));
+            }
             out.push_str(&ind);
             match visibility {
                 Visibility::Local => out.push_str("local "),
@@ -124,8 +129,10 @@ fn format_decl(out: &mut String, decl: &Decl, depth: usize) {
             }
             out.push_str(") -> ");
             format_type_expr(out, return_type, depth);
-            out.push_str(" = ");
-            format_expr(out, body, depth);
+            if let Some(body) = body {
+                out.push_str(" = ");
+                format_expr(out, body, depth);
+            }
         }
         Decl::Test { name, body, .. } => {
             out.push_str(&format!("{}test \"{}\" ", ind, name));

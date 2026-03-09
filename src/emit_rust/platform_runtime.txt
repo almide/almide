@@ -1,0 +1,202 @@
+// Almide platform runtime — fs, env, process, io, random
+// Functions extracted from inline codegen for @extern migration.
+
+// ---- fs ----
+
+fn almide_rt_fs_read_text(path: &str) -> Result<String, String> {
+    std::fs::read_to_string(path).map_err(|e| e.to_string())
+}
+
+fn almide_rt_fs_write(path: &str, content: &str) -> Result<(), String> {
+    std::fs::write(path, content).map_err(|e| e.to_string())
+}
+
+fn almide_rt_fs_write_bytes(path: &str, bytes: &[i64]) -> Result<(), String> {
+    let raw: Vec<u8> = bytes.iter().map(|b| *b as u8).collect();
+    std::fs::write(path, &raw).map_err(|e| e.to_string())
+}
+
+fn almide_rt_fs_read_bytes(path: &str) -> Result<Vec<i64>, String> {
+    let raw = std::fs::read(path).map_err(|e| e.to_string())?;
+    Ok(raw.into_iter().map(|b| b as i64).collect())
+}
+
+fn almide_rt_fs_exists(path: &str) -> bool {
+    std::path::Path::new(path).exists()
+}
+
+fn almide_rt_fs_mkdir_p(path: &str) -> Result<(), String> {
+    std::fs::create_dir_all(path).map_err(|e| e.to_string())
+}
+
+fn almide_rt_fs_append(path: &str, content: &str) -> Result<(), String> {
+    let prev = std::fs::read_to_string(path).unwrap_or_default();
+    std::fs::write(path, format!("{}{}", prev, content)).map_err(|e| e.to_string())
+}
+
+fn almide_rt_fs_read_lines(path: &str) -> Result<Vec<String>, String> {
+    let s = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    Ok(s.split('\n').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect())
+}
+
+fn almide_rt_fs_remove(path: &str) -> Result<(), String> {
+    std::fs::remove_file(path).map_err(|e| e.to_string())
+}
+
+fn almide_rt_fs_list_dir(path: &str) -> Result<Vec<String>, String> {
+    let mut v: Vec<String> = std::fs::read_dir(path)
+        .map_err(|e| e.to_string())?
+        .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().to_string()))
+        .collect();
+    v.sort();
+    Ok(v)
+}
+
+fn almide_rt_fs_is_dir(path: &str) -> bool {
+    std::path::Path::new(path).is_dir()
+}
+
+fn almide_rt_fs_is_file(path: &str) -> bool {
+    std::path::Path::new(path).is_file()
+}
+
+fn almide_rt_fs_copy(src: &str, dst: &str) -> Result<(), String> {
+    std::fs::copy(src, dst).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn almide_rt_fs_rename(src: &str, dst: &str) -> Result<(), String> {
+    std::fs::rename(src, dst).map_err(|e| e.to_string())
+}
+
+// ---- env ----
+
+fn almide_rt_env_unix_timestamp() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64
+}
+
+fn almide_rt_env_args() -> Vec<String> {
+    std::env::args().collect()
+}
+
+fn almide_rt_env_get(name: &str) -> Option<String> {
+    std::env::var(name).ok()
+}
+
+fn almide_rt_env_set(name: &str, value: &str) {
+    std::env::set_var(name, value);
+}
+
+fn almide_rt_env_cwd() -> Result<String, String> {
+    std::env::current_dir().map(|p| p.to_string_lossy().to_string()).map_err(|e| e.to_string())
+}
+
+fn almide_rt_env_millis() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64
+}
+
+fn almide_rt_env_sleep_ms(ms: i64) {
+    std::thread::sleep(std::time::Duration::from_millis(ms as u64));
+}
+
+// ---- process ----
+
+fn almide_rt_process_exec(cmd: &str, args: &[String]) -> Result<String, String> {
+    match std::process::Command::new(cmd).args(args).output() {
+        Ok(out) => {
+            if out.status.success() {
+                Ok(String::from_utf8_lossy(&out.stdout).to_string())
+            } else {
+                Err(String::from_utf8_lossy(&out.stderr).to_string())
+            }
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+fn almide_rt_process_exit(code: i64) {
+    std::process::exit(code as i32);
+}
+
+fn almide_rt_process_stdin_lines() -> Result<Vec<String>, String> {
+    use std::io::BufRead;
+    std::io::stdin().lock().lines().collect::<Result<Vec<String>, _>>().map_err(|e| e.to_string())
+}
+
+fn almide_rt_process_exec_status(cmd: &str, args: &[String]) -> Result<(i64, String, String), String> {
+    match std::process::Command::new(cmd).args(args).output() {
+        Ok(out) => Ok((
+            out.status.code().unwrap_or(-1) as i64,
+            String::from_utf8_lossy(&out.stdout).to_string(),
+            String::from_utf8_lossy(&out.stderr).to_string(),
+        )),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+// ---- io ----
+
+fn almide_rt_io_read_line() -> Result<String, String> {
+    use std::io::BufRead;
+    let mut buf = String::new();
+    std::io::stdin().lock().read_line(&mut buf).map_err(|e| e.to_string())?;
+    Ok(buf.trim_end_matches('\n').trim_end_matches('\r').to_string())
+}
+
+fn almide_rt_io_print(value: &str) -> Result<(), String> {
+    use std::io::Write;
+    print!("{}", value);
+    std::io::stdout().flush().map_err(|e| e.to_string())
+}
+
+fn almide_rt_io_read_all() -> Result<String, String> {
+    use std::io::Read;
+    let mut buf = String::new();
+    std::io::stdin().lock().read_to_string(&mut buf).map_err(|e| e.to_string())?;
+    Ok(buf)
+}
+
+// ---- random ----
+
+fn almide_rt_random_int(lo: i64, hi: i64) -> Result<i64, String> {
+    let range = (hi - lo + 1) as u64;
+    let mut buf = [0u8; 8];
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| { use std::io::Read; f.read_exact(&mut buf) })
+        .map_err(|e| e.to_string())?;
+    let r = u64::from_le_bytes(buf) % range;
+    Ok(lo + r as i64)
+}
+
+fn almide_rt_random_float() -> Result<f64, String> {
+    let mut buf = [0u8; 8];
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| { use std::io::Read; f.read_exact(&mut buf) })
+        .map_err(|e| e.to_string())?;
+    Ok((u64::from_le_bytes(buf) as f64) / (u64::MAX as f64))
+}
+
+fn almide_rt_random_choice<T: Clone>(xs: &[T]) -> Result<Option<T>, String> {
+    if xs.is_empty() {
+        return Ok(None);
+    }
+    let mut buf = [0u8; 8];
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| { use std::io::Read; f.read_exact(&mut buf) })
+        .map_err(|e| e.to_string())?;
+    Ok(Some(xs[(u64::from_le_bytes(buf) as usize) % xs.len()].clone()))
+}
+
+fn almide_rt_random_shuffle<T: Clone>(xs: Vec<T>) -> Result<Vec<T>, String> {
+    let mut v = xs;
+    let n = v.len();
+    for i in (1..n).rev() {
+        let mut buf = [0u8; 8];
+        std::fs::File::open("/dev/urandom")
+            .and_then(|mut f| { use std::io::Read; f.read_exact(&mut buf) })
+            .map_err(|e| e.to_string())?;
+        let j = (u64::from_le_bytes(buf) as usize) % (i + 1);
+        v.swap(i, j);
+    }
+    Ok(v)
+}

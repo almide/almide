@@ -84,8 +84,8 @@ impl TsEmitter {
                     self.gen_type_decl(name, ty)
                 }
             }
-            Decl::Fn { name, params, return_type, body, r#async, .. } => {
-                self.gen_fn_decl(name, params, return_type, body, r#async.unwrap_or(false))
+            Decl::Fn { name, params, return_type, body, r#async, extern_attrs, .. } => {
+                self.gen_fn_decl(name, params, return_type, body.as_ref(), r#async.unwrap_or(false), extern_attrs)
             }
             Decl::Trait { name, .. } => format!("// trait {}", name),
             Decl::Impl { trait_, for_, methods, .. } => {
@@ -205,7 +205,7 @@ impl TsEmitter {
         }
     }
 
-    fn gen_fn_decl(&self, name: &str, params: &[Param], ret_type: &TypeExpr, body: &Expr, is_async: bool) -> String {
+    fn gen_fn_decl(&self, name: &str, params: &[Param], ret_type: &TypeExpr, body: Option<&Expr>, is_async: bool, extern_attrs: &[ExternAttr]) -> String {
         let async_ = if is_async { "async " } else { "" };
         let sname = Self::sanitize(name);
         let params_str: Vec<String> = params.iter()
@@ -219,18 +219,32 @@ impl TsEmitter {
             })
             .collect();
         let ret_str = if self.js_mode { String::new() } else { format!(": {}", self.gen_type_expr(ret_type)) };
-        let body_str = self.gen_expr(body);
 
-        match body {
-            Expr::Block { .. } => {
-                format!("{}function {}({}){} {}", async_, sname, params_str.join(", "), ret_str, body_str)
+        // Check for @extern(ts, ...)
+        if let Some(ext) = extern_attrs.iter().find(|a| a.target == "ts") {
+            let args: Vec<String> = params.iter()
+                .filter(|p| p.name != "self")
+                .map(|p| Self::sanitize(&p.name))
+                .collect();
+            let call = format!("{}.{}({})", ext.module, ext.function, args.join(", "));
+            return format!("{}function {}({}){} {{\n  return {};\n}}", async_, sname, params_str.join(", "), ret_str, call);
+        }
+
+        if let Some(body) = body {
+            let body_str = self.gen_expr(body);
+            match body {
+                Expr::Block { .. } => {
+                    format!("{}function {}({}){} {}", async_, sname, params_str.join(", "), ret_str, body_str)
+                }
+                Expr::DoBlock { .. } => {
+                    format!("{}function {}({}){} {{\n{}\n}}", async_, sname, params_str.join(", "), ret_str, body_str)
+                }
+                _ => {
+                    format!("{}function {}({}){} {{\n  return {};\n}}", async_, sname, params_str.join(", "), ret_str, body_str)
+                }
             }
-            Expr::DoBlock { .. } => {
-                format!("{}function {}({}){} {{\n{}\n}}", async_, sname, params_str.join(", "), ret_str, body_str)
-            }
-            _ => {
-                format!("{}function {}({}){} {{\n  return {};\n}}", async_, sname, params_str.join(", "), ret_str, body_str)
-            }
+        } else {
+            format!("{}function {}({}){} {{\n  throw new Error(\"no body and no @extern for ts target\");\n}}", async_, sname, params_str.join(", "), ret_str)
         }
     }
 }

@@ -57,6 +57,11 @@ impl Parser {
     // ---- Top-level Declarations ----
 
     pub(crate) fn parse_top_decl(&mut self) -> Result<Decl, String> {
+        // Collect @extern annotations
+        if self.check(TokenType::At) {
+            let extern_attrs = self.collect_extern_attrs()?;
+            return self.parse_fn_decl_with_attrs(extern_attrs);
+        }
         if self.check(TokenType::Type) {
             return self.parse_type_decl();
         }
@@ -91,6 +96,52 @@ impl Parser {
             "Expected top-level declaration (fn, effect fn, type, trait, impl, test) at line {}:{} (got {:?} '{}'){}",
             tok.line, tok.col, tok.token_type, tok.value, hint
         ))
+    }
+
+    fn collect_extern_attrs(&mut self) -> Result<Vec<ExternAttr>, String> {
+        let mut attrs = Vec::new();
+        while self.check(TokenType::At) {
+            self.advance(); // skip @
+            if !self.check_ident("extern") {
+                let tok = self.current();
+                return Err(format!("Expected 'extern' after '@' at line {}:{}", tok.line, tok.col));
+            }
+            self.advance(); // skip "extern"
+            self.expect(TokenType::LParen)?;
+            let target = self.expect_ident()?;
+            self.expect(TokenType::Comma)?;
+            let module = {
+                let tok = self.current();
+                if tok.token_type != TokenType::String {
+                    return Err(format!("Expected string literal for extern module at line {}:{}", tok.line, tok.col));
+                }
+                let val = tok.value.clone();
+                self.advance();
+                val
+            };
+            self.expect(TokenType::Comma)?;
+            let function = {
+                let tok = self.current();
+                if tok.token_type != TokenType::String {
+                    return Err(format!("Expected string literal for extern function at line {}:{}", tok.line, tok.col));
+                }
+                let val = tok.value.clone();
+                self.advance();
+                val
+            };
+            self.expect(TokenType::RParen)?;
+            attrs.push(ExternAttr { target, module, function });
+            self.skip_newlines();
+        }
+        Ok(attrs)
+    }
+
+    fn parse_fn_decl_with_attrs(&mut self, extern_attrs: Vec<ExternAttr>) -> Result<Decl, String> {
+        let mut decl = self.parse_fn_decl()?;
+        if let Decl::Fn { extern_attrs: ref mut attrs, .. } = decl {
+            *attrs = extern_attrs;
+        }
+        Ok(decl)
     }
 
     fn parse_type_decl(&mut self) -> Result<Decl, String> {
@@ -229,61 +280,70 @@ impl Parser {
         self.expect(TokenType::RParen)?;
         self.expect(TokenType::Arrow)?;
         let return_type = self.parse_type_expr()?;
-        self.expect(TokenType::Eq)?;
-        self.skip_newlines();
-        let mut body = self.parse_expr()?;
 
-        let returns_result = matches!(&return_type,
-            TypeExpr::Generic { name, .. } if name == "Result"
-        );
-        if effect && returns_result {
-            if let Expr::Block { ref stmts, ref expr, .. } = body {
-                let (effective_stmts, effective_expr) = if expr.is_none() && !stmts.is_empty() {
-                    // Find last non-comment stmt
-                    let last_non_comment = stmts.iter().rposition(|s| !matches!(s, Stmt::Comment { .. }));
-                    if let Some(idx) = last_non_comment {
-                        if let Stmt::Expr { expr: last_expr, .. } = &stmts[idx] {
-                            let mut remaining = stmts[..idx].to_vec();
-                            remaining.extend_from_slice(&stmts[idx+1..]);
-                            (remaining, Some(Box::new(last_expr.clone())))
+        // Body is optional — @extern-only functions have no `= expr`
+        let body = if self.check(TokenType::Eq) {
+            self.advance();
+            self.skip_newlines();
+            let mut body = self.parse_expr()?;
+
+            let returns_result = matches!(&return_type,
+                TypeExpr::Generic { name, .. } if name == "Result"
+            );
+            if effect && returns_result {
+                if let Expr::Block { ref stmts, ref expr, .. } = body {
+                    let (effective_stmts, effective_expr) = if expr.is_none() && !stmts.is_empty() {
+                        // Find last non-comment stmt
+                        let last_non_comment = stmts.iter().rposition(|s| !matches!(s, Stmt::Comment { .. }));
+                        if let Some(idx) = last_non_comment {
+                            if let Stmt::Expr { expr: last_expr, .. } = &stmts[idx] {
+                                let mut remaining = stmts[..idx].to_vec();
+                                remaining.extend_from_slice(&stmts[idx+1..]);
+                                (remaining, Some(Box::new(last_expr.clone())))
+                            } else {
+                                (stmts.clone(), None)
+                            }
                         } else {
                             (stmts.clone(), None)
                         }
                     } else {
-                        (stmts.clone(), None)
-                    }
-                } else {
-                    (stmts.clone(), expr.clone())
-                };
-                let needs_ok = match &effective_expr {
-                    None => true,
-                    Some(e) => matches!(e.as_ref(), Expr::Unit { .. }),
-                };
-                if needs_ok {
-                    let mut new_stmts = effective_stmts;
-                    if let Some(trailing) = effective_expr {
-                        new_stmts.push(Stmt::Expr { expr: *trailing, span: None });
-                    }
-                    body = Expr::Block {
-                        stmts: new_stmts,
-                        expr: Some(Box::new(Expr::Ok { expr: Box::new(Expr::Unit { span: None, resolved_type: None }), span: None, resolved_type: None })),
-                        span: None, resolved_type: None,
+                        (stmts.clone(), expr.clone())
                     };
-                } else if expr.is_none() {
-                    body = Expr::Block {
-                        stmts: effective_stmts,
-                        expr: effective_expr,
-                        span: None, resolved_type: None,
+                    let needs_ok = match &effective_expr {
+                        None => true,
+                        Some(e) => matches!(e.as_ref(), Expr::Unit { .. }),
                     };
+                    if needs_ok {
+                        let mut new_stmts = effective_stmts;
+                        if let Some(trailing) = effective_expr {
+                            new_stmts.push(Stmt::Expr { expr: *trailing, span: None });
+                        }
+                        body = Expr::Block {
+                            stmts: new_stmts,
+                            expr: Some(Box::new(Expr::Ok { expr: Box::new(Expr::Unit { span: None, resolved_type: None }), span: None, resolved_type: None })),
+                            span: None, resolved_type: None,
+                        };
+                    } else if expr.is_none() {
+                        body = Expr::Block {
+                            stmts: effective_stmts,
+                            expr: effective_expr,
+                            span: None, resolved_type: None,
+                        };
+                    }
                 }
             }
-        }
+
+            Some(body)
+        } else {
+            None
+        };
 
         Ok(Decl::Fn {
             name,
             r#async: if async_ { Some(true) } else { None },
             effect: if effect { Some(true) } else { None },
             visibility,
+            extern_attrs: Vec::new(),
             params,
             return_type,
             body,
