@@ -156,10 +156,6 @@ parser.parse(...)            // OK
 - [ ] Deprecation warning for `module` declarations
 - [ ] Deprecation warning for `lib.almd` as package entry (suggest rename to `mod.almd`)
 
-### Test Repository
-
-- https://github.com/almide/mod-sample — for verifying visibility + self import behavior
-
 ---
 
 ## User-Defined Generics
@@ -565,7 +561,7 @@ fn len(s: String) -> Int = string.len(s)
 
 ## Stdlib Self-Hosting
 
-Currently all stdlib functions are hardcoded in the compiler (`stdlib.rs` for type signatures, `emit_rust/calls.rs` for Rust codegen). This doesn't scale — every new function requires compiler changes. The goal: **Almide writes its own stdlib in Almide**, achieving automatic multi-target support.
+As of v0.2.1, all stdlib functions have been extracted from inline codegen to separated runtime files (see [Stdlib runtime extraction](#stdlib-runtime-extraction-completed-in-v021)). Type signatures remain in `stdlib.rs` and dispatch logic in `calls.rs`. The next goal: **Almide writes its own stdlib in Almide**, achieving automatic multi-target support with zero compiler changes.
 
 ### Why self-hosting matters
 
@@ -581,14 +577,14 @@ Almideの設計原則は「同じコードが複数ターゲットに出力さ�
 ```
 ┌──────────────────────────────────────────────┐
 │  Upper layer: Almide stdlib packages          │  ← .almd files, written in Almide
-│  string.reverse, list.flat_map, args.parse,   │     自動的にRust/TS両方で動く
+│  path.join, time.year, args.parse,            │     runs on both Rust/TS targets
 │  hash.sha256, encoding.base64, csv.parse ...  │
 └──────────────┬───────────────────────────────┘
                │ calls
 ┌──────────────▼───────────────────────────────┐
-│  Lower layer: compiler primitives             │  ← hardcoded in calls.rs (20-30 functions)
+│  Lower layer: runtime functions               │  ← *_runtime.txt files + calls.rs dispatch
 │  fs.read_text, process.exec, string.len,      │     OS syscalls, data structure internals
-│  list.get, map.set, int.to_string ...         │
+│  list.get, map.set, int.to_string ...         │     TS: __almd_<module> objects
 └──────────────────────────────────────────────┘
 ```
 
@@ -773,51 +769,35 @@ Phase 6 で追加予定の派生関数は、コンパイラに追加せず `.alm
 
 #### Strategy summary
 
-| 分類 | 方針 |
-|------|------|
-| **既存の string/list/map/int/float** | Rust のまま維持。既に両ターゲットで動作 |
-| **既存の fs/process/io/env/json/regex/random/http** | Rust のまま維持。OS/crate依存 |
-| **path** | ✅ `.almd` に移行済み |
-| **time decomposition** | ✅ `.almd` に移行済み（now/millis/sleep は env 経由で残留） |
-| **新規モジュール** | `.almd` で作成（コンパイラ変更ゼロ） |
-| **既存モジュールへの新規関数追加** | ハイブリッドresolver 実装後に `.almd` で追加 |
-| **合計** | **157** | **60** | **99** | **38% を .almd に移行可能** |
+| Category | Approach |
+|----------|----------|
+| **Core modules** (string/list/map/int/float/math) | ✅ Extracted to runtime files (`core_runtime.txt`, `collection_runtime.txt`). Both targets supported |
+| **Platform modules** (fs/process/io/env/random) | ✅ Extracted to `platform_runtime.txt`. OS-dependent |
+| **Existing runtime modules** (json/http/regex/time) | ✅ Already in separate runtime files |
+| **path** | ✅ Migrated to `.almd` |
+| **time decomposition** | ✅ Migrated to `.almd` (now/millis/sleep remain via env primitives) |
+| **New modules** | Create as `.almd` files (zero compiler changes) |
+| **New functions for existing modules** | Add runtime function + dispatch entry in `calls.rs` |
 
-### Phase 3: `extern` — Last Resort FFI
+### Phase 3: `@extern` FFI ✅ Implemented (v0.2.1)
 
-For cases where pure Almide is impractical (performance-critical inner loops, OS-specific APIs), `extern` provides target-specific escape hatches.
+`@extern(target, "module", "function")` provides target-specific implementation references. See [Extern / FFI Design](#extern--ffi-design--implemented-in-v021) for details.
 
-```almide
-extern "rust" {
-  fn fast_sha256(data: List[Int]) -> String
-}
-extern "ts" {
-  fn fast_sha256(data: List[Int]) -> String
-}
-```
-
-This is intentionally the **last phase** — if Almide's own language features are sufficient, extern is rarely needed. It exists for:
+Use cases:
 - Performance-critical code where pure Almide is too slow
 - Platform-specific APIs (WASM, native GUI, etc.)
 - Wrapping existing ecosystem libraries
 
-#### Implementation Steps (when needed)
-
-- [ ] Lexer: add `Extern` token
-- [ ] Parser: parse `extern "target" { fn name(params) -> ret }` declarations
-- [ ] AST: add `Decl::Extern` variant
-- [ ] Checker: register extern fn signatures
-- [ ] Emitter: emit target-specific function stubs
-
 ### Priority Order
 
-| Phase | What | Difficulty | Impact | Enables |
-|-------|------|-----------|--------|---------|
-| **0a.** Bitwise operators | `int.band/bor/bxor/bshl/bshr/bnot` | Low | High | hash, encoding, binary protocols |
-| **0b.** Wrapping arithmetic | `int.wrap_add/wrap_mul/rotate_right/left` | Low | High | SHA-256, SHA-1 in pure Almide |
-| **1.** Stdlib package mechanism | resolver + bundled .almd | Medium | High | args, term, csv, hash, encoding |
-| **2.** Migrate existing stdlib | move pure functions to .almd | Low | Medium | shrinks calls.rs |
-| **3.** `extern` FFI | target-specific escape hatch | Medium-High | Low (rarely needed) | platform-specific APIs |
+| Phase | What | Status | Enables |
+|-------|------|--------|---------|
+| **0a.** Bitwise operators | `int.band/bor/bxor/bshl/bshr/bnot` | ✅ Done | hash, encoding, binary protocols |
+| **0b.** Wrapping arithmetic | `int.wrap_add/wrap_mul/rotate_right/left` | ✅ Done | SHA-256, SHA-1 in pure Almide |
+| **1.** Stdlib package mechanism | resolver + bundled .almd | ✅ Done | args, term, csv, hash, encoding |
+| **2a.** Runtime extraction | all stdlib → runtime files | ✅ Done (v0.2.1) | clean codegen separation |
+| **2b.** Migrate more stdlib to .almd | move pure functions to .almd | Next | shrinks calls.rs further |
+| **3.** `@extern` FFI | target-specific escape hatch | ✅ Done (v0.2.1) | platform-specific APIs |
 
 ### CLI Stdlib Gaps (to be filled via self-hosting)
 
@@ -831,7 +811,7 @@ This is intentionally the **last phase** — if Almide's own language features a
 | `term` | `color`, `bold`, `dim`, `is_tty?`, `width` | No | MEDIUM |
 | `csv` | `parse`, `parse_with_header`, `stringify` | No | MEDIUM |
 
-#### Via compiler primitives (small additions to calls.rs — both targets)
+#### Via runtime additions (runtime file + dispatch entry in calls.rs — both targets)
 
 | Module | Functions | Priority |
 |--------|-----------|----------|
