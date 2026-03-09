@@ -34,15 +34,15 @@ pub fn is_any_stdlib(name: &str) -> bool {
 pub fn resolve_ufcs_module(method: &str) -> Option<&'static str> {
     match method {
         "trim" | "split" | "join" | "pad_left"
-        | "starts_with" | "starts_with_qm_" | "starts_with?"
-        | "ends_with" | "ends_with_qm_" | "ends_with?"
+        | "starts_with" | "starts_with_hdlm_qm_" | "starts_with?"
+        | "ends_with" | "ends_with_hdlm_qm_" | "ends_with?"
         | "slice" | "to_bytes" | "contains" | "to_upper" | "to_lower"
         | "to_int" | "replace" | "char_at" | "lines"
         | "chars" | "index_of" | "repeat" | "from_bytes"
-        | "is_digit?" | "is_digit_qm_"
-        | "is_alpha?" | "is_alpha_qm_"
-        | "is_alphanumeric?" | "is_alphanumeric_qm_"
-        | "is_whitespace?" | "is_whitespace_qm_"
+        | "is_digit?" | "is_digit_hdlm_qm_"
+        | "is_alpha?" | "is_alpha_hdlm_qm_"
+        | "is_alphanumeric?" | "is_alphanumeric_hdlm_qm_"
+        | "is_whitespace?" | "is_whitespace_hdlm_qm_"
         | "pad_right" | "trim_start" | "trim_end" | "count"
         | "strip_prefix" | "strip_suffix" => Some("string"),
 

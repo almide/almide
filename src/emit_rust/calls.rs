@@ -193,14 +193,14 @@ impl Emitter {
                 "write" => format!("std::fs::write(&*{}, &*{}).map_err(AlmideIoError::from)?", args_str[0], args_str[1]),
                 "write_bytes" => format!("std::fs::write(&*{}, &{}).map_err(AlmideIoError::from)?", args_str[0], args_str[1]),
                 "read_bytes" => format!("std::fs::read(&*{}).map_err(AlmideIoError::from)?", args_str[0]),
-                "exists?" | "exists_qm_" => format!("std::path::Path::new(&*{}).exists()", args_str[0]),
+                "exists?" | "exists_hdlm_qm_" => format!("std::path::Path::new(&*{}).exists()", args_str[0]),
                 "mkdir_p" => format!("std::fs::create_dir_all(&*{}).map_err(AlmideIoError::from)?", args_str[0]),
                 "append" => format!("{{ let prev = std::fs::read_to_string(&*{}).unwrap_or_default(); std::fs::write(&*{}, format!(\"{{}}{{}}\", prev, {})).map_err(AlmideIoError::from)?; }}", args_str[0], args_str[0], args_str[1]),
                 "read_lines" => format!("{{ let s = std::fs::read_to_string(&*{}).map_err(AlmideIoError::from)?; s.split('\\n').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect::<Vec<String>>() }}", args_str[0]),
                 "remove" => format!("std::fs::remove_file(&*{}).map_err(AlmideIoError::from)?", args_str[0]),
                 "list_dir" => format!("{{ let mut v: Vec<String> = std::fs::read_dir(&*{}).map_err(AlmideIoError::from)?.filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().to_string())).collect(); v.sort(); v }}", args_str[0]),
-                "is_dir?" | "is_dir_qm_" => format!("std::path::Path::new(&*{}).is_dir()", args_str[0]),
-                "is_file?" | "is_file_qm_" => format!("std::path::Path::new(&*{}).is_file()", args_str[0]),
+                "is_dir?" | "is_dir_hdlm_qm_" => format!("std::path::Path::new(&*{}).is_dir()", args_str[0]),
+                "is_file?" | "is_file_hdlm_qm_" => format!("std::path::Path::new(&*{}).is_file()", args_str[0]),
                 "copy" => format!("{{ std::fs::copy(&*{}, &*{}).map_err(AlmideIoError::from)?; () }}", args_str[0], args_str[1]),
                 "rename" => format!("std::fs::rename(&*{}, &*{}).map_err(AlmideIoError::from)?", args_str[0], args_str[1]),
                 _ => { eprintln!("internal error: no Rust codegen for fs.{}() — this is a compiler bug", func); std::process::exit(70); },
@@ -211,8 +211,8 @@ impl Emitter {
                 "join" => format!("({}).join(&*{})", args_str[0], args_str[1]),
                 "len" => format!("(({}).len() as i64)", args_str[0]),
                 "contains" => format!("({}).contains(&*{})", args_str[0], args_str[1]),
-                "starts_with?" | "starts_with_qm_" | "starts_with" => format!("({}).starts_with(&*{})", args_str[0], args_str[1]),
-                "ends_with?" | "ends_with_qm_" | "ends_with" => format!("({}).ends_with(&*{})", args_str[0], args_str[1]),
+                "starts_with?" | "starts_with_hdlm_qm_" | "starts_with" => format!("({}).starts_with(&*{})", args_str[0], args_str[1]),
+                "ends_with?" | "ends_with_hdlm_qm_" | "ends_with" => format!("({}).ends_with(&*{})", args_str[0], args_str[1]),
                 "slice" => {
                     if args_str.len() == 3 {
                         format!("({}).chars().skip({} as usize).take(({} - {}) as usize).collect::<String>()", args_str[0], args_str[1], args_str[2], args_str[1])
@@ -232,15 +232,15 @@ impl Emitter {
                 "index_of" => format!("({}).find(&*{}).map(|i| i as i64)", args_str[0], args_str[1]),
                 "repeat" => format!("({}).repeat({} as usize)", args_str[0], args_str[1]),
                 "from_bytes" => format!("{{ let __bytes: Vec<i64> = {}; String::from_utf8(__bytes.iter().map(|b| *b as u8).collect::<Vec<u8>>()).unwrap_or_default() }}", args_str[0]),
-                "is_digit?" | "is_digit_qm_" => format!("({}).chars().all(|c| c.is_ascii_digit()) && !({}).is_empty()", args_str[0], args_str[0]),
-                "is_alpha?" | "is_alpha_qm_" => format!("({}).chars().all(|c| c.is_ascii_alphabetic()) && !({}).is_empty()", args_str[0], args_str[0]),
-                "is_alphanumeric?" | "is_alphanumeric_qm_" => format!("({}).chars().all(|c| c.is_ascii_alphanumeric()) && !({}).is_empty()", args_str[0], args_str[0]),
-                "is_whitespace?" | "is_whitespace_qm_" => format!("({}).chars().all(|c| c.is_whitespace()) && !({}).is_empty()", args_str[0], args_str[0]),
+                "is_digit?" | "is_digit_hdlm_qm_" => format!("({}).chars().all(|c| c.is_ascii_digit()) && !({}).is_empty()", args_str[0], args_str[0]),
+                "is_alpha?" | "is_alpha_hdlm_qm_" => format!("({}).chars().all(|c| c.is_ascii_alphabetic()) && !({}).is_empty()", args_str[0], args_str[0]),
+                "is_alphanumeric?" | "is_alphanumeric_hdlm_qm_" => format!("({}).chars().all(|c| c.is_ascii_alphanumeric()) && !({}).is_empty()", args_str[0], args_str[0]),
+                "is_whitespace?" | "is_whitespace_hdlm_qm_" => format!("({}).chars().all(|c| c.is_whitespace()) && !({}).is_empty()", args_str[0], args_str[0]),
                 "pad_right" => format!("{{ let __s = {}; let __n = {} as usize; if __s.len() >= __n {{ __s }} else {{ let __ch = {}.chars().next().unwrap_or(' '); format!(\"{{}}{{}}\", __s, std::iter::repeat(__ch).take(__n - __s.len()).collect::<String>()) }} }}", args_str[0], args_str[1], args_str[2]),
                 "trim_start" => format!("({}).trim_start().to_string()", args_str[0]),
                 "trim_end" => format!("({}).trim_end().to_string()", args_str[0]),
                 "count" => format!("(({}).matches(&*{}).count() as i64)", args_str[0], args_str[1]),
-                "is_empty?" | "is_empty_qm_" => format!("({}).is_empty()", args_str[0]),
+                "is_empty?" | "is_empty_hdlm_qm_" => format!("({}).is_empty()", args_str[0]),
                 "reverse" => format!("({}).chars().rev().collect::<String>()", args_str[0]),
                 "strip_prefix" => format!("({}).strip_prefix(&*{}).map(|s| s.to_string())", args_str[0], args_str[1]),
                 "strip_suffix" => format!("({}).strip_suffix(&*{}).map(|s| s.to_string())", args_str[0], args_str[1]),
@@ -315,7 +315,7 @@ impl Emitter {
                     "sum" => format!("({}).iter().sum::<i64>()", args_str[0]),
                     "product" => format!("({}).iter().product::<i64>()", args_str[0]),
                     "first" => format!("({}).first().cloned()", args_str[0]),
-                    "is_empty?" | "is_empty_qm_" => format!("({}).is_empty()", args_str[0]),
+                    "is_empty?" | "is_empty_hdlm_qm_" => format!("({}).is_empty()", args_str[0]),
                     "flat_map" => {
                         let (names, body) = self.inline_lambda(&args[1], 1);
                         if self.in_effect && body.contains("?") {
@@ -346,7 +346,7 @@ impl Emitter {
                     format!("({}).clone().into_iter().map(|{}| {{ {} }}).collect::<HashMap<_, _>>()", args_str[0], names[0], body)
                 }
                 "merge" => format!("{{ let mut m = ({}).clone(); m.extend(({}).clone()); m }}", args_str[0], args_str[1]),
-                "is_empty?" | "is_empty_qm_" => format!("({}).is_empty()", args_str[0]),
+                "is_empty?" | "is_empty_hdlm_qm_" => format!("({}).is_empty()", args_str[0]),
                 _ => { eprintln!("internal error: no Rust codegen for map.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "int" => match func {
@@ -465,8 +465,8 @@ impl Emitter {
                 _ => { eprintln!("internal error: no Rust codegen for random.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "regex" => match func {
-                "match?" | "match_qm_" => format!("almide_regex_is_match(&{}, &{})", args_str[0], args_str[1]),
-                "full_match?" | "full_match_qm_" => format!("almide_regex_full_match(&{}, &{})", args_str[0], args_str[1]),
+                "match?" | "match_hdlm_qm_" => format!("almide_regex_is_match(&{}, &{})", args_str[0], args_str[1]),
+                "full_match?" | "full_match_hdlm_qm_" => format!("almide_regex_full_match(&{}, &{})", args_str[0], args_str[1]),
                 "find" => format!("almide_regex_find(&{}, &{})", args_str[0], args_str[1]),
                 "find_all" => format!("almide_regex_find_all(&{}, &{})", args_str[0], args_str[1]),
                 "replace" => format!("almide_regex_replace(&{}, &{}, &{})", args_str[0], args_str[1], args_str[2]),

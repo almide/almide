@@ -8,7 +8,7 @@ const __fs = {
   write_bytes(p: string, b: Uint8Array | number[]): void { Deno.writeFileSync(p, b instanceof Uint8Array ? b : new Uint8Array(b)); },
   append(p: string, s: string): void { Deno.writeTextFileSync(p, Deno.readTextFileSync(p) + s); },
   mkdir_p(p: string): void { Deno.mkdirSync(p, { recursive: true }); },
-  exists_qm_(p: string): boolean { try { Deno.statSync(p); return true; } catch { return false; } },
+  exists_hdlm_qm_(p: string): boolean { try { Deno.statSync(p); return true; } catch { return false; } },
   read_lines(p: string): string[] { return Deno.readTextFileSync(p).split("\n").filter(l => l.length > 0); },
   remove(p: string): void { Deno.removeSync(p); },
   list_dir(p: string): string[] { return [...Deno.readDirSync(p)].map(e => e.name).sort(); },
@@ -23,8 +23,8 @@ const __string = {
   slice(s: string, start: number, end?: number): string { return end !== undefined ? s.slice(start, end) : s.slice(start); },
   to_bytes(s: string): number[] { return Array.from(new TextEncoder().encode(s)); },
   contains(s: string, sub: string): boolean { return s.includes(sub); },
-  starts_with_qm_(s: string, prefix: string): boolean { return s.startsWith(prefix); },
-  ends_with_qm_(s: string, suffix: string): boolean { return s.endsWith(suffix); },
+  starts_with_hdlm_qm_(s: string, prefix: string): boolean { return s.startsWith(prefix); },
+  ends_with_hdlm_qm_(s: string, suffix: string): boolean { return s.endsWith(suffix); },
   to_upper(s: string): string { return s.toUpperCase(); },
   to_lower(s: string): string { return s.toLowerCase(); },
   to_int(s: string): number { const n = parseInt(s, 10); if (isNaN(n)) throw new Error("invalid integer: " + s); return n; },
@@ -35,10 +35,10 @@ const __string = {
   index_of(s: string, needle: string): number | null { const i = s.indexOf(needle); return i >= 0 ? i : null; },
   repeat(s: string, n: number): string { return s.repeat(n); },
   from_bytes(bytes: number[]): string { return new TextDecoder().decode(new Uint8Array(bytes)); },
-  is_digit_qm_(s: string): boolean { return s.length > 0 && /^[0-9]+$/.test(s); },
-  is_alpha_qm_(s: string): boolean { return s.length > 0 && /^[a-zA-Z]+$/.test(s); },
-  is_alphanumeric_qm_(s: string): boolean { return s.length > 0 && /^[a-zA-Z0-9]+$/.test(s); },
-  is_whitespace_qm_(s: string): boolean { return s.length > 0 && /^\s+$/.test(s); },
+  is_digit_hdlm_qm_(s: string): boolean { return s.length > 0 && /^[0-9]+$/.test(s); },
+  is_alpha_hdlm_qm_(s: string): boolean { return s.length > 0 && /^[a-zA-Z]+$/.test(s); },
+  is_alphanumeric_hdlm_qm_(s: string): boolean { return s.length > 0 && /^[a-zA-Z0-9]+$/.test(s); },
+  is_whitespace_hdlm_qm_(s: string): boolean { return s.length > 0 && /^\s+$/.test(s); },
 };
 const __list = {
   len<T>(xs: T[]): number { return xs.length; },
@@ -109,7 +109,7 @@ const __path = {
   dirname(p: string): string { const i = p.lastIndexOf("/"); return i >= 0 ? p.substring(0, i) : "."; },
   basename(p: string): string { const i = p.lastIndexOf("/"); return i >= 0 ? p.substring(i + 1) : p; },
   extension(p: string): string | null { const b = __path.basename(p); const i = b.lastIndexOf("."); return i > 0 ? b.substring(i + 1) : null; },
-  is_absolute_qm_(p: string): boolean { return p.startsWith("/"); },
+  is_absolute_hdlm_qm_(p: string): boolean { return p.startsWith("/"); },
 };
 const __json = {
   parse(text: string): any { return JSON.parse(text); },
@@ -164,8 +164,8 @@ const __random = {
   shuffle<T>(xs: T[]): T[] { const a = [...xs]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; },
 };
 const __regex = {
-  match_qm_(pat: string, s: string): boolean { return new RegExp(pat).test(s); },
-  full_match_qm_(pat: string, s: string): boolean { return new RegExp(`^(?:${pat})$`).test(s); },
+  match_hdlm_qm_(pat: string, s: string): boolean { return new RegExp(pat).test(s); },
+  full_match_hdlm_qm_(pat: string, s: string): boolean { return new RegExp(`^(?:${pat})$`).test(s); },
   find(pat: string, s: string): string | null { const m = s.match(new RegExp(pat)); return m ? m[0] : null; },
   find_all(pat: string, s: string): string[] { const m = s.match(new RegExp(pat, 'g')); return m ? [...m] : []; },
   replace(pat: string, s: string, rep: string): string { return s.replace(new RegExp(pat, 'g'), rep); },
@@ -267,7 +267,7 @@ const __fs = {
   write_bytes(p, b) { require("fs").writeFileSync(p, Buffer.from(b)); },
   append(p, s) { require("fs").appendFileSync(p, s); },
   mkdir_p(p) { require("fs").mkdirSync(p, { recursive: true }); },
-  exists_qm_(p) { const fs = require("fs"); try { fs.statSync(p); return true; } catch { return false; } },
+  exists_hdlm_qm_(p) { const fs = require("fs"); try { fs.statSync(p); return true; } catch { return false; } },
   read_lines(p) { return require("fs").readFileSync(p, "utf-8").split("\n").filter(l => l.length > 0); },
   remove(p) { require("fs").unlinkSync(p); },
   list_dir(p) { return require("fs").readdirSync(p).sort(); },
@@ -282,8 +282,8 @@ const __string = {
   slice(s, start, end) { return end !== undefined ? s.slice(start, end) : s.slice(start); },
   to_bytes(s) { return Array.from(new TextEncoder().encode(s)); },
   contains(s, sub) { return s.includes(sub); },
-  starts_with_qm_(s, prefix) { return s.startsWith(prefix); },
-  ends_with_qm_(s, suffix) { return s.endsWith(suffix); },
+  starts_with_hdlm_qm_(s, prefix) { return s.startsWith(prefix); },
+  ends_with_hdlm_qm_(s, suffix) { return s.endsWith(suffix); },
   to_upper(s) { return s.toUpperCase(); },
   to_lower(s) { return s.toLowerCase(); },
   to_int(s) { const n = parseInt(s, 10); if (isNaN(n)) throw new Error("invalid integer: " + s); return n; },
@@ -294,10 +294,10 @@ const __string = {
   index_of(s, needle) { const i = s.indexOf(needle); return i >= 0 ? i : null; },
   repeat(s, n) { return s.repeat(n); },
   from_bytes(bytes) { return new TextDecoder().decode(new Uint8Array(bytes)); },
-  is_digit_qm_(s) { return s.length > 0 && /^[0-9]+$/.test(s); },
-  is_alpha_qm_(s) { return s.length > 0 && /^[a-zA-Z]+$/.test(s); },
-  is_alphanumeric_qm_(s) { return s.length > 0 && /^[a-zA-Z0-9]+$/.test(s); },
-  is_whitespace_qm_(s) { return s.length > 0 && /^\s+$/.test(s); },
+  is_digit_hdlm_qm_(s) { return s.length > 0 && /^[0-9]+$/.test(s); },
+  is_alpha_hdlm_qm_(s) { return s.length > 0 && /^[a-zA-Z]+$/.test(s); },
+  is_alphanumeric_hdlm_qm_(s) { return s.length > 0 && /^[a-zA-Z0-9]+$/.test(s); },
+  is_whitespace_hdlm_qm_(s) { return s.length > 0 && /^\s+$/.test(s); },
 };
 const __list = {
   len(xs) { return xs.length; },
@@ -368,7 +368,7 @@ const __path = {
   dirname(p) { const i = p.lastIndexOf("/"); return i >= 0 ? p.substring(0, i) : "."; },
   basename(p) { const i = p.lastIndexOf("/"); return i >= 0 ? p.substring(i + 1) : p; },
   extension(p) { const b = __path.basename(p); const i = b.lastIndexOf("."); return i > 0 ? b.substring(i + 1) : null; },
-  is_absolute_qm_(p) { return p.startsWith("/"); },
+  is_absolute_hdlm_qm_(p) { return p.startsWith("/"); },
 };
 const __json = {
   parse(text) { return JSON.parse(text); },
@@ -423,8 +423,8 @@ const __random = {
   shuffle(xs) { const a = [...xs]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; },
 };
 const __regex = {
-  match_qm_(pat, s) { return new RegExp(pat).test(s); },
-  full_match_qm_(pat, s) { return new RegExp(`^(?:${pat})$`).test(s); },
+  match_hdlm_qm_(pat, s) { return new RegExp(pat).test(s); },
+  full_match_hdlm_qm_(pat, s) { return new RegExp(`^(?:${pat})$`).test(s); },
   find(pat, s) { const m = s.match(new RegExp(pat)); return m ? m[0] : null; },
   find_all(pat, s) { const m = s.match(new RegExp(pat, 'g')); return m ? [...m] : []; },
   replace(pat, s, rep) { return s.replace(new RegExp(pat, 'g'), rep); },
