@@ -172,7 +172,8 @@ pub fn cmd_build(args: &[String], no_check: bool) {
         .unwrap_or(default_output);
 
     let emit_options = emit_rust::EmitOptions { no_thread_wrap: is_wasm };
-    let rs_code = compile_with_options(&file, no_check, &emit_options);
+    let wasm_target = if is_wasm { Some("wasm") } else { None };
+    let rs_code = compile_with_options(&file, no_check, &emit_options, wasm_target);
 
     let tmp_rs = format!("{}.rs", output.strip_suffix(".wasm").unwrap_or(&output));
     if let Err(e) = std::fs::write(&tmp_rs, &rs_code) {

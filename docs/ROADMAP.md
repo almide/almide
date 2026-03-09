@@ -844,6 +844,101 @@ This is intentionally the **last phase** — if Almide's own language features a
 
 ---
 
+## Stdlib Architecture: 3-Layer Design
+
+Almide の stdlib を 3 層に分離する。WASM を一級市民として扱い、pure な計算と OS 依存を明確に分ける。
+
+参考にした言語:
+- **MoonBit**: core (pure) / x (platform) の 2 層。WASM-first。JSON は core に含む
+- **Gleam**: stdlib (target-independent) / gleam_erlang / gleam_javascript の分離
+- **Rust**: core / alloc / std の 3 層。WASM で使えない関数はコンパイルエラー
+- **Zig**: comptime でターゲット判定。未使用コード自動削除
+
+### Layer 1: core（全ターゲット、WASM OK）
+
+auto-import または `import xxx` で使える。pure な計算のみ。OS 依存なし。
+
+| Module | Status | Notes |
+|--------|--------|-------|
+| `string` | hardcoded (calls.rs) | 文字列操作 |
+| `list` | hardcoded (calls.rs) | リスト操作、HOF |
+| `int` | hardcoded (calls.rs) | 数値変換、ビット演算 |
+| `float` | hardcoded (calls.rs) | 数値変換 |
+| `map` | hardcoded (calls.rs) | ハッシュマップ |
+| `math` | hardcoded (calls.rs) | 数学関数 |
+| `json` | hardcoded (calls.rs) | パース・シリアライズ。WASM interop の共通言語 |
+| `regex` | hardcoded (calls.rs) | 正規表現 |
+| `path` | bundled .almd | パス操作（pure 文字列処理） |
+| `time` | bundled .almd | 日付分解（year/month/day 等。now/sleep は platform） |
+| `args` | bundled .almd | 引数パース（env.args() は platform 経由で注入） |
+
+### Layer 2: platform（native only）
+
+`import platform.fs` 等で明示的に import する。WASM ターゲットで import すると**コンパイルエラー**。
+
+| Module | Status | Notes |
+|--------|--------|-------|
+| `fs` | hardcoded (calls.rs) | ファイル I/O |
+| `process` | hardcoded (calls.rs) | 外部コマンド実行 |
+| `io` | hardcoded (calls.rs) | stdin/stdout |
+| `env` | hardcoded (calls.rs) | 環境変数、args、unix_timestamp、millis、sleep_ms |
+| `http` | hardcoded (calls.rs) | HTTP サーバー/クライアント |
+| `random` | hardcoded (calls.rs) | OS エントロピーベースの乱数 |
+
+### Layer 3: x（公式拡張パッケージ）
+
+`almide.toml` に依存追加して使う。公式メンテナンスだが stdlib とは独立してバージョン管理。
+
+| Package | Status | Notes |
+|---------|--------|-------|
+| `encoding` | implemented (.almd) → 分離予定 | hex, base64 |
+| `hash` | 未実装 | SHA-256, SHA-1, MD5 |
+| `crypto` | 未実装 | 暗号化 |
+| `csv` | 未実装 | CSV パース |
+| `term` | 未実装 | ANSI カラー、ターミナル制御 |
+
+### Implementation Steps
+
+#### Phase A: WASM コンパイルエラー
+- [ ] checker: WASM ターゲット時に platform モジュールの import を検出してエラー
+- [ ] `--target wasm` 時に checker にターゲット情報を渡す仕組み
+
+#### Phase B: platform namespace 導入
+- [ ] `import platform.fs` 構文の設計
+- [ ] 既存の `import fs` からの移行パス（deprecation warning → エラー）
+- [ ] platform モジュールの resolver 実装
+
+#### Phase C: x パッケージ分離
+- [ ] encoding を `almide/encoding` リポジトリに分離
+- [ ] パッケージマネージャ経由で利用可能に
+- [ ] hash, csv, term を x パッケージとして新規作成
+
+### Multi-Target Design (要検討)
+
+Gleam の `@external` パターン（同一関数にターゲット別実装を提供）を Almide でどう実現するか。
+
+```gleam
+// Gleam の例
+@external(erlang, "gleam_stdlib", "string_length")
+@external(javascript, "../gleam_stdlib.mjs", "string_length")
+pub fn length(string: String) -> Int
+```
+
+Almide での候補:
+```almide
+// 案1: extern ブロック（既に ROADMAP にある）
+extern "rust" { fn fast_hash(data: String) -> String }
+extern "ts"   { fn fast_hash(data: String) -> String }
+
+// 案2: target 属性
+@target(rust) fn fast_hash(data: String) -> String = ...
+@target(ts)   fn fast_hash(data: String) -> String = ...
+```
+
+この設計は別途議論が必要。HTTP の「型だけ共通、実装はターゲット別」パターン（Gleam 方式）も検討対象。
+
+---
+
 ## Other
 
 - [ ] Package registry (to be considered in the future)
