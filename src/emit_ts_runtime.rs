@@ -61,6 +61,8 @@ const __list = {
   drop<T>(xs: T[], n: number): T[] { return xs.slice(n); },
   sort_by<T>(xs: T[], f: (x: T) => any): T[] { return [...xs].sort((a, b) => { const ka = f(a), kb = f(b); return ka < kb ? -1 : ka > kb ? 1 : 0; }); },
   unique<T>(xs: T[]): T[] { const seen: T[] = []; return xs.filter(x => { if (seen.includes(x)) return false; seen.push(x); return true; }); },
+  index_of<T>(xs: T[], x: T): number | null { const i = xs.indexOf(x); return i >= 0 ? i : null; },
+  chunk<T>(xs: T[], n: number): T[][] { const r: T[][] = []; for (let i = 0; i < xs.length; i += n) r.push(xs.slice(i, i + n)); return r; },
 };
 const __map = {
   new_<K, V>(): Map<K, V> { return new Map(); },
@@ -318,6 +320,8 @@ const __list = {
   drop(xs, n) { return xs.slice(n); },
   sort_by(xs, f) { return [...xs].sort((a, b) => { const ka = f(a), kb = f(b); return ka < kb ? -1 : ka > kb ? 1 : 0; }); },
   unique(xs) { const seen = []; return xs.filter(x => { if (seen.includes(x)) return false; seen.push(x); return true; }); },
+  index_of(xs, x) { const i = xs.indexOf(x); return i >= 0 ? i : null; },
+  chunk(xs, n) { const r = []; for (let i = 0; i < xs.length; i += n) r.push(xs.slice(i, i + n)); return r; },
 };
 const __map = {
   new_() { return new Map(); },

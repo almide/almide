@@ -27,10 +27,10 @@ fn option(name: String) -> Option[String] = {
   }
 }
 
-fn option_or(name: String, default: String) -> String =
+fn option_or(name: String, fallback: String) -> String =
   match option(name) {
     some(v) => v
-    none => default
+    none => fallback
   }
 
 fn positional() -> List[String] = {
