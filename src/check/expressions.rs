@@ -39,7 +39,11 @@ impl Checker {
         match expr {
             ast::Expr::Int { .. } => Ty::Int,
             ast::Expr::Float { .. } => Ty::Float,
-            ast::Expr::String { .. } | ast::Expr::InterpolatedString { .. } => Ty::String,
+            ast::Expr::String { .. } => Ty::String,
+            ast::Expr::InterpolatedString { value, span, .. } => {
+                self.check_interpolated_string(value, span.as_ref());
+                Ty::String
+            }
             ast::Expr::Bool { .. } => Ty::Bool,
             ast::Expr::Unit { .. } => Ty::Unit,
             ast::Expr::None { .. } => Ty::Option(Box::new(Ty::Unknown)),
@@ -340,6 +344,40 @@ impl Checker {
                 match &it {
                     Ty::Result(ok, _) => *ok.clone(),
                     _ => it,
+                }
+            }
+        }
+    }
+
+    /// Validate interpolated expressions inside `"...${expr}..."` strings.
+    fn check_interpolated_string(&mut self, value: &str, span: Option<&ast::Span>) {
+        let mut chars = value.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '$' && chars.peek() == Some(&'{') {
+                chars.next(); // skip {
+                let mut expr_str = String::new();
+                let mut depth = 1;
+                while let Some(ch) = chars.next() {
+                    if ch == '{' { depth += 1; }
+                    if ch == '}' { depth -= 1; if depth == 0 { break; } }
+                    expr_str.push(ch);
+                }
+                // Parse the interpolated expression
+                let tokens = crate::lexer::Lexer::tokenize(&expr_str);
+                let mut parser = crate::parser::Parser::new(tokens);
+                match parser.parse_single_expr() {
+                    Ok(mut parsed_expr) => {
+                        // Type-check the expression
+                        self.check_expr(&mut parsed_expr);
+                    }
+                    Err(_) => {
+                        let line = span.map(|s| s.line).unwrap_or(0);
+                        self.push_diagnostic(err(
+                            format!("invalid expression in string interpolation: ${{{}}}", expr_str),
+                            "Check the syntax of the expression inside ${{...}}",
+                            format!("string at line {}", line),
+                        ));
+                    }
                 }
             }
         }

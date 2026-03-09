@@ -148,7 +148,7 @@ impl Emitter {
                 "read_lines" => format!("{{ let s = std::fs::read_to_string(&*{}).map_err(AlmideIoError::from)?; s.split('\\n').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect::<Vec<String>>() }}", args_str[0]),
                 "remove" => format!("std::fs::remove_file(&*{}).map_err(AlmideIoError::from)?", args_str[0]),
                 "list_dir" => format!("{{ let mut v: Vec<String> = std::fs::read_dir(&*{}).map_err(AlmideIoError::from)?.filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().to_string())).collect(); v.sort(); v }}", args_str[0]),
-                _ => format!("/* fs.{} */ todo!()", func),
+                _ => { eprintln!("internal error: no Rust codegen for fs.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "string" => match func {
                 "trim" => format!("({}).trim().to_string()", args_str[0]),
@@ -181,7 +181,7 @@ impl Emitter {
                 "is_alpha?" | "is_alpha_qm_" => format!("({}).chars().all(|c| c.is_ascii_alphabetic()) && !({}).is_empty()", args_str[0], args_str[0]),
                 "is_alphanumeric?" | "is_alphanumeric_qm_" => format!("({}).chars().all(|c| c.is_ascii_alphanumeric()) && !({}).is_empty()", args_str[0], args_str[0]),
                 "is_whitespace?" | "is_whitespace_qm_" => format!("({}).chars().all(|c| c.is_whitespace()) && !({}).is_empty()", args_str[0], args_str[0]),
-                _ => format!("/* string.{} */ todo!()", func),
+                _ => { eprintln!("internal error: no Rust codegen for string.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "list" => {
                 match func {
@@ -246,7 +246,7 @@ impl Emitter {
                         format!("{{ let mut v = ({}).to_vec(); v.sort_by(|__a, __b| {{ let {n} = __a.clone(); let __ka = {{ {body} }}; let {n} = __b.clone(); let __kb = {{ {body} }}; __ka.partial_cmp(&__kb).unwrap_or(std::cmp::Ordering::Equal) }}); v }}", args_str[0], n = names[0], body = body)
                     }
                     "unique" => format!("{{ let mut seen = Vec::new(); let mut out = Vec::new(); for x in ({}).iter() {{ if !seen.contains(x) {{ seen.push(x.clone()); out.push(x.clone()); }} }} out }}", args_str[0]),
-                    _ => format!("/* list.{} */ todo!()", func),
+                    _ => { eprintln!("internal error: no Rust codegen for list.{}() — this is a compiler bug", func); std::process::exit(70); },
                 }
             },
             "map" => match func {
@@ -264,12 +264,12 @@ impl Emitter {
                     let (names, body) = self.inline_lambda(&args[1], 1);
                     format!("({}).clone().into_iter().map(|{}| {{ {} }}).collect::<HashMap<_, _>>()", args_str[0], names[0], body)
                 }
-                _ => format!("/* map.{} */ todo!()", func),
+                _ => { eprintln!("internal error: no Rust codegen for map.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "int" => match func {
                 "to_hex" => format!("format!(\"{{:x}}\", {} as u64)", args_str[0]),
                 "to_string" => format!("({}).to_string()", args_str[0]),
-                _ => format!("/* int.{} */ todo!()", func),
+                _ => { eprintln!("internal error: no Rust codegen for int.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "float" => match func {
                 "to_string" => format!("({}).to_string()", args_str[0]),
@@ -281,7 +281,7 @@ impl Emitter {
                 "sqrt" => format!("({}).sqrt()", args_str[0]),
                 "parse" => format!("({}).parse::<f64>().map_err(|e| e.to_string())?", args_str[0]),
                 "from_int" => format!("({} as f64)", args_str[0]),
-                _ => format!("/* float.{} */ todo!()", func),
+                _ => { eprintln!("internal error: no Rust codegen for float.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "env" => match func {
                 "unix_timestamp" => {
@@ -291,19 +291,19 @@ impl Emitter {
                 "get" => format!("std::env::var(&*{}).ok()", args_str[0]),
                 "set" => format!("std::env::set_var(&*{}, &*{})", args_str[0], args_str[1]),
                 "cwd" => "std::env::current_dir().map(|p| p.to_string_lossy().to_string()).map_err(|e| e.to_string())?".to_string(),
-                _ => format!("/* env.{} */ todo!()", func),
+                _ => { eprintln!("internal error: no Rust codegen for env.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "process" => match func {
                 "exec" => format!("match std::process::Command::new(&*{}).args({{ let __a: Vec<String> = {}; __a }}.iter().map(|s| s.as_str())).output() {{ Ok(__out) => if __out.status.success() {{ Ok(String::from_utf8_lossy(&__out.stdout).to_string()) }} else {{ Err(String::from_utf8_lossy(&__out.stderr).to_string()) }}, Err(e) => Err(e.to_string()) }}", args_str[0], args_str[1]),
                 "exit" => format!("std::process::exit({} as i32)", args_str[0]),
                 "stdin_lines" => "{{ use std::io::BufRead; std::io::stdin().lock().lines().collect::<Result<Vec<String>, _>>().map_err(|e| e.to_string())? }}".to_string(),
-                _ => format!("/* process.{} */ todo!()", func),
+                _ => { eprintln!("internal error: no Rust codegen for process.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "io" => match func {
                 "read_line" => "{ use std::io::BufRead; let mut __buf = String::new(); std::io::stdin().lock().read_line(&mut __buf).map_err(|e| e.to_string())?; __buf.trim_end_matches('\\n').trim_end_matches('\\r').to_string() }".to_string(),
                 "print" => format!("{{ use std::io::Write; print!(\"{{}}\", {}); std::io::stdout().flush().map_err(|e| e.to_string())? }}", args_str[0]),
                 "read_all" => "{ use std::io::Read; let mut __buf = String::new(); std::io::stdin().lock().read_to_string(&mut __buf).map_err(|e| e.to_string())?; __buf }".to_string(),
-                _ => format!("/* io.{} */ todo!()", func),
+                _ => { eprintln!("internal error: no Rust codegen for io.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "json" => match func {
                 "parse" => format!("almide_json_parse(&{})?", args_str[0]),
@@ -322,7 +322,7 @@ impl Emitter {
                 "null" => "JNull".to_string(),
                 "array" => format!("JArray({})", args_str[0]),
                 "from_map" => format!("JObject({})", args_str[0]),
-                _ => format!("/* json.{} */ todo!()", func),
+                _ => { eprintln!("internal error: no Rust codegen for json.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "path" => match func {
                 "join" => format!("{{ let p = std::path::Path::new(&*{}).join(&*{}); p.to_string_lossy().to_string() }}", args_str[0], args_str[1]),
@@ -330,7 +330,7 @@ impl Emitter {
                 "basename" => format!("std::path::Path::new(&*{}).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default()", args_str[0]),
                 "extension" => format!("std::path::Path::new(&*{}).extension().map(|e| e.to_string_lossy().to_string())", args_str[0]),
                 "is_absolute?" | "is_absolute_qm_" => format!("std::path::Path::new(&*{}).is_absolute()", args_str[0]),
-                _ => format!("/* path.{} */ todo!()", func),
+                _ => { eprintln!("internal error: no Rust codegen for path.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "http" => match func {
                 "serve" => {
@@ -343,7 +343,7 @@ impl Emitter {
                 "with_headers" => format!("AlmideHttpResponse::with_headers({}, {}.to_string(), {})", args_str[0], args_str[1], args_str[2]),
                 "get" => format!("almide_http_get(&{})?", args_str[0]),
                 "post" => format!("almide_http_post(&{}, &{})?", args_str[0], args_str[1]),
-                _ => format!("/* http.{} */ todo!()", func),
+                _ => { eprintln!("internal error: no Rust codegen for http.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "math" => match func {
                 "min" => format!("std::cmp::min({}, {})", args_str[0], args_str[1]),
@@ -358,14 +358,14 @@ impl Emitter {
                 "log" => format!("({} as f64).ln()", args_str[0]),
                 "exp" => format!("({} as f64).exp()", args_str[0]),
                 "sqrt" => format!("({} as f64).sqrt()", args_str[0]),
-                _ => format!("/* math.{} */ todo!()", func),
+                _ => { eprintln!("internal error: no Rust codegen for math.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "random" => match func {
                 "int" => format!("{{ let __range = ({1} - {0} + 1) as u64; let mut __buf = [0u8; 8]; std::fs::File::open(\"/dev/urandom\").and_then(|mut f| {{ use std::io::Read; f.read_exact(&mut __buf) }}).map_err(|e| e.to_string())?; let __r = u64::from_le_bytes(__buf) % __range; ({0} + __r as i64) }}", args_str[0], args_str[1]),
                 "float" => "{ let mut __buf = [0u8; 8]; std::fs::File::open(\"/dev/urandom\").and_then(|mut f| { use std::io::Read; f.read_exact(&mut __buf) }).map_err(|e| e.to_string())?; (u64::from_le_bytes(__buf) as f64) / (u64::MAX as f64) }".to_string(),
                 "choice" => format!("{{ let __xs = &{}; if __xs.is_empty() {{ None }} else {{ let mut __buf = [0u8; 8]; std::fs::File::open(\"/dev/urandom\").and_then(|mut f| {{ use std::io::Read; f.read_exact(&mut __buf) }}).map_err(|e| e.to_string())?; Some(__xs[(u64::from_le_bytes(__buf) as usize) % __xs.len()].clone()) }} }}", args_str[0]),
                 "shuffle" => format!("{{ let mut __v = ({}).clone(); let __n = __v.len(); for __i in (1..__n).rev() {{ let mut __buf = [0u8; 8]; std::fs::File::open(\"/dev/urandom\").and_then(|mut f| {{ use std::io::Read; f.read_exact(&mut __buf) }}).map_err(|e| e.to_string())?; let __j = (u64::from_le_bytes(__buf) as usize) % (__i + 1); __v.swap(__i, __j); }} __v }}", args_str[0]),
-                _ => format!("/* random.{} */ todo!()", func),
+                _ => { eprintln!("internal error: no Rust codegen for random.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "regex" => match func {
                 "match?" | "match_qm_" => format!("almide_regex_is_match(&{}, &{})", args_str[0], args_str[1]),
@@ -376,7 +376,7 @@ impl Emitter {
                 "replace_first" => format!("almide_regex_replace_first(&{}, &{}, &{})", args_str[0], args_str[1], args_str[2]),
                 "split" => format!("almide_regex_split(&{}, &{})", args_str[0], args_str[1]),
                 "captures" => format!("almide_regex_captures(&{}, &{})", args_str[0], args_str[1]),
-                _ => format!("/* regex.{} */ todo!()", func),
+                _ => { eprintln!("internal error: no Rust codegen for regex.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "time" => match func {
                 "now" => "(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64)".to_string(),
@@ -391,7 +391,7 @@ impl Emitter {
                 "weekday" => format!("almide_time_weekday({})", args_str[0]),
                 "to_iso" => format!("almide_time_to_iso({})", args_str[0]),
                 "from_parts" => format!("almide_time_from_parts({}, {}, {}, {}, {}, {})", args_str[0], args_str[1], args_str[2], args_str[3], args_str[4], args_str[5]),
-                _ => format!("/* time.{} */ todo!()", func),
+                _ => { eprintln!("internal error: no Rust codegen for time.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             _ => {
                 let resolved = self.module_aliases.get(module)

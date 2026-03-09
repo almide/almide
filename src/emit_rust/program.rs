@@ -73,8 +73,8 @@ impl Emitter {
                 self.indent += 1;
                 self.emit_main_body(has_args, returns_result);
                 self.indent -= 1;
-                self.emitln("}).unwrap();");
-                self.emitln("t.join().unwrap();");
+                self.emitln("}).expect(\"failed to spawn main thread\");");
+                self.emitln("t.join().expect(\"main thread panicked\");");
             }
 
             self.indent -= 1;

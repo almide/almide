@@ -119,9 +119,13 @@ impl Parser {
         }
 
         let tok = self.current();
+        let hint = match tok.value.as_str() {
+            "=>" => "\n  Hint: Missing pattern before '=>'. Use '_' for wildcard, or a variable name",
+            _ => "\n  Hint: Valid patterns: _, variable, Type(args), (a, b), some(x), ok(x), err(x), none, true, false, 42, \"text\"",
+        };
         Err(format!(
-            "Expected pattern at line {}:{} (got {:?} '{}')",
-            tok.line, tok.col, tok.token_type, tok.value
+            "Expected pattern at line {}:{} (got {:?} '{}'){}",
+            tok.line, tok.col, tok.token_type, tok.value, hint
         ))
     }
 }
