@@ -979,6 +979,35 @@ After migration, adding a new stdlib function requires zero changes to the compi
 
 ---
 
+## Editor & GitHub Integration
+
+### TextMate Grammar + VS Code Extension
+
+- [ ] Create `.tmLanguage.json` for Almide syntax highlighting
+- [ ] Publish VS Code extension (`almide-lang`) to VS Code Marketplace
+- [ ] Create Chrome extension for `.almd` highlighting on GitHub
+
+### GitHub Linguist Registration
+
+Goal: get `.almd` recognized as "Almide" on GitHub (language bar, syntax highlighting, search).
+
+**Requirements** (from [linguist CONTRIBUTING.md](https://github.com/github-linguist/linguist/blob/main/CONTRIBUTING.md)):
+- 2,000+ `.almd` files indexed on GitHub in the past year (excluding forks)
+- Reasonable distribution across unique `user/repo` combinations (not dominated by the language author)
+- TextMate grammar with an approved license
+- Real-world code samples (no "Hello world")
+
+**Tracking metrics:**
+| Metric | Current | Target |
+|--------|---------|--------|
+| `.almd` files on GitHub | ~10 | 2,000+ |
+| Unique repos with `.almd` | ~2 | 200+ |
+| Unique users with `.almd` | ~1 | 50+ |
+| TextMate grammar | not yet | required |
+| VS Code extension published | not yet | recommended |
+
+**Interim workaround:** `.gitattributes` with `*.almd linguist-language=OCaml` for approximate highlighting.
+
 ## Other
 
 - [ ] Package registry (to be considered in the future)
