@@ -201,16 +201,14 @@ Almide's lexer is newline-sensitive (newlines act as statement separators). Insi
 
 ---
 
-## stdin / Interactive I/O
+## stdin / Interactive I/O ✅ Implemented
 
-Currently Almide has no way to read from stdin. LLMs tend to hallucinate patterns like `var input = ""` (which never actually reads anything), producing broken interactive programs.
-
-### Proposed API
+### API
 
 ```almide
 import io
 
-effect fn main(args: List[String]) -> Result[Unit, String] = {
+effect fn main() -> Result[Unit, String] = {
   io.print("Enter weight (kg): ")
   let weight_str = io.read_line()
   let weight = float.parse(weight_str)
@@ -218,30 +216,18 @@ effect fn main(args: List[String]) -> Result[Unit, String] = {
 }
 ```
 
-### Proposed stdlib additions
+### stdlib functions
 
 ```
-io.read_line() -> String          // read one line from stdin (blocking)
-io.print(s: String)               // print without newline (stdout)
-io.read_all() -> String           // read all of stdin
+io.read_line() -> String          // read one line from stdin (blocking), effect fn
+io.print(s: String)               // print without newline (stdout), effect fn
+io.read_all() -> String           // read all of stdin, effect fn
 ```
 
-- `io.read_line()` is an effect fn (side-effecting)
+- All are effect fns (require `effect fn` context)
 - `io.print` complements the existing `println` (which always adds newline)
-- Rust emitter: `let mut buf = String::new(); std::io::stdin().read_line(&mut buf)?; buf.trim_end().to_string()`
-- TS emitter: Deno → `prompt()`, Node → `readline`
-
-### Why this matters
-
-Without `io.read_line()`, LLMs generate hallucinated interactive patterns that compile but never actually read input. This is a common failure mode observed in playground-generated code.
-
-### Implementation Steps
-
-- [ ] Add `io` module to `stdlib.rs` with `read_line`, `print`, `read_all` signatures
-- [ ] Rust emitter: codegen for each function
-- [ ] TS emitter: Deno (`prompt`) and Node (`readline/promises`) variants
-- [ ] Add `io` to auto-import list (or require explicit `import io`)
-- [ ] Checker: warn when `float.parse` / `int.parse` result is used directly as non-Result type
+- Rust emitter: uses `std::io::BufRead` / `std::io::Write`
+- TS emitter: Deno → `prompt()` / `Deno.stdout.writeSync`, Node → `fs.readSync(0, ...)` / `process.stdout.write`
 
 ---
 

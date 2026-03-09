@@ -295,6 +295,9 @@ The runtime calls `main(args)` where `args` includes the program name at index 0
 ### int
 `int.to_string(n)` — Int to decimal String, `int.to_hex(n)` — Int to hex String
 
+### io (interactive I/O)
+`io.read_line()` → `String` (read one line from stdin, blocking), `io.print(s)` (print without newline), `io.read_all()` → `String` (read all of stdin). All are effect fns.
+
 ### env
 `env.unix_timestamp()` → Int, `env.args()` → `List[String]`
 

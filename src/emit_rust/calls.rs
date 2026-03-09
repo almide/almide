@@ -299,6 +299,12 @@ impl Emitter {
                 "stdin_lines" => "{{ use std::io::BufRead; std::io::stdin().lock().lines().collect::<Result<Vec<String>, _>>().map_err(|e| e.to_string())? }}".to_string(),
                 _ => format!("/* process.{} */ todo!()", func),
             },
+            "io" => match func {
+                "read_line" => "{ use std::io::BufRead; let mut __buf = String::new(); std::io::stdin().lock().read_line(&mut __buf).map_err(|e| e.to_string())?; __buf.trim_end_matches('\\n').trim_end_matches('\\r').to_string() }".to_string(),
+                "print" => format!("{{ use std::io::Write; print!(\"{{}}\", {}); std::io::stdout().flush().map_err(|e| e.to_string())? }}", args_str[0]),
+                "read_all" => "{ use std::io::Read; let mut __buf = String::new(); std::io::stdin().lock().read_to_string(&mut __buf).map_err(|e| e.to_string())?; __buf }".to_string(),
+                _ => format!("/* io.{} */ todo!()", func),
+            },
             "json" => match func {
                 "parse" => format!("almide_json_parse(&{})?", args_str[0]),
                 "stringify" => format!("almide_json_stringify(&{})", args_str[0]),

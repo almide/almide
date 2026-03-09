@@ -5,7 +5,7 @@
 use crate::types::{Ty, FnSig};
 
 /// All built-in stdlib module names.
-pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "path", "http", "process", "math", "random", "time", "regex"];
+pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "path", "http", "process", "math", "random", "time", "regex", "io"];
 
 /// Check if a module name is a stdlib module.
 pub fn is_stdlib_module(name: &str) -> bool {
@@ -219,6 +219,11 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         ("time", "weekday") => FnSig { params: vec![(s("ts"), Ty::Int)], ret: Ty::Int, is_effect: false },
         ("time", "to_iso") => FnSig { params: vec![(s("ts"), Ty::Int)], ret: Ty::String, is_effect: false },
         ("time", "from_parts") => FnSig { params: vec![(s("y"), Ty::Int), (s("m"), Ty::Int), (s("d"), Ty::Int), (s("h"), Ty::Int), (s("min"), Ty::Int), (s("s"), Ty::Int)], ret: Ty::Int, is_effect: false },
+
+        // ── io ──
+        ("io", "read_line") => FnSig { params: vec![], ret: Ty::String, is_effect: true },
+        ("io", "print") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::Unit, is_effect: true },
+        ("io", "read_all") => FnSig { params: vec![], ret: Ty::String, is_effect: true },
 
         // ── regex ──
         ("regex", "match?") => FnSig { params: vec![(s("pat"), Ty::String), (s("s"), Ty::String)], ret: Ty::Bool, is_effect: false },

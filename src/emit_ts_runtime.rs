@@ -157,6 +157,11 @@ const __regex = {
   split(pat: string, s: string): string[] { return s.split(new RegExp(pat)); },
   captures(pat: string, s: string): string[] | null { const m = s.match(new RegExp(pat)); return m && m.length > 1 ? m.slice(1) : null; },
 };
+const __io = {
+  read_line(): string { return prompt("") ?? ""; },
+  print(s: string): void { const buf = new TextEncoder().encode(s); Deno.stdout.writeSync(buf); },
+  read_all(): string { const d = new TextDecoder(); let r = ""; const buf = new Uint8Array(4096); let n: number | null; while ((n = Deno.stdin.readSync(buf)) !== null && n > 0) { r += d.decode(buf.subarray(0, n)); } return r; },
+};
 const __time = {
   now(): number { return Math.floor(Date.now() / 1000); },
   millis(): number { return Date.now(); },
@@ -394,6 +399,11 @@ const __regex = {
   replace_first(pat, s, rep) { return s.replace(new RegExp(pat), rep); },
   split(pat, s) { return s.split(new RegExp(pat)); },
   captures(pat, s) { const m = s.match(new RegExp(pat)); return m && m.length > 1 ? m.slice(1) : null; },
+};
+const __io = {
+  read_line() { const buf = Buffer.alloc(1024); let s = ""; while (true) { const n = require("fs").readSync(0, buf, 0, 1, null); if (n === 0) break; const ch = buf.toString("utf-8", 0, n); s += ch; if (ch === "\n") break; } return s.replace(/\r?\n$/, ""); },
+  print(s) { process.stdout.write(s); },
+  read_all() { return require("fs").readFileSync(0, "utf-8"); },
 };
 const __time = {
   now() { return Math.floor(Date.now() / 1000); },
