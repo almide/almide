@@ -262,41 +262,67 @@ impl Checker {
     pub(crate) fn check_decl(&mut self, decl: &mut ast::Decl) {
         self.current_decl_line = self.decl_line(decl);
         match decl {
-            ast::Decl::Fn { name, params, return_type, body, effect, .. } => {
-                self.env.push_scope();
-                let mut local_vars: Vec<String> = Vec::new();
-                for p in params {
-                    let ty = self.resolve_type_expr(&p.ty);
-                    self.env.define_var(&p.name, ty);
-                    local_vars.push(p.name.clone());
-                }
-                let ret_ty = self.resolve_type_expr(return_type);
-                let prev_ret = self.env.current_ret.take();
-                let prev_effect = self.env.in_effect;
-                self.env.current_ret = Some(ret_ty.clone());
-                self.env.in_effect = effect.unwrap_or(false);
-                let body_ty = self.check_expr(body);
-                let is_effect = effect.unwrap_or(false);
-                let effective_ret = if is_effect {
-                    match &ret_ty {
-                        Ty::Result(ok_ty, _) => *ok_ty.clone(),
-                        _ => ret_ty.clone(),
-                    }
-                } else {
-                    ret_ty.clone()
-                };
-                if !body_ty.compatible(&effective_ret) && !body_ty.compatible(&ret_ty) {
+            ast::Decl::Fn { name, params, return_type, body, effect, extern_attrs, .. } => {
+                // Validate extern completeness: if no body, both targets need @extern
+                // (for now, just check that the current target has coverage)
+                if body.is_none() && extern_attrs.is_empty() {
                     self.push_diagnostic(err(
-                        format!("function '{}' declared to return {} but body has type {}", name, ret_ty.display(), body_ty.display()),
-                        "Change the return type or fix the body expression",
+                        format!("function '{}' has no body and no @extern declarations", name),
+                        "Add a body with '= expr' or add @extern annotations",
                         format!("fn {}", name),
                     ));
                 }
-                // Warn about unused variables (skip _ prefixed)
-                self.warn_unused_vars_in_scope(&format!("fn {}", name));
-                self.env.current_ret = prev_ret;
-                self.env.in_effect = prev_effect;
-                self.env.pop_scope();
+                if body.is_none() {
+                    // Validate that both targets are covered
+                    let has_rs = extern_attrs.iter().any(|a| a.target == "rs");
+                    let has_ts = extern_attrs.iter().any(|a| a.target == "ts");
+                    if !has_rs || !has_ts {
+                        let missing: Vec<&str> = [("rs", has_rs), ("ts", has_ts)]
+                            .iter()
+                            .filter(|(_, has)| !has)
+                            .map(|(t, _)| *t)
+                            .collect();
+                        self.push_diagnostic(err(
+                            format!("function '{}' has no body and is missing @extern for: {}", name, missing.join(", ")),
+                            "Add a body as fallback or add the missing @extern declarations",
+                            format!("fn {}", name),
+                        ));
+                    }
+                }
+                if let Some(body) = body {
+                    self.env.push_scope();
+                    for p in params {
+                        let ty = self.resolve_type_expr(&p.ty);
+                        self.env.define_var(&p.name, ty);
+                    }
+                    let ret_ty = self.resolve_type_expr(return_type);
+                    let prev_ret = self.env.current_ret.take();
+                    let prev_effect = self.env.in_effect;
+                    self.env.current_ret = Some(ret_ty.clone());
+                    self.env.in_effect = effect.unwrap_or(false);
+                    let body_ty = self.check_expr(body);
+                    let is_effect = effect.unwrap_or(false);
+                    let effective_ret = if is_effect {
+                        match &ret_ty {
+                            Ty::Result(ok_ty, _) => *ok_ty.clone(),
+                            _ => ret_ty.clone(),
+                        }
+                    } else {
+                        ret_ty.clone()
+                    };
+                    if !body_ty.compatible(&effective_ret) && !body_ty.compatible(&ret_ty) {
+                        self.push_diagnostic(err(
+                            format!("function '{}' declared to return {} but body has type {}", name, ret_ty.display(), body_ty.display()),
+                            "Change the return type or fix the body expression",
+                            format!("fn {}", name),
+                        ));
+                    }
+                    // Warn about unused variables (skip _ prefixed)
+                    self.warn_unused_vars_in_scope(&format!("fn {}", name));
+                    self.env.current_ret = prev_ret;
+                    self.env.in_effect = prev_effect;
+                    self.env.pop_scope();
+                }
             }
             ast::Decl::Test { body, .. } => {
                 self.env.push_scope();

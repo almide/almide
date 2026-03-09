@@ -96,7 +96,7 @@ impl Parser {
                 TokenType::EOF => break,
                 TokenType::Fn | TokenType::Effect | TokenType::Async | TokenType::Pub | TokenType::Local | TokenType::Mod
                 | TokenType::Type | TokenType::Trait | TokenType::Impl
-                | TokenType::Test | TokenType::Strict => {
+                | TokenType::Test | TokenType::Strict | TokenType::At => {
                     // Check if this is at the start of a line (after newline)
                     // by looking if the previous token was a newline or we're at the very start
                     break;
@@ -108,7 +108,7 @@ impl Parser {
                     if matches!(next_tt,
                         TokenType::Fn | TokenType::Effect | TokenType::Async | TokenType::Pub | TokenType::Local | TokenType::Mod
                         | TokenType::Type | TokenType::Trait | TokenType::Impl
-                        | TokenType::Test | TokenType::Strict | TokenType::EOF
+                        | TokenType::Test | TokenType::Strict | TokenType::At | TokenType::EOF
                     ) {
                         break;
                     }

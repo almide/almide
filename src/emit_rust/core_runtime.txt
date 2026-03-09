@@ -1,0 +1,319 @@
+// Almide core runtime — string, int, float, math
+// Functions extracted from inline codegen for @extern migration.
+
+// ---- string ----
+
+fn almide_rt_string_trim(s: &str) -> String {
+    s.trim().to_string()
+}
+
+fn almide_rt_string_split(s: &str, delim: &str) -> Vec<String> {
+    if delim.is_empty() {
+        s.chars().map(|c| c.to_string()).collect()
+    } else {
+        s.split(delim).map(|s| s.to_string()).collect()
+    }
+}
+
+fn almide_rt_string_join(parts: &[String], sep: &str) -> String {
+    parts.join(sep)
+}
+
+fn almide_rt_string_len(s: &str) -> i64 {
+    s.len() as i64
+}
+
+fn almide_rt_string_contains(s: &str, sub: &str) -> bool {
+    s.contains(sub)
+}
+
+fn almide_rt_string_starts_with(s: &str, prefix: &str) -> bool {
+    s.starts_with(prefix)
+}
+
+fn almide_rt_string_ends_with(s: &str, suffix: &str) -> bool {
+    s.ends_with(suffix)
+}
+
+fn almide_rt_string_slice(s: &str, start: i64, end: Option<i64>) -> String {
+    match end {
+        Some(e) => s.chars().skip(start as usize).take((e - start) as usize).collect(),
+        None => s.chars().skip(start as usize).collect(),
+    }
+}
+
+fn almide_rt_string_pad_left(s: &str, width: i64) -> String {
+    format!("{:0>width$}", s, width = width as usize)
+}
+
+fn almide_rt_string_to_bytes(s: &str) -> Vec<i64> {
+    s.as_bytes().iter().map(|&b| b as i64).collect()
+}
+
+fn almide_rt_string_to_upper(s: &str) -> String {
+    s.to_uppercase()
+}
+
+fn almide_rt_string_to_lower(s: &str) -> String {
+    s.to_lowercase()
+}
+
+fn almide_rt_string_to_int(s: &str) -> Result<i64, String> {
+    s.parse::<i64>().map_err(|e| e.to_string())
+}
+
+fn almide_rt_string_replace(s: &str, from: &str, to: &str) -> String {
+    s.replace(from, to)
+}
+
+fn almide_rt_string_char_at(s: &str, idx: i64) -> Option<String> {
+    s.chars().nth(idx as usize).map(|c| c.to_string())
+}
+
+fn almide_rt_string_lines(s: &str) -> Vec<String> {
+    s.split('\n').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect()
+}
+
+fn almide_rt_string_chars(s: &str) -> Vec<String> {
+    s.chars().map(|c| c.to_string()).collect()
+}
+
+fn almide_rt_string_index_of(s: &str, sub: &str) -> Option<i64> {
+    s.find(sub).map(|i| i as i64)
+}
+
+fn almide_rt_string_repeat(s: &str, n: i64) -> String {
+    s.repeat(n as usize)
+}
+
+fn almide_rt_string_from_bytes(bytes: &[i64]) -> String {
+    String::from_utf8(bytes.iter().map(|b| *b as u8).collect::<Vec<u8>>()).unwrap_or_default()
+}
+
+fn almide_rt_string_is_digit(s: &str) -> bool {
+    s.chars().all(|c| c.is_ascii_digit()) && !s.is_empty()
+}
+
+fn almide_rt_string_is_alpha(s: &str) -> bool {
+    s.chars().all(|c| c.is_ascii_alphabetic()) && !s.is_empty()
+}
+
+fn almide_rt_string_is_alphanumeric(s: &str) -> bool {
+    s.chars().all(|c| c.is_ascii_alphanumeric()) && !s.is_empty()
+}
+
+fn almide_rt_string_is_whitespace(s: &str) -> bool {
+    s.chars().all(|c| c.is_whitespace()) && !s.is_empty()
+}
+
+fn almide_rt_string_pad_right(s: String, width: i64, ch: &str) -> String {
+    let n = width as usize;
+    if s.len() >= n {
+        s
+    } else {
+        let fill = ch.chars().next().unwrap_or(' ');
+        format!("{}{}", s, std::iter::repeat(fill).take(n - s.len()).collect::<String>())
+    }
+}
+
+fn almide_rt_string_trim_start(s: &str) -> String {
+    s.trim_start().to_string()
+}
+
+fn almide_rt_string_trim_end(s: &str) -> String {
+    s.trim_end().to_string()
+}
+
+fn almide_rt_string_count(s: &str, sub: &str) -> i64 {
+    s.matches(sub).count() as i64
+}
+
+fn almide_rt_string_is_empty(s: &str) -> bool {
+    s.is_empty()
+}
+
+fn almide_rt_string_reverse(s: &str) -> String {
+    s.chars().rev().collect()
+}
+
+fn almide_rt_string_strip_prefix(s: &str, prefix: &str) -> Option<String> {
+    s.strip_prefix(prefix).map(|s| s.to_string())
+}
+
+fn almide_rt_string_strip_suffix(s: &str, suffix: &str) -> Option<String> {
+    s.strip_suffix(suffix).map(|s| s.to_string())
+}
+
+// ---- int ----
+
+fn almide_rt_int_to_hex(n: i64) -> String {
+    format!("{:x}", n as u64)
+}
+
+fn almide_rt_int_to_string(n: i64) -> String {
+    n.to_string()
+}
+
+fn almide_rt_int_parse(s: &str) -> Result<i64, String> {
+    s.trim().parse::<i64>().map_err(|e| e.to_string())
+}
+
+fn almide_rt_int_parse_hex(s: &str) -> Result<i64, String> {
+    i64::from_str_radix(s.trim().trim_start_matches("0x").trim_start_matches("0X"), 16).map_err(|e| e.to_string())
+}
+
+fn almide_rt_int_abs(n: i64) -> i64 {
+    n.abs()
+}
+
+fn almide_rt_int_min(a: i64, b: i64) -> i64 {
+    std::cmp::min(a, b)
+}
+
+fn almide_rt_int_max(a: i64, b: i64) -> i64 {
+    std::cmp::max(a, b)
+}
+
+fn almide_rt_int_band(a: i64, b: i64) -> i64 {
+    a & b
+}
+
+fn almide_rt_int_bor(a: i64, b: i64) -> i64 {
+    a | b
+}
+
+fn almide_rt_int_bxor(a: i64, b: i64) -> i64 {
+    a ^ b
+}
+
+fn almide_rt_int_bshl(a: i64, b: i64) -> i64 {
+    a << b as u32
+}
+
+fn almide_rt_int_bshr(a: i64, b: i64) -> i64 {
+    ((a as u64) >> b as u32) as i64
+}
+
+fn almide_rt_int_bnot(n: i64) -> i64 {
+    !n
+}
+
+fn almide_rt_int_wrap_add(a: i64, b: i64, bits: i64) -> i64 {
+    let mask = (1u64 << (bits as u32)) - 1;
+    ((a as u64).wrapping_add(b as u64) & mask) as i64
+}
+
+fn almide_rt_int_wrap_mul(a: i64, b: i64, bits: i64) -> i64 {
+    let mask = (1u64 << (bits as u32)) - 1;
+    ((a as u64).wrapping_mul(b as u64) & mask) as i64
+}
+
+fn almide_rt_int_rotate_right(val: i64, n: i64, bits: i64) -> i64 {
+    let b = bits as u32;
+    let shift = (n as u32) % b;
+    let v = (val as u64) & ((1u64 << b) - 1);
+    ((v >> shift | v << (b - shift)) & ((1u64 << b) - 1)) as i64
+}
+
+fn almide_rt_int_rotate_left(val: i64, n: i64, bits: i64) -> i64 {
+    let b = bits as u32;
+    let shift = (n as u32) % b;
+    let v = (val as u64) & ((1u64 << b) - 1);
+    ((v << shift | v >> (b - shift)) & ((1u64 << b) - 1)) as i64
+}
+
+fn almide_rt_int_to_u32(n: i64) -> i64 {
+    ((n as u64) & 0xFFFFFFFF) as i64
+}
+
+fn almide_rt_int_to_u8(n: i64) -> i64 {
+    ((n as u64) & 0xFF) as i64
+}
+
+// ---- float ----
+
+fn almide_rt_float_to_string(n: f64) -> String {
+    n.to_string()
+}
+
+fn almide_rt_float_to_int(n: f64) -> i64 {
+    n as i64
+}
+
+fn almide_rt_float_round(n: f64) -> f64 {
+    n.round()
+}
+
+fn almide_rt_float_floor(n: f64) -> f64 {
+    n.floor()
+}
+
+fn almide_rt_float_ceil(n: f64) -> f64 {
+    n.ceil()
+}
+
+fn almide_rt_float_abs(n: f64) -> f64 {
+    n.abs()
+}
+
+fn almide_rt_float_sqrt(n: f64) -> f64 {
+    n.sqrt()
+}
+
+fn almide_rt_float_parse(s: &str) -> Result<f64, String> {
+    s.parse::<f64>().map_err(|e| e.to_string())
+}
+
+fn almide_rt_float_from_int(n: i64) -> f64 {
+    n as f64
+}
+
+// ---- math ----
+
+fn almide_rt_math_min(a: i64, b: i64) -> i64 {
+    std::cmp::min(a, b)
+}
+
+fn almide_rt_math_max(a: i64, b: i64) -> i64 {
+    std::cmp::max(a, b)
+}
+
+fn almide_rt_math_abs(n: i64) -> i64 {
+    n.abs()
+}
+
+fn almide_rt_math_pow(base: i64, exp: i64) -> i64 {
+    (base as i64).wrapping_pow(exp as u32)
+}
+
+fn almide_rt_math_pi() -> f64 {
+    std::f64::consts::PI
+}
+
+fn almide_rt_math_e() -> f64 {
+    std::f64::consts::E
+}
+
+fn almide_rt_math_sin(x: f64) -> f64 {
+    x.sin()
+}
+
+fn almide_rt_math_cos(x: f64) -> f64 {
+    x.cos()
+}
+
+fn almide_rt_math_tan(x: f64) -> f64 {
+    x.tan()
+}
+
+fn almide_rt_math_log(x: f64) -> f64 {
+    x.ln()
+}
+
+fn almide_rt_math_exp(x: f64) -> f64 {
+    x.exp()
+}
+
+fn almide_rt_math_sqrt(x: f64) -> f64 {
+    x.sqrt()
+}

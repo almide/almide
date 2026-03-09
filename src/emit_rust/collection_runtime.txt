@@ -1,0 +1,224 @@
+// Almide collection runtime — list and map operations
+// Functions extracted from inline codegen.
+
+// ---- list ----
+
+fn almide_rt_list_len<T>(list: &[T]) -> i64 {
+    list.len() as i64
+}
+
+fn almide_rt_list_get<T: Clone>(list: &[T], index: i64) -> Option<T> {
+    list.get(index as usize).cloned()
+}
+
+fn almide_rt_list_get_or<T: Clone>(list: &[T], index: i64, default: T) -> T {
+    list.get(index as usize).cloned().unwrap_or(default)
+}
+
+fn almide_rt_list_sort<T: Clone + Ord>(list: &[T]) -> Vec<T> {
+    let mut v = list.to_vec();
+    v.sort();
+    v
+}
+
+fn almide_rt_list_reverse<T: Clone>(list: &[T]) -> Vec<T> {
+    let mut v = list.to_vec();
+    v.reverse();
+    v
+}
+
+fn almide_rt_list_contains<T: Clone + PartialEq>(list: &[T], item: &T) -> bool {
+    list.contains(item)
+}
+
+fn almide_rt_list_enumerate<T: Clone>(list: Vec<T>) -> Vec<(i64, T)> {
+    list.into_iter().enumerate().map(|(i, x)| (i as i64, x)).collect()
+}
+
+fn almide_rt_list_zip<T: Clone, U: Clone>(a: Vec<T>, b: Vec<U>) -> Vec<(T, U)> {
+    a.into_iter().zip(b.into_iter()).collect()
+}
+
+fn almide_rt_list_flatten<T: Clone>(list: Vec<Vec<T>>) -> Vec<T> {
+    list.into_iter().flatten().collect()
+}
+
+fn almide_rt_list_take<T: Clone>(list: Vec<T>, n: i64) -> Vec<T> {
+    list.into_iter().take(n as usize).collect()
+}
+
+fn almide_rt_list_drop<T: Clone>(list: Vec<T>, n: i64) -> Vec<T> {
+    list.into_iter().skip(n as usize).collect()
+}
+
+fn almide_rt_list_unique<T: Clone + PartialEq>(list: &[T]) -> Vec<T> {
+    let mut seen = Vec::new();
+    let mut out = Vec::new();
+    for x in list.iter() {
+        if !seen.contains(x) {
+            seen.push(x.clone());
+            out.push(x.clone());
+        }
+    }
+    out
+}
+
+fn almide_rt_list_index_of<T: Clone + PartialEq>(list: &[T], item: &T) -> Option<i64> {
+    list.iter().position(|x| almide_eq!(x, item)).map(|i| i as i64)
+}
+
+fn almide_rt_list_last<T: Clone>(list: &[T]) -> Option<T> {
+    list.last().cloned()
+}
+
+fn almide_rt_list_chunk<T: Clone>(list: &[T], size: i64) -> Vec<Vec<T>> {
+    list.chunks(size as usize).map(|c| c.to_vec()).collect()
+}
+
+fn almide_rt_list_sum(list: &[i64]) -> i64 {
+    list.iter().sum::<i64>()
+}
+
+fn almide_rt_list_product(list: &[i64]) -> i64 {
+    list.iter().product::<i64>()
+}
+
+fn almide_rt_list_first<T: Clone>(list: &[T]) -> Option<T> {
+    list.first().cloned()
+}
+
+fn almide_rt_list_is_empty<T>(list: &[T]) -> bool {
+    list.is_empty()
+}
+
+fn almide_rt_list_join(list: &[String], sep: &str) -> String {
+    list.join(sep)
+}
+
+fn almide_rt_list_min<T: Clone + Ord>(list: &[T]) -> Option<T> {
+    list.iter().min().cloned()
+}
+
+fn almide_rt_list_max<T: Clone + Ord>(list: &[T]) -> Option<T> {
+    list.iter().max().cloned()
+}
+
+// ---- list (lambda-based) ----
+
+fn almide_rt_list_map<T, U>(list: Vec<T>, f: impl Fn(T) -> U) -> Vec<U> {
+    list.into_iter().map(f).collect()
+}
+
+fn almide_rt_list_map_effect<T, U>(list: Vec<T>, f: impl Fn(T) -> Result<U, String>) -> Result<Vec<U>, String> {
+    list.into_iter().map(f).collect()
+}
+
+fn almide_rt_list_filter<T: Clone>(list: Vec<T>, f: impl Fn(&T) -> bool) -> Vec<T> {
+    list.into_iter().filter(|x| f(x)).collect()
+}
+
+fn almide_rt_list_find<T: Clone>(list: Vec<T>, f: impl Fn(&T) -> bool) -> Option<T> {
+    list.into_iter().find(|x| f(x))
+}
+
+fn almide_rt_list_fold<T, U>(list: Vec<T>, init: U, f: impl Fn(U, T) -> U) -> U {
+    list.into_iter().fold(init, f)
+}
+
+fn almide_rt_list_fold_effect<T, U>(list: Vec<T>, init: U, f: impl Fn(U, T) -> Result<U, String>) -> Result<U, String> {
+    list.into_iter().try_fold(init, f)
+}
+
+fn almide_rt_list_any<T: Clone>(list: &[T], f: impl Fn(&T) -> bool) -> bool {
+    list.iter().any(|x| f(x))
+}
+
+fn almide_rt_list_all<T: Clone>(list: &[T], f: impl Fn(&T) -> bool) -> bool {
+    list.iter().all(|x| f(x))
+}
+
+fn almide_rt_list_each<T: Clone>(list: &[T], f: impl Fn(T)) {
+    for x in list.iter().cloned() { f(x); }
+}
+
+fn almide_rt_list_sort_by<T: Clone, K: PartialOrd>(mut list: Vec<T>, f: impl Fn(T) -> K) -> Vec<T> {
+    list.sort_by(|a, b| {
+        let ka = f(a.clone());
+        let kb = f(b.clone());
+        ka.partial_cmp(&kb).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    list
+}
+
+fn almide_rt_list_flat_map<T, U>(list: Vec<T>, f: impl Fn(T) -> Vec<U>) -> Vec<U> {
+    list.into_iter().flat_map(f).collect()
+}
+
+fn almide_rt_list_flat_map_effect<T, U>(list: Vec<T>, f: impl Fn(T) -> Result<Vec<U>, String>) -> Result<Vec<U>, String> {
+    let nested: Vec<Vec<U>> = list.into_iter().map(f).collect::<Result<_, _>>()?;
+    Ok(nested.into_iter().flatten().collect())
+}
+
+// ---- map (lambda-based) ----
+
+fn almide_rt_map_from_list<T, K: std::hash::Hash + Eq, V>(list: Vec<T>, f: impl Fn(T) -> (K, V)) -> HashMap<K, V> {
+    list.into_iter().map(f).collect()
+}
+
+// ---- map ----
+
+fn almide_rt_map_new<K, V>() -> HashMap<K, V> {
+    HashMap::new()
+}
+
+fn almide_rt_map_get<K: std::hash::Hash + Eq, V: Clone>(map: &HashMap<K, V>, key: &K) -> Option<V> {
+    map.get(key).cloned()
+}
+
+fn almide_rt_map_get_or<K: std::hash::Hash + Eq, V: Clone>(map: &HashMap<K, V>, key: &K, default: V) -> V {
+    map.get(key).cloned().unwrap_or(default)
+}
+
+fn almide_rt_map_set<K: std::hash::Hash + Eq + Clone, V: Clone>(map: &HashMap<K, V>, key: K, value: V) -> HashMap<K, V> {
+    let mut m = map.clone();
+    m.insert(key, value);
+    m
+}
+
+fn almide_rt_map_contains<K: std::hash::Hash + Eq, V>(map: &HashMap<K, V>, key: &K) -> bool {
+    map.contains_key(key)
+}
+
+fn almide_rt_map_remove<K: std::hash::Hash + Eq + Clone, V: Clone>(map: &HashMap<K, V>, key: &K) -> HashMap<K, V> {
+    let mut m = map.clone();
+    m.remove(key);
+    m
+}
+
+fn almide_rt_map_keys<K: Clone + Ord, V>(map: &HashMap<K, V>) -> Vec<K> {
+    let mut v: Vec<K> = map.keys().cloned().collect();
+    v.sort();
+    v
+}
+
+fn almide_rt_map_values<K, V: Clone>(map: &HashMap<K, V>) -> Vec<V> {
+    map.values().cloned().collect()
+}
+
+fn almide_rt_map_len<K, V>(map: &HashMap<K, V>) -> i64 {
+    map.len() as i64
+}
+
+fn almide_rt_map_entries<K: Clone, V: Clone>(map: &HashMap<K, V>) -> Vec<(K, V)> {
+    map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+}
+
+fn almide_rt_map_merge<K: std::hash::Hash + Eq + Clone, V: Clone>(base: &HashMap<K, V>, other: &HashMap<K, V>) -> HashMap<K, V> {
+    let mut m = base.clone();
+    m.extend(other.clone());
+    m
+}
+
+fn almide_rt_map_is_empty<K, V>(map: &HashMap<K, V>) -> bool {
+    map.is_empty()
+}

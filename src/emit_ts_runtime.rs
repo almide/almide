@@ -1,6 +1,6 @@
 /// TypeScript runtime (Deno) for emitted code.
 pub const RUNTIME: &str = r#"// ---- Almide Runtime ----
-const __fs = {
+const __almd_fs = {
   exists(p: string): boolean { try { Deno.statSync(p); return true; } catch { return false; } },
   read_text(p: string): string { return Deno.readTextFileSync(p); },
   read_bytes(p: string): Uint8Array { return Deno.readFileSync(p); },
@@ -13,7 +13,7 @@ const __fs = {
   remove(p: string): void { Deno.removeSync(p); },
   list_dir(p: string): string[] { return [...Deno.readDirSync(p)].map(e => e.name).sort(); },
 };
-const __string = {
+const __almd_string = {
   trim(s: string): string { return s.trim(); },
   split(s: string, sep: string): string[] { return s.split(sep); },
   join(arr: string[], sep: string): string { return arr.join(sep); },
@@ -40,7 +40,7 @@ const __string = {
   is_alphanumeric_hdlm_qm_(s: string): boolean { return s.length > 0 && /^[a-zA-Z0-9]+$/.test(s); },
   is_whitespace_hdlm_qm_(s: string): boolean { return s.length > 0 && /^\s+$/.test(s); },
 };
-const __list = {
+const __almd_list = {
   len<T>(xs: T[]): number { return xs.length; },
   get<T>(xs: T[], i: number): T | null { return i < xs.length ? xs[i] : null; },
   get_or<T>(xs: T[], i: number, d: T): T { return i < xs.length ? xs[i] : d; },
@@ -64,7 +64,7 @@ const __list = {
   index_of<T>(xs: T[], x: T): number | null { const i = xs.indexOf(x); return i >= 0 ? i : null; },
   chunk<T>(xs: T[], n: number): T[][] { const r: T[][] = []; for (let i = 0; i < xs.length; i += n) r.push(xs.slice(i, i + n)); return r; },
 };
-const __map = {
+const __almd_map = {
   new_<K, V>(): Map<K, V> { return new Map(); },
   get<K, V>(m: Map<K, V>, k: K): V | null { return m.has(k) ? m.get(k)! : null; },
   get_or<K, V>(m: Map<K, V>, k: K, d: V): V { return m.has(k) ? m.get(k)! : d; },
@@ -77,7 +77,7 @@ const __map = {
   entries<K, V>(m: Map<K, V>): [K, V][] { return [...m.entries()]; },
   from_list<T, K, V>(xs: T[], f: (x: T) => [K, V]): Map<K, V> { const r = new Map<K, V>(); for (const x of xs) { const [k, v] = f(x); r.set(k, v); } return r; },
 };
-const __int = {
+const __almd_int = {
   to_hex(n: bigint): string { return (n >= 0n ? n : n + (1n << 64n)).toString(16); },
   to_string(n: number): string { return String(n); },
   band(a: number, b: number): number { return a & b; },
@@ -93,7 +93,7 @@ const __int = {
   to_u32(a: number): number { return a >>> 0; },
   to_u8(a: number): number { return a & 0xFF; },
 };
-const __float = {
+const __almd_float = {
   to_string(n: number): string { return String(n); },
   to_int(n: number): number { return Math.trunc(n); },
   round(n: number): number { return Math.round(n); },
@@ -104,21 +104,21 @@ const __float = {
   parse(s: string): number { const n = parseFloat(s); if (isNaN(n)) throw new Error("invalid float: " + s); return n; },
   from_int(n: number): number { return n; },
 };
-const __path = {
+const __almd_path = {
   join(base: string, child: string): string { return base.replace(/\/+$/, "") + "/" + child; },
   dirname(p: string): string { const i = p.lastIndexOf("/"); return i >= 0 ? p.substring(0, i) : "."; },
   basename(p: string): string { const i = p.lastIndexOf("/"); return i >= 0 ? p.substring(i + 1) : p; },
-  extension(p: string): string | null { const b = __path.basename(p); const i = b.lastIndexOf("."); return i > 0 ? b.substring(i + 1) : null; },
+  extension(p: string): string | null { const b = __almd_path.basename(p); const i = b.lastIndexOf("."); return i > 0 ? b.substring(i + 1) : null; },
   is_absolute_hdlm_qm_(p: string): boolean { return p.startsWith("/"); },
 };
-const __json = {
+const __almd_json = {
   parse(text: string): any { return JSON.parse(text); },
   stringify(j: any): string { return JSON.stringify(j); },
   get(j: any, key: string): any | null { return (j && typeof j === "object" && !Array.isArray(j) && key in j) ? j[key] : null; },
-  get_string(j: any, key: string): string | null { const v = __json.get(j, key); return typeof v === "string" ? v : null; },
-  get_int(j: any, key: string): number | null { const v = __json.get(j, key); return typeof v === "number" ? v : null; },
-  get_bool(j: any, key: string): boolean | null { const v = __json.get(j, key); return typeof v === "boolean" ? v : null; },
-  get_array(j: any, key: string): any[] | null { const v = __json.get(j, key); return Array.isArray(v) ? v : null; },
+  get_string(j: any, key: string): string | null { const v = __almd_json.get(j, key); return typeof v === "string" ? v : null; },
+  get_int(j: any, key: string): number | null { const v = __almd_json.get(j, key); return typeof v === "number" ? v : null; },
+  get_bool(j: any, key: string): boolean | null { const v = __almd_json.get(j, key); return typeof v === "boolean" ? v : null; },
+  get_array(j: any, key: string): any[] | null { const v = __almd_json.get(j, key); return Array.isArray(v) ? v : null; },
   keys(j: any): string[] { return (j && typeof j === "object" && !Array.isArray(j)) ? Object.keys(j).sort() : []; },
   to_string(j: any): string | null { return typeof j === "string" ? j : null; },
   to_int(j: any): number | null { return typeof j === "number" ? j : null; },
@@ -129,7 +129,7 @@ const __json = {
   array(items: any[]): any { return items; },
   from_map(m: any): any { if (m instanceof Map) { const o: any = {}; m.forEach((v: any, k: string) => { o[k] = v; }); return o; } return m; },
 };
-const __env = {
+const __almd_env = {
   unix_timestamp(): number { return Math.floor(Date.now() / 1000); },
   args(): string[] { return Deno.args; },
   get(name: string): string | null { const v = Deno.env.get(name); return v !== undefined ? v : null; },
@@ -138,12 +138,12 @@ const __env = {
   millis(): number { return Date.now(); },
   sleep_ms(ms: number): void { const end = Date.now() + ms; while (Date.now() < end) {} },
 };
-const __process = {
+const __almd_process = {
   exec(cmd: string, args: string[]): string { try { const p = new Deno.Command(cmd, { args, stdout: "piped", stderr: "piped" }); const out = p.outputSync(); if (out.success) { return new TextDecoder().decode(out.stdout); } else { const msg = new TextDecoder().decode(out.stderr); throw new Error(msg || "command failed"); } } catch (e) { if (e instanceof Error) throw e; throw new Error(String(e)); } },
   exit(code: number): void { Deno.exit(code); },
   stdin_lines(): string[] { const buf = new Uint8Array(1024 * 1024); const n = Deno.stdin.readSync(buf); return n ? new TextDecoder().decode(buf.subarray(0, n)).split("\n").filter(l => l.length > 0) : []; },
 };
-const __math = {
+const __almd_math = {
   min(a: number, b: number): number { return Math.min(a, b); },
   max(a: number, b: number): number { return Math.max(a, b); },
   abs(n: number): number { return Math.abs(n); },
@@ -157,13 +157,13 @@ const __math = {
   exp(x: number): number { return Math.exp(x); },
   sqrt(x: number): number { return Math.sqrt(x); },
 };
-const __random = {
+const __almd_random = {
   int(min: number, max: number): number { return Math.floor(Math.random() * (max - min + 1)) + min; },
   float(): number { return Math.random(); },
   choice<T>(xs: T[]): T | null { return xs.length > 0 ? xs[Math.floor(Math.random() * xs.length)] : null; },
   shuffle<T>(xs: T[]): T[] { const a = [...xs]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; },
 };
-const __regex = {
+const __almd_regex = {
   match_hdlm_qm_(pat: string, s: string): boolean { return new RegExp(pat).test(s); },
   full_match_hdlm_qm_(pat: string, s: string): boolean { return new RegExp(`^(?:${pat})$`).test(s); },
   find(pat: string, s: string): string | null { const m = s.match(new RegExp(pat)); return m ? m[0] : null; },
@@ -173,12 +173,12 @@ const __regex = {
   split(pat: string, s: string): string[] { return s.split(new RegExp(pat)); },
   captures(pat: string, s: string): string[] | null { const m = s.match(new RegExp(pat)); return m && m.length > 1 ? m.slice(1) : null; },
 };
-const __io = {
+const __almd_io = {
   read_line(): string { return prompt("") ?? ""; },
   print(s: string): void { const buf = new TextEncoder().encode(s); Deno.stdout.writeSync(buf); },
   read_all(): string { const d = new TextDecoder(); let r = ""; const buf = new Uint8Array(4096); let n: number | null; while ((n = Deno.stdin.readSync(buf)) !== null && n > 0) { r += d.decode(buf.subarray(0, n)); } return r; },
 };
-const __time = {
+const __almd_time = {
   now(): number { return Math.floor(Date.now() / 1000); },
   millis(): number { return Date.now(); },
   sleep(ms: number): void { /* Deno */ if (typeof Deno !== "undefined") { const end = Date.now() + ms; while (Date.now() < end) {} } },
@@ -190,10 +190,10 @@ const __time = {
   minute(ts: number): number { return new Date(ts * 1000).getUTCMinutes(); },
   second(ts: number): number { return new Date(ts * 1000).getUTCSeconds(); },
   weekday(ts: number): number { const d = new Date(ts * 1000).getUTCDay(); return d === 0 ? 6 : d - 1; },
-  to_iso(ts: number): string { const [y, m, d, h, mi, s] = __time._parts(ts); return `${String(y).padStart(4,"0")}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}T${String(h).padStart(2,"0")}:${String(mi).padStart(2,"0")}:${String(s).padStart(2,"0")}Z`; },
+  to_iso(ts: number): string { const [y, m, d, h, mi, s] = __almd_time._parts(ts); return `${String(y).padStart(4,"0")}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}T${String(h).padStart(2,"0")}:${String(mi).padStart(2,"0")}:${String(s).padStart(2,"0")}Z`; },
   from_parts(y: number, m: number, d: number, h: number, min: number, s: number): number { return Math.floor(Date.UTC(y, m - 1, d, h, min, s) / 1000); },
 };
-const __http = {
+const __almd_http = {
   async serve(port: number, handler: (req: any) => any): Promise<void> { const server = Deno.serve({ port }, async (request: Request) => { const url = new URL(request.url); const method = request.method; const path = url.pathname; const body = method === "POST" || method === "PUT" ? await request.text() : ""; const headers: Record<string, string> = {}; request.headers.forEach((v: string, k: string) => { headers[k] = v; }); const req = { method, path, body, headers }; const res = handler(req); return new Response(res.body, { status: res.status, headers: res.headers || {} }); }); },
   response(status: number, body: string): any { return { status, body, headers: { "content-type": "text/plain" } }; },
   json(status: number, body: string): any { return { status, body, headers: { "content-type": "application/json" } }; },
@@ -259,7 +259,7 @@ function __assert_throws(fn: () => any, expectedMsg: string): void {
 
 /// JavaScript runtime (Node.js) for emitted code.
 pub const RUNTIME_JS: &str = r#"// ---- Almide Runtime (JS) ----
-const __fs = {
+const __almd_fs = {
   exists(p) { const fs = require("fs"); try { fs.statSync(p); return true; } catch { return false; } },
   read_text(p) { return require("fs").readFileSync(p, "utf-8"); },
   read_bytes(p) { return Array.from(require("fs").readFileSync(p)); },
@@ -272,7 +272,7 @@ const __fs = {
   remove(p) { require("fs").unlinkSync(p); },
   list_dir(p) { return require("fs").readdirSync(p).sort(); },
 };
-const __string = {
+const __almd_string = {
   trim(s) { return s.trim(); },
   split(s, sep) { return s.split(sep); },
   join(arr, sep) { return arr.join(sep); },
@@ -299,7 +299,7 @@ const __string = {
   is_alphanumeric_hdlm_qm_(s) { return s.length > 0 && /^[a-zA-Z0-9]+$/.test(s); },
   is_whitespace_hdlm_qm_(s) { return s.length > 0 && /^\s+$/.test(s); },
 };
-const __list = {
+const __almd_list = {
   len(xs) { return xs.length; },
   get(xs, i) { return i < xs.length ? xs[i] : null; },
   get_or(xs, i, d) { return i < xs.length ? xs[i] : d; },
@@ -323,7 +323,7 @@ const __list = {
   index_of(xs, x) { const i = xs.indexOf(x); return i >= 0 ? i : null; },
   chunk(xs, n) { const r = []; for (let i = 0; i < xs.length; i += n) r.push(xs.slice(i, i + n)); return r; },
 };
-const __map = {
+const __almd_map = {
   new_() { return new Map(); },
   get(m, k) { return m.has(k) ? m.get(k) : null; },
   get_or(m, k, d) { return m.has(k) ? m.get(k) : d; },
@@ -336,7 +336,7 @@ const __map = {
   entries(m) { return [...m.entries()]; },
   from_list(xs, f) { const r = new Map(); for (const x of xs) { const [k, v] = f(x); r.set(k, v); } return r; },
 };
-const __int = {
+const __almd_int = {
   to_hex(n) { return (typeof n === "bigint" ? (n >= 0n ? n : n + (1n << 64n)).toString(16) : n.toString(16)); },
   to_string(n) { return String(n); },
   band(a, b) { return a & b; },
@@ -352,7 +352,7 @@ const __int = {
   to_u32(a) { return a >>> 0; },
   to_u8(a) { return a & 0xFF; },
 };
-const __float = {
+const __almd_float = {
   to_string(n) { return String(n); },
   to_int(n) { return Math.trunc(n); },
   round(n) { return Math.round(n); },
@@ -363,21 +363,21 @@ const __float = {
   parse(s) { const n = parseFloat(s); if (isNaN(n)) throw new Error("invalid float: " + s); return n; },
   from_int(n) { return n; },
 };
-const __path = {
+const __almd_path = {
   join(base, child) { return base.replace(/\/+$/, "") + "/" + child; },
   dirname(p) { const i = p.lastIndexOf("/"); return i >= 0 ? p.substring(0, i) : "."; },
   basename(p) { const i = p.lastIndexOf("/"); return i >= 0 ? p.substring(i + 1) : p; },
-  extension(p) { const b = __path.basename(p); const i = b.lastIndexOf("."); return i > 0 ? b.substring(i + 1) : null; },
+  extension(p) { const b = __almd_path.basename(p); const i = b.lastIndexOf("."); return i > 0 ? b.substring(i + 1) : null; },
   is_absolute_hdlm_qm_(p) { return p.startsWith("/"); },
 };
-const __json = {
+const __almd_json = {
   parse(text) { return JSON.parse(text); },
   stringify(j) { return JSON.stringify(j); },
   get(j, key) { return (j && typeof j === "object" && !Array.isArray(j) && key in j) ? j[key] : null; },
-  get_string(j, key) { const v = __json.get(j, key); return typeof v === "string" ? v : null; },
-  get_int(j, key) { const v = __json.get(j, key); return typeof v === "number" ? v : null; },
-  get_bool(j, key) { const v = __json.get(j, key); return typeof v === "boolean" ? v : null; },
-  get_array(j, key) { const v = __json.get(j, key); return Array.isArray(v) ? v : null; },
+  get_string(j, key) { const v = __almd_json.get(j, key); return typeof v === "string" ? v : null; },
+  get_int(j, key) { const v = __almd_json.get(j, key); return typeof v === "number" ? v : null; },
+  get_bool(j, key) { const v = __almd_json.get(j, key); return typeof v === "boolean" ? v : null; },
+  get_array(j, key) { const v = __almd_json.get(j, key); return Array.isArray(v) ? v : null; },
   keys(j) { return (j && typeof j === "object" && !Array.isArray(j)) ? Object.keys(j).sort() : []; },
   to_string(j) { return typeof j === "string" ? j : null; },
   to_int(j) { return typeof j === "number" ? j : null; },
@@ -388,7 +388,7 @@ const __json = {
   array(items) { return items; },
   from_map(m) { if (m instanceof Map) { const o = {}; m.forEach((v, k) => { o[k] = v; }); return o; } return m; },
 };
-const __env = {
+const __almd_env = {
   unix_timestamp() { return Math.floor(Date.now() / 1000); },
   args() { return process.argv.slice(2); },
   get(name) { const v = process.env[name]; return v !== undefined ? v : null; },
@@ -397,12 +397,12 @@ const __env = {
   millis() { return Date.now(); },
   sleep_ms(ms) { const end = Date.now() + ms; while (Date.now() < end) {} },
 };
-const __process = {
+const __almd_process = {
   exec(cmd, args) { const { execFileSync } = require("child_process"); try { return execFileSync(cmd, args, { encoding: "utf-8" }); } catch (e) { const msg = e.stderr ? String(e.stderr) : e.message; throw new Error(msg || "command failed"); } },
   exit(code) { process.exit(code); },
   stdin_lines() { return require("fs").readFileSync(0, "utf-8").split("\n").filter(l => l.length > 0); },
 };
-const __math = {
+const __almd_math = {
   min(a, b) { return Math.min(a, b); },
   max(a, b) { return Math.max(a, b); },
   abs(n) { return Math.abs(n); },
@@ -416,13 +416,13 @@ const __math = {
   exp(x) { return Math.exp(x); },
   sqrt(x) { return Math.sqrt(x); },
 };
-const __random = {
+const __almd_random = {
   int(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; },
   float() { return Math.random(); },
   choice(xs) { return xs.length > 0 ? xs[Math.floor(Math.random() * xs.length)] : null; },
   shuffle(xs) { const a = [...xs]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; },
 };
-const __regex = {
+const __almd_regex = {
   match_hdlm_qm_(pat, s) { return new RegExp(pat).test(s); },
   full_match_hdlm_qm_(pat, s) { return new RegExp(`^(?:${pat})$`).test(s); },
   find(pat, s) { const m = s.match(new RegExp(pat)); return m ? m[0] : null; },
@@ -432,12 +432,12 @@ const __regex = {
   split(pat, s) { return s.split(new RegExp(pat)); },
   captures(pat, s) { const m = s.match(new RegExp(pat)); return m && m.length > 1 ? m.slice(1) : null; },
 };
-const __io = {
+const __almd_io = {
   read_line() { const buf = Buffer.alloc(1024); let s = ""; while (true) { const n = require("fs").readSync(0, buf, 0, 1, null); if (n === 0) break; const ch = buf.toString("utf-8", 0, n); s += ch; if (ch === "\n") break; } return s.replace(/\r?\n$/, ""); },
   print(s) { process.stdout.write(s); },
   read_all() { return require("fs").readFileSync(0, "utf-8"); },
 };
-const __time = {
+const __almd_time = {
   now() { return Math.floor(Date.now() / 1000); },
   millis() { return Date.now(); },
   sleep(ms) { const end = Date.now() + ms; while (Date.now() < end) {} },
@@ -449,10 +449,10 @@ const __time = {
   minute(ts) { return new Date(ts * 1000).getUTCMinutes(); },
   second(ts) { return new Date(ts * 1000).getUTCSeconds(); },
   weekday(ts) { const d = new Date(ts * 1000).getUTCDay(); return d === 0 ? 6 : d - 1; },
-  to_iso(ts) { const [y, m, d, h, mi, s] = __time._parts(ts); return `${String(y).padStart(4,"0")}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}T${String(h).padStart(2,"0")}:${String(mi).padStart(2,"0")}:${String(s).padStart(2,"0")}Z`; },
+  to_iso(ts) { const [y, m, d, h, mi, s] = __almd_time._parts(ts); return `${String(y).padStart(4,"0")}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}T${String(h).padStart(2,"0")}:${String(mi).padStart(2,"0")}:${String(s).padStart(2,"0")}Z`; },
   from_parts(y, m, d, h, min, s) { return Math.floor(Date.UTC(y, m - 1, d, h, min, s) / 1000); },
 };
-const __http = {
+const __almd_http = {
   async serve(port, handler) { const http = require("http"); const server = http.createServer(async (req, res) => { let body = ""; req.on("data", (c) => { body += c; }); req.on("end", () => { const r = handler({ method: req.method, path: req.url, body, headers: req.headers || {} }); const headers = r.headers || {}; res.writeHead(r.status, headers); res.end(r.body); }); }); server.listen(port); },
   response(status, body) { return { status, body, headers: { "content-type": "text/plain" } }; },
   json(status, body) { return { status, body, headers: { "content-type": "application/json" } }; },

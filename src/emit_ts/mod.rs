@@ -38,7 +38,7 @@ impl TsEmitter {
         if self.user_modules.contains(&name.to_string()) {
             name.to_string()
         } else if crate::stdlib::is_stdlib_module(name) {
-            format!("__{}", name)
+            format!("__almd_{}", name)
         } else {
             name.to_string()
         }

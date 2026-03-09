@@ -5,6 +5,9 @@ use super::HTTP_RUNTIME;
 use super::TIME_RUNTIME;
 use super::REGEX_RUNTIME;
 use super::IO_RUNTIME;
+use super::PLATFORM_RUNTIME;
+use super::COLLECTION_RUNTIME;
+use super::CORE_RUNTIME;
 
 impl Emitter {
     /// Scan declarations to classify effect/result functions (single pass).
@@ -113,7 +116,8 @@ impl Emitter {
 
         for decl in &prog.decls {
             match decl {
-                Decl::Fn { name: fn_name, params, return_type, body, effect, r#async, visibility, .. } => {
+                Decl::Fn { name: fn_name, params, return_type, body, effect, r#async, visibility, extern_attrs, .. } => {
+                    let rs_extern = extern_attrs.iter().find(|a| a.target == "rs");
                     let is_effect = effect.unwrap_or(false);
                     let is_async = r#async.unwrap_or(false);
                     let params_str: Vec<String> = params.iter()
@@ -140,24 +144,37 @@ impl Emitter {
                     let safe_fn_name = crate::emit_common::sanitize(fn_name);
                     self.emitln(&format!("{}fn {}({}) -> {} {{", async_prefix, safe_fn_name, params_str.join(", "), actual_ret));
                     self.indent += 1;
-                    let prev_effect = self.in_effect;
-                    self.in_effect = is_effect;
-                    let body_code = self.gen_expr(body);
 
-                    if is_effect {
-                        if ret_str.starts_with("Result<") {
-                            self.emitln(&body_code);
-                        } else if ret_str == "()" {
-                            self.emitln(&format!("{};", body_code));
-                            self.emitln("Ok(())");
+                    if let Some(ext) = rs_extern {
+                        let args: Vec<String> = params.iter().map(|p| format!("{}.clone()", p.name)).collect();
+                        let call = format!("{}::{}({})", ext.module.replace('.', "::"), ext.function, args.join(", "));
+                        if is_effect {
+                            self.emitln(&format!("{}?", call));
                         } else {
-                            self.emitln(&format!("Ok({})", body_code));
+                            self.emitln(&call);
                         }
+                    } else if let Some(body) = body {
+                        let prev_effect = self.in_effect;
+                        self.in_effect = is_effect;
+                        let body_code = self.gen_expr(body);
+
+                        if is_effect {
+                            if ret_str.starts_with("Result<") {
+                                self.emitln(&body_code);
+                            } else if ret_str == "()" {
+                                self.emitln(&format!("{};", body_code));
+                                self.emitln("Ok(())");
+                            } else {
+                                self.emitln(&format!("Ok({})", body_code));
+                            }
+                        } else {
+                            self.emitln(&body_code);
+                        }
+                        self.in_effect = prev_effect;
                     } else {
-                        self.emitln(&body_code);
+                        self.emitln("unimplemented!(\"no body and no @extern for rs target\")");
                     }
 
-                    self.in_effect = prev_effect;
                     self.indent -= 1;
                     self.emitln("}");
                     self.emitln("");
@@ -210,6 +227,12 @@ impl Emitter {
         self.emitln("");
         self.out.push_str(REGEX_RUNTIME);
         self.emitln("");
+        self.out.push_str(PLATFORM_RUNTIME);
+        self.emitln("");
+        self.out.push_str(COLLECTION_RUNTIME);
+        self.emitln("");
+        self.out.push_str(CORE_RUNTIME);
+        self.emitln("");
     }
 
     pub(crate) fn emit_decl(&mut self, decl: &Decl) {
@@ -223,8 +246,8 @@ impl Emitter {
             Decl::Type { name, ty, deriving, .. } => {
                 self.emit_type_decl(name, ty, deriving);
             }
-            Decl::Fn { name, params, return_type, body, effect, r#async, .. } => {
-                self.emit_fn_decl(name, params, return_type, body, effect.unwrap_or(false), r#async.unwrap_or(false));
+            Decl::Fn { name, params, return_type, body, effect, r#async, extern_attrs, .. } => {
+                self.emit_fn_decl(name, params, return_type, body.as_ref(), effect.unwrap_or(false), r#async.unwrap_or(false), extern_attrs);
             }
             Decl::Impl { trait_, for_, methods, .. } => {
                 self.emitln(&format!("// impl {} for {}", trait_, for_));
@@ -333,7 +356,7 @@ impl Emitter {
         }
     }
 
-    fn emit_fn_decl(&mut self, name: &str, params: &[Param], ret_type: &TypeExpr, body: &Expr, is_effect: bool, is_async: bool) {
+    fn emit_fn_decl(&mut self, name: &str, params: &[Param], ret_type: &TypeExpr, body: Option<&Expr>, is_effect: bool, is_async: bool, extern_attrs: &[ExternAttr]) {
         let fn_name = if name == "main" { "almide_main".to_string() } else { crate::emit_common::sanitize(name) };
         let ret_str = self.gen_type(ret_type);
         let is_unit_ret = ret_str == "()";
@@ -363,66 +386,83 @@ impl Emitter {
         self.emitln(&format!("{}fn {}({}) -> {} {{", async_prefix, fn_name, params_str.join(", "), actual_ret));
         self.indent += 1;
 
-        let prev_effect = self.in_effect;
-        // Treat fn as effect if explicitly marked OR if it returns Result
-        self.in_effect = is_effect || ret_str.starts_with("Result<");
+        // Check for @extern(rs, ...)
+        let rs_extern = extern_attrs.iter().find(|a| a.target == "rs");
 
-        match body {
-            Expr::Block { stmts, expr: final_expr, .. } => {
-                self.emit_stmts(stmts);
-                let ret_is_result = ret_str.starts_with("Result<");
-                if is_effect {
-                    if ret_is_result {
-                        // Return type is already Result - check if final expr already returns Result
-                        if let Some(fe) = final_expr {
-                            let already_result = matches!(fe.as_ref(),
-                                Expr::Ok { .. } | Expr::Err { .. } | Expr::Match { .. } | Expr::If { .. }
-                            );
-                            let e = self.gen_expr(fe);
-                            if already_result {
-                                self.emitln(&e);
+        if let Some(ext) = rs_extern {
+            let args: Vec<String> = params.iter()
+                .filter(|p| p.name != "self")
+                .map(|p| format!("{}.clone()", p.name))
+                .collect();
+            let call = format!("{}::{}({})", ext.module.replace('.', "::"), ext.function, args.join(", "));
+            if is_effect {
+                self.emitln(&format!("{}?", call));
+            } else {
+                self.emitln(&call);
+            }
+        } else if let Some(body) = body {
+            let prev_effect = self.in_effect;
+            // Treat fn as effect if explicitly marked OR if it returns Result
+            self.in_effect = is_effect || ret_str.starts_with("Result<");
+
+            match body {
+                Expr::Block { stmts, expr: final_expr, .. } => {
+                    self.emit_stmts(stmts);
+                    let ret_is_result = ret_str.starts_with("Result<");
+                    if is_effect {
+                        if ret_is_result {
+                            if let Some(fe) = final_expr {
+                                let already_result = matches!(fe.as_ref(),
+                                    Expr::Ok { .. } | Expr::Err { .. } | Expr::Match { .. } | Expr::If { .. }
+                                );
+                                let e = self.gen_expr(fe);
+                                if already_result {
+                                    self.emitln(&e);
+                                } else {
+                                    self.emitln(&format!("Ok({})", e));
+                                }
                             } else {
+                                self.emitln("Ok(())");
+                            }
+                        } else if let Some(fe) = final_expr {
+                            if is_unit_ret {
+                                let e = self.gen_expr(fe);
+                                self.emitln(&format!("{};", e));
+                                self.emitln("Ok(())");
+                            } else {
+                                let e = self.gen_expr(fe);
                                 self.emitln(&format!("Ok({})", e));
                             }
                         } else {
                             self.emitln("Ok(())");
                         }
-                    } else if let Some(fe) = final_expr {
-                        if is_unit_ret {
+                    } else {
+                        if let Some(fe) = final_expr {
                             let e = self.gen_expr(fe);
-                            self.emitln(&format!("{};", e));
-                            self.emitln("Ok(())");
+                            self.emitln(&e);
+                        }
+                    }
+                }
+                _ => {
+                    let expr = self.gen_expr(body);
+                    if is_effect {
+                        let ret_is_result = ret_str.starts_with("Result<");
+                        if ret_is_result {
+                            self.emitln(&expr);
                         } else {
-                            let e = self.gen_expr(fe);
-                            self.emitln(&format!("Ok({})", e));
+                            self.emitln(&format!("Ok({})", expr));
                         }
                     } else {
-                        self.emitln("Ok(())");
-                    }
-                } else {
-                    if let Some(fe) = final_expr {
-                        let e = self.gen_expr(fe);
-                        self.emitln(&e);
-                    }
-                }
-            }
-            _ => {
-                let expr = self.gen_expr(body);
-                if is_effect {
-                    let ret_is_result = ret_str.starts_with("Result<");
-                    if ret_is_result {
-                        // Already returns Result, don't wrap
                         self.emitln(&expr);
-                    } else {
-                        self.emitln(&format!("Ok({})", expr));
                     }
-                } else {
-                    self.emitln(&expr);
                 }
             }
+
+            self.in_effect = prev_effect;
+        } else {
+            self.emitln("unimplemented!(\"no body and no @extern for rs target\")");
         }
 
-        self.in_effect = prev_effect;
         self.indent -= 1;
         self.emitln("}");
     }

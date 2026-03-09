@@ -181,7 +181,7 @@ impl TsEmitter {
 
     fn resolve_ufcs_module(method: &str) -> Option<String> {
         // UFCS is only for stdlib modules, so always prefix with __
-        crate::stdlib::resolve_ufcs_module(method).map(|m| format!("__{}", m))
+        crate::stdlib::resolve_ufcs_module(method).map(|m| format!("__almd_{}", m))
     }
 
     pub(crate) fn gen_call(&self, callee: &Expr, args: &[Expr]) -> String {
@@ -203,7 +203,7 @@ impl TsEmitter {
                         let obj_str = self.gen_expr(object);
                         let mut all_args = vec![obj_str];
                         all_args.extend(args.iter().map(|a| self.gen_expr(a)));
-                        return format!("__list.{}({})", Self::sanitize(field), all_args.join(", "));
+                        return format!("__almd_list.{}({})", Self::sanitize(field), all_args.join(", "));
                     }
                 }
             } else {
@@ -225,7 +225,7 @@ impl TsEmitter {
                         let obj_str = self.gen_expr(object);
                         let mut all_args = vec![obj_str];
                         all_args.extend(args.iter().map(|a| self.gen_expr(a)));
-                        return format!("__list.{}({})", Self::sanitize(field), all_args.join(", "));
+                        return format!("__almd_list.{}({})", Self::sanitize(field), all_args.join(", "));
                     }
                 }
             }

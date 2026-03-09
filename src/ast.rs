@@ -240,6 +240,14 @@ pub enum Visibility {
     Local,    // this file only
 }
 
+/// @extern(target, "module", "function") annotation for FFI declarations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExternAttr {
+    pub target: String,     // "rust" or "ts"
+    pub module: String,     // e.g., "fast_lib"
+    pub function: String,   // e.g., "reverse"
+}
+
 impl Default for Visibility {
     fn default() -> Self { Visibility::Public }
 }
@@ -255,9 +263,10 @@ pub enum Decl {
         #[serde(default)] effect: Option<bool>,
         #[serde(default)] r#async: Option<bool>,
         #[serde(default)] visibility: Visibility,
+        #[serde(default)] extern_attrs: Vec<ExternAttr>,
         params: Vec<Param>,
         #[serde(rename = "returnType")] return_type: TypeExpr,
-        body: Expr,
+        body: Option<Expr>,
         #[serde(skip)] span: Option<Span>,
     },
     Trait { name: String, methods: Vec<serde_json::Value>, #[serde(skip)] span: Option<Span> },
