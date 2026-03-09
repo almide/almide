@@ -26,18 +26,20 @@ pub fn resolve_ufcs_module(method: &str) -> Option<&'static str> {
         | "is_alpha?" | "is_alpha_qm_"
         | "is_alphanumeric?" | "is_alphanumeric_qm_"
         | "is_whitespace?" | "is_whitespace_qm_"
-        | "pad_right" | "trim_start" | "trim_end" | "count" => Some("string"),
+        | "pad_right" | "trim_start" | "trim_end" | "count"
+        | "strip_prefix" | "strip_suffix" => Some("string"),
 
         "get" | "get_or" | "sort" | "reverse"
         | "each" | "map" | "filter" | "find" | "fold"
         | "any" | "all" | "len"
         | "enumerate" | "zip" | "flatten" | "take" | "drop"
         | "sort_by" | "unique"
-        | "last" | "chunk" | "sum" | "product" => Some("list"),
+        | "last" | "chunk" | "sum" | "product"
+        | "first" | "flat_map" => Some("list"),
 
         "to_string" | "to_hex" => Some("int"),
 
-        "keys" | "values" | "entries" => Some("map"),
+        "keys" | "values" | "entries" | "merge" => Some("map"),
 
         _ => None,
     }
@@ -115,6 +117,12 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         ("list", "chunk") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("n"), Ty::Int)], ret: Ty::List(Box::new(Ty::List(Box::new(Ty::Unknown)))), is_effect: false },
         ("list", "sum") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Int)))], ret: Ty::Int, is_effect: false },
         ("list", "product") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Int)))], ret: Ty::Int, is_effect: false },
+        ("list", "first") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "is_empty?") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::Bool, is_effect: false },
+        ("list", "flat_map") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::List(Box::new(Ty::Unknown))) })], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "min") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "max") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "join") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::String))), (s("sep"), Ty::String)], ret: Ty::String, is_effect: false },
 
         // ── map ──
         ("map", "new") => FnSig { params: vec![], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)), is_effect: false },
@@ -128,12 +136,18 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         ("map", "len") => FnSig { params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)))], ret: Ty::Int, is_effect: false },
         ("map", "entries") => FnSig { params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
         ("map", "from_list") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Unknown) })], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)), is_effect: false },
+        ("map", "merge") => FnSig { params: vec![(s("a"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown))), (s("b"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)))], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)), is_effect: false },
+        ("map", "is_empty?") => FnSig { params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)))], ret: Ty::Bool, is_effect: false },
 
         // ── string (additional) ──
         ("string", "pad_right") => FnSig { params: vec![(s("s"), Ty::String), (s("n"), Ty::Int), (s("ch"), Ty::String)], ret: Ty::String, is_effect: false },
         ("string", "trim_start") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::String, is_effect: false },
         ("string", "trim_end") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::String, is_effect: false },
         ("string", "count") => FnSig { params: vec![(s("s"), Ty::String), (s("sub"), Ty::String)], ret: Ty::Int, is_effect: false },
+        ("string", "is_empty?") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::Bool, is_effect: false },
+        ("string", "reverse") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::String, is_effect: false },
+        ("string", "strip_prefix") => FnSig { params: vec![(s("s"), Ty::String), (s("prefix"), Ty::String)], ret: Ty::Option(Box::new(Ty::String)), is_effect: false },
+        ("string", "strip_suffix") => FnSig { params: vec![(s("s"), Ty::String), (s("suffix"), Ty::String)], ret: Ty::Option(Box::new(Ty::String)), is_effect: false },
 
         // ── int ──
         ("int", "to_string") => FnSig { params: vec![(s("n"), Ty::Int)], ret: Ty::String, is_effect: false },
@@ -191,6 +205,7 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         ("process", "exec") => FnSig { params: vec![(s("cmd"), Ty::String), (s("args"), Ty::List(Box::new(Ty::String)))], ret: Ty::Result(Box::new(Ty::String), Box::new(Ty::String)), is_effect: true },
         ("process", "exit") => FnSig { params: vec![(s("code"), Ty::Int)], ret: Ty::Unit, is_effect: true },
         ("process", "stdin_lines") => FnSig { params: vec![], ret: Ty::Result(Box::new(Ty::List(Box::new(Ty::String))), Box::new(Ty::String)), is_effect: true },
+        ("process", "exec_status") => FnSig { params: vec![(s("cmd"), Ty::String), (s("args"), Ty::List(Box::new(Ty::String)))], ret: Ty::Result(Box::new(Ty::Record { fields: vec![(s("code"), Ty::Int), (s("stdout"), Ty::String), (s("stderr"), Ty::String)] }), Box::new(Ty::String)), is_effect: true },
 
         // ── fs ──
         ("fs", "read_text") => FnSig { params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::String), Box::new(io_err())), is_effect: true },
@@ -203,6 +218,10 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         ("fs", "read_lines") => FnSig { params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::List(Box::new(Ty::String))), Box::new(io_err())), is_effect: true },
         ("fs", "remove") => FnSig { params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::Unit), Box::new(io_err())), is_effect: true },
         ("fs", "list_dir") => FnSig { params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::List(Box::new(Ty::String))), Box::new(io_err())), is_effect: true },
+        ("fs", "is_dir?") => FnSig { params: vec![(s("path"), Ty::String)], ret: Ty::Bool, is_effect: true },
+        ("fs", "is_file?") => FnSig { params: vec![(s("path"), Ty::String)], ret: Ty::Bool, is_effect: true },
+        ("fs", "copy") => FnSig { params: vec![(s("src"), Ty::String), (s("dst"), Ty::String)], ret: Ty::Result(Box::new(Ty::Unit), Box::new(io_err())), is_effect: true },
+        ("fs", "rename") => FnSig { params: vec![(s("src"), Ty::String), (s("dst"), Ty::String)], ret: Ty::Result(Box::new(Ty::Unit), Box::new(io_err())), is_effect: true },
 
         // ── math ──
         ("math", "min") => FnSig { params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },

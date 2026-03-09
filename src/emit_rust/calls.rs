@@ -198,6 +198,10 @@ impl Emitter {
                 "read_lines" => format!("{{ let s = std::fs::read_to_string(&*{}).map_err(AlmideIoError::from)?; s.split('\\n').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect::<Vec<String>>() }}", args_str[0]),
                 "remove" => format!("std::fs::remove_file(&*{}).map_err(AlmideIoError::from)?", args_str[0]),
                 "list_dir" => format!("{{ let mut v: Vec<String> = std::fs::read_dir(&*{}).map_err(AlmideIoError::from)?.filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().to_string())).collect(); v.sort(); v }}", args_str[0]),
+                "is_dir?" | "is_dir_qm_" => format!("std::path::Path::new(&*{}).is_dir()", args_str[0]),
+                "is_file?" | "is_file_qm_" => format!("std::path::Path::new(&*{}).is_file()", args_str[0]),
+                "copy" => format!("{{ std::fs::copy(&*{}, &*{}).map_err(AlmideIoError::from)?; () }}", args_str[0], args_str[1]),
+                "rename" => format!("std::fs::rename(&*{}, &*{}).map_err(AlmideIoError::from)?", args_str[0], args_str[1]),
                 _ => { eprintln!("internal error: no Rust codegen for fs.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "string" => match func {
@@ -235,6 +239,10 @@ impl Emitter {
                 "trim_start" => format!("({}).trim_start().to_string()", args_str[0]),
                 "trim_end" => format!("({}).trim_end().to_string()", args_str[0]),
                 "count" => format!("(({}).matches(&*{}).count() as i64)", args_str[0], args_str[1]),
+                "is_empty?" | "is_empty_qm_" => format!("({}).is_empty()", args_str[0]),
+                "reverse" => format!("({}).chars().rev().collect::<String>()", args_str[0]),
+                "strip_prefix" => format!("({}).strip_prefix(&*{}).map(|s| s.to_string())", args_str[0], args_str[1]),
+                "strip_suffix" => format!("({}).strip_suffix(&*{}).map(|s| s.to_string())", args_str[0], args_str[1]),
                 _ => { eprintln!("internal error: no Rust codegen for string.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "list" => {
@@ -305,6 +313,19 @@ impl Emitter {
                     "chunk" => format!("({}).chunks({} as usize).map(|c| c.to_vec()).collect::<Vec<_>>()", args_str[0], args_str[1]),
                     "sum" => format!("({}).iter().sum::<i64>()", args_str[0]),
                     "product" => format!("({}).iter().product::<i64>()", args_str[0]),
+                    "first" => format!("({}).first().cloned()", args_str[0]),
+                    "is_empty?" | "is_empty_qm_" => format!("({}).is_empty()", args_str[0]),
+                    "flat_map" => {
+                        let (names, body) = self.inline_lambda(&args[1], 1);
+                        if self.in_effect && body.contains("?") {
+                            format!("({}).clone().into_iter().map(|{}| -> Result<Vec<_>, String> {{ Ok({{ {} }}) }}).collect::<Result<Vec<_>, _>>()?.into_iter().flatten().collect::<Vec<_>>()", args_str[0], names[0], body)
+                        } else {
+                            format!("({}).clone().into_iter().flat_map(|{}| {{ {} }}).collect::<Vec<_>>()", args_str[0], names[0], body)
+                        }
+                    }
+                    "min" => format!("({}).iter().min().cloned()", args_str[0]),
+                    "max" => format!("({}).iter().max().cloned()", args_str[0]),
+                    "join" => format!("({}).join(&*{})", args_str[0], args_str[1]),
                     _ => { eprintln!("internal error: no Rust codegen for list.{}() — this is a compiler bug", func); std::process::exit(70); },
                 }
             },
@@ -323,6 +344,8 @@ impl Emitter {
                     let (names, body) = self.inline_lambda(&args[1], 1);
                     format!("({}).clone().into_iter().map(|{}| {{ {} }}).collect::<HashMap<_, _>>()", args_str[0], names[0], body)
                 }
+                "merge" => format!("{{ let mut m = ({}).clone(); m.extend(({}).clone()); m }}", args_str[0], args_str[1]),
+                "is_empty?" | "is_empty_qm_" => format!("({}).is_empty()", args_str[0]),
                 _ => { eprintln!("internal error: no Rust codegen for map.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "int" => match func {
@@ -361,6 +384,7 @@ impl Emitter {
                 "exec" => format!("match std::process::Command::new(&*{}).args({{ let __a: Vec<String> = {}; __a }}.iter().map(|s| s.as_str())).output() {{ Ok(__out) => if __out.status.success() {{ Ok(String::from_utf8_lossy(&__out.stdout).to_string()) }} else {{ Err(String::from_utf8_lossy(&__out.stderr).to_string()) }}, Err(e) => Err(e.to_string()) }}", args_str[0], args_str[1]),
                 "exit" => format!("std::process::exit({} as i32)", args_str[0]),
                 "stdin_lines" => "{{ use std::io::BufRead; std::io::stdin().lock().lines().collect::<Result<Vec<String>, _>>().map_err(|e| e.to_string())? }}".to_string(),
+                "exec_status" => format!("match std::process::Command::new(&*{}).args({{ let __a: Vec<String> = {}; __a }}.iter().map(|s| s.as_str())).output() {{ Ok(__out) => Ok(((__out.status.code().unwrap_or(-1) as i64), String::from_utf8_lossy(&__out.stdout).to_string(), String::from_utf8_lossy(&__out.stderr).to_string())), Err(e) => Err(e.to_string()) }}", args_str[0], args_str[1]),
                 _ => { eprintln!("internal error: no Rust codegen for process.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "io" => match func {

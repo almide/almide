@@ -1,0 +1,126 @@
+// Stdlib Phase 5 — HIGH priority gap tests
+
+// ── string ──
+
+test "string.is_empty? on empty" {
+  assert_eq(string.is_empty?(""), true)
+}
+
+test "string.is_empty? on non-empty" {
+  assert_eq(string.is_empty?("hi"), false)
+}
+
+test "string.reverse basic" {
+  assert_eq(string.reverse("hello"), "olleh")
+}
+
+test "string.reverse empty" {
+  assert_eq(string.reverse(""), "")
+}
+
+test "string.strip_prefix found" {
+  assert_eq(string.strip_prefix("hello world", "hello "), some("world"))
+}
+
+test "string.strip_prefix not found" {
+  assert_eq(string.strip_prefix("hello", "xyz"), none)
+}
+
+test "string.strip_suffix found" {
+  assert_eq(string.strip_suffix("file.txt", ".txt"), some("file"))
+}
+
+test "string.strip_suffix not found" {
+  assert_eq(string.strip_suffix("file.txt", ".rs"), none)
+}
+
+// ── list ──
+
+test "list.first on non-empty" {
+  assert_eq(list.first([10, 20, 30]), some(10))
+}
+
+test "list.first on empty" {
+  let xs: List[Int] = []
+  assert_eq(list.first(xs), none)
+}
+
+test "list.first via UFCS" {
+  assert_eq([1, 2, 3].first(), some(1))
+}
+
+test "list.is_empty? true" {
+  let xs: List[Int] = []
+  assert_eq(list.is_empty?(xs), true)
+}
+
+test "list.is_empty? false" {
+  assert_eq(list.is_empty?([1]), false)
+}
+
+test "list.flat_map basic" {
+  let xs = [1, 2, 3]
+  let result = list.flat_map(xs, fn(x) => [x, x * 10])
+  assert_eq(result, [1, 10, 2, 20, 3, 30])
+}
+
+test "list.flat_map with strings" {
+  let xs = ["ab", "cd"]
+  let result = list.flat_map(xs, fn(s) => string.chars(s))
+  assert_eq(result, ["a", "b", "c", "d"])
+}
+
+test "list.min on non-empty" {
+  assert_eq(list.min([3, 1, 4, 1, 5]), some(1))
+}
+
+test "list.min on empty" {
+  let xs: List[Int] = []
+  assert_eq(list.min(xs), none)
+}
+
+test "list.max on non-empty" {
+  assert_eq(list.max([3, 1, 4, 1, 5]), some(5))
+}
+
+test "list.max on empty" {
+  let xs: List[Int] = []
+  assert_eq(list.max(xs), none)
+}
+
+test "list.join basic" {
+  assert_eq(list.join(["a", "b", "c"], ", "), "a, b, c")
+}
+
+test "list.join empty" {
+  let xs: List[String] = []
+  assert_eq(list.join(xs, ","), "")
+}
+
+// ── map ──
+
+test "map.merge basic" {
+  let a = map.set(map.set(map.new(), "x", 1), "y", 2)
+  let b = map.set(map.set(map.new(), "y", 99), "z", 3)
+  let merged = map.merge(a, b)
+  assert_eq(map.get(merged, "x"), some(1))
+  assert_eq(map.get(merged, "y"), some(99))
+  assert_eq(map.get(merged, "z"), some(3))
+}
+
+test "map.merge via UFCS" {
+  let a = map.set(map.new(), "a", 1)
+  let b = map.set(map.new(), "b", 2)
+  let merged = a.merge(b)
+  assert_eq(map.len(merged), 2)
+}
+
+test "map.is_empty? true" {
+  let m: Map[String, Int] = map.new()
+  assert_eq(map.is_empty?(m), true)
+}
+
+test "map.is_empty? false" {
+  let m = map.set(map.new(), "k", 1)
+  assert_eq(map.is_empty?(m), false)
+}

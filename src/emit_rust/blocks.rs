@@ -178,7 +178,7 @@ impl Emitter {
 
     pub(crate) fn gen_stmt(&self, stmt: &Stmt) -> String {
         match stmt {
-            Stmt::Let { name, value, .. } => {
+            Stmt::Let { name, value, ty, .. } => {
                 // Use gen_arg to clone Ident values, preventing move issues
                 let val = match value {
                     Expr::If { cond, then, else_, .. } => {
@@ -189,6 +189,25 @@ impl Emitter {
                     }
                     _ => self.gen_expr(value),
                 };
+                // Emit type annotation for empty collections (Rust can't infer the element type)
+                let needs_type = match value {
+                    Expr::List { elements, .. } if elements.is_empty() => true,
+                    Expr::Call { callee, args, .. } => {
+                        // map.new() generates HashMap::new()
+                        if let Expr::Member { object, field, .. } = callee.as_ref() {
+                            if let Expr::Ident { name: mod_name, .. } = object.as_ref() {
+                                mod_name == "map" && field == "new" && args.is_empty()
+                            } else { false }
+                        } else { false }
+                    }
+                    _ => false,
+                };
+                if needs_type {
+                    if let Some(t) = ty {
+                        let rust_ty = self.gen_type(t);
+                        return format!("let {}: {} = {};", name, rust_ty, val);
+                    }
+                }
                 format!("let {} = {};", name, val)
             }
             Stmt::LetDestructure { fields, value, .. } => {
