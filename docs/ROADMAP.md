@@ -529,6 +529,212 @@ fn len(s: String) -> Int = string.len(s)
 
 ---
 
+## Stdlib Self-Hosting
+
+Currently all stdlib functions are hardcoded in the compiler (`stdlib.rs` for type signatures, `emit_rust/calls.rs` for Rust codegen). This doesn't scale — every new function requires compiler changes. The goal is to make stdlib extensible without touching the compiler.
+
+### Architecture: Two-Layer Stdlib
+
+```
+┌─────────────────────────────────────────┐
+│  Upper layer: Almide stdlib packages     │  ← .almd files, written in Almide
+│  string.reverse, list.flat_map,          │
+│  hash.sha256, encoding.base64, etc.      │
+└──────────────┬──────────────────────────┘
+               │ calls
+┌──────────────▼──────────────────────────┐
+│  Lower layer: compiler primitives        │  ← hardcoded in calls.rs (20-30 functions)
+│  fs.read_text, process.exec,             │
+│  string.len, list.get, map.set, etc.     │
+└─────────────────────────────────────────┘
+```
+
+**Upper layer** = pure logic or `extern` wrappers. Written as `.almd` packages.
+**Lower layer** = OS syscalls, data structure internals. Stay in the compiler.
+
+### Phase 1: Stdlib Package Mechanism
+
+Allow stdlib modules to be implemented as `.almd` files that ship with the compiler. No language changes needed — uses existing module system.
+
+```
+~/.local/almide/
+  almide              ← compiler binary
+  stdlib/
+    args.almd          ← argument parsing (pure Almide)
+    term.almd          ← terminal colors (pure Almide)
+    csv.almd           ← CSV parsing (pure Almide)
+```
+
+#### Implementation Steps
+
+- [ ] Resolver: add stdlib package search path (`~/.local/almide/stdlib/` or relative to binary)
+- [ ] Resolver: stdlib `.almd` files take precedence over hardcoded modules (for gradual migration)
+- [ ] Bundled stdlib: embed `.almd` files in the compiler binary via `include_str!` (no external file dependency)
+- [ ] Test: implement `args` module entirely in Almide as proof of concept
+
+#### Proof of concept: `args` module
+
+```almide
+// stdlib/args.almd — argument parsing, pure Almide
+
+fn flag?(name: String) -> Bool = {
+  let args = env.args()
+  list.any(args, fn(a) => a == "--" ++ name || a == "-" ++ string.slice(name, 0, 1))
+}
+
+fn option(name: String) -> Option[String] = {
+  let args = env.args()
+  let long = "--" ++ name
+  // check --name=value
+  let eq_match = list.find(args, fn(a) => string.starts_with?(a, long ++ "="))
+  match eq_match {
+    some(a) => string.strip_prefix(a, long ++ "=")
+    none => {
+      // check --name value
+      let idx = list.index_of(args, long)
+      match idx {
+        some(i) => list.get(args, i + 1)
+        none => none
+      }
+    }
+  }
+}
+
+fn option_or(name: String, default: String) -> String =
+  match option(name) {
+    some(v) => v
+    none => default
+  }
+
+fn positional() -> List[String] =
+  list.filter(env.args(), fn(a) => not string.starts_with?(a, "-"))
+    |> list.drop(1)  // drop program name
+```
+
+### Phase 2: `extern "rust"` — FFI for Rust Crates
+
+New syntax to call Rust functions from Almide. Enables stdlib packages that wrap high-performance Rust crates without touching the compiler.
+
+```almide
+// stdlib/hash.almd
+extern "rust" {
+  fn sha256_raw(data: String) -> String
+  fn sha1_raw(data: String) -> String
+}
+
+fn sha256(data: String) -> String = sha256_raw(data)
+fn sha1(data: String) -> String = sha1_raw(data)
+```
+
+#### Emitted Rust (from `extern "rust"`)
+
+```rust
+// The compiler emits a call to the function name as-is.
+// A companion .rs file provides the implementation.
+fn sha256_raw(data: String) -> String { /* links to sha2 crate */ }
+```
+
+#### Implementation Steps
+
+- [ ] Lexer: add `Extern` token
+- [ ] Parser: parse `extern "rust" { fn name(params) -> ret }` declarations
+- [ ] AST: add `Decl::Extern { target: String, functions: Vec<ExternFn> }` variant
+- [ ] Checker: register extern fn signatures, treat as available functions
+- [ ] Emitter (Rust): emit extern function stubs, link companion `.rs` files
+- [ ] Project: auto-add Rust crate dependencies to generated `Cargo.toml`
+- [ ] Test: implement `hash` module with `extern "rust"` wrapping `sha2` crate
+
+#### What `extern` unlocks
+
+| Module | Wrapped crate | Functions |
+|--------|--------------|-----------|
+| `hash` | `sha2`, `sha1`, `md5` | `sha256`, `sha1`, `md5` |
+| `encoding` | `base64`, `hex` | `base64_encode/decode`, `hex_encode/decode`, `url_encode/decode` |
+| `compress` | `flate2` | `gzip`, `gunzip`, `deflate`, `inflate` |
+| `toml` | `toml` | `parse`, `stringify` |
+
+### Phase 3: Migrate Existing Stdlib
+
+Gradually move pure-logic functions from `calls.rs` to `.almd` files.
+
+#### Candidates for immediate migration (pure logic, no syscalls)
+
+| Function | Current LOC in calls.rs | Can be written in Almide |
+|----------|------------------------|-------------------------|
+| `string.reverse` | 1 | `list.fold(string.chars(s), "", fn(acc, c) => c ++ acc)` |
+| `string.is_empty?` | 1 | `string.len(s) == 0` |
+| `string.strip_prefix/suffix` | 1 each | `if starts_with? then some(slice(...)) else none` |
+| `list.first` | 1 | `list.get(xs, 0)` |
+| `list.is_empty?` | 1 | `list.len(xs) == 0` |
+| `list.flat_map` | 3 | `list.flatten(list.map(xs, f))` |
+| `list.min/max` | 1 each | `list.fold(...)` |
+| `list.join` | 1 | `list.fold(...)` |
+| `list.unique` | 2 | pure Almide with fold |
+| `list.sum/product` | 1 each | `list.fold(xs, 0, fn(a, b) => a + b)` |
+| `map.merge` | 1 | fold over entries |
+
+#### Must stay in compiler (system primitives)
+
+```
+string: len, split, join(delimiter), trim, contains, starts/ends_with,
+        slice, to_upper/lower, replace, chars, to_bytes, from_bytes
+list:   len, get, get_or, sort, reverse, contains
+map:    new, get, get_or, set, remove, keys, values, len, entries, contains
+fs:     all functions (OS syscalls)
+process: all functions (OS syscalls)
+io:     all functions (OS syscalls)
+env:    all functions (OS syscalls)
+path:   all functions (OS path operations)
+time:   all functions (OS time)
+math:   all functions (CPU instructions)
+int:    all functions (type conversions)
+float:  all functions (type conversions)
+json:   all functions (serde_json)
+regex:  all functions (regex crate)
+random: all functions (/dev/urandom)
+http:   all functions (network I/O)
+```
+
+### Priority Order
+
+| Phase | Difficulty | Impact | Prerequisite |
+|-------|-----------|--------|-------------|
+| 1. Stdlib package mechanism | Medium | High — unblocks `args`, `term`, `csv` without compiler changes | None |
+| 2. `extern "rust"` | Medium-High | High — unblocks `hash`, `encoding`, `compress`, `toml` | None (independent of Phase 1) |
+| 3. Migrate existing stdlib | Low | Medium — shrinks `calls.rs`, proves the architecture | Phase 1 |
+
+### CLI Stdlib Gaps (to be filled via Phase 1 + Phase 2)
+
+#### Via Phase 1 (pure Almide, no extern needed)
+
+| Module | Functions | Priority |
+|--------|-----------|----------|
+| `args` | `flag?`, `option`, `option_or`, `positional`, `positional_at` | CRITICAL |
+| `term` | `color`, `bold`, `dim`, `is_tty?`, `width` | MEDIUM |
+| `csv` | `parse`, `parse_with_header`, `stringify` | MEDIUM |
+
+#### Via Phase 2 (needs `extern "rust"`)
+
+| Module | Functions | Priority |
+|--------|-----------|----------|
+| `hash` | `sha256`, `sha1`, `md5`, `sha256_bytes` | CRITICAL |
+| `encoding` | `base64_encode/decode`, `hex_encode/decode`, `url_encode/decode` | HIGH |
+| `compress` | `gzip`, `gunzip` | MEDIUM |
+| `toml` | `parse`, `stringify` | MEDIUM |
+
+#### Via compiler primitives (small additions to calls.rs)
+
+| Module | Functions | Priority |
+|--------|-----------|----------|
+| `float` | `to_fixed(n, decimals)` | CRITICAL |
+| `fs` | `walk`, `remove_all`, `glob`, `file_size`, `temp_dir` | HIGH |
+| `process` | `exec_in(dir, cmd, args)`, `exec_with_stdin` | HIGH |
+| `time` | `format(ts, fmt)`, `parse(s, fmt)` | HIGH |
+| `http` | fix missing type signatures in stdlib.rs (bug) | HIGH |
+| `http` | `get_with_headers`, `request(method, url, body, headers)` | MEDIUM |
+
+---
+
 ## Other
 
 - [ ] Package registry (to be considered in the future)
