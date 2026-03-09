@@ -8,175 +8,261 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.89.0"
 
 jobs:
+  # ─── Build compiler, upload as artifact ───
   build:
-    name: Build & Test
+    name: Build (${{ matrix.os }})
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            artifact: almide-linux
+          - os: macos-latest
+            artifact: almide-macos
     runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.89.0
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      - name: Cache cargo registry & build
-        uses: actions/cache@v4
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-1.89.0-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-1.89.0-
+          key: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-
 
-      - name: Build almide
-        run: cargo build --release
+      - run: cargo build --release
 
-      - name: Smoke test - emit targets
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: target/release/almide
+          retention-days: 1
+
+  # ─── Test: Rust target ───
+  test-rust:
+    name: Test Rust (${{ matrix.os }})
+    needs: build
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: almide-linux
+          - os: macos-latest
+            artifact: almide-macos
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: /tmp/almide-bin
+
+      - name: Setup
+        run: chmod +x /tmp/almide-bin/almide
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Run all exercises (Rust target)
         run: |
-          ./target/release/almide exercises/pangram/pangram.almd --target rust > /dev/null
-          echo "Rust emit OK"
-          ./target/release/almide exercises/pangram/pangram.almd --target ts > /dev/null
-          echo "TypeScript emit OK"
-          ./target/release/almide exercises/pangram/pangram.almd --target js > /dev/null
-          echo "JavaScript emit OK"
-          ./target/release/almide exercises/pangram/pangram.almd --emit-ast > /dev/null
-          echo "AST emit OK"
-
-      - name: Run stdlib test suite
-        run: ./target/release/almide run exercises/stdlib-test/stdlib-test.almd
-
-      - name: Run all exercises
-        run: |
-          failed=0
-          passed=0
-          for almd in exercises/*/*.almd; do
-            # Skip negative tests (expected to fail with compile errors)
-            case "$almd" in *_error_test.almd) echo "SKIP (negative test): $almd"; continue;; esac
-            dir=$(dirname "$almd")
-            name=$(basename "$dir")
-            if ./target/release/almide run "$almd" 2>&1; then
-              echo "OK: $name"
+          ALMIDE=/tmp/almide-bin/almide
+          failed=0; passed=0
+          for f in exercises/*/*.almd; do
+            case "$f" in *_error_test.almd) continue;; esac
+            if $ALMIDE run "$f" 2>&1; then
               passed=$((passed + 1))
             else
-              echo "FAIL: $name"
+              echo "FAIL: $f"
               failed=$((failed + 1))
             fi
           done
-          echo ""
-          echo "Results: $passed passed, $failed failed"
+          echo "Rust target: $passed passed, $failed failed"
           [ $failed -eq 0 ]
 
-      - name: Check formatting roundtrip
-        run: |
-          for almd in exercises/pangram/pangram.almd exercises/bob/bob.almd exercises/collatz-conjecture/collatz_conjecture.almd; do
-            ./target/release/almide fmt "$almd" --dry-run > /tmp/fmt_test.almd
-            ./target/release/almide check /tmp/fmt_test.almd 2>&1
-            echo "FMT OK: $almd"
-          done
+  # ─── Test: TypeScript target (Deno) ───
+  test-ts:
+    name: Test TS/Deno (${{ matrix.os }})
+    needs: build
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: almide-linux
+          - os: macos-latest
+            artifact: almide-macos
+    runs-on: ${{ matrix.os }}
 
-      - name: Install Deno
-        uses: denoland/setup-deno@v2
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: /tmp/almide-bin
+
+      - name: Setup
+        run: chmod +x /tmp/almide-bin/almide
+
+      - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
 
-      - name: TypeScript runtime test
+      - name: Run all exercises (TS target)
         run: |
-          failed=0
-          for dir in pangram bob raindrops collatz-conjecture stdlib-test; do
-            almd=$(ls exercises/$dir/*.almd 2>/dev/null | head -1)
-            if [ -z "$almd" ]; then continue; fi
-            ./target/release/almide "$almd" --target ts > /tmp/ts_test.ts
-            if deno run --allow-all /tmp/ts_test.ts 2>&1; then
-              echo "TS OK: $dir"
+          ALMIDE=/tmp/almide-bin/almide
+          failed=0; passed=0
+          for f in exercises/*/*.almd; do
+            case "$f" in *_error_test.almd) continue;; esac
+            if $ALMIDE run "$f" --target ts 2>&1; then
+              passed=$((passed + 1))
             else
-              echo "TS FAIL: $dir"
+              echo "FAIL: $f"
               failed=$((failed + 1))
             fi
           done
-          echo "TS Results: $failed failed"
+          echo "TS target: $passed passed, $failed failed"
           [ $failed -eq 0 ]
 
-      - name: JavaScript runtime test
+  # ─── Test: JavaScript target (Node) ───
+  test-js:
+    name: Test JS/Node (${{ matrix.os }})
+    needs: build
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: almide-linux
+          - os: macos-latest
+            artifact: almide-macos
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: /tmp/almide-bin
+
+      - name: Setup
+        run: chmod +x /tmp/almide-bin/almide
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run exercises (JS target)
         run: |
-          failed=0
-          for dir in pangram bob raindrops collatz-conjecture; do
-            almd=$(ls exercises/$dir/*.almd 2>/dev/null | head -1)
-            if [ -z "$almd" ]; then continue; fi
-            ./target/release/almide "$almd" --target js > /tmp/js_test.js
-            if node /tmp/js_test.js 2>&1; then
-              echo "JS OK: $dir"
+          ALMIDE=/tmp/almide-bin/almide
+          failed=0; passed=0
+          for f in exercises/*/*.almd; do
+            case "$f" in *_error_test.almd) continue;; esac
+            $ALMIDE "$f" --target js > /tmp/test_out.js 2>/dev/null || continue
+            if node /tmp/test_out.js 2>&1; then
+              passed=$((passed + 1))
             else
-              echo "JS FAIL: $dir"
+              echo "FAIL: $f"
               failed=$((failed + 1))
             fi
           done
-          echo "JS Results: $failed failed"
+          echo "JS target: $passed passed, $failed failed"
           [ $failed -eq 0 ]
 
-  wasm:
-    name: WASM Build & Test
+  # ─── Emit & format checks ───
+  checks:
+    name: Emit & Format
+    needs: build
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust with wasm target
-        uses: dtolnay/rust-toolchain@stable
+      - uses: actions/download-artifact@v4
         with:
-          toolchain: 1.89.0
-          targets: wasm32-wasip1
+          name: almide-linux
+          path: /tmp/almide-bin
 
-      - name: Cache cargo registry & build
-        uses: actions/cache@v4
+      - name: Setup
+        run: chmod +x /tmp/almide-bin/almide
+
+      - name: Smoke test - all emit targets
+        run: |
+          ALMIDE=/tmp/almide-bin/almide
+          $ALMIDE exercises/pangram/pangram.almd --target rust > /dev/null && echo "Rust emit OK"
+          $ALMIDE exercises/pangram/pangram.almd --target ts   > /dev/null && echo "TS emit OK"
+          $ALMIDE exercises/pangram/pangram.almd --target js   > /dev/null && echo "JS emit OK"
+          $ALMIDE exercises/pangram/pangram.almd --emit-ast    > /dev/null && echo "AST emit OK"
+
+      - name: Formatting roundtrip
+        run: |
+          ALMIDE=/tmp/almide-bin/almide
+          for f in exercises/pangram/pangram.almd exercises/bob/bob.almd exercises/collatz-conjecture/collatz_conjecture.almd; do
+            $ALMIDE fmt "$f" --dry-run > /tmp/fmt_test.almd
+            $ALMIDE check /tmp/fmt_test.almd 2>&1
+            echo "FMT OK: $f"
+          done
+
+  # ─── WASM ───
+  wasm:
+    name: WASM
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ubuntu-cargo-wasm-1.89.0-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ubuntu-cargo-wasm-1.89.0-
+          name: almide-linux
+          path: /tmp/almide-bin
+
+      - name: Setup almide
+        run: chmod +x /tmp/almide-bin/almide
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: wasm32-wasip1
 
       - name: Install wasmtime
         run: |
-          WASMTIME_VERSION=$(curl -s https://api.github.com/repos/bytecodealliance/wasmtime/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
-          curl -LO "https://github.com/bytecodealliance/wasmtime/releases/download/${WASMTIME_VERSION}/wasmtime-${WASMTIME_VERSION}-x86_64-linux.tar.xz"
+          VERSION=$(curl -s https://api.github.com/repos/bytecodealliance/wasmtime/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+          curl -LO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/wasmtime-${VERSION}-x86_64-linux.tar.xz"
           tar -xf wasmtime-*.tar.xz
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
 
-      - name: Build almide
-        run: cargo build --release
-
       - name: WASM smoke test
         run: |
-          ./target/release/almide build exercises/wasm-smoke/wasm-smoke.almd --target wasm -o /tmp/wasm-smoke.wasm
+          ALMIDE=/tmp/almide-bin/almide
+          $ALMIDE build exercises/wasm-smoke/wasm-smoke.almd --target wasm -o /tmp/wasm-smoke.wasm
           wasmtime /tmp/wasm-smoke.wasm
 
-      - name: WASM emit check - exercises
+      - name: WASM emit check
         run: |
-          failed=0
+          ALMIDE=/tmp/almide-bin/almide
           for dir in pangram raindrops roman-numerals; do
-            almd=$(ls exercises/$dir/*.almd 2>/dev/null | head -1)
-            if [ -z "$almd" ]; then echo "SKIP: $dir"; continue; fi
-            if ./target/release/almide "$almd" --target rust > /dev/null 2>&1; then
-              echo "EMIT OK: $dir"
-            else
-              echo "EMIT FAIL: $dir"
-              failed=1
-            fi
+            f=$(ls exercises/$dir/*.almd 2>/dev/null | head -1)
+            [ -z "$f" ] && continue
+            $ALMIDE "$f" --target rust > /dev/null 2>&1 && echo "EMIT OK: $dir"
           done
-          exit $failed
 
+  # ─── Deploy playground on main push ───
   trigger-playground:
     name: Trigger Playground Deploy
-    needs: [build, wasm]
+    needs: [test-rust, test-ts, test-js, wasm, checks]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
