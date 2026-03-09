@@ -63,12 +63,16 @@ impl Emitter {
     }
 }
 
-pub fn emit(program: &Program, modules: &[(String, Program, Option<crate::project::PkgId>)]) -> String {
-    emit_with_options(program, modules, &EmitOptions::default())
+pub fn emit(program: &Program, modules: &[(String, Program, Option<crate::project::PkgId>, bool)]) -> String {
+    emit_with_options(program, modules, &EmitOptions::default(), &[])
 }
 
-pub fn emit_with_options(program: &Program, modules: &[(String, Program, Option<crate::project::PkgId>)], options: &EmitOptions) -> String {
+pub fn emit_with_options(program: &Program, modules: &[(String, Program, Option<crate::project::PkgId>, bool)], options: &EmitOptions, import_aliases: &[(String, String)]) -> String {
     let mut emitter = Emitter::new(options);
+    // Register user-level import aliases (import pkg as alias)
+    for (alias, target) in import_aliases {
+        emitter.module_aliases.insert(alias.clone(), target.clone());
+    }
     emitter.emit_program(program, modules);
     emitter.out
 }

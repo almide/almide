@@ -209,13 +209,26 @@ impl Parser {
             if self.check(TokenType::Dot) {
                 let span = Some(self.current_span());
                 self.advance();
-                let field = self.expect_any_name()?;
-                expr = Expr::Member {
-                    object: Box::new(expr),
-                    field,
-                    span,
-                    resolved_type: None,
-                };
+                // Tuple index access: t.0, t.1, etc.
+                if self.check(TokenType::Int) {
+                    let idx_str = self.current().value.clone();
+                    self.advance();
+                    let index = idx_str.parse::<usize>().map_err(|_| format!("invalid tuple index '{}' at line {:?}", idx_str, span))?;
+                    expr = Expr::TupleIndex {
+                        object: Box::new(expr),
+                        index,
+                        span,
+                        resolved_type: None,
+                    };
+                } else {
+                    let field = self.expect_any_name()?;
+                    expr = Expr::Member {
+                        object: Box::new(expr),
+                        field,
+                        span,
+                        resolved_type: None,
+                    };
+                }
             } else if self.check(TokenType::LParen) {
                 let span = Some(self.current_span());
                 self.advance();

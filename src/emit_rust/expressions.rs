@@ -94,9 +94,13 @@ impl Emitter {
                 let elems: Vec<String> = elements.iter().map(|e| self.gen_expr(e)).collect();
                 format!("vec![{}]", elems.join(", "))
             }
-            Expr::Record { fields, .. } => {
+            Expr::Record { name, fields, .. } => {
                 let fs: Vec<String> = fields.iter().map(|f| format!("{}: {}", f.name, self.gen_expr(&f.value))).collect();
-                format!("{{ {} }}", fs.join(", "))
+                if let Some(struct_name) = name {
+                    format!("{} {{ {} }}", struct_name, fs.join(", "))
+                } else {
+                    format!("{{ {} }}", fs.join(", "))
+                }
             }
 
             Expr::Binary { op, left, right, .. } => self.gen_binary(op, left, right),
@@ -120,6 +124,11 @@ impl Emitter {
             Expr::Member { object, field, .. } => {
                 let obj = self.gen_expr(object);
                 format!("{}.{}", obj, field)
+            }
+
+            Expr::TupleIndex { object, index, .. } => {
+                let obj = self.gen_expr(object);
+                format!("({}).{}", obj, index)
             }
 
             Expr::Pipe { left, right, .. } => {

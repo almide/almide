@@ -1,0 +1,141 @@
+// Phase 0 — Bitwise operations and wrapping arithmetic
+
+// ── bitwise operators ──
+
+test "int.band" {
+  assert_eq(int.band(255, 15), 15)
+  assert_eq(int.band(12, 10), 8)
+  assert_eq(int.band(0, 255), 0)
+}
+
+test "int.bor" {
+  assert_eq(int.bor(240, 15), 255)
+  assert_eq(int.bor(12, 10), 14)
+  assert_eq(int.bor(0, 0), 0)
+}
+
+test "int.bxor" {
+  assert_eq(int.bxor(255, 15), 240)
+  assert_eq(int.bxor(12, 10), 6)
+  assert_eq(int.bxor(42, 42), 0)
+}
+
+test "int.bshl" {
+  assert_eq(int.bshl(1, 8), 256)
+  assert_eq(int.bshl(255, 4), 4080)
+  assert_eq(int.bshl(1, 0), 1)
+}
+
+test "int.bshr" {
+  assert_eq(int.bshr(256, 8), 1)
+  assert_eq(int.bshr(4080, 4), 255)
+  assert_eq(int.bshr(1, 0), 1)
+}
+
+test "int.bnot" {
+  assert_eq(int.band(int.bnot(0), 255), 255)
+  assert_eq(int.band(int.bnot(255), 255), 0)
+}
+
+// ── truncation ──
+
+test "int.to_u32" {
+  assert_eq(int.to_u32(4294967295), 4294967295)
+  assert_eq(int.to_u32(4294967296), 0)
+  assert_eq(int.to_u32(42), 42)
+  assert_eq(int.to_u32(-1), 4294967295)
+}
+
+test "int.to_u8" {
+  assert_eq(int.to_u8(255), 255)
+  assert_eq(int.to_u8(256), 0)
+  assert_eq(int.to_u8(-1), 255)
+  assert_eq(int.to_u8(511), 255)
+}
+
+// ── wrapping arithmetic ──
+
+test "int.wrap_add 32-bit" {
+  assert_eq(int.wrap_add(4294967295, 1, 32), 0)
+  assert_eq(int.wrap_add(4294967295, 2, 32), 1)
+  assert_eq(int.wrap_add(100, 200, 32), 300)
+}
+
+test "int.wrap_add 8-bit" {
+  assert_eq(int.wrap_add(255, 1, 8), 0)
+  assert_eq(int.wrap_add(200, 100, 8), 44)
+}
+
+test "int.wrap_mul 32-bit" {
+  assert_eq(int.wrap_mul(2, 3, 32), 6)
+  assert_eq(int.wrap_mul(65536, 65536, 32), 0)
+}
+
+test "int.wrap_mul 8-bit" {
+  assert_eq(int.wrap_mul(16, 16, 8), 0)
+  assert_eq(int.wrap_mul(5, 5, 8), 25)
+}
+
+// ── rotation ──
+
+test "int.rotate_right 32-bit" {
+  // 2147483648 (0x80000000) >> 1 = 1073741824 (0x40000000)
+  assert_eq(int.rotate_right(2147483648, 1, 32), 1073741824)
+  // 1 >> 1 = 2147483648 (0x80000000) — wraps around
+  assert_eq(int.rotate_right(1, 1, 32), 2147483648)
+  // full rotation = identity
+  assert_eq(int.rotate_right(3735928559, 32, 32), 3735928559)
+}
+
+test "int.rotate_left 32-bit" {
+  // 1 << 1 = 2
+  assert_eq(int.rotate_left(1, 1, 32), 2)
+  // 2147483648 (0x80000000) << 1 = 1 — wraps around
+  assert_eq(int.rotate_left(2147483648, 1, 32), 1)
+  // full rotation = identity
+  assert_eq(int.rotate_left(3735928559, 32, 32), 3735928559)
+}
+
+test "int.rotate_right 8-bit" {
+  assert_eq(int.rotate_right(1, 1, 8), 128)
+  assert_eq(int.rotate_right(128, 1, 8), 64)
+}
+
+// ── combined: SHA-256 style operations ──
+
+test "sha256-style sigma0" {
+  // Sigma0(x) = RotateRight(x, 2, 32) ^ RotateRight(x, 13, 32) ^ RotateRight(x, 22, 32)
+  let x = 1779033703   // 0x6A09E667
+  let s0 = int.bxor(
+    int.bxor(
+      int.rotate_right(x, 2, 32),
+      int.rotate_right(x, 13, 32)
+    ),
+    int.rotate_right(x, 22, 32)
+  )
+  assert(s0 >= 0, "sigma0 should be non-negative")
+  assert(s0 < 4294967296, "sigma0 should fit in 32 bits")
+}
+
+test "sha256-style Ch" {
+  // Ch(x, y, z) = (x & y) ^ (~x & z)
+  let x = 1779033703   // 0x6A09E667
+  let y = 3144134277   // 0xBB67AE85
+  let z = 1013904242   // 0x3C6EF372
+  let ch = int.bxor(
+    int.band(x, y),
+    int.band(int.to_u32(int.bnot(x)), z)
+  )
+  assert(ch >= 0, "ch should be non-negative")
+  assert(ch < 4294967296, "ch should fit in 32 bits")
+}
+
+test "sha256-style Maj" {
+  // Maj(x, y, z) = (x & y) ^ (x & z) ^ (y & z)
+  let x = 1779033703
+  let y = 3144134277
+  let z = 1013904242
+  let maj = int.bxor(int.bxor(int.band(x, y), int.band(x, z)), int.band(y, z))
+  assert(maj >= 0, "maj should be non-negative")
+  assert(maj < 4294967296, "maj should fit in 32 bits")
+}

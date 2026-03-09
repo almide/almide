@@ -55,10 +55,10 @@ fn parse_file(file: &str) -> ast::Program {
 }
 
 fn compile(file: &str, no_check: bool) -> String {
-    compile_with_options(file, no_check, &emit_rust::EmitOptions::default())
+    compile_with_options(file, no_check, &emit_rust::EmitOptions::default(), None)
 }
 
-fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::EmitOptions) -> String {
+fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::EmitOptions, build_target: Option<&str>) -> String {
     let mut program = parse_file(file);
 
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
@@ -78,12 +78,37 @@ fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::Em
     let resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
         .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
 
+    // Extract user-level import aliases (import pkg as alias, or implicit aliases for multi-segment imports)
+    let import_aliases: Vec<(String, String)> = program.imports.iter().filter_map(|imp| {
+        if let ast::Decl::Import { path, alias, .. } = imp {
+            if let Some(a) = alias {
+                // Explicit alias: import pkg as alias
+                Some((a.clone(), path.join(".")))
+            } else if path.len() > 1 && path.first().map(|s| s.as_str()) != Some("self") {
+                // Implicit alias: import pkg.sub → "sub" maps to "pkg.sub"
+                let last = path.last().unwrap().clone();
+                Some((last, path.join(".")))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }).collect();
+
     if !no_check {
         let source_text = std::fs::read_to_string(file).unwrap_or_default();
         let mut checker = check::Checker::new();
         checker.set_source(file, &source_text);
-        for (name, mod_prog, pkg_id) in &resolved.modules {
-            checker.register_module(name, mod_prog, pkg_id.as_ref());
+        if let Some(t) = build_target {
+            checker.set_target(t);
+        }
+        for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
+            checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
+        }
+        // Register user-level import aliases
+        for (alias, target) in &import_aliases {
+            checker.register_alias(alias, target);
         }
         let diagnostics = checker.check_program(&mut program);
         let errors: Vec<_> = diagnostics.iter()
@@ -101,7 +126,60 @@ fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::Em
         }
     }
 
-    emit_rust::emit_with_options(&program, &resolved.modules, emit_options)
+    emit_rust::emit_with_options(&program, &resolved.modules, emit_options, &import_aliases)
+}
+
+fn collect_almd_files(dir: &std::path::Path, out: &mut Vec<String>) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        let mut entries: Vec<_> = entries.filter_map(|e| e.ok()).collect();
+        entries.sort_by_key(|e| e.path());
+        for entry in entries {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_almd_files(&path, out);
+            } else if path.extension().map_or(false, |ext| ext == "almd") {
+                out.push(path.to_string_lossy().to_string());
+            }
+        }
+    }
+}
+
+fn print_help() {
+    println!("almide {}", env!("CARGO_PKG_VERSION"));
+    println!();
+    println!("Usage: almide <command> [options]");
+    println!();
+    println!("Commands:");
+    println!("  init                        Create a new Almide project");
+    println!("  run [file.almd] [args...]   Compile and execute (default: src/main.almd)");
+    println!("  build [file.almd] [opts]    Build a binary");
+    println!("  test [file.almd] [-run pat] Run tests");
+    println!("  check [file.almd]           Type check only");
+    println!("  fmt [files...] [--check]    Format source files (default: src/**/*.almd)");
+    println!("  clean                       Clear dependency cache");
+    println!("  add <pkg> [--git url]       Add a dependency");
+    println!("  deps                        List dependencies");
+    println!();
+    println!("Build options:");
+    println!("  -o <output>                 Output file name");
+    println!("  --target wasm               Build for WebAssembly");
+    println!("  --release                   Optimize for performance (opt-level=2)");
+    println!("  --no-check                  Skip type checking");
+    println!();
+    println!("Emit options:");
+    println!("  almide <file> --target rust  Emit Rust source");
+    println!("  almide <file> --target ts    Emit TypeScript source");
+    println!("  almide <file> --emit-ast     Emit AST as JSON");
+    println!();
+    println!("Examples:");
+    println!("  almide init");
+    println!("  almide run");
+    println!("  almide run hello.almd");
+    println!("  almide build --release");
+    println!("  almide build app.almd --target wasm -o app.wasm");
+    println!("  almide test -run \"parser\"");
+    println!("  almide fmt");
+    println!("  almide fmt src/main.almd --check");
 }
 
 fn main() {
@@ -109,6 +187,11 @@ fn main() {
 
     if args.len() >= 2 && (args[1] == "--version" || args[1] == "-V") {
         println!("almide {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+
+    if args.len() >= 2 && (args[1] == "--help" || args[1] == "-h" || args[1] == "help") {
+        print_help();
         return;
     }
 
@@ -232,16 +315,25 @@ fn main() {
     }
 
     if args.len() >= 2 && args[1] == "fmt" {
-        let write_back = !args.iter().any(|a| a == "--dry-run");
+        let write_back = !args.iter().any(|a| a == "--check" || a == "--dry-run");
         let fmt_files: Vec<String> = args.iter().skip(2)
             .filter(|a| !a.starts_with("--"))
             .cloned()
             .collect();
         if fmt_files.is_empty() {
-            eprintln!("Usage: almide fmt <file.almd> [files...] [--dry-run]");
-            std::process::exit(1);
+            // No files specified — format all src/**/*.almd recursively
+            let mut files = Vec::new();
+            if std::path::Path::new("src").is_dir() {
+                collect_almd_files(std::path::Path::new("src"), &mut files);
+            }
+            if files.is_empty() {
+                eprintln!("No .almd files found in src/");
+                std::process::exit(1);
+            }
+            cli::cmd_fmt(&files, write_back);
+        } else {
+            cli::cmd_fmt(&fmt_files, write_back);
         }
-        cli::cmd_fmt(&fmt_files, write_back);
         return;
     }
 
@@ -257,14 +349,9 @@ fn main() {
         .collect();
 
     if files.is_empty() {
-        eprintln!("Usage: almide init");
-        eprintln!("       almide run <file.almd> [args...]");
-        eprintln!("       almide build <file.almd> [-o output] [--target wasm]");
-        eprintln!("       almide test [file.almd]");
-        eprintln!("       almide check [file.almd]");
-        eprintln!("       almide fmt <file.almd> [--dry-run]");
-        eprintln!("       almide clean");
-        eprintln!("       almide <file.almd> [--target rust|ts] [--emit-ast]");
+        eprintln!("Usage: almide <command> [options]");
+        eprintln!();
+        eprintln!("Run 'almide --help' for detailed usage.");
         std::process::exit(1);
     }
 

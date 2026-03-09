@@ -1,0 +1,1 @@
+fn format_upper(s: String) -> String = string.to_upper(s)

@@ -59,9 +59,9 @@ impl TsEmitter {
         }
 
         // Export non-local functions
-        let fn_names: Vec<&str> = prog.decls.iter().filter_map(|d| {
+        let fn_names: Vec<String> = prog.decls.iter().filter_map(|d| {
             if let Decl::Fn { name, visibility, .. } = d {
-                if *visibility != Visibility::Local { Some(name.as_str()) } else { None }
+                if *visibility != Visibility::Local { Some(Self::sanitize(name)) } else { None }
             } else { None }
         }).collect();
         self.out.push_str(&format!("  return {{ {} }};\n", fn_names.join(", ")));

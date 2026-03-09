@@ -1,0 +1,1 @@
+fn parse(s: String) -> String = "parsed: " ++ s

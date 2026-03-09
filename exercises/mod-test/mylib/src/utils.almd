@@ -1,0 +1,4 @@
+// Sub-module that imports another external package
+import extlib
+
+fn describe(s: String) -> String = extlib.pub_fn() ++ ": " ++ s

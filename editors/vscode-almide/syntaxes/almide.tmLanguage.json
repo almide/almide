@@ -4,6 +4,9 @@
   "scopeName": "source.almide",
   "patterns": [
     { "include": "#comment" },
+    { "include": "#raw-heredoc-string" },
+    { "include": "#heredoc-string" },
+    { "include": "#raw-string" },
     { "include": "#string" },
     { "include": "#number" },
     { "include": "#keyword" },
@@ -20,10 +23,27 @@
       "name": "comment.line.double-slash.almide",
       "match": "//.*$"
     },
-    "string": {
-      "name": "string.quoted.double.almide",
-      "begin": "\"",
-      "end": "\"",
+    "raw-heredoc-string": {
+      "name": "string.quoted.triple.raw.almide",
+      "begin": "r\"\"\"",
+      "end": "\"\"\"",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.string.begin.almide" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.string.end.almide" }
+      }
+    },
+    "heredoc-string": {
+      "name": "string.quoted.triple.almide",
+      "begin": "\"\"\"",
+      "end": "\"\"\"",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.string.begin.almide" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.string.end.almide" }
+      },
       "patterns": [
         {
           "name": "constant.character.escape.almide",
@@ -45,8 +65,48 @@
         }
       ]
     },
+    "raw-string": {
+      "name": "string.quoted.double.raw.almide",
+      "begin": "r\"",
+      "end": "\"",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.string.begin.almide" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.string.end.almide" }
+      }
+    },
+    "string": {
+      "name": "string.quoted.double.almide",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.almide",
+          "match": "\\\\[nrt\\\\\"$0]"
+        },
+        {
+          "name": "meta.interpolation.almide",
+          "begin": "\\$\\{",
+          "end": "\\}",
+          "beginCaptures": {
+            "0": { "name": "punctuation.section.interpolation.begin.almide" }
+          },
+          "endCaptures": {
+            "0": { "name": "punctuation.section.interpolation.end.almide" }
+          },
+          "patterns": [
+            { "include": "source.almide" }
+          ]
+        }
+      ]
+    },
     "number": {
       "patterns": [
+        {
+          "name": "constant.numeric.hex.almide",
+          "match": "\\b0[xX][0-9a-fA-F]+\\b"
+        },
         {
           "name": "constant.numeric.float.almide",
           "match": "\\b[0-9]+\\.[0-9]+\\b"
@@ -69,7 +129,7 @@
         },
         {
           "name": "keyword.modifier.almide",
-          "match": "\\b(effect|async|await|pub|strict|deriving|unsafe)\\b"
+          "match": "\\b(effect|async|await|pub|strict|deriving|unsafe|local|mod)\\b"
         },
         {
           "name": "keyword.operator.logical.almide",
@@ -78,6 +138,10 @@
         {
           "name": "keyword.other.almide",
           "match": "\\b(ok|err|some|none|try|todo)\\b"
+        },
+        {
+          "name": "variable.language.self.almide",
+          "match": "\\bself\\b"
         }
       ]
     },
@@ -91,11 +155,11 @@
     },
     "module-name": {
       "name": "support.module.almide",
-      "match": "\\b(string|list|int|env|fs)\\b(?=\\.)"
+      "match": "\\b(string|list|int|float|map|char|env|fs|json|path|http|math|random|regex|time|io|process)\\b(?=\\.)"
     },
     "builtin-function": {
       "name": "support.function.almide",
-      "match": "\\b(println|eprintln|assert|assert_eq|assert_ne|unwrap_or)\\b"
+      "match": "\\b(println|eprintln|assert|assert_eq|assert_ne|unwrap_or|unwrap)\\b"
     },
     "function-call": {
       "match": "\\b([a-z_][a-zA-Z0-9_]*\\??)\\s*(?=\\()",
@@ -115,7 +179,7 @@
         },
         {
           "name": "keyword.operator.almide",
-          "match": "\\+\\+|\\.\\.\\."
+          "match": "\\+\\+|\\.\\.\\.|\\.\\.=|\\.\\."
         }
       ]
     },

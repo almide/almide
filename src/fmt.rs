@@ -96,7 +96,7 @@ fn format_decl(out: &mut String, decl: &Decl, depth: usize) {
             format_type_expr(out, ty, depth);
             if let Some(derives) = deriving {
                 if !derives.is_empty() {
-                    out.push_str(&format!(" deriving ({})", derives.join(", ")));
+                    out.push_str(&format!(" deriving {}", derives.join(", ")));
                 }
             }
         }
@@ -189,7 +189,7 @@ fn format_type_expr(out: &mut String, ty: &TypeExpr, _depth: usize) {
         }
         TypeExpr::Variant { cases } => {
             for (i, case) in cases.iter().enumerate() {
-                if i > 0 { out.push_str(" | "); }
+                if i > 0 { out.push_str(" | "); } else { out.push_str("| "); }
                 match case {
                     VariantCase::Unit { name } => out.push_str(name),
                     VariantCase::Tuple { name, fields } => {
@@ -221,11 +221,26 @@ fn format_type_expr(out: &mut String, ty: &TypeExpr, _depth: usize) {
 fn format_expr(out: &mut String, expr: &Expr, depth: usize) {
     match expr {
         Expr::Int { raw, .. } => out.push_str(raw),
-        Expr::Float { value, .. } => out.push_str(&format!("{}", value)),
+        Expr::Float { value, .. } => {
+            let s = format!("{}", value);
+            if s.contains('.') {
+                out.push_str(&s);
+            } else {
+                out.push_str(&format!("{}.0", s));
+            }
+        }
         Expr::String { value, .. } => out.push_str(&format!("{:?}", value)),
         Expr::InterpolatedString { value, .. } => {
             out.push('"');
-            out.push_str(value);
+            for ch in value.chars() {
+                match ch {
+                    '\n' => out.push_str("\\n"),
+                    '\t' => out.push_str("\\t"),
+                    '\\' => out.push_str("\\\\"),
+                    '"' => out.push_str("\\\""),
+                    other => out.push(other),
+                }
+            }
             out.push('"');
         }
         Expr::Bool { value, .. } => out.push_str(if *value { "true" } else { "false" }),
@@ -294,7 +309,11 @@ fn format_expr(out: &mut String, expr: &Expr, depth: usize) {
             }
         }
 
-        Expr::Record { fields, .. } => {
+        Expr::Record { name, fields, .. } => {
+            if let Some(n) = name {
+                out.push_str(n);
+                out.push(' ');
+            }
             if fields.is_empty() {
                 out.push_str("{}");
             } else {
@@ -335,6 +354,12 @@ fn format_expr(out: &mut String, expr: &Expr, depth: usize) {
             format_expr(out, object, depth);
             out.push('.');
             out.push_str(field);
+        }
+
+        Expr::TupleIndex { object, index, .. } => {
+            format_expr(out, object, depth);
+            out.push('.');
+            out.push_str(&index.to_string());
         }
 
         Expr::Pipe { left, right, .. } => {
@@ -421,7 +446,7 @@ fn format_expr(out: &mut String, expr: &Expr, depth: usize) {
         Expr::Block { stmts, expr, .. } => {
             if stmts.is_empty() && expr.is_some() {
                 // Single-expression block: might be inline
-                let inner = expr.as_ref().unwrap();
+                let inner = expr.as_ref().expect("guarded by is_some()");
                 if is_short_expr(inner) && depth > 0 {
                     out.push_str("{ ");
                     format_expr(out, inner, depth);

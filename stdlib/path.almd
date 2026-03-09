@@ -1,0 +1,43 @@
+// path — file path manipulation
+// Bundled stdlib module (written in Almide, auto multi-target)
+
+fn join(base: String, child: String) -> String = {
+  // If child is absolute, it replaces base (matches Rust Path::join behavior)
+  if string.starts_with?(child, "/") then child
+  else {
+    let b = if string.ends_with?(base, "/") then string.slice(base, 0, string.len(base) - 1) else base
+    if string.len(b) == 0 then child
+    else b ++ "/" ++ child
+  }
+}
+
+fn dirname(p: String) -> String = {
+  let parts = string.split(p, "/")
+  let n = list.len(parts)
+  if n <= 1 then ""
+  else {
+    let parent_parts = list.take(parts, n - 1)
+    let joined = string.join(parent_parts, "/")
+    // Preserve root "/" for absolute paths
+    if string.len(joined) == 0 and string.starts_with?(p, "/") then "/"
+    else joined
+  }
+}
+
+fn basename(p: String) -> String = {
+  let parts = string.split(p, "/")
+  let filtered = list.filter(parts, fn(s) => string.len(s) > 0)
+  match list.last(filtered) {
+    some(name) => name
+    none => ""
+  }
+}
+
+fn extension(p: String) -> Option[String] = {
+  let name = basename(p)
+  let parts = string.split(name, ".")
+  if list.len(parts) <= 1 then none
+  else list.last(parts)
+}
+
+fn is_absolute?(p: String) -> Bool = string.starts_with?(p, "/")

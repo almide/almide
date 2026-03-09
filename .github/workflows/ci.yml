@@ -57,6 +57,8 @@ jobs:
           failed=0
           passed=0
           for almd in exercises/*/*.almd; do
+            # Skip negative tests (expected to fail with compile errors)
+            case "$almd" in *_error_test.almd) echo "SKIP (negative test): $almd"; continue;; esac
             dir=$(dirname "$almd")
             name=$(basename "$dir")
             if ./target/release/almide run "$almd" 2>&1; then

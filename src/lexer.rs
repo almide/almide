@@ -199,6 +199,37 @@ pub struct Lexer {
     col: usize,
     tokens: Vec<Token>,
     keywords: HashMap<&'static str, TokenType>,
+    paren_depth: usize, // depth of () and [] — newlines suppressed when > 0
+}
+
+fn strip_indent(s: &str) -> String {
+    // Remove trailing whitespace-only content (the indent before closing """)
+    let s = s.trim_end();
+    // Also remove the trailing newline before that indent
+    let s = s.strip_suffix('\n').unwrap_or(s);
+
+    if s.is_empty() {
+        return String::new();
+    }
+
+    let lines: Vec<&str> = s.split('\n').collect();
+    let min_indent = lines
+        .iter()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.len() - line.trim_start().len())
+        .min()
+        .unwrap_or(0);
+    lines
+        .iter()
+        .map(|line| {
+            if line.len() >= min_indent {
+                &line[min_indent..]
+            } else {
+                line.trim()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 impl Lexer {
@@ -210,6 +241,7 @@ impl Lexer {
             col: 1,
             tokens: Vec::new(),
             keywords: build_keyword_map(),
+            paren_depth: 0,
         };
         lexer.run();
         lexer.tokens
@@ -224,16 +256,25 @@ impl Lexer {
 
             let ch = self.chars[self.pos];
 
-            // Newline
+            // Newline — suppressed inside () and []
             if ch == '\n' {
-                self.add_newline();
-                self.advance();
+                if self.paren_depth == 0 {
+                    self.add_newline();
+                } else {
+                    self.line += 1;
+                    self.col = 1;
+                }
+                self.pos += 1;
                 continue;
             }
 
             // String literal
             if ch == '"' {
-                self.read_string();
+                if self.peek(1) == '"' && self.peek(2) == '"' {
+                    self.read_heredoc(false);
+                } else {
+                    self.read_string();
+                }
                 continue;
             }
 
@@ -243,9 +284,13 @@ impl Lexer {
                 continue;
             }
 
-            // Raw string literal r"..."
+            // Raw string literal r"..." or r"""..."""
             if ch == 'r' && self.peek(1) == '"' {
-                self.read_raw_string();
+                if self.peek(2) == '"' && self.peek(3) == '"' {
+                    self.read_heredoc(true);
+                } else {
+                    self.read_raw_string();
+                }
                 continue;
             }
 
@@ -359,6 +404,16 @@ impl Lexer {
         if self.chars[i] == '|' && i + 1 < self.chars.len() && self.chars[i + 1] == '>' {
             return true;
         }
+        // Leading binary operator (continuation of expression)
+        if matches!(self.chars[i], '+' | '-' | '*' | '/' | '%' | '&') {
+            return true;
+        }
+        // Leading == != <= >= && ||
+        if (self.chars[i] == '=' || self.chars[i] == '!' || self.chars[i] == '<' || self.chars[i] == '>')
+            && i + 1 < self.chars.len() && self.chars[i + 1] == '='
+        {
+            return true;
+        }
         false
     }
 
@@ -395,6 +450,85 @@ impl Lexer {
         if self.pos < self.chars.len() {
             self.advance(); // skip closing "
         }
+
+        let token_type = if has_interpolation {
+            TokenType::InterpolatedString
+        } else {
+            TokenType::String
+        };
+        self.tokens.push(Token {
+            token_type,
+            value,
+            line: start_line,
+            col: start_col,
+        });
+    }
+
+    fn read_heredoc(&mut self, is_raw: bool) {
+        let start_line = self.line;
+        let start_col = self.col;
+
+        // Skip r prefix if raw
+        if is_raw {
+            self.advance();
+        }
+
+        // Skip opening """
+        self.advance();
+        self.advance();
+        self.advance();
+
+        // Skip the first newline immediately after """
+        if self.pos < self.chars.len() && self.chars[self.pos] == '\n' {
+            self.pos += 1;
+            self.line += 1;
+            self.col = 1;
+        }
+
+        let mut raw_content = String::new();
+        let mut has_interpolation = false;
+
+        while self.pos < self.chars.len() {
+            if self.chars[self.pos] == '"' && self.peek(1) == '"' && self.peek(2) == '"' {
+                break;
+            }
+
+            if !is_raw && self.chars[self.pos] == '$' && self.peek(1) == '{' {
+                has_interpolation = true;
+            }
+
+            if self.chars[self.pos] == '\n' {
+                raw_content.push('\n');
+                self.pos += 1;
+                self.line += 1;
+                self.col = 1;
+            } else if !is_raw && self.chars[self.pos] == '\\' {
+                self.advance();
+                if self.pos < self.chars.len() {
+                    match self.chars[self.pos] {
+                        'n' => raw_content.push('\n'),
+                        't' => raw_content.push('\t'),
+                        '\\' => raw_content.push('\\'),
+                        '"' => raw_content.push('"'),
+                        '$' => raw_content.push('$'),
+                        other => raw_content.push(other),
+                    }
+                    self.advance();
+                }
+            } else {
+                raw_content.push(self.chars[self.pos]);
+                self.advance();
+            }
+        }
+
+        // Skip closing """
+        if self.pos < self.chars.len() {
+            self.advance();
+            self.advance();
+            self.advance();
+        }
+
+        let value = strip_indent(&raw_content);
 
         let token_type = if has_interpolation {
             TokenType::InterpolatedString
@@ -607,6 +741,11 @@ impl Lexer {
             _ => Option::None,
         };
         if let Some(tt) = one_char_type {
+            match tt {
+                TokenType::LParen | TokenType::LBracket => self.paren_depth += 1,
+                TokenType::RParen | TokenType::RBracket => { if self.paren_depth > 0 { self.paren_depth -= 1; } },
+                _ => {}
+            }
             self.tokens.push(Token {
                 token_type: tt,
                 value: c.to_string(),

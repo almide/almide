@@ -29,18 +29,38 @@ The core thesis: **if AI can write a language reliably, code proliferates → tr
 
 **[Try it in your browser →](https://almide.github.io/playground/)** — No installation required.
 
+### Prerequisites
+
+- [Rust](https://rustup.rs/) (stable, 1.80+)
+
 ### Install from source
 
 ```bash
 git clone https://github.com/almide/almide.git
 cd almide
 cargo build --release
+```
+
+Copy the binary to a directory on your `PATH`:
+
+```bash
+# macOS / Linux
 cp target/release/almide ~/.local/bin/
+
+# or system-wide
+sudo cp target/release/almide /usr/local/bin/
+```
+
+Verify the installation:
+
+```bash
+almide --version
+# almide 0.1.0
 ```
 
 ### Hello World
 
-```
+```almd
 effect fn main(args: List[String]) -> Result[Unit, String] = {
   println("Hello, world!")
   ok(())
@@ -63,7 +83,7 @@ For the full design rationale, see [Design Philosophy](./docs/DESIGN.md).
 
 ## Example
 
-```
+```almd
 import fs
 
 type AppError =
@@ -94,7 +114,7 @@ test "greet succeeds" {
 
 Almide source (`.almd`) is compiled by a pure-Rust compiler to Rust, TypeScript, or WebAssembly.
 
-```
+```almd
 .almd → Lexer → Parser → AST → CodeGen → .rs / .ts / .wasm
 ```
 
@@ -159,6 +179,15 @@ Almide compiles to Rust, then to native machine code. The generated binaries are
 ## Contributing
 
 Contributions are welcome! Please open an issue or pull request on [GitHub](https://github.com/almide/almide).
+
+After cloning, install the git hooks:
+
+```bash
+brew install lefthook  # macOS; see https://github.com/evilmartians/lefthook for other platforms
+lefthook install
+```
+
+All commits must be in English (enforced by the commit-msg hook). See [CLAUDE.md](./CLAUDE.md) for project conventions.
 
 ## License
 

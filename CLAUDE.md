@@ -12,7 +12,7 @@
 - No prefix (feat:, fix:, etc.)
 - Keep it to one concise line
 - Focus on what changed, not why
-- Japanese characters in commit messages are **blocked by a commit-msg hook**
+- Commit messages must be in **English only** (enforced by `english-only` commit-msg hook)
 
 ## Development Setup
 

@@ -159,7 +159,7 @@ impl Emitter {
             }
             // Wrap the final expression in Ok() if we're in effect context
             let result = if self.in_effect && final_expr.is_some() {
-                let expr = final_expr.unwrap();
+                let expr = final_expr.expect("guarded by is_some()");
                 let inner = self.gen_expr(expr);
                 let mut lines = vec!["{".to_string()];
                 for stmt in stmts {
@@ -178,7 +178,7 @@ impl Emitter {
 
     pub(crate) fn gen_stmt(&self, stmt: &Stmt) -> String {
         match stmt {
-            Stmt::Let { name, value, .. } => {
+            Stmt::Let { name, value, ty, .. } => {
                 // Use gen_arg to clone Ident values, preventing move issues
                 let val = match value {
                     Expr::If { cond, then, else_, .. } => {
@@ -189,6 +189,25 @@ impl Emitter {
                     }
                     _ => self.gen_expr(value),
                 };
+                // Emit type annotation for empty collections (Rust can't infer the element type)
+                let needs_type = match value {
+                    Expr::List { elements, .. } if elements.is_empty() => true,
+                    Expr::Call { callee, args, .. } => {
+                        // map.new() generates HashMap::new()
+                        if let Expr::Member { object, field, .. } = callee.as_ref() {
+                            if let Expr::Ident { name: mod_name, .. } = object.as_ref() {
+                                mod_name == "map" && field == "new" && args.is_empty()
+                            } else { false }
+                        } else { false }
+                    }
+                    _ => false,
+                };
+                if needs_type {
+                    if let Some(t) = ty {
+                        let rust_ty = self.gen_type(t);
+                        return format!("let {}: {} = {};", name, rust_ty, val);
+                    }
+                }
                 format!("let {} = {};", name, val)
             }
             Stmt::LetDestructure { fields, value, .. } => {

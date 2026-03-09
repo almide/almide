@@ -169,12 +169,16 @@ Expr      ::= Literal
 
 ## 4. Modules and Imports
 
+> Full specification: **[specs/module-system.md](specs/module-system.md)**
+> (package structure, sub-namespaces, aliases, visibility, diamond dependency, resolution pipeline)
+
 Package identity is declared in `almide.toml` — no `module` declaration in source files.
 
 ### 4.1 Import Declaration
 
 ```
 ImportDecl ::= "import" ImportPath
+             | "import" ImportPath "as" Ident
              | "import" ImportPath "." "{" NameList "}"
 
 NameList ::= Name ( "," Name )*
@@ -182,14 +186,22 @@ NameList ::= Name ( "," Name )*
 
 Examples:
 ```
-import fs
-import json
-import collections.{List, Map}
+import fs                       -- stdlib module
+import mylib                    -- user package (loads all sub-namespaces)
+import mylib.parser             -- direct sub-module import
+import mylib as m               -- alias: m.hello(), m.parser.parse()
+import mylib.formatter as fmt   -- sub-module alias: fmt.format_upper()
 ```
 
 **Prohibited: wildcard imports.** `import fs.*` is a compile error.
 
-Selective imports are allowed. Because "what was brought in" is visible in the code, it helps LLM name resolution.
+### 4.2 Visibility Modifiers
+
+```
+fn pub_fn() -> String = ...       -- public (default)
+mod fn internal() -> String = ... -- same project only
+local fn helper() -> String = ... -- same file only
+```
 
 ### 4.3 Minimal Prelude
 

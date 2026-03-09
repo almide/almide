@@ -17,7 +17,12 @@ pub struct Checker {
     pub source_file: Option<String>,
     pub source_text: Option<String>,
     current_decl_line: Option<usize>,
+    /// Build target (e.g. "rust", "ts", "wasm"). Used to gate platform modules.
+    pub target: Option<String>,
 }
+
+/// Modules that require a native runtime (OS access). Not available on WASM.
+const PLATFORM_MODULES: &[&str] = &["fs", "process", "io", "env", "http", "random"];
 
 pub(crate) fn err(msg: impl Into<String>, hint: impl Into<String>, ctx: impl Into<String>) -> Diagnostic {
     Diagnostic::error(msg, hint, ctx)
@@ -31,6 +36,7 @@ impl Checker {
             source_file: None,
             source_text: None,
             current_decl_line: None,
+            target: None,
         };
         c.register_stdlib();
         c
@@ -136,8 +142,8 @@ impl Checker {
     }
 
     /// Register an imported module's exported functions and types.
-    pub fn register_module(&mut self, mod_name: &str, prog: &ast::Program, pkg_id: Option<&crate::project::PkgId>) {
-        let is_external = pkg_id.is_some();
+    pub fn register_module(&mut self, mod_name: &str, prog: &ast::Program, pkg_id: Option<&crate::project::PkgId>, is_self_import: bool) {
+        let is_external = !is_self_import;
         if let Some(pid) = pkg_id {
             let internal_name = pid.mod_name();
             self.env.user_modules.insert(internal_name.clone());
@@ -149,7 +155,42 @@ impl Checker {
         }
     }
 
+    /// Register a user-level import alias (import pkg as alias).
+    pub fn register_alias(&mut self, alias: &str, target: &str) {
+        self.env.module_aliases.insert(alias.to_string(), target.to_string());
+    }
+
+    /// Set the build target (e.g. "wasm") to enable platform module gating.
+    pub fn set_target(&mut self, target: &str) {
+        self.target = Some(target.to_string());
+    }
+
+    fn is_wasm_target(&self) -> bool {
+        self.target.as_ref().map_or(false, |t| t.starts_with("wasm"))
+    }
+
     pub fn check_program(&mut self, prog: &mut ast::Program) -> Vec<Diagnostic> {
+        // Check for platform module imports on WASM target
+        if self.is_wasm_target() {
+            for imp in &prog.imports {
+                if let ast::Decl::Import { path, span, .. } = imp {
+                    let mod_name = path.first().map(|s| s.as_str()).unwrap_or("");
+                    if PLATFORM_MODULES.contains(&mod_name) {
+                        let mut d = err(
+                            format!("module '{}' is not available on WASM target", mod_name),
+                            format!("'{}' requires OS access (file I/O, networking, etc.) which is not available in WebAssembly. Use only core modules (string, list, map, int, float, math, json, regex, path, time, args)", mod_name),
+                            format!("import {}", path.join(".")),
+                        );
+                        if let Some(ref file) = self.source_file {
+                            d.file = Some(file.clone());
+                        }
+                        d.line = span.map(|s| s.line);
+                        self.diagnostics.push(d);
+                    }
+                }
+            }
+        }
+
         self.register_decls(&prog.decls, None, false);
         for decl in prog.decls.iter_mut() {
             self.check_decl(decl);
@@ -162,8 +203,9 @@ impl Checker {
                 let is_self_import = path.first().map(|s| s.as_str()) == Some("self");
                 let accessible_name = if let Some(a) = alias {
                     a.as_str()
-                } else if is_self_import && path.len() >= 2 {
-                    path.last().unwrap().as_str()
+                } else if (is_self_import && path.len() >= 2) || path.len() > 1 {
+                    // import self.xxx or import pkg.sub → accessible as last segment
+                    path.last().map(|s| s.as_str()).unwrap_or(&path[0])
                 } else {
                     path[0].as_str()
                 };

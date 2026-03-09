@@ -321,11 +321,11 @@ pub fn resolve_package_spec(spec: &str) -> (String, String, Option<String>) {
             (format!("https://github.com/{}/{}", parts[0], parts[1]), parts[1].to_string())
         }
         _ if parts[0].contains('.') => {
-            let name = parts.last().unwrap().to_string();
+            let name = parts.last().expect("split always yields ≥1 element").to_string();
             (format!("https://{}", path), name)
         }
         _ => {
-            (format!("https://github.com/{}", path), parts.last().unwrap().to_string())
+            (format!("https://github.com/{}", path), parts.last().expect("split always yields ≥1 element").to_string())
         }
     };
 

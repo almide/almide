@@ -24,13 +24,13 @@ impl Emitter {
         }
     }
 
-    pub(crate) fn emit_program(&mut self, prog: &Program, modules: &[(String, Program, Option<crate::project::PkgId>)]) {
+    pub(crate) fn emit_program(&mut self, prog: &Program, modules: &[(String, Program, Option<crate::project::PkgId>, bool)]) {
         self.collect_fn_info(&prog.decls);
-        for (_, mod_prog, _) in modules {
+        for (_, mod_prog, _, _) in modules {
             self.collect_fn_info(&mod_prog.decls);
         }
         // Build module_aliases and user_modules from PkgId info
-        for (name, _, pkg_id) in modules {
+        for (name, _, pkg_id, _) in modules {
             if let Some(pid) = pkg_id {
                 let versioned = pid.mod_name();
                 self.module_aliases.insert(name.clone(), versioned.clone());
@@ -46,7 +46,7 @@ impl Emitter {
         self.emitln("");
 
         // Emit imported modules as `mod name { ... }`
-        for (mod_name, mod_prog, pkg_id) in modules {
+        for (mod_name, mod_prog, pkg_id, _) in modules {
             self.emit_user_module(mod_name, mod_prog, pkg_id.as_ref());
             self.emitln("");
         }
@@ -73,8 +73,8 @@ impl Emitter {
                 self.indent += 1;
                 self.emit_main_body(has_args, returns_result);
                 self.indent -= 1;
-                self.emitln("}).unwrap();");
-                self.emitln("t.join().unwrap();");
+                self.emitln("}).expect(\"failed to spawn main thread\");");
+                self.emitln("t.join().expect(\"main thread panicked\");");
             }
 
             self.indent -= 1;
@@ -105,7 +105,8 @@ impl Emitter {
         } else {
             name.to_string()
         };
-        self.emitln(&format!("mod {} {{", mod_name));
+        let rust_mod_name = mod_name.replace('.', "_");
+        self.emitln(&format!("mod {} {{", rust_mod_name));
         self.indent += 1;
         self.emitln("use super::*;");
         self.emitln("");
@@ -136,7 +137,8 @@ impl Emitter {
                         Visibility::Local => "",
                     };
                     let async_prefix = if is_async { &format!("{}async ", vis) } else { vis };
-                    self.emitln(&format!("{}fn {}({}) -> {} {{", async_prefix, fn_name, params_str.join(", "), actual_ret));
+                    let safe_fn_name = crate::emit_common::sanitize(fn_name);
+                    self.emitln(&format!("{}fn {}({}) -> {} {{", async_prefix, safe_fn_name, params_str.join(", "), actual_ret));
                     self.indent += 1;
                     let prev_effect = self.in_effect;
                     self.in_effect = is_effect;
@@ -161,18 +163,12 @@ impl Emitter {
                     self.emitln("");
                 }
                 Decl::Type { name: type_name, ty, deriving, visibility, .. } => {
-                    match visibility {
-                        Visibility::Public => {
-                            self.emit_indent();
-                            self.out.push_str("pub ");
-                        }
-                        Visibility::Mod => {
-                            self.emit_indent();
-                            self.out.push_str("pub(crate) ");
-                        }
-                        Visibility::Local => {}
-                    }
-                    self.emit_type_decl(type_name, ty, deriving);
+                    let vis_prefix = match visibility {
+                        Visibility::Public => "pub ",
+                        Visibility::Mod => "pub(crate) ",
+                        Visibility::Local => "",
+                    };
+                    self.emit_type_decl_vis(type_name, ty, deriving, vis_prefix);
                 }
                 _ => {}
             }
@@ -265,29 +261,34 @@ impl Emitter {
     }
 
     pub(crate) fn emit_type_decl(&mut self, name: &str, ty: &TypeExpr, deriving: &Option<Vec<String>>) {
+        self.emit_type_decl_vis(name, ty, deriving, "");
+    }
+
+    pub(crate) fn emit_type_decl_vis(&mut self, name: &str, ty: &TypeExpr, deriving: &Option<Vec<String>>, vis: &str) {
         match ty {
             TypeExpr::Record { fields } => {
                 self.emitln("#[derive(Debug, Clone, PartialEq)]");
-                self.emitln(&format!("struct {} {{", name));
+                self.emitln(&format!("{}struct {} {{", vis, name));
                 self.indent += 1;
                 for f in fields {
                     let ty_str = self.gen_type(&f.ty);
-                    self.emitln(&format!("{}: {},", f.name, ty_str));
+                    let field_vis = if vis.is_empty() { "" } else { "pub " };
+                    self.emitln(&format!("{}{}: {},", field_vis, f.name, ty_str));
                 }
                 self.indent -= 1;
                 self.emitln("}");
             }
             TypeExpr::Simple { .. } | TypeExpr::Generic { .. } => {
                 let ty_str = self.gen_type(ty);
-                self.emitln(&format!("type {} = {};", name, ty_str));
+                self.emitln(&format!("{}type {} = {};", vis, name, ty_str));
             }
             TypeExpr::Newtype { inner } => {
                 let ty_str = self.gen_type(inner);
-                self.emitln(&format!("struct {}({});", name, ty_str));
+                self.emitln(&format!("{}struct {}({});", vis, name, ty_str));
             }
             TypeExpr::Variant { cases } => {
                 self.emitln("#[derive(Debug, Clone, PartialEq)]");
-                self.emitln(&format!("enum {} {{", name));
+                self.emitln(&format!("{}enum {} {{", vis, name));
                 self.indent += 1;
                 for case in cases {
                     match case {

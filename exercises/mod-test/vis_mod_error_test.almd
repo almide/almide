@@ -1,0 +1,12 @@
+// ============================================================
+// Visibility Error Test: mod fn
+// ============================================================
+// EXPECTED: Compile error — "function 'mod_fn' is not accessible"
+//
+// `mod fn` restricts visibility to the same project.
+// Calling it from an external consumer must fail.
+
+import extlib
+fn main(_args: List[String]) -> Unit = {
+  println(extlib.mod_fn())
+}

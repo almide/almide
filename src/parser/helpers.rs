@@ -11,10 +11,17 @@ impl Parser {
     pub(crate) fn current(&self) -> &Token {
         if self.pos < self.tokens.len() {
             &self.tokens[self.pos]
+        } else if let Some(last) = self.tokens.last() {
+            last
         } else {
-            self.tokens.last().unwrap_or_else(|| {
-                panic!("Parser: no tokens available")
-            })
+            // Static EOF token as fallback — lexer always adds EOF, so this is unreachable
+            static EOF_TOKEN: Token = Token {
+                token_type: TokenType::EOF,
+                value: String::new(),
+                line: 0,
+                col: 0,
+            };
+            &EOF_TOKEN
         }
     }
 
@@ -96,9 +103,14 @@ impl Parser {
             return Ok(self.advance_and_get_value());
         }
         let tok = self.current();
+        let hint = if tok.token_type == TokenType::Ident {
+            "\n  Hint: Type names must start with an uppercase letter, e.g. Int, String, MyType"
+        } else {
+            ""
+        };
         Err(format!(
-            "Expected type name at line {}:{} (got {:?} '{}')",
-            tok.line, tok.col, tok.token_type, tok.value
+            "Expected type name at line {}:{} (got {:?} '{}'){}",
+            tok.line, tok.col, tok.token_type, tok.value, hint
         ))
     }
 
@@ -113,9 +125,18 @@ impl Parser {
             return Ok(self.advance_and_get_value());
         }
         let tok = self.current();
+        let hint = match &tok.token_type {
+            TokenType::Int | TokenType::Float | TokenType::String => {
+                "\n  Hint: Expected a name (identifier), not a literal value"
+            }
+            _ if tok.value == "=" || tok.value == ":" => {
+                "\n  Hint: A name is required before '='. Example: fn my_func() -> Int = ..."
+            }
+            _ => "",
+        };
         Err(format!(
-            "Expected name at line {}:{} (got {:?} '{}')",
-            tok.line, tok.col, tok.token_type, tok.value
+            "Expected name at line {}:{} (got {:?} '{}'){}",
+            tok.line, tok.col, tok.token_type, tok.value, hint
         ))
     }
 
@@ -127,9 +148,14 @@ impl Parser {
             return Ok(self.advance_and_get_value());
         }
         let tok = self.current();
+        let hint = if tok.token_type == TokenType::TypeName {
+            "\n  Hint: Function names must start with a lowercase letter. Use camelCase, e.g. fn myFunc()"
+        } else {
+            ""
+        };
         Err(format!(
-            "Expected function name at line {}:{} (got {:?} '{}')",
-            tok.line, tok.col, tok.token_type, tok.value
+            "Expected function name at line {}:{} (got {:?} '{}'){}",
+            tok.line, tok.col, tok.token_type, tok.value, hint
         ))
     }
 
@@ -141,9 +167,16 @@ impl Parser {
             return Ok(self.advance_and_get_value());
         }
         let tok = self.current();
+        let hint = if tok.token_type == TokenType::TypeName {
+            "\n  Hint: Parameter names must start with a lowercase letter. Example: fn greet(name: String)"
+        } else if tok.value == ")" {
+            "\n  Hint: Trailing comma before ')' is not allowed"
+        } else {
+            ""
+        };
         Err(format!(
-            "Expected parameter name at line {}:{} (got {:?} '{}')",
-            tok.line, tok.col, tok.token_type, tok.value
+            "Expected parameter name at line {}:{} (got {:?} '{}'){}",
+            tok.line, tok.col, tok.token_type, tok.value, hint
         ))
     }
 

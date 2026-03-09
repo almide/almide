@@ -1,0 +1,42 @@
+fn main() -> Unit = {
+  // Basic heredoc with indentation stripping
+  let sql = """
+    SELECT *
+    FROM users
+    WHERE id = 1
+  """
+  assert_eq(sql, "SELECT *\nFROM users\nWHERE id = 1")
+
+  // Heredoc with interpolation
+  let name = "Alice"
+  let greeting = """
+    Hello, ${name}!
+    Welcome.
+  """
+  assert_eq(greeting, "Hello, Alice!\nWelcome.")
+
+  // Single-line heredoc (no newline after opening """)
+  let single = """hello"""
+  assert_eq(single, "hello")
+
+  // Empty heredoc
+  let empty = """
+  """
+  assert_eq(empty, "")
+
+  // Raw heredoc (no escape processing)
+  let pattern = r"""
+    \d+\.\d+
+  """
+  assert_eq(pattern, "\\d+\\.\\d+")
+
+  // Heredoc preserves relative indentation
+  let code = """
+    if x {
+      println("yes")
+    }
+  """
+  assert_eq(code, "if x {\n  println(\"yes\")\n}")
+
+  println("All heredoc tests passed!")
+}

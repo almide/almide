@@ -1,4 +1,4 @@
 commit-msg:
   scripts:
-    "no-japanese":
+    "english-only":
       runner: python3
