@@ -15,9 +15,46 @@ impl TsEmitter {
         for (mod_name, _) in modules {
             self.user_modules.push(mod_name.clone());
         }
+        // Pre-declare namespace objects for parent modules that don't have their own module
+        let module_names: std::collections::HashSet<String> = modules.iter().map(|(n, _)| n.clone()).collect();
+        let mut emitted_ns: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for (mod_name, _) in modules {
+            if mod_name.contains('.') {
+                // Walk up the parent chain (e.g. a.b.c -> check a, a.b)
+                let parts: Vec<&str> = mod_name.split('.').collect();
+                for i in 1..parts.len() {
+                    let ancestor = parts[..i].join(".");
+                    if !module_names.contains(&ancestor) && !emitted_ns.contains(&ancestor) {
+                        emitted_ns.insert(ancestor.clone());
+                        if ancestor.contains('.') {
+                            self.out.push_str(&format!("{} = {{}};\n", ancestor));
+                        } else {
+                            self.out.push_str(&format!("const {} = {{}};\n", ancestor));
+                        }
+                    }
+                }
+            }
+        }
         for (mod_name, mod_prog) in modules {
             self.emit_user_module(mod_name, mod_prog);
         }
+
+        // Emit import aliases and direct sub-module imports
+        for imp in &prog.imports {
+            if let Decl::Import { path, alias, .. } = imp {
+                let full_path = path.join(".");
+                if let Some(alias_name) = alias {
+                    let kw = if self.js_mode { "var" } else { "const" };
+                    self.out.push_str(&format!("{} {} = {};\n", kw, alias_name, full_path));
+                } else if path.len() > 1 {
+                    // Direct sub-module import: `import mylib.parser` makes `parser` available
+                    let short_name = path.last().unwrap();
+                    let kw = if self.js_mode { "var" } else { "const" };
+                    self.out.push_str(&format!("{} {} = {};\n", kw, short_name, full_path));
+                }
+            }
+        }
+        self.out.push('\n');
 
         let mut has_main = false;
         for decl in &prog.decls {
@@ -33,7 +70,7 @@ impl TsEmitter {
         if has_main {
             self.out.push_str("// ---- Entry Point ----\n");
             if self.js_mode {
-                self.out.push_str("try { main([\"app\", ...process.argv.slice(2)]); } catch (e) { if (e instanceof Error) { console.error(e.message); process.exit(1); } throw e; }\n");
+                self.out.push_str("try { main([\"app\", ...__node_process.argv.slice(2)]); } catch (e) { if (e instanceof Error) { console.error(e.message); __node_process.exit(1); } throw e; }\n");
             } else {
                 self.out.push_str("try { main([\"minigit\", ...Deno.args]); } catch (e) { if (e instanceof Error) { eprintln(e.message); Deno.exit(1); } throw e; }\n");
             }
@@ -42,7 +79,12 @@ impl TsEmitter {
 
     fn emit_user_module(&mut self, name: &str, prog: &Program) {
         self.out.push_str(&format!("// module: {}\n", name));
-        self.out.push_str(&format!("const {} = (() => {{\n", name));
+        if name.contains('.') {
+            // Sub-module: use property assignment instead of const declaration
+            self.out.push_str(&format!("{} = (() => {{\n", name));
+        } else {
+            self.out.push_str(&format!("const {} = (() => {{\n", name));
+        }
 
         for decl in &prog.decls {
             match decl {
@@ -100,7 +142,7 @@ impl TsEmitter {
                 if self.js_mode {
                     let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
                     format!(
-                        "try {{ (() => {})(); console.log(\"  test {} ... ok\"); }} catch(__e) {{ console.log(\"  test {} ... FAILED\"); console.log(\"    \" + __e.message.split(\"\\n\").join(\"\\n    \")); process.exitCode = 1; }}",
+                        "try {{ (() => {})(); console.log(\"  test {} ... ok\"); }} catch(__e) {{ console.log(\"  test {} ... FAILED\"); console.log(\"    \" + __e.message.split(\"\\n\").join(\"\\n    \")); __node_process.exitCode = 1; }}",
                         body_str,
                         escaped,
                         escaped,

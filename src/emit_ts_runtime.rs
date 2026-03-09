@@ -28,6 +28,10 @@ const __almd_fs = {
     const s = Deno.statSync(path);
     return { size: s.size, is_dir: s.isDirectory, is_file: s.isFile, modified: Math.floor((s.mtime?.getTime() ?? 0) / 1000) };
   },
+  is_dir_hdlm_qm_(p: string): boolean { try { return Deno.statSync(p).isDirectory; } catch { return false; } },
+  is_file_hdlm_qm_(p: string): boolean { try { return Deno.statSync(p).isFile; } catch { return false; } },
+  copy(src: string, dst: string): void { Deno.copyFileSync(src, dst); },
+  rename(src: string, dst: string): void { Deno.renameSync(src, dst); },
 };
 const __almd_string = {
   trim(s: string): string { return s.trim(); },
@@ -103,6 +107,7 @@ const __almd_list = {
   sum(xs: number[]): number { return xs.reduce((a, b) => a + b, 0); },
   product(xs: number[]): number { return xs.reduce((a, b) => a * b, 1); },
   is_empty<T>(xs: T[]): boolean { return xs.length === 0; },
+  is_empty_hdlm_qm_<T>(xs: T[]): boolean { return xs.length === 0; },
   flat_map<T, U>(xs: T[], f: (x: T) => U[]): U[] { return xs.flatMap(f); },
   min<T>(xs: T[]): T | null { return xs.length === 0 ? null : xs.reduce((a, b) => a < b ? a : b); },
   max<T>(xs: T[]): T | null { return xs.length === 0 ? null : xs.reduce((a, b) => a > b ? a : b); },
@@ -125,23 +130,29 @@ const __almd_map = {
   from_entries<K, V>(entries: [K, V][]): Map<K, V> { const r = new Map<K, V>(); for (const [k, v] of entries) r.set(k, v); return r; },
   merge<K, V>(a: Map<K, V>, b: Map<K, V>): Map<K, V> { const r = new Map(a); b.forEach((v, k) => r.set(k, v)); return r; },
   is_empty<K, V>(m: Map<K, V>): boolean { return m.size === 0; },
+  is_empty_hdlm_qm_<K, V>(m: Map<K, V>): boolean { return m.size === 0; },
 };
 const __almd_int = {
   to_hex(n: bigint): string { return (n >= 0n ? n : n + (1n << 64n)).toString(16); },
   to_string(n: number): string { return String(n); },
-  band(a: number, b: number): number { return a & b; },
-  bor(a: number, b: number): number { return a | b; },
-  bxor(a: number, b: number): number { return a ^ b; },
-  bshl(a: number, n: number): number { return a << n; },
+  band(a: number, b: number): number { return (a & b) >>> 0; },
+  bor(a: number, b: number): number { return (a | b) >>> 0; },
+  bxor(a: number, b: number): number { return (a ^ b) >>> 0; },
+  bshl(a: number, n: number): number { return (a << n) >>> 0; },
   bshr(a: number, n: number): number { return a >>> n; },
   bnot(a: number): number { return ~a; },
   wrap_add(a: number, b: number, bits: number): number { const mask = bits === 32 ? 0xFFFFFFFF : (1 << bits) - 1; return ((a + b) & mask) >>> 0; },
   wrap_mul(a: number, b: number, bits: number): number { const mask = bits === 32 ? 0xFFFFFFFF : (1 << bits) - 1; return (Math.imul(a, b) & mask) >>> 0; },
-  rotate_right(a: number, n: number, bits: number): number { const mask = bits === 32 ? 0xFFFFFFFF : (1 << bits) - 1; const v = a & mask; n = n % bits; return ((v >>> n) | (v << (bits - n))) & mask; },
-  rotate_left(a: number, n: number, bits: number): number { const mask = bits === 32 ? 0xFFFFFFFF : (1 << bits) - 1; const v = a & mask; n = n % bits; return ((v << n) | (v >>> (bits - n))) & mask; },
+  rotate_right(a: number, n: number, bits: number): number { const mask = bits === 32 ? 0xFFFFFFFF : (1 << bits) - 1; const v = a & mask; n = n % bits; return (((v >>> n) | (v << (bits - n))) & mask) >>> 0; },
+  rotate_left(a: number, n: number, bits: number): number { const mask = bits === 32 ? 0xFFFFFFFF : (1 << bits) - 1; const v = a & mask; n = n % bits; return (((v << n) | (v >>> (bits - n))) & mask) >>> 0; },
   to_u32(a: number): number { return a >>> 0; },
   to_u8(a: number): number { return a & 0xFF; },
   clamp(n: number, lo: number, hi: number): number { return Math.max(lo, Math.min(hi, n)); },
+  parse(s: string): number { const n = parseInt(s, 10); if (isNaN(n) || !/^-?\d+$/.test(s.trim())) throw new Error("invalid digit found in string"); return n; },
+  parse_hex(s: string): number { const h = s.startsWith("0x") || s.startsWith("0X") ? s.slice(2) : s; const n = parseInt(h, 16); if (isNaN(n)) throw new Error("invalid digit found in string"); return n; },
+  abs(n: number): number { return Math.abs(n); },
+  min(a: number, b: number): number { return Math.min(a, b); },
+  max(a: number, b: number): number { return Math.max(a, b); },
 };
 const __almd_float = {
   to_string(n: number): string { return String(n); },
@@ -196,6 +207,7 @@ const __almd_env = {
 };
 const __almd_process = {
   exec(cmd: string, args: string[]): string { try { const p = new Deno.Command(cmd, { args, stdout: "piped", stderr: "piped" }); const out = p.outputSync(); if (out.success) { return new TextDecoder().decode(out.stdout); } else { const msg = new TextDecoder().decode(out.stderr); throw new Error(msg || "command failed"); } } catch (e) { if (e instanceof Error) throw e; throw new Error(String(e)); } },
+  exec_status(cmd: string, args: string[]): {code: number, stdout: string, stderr: string} { try { const p = new Deno.Command(cmd, { args, stdout: "piped", stderr: "piped" }); const out = p.outputSync(); return { code: out.code, stdout: new TextDecoder().decode(out.stdout), stderr: new TextDecoder().decode(out.stderr) }; } catch (e) { throw e instanceof Error ? e : new Error(String(e)); } },
   exit(code: number): void { Deno.exit(code); },
   stdin_lines(): string[] { const buf = new Uint8Array(1024 * 1024); const n = Deno.stdin.readSync(buf); return n ? new TextDecoder().decode(buf.subarray(0, n)).split("\n").filter(l => l.length > 0) : []; },
 };
@@ -315,6 +327,7 @@ function __assert_throws(fn: () => any, expectedMsg: string): void {
 
 /// JavaScript runtime (Node.js) for emitted code.
 pub const RUNTIME_JS: &str = r#"// ---- Almide Runtime (JS) ----
+const __node_process = globalThis.process || {};
 const __almd_fs = {
   exists(p) { const fs = require("fs"); try { fs.statSync(p); return true; } catch { return false; } },
   read_text(p) { return require("fs").readFileSync(p, "utf-8"); },
@@ -346,6 +359,10 @@ const __almd_fs = {
     const s = fs.statSync(path);
     return { size: s.size, is_dir: s.isDirectory(), is_file: s.isFile(), modified: Math.floor(s.mtimeMs / 1000) };
   },
+  is_dir_hdlm_qm_(p) { try { return require("fs").statSync(p).isDirectory(); } catch { return false; } },
+  is_file_hdlm_qm_(p) { try { return require("fs").statSync(p).isFile(); } catch { return false; } },
+  copy(src, dst) { require("fs").copyFileSync(src, dst); },
+  rename(src, dst) { require("fs").renameSync(src, dst); },
 };
 const __almd_string = {
   trim(s) { return s.trim(); },
@@ -421,6 +438,7 @@ const __almd_list = {
   sum(xs) { return xs.reduce((a, b) => a + b, 0); },
   product(xs) { return xs.reduce((a, b) => a * b, 1); },
   is_empty(xs) { return xs.length === 0; },
+  is_empty_hdlm_qm_(xs) { return xs.length === 0; },
   flat_map(xs, f) { return xs.flatMap(f); },
   min(xs) { return xs.length === 0 ? null : xs.reduce((a, b) => a < b ? a : b); },
   max(xs) { return xs.length === 0 ? null : xs.reduce((a, b) => a > b ? a : b); },
@@ -443,23 +461,29 @@ const __almd_map = {
   from_entries(entries) { const r = new Map(); for (const [k, v] of entries) r.set(k, v); return r; },
   merge(a, b) { const r = new Map(a); b.forEach((v, k) => r.set(k, v)); return r; },
   is_empty(m) { return m.size === 0; },
+  is_empty_hdlm_qm_(m) { return m.size === 0; },
 };
 const __almd_int = {
   to_hex(n) { return (typeof n === "bigint" ? (n >= 0n ? n : n + (1n << 64n)).toString(16) : n.toString(16)); },
   to_string(n) { return String(n); },
-  band(a, b) { return a & b; },
-  bor(a, b) { return a | b; },
-  bxor(a, b) { return a ^ b; },
-  bshl(a, n) { return a << n; },
+  band(a, b) { return (a & b) >>> 0; },
+  bor(a, b) { return (a | b) >>> 0; },
+  bxor(a, b) { return (a ^ b) >>> 0; },
+  bshl(a, n) { return (a << n) >>> 0; },
   bshr(a, n) { return a >>> n; },
   bnot(a) { return ~a; },
   wrap_add(a, b, bits) { const mask = bits === 32 ? 0xFFFFFFFF : (1 << bits) - 1; return ((a + b) & mask) >>> 0; },
   wrap_mul(a, b, bits) { const mask = bits === 32 ? 0xFFFFFFFF : (1 << bits) - 1; return (Math.imul(a, b) & mask) >>> 0; },
-  rotate_right(a, n, bits) { const mask = bits === 32 ? 0xFFFFFFFF : (1 << bits) - 1; const v = a & mask; n = n % bits; return ((v >>> n) | (v << (bits - n))) & mask; },
-  rotate_left(a, n, bits) { const mask = bits === 32 ? 0xFFFFFFFF : (1 << bits) - 1; const v = a & mask; n = n % bits; return ((v << n) | (v >>> (bits - n))) & mask; },
+  rotate_right(a, n, bits) { const mask = bits === 32 ? 0xFFFFFFFF : (1 << bits) - 1; const v = a & mask; n = n % bits; return (((v >>> n) | (v << (bits - n))) & mask) >>> 0; },
+  rotate_left(a, n, bits) { const mask = bits === 32 ? 0xFFFFFFFF : (1 << bits) - 1; const v = a & mask; n = n % bits; return (((v << n) | (v >>> (bits - n))) & mask) >>> 0; },
   to_u32(a) { return a >>> 0; },
   to_u8(a) { return a & 0xFF; },
   clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); },
+  parse(s) { var n = parseInt(s, 10); if (isNaN(n) || !/^-?\d+$/.test(s.trim())) throw new Error("invalid digit found in string"); return n; },
+  parse_hex(s) { var h = s.startsWith("0x") || s.startsWith("0X") ? s.slice(2) : s; var n = parseInt(h, 16); if (isNaN(n)) throw new Error("invalid digit found in string"); return n; },
+  abs(n) { return Math.abs(n); },
+  min(a, b) { return Math.min(a, b); },
+  max(a, b) { return Math.max(a, b); },
 };
 const __almd_float = {
   to_string(n) { return String(n); },
@@ -505,16 +529,17 @@ const __almd_json = {
 };
 const __almd_env = {
   unix_timestamp() { return Math.floor(Date.now() / 1000); },
-  args() { return process.argv.slice(2); },
-  get(name) { const v = process.env[name]; return v !== undefined ? v : null; },
-  set(name, value) { process.env[name] = value; },
-  cwd() { return process.cwd(); },
+  args() { return __node_process.argv.slice(2); },
+  get(name) { const v = __node_process.env[name]; return v !== undefined ? v : null; },
+  set(name, value) { __node_process.env[name] = value; },
+  cwd() { return __node_process.cwd(); },
   millis() { return Date.now(); },
   sleep_ms(ms) { const end = Date.now() + ms; while (Date.now() < end) {} },
 };
 const __almd_process = {
   exec(cmd, args) { const { execFileSync } = require("child_process"); try { return execFileSync(cmd, args, { encoding: "utf-8" }); } catch (e) { const msg = e.stderr ? String(e.stderr) : e.message; throw new Error(msg || "command failed"); } },
-  exit(code) { process.exit(code); },
+  exec_status(cmd, args) { const { spawnSync } = require("child_process"); const r = spawnSync(cmd, args, { encoding: "utf-8" }); if (r.error) throw r.error; return { code: r.status ?? 1, stdout: r.stdout || "", stderr: r.stderr || "" }; },
+  exit(code) { __node_process.exit(code); },
   stdin_lines() { return require("fs").readFileSync(0, "utf-8").split("\n").filter(l => l.length > 0); },
 };
 const __almd_math = {
@@ -549,7 +574,7 @@ const __almd_regex = {
 };
 const __almd_io = {
   read_line() { const buf = Buffer.alloc(1024); let s = ""; while (true) { const n = require("fs").readSync(0, buf, 0, 1, null); if (n === 0) break; const ch = buf.toString("utf-8", 0, n); s += ch; if (ch === "\n") break; } return s.replace(/\r?\n$/, ""); },
-  print(s) { process.stdout.write(s); },
+  print(s) { __node_process.stdout.write(s); },
   read_all() { return require("fs").readFileSync(0, "utf-8"); },
 };
 const __almd_time = {

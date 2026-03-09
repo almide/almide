@@ -184,6 +184,37 @@ impl TsEmitter {
         crate::stdlib::resolve_ufcs_module(method).map(|m| format!("__almd_{}", m))
     }
 
+    /// Check if an expression is a module chain (e.g. deeplib.http.client)
+    fn is_module_chain(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Ident { name, .. } => {
+                self.user_modules.contains(&name.to_string()) || crate::stdlib::is_stdlib_module(name)
+            }
+            Expr::Member { object, .. } => {
+                // Check if the full path up to this point is a known module
+                if let Some(path) = self.expr_to_module_path(expr) {
+                    if self.user_modules.contains(&path) {
+                        return true;
+                    }
+                }
+                // Recurse: if the object is a module chain, this is likely a module member
+                self.is_module_chain(object)
+            }
+            _ => false,
+        }
+    }
+
+    /// Try to reconstruct a dotted module path from a member chain
+    fn expr_to_module_path(&self, expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::Ident { name, .. } => Some(name.clone()),
+            Expr::Member { object, field, .. } => {
+                self.expr_to_module_path(object).map(|base| format!("{}.{}", base, field))
+            }
+            _ => None,
+        }
+    }
+
     pub(crate) fn gen_call(&self, callee: &Expr, args: &[Expr]) -> String {
         // UFCS: expr.method(args) => __module.method(expr, args)
         if let Expr::Member { object, field, .. } = callee {
@@ -208,11 +239,7 @@ impl TsEmitter {
                 }
             } else {
                 // Non-ident object (e.g. call result, member chain)
-                let is_module_chain = if let Expr::Member { object: inner_obj, .. } = object.as_ref() {
-                    if let Expr::Ident { name, .. } = inner_obj.as_ref() {
-                        crate::stdlib::is_stdlib_module(name)
-                    } else { false }
-                } else { false };
+                let is_module_chain = self.is_module_chain(object);
 
                 if !is_module_chain {
                     if let Some(module) = Self::resolve_ufcs_module(field) {
