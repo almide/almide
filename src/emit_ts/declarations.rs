@@ -1,14 +1,10 @@
 use crate::ast::*;
-use crate::emit_ts_runtime::{RUNTIME, RUNTIME_JS};
+use crate::emit_ts_runtime;
 use super::TsEmitter;
 
 impl TsEmitter {
     pub(crate) fn emit_program(&mut self, prog: &Program, modules: &[(String, Program)]) {
-        if self.js_mode {
-            self.out.push_str(RUNTIME_JS);
-        } else {
-            self.out.push_str(RUNTIME);
-        }
+        self.out.push_str(&emit_ts_runtime::full_runtime(self.js_mode));
         self.out.push('\n');
 
         // Register and emit imported modules as namespace objects

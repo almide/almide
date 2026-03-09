@@ -2,17 +2,26 @@ mod declarations;
 mod expressions;
 mod blocks;
 
+use std::cell::RefCell;
+use std::collections::HashSet;
 use crate::ast::*;
 
 pub(crate) struct TsEmitter {
     pub(crate) out: String,
     pub(crate) js_mode: bool,
     pub(crate) user_modules: Vec<String>,
+    /// Tracks which stdlib modules (`__almd_*`) are referenced during codegen.
+    pub(crate) used_stdlib: RefCell<HashSet<String>>,
 }
 
 impl TsEmitter {
     fn new() -> Self {
-        Self { out: String::new(), js_mode: false, user_modules: Vec::new() }
+        Self {
+            out: String::new(),
+            js_mode: false,
+            user_modules: Vec::new(),
+            used_stdlib: RefCell::new(HashSet::new()),
+        }
     }
 
     // Helpers
@@ -38,6 +47,7 @@ impl TsEmitter {
         if self.user_modules.contains(&name.to_string()) {
             name.to_string()
         } else if crate::stdlib::is_stdlib_module(name) {
+            self.used_stdlib.borrow_mut().insert(name.to_string());
             format!("__almd_{}", name)
         } else {
             name.to_string()
