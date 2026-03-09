@@ -119,21 +119,30 @@ pub fn emit_npm_package(program: &Program, modules: &[(String, Program)], config
 
     let used = emitter.used_stdlib.borrow();
 
-    // Build import preamble
+    // Post-process: rename __almd_X → __X in user code for cleaner output.
+    // Safe because __almd_ prefix is compiler-generated and never appears in user identifiers.
+    let mut clean_code = user_code;
+    for mod_name in used.iter() {
+        clean_code = clean_code.replace(
+            &format!("__almd_{}", mod_name),
+            &format!("__{}", mod_name),
+        );
+    }
+
+    // Build import preamble with aliased imports: __almd_X as __X
     let mut imports = String::new();
-    // Helpers are always needed (operators, deep_eq, etc.)
     imports.push_str("import { __bigop, __div, __deep_eq, __concat, __throw, println, eprintln, assert_eq, assert_ne, assert, unwrap_or, __assert_throws } from \"./_runtime/helpers.js\";\n");
     let mut sorted_modules: Vec<&String> = used.iter().collect();
     sorted_modules.sort();
     for mod_name in &sorted_modules {
         imports.push_str(&format!(
-            "import {{ __almd_{name} }} from \"./_runtime/{name}.js\";\n",
+            "import {{ __almd_{name} as __{name} }} from \"./_runtime/{name}.js\";\n",
             name = mod_name
         ));
     }
     imports.push('\n');
 
-    let index_js = format!("{}{}", imports, user_code);
+    let index_js = format!("{}{}", imports, clean_code);
 
     // Generate index.d.ts
     let index_dts = emitter.generate_dts(program);
