@@ -179,6 +179,17 @@ create_user("alice", age: 30)          // mixed positional + named
 "hello ${name}, result=${1 + 1}"
 ```
 
+### Heredoc (multi-line strings)
+```
+let sql = """
+  SELECT *
+  FROM users
+"""
+// Leading whitespace stripped based on minimum indent
+// Interpolation ${expr} works the same
+// Raw heredoc: r"""...""" (no escapes)
+```
+
 ## Statements
 
 ### let / var

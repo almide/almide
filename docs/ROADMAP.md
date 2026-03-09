@@ -155,11 +155,11 @@ impl Show for Color {
 
 ---
 
-## String Handling
+## String Handling ✅ Implemented
 
 ### Heredoc
 
-Multi-line strings without escape noise. Useful for SQL, HTML, JSON templates, etc.
+Multi-line strings with `"""..."""` syntax.
 
 ```almide
 let query = """
@@ -167,37 +167,13 @@ let query = """
   FROM users
   WHERE id = ${user_id}
 """
-
-let html = """
-  <html>
-    <body>${content}</body>
-  </html>
-"""
 ```
 
 - `"""..."""` syntax (consistent with Python/Kotlin/Swift)
-- Leading whitespace stripped based on indentation of closing `"""`
+- Leading whitespace stripped based on minimum indent of non-empty lines (Kotlin trimIndent)
 - Interpolation `${expr}` works the same as in regular strings
-
-### Implementation Steps
-
-- [ ] Lexer: recognize `"""` as heredoc open token; suppress newline-as-separator handling until closing `"""`
-- [ ] Lexer: capture raw content with indentation, strip common leading whitespace on close (dedent based on closing `"""` column)
-- [ ] Parser: reuse existing interpolation logic for `${expr}` inside heredocs
-- [ ] Rust emitter: emit as `format!(...)` (same as regular interpolated strings)
-- [ ] TS emitter: emit as template literals `` `...` ``
-
-### Key Lexer Concern
-
-Almide's lexer is newline-sensitive (newlines act as statement separators). Inside `"""..."""`, newlines must be treated as literal content, not as token delimiters. The lexer needs a `in_heredoc` flag that suppresses normal newline handling until the closing `"""` is encountered.
-
-### Design Notes
-
-- Indentation stripping follows the closing `"""` column (same as Kotlin trimIndent)
-- No need for separate raw heredoc — use `r"""..."""` if escape-free is needed
-- Single-line `"..."` with `${expr}` already works; heredoc is purely for multi-line ergonomics
-
----
+- Raw heredoc: `r"""..."""` (no escape processing, no interpolation)
+- Implemented entirely in the lexer — no AST, parser, or emitter changes needed
 
 ---
 
