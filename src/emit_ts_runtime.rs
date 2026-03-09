@@ -78,6 +78,18 @@ const __map = {
 const __int = {
   to_hex(n: bigint): string { return (n >= 0n ? n : n + (1n << 64n)).toString(16); },
   to_string(n: number): string { return String(n); },
+  band(a: number, b: number): number { return a & b; },
+  bor(a: number, b: number): number { return a | b; },
+  bxor(a: number, b: number): number { return a ^ b; },
+  bshl(a: number, n: number): number { return a << n; },
+  bshr(a: number, n: number): number { return a >>> n; },
+  bnot(a: number): number { return ~a; },
+  wrap_add(a: number, b: number, bits: number): number { const mask = bits === 32 ? 0xFFFFFFFF : (1 << bits) - 1; return ((a + b) & mask) >>> 0; },
+  wrap_mul(a: number, b: number, bits: number): number { const mask = bits === 32 ? 0xFFFFFFFF : (1 << bits) - 1; return (Math.imul(a, b) & mask) >>> 0; },
+  rotate_right(a: number, n: number, bits: number): number { const mask = bits === 32 ? 0xFFFFFFFF : (1 << bits) - 1; const v = a & mask; n = n % bits; return ((v >>> n) | (v << (bits - n))) & mask; },
+  rotate_left(a: number, n: number, bits: number): number { const mask = bits === 32 ? 0xFFFFFFFF : (1 << bits) - 1; const v = a & mask; n = n % bits; return ((v << n) | (v >>> (bits - n))) & mask; },
+  to_u32(a: number): number { return a >>> 0; },
+  to_u8(a: number): number { return a & 0xFF; },
 };
 const __float = {
   to_string(n: number): string { return String(n); },
@@ -321,6 +333,18 @@ const __map = {
 const __int = {
   to_hex(n) { return (typeof n === "bigint" ? (n >= 0n ? n : n + (1n << 64n)).toString(16) : n.toString(16)); },
   to_string(n) { return String(n); },
+  band(a, b) { return a & b; },
+  bor(a, b) { return a | b; },
+  bxor(a, b) { return a ^ b; },
+  bshl(a, n) { return a << n; },
+  bshr(a, n) { return a >>> n; },
+  bnot(a) { return ~a; },
+  wrap_add(a, b, bits) { const mask = bits === 32 ? 0xFFFFFFFF : (1 << bits) - 1; return ((a + b) & mask) >>> 0; },
+  wrap_mul(a, b, bits) { const mask = bits === 32 ? 0xFFFFFFFF : (1 << bits) - 1; return (Math.imul(a, b) & mask) >>> 0; },
+  rotate_right(a, n, bits) { const mask = bits === 32 ? 0xFFFFFFFF : (1 << bits) - 1; const v = a & mask; n = n % bits; return ((v >>> n) | (v << (bits - n))) & mask; },
+  rotate_left(a, n, bits) { const mask = bits === 32 ? 0xFFFFFFFF : (1 << bits) - 1; const v = a & mask; n = n % bits; return ((v << n) | (v >>> (bits - n))) & mask; },
+  to_u32(a) { return a >>> 0; },
+  to_u8(a) { return a & 0xFF; },
 };
 const __float = {
   to_string(n) { return String(n); },

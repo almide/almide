@@ -157,6 +157,20 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         ("int", "abs") => FnSig { params: vec![(s("n"), Ty::Int)], ret: Ty::Int, is_effect: false },
         ("int", "min") => FnSig { params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
         ("int", "max") => FnSig { params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        // bitwise operations
+        ("int", "band") => FnSig { params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("int", "bor") => FnSig { params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("int", "bxor") => FnSig { params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("int", "bshl") => FnSig { params: vec![(s("a"), Ty::Int), (s("n"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("int", "bshr") => FnSig { params: vec![(s("a"), Ty::Int), (s("n"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("int", "bnot") => FnSig { params: vec![(s("a"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        // wrapping arithmetic (for hash algorithms operating on fixed-width integers)
+        ("int", "wrap_add") => FnSig { params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int), (s("bits"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("int", "wrap_mul") => FnSig { params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int), (s("bits"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("int", "rotate_right") => FnSig { params: vec![(s("a"), Ty::Int), (s("n"), Ty::Int), (s("bits"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("int", "rotate_left") => FnSig { params: vec![(s("a"), Ty::Int), (s("n"), Ty::Int), (s("bits"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("int", "to_u32") => FnSig { params: vec![(s("a"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("int", "to_u8") => FnSig { params: vec![(s("a"), Ty::Int)], ret: Ty::Int, is_effect: false },
 
         // ── float ──
         ("float", "to_string") => FnSig { params: vec![(s("n"), Ty::Float)], ret: Ty::String, is_effect: false },

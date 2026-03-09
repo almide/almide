@@ -356,6 +356,20 @@ impl Emitter {
                 "abs" => format!("({}).abs()", args_str[0]),
                 "min" => format!("std::cmp::min({}, {})", args_str[0], args_str[1]),
                 "max" => format!("std::cmp::max({}, {})", args_str[0], args_str[1]),
+                // bitwise operations
+                "band" => format!("({} & {})", args_str[0], args_str[1]),
+                "bor" => format!("({} | {})", args_str[0], args_str[1]),
+                "bxor" => format!("({} ^ {})", args_str[0], args_str[1]),
+                "bshl" => format!("({} << {} as u32)", args_str[0], args_str[1]),
+                "bshr" => format!("((({}) as u64 >> {} as u32) as i64)", args_str[0], args_str[1]),
+                "bnot" => format!("(!{})", args_str[0]),
+                // wrapping arithmetic
+                "wrap_add" => format!("{{ let __mask = (1u64 << ({} as u32)) - 1; ((({}) as u64).wrapping_add(({}) as u64) & __mask) as i64 }}", args_str[2], args_str[0], args_str[1]),
+                "wrap_mul" => format!("{{ let __mask = (1u64 << ({} as u32)) - 1; ((({}) as u64).wrapping_mul(({}) as u64) & __mask) as i64 }}", args_str[2], args_str[0], args_str[1]),
+                "rotate_right" => format!("{{ let __bits = {} as u32; let __n = ({} as u32) % __bits; let __v = ({}) as u64 & ((1u64 << __bits) - 1); ((__v >> __n | __v << (__bits - __n)) & ((1u64 << __bits) - 1)) as i64 }}", args_str[2], args_str[1], args_str[0]),
+                "rotate_left" => format!("{{ let __bits = {} as u32; let __n = ({} as u32) % __bits; let __v = ({}) as u64 & ((1u64 << __bits) - 1); ((__v << __n | __v >> (__bits - __n)) & ((1u64 << __bits) - 1)) as i64 }}", args_str[2], args_str[1], args_str[0]),
+                "to_u32" => format!("(({}) as u64 & 0xFFFFFFFF) as i64", args_str[0]),
+                "to_u8" => format!("(({}) as u64 & 0xFF) as i64", args_str[0]),
                 _ => { eprintln!("internal error: no Rust codegen for int.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "float" => match func {

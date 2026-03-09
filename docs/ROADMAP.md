@@ -583,12 +583,12 @@ Required for: hash algorithms (SHA-1, SHA-256, MD5), encoding (base64, hex), com
 - Most Almide code never needs bitwise ops — they shouldn't pollute the operator space
 
 Implementation:
-- [ ] stdlib.rs: add `int.band`, `int.bor`, `int.bxor`, `int.bshl`, `int.bshr`, `int.bnot` signatures
-- [ ] emit_rust/calls.rs: emit corresponding Rust operators
-- [ ] emit_ts/expressions.rs: emit corresponding JS operators (note: `>>>` for unsigned shift)
-- [ ] Test: verify all operators with known values
+- [x] stdlib.rs: add `int.band`, `int.bor`, `int.bxor`, `int.bshl`, `int.bshr`, `int.bnot` signatures
+- [x] emit_rust/calls.rs: emit corresponding Rust operators
+- [x] emit_ts_runtime.rs: emit corresponding JS operators (note: `>>>` for unsigned shift)
+- [x] Test: verify all operators with known values
 
-#### 0b. Wrapping Arithmetic
+#### 0b. Wrapping Arithmetic ✅
 
 Required for: hash algorithms that operate on 32-bit unsigned integers with overflow wrapping.
 
@@ -602,10 +602,10 @@ int.to_u8(a)                // truncate to 0..255
 ```
 
 Implementation:
-- [ ] stdlib.rs: add wrapping arithmetic signatures to `int` module
-- [ ] emit_rust/calls.rs: use Rust's `.wrapping_add()`, `.rotate_right()` etc.
-- [ ] emit_ts/expressions.rs: use `Math.imul()`, manual rotation, `>>> 0` for u32
-- [ ] Test: SHA-256 test vectors
+- [x] stdlib.rs: add wrapping arithmetic signatures to `int` module
+- [x] emit_rust/calls.rs: use Rust wrapping operations with bitmask
+- [x] emit_ts_runtime.rs: use `Math.imul()`, manual rotation, `>>> 0` for u32
+- [x] Test: SHA-256 style round operations (sigma0, Ch, Maj)
 
 #### 0c. Byte Array Type (future consideration)
 
