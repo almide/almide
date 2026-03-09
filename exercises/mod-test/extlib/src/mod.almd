@@ -1,0 +1,3 @@
+fn pub_fn() -> String = "public"
+mod fn mod_fn() -> String = "mod only"
+local fn local_fn() -> String = "local only"

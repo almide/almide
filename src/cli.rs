@@ -232,11 +232,30 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, no_check: bool) {
     let resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
         .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
 
+    // Extract user-level import aliases (import pkg as alias, or implicit aliases for multi-segment imports)
+    let import_aliases: Vec<(String, String)> = program.imports.iter().filter_map(|imp| {
+        if let crate::ast::Decl::Import { path, alias, .. } = imp {
+            if let Some(a) = alias {
+                Some((a.clone(), path.join(".")))
+            } else if path.len() > 1 && path.first().map(|s| s.as_str()) != Some("self") {
+                let last = path.last().unwrap().clone();
+                Some((last, path.join(".")))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }).collect();
+
     if !no_check && !emit_ast {
         let mut checker = check::Checker::new();
         checker.set_source(file, &source_text);
-        for (name, mod_prog, pkg_id) in &resolved.modules {
-            checker.register_module(name, mod_prog, pkg_id.as_ref());
+        for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
+            checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
+        }
+        for (alias, target) in &import_aliases {
+            checker.register_alias(alias, target);
         }
         let diagnostics = checker.check_program(&mut program);
         let errors: Vec<_> = diagnostics.iter()
@@ -260,17 +279,17 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, no_check: bool) {
         println!("{}", json);
     } else {
         let code = match target {
-            "rust" | "rs" => emit_rust::emit(&program, &resolved.modules),
+            "rust" | "rs" => emit_rust::emit_with_options(&program, &resolved.modules, &emit_rust::EmitOptions::default(), &import_aliases),
             "ts" | "typescript" => {
                 // Convert to legacy format for emit_ts (no PkgId support)
                 let legacy_modules: Vec<(String, crate::ast::Program)> = resolved.modules.iter()
-                    .map(|(n, p, _)| (n.clone(), p.clone()))
+                    .map(|(n, p, _, _)| (n.clone(), p.clone()))
                     .collect();
                 emit_ts::emit_with_modules(&program, &legacy_modules)
             }
             "js" | "javascript" => {
                 let legacy_modules: Vec<(String, crate::ast::Program)> = resolved.modules.iter()
-                    .map(|(n, p, _)| (n.clone(), p.clone()))
+                    .map(|(n, p, _, _)| (n.clone(), p.clone()))
                     .collect();
                 emit_ts::emit_js_with_modules(&program, &legacy_modules)
             }
@@ -303,8 +322,8 @@ pub fn cmd_check(file: &str) {
 
     let mut checker = check::Checker::new();
     checker.set_source(file, &source_text);
-    for (name, mod_prog, pkg_id) in &resolved.modules {
-        checker.register_module(name, mod_prog, pkg_id.as_ref());
+    for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
+        checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
     }
     let diagnostics = checker.check_program(&mut program);
 

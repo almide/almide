@@ -24,13 +24,13 @@ impl Emitter {
         }
     }
 
-    pub(crate) fn emit_program(&mut self, prog: &Program, modules: &[(String, Program, Option<crate::project::PkgId>)]) {
+    pub(crate) fn emit_program(&mut self, prog: &Program, modules: &[(String, Program, Option<crate::project::PkgId>, bool)]) {
         self.collect_fn_info(&prog.decls);
-        for (_, mod_prog, _) in modules {
+        for (_, mod_prog, _, _) in modules {
             self.collect_fn_info(&mod_prog.decls);
         }
         // Build module_aliases and user_modules from PkgId info
-        for (name, _, pkg_id) in modules {
+        for (name, _, pkg_id, _) in modules {
             if let Some(pid) = pkg_id {
                 let versioned = pid.mod_name();
                 self.module_aliases.insert(name.clone(), versioned.clone());
@@ -46,7 +46,7 @@ impl Emitter {
         self.emitln("");
 
         // Emit imported modules as `mod name { ... }`
-        for (mod_name, mod_prog, pkg_id) in modules {
+        for (mod_name, mod_prog, pkg_id, _) in modules {
             self.emit_user_module(mod_name, mod_prog, pkg_id.as_ref());
             self.emitln("");
         }
@@ -105,7 +105,8 @@ impl Emitter {
         } else {
             name.to_string()
         };
-        self.emitln(&format!("mod {} {{", mod_name));
+        let rust_mod_name = mod_name.replace('.', "_");
+        self.emitln(&format!("mod {} {{", rust_mod_name));
         self.indent += 1;
         self.emitln("use super::*;");
         self.emitln("");

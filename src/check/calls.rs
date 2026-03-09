@@ -4,12 +4,62 @@ use crate::stdlib;
 use super::{Checker, err};
 
 impl Checker {
+    /// Flatten nested Member expressions into (segments, func).
+    /// e.g. pkg.sub.func() → (["pkg", "sub"], "func")
+    fn flatten_member_chain<'a>(expr: &'a ast::Expr) -> Option<(Vec<&'a str>, &'a str)> {
+        if let ast::Expr::Member { object, field, .. } = expr {
+            let mut segments = Vec::new();
+            let mut current = object.as_ref();
+            loop {
+                match current {
+                    ast::Expr::Ident { name, .. } => {
+                        segments.push(name.as_str());
+                        break;
+                    }
+                    ast::Expr::Member { object, field: seg, .. } => {
+                        segments.push(seg.as_str());
+                        current = object.as_ref();
+                    }
+                    _ => return None,
+                }
+            }
+            segments.reverse();
+            Some((segments, field.as_str()))
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn check_call(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr]) -> Ty {
         let arg_tys: Vec<Ty> = args.iter_mut().map(|a| self.check_expr(a)).collect();
 
-        if let ast::Expr::Member { object, field, .. } = callee {
-            if let ast::Expr::Ident { name: module, .. } = object.as_ref() {
-                return self.check_module_call(module, field, &arg_tys);
+        // Module System v2: handle nested member access (any depth)
+        if let Some((segments, func)) = Self::flatten_member_chain(callee) {
+            // Resolve alias on the first segment (e.g. "m" → "mylib")
+            let first = self.env.module_aliases.get(segments[0])
+                .map(|s| s.as_str())
+                .unwrap_or(segments[0]);
+
+            // Try progressively longer module paths: pkg.sub.subsub, pkg.sub, pkg
+            for i in (1..=segments.len()).rev() {
+                let dotted = if i == 1 {
+                    first.to_string()
+                } else {
+                    let rest: Vec<&str> = segments[1..i].to_vec();
+                    format!("{}.{}", first, rest.join("."))
+                };
+                if self.env.user_modules.contains(&dotted) || stdlib::is_stdlib_module(&dotted) {
+                    // Track alias usage for unused import detection
+                    if first != segments[0] {
+                        self.env.used_modules.insert(segments[0].to_string());
+                    }
+                    return self.check_module_call(&dotted, func, &arg_tys);
+                }
+            }
+
+            // Single segment — direct module call
+            if segments.len() == 1 {
+                return self.check_module_call(segments[0], func, &arg_tys);
             }
         }
 

@@ -1,0 +1,4 @@
+import dmod_d
+
+fn from_c() -> String = "C says: " ++ dmod_d.shared()
+fn c_value() -> Int = dmod_d.value() + 1

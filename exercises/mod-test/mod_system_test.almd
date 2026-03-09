@@ -1,0 +1,207 @@
+// ============================================================
+// Module System v2 — Specification Tests
+// ============================================================
+// This file serves as the living specification for Almide's
+// module system. Each test group documents one aspect of the
+// module resolution, namespace, aliasing, or visibility model.
+//
+// Library packages used:
+//   mylib/        — mod.almd + parser.almd + formatter.almd + utils.almd
+//   deeplib/      — mod.almd + http/mod.almd + http/client.almd (3 levels)
+//   extlib/       — fn / mod fn / local fn  (visibility)
+//   dmod_b/       — imports dmod_d  (diamond)
+//   dmod_c/       — imports dmod_d  (diamond)
+//   dmod_d/       — shared leaf     (diamond)
+//   effectlib/    — effect fn       (side effects)
+//   nomod_lib/    — no mod.almd, only parser.almd
+// ============================================================
+
+import mylib
+import mylib as m
+import mylib.parser
+import mylib.formatter as fmt
+import deeplib
+import extlib
+import dmod_b
+import dmod_c
+import dmod_d
+import nomod_lib.parser as nomod_p
+
+// ------------------------------------------------------------
+// 1. Basic Import
+//    import pkg → loads pkg/src/mod.almd as the top-level module
+// ------------------------------------------------------------
+
+test "basic: top-level function call" {
+  assert_eq(mylib.hello(), "hello from mod.almd")
+}
+
+test "basic: top-level function with arguments" {
+  assert_eq(mylib.add(10, 20), 30)
+}
+
+// ------------------------------------------------------------
+// 2. Sub-namespaces (file = namespace)
+//    Sibling .almd files next to mod.almd become pkg.filename
+// ------------------------------------------------------------
+
+test "sub-ns: parser.almd becomes mylib.parser" {
+  assert_eq(mylib.parser.parse("input"), "parsed: input")
+}
+
+test "sub-ns: formatter.almd becomes mylib.formatter" {
+  assert_eq(mylib.formatter.format_upper("hello"), "HELLO")
+}
+
+test "sub-ns: utils.almd becomes mylib.utils" {
+  assert_eq(mylib.utils.describe("x"), "public: x")
+}
+
+// ------------------------------------------------------------
+// 3. Deep Nesting (recursive sub-namespaces)
+//    Subdirectories with mod.almd create deeper namespaces.
+//    deeplib/src/http/mod.almd   → deeplib.http
+//    deeplib/src/http/client.almd → deeplib.http.client
+// ------------------------------------------------------------
+
+test "deep: 1 level — deeplib.hello()" {
+  assert_eq(deeplib.hello(), "deeplib top")
+}
+
+test "deep: 2 levels — deeplib.http.info()" {
+  assert_eq(deeplib.http.info(), "http module")
+}
+
+test "deep: 3 levels — deeplib.http.client.get()" {
+  assert_eq(deeplib.http.client.get("https://example.com"), "GET https://example.com")
+}
+
+// ------------------------------------------------------------
+// 4. Direct Sub-module Import
+//    import pkg.sub → loads only that sub-module
+//    Accessible as the last segment name
+// ------------------------------------------------------------
+
+test "direct: import mylib.parser → parser.parse()" {
+  assert_eq(parser.parse("direct"), "parsed: direct")
+}
+
+// ------------------------------------------------------------
+// 5. Aliases
+//    import pkg as alias → alias.func() and alias.sub.func()
+//    import pkg.sub as alias → alias.func()
+// ------------------------------------------------------------
+
+test "alias: import mylib as m → m.hello()" {
+  assert_eq(m.hello(), "hello from mod.almd")
+}
+
+test "alias: m.add() with arguments" {
+  assert_eq(m.add(3, 4), 7)
+}
+
+test "alias: m.parser.parse() — sub-module via alias" {
+  assert_eq(m.parser.parse("aliased"), "parsed: aliased")
+}
+
+test "alias: import mylib.formatter as fmt → fmt.format_upper()" {
+  assert_eq(fmt.format_upper("world"), "WORLD")
+}
+
+test "alias: import nomod_lib.parser as nomod_p" {
+  assert_eq(nomod_p.parse("hello"), "no-mod parsed: hello")
+}
+
+// ------------------------------------------------------------
+// 6. Diamond Dependency
+//    main→B, main→C, B→D, C→D
+//    D is loaded exactly once (deduplication via loaded_names)
+// ------------------------------------------------------------
+
+test "diamond: B uses D transitively" {
+  assert_eq(dmod_b.from_b(), "B says: from D")
+}
+
+test "diamond: C uses D transitively" {
+  assert_eq(dmod_c.from_c(), "C says: from D")
+}
+
+test "diamond: C computes using D.value()" {
+  assert_eq(dmod_c.c_value(), 43)
+}
+
+test "diamond: D is directly accessible" {
+  assert_eq(dmod_d.shared(), "from D")
+  assert_eq(dmod_d.value(), 42)
+}
+
+// ------------------------------------------------------------
+// 7. Name Conflicts (same function name, different namespaces)
+//    mylib.add() and mylib.parser.parse() coexist without conflict
+// ------------------------------------------------------------
+
+test "name-conflict: top-level and sub-module share no collision" {
+  let top = mylib.add(1, 2)
+  let sub = mylib.parser.parse("x")
+  assert_eq(top, 3)
+  assert_eq(sub, "parsed: x")
+}
+
+// ------------------------------------------------------------
+// 8. Package Without mod.almd
+//    A package directory with only sub-module files (no mod.almd)
+//    can still be imported via direct sub-module import.
+// ------------------------------------------------------------
+
+test "no-mod: import nomod_lib.parser as p works" {
+  assert_eq(nomod_p.parse("data"), "no-mod parsed: data")
+}
+
+// ------------------------------------------------------------
+// 9. Sub-module With Own Imports
+//    Sub-modules can import stdlib and other packages.
+//    mylib/src/formatter.almd uses string.to_upper (stdlib)
+//    mylib/src/utils.almd imports extlib (user package)
+// ------------------------------------------------------------
+
+test "sub-import: formatter uses stdlib string.to_upper" {
+  assert_eq(mylib.formatter.format_upper("abc"), "ABC")
+}
+
+test "sub-import: utils imports extlib package" {
+  assert_eq(mylib.utils.describe("test"), "public: test")
+}
+
+// ------------------------------------------------------------
+// 10. Visibility
+//     fn       → public (accessible from any module)
+//     mod fn   → same-project only (not from external consumers)
+//     local fn → same-file only
+//     See vis_mod_error_test.almd and vis_local_error_test.almd
+//     for the error cases (they must fail to compile).
+// ------------------------------------------------------------
+
+test "visibility: public fn is accessible from external" {
+  assert_eq(extlib.pub_fn(), "public")
+}
+
+// ------------------------------------------------------------
+// 11. Multiple Aliases in Same File
+//     Multiple import-as statements coexist without conflict.
+// ------------------------------------------------------------
+
+test "multi-alias: m and fmt are independent aliases" {
+  assert_eq(m.hello(), "hello from mod.almd")
+  assert_eq(fmt.format_upper("test"), "TEST")
+}
+
+// ------------------------------------------------------------
+// 12. Duplicate Imports Are Deduplicated
+//     Importing the same module multiple times (via different
+//     import statements) only loads it once.
+// ------------------------------------------------------------
+
+test "dedup: mylib imported twice (direct + alias) works" {
+  assert_eq(mylib.add(5, 5), 10)
+  assert_eq(m.add(5, 5), 10)
+}

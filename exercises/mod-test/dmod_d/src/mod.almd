@@ -1,0 +1,2 @@
+fn shared() -> String = "from D"
+fn value() -> Int = 42

@@ -23,19 +23,68 @@ impl Emitter {
         }
     }
 
-    pub(crate) fn gen_call(&self, callee: &Expr, args: &[Expr]) -> String {
-        // Handle module calls
-        if let Expr::Member { object, field, .. } = callee {
-            if let Expr::Ident { name: module, .. } = object.as_ref() {
-                let resolved_mod = self.module_aliases.get(module.as_str())
-                    .cloned()
-                    .unwrap_or_else(|| module.to_string());
-                let is_user_module = self.user_modules.contains(&resolved_mod);
-                let is_stdlib = !is_user_module && stdlib::is_stdlib_module(module);
-                if is_user_module || is_stdlib {
-                    return self.gen_module_call(module, field, args);
+    /// Flatten nested Member expressions into (segments, func).
+    fn flatten_member_chain<'a>(expr: &'a Expr) -> Option<(Vec<&'a str>, &'a str)> {
+        if let Expr::Member { object, field, .. } = expr {
+            let mut segments = Vec::new();
+            let mut current = object.as_ref();
+            loop {
+                match current {
+                    Expr::Ident { name, .. } => {
+                        segments.push(name.as_str());
+                        break;
+                    }
+                    Expr::Member { object, field: seg, .. } => {
+                        segments.push(seg.as_str());
+                        current = object.as_ref();
+                    }
+                    _ => return None,
                 }
             }
+            segments.reverse();
+            Some((segments, field.as_str()))
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn gen_call(&self, callee: &Expr, args: &[Expr]) -> String {
+        // Handle module calls — any depth of nesting
+        if let Some((segments, func)) = Self::flatten_member_chain(callee) {
+            // Resolve alias on the first segment
+            let first = self.module_aliases.get(segments[0])
+                .map(|s| s.as_str())
+                .unwrap_or(segments[0]);
+
+            // Try progressively longer module paths
+            for i in (1..=segments.len()).rev() {
+                let dotted = if i == 1 {
+                    first.to_string()
+                } else {
+                    let rest: Vec<&str> = segments[1..i].to_vec();
+                    format!("{}.{}", first, rest.join("."))
+                };
+                let is_user = self.user_modules.contains(&dotted);
+                let is_stdlib = !is_user && stdlib::is_stdlib_module(&dotted);
+                if is_user || is_stdlib {
+                    return self.gen_module_call(&dotted, func, args);
+                }
+            }
+
+            // Single segment — direct module call
+            if segments.len() == 1 {
+                let resolved_mod = self.module_aliases.get(segments[0])
+                    .cloned()
+                    .unwrap_or_else(|| segments[0].to_string());
+                let is_user = self.user_modules.contains(&resolved_mod);
+                let is_stdlib = !is_user && stdlib::is_stdlib_module(segments[0]);
+                if is_user || is_stdlib {
+                    return self.gen_module_call(segments[0], func, args);
+                }
+            }
+        }
+
+        if let Expr::Member { object, field, .. } = callee {
             // UFCS: receiver.method(args) => module.method(receiver, args)
             if let Some(resolved) = Self::resolve_ufcs_module(field) {
                 let mut new_args = vec![object.as_ref().clone()];
@@ -130,7 +179,8 @@ impl Emitter {
             .cloned()
             .unwrap_or_else(|| module.to_string());
         if self.user_modules.contains(&resolved_mod) {
-            let call = format!("{}::{}({})", resolved_mod, func, args_str.join(", "));
+            let rust_mod = resolved_mod.replace('.', "_");
+            let call = format!("{}::{}({})", rust_mod, func, args_str.join(", "));
             if self.in_effect && (self.effect_fns.contains(&func.to_string()) || self.result_fns.contains(&func.to_string())) {
                 return format!("{}?", call);
             }
@@ -181,6 +231,10 @@ impl Emitter {
                 "is_alpha?" | "is_alpha_qm_" => format!("({}).chars().all(|c| c.is_ascii_alphabetic()) && !({}).is_empty()", args_str[0], args_str[0]),
                 "is_alphanumeric?" | "is_alphanumeric_qm_" => format!("({}).chars().all(|c| c.is_ascii_alphanumeric()) && !({}).is_empty()", args_str[0], args_str[0]),
                 "is_whitespace?" | "is_whitespace_qm_" => format!("({}).chars().all(|c| c.is_whitespace()) && !({}).is_empty()", args_str[0], args_str[0]),
+                "pad_right" => format!("{{ let __s = {}; let __n = {} as usize; if __s.len() >= __n {{ __s }} else {{ let __ch = {}.chars().next().unwrap_or(' '); format!(\"{{}}{{}}\", __s, std::iter::repeat(__ch).take(__n - __s.len()).collect::<String>()) }} }}", args_str[0], args_str[1], args_str[2]),
+                "trim_start" => format!("({}).trim_start().to_string()", args_str[0]),
+                "trim_end" => format!("({}).trim_end().to_string()", args_str[0]),
+                "count" => format!("(({}).matches(&*{}).count() as i64)", args_str[0], args_str[1]),
                 _ => { eprintln!("internal error: no Rust codegen for string.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "list" => {
@@ -246,6 +300,11 @@ impl Emitter {
                         format!("{{ let mut v = ({}).to_vec(); v.sort_by(|__a, __b| {{ let {n} = __a.clone(); let __ka = {{ {body} }}; let {n} = __b.clone(); let __kb = {{ {body} }}; __ka.partial_cmp(&__kb).unwrap_or(std::cmp::Ordering::Equal) }}); v }}", args_str[0], n = names[0], body = body)
                     }
                     "unique" => format!("{{ let mut seen = Vec::new(); let mut out = Vec::new(); for x in ({}).iter() {{ if !seen.contains(x) {{ seen.push(x.clone()); out.push(x.clone()); }} }} out }}", args_str[0]),
+                    "index_of" => format!("({}).iter().position(|__x| almide_eq!(__x, &{})).map(|i| i as i64)", args_str[0], args_str[1]),
+                    "last" => format!("({}).last().cloned()", args_str[0]),
+                    "chunk" => format!("({}).chunks({} as usize).map(|c| c.to_vec()).collect::<Vec<_>>()", args_str[0], args_str[1]),
+                    "sum" => format!("({}).iter().sum::<i64>()", args_str[0]),
+                    "product" => format!("({}).iter().product::<i64>()", args_str[0]),
                     _ => { eprintln!("internal error: no Rust codegen for list.{}() — this is a compiler bug", func); std::process::exit(70); },
                 }
             },
@@ -269,6 +328,11 @@ impl Emitter {
             "int" => match func {
                 "to_hex" => format!("format!(\"{{:x}}\", {} as u64)", args_str[0]),
                 "to_string" => format!("({}).to_string()", args_str[0]),
+                "parse" => format!("({}).trim().parse::<i64>().map_err(|e| e.to_string())", args_str[0]),
+                "parse_hex" => format!("i64::from_str_radix(({}).trim().trim_start_matches(\"0x\").trim_start_matches(\"0X\"), 16).map_err(|e| e.to_string())", args_str[0]),
+                "abs" => format!("({}).abs()", args_str[0]),
+                "min" => format!("std::cmp::min({}, {})", args_str[0], args_str[1]),
+                "max" => format!("std::cmp::max({}, {})", args_str[0], args_str[1]),
                 _ => { eprintln!("internal error: no Rust codegen for int.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "float" => match func {
@@ -397,7 +461,8 @@ impl Emitter {
                 let resolved = self.module_aliases.get(module)
                     .cloned()
                     .unwrap_or_else(|| module.to_string());
-                let call = format!("{}::{}({})", resolved, func, args_str.join(", "));
+                let rust_mod = resolved.replace('.', "_");
+                let call = format!("{}::{}({})", rust_mod, func, args_str.join(", "));
                 // Auto-propagate ? for user module effect/Result functions
                 if self.in_effect && (self.effect_fns.contains(&func.to_string()) || self.result_fns.contains(&func.to_string())) {
                     format!("{}?", call)

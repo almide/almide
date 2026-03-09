@@ -145,8 +145,8 @@ parser.parse(...)            // OK
 
 ### Implementation Steps
 
-- [ ] Resolver: support `import pkg` loading `mod.almd` + sub-namespace files
-- [ ] Resolver: support `import pkg.submodule` for direct sub-module access
+- [x] Resolver: support `import pkg` loading `mod.almd` + sub-namespace files
+- [x] Resolver: support `import pkg.submodule` for direct sub-module access
 - [ ] Checker: validate cross-package access respects `mod.almd` boundary
 - [x] CLI: `almide init` template — remove `module main` from generated code
 - [x] CLI: `almide fmt` without args — format all `src/**/*.almd` recursively
@@ -329,29 +329,29 @@ All 16 module fallbacks replaced with compile-time ICE (Internal Compiler Error)
 
 Fill gaps that make Almide less capable than Python/Go for everyday tasks.
 
-### int module
+### int module ✅
 
-- [ ] `int.parse(s)` → `Result[Int, String]` (parse decimal string)
-- [ ] `int.parse_hex(s)` → `Result[Int, String]`
-- [ ] `int.abs(n)` → `Int`
-- [ ] `int.min(a, b)` / `int.max(a, b)` (aliases for math.min/max)
+- [x] `int.parse(s)` → `Result[Int, String]` (parse decimal string)
+- [x] `int.parse_hex(s)` → `Result[Int, String]`
+- [x] `int.abs(n)` → `Int`
+- [x] `int.min(a, b)` / `int.max(a, b)`
 
-### string module
+### string module ✅
 
-- [ ] `string.pad_right(s, n, ch)` → `String`
-- [ ] `string.trim_start(s)` / `string.trim_end(s)` → `String`
-- [ ] `string.count(s, sub)` → `Int`
+- [x] `string.pad_right(s, n, ch)` → `String`
+- [x] `string.trim_start(s)` / `string.trim_end(s)` → `String`
+- [x] `string.count(s, sub)` → `Int`
 
-### list module
+### list module ✅
 
-- [ ] `list.index_of(xs, x)` → `Option[Int]`
-- [ ] `list.last(xs)` → `Option[T]`
-- [ ] `list.chunk(xs, n)` → `List[List[T]]`
-- [ ] `list.sum(xs)` / `list.product(xs)` → `Int`
+- [x] `list.index_of(xs, x)` → `Option[Int]`
+- [x] `list.last(xs)` → `Option[T]`
+- [x] `list.chunk(xs, n)` → `List[List[T]]`
+- [x] `list.sum(xs)` / `list.product(xs)` → `Int`
 
 ### CLI improvements
 
-- [ ] `almide --help`: detailed help with all options and examples
+- [x] `almide --help`: detailed help with all options and examples
 - [ ] `almide check`: show progress for multi-file projects
 - [ ] Exit codes: distinguish parse error (65), type error (66), codegen error (70)
 

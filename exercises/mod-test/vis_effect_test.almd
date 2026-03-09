@@ -1,0 +1,20 @@
+// ============================================================
+// Visibility + Effect — Specification Tests (effect context)
+// ============================================================
+// Effect functions from external packages are callable in effect context.
+// Pure functions are also accessible.
+// Note: uses effect fn main because test blocks cannot be effect.
+
+import effectlib
+
+effect fn main(_args: List[String]) -> Result[Unit, String] = {
+  // effect fn callable from effect context
+  let config = effectlib.read_config()
+  assert_eq(config, "config_value")
+
+  // pure fn also callable
+  assert_eq(effectlib.pure_fn(), "pure")
+
+  println("vis_effect: 2 assertions passed")
+  ok(())
+}

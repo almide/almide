@@ -78,12 +78,34 @@ fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::Em
     let resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
         .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
 
+    // Extract user-level import aliases (import pkg as alias, or implicit aliases for multi-segment imports)
+    let import_aliases: Vec<(String, String)> = program.imports.iter().filter_map(|imp| {
+        if let ast::Decl::Import { path, alias, .. } = imp {
+            if let Some(a) = alias {
+                // Explicit alias: import pkg as alias
+                Some((a.clone(), path.join(".")))
+            } else if path.len() > 1 && path.first().map(|s| s.as_str()) != Some("self") {
+                // Implicit alias: import pkg.sub → "sub" maps to "pkg.sub"
+                let last = path.last().unwrap().clone();
+                Some((last, path.join(".")))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }).collect();
+
     if !no_check {
         let source_text = std::fs::read_to_string(file).unwrap_or_default();
         let mut checker = check::Checker::new();
         checker.set_source(file, &source_text);
-        for (name, mod_prog, pkg_id) in &resolved.modules {
-            checker.register_module(name, mod_prog, pkg_id.as_ref());
+        for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
+            checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
+        }
+        // Register user-level import aliases
+        for (alias, target) in &import_aliases {
+            checker.register_alias(alias, target);
         }
         let diagnostics = checker.check_program(&mut program);
         let errors: Vec<_> = diagnostics.iter()
@@ -101,7 +123,7 @@ fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::Em
         }
     }
 
-    emit_rust::emit_with_options(&program, &resolved.modules, emit_options)
+    emit_rust::emit_with_options(&program, &resolved.modules, emit_options, &import_aliases)
 }
 
 fn collect_almd_files(dir: &std::path::Path, out: &mut Vec<String>) {

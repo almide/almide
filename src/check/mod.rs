@@ -136,8 +136,8 @@ impl Checker {
     }
 
     /// Register an imported module's exported functions and types.
-    pub fn register_module(&mut self, mod_name: &str, prog: &ast::Program, pkg_id: Option<&crate::project::PkgId>) {
-        let is_external = pkg_id.is_some();
+    pub fn register_module(&mut self, mod_name: &str, prog: &ast::Program, pkg_id: Option<&crate::project::PkgId>, is_self_import: bool) {
+        let is_external = !is_self_import;
         if let Some(pid) = pkg_id {
             let internal_name = pid.mod_name();
             self.env.user_modules.insert(internal_name.clone());
@@ -147,6 +147,11 @@ impl Checker {
             self.env.user_modules.insert(mod_name.to_string());
             self.register_decls(&prog.decls, Some(mod_name), is_external);
         }
+    }
+
+    /// Register a user-level import alias (import pkg as alias).
+    pub fn register_alias(&mut self, alias: &str, target: &str) {
+        self.env.module_aliases.insert(alias.to_string(), target.to_string());
     }
 
     pub fn check_program(&mut self, prog: &mut ast::Program) -> Vec<Diagnostic> {
@@ -162,7 +167,8 @@ impl Checker {
                 let is_self_import = path.first().map(|s| s.as_str()) == Some("self");
                 let accessible_name = if let Some(a) = alias {
                     a.as_str()
-                } else if is_self_import && path.len() >= 2 {
+                } else if (is_self_import && path.len() >= 2) || path.len() > 1 {
+                    // import self.xxx or import pkg.sub → accessible as last segment
                     path.last().map(|s| s.as_str()).unwrap_or(&path[0])
                 } else {
                     path[0].as_str()
