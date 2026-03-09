@@ -199,6 +199,7 @@ pub struct Lexer {
     col: usize,
     tokens: Vec<Token>,
     keywords: HashMap<&'static str, TokenType>,
+    paren_depth: usize, // depth of () and [] — newlines suppressed when > 0
 }
 
 fn strip_indent(s: &str) -> String {
@@ -240,6 +241,7 @@ impl Lexer {
             col: 1,
             tokens: Vec::new(),
             keywords: build_keyword_map(),
+            paren_depth: 0,
         };
         lexer.run();
         lexer.tokens
@@ -254,10 +256,15 @@ impl Lexer {
 
             let ch = self.chars[self.pos];
 
-            // Newline
+            // Newline — suppressed inside () and []
             if ch == '\n' {
-                self.add_newline();
-                self.advance();
+                if self.paren_depth == 0 {
+                    self.add_newline();
+                } else {
+                    self.line += 1;
+                    self.col = 1;
+                }
+                self.pos += 1;
                 continue;
             }
 
@@ -395,6 +402,16 @@ impl Lexer {
         }
         // Leading |> (pipe)
         if self.chars[i] == '|' && i + 1 < self.chars.len() && self.chars[i + 1] == '>' {
+            return true;
+        }
+        // Leading binary operator (continuation of expression)
+        if matches!(self.chars[i], '+' | '-' | '*' | '/' | '%' | '&') {
+            return true;
+        }
+        // Leading == != <= >= && ||
+        if (self.chars[i] == '=' || self.chars[i] == '!' || self.chars[i] == '<' || self.chars[i] == '>')
+            && i + 1 < self.chars.len() && self.chars[i + 1] == '='
+        {
             return true;
         }
         false
@@ -724,6 +741,11 @@ impl Lexer {
             _ => Option::None,
         };
         if let Some(tt) = one_char_type {
+            match tt {
+                TokenType::LParen | TokenType::LBracket => self.paren_depth += 1,
+                TokenType::RParen | TokenType::RBracket => { if self.paren_depth > 0 { self.paren_depth -= 1; } },
+                _ => {}
+            }
             self.tokens.push(Token {
                 token_type: tt,
                 value: c.to_string(),

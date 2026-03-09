@@ -1,0 +1,269 @@
+import math
+
+fn pi() -> Float = 3.141592653589793
+fn solar_mass() -> Float = 4.0 * pi() * pi()
+fn days_per_year() -> Float = 365.24
+
+fn main() -> Unit = {
+  let n = 50000000
+
+  // Sun
+  var s_x  = 0.0
+  var s_y  = 0.0
+  var s_z  = 0.0
+  var s_vx = 0.0
+  var s_vy = 0.0
+  var s_vz = 0.0
+  let s_m  = solar_mass()
+
+  // Jupiter
+  var j_x  = 4.84143144246472090
+  var j_y  = -1.16032004402742839
+  var j_z  = -0.103622044471123109
+  var j_vx = 0.00166007664274403694 * days_per_year()
+  var j_vy = 0.00769901118419740425 * days_per_year()
+  var j_vz = -0.0000690460016972063023 * days_per_year()
+  let j_m  = 0.000954791938424326609 * solar_mass()
+
+  // Saturn
+  var a_x  = 8.34336671824457987
+  var a_y  = 4.12479856412430479
+  var a_z  = -0.403523417114321381
+  var a_vx = -0.00276742510726862411 * days_per_year()
+  var a_vy = 0.00499852801234917238 * days_per_year()
+  var a_vz = 0.0000230417297573763929 * days_per_year()
+  let a_m  = 0.000285885980666130812 * solar_mass()
+
+  // Uranus
+  var u_x  = 12.8943695621391310
+  var u_y  = -15.1111514016986312
+  var u_z  = -0.223307578892655734
+  var u_vx = 0.00296460137564761618 * days_per_year()
+  var u_vy = 0.00237847173959480950 * days_per_year()
+  var u_vz = -0.0000296589568540237556 * days_per_year()
+  let u_m  = 0.0000436624404335156298 * solar_mass()
+
+  // Neptune
+  var n_x  = 15.3796971148509165
+  var n_y  = -25.9193146099879641
+  var n_z  = 0.179258772950371181
+  var n_vx = 0.00268067772490389322 * days_per_year()
+  var n_vy = 0.00162824170038242295 * days_per_year()
+  var n_vz = -0.0000951592254519715870 * days_per_year()
+  let n_m  = 0.0000515138902046611451 * solar_mass()
+
+  // Offset momentum (sun velocity = -sum(planet momentums) / solar_mass)
+  s_vx = 0.0 - (j_vx * j_m + a_vx * a_m + u_vx * u_m + n_vx * n_m) / s_m
+  s_vy = 0.0 - (j_vy * j_m + a_vy * a_m + u_vy * u_m + n_vy * n_m) / s_m
+  s_vz = 0.0 - (j_vz * j_m + a_vz * a_m + u_vz * u_m + n_vz * n_m) / s_m
+
+  // Energy before
+  let e0 = energy(s_x, s_y, s_z, s_vx, s_vy, s_vz, s_m, j_x, j_y, j_z, j_vx, j_vy, j_vz, j_m, a_x, a_y, a_z, a_vx, a_vy, a_vz, a_m, u_x, u_y, u_z, u_vx, u_vy, u_vz, u_m, n_x, n_y, n_z, n_vx, n_vy, n_vz, n_m)
+  println("${e0}")
+
+  // Advance
+  let dt = 0.01
+  for _step in 0..n {
+    // Sun-Jupiter
+    let dx_sj = s_x - j_x
+    let dy_sj = s_y - j_y
+    let dz_sj = s_z - j_z
+    let dsq_sj = dx_sj * dx_sj + dy_sj * dy_sj + dz_sj * dz_sj
+    let dist_sj = math.sqrt(dsq_sj)
+    let mag_sj = dt / (dsq_sj * dist_sj)
+    s_vx = s_vx - dx_sj * j_m * mag_sj
+    s_vy = s_vy - dy_sj * j_m * mag_sj
+    s_vz = s_vz - dz_sj * j_m * mag_sj
+    j_vx = j_vx + dx_sj * s_m * mag_sj
+    j_vy = j_vy + dy_sj * s_m * mag_sj
+    j_vz = j_vz + dz_sj * s_m * mag_sj
+
+    // Sun-Saturn
+    let dx_sa = s_x - a_x
+    let dy_sa = s_y - a_y
+    let dz_sa = s_z - a_z
+    let dsq_sa = dx_sa * dx_sa + dy_sa * dy_sa + dz_sa * dz_sa
+    let dist_sa = math.sqrt(dsq_sa)
+    let mag_sa = dt / (dsq_sa * dist_sa)
+    s_vx = s_vx - dx_sa * a_m * mag_sa
+    s_vy = s_vy - dy_sa * a_m * mag_sa
+    s_vz = s_vz - dz_sa * a_m * mag_sa
+    a_vx = a_vx + dx_sa * s_m * mag_sa
+    a_vy = a_vy + dy_sa * s_m * mag_sa
+    a_vz = a_vz + dz_sa * s_m * mag_sa
+
+    // Sun-Uranus
+    let dx_su = s_x - u_x
+    let dy_su = s_y - u_y
+    let dz_su = s_z - u_z
+    let dsq_su = dx_su * dx_su + dy_su * dy_su + dz_su * dz_su
+    let dist_su = math.sqrt(dsq_su)
+    let mag_su = dt / (dsq_su * dist_su)
+    s_vx = s_vx - dx_su * u_m * mag_su
+    s_vy = s_vy - dy_su * u_m * mag_su
+    s_vz = s_vz - dz_su * u_m * mag_su
+    u_vx = u_vx + dx_su * s_m * mag_su
+    u_vy = u_vy + dy_su * s_m * mag_su
+    u_vz = u_vz + dz_su * s_m * mag_su
+
+    // Sun-Neptune
+    let dx_sn = s_x - n_x
+    let dy_sn = s_y - n_y
+    let dz_sn = s_z - n_z
+    let dsq_sn = dx_sn * dx_sn + dy_sn * dy_sn + dz_sn * dz_sn
+    let dist_sn = math.sqrt(dsq_sn)
+    let mag_sn = dt / (dsq_sn * dist_sn)
+    s_vx = s_vx - dx_sn * n_m * mag_sn
+    s_vy = s_vy - dy_sn * n_m * mag_sn
+    s_vz = s_vz - dz_sn * n_m * mag_sn
+    n_vx = n_vx + dx_sn * s_m * mag_sn
+    n_vy = n_vy + dy_sn * s_m * mag_sn
+    n_vz = n_vz + dz_sn * s_m * mag_sn
+
+    // Jupiter-Saturn
+    let dx_ja = j_x - a_x
+    let dy_ja = j_y - a_y
+    let dz_ja = j_z - a_z
+    let dsq_ja = dx_ja * dx_ja + dy_ja * dy_ja + dz_ja * dz_ja
+    let dist_ja = math.sqrt(dsq_ja)
+    let mag_ja = dt / (dsq_ja * dist_ja)
+    j_vx = j_vx - dx_ja * a_m * mag_ja
+    j_vy = j_vy - dy_ja * a_m * mag_ja
+    j_vz = j_vz - dz_ja * a_m * mag_ja
+    a_vx = a_vx + dx_ja * j_m * mag_ja
+    a_vy = a_vy + dy_ja * j_m * mag_ja
+    a_vz = a_vz + dz_ja * j_m * mag_ja
+
+    // Jupiter-Uranus
+    let dx_ju = j_x - u_x
+    let dy_ju = j_y - u_y
+    let dz_ju = j_z - u_z
+    let dsq_ju = dx_ju * dx_ju + dy_ju * dy_ju + dz_ju * dz_ju
+    let dist_ju = math.sqrt(dsq_ju)
+    let mag_ju = dt / (dsq_ju * dist_ju)
+    j_vx = j_vx - dx_ju * u_m * mag_ju
+    j_vy = j_vy - dy_ju * u_m * mag_ju
+    j_vz = j_vz - dz_ju * u_m * mag_ju
+    u_vx = u_vx + dx_ju * j_m * mag_ju
+    u_vy = u_vy + dy_ju * j_m * mag_ju
+    u_vz = u_vz + dz_ju * j_m * mag_ju
+
+    // Jupiter-Neptune
+    let dx_jn = j_x - n_x
+    let dy_jn = j_y - n_y
+    let dz_jn = j_z - n_z
+    let dsq_jn = dx_jn * dx_jn + dy_jn * dy_jn + dz_jn * dz_jn
+    let dist_jn = math.sqrt(dsq_jn)
+    let mag_jn = dt / (dsq_jn * dist_jn)
+    j_vx = j_vx - dx_jn * n_m * mag_jn
+    j_vy = j_vy - dy_jn * n_m * mag_jn
+    j_vz = j_vz - dz_jn * n_m * mag_jn
+    n_vx = n_vx + dx_jn * j_m * mag_jn
+    n_vy = n_vy + dy_jn * j_m * mag_jn
+    n_vz = n_vz + dz_jn * j_m * mag_jn
+
+    // Saturn-Uranus
+    let dx_au = a_x - u_x
+    let dy_au = a_y - u_y
+    let dz_au = a_z - u_z
+    let dsq_au = dx_au * dx_au + dy_au * dy_au + dz_au * dz_au
+    let dist_au = math.sqrt(dsq_au)
+    let mag_au = dt / (dsq_au * dist_au)
+    a_vx = a_vx - dx_au * u_m * mag_au
+    a_vy = a_vy - dy_au * u_m * mag_au
+    a_vz = a_vz - dz_au * u_m * mag_au
+    u_vx = u_vx + dx_au * a_m * mag_au
+    u_vy = u_vy + dy_au * a_m * mag_au
+    u_vz = u_vz + dz_au * a_m * mag_au
+
+    // Saturn-Neptune
+    let dx_an = a_x - n_x
+    let dy_an = a_y - n_y
+    let dz_an = a_z - n_z
+    let dsq_an = dx_an * dx_an + dy_an * dy_an + dz_an * dz_an
+    let dist_an = math.sqrt(dsq_an)
+    let mag_an = dt / (dsq_an * dist_an)
+    a_vx = a_vx - dx_an * n_m * mag_an
+    a_vy = a_vy - dy_an * n_m * mag_an
+    a_vz = a_vz - dz_an * n_m * mag_an
+    n_vx = n_vx + dx_an * a_m * mag_an
+    n_vy = n_vy + dy_an * a_m * mag_an
+    n_vz = n_vz + dz_an * a_m * mag_an
+
+    // Uranus-Neptune
+    let dx_un = u_x - n_x
+    let dy_un = u_y - n_y
+    let dz_un = u_z - n_z
+    let dsq_un = dx_un * dx_un + dy_un * dy_un + dz_un * dz_un
+    let dist_un = math.sqrt(dsq_un)
+    let mag_un = dt / (dsq_un * dist_un)
+    u_vx = u_vx - dx_un * n_m * mag_un
+    u_vy = u_vy - dy_un * n_m * mag_un
+    u_vz = u_vz - dz_un * n_m * mag_un
+    n_vx = n_vx + dx_un * u_m * mag_un
+    n_vy = n_vy + dy_un * u_m * mag_un
+    n_vz = n_vz + dz_un * u_m * mag_un
+
+    // Update positions
+    s_x = s_x + dt * s_vx
+    s_y = s_y + dt * s_vy
+    s_z = s_z + dt * s_vz
+    j_x = j_x + dt * j_vx
+    j_y = j_y + dt * j_vy
+    j_z = j_z + dt * j_vz
+    a_x = a_x + dt * a_vx
+    a_y = a_y + dt * a_vy
+    a_z = a_z + dt * a_vz
+    u_x = u_x + dt * u_vx
+    u_y = u_y + dt * u_vy
+    u_z = u_z + dt * u_vz
+    n_x = n_x + dt * n_vx
+    n_y = n_y + dt * n_vy
+    n_z = n_z + dt * n_vz
+  }
+
+  // Energy after
+  let e1 = energy(s_x, s_y, s_z, s_vx, s_vy, s_vz, s_m, j_x, j_y, j_z, j_vx, j_vy, j_vz, j_m, a_x, a_y, a_z, a_vx, a_vy, a_vz, a_m, u_x, u_y, u_z, u_vx, u_vy, u_vz, u_m, n_x, n_y, n_z, n_vx, n_vy, n_vz, n_m)
+  println("${e1}")
+}
+
+fn energy(
+  s_x: Float, s_y: Float, s_z: Float, s_vx: Float, s_vy: Float, s_vz: Float, s_m: Float,
+  j_x: Float, j_y: Float, j_z: Float, j_vx: Float, j_vy: Float, j_vz: Float, j_m: Float,
+  a_x: Float, a_y: Float, a_z: Float, a_vx: Float, a_vy: Float, a_vz: Float, a_m: Float,
+  u_x: Float, u_y: Float, u_z: Float, u_vx: Float, u_vy: Float, u_vz: Float, u_m: Float,
+  n_x: Float, n_y: Float, n_z: Float, n_vx: Float, n_vy: Float, n_vz: Float, n_m: Float
+) -> Float = {
+  // Kinetic energy
+  let ke = 0.5 * s_m * (s_vx * s_vx + s_vy * s_vy + s_vz * s_vz)
+         + 0.5 * j_m * (j_vx * j_vx + j_vy * j_vy + j_vz * j_vz)
+         + 0.5 * a_m * (a_vx * a_vx + a_vy * a_vy + a_vz * a_vz)
+         + 0.5 * u_m * (u_vx * u_vx + u_vy * u_vy + u_vz * u_vz)
+         + 0.5 * n_m * (n_vx * n_vx + n_vy * n_vy + n_vz * n_vz)
+
+  // Potential energy (10 pairs)
+  let pe_sj = dist(s_x, s_y, s_z, j_x, j_y, j_z)
+  let pe_sa = dist(s_x, s_y, s_z, a_x, a_y, a_z)
+  let pe_su = dist(s_x, s_y, s_z, u_x, u_y, u_z)
+  let pe_sn = dist(s_x, s_y, s_z, n_x, n_y, n_z)
+  let pe_ja = dist(j_x, j_y, j_z, a_x, a_y, a_z)
+  let pe_ju = dist(j_x, j_y, j_z, u_x, u_y, u_z)
+  let pe_jn = dist(j_x, j_y, j_z, n_x, n_y, n_z)
+  let pe_au = dist(a_x, a_y, a_z, u_x, u_y, u_z)
+  let pe_an = dist(a_x, a_y, a_z, n_x, n_y, n_z)
+  let pe_un = dist(u_x, u_y, u_z, n_x, n_y, n_z)
+
+  let pe = s_m * j_m / pe_sj + s_m * a_m / pe_sa + s_m * u_m / pe_su + s_m * n_m / pe_sn
+         + j_m * a_m / pe_ja + j_m * u_m / pe_ju + j_m * n_m / pe_jn
+         + a_m * u_m / pe_au + a_m * n_m / pe_an
+         + u_m * n_m / pe_un
+
+  ke - pe
+}
+
+fn dist(x1: Float, y1: Float, z1: Float, x2: Float, y2: Float, z2: Float) -> Float = {
+  let dx = x1 - x2
+  let dy = y1 - y2
+  let dz = z1 - z2
+  math.sqrt(dx * dx + dy * dy + dz * dz)
+}
