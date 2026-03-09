@@ -53,9 +53,9 @@ impl TsEmitter {
         for (i, c) in name.chars().enumerate() {
             if i > 0 && c.is_uppercase() {
                 result.push(' ');
-                result.push(c.to_lowercase().next().unwrap());
+                result.push(c.to_lowercase().next().unwrap_or(c));
             } else if i == 0 {
-                result.push(c.to_uppercase().next().unwrap());
+                result.push(c.to_uppercase().next().unwrap_or(c));
             } else {
                 result.push(c);
             }

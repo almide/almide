@@ -285,7 +285,7 @@ impl Emitter {
             },
             "env" => match func {
                 "unix_timestamp" => {
-                    "(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64)".to_string()
+                    "(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64)".to_string()
                 }
                 "args" => "std::env::args().collect::<Vec<String>>()".to_string(),
                 "get" => format!("std::env::var(&*{}).ok()", args_str[0]),
@@ -361,10 +361,10 @@ impl Emitter {
                 _ => format!("/* math.{} */ todo!()", func),
             },
             "random" => match func {
-                "int" => format!("{{ let __range = ({1} - {0} + 1) as u64; let mut __buf = [0u8; 8]; std::fs::File::open(\"/dev/urandom\").and_then(|mut f| {{ use std::io::Read; f.read_exact(&mut __buf) }}).unwrap(); let __r = u64::from_le_bytes(__buf) % __range; ({0} + __r as i64) }}", args_str[0], args_str[1]),
-                "float" => "{ let mut __buf = [0u8; 8]; std::fs::File::open(\"/dev/urandom\").and_then(|mut f| { use std::io::Read; f.read_exact(&mut __buf) }).unwrap(); (u64::from_le_bytes(__buf) as f64) / (u64::MAX as f64) }".to_string(),
-                "choice" => format!("{{ let __xs = &{}; if __xs.is_empty() {{ None }} else {{ let mut __buf = [0u8; 8]; std::fs::File::open(\"/dev/urandom\").and_then(|mut f| {{ use std::io::Read; f.read_exact(&mut __buf) }}).unwrap(); Some(__xs[(u64::from_le_bytes(__buf) as usize) % __xs.len()].clone()) }} }}", args_str[0]),
-                "shuffle" => format!("{{ let mut __v = ({}).clone(); let __n = __v.len(); for __i in (1..__n).rev() {{ let mut __buf = [0u8; 8]; std::fs::File::open(\"/dev/urandom\").and_then(|mut f| {{ use std::io::Read; f.read_exact(&mut __buf) }}).unwrap(); let __j = (u64::from_le_bytes(__buf) as usize) % (__i + 1); __v.swap(__i, __j); }} __v }}", args_str[0]),
+                "int" => format!("{{ let __range = ({1} - {0} + 1) as u64; let mut __buf = [0u8; 8]; std::fs::File::open(\"/dev/urandom\").and_then(|mut f| {{ use std::io::Read; f.read_exact(&mut __buf) }}).map_err(|e| e.to_string())?; let __r = u64::from_le_bytes(__buf) % __range; ({0} + __r as i64) }}", args_str[0], args_str[1]),
+                "float" => "{ let mut __buf = [0u8; 8]; std::fs::File::open(\"/dev/urandom\").and_then(|mut f| { use std::io::Read; f.read_exact(&mut __buf) }).map_err(|e| e.to_string())?; (u64::from_le_bytes(__buf) as f64) / (u64::MAX as f64) }".to_string(),
+                "choice" => format!("{{ let __xs = &{}; if __xs.is_empty() {{ None }} else {{ let mut __buf = [0u8; 8]; std::fs::File::open(\"/dev/urandom\").and_then(|mut f| {{ use std::io::Read; f.read_exact(&mut __buf) }}).map_err(|e| e.to_string())?; Some(__xs[(u64::from_le_bytes(__buf) as usize) % __xs.len()].clone()) }} }}", args_str[0]),
+                "shuffle" => format!("{{ let mut __v = ({}).clone(); let __n = __v.len(); for __i in (1..__n).rev() {{ let mut __buf = [0u8; 8]; std::fs::File::open(\"/dev/urandom\").and_then(|mut f| {{ use std::io::Read; f.read_exact(&mut __buf) }}).map_err(|e| e.to_string())?; let __j = (u64::from_le_bytes(__buf) as usize) % (__i + 1); __v.swap(__i, __j); }} __v }}", args_str[0]),
                 _ => format!("/* random.{} */ todo!()", func),
             },
             "regex" => match func {
@@ -379,8 +379,8 @@ impl Emitter {
                 _ => format!("/* regex.{} */ todo!()", func),
             },
             "time" => match func {
-                "now" => "(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64)".to_string(),
-                "millis" => "(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64)".to_string(),
+                "now" => "(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64)".to_string(),
+                "millis" => "(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64)".to_string(),
                 "sleep" => format!("std::thread::sleep(std::time::Duration::from_millis({} as u64))", args_str[0]),
                 "year" => format!("almide_time_parts({}).0", args_str[0]),
                 "month" => format!("almide_time_parts({}).1", args_str[0]),

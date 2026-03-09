@@ -163,7 +163,7 @@ impl Checker {
                 let accessible_name = if let Some(a) = alias {
                     a.as_str()
                 } else if is_self_import && path.len() >= 2 {
-                    path.last().unwrap().as_str()
+                    path.last().map(|s| s.as_str()).unwrap_or(&path[0])
                 } else {
                     path[0].as_str()
                 };

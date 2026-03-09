@@ -11,10 +11,17 @@ impl Parser {
     pub(crate) fn current(&self) -> &Token {
         if self.pos < self.tokens.len() {
             &self.tokens[self.pos]
+        } else if let Some(last) = self.tokens.last() {
+            last
         } else {
-            self.tokens.last().unwrap_or_else(|| {
-                panic!("Parser: no tokens available")
-            })
+            // Static EOF token as fallback — lexer always adds EOF, so this is unreachable
+            static EOF_TOKEN: Token = Token {
+                token_type: TokenType::EOF,
+                value: String::new(),
+                line: 0,
+                col: 0,
+            };
+            &EOF_TOKEN
         }
     }
 

@@ -7,12 +7,18 @@ pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool) -> i32
     let rs_code = compile(file, no_check);
 
     let tmp_dir = std::env::temp_dir().join("almide-run");
-    std::fs::create_dir_all(&tmp_dir).unwrap();
+    if let Err(e) = std::fs::create_dir_all(&tmp_dir) {
+        eprintln!("Failed to create temp directory {}: {}", tmp_dir.display(), e);
+        std::process::exit(1);
+    }
 
     let rs_path = tmp_dir.join("main.rs");
     let bin_path = tmp_dir.join("main");
 
-    std::fs::write(&rs_path, &rs_code).unwrap();
+    if let Err(e) = std::fs::write(&rs_path, &rs_code) {
+        eprintln!("Failed to write {}: {}", rs_path.display(), e);
+        std::process::exit(1);
+    }
 
     // Detect test-only files (no main function)
     let is_test_only = !rs_code.contains("\nfn almide_main(") && !rs_code.contains("\nfn main(");
@@ -61,12 +67,24 @@ pub fn cmd_init() {
 
     let toml = format!("[package]\nname = \"{}\"\nversion = \"0.1.0\"\n", dir_name);
 
-    std::fs::write("almide.toml", toml).unwrap();
-    std::fs::create_dir_all("src").unwrap();
-    std::fs::create_dir_all("tests").unwrap();
+    if let Err(e) = std::fs::write("almide.toml", toml) {
+        eprintln!("Failed to write almide.toml: {}", e);
+        std::process::exit(1);
+    }
+    if let Err(e) = std::fs::create_dir_all("src") {
+        eprintln!("Failed to create src/: {}", e);
+        std::process::exit(1);
+    }
+    if let Err(e) = std::fs::create_dir_all("tests") {
+        eprintln!("Failed to create tests/: {}", e);
+        std::process::exit(1);
+    }
 
     if !std::path::Path::new("src/main.almd").exists() {
-        std::fs::write("src/main.almd", "module main\n\neffect fn main(args: List[String]) -> Result[Unit, String] = {\n  println(\"Hello, Almide!\")\n  ok(())\n}\n").unwrap();
+        if let Err(e) = std::fs::write("src/main.almd", "module main\n\neffect fn main(args: List[String]) -> Result[Unit, String] = {\n  println(\"Hello, Almide!\")\n  ok(())\n}\n") {
+            eprintln!("Failed to write src/main.almd: {}", e);
+            std::process::exit(1);
+        }
     }
 
     eprintln!("Initialized project in ./");
@@ -80,7 +98,7 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
         vec![file.to_string()]
     } else if std::path::Path::new("tests").is_dir() {
         let mut files: Vec<String> = std::fs::read_dir("tests")
-            .unwrap()
+            .unwrap_or_else(|e| { eprintln!("Failed to read tests/: {}", e); std::process::exit(1); })
             .filter_map(|e| e.ok())
             .map(|e| e.path().to_string_lossy().to_string())
             .filter(|f| f.ends_with(".almd"))
@@ -157,7 +175,10 @@ pub fn cmd_build(args: &[String], no_check: bool) {
     let rs_code = compile_with_options(&file, no_check, &emit_options);
 
     let tmp_rs = format!("{}.rs", output.strip_suffix(".wasm").unwrap_or(&output));
-    std::fs::write(&tmp_rs, &rs_code).unwrap();
+    if let Err(e) = std::fs::write(&tmp_rs, &rs_code) {
+        eprintln!("Failed to write {}: {}", tmp_rs, e);
+        std::process::exit(1);
+    }
 
     let mut rustc_cmd = Command::new(&find_rustc());
     rustc_cmd.arg(&tmp_rs)

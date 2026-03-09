@@ -53,7 +53,7 @@ pub fn resolve_imports_with_deps(
                     return Err("invalid self import: expected 'import self.module_name'".to_string());
                 }
                 let mod_path = &path[1..]; // skip "self"
-                let mod_name = alias.as_deref().unwrap_or(mod_path.last().unwrap());
+                let mod_name = alias.as_deref().unwrap_or_else(|| mod_path.last().expect("guarded by path.len() >= 2"));
                 let display_name = mod_path.join(".");
 
                 if loaded_names.contains(mod_name) {
@@ -116,7 +116,7 @@ fn load_self_module(
             if is_self {
                 if path.len() >= 2 {
                     let sub_mod_path = &path[1..];
-                    let sub_mod_name = alias.as_deref().unwrap_or(sub_mod_path.last().unwrap());
+                    let sub_mod_name = alias.as_deref().unwrap_or_else(|| sub_mod_path.last().expect("guarded by path.len() >= 2"));
                     load_self_module(sub_mod_name, sub_mod_path, src_dir, base_dir, dep_paths, loaded, loaded_names, loading)?;
                 }
             } else {

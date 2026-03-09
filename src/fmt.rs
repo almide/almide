@@ -436,7 +436,7 @@ fn format_expr(out: &mut String, expr: &Expr, depth: usize) {
         Expr::Block { stmts, expr, .. } => {
             if stmts.is_empty() && expr.is_some() {
                 // Single-expression block: might be inline
-                let inner = expr.as_ref().unwrap();
+                let inner = expr.as_ref().expect("guarded by is_some()");
                 if is_short_expr(inner) && depth > 0 {
                     out.push_str("{ ");
                     format_expr(out, inner, depth);

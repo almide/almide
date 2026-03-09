@@ -159,7 +159,7 @@ impl Emitter {
             }
             // Wrap the final expression in Ok() if we're in effect context
             let result = if self.in_effect && final_expr.is_some() {
-                let expr = final_expr.unwrap();
+                let expr = final_expr.expect("guarded by is_some()");
                 let inner = self.gen_expr(expr);
                 let mut lines = vec!["{".to_string()];
                 for stmt in stmts {
