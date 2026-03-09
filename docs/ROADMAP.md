@@ -207,6 +207,70 @@ io.read_all() -> String           // read all of stdin, effect fn
 
 ---
 
+## Compiler Hardening
+
+Eliminate all panics and unhandled edge cases. Other languages never crash on invalid input — Almide shouldn't either.
+
+### Panic elimination
+
+Replace `unwrap()`, `panic!()`, and silent failures with proper diagnostic errors.
+
+- [ ] Parser: `panic!("Parser: no tokens available")` → diagnostic error with file/line
+- [ ] Emitter: `.unwrap()` on character case conversion (emit_ts/mod.rs)
+- [ ] Emitter: `final_expr.unwrap()` in do-block codegen (emit_rust/blocks.rs)
+- [ ] Checker: `path.last().unwrap()` in import resolution (check/mod.rs)
+- [ ] CLI: `unwrap()` on file I/O in init/build commands (cli.rs)
+- [ ] Codegen: `/dev/urandom` direct read with `unwrap()` in random module — use `?` propagation
+- [ ] Codegen: `UNIX_EPOCH` duration `.unwrap()` in time module — use `unwrap_or(0)`
+
+### Codegen `todo!()` fallbacks
+
+Stdlib functions that pass the type checker but generate `todo!()` in Rust output, producing broken code at compile time.
+
+- [ ] Audit all `format!("/* {}.{} */ todo!()", ...)` patterns in emit_rust/calls.rs
+- [ ] Either implement the missing codegen, or reject at checker stage with a clear error
+- [ ] Add compile-time validation: every function in `stdlib::lookup_sig()` must have a corresponding emitter case
+
+### Error message improvements
+
+- [ ] Import resolution failures: include file path tried and hint for typos
+- [ ] Effect fn called outside effect context: suggest adding `effect` keyword
+- [ ] Interpolated string validation at checker stage (currently re-parsed at codegen)
+
+---
+
+## Stdlib Completeness
+
+Fill gaps that make Almide less capable than Python/Go for everyday tasks.
+
+### int module
+
+- [ ] `int.parse(s)` → `Result[Int, String]` (parse decimal string)
+- [ ] `int.parse_hex(s)` → `Result[Int, String]`
+- [ ] `int.abs(n)` → `Int`
+- [ ] `int.min(a, b)` / `int.max(a, b)` (aliases for math.min/max)
+
+### string module
+
+- [ ] `string.pad_right(s, n, ch)` → `String`
+- [ ] `string.trim_start(s)` / `string.trim_end(s)` → `String`
+- [ ] `string.count(s, sub)` → `Int`
+
+### list module
+
+- [ ] `list.index_of(xs, x)` → `Option[Int]`
+- [ ] `list.last(xs)` → `Option[T]`
+- [ ] `list.chunk(xs, n)` → `List[List[T]]`
+- [ ] `list.sum(xs)` / `list.product(xs)` → `Int`
+
+### CLI improvements
+
+- [ ] `almide --help`: detailed help with all options and examples
+- [ ] `almide check`: show progress for multi-file projects
+- [ ] Exit codes: distinguish parse error (65), type error (66), codegen error (70)
+
+---
+
 ## Other
 
 - [ ] Package registry (to be considered in the future)
