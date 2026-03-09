@@ -167,6 +167,13 @@ Almide compiles to Rust, then to native machine code. The generated binaries are
 - **Zero dependencies** — single binary, no package manager needed at runtime
 - **WASM-native** — compiles to `wasm32-wasip1` without GC or runtime shims
 
+## Editor Support
+
+Install syntax highlighting from [almide/almide-editors](https://github.com/almide/almide-editors):
+
+- **VS Code** — Download `.vsix` from [Releases](https://github.com/almide/almide-editors/releases), then `code --install-extension almide-lang-*.vsix`
+- **Chrome** — Highlights `.almd` files on GitHub and `` ```almd `` code blocks on any website. See [install instructions](https://github.com/almide/almide-editors#chrome-extension--almide-highlight)
+
 ## Documentation
 
 - [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — Compiler pipeline, module map, design decisions
