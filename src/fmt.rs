@@ -96,7 +96,7 @@ fn format_decl(out: &mut String, decl: &Decl, depth: usize) {
             format_type_expr(out, ty, depth);
             if let Some(derives) = deriving {
                 if !derives.is_empty() {
-                    out.push_str(&format!(" deriving ({})", derives.join(", ")));
+                    out.push_str(&format!(" deriving {}", derives.join(", ")));
                 }
             }
         }
@@ -189,7 +189,7 @@ fn format_type_expr(out: &mut String, ty: &TypeExpr, _depth: usize) {
         }
         TypeExpr::Variant { cases } => {
             for (i, case) in cases.iter().enumerate() {
-                if i > 0 { out.push_str(" | "); }
+                if i > 0 { out.push_str(" | "); } else { out.push_str("| "); }
                 match case {
                     VariantCase::Unit { name } => out.push_str(name),
                     VariantCase::Tuple { name, fields } => {
@@ -221,7 +221,14 @@ fn format_type_expr(out: &mut String, ty: &TypeExpr, _depth: usize) {
 fn format_expr(out: &mut String, expr: &Expr, depth: usize) {
     match expr {
         Expr::Int { raw, .. } => out.push_str(raw),
-        Expr::Float { value, .. } => out.push_str(&format!("{}", value)),
+        Expr::Float { value, .. } => {
+            let s = format!("{}", value);
+            if s.contains('.') {
+                out.push_str(&s);
+            } else {
+                out.push_str(&format!("{}.0", s));
+            }
+        }
         Expr::String { value, .. } => out.push_str(&format!("{:?}", value)),
         Expr::InterpolatedString { value, .. } => {
             out.push('"');
