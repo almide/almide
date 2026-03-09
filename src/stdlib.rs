@@ -275,6 +275,8 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         ("fs", "is_file?") => FnSig { params: vec![(s("path"), Ty::String)], ret: Ty::Bool, is_effect: true },
         ("fs", "copy") => FnSig { params: vec![(s("src"), Ty::String), (s("dst"), Ty::String)], ret: Ty::Result(Box::new(Ty::Unit), Box::new(io_err())), is_effect: true },
         ("fs", "rename") => FnSig { params: vec![(s("src"), Ty::String), (s("dst"), Ty::String)], ret: Ty::Result(Box::new(Ty::Unit), Box::new(io_err())), is_effect: true },
+        ("fs", "walk") => FnSig { params: vec![(s("dir"), Ty::String)], ret: Ty::Result(Box::new(Ty::List(Box::new(Ty::String))), Box::new(io_err())), is_effect: true },
+        ("fs", "stat") => FnSig { params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::Record { fields: vec![(s("size"), Ty::Int), (s("is_dir"), Ty::Bool), (s("is_file"), Ty::Bool), (s("modified"), Ty::Int)] }), Box::new(io_err())), is_effect: true },
 
         // ── math ──
         ("math", "min") => FnSig { params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },

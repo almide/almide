@@ -233,10 +233,11 @@ impl TsEmitter {
     pub(crate) fn gen_stmt(&self, stmt: &Stmt) -> String {
         match stmt {
             Stmt::Let { name, value, .. } => {
-                format!("const {} = {};", Self::sanitize(name), self.gen_expr(value))
+                // Use `var` to allow Almide's let-shadowing (const/let disallow re-declaration)
+                format!("var {} = {};", Self::sanitize(name), self.gen_expr(value))
             }
             Stmt::LetDestructure { fields, value, .. } => {
-                format!("const {{ {} }} = {};", fields.join(", "), self.gen_expr(value))
+                format!("var {{ {} }} = {};", fields.join(", "), self.gen_expr(value))
             }
             Stmt::Var { name, value, .. } => {
                 format!("let {} = {};", Self::sanitize(name), self.gen_expr(value))

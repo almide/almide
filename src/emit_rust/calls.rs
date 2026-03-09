@@ -203,6 +203,8 @@ impl Emitter {
                 "is_file?" | "is_file_hdlm_qm_" => format!("almide_rt_fs_is_file(&*{})", args_str[0]),
                 "copy" => format!("almide_rt_fs_copy(&*{}, &*{})?", args_str[0], args_str[1]),
                 "rename" => format!("almide_rt_fs_rename(&*{}, &*{})?", args_str[0], args_str[1]),
+                "walk" => format!("almide_rt_fs_walk(&*{})?", args_str[0]),
+                "stat" => format!("almide_rt_fs_stat(&*{})?", args_str[0]),
                 _ => { eprintln!("internal error: no Rust codegen for fs.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "string" => match func {
