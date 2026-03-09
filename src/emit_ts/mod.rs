@@ -9,6 +9,7 @@ use crate::ast::*;
 pub(crate) struct TsEmitter {
     pub(crate) out: String,
     pub(crate) js_mode: bool,
+    pub(crate) npm_mode: bool,
     pub(crate) user_modules: Vec<String>,
     /// Tracks which stdlib modules (`__almd_*`) are referenced during codegen.
     pub(crate) used_stdlib: RefCell<HashSet<String>>,
@@ -19,6 +20,7 @@ impl TsEmitter {
         Self {
             out: String::new(),
             js_mode: false,
+            npm_mode: false,
             user_modules: Vec::new(),
             used_stdlib: RefCell::new(HashSet::new()),
         }
@@ -85,4 +87,125 @@ pub fn emit_js_with_modules(program: &Program, modules: &[(String, Program)]) ->
     emitter.js_mode = true;
     emitter.emit_program(program, modules);
     emitter.out
+}
+
+/// Output from the npm package emitter.
+pub struct NpmOutput {
+    /// `index.js` — ESM user code with runtime imports and exports.
+    pub index_js: String,
+    /// `index.d.ts` — TypeScript type declarations for public functions.
+    pub index_dts: String,
+    /// Runtime files: `(relative_path, content)` pairs (e.g. `("_runtime/list.js", "...")`)
+    pub runtime_files: Vec<(String, String)>,
+    /// `package.json` content.
+    pub package_json: String,
+}
+
+/// Configuration for npm package generation.
+pub struct NpmConfig {
+    pub name: String,
+    pub version: String,
+}
+
+/// Emit an npm-publishable package from an Almide program.
+pub fn emit_npm_package(program: &Program, modules: &[(String, Program)], config: &NpmConfig) -> NpmOutput {
+    use crate::emit_ts_runtime;
+
+    let mut emitter = TsEmitter::new();
+    emitter.js_mode = true;
+    emitter.npm_mode = true;
+    emitter.emit_npm_program(program, modules);
+    let user_code = std::mem::take(&mut emitter.out);
+
+    let used = emitter.used_stdlib.borrow();
+
+    // Build import preamble
+    let mut imports = String::new();
+    // Helpers are always needed (operators, deep_eq, etc.)
+    imports.push_str("import { __bigop, __div, __deep_eq, __concat, println, eprintln, assert_eq, assert_ne, assert, unwrap_or, __assert_throws } from \"./_runtime/helpers.js\";\n");
+    let mut sorted_modules: Vec<&String> = used.iter().collect();
+    sorted_modules.sort();
+    for mod_name in &sorted_modules {
+        imports.push_str(&format!(
+            "import {{ __almd_{name} }} from \"./_runtime/{name}.js\";\n",
+            name = mod_name
+        ));
+    }
+    imports.push('\n');
+
+    let index_js = format!("{}{}", imports, user_code);
+
+    // Generate index.d.ts
+    let index_dts = emitter.generate_dts(program);
+
+    // Generate runtime files
+    let mut runtime_files = Vec::new();
+
+    // helpers.js
+    let helpers_src = emit_ts_runtime::get_helpers_source(true);
+    let helpers_esm = convert_helpers_to_esm(helpers_src);
+    runtime_files.push(("_runtime/helpers.js".to_string(), helpers_esm));
+
+    // Individual stdlib modules
+    for mod_name in &sorted_modules {
+        if let Some(src) = emit_ts_runtime::get_module_source(mod_name, true) {
+            let esm_src = convert_module_to_esm(mod_name, src);
+            runtime_files.push((format!("_runtime/{}.js", mod_name), esm_src));
+        }
+    }
+
+    // package.json
+    let package_json = format!(
+        r#"{{
+  "name": "{}",
+  "version": "{}",
+  "type": "module",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "exports": {{
+    ".": {{
+      "import": "./index.js",
+      "types": "./index.d.ts"
+    }}
+  }},
+  "engines": {{
+    "node": ">=22"
+  }}
+}}
+"#,
+        config.name, config.version
+    );
+
+    NpmOutput {
+        index_js,
+        index_dts,
+        runtime_files,
+        package_json,
+    }
+}
+
+/// Convert a `const __almd_X = { ... };` block to an ESM export.
+fn convert_module_to_esm(name: &str, src: &str) -> String {
+    // The source starts with `const __almd_X = {` — replace `const` with `export const`
+    let prefix = format!("const __almd_{}", name);
+    if let Some(rest) = src.strip_prefix(&prefix) {
+        format!("export const __almd_{}{}", name, rest)
+    } else {
+        format!("export {}", src)
+    }
+}
+
+/// Convert helper functions to ESM exports.
+fn convert_helpers_to_esm(src: &str) -> String {
+    let mut out = String::with_capacity(src.len() + 200);
+    for line in src.lines() {
+        if line.starts_with("function ") {
+            out.push_str("export ");
+            out.push_str(line);
+        } else {
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+    out
 }
