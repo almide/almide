@@ -110,6 +110,9 @@ impl Parser {
                 }
                 self.expect(TokenType::RParen)?;
                 (names[0].clone(), Some(names))
+            } else if self.check(TokenType::Underscore) {
+                self.advance();
+                ("_".to_string(), None)
             } else {
                 (self.expect_ident()?, None)
             };

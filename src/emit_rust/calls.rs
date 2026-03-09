@@ -244,6 +244,9 @@ impl Emitter {
                 "reverse" => format!("almide_rt_string_reverse(&*{})", args_str[0]),
                 "strip_prefix" => format!("almide_rt_string_strip_prefix(&*{}, &*{})", args_str[0], args_str[1]),
                 "strip_suffix" => format!("almide_rt_string_strip_suffix(&*{}, &*{})", args_str[0], args_str[1]),
+                "replace_first" => format!("almide_rt_string_replace_first(&*{}, &*{}, &*{})", args_str[0], args_str[1], args_str[2]),
+                "last_index_of" => format!("almide_rt_string_last_index_of(&*{}, &*{})", args_str[0], args_str[1]),
+                "to_float" => format!("almide_rt_string_to_float(&*{})?", args_str[0]),
                 _ => { eprintln!("internal error: no Rust codegen for string.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "list" => {
@@ -324,6 +327,34 @@ impl Emitter {
                     "min" => format!("almide_rt_list_min(&{})", args_str[0]),
                     "max" => format!("almide_rt_list_max(&{})", args_str[0]),
                     "join" => format!("almide_rt_list_join(&{}, &*{})", args_str[0], args_str[1]),
+                    "filter_map" => {
+                        let (names, body) = self.inline_lambda(&args[1], 1);
+                        format!("almide_rt_list_filter_map(({}).clone(), |{}| {{ {} }})", args_str[0], names[0], body)
+                    }
+                    "take_while" => {
+                        let (names, body) = self.inline_lambda(&args[1], 1);
+                        format!("almide_rt_list_take_while(({}).clone(), |{}| {{ let {} = {}.clone(); {} }})", args_str[0], names[0], names[0], names[0], body)
+                    }
+                    "drop_while" => {
+                        let (names, body) = self.inline_lambda(&args[1], 1);
+                        format!("almide_rt_list_drop_while(({}).clone(), |{}| {{ let {} = {}.clone(); {} }})", args_str[0], names[0], names[0], names[0], body)
+                    }
+                    "count" => {
+                        let (names, body) = self.inline_lambda(&args[1], 1);
+                        format!("almide_rt_list_count(&{}, |{}| {{ let {} = {}.clone(); {} }})", args_str[0], names[0], names[0], names[0], body)
+                    }
+                    "partition" => {
+                        let (names, body) = self.inline_lambda(&args[1], 1);
+                        format!("almide_rt_list_partition(({}).clone(), |{}| {{ let {} = {}.clone(); {} }})", args_str[0], names[0], names[0], names[0], body)
+                    }
+                    "reduce" => {
+                        let (names, body) = self.inline_lambda(&args[1], 2);
+                        format!("almide_rt_list_reduce(({}).clone(), |{}, {}| {{ {} }})", args_str[0], names[0], names[1], body)
+                    }
+                    "group_by" => {
+                        let (names, body) = self.inline_lambda(&args[1], 1);
+                        format!("almide_rt_list_group_by(({}).clone(), |{}| {{ {} }})", args_str[0], names[0], body)
+                    }
                     _ => { eprintln!("internal error: no Rust codegen for list.{}() — this is a compiler bug", func); std::process::exit(70); },
                 }
             },
@@ -344,6 +375,15 @@ impl Emitter {
                 }
                 "merge" => format!("almide_rt_map_merge(&{}, &{})", args_str[0], args_str[1]),
                 "is_empty?" | "is_empty_hdlm_qm_" => format!("almide_rt_map_is_empty(&{})", args_str[0]),
+                "map_values" => {
+                    let (names, body) = self.inline_lambda(&args[1], 1);
+                    format!("almide_rt_map_map_values(&{}, |{}| {{ let {} = {}.clone(); {} }})", args_str[0], names[0], names[0], names[0], body)
+                }
+                "filter" => {
+                    let (names, body) = self.inline_lambda(&args[1], 2);
+                    format!("almide_rt_map_filter(&{}, |{}, {}| {{ let {} = {}.clone(); let {} = {}.clone(); {} }})", args_str[0], names[0], names[1], names[0], names[0], names[1], names[1], body)
+                }
+                "from_entries" => format!("almide_rt_map_from_entries(({}).clone())", args_str[0]),
                 _ => { eprintln!("internal error: no Rust codegen for map.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "int" => match func {
@@ -368,6 +408,7 @@ impl Emitter {
                 "rotate_left" => format!("almide_rt_int_rotate_left({}, {}, {})", args_str[0], args_str[1], args_str[2]),
                 "to_u32" => format!("almide_rt_int_to_u32({})", args_str[0]),
                 "to_u8" => format!("almide_rt_int_to_u8({})", args_str[0]),
+                "clamp" => format!("almide_rt_int_clamp({}, {}, {})", args_str[0], args_str[1], args_str[2]),
                 _ => { eprintln!("internal error: no Rust codegen for int.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "float" => match func {
@@ -380,6 +421,9 @@ impl Emitter {
                 "sqrt" => format!("almide_rt_float_sqrt({})", args_str[0]),
                 "parse" => format!("almide_rt_float_parse(&*{})?", args_str[0]),
                 "from_int" => format!("almide_rt_float_from_int({})", args_str[0]),
+                "min" => format!("almide_rt_float_min({}, {})", args_str[0], args_str[1]),
+                "max" => format!("almide_rt_float_max({}, {})", args_str[0], args_str[1]),
+                "clamp" => format!("almide_rt_float_clamp({}, {}, {})", args_str[0], args_str[1], args_str[2]),
                 _ => { eprintln!("internal error: no Rust codegen for float.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "env" => match func {
@@ -422,6 +466,9 @@ impl Emitter {
                 "null" => "JNull".to_string(),
                 "array" => format!("JArray({})", args_str[0]),
                 "from_map" => format!("JObject({})", args_str[0]),
+                "get_float" => format!("almide_json_get_float(&{}, &{})", args_str[0], args_str[1]),
+                "from_float" => format!("almide_json_from_float({})", args_str[0]),
+                "stringify_pretty" => format!("almide_json_stringify_pretty(&{})", args_str[0]),
                 _ => { eprintln!("internal error: no Rust codegen for json.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "http" => match func {

@@ -238,7 +238,65 @@ p.parse("hello")                -- works
 
 ---
 
-## 10. Compiler Pipeline
+## 10. Foreign Function Interface (`@extern`)
+
+The `@extern` attribute allows functions to delegate to target-specific implementations.
+
+### Syntax
+
+```almide
+@extern(target, "module", "function")
+fn name(params) -> ReturnType
+```
+
+- `target`: `rs` (Rust) or `ts` (TypeScript)
+- `"module"`: the foreign module path (e.g., `"std::cmp"`, `"Math"`)
+- `"function"`: the foreign function name
+
+### Patterns
+
+```almide
+// Body-optional: @extern provides the implementation, body is fallback
+@extern(rs, "std::cmp", "min")
+fn my_min(a: Int, b: Int) -> Int = if a < b then a else b
+
+// Body-less: both targets must have @extern
+@extern(rs, "std::cmp", "max")
+@extern(ts, "Math", "max")
+fn my_max(a: Int, b: Int) -> Int
+```
+
+### Completeness Rules
+
+| Has body? | @extern(rs) | @extern(ts) | Result |
+|-----------|-------------|-------------|--------|
+| Yes | Optional | Optional | Body used as fallback for missing targets |
+| No | Required | Required | Compile error if either is missing |
+
+### Code Generation
+
+- **Rust**: `@extern(rs, "mod", "func")` emits `mod::func(args)`
+- **TypeScript**: `@extern(ts, "mod", "func")` emits `mod.func(args)`
+
+### Stdlib Runtime Architecture
+
+All stdlib modules use separated runtime files instead of inline codegen:
+
+| Runtime file | Modules |
+|---|---|
+| `platform_runtime.txt` | fs, env, process, io, random |
+| `core_runtime.txt` | string, int, float, math |
+| `collection_runtime.txt` | list, map |
+| `json_runtime.txt` | json |
+| `http_runtime.txt` | http |
+| `regex_runtime.txt` | regex |
+| `time_runtime.txt` | time |
+
+Rust runtime functions follow `almide_rt_<module>_<func>()` naming. TS runtime uses `__almd_<module>.<func>()` namespaced objects.
+
+---
+
+## 11. Compiler Pipeline
 
 ### Resolve Phase (`src/resolve.rs`)
 
@@ -255,15 +313,23 @@ p.parse("hello")                -- works
 2. Register import aliases (explicit `as` and implicit last-segment for multi-segment imports)
 3. On call: `flatten_member_chain` → alias resolution on first segment → progressive dotted path matching → type check
 
-### Emit Phase (`src/emit_rust/`)
+### Emit Phase (`src/emit_rust/`, `src/emit_ts/`)
 
+**Rust:**
 1. Register import aliases
 2. Each module emitted as `mod pkg_sub { ... }` (dots replaced with underscores)
 3. On call: same `flatten_member_chain` + alias resolution → `pkg_sub::func()` in generated Rust
+4. Stdlib calls dispatch to `almide_rt_*` runtime functions (defined in `*_runtime.txt` files)
+5. `@extern(rs, ...)` functions emit `module::function(args)` delegation
+
+**TypeScript:**
+1. Each module emitted as a namespace object via IIFE
+2. Stdlib calls dispatch to `__almd_<module>.<func>()` runtime objects (defined in `emit_ts_runtime.rs`)
+3. `@extern(ts, ...)` functions emit `module.function(args)` delegation
 
 ---
 
-## 11. File Resolution Order
+## 12. File Resolution Order
 
 When resolving `import pkg`, the compiler searches in order:
 
@@ -282,15 +348,16 @@ When resolving `import pkg.sub`, the compiler searches:
 
 ## Test Reference
 
-All behaviors above are verified by executable tests in `exercises/mod-test/`:
+All behaviors above are verified by executable tests:
 
 | File | Tests | Covers |
 |---|---|---|
-| `mod_system_test.almd` | 25 | Sections 1–6, 8–9 |
-| `vis_effect_test.almd` | 2 assertions | Section 8 |
-| `vis_mod_error_test.almd` | error check | Section 7 (`mod fn` rejected) |
-| `vis_local_error_test.almd` | error check | Section 7 (`local fn` rejected) |
-| `run_tests.sh` | runner | Executes all above |
+| `exercises/mod-test/mod_system_test.almd` | 25 | Sections 1–6, 8–9 |
+| `exercises/mod-test/vis_effect_test.almd` | 2 assertions | Section 8 |
+| `exercises/mod-test/vis_mod_error_test.almd` | error check | Section 7 (`mod fn` rejected) |
+| `exercises/mod-test/vis_local_error_test.almd` | error check | Section 7 (`local fn` rejected) |
+| `exercises/extern-test/extern_test.almd` | 6 assertions | Section 10 (`@extern` patterns) |
+| `exercises/mod-test/run_tests.sh` | runner | Executes mod tests |
 
 ### Test Packages
 

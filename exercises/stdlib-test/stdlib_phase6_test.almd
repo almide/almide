@@ -1,0 +1,99 @@
+test "string.replace_first" {
+  assert(string.replace_first("abab", "ab", "X") == "Xab", "replace_first")
+}
+
+test "string.last_index_of" {
+  let r = string.last_index_of("abcabc", "bc")
+  assert(r == some(4), "last_index_of")
+}
+
+test "string.to_float" {
+  let f = string.to_float("3.14")
+  assert(f > 3.0 and f < 4.0, "to_float ok")
+}
+
+test "list.filter_map" {
+  let xs = [1, 2, 3, 4, 5]
+  let evens = list.filter_map(xs, fn(x) => if x % 2 == 0 then some(x * 10) else none)
+  assert(evens == [20, 40], "filter_map")
+}
+
+test "list.take_while" {
+  let xs = [1, 2, 3, 4, 1]
+  let r = list.take_while(xs, fn(x) => x < 4)
+  assert(r == [1, 2, 3], "take_while")
+}
+
+test "list.drop_while" {
+  let xs = [1, 2, 3, 4, 1]
+  let r = list.drop_while(xs, fn(x) => x < 3)
+  assert(r == [3, 4, 1], "drop_while")
+}
+
+test "list.count" {
+  let xs = [1, 2, 3, 4, 5]
+  let n = list.count(xs, fn(x) => x > 3)
+  assert(n == 2, "count")
+}
+
+test "list.partition" {
+  let xs = [1, 2, 3, 4, 5]
+  let result = list.partition(xs, fn(x) => x % 2 == 0)
+  let yes = result.0
+  let no = result.1
+  assert(yes == [2, 4], "partition yes")
+  assert(no == [1, 3, 5], "partition no")
+}
+
+test "list.reduce" {
+  let xs = [1, 2, 3, 4]
+  let r = list.reduce(xs, fn(a, b) => a + b)
+  assert(r == some(10), "reduce")
+}
+
+test "list.group_by" {
+  let xs = [1, 2, 3, 4, 5, 6]
+  let groups = list.group_by(xs, fn(x) => x % 2)
+  let evens = map.get_or(groups, 0, [])
+  let odds = map.get_or(groups, 1, [])
+  assert(evens == [2, 4, 6], "group_by evens")
+  assert(odds == [1, 3, 5], "group_by odds")
+}
+
+test "map.map_values" {
+  let m = map.set(map.set(map.new(), "a", 1), "b", 2)
+  let doubled = map.map_values(m, fn(v) => v * 2)
+  assert(map.get_or(doubled, "a", 0) == 2, "map_values a")
+  assert(map.get_or(doubled, "b", 0) == 4, "map_values b")
+}
+
+test "map.filter" {
+  let m = map.set(map.set(map.set(map.new(), "a", 1), "b", 2), "c", 3)
+  let big = map.filter(m, fn(k, v) => v > 1)
+  assert(map.len(big) == 2, "map.filter len")
+  assert(map.contains(big, "b"), "map.filter has b")
+  assert(map.contains(big, "c"), "map.filter has c")
+}
+
+test "map.from_entries" {
+  let entries = [("x", 10), ("y", 20)]
+  let m = map.from_entries(entries)
+  assert(map.get_or(m, "x", 0) == 10, "from_entries x")
+  assert(map.get_or(m, "y", 0) == 20, "from_entries y")
+}
+
+test "int.clamp" {
+  assert(int.clamp(5, 1, 10) == 5, "clamp mid")
+  assert(int.clamp(-1, 1, 10) == 1, "clamp lo")
+  assert(int.clamp(99, 1, 10) == 10, "clamp hi")
+}
+
+test "float.min and float.max" {
+  assert(float.min(1.5, 2.5) == 1.5, "float.min")
+  assert(float.max(1.5, 2.5) == 2.5, "float.max")
+}
+
+test "float.clamp" {
+  assert(float.clamp(5.0, 1.0, 10.0) == 5.0, "float.clamp mid")
+  assert(float.clamp(0.5, 1.0, 10.0) == 1.0, "float.clamp lo")
+}

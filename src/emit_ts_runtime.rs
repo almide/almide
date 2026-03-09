@@ -39,6 +39,18 @@ const __almd_string = {
   is_alpha_hdlm_qm_(s: string): boolean { return s.length > 0 && /^[a-zA-Z]+$/.test(s); },
   is_alphanumeric_hdlm_qm_(s: string): boolean { return s.length > 0 && /^[a-zA-Z0-9]+$/.test(s); },
   is_whitespace_hdlm_qm_(s: string): boolean { return s.length > 0 && /^\s+$/.test(s); },
+  replace_first(s: string, from: string, to: string): string { const i = s.indexOf(from); return i < 0 ? s : s.slice(0, i) + to + s.slice(i + from.length); },
+  last_index_of(s: string, needle: string): number | null { const i = s.lastIndexOf(needle); return i >= 0 ? i : null; },
+  to_float(s: string): number { const n = parseFloat(s); if (isNaN(n)) throw new Error("invalid float number: " + s); return n; },
+  pad_right(s: string, n: number, ch: string): string { return s.padEnd(n, ch); },
+  trim_start(s: string): string { return s.trimStart(); },
+  trim_end(s: string): string { return s.trimEnd(); },
+  count(s: string, sub: string): number { if (!sub) return 0; let c = 0, i = 0; while ((i = s.indexOf(sub, i)) >= 0) { c++; i += sub.length; } return c; },
+  is_empty_hdlm_qm_(s: string): boolean { return s.length === 0; },
+  reverse(s: string): string { return [...s].reverse().join(""); },
+  strip_prefix(s: string, prefix: string): string | null { return s.startsWith(prefix) ? s.slice(prefix.length) : null; },
+  strip_suffix(s: string, suffix: string): string | null { return s.endsWith(suffix) ? s.slice(0, -suffix.length) : null; },
+  ends_with(s: string, suffix: string): boolean { return s.endsWith(suffix); },
 };
 const __almd_list = {
   len<T>(xs: T[]): number { return xs.length; },
@@ -63,9 +75,25 @@ const __almd_list = {
   unique<T>(xs: T[]): T[] { const seen: T[] = []; return xs.filter(x => { if (seen.includes(x)) return false; seen.push(x); return true; }); },
   index_of<T>(xs: T[], x: T): number | null { const i = xs.indexOf(x); return i >= 0 ? i : null; },
   chunk<T>(xs: T[], n: number): T[][] { const r: T[][] = []; for (let i = 0; i < xs.length; i += n) r.push(xs.slice(i, i + n)); return r; },
+  filter_map<T, U>(xs: T[], f: (x: T) => U | null): U[] { const r: U[] = []; for (const x of xs) { const v = f(x); if (v !== null) r.push(v); } return r; },
+  take_while<T>(xs: T[], f: (x: T) => boolean): T[] { const r: T[] = []; for (const x of xs) { if (!f(x)) break; r.push(x); } return r; },
+  drop_while<T>(xs: T[], f: (x: T) => boolean): T[] { let dropping = true; const r: T[] = []; for (const x of xs) { if (dropping && f(x)) continue; dropping = false; r.push(x); } return r; },
+  count<T>(xs: T[], f: (x: T) => boolean): number { return xs.filter(f).length; },
+  partition<T>(xs: T[], f: (x: T) => boolean): [T[], T[]] { const a: T[] = [], b: T[] = []; for (const x of xs) { if (f(x)) a.push(x); else b.push(x); } return [a, b]; },
+  reduce<T>(xs: T[], f: (a: T, b: T) => T): T | null { if (xs.length === 0) return null; return xs.reduce(f); },
+  group_by<T, K>(xs: T[], f: (x: T) => K): Map<K, T[]> { const m = new Map<K, T[]>(); for (const x of xs) { const k = f(x); if (!m.has(k)) m.set(k, []); m.get(k)!.push(x); } return m; },
+  last<T>(xs: T[]): T | null { return xs.length > 0 ? xs[xs.length - 1] : null; },
+  first<T>(xs: T[]): T | null { return xs.length > 0 ? xs[0] : null; },
+  sum(xs: number[]): number { return xs.reduce((a, b) => a + b, 0); },
+  product(xs: number[]): number { return xs.reduce((a, b) => a * b, 1); },
+  is_empty<T>(xs: T[]): boolean { return xs.length === 0; },
+  flat_map<T, U>(xs: T[], f: (x: T) => U[]): U[] { return xs.flatMap(f); },
+  min<T>(xs: T[]): T | null { return xs.length === 0 ? null : xs.reduce((a, b) => a < b ? a : b); },
+  max<T>(xs: T[]): T | null { return xs.length === 0 ? null : xs.reduce((a, b) => a > b ? a : b); },
+  join(xs: string[], sep: string): string { return xs.join(sep); },
 };
 const __almd_map = {
-  new_<K, V>(): Map<K, V> { return new Map(); },
+  new<K, V>(): Map<K, V> { return new Map(); },
   get<K, V>(m: Map<K, V>, k: K): V | null { return m.has(k) ? m.get(k)! : null; },
   get_or<K, V>(m: Map<K, V>, k: K, d: V): V { return m.has(k) ? m.get(k)! : d; },
   set<K, V>(m: Map<K, V>, k: K, v: V): Map<K, V> { const r = new Map(m); r.set(k, v); return r; },
@@ -76,6 +104,11 @@ const __almd_map = {
   len<K, V>(m: Map<K, V>): number { return m.size; },
   entries<K, V>(m: Map<K, V>): [K, V][] { return [...m.entries()]; },
   from_list<T, K, V>(xs: T[], f: (x: T) => [K, V]): Map<K, V> { const r = new Map<K, V>(); for (const x of xs) { const [k, v] = f(x); r.set(k, v); } return r; },
+  map_values<K, V, V2>(m: Map<K, V>, f: (v: V) => V2): Map<K, V2> { const r = new Map<K, V2>(); m.forEach((v, k) => r.set(k, f(v))); return r; },
+  filter<K, V>(m: Map<K, V>, f: (k: K, v: V) => boolean): Map<K, V> { const r = new Map<K, V>(); m.forEach((v, k) => { if (f(k, v)) r.set(k, v); }); return r; },
+  from_entries<K, V>(entries: [K, V][]): Map<K, V> { const r = new Map<K, V>(); for (const [k, v] of entries) r.set(k, v); return r; },
+  merge<K, V>(a: Map<K, V>, b: Map<K, V>): Map<K, V> { const r = new Map(a); b.forEach((v, k) => r.set(k, v)); return r; },
+  is_empty<K, V>(m: Map<K, V>): boolean { return m.size === 0; },
 };
 const __almd_int = {
   to_hex(n: bigint): string { return (n >= 0n ? n : n + (1n << 64n)).toString(16); },
@@ -92,6 +125,7 @@ const __almd_int = {
   rotate_left(a: number, n: number, bits: number): number { const mask = bits === 32 ? 0xFFFFFFFF : (1 << bits) - 1; const v = a & mask; n = n % bits; return ((v << n) | (v >>> (bits - n))) & mask; },
   to_u32(a: number): number { return a >>> 0; },
   to_u8(a: number): number { return a & 0xFF; },
+  clamp(n: number, lo: number, hi: number): number { return Math.max(lo, Math.min(hi, n)); },
 };
 const __almd_float = {
   to_string(n: number): string { return String(n); },
@@ -103,6 +137,9 @@ const __almd_float = {
   sqrt(n: number): number { return Math.sqrt(n); },
   parse(s: string): number { const n = parseFloat(s); if (isNaN(n)) throw new Error("invalid float: " + s); return n; },
   from_int(n: number): number { return n; },
+  min(a: number, b: number): number { return Math.min(a, b); },
+  max(a: number, b: number): number { return Math.max(a, b); },
+  clamp(n: number, lo: number, hi: number): number { return Math.max(lo, Math.min(hi, n)); },
 };
 const __almd_path = {
   join(base: string, child: string): string { return base.replace(/\/+$/, "") + "/" + child; },
@@ -128,6 +165,9 @@ const __almd_json = {
   null_(): any { return null; },
   array(items: any[]): any { return items; },
   from_map(m: any): any { if (m instanceof Map) { const o: any = {}; m.forEach((v: any, k: string) => { o[k] = v; }); return o; } return m; },
+  get_float(j: any, key: string): number | null { const v = __almd_json.get(j, key); return typeof v === "number" ? v : null; },
+  from_float(n: number): any { return n; },
+  stringify_pretty(j: any): string { return JSON.stringify(j, null, 2); },
 };
 const __almd_env = {
   unix_timestamp(): number { return Math.floor(Date.now() / 1000); },
@@ -298,6 +338,18 @@ const __almd_string = {
   is_alpha_hdlm_qm_(s) { return s.length > 0 && /^[a-zA-Z]+$/.test(s); },
   is_alphanumeric_hdlm_qm_(s) { return s.length > 0 && /^[a-zA-Z0-9]+$/.test(s); },
   is_whitespace_hdlm_qm_(s) { return s.length > 0 && /^\s+$/.test(s); },
+  replace_first(s, from, to) { const i = s.indexOf(from); return i < 0 ? s : s.slice(0, i) + to + s.slice(i + from.length); },
+  last_index_of(s, needle) { const i = s.lastIndexOf(needle); return i >= 0 ? i : null; },
+  to_float(s) { const n = parseFloat(s); if (isNaN(n)) throw new Error("invalid float number: " + s); return n; },
+  pad_right(s, n, ch) { return s.padEnd(n, ch); },
+  trim_start(s) { return s.trimStart(); },
+  trim_end(s) { return s.trimEnd(); },
+  count(s, sub) { if (!sub) return 0; let c = 0, i = 0; while ((i = s.indexOf(sub, i)) >= 0) { c++; i += sub.length; } return c; },
+  is_empty_hdlm_qm_(s) { return s.length === 0; },
+  reverse(s) { return [...s].reverse().join(""); },
+  strip_prefix(s, prefix) { return s.startsWith(prefix) ? s.slice(prefix.length) : null; },
+  strip_suffix(s, suffix) { return s.endsWith(suffix) ? s.slice(0, -suffix.length) : null; },
+  ends_with(s, suffix) { return s.endsWith(suffix); },
 };
 const __almd_list = {
   len(xs) { return xs.length; },
@@ -322,9 +374,25 @@ const __almd_list = {
   unique(xs) { const seen = []; return xs.filter(x => { if (seen.includes(x)) return false; seen.push(x); return true; }); },
   index_of(xs, x) { const i = xs.indexOf(x); return i >= 0 ? i : null; },
   chunk(xs, n) { const r = []; for (let i = 0; i < xs.length; i += n) r.push(xs.slice(i, i + n)); return r; },
+  filter_map(xs, f) { const r = []; for (const x of xs) { const v = f(x); if (v !== null) r.push(v); } return r; },
+  take_while(xs, f) { const r = []; for (const x of xs) { if (!f(x)) break; r.push(x); } return r; },
+  drop_while(xs, f) { let dropping = true; const r = []; for (const x of xs) { if (dropping && f(x)) continue; dropping = false; r.push(x); } return r; },
+  count(xs, f) { return xs.filter(f).length; },
+  partition(xs, f) { const a = [], b = []; for (const x of xs) { if (f(x)) a.push(x); else b.push(x); } return [a, b]; },
+  reduce(xs, f) { if (xs.length === 0) return null; return xs.reduce(f); },
+  group_by(xs, f) { const m = new Map(); for (const x of xs) { const k = f(x); if (!m.has(k)) m.set(k, []); m.get(k).push(x); } return m; },
+  last(xs) { return xs.length > 0 ? xs[xs.length - 1] : null; },
+  first(xs) { return xs.length > 0 ? xs[0] : null; },
+  sum(xs) { return xs.reduce((a, b) => a + b, 0); },
+  product(xs) { return xs.reduce((a, b) => a * b, 1); },
+  is_empty(xs) { return xs.length === 0; },
+  flat_map(xs, f) { return xs.flatMap(f); },
+  min(xs) { return xs.length === 0 ? null : xs.reduce((a, b) => a < b ? a : b); },
+  max(xs) { return xs.length === 0 ? null : xs.reduce((a, b) => a > b ? a : b); },
+  join(xs, sep) { return xs.join(sep); },
 };
 const __almd_map = {
-  new_() { return new Map(); },
+  new() { return new Map(); },
   get(m, k) { return m.has(k) ? m.get(k) : null; },
   get_or(m, k, d) { return m.has(k) ? m.get(k) : d; },
   set(m, k, v) { const r = new Map(m); r.set(k, v); return r; },
@@ -335,6 +403,11 @@ const __almd_map = {
   len(m) { return m.size; },
   entries(m) { return [...m.entries()]; },
   from_list(xs, f) { const r = new Map(); for (const x of xs) { const [k, v] = f(x); r.set(k, v); } return r; },
+  map_values(m, f) { const r = new Map(); m.forEach((v, k) => r.set(k, f(v))); return r; },
+  filter(m, f) { const r = new Map(); m.forEach((v, k) => { if (f(k, v)) r.set(k, v); }); return r; },
+  from_entries(entries) { const r = new Map(); for (const [k, v] of entries) r.set(k, v); return r; },
+  merge(a, b) { const r = new Map(a); b.forEach((v, k) => r.set(k, v)); return r; },
+  is_empty(m) { return m.size === 0; },
 };
 const __almd_int = {
   to_hex(n) { return (typeof n === "bigint" ? (n >= 0n ? n : n + (1n << 64n)).toString(16) : n.toString(16)); },
@@ -351,6 +424,7 @@ const __almd_int = {
   rotate_left(a, n, bits) { const mask = bits === 32 ? 0xFFFFFFFF : (1 << bits) - 1; const v = a & mask; n = n % bits; return ((v << n) | (v >>> (bits - n))) & mask; },
   to_u32(a) { return a >>> 0; },
   to_u8(a) { return a & 0xFF; },
+  clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); },
 };
 const __almd_float = {
   to_string(n) { return String(n); },
@@ -362,6 +436,9 @@ const __almd_float = {
   sqrt(n) { return Math.sqrt(n); },
   parse(s) { const n = parseFloat(s); if (isNaN(n)) throw new Error("invalid float: " + s); return n; },
   from_int(n) { return n; },
+  min(a, b) { return Math.min(a, b); },
+  max(a, b) { return Math.max(a, b); },
+  clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); },
 };
 const __almd_path = {
   join(base, child) { return base.replace(/\/+$/, "") + "/" + child; },
@@ -387,6 +464,9 @@ const __almd_json = {
   null_() { return null; },
   array(items) { return items; },
   from_map(m) { if (m instanceof Map) { const o = {}; m.forEach((v, k) => { o[k] = v; }); return o; } return m; },
+  get_float(j, key) { const v = __almd_json.get(j, key); return typeof v === "number" ? v : null; },
+  from_float(n) { return n; },
+  stringify_pretty(j) { return JSON.stringify(j, null, 2); },
 };
 const __almd_env = {
   unix_timestamp() { return Math.floor(Date.now() / 1000); },

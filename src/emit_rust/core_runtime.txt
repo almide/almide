@@ -144,6 +144,18 @@ fn almide_rt_string_strip_suffix(s: &str, suffix: &str) -> Option<String> {
     s.strip_suffix(suffix).map(|s| s.to_string())
 }
 
+fn almide_rt_string_replace_first(s: &str, from: &str, to: &str) -> String {
+    s.replacen(from, to, 1)
+}
+
+fn almide_rt_string_last_index_of(s: &str, needle: &str) -> Option<i64> {
+    s.rfind(needle).map(|i| i as i64)
+}
+
+fn almide_rt_string_to_float(s: &str) -> Result<f64, String> {
+    s.parse::<f64>().map_err(|e| e.to_string())
+}
+
 // ---- int ----
 
 fn almide_rt_int_to_hex(n: i64) -> String {
@@ -230,6 +242,10 @@ fn almide_rt_int_to_u8(n: i64) -> i64 {
     ((n as u64) & 0xFF) as i64
 }
 
+fn almide_rt_int_clamp(n: i64, lo: i64, hi: i64) -> i64 {
+    n.max(lo).min(hi)
+}
+
 // ---- float ----
 
 fn almide_rt_float_to_string(n: f64) -> String {
@@ -266,6 +282,18 @@ fn almide_rt_float_parse(s: &str) -> Result<f64, String> {
 
 fn almide_rt_float_from_int(n: i64) -> f64 {
     n as f64
+}
+
+fn almide_rt_float_min(a: f64, b: f64) -> f64 {
+    a.min(b)
+}
+
+fn almide_rt_float_max(a: f64, b: f64) -> f64 {
+    a.max(b)
+}
+
+fn almide_rt_float_clamp(n: f64, lo: f64, hi: f64) -> f64 {
+    n.max(lo).min(hi)
 }
 
 // ---- math ----

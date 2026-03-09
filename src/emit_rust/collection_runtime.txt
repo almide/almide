@@ -159,6 +159,46 @@ fn almide_rt_list_flat_map_effect<T, U>(list: Vec<T>, f: impl Fn(T) -> Result<Ve
     Ok(nested.into_iter().flatten().collect())
 }
 
+fn almide_rt_list_filter_map<T, U>(list: Vec<T>, f: impl Fn(T) -> Option<U>) -> Vec<U> {
+    list.into_iter().filter_map(f).collect()
+}
+
+fn almide_rt_list_take_while<T: Clone>(list: Vec<T>, f: impl Fn(&T) -> bool) -> Vec<T> {
+    list.into_iter().take_while(|x| f(x)).collect()
+}
+
+fn almide_rt_list_drop_while<T: Clone>(list: Vec<T>, f: impl Fn(&T) -> bool) -> Vec<T> {
+    list.into_iter().skip_while(|x| f(x)).collect()
+}
+
+fn almide_rt_list_count<T: Clone>(list: &[T], f: impl Fn(&T) -> bool) -> i64 {
+    list.iter().filter(|x| f(x)).count() as i64
+}
+
+fn almide_rt_list_partition<T: Clone>(list: Vec<T>, f: impl Fn(&T) -> bool) -> (Vec<T>, Vec<T>) {
+    let mut yes = Vec::new();
+    let mut no = Vec::new();
+    for x in list {
+        if f(&x) { yes.push(x); } else { no.push(x); }
+    }
+    (yes, no)
+}
+
+fn almide_rt_list_reduce<T: Clone>(list: Vec<T>, f: impl Fn(T, T) -> T) -> Option<T> {
+    let mut iter = list.into_iter();
+    let first = iter.next()?;
+    Some(iter.fold(first, f))
+}
+
+fn almide_rt_list_group_by<T: Clone, K: std::hash::Hash + Eq + Clone>(list: Vec<T>, f: impl Fn(T) -> K) -> HashMap<K, Vec<T>> {
+    let mut map: HashMap<K, Vec<T>> = HashMap::new();
+    for x in list {
+        let key = f(x.clone());
+        map.entry(key).or_insert_with(Vec::new).push(x);
+    }
+    map
+}
+
 // ---- map (lambda-based) ----
 
 fn almide_rt_map_from_list<T, K: std::hash::Hash + Eq, V>(list: Vec<T>, f: impl Fn(T) -> (K, V)) -> HashMap<K, V> {
@@ -221,4 +261,16 @@ fn almide_rt_map_merge<K: std::hash::Hash + Eq + Clone, V: Clone>(base: &HashMap
 
 fn almide_rt_map_is_empty<K, V>(map: &HashMap<K, V>) -> bool {
     map.is_empty()
+}
+
+fn almide_rt_map_map_values<K: std::hash::Hash + Eq + Clone, V, V2>(map: &HashMap<K, V>, f: impl Fn(&V) -> V2) -> HashMap<K, V2> {
+    map.iter().map(|(k, v)| (k.clone(), f(v))).collect()
+}
+
+fn almide_rt_map_filter<K: std::hash::Hash + Eq + Clone, V: Clone>(map: &HashMap<K, V>, f: impl Fn(&K, &V) -> bool) -> HashMap<K, V> {
+    map.iter().filter(|(k, v)| f(k, v)).map(|(k, v)| (k.clone(), v.clone())).collect()
+}
+
+fn almide_rt_map_from_entries<K: std::hash::Hash + Eq + Clone, V: Clone>(entries: Vec<(K, V)>) -> HashMap<K, V> {
+    entries.into_iter().collect()
 }
