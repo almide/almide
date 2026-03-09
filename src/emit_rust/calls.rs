@@ -393,6 +393,8 @@ impl Emitter {
                 "get" => format!("std::env::var(&*{}).ok()", args_str[0]),
                 "set" => format!("std::env::set_var(&*{}, &*{})", args_str[0], args_str[1]),
                 "cwd" => "std::env::current_dir().map(|p| p.to_string_lossy().to_string()).map_err(|e| e.to_string())?".to_string(),
+                "millis" => "(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64)".to_string(),
+                "sleep_ms" => format!("std::thread::sleep(std::time::Duration::from_millis({} as u64))", args_str[0]),
                 _ => { eprintln!("internal error: no Rust codegen for env.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "process" => match func {
@@ -426,14 +428,6 @@ impl Emitter {
                 "array" => format!("JArray({})", args_str[0]),
                 "from_map" => format!("JObject({})", args_str[0]),
                 _ => { eprintln!("internal error: no Rust codegen for json.{}() — this is a compiler bug", func); std::process::exit(70); },
-            },
-            "path" => match func {
-                "join" => format!("{{ let p = std::path::Path::new(&*{}).join(&*{}); p.to_string_lossy().to_string() }}", args_str[0], args_str[1]),
-                "dirname" => format!("std::path::Path::new(&*{}).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default()", args_str[0]),
-                "basename" => format!("std::path::Path::new(&*{}).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default()", args_str[0]),
-                "extension" => format!("std::path::Path::new(&*{}).extension().map(|e| e.to_string_lossy().to_string())", args_str[0]),
-                "is_absolute?" | "is_absolute_qm_" => format!("std::path::Path::new(&*{}).is_absolute()", args_str[0]),
-                _ => { eprintln!("internal error: no Rust codegen for path.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "http" => match func {
                 "serve" => {
@@ -480,21 +474,6 @@ impl Emitter {
                 "split" => format!("almide_regex_split(&{}, &{})", args_str[0], args_str[1]),
                 "captures" => format!("almide_regex_captures(&{}, &{})", args_str[0], args_str[1]),
                 _ => { eprintln!("internal error: no Rust codegen for regex.{}() — this is a compiler bug", func); std::process::exit(70); },
-            },
-            "time" => match func {
-                "now" => "(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64)".to_string(),
-                "millis" => "(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64)".to_string(),
-                "sleep" => format!("std::thread::sleep(std::time::Duration::from_millis({} as u64))", args_str[0]),
-                "year" => format!("almide_time_parts({}).0", args_str[0]),
-                "month" => format!("almide_time_parts({}).1", args_str[0]),
-                "day" => format!("almide_time_parts({}).2", args_str[0]),
-                "hour" => format!("almide_time_parts({}).3", args_str[0]),
-                "minute" => format!("almide_time_parts({}).4", args_str[0]),
-                "second" => format!("almide_time_parts({}).5", args_str[0]),
-                "weekday" => format!("almide_time_weekday({})", args_str[0]),
-                "to_iso" => format!("almide_time_to_iso({})", args_str[0]),
-                "from_parts" => format!("almide_time_from_parts({}, {}, {}, {}, {}, {})", args_str[0], args_str[1], args_str[2], args_str[3], args_str[4], args_str[5]),
-                _ => { eprintln!("internal error: no Rust codegen for time.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             _ => {
                 let resolved = self.module_aliases.get(module)

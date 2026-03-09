@@ -196,6 +196,41 @@ impl Parser {
                     resolved_type: None,
                 });
             }
+            // Named record construction: Foo {x: 1, y: 2}
+            if self.check(TokenType::LBrace) {
+                // Peek to distinguish from block: must be `Ident :` pattern
+                if self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Ident)
+                    && self.peek_at(2).map(|t| &t.token_type) == Some(&TokenType::Colon)
+                {
+                    self.advance(); // consume {
+                    let mut fields = Vec::new();
+                    while !self.check(TokenType::RBrace) {
+                        self.skip_newlines();
+                        let field_name = self.expect_any_name()?;
+                        if self.check(TokenType::Colon) {
+                            self.advance();
+                            self.skip_newlines();
+                            let field_value = self.parse_expr()?;
+                            fields.push(FieldInit {
+                                name: field_name,
+                                value: field_value,
+                            });
+                        } else {
+                            fields.push(FieldInit {
+                                name: field_name.clone(),
+                                value: Expr::Ident { name: field_name, span: None, resolved_type: None },
+                            });
+                        }
+                        self.skip_newlines();
+                        if self.check(TokenType::Comma) {
+                            self.advance();
+                            self.skip_newlines();
+                        }
+                    }
+                    self.expect(TokenType::RBrace)?;
+                    return Ok(Expr::Record { name: Some(name), fields, span, resolved_type: None });
+                }
+            }
             return Ok(Expr::TypeName { name, span, resolved_type: None });
         }
         if self.check(TokenType::Bang) {

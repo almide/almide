@@ -309,7 +309,11 @@ fn format_expr(out: &mut String, expr: &Expr, depth: usize) {
             }
         }
 
-        Expr::Record { fields, .. } => {
+        Expr::Record { name, fields, .. } => {
+            if let Some(n) = name {
+                out.push_str(n);
+                out.push(' ');
+            }
             if fields.is_empty() {
                 out.push_str("{}");
             } else {
@@ -350,6 +354,12 @@ fn format_expr(out: &mut String, expr: &Expr, depth: usize) {
             format_expr(out, object, depth);
             out.push('.');
             out.push_str(field);
+        }
+
+        Expr::TupleIndex { object, index, .. } => {
+            format_expr(out, object, depth);
+            out.push('.');
+            out.push_str(&index.to_string());
         }
 
         Expr::Pipe { left, right, .. } => {

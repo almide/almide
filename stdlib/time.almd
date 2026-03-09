@@ -1,0 +1,97 @@
+// time — date/time operations
+// Bundled stdlib module (written in Almide, auto multi-target)
+// OS primitives delegated to env.unix_timestamp, env.millis, env.sleep_ms
+
+type TimeParts = {year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int}
+
+effect fn now() -> Int = env.unix_timestamp()
+
+effect fn millis() -> Int = env.millis()
+
+effect fn sleep(ms: Int) -> Unit = env.sleep_ms(ms)
+
+// Date decomposition from UNIX timestamp (UTC)
+// Algorithm: Howard Hinnant's date algorithms
+// http://howardhinnant.github.io/date_algorithms.html
+
+fn time_parts(ts: Int) -> TimeParts = {
+  let secs = ts
+  let second = ((secs % 60) + 60) % 60
+  let mins = if secs < 0 then (secs - 59) / 60 else secs / 60
+  let minute = ((mins % 60) + 60) % 60
+  let hrs = if mins < 0 then (mins - 59) / 60 else mins / 60
+  let hour = ((hrs % 24) + 24) % 24
+  let days_raw = if hrs < 0 then (hrs - 23) / 24 else hrs / 24
+
+  // Days since epoch, shifted to 0000-03-01
+  let days = days_raw + 719468
+  let era = if days >= 0 then days / 146097 else (days - 146096) / 146097
+  let doe = days - era * 146097
+  let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+  let y = yoe + era * 400
+  let doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
+  let mp = (5 * doy + 2) / 153
+  let d = doy - (153 * mp + 2) / 5 + 1
+  let m = if mp < 10 then mp + 3 else mp - 9
+  let y_final = if m <= 2 then y + 1 else y
+
+  TimeParts {year: y_final, month: m, day: d, hour: hour, minute: minute, second: second}
+}
+
+fn year(ts: Int) -> Int = {
+  let p = time_parts(ts)
+  p.year
+}
+
+fn month(ts: Int) -> Int = {
+  let p = time_parts(ts)
+  p.month
+}
+
+fn day(ts: Int) -> Int = {
+  let p = time_parts(ts)
+  p.day
+}
+
+fn hour(ts: Int) -> Int = {
+  let p = time_parts(ts)
+  p.hour
+}
+
+fn minute(ts: Int) -> Int = {
+  let p = time_parts(ts)
+  p.minute
+}
+
+fn second(ts: Int) -> Int = {
+  let p = time_parts(ts)
+  p.second
+}
+
+fn weekday(ts: Int) -> Int = {
+  // 0 = Monday, 6 = Sunday
+  let days = if ts < 0 then (ts - 86399) / 86400 else ts / 86400
+  ((days + 3) % 7 + 7) % 7
+}
+
+fn to_iso(ts: Int) -> String = {
+  let p = time_parts(ts)
+  let y_str = string.pad_left(int.to_string(p.year), 4, "0")
+  let m_str = string.pad_left(int.to_string(p.month), 2, "0")
+  let d_str = string.pad_left(int.to_string(p.day), 2, "0")
+  let h_str = string.pad_left(int.to_string(p.hour), 2, "0")
+  let mi_str = string.pad_left(int.to_string(p.minute), 2, "0")
+  let s_str = string.pad_left(int.to_string(p.second), 2, "0")
+  y_str ++ "-" ++ m_str ++ "-" ++ d_str ++ "T" ++ h_str ++ ":" ++ mi_str ++ ":" ++ s_str ++ "Z"
+}
+
+fn from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int = {
+  let y2 = if m <= 2 then y - 1 else y
+  let m2 = if m <= 2 then m + 9 else m - 3
+  let era = if y2 >= 0 then y2 / 400 else (y2 - 399) / 400
+  let yoe = y2 - era * 400
+  let doy = (153 * m2 + 2) / 5 + d - 1
+  let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
+  let days = era * 146097 + doe - 719468
+  days * 86400 + h * 3600 + min * 60 + s
+}

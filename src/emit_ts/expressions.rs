@@ -54,7 +54,7 @@ impl TsEmitter {
                 let elems: Vec<String> = elements.iter().map(|e| self.gen_expr(e)).collect();
                 format!("[{}]", elems.join(", "))
             }
-            Expr::Record { fields, .. } => {
+            Expr::Record { fields, .. } => { // name ignored in TS — records are plain objects
                 let fs: Vec<String> = fields.iter()
                     .map(|f| format!("{}: {}", f.name, self.gen_expr(&f.value)))
                     .collect();
@@ -75,6 +75,10 @@ impl TsEmitter {
                     let obj = self.gen_expr(object);
                     format!("{}.{}", obj, Self::sanitize(field))
                 }
+            }
+            Expr::TupleIndex { object, index, .. } => {
+                let obj = self.gen_expr(object);
+                format!("({})[{}]", obj, index)
             }
             Expr::Pipe { left, right, .. } => self.gen_pipe(left, right),
             Expr::If { cond, then, else_, .. } => {

@@ -276,6 +276,25 @@ impl Checker {
                 self.check_member_access(&ot, field)
             }
 
+            ast::Expr::TupleIndex { object, index, .. } => {
+                let ot = self.check_expr(object);
+                match &ot {
+                    Ty::Tuple(elements) => {
+                        if *index < elements.len() {
+                            elements[*index].clone()
+                        } else {
+                            self.push_diagnostic(err(
+                                format!("tuple index {} is out of bounds (tuple has {} elements)", index, elements.len()),
+                                format!("Valid indices are 0..{}", elements.len() - 1),
+                                "tuple index",
+                            ));
+                            Ty::Unknown
+                        }
+                    }
+                    _ => Ty::Unknown,
+                }
+            }
+
             ast::Expr::Pipe { left, right, .. } => {
                 let _left_ty = self.check_expr(left);
                 if let ast::Expr::Call { callee, args, .. } = right.as_mut() {

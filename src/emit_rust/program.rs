@@ -163,18 +163,12 @@ impl Emitter {
                     self.emitln("");
                 }
                 Decl::Type { name: type_name, ty, deriving, visibility, .. } => {
-                    match visibility {
-                        Visibility::Public => {
-                            self.emit_indent();
-                            self.out.push_str("pub ");
-                        }
-                        Visibility::Mod => {
-                            self.emit_indent();
-                            self.out.push_str("pub(crate) ");
-                        }
-                        Visibility::Local => {}
-                    }
-                    self.emit_type_decl(type_name, ty, deriving);
+                    let vis_prefix = match visibility {
+                        Visibility::Public => "pub ",
+                        Visibility::Mod => "pub(crate) ",
+                        Visibility::Local => "",
+                    };
+                    self.emit_type_decl_vis(type_name, ty, deriving, vis_prefix);
                 }
                 _ => {}
             }
@@ -267,29 +261,34 @@ impl Emitter {
     }
 
     pub(crate) fn emit_type_decl(&mut self, name: &str, ty: &TypeExpr, deriving: &Option<Vec<String>>) {
+        self.emit_type_decl_vis(name, ty, deriving, "");
+    }
+
+    pub(crate) fn emit_type_decl_vis(&mut self, name: &str, ty: &TypeExpr, deriving: &Option<Vec<String>>, vis: &str) {
         match ty {
             TypeExpr::Record { fields } => {
                 self.emitln("#[derive(Debug, Clone, PartialEq)]");
-                self.emitln(&format!("struct {} {{", name));
+                self.emitln(&format!("{}struct {} {{", vis, name));
                 self.indent += 1;
                 for f in fields {
                     let ty_str = self.gen_type(&f.ty);
-                    self.emitln(&format!("{}: {},", f.name, ty_str));
+                    let field_vis = if vis.is_empty() { "" } else { "pub " };
+                    self.emitln(&format!("{}{}: {},", field_vis, f.name, ty_str));
                 }
                 self.indent -= 1;
                 self.emitln("}");
             }
             TypeExpr::Simple { .. } | TypeExpr::Generic { .. } => {
                 let ty_str = self.gen_type(ty);
-                self.emitln(&format!("type {} = {};", name, ty_str));
+                self.emitln(&format!("{}type {} = {};", vis, name, ty_str));
             }
             TypeExpr::Newtype { inner } => {
                 let ty_str = self.gen_type(inner);
-                self.emitln(&format!("struct {}({});", name, ty_str));
+                self.emitln(&format!("{}struct {}({});", vis, name, ty_str));
             }
             TypeExpr::Variant { cases } => {
                 self.emitln("#[derive(Debug, Clone, PartialEq)]");
-                self.emitln(&format!("enum {} {{", name));
+                self.emitln(&format!("{}enum {} {{", vis, name));
                 self.indent += 1;
                 for case in cases {
                     match case {

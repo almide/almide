@@ -160,7 +160,7 @@ impl Parser {
         self.skip_newlines_into_stmts(&mut initial_comments);
         if self.check(TokenType::RBrace) {
             self.advance();
-            return Ok(Expr::Record { fields: Vec::new(), span, resolved_type: None });
+            return Ok(Expr::Record { name: None, fields: Vec::new(), span, resolved_type: None });
         }
         if self.check(TokenType::DotDotDot) {
             self.advance();
@@ -218,7 +218,7 @@ impl Parser {
                 }
             }
             self.expect(TokenType::RBrace)?;
-            return Ok(Expr::Record { fields, span, resolved_type: None });
+            return Ok(Expr::Record { name: None, fields, span, resolved_type: None });
         }
 
         let mut stmts = initial_comments;

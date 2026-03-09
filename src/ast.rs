@@ -93,10 +93,11 @@ pub enum Expr {
     Ident { name: String, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     TypeName { name: String, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     List { elements: Vec<Expr>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Record { fields: Vec<FieldInit>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Record { name: Option<String>, fields: Vec<FieldInit>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     SpreadRecord { base: Box<Expr>, fields: Vec<FieldInit>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Call { callee: Box<Expr>, args: Vec<Expr>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Member { object: Box<Expr>, field: String, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    TupleIndex { object: Box<Expr>, index: usize, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Pipe { left: Box<Expr>, right: Box<Expr>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     If { cond: Box<Expr>, then: Box<Expr>, else_: Box<Expr>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Match { subject: Box<Expr>, arms: Vec<MatchArm>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
@@ -129,7 +130,7 @@ impl Expr {
             | Expr::Ident { span, .. } | Expr::TypeName { span, .. }
             | Expr::List { span, .. } | Expr::Record { span, .. }
             | Expr::SpreadRecord { span, .. } | Expr::Call { span, .. }
-            | Expr::Member { span, .. } | Expr::Pipe { span, .. }
+            | Expr::Member { span, .. } | Expr::TupleIndex { span, .. } | Expr::Pipe { span, .. }
             | Expr::If { span, .. } | Expr::Match { span, .. }
             | Expr::Block { span, .. } | Expr::DoBlock { span, .. }
             | Expr::ForIn { span, .. } | Expr::Lambda { span, .. }
@@ -151,7 +152,7 @@ impl Expr {
             | Expr::Ident { resolved_type, .. } | Expr::TypeName { resolved_type, .. }
             | Expr::List { resolved_type, .. } | Expr::Record { resolved_type, .. }
             | Expr::SpreadRecord { resolved_type, .. } | Expr::Call { resolved_type, .. }
-            | Expr::Member { resolved_type, .. } | Expr::Pipe { resolved_type, .. }
+            | Expr::Member { resolved_type, .. } | Expr::TupleIndex { resolved_type, .. } | Expr::Pipe { resolved_type, .. }
             | Expr::If { resolved_type, .. } | Expr::Match { resolved_type, .. }
             | Expr::Block { resolved_type, .. } | Expr::DoBlock { resolved_type, .. }
             | Expr::ForIn { resolved_type, .. } | Expr::Lambda { resolved_type, .. }
@@ -173,7 +174,7 @@ impl Expr {
             | Expr::Ident { resolved_type, .. } | Expr::TypeName { resolved_type, .. }
             | Expr::List { resolved_type, .. } | Expr::Record { resolved_type, .. }
             | Expr::SpreadRecord { resolved_type, .. } | Expr::Call { resolved_type, .. }
-            | Expr::Member { resolved_type, .. } | Expr::Pipe { resolved_type, .. }
+            | Expr::Member { resolved_type, .. } | Expr::TupleIndex { resolved_type, .. } | Expr::Pipe { resolved_type, .. }
             | Expr::If { resolved_type, .. } | Expr::Match { resolved_type, .. }
             | Expr::Block { resolved_type, .. } | Expr::DoBlock { resolved_type, .. }
             | Expr::ForIn { resolved_type, .. } | Expr::Lambda { resolved_type, .. }

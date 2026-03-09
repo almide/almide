@@ -133,6 +133,8 @@ const __env = {
   get(name: string): string | null { const v = Deno.env.get(name); return v !== undefined ? v : null; },
   set(name: string, value: string): void { Deno.env.set(name, value); },
   cwd(): string { return Deno.cwd(); },
+  millis(): number { return Date.now(); },
+  sleep_ms(ms: number): void { const end = Date.now() + ms; while (Date.now() < end) {} },
 };
 const __process = {
   exec(cmd: string, args: string[]): string { try { const p = new Deno.Command(cmd, { args, stdout: "piped", stderr: "piped" }); const out = p.outputSync(); if (out.success) { return new TextDecoder().decode(out.stdout); } else { const msg = new TextDecoder().decode(out.stderr); throw new Error(msg || "command failed"); } } catch (e) { if (e instanceof Error) throw e; throw new Error(String(e)); } },
@@ -388,6 +390,8 @@ const __env = {
   get(name) { const v = process.env[name]; return v !== undefined ? v : null; },
   set(name, value) { process.env[name] = value; },
   cwd() { return process.cwd(); },
+  millis() { return Date.now(); },
+  sleep_ms(ms) { const end = Date.now() + ms; while (Date.now() < end) {} },
 };
 const __process = {
   exec(cmd, args) { const { execFileSync } = require("child_process"); try { return execFileSync(cmd, args, { encoding: "utf-8" }); } catch (e) { const msg = e.stderr ? String(e.stderr) : e.message; throw new Error(msg || "command failed"); } },

@@ -1,0 +1,31 @@
+// Test bundled stdlib: path module (migrated from compiler to Almide)
+import path
+
+fn main() -> Unit = {
+  // path.join
+  assert_eq(path.join("/usr", "local"), "/usr/local", "join basic")
+  assert_eq(path.join("/usr/", "local"), "/usr/local", "join trailing slash")
+  assert_eq(path.join("", "file.txt"), "file.txt", "join empty base")
+  assert_eq(path.join("/usr", "/etc"), "/etc", "join absolute child replaces")
+
+  // path.dirname
+  assert_eq(path.dirname("/usr/local/bin"), "/usr/local", "dirname basic")
+  assert_eq(path.dirname("file.txt"), "", "dirname no dir")
+  assert_eq(path.dirname("/file.txt"), "/", "dirname root")
+
+  // path.basename
+  assert_eq(path.basename("/usr/local/bin"), "bin", "basename basic")
+  assert_eq(path.basename("file.txt"), "file.txt", "basename no dir")
+  assert_eq(path.basename("/usr/local/"), "local", "basename trailing slash")
+
+  // path.extension
+  assert_eq(path.extension("file.txt"), some("txt"), "extension basic")
+  assert_eq(path.extension("Makefile"), none, "extension none")
+  assert_eq(path.extension("archive.tar.gz"), some("gz"), "extension double")
+
+  // path.is_absolute?
+  assert_eq(path.is_absolute?("/usr"), true, "is_absolute? yes")
+  assert_eq(path.is_absolute?("relative"), false, "is_absolute? no")
+
+  println("path module tests passed!")
+}

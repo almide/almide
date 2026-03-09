@@ -238,6 +238,40 @@ impl Show for Color {
 
 ---
 
+## Tuple & Record Improvements
+
+### Named Record Construction ✅ Implemented
+
+```almide
+type Point = {x: Int, y: Int}
+
+let p = Point {x: 1, y: 2}   // named construction
+let q = {x: 3, y: 4}         // anonymous (still works)
+```
+
+- [x] Parser: `TypeName {field: value, ...}` → `Expr::Record { name: Some("TypeName"), ... }`
+- [x] AST: `Expr::Record` has `name: Option<String>`
+- [x] Rust emitter: `Point { x: 1i64, y: 2i64 }`
+- [x] TS emitter: name ignored (plain JS object)
+- [x] Formatter: preserves name in output
+
+### Tuple Index Access ✅ Implemented
+
+```almide
+let t = (1, "hello")
+let x = t.0     // → 1
+let s = t.1     // → "hello"
+```
+
+- [x] Parser: integer literal after `.` → `Expr::TupleIndex`
+- [x] AST: `Expr::TupleIndex { object, index }`
+- [x] Checker: validate index within tuple bounds, return element type
+- [x] Rust emitter: `(expr).0`
+- [x] TS emitter: `(expr)[0]`
+- [x] Formatter: preserves `t.0` syntax
+
+---
+
 ## String Handling ✅ Implemented
 
 ### Heredoc
@@ -684,47 +718,70 @@ fn sha256(data: String) -> String = {
 }
 ```
 
-### Phase 2: Migrate Existing Stdlib
+### Phase 2: Migrate & Extend Stdlib via .almd
 
-Gradually move pure-logic functions from `calls.rs` to `.almd` files.
+方針: **既存のstring/list/map等はRustのまま残す**（既にRust/TS両方で動いており、HOFはラムダインライン最適化がある）。移行は **丸ごと置き換えられるモジュール** と **新規追加** に集中する。
 
-#### Candidates for immediate migration (pure logic, no syscalls)
+#### 2a. path モジュール ✅ 完了
 
-| Function | Can be written in Almide |
-|----------|-------------------------|
-| `string.reverse` | `list.fold(string.chars(s), "", fn(acc, c) => c ++ acc)` |
-| `string.is_empty?` | `string.len(s) == 0` |
-| `string.strip_prefix/suffix` | `if starts_with? then some(slice(...)) else none` |
-| `list.first` | `list.get(xs, 0)` |
-| `list.is_empty?` | `list.len(xs) == 0` |
-| `list.flat_map` | `list.flatten(list.map(xs, f))` |
-| `list.min/max` | `list.fold(...)` |
-| `list.join` | `list.fold(...)` |
-| `list.unique` | fold with accumulator |
-| `list.sum/product` | `list.fold(xs, 0, fn(a, b) => a + b)` |
-| `map.merge` | fold over entries |
+全5関数を `stdlib/path.almd` に移行。コンパイラの `STDLIB_MODULES` から除外済み。
 
-#### Must stay in compiler (system primitives)
+| Function | Almide implementation |
+|----------|----------------------|
+| `join` | `++` with `/` separator, absolute child replaces |
+| `dirname` | `split("/")` → take all but last → `join("/")` |
+| `basename` | `split("/")` → last non-empty part |
+| `extension` | `split(".")` on basename → last part |
+| `is_absolute?` | `starts_with?(p, "/")` |
 
-```
-string: len, split, join(delimiter), trim, contains, starts/ends_with,
-        slice, to_upper/lower, replace, chars, to_bytes, from_bytes
-list:   len, get, get_or, sort, reverse, contains, map, filter, fold
-map:    new, get, get_or, set, remove, keys, values, len, entries, contains
-fs:     all functions (OS syscalls)
-process: all functions (OS syscalls)
-io:     all functions (OS syscalls)
-env:    all functions (OS syscalls)
-path:   all functions (OS path operations)
-time:   all functions (OS time)
-math:   all functions (CPU instructions)
-int:    all functions (type conversions + bitwise)
-float:  all functions (type conversions)
-json:   all functions (serde_json)
-regex:  all functions (regex crate)
-random: all functions (/dev/urandom)
-http:   all functions (network I/O)
-```
+#### 2b. time モジュール ✅ 完了
+
+全12関数を `stdlib/time.almd` に完全移行。`STDLIB_MODULES` から除外済み。
+`now/millis/sleep` は `env.unix_timestamp/env.millis/env.sleep_ms` プリミティブのラッパー。
+残り9関数（year/month/day/hour/minute/second/weekday/to_iso/from_parts）は純粋なAlmide実装（Hinnant日付算術）。
+
+| Function | Almide implementation |
+|----------|----------------------|
+| `hour` | `(ts % 86400) / 3600` |
+| `minute` | `(ts % 3600) / 60` |
+| `second` | `ts % 60` |
+| `weekday` | `(ts / 86400 + 4) % 7` |
+| `year` | UNIX timestamp → date arithmetic (leap year calc) |
+| `month` | same |
+| `day` | same |
+| `to_iso` | decompose + string formatting |
+| `from_parts` | reverse date arithmetic |
+
+#### 2c. 新規モジュール（コンパイラ変更ゼロで追加）
+
+| Module | Functions | Needs bitwise? | Priority |
+|--------|-----------|---------------|----------|
+| `hash` | `sha256`, `sha1`, `md5` | Yes | HIGH |
+| `encoding` | `base64_encode/decode`, `hex_encode/decode`, `url_encode/decode` | Yes | HIGH |
+| `term` | `color`, `bold`, `dim`, `reset` | No | MEDIUM |
+| `csv` | `parse`, `parse_with_header`, `stringify` | No | MEDIUM |
+
+#### 2d. Phase 6 の新規関数を .almd で追加
+
+Phase 6 で追加予定の派生関数は、コンパイラに追加せず `.almd` で実装する。ただし既存のハードコードモジュール (string/list/map) に関数を追加するには **ハイブリッドresolver** が必要（ハードコード + bundled .almd のマージ）。
+
+候補:
+- `list.filter_map`, `list.group_by`, `list.take_while`, `list.drop_while`
+- `list.count`, `list.partition`, `list.reduce`
+- `map.map_values`, `map.filter`, `map.from_entries`
+- `string.replace_first`, `string.last_index_of`, `string.to_float`
+
+#### Strategy summary
+
+| 分類 | 方針 |
+|------|------|
+| **既存の string/list/map/int/float** | Rust のまま維持。既に両ターゲットで動作 |
+| **既存の fs/process/io/env/json/regex/random/http** | Rust のまま維持。OS/crate依存 |
+| **path** | ✅ `.almd` に移行済み |
+| **time decomposition** | `.almd` に移行予定（now/millis/sleep は残留） |
+| **新規モジュール** | `.almd` で作成（コンパイラ変更ゼロ） |
+| **既存モジュールへの新規関数追加** | ハイブリッドresolver 実装後に `.almd` で追加 |
+| **合計** | **157** | **60** | **99** | **38% を .almd に移行可能** |
 
 ### Phase 3: `extern` — Last Resort FFI
 

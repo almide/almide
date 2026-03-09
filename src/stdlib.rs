@@ -5,7 +5,7 @@
 use crate::types::{Ty, FnSig};
 
 /// All built-in stdlib module names (hardcoded in the compiler).
-pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "path", "http", "process", "math", "random", "time", "regex", "io"];
+pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "http", "process", "math", "random", "regex", "io"];
 
 /// Check if a module name is a hardcoded stdlib module.
 pub fn is_stdlib_module(name: &str) -> bool {
@@ -17,6 +17,9 @@ pub fn is_stdlib_module(name: &str) -> bool {
 pub fn get_bundled_source(name: &str) -> Option<&'static str> {
     match name {
         "args" => Some(include_str!("../stdlib/args.almd")),
+        "path" => Some(include_str!("../stdlib/path.almd")),
+        "time" => Some(include_str!("../stdlib/time.almd")),
+        "encoding" => Some(include_str!("../stdlib/encoding.almd")),
         _ => None,
     }
 }
@@ -215,12 +218,6 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         ("json", "array") => FnSig { params: vec![(s("items"), Ty::List(Box::new(Ty::Named(s("Json")))))], ret: Ty::Named(s("Json")), is_effect: false },
         ("json", "from_map") => FnSig { params: vec![(s("m"), Ty::Map(Box::new(Ty::String), Box::new(Ty::Named(s("Json")))))], ret: Ty::Named(s("Json")), is_effect: false },
 
-        // ── path ──
-        ("path", "join") => FnSig { params: vec![(s("base"), Ty::String), (s("child"), Ty::String)], ret: Ty::String, is_effect: false },
-        ("path", "dirname") => FnSig { params: vec![(s("p"), Ty::String)], ret: Ty::String, is_effect: false },
-        ("path", "basename") => FnSig { params: vec![(s("p"), Ty::String)], ret: Ty::String, is_effect: false },
-        ("path", "extension") => FnSig { params: vec![(s("p"), Ty::String)], ret: Ty::Option(Box::new(Ty::String)), is_effect: false },
-        ("path", "is_absolute?") => FnSig { params: vec![(s("p"), Ty::String)], ret: Ty::Bool, is_effect: false },
 
         // ── env ──
         ("env", "unix_timestamp") => FnSig { params: vec![], ret: Ty::Int, is_effect: true },
@@ -228,6 +225,8 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         ("env", "get") => FnSig { params: vec![(s("name"), Ty::String)], ret: Ty::Option(Box::new(Ty::String)), is_effect: true },
         ("env", "set") => FnSig { params: vec![(s("name"), Ty::String), (s("value"), Ty::String)], ret: Ty::Unit, is_effect: true },
         ("env", "cwd") => FnSig { params: vec![], ret: Ty::Result(Box::new(Ty::String), Box::new(Ty::String)), is_effect: true },
+        ("env", "millis") => FnSig { params: vec![], ret: Ty::Int, is_effect: true },
+        ("env", "sleep_ms") => FnSig { params: vec![(s("ms"), Ty::Int)], ret: Ty::Unit, is_effect: true },
 
         // ── process ──
         ("process", "exec") => FnSig { params: vec![(s("cmd"), Ty::String), (s("args"), Ty::List(Box::new(Ty::String)))], ret: Ty::Result(Box::new(Ty::String), Box::new(Ty::String)), is_effect: true },
@@ -271,19 +270,7 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         ("random", "choice") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: true },
         ("random", "shuffle") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: true },
 
-        // ── time ──
-        ("time", "now") => FnSig { params: vec![], ret: Ty::Int, is_effect: true },
-        ("time", "millis") => FnSig { params: vec![], ret: Ty::Int, is_effect: true },
-        ("time", "sleep") => FnSig { params: vec![(s("ms"), Ty::Int)], ret: Ty::Unit, is_effect: true },
-        ("time", "year") => FnSig { params: vec![(s("ts"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("time", "month") => FnSig { params: vec![(s("ts"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("time", "day") => FnSig { params: vec![(s("ts"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("time", "hour") => FnSig { params: vec![(s("ts"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("time", "minute") => FnSig { params: vec![(s("ts"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("time", "second") => FnSig { params: vec![(s("ts"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("time", "weekday") => FnSig { params: vec![(s("ts"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("time", "to_iso") => FnSig { params: vec![(s("ts"), Ty::Int)], ret: Ty::String, is_effect: false },
-        ("time", "from_parts") => FnSig { params: vec![(s("y"), Ty::Int), (s("m"), Ty::Int), (s("d"), Ty::Int), (s("h"), Ty::Int), (s("min"), Ty::Int), (s("s"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        // ── time: fully migrated to stdlib/time.almd ──
 
         // ── io ──
         ("io", "read_line") => FnSig { params: vec![], ret: Ty::String, is_effect: true },

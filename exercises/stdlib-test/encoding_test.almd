@@ -1,0 +1,47 @@
+// Test bundled stdlib: encoding module (hex + base64)
+import encoding
+
+fn main() -> Unit = {
+  // ── hex ──
+  // encode bytes to hex
+  assert_eq(encoding.hex_encode([0, 255, 16, 171]), "00ff10ab", "hex_encode bytes")
+  assert_eq(encoding.hex_encode([]), "", "hex_encode empty")
+
+  // encode string to hex
+  assert_eq(encoding.hex_encode_string("Hello"), "48656c6c6f", "hex_encode_string Hello")
+  assert_eq(encoding.hex_encode_string("AB"), "4142", "hex_encode_string AB")
+
+  // decode hex to bytes
+  assert_eq(encoding.hex_decode("00ff10ab"), [0, 255, 16, 171], "hex_decode bytes")
+  assert_eq(encoding.hex_decode(""), [], "hex_decode empty")
+
+  // decode hex to string
+  assert_eq(encoding.hex_decode_string("48656c6c6f"), "Hello", "hex_decode_string Hello")
+
+  // roundtrip
+  assert_eq(encoding.hex_decode_string(encoding.hex_encode_string("test data 123")), "test data 123", "hex roundtrip")
+
+  // case insensitive decode
+  assert_eq(encoding.hex_decode("FF"), [255], "hex_decode uppercase")
+  assert_eq(encoding.hex_decode("ff"), [255], "hex_decode lowercase")
+
+  // ── base64 ──
+  // RFC 4648 test vectors
+  assert_eq(encoding.base64_encode_string(""), "", "base64 empty")
+  assert_eq(encoding.base64_encode_string("f"), "Zg==", "base64 f")
+  assert_eq(encoding.base64_encode_string("fo"), "Zm8=", "base64 fo")
+  assert_eq(encoding.base64_encode_string("foo"), "Zm9v", "base64 foo")
+  assert_eq(encoding.base64_encode_string("foob"), "Zm9vYg==", "base64 foob")
+  assert_eq(encoding.base64_encode_string("fooba"), "Zm9vYmE=", "base64 fooba")
+  assert_eq(encoding.base64_encode_string("foobar"), "Zm9vYmFy", "base64 foobar")
+
+  // base64 decode
+  assert_eq(encoding.base64_decode_string("Zm9vYmFy"), "foobar", "base64 decode foobar")
+  assert_eq(encoding.base64_decode_string("Zg=="), "f", "base64 decode f")
+  assert_eq(encoding.base64_decode_string("Zm8="), "fo", "base64 decode fo")
+
+  // roundtrip
+  assert_eq(encoding.base64_decode_string(encoding.base64_encode_string("Hello, World!")), "Hello, World!", "base64 roundtrip")
+
+  println("encoding module tests passed!")
+}
