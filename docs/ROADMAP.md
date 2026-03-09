@@ -349,41 +349,41 @@ Fill gaps that make Almide less capable than Python/Go for everyday tasks.
 - [x] `list.chunk(xs, n)` → `List[List[T]]`
 - [x] `list.sum(xs)` / `list.product(xs)` → `Int`
 
-### Stdlib Phase 5: HIGH priority gaps
+### Stdlib Phase 5: HIGH priority gaps ✅
 
 Functions that every mainstream language has and AI-generated code will expect.
 
 #### string
 
-- [ ] `string.is_empty?(s)` → `Bool`
-- [ ] `string.reverse(s)` → `String`
-- [ ] `string.strip_prefix(s, prefix)` → `Option[String]` — remove prefix if present
-- [ ] `string.strip_suffix(s, suffix)` → `Option[String]` — remove suffix if present
+- [x] `string.is_empty?(s)` → `Bool`
+- [x] `string.reverse(s)` → `String`
+- [x] `string.strip_prefix(s, prefix)` → `Option[String]` — remove prefix if present
+- [x] `string.strip_suffix(s, suffix)` → `Option[String]` — remove suffix if present
 
 #### list
 
-- [ ] `list.first(xs)` → `Option[T]` — alias-like for `list.get(xs, 0)`
-- [ ] `list.is_empty?(xs)` → `Bool`
-- [ ] `list.flat_map(xs, f)` → `List[U]` — map then flatten
-- [ ] `list.min(xs)` → `Option[T]` — minimum element
-- [ ] `list.max(xs)` → `Option[T]` — maximum element
-- [ ] `list.join(xs, sep)` → `String` — join `List[String]` with separator (UFCS: `xs.join(",")`)
+- [x] `list.first(xs)` → `Option[T]` — alias-like for `list.get(xs, 0)`
+- [x] `list.is_empty?(xs)` → `Bool`
+- [x] `list.flat_map(xs, f)` → `List[U]` — map then flatten
+- [x] `list.min(xs)` → `Option[T]` — minimum element
+- [x] `list.max(xs)` → `Option[T]` — maximum element
+- [x] `list.join(xs, sep)` → `String` — join `List[String]` with separator (UFCS: `xs.join(",")`)
 
 #### map
 
-- [ ] `map.merge(a, b)` → `Map[K, V]` — merge two maps (b wins on conflict)
-- [ ] `map.is_empty?(m)` → `Bool`
+- [x] `map.merge(a, b)` → `Map[K, V]` — merge two maps (b wins on conflict)
+- [x] `map.is_empty?(m)` → `Bool`
 
 #### fs
 
-- [ ] `fs.is_dir?(path)` → `Bool` (effect)
-- [ ] `fs.is_file?(path)` → `Bool` (effect)
-- [ ] `fs.copy(src, dst)` → `Result[Unit, IoError]` (effect)
-- [ ] `fs.rename(src, dst)` → `Result[Unit, IoError]` (effect)
+- [x] `fs.is_dir?(path)` → `Bool` (effect)
+- [x] `fs.is_file?(path)` → `Bool` (effect)
+- [x] `fs.copy(src, dst)` → `Result[Unit, IoError]` (effect)
+- [x] `fs.rename(src, dst)` → `Result[Unit, IoError]` (effect)
 
 #### process
 
-- [ ] `process.exec_status(cmd, args)` → `Result[{code: Int, stdout: String, stderr: String}, String]` (effect) — full exec result with exit code
+- [x] `process.exec_status(cmd, args)` → `Result[{code: Int, stdout: String, stderr: String}, String]` (effect) — full exec result with exit code
 
 ### Stdlib Phase 6: MEDIUM priority gaps (future)
 

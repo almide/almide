@@ -384,7 +384,7 @@ impl Emitter {
                 "exec" => format!("match std::process::Command::new(&*{}).args({{ let __a: Vec<String> = {}; __a }}.iter().map(|s| s.as_str())).output() {{ Ok(__out) => if __out.status.success() {{ Ok(String::from_utf8_lossy(&__out.stdout).to_string()) }} else {{ Err(String::from_utf8_lossy(&__out.stderr).to_string()) }}, Err(e) => Err(e.to_string()) }}", args_str[0], args_str[1]),
                 "exit" => format!("std::process::exit({} as i32)", args_str[0]),
                 "stdin_lines" => "{{ use std::io::BufRead; std::io::stdin().lock().lines().collect::<Result<Vec<String>, _>>().map_err(|e| e.to_string())? }}".to_string(),
-                "exec_status" => format!("match std::process::Command::new(&*{}).args({{ let __a: Vec<String> = {}; __a }}.iter().map(|s| s.as_str())).output() {{ Ok(__out) => Ok(((__out.status.code().unwrap_or(-1) as i64), String::from_utf8_lossy(&__out.stdout).to_string(), String::from_utf8_lossy(&__out.stderr).to_string())), Err(e) => Err(e.to_string()) }}", args_str[0], args_str[1]),
+                "exec_status" => format!("match std::process::Command::new(&*{}).args({{ let __a: Vec<String> = {}; __a }}.iter().map(|s| s.as_str())).output() {{ Ok(__out) => Ok(((__out.status.code().unwrap_or(-1) as i64), String::from_utf8_lossy(&__out.stdout).to_string(), String::from_utf8_lossy(&__out.stderr).to_string())), Err(e) => Err(e.to_string()) }}?", args_str[0], args_str[1]),
                 _ => { eprintln!("internal error: no Rust codegen for process.{}() — this is a compiler bug", func); std::process::exit(70); },
             },
             "io" => match func {
