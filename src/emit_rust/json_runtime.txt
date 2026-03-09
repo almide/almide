@@ -197,3 +197,37 @@ fn almide_json_to_string(j: &AlmideJson) -> Option<String> {
 fn almide_json_to_int(j: &AlmideJson) -> Option<i64> {
     if let JInt(n) = j { Some(*n) } else { None }
 }
+
+fn almide_json_get_float(j: &AlmideJson, key: &str) -> Option<f64> {
+    match almide_json_get(j, key) { Some(JInt(n)) => Some(n as f64), _ => None }
+}
+
+fn almide_json_from_float(n: f64) -> AlmideJson {
+    JInt(n as i64)
+}
+
+fn almide_json_stringify_pretty(j: &AlmideJson) -> String {
+    fn fmt_indent(j: &AlmideJson, indent: usize) -> String {
+        let pad = " ".repeat(indent);
+        let pad_inner = " ".repeat(indent + 2);
+        match j {
+            JNull => "null".into(),
+            JBool(b) => if *b { "true".into() } else { "false".into() },
+            JInt(n) => n.to_string(),
+            JStr(s) => almide_json_stringify(&JStr(s.clone())),
+            JArray(items) => {
+                if items.is_empty() { return "[]".into(); }
+                let inner: Vec<String> = items.iter().map(|v| format!("{}{}", pad_inner, fmt_indent(v, indent + 2))).collect();
+                format!("[\n{}\n{}]", inner.join(",\n"), pad)
+            }
+            JObject(map) => {
+                if map.is_empty() { return "{}".into(); }
+                let mut keys: Vec<&String> = map.keys().collect();
+                keys.sort();
+                let inner: Vec<String> = keys.iter().map(|k| format!("{}{}: {}", pad_inner, almide_json_stringify(&JStr(k.to_string())), fmt_indent(map.get(*k).unwrap(), indent + 2))).collect();
+                format!("{{\n{}\n{}}}", inner.join(",\n"), pad)
+            }
+        }
+    }
+    fmt_indent(j, 0)
+}

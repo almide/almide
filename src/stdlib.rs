@@ -20,6 +20,8 @@ pub fn get_bundled_source(name: &str) -> Option<&'static str> {
         "path" => Some(include_str!("../stdlib/path.almd")),
         "time" => Some(include_str!("../stdlib/time.almd")),
         "encoding" => Some(include_str!("../stdlib/encoding.almd")),
+        "hash" => Some(include_str!("../stdlib/hash.almd")),
+        "term" => Some(include_str!("../stdlib/term.almd")),
         _ => None,
     }
 }
@@ -44,7 +46,8 @@ pub fn resolve_ufcs_module(method: &str) -> Option<&'static str> {
         | "is_alphanumeric?" | "is_alphanumeric_hdlm_qm_"
         | "is_whitespace?" | "is_whitespace_hdlm_qm_"
         | "pad_right" | "trim_start" | "trim_end" | "count"
-        | "strip_prefix" | "strip_suffix" => Some("string"),
+        | "strip_prefix" | "strip_suffix"
+        | "replace_first" | "last_index_of" | "to_float" => Some("string"),
 
         "get" | "get_or" | "sort" | "reverse"
         | "each" | "map" | "filter" | "find" | "fold"
@@ -52,11 +55,14 @@ pub fn resolve_ufcs_module(method: &str) -> Option<&'static str> {
         | "enumerate" | "zip" | "flatten" | "take" | "drop"
         | "sort_by" | "unique"
         | "last" | "chunk" | "sum" | "product"
-        | "first" | "flat_map" => Some("list"),
+        | "first" | "flat_map"
+        | "filter_map" | "take_while" | "drop_while"
+        | "partition" | "reduce" | "group_by" => Some("list"),
 
         "to_string" | "to_hex" => Some("int"),
 
-        "keys" | "values" | "entries" | "merge" => Some("map"),
+        "keys" | "values" | "entries" | "merge"
+        | "map_values" => Some("map"),
 
         _ => None,
     }
@@ -140,6 +146,13 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         ("list", "min") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: false },
         ("list", "max") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: false },
         ("list", "join") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::String))), (s("sep"), Ty::String)], ret: Ty::String, is_effect: false },
+        ("list", "filter_map") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Option(Box::new(Ty::Unknown))) })], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "take_while") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Bool) })], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "drop_while") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Bool) })], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "count") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Bool) })], ret: Ty::Int, is_effect: false },
+        ("list", "partition") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Bool) })], ret: Ty::Unknown, is_effect: false },
+        ("list", "reduce") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown, Ty::Unknown], ret: Box::new(Ty::Unknown) })], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "group_by") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Unknown) })], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::List(Box::new(Ty::Unknown)))), is_effect: false },
 
         // ── map ──
         ("map", "new") => FnSig { params: vec![], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)), is_effect: false },
@@ -155,6 +168,9 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         ("map", "from_list") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Unknown) })], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)), is_effect: false },
         ("map", "merge") => FnSig { params: vec![(s("a"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown))), (s("b"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)))], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)), is_effect: false },
         ("map", "is_empty?") => FnSig { params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)))], ret: Ty::Bool, is_effect: false },
+        ("map", "map_values") => FnSig { params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Unknown) })], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)), is_effect: false },
+        ("map", "filter") => FnSig { params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown, Ty::Unknown], ret: Box::new(Ty::Bool) })], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)), is_effect: false },
+        ("map", "from_entries") => FnSig { params: vec![(s("entries"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)), is_effect: false },
 
         // ── string (additional) ──
         ("string", "pad_right") => FnSig { params: vec![(s("s"), Ty::String), (s("n"), Ty::Int), (s("ch"), Ty::String)], ret: Ty::String, is_effect: false },
@@ -165,6 +181,9 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         ("string", "reverse") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::String, is_effect: false },
         ("string", "strip_prefix") => FnSig { params: vec![(s("s"), Ty::String), (s("prefix"), Ty::String)], ret: Ty::Option(Box::new(Ty::String)), is_effect: false },
         ("string", "strip_suffix") => FnSig { params: vec![(s("s"), Ty::String), (s("suffix"), Ty::String)], ret: Ty::Option(Box::new(Ty::String)), is_effect: false },
+        ("string", "replace_first") => FnSig { params: vec![(s("s"), Ty::String), (s("from"), Ty::String), (s("to"), Ty::String)], ret: Ty::String, is_effect: false },
+        ("string", "last_index_of") => FnSig { params: vec![(s("s"), Ty::String), (s("needle"), Ty::String)], ret: Ty::Option(Box::new(Ty::Int)), is_effect: false },
+        ("string", "to_float") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::Result(Box::new(Ty::Float), Box::new(Ty::String)), is_effect: false },
 
         // ── int ──
         ("int", "to_string") => FnSig { params: vec![(s("n"), Ty::Int)], ret: Ty::String, is_effect: false },
@@ -188,6 +207,7 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         ("int", "rotate_left") => FnSig { params: vec![(s("a"), Ty::Int), (s("n"), Ty::Int), (s("bits"), Ty::Int)], ret: Ty::Int, is_effect: false },
         ("int", "to_u32") => FnSig { params: vec![(s("a"), Ty::Int)], ret: Ty::Int, is_effect: false },
         ("int", "to_u8") => FnSig { params: vec![(s("a"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("int", "clamp") => FnSig { params: vec![(s("n"), Ty::Int), (s("lo"), Ty::Int), (s("hi"), Ty::Int)], ret: Ty::Int, is_effect: false },
 
         // ── float ──
         ("float", "to_string") => FnSig { params: vec![(s("n"), Ty::Float)], ret: Ty::String, is_effect: false },
@@ -199,6 +219,9 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         ("float", "sqrt") => FnSig { params: vec![(s("n"), Ty::Float)], ret: Ty::Float, is_effect: false },
         ("float", "parse") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::Result(Box::new(Ty::Float), Box::new(Ty::String)), is_effect: false },
         ("float", "from_int") => FnSig { params: vec![(s("n"), Ty::Int)], ret: Ty::Float, is_effect: false },
+        ("float", "min") => FnSig { params: vec![(s("a"), Ty::Float), (s("b"), Ty::Float)], ret: Ty::Float, is_effect: false },
+        ("float", "max") => FnSig { params: vec![(s("a"), Ty::Float), (s("b"), Ty::Float)], ret: Ty::Float, is_effect: false },
+        ("float", "clamp") => FnSig { params: vec![(s("n"), Ty::Float), (s("lo"), Ty::Float), (s("hi"), Ty::Float)], ret: Ty::Float, is_effect: false },
 
         // ── json ──
         ("json", "parse") => FnSig { params: vec![(s("text"), Ty::String)], ret: Ty::Result(Box::new(Ty::Named(s("Json"))), Box::new(Ty::String)), is_effect: false },
@@ -217,6 +240,9 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         ("json", "null") => FnSig { params: vec![], ret: Ty::Named(s("Json")), is_effect: false },
         ("json", "array") => FnSig { params: vec![(s("items"), Ty::List(Box::new(Ty::Named(s("Json")))))], ret: Ty::Named(s("Json")), is_effect: false },
         ("json", "from_map") => FnSig { params: vec![(s("m"), Ty::Map(Box::new(Ty::String), Box::new(Ty::Named(s("Json")))))], ret: Ty::Named(s("Json")), is_effect: false },
+        ("json", "get_float") => FnSig { params: vec![(s("j"), Ty::Named(s("Json"))), (s("key"), Ty::String)], ret: Ty::Option(Box::new(Ty::Float)), is_effect: false },
+        ("json", "from_float") => FnSig { params: vec![(s("n"), Ty::Float)], ret: Ty::Named(s("Json")), is_effect: false },
+        ("json", "stringify_pretty") => FnSig { params: vec![(s("j"), Ty::Named(s("Json")))], ret: Ty::String, is_effect: false },
 
 
         // ── env ──
