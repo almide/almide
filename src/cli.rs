@@ -151,7 +151,13 @@ pub fn cmd_build(args: &[String], no_check: bool) {
         .and_then(|i| args.get(i + 1))
         .map(|s| s.as_str());
 
+    let is_npm = matches!(build_target, Some("npm"));
     let is_wasm = matches!(build_target, Some("wasm" | "wasm32" | "wasi"));
+
+    if is_npm {
+        cmd_build_npm(&file, &args, no_check);
+        return;
+    }
 
     let default_output = if is_wasm {
         format!("{}.wasm", file.strip_suffix(".almd").unwrap_or("a.out"))
@@ -210,6 +216,117 @@ pub fn cmd_build(args: &[String], no_check: bool) {
     }
 
     eprintln!("Built {}", output);
+}
+
+fn cmd_build_npm(file: &str, args: &[String], no_check: bool) {
+    let mut program = parse_file(file);
+    let source_text = std::fs::read_to_string(file).unwrap_or_default();
+
+    // Resolve dependencies
+    let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
+        if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
+            project::fetch_all_deps(&proj)
+                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); })
+                .into_iter()
+                .map(|fd| (fd.pkg_id, fd.source_dir))
+                .collect()
+        } else {
+            vec![]
+        }
+    } else {
+        vec![]
+    };
+
+    let resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
+        .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+
+    // Type check unless --no-check
+    if !no_check {
+        let mut checker = check::Checker::new();
+        checker.set_source(file, &source_text);
+        for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
+            checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
+        }
+        let diagnostics = checker.check_program(&mut program);
+        if diagnostics.iter().any(|d| d.level == diagnostic::Level::Error) {
+            for d in &diagnostics {
+                eprintln!("{}", d.display_with_source(&source_text));
+            }
+            std::process::exit(1);
+        }
+    }
+
+    // Read package metadata from almide.toml (or use defaults)
+    let (pkg_name, pkg_version) = if std::path::Path::new("almide.toml").exists() {
+        if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
+            (proj.package.name, proj.package.version)
+        } else {
+            (file.strip_suffix(".almd").unwrap_or("my-package").to_string(), "0.1.0".to_string())
+        }
+    } else {
+        (file.strip_suffix(".almd").unwrap_or("my-package").to_string(), "0.1.0".to_string())
+    };
+
+    let config = emit_ts::NpmConfig {
+        name: pkg_name,
+        version: pkg_version,
+    };
+
+    let legacy_modules: Vec<(String, crate::ast::Program)> = resolved.modules.iter()
+        .map(|(n, p, _, _)| (n.clone(), p.clone()))
+        .collect();
+
+    let output = emit_ts::emit_npm_package(&program, &legacy_modules, &config);
+
+    // Output directory
+    let out_dir = args.iter()
+        .position(|a| a == "-o")
+        .and_then(|i| args.get(i + 1))
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "dist".to_string());
+
+    // Write files
+    let out_path = std::path::Path::new(&out_dir);
+    std::fs::create_dir_all(out_path).unwrap_or_else(|e| {
+        eprintln!("Failed to create {}: {}", out_dir, e);
+        std::process::exit(1);
+    });
+
+    std::fs::write(out_path.join("package.json"), &output.package_json).unwrap_or_else(|e| {
+        eprintln!("Failed to write package.json: {}", e);
+        std::process::exit(1);
+    });
+    std::fs::write(out_path.join("index.js"), &output.index_js).unwrap_or_else(|e| {
+        eprintln!("Failed to write index.js: {}", e);
+        std::process::exit(1);
+    });
+    std::fs::write(out_path.join("index.d.ts"), &output.index_dts).unwrap_or_else(|e| {
+        eprintln!("Failed to write index.d.ts: {}", e);
+        std::process::exit(1);
+    });
+
+    // Write runtime files
+    for (path, content) in &output.runtime_files {
+        let full_path = out_path.join(path);
+        if let Some(parent) = full_path.parent() {
+            std::fs::create_dir_all(parent).unwrap_or_else(|e| {
+                eprintln!("Failed to create directory: {}", e);
+                std::process::exit(1);
+            });
+        }
+        std::fs::write(&full_path, content).unwrap_or_else(|e| {
+            eprintln!("Failed to write {}: {}", path, e);
+            std::process::exit(1);
+        });
+    }
+
+    eprintln!("Built npm package in {}/", out_dir);
+    eprintln!("  package.json");
+    eprintln!("  index.js");
+    eprintln!("  index.d.ts");
+    for (path, _) in &output.runtime_files {
+        eprintln!("  {}", path);
+    }
 }
 
 pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, no_check: bool) {

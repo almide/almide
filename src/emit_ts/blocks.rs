@@ -10,11 +10,7 @@ impl TsEmitter {
 
         if let Some(err_arm) = err_arm {
             let ok_arms: Vec<&MatchArm> = arms.iter().filter(|a| !matches!(&a.pattern, Pattern::Err { .. })).collect();
-            let err_body = if Self::needs_iife(&err_arm.body) {
-                format!("(() => {})()", self.gen_expr(&err_arm.body))
-            } else {
-                self.gen_expr(&err_arm.body)
-            };
+            let err_body = self.gen_expr_value(&err_arm.body);
             let err_binding = if let Pattern::Err { inner } = &err_arm.pattern {
                 if let Pattern::Ident { name } = inner.as_ref() {
                     Some(name.clone())
@@ -60,11 +56,7 @@ impl TsEmitter {
             .map(|b| format!("    const {} = {};", b.0, b.1))
             .collect::<Vec<_>>()
             .join("\n");
-        let body_str = if Self::needs_iife(&arm.body) {
-            format!("(() => {})()", self.gen_expr(&arm.body))
-        } else {
-            self.gen_expr(&arm.body)
-        };
+        let body_str = self.gen_expr_value(&arm.body);
 
         if let Some(guard) = &arm.guard {
             let guard_str = self.gen_expr(guard);

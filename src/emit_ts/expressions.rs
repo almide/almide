@@ -82,16 +82,8 @@ impl TsEmitter {
             }
             Expr::Pipe { left, right, .. } => self.gen_pipe(left, right),
             Expr::If { cond, then, else_, .. } => {
-                let t = if Self::needs_iife(then) {
-                    format!("(() => {})()", self.gen_expr(then))
-                } else {
-                    self.gen_expr(then)
-                };
-                let e = if Self::needs_iife(else_) {
-                    format!("(() => {})()", self.gen_expr(else_))
-                } else {
-                    self.gen_expr(else_)
-                };
+                let t = self.gen_expr_value(then);
+                let e = self.gen_expr_value(else_);
                 format!("({} ? {} : {})", self.gen_expr(cond), t, e)
             }
             Expr::Match { subject, arms, .. } => self.gen_match(subject, arms),
@@ -150,7 +142,7 @@ impl TsEmitter {
             Expr::Try { expr, .. } => self.gen_expr(expr),
             Expr::Await { expr, .. } => format!("await {}", self.gen_expr(expr)),
             Expr::Hole { .. } => if self.js_mode { "null /* hole */".to_string() } else { "null as any /* hole */".to_string() },
-            Expr::Todo { message, .. } => format!("(() => {{ throw new Error({}); }})()", Self::json_string(message)),
+            Expr::Todo { message, .. } => format!("__throw({})", Self::json_string(message)),
             Expr::Placeholder { .. } => "__placeholder__".to_string(),
         }
     }
@@ -164,18 +156,32 @@ impl TsEmitter {
                     self.gen_expr(callee)
                 };
                 let arg = if !args.is_empty() { self.gen_expr(&args[0]) } else { "\"\"".to_string() };
-                format!("(() => {{ throw new Error({} + \": \" + {}); }})()", Self::json_string(&callee_str), arg)
+                format!("__throw({} + \": \" + {})", Self::json_string(&callee_str), arg)
             }
             Expr::TypeName { name, .. } => {
                 let msg = Self::pascal_to_message(name);
-                format!("(() => {{ throw new Error({}); }})()", Self::json_string(&msg))
+                format!("__throw({})", Self::json_string(&msg))
             }
             Expr::String { value, .. } => {
-                format!("(() => {{ throw new Error({}); }})()", Self::json_string(value))
+                format!("__throw({})", Self::json_string(value))
             }
             _ => {
-                format!("(() => {{ throw new Error(String({})); }})()", self.gen_expr(expr))
+                format!("__throw(String({}))", self.gen_expr(expr))
             }
+        }
+    }
+
+    /// Generate an expression as a value, unwrapping simple blocks to avoid unnecessary IIFEs.
+    /// A block with no statements and just a final expression can be inlined directly.
+    pub(crate) fn gen_expr_value(&self, expr: &Expr) -> String {
+        match expr {
+            Expr::Block { stmts, expr: Some(final_expr), .. } if stmts.is_empty() => {
+                self.gen_expr_value(final_expr)
+            }
+            other if Self::needs_iife(other) => {
+                format!("(() => {})()", self.gen_expr(other))
+            }
+            _ => self.gen_expr(expr),
         }
     }
 

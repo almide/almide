@@ -1,14 +1,10 @@
 use crate::ast::*;
-use crate::emit_ts_runtime::{RUNTIME, RUNTIME_JS};
+use crate::emit_ts_runtime;
 use super::TsEmitter;
 
 impl TsEmitter {
     pub(crate) fn emit_program(&mut self, prog: &Program, modules: &[(String, Program)]) {
-        if self.js_mode {
-            self.out.push_str(RUNTIME_JS);
-        } else {
-            self.out.push_str(RUNTIME);
-        }
+        self.out.push_str(&emit_ts_runtime::full_runtime(self.js_mode));
         self.out.push('\n');
 
         // Register and emit imported modules as namespace objects
@@ -288,5 +284,216 @@ impl TsEmitter {
         } else {
             format!("{}function {}({}){} {{\n  throw new Error(\"no body and no @extern for ts target\");\n}}", async_, sname, params_str.join(", "), ret_str)
         }
+    }
+
+    // ── npm package emission ──
+
+    /// Emit user code for npm target: no inlined runtime, `export` for public functions,
+    /// no entry point, no test blocks.
+    pub(crate) fn emit_npm_program(&mut self, prog: &Program, modules: &[(String, Program)]) {
+        // Register user modules
+        for (mod_name, _) in modules {
+            self.user_modules.push(mod_name.clone());
+        }
+
+        // Pre-declare namespace objects for parent modules
+        let module_names: std::collections::HashSet<String> = modules.iter().map(|(n, _)| n.clone()).collect();
+        let mut emitted_ns: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for (mod_name, _) in modules {
+            if mod_name.contains('.') {
+                let parts: Vec<&str> = mod_name.split('.').collect();
+                for i in 1..parts.len() {
+                    let ancestor = parts[..i].join(".");
+                    if !module_names.contains(&ancestor) && !emitted_ns.contains(&ancestor) {
+                        emitted_ns.insert(ancestor.clone());
+                        if ancestor.contains('.') {
+                            self.out.push_str(&format!("{} = {{}};\n", ancestor));
+                        } else {
+                            self.out.push_str(&format!("const {} = {{}};\n", ancestor));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Emit user modules
+        for (mod_name, mod_prog) in modules {
+            self.emit_user_module(mod_name, mod_prog);
+        }
+
+        // Emit import aliases
+        for imp in &prog.imports {
+            if let Decl::Import { path, alias, .. } = imp {
+                let full_path = path.join(".");
+                if let Some(alias_name) = alias {
+                    self.out.push_str(&format!("var {} = {};\n", alias_name, full_path));
+                } else if path.len() > 1 {
+                    let short_name = path.last().unwrap();
+                    self.out.push_str(&format!("var {} = {};\n", short_name, full_path));
+                }
+            }
+        }
+        self.out.push('\n');
+
+        // Emit declarations: all functions without export keyword, skip tests
+        // Collect public names for clean export at the end
+        let mut public_fns: Vec<(String, String)> = Vec::new(); // (sanitized, original)
+        let mut public_variants: Vec<String> = Vec::new(); // variant constructor names
+
+        for decl in &prog.decls {
+            match decl {
+                Decl::Test { .. } => continue,
+                Decl::Fn { name, visibility, .. } => {
+                    self.out.push_str(&self.gen_decl(decl));
+                    self.out.push_str("\n\n");
+                    if *visibility == Visibility::Public {
+                        public_fns.push((Self::sanitize(name), name.clone()));
+                    }
+                }
+                Decl::Type { name, ty, visibility, .. } => {
+                    if *visibility == Visibility::Public {
+                        if let TypeExpr::Variant { cases } = ty {
+                            self.out.push_str(&format!("// variant type {}\n", name));
+                            for case in cases {
+                                match case {
+                                    VariantCase::Unit { name: cname } => {
+                                        self.out.push_str(&format!("const {} = {{ tag: {} }};\n", cname, Self::json_string(cname)));
+                                        public_variants.push(cname.clone());
+                                    }
+                                    VariantCase::Tuple { name: cname, fields } => {
+                                        let params: Vec<String> = fields.iter().enumerate()
+                                            .map(|(i, _)| format!("_{}", i))
+                                            .collect();
+                                        let obj_fields: Vec<String> = fields.iter().enumerate()
+                                            .map(|(i, _)| format!("_{}: _{}", i, i))
+                                            .collect();
+                                        self.out.push_str(&format!("function {}({}) {{ return {{ tag: {}, {} }}; }}\n",
+                                            cname, params.join(", "), Self::json_string(cname), obj_fields.join(", ")));
+                                        public_variants.push(cname.clone());
+                                    }
+                                    VariantCase::Record { name: cname, fields } => {
+                                        let params: Vec<String> = fields.iter()
+                                            .map(|f| f.name.clone())
+                                            .collect();
+                                        let obj_fields: Vec<String> = fields.iter()
+                                            .map(|f| format!("{}: {}", f.name, f.name))
+                                            .collect();
+                                        self.out.push_str(&format!("function {}({}) {{ return {{ tag: {}, {} }}; }}\n",
+                                            cname, params.join(", "), Self::json_string(cname), obj_fields.join(", ")));
+                                        public_variants.push(cname.clone());
+                                    }
+                                }
+                            }
+                            self.out.push('\n');
+                        } else {
+                            self.out.push_str(&self.gen_decl(decl));
+                            self.out.push_str("\n\n");
+                        }
+                    } else {
+                        self.out.push_str(&self.gen_decl(decl));
+                        self.out.push_str("\n\n");
+                    }
+                }
+                _ => {
+                    self.out.push_str(&self.gen_decl(decl));
+                    self.out.push_str("\n\n");
+                }
+            }
+        }
+
+        // Emit clean camelCase exports
+        if !public_fns.is_empty() || !public_variants.is_empty() {
+            self.out.push_str("// ---- Exports ----\n");
+            let mut exports = Vec::new();
+            for (sanitized, _original) in &public_fns {
+                let clean = crate::emit_common::to_clean_export_name(sanitized);
+                if clean == *sanitized {
+                    exports.push(sanitized.clone());
+                } else {
+                    exports.push(format!("{} as {}", sanitized, clean));
+                }
+            }
+            for vname in &public_variants {
+                exports.push(vname.clone());
+            }
+            self.out.push_str(&format!("export {{ {} }};\n", exports.join(", ")));
+        }
+    }
+
+    /// Generate TypeScript declaration file (index.d.ts) for public functions and types.
+    /// Uses clean camelCase names matching the export aliases in index.js.
+    pub(crate) fn generate_dts(&self, prog: &Program) -> String {
+        let mut dts = String::new();
+        for decl in &prog.decls {
+            match decl {
+                Decl::Fn { name, params, return_type, visibility, r#async, .. } => {
+                    if *visibility != Visibility::Public {
+                        continue;
+                    }
+                    let sname = Self::sanitize(name);
+                    let clean = crate::emit_common::to_clean_export_name(&sname);
+                    let ps: Vec<String> = params.iter()
+                        .filter(|p| p.name != "self")
+                        .map(|p| {
+                            let pname = crate::emit_common::to_clean_export_name(&Self::sanitize(&p.name));
+                            format!("{}: {}", pname, self.gen_type_expr(&p.ty))
+                        })
+                        .collect();
+                    let ret = self.gen_type_expr(return_type);
+                    let ret_str = if r#async.unwrap_or(false) {
+                        format!("Promise<{}>", ret)
+                    } else {
+                        ret
+                    };
+                    dts.push_str(&format!("export declare function {}({}): {};\n", clean, ps.join(", "), ret_str));
+                }
+                Decl::Type { name, ty, visibility, .. } => {
+                    if *visibility != Visibility::Public {
+                        continue;
+                    }
+                    match ty {
+                        TypeExpr::Record { fields } => {
+                            let fs: Vec<String> = fields.iter()
+                                .map(|f| format!("  {}: {};", f.name, self.gen_type_expr(&f.ty)))
+                                .collect();
+                            dts.push_str(&format!("export interface {} {{\n{}\n}}\n", name, fs.join("\n")));
+                        }
+                        TypeExpr::Variant { cases } => {
+                            // Export variant constructor type declarations
+                            for case in cases {
+                                match case {
+                                    VariantCase::Unit { name: cname } => {
+                                        dts.push_str(&format!("export declare const {}: {{ tag: \"{}\" }};\n", cname, cname));
+                                    }
+                                    VariantCase::Tuple { name: cname, fields } => {
+                                        let ps: Vec<String> = fields.iter().enumerate()
+                                            .map(|(i, f)| format!("_{}: {}", i, self.gen_type_expr(f)))
+                                            .collect();
+                                        let ret_fields: Vec<String> = std::iter::once(format!("tag: \"{}\"", cname))
+                                            .chain(fields.iter().enumerate().map(|(i, f)| format!("_{}: {}", i, self.gen_type_expr(f))))
+                                            .collect();
+                                        dts.push_str(&format!("export declare function {}({}): {{ {} }};\n", cname, ps.join(", "), ret_fields.join(", ")));
+                                    }
+                                    VariantCase::Record { name: cname, fields } => {
+                                        let ps: Vec<String> = fields.iter()
+                                            .map(|f| format!("{}: {}", f.name, self.gen_type_expr(&f.ty)))
+                                            .collect();
+                                        let ret_fields: Vec<String> = std::iter::once(format!("tag: \"{}\"", cname))
+                                            .chain(fields.iter().map(|f| format!("{}: {}", f.name, self.gen_type_expr(&f.ty))))
+                                            .collect();
+                                        dts.push_str(&format!("export declare function {}({}): {{ {} }};\n", cname, ps.join(", "), ret_fields.join(", ")));
+                                    }
+                                }
+                            }
+                        }
+                        _ => {
+                            dts.push_str(&format!("export type {} = {};\n", name, self.gen_type_expr(ty)));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        dts
     }
 }
