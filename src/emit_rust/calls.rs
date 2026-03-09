@@ -180,7 +180,8 @@ impl Emitter {
             .unwrap_or_else(|| module.to_string());
         if self.user_modules.contains(&resolved_mod) {
             let rust_mod = resolved_mod.replace('.', "_");
-            let call = format!("{}::{}({})", rust_mod, func, args_str.join(", "));
+            let safe_func = crate::emit_common::sanitize(func);
+            let call = format!("{}::{}({})", rust_mod, safe_func, args_str.join(", "));
             if self.in_effect && (self.effect_fns.contains(&func.to_string()) || self.result_fns.contains(&func.to_string())) {
                 return format!("{}?", call);
             }

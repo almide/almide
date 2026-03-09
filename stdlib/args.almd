@@ -1,0 +1,42 @@
+// args — command-line argument parsing
+// Bundled stdlib module (written in Almide, auto multi-target)
+
+fn raw() -> List[String] = env.args()
+
+fn flag?(name: String) -> Bool = {
+  let args = env.args()
+  let long = "--" ++ name
+  let short = "-" ++ string.slice(name, 0, 1)
+  list.any(args, fn(a) => a == long or a == short)
+}
+
+fn option(name: String) -> Option[String] = {
+  let args = env.args()
+  let long = "--" ++ name
+  let eq_prefix = long ++ "="
+  let eq_match = list.find(args, fn(a) => string.starts_with?(a, eq_prefix))
+  match eq_match {
+    some(a) => string.strip_prefix(a, eq_prefix)
+    none => {
+      let idx = list.index_of(args, long)
+      match idx {
+        some(i) => list.get(args, i + 1)
+        none => none
+      }
+    }
+  }
+}
+
+fn option_or(name: String, default: String) -> String =
+  match option(name) {
+    some(v) => v
+    none => default
+  }
+
+fn positional() -> List[String] = {
+  let args = list.drop(env.args(), 1)
+  list.filter(args, fn(a) => not string.starts_with?(a, "-"))
+}
+
+fn positional_at(i: Int) -> Option[String] =
+  list.get(positional(), i)

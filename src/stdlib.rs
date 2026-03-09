@@ -4,12 +4,26 @@
 
 use crate::types::{Ty, FnSig};
 
-/// All built-in stdlib module names.
+/// All built-in stdlib module names (hardcoded in the compiler).
 pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "path", "http", "process", "math", "random", "time", "regex", "io"];
 
-/// Check if a module name is a stdlib module.
+/// Check if a module name is a hardcoded stdlib module.
 pub fn is_stdlib_module(name: &str) -> bool {
     STDLIB_MODULES.contains(&name)
+}
+
+/// Bundled stdlib packages written in Almide (.almd files embedded in the compiler binary).
+/// These are loaded as user modules — no hardcoded type signatures or codegen needed.
+pub fn get_bundled_source(name: &str) -> Option<&'static str> {
+    match name {
+        "args" => Some(include_str!("../stdlib/args.almd")),
+        _ => None,
+    }
+}
+
+/// Check if a module name is any kind of stdlib (hardcoded or bundled).
+pub fn is_any_stdlib(name: &str) -> bool {
+    is_stdlib_module(name) || get_bundled_source(name).is_some()
 }
 
 /// Resolve a method name to its stdlib module (for UFCS / dot syntax).

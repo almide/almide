@@ -611,15 +611,14 @@ Implementation:
 
 Currently bytes are `List[Int]` which is `Vec<i64>` — 8x memory overhead. For serious binary processing, a dedicated `Bytes` type may be needed. But `List[Int]` works for correctness and can be optimized later.
 
-### Phase 1: Stdlib Package Mechanism
+### Phase 1: Stdlib Package Mechanism ✅
 
 Allow stdlib modules to be implemented as `.almd` files that ship with the compiler. No language changes needed — uses existing module system.
 
 ```
-~/.local/almide/
-  almide              ← compiler binary
+almide/
   stdlib/
-    args.almd          ← argument parsing (pure Almide)
+    args.almd          ← argument parsing (pure Almide) ✅ implemented
     term.almd          ← terminal colors (pure Almide)
     csv.almd           ← CSV parsing (pure Almide)
     hash.almd          ← SHA-256, SHA-1 (pure Almide, uses bitwise ops)
@@ -628,10 +627,11 @@ Allow stdlib modules to be implemented as `.almd` files that ship with the compi
 
 #### Implementation Steps
 
-- [ ] Resolver: add stdlib package search path (`~/.local/almide/stdlib/` or relative to binary)
-- [ ] Resolver: stdlib `.almd` files take precedence over hardcoded modules (for gradual migration)
-- [ ] Bundled stdlib: embed `.almd` files in the compiler binary via `include_str!` (no external file dependency)
-- [ ] Test: implement `args` module entirely in Almide as proof of concept
+- [x] Resolver: bundled stdlib via `include_str!` in compiler binary
+- [x] Resolver: fallback to bundled source when module not found locally
+- [x] stdlib.rs: `get_bundled_source()` returns embedded `.almd` source
+- [x] Test: `args` module entirely in Almide as proof of concept
+- [x] Bug fix: sanitize `?` in user module function names and calls (`flag?` → `flag_qm_`)
 
 #### Proof of concept: `args` module
 

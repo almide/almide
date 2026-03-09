@@ -137,7 +137,8 @@ impl Emitter {
                         Visibility::Local => "",
                     };
                     let async_prefix = if is_async { &format!("{}async ", vis) } else { vis };
-                    self.emitln(&format!("{}fn {}({}) -> {} {{", async_prefix, fn_name, params_str.join(", "), actual_ret));
+                    let safe_fn_name = crate::emit_common::sanitize(fn_name);
+                    self.emitln(&format!("{}fn {}({}) -> {} {{", async_prefix, safe_fn_name, params_str.join(", "), actual_ret));
                     self.indent += 1;
                     let prev_effect = self.in_effect;
                     self.in_effect = is_effect;

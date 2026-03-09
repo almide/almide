@@ -71,6 +71,13 @@ pub fn resolve_imports_with_deps(
                 if stdlib::is_stdlib_module(name) {
                     continue;
                 }
+                // Check bundled stdlib packages (written in Almide)
+                if let Some(source) = stdlib::get_bundled_source(name) {
+                    if !loaded_names.contains(name.as_str()) {
+                        load_bundled_module(name, source, base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading)?;
+                    }
+                    continue;
+                }
                 load_module(name, base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading)?;
             } else {
                 // import pkg.submodule — load just the sub-module directly
@@ -90,6 +97,47 @@ pub fn resolve_imports_with_deps(
     }
 
     Ok(ResolvedModules { modules: loaded })
+}
+
+/// Load a bundled stdlib module from embedded source.
+fn load_bundled_module(
+    name: &str,
+    source: &str,
+    base_dir: &Path,
+    dep_paths: &[(project::PkgId, PathBuf)],
+    loaded: &mut Vec<(String, ast::Program, Option<project::PkgId>, bool)>,
+    loaded_names: &mut HashSet<String>,
+    loading: &mut HashSet<String>,
+) -> Result<(), String> {
+    if loaded_names.contains(name) {
+        return Ok(());
+    }
+
+    let tokens = lexer::Lexer::tokenize(source);
+    let mut p = parser::Parser::new(tokens);
+    let program = p.parse()
+        .map_err(|e| format!("parse error in bundled stdlib '{}': {}", name, e))?;
+    if !p.errors.is_empty() {
+        return Err(format!("parse error in bundled stdlib '{}': {}", name, p.errors.join("\n")));
+    }
+
+    // Recursively resolve this module's imports
+    for import in &program.imports {
+        if let ast::Decl::Import { path, .. } = import {
+            let dep_name = &path[0];
+            if !stdlib::is_stdlib_module(dep_name) {
+                if let Some(dep_source) = stdlib::get_bundled_source(dep_name) {
+                    load_bundled_module(dep_name, dep_source, base_dir, dep_paths, loaded, loaded_names, loading)?;
+                } else {
+                    load_module(dep_name, base_dir, dep_paths, loaded, loaded_names, loading)?;
+                }
+            }
+        }
+    }
+
+    loaded_names.insert(name.to_string());
+    loaded.push((name.to_string(), program, None, false));
+    Ok(())
 }
 
 /// Load a self-import module (import self.xxx).
