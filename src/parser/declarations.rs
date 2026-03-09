@@ -15,6 +15,16 @@ impl Parser {
     pub(crate) fn parse_import_decl(&mut self) -> Result<Decl, String> {
         let span = self.current_span();
         self.expect(TokenType::Import)?;
+
+        // Detect JS-style `import { name }` — Almide uses `import name`
+        if self.check(TokenType::LBrace) {
+            let tok = self.current();
+            return Err(format!(
+                "Unexpected '{{' in import at line {}:{}\n  Hint: Almide imports don't use braces. Write: import json (not import {{ json }})",
+                tok.line, tok.col
+            ));
+        }
+
         let path = self.parse_module_path()?;
 
         if self.check(TokenType::Dot) && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::LBrace) {
@@ -280,6 +290,15 @@ impl Parser {
         self.expect(TokenType::RParen)?;
         self.expect(TokenType::Arrow)?;
         let return_type = self.parse_type_expr()?;
+
+        // Detect missing `=` before body: `fn name() -> T { ... }` instead of `fn name() -> T = { ... }`
+        if self.check(TokenType::LBrace) {
+            let tok = self.current();
+            return Err(format!(
+                "Missing '=' before function body at line {}:{}\n  Hint: Almide requires '=' before the body. Write: fn {}(...) -> Type = {{ ... }}",
+                tok.line, tok.col, name
+            ));
+        }
 
         // Body is optional — @extern-only functions have no `= expr`
         let body = if self.check(TokenType::Eq) {

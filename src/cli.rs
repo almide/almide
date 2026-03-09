@@ -87,10 +87,20 @@ pub fn cmd_init() {
         }
     }
 
+    // Generate CLAUDE.md for AI-assisted development
+    if !std::path::Path::new("CLAUDE.md").exists() {
+        let claude_md = include_str!("../docs/CLAUDE_TEMPLATE.md");
+        if let Err(e) = std::fs::write("CLAUDE.md", claude_md) {
+            eprintln!("Failed to write CLAUDE.md: {}", e);
+            std::process::exit(1);
+        }
+    }
+
     eprintln!("Initialized project in ./");
     eprintln!("  almide.toml");
     eprintln!("  src/main.almd");
     eprintln!("  tests/");
+    eprintln!("  CLAUDE.md");
 }
 
 pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {

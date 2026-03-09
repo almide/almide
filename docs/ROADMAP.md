@@ -1135,6 +1135,28 @@ export declare function fibonacci(n: number): number[];
 
 ---
 
+## LLM Developer Experience
+
+### `almide init` CLAUDE.md generation
+
+Currently `almide init` always generates a `CLAUDE.md` file for AI-assisted development.
+This should become opt-in or configurable:
+
+- [ ] Add `--claude` / `--no-claude` flag to `almide init`
+- [ ] Or prompt interactively: "Generate CLAUDE.md for AI-assisted development? [Y/n]"
+- [ ] Consider a config in `almide.toml`: `[tools] claude_md = true`
+
+### UFCS ambiguity resolution
+
+Method-style calls like `x.len()`, `s.contains("a")` fail when the function name exists
+in multiple stdlib modules (e.g., `len` in both `string` and `list`, `contains?` in both).
+
+Current workaround: use explicit module calls (`string.len(x)`, `list.len(xs)`).
+
+- [ ] Add type-aware UFCS resolution (infer module from argument type)
+- [ ] Or: make common functions like `len`, `contains?`, `reverse` universal builtins
+- [ ] Track most common UFCS failures and prioritize resolution
+
 ## Other
 
 - [ ] Package registry (to be considered in the future)

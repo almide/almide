@@ -96,7 +96,7 @@ fn emit_list_concat() {
 fn emit_pipe() {
     let out = parse_and_emit_js("module app\nfn foo(xs: List[Int]) -> List[Int] = xs |> list.filter(fn(x) => x > 0)");
     let code = user_code(&out);
-    assert!(code.contains("__list.filter"));
+    assert!(code.contains("__almd_list.filter"));
 }
 
 // ---- Range ----
@@ -156,7 +156,7 @@ fn emit_test_ts() {
 fn emit_stdlib_module_call() {
     let out = parse_and_emit_js("module app\nfn foo(s: String) -> String = string.trim(s)");
     let code = user_code(&out);
-    assert!(code.contains("__string.trim(s)"));
+    assert!(code.contains("__almd_string.trim(s)"));
 }
 
 // ---- Entry point ----
@@ -175,15 +175,15 @@ fn emit_main_entry() {
 fn emit_js_has_runtime() {
     let out = parse_and_emit_js("module app");
     assert!(out.contains("// ---- Almide Runtime (JS) ----"));
-    assert!(out.contains("__string"));
-    assert!(out.contains("__list"));
-    assert!(out.contains("__http"));
+    assert!(out.contains("__almd_string"));
+    assert!(out.contains("__almd_list"));
+    assert!(out.contains("__almd_http"));
 }
 
 #[test]
 fn emit_ts_has_runtime() {
     let out = parse_and_emit_ts("module app");
     assert!(out.contains("// ---- Almide Runtime ----"));
-    assert!(out.contains("__string"));
-    assert!(out.contains("__http"));
+    assert!(out.contains("__almd_string"));
+    assert!(out.contains("__almd_http"));
 }

@@ -47,6 +47,15 @@ impl Parser {
             return Ok(Stmt::LetDestructure { fields, value, span: Some(span) });
         }
 
+        // Detect `let mut` (Rust style) — hint to use `var` instead
+        if self.check(TokenType::Ident) && self.current().value == "mut" {
+            let tok = self.current();
+            return Err(format!(
+                "'let mut' is not valid in Almide at line {}:{}\n  Hint: Use 'var' for mutable variables. Example: var x = 0",
+                tok.line, tok.col
+            ));
+        }
+
         let name = self.expect_ident()?;
         let mut ty: Option<TypeExpr> = None;
         if self.check(TokenType::Colon) {
