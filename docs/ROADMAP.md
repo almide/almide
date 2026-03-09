@@ -531,26 +531,85 @@ fn len(s: String) -> Int = string.len(s)
 
 ## Stdlib Self-Hosting
 
-Currently all stdlib functions are hardcoded in the compiler (`stdlib.rs` for type signatures, `emit_rust/calls.rs` for Rust codegen). This doesn't scale — every new function requires compiler changes. The goal is to make stdlib extensible without touching the compiler.
+Currently all stdlib functions are hardcoded in the compiler (`stdlib.rs` for type signatures, `emit_rust/calls.rs` for Rust codegen). This doesn't scale — every new function requires compiler changes. The goal: **Almide writes its own stdlib in Almide**, achieving automatic multi-target support.
+
+### Why self-hosting matters
+
+```
+extern "rust" で書く → Rustでしか動かない
+Almideで書く         → Rust/TS 両方に自動出力される
+```
+
+Almideの設計原則は「同じコードが複数ターゲットに出力される」こと。stdlibもこの原則に従うべき。`extern` は最終手段であり、主戦略は **Almideの表現力を上げてstdlibをAlmideで書く**。
 
 ### Architecture: Two-Layer Stdlib
 
 ```
-┌─────────────────────────────────────────┐
-│  Upper layer: Almide stdlib packages     │  ← .almd files, written in Almide
-│  string.reverse, list.flat_map,          │
-│  hash.sha256, encoding.base64, etc.      │
-└──────────────┬──────────────────────────┘
+┌──────────────────────────────────────────────┐
+│  Upper layer: Almide stdlib packages          │  ← .almd files, written in Almide
+│  string.reverse, list.flat_map, args.parse,   │     自動的にRust/TS両方で動く
+│  hash.sha256, encoding.base64, csv.parse ...  │
+└──────────────┬───────────────────────────────┘
                │ calls
-┌──────────────▼──────────────────────────┐
-│  Lower layer: compiler primitives        │  ← hardcoded in calls.rs (20-30 functions)
-│  fs.read_text, process.exec,             │
-│  string.len, list.get, map.set, etc.     │
-└─────────────────────────────────────────┘
+┌──────────────▼───────────────────────────────┐
+│  Lower layer: compiler primitives             │  ← hardcoded in calls.rs (20-30 functions)
+│  fs.read_text, process.exec, string.len,      │     OS syscalls, data structure internals
+│  list.get, map.set, int.to_string ...         │
+└──────────────────────────────────────────────┘
 ```
 
-**Upper layer** = pure logic or `extern` wrappers. Written as `.almd` packages.
-**Lower layer** = OS syscalls, data structure internals. Stay in the compiler.
+### Phase 0: Language Primitives for Self-Hosting
+
+Before Almide can write its own stdlib, the language needs low-level primitives. These are not stdlib functions — they are **language-level operators and types**.
+
+#### 0a. Bitwise Operators
+
+Required for: hash algorithms (SHA-1, SHA-256, MD5), encoding (base64, hex), compression, binary protocols.
+
+| Operator | Name | Rust emit | TS emit | Notes |
+|----------|------|-----------|---------|-------|
+| `band(a, b)` | bitwise AND | `({} & {})` | `({} & {})` | |
+| `bor(a, b)` | bitwise OR | `({} \| {})` | `({} \| {})` | |
+| `bxor(a, b)` | bitwise XOR | `({} ^ {})` | `({} ^ {})` | `^` is already used for pow/xor contextually |
+| `bshl(a, n)` | shift left | `({} << {})` | `({} << {})` | |
+| `bshr(a, n)` | shift right | `({} >> {})` | `({} >>> {})` | unsigned shift in TS |
+| `bnot(a)` | bitwise NOT | `(!{})` | `(~{})` | |
+
+**Design choice**: Use named functions (`band`, `bor`, `bxor`) rather than symbolic operators (`&`, `|`, `^`). Rationale:
+- `&` conflicts with potential reference syntax
+- `|` is used for variant types and lambdas
+- `^` is already used for power/XOR (contextual)
+- Named functions are explicit, unambiguous, readable
+- Most Almide code never needs bitwise ops — they shouldn't pollute the operator space
+
+Implementation:
+- [ ] stdlib.rs: add `int.band`, `int.bor`, `int.bxor`, `int.bshl`, `int.bshr`, `int.bnot` signatures
+- [ ] emit_rust/calls.rs: emit corresponding Rust operators
+- [ ] emit_ts/expressions.rs: emit corresponding JS operators (note: `>>>` for unsigned shift)
+- [ ] Test: verify all operators with known values
+
+#### 0b. Wrapping Arithmetic
+
+Required for: hash algorithms that operate on 32-bit unsigned integers with overflow wrapping.
+
+```almide
+int.wrap_add(a, b, bits)    // (a + b) mod 2^bits
+int.wrap_mul(a, b, bits)    // (a * b) mod 2^bits
+int.rotate_right(a, n, bits) // circular right rotation
+int.rotate_left(a, n, bits)  // circular left rotation
+int.to_u32(a)               // truncate to 0..2^32-1
+int.to_u8(a)                // truncate to 0..255
+```
+
+Implementation:
+- [ ] stdlib.rs: add wrapping arithmetic signatures to `int` module
+- [ ] emit_rust/calls.rs: use Rust's `.wrapping_add()`, `.rotate_right()` etc.
+- [ ] emit_ts/expressions.rs: use `Math.imul()`, manual rotation, `>>> 0` for u32
+- [ ] Test: SHA-256 test vectors
+
+#### 0c. Byte Array Type (future consideration)
+
+Currently bytes are `List[Int]` which is `Vec<i64>` — 8x memory overhead. For serious binary processing, a dedicated `Bytes` type may be needed. But `List[Int]` works for correctness and can be optimized later.
 
 ### Phase 1: Stdlib Package Mechanism
 
@@ -563,6 +622,8 @@ Allow stdlib modules to be implemented as `.almd` files that ship with the compi
     args.almd          ← argument parsing (pure Almide)
     term.almd          ← terminal colors (pure Almide)
     csv.almd           ← CSV parsing (pure Almide)
+    hash.almd          ← SHA-256, SHA-1 (pure Almide, uses bitwise ops)
+    encoding.almd      ← base64, hex (pure Almide, uses bitwise ops)
 ```
 
 #### Implementation Steps
@@ -585,12 +646,10 @@ fn flag?(name: String) -> Bool = {
 fn option(name: String) -> Option[String] = {
   let args = env.args()
   let long = "--" ++ name
-  // check --name=value
   let eq_match = list.find(args, fn(a) => string.starts_with?(a, long ++ "="))
   match eq_match {
     some(a) => string.strip_prefix(a, long ++ "=")
     none => {
-      // check --name value
       let idx = list.index_of(args, long)
       match idx {
         some(i) => list.get(args, i + 1)
@@ -608,77 +667,49 @@ fn option_or(name: String, default: String) -> String =
 
 fn positional() -> List[String] =
   list.filter(env.args(), fn(a) => not string.starts_with?(a, "-"))
-    |> list.drop(1)  // drop program name
+    |> list.drop(1)
 ```
 
-### Phase 2: `extern "rust"` — FFI for Rust Crates
-
-New syntax to call Rust functions from Almide. Enables stdlib packages that wrap high-performance Rust crates without touching the compiler.
+#### hash module (pure Almide, after Phase 0)
 
 ```almide
-// stdlib/hash.almd
-extern "rust" {
-  fn sha256_raw(data: String) -> String
-  fn sha1_raw(data: String) -> String
+// stdlib/hash.almd — SHA-256 in pure Almide
+
+fn sha256(data: String) -> String = {
+  let bytes = string.to_bytes(data)
+  let padded = pad_message(bytes)
+  // ... rounds using int.wrap_add, int.rotate_right, int.bxor etc.
+  // ... outputs hex string
+  // Runs on both Rust and TS targets — no extern needed
 }
-
-fn sha256(data: String) -> String = sha256_raw(data)
-fn sha1(data: String) -> String = sha1_raw(data)
 ```
 
-#### Emitted Rust (from `extern "rust"`)
-
-```rust
-// The compiler emits a call to the function name as-is.
-// A companion .rs file provides the implementation.
-fn sha256_raw(data: String) -> String { /* links to sha2 crate */ }
-```
-
-#### Implementation Steps
-
-- [ ] Lexer: add `Extern` token
-- [ ] Parser: parse `extern "rust" { fn name(params) -> ret }` declarations
-- [ ] AST: add `Decl::Extern { target: String, functions: Vec<ExternFn> }` variant
-- [ ] Checker: register extern fn signatures, treat as available functions
-- [ ] Emitter (Rust): emit extern function stubs, link companion `.rs` files
-- [ ] Project: auto-add Rust crate dependencies to generated `Cargo.toml`
-- [ ] Test: implement `hash` module with `extern "rust"` wrapping `sha2` crate
-
-#### What `extern` unlocks
-
-| Module | Wrapped crate | Functions |
-|--------|--------------|-----------|
-| `hash` | `sha2`, `sha1`, `md5` | `sha256`, `sha1`, `md5` |
-| `encoding` | `base64`, `hex` | `base64_encode/decode`, `hex_encode/decode`, `url_encode/decode` |
-| `compress` | `flate2` | `gzip`, `gunzip`, `deflate`, `inflate` |
-| `toml` | `toml` | `parse`, `stringify` |
-
-### Phase 3: Migrate Existing Stdlib
+### Phase 2: Migrate Existing Stdlib
 
 Gradually move pure-logic functions from `calls.rs` to `.almd` files.
 
 #### Candidates for immediate migration (pure logic, no syscalls)
 
-| Function | Current LOC in calls.rs | Can be written in Almide |
-|----------|------------------------|-------------------------|
-| `string.reverse` | 1 | `list.fold(string.chars(s), "", fn(acc, c) => c ++ acc)` |
-| `string.is_empty?` | 1 | `string.len(s) == 0` |
-| `string.strip_prefix/suffix` | 1 each | `if starts_with? then some(slice(...)) else none` |
-| `list.first` | 1 | `list.get(xs, 0)` |
-| `list.is_empty?` | 1 | `list.len(xs) == 0` |
-| `list.flat_map` | 3 | `list.flatten(list.map(xs, f))` |
-| `list.min/max` | 1 each | `list.fold(...)` |
-| `list.join` | 1 | `list.fold(...)` |
-| `list.unique` | 2 | pure Almide with fold |
-| `list.sum/product` | 1 each | `list.fold(xs, 0, fn(a, b) => a + b)` |
-| `map.merge` | 1 | fold over entries |
+| Function | Can be written in Almide |
+|----------|-------------------------|
+| `string.reverse` | `list.fold(string.chars(s), "", fn(acc, c) => c ++ acc)` |
+| `string.is_empty?` | `string.len(s) == 0` |
+| `string.strip_prefix/suffix` | `if starts_with? then some(slice(...)) else none` |
+| `list.first` | `list.get(xs, 0)` |
+| `list.is_empty?` | `list.len(xs) == 0` |
+| `list.flat_map` | `list.flatten(list.map(xs, f))` |
+| `list.min/max` | `list.fold(...)` |
+| `list.join` | `list.fold(...)` |
+| `list.unique` | fold with accumulator |
+| `list.sum/product` | `list.fold(xs, 0, fn(a, b) => a + b)` |
+| `map.merge` | fold over entries |
 
 #### Must stay in compiler (system primitives)
 
 ```
 string: len, split, join(delimiter), trim, contains, starts/ends_with,
         slice, to_upper/lower, replace, chars, to_bytes, from_bytes
-list:   len, get, get_or, sort, reverse, contains
+list:   len, get, get_or, sort, reverse, contains, map, filter, fold
 map:    new, get, get_or, set, remove, keys, values, len, entries, contains
 fs:     all functions (OS syscalls)
 process: all functions (OS syscalls)
@@ -687,7 +718,7 @@ env:    all functions (OS syscalls)
 path:   all functions (OS path operations)
 time:   all functions (OS time)
 math:   all functions (CPU instructions)
-int:    all functions (type conversions)
+int:    all functions (type conversions + bitwise)
 float:  all functions (type conversions)
 json:   all functions (serde_json)
 regex:  all functions (regex crate)
@@ -695,34 +726,55 @@ random: all functions (/dev/urandom)
 http:   all functions (network I/O)
 ```
 
+### Phase 3: `extern` — Last Resort FFI
+
+For cases where pure Almide is impractical (performance-critical inner loops, OS-specific APIs), `extern` provides target-specific escape hatches.
+
+```almide
+extern "rust" {
+  fn fast_sha256(data: List[Int]) -> String
+}
+extern "ts" {
+  fn fast_sha256(data: List[Int]) -> String
+}
+```
+
+This is intentionally the **last phase** — if Almide's own language features are sufficient, extern is rarely needed. It exists for:
+- Performance-critical code where pure Almide is too slow
+- Platform-specific APIs (WASM, native GUI, etc.)
+- Wrapping existing ecosystem libraries
+
+#### Implementation Steps (when needed)
+
+- [ ] Lexer: add `Extern` token
+- [ ] Parser: parse `extern "target" { fn name(params) -> ret }` declarations
+- [ ] AST: add `Decl::Extern` variant
+- [ ] Checker: register extern fn signatures
+- [ ] Emitter: emit target-specific function stubs
+
 ### Priority Order
 
-| Phase | Difficulty | Impact | Prerequisite |
-|-------|-----------|--------|-------------|
-| 1. Stdlib package mechanism | Medium | High — unblocks `args`, `term`, `csv` without compiler changes | None |
-| 2. `extern "rust"` | Medium-High | High — unblocks `hash`, `encoding`, `compress`, `toml` | None (independent of Phase 1) |
-| 3. Migrate existing stdlib | Low | Medium — shrinks `calls.rs`, proves the architecture | Phase 1 |
+| Phase | What | Difficulty | Impact | Enables |
+|-------|------|-----------|--------|---------|
+| **0a.** Bitwise operators | `int.band/bor/bxor/bshl/bshr/bnot` | Low | High | hash, encoding, binary protocols |
+| **0b.** Wrapping arithmetic | `int.wrap_add/wrap_mul/rotate_right/left` | Low | High | SHA-256, SHA-1 in pure Almide |
+| **1.** Stdlib package mechanism | resolver + bundled .almd | Medium | High | args, term, csv, hash, encoding |
+| **2.** Migrate existing stdlib | move pure functions to .almd | Low | Medium | shrinks calls.rs |
+| **3.** `extern` FFI | target-specific escape hatch | Medium-High | Low (rarely needed) | platform-specific APIs |
 
-### CLI Stdlib Gaps (to be filled via Phase 1 + Phase 2)
+### CLI Stdlib Gaps (to be filled via self-hosting)
 
-#### Via Phase 1 (pure Almide, no extern needed)
+#### Via Almide stdlib packages (after Phase 0 + Phase 1)
 
-| Module | Functions | Priority |
-|--------|-----------|----------|
-| `args` | `flag?`, `option`, `option_or`, `positional`, `positional_at` | CRITICAL |
-| `term` | `color`, `bold`, `dim`, `is_tty?`, `width` | MEDIUM |
-| `csv` | `parse`, `parse_with_header`, `stringify` | MEDIUM |
+| Module | Functions | Needs bitwise? | Priority |
+|--------|-----------|---------------|----------|
+| `args` | `flag?`, `option`, `option_or`, `positional`, `positional_at` | No | CRITICAL |
+| `hash` | `sha256`, `sha1`, `md5`, `sha256_bytes` | Yes | CRITICAL |
+| `encoding` | `base64_encode/decode`, `hex_encode/decode`, `url_encode/decode` | Yes | HIGH |
+| `term` | `color`, `bold`, `dim`, `is_tty?`, `width` | No | MEDIUM |
+| `csv` | `parse`, `parse_with_header`, `stringify` | No | MEDIUM |
 
-#### Via Phase 2 (needs `extern "rust"`)
-
-| Module | Functions | Priority |
-|--------|-----------|----------|
-| `hash` | `sha256`, `sha1`, `md5`, `sha256_bytes` | CRITICAL |
-| `encoding` | `base64_encode/decode`, `hex_encode/decode`, `url_encode/decode` | HIGH |
-| `compress` | `gzip`, `gunzip` | MEDIUM |
-| `toml` | `parse`, `stringify` | MEDIUM |
-
-#### Via compiler primitives (small additions to calls.rs)
+#### Via compiler primitives (small additions to calls.rs — both targets)
 
 | Module | Functions | Priority |
 |--------|-----------|----------|
