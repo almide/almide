@@ -41,3 +41,50 @@ fn extension(p: String) -> Option[String] = {
 }
 
 fn is_absolute?(p: String) -> Bool = string.starts_with?(p, "/")
+
+fn stem(p: String) -> String = {
+  let name = basename(p)
+  let parts = string.split(name, ".")
+  let n = list.len(parts)
+  // No dot, or only a leading dot (e.g. ".hidden") → return as-is
+  if n <= 1 then name
+  else if string.starts_with?(name, ".") and n == 2 then name
+  else {
+    // Drop the last segment and rejoin
+    let prefix_parts = list.take(parts, n - 1)
+    string.join(prefix_parts, ".")
+  }
+}
+
+fn normalize(p: String) -> String = {
+  let absolute = string.starts_with?(p, "/")
+  let segments = string.split(p, "/")
+  // Filter out empty segments (from //) and "." segments
+  let cleaned = list.filter(segments, fn(s) => string.len(s) > 0 and s != ".")
+  // Fold left, building a reversed list of resolved segments
+  let resolved = list.fold(cleaned, [], fn(acc, seg) => {
+    if seg == ".." then {
+      let acc_len = list.len(acc)
+      if acc_len == 0 then {
+        // Nothing to pop — keep ".." only if relative
+        if absolute then acc
+        else [".."] ++ acc
+      }
+      else {
+        let top = match list.first(acc) {
+          some(v) => v
+          none => ""
+        }
+        // Can't pop past ".."
+        if top == ".." then [".."] ++ acc
+        else list.drop(acc, 1)
+      }
+    }
+    else [seg] ++ acc
+  })
+  let ordered = list.reverse(resolved)
+  let joined = string.join(ordered, "/")
+  if absolute then "/" ++ joined
+  else if string.len(joined) == 0 then "."
+  else joined
+}

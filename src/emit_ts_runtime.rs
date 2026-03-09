@@ -10,8 +10,24 @@ const __almd_fs = {
   mkdir_p(p: string): void { Deno.mkdirSync(p, { recursive: true }); },
   exists_hdlm_qm_(p: string): boolean { try { Deno.statSync(p); return true; } catch { return false; } },
   read_lines(p: string): string[] { return Deno.readTextFileSync(p).split("\n").filter(l => l.length > 0); },
-  remove(p: string): void { Deno.removeSync(p); },
+  remove(p: string): void { Deno.removeSync(p, { recursive: true }); },
   list_dir(p: string): string[] { return [...Deno.readDirSync(p)].map(e => e.name).sort(); },
+  walk(dir: string): string[] {
+    const results: string[] = [];
+    function inner(d: string) {
+      for (const entry of Deno.readDirSync(d)) {
+        const p = d + "/" + entry.name;
+        results.push(p);
+        if (entry.isDirectory) inner(p);
+      }
+    }
+    inner(dir);
+    return results.sort();
+  },
+  stat(path: string): {size: number, is_dir: boolean, is_file: boolean, modified: number} {
+    const s = Deno.statSync(path);
+    return { size: s.size, is_dir: s.isDirectory, is_file: s.isFile, modified: Math.floor((s.mtime?.getTime() ?? 0) / 1000) };
+  },
 };
 const __almd_string = {
   trim(s: string): string { return s.trim(); },
@@ -309,8 +325,27 @@ const __almd_fs = {
   mkdir_p(p) { require("fs").mkdirSync(p, { recursive: true }); },
   exists_hdlm_qm_(p) { const fs = require("fs"); try { fs.statSync(p); return true; } catch { return false; } },
   read_lines(p) { return require("fs").readFileSync(p, "utf-8").split("\n").filter(l => l.length > 0); },
-  remove(p) { require("fs").unlinkSync(p); },
+  remove(p) { const fs = require("fs"); try { const s = fs.statSync(p); if (s.isDirectory()) fs.rmSync(p, { recursive: true }); else fs.unlinkSync(p); } catch(e) { throw e; } },
   list_dir(p) { return require("fs").readdirSync(p).sort(); },
+  walk(dir) {
+    const fs = require("fs");
+    const results = [];
+    function inner(d) {
+      const entries = fs.readdirSync(d, { withFileTypes: true });
+      for (const entry of entries) {
+        const p = d + "/" + entry.name;
+        results.push(p);
+        if (entry.isDirectory()) inner(p);
+      }
+    }
+    inner(dir);
+    return results.sort();
+  },
+  stat(path) {
+    const fs = require("fs");
+    const s = fs.statSync(path);
+    return { size: s.size, is_dir: s.isDirectory(), is_file: s.isFile(), modified: Math.floor(s.mtimeMs / 1000) };
+  },
 };
 const __almd_string = {
   trim(s) { return s.trim(); },

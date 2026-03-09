@@ -1,0 +1,18 @@
+import path
+
+test "path.stem basic" {
+  assert(path.stem("foo/bar.txt") == "bar", "stem basic")
+  assert(path.stem("archive.tar.gz") == "archive.tar", "stem multi-dot")
+  assert(path.stem("noext") == "noext", "stem no extension")
+  assert(path.stem(".hidden") == ".hidden", "stem hidden file")
+  assert(path.stem("dir/file.rs") == "file", "stem with dir")
+}
+
+test "path.normalize" {
+  assert(path.normalize("a/b/../c") == "a/c", "normalize dotdot")
+  assert(path.normalize("a/./b//c") == "a/b/c", "normalize dot and double slash")
+  assert(path.normalize("/a/b/../c") == "/a/c", "normalize absolute")
+  assert(path.normalize(".") == ".", "normalize single dot")
+  assert(path.normalize("a/b") == "a/b", "normalize no-op")
+  assert(path.normalize("/") == "/", "normalize root")
+}
