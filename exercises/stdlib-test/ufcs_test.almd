@@ -1,0 +1,66 @@
+// UFCS (Uniform Function Call Syntax) test
+// Verifies that x.method() resolves to the correct module based on receiver type
+
+fn main() -> Unit = {
+  // ── String UFCS ──
+  let s = "hello world"
+  assert_eq(s.len(), 11)
+  assert_eq(s.contains("world"), true)
+  assert_eq(s.contains("xyz"), false)
+  assert_eq(s.reverse(), "dlrow olleh")
+  assert_eq(s.index_of("world"), Some(6))
+
+  // ── List UFCS ──
+  let xs = [1, 2, 3, 4, 5]
+  assert_eq(xs.len(), 5)
+  assert_eq(xs.contains(3), true)
+  assert_eq(xs.contains(99), false)
+  assert_eq(xs.reverse(), [5, 4, 3, 2, 1])
+  assert_eq(xs.index_of(3), Some(2))
+  assert_eq(xs.first(), Some(1))
+  assert_eq(xs.last(), Some(5))
+
+  // ── Map UFCS ──
+  let m = map.set(map.set(map.new(), "a", 1), "b", 2)
+  assert_eq(m.len(), 2)
+  assert_eq(m.contains("a"), true)
+  assert_eq(m.contains("z"), false)
+  assert_eq(m.get("a"), Some(1))
+  assert_eq(m.get("z"), None)
+
+  // ── Mixed: same method name, different types in one function ──
+  let str1 = "abc"
+  let list1 = [10, 20, 30]
+  let map1 = map.set(map.new(), "x", 99)
+  assert_eq(str1.len(), 3)
+  assert_eq(list1.len(), 3)
+  assert_eq(map1.len(), 1)
+
+  // ── UFCS on expressions (non-ident receivers) ──
+  assert_eq("hello".len(), 5)
+  assert_eq([1, 2].len(), 2)
+  assert_eq("abc".reverse(), "cba")
+  assert_eq([3, 1, 2].reverse(), [2, 1, 3])
+
+  // ── UFCS with additional args ──
+  assert_eq("hello world".split(" "), ["hello", "world"])
+  assert_eq([1, 2, 3].get(1), Some(2))
+  assert_eq(m.get_or("z", 0), 0)
+
+  // ── String-only UFCS ──
+  assert_eq("  hello  ".trim(), "hello")
+  assert_eq("hello".to_upper(), "HELLO")
+  assert_eq("HELLO".to_lower(), "hello")
+
+  // ── List-only UFCS ──
+  assert_eq([3, 1, 2].sort(), [1, 2, 3])
+  assert_eq([1, 2, 3].sum(), 6)
+  assert_eq([[1, 2], [3, 4]].flatten(), [1, 2, 3, 4])
+
+  // ── Chained UFCS ──
+  let words = "hello world foo"
+  let result = words.split(" ").reverse()
+  assert_eq(result, ["foo", "world", "hello"])
+
+  println("UFCS: all tests passed")
+}

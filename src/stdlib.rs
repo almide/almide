@@ -33,38 +33,97 @@ pub fn is_any_stdlib(name: &str) -> bool {
 
 /// Resolve a method name to its stdlib module (for UFCS / dot syntax).
 /// e.g. `x.trim()` → `string.trim(x)`
+/// For ambiguous methods (exist in multiple modules), returns `None`.
+/// Use `resolve_ufcs_candidates` for those.
 pub fn resolve_ufcs_module(method: &str) -> Option<&'static str> {
+    let candidates = resolve_ufcs_candidates(method);
+    if candidates.is_empty() {
+        None
+    } else {
+        // For single candidate, return it directly.
+        // For ambiguous methods, return the first candidate as a reasonable default.
+        // The Rust emitter uses this; the TS emitter uses resolve_ufcs_candidates() for runtime dispatch.
+        Some(candidates[0])
+    }
+}
+
+/// Return all stdlib modules that contain a given method name.
+/// Used for runtime dispatch when a method is ambiguous (e.g. `len` in string/list/map).
+pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
     match method {
-        "trim" | "split" | "join" | "pad_left"
+        // ── string-only ──
+        "trim" | "split" | "pad_left"
         | "starts_with" | "starts_with_hdlm_qm_" | "starts_with?"
         | "ends_with" | "ends_with_hdlm_qm_" | "ends_with?"
-        | "slice" | "to_bytes" | "contains" | "to_upper" | "to_lower"
+        | "slice" | "to_bytes" | "to_upper" | "to_lower"
         | "to_int" | "replace" | "char_at" | "lines"
-        | "chars" | "index_of" | "repeat" | "from_bytes"
+        | "chars" | "repeat" | "from_bytes"
         | "is_digit?" | "is_digit_hdlm_qm_"
         | "is_alpha?" | "is_alpha_hdlm_qm_"
         | "is_alphanumeric?" | "is_alphanumeric_hdlm_qm_"
         | "is_whitespace?" | "is_whitespace_hdlm_qm_"
-        | "pad_right" | "trim_start" | "trim_end" | "count"
+        | "pad_right" | "trim_start" | "trim_end"
         | "strip_prefix" | "strip_suffix"
-        | "replace_first" | "last_index_of" | "to_float" => Some("string"),
+        | "replace_first" | "last_index_of" | "to_float" => vec!["string"],
 
-        "get" | "get_or" | "sort" | "reverse"
-        | "each" | "map" | "filter" | "find" | "fold"
-        | "any" | "all" | "len"
+        // ── list-only ──
+        "each" | "fold" | "find" | "any" | "all"
         | "enumerate" | "zip" | "flatten" | "take" | "drop"
         | "sort_by" | "unique"
         | "last" | "chunk" | "sum" | "product"
         | "first" | "flat_map"
         | "filter_map" | "take_while" | "drop_while"
-        | "partition" | "reduce" | "group_by" => Some("list"),
+        | "partition" | "reduce" | "group_by" => vec!["list"],
 
-        "to_string" | "to_hex" => Some("int"),
-
+        // ── map-only ──
         "keys" | "values" | "entries" | "merge"
-        | "map_values" => Some("map"),
+        | "map_values" => vec!["map"],
 
-        _ => None,
+        // ── int-only ──
+        "to_string" | "to_hex" => vec!["int"],
+
+        // ── ambiguous: string + list ──
+        "reverse" => vec!["string", "list"],
+        "index_of" => vec!["string", "list"],
+        "join" => vec!["string", "list"],
+        "count" => vec!["string", "list"],
+
+        // ── ambiguous: string + list + map ──
+        "len" => vec!["string", "list", "map"],
+        "contains" | "contains?" | "contains_hdlm_qm_" => vec!["string", "list", "map"],
+        "is_empty?" | "is_empty_hdlm_qm_" => vec!["list", "map"],
+
+        // ── ambiguous: list + map ──
+        "get" | "get_or" => vec!["list", "map"],
+        "sort" => vec!["list"],
+        "map" | "filter" => vec!["list"],
+
+        _ => vec![],
+    }
+}
+
+/// Resolve UFCS module by receiver type (compile-time resolution).
+/// Returns the correct module for a method based on the known type of the receiver.
+/// Returns None if the receiver type doesn't match any candidate, or the type is Unknown.
+pub fn resolve_ufcs_by_type(method: &str, receiver_type: crate::ast::ResolvedType) -> Option<&'static str> {
+    use crate::ast::ResolvedType;
+    let candidates = resolve_ufcs_candidates(method);
+    if candidates.is_empty() {
+        return None;
+    }
+    // Map receiver type to module name
+    let module = match receiver_type {
+        ResolvedType::String => "string",
+        ResolvedType::List => "list",
+        ResolvedType::Map => "map",
+        ResolvedType::Int => "int",
+        ResolvedType::Float => "float",
+        _ => return None, // Unknown, Record, etc. — cannot resolve at compile time
+    };
+    if candidates.contains(&module) {
+        Some(module)
+    } else {
+        None
     }
 }
 

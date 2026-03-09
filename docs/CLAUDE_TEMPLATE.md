@@ -17,7 +17,7 @@ return expr                    (last expression IS the return)
 fn foo() -> Int { ... }        fn foo() -> Int = { ... }
 import { json }                import json
 struct Foo { x: Int }          type Foo = { x: Int }
-x.len()                        string.len(x) or list.len(x)
+x.len()                        WORKS! (UFCS — auto-resolves by type)
 try { } catch(e) { }          match result { Ok(v) => ..., Err(e) => ... }
 while cond { }                 do { guard cond else ok(()) ... }
 ```
@@ -82,6 +82,11 @@ type Shape =
 // List/String concat
 let combined = [1, 2] ++ [3, 4]
 let greeting = "hello" ++ " " ++ "world"
+
+// UFCS — method syntax works on any type (auto-resolves to correct module)
+let n = "hello".len()          // same as string.len("hello")
+let m = [1, 2, 3].len()       // same as list.len([1, 2, 3])
+let r = "hello".split(" ").reverse()  // chaining works too
 ```
 
 ## Stdlib Quick Reference

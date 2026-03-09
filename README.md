@@ -21,9 +21,11 @@
 
 ## What is Almide?
 
-Almide is a language for AI to write code directly and efficiently. The design goal is that LLMs can express intent in the fewest tokens and with the least thinking, by providing the right abstractions and eliminating boilerplate.
+Almide is the language LLMs can write most accurately.
 
-The core thesis: **if AI can write a language reliably, code proliferates → training data grows → AI writes it even better → modules multiply**. Almide is designed to start this flywheel.
+Every design decision serves one metric: **modification survival rate** — how often AI-generated code still compiles and passes tests after a series of modifications. We optimize for this by making the language unambiguous, the compiler error messages actionable, and the standard library complete enough that LLMs rarely need to invent patterns.
+
+The flywheel: **LLM writes Almide reliably → code proliferates → training data grows → LLM writes it even better → modules multiply**.
 
 ## Quick Start
 
@@ -92,7 +94,7 @@ type AppError =
   deriving From
 
 effect fn greet(name: String) -> Result[Unit, AppError] = {
-  guard string.len(name) > 0 else err(NotFound("empty name"))
+  guard name.len() > 0 else err(NotFound("empty name"))
   println("Hello, ${name}!")
   ok(())
 }
@@ -106,7 +108,7 @@ effect fn main(args: List[String]) -> Result[Unit, AppError] = {
 }
 
 test "greet succeeds" {
-  assert_eq(string.len("hello"), 5)
+  assert_eq("hello".len(), 5)
 }
 ```
 

@@ -86,7 +86,11 @@ impl Emitter {
 
         if let Expr::Member { object, field, .. } = callee {
             // UFCS: receiver.method(args) => module.method(receiver, args)
-            if let Some(resolved) = Self::resolve_ufcs_module(field) {
+            // Try type-based resolution first (correct for ambiguous methods like len, contains)
+            let resolved = object.resolved_type()
+                .and_then(|rt| crate::stdlib::resolve_ufcs_by_type(field, rt))
+                .or_else(|| Self::resolve_ufcs_module(field));
+            if let Some(resolved) = resolved {
                 let mut new_args = vec![object.as_ref().clone()];
                 new_args.extend(args.iter().cloned());
                 return self.gen_module_call(resolved, field, &new_args);

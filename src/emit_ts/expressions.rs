@@ -185,9 +185,91 @@ impl TsEmitter {
         }
     }
 
-    fn resolve_ufcs_module(method: &str) -> Option<String> {
-        // UFCS is only for stdlib modules, so always prefix with __
-        crate::stdlib::resolve_ufcs_module(method).map(|m| format!("__almd_{}", m))
+    /// Resolve UFCS module for the TS target.
+    /// 1. Try compile-time resolution using the receiver's resolved_type
+    /// 2. Fall back to runtime dispatch for ambiguous methods with Unknown type
+    /// 3. Fall back to single-candidate resolution
+    fn resolve_ufcs_for_ts(&self, object: &Expr, method: &str) -> Option<String> {
+        let candidates = crate::stdlib::resolve_ufcs_candidates(method);
+        if candidates.is_empty() {
+            return None;
+        }
+
+        // Try type-based resolution first (zero runtime cost)
+        if let Some(rt) = object.resolved_type() {
+            if let Some(module) = crate::stdlib::resolve_ufcs_by_type(method, rt) {
+                return Some(format!("__almd_{}", module));
+            }
+        }
+
+        // Single candidate — use it directly
+        if candidates.len() == 1 {
+            return Some(format!("__almd_{}", candidates[0]));
+        }
+
+        // Ambiguous with unknown type — runtime dispatch
+        // Build IIFE: ((__r) => typeof __r === 'string' ? ... : ...)(obj)
+        // This is handled by gen_ufcs_dispatch, but we return a special marker
+        // Actually, we can't return a module name here — we need the full expression.
+        // Return None so the caller can handle it.
+        None
+    }
+
+    /// Resolve UFCS with runtime dispatch for truly ambiguous cases (Unknown receiver type).
+    /// Called only when resolve_ufcs_for_ts returns None but candidates exist.
+    fn try_ufcs_runtime_dispatch(&self, object: &Expr, method: &str, args: &[Expr]) -> Option<String> {
+        let candidates = crate::stdlib::resolve_ufcs_candidates(method);
+        if candidates.len() > 1 {
+            return Some(self.gen_ufcs_dispatch(method, &candidates, object, args));
+        }
+        None
+    }
+
+    /// Generate runtime dispatch for ambiguous UFCS methods (e.g. `len` in string/list/map).
+    /// Returns `typeof __r === 'string' ? __almd_string.len(__r) : Array.isArray(__r) ? __almd_list.len(__r) : __almd_map.len(__r)`
+    fn gen_ufcs_dispatch(&self, method: &str, candidates: &[&str], obj: &Expr, args: &[Expr]) -> String {
+        let obj_str = self.gen_expr(obj);
+        let sanitized = Self::sanitize(method);
+        let extra_args: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
+
+        let tmp = "__r";
+
+        // Build call strings using tmp directly (not via string replacement, which corrupts module names)
+        let mut parts: Vec<String> = Vec::new();
+        for &candidate in candidates {
+            let module = self.map_module(candidate);
+            let mut all_args = vec![tmp.to_string()];
+            all_args.extend(extra_args.clone());
+            let call = format!("{}.{}({})", module, sanitized, all_args.join(", "));
+            parts.push(call);
+        }
+
+        // Single candidate — call directly with the real object (no tmp wrapper needed)
+        if parts.len() == 1 {
+            let module = self.map_module(candidates[0]);
+            let mut all_args = vec![obj_str];
+            all_args.extend(extra_args);
+            return format!("{}.{}({})", module, sanitized, all_args.join(", "));
+        }
+
+        // Generate ternary chain wrapped in an IIFE
+        let mut chain = String::new();
+        let total = parts.len();
+        for (i, call_str) in parts.iter().enumerate() {
+            if i == total - 1 {
+                chain.push_str(call_str);
+            } else {
+                let cond = match candidates[i] {
+                    "string" => format!("typeof {} === 'string'", tmp),
+                    "list" => format!("Array.isArray({})", tmp),
+                    "map" => format!("typeof {} === 'object' && {} !== null && !Array.isArray({})", tmp, tmp, tmp),
+                    _ => "true".to_string(),
+                };
+                chain.push_str(&format!("{} ? {} : ", cond, call_str));
+            }
+        }
+
+        format!("(({}) => {})({})", tmp, chain, obj_str)
     }
 
     /// Check if an expression is a module chain (e.g. deeplib.http.client)
@@ -224,42 +306,24 @@ impl TsEmitter {
     pub(crate) fn gen_call(&self, callee: &Expr, args: &[Expr]) -> String {
         // UFCS: expr.method(args) => __module.method(expr, args)
         if let Expr::Member { object, field, .. } = callee {
-            if let Expr::Ident { name, .. } = object.as_ref() {
-                let is_user_module = self.user_modules.contains(&name.to_string());
-                let is_module = is_user_module || crate::stdlib::is_stdlib_module(name);
-                if !is_module {
-                    // UFCS: non-module receiver
-                    if let Some(module) = Self::resolve_ufcs_module(field) {
-                        let obj_str = self.gen_expr(object);
-                        let mut all_args = vec![obj_str];
-                        all_args.extend(args.iter().map(|a| self.gen_expr(a)));
-                        return format!("{}.{}({})", module, Self::sanitize(field), all_args.join(", "));
-                    }
-                    // len/contains: try both, default to list for identifiers
-                    if field == "len" || field == "contains" {
-                        let obj_str = self.gen_expr(object);
-                        let mut all_args = vec![obj_str];
-                        all_args.extend(args.iter().map(|a| self.gen_expr(a)));
-                        return format!("__almd_list.{}({})", Self::sanitize(field), all_args.join(", "));
-                    }
+            let is_module = match object.as_ref() {
+                Expr::Ident { name, .. } => {
+                    self.user_modules.contains(&name.to_string()) || crate::stdlib::is_stdlib_module(name)
                 }
-            } else {
-                // Non-ident object (e.g. call result, member chain)
-                let is_module_chain = self.is_module_chain(object);
+                _ => self.is_module_chain(object),
+            };
 
-                if !is_module_chain {
-                    if let Some(module) = Self::resolve_ufcs_module(field) {
-                        let obj_str = self.gen_expr(object);
-                        let mut all_args = vec![obj_str];
-                        all_args.extend(args.iter().map(|a| self.gen_expr(a)));
-                        return format!("{}.{}({})", module, Self::sanitize(field), all_args.join(", "));
-                    }
-                    if field == "len" || field == "contains" {
-                        let obj_str = self.gen_expr(object);
-                        let mut all_args = vec![obj_str];
-                        all_args.extend(args.iter().map(|a| self.gen_expr(a)));
-                        return format!("__almd_list.{}({})", Self::sanitize(field), all_args.join(", "));
-                    }
+            if !is_module {
+                // Try type-based UFCS resolution (compile-time, zero cost)
+                if let Some(module) = self.resolve_ufcs_for_ts(object, field) {
+                    let obj_str = self.gen_expr(object);
+                    let mut all_args = vec![obj_str];
+                    all_args.extend(args.iter().map(|a| self.gen_expr(a)));
+                    return format!("{}.{}({})", module, Self::sanitize(field), all_args.join(", "));
+                }
+                // Fallback: runtime dispatch for ambiguous methods with unknown receiver type
+                if let Some(dispatched) = self.try_ufcs_runtime_dispatch(object, field, args) {
+                    return dispatched;
                 }
             }
         }

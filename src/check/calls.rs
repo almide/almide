@@ -57,9 +57,15 @@ impl Checker {
                 }
             }
 
-            // Single segment — direct module call
+            // Single segment — only call as module if it's actually a known module
             if segments.len() == 1 {
-                return self.check_module_call(segments[0], func, &arg_tys);
+                let resolved_first = self.env.module_aliases.get(segments[0])
+                    .cloned()
+                    .unwrap_or_else(|| segments[0].to_string());
+                if self.env.user_modules.contains(&resolved_first) || stdlib::is_stdlib_module(segments[0]) {
+                    return self.check_module_call(segments[0], func, &arg_tys);
+                }
+                // Not a module — fall through to type-check the callee (UFCS will resolve via resolved_type)
             }
         }
 
@@ -69,6 +75,30 @@ impl Checker {
 
         if let ast::Expr::TypeName { name, .. } = callee {
             return self.check_constructor_call(name, &arg_tys);
+        }
+
+        // UFCS: receiver.method(args) — resolve module from receiver type
+        if let ast::Expr::Member { object, field, .. } = callee {
+            let receiver_ty = self.check_expr(object);
+            let module = match &receiver_ty {
+                Ty::String => Some("string"),
+                Ty::List(_) => Some("list"),
+                Ty::Map(_, _) => Some("map"),
+                Ty::Int => Some("int"),
+                Ty::Float => Some("float"),
+                _ => None,
+            };
+            if let Some(module) = module {
+                let candidates = stdlib::resolve_ufcs_candidates(field);
+                if candidates.contains(&module) {
+                    // Prepend receiver as first arg
+                    let mut full_arg_tys = vec![receiver_ty];
+                    full_arg_tys.extend(arg_tys);
+                    return self.check_module_call(module, field, &full_arg_tys);
+                }
+            }
+            // Not a UFCS call — return Unknown
+            return Ty::Unknown;
         }
 
         let ct = self.check_expr(callee);

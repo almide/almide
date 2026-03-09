@@ -18,6 +18,7 @@ pub enum ResolvedType {
     Bool,
     Unit,
     List,
+    Map,
     Option,
     Result,
     Fn,
