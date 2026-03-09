@@ -1,58 +1,124 @@
 # Almide Roadmap
 
-## Module System ✅ Implemented
+## Module System v2
+
+### Design Principles
+
+- **File = namespace**. Each `.almd` file is its own namespace. No barrel files, no `export` syntax, no `module` declaration.
+- **`mod.almd` is optional**. If present, it defines the package's top-level namespace. Other files are accessible as sub-namespaces.
+- **Only `src/main.almd` is special** — required for `almide run` / `almide build`.
+- **Visibility controls access**, not file structure. `fn` = public, `mod fn` = same project, `local fn` = same file.
 
 ### Project Structure
 
 ```
-myapp/
-  almide.toml
-  src/
-    main.almd              # entry point
-    utils.almd             # import self.utils
-    http/
-      client.almd          # import self.http.client
-      server.almd          # import self.http.server
-  tests/
-    utils_test.almd
+myapp/ (application)               mylib/ (library)
+  almide.toml                        almide.toml
+  src/                               src/
+    main.almd    ← fn main             mod.almd       ← package top-level (optional)
+    config.almd                        parser.almd
+    http/                              formatter.almd
+      client.almd                      utils.almd
+      server.almd                    tests/
+  tests/                               parser_test.almd
+    config_test.almd
 ```
 
 ### almide.toml
 
 ```toml
 [package]
-name = "myapp"
+name = "mylib"
 version = "0.1.0"
 
 [dependencies]
 json = { git = "https://github.com/almide/json", tag = "v1.0.0" }
 ```
 
-Package identity is managed in `almide.toml`. No `module` declaration is needed in source files.
+No `type = "app"` / `type = "lib"` needed — determined by file existence.
 
-### import syntax ✅
+### Import Syntax
+
+#### Self imports (same project)
 
 ```almide
-import self.utils              // utils.add(1, 2)
-import self.http.client        // client.get(url)
-import self.http.client as c   // c.get(url)
-import json                    // external dependency (almide.toml)
+import self.config             // config.load(...)
+import self.http.client        // client.get(...)
+import self.http.client as c   // c.get(...)
 ```
 
-- `self.xxx` = local module → resolved under `src/`
-- anything else = stdlib or external dependency
-- `as` alias supported
-- User modules take priority over stdlib when names conflict
+#### External package imports
 
-### Module File Resolution ✅
+```almide
+import mylib                   // mylib.parse(...), mylib.parser.parse(...)
+import mylib.parser            // parser.parse(...)
+import mylib.parser as p       // p.parse(...)
+```
 
-| import statement | resolved location |
+#### Stdlib imports
+
+```almide
+import string                  // string.trim(...)
+import regex                   // regex.find(...)
+```
+
+### Package Access Model
+
+When a user imports an external package, what they can access depends on whether `src/mod.almd` exists in that package:
+
+#### With `mod.almd`
+
+```
+mylib/src/
+  mod.almd        ← fn fuga(), fn hello()
+  a.almd          ← fn fuga(), fn bar()
+  b.almd          ← fn greet()
+```
+
+```almide
+import mylib
+
+mylib.fuga()       // mod.almd の fn fuga
+mylib.hello()      // mod.almd の fn hello
+mylib.a.fuga()     // a.almd の fn fuga (no conflict — different namespace)
+mylib.a.bar()      // a.almd の fn bar
+mylib.b.greet()    // b.almd の fn greet
+```
+
+`mod.almd` defines the package's top-level namespace. Other files are sub-namespaces accessed via `pkg.file.func()`.
+
+#### Without `mod.almd`
+
+```
+mylib/src/
+  parser.almd     ← fn parse()
+  formatter.almd  ← fn format()
+```
+
+```almide
+import mylib
+
+mylib.parser.parse(...)      // OK — sub-namespace access
+mylib.formatter.format(...)  // OK
+mylib.parse(...)             // ❌ Error — no mod.almd, no top-level namespace
+```
+
+```almide
+import mylib.parser          // Direct sub-module import also works
+
+parser.parse(...)            // OK
+```
+
+### File Resolution Rules
+
+| import | resolved location |
 |---|---|
 | `import self.utils` | `src/utils.almd` |
-| `import self.http.client` | `src/http/client.almd` |
-| `import json` | dependency in almide.toml → `~/.almide/cache/` |
+| `import self.http.client` | `src/http/client.almd` or `src/http/client/mod.almd` |
+| `import mylib` | dep `src/mod.almd` (top-level) + all `src/*.almd` (sub-namespaces) |
+| `import mylib.parser` | dep `src/parser.almd` or dep `src/parser/mod.almd` |
 
-### 3-Level Visibility ✅
+### 3-Level Visibility ✅ Implemented
 
 | Syntax | Scope | Rust output |
 |---|---|---|
@@ -62,20 +128,36 @@ import json                    // external dependency (almide.toml)
 
 - Same modifiers apply to `type` declarations
 - `pub` keyword is accepted for backward compatibility (no-op since default is already public)
+- `mod fn` is invisible to external importers — enforced at checker stage
+
+### Checker-level visibility errors ✅ Implemented
+
+- [x] Error at checker stage when `local fn` is called from an external module
+- [x] Error at checker stage when `mod fn` is called from an external package
+- [x] Error message: "function 'xxx' is not accessible from module 'yyy'"
+
+### Deprecations
+
+| Old | New | Status |
+|---|---|---|
+| `module xxx` declaration | Not needed | Parser accepts but warns |
+| `lib.almd` as package entry | `mod.almd` | Searched as fallback for now |
+
+### Implementation Steps
+
+- [ ] Resolver: support `import pkg` loading `mod.almd` + sub-namespace files
+- [ ] Resolver: support `import pkg.submodule` for direct sub-module access
+- [ ] Checker: validate cross-package access respects `mod.almd` boundary
+- [ ] CLI: `almide init` template — remove `module main` from generated code
+- [ ] CLI: `almide fmt` without args — format all `src/**/*.almd` recursively
+- [ ] CLI: `almide --help` and `almide --version`
+- [ ] CLI: `--dry-run` → `--check` rename for `almide fmt` (keep `--dry-run` as alias)
+- [ ] Deprecation warning for `module` declarations
+- [ ] Deprecation warning for `lib.almd` as package entry (suggest rename to `mod.almd`)
 
 ### Test Repository
 
 - https://github.com/almide/mod-sample — for verifying visibility + self import behavior
-
----
-
-## Remaining Improvements
-
-### Checker-level visibility errors ✅
-
-- [x] Error at checker stage when `local fn` is called from an external module
-- [x] Error at checker stage when `mod fn` is called from an external package (determined by `is_external` flag)
-- [x] Error message: "function 'xxx' is not accessible from module 'yyy'"
 
 ---
 
