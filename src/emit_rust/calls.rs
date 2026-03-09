@@ -377,11 +377,11 @@ impl Emitter {
                 "is_empty?" | "is_empty_hdlm_qm_" => format!("almide_rt_map_is_empty(&{})", args_str[0]),
                 "map_values" => {
                     let (names, body) = self.inline_lambda(&args[1], 1);
-                    format!("almide_rt_map_map_values(&{}, |{}| {{ {} }})", args_str[0], names[0], body)
+                    format!("almide_rt_map_map_values(&{}, |{}| {{ let {} = {}.clone(); {} }})", args_str[0], names[0], names[0], names[0], body)
                 }
                 "filter" => {
                     let (names, body) = self.inline_lambda(&args[1], 2);
-                    format!("almide_rt_map_filter(&{}, |{}, {}| {{ {} }})", args_str[0], names[0], names[1], body)
+                    format!("almide_rt_map_filter(&{}, |{}, {}| {{ let {} = {}.clone(); let {} = {}.clone(); {} }})", args_str[0], names[0], names[1], names[0], names[0], names[1], names[1], body)
                 }
                 "from_entries" => format!("almide_rt_map_from_entries(({}).clone())", args_str[0]),
                 _ => { eprintln!("internal error: no Rust codegen for map.{}() — this is a compiler bug", func); std::process::exit(70); },

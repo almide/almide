@@ -67,7 +67,13 @@ test "map.map_values" {
   assert(map.get_or(doubled, "b", 0) == 4, "map_values b")
 }
 
-// map.filter: skipped in test — closure receives references (known codegen edge case)
+test "map.filter" {
+  let m = map.set(map.set(map.set(map.new(), "a", 1), "b", 2), "c", 3)
+  let big = map.filter(m, fn(k, v) => v > 1)
+  assert(map.len(big) == 2, "map.filter len")
+  assert(map.contains(big, "b"), "map.filter has b")
+  assert(map.contains(big, "c"), "map.filter has c")
+}
 
 test "map.from_entries" {
   let entries = [("x", 10), ("y", 20)]
