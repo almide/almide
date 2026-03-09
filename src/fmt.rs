@@ -225,7 +225,15 @@ fn format_expr(out: &mut String, expr: &Expr, depth: usize) {
         Expr::String { value, .. } => out.push_str(&format!("{:?}", value)),
         Expr::InterpolatedString { value, .. } => {
             out.push('"');
-            out.push_str(value);
+            for ch in value.chars() {
+                match ch {
+                    '\n' => out.push_str("\\n"),
+                    '\t' => out.push_str("\\t"),
+                    '\\' => out.push_str("\\\\"),
+                    '"' => out.push_str("\\\""),
+                    other => out.push(other),
+                }
+            }
             out.push('"');
         }
         Expr::Bool { value, .. } => out.push_str(if *value { "true" } else { "false" }),
