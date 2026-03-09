@@ -81,7 +81,7 @@ pub fn cmd_init() {
     }
 
     if !std::path::Path::new("src/main.almd").exists() {
-        if let Err(e) = std::fs::write("src/main.almd", "module main\n\neffect fn main(args: List[String]) -> Result[Unit, String] = {\n  println(\"Hello, Almide!\")\n  ok(())\n}\n") {
+        if let Err(e) = std::fs::write("src/main.almd", "effect fn main(args: List[String]) -> Result[Unit, String] = {\n  println(\"Hello, Almide!\")\n  ok(())\n}\n") {
             eprintln!("Failed to write src/main.almd: {}", e);
             std::process::exit(1);
         }
@@ -180,6 +180,8 @@ pub fn cmd_build(args: &[String], no_check: bool) {
         std::process::exit(1);
     }
 
+    let is_release = args.iter().any(|a| a == "--release");
+
     let mut rustc_cmd = Command::new(&find_rustc());
     rustc_cmd.arg(&tmp_rs)
         .arg("-o")
@@ -191,6 +193,8 @@ pub fn cmd_build(args: &[String], no_check: bool) {
         rustc_cmd.arg("--target").arg("wasm32-wasip1")
             .arg("-C").arg("opt-level=s")
             .arg("-C").arg("lto=yes");
+    } else if is_release {
+        rustc_cmd.arg("-C").arg("opt-level=2");
     }
 
     let rustc = rustc_cmd.output()
