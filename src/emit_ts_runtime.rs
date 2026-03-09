@@ -704,6 +704,7 @@ function assert_ne<T>(a: T, b: T, msg?: string): void { if (__deep_eq(a, b)) { c
 function assert(c: boolean, msg?: string): void { if (!c) throw new Error(msg ? msg : "assertion failed"); }
 function unwrap_or<T>(x: T | null, d: T): T { return x !== null ? x : d; }
 function __concat(a: any, b: any): any { return typeof a === "string" ? a + b : [...a, ...b]; }
+function __throw(msg: string): never { throw new Error(msg); }
 function __assert_throws(fn: () => any, expectedMsg: string): void {
   try { fn(); throw new Error("Expected error but succeeded with: " + fn); }
   catch (e) { if (e instanceof Error && e.message === expectedMsg) return; throw e; }
@@ -759,6 +760,7 @@ function assert_ne(a, b, msg) { if (__deep_eq(a, b)) { var m = msg ? msg + ": " 
 function assert(c, msg) { if (!c) throw new Error(msg ? msg : "assertion failed"); }
 function unwrap_or(x, d) { return x !== null ? x : d; }
 function __concat(a, b) { return typeof a === "string" ? a + b : [...a, ...b]; }
+function __throw(msg) { throw new Error(msg); }
 function __assert_throws(fn, expectedMsg) {
   try { fn(); throw new Error("Expected error but succeeded with: " + fn); }
   catch (e) { if (e instanceof Error && e.message === expectedMsg) return; throw e; }

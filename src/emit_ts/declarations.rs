@@ -335,37 +335,30 @@ impl TsEmitter {
         }
         self.out.push('\n');
 
-        // Emit declarations: export public fns, skip tests and entry point
+        // Emit declarations: all functions without export keyword, skip tests
+        // Collect public names for clean export at the end
+        let mut public_fns: Vec<(String, String)> = Vec::new(); // (sanitized, original)
+        let mut public_variants: Vec<String> = Vec::new(); // variant constructor names
+
         for decl in &prog.decls {
             match decl {
                 Decl::Test { .. } => continue,
                 Decl::Fn { name, visibility, .. } => {
-                    if name == "main" {
-                        // Still emit main, but don't generate entry point invocation
-                        let code = self.gen_decl(decl);
-                        if *visibility == Visibility::Public {
-                            self.out.push_str(&format!("export {}\n\n", code));
-                        } else {
-                            self.out.push_str(&code);
-                            self.out.push_str("\n\n");
-                        }
-                    } else if *visibility == Visibility::Public {
-                        let code = self.gen_decl(decl);
-                        self.out.push_str(&format!("export {}\n\n", code));
-                    } else {
-                        self.out.push_str(&self.gen_decl(decl));
-                        self.out.push_str("\n\n");
+                    self.out.push_str(&self.gen_decl(decl));
+                    self.out.push_str("\n\n");
+                    if *visibility == Visibility::Public {
+                        public_fns.push((Self::sanitize(name), name.clone()));
                     }
                 }
                 Decl::Type { name, ty, visibility, .. } => {
                     if *visibility == Visibility::Public {
                         if let TypeExpr::Variant { cases } = ty {
-                            // Export variant constructors
                             self.out.push_str(&format!("// variant type {}\n", name));
                             for case in cases {
                                 match case {
                                     VariantCase::Unit { name: cname } => {
-                                        self.out.push_str(&format!("export const {} = {{ tag: {} }};\n", cname, Self::json_string(cname)));
+                                        self.out.push_str(&format!("const {} = {{ tag: {} }};\n", cname, Self::json_string(cname)));
+                                        public_variants.push(cname.clone());
                                     }
                                     VariantCase::Tuple { name: cname, fields } => {
                                         let params: Vec<String> = fields.iter().enumerate()
@@ -374,8 +367,9 @@ impl TsEmitter {
                                         let obj_fields: Vec<String> = fields.iter().enumerate()
                                             .map(|(i, _)| format!("_{}: _{}", i, i))
                                             .collect();
-                                        self.out.push_str(&format!("export function {}({}) {{ return {{ tag: {}, {} }}; }}\n",
+                                        self.out.push_str(&format!("function {}({}) {{ return {{ tag: {}, {} }}; }}\n",
                                             cname, params.join(", "), Self::json_string(cname), obj_fields.join(", ")));
+                                        public_variants.push(cname.clone());
                                     }
                                     VariantCase::Record { name: cname, fields } => {
                                         let params: Vec<String> = fields.iter()
@@ -384,8 +378,9 @@ impl TsEmitter {
                                         let obj_fields: Vec<String> = fields.iter()
                                             .map(|f| format!("{}: {}", f.name, f.name))
                                             .collect();
-                                        self.out.push_str(&format!("export function {}({}) {{ return {{ tag: {}, {} }}; }}\n",
+                                        self.out.push_str(&format!("function {}({}) {{ return {{ tag: {}, {} }}; }}\n",
                                             cname, params.join(", "), Self::json_string(cname), obj_fields.join(", ")));
+                                        public_variants.push(cname.clone());
                                     }
                                 }
                             }
@@ -405,9 +400,28 @@ impl TsEmitter {
                 }
             }
         }
+
+        // Emit clean camelCase exports
+        if !public_fns.is_empty() || !public_variants.is_empty() {
+            self.out.push_str("// ---- Exports ----\n");
+            let mut exports = Vec::new();
+            for (sanitized, _original) in &public_fns {
+                let clean = crate::emit_common::to_clean_export_name(sanitized);
+                if clean == *sanitized {
+                    exports.push(sanitized.clone());
+                } else {
+                    exports.push(format!("{} as {}", sanitized, clean));
+                }
+            }
+            for vname in &public_variants {
+                exports.push(vname.clone());
+            }
+            self.out.push_str(&format!("export {{ {} }};\n", exports.join(", ")));
+        }
     }
 
     /// Generate TypeScript declaration file (index.d.ts) for public functions and types.
+    /// Uses clean camelCase names matching the export aliases in index.js.
     pub(crate) fn generate_dts(&self, prog: &Program) -> String {
         let mut dts = String::new();
         for decl in &prog.decls {
@@ -416,12 +430,14 @@ impl TsEmitter {
                     if *visibility != Visibility::Public {
                         continue;
                     }
-                    let async_ = if r#async.unwrap_or(false) { "async " } else { "" };
-                    let _ = async_; // For now, use Promise<T> for async
                     let sname = Self::sanitize(name);
+                    let clean = crate::emit_common::to_clean_export_name(&sname);
                     let ps: Vec<String> = params.iter()
                         .filter(|p| p.name != "self")
-                        .map(|p| format!("{}: {}", Self::sanitize(&p.name), self.gen_type_expr(&p.ty)))
+                        .map(|p| {
+                            let pname = crate::emit_common::to_clean_export_name(&Self::sanitize(&p.name));
+                            format!("{}: {}", pname, self.gen_type_expr(&p.ty))
+                        })
                         .collect();
                     let ret = self.gen_type_expr(return_type);
                     let ret_str = if r#async.unwrap_or(false) {
@@ -429,7 +445,7 @@ impl TsEmitter {
                     } else {
                         ret
                     };
-                    dts.push_str(&format!("export declare function {}({}): {};\n", sname, ps.join(", "), ret_str));
+                    dts.push_str(&format!("export declare function {}({}): {};\n", clean, ps.join(", "), ret_str));
                 }
                 Decl::Type { name, ty, visibility, .. } => {
                     if *visibility != Visibility::Public {

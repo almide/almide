@@ -122,7 +122,7 @@ pub fn emit_npm_package(program: &Program, modules: &[(String, Program)], config
     // Build import preamble
     let mut imports = String::new();
     // Helpers are always needed (operators, deep_eq, etc.)
-    imports.push_str("import { __bigop, __div, __deep_eq, __concat, println, eprintln, assert_eq, assert_ne, assert, unwrap_or, __assert_throws } from \"./_runtime/helpers.js\";\n");
+    imports.push_str("import { __bigop, __div, __deep_eq, __concat, __throw, println, eprintln, assert_eq, assert_ne, assert, unwrap_or, __assert_throws } from \"./_runtime/helpers.js\";\n");
     let mut sorted_modules: Vec<&String> = used.iter().collect();
     sorted_modules.sort();
     for mod_name in &sorted_modules {
