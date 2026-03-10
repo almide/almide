@@ -1,5 +1,3 @@
-module config_merger
-
 import fs
 import string
 import list

@@ -1,5 +1,3 @@
-module error_type_test
-
 type AppError = | Custom(String) | Io(IoError) deriving From
 
 // This effect fn uses fs operations that return Result[T, IoError].

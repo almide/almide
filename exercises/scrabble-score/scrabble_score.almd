@@ -1,5 +1,3 @@
-module scrabble_score
-
 import string
 import list
 

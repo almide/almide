@@ -1,5 +1,3 @@
-module affine_cipher
-
 import string
 import list
 

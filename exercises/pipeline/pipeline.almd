@@ -1,5 +1,3 @@
-module pipeline
-
 import string
 import list
 import int

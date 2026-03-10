@@ -1,5 +1,3 @@
-module phone_number
-
 import string
 import list
 

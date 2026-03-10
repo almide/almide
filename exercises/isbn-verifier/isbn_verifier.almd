@@ -1,5 +1,3 @@
-module isbn_verifier
-
 import string
 import list
 

@@ -1,5 +1,3 @@
-module env_process_test
-
 import env
 import process
 import string

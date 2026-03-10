@@ -1,5 +1,3 @@
-module pangram
-
 import string
 import list
 

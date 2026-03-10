@@ -1,5 +1,3 @@
-module bmi_test
-
 fn bmi(weight: Float, height: Float) -> Float = {
   weight / (height * height)
 }
