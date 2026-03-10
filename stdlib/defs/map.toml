@@ -63,7 +63,7 @@ ts = "__almd_map.len({m})"
 [entries]
 type_params = ["K", "V"]
 params = [{ name = "m", type = "Map[K, V]" }]
-return = "List[Unknown]"
+return = "List[(K, V)]"
 rust = "almide_rt_map_entries(&{m})"
 ts = "__almd_map.entries({m})"
 

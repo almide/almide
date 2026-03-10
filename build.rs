@@ -137,6 +137,26 @@ fn parse_type(s: &str, type_params: &[String]) -> String {
                 parse_type(ret_str, type_params)
             )
         }
+        other if other.starts_with('(') && other.ends_with(')') => {
+            // Tuple type: (A, B, C)
+            let inner = &other[1..other.len() - 1];
+            let mut elements = Vec::new();
+            let mut start = 0;
+            let mut depth = 0;
+            for (i, ch) in inner.char_indices() {
+                match ch {
+                    '[' | '(' | '{' => depth += 1,
+                    ']' | ')' | '}' => depth -= 1,
+                    ',' if depth == 0 => {
+                        elements.push(parse_type(inner[start..i].trim(), type_params));
+                        start = i + 1;
+                    }
+                    _ => {}
+                }
+            }
+            elements.push(parse_type(inner[start..].trim(), type_params));
+            format!("Ty::Tuple(vec![{}])", elements.join(", "))
+        }
         other if other.starts_with('{') && other.ends_with('}') => {
             // Record type: {field1: Type1, field2: Type2, ...}
             let inner = &other[1..other.len() - 1];
