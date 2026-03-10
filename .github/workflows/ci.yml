@@ -19,18 +19,14 @@ env:
   RUST_TOOLCHAIN: "1.89.0"
 
 jobs:
-  # ─── Build compiler, upload as artifact ───
-  build:
-    name: Build (${{ matrix.os }})
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            artifact: almide-linux
-          - os: macos-latest
-            artifact: almide-macos
-    runs-on: ${{ matrix.os }}
+  # ═══════════════════════════════════════════════
+  # Fast CI — runs on every push to develop
+  # Build (Linux) + Rust target test + checks
+  # ═══════════════════════════════════════════════
 
+  build:
+    name: Build (Linux)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -44,36 +40,27 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-
+          key: linux-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: linux-cargo-${{ env.RUST_TOOLCHAIN }}-
 
       - run: cargo build --release
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
+          name: almide-linux
           path: target/release/almide
           retention-days: 1
 
-  # ─── Test: Rust target ───
   test-rust:
-    name: Test Rust (${{ matrix.os }})
+    name: Test Rust (Linux)
     needs: build
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            artifact: almide-linux
-          - os: macos-latest
-            artifact: almide-macos
-    runs-on: ${{ matrix.os }}
-
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/download-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
+          name: almide-linux
           path: /tmp/almide-bin
 
       - name: Setup
@@ -99,102 +86,10 @@ jobs:
           echo "Rust target: $passed passed, $failed failed"
           [ $failed -eq 0 ]
 
-  # ─── Test: TypeScript target (Deno) ───
-  test-ts:
-    name: Test TS/Deno (${{ matrix.os }})
-    needs: build
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            artifact: almide-linux
-          - os: macos-latest
-            artifact: almide-macos
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-          path: /tmp/almide-bin
-
-      - name: Setup
-        run: chmod +x /tmp/almide-bin/almide
-
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-
-      - name: Run all exercises (TS target)
-        run: |
-          ALMIDE=/tmp/almide-bin/almide
-          failed=0; passed=0
-          for f in exercises/*/*.almd; do
-            case "$f" in *_error_test.almd) continue;; esac
-            $ALMIDE "$f" --target ts > /tmp/test_out.ts 2>/dev/null || continue
-            if deno run --allow-all --no-check /tmp/test_out.ts 2>&1; then
-              passed=$((passed + 1))
-            else
-              echo "FAIL: $f"
-              failed=$((failed + 1))
-            fi
-          done
-          echo "TS target: $passed passed, $failed failed"
-          [ $failed -eq 0 ]
-
-  # ─── Test: JavaScript target (Node) ───
-  test-js:
-    name: Test JS/Node (${{ matrix.os }})
-    needs: build
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            artifact: almide-linux
-          - os: macos-latest
-            artifact: almide-macos
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-          path: /tmp/almide-bin
-
-      - name: Setup
-        run: chmod +x /tmp/almide-bin/almide
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Run exercises (JS target)
-        run: |
-          ALMIDE=/tmp/almide-bin/almide
-          failed=0; passed=0
-          for f in exercises/*/*.almd; do
-            case "$f" in *_error_test.almd) continue;; esac
-            $ALMIDE "$f" --target js > /tmp/test_out.js 2>/dev/null || continue
-            if node /tmp/test_out.js 2>&1; then
-              passed=$((passed + 1))
-            else
-              echo "FAIL: $f"
-              failed=$((failed + 1))
-            fi
-          done
-          echo "JS target: $passed passed, $failed failed"
-          [ $failed -eq 0 ]
-
-  # ─── Emit & format checks ───
   checks:
     name: Emit & Format
     needs: build
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
@@ -223,12 +118,174 @@ jobs:
             echo "FMT OK: $f"
           done
 
-  # ─── WASM ───
-  wasm:
-    name: WASM
+  # ═══════════════════════════════════════════════
+  # Full CI — runs on PRs to main only
+  # Cross-platform builds, TS/JS targets, WASM
+  # ═══════════════════════════════════════════════
+
+  build-cross:
+    name: Build (${{ matrix.os }})
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            artifact: almide-macos
+          - os: windows-latest
+            artifact: almide-windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-
+
+      - run: cargo build --release
+
+      - run: cargo test
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: target/release/almide${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+          retention-days: 1
+
+  test-rust-cross:
+    name: Test Rust (${{ matrix.os }})
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    needs: build-cross
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            artifact: almide-macos
+            binary: /tmp/almide-bin/almide
+          - os: windows-latest
+            artifact: almide-windows
+            binary: almide-bin/almide.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.os == 'windows-latest' && 'almide-bin' || '/tmp/almide-bin' }}
+
+      - name: Setup (Unix)
+        if: matrix.os != 'windows-latest'
+        run: chmod +x /tmp/almide-bin/almide
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Run all exercises (Rust target)
+        shell: bash
+        run: |
+          ALMIDE=${{ matrix.binary }}
+          failed=0; passed=0
+          for f in exercises/*/*.almd; do
+            case "$f" in *_error_test.almd) continue;; esac
+            if $ALMIDE run "$f" 2>&1; then
+              passed=$((passed + 1))
+            else
+              echo "FAIL: $f"
+              failed=$((failed + 1))
+            fi
+          done
+          echo "Rust target: $passed passed, $failed failed"
+          [ $failed -eq 0 ]
+
+  test-ts:
+    name: Test TS/Deno
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
     needs: build
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: almide-linux
+          path: /tmp/almide-bin
+
+      - name: Setup
+        run: chmod +x /tmp/almide-bin/almide
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Run all exercises (TS target)
+        run: |
+          ALMIDE=/tmp/almide-bin/almide
+          failed=0; passed=0
+          for f in exercises/*/*.almd; do
+            case "$f" in *_error_test.almd) continue;; esac
+            $ALMIDE "$f" --target ts > /tmp/test_out.ts 2>/dev/null || continue
+            if deno run --allow-all --no-check /tmp/test_out.ts 2>&1; then
+              passed=$((passed + 1))
+            else
+              echo "FAIL: $f"
+              failed=$((failed + 1))
+            fi
+          done
+          echo "TS target: $passed passed, $failed failed"
+          [ $failed -eq 0 ]
+
+  test-js:
+    name: Test JS/Node
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: almide-linux
+          path: /tmp/almide-bin
+
+      - name: Setup
+        run: chmod +x /tmp/almide-bin/almide
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run exercises (JS target)
+        run: |
+          ALMIDE=/tmp/almide-bin/almide
+          failed=0; passed=0
+          for f in exercises/*/*.almd; do
+            case "$f" in *_error_test.almd) continue;; esac
+            $ALMIDE "$f" --target js > /tmp/test_out.js 2>/dev/null || continue
+            if node /tmp/test_out.js 2>&1; then
+              passed=$((passed + 1))
+            else
+              echo "FAIL: $f"
+              failed=$((failed + 1))
+            fi
+          done
+          echo "JS target: $passed passed, $failed failed"
+          [ $failed -eq 0 ]
+
+  wasm:
+    name: WASM
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    needs: build
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -268,10 +325,13 @@ jobs:
             $ALMIDE "$f" --target rust > /dev/null 2>&1 && echo "EMIT OK: $dir"
           done
 
-  # ─── Deploy playground on main push ───
+  # ═══════════════════════════════════════════════
+  # Post-merge — trigger playground deploy
+  # ═══════════════════════════════════════════════
+
   trigger-playground:
     name: Trigger Playground Deploy
-    needs: [test-rust, test-ts, test-js, wasm, checks]
+    needs: [test-rust, checks]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:

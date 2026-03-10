@@ -10,3 +10,4 @@ pub mod stdlib;
 pub mod types;
 pub mod diagnostic;
 pub mod fmt;
+pub mod generated;

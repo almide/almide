@@ -144,6 +144,11 @@ pub fn builtin_effect_fns() -> Vec<&'static str> {
 
 /// Look up a stdlib function's type signature.
 pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
+    // Try auto-generated definitions first
+    if let Some(sig) = crate::generated::stdlib_sigs::lookup_generated_sig(module, func) {
+        return Some(sig);
+    }
+
     let s = |n: &str| -> String { n.to_string() };
     let io_err = || Ty::Named(s("IoError"));
 
@@ -247,43 +252,8 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         ("string", "last_index_of") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String), (s("needle"), Ty::String)], ret: Ty::Option(Box::new(Ty::Int)), is_effect: false },
         ("string", "to_float") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::Result(Box::new(Ty::Float), Box::new(Ty::String)), is_effect: false },
 
-        // ── int ──
-        ("int", "to_string") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Int)], ret: Ty::String, is_effect: false },
-        ("int", "to_hex") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Int)], ret: Ty::String, is_effect: false },
-        ("int", "parse") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::Result(Box::new(Ty::Int), Box::new(Ty::String)), is_effect: false },
-        ("int", "parse_hex") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::Result(Box::new(Ty::Int), Box::new(Ty::String)), is_effect: false },
-        ("int", "abs") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("int", "min") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("int", "max") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        // bitwise operations
-        ("int", "band") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("int", "bor") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("int", "bxor") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("int", "bshl") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int), (s("n"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("int", "bshr") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int), (s("n"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("int", "bnot") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        // wrapping arithmetic (for hash algorithms operating on fixed-width integers)
-        ("int", "wrap_add") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int), (s("bits"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("int", "wrap_mul") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int), (s("bits"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("int", "rotate_right") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int), (s("n"), Ty::Int), (s("bits"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("int", "rotate_left") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int), (s("n"), Ty::Int), (s("bits"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("int", "to_u32") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("int", "to_u8") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("int", "clamp") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Int), (s("lo"), Ty::Int), (s("hi"), Ty::Int)], ret: Ty::Int, is_effect: false },
-
-        // ── float ──
-        ("float", "to_string") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Float)], ret: Ty::String, is_effect: false },
-        ("float", "to_int") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Float)], ret: Ty::Int, is_effect: false },
-        ("float", "round") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("float", "floor") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("float", "ceil") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("float", "abs") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("float", "sqrt") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("float", "parse") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::Result(Box::new(Ty::Float), Box::new(Ty::String)), is_effect: false },
-        ("float", "from_int") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Int)], ret: Ty::Float, is_effect: false },
-        ("float", "min") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Float), (s("b"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("float", "max") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Float), (s("b"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("float", "clamp") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Float), (s("lo"), Ty::Float), (s("hi"), Ty::Float)], ret: Ty::Float, is_effect: false },
+        // ── int ── (auto-generated from stdlib/defs/int.toml)
+        // ── float ── (auto-generated from stdlib/defs/float.toml)
 
         // ── json ──
         ("json", "parse") => FnSig { generics: vec![], params: vec![(s("text"), Ty::String)], ret: Ty::Result(Box::new(Ty::Named(s("Json"))), Box::new(Ty::String)), is_effect: false },
@@ -341,19 +311,7 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         ("fs", "walk") => FnSig { generics: vec![], params: vec![(s("dir"), Ty::String)], ret: Ty::Result(Box::new(Ty::List(Box::new(Ty::String))), Box::new(io_err())), is_effect: true },
         ("fs", "stat") => FnSig { generics: vec![], params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::Record { fields: vec![(s("size"), Ty::Int), (s("is_dir"), Ty::Bool), (s("is_file"), Ty::Bool), (s("modified"), Ty::Int)] }), Box::new(io_err())), is_effect: true },
 
-        // ── math ──
-        ("math", "min") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("math", "max") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("math", "abs") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("math", "pow") => FnSig { generics: vec![], params: vec![(s("base"), Ty::Int), (s("exp"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("math", "pi") => FnSig { generics: vec![], params: vec![], ret: Ty::Float, is_effect: false },
-        ("math", "e") => FnSig { generics: vec![], params: vec![], ret: Ty::Float, is_effect: false },
-        ("math", "sin") => FnSig { generics: vec![], params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("math", "cos") => FnSig { generics: vec![], params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("math", "tan") => FnSig { generics: vec![], params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("math", "log") => FnSig { generics: vec![], params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("math", "exp") => FnSig { generics: vec![], params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("math", "sqrt") => FnSig { generics: vec![], params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
+        // ── math ── (auto-generated from stdlib/defs/math.toml)
 
         // ── random ──
         ("random", "int") => FnSig { generics: vec![], params: vec![(s("min"), Ty::Int), (s("max"), Ty::Int)], ret: Ty::Int, is_effect: true },
@@ -363,20 +321,8 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
 
         // ── time: fully migrated to stdlib/time.almd ──
 
-        // ── io ──
-        ("io", "read_line") => FnSig { generics: vec![], params: vec![], ret: Ty::String, is_effect: true },
-        ("io", "print") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::Unit, is_effect: true },
-        ("io", "read_all") => FnSig { generics: vec![], params: vec![], ret: Ty::String, is_effect: true },
-
-        // ── regex ──
-        ("regex", "match?") => FnSig { generics: vec![], params: vec![(s("pat"), Ty::String), (s("s"), Ty::String)], ret: Ty::Bool, is_effect: false },
-        ("regex", "full_match?") => FnSig { generics: vec![], params: vec![(s("pat"), Ty::String), (s("s"), Ty::String)], ret: Ty::Bool, is_effect: false },
-        ("regex", "find") => FnSig { generics: vec![], params: vec![(s("pat"), Ty::String), (s("s"), Ty::String)], ret: Ty::Option(Box::new(Ty::String)), is_effect: false },
-        ("regex", "find_all") => FnSig { generics: vec![], params: vec![(s("pat"), Ty::String), (s("s"), Ty::String)], ret: Ty::List(Box::new(Ty::String)), is_effect: false },
-        ("regex", "replace") => FnSig { generics: vec![], params: vec![(s("pat"), Ty::String), (s("s"), Ty::String), (s("rep"), Ty::String)], ret: Ty::String, is_effect: false },
-        ("regex", "replace_first") => FnSig { generics: vec![], params: vec![(s("pat"), Ty::String), (s("s"), Ty::String), (s("rep"), Ty::String)], ret: Ty::String, is_effect: false },
-        ("regex", "split") => FnSig { generics: vec![], params: vec![(s("pat"), Ty::String), (s("s"), Ty::String)], ret: Ty::List(Box::new(Ty::String)), is_effect: false },
-        ("regex", "captures") => FnSig { generics: vec![], params: vec![(s("pat"), Ty::String), (s("s"), Ty::String)], ret: Ty::Option(Box::new(Ty::List(Box::new(Ty::String)))), is_effect: false },
+        // ── io ── (auto-generated from stdlib/defs/io.toml)
+        // ── regex ── (auto-generated from stdlib/defs/regex.toml)
 
         _ => return None,
     };

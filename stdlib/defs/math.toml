@@ -1,0 +1,71 @@
+[min]
+params = [{ name = "a", type = "Int" }, { name = "b", type = "Int" }]
+return = "Int"
+rust = "almide_rt_math_min({a}, {b})"
+ts = "__almd_math.min({a}, {b})"
+
+[max]
+params = [{ name = "a", type = "Int" }, { name = "b", type = "Int" }]
+return = "Int"
+rust = "almide_rt_math_max({a}, {b})"
+ts = "__almd_math.max({a}, {b})"
+
+[abs]
+params = [{ name = "n", type = "Int" }]
+return = "Int"
+rust = "almide_rt_math_abs({n})"
+ts = "__almd_math.abs({n})"
+
+[pow]
+params = [{ name = "base", type = "Int" }, { name = "exp", type = "Int" }]
+return = "Int"
+rust = "almide_rt_math_pow({base}, {exp})"
+ts = "__almd_math.pow({base}, {exp})"
+
+[pi]
+params = []
+return = "Float"
+rust = "almide_rt_math_pi()"
+ts = "__almd_math.pi()"
+
+[e]
+params = []
+return = "Float"
+rust = "almide_rt_math_e()"
+ts = "__almd_math.e()"
+
+[sin]
+params = [{ name = "x", type = "Float" }]
+return = "Float"
+rust = "almide_rt_math_sin({x} as f64)"
+ts = "__almd_math.sin({x})"
+
+[cos]
+params = [{ name = "x", type = "Float" }]
+return = "Float"
+rust = "almide_rt_math_cos({x} as f64)"
+ts = "__almd_math.cos({x})"
+
+[tan]
+params = [{ name = "x", type = "Float" }]
+return = "Float"
+rust = "almide_rt_math_tan({x} as f64)"
+ts = "__almd_math.tan({x})"
+
+[log]
+params = [{ name = "x", type = "Float" }]
+return = "Float"
+rust = "almide_rt_math_log({x} as f64)"
+ts = "__almd_math.log({x})"
+
+[exp]
+params = [{ name = "x", type = "Float" }]
+return = "Float"
+rust = "almide_rt_math_exp({x} as f64)"
+ts = "__almd_math.exp({x})"
+
+[sqrt]
+params = [{ name = "x", type = "Float" }]
+return = "Float"
+rust = "almide_rt_math_sqrt({x} as f64)"
+ts = "__almd_math.sqrt({x})"

@@ -218,21 +218,23 @@ impl Emitter {
             }
             return call;
         }
+        // Try auto-generated codegen first
+        if let Some(expr) = almide::generated::emit_rust_calls::gen_generated_call(module, func, &args_str) {
+            return expr;
+        }
         match module {
             "fs" => self.gen_fs_call(func, &args_str),
             "string" => self.gen_string_call(func, &args_str),
             "list" => self.gen_list_call(func, args, &args_str),
             "map" => self.gen_map_call(func, args, &args_str),
-            "int" => self.gen_int_call(func, &args_str),
-            "float" => self.gen_float_call(func, &args_str),
+            // int, float — auto-generated from stdlib/defs/*.toml
             "env" => self.gen_env_call(func, &args_str),
             "process" => self.gen_process_call(func, &args_str),
-            "io" => self.gen_io_call(func, &args_str),
+            // io — auto-generated from stdlib/defs/io.toml
             "json" => self.gen_json_call(func, &args_str),
             "http" => self.gen_http_call(func, args, &args_str),
-            "math" => self.gen_math_call(func, &args_str),
             "random" => self.gen_random_call(func, &args_str),
-            "regex" => self.gen_regex_call(func, &args_str),
+            // regex — auto-generated from stdlib/defs/regex.toml
             _ => {
                 let resolved = self.module_aliases.get(module)
                     .cloned()
@@ -461,51 +463,8 @@ impl Emitter {
         }
     }
 
-    fn gen_int_call(&self, func: &str, args_str: &[String]) -> String {
-        match func {
-            "to_hex" => format!("almide_rt_int_to_hex({})", args_str[0]),
-            "to_string" => format!("almide_rt_int_to_string({})", args_str[0]),
-            "parse" => format!("almide_rt_int_parse(&*{})", args_str[0]),
-            "parse_hex" => format!("almide_rt_int_parse_hex(&*{})", args_str[0]),
-            "abs" => format!("almide_rt_int_abs({})", args_str[0]),
-            "min" => format!("almide_rt_int_min({}, {})", args_str[0], args_str[1]),
-            "max" => format!("almide_rt_int_max({}, {})", args_str[0], args_str[1]),
-            // bitwise operations
-            "band" => format!("almide_rt_int_band({}, {})", args_str[0], args_str[1]),
-            "bor" => format!("almide_rt_int_bor({}, {})", args_str[0], args_str[1]),
-            "bxor" => format!("almide_rt_int_bxor({}, {})", args_str[0], args_str[1]),
-            "bshl" => format!("almide_rt_int_bshl({}, {})", args_str[0], args_str[1]),
-            "bshr" => format!("almide_rt_int_bshr({}, {})", args_str[0], args_str[1]),
-            "bnot" => format!("almide_rt_int_bnot({})", args_str[0]),
-            // wrapping arithmetic
-            "wrap_add" => format!("almide_rt_int_wrap_add({}, {}, {})", args_str[0], args_str[1], args_str[2]),
-            "wrap_mul" => format!("almide_rt_int_wrap_mul({}, {}, {})", args_str[0], args_str[1], args_str[2]),
-            "rotate_right" => format!("almide_rt_int_rotate_right({}, {}, {})", args_str[0], args_str[1], args_str[2]),
-            "rotate_left" => format!("almide_rt_int_rotate_left({}, {}, {})", args_str[0], args_str[1], args_str[2]),
-            "to_u32" => format!("almide_rt_int_to_u32({})", args_str[0]),
-            "to_u8" => format!("almide_rt_int_to_u8({})", args_str[0]),
-            "clamp" => format!("almide_rt_int_clamp({}, {}, {})", args_str[0], args_str[1], args_str[2]),
-            _ => { eprintln!("internal error: no Rust codegen for int.{}() — this is a compiler bug", func); std::process::exit(70); },
-        }
-    }
-
-    fn gen_float_call(&self, func: &str, args_str: &[String]) -> String {
-        match func {
-            "to_string" => format!("almide_rt_float_to_string({})", args_str[0]),
-            "to_int" => format!("almide_rt_float_to_int({})", args_str[0]),
-            "round" => format!("almide_rt_float_round({})", args_str[0]),
-            "floor" => format!("almide_rt_float_floor({})", args_str[0]),
-            "ceil" => format!("almide_rt_float_ceil({})", args_str[0]),
-            "abs" => format!("almide_rt_float_abs({})", args_str[0]),
-            "sqrt" => format!("almide_rt_float_sqrt({})", args_str[0]),
-            "parse" => format!("almide_rt_float_parse(&*{})?", args_str[0]),
-            "from_int" => format!("almide_rt_float_from_int({})", args_str[0]),
-            "min" => format!("almide_rt_float_min({}, {})", args_str[0], args_str[1]),
-            "max" => format!("almide_rt_float_max({}, {})", args_str[0], args_str[1]),
-            "clamp" => format!("almide_rt_float_clamp({}, {}, {})", args_str[0], args_str[1], args_str[2]),
-            _ => { eprintln!("internal error: no Rust codegen for float.{}() — this is a compiler bug", func); std::process::exit(70); },
-        }
-    }
+    // gen_int_call — removed: now auto-generated from stdlib/defs/int.toml
+    // gen_float_call — removed: now auto-generated from stdlib/defs/float.toml
 
     fn gen_env_call(&self, func: &str, args_str: &[String]) -> String {
         match func {
@@ -531,14 +490,7 @@ impl Emitter {
         }
     }
 
-    fn gen_io_call(&self, func: &str, args_str: &[String]) -> String {
-        match func {
-            "read_line" => "almide_rt_io_read_line()?".to_string(),
-            "print" => format!("almide_rt_io_print(&*{})?", args_str[0]),
-            "read_all" => "almide_rt_io_read_all()?".to_string(),
-            _ => { eprintln!("internal error: no Rust codegen for io.{}() — this is a compiler bug", func); std::process::exit(70); },
-        }
-    }
+    // gen_io_call — removed: now auto-generated from stdlib/defs/io.toml
 
     fn gen_json_call(&self, func: &str, args_str: &[String]) -> String {
         match func {
@@ -581,23 +533,7 @@ impl Emitter {
         }
     }
 
-    fn gen_math_call(&self, func: &str, args_str: &[String]) -> String {
-        match func {
-            "min" => format!("almide_rt_math_min({}, {})", args_str[0], args_str[1]),
-            "max" => format!("almide_rt_math_max({}, {})", args_str[0], args_str[1]),
-            "abs" => format!("almide_rt_math_abs({})", args_str[0]),
-            "pow" => format!("almide_rt_math_pow({}, {})", args_str[0], args_str[1]),
-            "pi" => "almide_rt_math_pi()".to_string(),
-            "e" => "almide_rt_math_e()".to_string(),
-            "sin" => format!("almide_rt_math_sin({} as f64)", args_str[0]),
-            "cos" => format!("almide_rt_math_cos({} as f64)", args_str[0]),
-            "tan" => format!("almide_rt_math_tan({} as f64)", args_str[0]),
-            "log" => format!("almide_rt_math_log({} as f64)", args_str[0]),
-            "exp" => format!("almide_rt_math_exp({} as f64)", args_str[0]),
-            "sqrt" => format!("almide_rt_math_sqrt({} as f64)", args_str[0]),
-            _ => { eprintln!("internal error: no Rust codegen for math.{}() — this is a compiler bug", func); std::process::exit(70); },
-        }
-    }
+    // gen_math_call — removed: now auto-generated from stdlib/defs/math.toml
 
     fn gen_random_call(&self, func: &str, args_str: &[String]) -> String {
         match func {
@@ -609,17 +545,5 @@ impl Emitter {
         }
     }
 
-    fn gen_regex_call(&self, func: &str, args_str: &[String]) -> String {
-        match func {
-            "match?" | "match_hdlm_qm_" => format!("almide_regex_is_match(&{}, &{})", args_str[0], args_str[1]),
-            "full_match?" | "full_match_hdlm_qm_" => format!("almide_regex_full_match(&{}, &{})", args_str[0], args_str[1]),
-            "find" => format!("almide_regex_find(&{}, &{})", args_str[0], args_str[1]),
-            "find_all" => format!("almide_regex_find_all(&{}, &{})", args_str[0], args_str[1]),
-            "replace" => format!("almide_regex_replace(&{}, &{}, &{})", args_str[0], args_str[1], args_str[2]),
-            "replace_first" => format!("almide_regex_replace_first(&{}, &{}, &{})", args_str[0], args_str[1], args_str[2]),
-            "split" => format!("almide_regex_split(&{}, &{})", args_str[0], args_str[1]),
-            "captures" => format!("almide_regex_captures(&{}, &{})", args_str[0], args_str[1]),
-            _ => { eprintln!("internal error: no Rust codegen for regex.{}() — this is a compiler bug", func); std::process::exit(70); },
-        }
-    }
+    // gen_regex_call — removed: now auto-generated from stdlib/defs/regex.toml
 }
