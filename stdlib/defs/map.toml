@@ -5,67 +5,78 @@ rust = "almide_rt_map_new()"
 ts = "__almd_map.new()"
 
 [get]
-params = [{ name = "m", type = "Map[Unknown, Unknown]" }, { name = "key", type = "Unknown" }]
-return = "Option[Unknown]"
+type_params = ["K", "V"]
+params = [{ name = "m", type = "Map[K, V]" }, { name = "key", type = "K" }]
+return = "Option[V]"
 rust = "almide_rt_map_get(&{m}, &{key})"
 ts = "__almd_map.get({m}, {key})"
 
 [get_or]
-params = [{ name = "m", type = "Map[Unknown, Unknown]" }, { name = "key", type = "Unknown" }, { name = "default", type = "Unknown" }]
-return = "Unknown"
+type_params = ["K", "V"]
+params = [{ name = "m", type = "Map[K, V]" }, { name = "key", type = "K" }, { name = "default", type = "V" }]
+return = "V"
 rust = "almide_rt_map_get_or(&{m}, &{key}, {default})"
 ts = "__almd_map.get_or({m}, {key}, {default})"
 
 [set]
-params = [{ name = "m", type = "Map[Unknown, Unknown]" }, { name = "key", type = "Unknown" }, { name = "value", type = "Unknown" }]
-return = "Map[Unknown, Unknown]"
+type_params = ["K", "V"]
+params = [{ name = "m", type = "Map[K, V]" }, { name = "key", type = "K" }, { name = "value", type = "V" }]
+return = "Map[K, V]"
 rust = "almide_rt_map_set(&{m}, {key}, {value})"
 ts = "__almd_map.set({m}, {key}, {value})"
 
 [contains]
-params = [{ name = "m", type = "Map[Unknown, Unknown]" }, { name = "key", type = "Unknown" }]
+type_params = ["K", "V"]
+params = [{ name = "m", type = "Map[K, V]" }, { name = "key", type = "K" }]
 return = "Bool"
 rust = "almide_rt_map_contains(&{m}, &{key})"
 ts = "__almd_map.contains({m}, {key})"
 
 [remove]
-params = [{ name = "m", type = "Map[Unknown, Unknown]" }, { name = "key", type = "Unknown" }]
-return = "Map[Unknown, Unknown]"
+type_params = ["K", "V"]
+params = [{ name = "m", type = "Map[K, V]" }, { name = "key", type = "K" }]
+return = "Map[K, V]"
 rust = "almide_rt_map_remove(&{m}, &{key})"
 ts = "__almd_map.remove({m}, {key})"
 
 [keys]
-params = [{ name = "m", type = "Map[Unknown, Unknown]" }]
-return = "List[Unknown]"
+type_params = ["K", "V"]
+params = [{ name = "m", type = "Map[K, V]" }]
+return = "List[K]"
 rust = "almide_rt_map_keys(&{m})"
 ts = "__almd_map.keys({m})"
 
 [values]
-params = [{ name = "m", type = "Map[Unknown, Unknown]" }]
-return = "List[Unknown]"
+type_params = ["K", "V"]
+params = [{ name = "m", type = "Map[K, V]" }]
+return = "List[V]"
 rust = "almide_rt_map_values(&{m})"
 ts = "__almd_map.values({m})"
 
 [len]
-params = [{ name = "m", type = "Map[Unknown, Unknown]" }]
+type_params = ["K", "V"]
+params = [{ name = "m", type = "Map[K, V]" }]
 return = "Int"
 rust = "almide_rt_map_len(&{m})"
 ts = "__almd_map.len({m})"
 
 [entries]
-params = [{ name = "m", type = "Map[Unknown, Unknown]" }]
+type_params = ["K", "V"]
+params = [{ name = "m", type = "Map[K, V]" }]
 return = "List[Unknown]"
 rust = "almide_rt_map_entries(&{m})"
 ts = "__almd_map.entries({m})"
 
 [merge]
-params = [{ name = "a", type = "Map[Unknown, Unknown]" }, { name = "b", type = "Map[Unknown, Unknown]" }]
-return = "Map[Unknown, Unknown]"
+type_params = ["K", "V"]
+params = [{ name = "a", type = "Map[K, V]" }, { name = "b", type = "Map[K, V]" }]
+return = "Map[K, V]"
 rust = "almide_rt_map_merge(&{a}, &{b})"
 ts = "__almd_map.merge({a}, {b})"
 
 ["is_empty?"]
-params = [{ name = "m", type = "Map[Unknown, Unknown]" }]
+type_params = ["K", "V"]
+params = [{ name = "m", type = "Map[K, V]" }]
 return = "Bool"
 rust = "almide_rt_map_is_empty(&{m})"
 ts = "__almd_map.is_empty_hdlm_qm_({m})"
@@ -80,28 +91,31 @@ ts = "__almd_map.from_entries({entries})"
 # ── Closure-taking functions ──
 
 [from_list]
+type_params = ["A"]
 params = [
-    { name = "xs", type = "List[Unknown]" },
-    { name = "f", type = "Fn[Unknown] -> Unknown" },
+    { name = "xs", type = "List[A]" },
+    { name = "f", type = "Fn[A] -> Unknown" },
 ]
 return = "Map[Unknown, Unknown]"
 rust = "almide_rt_map_from_list(({xs}).clone(), |{f.args}| {{ {f.body} }})"
 ts = "__almd_map.from_list({xs}, {f.args} => {f.body})"
 
 [map_values]
+type_params = ["K", "V", "B"]
 params = [
-    { name = "m", type = "Map[Unknown, Unknown]" },
-    { name = "f", type = "Fn[Unknown] -> Unknown" },
+    { name = "m", type = "Map[K, V]" },
+    { name = "f", type = "Fn[V] -> B" },
 ]
-return = "Map[Unknown, Unknown]"
+return = "Map[K, B]"
 rust = "almide_rt_map_map_values(&{m}, |{f.args}| {{ {f.clone_bindings}{f.body} }})"
 ts = "__almd_map.map_values({m}, {f.args} => {f.body})"
 
 [filter]
+type_params = ["K", "V"]
 params = [
-    { name = "m", type = "Map[Unknown, Unknown]" },
-    { name = "f", type = "Fn[Unknown, Unknown] -> Bool", clone_args = true },
+    { name = "m", type = "Map[K, V]" },
+    { name = "f", type = "Fn[K, V] -> Bool", clone_args = true },
 ]
-return = "Map[Unknown, Unknown]"
+return = "Map[K, V]"
 rust = "almide_rt_map_filter(&{m}, |{f.args}| {{ {f.clone_bindings}{f.body} }})"
 ts = "__almd_map.filter({m}, ({f.args}) => {f.body})"

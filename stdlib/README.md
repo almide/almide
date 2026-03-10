@@ -49,11 +49,12 @@ Each `.toml` file defines one module. Each top-level table is a function:
 
 ```toml
 [filter]
+type_params = ["A"]
 params = [
-    { name = "xs", type = "List[Unknown]" },
-    { name = "f", type = "Fn[Unknown] -> Bool" },
+    { name = "xs", type = "List[A]" },
+    { name = "f", type = "Fn[A] -> Bool" },
 ]
-return = "List[Unknown]"
+return = "List[A]"
 rust = "almide_rt_list_filter(({xs}).clone(), |{f.args}| {{ {f.clone_bindings}{f.body} }})"
 ts = "__almd_list.filter({xs}, {f.args} => {f.body})"
 ```
@@ -64,6 +65,7 @@ ts = "__almd_list.filter({xs}, {f.args} => {f.body})"
 |---------------|----------|----------------------------------------------------|
 | `params`      | yes      | Array of `{ name, type }` parameter definitions    |
 | `return`      | yes      | Return type string                                 |
+| `type_params` | no       | Type variable names for generics (e.g. `["A", "B"]`) |
 | `rust`        | yes      | Rust codegen template                              |
 | `ts`          | no       | TypeScript codegen template (omit for Rust-only)   |
 | `effect`      | no       | `true` if this is an effect function               |
@@ -87,7 +89,8 @@ Type strings in TOML map directly to the compiler's internal `Ty` enum:
 | TOML type string                           | Internal type                  |
 |--------------------------------------------|--------------------------------|
 | `Int`, `Float`, `String`, `Bool`, `Unit`   | Primitives                     |
-| `Unknown`                                  | `Ty::Unknown` (generic slot)   |
+| `Unknown`                                  | `Ty::Unknown` (permissive wildcard) |
+| `A`, `B`, `K`, `V` (in `type_params`)     | `Ty::TypeVar` (generic slot)   |
 | `List[T]`                                  | `Ty::List(Box<T>)`             |
 | `Option[T]`                                | `Ty::Option(Box<T>)`           |
 | `Result[T, E]`                             | `Ty::Result(Box<T>, Box<E>)`   |
@@ -95,6 +98,24 @@ Type strings in TOML map directly to the compiler's internal `Ty` enum:
 | `Fn[A, B] -> C`                            | `Ty::Fn { params, ret }`       |
 | `{field: Type, ...}`                       | `Ty::Record { fields }`        |
 | `IoError`, `JsonValue`, etc.               | `Ty::Named(name)`              |
+
+### Type Variables vs Unknown
+
+When a type string matches a name declared in `type_params`, it generates `Ty::TypeVar` instead of `Ty::Named`. The checker's unification engine binds these from arguments and substitutes them into the return type:
+
+```toml
+[map]
+type_params = ["A", "B"]
+params = [
+    { name = "xs", type = "List[A]" },
+    { name = "f", type = "Fn[A] -> B" },
+]
+return = "List[B]"
+```
+
+Call `list.map([1, 2, 3], fn(x) => int.to_string(x))` → unifies `A = Int`, `B = String` → returns `List[String]`.
+
+`Unknown` remains for positions where type information is structurally unavailable (empty containers, tuple returns). See [stdlib-unknown-type-strategy.md](../docs/specs/stdlib-unknown-type-strategy.md) for details.
 
 ### Objective-C Runtime-Inspired Type Encoding
 

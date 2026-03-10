@@ -1,67 +1,49 @@
-# Type System Extensions [PLANNED]
+# Type System Extensions
 
 ## Stdlib Generics Migration (Unknown → TypeVar)
 
-**Status:** Future option — not blocked, not urgent
+**Status:** DONE (v0.4.10)
 
-Currently, stdlib signatures use `Unknown` as a permissive wildcard:
+Stdlib signatures now use named type variables instead of `Unknown` for generic positions:
 
 ```
+# Before (v0.4.9 and earlier)
 list.map : (List[Unknown], Fn[Unknown] -> Unknown) -> List[Unknown]
-```
 
-This works because Almide has **two-layer type safety** — the checker is permissive, the Rust/TS backend catches all real type errors. See [stdlib-unknown-type-strategy.md](../../specs/stdlib-unknown-type-strategy.md) for the full rationale.
-
-A future migration would replace `Unknown` with proper type variables:
-
-```
+# After (v0.4.10)
 list.map : [A, B](List[A], Fn[A] -> B) -> List[B]
 ```
 
+### Implementation
+
+- **TOML `type_params` field**: Each function declares its type variables (e.g., `type_params = ["A", "B"]`)
+- **build.rs**: `parse_type()` checks against `type_params` and generates `Ty::TypeVar` instead of `Ty::Unknown`
+- **Unification engine**: `unify()` in `types.rs` — binds TypeVars from arguments (e.g., `A = Int` from `List[Int]`)
+- **Substitution**: `substitute()` replaces TypeVars in return type with bound concrete types
+- **Effect auto-unwrap**: `unify()` handles closures returning `Result[X, _]` when `X` is expected (effect context)
+
 ### What this enables
 - Checker propagates concrete types through stdlib calls (`List[Int]` in → `List[Int]` out)
-- Better error messages at the Almide layer instead of deferring to Rust
+- **Actionable error messages**: "expects Int but got String" instead of "expects Unknown but got String"
 - Chained operations (`map → filter → fold`) maintain type context throughout
 
-### What this requires
-- **Unification engine**: Constraint-based type solver that binds `A = Int` when `List[A]` receives `List[Int]`, then substitutes `A → Int` in the return type
-- **TOML extension**: Type parameters on function definitions (`type_params = ["A", "B"]`)
-- **`build.rs` changes**: Generate `Ty::TypeVar` instead of `Ty::Unknown` for generic params, emit generic bounds in sigs
-- **Checker changes**: Unification pass after argument type checking, substitution into return type
+### Type variable conventions
+- **list.toml**: `A` = element type, `B` = transformed type (38 functions)
+- **map.toml**: `K` = key type, `V` = value type, `B` = transformed value (16 functions)
+- Concrete-only functions (`sum`, `join`) have no type params
+- Genuinely untyped positions (`enumerate` return, `flatten` input) remain `Unknown`
 
-### Estimated complexity
-- Unification engine: ~500 lines in `check/` (standard Algorithm W subset)
-- TOML + build.rs: ~100 lines
-- Testing: Verify all 42 test files + exercises still pass, no regressions
-
-### When to do this
-- When benchmark data shows LLMs are confused by Rust-layer type errors that Almide could have caught earlier
-- When chained stdlib operations become common in real-world Almide code
-- NOT before the current Unknown approach shows measurable problems
-
-### Design sketch
-
-```toml
-# Future stdlib/defs/list.toml
-[map]
-type_params = ["A", "B"]
-params = [
-    { name = "xs", type = "List[A]" },
-    { name = "f", type = "Fn[A] -> B" },
-]
-return = "List[B]"
-```
-
-The unification engine would:
-1. Receive call `list.map([1, 2, 3], fn(x) = to_string(x))`
-2. Bind `A = Int` from arg 0 (`List[Int]` unifies with `List[A]`)
-3. Bind `B = String` from closure return type
-4. Substitute into return type: `List[B]` → `List[String]`
-5. Caller sees `List[String]` instead of `List[Unknown]`
+### What remains Unknown (intentionally)
+- `map.new()` — empty map, no type information available
+- `list.enumerate()` return — tuples `(Int, A)` not expressible in current type system
+- `list.zip()` return — mixed tuples `(A, B)` not expressible
+- `list.partition()` return — tuple `(List[A], List[A])` not expressible
+- `list.flatten()` input — would need `List[List[A]]` constraint
+- `from_entries()` — tuple list input, types not inferrable
 
 ---
 
-## Trait Bounds on Generics
+## Trait Bounds on Generics [PLANNED]
 
 ```almide
 // Future syntax
@@ -70,7 +52,7 @@ fn sort[T: Ord](xs: List[T]) -> List[T] = ...
 
 Depends on trait system maturation. Currently all type variables accept anything — auto-derived Rust bounds (`Clone + Debug + PartialEq + PartialOrd`) handle the backend.
 
-## Full Trait Implementation
+## Full Trait Implementation [PLANNED]
 
 Keywords exist in lexer/parser, but type checking and code generation are incomplete.
 
@@ -84,7 +66,7 @@ impl Show for Point {
 }
 ```
 
-## Structured Error Types
+## Structured Error Types [PLANNED]
 
 Currently `Result[T, String]` uses a fixed String error type.
 
@@ -95,6 +77,16 @@ type AppResult[T] = Result[T, AppError]
 
 Enables branching by error type in match arms.
 
+## Tuple Type Propagation [PLANNED]
+
+Currently `enumerate`, `zip`, `partition`, `entries` return `Unknown` because tuples inside containers can't be expressed. A proper `Tuple[A, B]` type in container positions would close this gap.
+
+```
+list.enumerate : [A](List[A]) -> List[Tuple[Int, A]]
+list.zip : [A, B](List[A], List[B]) -> List[Tuple[A, B]]
+map.entries : [K, V](Map[K, V]) -> List[Tuple[K, V]]
+```
+
 ## Priority
 
-Structured error types > stdlib generics migration > trait bounds > full trait implementation
+Structured error types > tuple type propagation > trait bounds > full trait implementation

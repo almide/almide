@@ -1,5 +1,5 @@
 use crate::ast;
-use crate::types::{Ty, VariantPayload};
+use crate::types::{Ty, VariantPayload, unify, substitute};
 use crate::stdlib;
 use super::{Checker, err};
 
@@ -242,16 +242,37 @@ impl Checker {
                     format!("{}.{}()", module, func),
                 ));
             } else {
+                // Use unification to bind type variables from arguments
+                let mut bindings = std::collections::HashMap::new();
                 for (i, ((pname, pty), aty)) in sig.params.iter().zip(arg_tys.iter()).enumerate() {
-                    if !pty.compatible(aty) {
+                    if !unify(pty, aty, &mut bindings) {
+                        // Substitute known bindings into param type for better error messages
+                        let display_ty = substitute(pty, &bindings);
                         self.push_diagnostic(err(
-                            format!("{}.{}() argument '{}' (position {}) expects {} but got {}", module, func, pname, i + 1, pty.display(), aty.display()),
-                            format!("Pass a value of type {}", pty.display()),
+                            format!("{}.{}() argument '{}' (position {}) expects {} but got {}", module, func, pname, i + 1, display_ty.display(), aty.display()),
+                            format!("Pass a value of type {}", display_ty.display()),
                             format!("{}.{}()", module, func),
                         ));
                     }
                 }
+                // Substitute bindings into return type to propagate concrete types
+                let ret = substitute(&sig.ret, &bindings);
+                if sig.is_effect && !self.env.in_effect {
+                    self.push_diagnostic(err(
+                        format!("{}.{}() is an effect function and cannot be called from a pure function", module, func),
+                        "Mark the calling function as 'effect fn'",
+                        format!("{}.{}()", module, func),
+                    ));
+                }
+                // Stdlib calls always have hardcoded `?` in codegen, so always unwrap Result
+                if self.env.in_effect {
+                    if let Ty::Result(ok_ty, _) = &ret {
+                        return *ok_ty.clone();
+                    }
+                }
+                return ret;
             }
+            // Arg count mismatch — still check effect and return raw sig type
             if sig.is_effect && !self.env.in_effect {
                 self.push_diagnostic(err(
                     format!("{}.{}() is an effect function and cannot be called from a pure function", module, func),
@@ -260,7 +281,6 @@ impl Checker {
                 ));
             }
             let ret = sig.ret.clone();
-            // Stdlib calls always have hardcoded `?` in codegen, so always unwrap Result
             if self.env.in_effect {
                 if let Ty::Result(ok_ty, _) = &ret {
                     return *ok_ty.clone();

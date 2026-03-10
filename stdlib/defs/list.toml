@@ -1,59 +1,69 @@
 [len]
-params = [{ name = "xs", type = "List[Unknown]" }]
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }]
 return = "Int"
 rust = "almide_rt_list_len(&{xs})"
 ts = "__almd_list.len({xs})"
 
 [get]
-params = [{ name = "xs", type = "List[Unknown]" }, { name = "i", type = "Int" }]
-return = "Option[Unknown]"
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }, { name = "i", type = "Int" }]
+return = "Option[A]"
 rust = "almide_rt_list_get(&{xs}, {i})"
 ts = "__almd_list.get({xs}, {i})"
 
 [get_or]
-params = [{ name = "xs", type = "List[Unknown]" }, { name = "i", type = "Int" }, { name = "default", type = "Unknown" }]
-return = "Unknown"
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }, { name = "i", type = "Int" }, { name = "default", type = "A" }]
+return = "A"
 rust = "almide_rt_list_get_or(&{xs}, {i}, {default})"
 ts = "__almd_list.get_or({xs}, {i}, {default})"
 
 [set]
-params = [{ name = "xs", type = "List[Unknown]" }, { name = "i", type = "Int" }, { name = "val", type = "Unknown" }]
-return = "List[Unknown]"
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }, { name = "i", type = "Int" }, { name = "val", type = "A" }]
+return = "List[A]"
 rust = "almide_rt_list_set(&{xs}, {i}, {val})"
 ts = "__almd_list.set({xs}, {i}, {val})"
 
 [swap]
-params = [{ name = "xs", type = "List[Unknown]" }, { name = "i", type = "Int" }, { name = "j", type = "Int" }]
-return = "List[Unknown]"
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }, { name = "i", type = "Int" }, { name = "j", type = "Int" }]
+return = "List[A]"
 rust = "almide_rt_list_swap(&{xs}, {i}, {j})"
 ts = "__almd_list.swap({xs}, {i}, {j})"
 
 [sort]
-params = [{ name = "xs", type = "List[Unknown]" }]
-return = "List[Unknown]"
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }]
+return = "List[A]"
 rust = "almide_rt_list_sort(&{xs})"
 ts = "__almd_list.sort({xs})"
 
 [reverse]
-params = [{ name = "xs", type = "List[Unknown]" }]
-return = "List[Unknown]"
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }]
+return = "List[A]"
 rust = "almide_rt_list_reverse(&{xs})"
 ts = "__almd_list.reverse({xs})"
 
 [contains]
-params = [{ name = "xs", type = "List[Unknown]" }, { name = "x", type = "Unknown" }]
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }, { name = "x", type = "A" }]
 return = "Bool"
 rust = "almide_rt_list_contains(&{xs}, &{x})"
 ts = "__almd_list.contains({xs}, {x})"
 
 [enumerate]
-params = [{ name = "xs", type = "List[Unknown]" }]
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }]
 return = "List[Unknown]"
 rust = "almide_rt_list_enumerate(({xs}).clone())"
 ts = "__almd_list.enumerate({xs})"
 
 [zip]
-params = [{ name = "xs", type = "List[Unknown]" }, { name = "ys", type = "List[Unknown]" }]
+type_params = ["A", "B"]
+params = [{ name = "xs", type = "List[A]" }, { name = "ys", type = "List[B]" }]
 return = "List[Unknown]"
 rust = "almide_rt_list_zip(({xs}).clone(), ({ys}).clone())"
 ts = "__almd_list.zip({xs}, {ys})"
@@ -65,38 +75,44 @@ rust = "almide_rt_list_flatten(({xss}).clone())"
 ts = "__almd_list.flatten({xss})"
 
 [take]
-params = [{ name = "xs", type = "List[Unknown]" }, { name = "n", type = "Int" }]
-return = "List[Unknown]"
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }, { name = "n", type = "Int" }]
+return = "List[A]"
 rust = "almide_rt_list_take(({xs}).clone(), {n})"
 ts = "__almd_list.take({xs}, {n})"
 
 [drop]
-params = [{ name = "xs", type = "List[Unknown]" }, { name = "n", type = "Int" }]
-return = "List[Unknown]"
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }, { name = "n", type = "Int" }]
+return = "List[A]"
 rust = "almide_rt_list_drop(({xs}).clone(), {n})"
 ts = "__almd_list.drop({xs}, {n})"
 
 [unique]
-params = [{ name = "xs", type = "List[Unknown]" }]
-return = "List[Unknown]"
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }]
+return = "List[A]"
 rust = "almide_rt_list_unique(&{xs})"
 ts = "__almd_list.unique({xs})"
 
 [index_of]
-params = [{ name = "xs", type = "List[Unknown]" }, { name = "x", type = "Unknown" }]
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }, { name = "x", type = "A" }]
 return = "Option[Int]"
 rust = "almide_rt_list_index_of(&{xs}, &{x})"
 ts = "__almd_list.index_of({xs}, {x})"
 
 [last]
-params = [{ name = "xs", type = "List[Unknown]" }]
-return = "Option[Unknown]"
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }]
+return = "Option[A]"
 rust = "almide_rt_list_last(&{xs})"
 ts = "__almd_list.last({xs})"
 
 [chunk]
-params = [{ name = "xs", type = "List[Unknown]" }, { name = "n", type = "Int" }]
-return = "List[List[Unknown]]"
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }, { name = "n", type = "Int" }]
+return = "List[List[A]]"
 rust = "almide_rt_list_chunk(&{xs}, {n})"
 ts = "__almd_list.chunk({xs}, {n})"
 
@@ -113,27 +129,31 @@ rust = "almide_rt_list_product(&{xs})"
 ts = "__almd_list.product({xs})"
 
 [first]
-params = [{ name = "xs", type = "List[Unknown]" }]
-return = "Option[Unknown]"
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }]
+return = "Option[A]"
 rust = "almide_rt_list_first(&{xs})"
 ts = "__almd_list.first({xs})"
 
 ["is_empty?"]
-params = [{ name = "xs", type = "List[Unknown]" }]
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }]
 return = "Bool"
 rust = "almide_rt_list_is_empty(&{xs})"
 ts = "__almd_list.is_empty_hdlm_qm_({xs})"
 aliases = ["is_empty_hdlm_qm_"]
 
 [min]
-params = [{ name = "xs", type = "List[Unknown]" }]
-return = "Option[Unknown]"
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }]
+return = "Option[A]"
 rust = "almide_rt_list_min(&{xs})"
 ts = "__almd_list.min({xs})"
 
 [max]
-params = [{ name = "xs", type = "List[Unknown]" }]
-return = "Option[Unknown]"
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }]
+return = "Option[A]"
 rust = "almide_rt_list_max(&{xs})"
 ts = "__almd_list.max({xs})"
 
@@ -146,149 +166,165 @@ ts = "__almd_list.join({xs}, {sep})"
 # ── Closure-taking functions ──
 
 [map]
+type_params = ["A", "B"]
 params = [
-    { name = "xs", type = "List[Unknown]" },
-    { name = "f", type = "Fn[Unknown] -> Unknown" },
+    { name = "xs", type = "List[A]" },
+    { name = "f", type = "Fn[A] -> B" },
 ]
-return = "List[Unknown]"
+return = "List[B]"
 rust = "almide_rt_list_map(({xs}).clone(), |{f.args}| {{ {f.body} }})"
 rust_effect = "almide_rt_list_map_effect(({xs}).clone(), |{f.args}| -> Result<_, String> {{ Ok({{ {f.body} }}) }})?"
 ts = "__almd_list.map({xs}, {f.args} => {f.body})"
 
 [filter]
+type_params = ["A"]
 params = [
-    { name = "xs", type = "List[Unknown]" },
-    { name = "f", type = "Fn[Unknown] -> Bool" },
+    { name = "xs", type = "List[A]" },
+    { name = "f", type = "Fn[A] -> Bool" },
 ]
-return = "List[Unknown]"
+return = "List[A]"
 rust = "almide_rt_list_filter(({xs}).clone(), |{f.args}| {{ {f.clone_bindings}{f.body} }})"
 ts = "__almd_list.filter({xs}, {f.args} => {f.body})"
 
 [find]
+type_params = ["A"]
 params = [
-    { name = "xs", type = "List[Unknown]" },
-    { name = "f", type = "Fn[Unknown] -> Bool" },
+    { name = "xs", type = "List[A]" },
+    { name = "f", type = "Fn[A] -> Bool" },
 ]
-return = "Option[Unknown]"
+return = "Option[A]"
 rust = "almide_rt_list_find(({xs}).clone(), |{f.args}| {{ {f.clone_bindings}{f.body} }})"
 ts = "__almd_list.find({xs}, {f.args} => {f.body})"
 
 [any]
+type_params = ["A"]
 params = [
-    { name = "xs", type = "List[Unknown]" },
-    { name = "f", type = "Fn[Unknown] -> Bool" },
+    { name = "xs", type = "List[A]" },
+    { name = "f", type = "Fn[A] -> Bool" },
 ]
 return = "Bool"
 rust = "almide_rt_list_any(&{xs}, |{f.args}| {{ {f.clone_bindings}{f.body} }})"
 ts = "__almd_list.any({xs}, {f.args} => {f.body})"
 
 [all]
+type_params = ["A"]
 params = [
-    { name = "xs", type = "List[Unknown]" },
-    { name = "f", type = "Fn[Unknown] -> Bool" },
+    { name = "xs", type = "List[A]" },
+    { name = "f", type = "Fn[A] -> Bool" },
 ]
 return = "Bool"
 rust = "almide_rt_list_all(&{xs}, |{f.args}| {{ {f.clone_bindings}{f.body} }})"
 ts = "__almd_list.all({xs}, {f.args} => {f.body})"
 
 [each]
+type_params = ["A"]
 params = [
-    { name = "xs", type = "List[Unknown]" },
-    { name = "f", type = "Fn[Unknown] -> Unit" },
+    { name = "xs", type = "List[A]" },
+    { name = "f", type = "Fn[A] -> Unit" },
 ]
 return = "Unit"
 rust = "almide_rt_list_each(&{xs}, |{f.args}| {{ {f.body} ; }})"
 ts = "__almd_list.each({xs}, {f.args} => {f.body})"
 
 [sort_by]
+type_params = ["A", "B"]
 params = [
-    { name = "xs", type = "List[Unknown]" },
-    { name = "f", type = "Fn[Unknown] -> Unknown" },
+    { name = "xs", type = "List[A]" },
+    { name = "f", type = "Fn[A] -> B" },
 ]
-return = "List[Unknown]"
+return = "List[A]"
 rust = "almide_rt_list_sort_by(({xs}).clone(), |{f.args}| {{ {f.body} }})"
 ts = "__almd_list.sort_by({xs}, {f.args} => {f.body})"
 
 [flat_map]
+type_params = ["A", "B"]
 params = [
-    { name = "xs", type = "List[Unknown]" },
-    { name = "f", type = "Fn[Unknown] -> List[Unknown]" },
+    { name = "xs", type = "List[A]" },
+    { name = "f", type = "Fn[A] -> List[B]" },
 ]
-return = "List[Unknown]"
+return = "List[B]"
 rust = "almide_rt_list_flat_map(({xs}).clone(), |{f.args}| {{ {f.body} }})"
 rust_effect = "almide_rt_list_flat_map_effect(({xs}).clone(), |{f.args}| -> Result<Vec<_>, String> {{ Ok({{ {f.body} }}) }})?"
 ts = "__almd_list.flat_map({xs}, {f.args} => {f.body})"
 
 [filter_map]
+type_params = ["A", "B"]
 params = [
-    { name = "xs", type = "List[Unknown]" },
-    { name = "f", type = "Fn[Unknown] -> Option[Unknown]" },
+    { name = "xs", type = "List[A]" },
+    { name = "f", type = "Fn[A] -> Option[B]" },
 ]
-return = "List[Unknown]"
+return = "List[B]"
 rust = "almide_rt_list_filter_map(({xs}).clone(), |{f.args}| {{ {f.body} }})"
 ts = "__almd_list.filter_map({xs}, {f.args} => {f.body})"
 
 [take_while]
+type_params = ["A"]
 params = [
-    { name = "xs", type = "List[Unknown]" },
-    { name = "f", type = "Fn[Unknown] -> Bool" },
+    { name = "xs", type = "List[A]" },
+    { name = "f", type = "Fn[A] -> Bool" },
 ]
-return = "List[Unknown]"
+return = "List[A]"
 rust = "almide_rt_list_take_while(({xs}).clone(), |{f.args}| {{ {f.clone_bindings}{f.body} }})"
 ts = "__almd_list.take_while({xs}, {f.args} => {f.body})"
 
 [drop_while]
+type_params = ["A"]
 params = [
-    { name = "xs", type = "List[Unknown]" },
-    { name = "f", type = "Fn[Unknown] -> Bool" },
+    { name = "xs", type = "List[A]" },
+    { name = "f", type = "Fn[A] -> Bool" },
 ]
-return = "List[Unknown]"
+return = "List[A]"
 rust = "almide_rt_list_drop_while(({xs}).clone(), |{f.args}| {{ {f.clone_bindings}{f.body} }})"
 ts = "__almd_list.drop_while({xs}, {f.args} => {f.body})"
 
 [count]
+type_params = ["A"]
 params = [
-    { name = "xs", type = "List[Unknown]" },
-    { name = "f", type = "Fn[Unknown] -> Bool" },
+    { name = "xs", type = "List[A]" },
+    { name = "f", type = "Fn[A] -> Bool" },
 ]
 return = "Int"
 rust = "almide_rt_list_count(&{xs}, |{f.args}| {{ {f.clone_bindings}{f.body} }})"
 ts = "__almd_list.count({xs}, {f.args} => {f.body})"
 
 [partition]
+type_params = ["A"]
 params = [
-    { name = "xs", type = "List[Unknown]" },
-    { name = "f", type = "Fn[Unknown] -> Bool" },
+    { name = "xs", type = "List[A]" },
+    { name = "f", type = "Fn[A] -> Bool" },
 ]
 return = "Unknown"
 rust = "almide_rt_list_partition(({xs}).clone(), |{f.args}| {{ {f.clone_bindings}{f.body} }})"
 ts = "__almd_list.partition({xs}, {f.args} => {f.body})"
 
 [reduce]
+type_params = ["A"]
 params = [
-    { name = "xs", type = "List[Unknown]" },
-    { name = "f", type = "Fn[Unknown, Unknown] -> Unknown" },
+    { name = "xs", type = "List[A]" },
+    { name = "f", type = "Fn[A, A] -> A" },
 ]
-return = "Option[Unknown]"
+return = "Option[A]"
 rust = "almide_rt_list_reduce(({xs}).clone(), |{f.args}| {{ {f.body} }})"
 ts = "__almd_list.reduce({xs}, ({f.args}) => {f.body})"
 
 [group_by]
+type_params = ["A", "B"]
 params = [
-    { name = "xs", type = "List[Unknown]" },
-    { name = "f", type = "Fn[Unknown] -> Unknown" },
+    { name = "xs", type = "List[A]" },
+    { name = "f", type = "Fn[A] -> B" },
 ]
-return = "Map[Unknown, List[Unknown]]"
+return = "Map[B, List[A]]"
 rust = "almide_rt_list_group_by(({xs}).clone(), |{f.args}| {{ {f.body} }})"
 ts = "__almd_list.group_by({xs}, {f.args} => {f.body})"
 
 [fold]
+type_params = ["A", "B"]
 params = [
-    { name = "xs", type = "List[Unknown]" },
-    { name = "init", type = "Unknown" },
-    { name = "f", type = "Fn[Unknown, Unknown] -> Unknown" },
+    { name = "xs", type = "List[A]" },
+    { name = "init", type = "B" },
+    { name = "f", type = "Fn[B, A] -> B" },
 ]
-return = "Unknown"
+return = "B"
 rust = "almide_rt_list_fold(({xs}).clone(), {init}, |{f.args}| {{ {f.body} }})"
 rust_effect = "almide_rt_list_fold_effect(({xs}).clone(), {init}, |{f.args}| -> Result<_, String> {{ Ok({{ {f.body} }}) }})?"
 ts = "__almd_list.fold({xs}, {init}, ({f.args}) => {f.body})"

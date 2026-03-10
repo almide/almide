@@ -166,6 +166,75 @@ impl Ty {
     }
 }
 
+/// Unify a signature type against a concrete type, collecting TypeVar bindings.
+/// Returns true if the types are compatible. Unknown still accepts anything (error recovery).
+pub fn unify(sig_ty: &Ty, actual_ty: &Ty, bindings: &mut std::collections::HashMap<std::string::String, Ty>) -> bool {
+    // Unknown = error recovery, always accept
+    if *sig_ty == Ty::Unknown || *actual_ty == Ty::Unknown {
+        return true;
+    }
+    // TypeVar: bind or check consistency
+    if let Ty::TypeVar(name) = sig_ty {
+        if let Some(bound) = bindings.get(name) {
+            return bound.compatible(actual_ty);
+        } else {
+            bindings.insert(name.clone(), actual_ty.clone());
+            return true;
+        }
+    }
+    if matches!(actual_ty, Ty::TypeVar(_)) {
+        return true;
+    }
+    match (sig_ty, actual_ty) {
+        (Ty::List(a), Ty::List(b)) => unify(a, b, bindings),
+        (Ty::Option(a), Ty::Option(b)) => unify(a, b, bindings),
+        (Ty::Result(a1, a2), Ty::Result(b1, b2)) => unify(a1, b1, bindings) && unify(a2, b2, bindings),
+        (Ty::Map(k1, v1), Ty::Map(k2, v2)) => unify(k1, k2, bindings) && unify(v1, v2, bindings),
+        (Ty::Fn { params: p1, ret: r1 }, Ty::Fn { params: p2, ret: r2 }) => {
+            if p1.len() != p2.len() { return false; }
+            if !p1.iter().zip(p2.iter()).all(|(a, b)| unify(a, b, bindings)) { return false; }
+            // Try direct return type unification first
+            if unify(r1, r2, bindings) { return true; }
+            // Effect auto-unwrap: if actual closure returns Result[X, _], try unwrapping
+            if let Ty::Result(inner, _) = r2.as_ref() {
+                return unify(r1, inner, bindings);
+            }
+            if let Ty::Result(inner, _) = r1.as_ref() {
+                return unify(inner, r2, bindings);
+            }
+            false
+        }
+        (Ty::Tuple(a), Ty::Tuple(b)) => {
+            a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| unify(x, y, bindings))
+        }
+        _ => sig_ty.compatible(actual_ty),
+    }
+}
+
+/// Substitute TypeVars in a type using the collected bindings.
+pub fn substitute(ty: &Ty, bindings: &std::collections::HashMap<std::string::String, Ty>) -> Ty {
+    if bindings.is_empty() {
+        return ty.clone();
+    }
+    match ty {
+        Ty::TypeVar(name) => bindings.get(name).cloned().unwrap_or(Ty::Unknown),
+        Ty::Unknown => Ty::Unknown,
+        Ty::List(inner) => Ty::List(Box::new(substitute(inner, bindings))),
+        Ty::Option(inner) => Ty::Option(Box::new(substitute(inner, bindings))),
+        Ty::Result(ok, err) => Ty::Result(Box::new(substitute(ok, bindings)), Box::new(substitute(err, bindings))),
+        Ty::Map(k, v) => Ty::Map(Box::new(substitute(k, bindings)), Box::new(substitute(v, bindings))),
+        Ty::Fn { params, ret } => Ty::Fn {
+            params: params.iter().map(|p| substitute(p, bindings)).collect(),
+            ret: Box::new(substitute(ret, bindings)),
+        },
+        Ty::Tuple(tys) => Ty::Tuple(tys.iter().map(|t| substitute(t, bindings)).collect()),
+        Ty::Record { fields } => Ty::Record {
+            fields: fields.iter().map(|(n, t)| (n.clone(), substitute(t, bindings))).collect(),
+        },
+        _ => ty.clone(),
+    }
+}
+
 impl TypeEnv {
     pub fn new() -> Self {
         TypeEnv {

@@ -12,6 +12,9 @@ struct FnDef {
     effect: bool,
     #[serde(default)]
     ufcs: bool,
+    /// Type parameters for generics (e.g. ["A", "B"] or ["K", "V"])
+    #[serde(default)]
+    type_params: Vec<String>,
     rust: String,
     /// Alternative Rust template when in effect context and body contains `?`
     #[serde(default)]
@@ -78,7 +81,11 @@ fn split_top_level_comma(s: &str) -> Option<usize> {
     None
 }
 
-fn parse_type(s: &str) -> String {
+fn parse_type(s: &str, type_params: &[String]) -> String {
+    // Check if s is a type variable (declared in type_params)
+    if type_params.iter().any(|tp| tp == s) {
+        return format!("Ty::TypeVar(s(\"{}\"))", s);
+    }
     match s {
         "Int" => "Ty::Int".to_string(),
         "Float" => "Ty::Float".to_string(),
@@ -88,11 +95,11 @@ fn parse_type(s: &str) -> String {
         "Unknown" => "Ty::Unknown".to_string(),
         other if other.starts_with("List[") => {
             let inner = &other[5..other.len() - 1];
-            format!("Ty::List(Box::new({}))", parse_type(inner))
+            format!("Ty::List(Box::new({}))", parse_type(inner, type_params))
         }
         other if other.starts_with("Option[") => {
             let inner = &other[7..other.len() - 1];
-            format!("Ty::Option(Box::new({}))", parse_type(inner))
+            format!("Ty::Option(Box::new({}))", parse_type(inner, type_params))
         }
         other if other.starts_with("Result[") => {
             let inner = &other[7..other.len() - 1];
@@ -104,8 +111,8 @@ fn parse_type(s: &str) -> String {
             };
             format!(
                 "Ty::Result(Box::new({}), Box::new({}))",
-                parse_type(ok_ty),
-                parse_type(err_ty)
+                parse_type(ok_ty, type_params),
+                parse_type(err_ty, type_params)
             )
         }
         other if other.starts_with("Map[") => {
@@ -113,7 +120,7 @@ fn parse_type(s: &str) -> String {
             let split_pos = split_top_level_comma(inner).expect("Map type needs two type params");
             let key_ty = &inner[..split_pos];
             let val_ty = inner[split_pos + 2..].trim();
-            format!("Ty::Map(Box::new({}), Box::new({}))", parse_type(key_ty), parse_type(val_ty))
+            format!("Ty::Map(Box::new({}), Box::new({}))", parse_type(key_ty, type_params), parse_type(val_ty, type_params))
         }
         other if other.starts_with("Fn[") && other.contains("] -> ") => {
             // Fn[A, B] -> C
@@ -122,12 +129,12 @@ fn parse_type(s: &str) -> String {
             let ret_str = &other[arrow_pos + 5..];
             let param_types: Vec<String> = params_str
                 .split(", ")
-                .map(|t| parse_type(t.trim()))
+                .map(|t| parse_type(t.trim(), type_params))
                 .collect();
             format!(
                 "Ty::Fn {{ params: vec![{}], ret: Box::new({}) }}",
                 param_types.join(", "),
-                parse_type(ret_str)
+                parse_type(ret_str, type_params)
             )
         }
         other if other.starts_with('{') && other.ends_with('}') => {
@@ -137,7 +144,7 @@ fn parse_type(s: &str) -> String {
                 .split(", ")
                 .map(|field| {
                     let parts: Vec<&str> = field.splitn(2, ": ").collect();
-                    format!("(s(\"{}\"), {})", parts[0].trim(), parse_type(parts[1].trim()))
+                    format!("(s(\"{}\"), {})", parts[0].trim(), parse_type(parts[1].trim(), type_params))
                 })
                 .collect();
             format!("Ty::Record {{ fields: vec![{}] }}", fields.join(", "))
@@ -319,24 +326,32 @@ fn main() {
             }
 
             // Generate type signature
+            let tp = &def.type_params;
             let params_str: Vec<String> = def
                 .params
                 .iter()
                 .filter(|p| !p.optional) // Required params only for sig
-                .map(|p| format!("(s(\"{}\"), {})", p.name, parse_type(&p.ty)))
+                .map(|p| format!("(s(\"{}\"), {})", p.name, parse_type(&p.ty, tp)))
                 .collect();
             // Full params including optional (for sig we include all)
             let all_params_str: Vec<String> = def
                 .params
                 .iter()
-                .map(|p| format!("(s(\"{}\"), {})", p.name, parse_type(&p.ty)))
+                .map(|p| format!("(s(\"{}\"), {})", p.name, parse_type(&p.ty, tp)))
                 .collect();
-            let ret_ty = parse_type(&def.ret);
+            let ret_ty = parse_type(&def.ret, tp);
 
+            let generics_str = if def.type_params.is_empty() {
+                "vec![]".to_string()
+            } else {
+                let gs: Vec<String> = def.type_params.iter().map(|t| format!("s(\"{}\")", t)).collect();
+                format!("vec![{}]", gs.join(", "))
+            };
             sig_arms.push_str(&format!(
-                "        (\"{module}\", \"{func}\") => FnSig {{ generics: vec![], params: vec![{params}], ret: {ret}, is_effect: {effect} }},\n",
+                "        (\"{module}\", \"{func}\") => FnSig {{ generics: {generics}, params: vec![{params}], ret: {ret}, is_effect: {effect} }},\n",
                 module = module_name,
                 func = fn_name,
+                generics = generics_str,
                 params = all_params_str.join(", "),
                 ret = ret_ty,
                 effect = def.effect,
@@ -426,8 +441,9 @@ fn main() {
             // Generate alias arms
             for alias in &def.aliases {
                 sig_arms.push_str(&format!(
-                    "        (\"{module}\", \"{alias}\") => FnSig {{ generics: vec![], params: vec![{params}], ret: {ret}, is_effect: {effect} }},\n",
+                    "        (\"{module}\", \"{alias}\") => FnSig {{ generics: {generics}, params: vec![{params}], ret: {ret}, is_effect: {effect} }},\n",
                     module = module_name,
+                    generics = generics_str,
                     params = all_params_str.join(", "),
                     ret = ret_ty,
                     effect = def.effect,
