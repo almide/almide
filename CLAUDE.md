@@ -64,6 +64,7 @@ almide run app.almd              # Compile + execute
 almide build app.almd -o app     # Build binary
 almide build app.almd --target wasm  # Build WASM
 almide test                      # Run tests/ directory
+almide test --run "pattern"      # Filter tests by name
 almide check app.almd            # Type check only
 almide fmt app.almd              # Format source
 almide clean                     # Clear dependency cache

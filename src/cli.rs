@@ -146,26 +146,13 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
     eprintln!("\nAll {} test file(s) passed", test_files.len());
 }
 
-pub fn cmd_build(args: &[String], no_check: bool) {
-    let file = if args.len() >= 3 && !args[2].starts_with('-') {
-        args[2].clone()
-    } else if std::path::Path::new("almide.toml").exists() && std::path::Path::new("src/main.almd").exists() {
-        "src/main.almd".to_string()
-    } else {
-        eprintln!("No file specified and no almide.toml found.");
-        eprintln!("Run 'almide init' to create a project, or specify a file: almide build <file.almd>");
-        std::process::exit(1);
-    };
-    let build_target = args.iter()
-        .position(|a| a == "--target")
-        .and_then(|i| args.get(i + 1))
-        .map(|s| s.as_str());
-
-    let is_npm = matches!(build_target, Some("npm"));
-    let is_wasm = matches!(build_target, Some("wasm" | "wasm32" | "wasi"));
+pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release: bool, no_check: bool) {
+    let is_npm = matches!(target, Some("npm"));
+    let is_wasm = matches!(target, Some("wasm" | "wasm32" | "wasi"));
 
     if is_npm {
-        cmd_build_npm(&file, &args, no_check);
+        let out_dir = output.unwrap_or("dist");
+        cmd_build_npm(file, out_dir, no_check);
         return;
     }
 
@@ -181,28 +168,22 @@ pub fn cmd_build(args: &[String], no_check: bool) {
     } else {
         file.strip_suffix(".almd").unwrap_or("a.out").to_string()
     };
-    let output = args.iter()
-        .position(|a| a == "-o")
-        .and_then(|i| args.get(i + 1))
-        .map(|s| s.to_string())
-        .unwrap_or(default_output);
+    let output = output.unwrap_or(&default_output);
 
     let emit_options = emit_rust::EmitOptions { no_thread_wrap: is_wasm };
     let wasm_target = if is_wasm { Some("wasm") } else { None };
-    let rs_code = compile_with_options(&file, no_check, &emit_options, wasm_target);
+    let rs_code = compile_with_options(file, no_check, &emit_options, wasm_target);
 
-    let tmp_rs = format!("{}.rs", output.strip_suffix(".wasm").unwrap_or(&output));
+    let tmp_rs = format!("{}.rs", output.strip_suffix(".wasm").unwrap_or(output));
     if let Err(e) = std::fs::write(&tmp_rs, &rs_code) {
         eprintln!("Failed to write {}: {}", tmp_rs, e);
         std::process::exit(1);
     }
 
-    let is_release = args.iter().any(|a| a == "--release");
-
     let mut rustc_cmd = Command::new(&find_rustc());
     rustc_cmd.arg(&tmp_rs)
         .arg("-o")
-        .arg(&output)
+        .arg(output)
         .arg("-C").arg("overflow-checks=no")
         .arg("--edition").arg("2021");
 
@@ -210,7 +191,7 @@ pub fn cmd_build(args: &[String], no_check: bool) {
         rustc_cmd.arg("--target").arg("wasm32-wasip1")
             .arg("-C").arg("opt-level=s")
             .arg("-C").arg("lto=yes");
-    } else if is_release {
+    } else if release {
         rustc_cmd.arg("-C").arg("opt-level=2");
     }
 
@@ -228,7 +209,7 @@ pub fn cmd_build(args: &[String], no_check: bool) {
     eprintln!("Built {}", output);
 }
 
-fn cmd_build_npm(file: &str, args: &[String], no_check: bool) {
+fn cmd_build_npm(file: &str, out_dir: &str, no_check: bool) {
     let mut program = parse_file(file);
     let source_text = std::fs::read_to_string(file).unwrap_or_default();
 
@@ -288,15 +269,8 @@ fn cmd_build_npm(file: &str, args: &[String], no_check: bool) {
 
     let output = emit_ts::emit_npm_package(&program, &legacy_modules, &config);
 
-    // Output directory
-    let out_dir = args.iter()
-        .position(|a| a == "-o")
-        .and_then(|i| args.get(i + 1))
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| "dist".to_string());
-
     // Write files
-    let out_path = std::path::Path::new(&out_dir);
+    let out_path = std::path::Path::new(out_dir);
     std::fs::create_dir_all(out_path).unwrap_or_else(|e| {
         eprintln!("Failed to create {}: {}", out_dir, e);
         std::process::exit(1);
@@ -366,7 +340,7 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, no_check: bool) {
             if let Some(a) = alias {
                 Some((a.clone(), path.join(".")))
             } else if path.len() > 1 && path.first().map(|s| s.as_str()) != Some("self") {
-                let last = path.last().unwrap().clone();
+                let last = path.last().expect("path.len() > 1 checked above").clone();
                 Some((last, path.join(".")))
             } else {
                 None

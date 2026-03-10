@@ -1,6 +1,14 @@
 // Almide platform runtime — fs, env, process, io, random
 // Functions extracted from inline codegen for @extern migration.
 
+// ---- record types ----
+
+#[derive(Clone)]
+struct AlmideStatResult { size: i64, is_dir: bool, is_file: bool, modified: i64 }
+
+#[derive(Clone)]
+struct AlmideExecResult { code: i64, stdout: String, stderr: String }
+
 // ---- fs ----
 
 fn almide_rt_fs_read_text(path: &str) -> Result<String, String> {
@@ -93,13 +101,13 @@ fn almide_rt_fs_walk(dir: &str) -> Result<Vec<String>, String> {
     Ok(results)
 }
 
-fn almide_rt_fs_stat(path: &str) -> Result<(i64, bool, bool, i64), String> {
+fn almide_rt_fs_stat(path: &str) -> Result<AlmideStatResult, String> {
     let meta = std::fs::metadata(path).map_err(|e| e.to_string())?;
     let modified = meta.modified().ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    Ok((meta.len() as i64, meta.is_dir(), meta.is_file(), modified))
+    Ok(AlmideStatResult { size: meta.len() as i64, is_dir: meta.is_dir(), is_file: meta.is_file(), modified })
 }
 
 // ---- env ----
@@ -156,13 +164,13 @@ fn almide_rt_process_stdin_lines() -> Result<Vec<String>, String> {
     std::io::stdin().lock().lines().collect::<Result<Vec<String>, _>>().map_err(|e| e.to_string())
 }
 
-fn almide_rt_process_exec_status(cmd: &str, args: &[String]) -> Result<(i64, String, String), String> {
+fn almide_rt_process_exec_status(cmd: &str, args: &[String]) -> Result<AlmideExecResult, String> {
     match std::process::Command::new(cmd).args(args).output() {
-        Ok(out) => Ok((
-            out.status.code().unwrap_or(-1) as i64,
-            String::from_utf8_lossy(&out.stdout).to_string(),
-            String::from_utf8_lossy(&out.stderr).to_string(),
-        )),
+        Ok(out) => Ok(AlmideExecResult {
+            code: out.status.code().unwrap_or(-1) as i64,
+            stdout: String::from_utf8_lossy(&out.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&out.stderr).to_string(),
+        }),
         Err(e) => Err(e.to_string()),
     }
 }

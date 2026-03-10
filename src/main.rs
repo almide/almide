@@ -18,6 +18,105 @@ mod project;
 mod resolve;
 
 use std::process::Command;
+use clap::{Parser, Subcommand};
+
+#[derive(Parser)]
+#[command(name = "almide", version)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Create a new Almide project
+    Init,
+    /// Compile and execute
+    Run {
+        /// Source file (default: src/main.almd)
+        file: Option<String>,
+        /// Skip type checking
+        #[arg(long)]
+        no_check: bool,
+        /// Arguments passed to the program (use -- to separate)
+        #[arg(last = true)]
+        program_args: Vec<String>,
+    },
+    /// Build a binary
+    Build {
+        /// Source file (default: src/main.almd)
+        file: Option<String>,
+        /// Output file name
+        #[arg(short)]
+        o: Option<String>,
+        /// Build target (wasm, npm)
+        #[arg(long)]
+        target: Option<String>,
+        /// Optimize for performance (opt-level=2)
+        #[arg(long)]
+        release: bool,
+        /// Skip type checking
+        #[arg(long)]
+        no_check: bool,
+    },
+    /// Run tests
+    Test {
+        /// Test file
+        file: Option<String>,
+        /// Filter test names by pattern
+        #[arg(short = 'r', long)]
+        run: Option<String>,
+        /// Skip type checking
+        #[arg(long)]
+        no_check: bool,
+    },
+    /// Type check only
+    Check {
+        /// Source file (default: src/main.almd)
+        file: Option<String>,
+    },
+    /// Format source files
+    Fmt {
+        /// Files to format (default: src/**/*.almd)
+        files: Vec<String>,
+        /// Check formatting without writing
+        #[arg(long)]
+        check: bool,
+        /// Check formatting without writing
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Clear dependency cache
+    Clean,
+    /// Add a dependency
+    Add {
+        /// Package specifier
+        pkg: String,
+        /// Git repository URL
+        #[arg(long)]
+        git: Option<String>,
+        /// Git tag
+        #[arg(long)]
+        tag: Option<String>,
+    },
+    /// List dependencies
+    Deps,
+    /// Emit source code or AST
+    #[command(hide = true)]
+    Emit {
+        /// Source file
+        file: String,
+        /// Target language (rust, ts, js)
+        #[arg(long, default_value = "rust")]
+        target: String,
+        /// Emit AST as JSON
+        #[arg(long)]
+        emit_ast: bool,
+        /// Skip type checking
+        #[arg(long)]
+        no_check: bool,
+    },
+}
 
 fn find_rustc() -> String {
     if Command::new("rustc").arg("--version").output().is_ok() {
@@ -78,15 +177,12 @@ fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::Em
     let resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
         .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
 
-    // Extract user-level import aliases (import pkg as alias, or implicit aliases for multi-segment imports)
     let import_aliases: Vec<(String, String)> = program.imports.iter().filter_map(|imp| {
         if let ast::Decl::Import { path, alias, .. } = imp {
             if let Some(a) = alias {
-                // Explicit alias: import pkg as alias
                 Some((a.clone(), path.join(".")))
             } else if path.len() > 1 && path.first().map(|s| s.as_str()) != Some("self") {
-                // Implicit alias: import pkg.sub → "sub" maps to "pkg.sub"
-                let last = path.last().unwrap().clone();
+                let last = path.last().expect("path.len() > 1 checked above").clone();
                 Some((last, path.join(".")))
             } else {
                 None
@@ -106,7 +202,6 @@ fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::Em
         for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
             checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
         }
-        // Register user-level import aliases
         for (alias, target) in &import_aliases {
             checker.register_alias(alias, target);
         }
@@ -144,224 +239,109 @@ fn collect_almd_files(dir: &std::path::Path, out: &mut Vec<String>) {
     }
 }
 
-fn print_help() {
-    println!("almide {}", env!("CARGO_PKG_VERSION"));
-    println!();
-    println!("Usage: almide <command> [options]");
-    println!();
-    println!("Commands:");
-    println!("  init                        Create a new Almide project");
-    println!("  run [file.almd] [args...]   Compile and execute (default: src/main.almd)");
-    println!("  build [file.almd] [opts]    Build a binary");
-    println!("  test [file.almd] [-run pat] Run tests");
-    println!("  check [file.almd]           Type check only");
-    println!("  fmt [files...] [--check]    Format source files (default: src/**/*.almd)");
-    println!("  clean                       Clear dependency cache");
-    println!("  add <pkg> [--git url]       Add a dependency");
-    println!("  deps                        List dependencies");
-    println!();
-    println!("Build options:");
-    println!("  -o <output>                 Output file name");
-    println!("  --target wasm               Build for WebAssembly");
-    println!("  --release                   Optimize for performance (opt-level=2)");
-    println!("  --no-check                  Skip type checking");
-    println!();
-    println!("Emit options:");
-    println!("  almide <file> --target rust  Emit Rust source");
-    println!("  almide <file> --target ts    Emit TypeScript source");
-    println!("  almide <file> --emit-ast     Emit AST as JSON");
-    println!();
-    println!("Examples:");
-    println!("  almide init");
-    println!("  almide run");
-    println!("  almide run hello.almd");
-    println!("  almide build --release");
-    println!("  almide build app.almd --target wasm -o app.wasm");
-    println!("  almide test -run \"parser\"");
-    println!("  almide fmt");
-    println!("  almide fmt src/main.almd --check");
-}
-
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
-
-    if args.len() >= 2 && (args[1] == "--version" || args[1] == "-V") {
-        println!("almide {}", env!("CARGO_PKG_VERSION"));
-        return;
-    }
-
-    if args.len() >= 2 && (args[1] == "--help" || args[1] == "-h" || args[1] == "help") {
-        print_help();
-        return;
-    }
-
-    let no_check = args.iter().any(|a| a == "--no-check");
-
-    if args.len() >= 3 && args[1] == "add" {
-        let spec = &args[2];
-        let (name, git_url, tag) = if args.iter().any(|a| a == "--git") {
-            let git = args.iter().position(|a| a == "--git")
-                .and_then(|i| args.get(i + 1))
-                .unwrap_or_else(|| { eprintln!("--git requires a URL"); std::process::exit(1); });
-            let tag = args.iter().position(|a| a == "--tag")
-                .and_then(|i| args.get(i + 1))
-                .map(|s| s.to_string());
-            (spec.to_string(), git.to_string(), tag)
-        } else {
-            project::resolve_package_spec(spec)
-        };
-        project::add_dep_to_toml(&name, &git_url, tag.as_deref())
-            .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
-        let dep = project::Dependency {
-            name: name.clone(),
-            git: git_url,
-            tag,
-            branch: None,
-            version: None,
-        };
-        project::fetch_dep(&dep)
-            .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
-        return;
-    }
-
-    if args.len() >= 2 && args[1] == "deps" {
-        if std::path::Path::new("almide.toml").exists() {
-            let proj = project::parse_toml(std::path::Path::new("almide.toml"))
-                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
-            if proj.dependencies.is_empty() {
-                println!("No dependencies");
-            } else {
-                for dep in &proj.dependencies {
-                    let ref_name = dep.tag.as_deref().or(dep.branch.as_deref()).unwrap_or("main");
-                    println!("{} = {} ({})", dep.name, dep.git, ref_name);
-                }
-            }
-        } else {
-            eprintln!("No almide.toml found");
-        }
-        return;
-    }
-
-    if args.len() >= 2 && args[1] == "init" {
-        cli::cmd_init();
-        return;
-    }
-
-    if args.len() >= 2 && args[1] == "test" {
-        let mut file = "";
-        let mut run_filter = None;
-        let mut i = 2;
-        while i < args.len() {
-            if args[i] == "-run" || args[i] == "--run" {
-                if i + 1 < args.len() {
-                    run_filter = Some(args[i + 1].clone());
-                    i += 2;
-                    continue;
-                }
-            } else if !args[i].starts_with('-') && file.is_empty() {
-                file = &args[i];
-            }
-            i += 1;
-        }
-        cli::cmd_test(file, no_check, run_filter.as_deref());
-        return;
-    }
-
-    if args.len() >= 2 && args[1] == "run" {
-        let (file, arg_start) = if args.len() >= 3 && !args[2].starts_with('-') {
-            (args[2].clone(), 3)
-        } else if std::path::Path::new("almide.toml").exists() && std::path::Path::new("src/main.almd").exists() {
-            ("src/main.almd".to_string(), 2)
-        } else {
-            eprintln!("No file specified and no almide.toml found.");
-            eprintln!("Run 'almide init' to create a project, or specify a file: almide run <file.almd>");
-            std::process::exit(1);
-        };
-        let program_args: Vec<String> = if let Some(pos) = args.iter().position(|a| a == "--") {
-            args[pos + 1..].to_vec()
-        } else {
-            // Filter out compiler flags that shouldn't be passed to the program
-            let mut filtered = Vec::new();
-            let mut skip_next = false;
-            for a in &args[arg_start..] {
-                if skip_next { skip_next = false; continue; }
-                if a == "--no-check" { continue; }
-                if a == "--target" || a == "-o" { skip_next = true; continue; }
-                if a.starts_with("--target=") || a.starts_with("-o=") { continue; }
-                filtered.push(a.clone());
-            }
-            filtered
-        };
-        cli::cmd_run(&file, &program_args, no_check);
-        return;
-    }
-
-    if args.len() >= 2 && args[1] == "build" {
-        cli::cmd_build(&args, no_check);
-        return;
-    }
-
-    if args.len() >= 2 && args[1] == "check" {
-        let file = if args.len() >= 3 && !args[2].starts_with('-') {
-            args[2].clone()
-        } else if std::path::Path::new("almide.toml").exists() && std::path::Path::new("src/main.almd").exists() {
+fn resolve_file(file: Option<String>) -> String {
+    file.unwrap_or_else(|| {
+        if std::path::Path::new("almide.toml").exists() && std::path::Path::new("src/main.almd").exists() {
             "src/main.almd".to_string()
         } else {
             eprintln!("No file specified and no almide.toml found.");
+            eprintln!("Run 'almide init' to create a project, or specify a file.");
             std::process::exit(1);
-        };
-        cli::cmd_check(&file);
+        }
+    })
+}
+
+fn main() {
+    // Legacy mode: `almide file.almd [--target X]` → rewrite as `almide emit file.almd [--target X]`
+    let raw_args: Vec<String> = std::env::args().collect();
+    if raw_args.len() >= 2
+        && !raw_args[1].starts_with('-')
+        && (raw_args[1].ends_with(".almd") || raw_args[1].ends_with(".json"))
+    {
+        let mut new_args = vec![raw_args[0].clone(), "emit".to_string()];
+        new_args.extend_from_slice(&raw_args[1..]);
+        let cli = Cli::parse_from(new_args);
+        dispatch(cli);
         return;
     }
 
-    if args.len() >= 2 && args[1] == "fmt" {
-        let write_back = !args.iter().any(|a| a == "--check" || a == "--dry-run");
-        let fmt_files: Vec<String> = args.iter().skip(2)
-            .filter(|a| !a.starts_with("--"))
-            .cloned()
-            .collect();
-        if fmt_files.is_empty() {
-            // No files specified — format all src/**/*.almd recursively
-            let mut files = Vec::new();
-            if std::path::Path::new("src").is_dir() {
-                collect_almd_files(std::path::Path::new("src"), &mut files);
-            }
-            if files.is_empty() {
-                eprintln!("No .almd files found in src/");
-                std::process::exit(1);
-            }
-            cli::cmd_fmt(&files, write_back);
-        } else {
+    let cli = Cli::parse();
+    dispatch(cli);
+}
+
+fn dispatch(cli: Cli) {
+    match cli.command {
+        Commands::Init => cli::cmd_init(),
+        Commands::Run { file, no_check, program_args } => {
+            let file = resolve_file(file);
+            cli::cmd_run(&file, &program_args, no_check);
+        }
+        Commands::Build { file, o, target, release, no_check } => {
+            let file = resolve_file(file);
+            cli::cmd_build(&file, o.as_deref(), target.as_deref(), release, no_check);
+        }
+        Commands::Test { file, run, no_check } => {
+            let file_str = file.as_deref().unwrap_or("");
+            cli::cmd_test(file_str, no_check, run.as_deref());
+        }
+        Commands::Check { file } => {
+            let file = resolve_file(file);
+            cli::cmd_check(&file);
+        }
+        Commands::Fmt { files, check, dry_run } => {
+            let write_back = !check && !dry_run;
+            let fmt_files = if files.is_empty() {
+                let mut found = Vec::new();
+                if std::path::Path::new("src").is_dir() {
+                    collect_almd_files(std::path::Path::new("src"), &mut found);
+                }
+                if found.is_empty() {
+                    eprintln!("No .almd files found in src/");
+                    std::process::exit(1);
+                }
+                found
+            } else {
+                files
+            };
             cli::cmd_fmt(&fmt_files, write_back);
         }
-        return;
+        Commands::Clean => cli::cmd_clean(),
+        Commands::Add { pkg, git, tag } => {
+            let (name, git_url, tag) = if let Some(git_url) = git {
+                (pkg, git_url, tag)
+            } else {
+                project::resolve_package_spec(&pkg)
+            };
+            project::add_dep_to_toml(&name, &git_url, tag.as_deref())
+                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+            let dep = project::Dependency {
+                name: name.clone(),
+                git: git_url,
+                tag,
+                branch: None,
+                version: None,
+            };
+            project::fetch_dep(&dep)
+                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+        }
+        Commands::Deps => {
+            if std::path::Path::new("almide.toml").exists() {
+                let proj = project::parse_toml(std::path::Path::new("almide.toml"))
+                    .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+                if proj.dependencies.is_empty() {
+                    println!("No dependencies");
+                } else {
+                    for dep in &proj.dependencies {
+                        let ref_name = dep.tag.as_deref().or(dep.branch.as_deref()).unwrap_or("main");
+                        println!("{} = {} ({})", dep.name, dep.git, ref_name);
+                    }
+                }
+            } else {
+                eprintln!("No almide.toml found");
+            }
+        }
+        Commands::Emit { file, target, emit_ast, no_check } => {
+            cli::cmd_emit(&file, &target, emit_ast, no_check);
+        }
     }
-
-    if args.len() >= 2 && args[1] == "clean" {
-        cli::cmd_clean();
-        return;
-    }
-
-    // Legacy: almide file.almd [--target rust|ts] [--emit-ast]
-    let files: Vec<&str> = args.iter().skip(1)
-        .filter(|a| !a.starts_with("--"))
-        .map(|s| s.as_str())
-        .collect();
-
-    if files.is_empty() {
-        eprintln!("Usage: almide <command> [options]");
-        eprintln!();
-        eprintln!("Run 'almide --help' for detailed usage.");
-        std::process::exit(1);
-    }
-
-    let file = files[0];
-    let emit_ast = args.iter().any(|a| a == "--emit-ast");
-    let target = args.iter()
-        .position(|a| a == "--target")
-        .and_then(|i| args.get(i + 1))
-        .map(|s| s.as_str())
-        .unwrap_or("rust");
-
-    cli::cmd_emit(file, target, emit_ast, no_check);
 }

@@ -213,337 +213,20 @@ impl Emitter {
             return call;
         }
         match module {
-            "fs" => match func {
-                "read_text" => format!("almide_rt_fs_read_text(&*{})?", args_str[0]),
-                "write" => format!("almide_rt_fs_write(&*{}, &*{})?", args_str[0], args_str[1]),
-                "write_bytes" => format!("almide_rt_fs_write_bytes(&*{}, &{})?", args_str[0], args_str[1]),
-                "read_bytes" => format!("almide_rt_fs_read_bytes(&*{})?", args_str[0]),
-                "exists?" | "exists_hdlm_qm_" => format!("almide_rt_fs_exists(&*{})", args_str[0]),
-                "mkdir_p" => format!("almide_rt_fs_mkdir_p(&*{})?", args_str[0]),
-                "append" => format!("almide_rt_fs_append(&*{}, &*{})?", args_str[0], args_str[1]),
-                "read_lines" => format!("almide_rt_fs_read_lines(&*{})?", args_str[0]),
-                "remove" => format!("almide_rt_fs_remove(&*{})?", args_str[0]),
-                "list_dir" => format!("almide_rt_fs_list_dir(&*{})?", args_str[0]),
-                "is_dir?" | "is_dir_hdlm_qm_" => format!("almide_rt_fs_is_dir(&*{})", args_str[0]),
-                "is_file?" | "is_file_hdlm_qm_" => format!("almide_rt_fs_is_file(&*{})", args_str[0]),
-                "copy" => format!("almide_rt_fs_copy(&*{}, &*{})?", args_str[0], args_str[1]),
-                "rename" => format!("almide_rt_fs_rename(&*{}, &*{})?", args_str[0], args_str[1]),
-                "walk" => format!("almide_rt_fs_walk(&*{})?", args_str[0]),
-                "stat" => format!("almide_rt_fs_stat(&*{})?", args_str[0]),
-                _ => { eprintln!("internal error: no Rust codegen for fs.{}() — this is a compiler bug", func); std::process::exit(70); },
-            },
-            "string" => match func {
-                "trim" => format!("almide_rt_string_trim(&*{})", args_str[0]),
-                "split" => format!("almide_rt_string_split(&*{}, &*{})", args_str[0], args_str[1]),
-                "join" => format!("almide_rt_string_join(&{}, &*{})", args_str[0], args_str[1]),
-                "len" => format!("almide_rt_string_len(&*{})", args_str[0]),
-                "contains" | "contains?" | "contains_hdlm_qm_" => format!("almide_rt_string_contains(&*{}, &*{})", args_str[0], args_str[1]),
-                "starts_with?" | "starts_with_hdlm_qm_" | "starts_with" => format!("almide_rt_string_starts_with(&*{}, &*{})", args_str[0], args_str[1]),
-                "ends_with?" | "ends_with_hdlm_qm_" | "ends_with" => format!("almide_rt_string_ends_with(&*{}, &*{})", args_str[0], args_str[1]),
-                "slice" => {
-                    if args_str.len() == 3 {
-                        format!("almide_rt_string_slice(&*{}, {}, Some({}))", args_str[0], args_str[1], args_str[2])
-                    } else {
-                        format!("almide_rt_string_slice(&*{}, {}, None)", args_str[0], args_str[1])
-                    }
-                }
-                "pad_left" => format!("almide_rt_string_pad_left(&*{}, {})", args_str[0], args_str[1]),
-                "to_bytes" => format!("almide_rt_string_to_bytes(&*{})", args_str[0]),
-                "to_upper" => format!("almide_rt_string_to_upper(&*{})", args_str[0]),
-                "to_lower" => format!("almide_rt_string_to_lower(&*{})", args_str[0]),
-                "to_int" => format!("almide_rt_string_to_int(&*{})?", args_str[0]),
-                "replace" => format!("almide_rt_string_replace(&*{}, &*{}, &*{})", args_str[0], args_str[1], args_str[2]),
-                "char_at" => format!("almide_rt_string_char_at(&*{}, {})", args_str[0], args_str[1]),
-                "lines" => format!("almide_rt_string_lines(&*{})", args_str[0]),
-                "chars" => format!("almide_rt_string_chars(&*{})", args_str[0]),
-                "index_of" => format!("almide_rt_string_index_of(&*{}, &*{})", args_str[0], args_str[1]),
-                "repeat" => format!("almide_rt_string_repeat(&*{}, {})", args_str[0], args_str[1]),
-                "from_bytes" => format!("almide_rt_string_from_bytes(&{{ let __bytes: Vec<i64> = {}; __bytes }})", args_str[0]),
-                "is_digit?" | "is_digit_hdlm_qm_" => format!("almide_rt_string_is_digit(&*{})", args_str[0]),
-                "is_alpha?" | "is_alpha_hdlm_qm_" => format!("almide_rt_string_is_alpha(&*{})", args_str[0]),
-                "is_alphanumeric?" | "is_alphanumeric_hdlm_qm_" => format!("almide_rt_string_is_alphanumeric(&*{})", args_str[0]),
-                "is_whitespace?" | "is_whitespace_hdlm_qm_" => format!("almide_rt_string_is_whitespace(&*{})", args_str[0]),
-                "pad_right" => format!("almide_rt_string_pad_right({}, {}, &*{})", args_str[0], args_str[1], args_str[2]),
-                "trim_start" => format!("almide_rt_string_trim_start(&*{})", args_str[0]),
-                "trim_end" => format!("almide_rt_string_trim_end(&*{})", args_str[0]),
-                "count" => format!("almide_rt_string_count(&*{}, &*{})", args_str[0], args_str[1]),
-                "is_empty?" | "is_empty_hdlm_qm_" => format!("almide_rt_string_is_empty(&*{})", args_str[0]),
-                "reverse" => format!("almide_rt_string_reverse(&*{})", args_str[0]),
-                "strip_prefix" => format!("almide_rt_string_strip_prefix(&*{}, &*{})", args_str[0], args_str[1]),
-                "strip_suffix" => format!("almide_rt_string_strip_suffix(&*{}, &*{})", args_str[0], args_str[1]),
-                "replace_first" => format!("almide_rt_string_replace_first(&*{}, &*{}, &*{})", args_str[0], args_str[1], args_str[2]),
-                "last_index_of" => format!("almide_rt_string_last_index_of(&*{}, &*{})", args_str[0], args_str[1]),
-                "to_float" => format!("almide_rt_string_to_float(&*{})?", args_str[0]),
-                _ => { eprintln!("internal error: no Rust codegen for string.{}() — this is a compiler bug", func); std::process::exit(70); },
-            },
-            "list" => {
-                match func {
-                    "len" => format!("almide_rt_list_len(&{})", args_str[0]),
-                    "get" => format!("almide_rt_list_get(&{}, {})", args_str[0], args_str[1]),
-                    "get_or" => format!("almide_rt_list_get_or(&{}, {}, {})", args_str[0], args_str[1], args_str[2]),
-                    "sort" => format!("almide_rt_list_sort(&{})", args_str[0]),
-                    "reverse" => format!("almide_rt_list_reverse(&{})", args_str[0]),
-                    "any" => {
-                        let (names, body) = self.inline_lambda(&args[1], 1);
-                        format!("almide_rt_list_any(&{}, |{}| {{ let {} = {}.clone(); {} }})", args_str[0], names[0], names[0], names[0], body)
-                    }
-                    "all" => {
-                        let (names, body) = self.inline_lambda(&args[1], 1);
-                        format!("almide_rt_list_all(&{}, |{}| {{ let {} = {}.clone(); {} }})", args_str[0], names[0], names[0], names[0], body)
-                    }
-                    "contains" => format!("almide_rt_list_contains(&{}, &{})", args_str[0], args_str[1]),
-                    "each" => {
-                        let (names, body) = self.inline_lambda(&args[1], 1);
-                        format!("almide_rt_list_each(&{}, |{}| {{ {} ; }})", args_str[0], names[0], body)
-                    }
-                    "map" => {
-                        let (names, body) = self.inline_lambda(&args[1], 1);
-                        if self.in_effect && body.contains("?") {
-                            format!("almide_rt_list_map_effect(({}).clone(), |{}| -> Result<_, String> {{ Ok({{ {} }}) }})?", args_str[0], names[0], body)
-                        } else {
-                            format!("almide_rt_list_map(({}).clone(), |{}| {{ {} }})", args_str[0], names[0], body)
-                        }
-                    }
-                    "filter" => {
-                        let (names, body) = self.inline_lambda(&args[1], 1);
-                        format!("almide_rt_list_filter(({}).clone(), |{}| {{ let {} = {}.clone(); {} }})", args_str[0], names[0], names[0], names[0], body)
-                    }
-                    "find" => {
-                        let (names, body) = self.inline_lambda(&args[1], 1);
-                        format!("almide_rt_list_find(({}).clone(), |{}| {{ let {} = {}.clone(); {} }})", args_str[0], names[0], names[0], names[0], body)
-                    }
-                    "fold" => {
-                        let (names, body) = self.inline_lambda(&args[2], 2);
-                        let init = &args_str[1];
-                        if self.in_effect && body.contains("?") {
-                            format!("almide_rt_list_fold_effect(({}).clone(), {}, |{}, {}| -> Result<_, String> {{ Ok({{ {} }}) }})?", args_str[0], init, names[0], names[1], body)
-                        } else {
-                            let acc_typed = if init.starts_with("Ok(") || init.starts_with("Err(") {
-                                format!("{}: Result<_, String>", names[0])
-                            } else {
-                                names[0].clone()
-                            };
-                            format!("almide_rt_list_fold(({}).clone(), {}, |{}, {}| {{ {} }})", args_str[0], init, acc_typed, names[1], body)
-                        }
-                    }
-                    "enumerate" => format!("almide_rt_list_enumerate(({}).clone())", args_str[0]),
-                    "zip" => format!("almide_rt_list_zip(({}).clone(), ({}).clone())", args_str[0], args_str[1]),
-                    "flatten" => format!("almide_rt_list_flatten(({}).clone())", args_str[0]),
-                    "take" => format!("almide_rt_list_take(({}).clone(), {})", args_str[0], args_str[1]),
-                    "drop" => format!("almide_rt_list_drop(({}).clone(), {})", args_str[0], args_str[1]),
-                    "sort_by" => {
-                        let (names, body) = self.inline_lambda(&args[1], 1);
-                        format!("almide_rt_list_sort_by(({}).clone(), |{}| {{ {} }})", args_str[0], names[0], body)
-                    }
-                    "unique" => format!("almide_rt_list_unique(&{})", args_str[0]),
-                    "index_of" => format!("almide_rt_list_index_of(&{}, &{})", args_str[0], args_str[1]),
-                    "last" => format!("almide_rt_list_last(&{})", args_str[0]),
-                    "chunk" => format!("almide_rt_list_chunk(&{}, {})", args_str[0], args_str[1]),
-                    "sum" => format!("almide_rt_list_sum(&{})", args_str[0]),
-                    "product" => format!("almide_rt_list_product(&{})", args_str[0]),
-                    "first" => format!("almide_rt_list_first(&{})", args_str[0]),
-                    "is_empty?" | "is_empty_hdlm_qm_" => format!("almide_rt_list_is_empty(&{})", args_str[0]),
-                    "flat_map" => {
-                        let (names, body) = self.inline_lambda(&args[1], 1);
-                        if self.in_effect && body.contains("?") {
-                            format!("almide_rt_list_flat_map_effect(({}).clone(), |{}| -> Result<Vec<_>, String> {{ Ok({{ {} }}) }})?", args_str[0], names[0], body)
-                        } else {
-                            format!("almide_rt_list_flat_map(({}).clone(), |{}| {{ {} }})", args_str[0], names[0], body)
-                        }
-                    }
-                    "min" => format!("almide_rt_list_min(&{})", args_str[0]),
-                    "max" => format!("almide_rt_list_max(&{})", args_str[0]),
-                    "join" => format!("almide_rt_list_join(&{}, &*{})", args_str[0], args_str[1]),
-                    "filter_map" => {
-                        let (names, body) = self.inline_lambda(&args[1], 1);
-                        format!("almide_rt_list_filter_map(({}).clone(), |{}| {{ {} }})", args_str[0], names[0], body)
-                    }
-                    "take_while" => {
-                        let (names, body) = self.inline_lambda(&args[1], 1);
-                        format!("almide_rt_list_take_while(({}).clone(), |{}| {{ let {} = {}.clone(); {} }})", args_str[0], names[0], names[0], names[0], body)
-                    }
-                    "drop_while" => {
-                        let (names, body) = self.inline_lambda(&args[1], 1);
-                        format!("almide_rt_list_drop_while(({}).clone(), |{}| {{ let {} = {}.clone(); {} }})", args_str[0], names[0], names[0], names[0], body)
-                    }
-                    "count" => {
-                        let (names, body) = self.inline_lambda(&args[1], 1);
-                        format!("almide_rt_list_count(&{}, |{}| {{ let {} = {}.clone(); {} }})", args_str[0], names[0], names[0], names[0], body)
-                    }
-                    "partition" => {
-                        let (names, body) = self.inline_lambda(&args[1], 1);
-                        format!("almide_rt_list_partition(({}).clone(), |{}| {{ let {} = {}.clone(); {} }})", args_str[0], names[0], names[0], names[0], body)
-                    }
-                    "reduce" => {
-                        let (names, body) = self.inline_lambda(&args[1], 2);
-                        format!("almide_rt_list_reduce(({}).clone(), |{}, {}| {{ {} }})", args_str[0], names[0], names[1], body)
-                    }
-                    "group_by" => {
-                        let (names, body) = self.inline_lambda(&args[1], 1);
-                        format!("almide_rt_list_group_by(({}).clone(), |{}| {{ {} }})", args_str[0], names[0], body)
-                    }
-                    _ => { eprintln!("internal error: no Rust codegen for list.{}() — this is a compiler bug", func); std::process::exit(70); },
-                }
-            },
-            "map" => match func {
-                "new" => "almide_rt_map_new()".to_string(),
-                "get" => format!("almide_rt_map_get(&{}, &{})", args_str[0], args_str[1]),
-                "get_or" => format!("almide_rt_map_get_or(&{}, &{}, {})", args_str[0], args_str[1], args_str[2]),
-                "set" => format!("almide_rt_map_set(&{}, {}, {})", args_str[0], args_str[1], args_str[2]),
-                "contains" => format!("almide_rt_map_contains(&{}, &{})", args_str[0], args_str[1]),
-                "remove" => format!("almide_rt_map_remove(&{}, &{})", args_str[0], args_str[1]),
-                "keys" => format!("almide_rt_map_keys(&{})", args_str[0]),
-                "values" => format!("almide_rt_map_values(&{})", args_str[0]),
-                "len" => format!("almide_rt_map_len(&{})", args_str[0]),
-                "entries" => format!("almide_rt_map_entries(&{})", args_str[0]),
-                "from_list" => {
-                    let (names, body) = self.inline_lambda(&args[1], 1);
-                    format!("almide_rt_map_from_list(({}).clone(), |{}| {{ {} }})", args_str[0], names[0], body)
-                }
-                "merge" => format!("almide_rt_map_merge(&{}, &{})", args_str[0], args_str[1]),
-                "is_empty?" | "is_empty_hdlm_qm_" => format!("almide_rt_map_is_empty(&{})", args_str[0]),
-                "map_values" => {
-                    let (names, body) = self.inline_lambda(&args[1], 1);
-                    format!("almide_rt_map_map_values(&{}, |{}| {{ let {} = {}.clone(); {} }})", args_str[0], names[0], names[0], names[0], body)
-                }
-                "filter" => {
-                    let (names, body) = self.inline_lambda(&args[1], 2);
-                    format!("almide_rt_map_filter(&{}, |{}, {}| {{ let {} = {}.clone(); let {} = {}.clone(); {} }})", args_str[0], names[0], names[1], names[0], names[0], names[1], names[1], body)
-                }
-                "from_entries" => format!("almide_rt_map_from_entries(({}).clone())", args_str[0]),
-                _ => { eprintln!("internal error: no Rust codegen for map.{}() — this is a compiler bug", func); std::process::exit(70); },
-            },
-            "int" => match func {
-                "to_hex" => format!("almide_rt_int_to_hex({})", args_str[0]),
-                "to_string" => format!("almide_rt_int_to_string({})", args_str[0]),
-                "parse" => format!("almide_rt_int_parse(&*{})", args_str[0]),
-                "parse_hex" => format!("almide_rt_int_parse_hex(&*{})", args_str[0]),
-                "abs" => format!("almide_rt_int_abs({})", args_str[0]),
-                "min" => format!("almide_rt_int_min({}, {})", args_str[0], args_str[1]),
-                "max" => format!("almide_rt_int_max({}, {})", args_str[0], args_str[1]),
-                // bitwise operations
-                "band" => format!("almide_rt_int_band({}, {})", args_str[0], args_str[1]),
-                "bor" => format!("almide_rt_int_bor({}, {})", args_str[0], args_str[1]),
-                "bxor" => format!("almide_rt_int_bxor({}, {})", args_str[0], args_str[1]),
-                "bshl" => format!("almide_rt_int_bshl({}, {})", args_str[0], args_str[1]),
-                "bshr" => format!("almide_rt_int_bshr({}, {})", args_str[0], args_str[1]),
-                "bnot" => format!("almide_rt_int_bnot({})", args_str[0]),
-                // wrapping arithmetic
-                "wrap_add" => format!("almide_rt_int_wrap_add({}, {}, {})", args_str[0], args_str[1], args_str[2]),
-                "wrap_mul" => format!("almide_rt_int_wrap_mul({}, {}, {})", args_str[0], args_str[1], args_str[2]),
-                "rotate_right" => format!("almide_rt_int_rotate_right({}, {}, {})", args_str[0], args_str[1], args_str[2]),
-                "rotate_left" => format!("almide_rt_int_rotate_left({}, {}, {})", args_str[0], args_str[1], args_str[2]),
-                "to_u32" => format!("almide_rt_int_to_u32({})", args_str[0]),
-                "to_u8" => format!("almide_rt_int_to_u8({})", args_str[0]),
-                "clamp" => format!("almide_rt_int_clamp({}, {}, {})", args_str[0], args_str[1], args_str[2]),
-                _ => { eprintln!("internal error: no Rust codegen for int.{}() — this is a compiler bug", func); std::process::exit(70); },
-            },
-            "float" => match func {
-                "to_string" => format!("almide_rt_float_to_string({})", args_str[0]),
-                "to_int" => format!("almide_rt_float_to_int({})", args_str[0]),
-                "round" => format!("almide_rt_float_round({})", args_str[0]),
-                "floor" => format!("almide_rt_float_floor({})", args_str[0]),
-                "ceil" => format!("almide_rt_float_ceil({})", args_str[0]),
-                "abs" => format!("almide_rt_float_abs({})", args_str[0]),
-                "sqrt" => format!("almide_rt_float_sqrt({})", args_str[0]),
-                "parse" => format!("almide_rt_float_parse(&*{})?", args_str[0]),
-                "from_int" => format!("almide_rt_float_from_int({})", args_str[0]),
-                "min" => format!("almide_rt_float_min({}, {})", args_str[0], args_str[1]),
-                "max" => format!("almide_rt_float_max({}, {})", args_str[0], args_str[1]),
-                "clamp" => format!("almide_rt_float_clamp({}, {}, {})", args_str[0], args_str[1], args_str[2]),
-                _ => { eprintln!("internal error: no Rust codegen for float.{}() — this is a compiler bug", func); std::process::exit(70); },
-            },
-            "env" => match func {
-                "unix_timestamp" => "almide_rt_env_unix_timestamp()".to_string(),
-                "args" => "almide_rt_env_args()".to_string(),
-                "get" => format!("almide_rt_env_get(&*{})", args_str[0]),
-                "set" => format!("almide_rt_env_set(&*{}, &*{})", args_str[0], args_str[1]),
-                "cwd" => "almide_rt_env_cwd()?".to_string(),
-                "millis" => "almide_rt_env_millis()".to_string(),
-                "sleep_ms" => format!("almide_rt_env_sleep_ms({})", args_str[0]),
-                _ => { eprintln!("internal error: no Rust codegen for env.{}() — this is a compiler bug", func); std::process::exit(70); },
-            },
-            "process" => match func {
-                "exec" => format!("almide_rt_process_exec(&*{}, &{{ let __a: Vec<String> = {}; __a }})", args_str[0], args_str[1]),
-                "exit" => format!("almide_rt_process_exit({})", args_str[0]),
-                "stdin_lines" => "almide_rt_process_stdin_lines()?".to_string(),
-                "exec_status" => format!("almide_rt_process_exec_status(&*{}, &{{ let __a: Vec<String> = {}; __a }})?", args_str[0], args_str[1]),
-                _ => { eprintln!("internal error: no Rust codegen for process.{}() — this is a compiler bug", func); std::process::exit(70); },
-            },
-            "io" => match func {
-                "read_line" => "almide_rt_io_read_line()?".to_string(),
-                "print" => format!("almide_rt_io_print(&*{})?", args_str[0]),
-                "read_all" => "almide_rt_io_read_all()?".to_string(),
-                _ => { eprintln!("internal error: no Rust codegen for io.{}() — this is a compiler bug", func); std::process::exit(70); },
-            },
-            "json" => match func {
-                "parse" => format!("almide_json_parse(&{})?", args_str[0]),
-                "stringify" => format!("almide_json_stringify(&{})", args_str[0]),
-                "get" => format!("almide_json_get(&{}, &{})", args_str[0], args_str[1]),
-                "get_string" => format!("almide_json_get_string(&{}, &{})", args_str[0], args_str[1]),
-                "get_int" => format!("almide_json_get_int(&{}, &{})", args_str[0], args_str[1]),
-                "get_bool" => format!("almide_json_get_bool(&{}, &{})", args_str[0], args_str[1]),
-                "get_array" => format!("almide_json_get_array(&{}, &{})", args_str[0], args_str[1]),
-                "keys" => format!("almide_json_keys(&{})", args_str[0]),
-                "to_string" => format!("almide_json_to_string(&{})", args_str[0]),
-                "to_int" => format!("almide_json_to_int(&{})", args_str[0]),
-                "from_string" => format!("JStr({})", args_str[0]),
-                "from_int" => format!("JInt({})", args_str[0]),
-                "from_bool" => format!("JBool({})", args_str[0]),
-                "null" => "JNull".to_string(),
-                "array" => format!("JArray({})", args_str[0]),
-                "from_map" => format!("JObject({})", args_str[0]),
-                "get_float" => format!("almide_json_get_float(&{}, &{})", args_str[0], args_str[1]),
-                "from_float" => format!("almide_json_from_float({})", args_str[0]),
-                "stringify_pretty" => format!("almide_json_stringify_pretty(&{})", args_str[0]),
-                _ => { eprintln!("internal error: no Rust codegen for json.{}() — this is a compiler bug", func); std::process::exit(70); },
-            },
-            "http" => match func {
-                "serve" => {
-                    let (names, body) = self.inline_lambda(&args[1], 1);
-                    // serve returns Result<(), String> which matches effect fn main's return type
-                    format!("{{ almide_http_serve({}, |{}| -> Result<AlmideHttpResponse, String> {{ Ok({{ {} }}) }})?; Ok(()) }}", args_str[0], names[0], body)
-                }
-                "response" => format!("AlmideHttpResponse::new({}, {}.to_string())", args_str[0], args_str[1]),
-                "json" => format!("AlmideHttpResponse::json({}, {}.to_string())", args_str[0], args_str[1]),
-                "with_headers" => format!("AlmideHttpResponse::with_headers({}, {}.to_string(), {})", args_str[0], args_str[1], args_str[2]),
-                "get" => format!("almide_http_get(&{})?", args_str[0]),
-                "post" => format!("almide_http_post(&{}, &{})?", args_str[0], args_str[1]),
-                _ => { eprintln!("internal error: no Rust codegen for http.{}() — this is a compiler bug", func); std::process::exit(70); },
-            },
-            "math" => match func {
-                "min" => format!("almide_rt_math_min({}, {})", args_str[0], args_str[1]),
-                "max" => format!("almide_rt_math_max({}, {})", args_str[0], args_str[1]),
-                "abs" => format!("almide_rt_math_abs({})", args_str[0]),
-                "pow" => format!("almide_rt_math_pow({}, {})", args_str[0], args_str[1]),
-                "pi" => "almide_rt_math_pi()".to_string(),
-                "e" => "almide_rt_math_e()".to_string(),
-                "sin" => format!("almide_rt_math_sin({} as f64)", args_str[0]),
-                "cos" => format!("almide_rt_math_cos({} as f64)", args_str[0]),
-                "tan" => format!("almide_rt_math_tan({} as f64)", args_str[0]),
-                "log" => format!("almide_rt_math_log({} as f64)", args_str[0]),
-                "exp" => format!("almide_rt_math_exp({} as f64)", args_str[0]),
-                "sqrt" => format!("almide_rt_math_sqrt({} as f64)", args_str[0]),
-                _ => { eprintln!("internal error: no Rust codegen for math.{}() — this is a compiler bug", func); std::process::exit(70); },
-            },
-            "random" => match func {
-                "int" => format!("almide_rt_random_int({}, {})?", args_str[0], args_str[1]),
-                "float" => "almide_rt_random_float()?".to_string(),
-                "choice" => format!("almide_rt_random_choice(&{})?", args_str[0]),
-                "shuffle" => format!("almide_rt_random_shuffle(({}).clone())?", args_str[0]),
-                _ => { eprintln!("internal error: no Rust codegen for random.{}() — this is a compiler bug", func); std::process::exit(70); },
-            },
-            "regex" => match func {
-                "match?" | "match_hdlm_qm_" => format!("almide_regex_is_match(&{}, &{})", args_str[0], args_str[1]),
-                "full_match?" | "full_match_hdlm_qm_" => format!("almide_regex_full_match(&{}, &{})", args_str[0], args_str[1]),
-                "find" => format!("almide_regex_find(&{}, &{})", args_str[0], args_str[1]),
-                "find_all" => format!("almide_regex_find_all(&{}, &{})", args_str[0], args_str[1]),
-                "replace" => format!("almide_regex_replace(&{}, &{}, &{})", args_str[0], args_str[1], args_str[2]),
-                "replace_first" => format!("almide_regex_replace_first(&{}, &{}, &{})", args_str[0], args_str[1], args_str[2]),
-                "split" => format!("almide_regex_split(&{}, &{})", args_str[0], args_str[1]),
-                "captures" => format!("almide_regex_captures(&{}, &{})", args_str[0], args_str[1]),
-                _ => { eprintln!("internal error: no Rust codegen for regex.{}() — this is a compiler bug", func); std::process::exit(70); },
-            },
+            "fs" => self.gen_fs_call(func, &args_str),
+            "string" => self.gen_string_call(func, &args_str),
+            "list" => self.gen_list_call(func, args, &args_str),
+            "map" => self.gen_map_call(func, args, &args_str),
+            "int" => self.gen_int_call(func, &args_str),
+            "float" => self.gen_float_call(func, &args_str),
+            "env" => self.gen_env_call(func, &args_str),
+            "process" => self.gen_process_call(func, &args_str),
+            "io" => self.gen_io_call(func, &args_str),
+            "json" => self.gen_json_call(func, &args_str),
+            "http" => self.gen_http_call(func, args, &args_str),
+            "math" => self.gen_math_call(func, &args_str),
+            "random" => self.gen_random_call(func, &args_str),
+            "regex" => self.gen_regex_call(func, &args_str),
             _ => {
                 let resolved = self.module_aliases.get(module)
                     .cloned()
@@ -557,6 +240,377 @@ impl Emitter {
                     call
                 }
             }
+        }
+    }
+
+    fn gen_fs_call(&self, func: &str, args_str: &[String]) -> String {
+        match func {
+            "read_text" => format!("almide_rt_fs_read_text(&*{})?", args_str[0]),
+            "write" => format!("almide_rt_fs_write(&*{}, &*{})?", args_str[0], args_str[1]),
+            "write_bytes" => format!("almide_rt_fs_write_bytes(&*{}, &{})?", args_str[0], args_str[1]),
+            "read_bytes" => format!("almide_rt_fs_read_bytes(&*{})?", args_str[0]),
+            "exists?" | "exists_hdlm_qm_" => format!("almide_rt_fs_exists(&*{})", args_str[0]),
+            "mkdir_p" => format!("almide_rt_fs_mkdir_p(&*{})?", args_str[0]),
+            "append" => format!("almide_rt_fs_append(&*{}, &*{})?", args_str[0], args_str[1]),
+            "read_lines" => format!("almide_rt_fs_read_lines(&*{})?", args_str[0]),
+            "remove" => format!("almide_rt_fs_remove(&*{})?", args_str[0]),
+            "list_dir" => format!("almide_rt_fs_list_dir(&*{})?", args_str[0]),
+            "is_dir?" | "is_dir_hdlm_qm_" => format!("almide_rt_fs_is_dir(&*{})", args_str[0]),
+            "is_file?" | "is_file_hdlm_qm_" => format!("almide_rt_fs_is_file(&*{})", args_str[0]),
+            "copy" => format!("almide_rt_fs_copy(&*{}, &*{})?", args_str[0], args_str[1]),
+            "rename" => format!("almide_rt_fs_rename(&*{}, &*{})?", args_str[0], args_str[1]),
+            "walk" => format!("almide_rt_fs_walk(&*{})?", args_str[0]),
+            "stat" => format!("almide_rt_fs_stat(&*{})?", args_str[0]),
+            _ => { eprintln!("internal error: no Rust codegen for fs.{}() — this is a compiler bug", func); std::process::exit(70); },
+        }
+    }
+
+    fn gen_string_call(&self, func: &str, args_str: &[String]) -> String {
+        match func {
+            "trim" => format!("almide_rt_string_trim(&*{})", args_str[0]),
+            "split" => format!("almide_rt_string_split(&*{}, &*{})", args_str[0], args_str[1]),
+            "join" => format!("almide_rt_string_join(&{}, &*{})", args_str[0], args_str[1]),
+            "len" => format!("almide_rt_string_len(&*{})", args_str[0]),
+            "contains" | "contains?" | "contains_hdlm_qm_" => format!("almide_rt_string_contains(&*{}, &*{})", args_str[0], args_str[1]),
+            "starts_with?" | "starts_with_hdlm_qm_" | "starts_with" => format!("almide_rt_string_starts_with(&*{}, &*{})", args_str[0], args_str[1]),
+            "ends_with?" | "ends_with_hdlm_qm_" | "ends_with" => format!("almide_rt_string_ends_with(&*{}, &*{})", args_str[0], args_str[1]),
+            "slice" => {
+                if args_str.len() == 3 {
+                    format!("almide_rt_string_slice(&*{}, {}, Some({}))", args_str[0], args_str[1], args_str[2])
+                } else {
+                    format!("almide_rt_string_slice(&*{}, {}, None)", args_str[0], args_str[1])
+                }
+            }
+            "pad_left" => format!("almide_rt_string_pad_left(&*{}, {})", args_str[0], args_str[1]),
+            "to_bytes" => format!("almide_rt_string_to_bytes(&*{})", args_str[0]),
+            "to_upper" => format!("almide_rt_string_to_upper(&*{})", args_str[0]),
+            "to_lower" => format!("almide_rt_string_to_lower(&*{})", args_str[0]),
+            "to_int" => format!("almide_rt_string_to_int(&*{})?", args_str[0]),
+            "replace" => format!("almide_rt_string_replace(&*{}, &*{}, &*{})", args_str[0], args_str[1], args_str[2]),
+            "char_at" => format!("almide_rt_string_char_at(&*{}, {})", args_str[0], args_str[1]),
+            "lines" => format!("almide_rt_string_lines(&*{})", args_str[0]),
+            "chars" => format!("almide_rt_string_chars(&*{})", args_str[0]),
+            "index_of" => format!("almide_rt_string_index_of(&*{}, &*{})", args_str[0], args_str[1]),
+            "repeat" => format!("almide_rt_string_repeat(&*{}, {})", args_str[0], args_str[1]),
+            "from_bytes" => format!("almide_rt_string_from_bytes(&{{ let __bytes: Vec<i64> = {}; __bytes }})", args_str[0]),
+            "is_digit?" | "is_digit_hdlm_qm_" => format!("almide_rt_string_is_digit(&*{})", args_str[0]),
+            "is_alpha?" | "is_alpha_hdlm_qm_" => format!("almide_rt_string_is_alpha(&*{})", args_str[0]),
+            "is_alphanumeric?" | "is_alphanumeric_hdlm_qm_" => format!("almide_rt_string_is_alphanumeric(&*{})", args_str[0]),
+            "is_whitespace?" | "is_whitespace_hdlm_qm_" => format!("almide_rt_string_is_whitespace(&*{})", args_str[0]),
+            "pad_right" => format!("almide_rt_string_pad_right({}, {}, &*{})", args_str[0], args_str[1], args_str[2]),
+            "trim_start" => format!("almide_rt_string_trim_start(&*{})", args_str[0]),
+            "trim_end" => format!("almide_rt_string_trim_end(&*{})", args_str[0]),
+            "count" => format!("almide_rt_string_count(&*{}, &*{})", args_str[0], args_str[1]),
+            "is_empty?" | "is_empty_hdlm_qm_" => format!("almide_rt_string_is_empty(&*{})", args_str[0]),
+            "reverse" => format!("almide_rt_string_reverse(&*{})", args_str[0]),
+            "strip_prefix" => format!("almide_rt_string_strip_prefix(&*{}, &*{})", args_str[0], args_str[1]),
+            "strip_suffix" => format!("almide_rt_string_strip_suffix(&*{}, &*{})", args_str[0], args_str[1]),
+            "replace_first" => format!("almide_rt_string_replace_first(&*{}, &*{}, &*{})", args_str[0], args_str[1], args_str[2]),
+            "last_index_of" => format!("almide_rt_string_last_index_of(&*{}, &*{})", args_str[0], args_str[1]),
+            "to_float" => format!("almide_rt_string_to_float(&*{})?", args_str[0]),
+            _ => { eprintln!("internal error: no Rust codegen for string.{}() — this is a compiler bug", func); std::process::exit(70); },
+        }
+    }
+
+    fn gen_list_call(&self, func: &str, args: &[Expr], args_str: &[String]) -> String {
+        match func {
+            "len" => format!("almide_rt_list_len(&{})", args_str[0]),
+            "get" => format!("almide_rt_list_get(&{}, {})", args_str[0], args_str[1]),
+            "get_or" => format!("almide_rt_list_get_or(&{}, {}, {})", args_str[0], args_str[1], args_str[2]),
+            "sort" => format!("almide_rt_list_sort(&{})", args_str[0]),
+            "reverse" => format!("almide_rt_list_reverse(&{})", args_str[0]),
+            "any" => {
+                let (names, body) = self.inline_lambda(&args[1], 1);
+                format!("almide_rt_list_any(&{}, |{}| {{ let {} = {}.clone(); {} }})", args_str[0], names[0], names[0], names[0], body)
+            }
+            "all" => {
+                let (names, body) = self.inline_lambda(&args[1], 1);
+                format!("almide_rt_list_all(&{}, |{}| {{ let {} = {}.clone(); {} }})", args_str[0], names[0], names[0], names[0], body)
+            }
+            "contains" => format!("almide_rt_list_contains(&{}, &{})", args_str[0], args_str[1]),
+            "each" => {
+                let (names, body) = self.inline_lambda(&args[1], 1);
+                format!("almide_rt_list_each(&{}, |{}| {{ {} ; }})", args_str[0], names[0], body)
+            }
+            "map" => {
+                let (names, body) = self.inline_lambda(&args[1], 1);
+                if self.in_effect && body.contains("?") {
+                    format!("almide_rt_list_map_effect(({}).clone(), |{}| -> Result<_, String> {{ Ok({{ {} }}) }})?", args_str[0], names[0], body)
+                } else {
+                    format!("almide_rt_list_map(({}).clone(), |{}| {{ {} }})", args_str[0], names[0], body)
+                }
+            }
+            "filter" => {
+                let (names, body) = self.inline_lambda(&args[1], 1);
+                format!("almide_rt_list_filter(({}).clone(), |{}| {{ let {} = {}.clone(); {} }})", args_str[0], names[0], names[0], names[0], body)
+            }
+            "find" => {
+                let (names, body) = self.inline_lambda(&args[1], 1);
+                format!("almide_rt_list_find(({}).clone(), |{}| {{ let {} = {}.clone(); {} }})", args_str[0], names[0], names[0], names[0], body)
+            }
+            "fold" => {
+                let (names, body) = self.inline_lambda(&args[2], 2);
+                let init = &args_str[1];
+                if self.in_effect && body.contains("?") {
+                    format!("almide_rt_list_fold_effect(({}).clone(), {}, |{}, {}| -> Result<_, String> {{ Ok({{ {} }}) }})?", args_str[0], init, names[0], names[1], body)
+                } else {
+                    let acc_typed = if init.starts_with("Ok(") || init.starts_with("Err(") {
+                        format!("{}: Result<_, String>", names[0])
+                    } else {
+                        names[0].clone()
+                    };
+                    format!("almide_rt_list_fold(({}).clone(), {}, |{}, {}| {{ {} }})", args_str[0], init, acc_typed, names[1], body)
+                }
+            }
+            "enumerate" => format!("almide_rt_list_enumerate(({}).clone())", args_str[0]),
+            "zip" => format!("almide_rt_list_zip(({}).clone(), ({}).clone())", args_str[0], args_str[1]),
+            "flatten" => format!("almide_rt_list_flatten(({}).clone())", args_str[0]),
+            "take" => format!("almide_rt_list_take(({}).clone(), {})", args_str[0], args_str[1]),
+            "drop" => format!("almide_rt_list_drop(({}).clone(), {})", args_str[0], args_str[1]),
+            "sort_by" => {
+                let (names, body) = self.inline_lambda(&args[1], 1);
+                format!("almide_rt_list_sort_by(({}).clone(), |{}| {{ {} }})", args_str[0], names[0], body)
+            }
+            "unique" => format!("almide_rt_list_unique(&{})", args_str[0]),
+            "index_of" => format!("almide_rt_list_index_of(&{}, &{})", args_str[0], args_str[1]),
+            "last" => format!("almide_rt_list_last(&{})", args_str[0]),
+            "chunk" => format!("almide_rt_list_chunk(&{}, {})", args_str[0], args_str[1]),
+            "sum" => format!("almide_rt_list_sum(&{})", args_str[0]),
+            "product" => format!("almide_rt_list_product(&{})", args_str[0]),
+            "first" => format!("almide_rt_list_first(&{})", args_str[0]),
+            "is_empty?" | "is_empty_hdlm_qm_" => format!("almide_rt_list_is_empty(&{})", args_str[0]),
+            "flat_map" => {
+                let (names, body) = self.inline_lambda(&args[1], 1);
+                if self.in_effect && body.contains("?") {
+                    format!("almide_rt_list_flat_map_effect(({}).clone(), |{}| -> Result<Vec<_>, String> {{ Ok({{ {} }}) }})?", args_str[0], names[0], body)
+                } else {
+                    format!("almide_rt_list_flat_map(({}).clone(), |{}| {{ {} }})", args_str[0], names[0], body)
+                }
+            }
+            "min" => format!("almide_rt_list_min(&{})", args_str[0]),
+            "max" => format!("almide_rt_list_max(&{})", args_str[0]),
+            "join" => format!("almide_rt_list_join(&{}, &*{})", args_str[0], args_str[1]),
+            "filter_map" => {
+                let (names, body) = self.inline_lambda(&args[1], 1);
+                format!("almide_rt_list_filter_map(({}).clone(), |{}| {{ {} }})", args_str[0], names[0], body)
+            }
+            "take_while" => {
+                let (names, body) = self.inline_lambda(&args[1], 1);
+                format!("almide_rt_list_take_while(({}).clone(), |{}| {{ let {} = {}.clone(); {} }})", args_str[0], names[0], names[0], names[0], body)
+            }
+            "drop_while" => {
+                let (names, body) = self.inline_lambda(&args[1], 1);
+                format!("almide_rt_list_drop_while(({}).clone(), |{}| {{ let {} = {}.clone(); {} }})", args_str[0], names[0], names[0], names[0], body)
+            }
+            "count" => {
+                let (names, body) = self.inline_lambda(&args[1], 1);
+                format!("almide_rt_list_count(&{}, |{}| {{ let {} = {}.clone(); {} }})", args_str[0], names[0], names[0], names[0], body)
+            }
+            "partition" => {
+                let (names, body) = self.inline_lambda(&args[1], 1);
+                format!("almide_rt_list_partition(({}).clone(), |{}| {{ let {} = {}.clone(); {} }})", args_str[0], names[0], names[0], names[0], body)
+            }
+            "reduce" => {
+                let (names, body) = self.inline_lambda(&args[1], 2);
+                format!("almide_rt_list_reduce(({}).clone(), |{}, {}| {{ {} }})", args_str[0], names[0], names[1], body)
+            }
+            "group_by" => {
+                let (names, body) = self.inline_lambda(&args[1], 1);
+                format!("almide_rt_list_group_by(({}).clone(), |{}| {{ {} }})", args_str[0], names[0], body)
+            }
+            _ => { eprintln!("internal error: no Rust codegen for list.{}() — this is a compiler bug", func); std::process::exit(70); },
+        }
+    }
+
+    fn gen_map_call(&self, func: &str, args: &[Expr], args_str: &[String]) -> String {
+        match func {
+            "new" => "almide_rt_map_new()".to_string(),
+            "get" => format!("almide_rt_map_get(&{}, &{})", args_str[0], args_str[1]),
+            "get_or" => format!("almide_rt_map_get_or(&{}, &{}, {})", args_str[0], args_str[1], args_str[2]),
+            "set" => format!("almide_rt_map_set(&{}, {}, {})", args_str[0], args_str[1], args_str[2]),
+            "contains" => format!("almide_rt_map_contains(&{}, &{})", args_str[0], args_str[1]),
+            "remove" => format!("almide_rt_map_remove(&{}, &{})", args_str[0], args_str[1]),
+            "keys" => format!("almide_rt_map_keys(&{})", args_str[0]),
+            "values" => format!("almide_rt_map_values(&{})", args_str[0]),
+            "len" => format!("almide_rt_map_len(&{})", args_str[0]),
+            "entries" => format!("almide_rt_map_entries(&{})", args_str[0]),
+            "from_list" => {
+                let (names, body) = self.inline_lambda(&args[1], 1);
+                format!("almide_rt_map_from_list(({}).clone(), |{}| {{ {} }})", args_str[0], names[0], body)
+            }
+            "merge" => format!("almide_rt_map_merge(&{}, &{})", args_str[0], args_str[1]),
+            "is_empty?" | "is_empty_hdlm_qm_" => format!("almide_rt_map_is_empty(&{})", args_str[0]),
+            "map_values" => {
+                let (names, body) = self.inline_lambda(&args[1], 1);
+                format!("almide_rt_map_map_values(&{}, |{}| {{ let {} = {}.clone(); {} }})", args_str[0], names[0], names[0], names[0], body)
+            }
+            "filter" => {
+                let (names, body) = self.inline_lambda(&args[1], 2);
+                format!("almide_rt_map_filter(&{}, |{}, {}| {{ let {} = {}.clone(); let {} = {}.clone(); {} }})", args_str[0], names[0], names[1], names[0], names[0], names[1], names[1], body)
+            }
+            "from_entries" => format!("almide_rt_map_from_entries(({}).clone())", args_str[0]),
+            _ => { eprintln!("internal error: no Rust codegen for map.{}() — this is a compiler bug", func); std::process::exit(70); },
+        }
+    }
+
+    fn gen_int_call(&self, func: &str, args_str: &[String]) -> String {
+        match func {
+            "to_hex" => format!("almide_rt_int_to_hex({})", args_str[0]),
+            "to_string" => format!("almide_rt_int_to_string({})", args_str[0]),
+            "parse" => format!("almide_rt_int_parse(&*{})", args_str[0]),
+            "parse_hex" => format!("almide_rt_int_parse_hex(&*{})", args_str[0]),
+            "abs" => format!("almide_rt_int_abs({})", args_str[0]),
+            "min" => format!("almide_rt_int_min({}, {})", args_str[0], args_str[1]),
+            "max" => format!("almide_rt_int_max({}, {})", args_str[0], args_str[1]),
+            // bitwise operations
+            "band" => format!("almide_rt_int_band({}, {})", args_str[0], args_str[1]),
+            "bor" => format!("almide_rt_int_bor({}, {})", args_str[0], args_str[1]),
+            "bxor" => format!("almide_rt_int_bxor({}, {})", args_str[0], args_str[1]),
+            "bshl" => format!("almide_rt_int_bshl({}, {})", args_str[0], args_str[1]),
+            "bshr" => format!("almide_rt_int_bshr({}, {})", args_str[0], args_str[1]),
+            "bnot" => format!("almide_rt_int_bnot({})", args_str[0]),
+            // wrapping arithmetic
+            "wrap_add" => format!("almide_rt_int_wrap_add({}, {}, {})", args_str[0], args_str[1], args_str[2]),
+            "wrap_mul" => format!("almide_rt_int_wrap_mul({}, {}, {})", args_str[0], args_str[1], args_str[2]),
+            "rotate_right" => format!("almide_rt_int_rotate_right({}, {}, {})", args_str[0], args_str[1], args_str[2]),
+            "rotate_left" => format!("almide_rt_int_rotate_left({}, {}, {})", args_str[0], args_str[1], args_str[2]),
+            "to_u32" => format!("almide_rt_int_to_u32({})", args_str[0]),
+            "to_u8" => format!("almide_rt_int_to_u8({})", args_str[0]),
+            "clamp" => format!("almide_rt_int_clamp({}, {}, {})", args_str[0], args_str[1], args_str[2]),
+            _ => { eprintln!("internal error: no Rust codegen for int.{}() — this is a compiler bug", func); std::process::exit(70); },
+        }
+    }
+
+    fn gen_float_call(&self, func: &str, args_str: &[String]) -> String {
+        match func {
+            "to_string" => format!("almide_rt_float_to_string({})", args_str[0]),
+            "to_int" => format!("almide_rt_float_to_int({})", args_str[0]),
+            "round" => format!("almide_rt_float_round({})", args_str[0]),
+            "floor" => format!("almide_rt_float_floor({})", args_str[0]),
+            "ceil" => format!("almide_rt_float_ceil({})", args_str[0]),
+            "abs" => format!("almide_rt_float_abs({})", args_str[0]),
+            "sqrt" => format!("almide_rt_float_sqrt({})", args_str[0]),
+            "parse" => format!("almide_rt_float_parse(&*{})?", args_str[0]),
+            "from_int" => format!("almide_rt_float_from_int({})", args_str[0]),
+            "min" => format!("almide_rt_float_min({}, {})", args_str[0], args_str[1]),
+            "max" => format!("almide_rt_float_max({}, {})", args_str[0], args_str[1]),
+            "clamp" => format!("almide_rt_float_clamp({}, {}, {})", args_str[0], args_str[1], args_str[2]),
+            _ => { eprintln!("internal error: no Rust codegen for float.{}() — this is a compiler bug", func); std::process::exit(70); },
+        }
+    }
+
+    fn gen_env_call(&self, func: &str, args_str: &[String]) -> String {
+        match func {
+            "unix_timestamp" => "almide_rt_env_unix_timestamp()".to_string(),
+            "args" => "almide_rt_env_args()".to_string(),
+            "get" => format!("almide_rt_env_get(&*{})", args_str[0]),
+            "set" => format!("almide_rt_env_set(&*{}, &*{})", args_str[0], args_str[1]),
+            "cwd" => "almide_rt_env_cwd()?".to_string(),
+            "millis" => "almide_rt_env_millis()".to_string(),
+            "sleep_ms" => format!("almide_rt_env_sleep_ms({})", args_str[0]),
+            _ => { eprintln!("internal error: no Rust codegen for env.{}() — this is a compiler bug", func); std::process::exit(70); },
+        }
+    }
+
+    fn gen_process_call(&self, func: &str, args_str: &[String]) -> String {
+        match func {
+            "exec" => format!("almide_rt_process_exec(&*{}, &{{ let __a: Vec<String> = {}; __a }})", args_str[0], args_str[1]),
+            "exit" => format!("almide_rt_process_exit({})", args_str[0]),
+            "stdin_lines" => "almide_rt_process_stdin_lines()?".to_string(),
+            "exec_status" => format!("almide_rt_process_exec_status(&*{}, &{{ let __a: Vec<String> = {}; __a }})?", args_str[0], args_str[1]),
+            _ => { eprintln!("internal error: no Rust codegen for process.{}() — this is a compiler bug", func); std::process::exit(70); },
+        }
+    }
+
+    fn gen_io_call(&self, func: &str, args_str: &[String]) -> String {
+        match func {
+            "read_line" => "almide_rt_io_read_line()?".to_string(),
+            "print" => format!("almide_rt_io_print(&*{})?", args_str[0]),
+            "read_all" => "almide_rt_io_read_all()?".to_string(),
+            _ => { eprintln!("internal error: no Rust codegen for io.{}() — this is a compiler bug", func); std::process::exit(70); },
+        }
+    }
+
+    fn gen_json_call(&self, func: &str, args_str: &[String]) -> String {
+        match func {
+            "parse" => format!("almide_json_parse(&{})?", args_str[0]),
+            "stringify" => format!("almide_json_stringify(&{})", args_str[0]),
+            "get" => format!("almide_json_get(&{}, &{})", args_str[0], args_str[1]),
+            "get_string" => format!("almide_json_get_string(&{}, &{})", args_str[0], args_str[1]),
+            "get_int" => format!("almide_json_get_int(&{}, &{})", args_str[0], args_str[1]),
+            "get_bool" => format!("almide_json_get_bool(&{}, &{})", args_str[0], args_str[1]),
+            "get_array" => format!("almide_json_get_array(&{}, &{})", args_str[0], args_str[1]),
+            "keys" => format!("almide_json_keys(&{})", args_str[0]),
+            "to_string" => format!("almide_json_to_string(&{})", args_str[0]),
+            "to_int" => format!("almide_json_to_int(&{})", args_str[0]),
+            "from_string" => format!("JStr({})", args_str[0]),
+            "from_int" => format!("JInt({})", args_str[0]),
+            "from_bool" => format!("JBool({})", args_str[0]),
+            "null" => "JNull".to_string(),
+            "array" => format!("JArray({})", args_str[0]),
+            "from_map" => format!("JObject({})", args_str[0]),
+            "get_float" => format!("almide_json_get_float(&{}, &{})", args_str[0], args_str[1]),
+            "from_float" => format!("almide_json_from_float({})", args_str[0]),
+            "stringify_pretty" => format!("almide_json_stringify_pretty(&{})", args_str[0]),
+            _ => { eprintln!("internal error: no Rust codegen for json.{}() — this is a compiler bug", func); std::process::exit(70); },
+        }
+    }
+
+    fn gen_http_call(&self, func: &str, args: &[Expr], args_str: &[String]) -> String {
+        match func {
+            "serve" => {
+                let (names, body) = self.inline_lambda(&args[1], 1);
+                // serve returns Result<(), String> which matches effect fn main's return type
+                format!("{{ almide_http_serve({}, |{}| -> Result<AlmideHttpResponse, String> {{ Ok({{ {} }}) }})?; Ok(()) }}", args_str[0], names[0], body)
+            }
+            "response" => format!("AlmideHttpResponse::new({}, {}.to_string())", args_str[0], args_str[1]),
+            "json" => format!("AlmideHttpResponse::json({}, {}.to_string())", args_str[0], args_str[1]),
+            "with_headers" => format!("AlmideHttpResponse::with_headers({}, {}.to_string(), {})", args_str[0], args_str[1], args_str[2]),
+            "get" => format!("almide_http_get(&{})?", args_str[0]),
+            "post" => format!("almide_http_post(&{}, &{})?", args_str[0], args_str[1]),
+            _ => { eprintln!("internal error: no Rust codegen for http.{}() — this is a compiler bug", func); std::process::exit(70); },
+        }
+    }
+
+    fn gen_math_call(&self, func: &str, args_str: &[String]) -> String {
+        match func {
+            "min" => format!("almide_rt_math_min({}, {})", args_str[0], args_str[1]),
+            "max" => format!("almide_rt_math_max({}, {})", args_str[0], args_str[1]),
+            "abs" => format!("almide_rt_math_abs({})", args_str[0]),
+            "pow" => format!("almide_rt_math_pow({}, {})", args_str[0], args_str[1]),
+            "pi" => "almide_rt_math_pi()".to_string(),
+            "e" => "almide_rt_math_e()".to_string(),
+            "sin" => format!("almide_rt_math_sin({} as f64)", args_str[0]),
+            "cos" => format!("almide_rt_math_cos({} as f64)", args_str[0]),
+            "tan" => format!("almide_rt_math_tan({} as f64)", args_str[0]),
+            "log" => format!("almide_rt_math_log({} as f64)", args_str[0]),
+            "exp" => format!("almide_rt_math_exp({} as f64)", args_str[0]),
+            "sqrt" => format!("almide_rt_math_sqrt({} as f64)", args_str[0]),
+            _ => { eprintln!("internal error: no Rust codegen for math.{}() — this is a compiler bug", func); std::process::exit(70); },
+        }
+    }
+
+    fn gen_random_call(&self, func: &str, args_str: &[String]) -> String {
+        match func {
+            "int" => format!("almide_rt_random_int({}, {})?", args_str[0], args_str[1]),
+            "float" => "almide_rt_random_float()?".to_string(),
+            "choice" => format!("almide_rt_random_choice(&{})?", args_str[0]),
+            "shuffle" => format!("almide_rt_random_shuffle(({}).clone())?", args_str[0]),
+            _ => { eprintln!("internal error: no Rust codegen for random.{}() — this is a compiler bug", func); std::process::exit(70); },
+        }
+    }
+
+    fn gen_regex_call(&self, func: &str, args_str: &[String]) -> String {
+        match func {
+            "match?" | "match_hdlm_qm_" => format!("almide_regex_is_match(&{}, &{})", args_str[0], args_str[1]),
+            "full_match?" | "full_match_hdlm_qm_" => format!("almide_regex_full_match(&{}, &{})", args_str[0], args_str[1]),
+            "find" => format!("almide_regex_find(&{}, &{})", args_str[0], args_str[1]),
+            "find_all" => format!("almide_regex_find_all(&{}, &{})", args_str[0], args_str[1]),
+            "replace" => format!("almide_regex_replace(&{}, &{}, &{})", args_str[0], args_str[1], args_str[2]),
+            "replace_first" => format!("almide_regex_replace_first(&{}, &{}, &{})", args_str[0], args_str[1], args_str[2]),
+            "split" => format!("almide_regex_split(&{}, &{})", args_str[0], args_str[1]),
+            "captures" => format!("almide_regex_captures(&{}, &{})", args_str[0], args_str[1]),
+            _ => { eprintln!("internal error: no Rust codegen for regex.{}() — this is a compiler bug", func); std::process::exit(70); },
         }
     }
 }
