@@ -203,7 +203,7 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
     let wasm_target = if is_wasm { Some("wasm") } else { None };
     let rs_code = compile_with_options(file, no_check, &emit_options, wasm_target);
 
-    let tmp_rs = format!("{}.rs", output.strip_suffix(".wasm").unwrap_or(output));
+    let tmp_rs = format!("{}.rs", output.strip_suffix(".wasm").or_else(|| output.strip_suffix(".exe")).unwrap_or(output));
     if let Err(e) = std::fs::write(&tmp_rs, &rs_code) {
         eprintln!("Failed to write {}: {}", tmp_rs, e);
         std::process::exit(1);
