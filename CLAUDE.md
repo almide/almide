@@ -63,9 +63,9 @@ cargo build --release
 almide run app.almd              # Compile + execute
 almide build app.almd -o app     # Build binary
 almide build app.almd --target wasm  # Build WASM
-almide test                      # Run test/ directory (recursive)
-almide test test/lang            # Run a specific test category
-almide test test/lang/expr_test.almd  # Run a single test file
+almide test                      # Find all .almd with test blocks (recursive)
+almide test lang/                # Run tests in a directory
+almide test lang/expr_test.almd  # Run a single test file
 almide test --run "pattern"      # Filter tests by name
 almide check app.almd            # Type check only
 almide fmt app.almd              # Format source
@@ -77,19 +77,23 @@ almide app.almd --emit-ast       # Emit AST as JSON
 
 ## Test Structure
 
+`almide test` recursively finds all `.almd` files containing `test` blocks.
+
+- **Inline tests**: Write `test "name" { }` in any `.almd` file
+- **Test files**: Use `*_test.almd` suffix for dedicated test files (convention)
+
 ```
-test/
-├── lang/            Language feature tests (expr, control_flow, data_types, variable, ...)
-└── stdlib/          Standard library tests
-exercises/           Exercism-style exercises (not tests)
-tests/               Rust compiler unit tests (parser, emit_ts, fmt)
+lang/                Language feature tests (*_test.almd)
+stdlib/              Stdlib source + tests side by side (*_test.almd)
+tests/               Rust compiler unit tests (.rs)
+exercises/           Exercism-style exercises (may contain inline tests)
 ```
 
 Run tests:
 ```bash
-almide test                      # All tests under test/
-almide test test/lang            # Language tests only
-almide test test/stdlib          # Stdlib tests only
+almide test                      # All .almd with test blocks (recursive)
+almide test lang/                # Language tests only
+almide test stdlib/              # Stdlib tests only
 ```
 
 ## Testing Rules
@@ -97,7 +101,7 @@ almide test test/stdlib          # Stdlib tests only
 Changes to the compiler MUST be verified against **all exercises and tests**:
 
 ```bash
-almide test && for f in exercises/*/*.almd; do almide run "$f"; done
+almide test
 ```
 
 When adding or modifying stdlib functions:
@@ -105,7 +109,7 @@ When adding or modifying stdlib functions:
 - Add Rust codegen to `src/emit_rust/calls.rs`
 - Add TS codegen to `src/emit_ts/expressions.rs` (if applicable)
 - Add UFCS mapping to `stdlib.rs` `resolve_ufcs_candidates` (if method-callable)
-- Write a test in `test/stdlib/`
+- Write a test in `stdlib/` (as `*_test.almd` or inline `test` block)
 
 When modifying codegen:
 - Test ownership: variables used after `for...in` must still work
