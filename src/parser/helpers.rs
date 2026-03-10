@@ -29,6 +29,16 @@ impl Parser {
         self.tokens.get(self.pos + offset)
     }
 
+    /// Returns true if the current token is on a different line than the previous token.
+    pub(crate) fn newline_before_current(&self) -> bool {
+        if self.pos == 0 {
+            return false;
+        }
+        let prev = &self.tokens[self.pos - 1];
+        let curr = self.current();
+        curr.line > prev.line
+    }
+
     /// Look ahead to check if `[...]` is followed by `(` — indicating type args before a call.
     pub(crate) fn peek_type_args_call(&self) -> bool {
         // Current token should be `[`

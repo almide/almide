@@ -616,6 +616,26 @@ impl Lexer {
             }
         }
 
+        // Scientific notation: e.g. 1.989e30, 6.674e-11, 3E+8
+        if self.pos < self.chars.len()
+            && (self.chars[self.pos] == 'e' || self.chars[self.pos] == 'E')
+        {
+            let next = self.peek(1);
+            if next.is_ascii_digit() || next == '+' || next == '-' {
+                is_float = true;
+                value.push(self.chars[self.pos]);
+                self.advance();
+                if self.pos < self.chars.len() && (self.chars[self.pos] == '+' || self.chars[self.pos] == '-') {
+                    value.push(self.chars[self.pos]);
+                    self.advance();
+                }
+                while self.pos < self.chars.len() && self.chars[self.pos].is_ascii_digit() {
+                    value.push(self.chars[self.pos]);
+                    self.advance();
+                }
+            }
+        }
+
         let token_type = if is_float {
             TokenType::Float
         } else {
