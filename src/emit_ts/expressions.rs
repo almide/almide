@@ -66,7 +66,7 @@ impl TsEmitter {
                     .collect();
                 format!("{{ ...{}, {} }}", self.gen_expr(base), fs.join(", "))
             }
-            Expr::Call { callee, args, .. } => self.gen_call(callee, args),
+            Expr::Call { callee, args, type_args, .. } => self.gen_call_with_ta(callee, args, type_args.as_ref()),
             Expr::Member { object, field, .. } => {
                 if let Expr::Ident { name, .. } = object.as_ref() {
                     let mapped = self.map_module(name);
@@ -301,6 +301,12 @@ impl TsEmitter {
             }
             _ => None,
         }
+    }
+
+    pub(crate) fn gen_call_with_ta(&self, callee: &Expr, args: &[Expr], _type_args: Option<&Vec<crate::ast::TypeExpr>>) -> String {
+        // TypeScript/JS: type arguments are erased at runtime, so we ignore them
+        // In TS mode we could emit `fn<T>()` but for calls it's not needed since TS infers
+        self.gen_call(callee, args)
     }
 
     pub(crate) fn gen_call(&self, callee: &Expr, args: &[Expr]) -> String {

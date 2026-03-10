@@ -29,6 +29,35 @@ impl Parser {
         self.tokens.get(self.pos + offset)
     }
 
+    /// Look ahead to check if `[...]` is followed by `(` — indicating type args before a call.
+    pub(crate) fn peek_type_args_call(&self) -> bool {
+        // Current token should be `[`
+        if self.current().token_type != TokenType::LBracket {
+            return false;
+        }
+        let mut depth = 0;
+        let mut i = 0;
+        loop {
+            let tok = match self.peek_at(i) {
+                Some(t) => t,
+                None => return false,
+            };
+            match tok.token_type {
+                TokenType::LBracket => depth += 1,
+                TokenType::RBracket => {
+                    depth -= 1;
+                    if depth == 0 {
+                        // Check if next token after `]` is `(`
+                        return self.peek_at(i + 1).map(|t| t.token_type == TokenType::LParen).unwrap_or(false);
+                    }
+                }
+                TokenType::EOF => return false,
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+
     pub(crate) fn check(&self, token_type: TokenType) -> bool {
         self.current().token_type == token_type
     }

@@ -27,10 +27,79 @@ impl Emitter {
         }
     }
 
+    /// Pre-collect named record types so anonymous record literals can use the correct struct name.
+    fn collect_named_records(&mut self, decls: &[Decl]) {
+        for decl in decls {
+            match decl {
+                Decl::Type { name, ty: TypeExpr::Record { fields }, .. } => {
+                    let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+                    self.named_record_types.insert(field_names, name.clone());
+                }
+                Decl::Type { name: enum_name, ty: TypeExpr::Variant { cases }, generics: Some(gs), .. } if !gs.is_empty() => {
+                    for case in cases {
+                        let ctor_name = match case {
+                            VariantCase::Unit { name } => {
+                                self.generic_variant_unit_ctors.insert(name.clone());
+                                name.clone()
+                            }
+                            VariantCase::Tuple { name, fields } => {
+                                // Track which args are recursive (need Box wrapping)
+                                for (i, f) in fields.iter().enumerate() {
+                                    if Self::type_references_name(f, enum_name) {
+                                        self.boxed_variant_args.insert((name.clone(), i));
+                                    }
+                                }
+                                name.clone()
+                            }
+                            VariantCase::Record { name, fields } => {
+                                for (i, f) in fields.iter().enumerate() {
+                                    if Self::type_references_name(&f.ty, enum_name) {
+                                        self.boxed_variant_args.insert((name.clone(), i));
+                                    }
+                                }
+                                name.clone()
+                            }
+                        };
+                        self.generic_variant_constructors.insert(ctor_name, enum_name.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Check if a TypeExpr references a given type name (for detecting recursive variants).
+    fn type_references_name(ty: &TypeExpr, target: &str) -> bool {
+        match ty {
+            TypeExpr::Simple { name } => name == target,
+            TypeExpr::Generic { name, args } => {
+                name == target || args.iter().any(|a| Self::type_references_name(a, target))
+            }
+            TypeExpr::Record { fields } => fields.iter().any(|f| Self::type_references_name(&f.ty, target)),
+            TypeExpr::Fn { params, ret } => {
+                params.iter().any(|p| Self::type_references_name(p, target))
+                    || Self::type_references_name(ret, target)
+            }
+            TypeExpr::Tuple { elements } => elements.iter().any(|e| Self::type_references_name(e, target)),
+            _ => false,
+        }
+    }
+
+    /// Generate a type string, wrapping with Box if it references the given recursive type name.
+    fn gen_type_boxed(&self, ty: &TypeExpr, recursive_name: &str) -> String {
+        if Self::type_references_name(ty, recursive_name) {
+            format!("Box<{}>", self.gen_type(ty))
+        } else {
+            self.gen_type(ty)
+        }
+    }
+
     pub(crate) fn emit_program(&mut self, prog: &Program, modules: &[(String, Program, Option<crate::project::PkgId>, bool)]) {
         self.collect_fn_info(&prog.decls);
+        self.collect_named_records(&prog.decls);
         for (_, mod_prog, _, _) in modules {
             self.collect_fn_info(&mod_prog.decls);
+            self.collect_named_records(&mod_prog.decls);
         }
         // Build module_aliases and user_modules from PkgId info
         for (name, _, pkg_id, _) in modules {
@@ -46,6 +115,11 @@ impl Emitter {
         self.emitln("#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use)]");
         self.emitln("");
         self.emit_runtime();
+        self.emitln("");
+
+        // Placeholder for anonymous record structs — filled after codegen
+        let anon_record_placeholder = "/* __ALMD_ANON_RECORDS__ */";
+        self.emitln(anon_record_placeholder);
         self.emitln("");
 
         // Emit imported modules as `mod name { ... }`
@@ -83,6 +157,31 @@ impl Emitter {
             self.indent -= 1;
             self.emitln("}");
         }
+
+        // Replace placeholder with collected anonymous record struct definitions
+        let structs_code = {
+            let anon_records = self.anon_record_structs.borrow();
+            if anon_records.is_empty() {
+                None
+            } else {
+                let mut code = String::new();
+                for (field_names, struct_name) in anon_records.iter() {
+                    let n = field_names.len();
+                    let type_params: Vec<String> = (0..n).map(|i| format!("T{}", i)).collect();
+                    code.push_str(&format!("#[derive(Debug, Clone, PartialEq)]\nstruct {}<{}> {{\n", struct_name, type_params.join(", ")));
+                    for (i, fname) in field_names.iter().enumerate() {
+                        code.push_str(&format!("    pub {}: T{},\n", fname, i));
+                    }
+                    code.push_str("}\n\n");
+                }
+                Some(code)
+            }
+        };
+        if let Some(code) = structs_code {
+            self.out = self.out.replace("/* __ALMD_ANON_RECORDS__ */\n", &code);
+        } else {
+            self.out = self.out.replace("/* __ALMD_ANON_RECORDS__ */\n", "");
+        }
     }
 
     fn emit_main_body(&mut self, has_args: bool, returns_result: bool) {
@@ -116,7 +215,7 @@ impl Emitter {
 
         for decl in &prog.decls {
             match decl {
-                Decl::Fn { name: fn_name, params, return_type, body, effect, r#async, visibility, extern_attrs, .. } => {
+                Decl::Fn { name: fn_name, params, return_type, body, effect, r#async, visibility, extern_attrs, generics, .. } => {
                     let rs_extern = extern_attrs.iter().find(|a| a.target == "rs");
                     let is_effect = effect.unwrap_or(false);
                     let is_async = r#async.unwrap_or(false);
@@ -140,9 +239,18 @@ impl Emitter {
                         Visibility::Mod => "pub(crate) ",
                         Visibility::Local => "",
                     };
+                    let generic_str = match generics {
+                        Some(gs) if !gs.is_empty() => {
+                            let gparams: Vec<String> = gs.iter().map(|g| {
+                                format!("{}: Clone + std::fmt::Debug + PartialEq + PartialOrd", g.name)
+                            }).collect();
+                            format!("<{}>", gparams.join(", "))
+                        }
+                        _ => String::new(),
+                    };
                     let async_prefix = if is_async { &format!("{}async ", vis) } else { vis };
                     let safe_fn_name = crate::emit_common::sanitize(fn_name);
-                    self.emitln(&format!("{}fn {}({}) -> {} {{", async_prefix, safe_fn_name, params_str.join(", "), actual_ret));
+                    self.emitln(&format!("{}fn {}{}({}) -> {} {{", async_prefix, safe_fn_name, generic_str, params_str.join(", "), actual_ret));
                     self.indent += 1;
 
                     if let Some(ext) = rs_extern {
@@ -179,13 +287,13 @@ impl Emitter {
                     self.emitln("}");
                     self.emitln("");
                 }
-                Decl::Type { name: type_name, ty, deriving, visibility, .. } => {
+                Decl::Type { name: type_name, ty, deriving, visibility, generics, .. } => {
                     let vis_prefix = match visibility {
                         Visibility::Public => "pub ",
                         Visibility::Mod => "pub(crate) ",
                         Visibility::Local => "",
                     };
-                    self.emit_type_decl_vis(type_name, ty, deriving, vis_prefix);
+                    self.emit_type_decl_vis(type_name, ty, deriving, vis_prefix, generics.as_ref());
                 }
                 _ => {}
             }
@@ -243,11 +351,11 @@ impl Emitter {
             Decl::Import { path, .. } => {
                 self.emitln(&format!("// import: {}", path.join(".")));
             }
-            Decl::Type { name, ty, deriving, .. } => {
-                self.emit_type_decl(name, ty, deriving);
+            Decl::Type { name, ty, deriving, generics, .. } => {
+                self.emit_type_decl(name, ty, deriving, generics.as_ref());
             }
-            Decl::Fn { name, params, return_type, body, effect, r#async, extern_attrs, .. } => {
-                self.emit_fn_decl(name, params, return_type, body.as_ref(), effect.unwrap_or(false), r#async.unwrap_or(false), extern_attrs);
+            Decl::Fn { name, params, return_type, body, effect, r#async, extern_attrs, generics, .. } => {
+                self.emit_fn_decl(name, params, return_type, body.as_ref(), effect.unwrap_or(false), r#async.unwrap_or(false), extern_attrs, generics.as_ref());
             }
             Decl::Impl { trait_, for_, methods, .. } => {
                 self.emitln(&format!("// impl {} for {}", trait_, for_));
@@ -283,15 +391,32 @@ impl Emitter {
         }
     }
 
-    pub(crate) fn emit_type_decl(&mut self, name: &str, ty: &TypeExpr, deriving: &Option<Vec<String>>) {
-        self.emit_type_decl_vis(name, ty, deriving, "");
+    pub(crate) fn emit_type_decl(&mut self, name: &str, ty: &TypeExpr, deriving: &Option<Vec<String>>, generics: Option<&Vec<crate::ast::GenericParam>>) {
+        self.emit_type_decl_vis(name, ty, deriving, "", generics);
     }
 
-    pub(crate) fn emit_type_decl_vis(&mut self, name: &str, ty: &TypeExpr, deriving: &Option<Vec<String>>, vis: &str) {
+    pub(crate) fn emit_type_decl_vis(&mut self, name: &str, ty: &TypeExpr, deriving: &Option<Vec<String>>, vis: &str, generics: Option<&Vec<crate::ast::GenericParam>>) {
+        let generic_str = match generics {
+            Some(gs) if !gs.is_empty() => {
+                let gparams: Vec<String> = gs.iter().map(|g| {
+                    format!("{}: Clone + std::fmt::Debug + PartialEq + PartialOrd", g.name)
+                }).collect();
+                format!("<{}>", gparams.join(", "))
+            }
+            _ => String::new(),
+        };
+        // Just the type param names (for impl blocks)
+        let generic_names = match generics {
+            Some(gs) if !gs.is_empty() => {
+                let names: Vec<String> = gs.iter().map(|g| g.name.clone()).collect();
+                format!("<{}>", names.join(", "))
+            }
+            _ => String::new(),
+        };
         match ty {
             TypeExpr::Record { fields } => {
                 self.emitln("#[derive(Debug, Clone, PartialEq)]");
-                self.emitln(&format!("{}struct {} {{", vis, name));
+                self.emitln(&format!("{}struct {}{} {{", vis, name, generic_str));
                 self.indent += 1;
                 for f in fields {
                     let ty_str = self.gen_type(&f.ty);
@@ -303,27 +428,38 @@ impl Emitter {
             }
             TypeExpr::Simple { .. } | TypeExpr::Generic { .. } => {
                 let ty_str = self.gen_type(ty);
-                self.emitln(&format!("{}type {} = {};", vis, name, ty_str));
+                self.emitln(&format!("{}type {}{} = {};", vis, name, generic_str, ty_str));
             }
             TypeExpr::Newtype { inner } => {
                 let ty_str = self.gen_type(inner);
-                self.emitln(&format!("{}struct {}({});", vis, name, ty_str));
+                self.emitln(&format!("{}struct {}{}({});", vis, name, generic_str, ty_str));
             }
             TypeExpr::Variant { cases } => {
                 self.emitln("#[derive(Debug, Clone, PartialEq)]");
-                self.emitln(&format!("{}enum {} {{", vis, name));
+                self.emitln(&format!("{}enum {}{} {{", vis, name, generic_str));
                 self.indent += 1;
+                // Detect if this variant has any recursive fields
+                let is_recursive = cases.iter().any(|c| match c {
+                    VariantCase::Tuple { fields, .. } => fields.iter().any(|f| Self::type_references_name(f, name)),
+                    VariantCase::Record { fields, .. } => fields.iter().any(|f| Self::type_references_name(&f.ty, name)),
+                    _ => false,
+                });
                 for case in cases {
                     match case {
                         VariantCase::Unit { name: cname } => {
                             self.emitln(&format!("{},", cname));
                         }
                         VariantCase::Tuple { name: cname, fields } => {
-                            let fs: Vec<String> = fields.iter().map(|f| self.gen_type(f)).collect();
+                            let fs: Vec<String> = fields.iter().map(|f| {
+                                if is_recursive { self.gen_type_boxed(f, name) } else { self.gen_type(f) }
+                            }).collect();
                             self.emitln(&format!("{}({}),", cname, fs.join(", ")));
                         }
                         VariantCase::Record { name: cname, fields } => {
-                            let fs: Vec<String> = fields.iter().map(|f| format!("{}: {}", f.name, self.gen_type(&f.ty))).collect();
+                            let fs: Vec<String> = fields.iter().map(|f| {
+                                let ty_str = if is_recursive { self.gen_type_boxed(&f.ty, name) } else { self.gen_type(&f.ty) };
+                                format!("{}: {}", f.name, ty_str)
+                            }).collect();
                             self.emitln(&format!("{} {{ {} }},", cname, fs.join(", ")));
                         }
                     }
@@ -331,11 +467,53 @@ impl Emitter {
                 self.indent -= 1;
                 self.emitln("}");
                 // impl Display for error types (so they work with .to_string())
-                self.emitln(&format!("impl std::fmt::Display for {} {{", name));
+                self.emitln(&format!("impl{} std::fmt::Display for {}{} {{", generic_str, name, generic_names));
                 self.emitln(&format!("    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {{ write!(f, \"{{:?}}\", self) }}"));
                 self.emitln("}");
                 // Allow using variant names without prefix
-                self.emitln(&format!("use {}::*;", name));
+                if generic_str.is_empty() {
+                    self.emitln(&format!("use {}::*;", name));
+                } else {
+                    // For generic enums, generate constructor wrapper functions
+                    for case in cases {
+                        match case {
+                            VariantCase::Unit { name: cname } => {
+                                self.emitln(&format!("#[allow(non_snake_case)]"));
+                                self.emitln(&format!("fn {}{}() -> {}{} {{ {}::{} }}", cname, generic_str, name, generic_names, name, cname));
+                            }
+                            VariantCase::Tuple { name: cname, fields } => {
+                                let params: Vec<String> = fields.iter().enumerate()
+                                    .map(|(i, f)| format!("_{}: {}", i, self.gen_type(f)))
+                                    .collect();
+                                let args: Vec<String> = fields.iter().enumerate().map(|(i, f)| {
+                                    if is_recursive && Self::type_references_name(f, name) {
+                                        format!("Box::new(_{})", i)
+                                    } else {
+                                        format!("_{}", i)
+                                    }
+                                }).collect();
+                                self.emitln(&format!("#[allow(non_snake_case)]"));
+                                self.emitln(&format!("fn {}{}({}) -> {}{} {{ {}::{}({}) }}", cname, generic_str, params.join(", "), name, generic_names, name, cname, args.join(", ")));
+                            }
+                            VariantCase::Record { name: cname, fields } => {
+                                let params: Vec<String> = fields.iter()
+                                    .map(|f| format!("{}: {}", f.name, self.gen_type(&f.ty)))
+                                    .collect();
+                                let args: Vec<String> = fields.iter()
+                                    .map(|f| {
+                                        if is_recursive && Self::type_references_name(&f.ty, name) {
+                                            format!("{}: Box::new({})", f.name, f.name)
+                                        } else {
+                                            f.name.clone()
+                                        }
+                                    })
+                                    .collect();
+                                self.emitln(&format!("#[allow(non_snake_case)]"));
+                                self.emitln(&format!("fn {}{}({}) -> {}{} {{ {}::{} {{ {} }} }}", cname, generic_str, params.join(", "), name, generic_names, name, cname, args.join(", ")));
+                            }
+                        }
+                    }
+                }
                 // deriving From: generate impl From<InnerType> for VariantType
                 if deriving.as_ref().map_or(false, |d| d.iter().any(|s| s == "From")) {
                     for case in cases {
@@ -356,7 +534,7 @@ impl Emitter {
         }
     }
 
-    fn emit_fn_decl(&mut self, name: &str, params: &[Param], ret_type: &TypeExpr, body: Option<&Expr>, is_effect: bool, is_async: bool, extern_attrs: &[ExternAttr]) {
+    fn emit_fn_decl(&mut self, name: &str, params: &[Param], ret_type: &TypeExpr, body: Option<&Expr>, is_effect: bool, is_async: bool, extern_attrs: &[ExternAttr], generics: Option<&Vec<crate::ast::GenericParam>>) {
         let fn_name = if name == "main" { "almide_main".to_string() } else { crate::emit_common::sanitize(name) };
         let ret_str = self.gen_type(ret_type);
         let is_unit_ret = ret_str == "()";
@@ -382,8 +560,20 @@ impl Emitter {
             })
             .collect();
 
+        // Generate generic type parameter list
+        let generic_str = match generics {
+            Some(gs) if !gs.is_empty() => {
+                let gparams: Vec<String> = gs.iter().map(|g| {
+                    // All generic types need Clone + Debug + PartialEq for Almide runtime compatibility
+                    format!("{}: Clone + std::fmt::Debug + PartialEq + PartialOrd", g.name)
+                }).collect();
+                format!("<{}>", gparams.join(", "))
+            }
+            _ => String::new(),
+        };
+
         let async_prefix = if is_async { "async " } else { "" };
-        self.emitln(&format!("{}fn {}({}) -> {} {{", async_prefix, fn_name, params_str.join(", "), actual_ret));
+        self.emitln(&format!("{}fn {}{}({}) -> {} {{", async_prefix, fn_name, generic_str, params_str.join(", "), actual_ret));
         self.indent += 1;
 
         // Check for @extern(rs, ...)

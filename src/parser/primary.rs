@@ -174,7 +174,7 @@ impl Parser {
             let name = tok.value.clone();
             self.advance();
             if self.check(TokenType::LBracket) {
-                self.parse_type_args()?;
+                let ta = self.parse_type_args()?;
                 if self.check(TokenType::LParen) {
                     self.advance();
                     let args = self.parse_call_args()?;
@@ -182,6 +182,7 @@ impl Parser {
                     return Ok(Expr::Call {
                         callee: Box::new(Expr::TypeName { name, span, resolved_type: None }),
                         args,
+                        type_args: Some(ta),
                         span,
                         resolved_type: None,
                     });
@@ -195,6 +196,7 @@ impl Parser {
                 return Ok(Expr::Call {
                     callee: Box::new(Expr::TypeName { name, span, resolved_type: None }),
                     args,
+                    type_args: None,
                     span,
                     resolved_type: None,
                 });

@@ -1,49 +1,113 @@
 # User-Defined Generics
 
-Currently `List[T]`, `Option[T]`, `Result[T, E]` etc. are compiler built-ins, but users cannot define their own generic types or functions.
+## Status: Phase 1 Complete + Recursive Variants
 
-## Proposed Syntax
+Generic functions, generic record types, generic variant types, call-site type arguments, and recursive generic variants are fully implemented across all compiler layers.
+
+## Working Syntax
 
 ```almide
-// generic type
-type Stack[T] =
-  | Empty
-  | Push(T, Stack[T])
-
 // generic function
-fn map[A, B](xs: List[A], f: fn(A) -> B) -> List[B] =
-  match xs {
-    [] => []
-    [head, ...tail] => [f(head)] ++ map(tail, f)
-  }
-
 fn identity[T](x: T) -> T = x
+fn pair[A, B](a: A, b: B) -> (A, B) = (a, b)
+fn wrap_list[T](x: T) -> List[T] = [x]
+
+// generic record type
+type Stack[T] = { items: List[T], size: Int }
+type Pair[A, B] = { fst: A, snd: B }
+
+// functions using generic types
+fn stack_push[T](s: Stack[T], item: T) -> Stack[T] = {
+  { items: s.items ++ [item], size: s.size + 1 }
+}
+
+fn swap_pair[A, B](p: Pair[A, B]) -> Pair[B, A] = {
+  { fst: p.snd, snd: p.fst }
+}
 ```
 
-## Implementation Steps
+## Implementation Details
 
-- [ ] Parser: parse generic parameters in `fn name[T, U](...) -> ...` (partial support exists in `try_parse_generic_params`)
-- [ ] Type checker: introduce type variables, type inference (unification-based)
-- [ ] Rust emitter: convert to `fn name<T, U>(...) -> ...`
-- [ ] TS emitter: convert to `function name<T, U>(...): ...` (type erasure in JS mode)
+| Layer | Status | Details |
+|-------|--------|---------|
+| AST | Done | `generics: Option<Vec<GenericParam>>` on Fn, Type, Trait, Impl |
+| Parser | Done | `try_parse_generic_params()` extracts `[T, U]` |
+| Type System | Done | `Ty::TypeVar(name)`, `FnSig.generics`, TypeVar compatible with everything |
+| Type Checker | Done | TypeVars registered/cleaned per decl, `resolve_named` for return type compat |
+| Rust Emitter | Done | `<T: Clone + Debug + PartialEq>` on fns, structs, enums, impl blocks |
+| TS Emitter | Done | `<T, U>` on functions, interfaces, type aliases (erased in JS mode) |
+| Record Resolution | Done | Anonymous record literals auto-resolve to named struct types |
 
 ## Design Decisions
 
-- Type parameters use `[T]` notation (consistent with existing `List[T]` in Almide)
-- Type inference is the primary approach; explicit type arguments at call sites are not required
-- Type constraints will be introduced after trait implementation, e.g. `fn sort[T: Ord](xs: List[T])`
+- **No trait bounds yet** — `T` accepts anything. AI-friendliness > type safety rigor
+- **Rust bounds are auto-derived**: `Clone + Debug + PartialEq` (minimum for Almide runtime)
+- **Type inference only** — no explicit type args at call sites (see roadmap below)
+- **`use Enum::*`** skipped for generic enums (Rust doesn't allow it)
 
----
+## Roadmap
 
-*Content from existing type-system.md:*
-
-Currently only built-in types like List[T] and Option[T] are generic.
+### Call-site Type Arguments — Done
 
 ```almide
-// proposed
-type Stack[T] = { items: List[T] }
-
-fn push[T](stack: Stack[T], item: T) -> Stack[T] = {
-  { items: stack.items ++ [item] }
-}
+// All working:
+identity[Int](42)
+stack_new[Int]()
+pair[Int, String](1, "hello")
 ```
+
+- Parser: `peek_type_args_call()` lookahead distinguishes `f[Type](args)` from list indexing
+- Rust emitter: turbofish `f::<i64>(args)`
+- TS emitter: type args erased (TS infers from usage)
+- Formatter: roundtrips `f[Type](args)` correctly
+
+### Generic Variant Types — Done
+
+```almide
+// Working:
+type Maybe[T] =
+  | Just(T)
+  | Nothing
+
+fn from_option[T](opt: Option[T]) -> Maybe[T] =
+  match opt {
+    some(v) => Just(v)
+    none => Nothing
+  }
+```
+
+- Rust: wrapper constructor functions generated for each case (since `use Enum::*` doesn't work with generics)
+- Unit constructors (e.g. `Nothing`) auto-call as `Nothing()` in expression context
+- Pattern matching uses qualified `Maybe::Just(v)` / `Maybe::Nothing`
+- Comparison operators (`>`, `<`, etc.) work on generic types via `PartialOrd` bound
+
+### Recursive Generic Variants — Done
+
+```almide
+// Working:
+type Tree[T] =
+  | Leaf(T)
+  | Node(Tree[T], Tree[T])
+
+fn tree_sum(t: Tree[Int]) -> Int =
+  match t {
+    Leaf(v) => v
+    Node(left, right) => tree_sum(left) + tree_sum(right)
+  }
+```
+
+- Rust: auto-detects self-referencing fields and wraps with `Box<>`
+- Constructor wrappers accept unboxed values, insert `Box::new()` internally
+- Pattern matching auto-derefs: `Node(__boxed_left, __boxed_right)` + `let left = *__boxed_left;`
+- `tree_map` with closures works correctly across recursive structures
+
+### Trait Bounds (Future, post-trait system)
+
+```almide
+// Future syntax:
+fn sort[T: Ord](xs: List[T]) -> List[T] = ...
+```
+
+Depends on trait system maturation. Low priority for AI proliferation since most LLM-generated code uses concrete types.
+
+---

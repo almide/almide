@@ -243,6 +243,20 @@ impl Parser {
                         resolved_type: None,
                     };
                 }
+            } else if self.check(TokenType::LBracket) && self.peek_type_args_call() {
+                // Call with explicit type arguments: f[Int, String](args)
+                let span = Some(self.current_span());
+                let ta = self.parse_type_args()?;
+                self.expect(TokenType::LParen)?;
+                let args = self.parse_call_args()?;
+                self.expect(TokenType::RParen)?;
+                expr = Expr::Call {
+                    callee: Box::new(expr),
+                    args,
+                    type_args: Some(ta),
+                    span,
+                    resolved_type: None,
+                };
             } else if self.check(TokenType::LParen) {
                 let span = Some(self.current_span());
                 self.advance();
@@ -251,6 +265,7 @@ impl Parser {
                 expr = Expr::Call {
                     callee: Box::new(expr),
                     args,
+                    type_args: None,
                     span,
                     resolved_type: None,
                 };

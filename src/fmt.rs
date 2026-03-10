@@ -347,8 +347,16 @@ fn format_expr(out: &mut String, expr: &Expr, depth: usize) {
             out.push_str(" }");
         }
 
-        Expr::Call { callee, args, .. } => {
+        Expr::Call { callee, args, type_args, .. } => {
             format_expr(out, callee, depth);
+            if let Some(ta) = type_args {
+                out.push('[');
+                for (i, t) in ta.iter().enumerate() {
+                    if i > 0 { out.push_str(", "); }
+                    format_type_expr(out, t, depth);
+                }
+                out.push(']');
+            }
             out.push('(');
             for (i, a) in args.iter().enumerate() {
                 if i > 0 { out.push_str(", "); }

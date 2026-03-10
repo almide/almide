@@ -18,6 +18,7 @@ fn ty_to_resolved(ty: &Ty) -> ResolvedType {
         Ty::Fn { .. } => ResolvedType::Fn,
         Ty::Tuple(_) => ResolvedType::Tuple,
         Ty::Named(_) => ResolvedType::Named,
+        Ty::TypeVar(_) => ResolvedType::Named,
         Ty::Unknown => ResolvedType::Unknown,
     }
 }

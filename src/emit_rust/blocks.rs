@@ -48,7 +48,13 @@ impl Emitter {
             let pat = self.gen_pattern(&arm.pattern);
             let guard = arm.guard.as_ref().map(|g| format!(" if {}", self.gen_expr(g))).unwrap_or_default();
             let body = self.gen_expr(&arm.body);
-            lines.push(format!("    {}{} => {{ {} }}", pat, guard, body));
+            let derefs = self.collect_box_derefs(&arm.pattern);
+            if derefs.is_empty() {
+                lines.push(format!("    {}{} => {{ {} }}", pat, guard, body));
+            } else {
+                let deref_str = derefs.join(" ");
+                lines.push(format!("    {}{} => {{ {} {} }}", pat, guard, deref_str, body));
+            }
         }
         lines.push("}".to_string());
         lines.join("\n")
@@ -64,11 +70,29 @@ impl Emitter {
             Pattern::Ok { inner } => format!("Ok({})", self.gen_pattern(inner)),
             Pattern::Err { inner } => format!("Err({})", self.gen_pattern(inner)),
             Pattern::Constructor { name, args } => {
-                if args.is_empty() {
-                    format!("{}()", name)
+                // For generic variant constructors, qualify with enum name
+                let qualified = if let Some(enum_name) = self.generic_variant_constructors.get(name) {
+                    format!("{}::{}", enum_name, name)
                 } else {
-                    let ps: Vec<String> = args.iter().map(|p| self.gen_pattern(p)).collect();
-                    format!("{}({})", name, ps.join(", "))
+                    name.clone()
+                };
+                if args.is_empty() {
+                    qualified
+                } else {
+                    let ps: Vec<String> = args.iter().enumerate().map(|(i, p)| {
+                        let inner = self.gen_pattern(p);
+                        // For boxed recursive fields, rename binding so we can auto-deref later
+                        if self.boxed_variant_args.contains(&(name.clone(), i)) {
+                            if let Pattern::Ident { .. } = p {
+                                format!("__boxed_{}", inner)
+                            } else {
+                                inner // non-ident patterns (wildcard etc) don't need deref
+                            }
+                        } else {
+                            inner
+                        }
+                    }).collect();
+                    format!("{}({})", qualified, ps.join(", "))
                 }
             }
             Pattern::Tuple { elements } => {
@@ -85,6 +109,26 @@ impl Emitter {
                 }).collect();
                 format!("{} {{ {} }}", name, fs.join(", "))
             }
+        }
+    }
+
+    /// Collect auto-deref let bindings needed for boxed recursive variant fields.
+    fn collect_box_derefs(&self, pat: &Pattern) -> Vec<String> {
+        match pat {
+            Pattern::Constructor { name, args } => {
+                let mut derefs = Vec::new();
+                for (i, p) in args.iter().enumerate() {
+                    if self.boxed_variant_args.contains(&(name.clone(), i)) {
+                        if let Pattern::Ident { name: var_name } = p {
+                            derefs.push(format!("let {} = *__boxed_{};", var_name, var_name));
+                        }
+                    }
+                    // Recurse into nested patterns
+                    derefs.extend(self.collect_box_derefs(p));
+                }
+                derefs
+            }
+            _ => Vec::new(),
         }
     }
 
