@@ -47,7 +47,7 @@ for i in 0..n {
 
 New syntax for mutating elements of `var` collections and record fields.
 
-#### 2a. List element update
+#### 2a. List element update ✅
 
 ```almide
 var xs = [1, 2, 3]
@@ -58,11 +58,11 @@ xs[1] = 99
 xs[1] = 99i64;
 ```
 
-- [ ] Parser: `Stmt::IndexAssign { target, index, value }`
-- [ ] Checker: verify target is `var`, element type matches
-- [ ] Emitter: direct index assignment
+- [x] Parser: `Stmt::IndexAssign { target, index, value }`
+- [x] Checker: verify target is `var`, element type matches
+- [x] Emitter: direct index assignment (Rust + TS)
 
-#### 2b. Record field update
+#### 2b. Record field update ✅
 
 ```almide
 var user = { name: "alice", age: 30 }
@@ -73,9 +73,9 @@ user.age = 31
 user.age = 31i64;
 ```
 
-- [ ] Parser: `Stmt::FieldAssign { target, field, value }`
-- [ ] Checker: verify target is `var`, field exists, type matches
-- [ ] Emitter: direct field assignment
+- [x] Parser: `Stmt::FieldAssign { target, field, value }`
+- [x] Checker: verify target is `var`, field exists, type matches
+- [x] Emitter: direct field assignment (Rust + TS)
 
 ### Phase 3: Borrow inference (future)
 

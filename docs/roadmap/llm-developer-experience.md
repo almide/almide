@@ -1,4 +1,4 @@
-# LLM Developer Experience [IN PROGRESS]
+# LLM Developer Experience [ON HOLD]
 
 ### `almide init` CLAUDE.md generation
 

@@ -1,4 +1,15 @@
-# Control Flow Extensions [PLANNED]
+# Control Flow Extensions [CLOSED]
+
+**Closed**: `while`, `break`, `continue`, `return` contradict the design philosophy.
+Almide intentionally provides one construct per concept (`for...in` for collections,
+`do { guard }` for dynamic loops, last-expression for returns). Adding imperative
+control flow would double the syntax surface and increase LLM token branching.
+
+`for-range` (`0..10`) is tracked separately under [Syntax Sugar](syntax-sugar.md).
+
+---
+
+## (archived proposal)
 
 ## while loop
 Currently `do { guard cond else ok(()); ... }` is used as a workaround, but it is verbose.

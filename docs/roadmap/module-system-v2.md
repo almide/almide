@@ -1,4 +1,4 @@
-# Module System v2 [IN PROGRESS]
+# Module System v2 [DONE]
 
 ### Design Principles
 

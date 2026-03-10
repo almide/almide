@@ -1,4 +1,4 @@
-# almide scaffold & Module Proliferation Pipeline [IN PROGRESS]
+# almide scaffold & Module Proliferation Pipeline [ON HOLD]
 
 Infrastructure for mass-producing Almide modules. Enables LLMs to autonomously generate, verify, and publish modules — the core loop of AI proliferation.
 

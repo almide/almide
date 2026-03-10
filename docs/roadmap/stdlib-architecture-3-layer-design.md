@@ -1,4 +1,4 @@
-# Stdlib Architecture: 3-Layer Design [IN PROGRESS]
+# Stdlib Architecture: 3-Layer Design [DONE]
 
 Almide の stdlib を 3 層に分離する。WASM を一級市民として扱い、pure な計算と OS 依存を明確に分ける。
 
