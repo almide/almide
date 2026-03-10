@@ -555,11 +555,17 @@ fn format_stmt(out: &mut String, stmt: &Stmt, depth: usize) {
             out.push_str(" = ");
             format_expr(out, value, depth);
         }
-        Stmt::LetDestructure { fields, value, .. } => {
+        Stmt::LetDestructure { fields, is_tuple, value, .. } => {
             out.push_str(&ind);
-            out.push_str("let { ");
-            out.push_str(&fields.join(", "));
-            out.push_str(" } = ");
+            if *is_tuple {
+                out.push_str("let (");
+                out.push_str(&fields.join(", "));
+                out.push_str(") = ");
+            } else {
+                out.push_str("let { ");
+                out.push_str(&fields.join(", "));
+                out.push_str(" } = ");
+            }
             format_expr(out, value, depth);
         }
         Stmt::Var { name, ty, value, .. } => {

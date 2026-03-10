@@ -230,19 +230,9 @@ impl Checker {
                     }
                 };
                 if let Some(names) = var_tuple {
-                    // Tuple destructuring: define each name
-                    match &elem_ty {
-                        Ty::Tuple(tys) => {
-                            for (i, name) in names.iter().enumerate() {
-                                let ty = tys.get(i).cloned().unwrap_or(Ty::Unknown);
-                                self.env.define_var(name, ty);
-                            }
-                        }
-                        _ => {
-                            for name in names {
-                                self.env.define_var(name, Ty::Unknown);
-                            }
-                        }
+                    let tys = self.resolve_tuple_elements(&elem_ty, names.len(), format!("for ({}) in ...", names.join(", ")));
+                    for (name, ty) in names.iter().zip(tys) {
+                        self.env.define_var(name, ty);
                     }
                 } else {
                     self.env.define_var(var, elem_ty);
