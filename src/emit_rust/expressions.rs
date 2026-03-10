@@ -114,6 +114,15 @@ impl Emitter {
                 }
             }
 
+            Expr::SpreadRecord { base, fields, .. } => {
+                let base_expr = self.gen_expr(base);
+                let mut assigns: Vec<String> = Vec::new();
+                for f in fields {
+                    assigns.push(format!("__spread.{} = {};", f.name, self.gen_expr(&f.value)));
+                }
+                format!("{{ let mut __spread = {}.clone(); {} __spread }}", base_expr, assigns.join(" "))
+            }
+
             Expr::Binary { op, left, right, .. } => self.gen_binary(op, left, right),
             Expr::Unary { op, operand, .. } => {
                 let o = self.gen_expr(operand);
@@ -242,8 +251,6 @@ impl Emitter {
             Expr::Hole { .. } => "todo!()".to_string(),
             Expr::Todo { message, .. } => format!("todo!(\"{}\")", message),
             Expr::Placeholder { .. } => "_".to_string(),
-
-            _ => format!("todo!(/* unsupported */)")
         }
     }
 

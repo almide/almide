@@ -233,24 +233,10 @@ impl Emitter {
                     }
                     _ => self.gen_expr(value),
                 };
-                // Emit type annotation for empty collections (Rust can't infer the element type)
-                let needs_type = match value {
-                    Expr::List { elements, .. } if elements.is_empty() => true,
-                    Expr::Call { callee, args, .. } => {
-                        // map.new() generates HashMap::new()
-                        if let Expr::Member { object, field, .. } = callee.as_ref() {
-                            if let Expr::Ident { name: mod_name, .. } = object.as_ref() {
-                                mod_name == "map" && field == "new" && args.is_empty()
-                            } else { false }
-                        } else { false }
-                    }
-                    _ => false,
-                };
-                if needs_type {
-                    if let Some(t) = ty {
-                        let rust_ty = self.gen_type(t);
-                        return format!("let {}: {} = {};", name, rust_ty, val);
-                    }
+                // Emit type annotation when present (Rust needs it for Result, Option, empty collections, etc.)
+                if let Some(t) = ty {
+                    let rust_ty = self.gen_type(t);
+                    return format!("let {}: {} = {};", name, rust_ty, val);
                 }
                 format!("let {} = {};", name, val)
             }
@@ -285,6 +271,15 @@ impl Emitter {
                     }
                 }
                 format!("{} = {};", name, self.gen_expr(value))
+            }
+            Stmt::IndexAssign { target, index, value, .. } => {
+                let idx = self.gen_expr(index);
+                let val = self.gen_expr(value);
+                format!("{}[{} as usize] = {};", target, idx, val)
+            }
+            Stmt::FieldAssign { target, field, value, .. } => {
+                let val = self.gen_expr(value);
+                format!("{}.{} = {};", target, field, val)
             }
             Stmt::Guard { cond, else_, .. } => {
                 let c = self.gen_expr(cond);
