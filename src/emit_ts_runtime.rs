@@ -311,7 +311,7 @@ const MOD_MAP_JS: &str = r#"const __almd_map = {
 
 const MOD_INT_TS: &str = r#"const __almd_int = {
   to_hex(n: bigint): string { return (n >= 0n ? n : n + (1n << 64n)).toString(16); },
-  to_string(n: number): string { const s = String(n); return s.includes('.') || s.includes('e') ? s : s + '.0'; },
+  to_string(n: number): string { return String(n); },
   band(a: number, b: number): number { return (a & b) >>> 0; },
   bor(a: number, b: number): number { return (a | b) >>> 0; },
   bxor(a: number, b: number): number { return (a ^ b) >>> 0; },
@@ -335,7 +335,7 @@ const MOD_INT_TS: &str = r#"const __almd_int = {
 
 const MOD_INT_JS: &str = r#"const __almd_int = {
   to_hex(n) { return (typeof n === "bigint" ? (n >= 0n ? n : n + (1n << 64n)).toString(16) : n.toString(16)); },
-  to_string(n) { const s = String(n); return s.includes('.') || s.includes('e') ? s : s + '.0'; },
+  to_string(n) { return String(n); },
   band(a, b) { return (a & b) >>> 0; },
   bor(a, b) { return (a | b) >>> 0; },
   bxor(a, b) { return (a ^ b) >>> 0; },
@@ -684,8 +684,11 @@ function __div(a: any, b: any): any {
 }
 function println(s: string): void { console.log(s); }
 function eprintln(s: string): void { console.error(s); }
+class __Err { constructor(public message: string) {} }
 function __deep_eq(a: any, b: any): boolean {
   if (a === b) return true;
+  if (a instanceof __Err && b instanceof __Err) return a.message === b.message;
+  if (a instanceof __Err || b instanceof __Err) return false;
   if (Array.isArray(a) && Array.isArray(b)) {
     if (a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) { if (!__deep_eq(a[i], b[i])) return false; }
@@ -740,8 +743,11 @@ function __div(a, b) {
 }
 function println(s) { console.log(s); }
 function eprintln(s) { console.error(s); }
+class __Err { constructor(message) { this.message = message; } }
 function __deep_eq(a, b) {
   if (a === b) return true;
+  if (a instanceof __Err && b instanceof __Err) return a.message === b.message;
+  if (a instanceof __Err || b instanceof __Err) return false;
   if (Array.isArray(a) && Array.isArray(b)) {
     if (a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) { if (!__deep_eq(a[i], b[i])) return false; }

@@ -17,13 +17,21 @@ impl TsEmitter {
                 } else { None }
             } else { None };
 
-            let catch_return = if let Some(ref binding) = err_binding {
-                format!("const {} = __e instanceof Error ? __e.message : String(__e); return {};", binding, err_body)
+            // Handle both __Err values (from non-effect err()) and thrown errors (from effect fn calls)
+            // Thrown errors are caught and converted to __Err; __Err values pass through try-catch.
+            // After try-catch, check if __m is an __Err instance.
+            let catch_convert = format!("{} = new __Err(__e instanceof Error ? __e.message : String(__e));", tmp);
+
+            let err_return = if let Some(ref binding) = err_binding {
+                format!("const {} = {}.message; return {};", binding, tmp, err_body)
             } else {
                 format!("return {};", err_body)
             };
 
-            let mut lines = vec![format!("(() => {{ let {}; try {{ {} = {}; }} catch (__e) {{ {} }}", tmp, tmp, subj, catch_return)];
+            let mut lines = vec![format!(
+                "(() => {{ let {}: any; try {{ {} = {}; }} catch (__e) {{ {} }} if ({} instanceof __Err) {{ {} }}",
+                tmp, tmp, subj, catch_convert, tmp, err_return
+            )];
             for arm in &ok_arms {
                 self.emit_match_arm(&mut lines, tmp, arm);
             }
@@ -226,7 +234,15 @@ impl TsEmitter {
         match stmt {
             Stmt::Let { name, value, .. } => {
                 // Use `var` to allow Almide's let-shadowing (const/let disallow re-declaration)
-                format!("var {} = {};", Self::sanitize(name), self.gen_expr(value))
+                let val = self.gen_expr(value);
+                // In test blocks, wrap function calls in try-catch so that effect fn
+                // errors get captured as __Err values instead of crashing the test
+                let is_call = matches!(value, Expr::Call { .. });
+                if self.in_test.get() && !self.in_effect.get() && is_call {
+                    format!("var {}; try {{ {} = {}; }} catch (__e) {{ {} = new __Err(__e instanceof Error ? __e.message : String(__e)); }}", Self::sanitize(name), Self::sanitize(name), val, Self::sanitize(name))
+                } else {
+                    format!("var {} = {};", Self::sanitize(name), val)
+                }
             }
             Stmt::LetDestructure { pattern, value, .. } => {
                 format!("var {} = {};", self.gen_destructure_pattern(pattern), self.gen_expr(value))

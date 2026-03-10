@@ -1,0 +1,167 @@
+// edge_cases_test — Edge cases and boundary values
+
+// ── Empty collections ──
+
+test "empty list length" {
+  let xs: List[Int] = []
+  assert_eq(list.len(xs), 0)
+}
+
+test "empty list map and filter" {
+  let xs: List[Int] = []
+  assert_eq(list.map(xs, fn(x) => x * 2), [])
+  assert_eq(list.filter(xs, fn(x) => x > 0), [])
+}
+
+test "empty list fold" {
+  let xs: List[Int] = []
+  assert_eq(list.fold(xs, 0, fn(acc, x) => acc + x), 0)
+}
+
+test "list get out of bounds returns none" {
+  let xs = [1, 2, 3]
+  assert_eq(list.get(xs, -1), none)
+  assert_eq(list.get(xs, 3), none)
+  assert_eq(list.get(xs, 100), none)
+}
+
+test "empty map operations" {
+  let m: Map[String, Int] = map.new()
+  assert_eq(map.len(m), 0)
+  assert_eq(map.get(m, "x"), none)
+  assert_eq(map.contains(m, "x"), false)
+}
+
+// ── Empty string ──
+
+test "empty string operations" {
+  assert_eq(string.len(""), 0)
+  assert_eq(string.trim(""), "")
+  assert_eq(string.to_upper(""), "")
+  assert_eq(string.to_lower(""), "")
+  assert_eq(string.reverse(""), "")
+  assert_eq(string.contains("", ""), true)
+}
+
+test "empty string split" {
+  let parts = string.split("", ",")
+  assert_eq(parts, [""])
+}
+
+// ── Large numbers ──
+
+test "large integer arithmetic" {
+  let big = 1000000000
+  assert_eq(big * 2, 2000000000)
+  assert_eq(big + big, 2000000000)
+}
+
+test "negative arithmetic" {
+  assert_eq(-1 * -1, 1)
+  assert_eq(-100 + 50, -50)
+  assert_eq(-10 * 10, -100)
+}
+
+// ── Nested compound types ──
+
+test "list of lists" {
+  let matrix = [[1, 2], [3, 4], [5, 6]]
+  assert_eq(list.len(matrix), 3)
+  assert_eq(list.get(matrix, 0), some([1, 2]))
+  assert_eq(list.get(matrix, 1), some([3, 4]))
+}
+
+test "list of records" {
+  let users = [
+    { name: "alice", age: 30 },
+    { name: "bob", age: 25 },
+  ]
+  assert_eq(list.len(users), 2)
+  let first = match list.get(users, 0) {
+    some(u) => u.name,
+    none => "",
+  }
+  assert_eq(first, "alice")
+}
+
+test "record with list field" {
+  let data = { items: [1, 2, 3], count: 3 }
+  assert_eq(list.len(data.items), data.count)
+  assert_eq(data.items, [1, 2, 3])
+}
+
+test "nested option" {
+  let x = some(some(42))
+  let result = match x {
+    some(inner) => match inner {
+      some(v) => v,
+      none => 0,
+    },
+    none => 0,
+  }
+  assert_eq(result, 42)
+}
+
+// ── Single element collections ──
+
+test "single element list" {
+  let xs = [42]
+  assert_eq(list.len(xs), 1)
+  assert_eq(list.get(xs, 0), some(42))
+  assert_eq(list.map(xs, fn(x) => x * 2), [84])
+}
+
+test "single entry map" {
+  let m = map.new()
+  let m = map.set(m, "only", 1)
+  assert_eq(map.len(m), 1)
+  assert_eq(map.get(m, "only"), some(1))
+}
+
+// ── String edge cases ──
+
+test "string with special characters" {
+  let s = "hello\nworld\ttab"
+  assert_eq(string.contains(s, "\n"), true)
+  assert_eq(string.contains(s, "\t"), true)
+}
+
+test "string repeat zero" {
+  assert_eq(string.repeat("abc", 0), "")
+}
+
+test "string char_at boundaries" {
+  let s = "ab"
+  assert_eq(string.char_at(s, 0), some("a"))
+  assert_eq(string.char_at(s, 1), some("b"))
+  assert_eq(string.char_at(s, 2), none)
+}
+
+// ── Boolean edge cases ──
+
+test "chained logical operators" {
+  assert_eq(true and true and true, true)
+  assert_eq(true and true and false, false)
+  assert_eq(false or false or true, true)
+  assert_eq(false or false or false, false)
+}
+
+test "mixed logical operators" {
+  assert_eq(true and false or true, true)
+  assert_eq(false or true and false, false)
+}
+
+// ── Concat edge cases ──
+
+test "list concat with empty" {
+  let xs = [1, 2, 3]
+  let empty: List[Int] = []
+  assert_eq(xs ++ empty, xs)
+  assert_eq(empty ++ xs, xs)
+  assert_eq(empty ++ empty, empty)
+}
+
+test "string concat chain" {
+  let result = "" ++ "" ++ "a" ++ "" ++ "b" ++ ""
+  assert_eq(result, "ab")
+}

@@ -2,7 +2,7 @@ mod declarations;
 mod expressions;
 mod blocks;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use crate::ast::*;
 
@@ -15,6 +15,10 @@ pub(crate) struct TsEmitter {
     pub(crate) used_stdlib: RefCell<HashSet<String>>,
     /// Generic variant unit constructors — need `()` when used as standalone expressions
     pub(crate) generic_variant_unit_ctors: HashSet<String>,
+    /// True when inside an effect fn body (err() should throw for auto-? propagation)
+    pub(crate) in_effect: Cell<bool>,
+    /// True when inside a test block (effect fn calls should be caught and wrapped as __Err)
+    pub(crate) in_test: Cell<bool>,
 }
 
 impl TsEmitter {
@@ -26,6 +30,8 @@ impl TsEmitter {
             user_modules: Vec::new(),
             used_stdlib: RefCell::new(HashSet::new()),
             generic_variant_unit_ctors: HashSet::new(),
+            in_effect: Cell::new(false),
+            in_test: Cell::new(false),
         }
     }
 

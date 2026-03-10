@@ -89,7 +89,13 @@ impl Parser {
             ));
         }
 
-        let name = self.expect_ident()?;
+        // Allow `let _ = expr` to discard values
+        let name = if self.check(TokenType::Underscore) {
+            self.advance();
+            "_".to_string()
+        } else {
+            self.expect_ident()?
+        };
         let mut ty: Option<TypeExpr> = None;
         if self.check(TokenType::Colon) {
             self.advance();
