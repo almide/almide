@@ -63,7 +63,9 @@ cargo build --release
 almide run app.almd              # Compile + execute
 almide build app.almd -o app     # Build binary
 almide build app.almd --target wasm  # Build WASM
-almide test                      # Run tests/ directory
+almide test                      # Run test/ directory (recursive)
+almide test test/lang            # Run a specific test category
+almide test test/lang/expr_test.almd  # Run a single test file
 almide test --run "pattern"      # Filter tests by name
 almide check app.almd            # Type check only
 almide fmt app.almd              # Format source
@@ -73,12 +75,29 @@ almide app.almd --target ts      # Emit TypeScript source
 almide app.almd --emit-ast       # Emit AST as JSON
 ```
 
+## Test Structure
+
+```
+test/
+├── lang/            Language feature tests (expr, control_flow, data_types, variable, ...)
+└── stdlib/          Standard library tests
+exercises/           Exercism-style exercises (not tests)
+tests/               Rust compiler unit tests (parser, emit_ts, fmt)
+```
+
+Run tests:
+```bash
+almide test                      # All tests under test/
+almide test test/lang            # Language tests only
+almide test test/stdlib          # Stdlib tests only
+```
+
 ## Testing Rules
 
-Changes to the compiler MUST be verified against **all exercises**:
+Changes to the compiler MUST be verified against **all exercises and tests**:
 
 ```bash
-for f in exercises/*/*.almd; do almide run "$f"; done
+almide test && for f in exercises/*/*.almd; do almide run "$f"; done
 ```
 
 When adding or modifying stdlib functions:
@@ -86,7 +105,7 @@ When adding or modifying stdlib functions:
 - Add Rust codegen to `src/emit_rust/calls.rs`
 - Add TS codegen to `src/emit_ts/expressions.rs` (if applicable)
 - Add UFCS mapping to `stdlib.rs` `resolve_ufcs_candidates` (if method-callable)
-- Write a test in `exercises/stdlib-test/`
+- Write a test in `test/stdlib/`
 
 When modifying codegen:
 - Test ownership: variables used after `for...in` must still work
