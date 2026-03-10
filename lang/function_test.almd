@@ -1,0 +1,156 @@
+// function_test — Functions, lambdas, closures, UFCS
+
+// ── Basic functions ──
+
+fn add(a: Int, b: Int) -> Int = a + b
+
+fn greet(name: String) -> String = "hello ${name}"
+
+fn unit_fn() -> Unit = ()
+
+fn constant() -> Int = 42
+
+test "simple function call" {
+  assert_eq(add(1, 2), 3)
+  assert_eq(greet("world"), "hello world")
+}
+
+test "multiple arguments" {
+  assert_eq(add(10, 20), 30)
+  assert_eq(add(-1, 1), 0)
+}
+
+test "no-arg function" {
+  assert_eq(constant(), 42)
+}
+
+// ── Recursion ──
+
+fn factorial(n: Int) -> Int =
+  if n <= 1 then 1 else n * factorial(n - 1)
+
+fn fib(n: Int) -> Int =
+  if n <= 1 then n else fib(n - 1) + fib(n - 2)
+
+test "recursion factorial" {
+  assert_eq(factorial(0), 1)
+  assert_eq(factorial(1), 1)
+  assert_eq(factorial(5), 120)
+  assert_eq(factorial(10), 3628800)
+}
+
+test "recursion fibonacci" {
+  assert_eq(fib(0), 0)
+  assert_eq(fib(1), 1)
+  assert_eq(fib(10), 55)
+}
+
+// ── Mutual recursion ──
+
+fn is_even(n: Int) -> Bool =
+  if n == 0 then true else is_odd(n - 1)
+
+fn is_odd(n: Int) -> Bool =
+  if n == 0 then false else is_even(n - 1)
+
+test "mutual recursion" {
+  assert_eq(is_even(0), true)
+  assert_eq(is_even(4), true)
+  assert_eq(is_even(5), false)
+  assert_eq(is_odd(3), true)
+  assert_eq(is_odd(4), false)
+}
+
+// ── Higher-order functions ──
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int = f(x)
+
+fn twice(f: fn(Int) -> Int, x: Int) -> Int = f(f(x))
+
+test "higher-order function" {
+  let double = fn(x) => x * 2
+  assert_eq(apply(double, 5), 10)
+  assert_eq(twice(double, 3), 12)
+}
+
+// ── Function returning function ──
+
+fn adder(n: Int) -> fn(Int) -> Int = fn(x) => x + n
+
+test "function returning function" {
+  let add5 = adder(5)
+  assert_eq(add5(10), 15)
+  assert_eq(add5(0), 5)
+}
+
+// ── Lambda ──
+
+test "lambda expression" {
+  let square = fn(x) => x * x
+  assert_eq(square(4), 16)
+  assert_eq(square(0), 0)
+}
+
+test "lambda with two args" {
+  let mul = fn(a, b) => a * b
+  assert_eq(mul(3, 4), 12)
+}
+
+test "lambda with block body" {
+  let compute = fn(x) => {
+    let doubled = x * 2
+    let incremented = doubled + 1
+    incremented
+  }
+  assert_eq(compute(5), 11)
+}
+
+test "lambda in map filter fold" {
+  let xs = [1, 2, 3, 4, 5]
+  let doubled = list.map(xs, fn(x) => x * 2)
+  assert_eq(doubled, [2, 4, 6, 8, 10])
+
+  let evens = list.filter(xs, fn(x) => x % 2 == 0)
+  assert_eq(evens, [2, 4])
+
+  let sum = list.fold(xs, 0, fn(acc, x) => acc + x)
+  assert_eq(sum, 15)
+}
+
+// ── Closure ──
+
+test "closure captures outer variable" {
+  let base = 100
+  let add_base = fn(x) => x + base
+  assert_eq(add_base(5), 105)
+  assert_eq(add_base(0), 100)
+}
+
+test "closure captures multiple variables" {
+  let a = 10
+  let b = 20
+  let sum_with = fn(x) => x + a + b
+  assert_eq(sum_with(5), 35)
+}
+
+// ── UFCS ──
+
+fn double(x: Int) -> Int = x * 2
+
+fn exclaim(s: String) -> String = s ++ "!"
+
+test "UFCS basic" {
+  assert_eq(3.double(), 6)
+  assert_eq("hello".exclaim(), "hello!")
+}
+
+test "UFCS chain" {
+  assert_eq(3.double().double(), 12)
+  assert_eq("hi".exclaim().exclaim(), "hi!!")
+}
+
+test "UFCS with stdlib" {
+  let xs = [3, 1, 2]
+  assert_eq(xs.sort(), [1, 2, 3])
+  assert_eq("hello".len(), 5)
+}

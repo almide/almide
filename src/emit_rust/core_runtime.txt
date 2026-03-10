@@ -249,7 +249,8 @@ fn almide_rt_int_clamp(n: i64, lo: i64, hi: i64) -> i64 {
 // ---- float ----
 
 fn almide_rt_float_to_string(n: f64) -> String {
-    n.to_string()
+    let s = n.to_string();
+    if s.contains('.') || s.contains('e') || s.contains('E') { s } else { format!("{}.0", s) }
 }
 
 fn almide_rt_float_to_int(n: f64) -> i64 {

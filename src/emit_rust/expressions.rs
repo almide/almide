@@ -184,7 +184,7 @@ impl Emitter {
                     }
                 }).collect();
                 let b = self.gen_expr(body);
-                format!("|{}| {{ {} }}", ps.join(", "), b)
+                format!("move |{}| {{ {} }}", ps.join(", "), b)
             }
 
             Expr::Match { subject, arms, .. } => self.gen_match(subject, arms),

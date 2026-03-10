@@ -1,28 +1,30 @@
 // Test: index assignment (xs[i] = v) and field assignment (r.f = v)
 
-fn main(_args: List[String]) -> String = {
-  // 2a: list index assignment
+test "list index assign" {
   var xs = [10, 20, 30]
   xs[1] = 99
-  let t1 = if list.get(xs, 1) == some(99) then "PASS" else "FAIL"
+  assert_eq(list.get(xs, 1), some(99))
+  assert_eq(list.get(xs, 0), some(10))
+  assert_eq(list.get(xs, 2), some(30))
+}
 
-  // 2a: index with expression
+test "list index assign with expression" {
   var ys = [1, 2, 3, 4, 5]
   let idx = 2
   ys[idx] = 100
-  let t2 = if list.get(ys, 2) == some(100) then "PASS" else "FAIL"
+  assert_eq(list.get(ys, 2), some(100))
+}
 
-  // 2b: record field assignment
+test "record field assign" {
   var user = { name: "alice", age: 30 }
   user.age = 31
-  let t3 = if user.age == 31 then "PASS" else "FAIL"
+  assert_eq(user.age, 31)
+  assert_eq(user.name, "alice")
+}
 
-  // 2b: string field
+test "record field assign string" {
   var config = { host: "localhost", port: 8080 }
   config.host = "0.0.0.0"
-  let t4 = if config.host == "0.0.0.0" then "PASS" else "FAIL"
-
-  let results = [t1, t2, t3, t4]
-  let all_pass = list.all(results, fn(r) => r == "PASS")
-  if all_pass then "ALL PASS" else string.join(results, ", ")
+  assert_eq(config.host, "0.0.0.0")
+  assert_eq(config.port, 8080)
 }

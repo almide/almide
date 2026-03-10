@@ -697,7 +697,7 @@ impl Emitter {
             }
             TypeExpr::Fn { params, ret } => {
                 let ps: Vec<String> = params.iter().map(|p| self.gen_type(p)).collect();
-                format!("fn({}) -> {}", ps.join(", "), self.gen_type(ret))
+                format!("impl Fn({}) -> {} + Clone", ps.join(", "), self.gen_type(ret))
             }
             TypeExpr::Tuple { elements } => {
                 let ts: Vec<String> = elements.iter().map(|e| self.gen_type(e)).collect();

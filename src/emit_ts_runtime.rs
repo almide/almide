@@ -311,7 +311,7 @@ const MOD_MAP_JS: &str = r#"const __almd_map = {
 
 const MOD_INT_TS: &str = r#"const __almd_int = {
   to_hex(n: bigint): string { return (n >= 0n ? n : n + (1n << 64n)).toString(16); },
-  to_string(n: number): string { return String(n); },
+  to_string(n: number): string { const s = String(n); return s.includes('.') || s.includes('e') ? s : s + '.0'; },
   band(a: number, b: number): number { return (a & b) >>> 0; },
   bor(a: number, b: number): number { return (a | b) >>> 0; },
   bxor(a: number, b: number): number { return (a ^ b) >>> 0; },
@@ -335,7 +335,7 @@ const MOD_INT_TS: &str = r#"const __almd_int = {
 
 const MOD_INT_JS: &str = r#"const __almd_int = {
   to_hex(n) { return (typeof n === "bigint" ? (n >= 0n ? n : n + (1n << 64n)).toString(16) : n.toString(16)); },
-  to_string(n) { return String(n); },
+  to_string(n) { const s = String(n); return s.includes('.') || s.includes('e') ? s : s + '.0'; },
   band(a, b) { return (a & b) >>> 0; },
   bor(a, b) { return (a | b) >>> 0; },
   bxor(a, b) { return (a ^ b) >>> 0; },
@@ -360,7 +360,7 @@ const MOD_INT_JS: &str = r#"const __almd_int = {
 // ──────────────────────────────── float ────────────────────────────────
 
 const MOD_FLOAT_TS: &str = r#"const __almd_float = {
-  to_string(n: number): string { return String(n); },
+  to_string(n: number): string { const s = String(n); return s.includes('.') || s.includes('e') ? s : s + '.0'; },
   to_int(n: number): number { return Math.trunc(n); },
   round(n: number): number { return Math.round(n); },
   floor(n: number): number { return Math.floor(n); },
@@ -376,7 +376,7 @@ const MOD_FLOAT_TS: &str = r#"const __almd_float = {
 "#;
 
 const MOD_FLOAT_JS: &str = r#"const __almd_float = {
-  to_string(n) { return String(n); },
+  to_string(n) { const s = String(n); return s.includes('.') || s.includes('e') ? s : s + '.0'; },
   to_int(n) { return Math.trunc(n); },
   round(n) { return Math.round(n); },
   floor(n) { return Math.floor(n); },

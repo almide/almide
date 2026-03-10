@@ -101,6 +101,12 @@ impl Emitter {
                 new_args.extend(args.iter().cloned());
                 return self.gen_module_call(resolved, field, &new_args);
             }
+            // Fallback: user-defined UFCS — receiver.f(args) => f(receiver, args)
+            let receiver = self.gen_expr(object);
+            let rest: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
+            let mut all_args = vec![receiver];
+            all_args.extend(rest);
+            return format!("{}({})", crate::emit_common::sanitize(field), all_args.join(", "));
         }
 
         // Handle built-in functions
