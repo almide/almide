@@ -76,6 +76,10 @@ Almide's literal syntax compared against 7 languages (Python, JS, Rust, Haskell,
 - Map/Set literals — use stdlib constructors
 - Regex literals — out of scope
 
+## Deferred: Unicode identifiers
+
+Japanese/CJK variable names (`契約者名`, `甲`, `乙`) would improve readability for legal/domain-specific code. Implementation is trivial (`is_alpha_num` → `ch.is_alphanumeric()`), Rust/JS targets both support Unicode identifiers. Deferred because LLMs generate ASCII identifiers more reliably, and Unicode introduces typo risks (fullwidth/halfwidth confusion). Revisit if domain-specific use cases (legal, i18n) become a priority.
+
 ## Sources
 
 - [PEP 515 – Underscores in Numeric Literals](https://peps.python.org/pep-0515/)
