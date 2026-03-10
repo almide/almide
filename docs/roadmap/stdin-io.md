@@ -1,6 +1,6 @@
-# stdin / Interactive I/O ✅ Implemented
+# stdin / Interactive I/O [DONE]
 
-## API
+### API
 
 ```almide
 import io
@@ -13,7 +13,7 @@ effect fn main() -> Result[Unit, String] = {
 }
 ```
 
-## stdlib functions
+### stdlib functions
 
 ```
 io.read_line() -> String          // read one line from stdin (blocking), effect fn
@@ -25,3 +25,5 @@ io.read_all() -> String           // read all of stdin, effect fn
 - `io.print` complements the existing `println` (which always adds newline)
 - Rust emitter: uses `std::io::BufRead` / `std::io::Write`
 - TS emitter: Deno → `prompt()` / `Deno.stdout.writeSync`, Node → `fs.readSync(0, ...)` / `process.stdout.write`
+
+---

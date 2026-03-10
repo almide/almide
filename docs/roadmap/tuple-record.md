@@ -1,6 +1,6 @@
-# Tuple & Record Improvements
+# Tuple & Record [DONE]
 
-## Named Record Construction ✅ Implemented
+### Named Record Construction ✅ Implemented
 
 ```almide
 type Point = {x: Int, y: Int}
@@ -15,7 +15,7 @@ let q = {x: 3, y: 4}         // anonymous (still works)
 - [x] TS emitter: name ignored (plain JS object)
 - [x] Formatter: preserves name in output
 
-## Tuple Index Access ✅ Implemented
+### Tuple Index Access ✅ Implemented
 
 ```almide
 let t = (1, "hello")
@@ -31,36 +31,3 @@ let s = t.1     // → "hello"
 - [x] Formatter: preserves `t.0` syntax
 
 ---
-
-*Content from existing type-system.md:*
-
-## Tuple Types
-
-Records require names, which can be verbose.
-
-```almide
-// proposed
-let pair: (Int, String) = (42, "hello")
-let (a, b) = pair
-```
-
-## Structured Error Types
-
-Currently Result[T, String] uses a fixed String error type, making it hard to distinguish error kinds.
-
-```almide
-// proposed
-type AppError = NotFound(String) | Unauthorized | Internal(String)
-type AppResult[T] = Result[T, AppError]
-```
-
-Enables branching by error type in match arms.
-
-## Type Aliases
-
-```almide
-type UserId = Int
-type Config = Map[String, String]
-```
-
-Newtype exists currently but is limited in scope.

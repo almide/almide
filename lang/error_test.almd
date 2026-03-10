@@ -1,0 +1,121 @@
+// error_test — Error handling (Result, effect fn, auto-?, do block)
+
+// ── ok / err construction ──
+
+test "ok and err values" {
+  let x: Result[Int, String] = ok(42)
+  let y: Result[Int, String] = err("fail")
+  assert_eq(x, ok(42))
+  assert_eq(y, err("fail"))
+}
+
+test "match on ok" {
+  let x: Result[Int, String] = ok(10)
+  let result = match x {
+    ok(v) => v * 2,
+    err(_) => 0,
+  }
+  assert_eq(result, 20)
+}
+
+test "match on err" {
+  let x: Result[Int, String] = err("oops")
+  let result = match x {
+    ok(_) => "",
+    err(e) => e,
+  }
+  assert_eq(result, "oops")
+}
+
+// ── effect fn with auto-? ──
+
+effect fn parse_int(s: String) -> Result[Int, String] = {
+  let n = string.to_int(s)
+  ok(n)
+}
+
+effect fn add_parsed(a: String, b: String) -> Result[Int, String] = {
+  let x = parse_int(a)
+  let y = parse_int(b)
+  ok(x + y)
+}
+
+test "effect fn auto unwrap ok" {
+  let result = add_parsed("10", "20")
+  assert_eq(result, ok(30))
+}
+
+test "effect fn propagates err" {
+  let result = parse_int("not_a_number")
+  match result {
+    ok(_) => assert(false, "should be err"),
+    err(e) => assert(string.len(e) > 0),
+  }
+}
+
+// ── effect fn chain ──
+
+effect fn validate_positive(n: Int) -> Result[Int, String] = {
+  if n > 0 then ok(n)
+  else err("must be positive")
+}
+
+effect fn double_positive(s: String) -> Result[Int, String] = {
+  let n = parse_int(s)
+  let valid = validate_positive(n)
+  ok(valid * 2)
+}
+
+test "effect fn chain success" {
+  assert_eq(double_positive("5"), ok(10))
+}
+
+test "effect fn chain err from first" {
+  let result = double_positive("abc")
+  match result {
+    ok(_) => assert(false, "should be err"),
+    err(_) => assert(true),
+  }
+}
+
+test "effect fn chain err from second" {
+  let result = double_positive("-3")
+  assert_eq(result, err("must be positive"))
+}
+
+// ── do block with guard ──
+
+test "do guard loop counts" {
+  var count = 0
+  do {
+    guard count < 3 else ok(())
+    count = count + 1
+  }
+  assert_eq(count, 3)
+}
+
+test "do guard with accumulator" {
+  var total = 0
+  var i = 1
+  do {
+    guard i <= 5 else ok(())
+    total = total + i
+    i = i + 1
+  }
+  assert_eq(total, 15)
+}
+
+// ── guard else err ──
+
+effect fn require_nonempty(s: String) -> Result[String, String] = {
+  guard string.len(s) > 0 else err("empty string")
+  ok(s)
+}
+
+test "guard else err success" {
+  assert_eq(require_nonempty("hello"), ok("hello"))
+}
+
+test "guard else err failure" {
+  assert_eq(require_nonempty(""), err("empty string"))
+}

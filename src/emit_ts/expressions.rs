@@ -160,6 +160,18 @@ impl TsEmitter {
     }
 
     pub(crate) fn gen_err(&self, expr: &Expr) -> String {
+        // In effect fn, throw immediately (for auto-? propagation via try-catch)
+        // In non-effect context (test blocks, pure fn), produce a value
+        let msg = self.gen_err_msg_expr(expr);
+        if self.in_effect.get() {
+            format!("__throw({})", msg)
+        } else {
+            format!("new __Err({})", msg)
+        }
+    }
+
+    /// Generate the error message expression string for err()
+    pub(crate) fn gen_err_msg_expr(&self, expr: &Expr) -> String {
         match expr {
             Expr::Call { callee, args, .. } => {
                 let callee_str = if let Expr::TypeName { name, .. } = callee.as_ref() {
@@ -168,17 +180,16 @@ impl TsEmitter {
                     self.gen_expr(callee)
                 };
                 let arg = if !args.is_empty() { self.gen_expr(&args[0]) } else { "\"\"".to_string() };
-                format!("__throw({} + \": \" + {})", Self::json_string(&callee_str), arg)
+                format!("{} + \": \" + {}", Self::json_string(&callee_str), arg)
             }
             Expr::TypeName { name, .. } => {
-                let msg = Self::pascal_to_message(name);
-                format!("__throw({})", Self::json_string(&msg))
+                Self::json_string(&Self::pascal_to_message(name))
             }
             Expr::String { value, .. } => {
-                format!("__throw({})", Self::json_string(value))
+                Self::json_string(value)
             }
             _ => {
-                format!("__throw(String({}))", self.gen_expr(expr))
+                format!("String({})", self.gen_expr(expr))
             }
         }
     }
@@ -352,34 +363,24 @@ impl TsEmitter {
             Expr::Ident { name, .. } if self.generic_variant_unit_ctors.contains(name) => Self::sanitize(name),
             _ => self.gen_expr(callee),
         };
-        // Special case: assert_eq(x, err(e))
+        // assert_eq with err(): when one arg is err(), wrap the other in try-catch
+        // so that effect fn calls that throw get compared as __Err values
         if callee_str == "assert_eq" && args.len() == 2 {
-            if let Expr::Err { expr: err_expr, .. } = &args[1] {
-                return format!("__assert_throws(() => {}, {})", self.gen_expr(&args[0]), self.gen_err_message(err_expr));
+            if matches!(&args[1], Expr::Err { .. }) {
+                let other = self.gen_expr(&args[0]);
+                let err_val = self.gen_expr(&args[1]);
+                return format!("(() => {{ let __v; try {{ __v = {}; }} catch (__e) {{ __v = new __Err(__e instanceof Error ? __e.message : String(__e)); }} assert_eq(__v, {}); }})()", other, err_val);
             }
-            if let Expr::Err { expr: err_expr, .. } = &args[0] {
-                return format!("__assert_throws(() => {}, {})", self.gen_expr(&args[1]), self.gen_err_message(err_expr));
+            if matches!(&args[0], Expr::Err { .. }) {
+                let other = self.gen_expr(&args[1]);
+                let err_val = self.gen_expr(&args[0]);
+                return format!("(() => {{ let __v; try {{ __v = {}; }} catch (__e) {{ __v = new __Err(__e instanceof Error ? __e.message : String(__e)); }} assert_eq({}, __v); }})()", other, err_val);
             }
         }
         let args_str: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
         format!("{}({})", callee_str, args_str.join(", "))
     }
 
-    pub(crate) fn gen_err_message(&self, expr: &Expr) -> String {
-        match expr {
-            Expr::String { value, .. } => Self::json_string(value),
-            Expr::Call { callee, args, .. } if matches!(callee.as_ref(), Expr::TypeName { .. }) => {
-                if let Expr::TypeName { name, .. } = callee.as_ref() {
-                    let msg = Self::pascal_to_message(name);
-                    format!("{} + \": \" + {}", Self::json_string(&msg), self.gen_expr(&args[0]))
-                } else {
-                    format!("String({})", self.gen_expr(expr))
-                }
-            }
-            Expr::TypeName { name, .. } => Self::json_string(&Self::pascal_to_message(name)),
-            _ => format!("String({})", self.gen_expr(expr)),
-        }
-    }
 
     pub(crate) fn gen_binary(&self, op: &str, left: &Expr, right: &Expr) -> String {
         let l = self.gen_expr(left);

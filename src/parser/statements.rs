@@ -21,6 +21,25 @@ impl Parser {
             return self.parse_assign_stmt();
         }
 
+        // xs[i] = value (index assignment)
+        if self.check(TokenType::Ident)
+            && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::LBracket)
+        {
+            if let Some(stmt) = self.try_parse_index_assign()? {
+                return Ok(stmt);
+            }
+        }
+
+        // obj.field = value (field assignment)
+        if self.check(TokenType::Ident)
+            && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Dot)
+            && self.peek_at(2).map(|t| matches!(t.token_type, TokenType::Ident)).unwrap_or(false)
+            && self.peek_at(3).map(|t| &t.token_type) == Some(&TokenType::Eq)
+            && self.peek_at(4).map(|t| &t.token_type) != Some(&TokenType::Eq)
+        {
+            return self.parse_field_assign_stmt();
+        }
+
         let span = self.current_span();
         let expr = self.parse_expr()?;
         Ok(Stmt::Expr { expr, span: Some(span) })
@@ -70,7 +89,13 @@ impl Parser {
             ));
         }
 
-        let name = self.expect_ident()?;
+        // Allow `let _ = expr` to discard values
+        let name = if self.check(TokenType::Underscore) {
+            self.advance();
+            "_".to_string()
+        } else {
+            self.expect_ident()?
+        };
         let mut ty: Option<TypeExpr> = None;
         if self.check(TokenType::Colon) {
             self.advance();
@@ -115,6 +140,40 @@ impl Parser {
         self.skip_newlines();
         let value = self.parse_expr()?;
         Ok(Stmt::Assign { name, value, span: Some(span) })
+    }
+
+    /// Try to parse `xs[i] = value`. Returns None if not an assignment (e.g. just `xs[i]`).
+    fn try_parse_index_assign(&mut self) -> Result<Option<Stmt>, String> {
+        let saved = self.pos;
+        let span = self.current_span();
+        let target = self.current().value.clone();
+        self.advance(); // skip ident
+        self.expect(TokenType::LBracket)?;
+        let index = self.parse_expr()?;
+        self.expect(TokenType::RBracket)?;
+        // Check if followed by `=` (but not `==`)
+        if self.check(TokenType::Eq) && self.peek_at(1).map(|t| &t.token_type) != Some(&TokenType::Eq) {
+            self.advance(); // skip =
+            self.skip_newlines();
+            let value = self.parse_expr()?;
+            Ok(Some(Stmt::IndexAssign { target, index: Box::new(index), value, span: Some(span) }))
+        } else {
+            // Not an assignment — rewind and let parse_expr handle it
+            self.pos = saved;
+            Ok(None)
+        }
+    }
+
+    fn parse_field_assign_stmt(&mut self) -> Result<Stmt, String> {
+        let span = self.current_span();
+        let target = self.current().value.clone();
+        self.advance(); // skip ident
+        self.advance(); // skip .
+        let field = self.expect_ident()?;
+        self.expect(TokenType::Eq)?;
+        self.skip_newlines();
+        let value = self.parse_expr()?;
+        Ok(Stmt::FieldAssign { target, field, value, span: Some(span) })
     }
 
     /// Parse a destructure pattern for tuples: `(a, b)` or `((a, b), c)`

@@ -1,5 +1,3 @@
-module grade_report
-
 import string
 import list
 

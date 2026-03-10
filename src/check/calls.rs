@@ -181,6 +181,15 @@ impl Checker {
             return self.check_constructor_call(name, arg_tys);
         }
 
+        // Check if name is a local variable with function type (e.g. fn parameter)
+        if let Some(ty) = self.env.lookup_var(name).cloned() {
+            self.env.used_vars.insert(name.to_string());
+            if let Ty::Fn { ret, .. } = &ty {
+                return *ret.clone();
+            }
+            return ty;
+        }
+
         Ty::Unknown
     }
 

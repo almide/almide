@@ -585,6 +585,22 @@ fn format_stmt(out: &mut String, stmt: &Stmt, depth: usize) {
             out.push_str(" = ");
             format_expr(out, value, depth);
         }
+        Stmt::IndexAssign { target, index, value, .. } => {
+            out.push_str(&ind);
+            out.push_str(target);
+            out.push('[');
+            format_expr(out, index, depth);
+            out.push_str("] = ");
+            format_expr(out, value, depth);
+        }
+        Stmt::FieldAssign { target, field, value, .. } => {
+            out.push_str(&ind);
+            out.push_str(target);
+            out.push('.');
+            out.push_str(field);
+            out.push_str(" = ");
+            format_expr(out, value, depth);
+        }
         Stmt::Guard { cond, else_, .. } => {
             out.push_str(&ind);
             out.push_str("guard ");

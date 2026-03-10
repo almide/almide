@@ -233,24 +233,10 @@ impl Emitter {
                     }
                     _ => self.gen_expr(value),
                 };
-                // Emit type annotation for empty collections (Rust can't infer the element type)
-                let needs_type = match value {
-                    Expr::List { elements, .. } if elements.is_empty() => true,
-                    Expr::Call { callee, args, .. } => {
-                        // map.new() generates HashMap::new()
-                        if let Expr::Member { object, field, .. } = callee.as_ref() {
-                            if let Expr::Ident { name: mod_name, .. } = object.as_ref() {
-                                mod_name == "map" && field == "new" && args.is_empty()
-                            } else { false }
-                        } else { false }
-                    }
-                    _ => false,
-                };
-                if needs_type {
-                    if let Some(t) = ty {
-                        let rust_ty = self.gen_type(t);
-                        return format!("let {}: {} = {};", name, rust_ty, val);
-                    }
+                // Emit type annotation when present (Rust needs it for Result, Option, empty collections, etc.)
+                if let Some(t) = ty {
+                    let rust_ty = self.gen_type(t);
+                    return format!("let {}: {} = {};", name, rust_ty, val);
                 }
                 format!("let {} = {};", name, val)
             }
@@ -272,7 +258,28 @@ impl Emitter {
                 format!("let mut {} = {};", name, self.gen_expr(value))
             }
             Stmt::Assign { name, value, .. } => {
+                // Optimize: s = s ++ expr → s.almide_push_concat(expr)
+                // Avoids clone + alloc; works for both String and Vec via trait dispatch
+                if let Expr::Binary { op, left, right, .. } = value {
+                    if op == "++" {
+                        if let Expr::Ident { name: ref lname, .. } = **left {
+                            if lname == name {
+                                let r = self.gen_expr(right);
+                                return format!("{}.almide_push_concat({});", name, r);
+                            }
+                        }
+                    }
+                }
                 format!("{} = {};", name, self.gen_expr(value))
+            }
+            Stmt::IndexAssign { target, index, value, .. } => {
+                let idx = self.gen_expr(index);
+                let val = self.gen_expr(value);
+                format!("{}[{} as usize] = {};", target, idx, val)
+            }
+            Stmt::FieldAssign { target, field, value, .. } => {
+                let val = self.gen_expr(value);
+                format!("{}.{} = {};", target, field, val)
             }
             Stmt::Guard { cond, else_, .. } => {
                 let c = self.gen_expr(cond);

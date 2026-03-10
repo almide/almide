@@ -1,5 +1,3 @@
-module hamming
-
 import string
 import list
 

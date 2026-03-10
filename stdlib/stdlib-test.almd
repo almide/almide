@@ -1,5 +1,3 @@
-module stdlib_test
-
 import fs
 import string
 import list

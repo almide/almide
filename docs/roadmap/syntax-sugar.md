@@ -1,4 +1,4 @@
-# Syntax Sugar & Convenience
+# Syntax Sugar [PLANNED]
 
 ## Range Literals
 ```almide

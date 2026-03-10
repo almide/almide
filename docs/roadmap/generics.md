@@ -1,4 +1,4 @@
-# User-Defined Generics
+# Generics [DONE]
 
 ## Status: Phase 1 Complete + Recursive Variants
 

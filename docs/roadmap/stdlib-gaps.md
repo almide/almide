@@ -1,4 +1,4 @@
-# Standard Library Expansion Roadmap
+# Stdlib Gaps [DONE]
 
 ## Goal
 Reduce boilerplate in AI-generated code, improving LOC, token count, and generation time.

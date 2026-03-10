@@ -309,6 +309,16 @@ impl Checker {
             ast::Expr::Binary { op, left, right, .. } => {
                 let lt = self.check_expr(left);
                 let rt = self.check_expr(right);
+                if (op == "==" || op == "!=")
+                    && matches!(&lt, Ty::List(inner) if matches!(inner.as_ref(), Ty::Unknown))
+                    && matches!(&rt, Ty::List(inner) if matches!(inner.as_ref(), Ty::Unknown))
+                {
+                    self.push_diagnostic(err(
+                        "cannot compare two empty lists without type annotations",
+                        "Add a type annotation to at least one side, e.g., let xs: List[Int] = []",
+                        format!("operator '{}'", op),
+                    ));
+                }
                 self.check_binary_op(op, &lt, &rt)
             }
 

@@ -141,8 +141,14 @@ impl TsEmitter {
                     self.gen_type_decl(name, ty, generics.as_ref())
                 }
             }
-            Decl::Fn { name, params, return_type, body, r#async, extern_attrs, generics, .. } => {
-                self.gen_fn_decl(name, params, return_type, body.as_ref(), r#async.unwrap_or(false), extern_attrs, generics.as_ref())
+            Decl::Fn { name, params, return_type, body, effect, r#async, extern_attrs, generics, .. } => {
+                let prev = self.in_effect.get();
+                if effect.unwrap_or(false) {
+                    self.in_effect.set(true);
+                }
+                let result = self.gen_fn_decl(name, params, return_type, body.as_ref(), r#async.unwrap_or(false), extern_attrs, generics.as_ref());
+                self.in_effect.set(prev);
+                result
             }
             Decl::Trait { name, .. } => format!("// trait {}", name),
             Decl::Impl { trait_, for_, methods, .. } => {
@@ -153,7 +159,10 @@ impl TsEmitter {
                 lines.join("\n")
             }
             Decl::Test { name, body, .. } => {
+                let prev_test = self.in_test.get();
+                self.in_test.set(true);
                 let body_str = self.gen_expr(body);
+                self.in_test.set(prev_test);
                 if self.js_mode {
                     let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
                     format!(

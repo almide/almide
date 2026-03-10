@@ -1,5 +1,3 @@
-module roman_numerals
-
 import string
 import list
 

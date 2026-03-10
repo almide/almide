@@ -1,4 +1,4 @@
-# Stdlib Completeness
+# Stdlib Completeness [DONE]
 
 Fill gaps that make Almide less capable than Python/Go for everyday tasks.
 

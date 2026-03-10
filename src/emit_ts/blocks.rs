@@ -17,13 +17,22 @@ impl TsEmitter {
                 } else { None }
             } else { None };
 
-            let catch_return = if let Some(ref binding) = err_binding {
-                format!("const {} = __e instanceof Error ? __e.message : String(__e); return {};", binding, err_body)
+            // Handle both __Err values (from non-effect err()) and thrown errors (from effect fn calls)
+            // Thrown errors are caught and converted to __Err; __Err values pass through try-catch.
+            // After try-catch, check if __m is an __Err instance.
+            let catch_convert = format!("{} = new __Err(__e instanceof Error ? __e.message : String(__e));", tmp);
+
+            let err_return = if let Some(ref binding) = err_binding {
+                format!("const {} = {}.message; return {};", binding, tmp, err_body)
             } else {
                 format!("return {};", err_body)
             };
 
-            let mut lines = vec![format!("(() => {{ let {}; try {{ {} = {}; }} catch (__e) {{ {} }}", tmp, tmp, subj, catch_return)];
+            let type_ann = if self.js_mode { "" } else { ": any" };
+            let mut lines = vec![format!(
+                "(() => {{ let {}{}; try {{ {} = {}; }} catch (__e) {{ {} }} if ({} instanceof __Err) {{ {} }}",
+                tmp, type_ann, tmp, subj, catch_convert, tmp, err_return
+            )];
             for arm in &ok_arms {
                 self.emit_match_arm(&mut lines, tmp, arm);
             }
@@ -207,6 +216,11 @@ impl TsEmitter {
                 }
             }
             lines.push(format!("{}{}", ind, self.gen_stmt(stmt)));
+            // Auto-propagate __Err values from let bindings in do blocks
+            if let Stmt::Let { name, .. } = stmt {
+                let san = Self::sanitize(name);
+                lines.push(format!("{}if ({} instanceof __Err) throw new Error({}.message);", ind, san, san));
+            }
         }
 
         if has_guard {
@@ -226,7 +240,15 @@ impl TsEmitter {
         match stmt {
             Stmt::Let { name, value, .. } => {
                 // Use `var` to allow Almide's let-shadowing (const/let disallow re-declaration)
-                format!("var {} = {};", Self::sanitize(name), self.gen_expr(value))
+                let val = self.gen_expr(value);
+                // In test blocks, wrap function calls in try-catch so that effect fn
+                // errors get captured as __Err values instead of crashing the test
+                let is_call = matches!(value, Expr::Call { .. });
+                if self.in_test.get() && !self.in_effect.get() && is_call {
+                    format!("var {}; try {{ {} = {}; }} catch (__e) {{ {} = new __Err(__e instanceof Error ? __e.message : String(__e)); }}", Self::sanitize(name), Self::sanitize(name), val, Self::sanitize(name))
+                } else {
+                    format!("var {} = {};", Self::sanitize(name), val)
+                }
             }
             Stmt::LetDestructure { pattern, value, .. } => {
                 format!("var {} = {};", self.gen_destructure_pattern(pattern), self.gen_expr(value))
@@ -236,6 +258,15 @@ impl TsEmitter {
             }
             Stmt::Assign { name, value, .. } => {
                 format!("{} = {};", Self::sanitize(name), self.gen_expr(value))
+            }
+            Stmt::IndexAssign { target, index, value, .. } => {
+                let idx = self.gen_expr(index);
+                let val = self.gen_expr(value);
+                format!("{}[{}] = {};", Self::sanitize(target), idx, val)
+            }
+            Stmt::FieldAssign { target, field, value, .. } => {
+                let val = self.gen_expr(value);
+                format!("{}.{} = {};", Self::sanitize(target), field, val)
             }
             Stmt::Guard { cond, else_, .. } => {
                 let c = self.gen_expr(cond);
@@ -266,6 +297,14 @@ impl TsEmitter {
                     .collect::<Vec<_>>()
                     .join("\n");
                 format!("if (!({})) {{\n{}\n}}", cond, body)
+            }
+            Expr::Err { .. } => {
+                let msg = if let Expr::Err { expr, .. } = else_ {
+                    self.gen_err_msg_expr(expr)
+                } else {
+                    "\"error\"".to_string()
+                };
+                format!("if (!({})) {{ throw new Error({}); }}", cond, msg)
             }
             _ => format!("if (!({})) {{ return {}; }}", cond, self.gen_expr(else_)),
         }

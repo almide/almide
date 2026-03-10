@@ -94,7 +94,7 @@ test "mixed operators continuation" {
     + 2.0
     * 3.0
   // 1.0 + (2.0 * 3.0) = 7.0 due to precedence
-  assert_eq(float.to_string(x), "7")
+  assert_eq(float.to_string(x), "7.0")
 }
 
 // --- Multi-line with comparison operators ---
@@ -124,7 +124,7 @@ test "multi-line float expression" {
   // 0.5*10*25 + 0.5*20*5 - 200/sqrt(13)
   // 125 + 50 - 55.47... = 119.52...
   let rounded = float.round(energy)
-  assert_eq(float.to_string(rounded), "120")
+  assert_eq(float.to_string(rounded), "120.0")
 }
 
 // --- Multi-line type annotation in function ---

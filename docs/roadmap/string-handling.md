@@ -1,6 +1,6 @@
-# String Handling ✅ Implemented
+# String Handling [DONE]
 
-## Heredoc
+### Heredoc
 
 Multi-line strings with `"""..."""` syntax.
 
@@ -17,3 +17,5 @@ let query = """
 - Interpolation `${expr}` works the same as in regular strings
 - Raw heredoc: `r"""..."""` (no escape processing, no interpolation)
 - Implemented entirely in the lexer — no AST, parser, or emitter changes needed
+
+---

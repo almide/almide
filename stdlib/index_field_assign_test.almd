@@ -1,0 +1,30 @@
+// Test: index assignment (xs[i] = v) and field assignment (r.f = v)
+
+test "list index assign" {
+  var xs = [10, 20, 30]
+  xs[1] = 99
+  assert_eq(list.get(xs, 1), some(99))
+  assert_eq(list.get(xs, 0), some(10))
+  assert_eq(list.get(xs, 2), some(30))
+}
+
+test "list index assign with expression" {
+  var ys = [1, 2, 3, 4, 5]
+  let idx = 2
+  ys[idx] = 100
+  assert_eq(list.get(ys, 2), some(100))
+}
+
+test "record field assign" {
+  var user = { name: "alice", age: 30 }
+  user.age = 31
+  assert_eq(user.age, 31)
+  assert_eq(user.name, "alice")
+}
+
+test "record field assign string" {
+  var config = { host: "localhost", port: 8080 }
+  config.host = "0.0.0.0"
+  assert_eq(config.host, "0.0.0.0")
+  assert_eq(config.port, 8080)
+}

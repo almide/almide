@@ -311,6 +311,10 @@ impl Emitter {
         self.emitln("impl AlmideConcat<String> for &str { type Output = String; fn concat(self, rhs: String) -> String { format!(\"{}{}\", self, rhs) } }");
         self.emitln("impl AlmideConcat<&str> for &str { type Output = String; fn concat(self, rhs: &str) -> String { format!(\"{}{}\", self, rhs) } }");
         self.emitln("impl<T: Clone> AlmideConcat<Vec<T>> for Vec<T> { type Output = Vec<T>; fn concat(self, rhs: Vec<T>) -> Vec<T> { let mut r = self; r.extend(rhs); r } }");
+        self.emitln("trait AlmidePushConcat<Rhs> { fn almide_push_concat(&mut self, rhs: Rhs); }");
+        self.emitln("impl AlmidePushConcat<String> for String { fn almide_push_concat(&mut self, rhs: String) { self.push_str(&rhs); } }");
+        self.emitln("impl AlmidePushConcat<&str> for String { fn almide_push_concat(&mut self, rhs: &str) { self.push_str(rhs); } }");
+        self.emitln("impl<T: Clone> AlmidePushConcat<Vec<T>> for Vec<T> { fn almide_push_concat(&mut self, rhs: Vec<T>) { self.extend(rhs); } }");
         self.emitln("macro_rules! almide_eq { ($a:expr, $b:expr) => { ($a) == ($b) }; }");
         self.emitln("macro_rules! almide_ne { ($a:expr, $b:expr) => { ($a) != ($b) }; }");
         self.emitln("");
@@ -693,7 +697,7 @@ impl Emitter {
             }
             TypeExpr::Fn { params, ret } => {
                 let ps: Vec<String> = params.iter().map(|p| self.gen_type(p)).collect();
-                format!("fn({}) -> {}", ps.join(", "), self.gen_type(ret))
+                format!("impl Fn({}) -> {} + Clone", ps.join(", "), self.gen_type(ret))
             }
             TypeExpr::Tuple { elements } => {
                 let ts: Vec<String> = elements.iter().map(|e| self.gen_type(e)).collect();

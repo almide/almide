@@ -1,0 +1,160 @@
+// data_types_test — Data types
+
+// ── Record ──
+
+test "record literal and field access" {
+  let user = { name: "alice", age: 30 }
+  assert_eq(user.name, "alice")
+  assert_eq(user.age, 30)
+}
+
+test "nested record" {
+  let data = { user: { name: "bob" }, score: 100 }
+  assert_eq(data.user.name, "bob")
+  assert_eq(data.score, 100)
+}
+
+test "record spread" {
+  let base = { name: "alice", age: 30 }
+  let updated = { ...base, age: 31 }
+  assert_eq(updated.name, "alice")
+  assert_eq(updated.age, 31)
+}
+
+// ── Tuple ──
+
+test "tuple literal and index access" {
+  let t = (1, "hello", true)
+  assert_eq(t.0, 1)
+  assert_eq(t.1, "hello")
+  assert_eq(t.2, true)
+}
+
+test "tuple pair" {
+  let p = (10, 20)
+  assert_eq(p.0 + p.1, 30)
+}
+
+test "tuple destructure" {
+  let (a, b) = (1, 2)
+  assert_eq(a, 1)
+  assert_eq(b, 2)
+}
+
+test "tuple destructure three" {
+  let (x, y, z) = ("a", "b", "c")
+  assert_eq(x, "a")
+  assert_eq(y, "b")
+  assert_eq(z, "c")
+}
+
+// ── Variant ──
+
+type Color = | Red | Green | Blue
+
+type Shape =
+  | Circle(Float)
+  | Rect(Float, Float)
+
+fn color_name(c: Color) -> String = match c {
+  Red => "red",
+  Green => "green",
+  Blue => "blue",
+}
+
+fn area(s: Shape) -> Float = match s {
+  Circle(r) => 3.14 * r * r,
+  Rect(w, h) => w * h,
+}
+
+test "variant zero-arg constructor" {
+  assert_eq(color_name(Red), "red")
+  assert_eq(color_name(Blue), "blue")
+}
+
+test "variant with tuple payload" {
+  let c = Circle(1.0)
+  let r = Rect(3.0, 4.0)
+  assert_eq(area(c), 3.14)
+  assert_eq(area(r), 12.0)
+}
+
+// ── Option ──
+
+test "Option some and none" {
+  let x = some(42)
+  let y: Option[Int] = none
+  assert_eq(x, some(42))
+  assert_eq(y, none)
+}
+
+test "Option match" {
+  let val = some("hi")
+  let result = match val {
+    some(s) => s,
+    none => "empty",
+  }
+  assert_eq(result, "hi")
+}
+
+// ── Result ──
+
+test "Result ok and err" {
+  let x: Result[Int, String] = ok(10)
+  let y: Result[Int, String] = err("fail")
+  assert_eq(x, ok(10))
+  assert_eq(y, err("fail"))
+}
+
+// ── List ──
+
+test "list literal" {
+  let xs = [1, 2, 3]
+  assert_eq(list.len(xs), 3)
+  assert_eq(list.get(xs, 0), some(1))
+  assert_eq(list.get(xs, 2), some(3))
+}
+
+test "list get out of bounds" {
+  let xs = [10, 20]
+  assert_eq(list.get(xs, 5), none)
+}
+
+test "list map" {
+  let xs = [1, 2, 3]
+  let ys = list.map(xs, fn(x) => x * 2)
+  assert_eq(ys, [2, 4, 6])
+}
+
+test "list filter" {
+  let xs = [1, 2, 3, 4, 5]
+  let evens = list.filter(xs, fn(x) => x % 2 == 0)
+  assert_eq(evens, [2, 4])
+}
+
+test "list fold" {
+  let xs = [1, 2, 3, 4]
+  let sum = list.fold(xs, 0, fn(acc, x) => acc + x)
+  assert_eq(sum, 10)
+}
+
+// ── Map ──
+
+test "map basic operations" {
+  let m = map.new()
+  let m = map.set(m, "a", 1)
+  let m = map.set(m, "b", 2)
+  assert_eq(map.get(m, "a"), some(1))
+  assert_eq(map.get(m, "b"), some(2))
+  assert_eq(map.get(m, "c"), none)
+  assert_eq(map.len(m), 2)
+}
+
+test "map contains and remove" {
+  let m = map.new()
+  let m = map.set(m, "x", 10)
+  assert_eq(map.contains(m, "x"), true)
+  assert_eq(map.contains(m, "y"), false)
+  let m = map.remove(m, "x")
+  assert_eq(map.contains(m, "x"), false)
+}

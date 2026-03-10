@@ -179,8 +179,8 @@ const MOD_STRING_JS: &str = r#"const __almd_string = {
 
 const MOD_LIST_TS: &str = r#"const __almd_list = {
   len<T>(xs: T[]): number { return xs.length; },
-  get<T>(xs: T[], i: number): T | null { return i < xs.length ? xs[i] : null; },
-  get_or<T>(xs: T[], i: number, d: T): T { return i < xs.length ? xs[i] : d; },
+  get<T>(xs: T[], i: number): T | null { return (i >= 0 && i < xs.length) ? xs[i] : null; },
+  get_or<T>(xs: T[], i: number, d: T): T { return (i >= 0 && i < xs.length) ? xs[i] : d; },
   sort<T>(xs: T[]): T[] { return [...xs].sort(); },
   reverse<T>(xs: T[]): T[] { return [...xs].reverse(); },
   any<T>(xs: T[], f: (x: T) => boolean): boolean { return xs.some(f); },
@@ -222,8 +222,8 @@ const MOD_LIST_TS: &str = r#"const __almd_list = {
 
 const MOD_LIST_JS: &str = r#"const __almd_list = {
   len(xs) { return xs.length; },
-  get(xs, i) { return i < xs.length ? xs[i] : null; },
-  get_or(xs, i, d) { return i < xs.length ? xs[i] : d; },
+  get(xs, i) { return (i >= 0 && i < xs.length) ? xs[i] : null; },
+  get_or(xs, i, d) { return (i >= 0 && i < xs.length) ? xs[i] : d; },
   sort(xs) { return [...xs].sort(); },
   reverse(xs) { return [...xs].reverse(); },
   any(xs, f) { return xs.some(f); },
@@ -360,7 +360,7 @@ const MOD_INT_JS: &str = r#"const __almd_int = {
 // ──────────────────────────────── float ────────────────────────────────
 
 const MOD_FLOAT_TS: &str = r#"const __almd_float = {
-  to_string(n: number): string { return String(n); },
+  to_string(n: number): string { const s = String(n); return s.includes('.') || s.includes('e') ? s : s + '.0'; },
   to_int(n: number): number { return Math.trunc(n); },
   round(n: number): number { return Math.round(n); },
   floor(n: number): number { return Math.floor(n); },
@@ -376,7 +376,7 @@ const MOD_FLOAT_TS: &str = r#"const __almd_float = {
 "#;
 
 const MOD_FLOAT_JS: &str = r#"const __almd_float = {
-  to_string(n) { return String(n); },
+  to_string(n) { const s = String(n); return s.includes('.') || s.includes('e') ? s : s + '.0'; },
   to_int(n) { return Math.trunc(n); },
   round(n) { return Math.round(n); },
   floor(n) { return Math.floor(n); },
@@ -684,8 +684,11 @@ function __div(a: any, b: any): any {
 }
 function println(s: string): void { console.log(s); }
 function eprintln(s: string): void { console.error(s); }
+class __Err { constructor(public message: string) {} }
 function __deep_eq(a: any, b: any): boolean {
   if (a === b) return true;
+  if (a instanceof __Err && b instanceof __Err) return a.message === b.message;
+  if (a instanceof __Err || b instanceof __Err) return false;
   if (Array.isArray(a) && Array.isArray(b)) {
     if (a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) { if (!__deep_eq(a[i], b[i])) return false; }
@@ -740,8 +743,11 @@ function __div(a, b) {
 }
 function println(s) { console.log(s); }
 function eprintln(s) { console.error(s); }
+class __Err { constructor(message) { this.message = message; } }
 function __deep_eq(a, b) {
   if (a === b) return true;
+  if (a instanceof __Err && b instanceof __Err) return a.message === b.message;
+  if (a instanceof __Err || b instanceof __Err) return false;
   if (Array.isArray(a) && Array.isArray(b)) {
     if (a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) { if (!__deep_eq(a[i], b[i])) return false; }

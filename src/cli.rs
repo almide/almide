@@ -3,6 +3,32 @@
 use std::process::Command;
 use crate::{compile, compile_with_options, parse_file, find_rustc, emit_rust, emit_ts, check, diagnostic, resolve, fmt, project};
 
+/// Recursively collect .almd files that contain `test` blocks.
+fn collect_test_files(dir: &std::path::Path) -> Vec<String> {
+    let mut files = Vec::new();
+    // Skip hidden directories, target/, node_modules/, etc.
+    let dir_name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    if dir_name.starts_with('.') || dir_name == "target" || dir_name == "node_modules" {
+        return files;
+    }
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if path.is_dir() {
+                files.extend(collect_test_files(&path));
+            } else if path.extension().map(|e| e == "almd").unwrap_or(false) {
+                // Check if file contains a test block
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    if content.contains("\ntest ") || content.starts_with("test ") {
+                        files.push(path.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+    }
+    files
+}
+
 pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool) -> i32 {
     let rs_code = compile(file, no_check);
 
@@ -105,25 +131,28 @@ pub fn cmd_init() {
 
 pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
     let test_files: Vec<String> = if !file.is_empty() {
-        vec![file.to_string()]
-    } else if std::path::Path::new("tests").is_dir() {
-        let mut files: Vec<String> = std::fs::read_dir("tests")
-            .unwrap_or_else(|e| { eprintln!("Failed to read tests/: {}", e); std::process::exit(1); })
-            .filter_map(|e| e.ok())
-            .map(|e| e.path().to_string_lossy().to_string())
-            .filter(|f| f.ends_with(".almd"))
-            .collect();
-        files.sort();
-        files
+        let path = std::path::Path::new(file);
+        if path.is_dir() {
+            let mut files = collect_test_files(path);
+            files.sort();
+            if files.is_empty() {
+                eprintln!("No .almd files with test blocks found in {}", file);
+                std::process::exit(1);
+            }
+            files
+        } else {
+            vec![file.to_string()]
+        }
     } else {
-        eprintln!("No test files found. Create tests/*.almd or specify a file.");
-        std::process::exit(1);
+        // Default: recursively find all .almd files with test blocks in current directory
+        let mut files = collect_test_files(std::path::Path::new("."));
+        files.sort();
+        if files.is_empty() {
+            eprintln!("No .almd files with test blocks found.");
+            std::process::exit(1);
+        }
+        files
     };
-
-    if test_files.is_empty() {
-        eprintln!("No test files found in tests/");
-        std::process::exit(1);
-    }
 
     let mut program_args: Vec<String> = Vec::new();
     if let Some(filter) = run_filter {

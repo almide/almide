@@ -1,5 +1,3 @@
-module math_random_time_test
-
 import math
 import random
 import time
