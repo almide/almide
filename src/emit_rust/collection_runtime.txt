@@ -24,6 +24,16 @@ fn almide_rt_list_set<T: Clone>(list: &[T], index: i64, value: T) -> Vec<T> {
     v
 }
 
+fn almide_rt_list_swap<T: Clone>(list: &[T], i: i64, j: i64) -> Vec<T> {
+    let mut v = list.to_vec();
+    let a = i as usize;
+    let b = j as usize;
+    if a < v.len() && b < v.len() {
+        v.swap(a, b);
+    }
+    v
+}
+
 fn almide_rt_list_sort<T: Clone + Ord>(list: &[T]) -> Vec<T> {
     let mut v = list.to_vec();
     v.sort();
