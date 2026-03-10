@@ -216,6 +216,11 @@ impl TsEmitter {
                 }
             }
             lines.push(format!("{}{}", ind, self.gen_stmt(stmt)));
+            // Auto-propagate __Err values from let bindings in do blocks
+            if let Stmt::Let { name, .. } = stmt {
+                let san = Self::sanitize(name);
+                lines.push(format!("{}if ({} instanceof __Err) throw new Error({}.message);", ind, san, san));
+            }
         }
 
         if has_guard {
@@ -292,6 +297,14 @@ impl TsEmitter {
                     .collect::<Vec<_>>()
                     .join("\n");
                 format!("if (!({})) {{\n{}\n}}", cond, body)
+            }
+            Expr::Err { .. } => {
+                let msg = if let Expr::Err { expr, .. } = else_ {
+                    self.gen_err_msg_expr(expr)
+                } else {
+                    "\"error\"".to_string()
+                };
+                format!("if (!({})) {{ throw new Error({}); }}", cond, msg)
             }
             _ => format!("if (!({})) {{ return {}; }}", cond, self.gen_expr(else_)),
         }

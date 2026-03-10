@@ -171,7 +171,7 @@ impl TsEmitter {
     }
 
     /// Generate the error message expression string for err()
-    fn gen_err_msg_expr(&self, expr: &Expr) -> String {
+    pub(crate) fn gen_err_msg_expr(&self, expr: &Expr) -> String {
         match expr {
             Expr::Call { callee, args, .. } => {
                 let callee_str = if let Expr::TypeName { name, .. } = callee.as_ref() {

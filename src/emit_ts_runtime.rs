@@ -179,8 +179,8 @@ const MOD_STRING_JS: &str = r#"const __almd_string = {
 
 const MOD_LIST_TS: &str = r#"const __almd_list = {
   len<T>(xs: T[]): number { return xs.length; },
-  get<T>(xs: T[], i: number): T | null { return i < xs.length ? xs[i] : null; },
-  get_or<T>(xs: T[], i: number, d: T): T { return i < xs.length ? xs[i] : d; },
+  get<T>(xs: T[], i: number): T | null { return (i >= 0 && i < xs.length) ? xs[i] : null; },
+  get_or<T>(xs: T[], i: number, d: T): T { return (i >= 0 && i < xs.length) ? xs[i] : d; },
   sort<T>(xs: T[]): T[] { return [...xs].sort(); },
   reverse<T>(xs: T[]): T[] { return [...xs].reverse(); },
   any<T>(xs: T[], f: (x: T) => boolean): boolean { return xs.some(f); },
@@ -222,8 +222,8 @@ const MOD_LIST_TS: &str = r#"const __almd_list = {
 
 const MOD_LIST_JS: &str = r#"const __almd_list = {
   len(xs) { return xs.length; },
-  get(xs, i) { return i < xs.length ? xs[i] : null; },
-  get_or(xs, i, d) { return i < xs.length ? xs[i] : d; },
+  get(xs, i) { return (i >= 0 && i < xs.length) ? xs[i] : null; },
+  get_or(xs, i, d) { return (i >= 0 && i < xs.length) ? xs[i] : d; },
   sort(xs) { return [...xs].sort(); },
   reverse(xs) { return [...xs].reverse(); },
   any(xs, f) { return xs.some(f); },
