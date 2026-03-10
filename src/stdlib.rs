@@ -255,69 +255,17 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         // ── int ── (auto-generated from stdlib/defs/int.toml)
         // ── float ── (auto-generated from stdlib/defs/float.toml)
 
-        // ── json ──
-        ("json", "parse") => FnSig { generics: vec![], params: vec![(s("text"), Ty::String)], ret: Ty::Result(Box::new(Ty::Named(s("Json"))), Box::new(Ty::String)), is_effect: false },
-        ("json", "stringify") => FnSig { generics: vec![], params: vec![(s("j"), Ty::Named(s("Json")))], ret: Ty::String, is_effect: false },
-        ("json", "get") => FnSig { generics: vec![], params: vec![(s("j"), Ty::Named(s("Json"))), (s("key"), Ty::String)], ret: Ty::Option(Box::new(Ty::Named(s("Json")))), is_effect: false },
-        ("json", "get_string") => FnSig { generics: vec![], params: vec![(s("j"), Ty::Named(s("Json"))), (s("key"), Ty::String)], ret: Ty::Option(Box::new(Ty::String)), is_effect: false },
-        ("json", "get_int") => FnSig { generics: vec![], params: vec![(s("j"), Ty::Named(s("Json"))), (s("key"), Ty::String)], ret: Ty::Option(Box::new(Ty::Int)), is_effect: false },
-        ("json", "get_bool") => FnSig { generics: vec![], params: vec![(s("j"), Ty::Named(s("Json"))), (s("key"), Ty::String)], ret: Ty::Option(Box::new(Ty::Bool)), is_effect: false },
-        ("json", "get_array") => FnSig { generics: vec![], params: vec![(s("j"), Ty::Named(s("Json"))), (s("key"), Ty::String)], ret: Ty::Option(Box::new(Ty::List(Box::new(Ty::Named(s("Json")))))), is_effect: false },
-        ("json", "keys") => FnSig { generics: vec![], params: vec![(s("j"), Ty::Named(s("Json")))], ret: Ty::List(Box::new(Ty::String)), is_effect: false },
-        ("json", "to_string") => FnSig { generics: vec![], params: vec![(s("j"), Ty::Named(s("Json")))], ret: Ty::Option(Box::new(Ty::String)), is_effect: false },
-        ("json", "to_int") => FnSig { generics: vec![], params: vec![(s("j"), Ty::Named(s("Json")))], ret: Ty::Option(Box::new(Ty::Int)), is_effect: false },
-        ("json", "from_string") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::Named(s("Json")), is_effect: false },
-        ("json", "from_int") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Int)], ret: Ty::Named(s("Json")), is_effect: false },
-        ("json", "from_bool") => FnSig { generics: vec![], params: vec![(s("b"), Ty::Bool)], ret: Ty::Named(s("Json")), is_effect: false },
-        ("json", "null") => FnSig { generics: vec![], params: vec![], ret: Ty::Named(s("Json")), is_effect: false },
-        ("json", "array") => FnSig { generics: vec![], params: vec![(s("items"), Ty::List(Box::new(Ty::Named(s("Json")))))], ret: Ty::Named(s("Json")), is_effect: false },
-        ("json", "from_map") => FnSig { generics: vec![], params: vec![(s("m"), Ty::Map(Box::new(Ty::String), Box::new(Ty::Named(s("Json")))))], ret: Ty::Named(s("Json")), is_effect: false },
-        ("json", "get_float") => FnSig { generics: vec![], params: vec![(s("j"), Ty::Named(s("Json"))), (s("key"), Ty::String)], ret: Ty::Option(Box::new(Ty::Float)), is_effect: false },
-        ("json", "from_float") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Float)], ret: Ty::Named(s("Json")), is_effect: false },
-        ("json", "stringify_pretty") => FnSig { generics: vec![], params: vec![(s("j"), Ty::Named(s("Json")))], ret: Ty::String, is_effect: false },
+        // ── json ── (auto-generated from stdlib/defs/json.toml)
 
 
-        // ── env ──
-        ("env", "unix_timestamp") => FnSig { generics: vec![], params: vec![], ret: Ty::Int, is_effect: true },
-        ("env", "args") => FnSig { generics: vec![], params: vec![], ret: Ty::List(Box::new(Ty::String)), is_effect: true },
-        ("env", "get") => FnSig { generics: vec![], params: vec![(s("name"), Ty::String)], ret: Ty::Option(Box::new(Ty::String)), is_effect: true },
-        ("env", "set") => FnSig { generics: vec![], params: vec![(s("name"), Ty::String), (s("value"), Ty::String)], ret: Ty::Unit, is_effect: true },
-        ("env", "cwd") => FnSig { generics: vec![], params: vec![], ret: Ty::Result(Box::new(Ty::String), Box::new(Ty::String)), is_effect: true },
-        ("env", "millis") => FnSig { generics: vec![], params: vec![], ret: Ty::Int, is_effect: true },
-        ("env", "sleep_ms") => FnSig { generics: vec![], params: vec![(s("ms"), Ty::Int)], ret: Ty::Unit, is_effect: true },
-        ("env", "temp_dir") => FnSig { generics: vec![], params: vec![], ret: Ty::String, is_effect: true },
+        // ── env ── (auto-generated from stdlib/defs/env.toml)
 
-        // ── process ──
-        ("process", "exec") => FnSig { generics: vec![], params: vec![(s("cmd"), Ty::String), (s("args"), Ty::List(Box::new(Ty::String)))], ret: Ty::Result(Box::new(Ty::String), Box::new(Ty::String)), is_effect: true },
-        ("process", "exit") => FnSig { generics: vec![], params: vec![(s("code"), Ty::Int)], ret: Ty::Unit, is_effect: true },
-        ("process", "stdin_lines") => FnSig { generics: vec![], params: vec![], ret: Ty::Result(Box::new(Ty::List(Box::new(Ty::String))), Box::new(Ty::String)), is_effect: true },
-        ("process", "exec_status") => FnSig { generics: vec![], params: vec![(s("cmd"), Ty::String), (s("args"), Ty::List(Box::new(Ty::String)))], ret: Ty::Result(Box::new(Ty::Record { fields: vec![(s("code"), Ty::Int), (s("stdout"), Ty::String), (s("stderr"), Ty::String)] }), Box::new(Ty::String)), is_effect: true },
-
-        // ── fs ──
-        ("fs", "read_text") => FnSig { generics: vec![], params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::String), Box::new(io_err())), is_effect: true },
-        ("fs", "read_bytes") => FnSig { generics: vec![], params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::List(Box::new(Ty::Int))), Box::new(io_err())), is_effect: true },
-        ("fs", "write") => FnSig { generics: vec![], params: vec![(s("path"), Ty::String), (s("content"), Ty::String)], ret: Ty::Result(Box::new(Ty::Unit), Box::new(io_err())), is_effect: true },
-        ("fs", "write_bytes") => FnSig { generics: vec![], params: vec![(s("path"), Ty::String), (s("bytes"), Ty::List(Box::new(Ty::Int)))], ret: Ty::Result(Box::new(Ty::Unit), Box::new(io_err())), is_effect: true },
-        ("fs", "append") => FnSig { generics: vec![], params: vec![(s("path"), Ty::String), (s("content"), Ty::String)], ret: Ty::Result(Box::new(Ty::Unit), Box::new(io_err())), is_effect: true },
-        ("fs", "mkdir_p") => FnSig { generics: vec![], params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::Unit), Box::new(io_err())), is_effect: true },
-        ("fs", "exists?") => FnSig { generics: vec![], params: vec![(s("path"), Ty::String)], ret: Ty::Bool, is_effect: true },
-        ("fs", "read_lines") => FnSig { generics: vec![], params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::List(Box::new(Ty::String))), Box::new(io_err())), is_effect: true },
-        ("fs", "remove") => FnSig { generics: vec![], params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::Unit), Box::new(io_err())), is_effect: true },
-        ("fs", "list_dir") => FnSig { generics: vec![], params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::List(Box::new(Ty::String))), Box::new(io_err())), is_effect: true },
-        ("fs", "is_dir?") => FnSig { generics: vec![], params: vec![(s("path"), Ty::String)], ret: Ty::Bool, is_effect: true },
-        ("fs", "is_file?") => FnSig { generics: vec![], params: vec![(s("path"), Ty::String)], ret: Ty::Bool, is_effect: true },
-        ("fs", "copy") => FnSig { generics: vec![], params: vec![(s("src"), Ty::String), (s("dst"), Ty::String)], ret: Ty::Result(Box::new(Ty::Unit), Box::new(io_err())), is_effect: true },
-        ("fs", "rename") => FnSig { generics: vec![], params: vec![(s("src"), Ty::String), (s("dst"), Ty::String)], ret: Ty::Result(Box::new(Ty::Unit), Box::new(io_err())), is_effect: true },
-        ("fs", "walk") => FnSig { generics: vec![], params: vec![(s("dir"), Ty::String)], ret: Ty::Result(Box::new(Ty::List(Box::new(Ty::String))), Box::new(io_err())), is_effect: true },
-        ("fs", "stat") => FnSig { generics: vec![], params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::Record { fields: vec![(s("size"), Ty::Int), (s("is_dir"), Ty::Bool), (s("is_file"), Ty::Bool), (s("modified"), Ty::Int)] }), Box::new(io_err())), is_effect: true },
+        // ── process ── (auto-generated from stdlib/defs/process.toml)
+        // ── fs ── (auto-generated from stdlib/defs/fs.toml)
 
         // ── math ── (auto-generated from stdlib/defs/math.toml)
 
-        // ── random ──
-        ("random", "int") => FnSig { generics: vec![], params: vec![(s("min"), Ty::Int), (s("max"), Ty::Int)], ret: Ty::Int, is_effect: true },
-        ("random", "float") => FnSig { generics: vec![], params: vec![], ret: Ty::Float, is_effect: true },
-        ("random", "choice") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: true },
-        ("random", "shuffle") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: true },
+        // ── random ── (auto-generated from stdlib/defs/random.toml)
 
         // ── time: fully migrated to stdlib/time.almd ──
 

@@ -1,0 +1,114 @@
+[read_text]
+params = [{ name = "path", type = "String" }]
+return = "Result[String, IoError]"
+effect = true
+rust = "almide_rt_fs_read_text(&*{path})?"
+ts = "__almd_fs.read_text({path})"
+
+[read_bytes]
+params = [{ name = "path", type = "String" }]
+return = "Result[List[Int], IoError]"
+effect = true
+rust = "almide_rt_fs_read_bytes(&*{path})?"
+ts = "__almd_fs.read_bytes({path})"
+
+[write]
+params = [{ name = "path", type = "String" }, { name = "content", type = "String" }]
+return = "Result[Unit, IoError]"
+effect = true
+rust = "almide_rt_fs_write(&*{path}, &*{content})?"
+ts = "__almd_fs.write({path}, {content})"
+
+[write_bytes]
+params = [{ name = "path", type = "String" }, { name = "bytes", type = "List[Int]" }]
+return = "Result[Unit, IoError]"
+effect = true
+rust = "almide_rt_fs_write_bytes(&*{path}, &{bytes})?"
+ts = "__almd_fs.write_bytes({path}, {bytes})"
+
+[append]
+params = [{ name = "path", type = "String" }, { name = "content", type = "String" }]
+return = "Result[Unit, IoError]"
+effect = true
+rust = "almide_rt_fs_append(&*{path}, &*{content})?"
+ts = "__almd_fs.append({path}, {content})"
+
+[mkdir_p]
+params = [{ name = "path", type = "String" }]
+return = "Result[Unit, IoError]"
+effect = true
+rust = "almide_rt_fs_mkdir_p(&*{path})?"
+ts = "__almd_fs.mkdir_p({path})"
+
+["exists?"]
+params = [{ name = "path", type = "String" }]
+return = "Bool"
+effect = true
+rust = "almide_rt_fs_exists(&*{path})"
+ts = "__almd_fs.exists_hdlm_qm_({path})"
+aliases = ["exists_hdlm_qm_"]
+
+[read_lines]
+params = [{ name = "path", type = "String" }]
+return = "Result[List[String], IoError]"
+effect = true
+rust = "almide_rt_fs_read_lines(&*{path})?"
+ts = "__almd_fs.read_lines({path})"
+
+[remove]
+params = [{ name = "path", type = "String" }]
+return = "Result[Unit, IoError]"
+effect = true
+rust = "almide_rt_fs_remove(&*{path})?"
+ts = "__almd_fs.remove({path})"
+
+[list_dir]
+params = [{ name = "path", type = "String" }]
+return = "Result[List[String], IoError]"
+effect = true
+rust = "almide_rt_fs_list_dir(&*{path})?"
+ts = "__almd_fs.list_dir({path})"
+
+["is_dir?"]
+params = [{ name = "path", type = "String" }]
+return = "Bool"
+effect = true
+rust = "almide_rt_fs_is_dir(&*{path})"
+ts = "__almd_fs.is_dir_hdlm_qm_({path})"
+aliases = ["is_dir_hdlm_qm_"]
+
+["is_file?"]
+params = [{ name = "path", type = "String" }]
+return = "Bool"
+effect = true
+rust = "almide_rt_fs_is_file(&*{path})"
+ts = "__almd_fs.is_file_hdlm_qm_({path})"
+aliases = ["is_file_hdlm_qm_"]
+
+[copy]
+params = [{ name = "src", type = "String" }, { name = "dst", type = "String" }]
+return = "Result[Unit, IoError]"
+effect = true
+rust = "almide_rt_fs_copy(&*{src}, &*{dst})?"
+ts = "__almd_fs.copy({src}, {dst})"
+
+[rename]
+params = [{ name = "src", type = "String" }, { name = "dst", type = "String" }]
+return = "Result[Unit, IoError]"
+effect = true
+rust = "almide_rt_fs_rename(&*{src}, &*{dst})?"
+ts = "__almd_fs.rename({src}, {dst})"
+
+[walk]
+params = [{ name = "dir", type = "String" }]
+return = "Result[List[String], IoError]"
+effect = true
+rust = "almide_rt_fs_walk(&*{dir})?"
+ts = "__almd_fs.walk({dir})"
+
+[stat]
+params = [{ name = "path", type = "String" }]
+return = "Result[{size: Int, is_dir: Bool, is_file: Bool, modified: Int}, IoError]"
+effect = true
+rust = "almide_rt_fs_stat(&*{path})?"
+ts = "__almd_fs.stat({path})"

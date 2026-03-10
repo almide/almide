@@ -1,0 +1,27 @@
+[exec]
+params = [{ name = "cmd", type = "String" }, { name = "args", type = "List[String]" }]
+return = "Result[String, String]"
+effect = true
+rust = "almide_rt_process_exec(&*{cmd}, &{ let __a: Vec<String> = {args}; __a })"
+ts = "__almd_process.exec({cmd}, {args})"
+
+[exit]
+params = [{ name = "code", type = "Int" }]
+return = "Unit"
+effect = true
+rust = "almide_rt_process_exit({code})"
+ts = "__almd_process.exit({code})"
+
+[stdin_lines]
+params = []
+return = "Result[List[String], String]"
+effect = true
+rust = "almide_rt_process_stdin_lines()?"
+ts = "__almd_process.stdin_lines()"
+
+[exec_status]
+params = [{ name = "cmd", type = "String" }, { name = "args", type = "List[String]" }]
+return = "Result[{code: Int, stdout: String, stderr: String}, String]"
+effect = true
+rust = "almide_rt_process_exec_status(&*{cmd}, &{ let __a: Vec<String> = {args}; __a })?"
+ts = "__almd_process.exec_status({cmd}, {args})"

@@ -27,6 +27,21 @@ struct Param {
     ty: String,
 }
 
+/// Find the position of the top-level ", " separator, respecting nested brackets/braces.
+fn split_top_level_comma(s: &str) -> Option<usize> {
+    let mut depth = 0;
+    let bytes = s.as_bytes();
+    for i in 0..bytes.len() {
+        match bytes[i] {
+            b'[' | b'{' => depth += 1,
+            b']' | b'}' => depth -= 1,
+            b',' if depth == 0 && i + 1 < bytes.len() && bytes[i + 1] == b' ' => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
 fn parse_type(s: &str) -> String {
     match s {
         "Int" => "Ty::Int".to_string(),
@@ -34,6 +49,7 @@ fn parse_type(s: &str) -> String {
         "String" => "Ty::String".to_string(),
         "Bool" => "Ty::Bool".to_string(),
         "Unit" => "Ty::Unit".to_string(),
+        "Unknown" => "Ty::Unknown".to_string(),
         other if other.starts_with("List[") => {
             let inner = &other[5..other.len() - 1];
             format!("Ty::List(Box::new({}))", parse_type(inner))
@@ -44,13 +60,36 @@ fn parse_type(s: &str) -> String {
         }
         other if other.starts_with("Result[") => {
             let inner = &other[7..other.len() - 1];
-            // Split on ", " for Result[T, E]
-            let parts: Vec<&str> = inner.splitn(2, ", ").collect();
+            let split_pos = split_top_level_comma(inner);
+            let (ok_ty, err_ty) = if let Some(pos) = split_pos {
+                (&inner[..pos], inner[pos + 2..].trim())
+            } else {
+                (inner, "String")
+            };
             format!(
                 "Ty::Result(Box::new({}), Box::new({}))",
-                parse_type(parts[0]),
-                parse_type(parts.get(1).unwrap_or(&"String"))
+                parse_type(ok_ty),
+                parse_type(err_ty)
             )
+        }
+        other if other.starts_with("Map[") => {
+            let inner = &other[4..other.len() - 1];
+            let split_pos = split_top_level_comma(inner).expect("Map type needs two type params");
+            let key_ty = &inner[..split_pos];
+            let val_ty = inner[split_pos + 2..].trim();
+            format!("Ty::Map(Box::new({}), Box::new({}))", parse_type(key_ty), parse_type(val_ty))
+        }
+        other if other.starts_with('{') && other.ends_with('}') => {
+            // Record type: {field1: Type1, field2: Type2, ...}
+            let inner = &other[1..other.len() - 1];
+            let fields: Vec<String> = inner
+                .split(", ")
+                .map(|field| {
+                    let parts: Vec<&str> = field.splitn(2, ": ").collect();
+                    format!("(s(\"{}\"), {})", parts[0].trim(), parse_type(parts[1].trim()))
+                })
+                .collect();
+            format!("Ty::Record {{ fields: vec![{}] }}", fields.join(", "))
         }
         other => format!("Ty::Named(s(\"{}\"))", other),
     }
@@ -63,16 +102,23 @@ fn render_template(template: &str, args: &[String]) -> String {
 }
 
 fn render_rust_template(template: &str, params: &[Param]) -> String {
-    let mut result = format!("format!(\"{}\"", template);
-    // Replace {name} with {} and collect param references
+    // 1. Replace {param_name} with a temporary marker \x00N\x00
     let mut fmt_str = template.to_string();
     let mut fmt_args = Vec::new();
     for (i, p) in params.iter().enumerate() {
         let placeholder = format!("{{{}}}", p.name);
         if fmt_str.contains(&placeholder) {
-            fmt_str = fmt_str.replace(&placeholder, "{}");
+            let marker = format!("\x00{}\x00", fmt_args.len());
+            fmt_str = fmt_str.replace(&placeholder, &marker);
             fmt_args.push(format!("args_str[{}]", i));
         }
+    }
+    // 2. Escape remaining literal braces for format!()
+    fmt_str = fmt_str.replace('{', "{{").replace('}', "}}");
+    // 3. Restore markers as {}
+    for i in 0..fmt_args.len() {
+        let marker = format!("\x00{}\x00", i);
+        fmt_str = fmt_str.replace(&marker, "{}");
     }
     if fmt_args.is_empty() {
         format!("\"{}\".to_string()", fmt_str)

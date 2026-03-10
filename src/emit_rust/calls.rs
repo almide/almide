@@ -223,17 +223,17 @@ impl Emitter {
             return expr;
         }
         match module {
-            "fs" => self.gen_fs_call(func, &args_str),
+            // fs — auto-generated from stdlib/defs/fs.toml
             "string" => self.gen_string_call(func, &args_str),
             "list" => self.gen_list_call(func, args, &args_str),
             "map" => self.gen_map_call(func, args, &args_str),
             // int, float — auto-generated from stdlib/defs/*.toml
-            "env" => self.gen_env_call(func, &args_str),
-            "process" => self.gen_process_call(func, &args_str),
+            // env — auto-generated from stdlib/defs/env.toml
+            // process — auto-generated from stdlib/defs/process.toml
             // io — auto-generated from stdlib/defs/io.toml
-            "json" => self.gen_json_call(func, &args_str),
+            // json — auto-generated from stdlib/defs/json.toml
             "http" => self.gen_http_call(func, args, &args_str),
-            "random" => self.gen_random_call(func, &args_str),
+            // random — auto-generated from stdlib/defs/random.toml
             // regex — auto-generated from stdlib/defs/regex.toml
             _ => {
                 let resolved = self.module_aliases.get(module)
@@ -251,27 +251,7 @@ impl Emitter {
         }
     }
 
-    fn gen_fs_call(&self, func: &str, args_str: &[String]) -> String {
-        match func {
-            "read_text" => format!("almide_rt_fs_read_text(&*{})?", args_str[0]),
-            "write" => format!("almide_rt_fs_write(&*{}, &*{})?", args_str[0], args_str[1]),
-            "write_bytes" => format!("almide_rt_fs_write_bytes(&*{}, &{})?", args_str[0], args_str[1]),
-            "read_bytes" => format!("almide_rt_fs_read_bytes(&*{})?", args_str[0]),
-            "exists?" | "exists_hdlm_qm_" => format!("almide_rt_fs_exists(&*{})", args_str[0]),
-            "mkdir_p" => format!("almide_rt_fs_mkdir_p(&*{})?", args_str[0]),
-            "append" => format!("almide_rt_fs_append(&*{}, &*{})?", args_str[0], args_str[1]),
-            "read_lines" => format!("almide_rt_fs_read_lines(&*{})?", args_str[0]),
-            "remove" => format!("almide_rt_fs_remove(&*{})?", args_str[0]),
-            "list_dir" => format!("almide_rt_fs_list_dir(&*{})?", args_str[0]),
-            "is_dir?" | "is_dir_hdlm_qm_" => format!("almide_rt_fs_is_dir(&*{})", args_str[0]),
-            "is_file?" | "is_file_hdlm_qm_" => format!("almide_rt_fs_is_file(&*{})", args_str[0]),
-            "copy" => format!("almide_rt_fs_copy(&*{}, &*{})?", args_str[0], args_str[1]),
-            "rename" => format!("almide_rt_fs_rename(&*{}, &*{})?", args_str[0], args_str[1]),
-            "walk" => format!("almide_rt_fs_walk(&*{})?", args_str[0]),
-            "stat" => format!("almide_rt_fs_stat(&*{})?", args_str[0]),
-            _ => { eprintln!("internal error: no Rust codegen for fs.{}() — this is a compiler bug", func); std::process::exit(70); },
-        }
-    }
+    // gen_fs_call — removed: now auto-generated from stdlib/defs/fs.toml
 
     fn gen_string_call(&self, func: &str, args_str: &[String]) -> String {
         match func {
@@ -466,56 +446,12 @@ impl Emitter {
     // gen_int_call — removed: now auto-generated from stdlib/defs/int.toml
     // gen_float_call — removed: now auto-generated from stdlib/defs/float.toml
 
-    fn gen_env_call(&self, func: &str, args_str: &[String]) -> String {
-        match func {
-            "unix_timestamp" => "almide_rt_env_unix_timestamp()".to_string(),
-            "args" => "almide_rt_env_args()".to_string(),
-            "get" => format!("almide_rt_env_get(&*{})", args_str[0]),
-            "set" => format!("almide_rt_env_set(&*{}, &*{})", args_str[0], args_str[1]),
-            "cwd" => "almide_rt_env_cwd()?".to_string(),
-            "millis" => "almide_rt_env_millis()".to_string(),
-            "sleep_ms" => format!("almide_rt_env_sleep_ms({})", args_str[0]),
-            "temp_dir" => "std::env::temp_dir().to_string_lossy().to_string()".to_string(),
-            _ => { eprintln!("internal error: no Rust codegen for env.{}() — this is a compiler bug", func); std::process::exit(70); },
-        }
-    }
-
-    fn gen_process_call(&self, func: &str, args_str: &[String]) -> String {
-        match func {
-            "exec" => format!("almide_rt_process_exec(&*{}, &{{ let __a: Vec<String> = {}; __a }})", args_str[0], args_str[1]),
-            "exit" => format!("almide_rt_process_exit({})", args_str[0]),
-            "stdin_lines" => "almide_rt_process_stdin_lines()?".to_string(),
-            "exec_status" => format!("almide_rt_process_exec_status(&*{}, &{{ let __a: Vec<String> = {}; __a }})?", args_str[0], args_str[1]),
-            _ => { eprintln!("internal error: no Rust codegen for process.{}() — this is a compiler bug", func); std::process::exit(70); },
-        }
-    }
+    // gen_env_call — removed: now auto-generated from stdlib/defs/env.toml
+    // gen_process_call — removed: now auto-generated from stdlib/defs/process.toml
 
     // gen_io_call — removed: now auto-generated from stdlib/defs/io.toml
 
-    fn gen_json_call(&self, func: &str, args_str: &[String]) -> String {
-        match func {
-            "parse" => format!("almide_json_parse(&{})?", args_str[0]),
-            "stringify" => format!("almide_json_stringify(&{})", args_str[0]),
-            "get" => format!("almide_json_get(&{}, &{})", args_str[0], args_str[1]),
-            "get_string" => format!("almide_json_get_string(&{}, &{})", args_str[0], args_str[1]),
-            "get_int" => format!("almide_json_get_int(&{}, &{})", args_str[0], args_str[1]),
-            "get_bool" => format!("almide_json_get_bool(&{}, &{})", args_str[0], args_str[1]),
-            "get_array" => format!("almide_json_get_array(&{}, &{})", args_str[0], args_str[1]),
-            "keys" => format!("almide_json_keys(&{})", args_str[0]),
-            "to_string" => format!("almide_json_to_string(&{})", args_str[0]),
-            "to_int" => format!("almide_json_to_int(&{})", args_str[0]),
-            "from_string" => format!("JStr({})", args_str[0]),
-            "from_int" => format!("JInt({})", args_str[0]),
-            "from_bool" => format!("JBool({})", args_str[0]),
-            "null" => "JNull".to_string(),
-            "array" => format!("JArray({})", args_str[0]),
-            "from_map" => format!("JObject({})", args_str[0]),
-            "get_float" => format!("almide_json_get_float(&{}, &{})", args_str[0], args_str[1]),
-            "from_float" => format!("almide_json_from_float({})", args_str[0]),
-            "stringify_pretty" => format!("almide_json_stringify_pretty(&{})", args_str[0]),
-            _ => { eprintln!("internal error: no Rust codegen for json.{}() — this is a compiler bug", func); std::process::exit(70); },
-        }
-    }
+    // gen_json_call — removed: now auto-generated from stdlib/defs/json.toml
 
     fn gen_http_call(&self, func: &str, args: &[Expr], args_str: &[String]) -> String {
         match func {
@@ -535,15 +471,7 @@ impl Emitter {
 
     // gen_math_call — removed: now auto-generated from stdlib/defs/math.toml
 
-    fn gen_random_call(&self, func: &str, args_str: &[String]) -> String {
-        match func {
-            "int" => format!("almide_rt_random_int({}, {})?", args_str[0], args_str[1]),
-            "float" => "almide_rt_random_float()?".to_string(),
-            "choice" => format!("almide_rt_random_choice(&{})?", args_str[0]),
-            "shuffle" => format!("almide_rt_random_shuffle(({}).clone())?", args_str[0]),
-            _ => { eprintln!("internal error: no Rust codegen for random.{}() — this is a compiler bug", func); std::process::exit(70); },
-        }
-    }
+    // gen_random_call — removed: now auto-generated from stdlib/defs/random.toml
 
     // gen_regex_call — removed: now auto-generated from stdlib/defs/regex.toml
 }

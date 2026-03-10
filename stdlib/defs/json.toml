@@ -1,0 +1,113 @@
+[parse]
+params = [{ name = "text", type = "String" }]
+return = "Result[Json, String]"
+rust = "almide_json_parse(&{text})?"
+ts = "__almd_json.parse({text})"
+
+[stringify]
+params = [{ name = "j", type = "Json" }]
+return = "String"
+rust = "almide_json_stringify(&{j})"
+ts = "__almd_json.stringify({j})"
+
+[get]
+params = [{ name = "j", type = "Json" }, { name = "key", type = "String" }]
+return = "Option[Json]"
+rust = "almide_json_get(&{j}, &{key})"
+ts = "__almd_json.get({j}, {key})"
+
+[get_string]
+params = [{ name = "j", type = "Json" }, { name = "key", type = "String" }]
+return = "Option[String]"
+rust = "almide_json_get_string(&{j}, &{key})"
+ts = "__almd_json.get_string({j}, {key})"
+
+[get_int]
+params = [{ name = "j", type = "Json" }, { name = "key", type = "String" }]
+return = "Option[Int]"
+rust = "almide_json_get_int(&{j}, &{key})"
+ts = "__almd_json.get_int({j}, {key})"
+
+[get_bool]
+params = [{ name = "j", type = "Json" }, { name = "key", type = "String" }]
+return = "Option[Bool]"
+rust = "almide_json_get_bool(&{j}, &{key})"
+ts = "__almd_json.get_bool({j}, {key})"
+
+[get_array]
+params = [{ name = "j", type = "Json" }, { name = "key", type = "String" }]
+return = "Option[List[Json]]"
+rust = "almide_json_get_array(&{j}, &{key})"
+ts = "__almd_json.get_array({j}, {key})"
+
+[keys]
+params = [{ name = "j", type = "Json" }]
+return = "List[String]"
+rust = "almide_json_keys(&{j})"
+ts = "__almd_json.keys({j})"
+
+[to_string]
+params = [{ name = "j", type = "Json" }]
+return = "Option[String]"
+rust = "almide_json_to_string(&{j})"
+ts = "__almd_json.to_string({j})"
+
+[to_int]
+params = [{ name = "j", type = "Json" }]
+return = "Option[Int]"
+rust = "almide_json_to_int(&{j})"
+ts = "__almd_json.to_int({j})"
+
+[from_string]
+params = [{ name = "s", type = "String" }]
+return = "Json"
+rust = "JStr({s})"
+ts = "__almd_json.from_string({s})"
+
+[from_int]
+params = [{ name = "n", type = "Int" }]
+return = "Json"
+rust = "JInt({n})"
+ts = "__almd_json.from_int({n})"
+
+[from_bool]
+params = [{ name = "b", type = "Bool" }]
+return = "Json"
+rust = "JBool({b})"
+ts = "__almd_json.from_bool({b})"
+
+[null]
+params = []
+return = "Json"
+rust = "JNull"
+ts = "__almd_json.null()"
+
+[array]
+params = [{ name = "items", type = "List[Json]" }]
+return = "Json"
+rust = "JArray({items})"
+ts = "__almd_json.array({items})"
+
+[from_map]
+params = [{ name = "m", type = "Map[String, Json]" }]
+return = "Json"
+rust = "JObject({m})"
+ts = "__almd_json.from_map({m})"
+
+[get_float]
+params = [{ name = "j", type = "Json" }, { name = "key", type = "String" }]
+return = "Option[Float]"
+rust = "almide_json_get_float(&{j}, &{key})"
+ts = "__almd_json.get_float({j}, {key})"
+
+[from_float]
+params = [{ name = "n", type = "Float" }]
+return = "Json"
+rust = "almide_json_from_float({n})"
+ts = "__almd_json.from_float({n})"
+
+[stringify_pretty]
+params = [{ name = "j", type = "Json" }]
+return = "String"
+rust = "almide_json_stringify_pretty(&{j})"
+ts = "__almd_json.stringify_pretty({j})"
