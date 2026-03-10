@@ -1,4 +1,4 @@
-# Editor & GitHub Integration
+# Editor & GitHub Integration [IN PROGRESS]
 
 ### TextMate Grammar + Editor Extensions
 

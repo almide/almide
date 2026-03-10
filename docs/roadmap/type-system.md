@@ -1,4 +1,4 @@
-# Type System Extensions
+# Type System Extensions [PLANNED]
 
 ## User-Defined Generics
 Currently only built-in types like List[T] and Option[T] are generic.

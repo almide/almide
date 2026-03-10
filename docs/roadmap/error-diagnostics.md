@@ -1,4 +1,4 @@
-# Error Diagnostics Improvements
+# Error Diagnostics [PLANNED]
 
 ## Source Location (Span)
 The current Diagnostic only has a context field; line and column numbers are missing.

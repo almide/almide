@@ -1,4 +1,4 @@
-# Structured Concurrency
+# Structured Concurrency [PLANNED]
 
 ## Overview
 Provides task lifecycle management as a higher-level layer on top of async/await.

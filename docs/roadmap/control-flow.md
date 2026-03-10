@@ -1,4 +1,4 @@
-# Control Flow Extensions
+# Control Flow Extensions [PLANNED]
 
 ## while loop
 Currently `do { guard cond else ok(()); ... }` is used as a workaround, but it is verbose.

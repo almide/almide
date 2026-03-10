@@ -1,4 +1,4 @@
-# Codegen Optimization
+# Codegen Optimization [IN PROGRESS]
 
 Almide generates Rust code that is near-identical in performance to hand-written Rust for numeric workloads (n-body: 1.74s vs Rust 1.69s). However, heap-allocated types (String, List) incur unnecessary clone overhead. The goal is to close this gap **without exposing ownership to the user**.
 

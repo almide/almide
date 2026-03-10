@@ -1,4 +1,4 @@
-# Toolchain Extensions
+# Tooling [PLANNED]
 
 ## REPL (`almide repl`)
 Evaluate expressions interactively. For learning and prototyping.

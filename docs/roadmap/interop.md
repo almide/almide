@@ -1,4 +1,4 @@
-# External Interoperability
+# Interop / FFI [PLANNED]
 
 ## FFI (Foreign Function Interface)
 A mechanism for calling Rust libraries directly.
