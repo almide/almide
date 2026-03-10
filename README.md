@@ -57,7 +57,7 @@ Verify the installation:
 
 ```bash
 almide --version
-# almide 0.4.1
+# almide 0.4.4
 ```
 
 ### Hello World
@@ -142,7 +142,7 @@ almide run app.almd              # Compile + execute
 almide run app.almd -- arg1      # With arguments
 almide build app.almd -o app     # Build standalone binary
 almide build app.almd --target wasm  # Build WebAssembly (WASI)
-almide test                      # Run tests/ directory
+almide test                      # Find and run all test blocks (recursive)
 almide check app.almd            # Type check only (no compilation)
 almide fmt app.almd              # Format source code
 almide clean                     # Clear dependency cache

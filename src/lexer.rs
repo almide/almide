@@ -442,9 +442,34 @@ impl Lexer {
                     match esc {
                         'n' => value.push('\n'),
                         't' => value.push('\t'),
+                        'r' => value.push('\r'),
+                        '0' => value.push('\0'),
                         '\\' => value.push('\\'),
                         '"' => value.push('"'),
                         '$' => value.push('$'),
+                        'u' => {
+                            // Unicode escape: \u{XXXX} or \u{XXXXXX}
+                            self.advance(); // skip 'u', now pos is at '{'
+                            if self.pos < self.chars.len() && self.chars[self.pos] == '{' {
+                                self.advance(); // skip '{'
+                                let mut hex = String::new();
+                                while self.pos < self.chars.len() && self.chars[self.pos] != '}' {
+                                    hex.push(self.chars[self.pos]);
+                                    self.advance();
+                                }
+                                if self.pos < self.chars.len() {
+                                    self.advance(); // skip '}'
+                                }
+                                if let Ok(code) = u32::from_str_radix(&hex, 16) {
+                                    if let Some(ch) = char::from_u32(code) {
+                                        value.push(ch);
+                                    }
+                                }
+                            } else {
+                                value.push('u');
+                            }
+                            continue; // skip the normal advance below
+                        }
                         other => value.push(other),
                     }
                     self.advance();
@@ -574,35 +599,57 @@ impl Lexer {
     fn read_number(&mut self) {
         let start_line = self.line;
         let start_col = self.col;
-        let mut value = String::new();
         let mut is_float = false;
 
-        // Accept hex literals (0xFF) — convert to decimal since Almide has no hex syntax
+        // Helper: read digits with underscore separators, return digits only
+        fn read_digits_with_sep(lexer: &mut Lexer, validator: fn(char) -> bool) -> String {
+            let mut s = String::new();
+            while lexer.pos < lexer.chars.len() && (validator(lexer.chars[lexer.pos]) || lexer.chars[lexer.pos] == '_') {
+                if lexer.chars[lexer.pos] != '_' {
+                    s.push(lexer.chars[lexer.pos]);
+                }
+                lexer.advance();
+            }
+            s
+        }
+
+        // Hex: 0x / 0X
         if self.chars[self.pos] == '0' && self.pos + 1 < self.chars.len()
             && (self.chars[self.pos + 1] == 'x' || self.chars[self.pos + 1] == 'X')
         {
-            self.advance(); // skip '0'
-            self.advance(); // skip 'x'/'X'
-            let mut hex = String::new();
-            while self.pos < self.chars.len() && self.chars[self.pos].is_ascii_hexdigit() {
-                hex.push(self.chars[self.pos]);
-                self.advance();
-            }
+            self.advance(); self.advance();
+            let hex = read_digits_with_sep(self, |c| c.is_ascii_hexdigit());
             let dec = i64::from_str_radix(&hex, 16).unwrap_or(0);
-            self.tokens.push(Token {
-                token_type: TokenType::Int,
-                value: dec.to_string(),
-                line: start_line,
-                col: start_col,
-            });
+            self.tokens.push(Token { token_type: TokenType::Int, value: dec.to_string(), line: start_line, col: start_col });
             return;
         }
 
-        while self.pos < self.chars.len() && self.chars[self.pos].is_ascii_digit() {
-            value.push(self.chars[self.pos]);
-            self.advance();
+        // Binary: 0b / 0B
+        if self.chars[self.pos] == '0' && self.pos + 1 < self.chars.len()
+            && (self.chars[self.pos + 1] == 'b' || self.chars[self.pos + 1] == 'B')
+        {
+            self.advance(); self.advance();
+            let bin = read_digits_with_sep(self, |c| c == '0' || c == '1');
+            let dec = i64::from_str_radix(&bin, 2).unwrap_or(0);
+            self.tokens.push(Token { token_type: TokenType::Int, value: dec.to_string(), line: start_line, col: start_col });
+            return;
         }
 
+        // Octal: 0o / 0O
+        if self.chars[self.pos] == '0' && self.pos + 1 < self.chars.len()
+            && (self.chars[self.pos + 1] == 'o' || self.chars[self.pos + 1] == 'O')
+        {
+            self.advance(); self.advance();
+            let oct = read_digits_with_sep(self, |c| c >= '0' && c <= '7');
+            let dec = i64::from_str_radix(&oct, 8).unwrap_or(0);
+            self.tokens.push(Token { token_type: TokenType::Int, value: dec.to_string(), line: start_line, col: start_col });
+            return;
+        }
+
+        // Decimal integer part (with underscore separators)
+        let mut value = read_digits_with_sep(self, |c| c.is_ascii_digit());
+
+        // Fractional part
         if self.pos < self.chars.len()
             && self.chars[self.pos] == '.'
             && self.peek(1).is_ascii_digit()
@@ -610,23 +657,30 @@ impl Lexer {
             is_float = true;
             value.push('.');
             self.advance();
-            while self.pos < self.chars.len() && self.chars[self.pos].is_ascii_digit() {
+            let frac = read_digits_with_sep(self, |c| c.is_ascii_digit());
+            value.push_str(&frac);
+        }
+
+        // Scientific notation: e.g. 1.989e30, 6.674e-11, 3E+8
+        if self.pos < self.chars.len()
+            && (self.chars[self.pos] == 'e' || self.chars[self.pos] == 'E')
+        {
+            let next = self.peek(1);
+            if next.is_ascii_digit() || next == '+' || next == '-' {
+                is_float = true;
                 value.push(self.chars[self.pos]);
                 self.advance();
+                if self.pos < self.chars.len() && (self.chars[self.pos] == '+' || self.chars[self.pos] == '-') {
+                    value.push(self.chars[self.pos]);
+                    self.advance();
+                }
+                let exp = read_digits_with_sep(self, |c| c.is_ascii_digit());
+                value.push_str(&exp);
             }
         }
 
-        let token_type = if is_float {
-            TokenType::Float
-        } else {
-            TokenType::Int
-        };
-        self.tokens.push(Token {
-            token_type,
-            value,
-            line: start_line,
-            col: start_col,
-        });
+        let token_type = if is_float { TokenType::Float } else { TokenType::Int };
+        self.tokens.push(Token { token_type, value, line: start_line, col: start_col });
     }
 
     fn read_identifier(&mut self) {

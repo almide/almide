@@ -1,3 +1,4 @@
 target/
 .test/
 .minigit/
+codopsy-report.json

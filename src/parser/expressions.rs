@@ -257,7 +257,7 @@ impl Parser {
                     span,
                     resolved_type: None,
                 };
-            } else if self.check(TokenType::LParen) {
+            } else if self.check(TokenType::LParen) && !self.newline_before_current() {
                 let span = Some(self.current_span());
                 self.advance();
                 let args = self.parse_call_args()?;
