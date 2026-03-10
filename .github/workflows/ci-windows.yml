@@ -3,8 +3,16 @@ name: CI (Windows)
 on:
   push:
     branches: [ci/windows-test]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - 'LICENSE'
   pull_request:
     branches: [develop, main]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - 'LICENSE'
 
 jobs:
   build-and-test:
