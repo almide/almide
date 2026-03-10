@@ -57,18 +57,15 @@ Special handling:
 
 ## 3. Where Unknown Remains
 
-`Unknown` is intentionally preserved in positions where type information is structurally unavailable:
+Most stdlib positions are now fully typed with TypeVars (v0.4.10). Tuple types in containers were also resolved — `enumerate`, `zip`, `partition`, `entries` now return proper `Tuple` types.
+
+Only 2 positions remain `Unknown`, each requiring a separate language feature:
 
 | Function | Why Unknown | What would fix it |
 |----------|------------|-------------------|
-| `map.new()` return | Empty map — no type context | Type annotation syntax |
-| `list.enumerate()` return | Returns `List[(Int, A)]` — tuples in containers untyped | Tuple type in containers |
-| `list.zip()` return | Returns `List[(A, B)]` | Tuple type in containers |
-| `list.partition()` return | Returns `(List[A], List[A])` | Tuple return types |
-| `map.entries()` return | Returns `List[(K, V)]` | Tuple type in containers |
-| `list.flatten()` input | Needs `List[List[A]]` constraint | Higher-kinded input constraint |
-| `map.from_entries()` | Tuple list input, types not inferrable | Tuple type |
-| Error recovery | `undefined_function()` → `Unknown` | N/A (by design) |
+| `map.new()` → `Map[Unknown, Unknown]` | Empty container — no argument to infer from | **Bidirectional type checking** with type annotations (`let m: Map[String, Int] = map.new()`) |
+| `list.flatten()` input `List[Unknown]` | Needs `List[List[A]]` constraint on input | **Nested type constraints** — a higher-kinded input restriction |
+| Error recovery | `undefined_function()` → `Unknown` | N/A (by design, prevents cascade errors) |
 
 ---
 
@@ -132,14 +129,20 @@ Almide's approach is closest to Go's evolution: start permissive, add generics w
 
 ---
 
-## 8. Future: Closing the Unknown Gaps
+## 8. Future: Closing the Last 2 Unknown Gaps
 
-The remaining `Unknown` positions (Section 3) can be closed by adding **tuple types in containers**:
+Tuple types in containers were resolved in v0.4.10. The 2 remaining `Unknown` positions require distinct language features:
 
+### `map.new()` → Bidirectional type checking
+```almide
+let m: Map[String, Int] = map.new()  // annotation flows expected type into expression
 ```
-list.enumerate : [A](List[A]) -> List[Tuple[Int, A]]
-list.zip : [A, B](List[A], List[B]) -> List[Tuple[A, B]]
-map.entries : [K, V](Map[K, V]) -> List[Tuple[K, V]]
-```
+Requires the checker to propagate the expected type from `let` binding into the call, then bind K=String, V=Int on the empty map. Standard bidirectional approach.
 
-This is tracked in [type-system.md](../roadmap/planned/type-system.md) under "Tuple Type Propagation".
+### `list.flatten()` → Nested type constraints
+```
+list.flatten : [A](List[List[A]]) -> List[A]
+```
+Currently the input is `List[Unknown]` because `parse_type` can't express "the input must be a list of lists". Fixing this requires either a nested-list constraint in TOML or a special-case in the checker.
+
+Both are low priority — the Rust backend catches all type errors in these positions. Tracked in [type-system.md](../roadmap/planned/type-system.md).

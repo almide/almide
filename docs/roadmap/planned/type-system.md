@@ -31,15 +31,28 @@ list.map : [A, B](List[A], Fn[A] -> B) -> List[B]
 - **list.toml**: `A` = element type, `B` = transformed type (38 functions)
 - **map.toml**: `K` = key type, `V` = value type, `B` = transformed value (16 functions)
 - Concrete-only functions (`sum`, `join`) have no type params
-- Genuinely untyped positions (`enumerate` return, `flatten` input) remain `Unknown`
 
-### What remains Unknown (intentionally)
-- `map.new()` — empty map, no type information available
-- `list.enumerate()` return — tuples `(Int, A)` not expressible in current type system
-- `list.zip()` return — mixed tuples `(A, B)` not expressible
-- `list.partition()` return — tuple `(List[A], List[A])` not expressible
-- `list.flatten()` input — would need `List[List[A]]` constraint
-- `from_entries()` — tuple list input, types not inferrable
+## Tuple Type Propagation
+
+**Status:** DONE (v0.4.10)
+
+Tuple types inside containers are now fully typed:
+
+```
+list.enumerate : [A](List[A]) -> List[(Int, A)]
+list.zip : [A, B](List[A], List[B]) -> List[(A, B)]
+list.partition : [A](List[A], Fn[A] -> Bool) -> (List[A], List[A])
+map.entries : [K, V](Map[K, V]) -> List[(K, V)]
+```
+
+### Remaining Unknown (2 positions, requires new language features)
+
+| Function | Current | What's needed |
+|----------|---------|---------------|
+| `map.new()` → `Map[Unknown, Unknown]` | 引数なし、型情報ゼロ | **型注釈構文** (`let m: Map[String, Int] = map.new()`) でコンテキストから推論 |
+| `list.flatten()` input `List[Unknown]` | ネストされたリストの内側の型が不明 | **ネスト型制約** (`List[List[A]] → List[A]`) で入力型を制約 |
+
+These are not solvable by the current TypeVar/unification approach — each requires a separate language feature. They are low priority because the Rust backend catches all type errors in these positions.
 
 ---
 
@@ -77,16 +90,17 @@ type AppResult[T] = Result[T, AppError]
 
 Enables branching by error type in match arms.
 
-## Tuple Type Propagation [PLANNED]
+## Type Annotation on Empty Containers [PLANNED]
 
-Currently `enumerate`, `zip`, `partition`, `entries` return `Unknown` because tuples inside containers can't be expressed. A proper `Tuple[A, B]` type in container positions would close this gap.
+`map.new()` and `[]` return `Unknown` types because there's no argument to infer from. A type annotation syntax would allow the checker to assign concrete types:
 
+```almide
+let m: Map[String, Int] = map.new()
+let xs: List[Int] = []
 ```
-list.enumerate : [A](List[A]) -> List[Tuple[Int, A]]
-list.zip : [A, B](List[A], List[B]) -> List[Tuple[A, B]]
-map.entries : [K, V](Map[K, V]) -> List[Tuple[K, V]]
-```
+
+This requires bidirectional type checking (expected type flows into the expression).
 
 ## Priority
 
-Structured error types > tuple type propagation > trait bounds > full trait implementation
+Structured error types > type annotation on empty containers > trait bounds > full trait implementation
