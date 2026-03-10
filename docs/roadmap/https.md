@@ -1,4 +1,4 @@
-# HTTPS Client [PLANNED]
+# HTTPS Client [DONE]
 
 ## Approach
 Do not implement TLS from scratch. Link directly to the OS standard TLS library using `rustc -l`.

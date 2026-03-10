@@ -9,6 +9,8 @@
 - [Stdlib Completeness](roadmap/stdlib-completeness.md)
 - [Tuple & Record](roadmap/tuple-record.md)
 - [Proliferation Blockers](roadmap/proliferation-blockers.md)
+- [HTTP Module](roadmap/http.md)
+- [HTTPS Client](roadmap/https.md)
 
 ## In Progress
 
@@ -29,8 +31,6 @@
 - [Error Diagnostics](roadmap/error-diagnostics.md)
 - [Type System Extensions](roadmap/type-system.md)
 - [Syntax Sugar](roadmap/syntax-sugar.md)
-- [HTTP Module](roadmap/http.md)
-- [HTTPS Client](roadmap/https.md)
 - [npm Package Target](roadmap/npm-package-target-target-npm.md)
 - [Interop / FFI](roadmap/interop.md)
 - [Structured Concurrency](roadmap/structured-concurrency.md)
