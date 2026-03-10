@@ -44,7 +44,24 @@ impl Parser {
             self.expect(TokenType::Eq)?;
             self.skip_newlines();
             let value = self.parse_expr()?;
-            return Ok(Stmt::LetDestructure { fields, value, span: Some(span) });
+            return Ok(Stmt::LetDestructure { fields, is_tuple: false, value, span: Some(span) });
+        }
+
+        if self.check(TokenType::LParen) {
+            self.advance();
+            let mut fields = Vec::new();
+            while !self.check(TokenType::RParen) {
+                fields.push(self.expect_ident()?);
+                if self.check(TokenType::Comma) {
+                    self.advance();
+                    self.skip_newlines();
+                }
+            }
+            self.expect(TokenType::RParen)?;
+            self.expect(TokenType::Eq)?;
+            self.skip_newlines();
+            let value = self.parse_expr()?;
+            return Ok(Stmt::LetDestructure { fields, is_tuple: true, value, span: Some(span) });
         }
 
         // Detect `let mut` (Rust style) — hint to use `var` instead

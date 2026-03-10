@@ -228,8 +228,12 @@ impl TsEmitter {
                 // Use `var` to allow Almide's let-shadowing (const/let disallow re-declaration)
                 format!("var {} = {};", Self::sanitize(name), self.gen_expr(value))
             }
-            Stmt::LetDestructure { fields, value, .. } => {
-                format!("var {{ {} }} = {};", fields.join(", "), self.gen_expr(value))
+            Stmt::LetDestructure { fields, is_tuple, value, .. } => {
+                if *is_tuple {
+                    format!("var [{}] = {};", fields.join(", "), self.gen_expr(value))
+                } else {
+                    format!("var {{ {} }} = {};", fields.join(", "), self.gen_expr(value))
+                }
             }
             Stmt::Var { name, value, .. } => {
                 format!("let {} = {};", Self::sanitize(name), self.gen_expr(value))

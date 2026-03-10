@@ -55,34 +55,41 @@ impl Checker {
                 } else { vt };
                 self.env.define_var(name, dt);
             }
-            ast::Stmt::LetDestructure { fields, value, .. } => {
+            ast::Stmt::LetDestructure { fields, is_tuple, value, .. } => {
                 let vt = self.check_expr(value);
                 let resolved = self.env.resolve_named(&vt);
-                match &resolved {
-                    Ty::Record { fields: rec_fields } => {
-                        for fname in &**fields {
-                            let ft = rec_fields.iter().find(|(n, _)| n == fname)
-                                .map(|(_, t)| t.clone())
-                                .unwrap_or_else(|| {
-                                    let avail = rec_fields.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ");
-                                    self.push_diagnostic(err(
-                                        format!("record has no field '{}'", fname),
-                                        format!("Available fields: {}", avail),
-                                        format!("let {{ {} }} = ...", fields.join(", ")),
-                                    ));
-                                    Ty::Unknown
-                                });
-                            self.env.define_var(fname, ft);
-                        }
+                if *is_tuple {
+                    let tys = self.resolve_tuple_elements(&resolved, fields.len(), format!("let ({}) = ...", fields.join(", ")));
+                    for (fname, ft) in fields.iter().zip(tys) {
+                        self.env.define_var(fname, ft);
                     }
-                    Ty::Unknown => { for f in fields { self.env.define_var(f, Ty::Unknown); } }
-                    _ => {
-                        self.push_diagnostic(err(
-                            format!("cannot destructure type {}", vt.display()),
-                            "Destructuring only works on record types",
-                            format!("let {{ {} }} = ...", fields.join(", ")),
-                        ));
-                        for f in fields { self.env.define_var(f, Ty::Unknown); }
+                } else {
+                    match &resolved {
+                        Ty::Record { fields: rec_fields } => {
+                            for fname in &**fields {
+                                let ft = rec_fields.iter().find(|(n, _)| n == fname)
+                                    .map(|(_, t)| t.clone())
+                                    .unwrap_or_else(|| {
+                                        let avail = rec_fields.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ");
+                                        self.push_diagnostic(err(
+                                            format!("record has no field '{}'", fname),
+                                            format!("Available fields: {}", avail),
+                                            format!("let {{ {} }} = ...", fields.join(", ")),
+                                        ));
+                                        Ty::Unknown
+                                    });
+                                self.env.define_var(fname, ft);
+                            }
+                        }
+                        Ty::Unknown => { for f in fields { self.env.define_var(f, Ty::Unknown); } }
+                        _ => {
+                            self.push_diagnostic(err(
+                                format!("cannot destructure type {}", vt.display()),
+                                "Destructuring only works on record types",
+                                format!("let {{ {} }} = ...", fields.join(", ")),
+                            ));
+                            for f in fields { self.env.define_var(f, Ty::Unknown); }
+                        }
                     }
                 }
             }
@@ -144,10 +151,7 @@ impl Checker {
                 }
             }
             ast::Pattern::Tuple { elements } => {
-                let tys = match subject_ty {
-                    Ty::Tuple(ts) => ts.clone(),
-                    _ => vec![Ty::Unknown; elements.len()],
-                };
+                let tys = self.resolve_tuple_elements(subject_ty, elements.len(), "tuple pattern");
                 for (pat, ty) in elements.iter().zip(tys.iter()) {
                     self.check_pattern(pat, ty);
                 }

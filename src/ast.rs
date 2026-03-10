@@ -218,7 +218,7 @@ pub struct LambdaParam {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Stmt {
     Let { name: String, #[serde(rename = "type")] ty: Option<TypeExpr>, value: Expr, #[serde(skip)] span: Option<Span> },
-    LetDestructure { fields: Vec<String>, value: Expr, #[serde(skip)] span: Option<Span> },
+    LetDestructure { fields: Vec<String>, #[serde(default)] is_tuple: bool, value: Expr, #[serde(skip)] span: Option<Span> },
     Var { name: String, #[serde(rename = "type")] ty: Option<TypeExpr>, value: Expr, #[serde(skip)] span: Option<Span> },
     Assign { name: String, value: Expr, #[serde(skip)] span: Option<Span> },
     Guard { cond: Expr, else_: Expr, #[serde(skip)] span: Option<Span> },

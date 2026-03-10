@@ -511,6 +511,26 @@ impl Checker {
         }
     }
 
+    /// Validate tuple arity and return element types.
+    /// Returns a Vec of types matching `expected` count.
+    /// Emits a diagnostic if the tuple has a different number of elements.
+    /// For non-tuple / Unknown types, returns `vec![Ty::Unknown; expected]` silently.
+    pub(crate) fn resolve_tuple_elements(&mut self, ty: &Ty, expected: usize, context: impl Into<String>) -> Vec<Ty> {
+        match ty {
+            Ty::Tuple(elements) => {
+                if elements.len() != expected {
+                    self.push_diagnostic(err(
+                        format!("tuple has {} elements but {} expected", elements.len(), expected),
+                        format!("The value has type {}", ty.display()),
+                        context,
+                    ));
+                }
+                (0..expected).map(|i| elements.get(i).cloned().unwrap_or(Ty::Unknown)).collect()
+            }
+            _ => vec![Ty::Unknown; expected],
+        }
+    }
+
     fn register_stdlib(&mut self) {
         for name in stdlib::builtin_effect_fns() {
             self.env.effect_fns.insert(name.to_string());
