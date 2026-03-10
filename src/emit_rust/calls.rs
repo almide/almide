@@ -10,7 +10,13 @@ impl Emitter {
     /// Extract lambda parameter names and body code from a lambda expression or function reference.
     pub(crate) fn inline_lambda(&self, lambda_arg: &Expr, arity: usize) -> (Vec<String>, String) {
         if let Expr::Lambda { params, body, .. } = lambda_arg {
-            let names: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
+            let names: Vec<String> = params.iter().map(|p| {
+                if let Some(tuple_names) = &p.tuple_names {
+                    format!("({})", tuple_names.join(", "))
+                } else {
+                    p.name.clone()
+                }
+            }).collect();
             let body_str = self.gen_expr(body);
             (names, body_str)
         } else {

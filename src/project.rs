@@ -1,7 +1,6 @@
 /// Project configuration (almide.toml) and dependency management.
 
 use std::path::{Path, PathBuf};
-use std::collections::HashMap;
 use std::process::Command;
 
 /// Package identity for diamond dependency resolution.
@@ -34,10 +33,6 @@ impl PkgId {
         format!("{}_v{}", self.name, self.major)
     }
 
-    /// The import name users write: "json"
-    pub fn import_name(&self) -> &str {
-        &self.name
-    }
 }
 
 impl std::fmt::Display for PkgId {
@@ -49,7 +44,6 @@ impl std::fmt::Display for PkgId {
 #[derive(Debug, Clone)]
 pub struct FetchedDep {
     pub pkg_id: PkgId,
-    pub version: String,
     pub source_dir: PathBuf,
 }
 
@@ -244,16 +238,6 @@ pub fn fetch_all_deps(project: &Project) -> Result<Vec<FetchedDep>, String> {
     Ok(fetched)
 }
 
-/// Legacy API: returns HashMap<String, PathBuf> for backward compatibility.
-pub fn fetch_all_deps_flat(project: &Project) -> Result<HashMap<String, PathBuf>, String> {
-    let fetched = fetch_all_deps(project)?;
-    let mut paths = HashMap::new();
-    for dep in fetched {
-        paths.insert(dep.pkg_id.name.clone(), dep.source_dir);
-    }
-    Ok(paths)
-}
-
 fn fetch_deps_recursive(
     deps: &[Dependency],
     fetched: &mut Vec<FetchedDep>,
@@ -293,7 +277,6 @@ fn fetch_deps_recursive(
         let actual_pkg_id = PkgId::from_version_str(&module_name, &version_str);
         fetched.push(FetchedDep {
             pkg_id: actual_pkg_id,
-            version: version_str,
             source_dir,
         });
 

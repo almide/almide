@@ -16,10 +16,6 @@ pub struct ResolvedModules {
     pub modules: Vec<(String, ast::Program, Option<project::PkgId>, bool)>,
 }
 
-pub fn resolve_imports(source_file: &str, program: &ast::Program) -> Result<ResolvedModules, String> {
-    resolve_imports_with_deps(source_file, program, &[])
-}
-
 /// Find the project root (directory containing almide.toml), searching upward from base_dir.
 fn find_project_root(base_dir: &Path) -> Option<PathBuf> {
     let mut dir = base_dir.to_path_buf();

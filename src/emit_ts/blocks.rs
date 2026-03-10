@@ -228,12 +228,8 @@ impl TsEmitter {
                 // Use `var` to allow Almide's let-shadowing (const/let disallow re-declaration)
                 format!("var {} = {};", Self::sanitize(name), self.gen_expr(value))
             }
-            Stmt::LetDestructure { fields, is_tuple, value, .. } => {
-                if *is_tuple {
-                    format!("var [{}] = {};", fields.join(", "), self.gen_expr(value))
-                } else {
-                    format!("var {{ {} }} = {};", fields.join(", "), self.gen_expr(value))
-                }
+            Stmt::LetDestructure { pattern, value, .. } => {
+                format!("var {} = {};", self.gen_destructure_pattern(pattern), self.gen_expr(value))
             }
             Stmt::Var { name, value, .. } => {
                 format!("let {} = {};", Self::sanitize(name), self.gen_expr(value))
@@ -272,6 +268,24 @@ impl TsEmitter {
                 format!("if (!({})) {{\n{}\n}}", cond, body)
             }
             _ => format!("if (!({})) {{ return {}; }}", cond, self.gen_expr(else_)),
+        }
+    }
+
+    /// Convert a destructure Pattern to JS destructuring syntax.
+    /// Tuple → `[a, b]`, Record → `{ a, b }`, nested → `[[a, b], c]`
+    pub(crate) fn gen_destructure_pattern(&self, pattern: &Pattern) -> String {
+        match pattern {
+            Pattern::Ident { name } => name.clone(),
+            Pattern::Wildcard => "_".to_string(),
+            Pattern::Tuple { elements } => {
+                let ps: Vec<String> = elements.iter().map(|p| self.gen_destructure_pattern(p)).collect();
+                format!("[{}]", ps.join(", "))
+            }
+            Pattern::RecordPattern { fields, .. } => {
+                let fs: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+                format!("{{ {} }}", fs.join(", "))
+            }
+            _ => "_".to_string(),
         }
     }
 }

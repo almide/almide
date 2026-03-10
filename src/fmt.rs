@@ -529,7 +529,13 @@ fn format_expr(out: &mut String, expr: &Expr, depth: usize) {
             out.push_str("fn(");
             for (i, p) in params.iter().enumerate() {
                 if i > 0 { out.push_str(", "); }
-                out.push_str(&p.name);
+                if let Some(names) = &p.tuple_names {
+                    out.push('(');
+                    out.push_str(&names.join(", "));
+                    out.push(')');
+                } else {
+                    out.push_str(&p.name);
+                }
                 if let Some(ref ty) = p.ty {
                     out.push_str(": ");
                     format_type_expr(out, ty, depth);
@@ -555,17 +561,11 @@ fn format_stmt(out: &mut String, stmt: &Stmt, depth: usize) {
             out.push_str(" = ");
             format_expr(out, value, depth);
         }
-        Stmt::LetDestructure { fields, is_tuple, value, .. } => {
+        Stmt::LetDestructure { pattern, value, .. } => {
             out.push_str(&ind);
-            if *is_tuple {
-                out.push_str("let (");
-                out.push_str(&fields.join(", "));
-                out.push_str(") = ");
-            } else {
-                out.push_str("let { ");
-                out.push_str(&fields.join(", "));
-                out.push_str(" } = ");
-            }
+            out.push_str("let ");
+            format_destructure_pattern(out, pattern);
+            out.push_str(" = ");
             format_expr(out, value, depth);
         }
         Stmt::Var { name, ty, value, .. } => {
@@ -604,6 +604,31 @@ fn format_stmt(out: &mut String, stmt: &Stmt, depth: usize) {
         }
     }
     out.push_str(";\n");
+}
+
+/// Format a destructure pattern for `let` statements.
+/// Differs from `format_pattern` in that record patterns omit the constructor name.
+fn format_destructure_pattern(out: &mut String, pat: &Pattern) {
+    match pat {
+        Pattern::Tuple { elements } => {
+            out.push('(');
+            for (i, e) in elements.iter().enumerate() {
+                if i > 0 { out.push_str(", "); }
+                format_destructure_pattern(out, e);
+            }
+            out.push(')');
+        }
+        Pattern::RecordPattern { fields, .. } => {
+            out.push_str("{ ");
+            for (i, f) in fields.iter().enumerate() {
+                if i > 0 { out.push_str(", "); }
+                out.push_str(&f.name);
+            }
+            out.push_str(" }");
+        }
+        Pattern::Ident { name } => out.push_str(name),
+        _ => format_pattern(out, pat),
+    }
 }
 
 fn format_pattern(out: &mut String, pat: &Pattern) {

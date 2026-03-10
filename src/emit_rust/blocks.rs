@@ -254,8 +254,19 @@ impl Emitter {
                 }
                 format!("let {} = {};", name, val)
             }
-            Stmt::LetDestructure { fields, value, .. } => {
-                format!("let ({}) = {};", fields.join(", "), self.gen_expr(value))
+            Stmt::LetDestructure { pattern, value, .. } => {
+                // Record destructure: emit field-access bindings (Rust has no anonymous record destructuring)
+                if let Pattern::RecordPattern { fields, .. } = pattern {
+                    let val = self.gen_expr(value);
+                    let tmp = "__ds";
+                    let mut lines = vec![format!("let {} = {};", tmp, val)];
+                    for f in fields {
+                        lines.push(format!("let {} = {}.{}.clone();", f.name, tmp, f.name));
+                    }
+                    lines.join("\n    ")
+                } else {
+                    format!("let {} = {};", self.gen_pattern(pattern), self.gen_expr(value))
+                }
             }
             Stmt::Var { name, value, .. } => {
                 format!("let mut {} = {};", name, self.gen_expr(value))
