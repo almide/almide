@@ -218,6 +218,10 @@ impl Emitter {
             }
             return call;
         }
+        // Try auto-generated codegen first
+        if let Some(expr) = almide::generated::emit_rust_calls::gen_generated_call(module, func, &args_str) {
+            return expr;
+        }
         match module {
             "fs" => self.gen_fs_call(func, &args_str),
             "string" => self.gen_string_call(func, &args_str),
@@ -230,7 +234,6 @@ impl Emitter {
             "io" => self.gen_io_call(func, &args_str),
             "json" => self.gen_json_call(func, &args_str),
             "http" => self.gen_http_call(func, args, &args_str),
-            "math" => self.gen_math_call(func, &args_str),
             "random" => self.gen_random_call(func, &args_str),
             "regex" => self.gen_regex_call(func, &args_str),
             _ => {
@@ -581,23 +584,7 @@ impl Emitter {
         }
     }
 
-    fn gen_math_call(&self, func: &str, args_str: &[String]) -> String {
-        match func {
-            "min" => format!("almide_rt_math_min({}, {})", args_str[0], args_str[1]),
-            "max" => format!("almide_rt_math_max({}, {})", args_str[0], args_str[1]),
-            "abs" => format!("almide_rt_math_abs({})", args_str[0]),
-            "pow" => format!("almide_rt_math_pow({}, {})", args_str[0], args_str[1]),
-            "pi" => "almide_rt_math_pi()".to_string(),
-            "e" => "almide_rt_math_e()".to_string(),
-            "sin" => format!("almide_rt_math_sin({} as f64)", args_str[0]),
-            "cos" => format!("almide_rt_math_cos({} as f64)", args_str[0]),
-            "tan" => format!("almide_rt_math_tan({} as f64)", args_str[0]),
-            "log" => format!("almide_rt_math_log({} as f64)", args_str[0]),
-            "exp" => format!("almide_rt_math_exp({} as f64)", args_str[0]),
-            "sqrt" => format!("almide_rt_math_sqrt({} as f64)", args_str[0]),
-            _ => { eprintln!("internal error: no Rust codegen for math.{}() — this is a compiler bug", func); std::process::exit(70); },
-        }
-    }
+    // gen_math_call — removed: now auto-generated from stdlib/defs/math.toml
 
     fn gen_random_call(&self, func: &str, args_str: &[String]) -> String {
         match func {

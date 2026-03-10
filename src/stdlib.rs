@@ -144,6 +144,11 @@ pub fn builtin_effect_fns() -> Vec<&'static str> {
 
 /// Look up a stdlib function's type signature.
 pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
+    // Try auto-generated definitions first
+    if let Some(sig) = crate::generated::stdlib_sigs::lookup_generated_sig(module, func) {
+        return Some(sig);
+    }
+
     let s = |n: &str| -> String { n.to_string() };
     let io_err = || Ty::Named(s("IoError"));
 
@@ -341,19 +346,7 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         ("fs", "walk") => FnSig { generics: vec![], params: vec![(s("dir"), Ty::String)], ret: Ty::Result(Box::new(Ty::List(Box::new(Ty::String))), Box::new(io_err())), is_effect: true },
         ("fs", "stat") => FnSig { generics: vec![], params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::Record { fields: vec![(s("size"), Ty::Int), (s("is_dir"), Ty::Bool), (s("is_file"), Ty::Bool), (s("modified"), Ty::Int)] }), Box::new(io_err())), is_effect: true },
 
-        // ── math ──
-        ("math", "min") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("math", "max") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("math", "abs") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("math", "pow") => FnSig { generics: vec![], params: vec![(s("base"), Ty::Int), (s("exp"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("math", "pi") => FnSig { generics: vec![], params: vec![], ret: Ty::Float, is_effect: false },
-        ("math", "e") => FnSig { generics: vec![], params: vec![], ret: Ty::Float, is_effect: false },
-        ("math", "sin") => FnSig { generics: vec![], params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("math", "cos") => FnSig { generics: vec![], params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("math", "tan") => FnSig { generics: vec![], params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("math", "log") => FnSig { generics: vec![], params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("math", "exp") => FnSig { generics: vec![], params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("math", "sqrt") => FnSig { generics: vec![], params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
+        // ── math ── (auto-generated from stdlib/defs/math.toml)
 
         // ── random ──
         ("random", "int") => FnSig { generics: vec![], params: vec![(s("min"), Ty::Int), (s("max"), Ty::Int)], ret: Ty::Int, is_effect: true },
