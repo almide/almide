@@ -129,7 +129,13 @@ impl TsEmitter {
                 }
             }
             Expr::Lambda { params, body, .. } => {
-                let ps: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
+                let ps: Vec<String> = params.iter().map(|p| {
+                    if let Some(names) = &p.tuple_names {
+                        format!("[{}]", names.join(", "))
+                    } else {
+                        p.name.clone()
+                    }
+                }).collect();
                 format!("(({}) => {})", ps.join(", "), self.gen_expr(body))
             }
             Expr::Binary { op, left, right, .. } => self.gen_binary(op, left, right),

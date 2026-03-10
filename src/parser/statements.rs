@@ -32,9 +32,9 @@ impl Parser {
 
         if self.check(TokenType::LBrace) {
             self.advance();
-            let mut fields = Vec::new();
+            let mut names = Vec::new();
             while !self.check(TokenType::RBrace) {
-                fields.push(self.expect_ident()?);
+                names.push(self.expect_ident()?);
                 if self.check(TokenType::Comma) {
                     self.advance();
                     self.skip_newlines();
@@ -44,24 +44,21 @@ impl Parser {
             self.expect(TokenType::Eq)?;
             self.skip_newlines();
             let value = self.parse_expr()?;
-            return Ok(Stmt::LetDestructure { fields, is_tuple: false, value, span: Some(span) });
+            let fields = names.into_iter()
+                .map(|n| FieldPattern { name: n, pattern: None })
+                .collect();
+            return Ok(Stmt::LetDestructure {
+                pattern: Pattern::RecordPattern { name: String::new(), fields },
+                value, span: Some(span),
+            });
         }
 
         if self.check(TokenType::LParen) {
-            self.advance();
-            let mut fields = Vec::new();
-            while !self.check(TokenType::RParen) {
-                fields.push(self.expect_ident()?);
-                if self.check(TokenType::Comma) {
-                    self.advance();
-                    self.skip_newlines();
-                }
-            }
-            self.expect(TokenType::RParen)?;
+            let pattern = self.parse_destructure_tuple()?;
             self.expect(TokenType::Eq)?;
             self.skip_newlines();
             let value = self.parse_expr()?;
-            return Ok(Stmt::LetDestructure { fields, is_tuple: true, value, span: Some(span) });
+            return Ok(Stmt::LetDestructure { pattern, value, span: Some(span) });
         }
 
         // Detect `let mut` (Rust style) — hint to use `var` instead
@@ -118,5 +115,26 @@ impl Parser {
         self.skip_newlines();
         let value = self.parse_expr()?;
         Ok(Stmt::Assign { name, value, span: Some(span) })
+    }
+
+    /// Parse a destructure pattern for tuples: `(a, b)` or `((a, b), c)`
+    fn parse_destructure_tuple(&mut self) -> Result<Pattern, String> {
+        self.expect(TokenType::LParen)?;
+        let mut elements = Vec::new();
+        while !self.check(TokenType::RParen) {
+            if self.check(TokenType::LParen) {
+                // Nested tuple
+                elements.push(self.parse_destructure_tuple()?);
+            } else {
+                let name = self.expect_ident()?;
+                elements.push(Pattern::Ident { name });
+            }
+            if self.check(TokenType::Comma) {
+                self.advance();
+                self.skip_newlines();
+            }
+        }
+        self.expect(TokenType::RParen)?;
+        Ok(Pattern::Tuple { elements })
     }
 }

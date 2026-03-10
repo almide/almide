@@ -167,7 +167,13 @@ impl Emitter {
             }
 
             Expr::Lambda { params, body, .. } => {
-                let ps: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
+                let ps: Vec<String> = params.iter().map(|p| {
+                    if let Some(names) = &p.tuple_names {
+                        format!("({})", names.join(", "))
+                    } else {
+                        p.name.clone()
+                    }
+                }).collect();
                 let b = self.gen_expr(body);
                 format!("|{}| {{ {} }}", ps.join(", "), b)
             }

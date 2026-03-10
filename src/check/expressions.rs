@@ -245,9 +245,18 @@ impl Checker {
             ast::Expr::Lambda { params, body, .. } => {
                 self.env.push_scope();
                 let pts: Vec<Ty> = params.iter().map(|p| {
-                    let ty = p.ty.as_ref().map(|te| self.resolve_type_expr(te)).unwrap_or(Ty::Unknown);
-                    self.env.define_var(&p.name, ty.clone());
-                    ty
+                    if let Some(names) = &p.tuple_names {
+                        let tuple_ty = p.ty.as_ref().map(|te| self.resolve_type_expr(te)).unwrap_or(Ty::Unknown);
+                        let tys = self.resolve_tuple_elements(&tuple_ty, names.len(), format!("fn({}) => ...", p.name));
+                        for (name, ty) in names.iter().zip(tys.iter()) {
+                            self.env.define_var(name, ty.clone());
+                        }
+                        Ty::Tuple(tys)
+                    } else {
+                        let ty = p.ty.as_ref().map(|te| self.resolve_type_expr(te)).unwrap_or(Ty::Unknown);
+                        self.env.define_var(&p.name, ty.clone());
+                        ty
+                    }
                 }).collect();
                 let ret = self.check_expr(body);
                 self.env.pop_scope();

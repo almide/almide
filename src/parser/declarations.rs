@@ -207,7 +207,7 @@ impl Parser {
         }
         self.expect(TokenType::Fn)?;
         let name = self.expect_any_fn_name()?;
-        let generics = self.try_parse_generic_params()?;
+        let _generics = self.try_parse_generic_params()?;
         self.expect(TokenType::LParen)?;
         let params = self.parse_param_list()?;
         self.expect(TokenType::RParen)?;

@@ -55,43 +55,10 @@ impl Checker {
                 } else { vt };
                 self.env.define_var(name, dt);
             }
-            ast::Stmt::LetDestructure { fields, is_tuple, value, .. } => {
+            ast::Stmt::LetDestructure { pattern, value, .. } => {
                 let vt = self.check_expr(value);
                 let resolved = self.env.resolve_named(&vt);
-                if *is_tuple {
-                    let tys = self.resolve_tuple_elements(&resolved, fields.len(), format!("let ({}) = ...", fields.join(", ")));
-                    for (fname, ft) in fields.iter().zip(tys) {
-                        self.env.define_var(fname, ft);
-                    }
-                } else {
-                    match &resolved {
-                        Ty::Record { fields: rec_fields } => {
-                            for fname in &**fields {
-                                let ft = rec_fields.iter().find(|(n, _)| n == fname)
-                                    .map(|(_, t)| t.clone())
-                                    .unwrap_or_else(|| {
-                                        let avail = rec_fields.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ");
-                                        self.push_diagnostic(err(
-                                            format!("record has no field '{}'", fname),
-                                            format!("Available fields: {}", avail),
-                                            format!("let {{ {} }} = ...", fields.join(", ")),
-                                        ));
-                                        Ty::Unknown
-                                    });
-                                self.env.define_var(fname, ft);
-                            }
-                        }
-                        Ty::Unknown => { for f in fields { self.env.define_var(f, Ty::Unknown); } }
-                        _ => {
-                            self.push_diagnostic(err(
-                                format!("cannot destructure type {}", vt.display()),
-                                "Destructuring only works on record types",
-                                format!("let {{ {} }} = ...", fields.join(", ")),
-                            ));
-                            for f in fields { self.env.define_var(f, Ty::Unknown); }
-                        }
-                    }
-                }
+                self.check_pattern(pattern, &resolved);
             }
             ast::Stmt::Assign { name, value, .. } => {
                 let vt = self.check_expr(value);
@@ -156,10 +123,27 @@ impl Checker {
                     self.check_pattern(pat, ty);
                 }
             }
-            ast::Pattern::RecordPattern { fields, .. } => {
+            ast::Pattern::RecordPattern { name, fields } => {
+                // Look up field types from variant constructor or subject record type
+                let field_type_map: Vec<(String, Ty)> = if !name.is_empty() {
+                    if let Some((_, case)) = self.env.constructors.get(name).cloned() {
+                        if let VariantPayload::Record(rec_fields) = case.payload {
+                            rec_fields
+                        } else { vec![] }
+                    } else { vec![] }
+                } else if let Ty::Record { fields: rec_fields } = subject_ty {
+                    rec_fields.clone()
+                } else { vec![] };
                 for field in fields {
-                    if let Some(ref pat) = field.pattern { self.check_pattern(pat, &Ty::Unknown); }
-                    else { self.env.define_var(&field.name, Ty::Unknown); }
+                    let ft = field_type_map.iter()
+                        .find(|(n, _)| n == &field.name)
+                        .map(|(_, t)| t.clone())
+                        .unwrap_or(Ty::Unknown);
+                    if let Some(ref pat) = field.pattern {
+                        self.check_pattern(pat, &ft);
+                    } else {
+                        self.env.define_var(&field.name, ft);
+                    }
                 }
             }
         }

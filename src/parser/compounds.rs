@@ -109,13 +109,26 @@ impl Parser {
     }
 
     fn parse_lambda_param(&mut self) -> Result<LambdaParam, String> {
+        if self.check(TokenType::LParen) {
+            self.advance();
+            let mut names = Vec::new();
+            while !self.check(TokenType::RParen) {
+                names.push(self.expect_ident()?);
+                if self.check(TokenType::Comma) {
+                    self.advance();
+                }
+            }
+            self.expect(TokenType::RParen)?;
+            let first = names.first().cloned().unwrap_or_default();
+            return Ok(LambdaParam { name: first, tuple_names: Some(names), ty: None });
+        }
         let name = self.expect_ident()?;
         let mut ty: Option<TypeExpr> = None;
         if self.check(TokenType::Colon) {
             self.advance();
             ty = Some(self.parse_type_expr()?);
         }
-        Ok(LambdaParam { name, ty })
+        Ok(LambdaParam { name, tuple_names: None, ty })
     }
 
     pub(crate) fn parse_do_block(&mut self) -> Result<Expr, String> {

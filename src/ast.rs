@@ -210,6 +210,8 @@ pub struct MatchArm {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LambdaParam {
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tuple_names: Option<Vec<String>>,
     #[serde(rename = "type")]
     pub ty: Option<TypeExpr>,
 }
@@ -218,7 +220,7 @@ pub struct LambdaParam {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Stmt {
     Let { name: String, #[serde(rename = "type")] ty: Option<TypeExpr>, value: Expr, #[serde(skip)] span: Option<Span> },
-    LetDestructure { fields: Vec<String>, #[serde(default)] is_tuple: bool, value: Expr, #[serde(skip)] span: Option<Span> },
+    LetDestructure { pattern: Pattern, value: Expr, #[serde(skip)] span: Option<Span> },
     Var { name: String, #[serde(rename = "type")] ty: Option<TypeExpr>, value: Expr, #[serde(skip)] span: Option<Span> },
     Assign { name: String, value: Expr, #[serde(skip)] span: Option<Span> },
     Guard { cond: Expr, else_: Expr, #[serde(skip)] span: Option<Span> },
