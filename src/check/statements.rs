@@ -56,6 +56,7 @@ impl Checker {
                     t
                 } else { vt };
                 self.env.define_var(name, dt);
+                self.env.mutable_vars.insert(name.clone());
             }
             ast::Stmt::LetDestructure { pattern, value, .. } => {
                 let vt = self.check_expr(value);
@@ -65,7 +66,13 @@ impl Checker {
             ast::Stmt::Assign { name, value, .. } => {
                 let vt = self.check_expr(value);
                 if let Some(var_ty) = self.env.lookup_var(name).cloned() {
-                    if !var_ty.compatible(&vt) {
+                    if !self.env.mutable_vars.contains(name) {
+                        self.push_diagnostic(err(
+                            format!("cannot reassign immutable binding '{}'", name),
+                            "Use 'var' instead of 'let' to declare a mutable variable, or use a different name",
+                            format!("{} = ...", name),
+                        ));
+                    } else if !var_ty.compatible(&vt) {
                         self.push_diagnostic(err(
                             format!("cannot assign {} to variable '{}' of type {}", vt.display(), name, var_ty.display()),
                             "Assignment must match the variable's declared type",
