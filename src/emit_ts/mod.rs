@@ -13,6 +13,8 @@ pub(crate) struct TsEmitter {
     pub(crate) user_modules: Vec<String>,
     /// Tracks which stdlib modules (`__almd_*`) are referenced during codegen.
     pub(crate) used_stdlib: RefCell<HashSet<String>>,
+    /// Generic variant unit constructors — need `()` when used as standalone expressions
+    pub(crate) generic_variant_unit_ctors: HashSet<String>,
 }
 
 impl TsEmitter {
@@ -23,6 +25,7 @@ impl TsEmitter {
             npm_mode: false,
             user_modules: Vec::new(),
             used_stdlib: RefCell::new(HashSet::new()),
+            generic_variant_unit_ctors: HashSet::new(),
         }
     }
 
