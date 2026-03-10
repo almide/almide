@@ -1,0 +1,4926 @@
+{
+  "timestamp": "2026-03-10T05:09:24.258474+00:00",
+  "targetDir": "/Users/o6lvl4/workspace/github.com/almide/almide/src",
+  "files": [
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/ast.rs",
+      "complexity": {
+        "cyclomatic": 2,
+        "cognitive": 1,
+        "functions": [
+          {
+            "name": "span",
+            "line": 127,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "resolved_type",
+            "line": 149,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "set_resolved_type",
+            "line": 171,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "default",
+            "line": 255,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          }
+        ]
+      },
+      "issues": [],
+      "score": {
+        "score": 100,
+        "grade": "A"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/check/calls.rs",
+      "complexity": {
+        "cyclomatic": 23,
+        "cognitive": 51,
+        "functions": [
+          {
+            "name": "flatten_member_chain",
+            "line": 9,
+            "complexity": 6,
+            "cognitiveComplexity": 7
+          },
+          {
+            "name": "check_call",
+            "line": 33,
+            "complexity": 23,
+            "cognitiveComplexity": 32
+          },
+          {
+            "name": "(closure)",
+            "line": 34,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 40,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 64,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "check_direct_call",
+            "line": 111,
+            "complexity": 23,
+            "cognitiveComplexity": 28
+          },
+          {
+            "name": "check_constructor_call",
+            "line": 187,
+            "complexity": 7,
+            "cognitiveComplexity": 9
+          },
+          {
+            "name": "(closure)",
+            "line": 201,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "check_module_call",
+            "line": 216,
+            "complexity": 22,
+            "cognitiveComplexity": 51
+          },
+          {
+            "name": "(closure)",
+            "line": 220,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "check_member_access",
+            "line": 315,
+            "complexity": 6,
+            "cognitiveComplexity": 6
+          },
+          {
+            "name": "(closure)",
+            "line": 322,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          }
+        ]
+      },
+      "issues": [
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/check/calls.rs",
+          "line": 1,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-lines",
+          "message": "File has 335 lines (max: 300)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/check/calls.rs",
+          "line": 33,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-cognitive-complexity",
+          "message": "Function \"check_call\" has a cognitive complexity of 32 (threshold: 30)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/check/calls.rs",
+          "line": 216,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-cognitive-complexity",
+          "message": "Function \"check_module_call\" has a cognitive complexity of 51 (threshold: 30)"
+        }
+      ],
+      "score": {
+        "score": 55,
+        "grade": "D"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/check/expressions.rs",
+      "complexity": {
+        "cyclomatic": 87,
+        "cognitive": 97,
+        "functions": [
+          {
+            "name": "ty_to_resolved",
+            "line": 5,
+            "complexity": 17,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "check_expr",
+            "line": 27,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "check_expr_inner",
+            "line": 39,
+            "complexity": 87,
+            "cognitiveComplexity": 97
+          },
+          {
+            "name": "(closure)",
+            "line": 69,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 98,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 128,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 178,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 189,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 247,
+            "complexity": 3,
+            "cognitiveComplexity": 4
+          },
+          {
+            "name": "(closure)",
+            "line": 249,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 256,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 342,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "check_interpolated_string",
+            "line": 372,
+            "complexity": 10,
+            "cognitiveComplexity": 23
+          },
+          {
+            "name": "(closure)",
+            "line": 393,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          }
+        ]
+      },
+      "issues": [
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/check/expressions.rs",
+          "line": 1,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-lines",
+          "message": "File has 405 lines (max: 300)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/check/expressions.rs",
+          "line": 39,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-complexity",
+          "message": "Function \"check_expr_inner\" has a cyclomatic complexity of 87 (threshold: 30)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/check/expressions.rs",
+          "line": 39,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-cognitive-complexity",
+          "message": "Function \"check_expr_inner\" has a cognitive complexity of 97 (threshold: 30)"
+        }
+      ],
+      "score": {
+        "score": 55,
+        "grade": "D"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/check/mod.rs",
+      "complexity": {
+        "cyclomatic": 31,
+        "cognitive": 70,
+        "functions": [
+          {
+            "name": "err",
+            "line": 27,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "new",
+            "line": 32,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "set_source",
+            "line": 45,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "decl_line",
+            "line": 51,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "(closure)",
+            "line": 60,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "push_diagnostic",
+            "line": 64,
+            "complexity": 4,
+            "cognitiveComplexity": 4
+          },
+          {
+            "name": "register_decls",
+            "line": 79,
+            "complexity": 31,
+            "cognitiveComplexity": 70
+          },
+          {
+            "name": "(closure)",
+            "line": 98,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 98,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 105,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 138,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 138,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "register_module",
+            "line": 168,
+            "complexity": 2,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "register_alias",
+            "line": 182,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "set_target",
+            "line": 187,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "is_wasm_target",
+            "line": 191,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 192,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "check_program",
+            "line": 195,
+            "complexity": 15,
+            "cognitiveComplexity": 32
+          },
+          {
+            "name": "(closure)",
+            "line": 200,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 210,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 226,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 231,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "warn_unused_vars_in_scope",
+            "line": 255,
+            "complexity": 3,
+            "cognitiveComplexity": 3
+          },
+          {
+            "name": "(closure)",
+            "line": 258,
+            "complexity": 3,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "find_import_line_by_path",
+            "line": 273,
+            "complexity": 4,
+            "cognitiveComplexity": 4
+          },
+          {
+            "name": "check_decl",
+            "line": 285,
+            "complexity": 22,
+            "cognitiveComplexity": 41
+          },
+          {
+            "name": "(closure)",
+            "line": 300,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 301,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 305,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 306,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "resolve_type_expr",
+            "line": 380,
+            "complexity": 22,
+            "cognitiveComplexity": 9
+          },
+          {
+            "name": "(closure)",
+            "line": 395,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 406,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 409,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 413,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 417,
+            "complexity": 4,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "(closure)",
+            "line": 421,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 425,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "check_match_exhaustiveness",
+            "line": 435,
+            "complexity": 12,
+            "cognitiveComplexity": 10
+          },
+          {
+            "name": "(closure)",
+            "line": 441,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 469,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 473,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "collect_covered_cases",
+            "line": 487,
+            "complexity": 13,
+            "cognitiveComplexity": 3
+          },
+          {
+            "name": "resolve_tuple_elements",
+            "line": 518,
+            "complexity": 4,
+            "cognitiveComplexity": 3
+          },
+          {
+            "name": "(closure)",
+            "line": 528,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "register_stdlib",
+            "line": 534,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          }
+        ]
+      },
+      "issues": [
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/check/mod.rs",
+          "line": 1,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-lines",
+          "message": "File has 540 lines (max: 300)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/check/mod.rs",
+          "line": 79,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-complexity",
+          "message": "Function \"register_decls\" has a cyclomatic complexity of 31 (threshold: 30)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/check/mod.rs",
+          "line": 79,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-cognitive-complexity",
+          "message": "Function \"register_decls\" has a cognitive complexity of 70 (threshold: 30)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/check/mod.rs",
+          "line": 195,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-cognitive-complexity",
+          "message": "Function \"check_program\" has a cognitive complexity of 32 (threshold: 30)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/check/mod.rs",
+          "line": 285,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-cognitive-complexity",
+          "message": "Function \"check_decl\" has a cognitive complexity of 41 (threshold: 30)"
+        }
+      ],
+      "score": {
+        "score": 55,
+        "grade": "D"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/check/operators.rs",
+      "complexity": {
+        "cyclomatic": 30,
+        "cognitive": 27,
+        "functions": [
+          {
+            "name": "check_binary_op",
+            "line": 5,
+            "complexity": 30,
+            "cognitiveComplexity": 27
+          }
+        ]
+      },
+      "issues": [],
+      "score": {
+        "score": 73,
+        "grade": "C"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/check/statements.rs",
+      "complexity": {
+        "cyclomatic": 29,
+        "cognitive": 46,
+        "functions": [
+          {
+            "name": "check_stmt",
+            "line": 6,
+            "complexity": 21,
+            "cognitiveComplexity": 28
+          },
+          {
+            "name": "(closure)",
+            "line": 14,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "check_pattern",
+            "line": 91,
+            "complexity": 29,
+            "cognitiveComplexity": 46
+          },
+          {
+            "name": "(closure)",
+            "line": 139,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 140,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          }
+        ]
+      },
+      "issues": [
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/check/statements.rs",
+          "line": 91,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-cognitive-complexity",
+          "message": "Function \"check_pattern\" has a cognitive complexity of 46 (threshold: 30)"
+        }
+      ],
+      "score": {
+        "score": 65,
+        "grade": "C"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/cli.rs",
+      "complexity": {
+        "cyclomatic": 15,
+        "cognitive": 22,
+        "functions": [
+          {
+            "name": "cmd_run_inner",
+            "line": 6,
+            "complexity": 6,
+            "cognitiveComplexity": 5
+          },
+          {
+            "name": "(closure)",
+            "line": 37,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 49,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "cmd_run",
+            "line": 54,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "cmd_init",
+            "line": 58,
+            "complexity": 9,
+            "cognitiveComplexity": 10
+          },
+          {
+            "name": "(closure)",
+            "line": 65,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 65,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 66,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "cmd_test",
+            "line": 106,
+            "complexity": 8,
+            "cognitiveComplexity": 9
+          },
+          {
+            "name": "(closure)",
+            "line": 111,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 112,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 113,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 114,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "cmd_build",
+            "line": 149,
+            "complexity": 13,
+            "cognitiveComplexity": 15
+          },
+          {
+            "name": "(closure)",
+            "line": 160,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 161,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 162,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 177,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 178,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 179,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 180,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 185,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 186,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 187,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 200,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 218,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "cmd_build_npm",
+            "line": 231,
+            "complexity": 12,
+            "cognitiveComplexity": 22
+          },
+          {
+            "name": "(closure)",
+            "line": 239,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 241,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 251,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 261,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 286,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 293,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 294,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 295,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 296,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 300,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 305,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 309,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 313,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 322,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 327,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "cmd_emit",
+            "line": 342,
+            "complexity": 15,
+            "cognitiveComplexity": 22
+          },
+          {
+            "name": "(closure)",
+            "line": 349,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 351,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 361,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 364,
+            "complexity": 5,
+            "cognitiveComplexity": 7
+          },
+          {
+            "name": "(closure)",
+            "line": 368,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 390,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 399,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 406,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 414,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 420,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "cmd_check",
+            "line": 430,
+            "complexity": 7,
+            "cognitiveComplexity": 10
+          },
+          {
+            "name": "(closure)",
+            "line": 437,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 439,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 449,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 458,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 463,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "cmd_fmt",
+            "line": 476,
+            "complexity": 3,
+            "cognitiveComplexity": 4
+          },
+          {
+            "name": "(closure)",
+            "line": 482,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "cmd_clean",
+            "line": 490,
+            "complexity": 2,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "(closure)",
+            "line": 494,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          }
+        ]
+      },
+      "issues": [
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/cli.rs",
+          "line": 369,
+          "column": 28,
+          "severity": "warning",
+          "rule": "no-unwrap",
+          "message": "Avoid `.unwrap()`, use `?` or handle the error explicitly"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/cli.rs",
+          "line": 1,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-lines",
+          "message": "File has 500 lines (max: 300)"
+        }
+      ],
+      "score": {
+        "score": 51,
+        "grade": "D"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/diagnostic.rs",
+      "complexity": {
+        "cyclomatic": 9,
+        "cognitive": 6,
+        "functions": [
+          {
+            "name": "error",
+            "line": 20,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "warning",
+            "line": 31,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "at",
+            "line": 43,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "display",
+            "line": 49,
+            "complexity": 9,
+            "cognitiveComplexity": 4
+          },
+          {
+            "name": "display_with_source",
+            "line": 70,
+            "complexity": 4,
+            "cognitiveComplexity": 6
+          }
+        ]
+      },
+      "issues": [],
+      "score": {
+        "score": 100,
+        "grade": "A"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_common.rs",
+      "complexity": {
+        "cyclomatic": 4,
+        "cognitive": 5,
+        "functions": [
+          {
+            "name": "sanitize",
+            "line": 6,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "to_clean_export_name",
+            "line": 16,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "snake_to_camel",
+            "line": 22,
+            "complexity": 4,
+            "cognitiveComplexity": 5
+          }
+        ]
+      },
+      "issues": [],
+      "score": {
+        "score": 100,
+        "grade": "A"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_rust/blocks.rs",
+      "complexity": {
+        "cyclomatic": 22,
+        "cognitive": 34,
+        "functions": [
+          {
+            "name": "has_string_in_option_pattern",
+            "line": 6,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "check_inner",
+            "line": 7,
+            "complexity": 4,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "(closure)",
+            "line": 16,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "has_bare_string_literal",
+            "line": 20,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 21,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "has_result_patterns",
+            "line": 25,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 26,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "gen_match",
+            "line": 29,
+            "complexity": 6,
+            "cognitiveComplexity": 8
+          },
+          {
+            "name": "(closure)",
+            "line": 49,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "gen_pattern",
+            "line": 63,
+            "complexity": 13,
+            "cognitiveComplexity": 7
+          },
+          {
+            "name": "(closure)",
+            "line": 82,
+            "complexity": 3,
+            "cognitiveComplexity": 5
+          },
+          {
+            "name": "(closure)",
+            "line": 99,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 103,
+            "complexity": 2,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "collect_box_derefs",
+            "line": 116,
+            "complexity": 6,
+            "cognitiveComplexity": 10
+          },
+          {
+            "name": "gen_pattern_literal",
+            "line": 135,
+            "complexity": 6,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "gen_block",
+            "line": 145,
+            "complexity": 3,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "is_ok_unit",
+            "line": 157,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "gen_do_block",
+            "line": 161,
+            "complexity": 15,
+            "cognitiveComplexity": 34
+          },
+          {
+            "name": "(closure)",
+            "line": 162,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 165,
+            "complexity": 2,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "gen_stmt",
+            "line": 223,
+            "complexity": 22,
+            "cognitiveComplexity": 29
+          }
+        ]
+      },
+      "issues": [
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_rust/blocks.rs",
+          "line": 161,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-cognitive-complexity",
+          "message": "Function \"gen_do_block\" has a cognitive complexity of 34 (threshold: 30)"
+        }
+      ],
+      "score": {
+        "score": 65,
+        "grade": "C"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_rust/calls.rs",
+      "complexity": {
+        "cyclomatic": 48,
+        "cognitive": 68,
+        "functions": [
+          {
+            "name": "resolve_ufcs_module",
+            "line": 6,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "inline_lambda",
+            "line": 11,
+            "complexity": 3,
+            "cognitiveComplexity": 5
+          },
+          {
+            "name": "(closure)",
+            "line": 13,
+            "complexity": 2,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "flatten_member_chain",
+            "line": 33,
+            "complexity": 6,
+            "cognitiveComplexity": 7
+          },
+          {
+            "name": "gen_call",
+            "line": 57,
+            "complexity": 44,
+            "cognitiveComplexity": 68
+          },
+          {
+            "name": "(closure)",
+            "line": 62,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 84,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 97,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 98,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 172,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 177,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "gen_module_call",
+            "line": 198,
+            "complexity": 23,
+            "cognitiveComplexity": 9
+          },
+          {
+            "name": "(closure)",
+            "line": 199,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 203,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 206,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 233,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "gen_fs_call",
+            "line": 246,
+            "complexity": 18,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "gen_string_call",
+            "line": 268,
+            "complexity": 38,
+            "cognitiveComplexity": 4
+          },
+          {
+            "name": "gen_list_call",
+            "line": 315,
+            "complexity": 48,
+            "cognitiveComplexity": 18
+          },
+          {
+            "name": "gen_map_call",
+            "line": 425,
+            "complexity": 18,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "gen_int_call",
+            "line": 456,
+            "complexity": 22,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "gen_float_call",
+            "line": 484,
+            "complexity": 14,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "gen_env_call",
+            "line": 502,
+            "complexity": 9,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "gen_process_call",
+            "line": 515,
+            "complexity": 6,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "gen_io_call",
+            "line": 525,
+            "complexity": 5,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "gen_json_call",
+            "line": 534,
+            "complexity": 21,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "gen_http_call",
+            "line": 559,
+            "complexity": 8,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "gen_math_call",
+            "line": 575,
+            "complexity": 14,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "gen_random_call",
+            "line": 593,
+            "complexity": 6,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "gen_regex_call",
+            "line": 603,
+            "complexity": 10,
+            "cognitiveComplexity": 1
+          }
+        ]
+      },
+      "issues": [
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_rust/calls.rs",
+          "line": 1,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-lines",
+          "message": "File has 617 lines (max: 300)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_rust/calls.rs",
+          "line": 57,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-complexity",
+          "message": "Function \"gen_call\" has a cyclomatic complexity of 44 (threshold: 30)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_rust/calls.rs",
+          "line": 268,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-complexity",
+          "message": "Function \"gen_string_call\" has a cyclomatic complexity of 38 (threshold: 30)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_rust/calls.rs",
+          "line": 315,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-complexity",
+          "message": "Function \"gen_list_call\" has a cyclomatic complexity of 48 (threshold: 30)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_rust/calls.rs",
+          "line": 57,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-cognitive-complexity",
+          "message": "Function \"gen_call\" has a cognitive complexity of 68 (threshold: 30)"
+        }
+      ],
+      "score": {
+        "score": 55,
+        "grade": "D"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_rust/expressions.rs",
+      "complexity": {
+        "cyclomatic": 68,
+        "cognitive": 86,
+        "functions": [
+          {
+            "name": "gen_expr",
+            "line": 5,
+            "complexity": 68,
+            "cognitiveComplexity": 86
+          },
+          {
+            "name": "(closure)",
+            "line": 102,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 106,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 111,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 170,
+            "complexity": 2,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "(closure)",
+            "line": 197,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 222,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "gen_expr_as_float",
+            "line": 251,
+            "complexity": 6,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "expr_has_float",
+            "line": 271,
+            "complexity": 7,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "gen_binary_float",
+            "line": 286,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "gen_expr_u64_wrapping",
+            "line": 299,
+            "complexity": 15,
+            "cognitiveComplexity": 14
+          },
+          {
+            "name": "is_pow2_64",
+            "line": 334,
+            "complexity": 4,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "is_bigint_expr",
+            "line": 342,
+            "complexity": 9,
+            "cognitiveComplexity": 6
+          },
+          {
+            "name": "gen_binary",
+            "line": 355,
+            "complexity": 29,
+            "cognitiveComplexity": 33
+          }
+        ]
+      },
+      "issues": [
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_rust/expressions.rs",
+          "line": 1,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-lines",
+          "message": "File has 448 lines (max: 300)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_rust/expressions.rs",
+          "line": 5,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-complexity",
+          "message": "Function \"gen_expr\" has a cyclomatic complexity of 68 (threshold: 30)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_rust/expressions.rs",
+          "line": 5,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-cognitive-complexity",
+          "message": "Function \"gen_expr\" has a cognitive complexity of 86 (threshold: 30)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_rust/expressions.rs",
+          "line": 355,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-cognitive-complexity",
+          "message": "Function \"gen_binary\" has a cognitive complexity of 33 (threshold: 30)"
+        }
+      ],
+      "score": {
+        "score": 55,
+        "grade": "D"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_rust/mod.rs",
+      "complexity": {
+        "cyclomatic": 3,
+        "cognitive": 2,
+        "functions": [
+          {
+            "name": "default",
+            "line": 23,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "new",
+            "line": 64,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "emit_indent",
+            "line": 68,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "emitln",
+            "line": 74,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "anon_record_name",
+            "line": 82,
+            "complexity": 3,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "emit_with_options",
+            "line": 101,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          }
+        ]
+      },
+      "issues": [],
+      "score": {
+        "score": 100,
+        "grade": "A"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_rust/program.rs",
+      "complexity": {
+        "cyclomatic": 25,
+        "cognitive": 62,
+        "functions": [
+          {
+            "name": "collect_fn_info",
+            "line": 14,
+            "complexity": 6,
+            "cognitiveComplexity": 10
+          },
+          {
+            "name": "collect_named_records",
+            "line": 31,
+            "complexity": 13,
+            "cognitiveComplexity": 32
+          },
+          {
+            "name": "(closure)",
+            "line": 35,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "type_references_name",
+            "line": 72,
+            "complexity": 9,
+            "cognitiveComplexity": 3
+          },
+          {
+            "name": "(closure)",
+            "line": 76,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 78,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 80,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 83,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "gen_type_boxed",
+            "line": 89,
+            "complexity": 2,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "emit_program",
+            "line": 97,
+            "complexity": 13,
+            "cognitiveComplexity": 21
+          },
+          {
+            "name": "(closure)",
+            "line": 136,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 170,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "emit_main_body",
+            "line": 187,
+            "complexity": 4,
+            "cognitiveComplexity": 5
+          },
+          {
+            "name": "emit_user_module",
+            "line": 204,
+            "complexity": 24,
+            "cognitiveComplexity": 50
+          },
+          {
+            "name": "(closure)",
+            "line": 219,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 223,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 244,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 257,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "emit_runtime",
+            "line": 306,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "emit_decl",
+            "line": 346,
+            "complexity": 10,
+            "cognitiveComplexity": 6
+          },
+          {
+            "name": "(closure)",
+            "line": 368,
+            "complexity": 3,
+            "cognitiveComplexity": 3
+          },
+          {
+            "name": "emit_type_decl",
+            "line": 394,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "emit_type_decl_vis",
+            "line": 398,
+            "complexity": 25,
+            "cognitiveComplexity": 38
+          },
+          {
+            "name": "(closure)",
+            "line": 401,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 411,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 442,
+            "complexity": 4,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "(closure)",
+            "line": 443,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 444,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 453,
+            "complexity": 2,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "(closure)",
+            "line": 459,
+            "complexity": 2,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "(closure)",
+            "line": 486,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 488,
+            "complexity": 3,
+            "cognitiveComplexity": 3
+          },
+          {
+            "name": "(closure)",
+            "line": 500,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 503,
+            "complexity": 3,
+            "cognitiveComplexity": 3
+          },
+          {
+            "name": "(closure)",
+            "line": 518,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 518,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "emit_fn_decl",
+            "line": 537,
+            "complexity": 23,
+            "cognitiveComplexity": 62
+          },
+          {
+            "name": "(closure)",
+            "line": 556,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 557,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 566,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 580,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 584,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 585,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "emit_stmts",
+            "line": 660,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "gen_type",
+            "line": 667,
+            "complexity": 25,
+            "cognitiveComplexity": 5
+          },
+          {
+            "name": "(closure)",
+            "line": 691,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 695,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 699,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "gen_arg",
+            "line": 708,
+            "complexity": 3,
+            "cognitiveComplexity": 1
+          }
+        ]
+      },
+      "issues": [
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_rust/program.rs",
+          "line": 1,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-lines",
+          "message": "File has 715 lines (max: 300)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_rust/program.rs",
+          "line": 272,
+          "column": 36,
+          "severity": "info",
+          "rule": "max-depth",
+          "message": "Nesting depth 7 exceeds max of 6"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_rust/program.rs",
+          "line": 609,
+          "column": 33,
+          "severity": "info",
+          "rule": "max-depth",
+          "message": "Nesting depth 7 exceeds max of 6"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_rust/program.rs",
+          "line": 618,
+          "column": 29,
+          "severity": "info",
+          "rule": "max-depth",
+          "message": "Nesting depth 7 exceeds max of 6"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_rust/program.rs",
+          "line": 537,
+          "column": 5,
+          "severity": "info",
+          "rule": "max-params",
+          "message": "Function has 9 parameters (max: 8)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_rust/program.rs",
+          "line": 31,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-cognitive-complexity",
+          "message": "Function \"collect_named_records\" has a cognitive complexity of 32 (threshold: 30)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_rust/program.rs",
+          "line": 204,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-cognitive-complexity",
+          "message": "Function \"emit_user_module\" has a cognitive complexity of 50 (threshold: 30)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_rust/program.rs",
+          "line": 398,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-cognitive-complexity",
+          "message": "Function \"emit_type_decl_vis\" has a cognitive complexity of 38 (threshold: 30)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_rust/program.rs",
+          "line": 537,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-cognitive-complexity",
+          "message": "Function \"emit_fn_decl\" has a cognitive complexity of 62 (threshold: 30)"
+        }
+      ],
+      "score": {
+        "score": 40,
+        "grade": "D"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_ts/blocks.rs",
+      "complexity": {
+        "cyclomatic": 21,
+        "cognitive": 33,
+        "functions": [
+          {
+            "name": "gen_match",
+            "line": 5,
+            "complexity": 9,
+            "cognitiveComplexity": 17
+          },
+          {
+            "name": "(closure)",
+            "line": 9,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 12,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 30,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "(closure)",
+            "line": 41,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "is_unconditional_pattern",
+            "line": 48,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "emit_match_arm",
+            "line": 53,
+            "complexity": 8,
+            "cognitiveComplexity": 10
+          },
+          {
+            "name": "(closure)",
+            "line": 56,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "gen_pattern_cond",
+            "line": 81,
+            "complexity": 21,
+            "cognitiveComplexity": 32
+          },
+          {
+            "name": "gen_block",
+            "line": 151,
+            "complexity": 13,
+            "cognitiveComplexity": 33
+          },
+          {
+            "name": "(closure)",
+            "line": 161,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "gen_do_block",
+            "line": 192,
+            "complexity": 8,
+            "cognitiveComplexity": 17
+          },
+          {
+            "name": "(closure)",
+            "line": 193,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "gen_stmt",
+            "line": 225,
+            "complexity": 8,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "gen_guard_stmt",
+            "line": 253,
+            "complexity": 3,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "(closure)",
+            "line": 257,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 260,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 264,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "gen_destructure_pattern",
+            "line": 276,
+            "complexity": 6,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "(closure)",
+            "line": 281,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 285,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          }
+        ]
+      },
+      "issues": [
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_ts/blocks.rs",
+          "line": 162,
+          "column": 33,
+          "severity": "info",
+          "rule": "max-depth",
+          "message": "Nesting depth 7 exceeds max of 6"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_ts/blocks.rs",
+          "line": 81,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-cognitive-complexity",
+          "message": "Function \"gen_pattern_cond\" has a cognitive complexity of 32 (threshold: 30)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_ts/blocks.rs",
+          "line": 151,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-cognitive-complexity",
+          "message": "Function \"gen_block\" has a cognitive complexity of 33 (threshold: 30)"
+        }
+      ],
+      "score": {
+        "score": 61,
+        "grade": "C"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_ts/declarations.rs",
+      "complexity": {
+        "cyclomatic": 31,
+        "cognitive": 63,
+        "functions": [
+          {
+            "name": "collect_generic_variant_info",
+            "line": 7,
+            "complexity": 6,
+            "cognitiveComplexity": 15
+          },
+          {
+            "name": "emit_program",
+            "line": 21,
+            "complexity": 21,
+            "cognitiveComplexity": 47
+          },
+          {
+            "name": "(closure)",
+            "line": 34,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "emit_user_module",
+            "line": 95,
+            "complexity": 6,
+            "cognitiveComplexity": 5
+          },
+          {
+            "name": "(closure)",
+            "line": 119,
+            "complexity": 3,
+            "cognitiveComplexity": 5
+          },
+          {
+            "name": "gen_decl",
+            "line": 128,
+            "complexity": 13,
+            "cognitiveComplexity": 13
+          },
+          {
+            "name": "gen_type_decl",
+            "line": 173,
+            "complexity": 13,
+            "cognitiveComplexity": 15
+          },
+          {
+            "name": "(closure)",
+            "line": 179,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 188,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 207,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 210,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 217,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 220,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "gen_type_expr",
+            "line": 236,
+            "complexity": 14,
+            "cognitiveComplexity": 3
+          },
+          {
+            "name": "(closure)",
+            "line": 251,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 257,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 262,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "map_type_name",
+            "line": 270,
+            "complexity": 8,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "gen_fn_decl",
+            "line": 282,
+            "complexity": 11,
+            "cognitiveComplexity": 13
+          },
+          {
+            "name": "(closure)",
+            "line": 290,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 297,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 298,
+            "complexity": 2,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "(closure)",
+            "line": 309,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 311,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 312,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "emit_npm_program",
+            "line": 340,
+            "complexity": 31,
+            "cognitiveComplexity": 63
+          },
+          {
+            "name": "(closure)",
+            "line": 351,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 416,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 419,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 427,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 430,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "generate_dts",
+            "line": 476,
+            "complexity": 15,
+            "cognitiveComplexity": 25
+          },
+          {
+            "name": "(closure)",
+            "line": 487,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 488,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 508,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 521,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 524,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 530,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 533,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          }
+        ]
+      },
+      "issues": [
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_ts/declarations.rs",
+          "line": 66,
+          "column": 38,
+          "severity": "warning",
+          "rule": "no-unwrap",
+          "message": "Avoid `.unwrap()`, use `?` or handle the error explicitly"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_ts/declarations.rs",
+          "line": 382,
+          "column": 38,
+          "severity": "warning",
+          "rule": "no-unwrap",
+          "message": "Avoid `.unwrap()`, use `?` or handle the error explicitly"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_ts/declarations.rs",
+          "line": 1,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-lines",
+          "message": "File has 551 lines (max: 300)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_ts/declarations.rs",
+          "line": 340,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-complexity",
+          "message": "Function \"emit_npm_program\" has a cyclomatic complexity of 31 (threshold: 30)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_ts/declarations.rs",
+          "line": 21,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-cognitive-complexity",
+          "message": "Function \"emit_program\" has a cognitive complexity of 47 (threshold: 30)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_ts/declarations.rs",
+          "line": 340,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-cognitive-complexity",
+          "message": "Function \"emit_npm_program\" has a cognitive complexity of 63 (threshold: 30)"
+        }
+      ],
+      "score": {
+        "score": 49,
+        "grade": "D"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_ts/expressions.rs",
+      "complexity": {
+        "cyclomatic": 55,
+        "cognitive": 64,
+        "functions": [
+          {
+            "name": "gen_expr",
+            "line": 5,
+            "complexity": 55,
+            "cognitiveComplexity": 64
+          },
+          {
+            "name": "(closure)",
+            "line": 60,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 65,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 71,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 113,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 132,
+            "complexity": 2,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "(closure)",
+            "line": 151,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "gen_err",
+            "line": 162,
+            "complexity": 7,
+            "cognitiveComplexity": 7
+          },
+          {
+            "name": "gen_expr_value",
+            "line": 188,
+            "complexity": 4,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "resolve_ufcs_for_ts",
+            "line": 204,
+            "complexity": 5,
+            "cognitiveComplexity": 5
+          },
+          {
+            "name": "try_ufcs_runtime_dispatch",
+            "line": 232,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "gen_ufcs_dispatch",
+            "line": 242,
+            "complexity": 9,
+            "cognitiveComplexity": 9
+          },
+          {
+            "name": "(closure)",
+            "line": 245,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "is_module_chain",
+            "line": 288,
+            "complexity": 7,
+            "cognitiveComplexity": 7
+          },
+          {
+            "name": "expr_to_module_path",
+            "line": 308,
+            "complexity": 4,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "(closure)",
+            "line": 312,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "gen_call_with_ta",
+            "line": 318,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "gen_call",
+            "line": 324,
+            "complexity": 15,
+            "cognitiveComplexity": 19
+          },
+          {
+            "name": "(closure)",
+            "line": 339,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 364,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "gen_err_message",
+            "line": 368,
+            "complexity": 6,
+            "cognitiveComplexity": 4
+          },
+          {
+            "name": "gen_binary",
+            "line": 384,
+            "complexity": 13,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "expr_has_float",
+            "line": 404,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "gen_pipe",
+            "line": 413,
+            "complexity": 5,
+            "cognitiveComplexity": 8
+          },
+          {
+            "name": "(closure)",
+            "line": 417,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 419,
+            "complexity": 2,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "(closure)",
+            "line": 426,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          }
+        ]
+      },
+      "issues": [
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_ts/expressions.rs",
+          "line": 1,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-lines",
+          "message": "File has 438 lines (max: 300)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_ts/expressions.rs",
+          "line": 5,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-complexity",
+          "message": "Function \"gen_expr\" has a cyclomatic complexity of 55 (threshold: 30)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_ts/expressions.rs",
+          "line": 5,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-cognitive-complexity",
+          "message": "Function \"gen_expr\" has a cognitive complexity of 64 (threshold: 30)"
+        }
+      ],
+      "score": {
+        "score": 55,
+        "grade": "D"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_ts/mod.rs",
+      "complexity": {
+        "cyclomatic": 5,
+        "cognitive": 6,
+        "functions": [
+          {
+            "name": "new",
+            "line": 21,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "needs_iife",
+            "line": 34,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "is_unit",
+            "line": 38,
+            "complexity": 4,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "sanitize",
+            "line": 46,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "map_module",
+            "line": 50,
+            "complexity": 3,
+            "cognitiveComplexity": 3
+          },
+          {
+            "name": "json_string",
+            "line": 62,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 63,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "pascal_to_message",
+            "line": 66,
+            "complexity": 5,
+            "cognitiveComplexity": 6
+          },
+          {
+            "name": "emit_with_modules",
+            "line": 82,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "emit_js_with_modules",
+            "line": 88,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "emit_npm_package",
+            "line": 114,
+            "complexity": 5,
+            "cognitiveComplexity": 5
+          },
+          {
+            "name": "convert_module_to_esm",
+            "line": 200,
+            "complexity": 2,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "convert_helpers_to_esm",
+            "line": 211,
+            "complexity": 3,
+            "cognitiveComplexity": 4
+          }
+        ]
+      },
+      "issues": [],
+      "score": {
+        "score": 100,
+        "grade": "A"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_ts_runtime.rs",
+      "complexity": {
+        "cyclomatic": 6,
+        "cognitive": 10,
+        "functions": [
+          {
+            "name": "full_runtime",
+            "line": 800,
+            "complexity": 6,
+            "cognitiveComplexity": 10
+          },
+          {
+            "name": "get_module_source",
+            "line": 812,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 813,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 813,
+            "complexity": 2,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "get_helpers_source",
+            "line": 819,
+            "complexity": 2,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "get_preamble",
+            "line": 824,
+            "complexity": 2,
+            "cognitiveComplexity": 2
+          }
+        ]
+      },
+      "issues": [
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/emit_ts_runtime.rs",
+          "line": 1,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-lines",
+          "message": "File has 827 lines (max: 300)"
+        }
+      ],
+      "score": {
+        "score": 90,
+        "grade": "A"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/fmt.rs",
+      "complexity": {
+        "cyclomatic": 86,
+        "cognitive": 122,
+        "functions": [
+          {
+            "name": "format_program",
+            "line": 11,
+            "complexity": 11,
+            "cognitiveComplexity": 23
+          },
+          {
+            "name": "emit_comments",
+            "line": 17,
+            "complexity": 3,
+            "cognitiveComplexity": 3
+          },
+          {
+            "name": "format_decl",
+            "line": 70,
+            "complexity": 26,
+            "cognitiveComplexity": 29
+          },
+          {
+            "name": "format_type_expr",
+            "line": 155,
+            "complexity": 25,
+            "cognitiveComplexity": 48
+          },
+          {
+            "name": "format_expr",
+            "line": 228,
+            "complexity": 86,
+            "cognitiveComplexity": 122
+          },
+          {
+            "name": "format_stmt",
+            "line": 550,
+            "complexity": 10,
+            "cognitiveComplexity": 5
+          },
+          {
+            "name": "format_destructure_pattern",
+            "line": 611,
+            "complexity": 9,
+            "cognitiveComplexity": 11
+          },
+          {
+            "name": "format_pattern",
+            "line": 634,
+            "complexity": 19,
+            "cognitiveComplexity": 23
+          },
+          {
+            "name": "indent",
+            "line": 690,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "is_short_expr",
+            "line": 695,
+            "complexity": 12,
+            "cognitiveComplexity": 4
+          },
+          {
+            "name": "is_short_list",
+            "line": 712,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          }
+        ]
+      },
+      "issues": [
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/fmt.rs",
+          "line": 1,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-lines",
+          "message": "File has 715 lines (max: 300)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/fmt.rs",
+          "line": 228,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-complexity",
+          "message": "Function \"format_expr\" has a cyclomatic complexity of 86 (threshold: 30)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/fmt.rs",
+          "line": 155,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-cognitive-complexity",
+          "message": "Function \"format_type_expr\" has a cognitive complexity of 48 (threshold: 30)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/fmt.rs",
+          "line": 228,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-cognitive-complexity",
+          "message": "Function \"format_expr\" has a cognitive complexity of 122 (threshold: 30)"
+        }
+      ],
+      "score": {
+        "score": 55,
+        "grade": "D"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/lexer.rs",
+      "complexity": {
+        "cyclomatic": 50,
+        "cognitive": 37,
+        "functions": [
+          {
+            "name": "build_keyword_map",
+            "line": 112,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "is_continuation_token",
+            "line": 159,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "strip_indent",
+            "line": 212,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "(closure)",
+            "line": 225,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 226,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 231,
+            "complexity": 2,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "tokenize",
+            "line": 243,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "run",
+            "line": 257,
+            "complexity": 19,
+            "cognitiveComplexity": 37
+          },
+          {
+            "name": "skip_spaces_and_comments",
+            "line": 334,
+            "complexity": 9,
+            "cognitiveComplexity": 11
+          },
+          {
+            "name": "add_newline",
+            "line": 360,
+            "complexity": 5,
+            "cognitiveComplexity": 7
+          },
+          {
+            "name": "peek_next_non_whitespace",
+            "line": 393,
+            "complexity": 18,
+            "cognitiveComplexity": 9
+          },
+          {
+            "name": "read_string",
+            "line": 427,
+            "complexity": 15,
+            "cognitiveComplexity": 18
+          },
+          {
+            "name": "read_heredoc",
+            "line": 474,
+            "complexity": 23,
+            "cognitiveComplexity": 25
+          },
+          {
+            "name": "read_raw_string",
+            "line": 553,
+            "complexity": 4,
+            "cognitiveComplexity": 3
+          },
+          {
+            "name": "read_number",
+            "line": 574,
+            "complexity": 15,
+            "cognitiveComplexity": 14
+          },
+          {
+            "name": "read_identifier",
+            "line": 632,
+            "complexity": 6,
+            "cognitiveComplexity": 6
+          },
+          {
+            "name": "read_type_name",
+            "line": 669,
+            "complexity": 3,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "read_symbol",
+            "line": 689,
+            "complexity": 50,
+            "cognitiveComplexity": 15
+          },
+          {
+            "name": "add_token",
+            "line": 793,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "advance",
+            "line": 802,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "peek",
+            "line": 807,
+            "complexity": 2,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "is_alpha_num",
+            "line": 816,
+            "complexity": 4,
+            "cognitiveComplexity": 1
+          }
+        ]
+      },
+      "issues": [
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/lexer.rs",
+          "line": 1,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-lines",
+          "message": "File has 820 lines (max: 300)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/lexer.rs",
+          "line": 689,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-complexity",
+          "message": "Function \"read_symbol\" has a cyclomatic complexity of 50 (threshold: 30)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/lexer.rs",
+          "line": 257,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-cognitive-complexity",
+          "message": "Function \"run\" has a cognitive complexity of 37 (threshold: 30)"
+        }
+      ],
+      "score": {
+        "score": 55,
+        "grade": "D"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/lib.rs",
+      "complexity": {
+        "cyclomatic": 0,
+        "cognitive": 0,
+        "functions": []
+      },
+      "issues": [],
+      "score": {
+        "score": 100,
+        "grade": "A"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/main.rs",
+      "complexity": {
+        "cyclomatic": 56,
+        "cognitive": 94,
+        "functions": [
+          {
+            "name": "find_rustc",
+            "line": 22,
+            "complexity": 4,
+            "cognitiveComplexity": 4
+          },
+          {
+            "name": "parse_file",
+            "line": 35,
+            "complexity": 4,
+            "cognitiveComplexity": 7
+          },
+          {
+            "name": "(closure)",
+            "line": 37,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 41,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 46,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "compile",
+            "line": 57,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "compile_with_options",
+            "line": 61,
+            "complexity": 10,
+            "cognitiveComplexity": 19
+          },
+          {
+            "name": "(closure)",
+            "line": 67,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 69,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 79,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 82,
+            "complexity": 5,
+            "cognitiveComplexity": 7
+          },
+          {
+            "name": "(closure)",
+            "line": 87,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 115,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 124,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "collect_almd_files",
+            "line": 132,
+            "complexity": 5,
+            "cognitiveComplexity": 7
+          },
+          {
+            "name": "(closure)",
+            "line": 134,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 135,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 140,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "print_help",
+            "line": 147,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "main",
+            "line": 185,
+            "complexity": 56,
+            "cognitiveComplexity": 94
+          },
+          {
+            "name": "(closure)",
+            "line": 198,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 202,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 203,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 204,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 205,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 206,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 207,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 208,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 214,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 223,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 230,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 280,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 318,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "(closure)",
+            "line": 320,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 347,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 348,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 359,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 361,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 362,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 363,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          }
+        ]
+      },
+      "issues": [
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/main.rs",
+          "line": 89,
+          "column": 28,
+          "severity": "warning",
+          "rule": "no-unwrap",
+          "message": "Avoid `.unwrap()`, use `?` or handle the error explicitly"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/main.rs",
+          "line": 1,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-lines",
+          "message": "File has 368 lines (max: 300)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/main.rs",
+          "line": 185,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-complexity",
+          "message": "Function \"main\" has a cyclomatic complexity of 56 (threshold: 30)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/main.rs",
+          "line": 185,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-cognitive-complexity",
+          "message": "Function \"main\" has a cognitive complexity of 94 (threshold: 30)"
+        }
+      ],
+      "score": {
+        "score": 53,
+        "grade": "D"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/parser/compounds.rs",
+      "complexity": {
+        "cyclomatic": 15,
+        "cognitive": 28,
+        "functions": [
+          {
+            "name": "parse_if_expr",
+            "line": 6,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "parse_if_branch",
+            "line": 28,
+            "complexity": 3,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "(closure)",
+            "line": 29,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "parse_match_expr",
+            "line": 45,
+            "complexity": 3,
+            "cognitiveComplexity": 3
+          },
+          {
+            "name": "parse_match_arm",
+            "line": 74,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "parse_lambda",
+            "line": 87,
+            "complexity": 3,
+            "cognitiveComplexity": 3
+          },
+          {
+            "name": "parse_lambda_param",
+            "line": 111,
+            "complexity": 5,
+            "cognitiveComplexity": 7
+          },
+          {
+            "name": "parse_do_block",
+            "line": 134,
+            "complexity": 5,
+            "cognitiveComplexity": 10
+          },
+          {
+            "name": "parse_brace_expr",
+            "line": 169,
+            "complexity": 15,
+            "cognitiveComplexity": 28
+          },
+          {
+            "name": "(closure)",
+            "line": 207,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "parse_list_expr",
+            "line": 268,
+            "complexity": 3,
+            "cognitiveComplexity": 3
+          }
+        ]
+      },
+      "issues": [],
+      "score": {
+        "score": 78,
+        "grade": "B"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/parser/declarations.rs",
+      "complexity": {
+        "cyclomatic": 21,
+        "cognitive": 49,
+        "functions": [
+          {
+            "name": "parse_module_decl",
+            "line": 8,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "parse_import_decl",
+            "line": 15,
+            "complexity": 7,
+            "cognitiveComplexity": 10
+          },
+          {
+            "name": "(closure)",
+            "line": 30,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "parse_module_path",
+            "line": 57,
+            "complexity": 3,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "(closure)",
+            "line": 60,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "parse_top_decl",
+            "line": 69,
+            "complexity": 21,
+            "cognitiveComplexity": 12
+          },
+          {
+            "name": "(closure)",
+            "line": 86,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "collect_extern_attrs",
+            "line": 111,
+            "complexity": 5,
+            "cognitiveComplexity": 7
+          },
+          {
+            "name": "parse_fn_decl_with_attrs",
+            "line": 149,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "parse_type_decl",
+            "line": 157,
+            "complexity": 3,
+            "cognitiveComplexity": 3
+          },
+          {
+            "name": "parse_trait_decl",
+            "line": 181,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "parse_trait_method",
+            "line": 197,
+            "complexity": 6,
+            "cognitiveComplexity": 5
+          },
+          {
+            "name": "(closure)",
+            "line": 227,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "parse_impl_decl",
+            "line": 243,
+            "complexity": 3,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "parse_fn_decl",
+            "line": 270,
+            "complexity": 20,
+            "cognitiveComplexity": 49
+          },
+          {
+            "name": "(closure)",
+            "line": 317,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "parse_strict_decl",
+            "line": 375,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "parse_test_decl",
+            "line": 382,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "parse_visibility",
+            "line": 391,
+            "complexity": 3,
+            "cognitiveComplexity": 3
+          },
+          {
+            "name": "parse_param_list",
+            "line": 403,
+            "complexity": 6,
+            "cognitiveComplexity": 8
+          }
+        ]
+      },
+      "issues": [
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/parser/declarations.rs",
+          "line": 1,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-lines",
+          "message": "File has 437 lines (max: 300)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/parser/declarations.rs",
+          "line": 270,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-cognitive-complexity",
+          "message": "Function \"parse_fn_decl\" has a cognitive complexity of 49 (threshold: 30)"
+        }
+      ],
+      "score": {
+        "score": 55,
+        "grade": "D"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/parser/expressions.rs",
+      "complexity": {
+        "cyclomatic": 7,
+        "cognitive": 12,
+        "functions": [
+          {
+            "name": "parse_expr",
+            "line": 6,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "parse_pipe",
+            "line": 10,
+            "complexity": 6,
+            "cognitiveComplexity": 12
+          },
+          {
+            "name": "(closure)",
+            "line": 16,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "parse_or",
+            "line": 50,
+            "complexity": 4,
+            "cognitiveComplexity": 4
+          },
+          {
+            "name": "parse_and",
+            "line": 75,
+            "complexity": 4,
+            "cognitiveComplexity": 4
+          },
+          {
+            "name": "parse_comparison",
+            "line": 100,
+            "complexity": 7,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "parse_range",
+            "line": 125,
+            "complexity": 3,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "parse_add_sub",
+            "line": 156,
+            "complexity": 4,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "parse_mul_div",
+            "line": 175,
+            "complexity": 5,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "parse_unary",
+            "line": 194,
+            "complexity": 3,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "parse_postfix",
+            "line": 220,
+            "complexity": 7,
+            "cognitiveComplexity": 11
+          },
+          {
+            "name": "(closure)",
+            "line": 230,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "parse_call_args",
+            "line": 279,
+            "complexity": 4,
+            "cognitiveComplexity": 4
+          },
+          {
+            "name": "parse_one_call_arg",
+            "line": 298,
+            "complexity": 4,
+            "cognitiveComplexity": 4
+          },
+          {
+            "name": "(closure)",
+            "line": 305,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          }
+        ]
+      },
+      "issues": [
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/parser/expressions.rs",
+          "line": 1,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-lines",
+          "message": "File has 317 lines (max: 300)"
+        }
+      ],
+      "score": {
+        "score": 90,
+        "grade": "A"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/parser/helpers.rs",
+      "complexity": {
+        "cyclomatic": 10,
+        "cognitive": 9,
+        "functions": [
+          {
+            "name": "current_span",
+            "line": 6,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "current",
+            "line": 11,
+            "complexity": 3,
+            "cognitiveComplexity": 3
+          },
+          {
+            "name": "peek_at",
+            "line": 28,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "peek_type_args_call",
+            "line": 33,
+            "complexity": 10,
+            "cognitiveComplexity": 9
+          },
+          {
+            "name": "(closure)",
+            "line": 51,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "check",
+            "line": 61,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "check_ident",
+            "line": 65,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "advance",
+            "line": 69,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "advance_and_get_value",
+            "line": 77,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "expect",
+            "line": 83,
+            "complexity": 3,
+            "cognitiveComplexity": 3
+          },
+          {
+            "name": "hint_for_expected",
+            "line": 99,
+            "complexity": 5,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "expect_ident",
+            "line": 114,
+            "complexity": 5,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "expect_type_name",
+            "line": 130,
+            "complexity": 3,
+            "cognitiveComplexity": 3
+          },
+          {
+            "name": "expect_any_name",
+            "line": 146,
+            "complexity": 8,
+            "cognitiveComplexity": 5
+          },
+          {
+            "name": "expect_any_fn_name",
+            "line": 172,
+            "complexity": 4,
+            "cognitiveComplexity": 4
+          },
+          {
+            "name": "expect_any_param_name",
+            "line": 191,
+            "complexity": 5,
+            "cognitiveComplexity": 5
+          },
+          {
+            "name": "skip_newlines",
+            "line": 212,
+            "complexity": 3,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "skip_newlines_into_stmts",
+            "line": 219,
+            "complexity": 4,
+            "cognitiveComplexity": 4
+          },
+          {
+            "name": "skip_newlines_collect_comments",
+            "line": 229,
+            "complexity": 4,
+            "cognitiveComplexity": 4
+          }
+        ]
+      },
+      "issues": [],
+      "score": {
+        "score": 100,
+        "grade": "A"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/parser/mod.rs",
+      "complexity": {
+        "cyclomatic": 11,
+        "cognitive": 10,
+        "functions": [
+          {
+            "name": "new",
+            "line": 20,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "parse_single_expr",
+            "line": 24,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "parse",
+            "line": 28,
+            "complexity": 11,
+            "cognitiveComplexity": 10
+          },
+          {
+            "name": "skip_to_next_decl",
+            "line": 91,
+            "complexity": 7,
+            "cognitiveComplexity": 6
+          }
+        ]
+      },
+      "issues": [],
+      "score": {
+        "score": 98,
+        "grade": "A"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/parser/patterns.rs",
+      "complexity": {
+        "cyclomatic": 25,
+        "cognitive": 41,
+        "functions": [
+          {
+            "name": "parse_pattern",
+            "line": 6,
+            "complexity": 25,
+            "cognitiveComplexity": 41
+          }
+        ]
+      },
+      "issues": [
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/parser/patterns.rs",
+          "line": 6,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-cognitive-complexity",
+          "message": "Function \"parse_pattern\" has a cognitive complexity of 41 (threshold: 30)"
+        }
+      ],
+      "score": {
+        "score": 73,
+        "grade": "C"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/parser/primary.rs",
+      "complexity": {
+        "cyclomatic": 68,
+        "cognitive": 88,
+        "functions": [
+          {
+            "name": "parse_primary",
+            "line": 6,
+            "complexity": 68,
+            "cognitiveComplexity": 88
+          },
+          {
+            "name": "(closure)",
+            "line": 16,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 17,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 98,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 207,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 208,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 247,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          }
+        ]
+      },
+      "issues": [
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/parser/primary.rs",
+          "line": 1,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-lines",
+          "message": "File has 305 lines (max: 300)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/parser/primary.rs",
+          "line": 6,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-complexity",
+          "message": "Function \"parse_primary\" has a cyclomatic complexity of 68 (threshold: 30)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/parser/primary.rs",
+          "line": 6,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-cognitive-complexity",
+          "message": "Function \"parse_primary\" has a cognitive complexity of 88 (threshold: 30)"
+        }
+      ],
+      "score": {
+        "score": 63,
+        "grade": "C"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/parser/statements.rs",
+      "complexity": {
+        "cyclomatic": 8,
+        "cognitive": 10,
+        "functions": [
+          {
+            "name": "parse_stmt",
+            "line": 6,
+            "complexity": 7,
+            "cognitiveComplexity": 5
+          },
+          {
+            "name": "(closure)",
+            "line": 18,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 19,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "parse_let_stmt",
+            "line": 29,
+            "complexity": 8,
+            "cognitiveComplexity": 10
+          },
+          {
+            "name": "(closure)",
+            "line": 48,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "parse_var_stmt",
+            "line": 85,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "parse_guard_stmt",
+            "line": 100,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "parse_assign_stmt",
+            "line": 110,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "parse_destructure_tuple",
+            "line": 121,
+            "complexity": 4,
+            "cognitiveComplexity": 6
+          }
+        ]
+      },
+      "issues": [],
+      "score": {
+        "score": 100,
+        "grade": "A"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/parser/types.rs",
+      "complexity": {
+        "cyclomatic": 13,
+        "cognitive": 17,
+        "functions": [
+          {
+            "name": "parse_type_expr",
+            "line": 6,
+            "complexity": 13,
+            "cognitiveComplexity": 17
+          },
+          {
+            "name": "parse_tuple_type",
+            "line": 55,
+            "complexity": 4,
+            "cognitiveComplexity": 3
+          },
+          {
+            "name": "parse_variant_type",
+            "line": 77,
+            "complexity": 6,
+            "cognitiveComplexity": 12
+          },
+          {
+            "name": "try_parse_inline_variant",
+            "line": 108,
+            "complexity": 7,
+            "cognitiveComplexity": 14
+          },
+          {
+            "name": "parse_record_type",
+            "line": 144,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "parse_field_type_list",
+            "line": 153,
+            "complexity": 3,
+            "cognitiveComplexity": 3
+          },
+          {
+            "name": "parse_fn_type",
+            "line": 170,
+            "complexity": 3,
+            "cognitiveComplexity": 3
+          },
+          {
+            "name": "parse_type_args",
+            "line": 187,
+            "complexity": 3,
+            "cognitiveComplexity": 3
+          },
+          {
+            "name": "try_parse_generic_params",
+            "line": 201,
+            "complexity": 4,
+            "cognitiveComplexity": 4
+          },
+          {
+            "name": "parse_generic_param",
+            "line": 218,
+            "complexity": 4,
+            "cognitiveComplexity": 5
+          }
+        ]
+      },
+      "issues": [],
+      "score": {
+        "score": 91,
+        "grade": "A"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/project.rs",
+      "complexity": {
+        "cyclomatic": 16,
+        "cognitive": 28,
+        "functions": [
+          {
+            "name": "from_version",
+            "line": 16,
+            "complexity": 2,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "from_version_str",
+            "line": 23,
+            "complexity": 2,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "mod_name",
+            "line": 32,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "fmt",
+            "line": 39,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "parse_toml",
+            "line": 73,
+            "complexity": 16,
+            "cognitiveComplexity": 24
+          },
+          {
+            "name": "(closure)",
+            "line": 75,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "parse_kv",
+            "line": 122,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "parse_dep_line",
+            "line": 130,
+            "complexity": 10,
+            "cognitiveComplexity": 8
+          },
+          {
+            "name": "cache_dir",
+            "line": 164,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 165,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "fetch_dep",
+            "line": 170,
+            "complexity": 5,
+            "cognitiveComplexity": 4
+          },
+          {
+            "name": "(closure)",
+            "line": 182,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 199,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "resolve_dep_version",
+            "line": 210,
+            "complexity": 9,
+            "cognitiveComplexity": 7
+          },
+          {
+            "name": "(closure)",
+            "line": 212,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "fetch_all_deps",
+            "line": 234,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "fetch_deps_recursive",
+            "line": 241,
+            "complexity": 10,
+            "cognitiveComplexity": 28
+          },
+          {
+            "name": "(closure)",
+            "line": 250,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "resolve_package_spec",
+            "line": 291,
+            "complexity": 6,
+            "cognitiveComplexity": 3
+          },
+          {
+            "name": "add_dep_to_toml",
+            "line": 319,
+            "complexity": 4,
+            "cognitiveComplexity": 5
+          },
+          {
+            "name": "(closure)",
+            "line": 326,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 341,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          }
+        ]
+      },
+      "issues": [
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/project.rs",
+          "line": 1,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-lines",
+          "message": "File has 346 lines (max: 300)"
+        }
+      ],
+      "score": {
+        "score": 55,
+        "grade": "D"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/resolve.rs",
+      "complexity": {
+        "cyclomatic": 12,
+        "cognitive": 37,
+        "functions": [
+          {
+            "name": "find_project_root",
+            "line": 20,
+            "complexity": 4,
+            "cognitiveComplexity": 5
+          },
+          {
+            "name": "resolve_imports_with_deps",
+            "line": 32,
+            "complexity": 12,
+            "cognitiveComplexity": 37
+          },
+          {
+            "name": "(closure)",
+            "line": 45,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 53,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 60,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "load_bundled_module",
+            "line": 99,
+            "complexity": 7,
+            "cognitiveComplexity": 13
+          },
+          {
+            "name": "(closure)",
+            "line": 115,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "load_self_module",
+            "line": 140,
+            "complexity": 9,
+            "cognitiveComplexity": 18
+          },
+          {
+            "name": "(closure)",
+            "line": 160,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 165,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 173,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 177,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "find_self_module_file",
+            "line": 196,
+            "complexity": 4,
+            "cognitiveComplexity": 4
+          },
+          {
+            "name": "load_module",
+            "line": 223,
+            "complexity": 10,
+            "cognitiveComplexity": 13
+          },
+          {
+            "name": "(closure)",
+            "line": 241,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 246,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 267,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "parse_almd_file",
+            "line": 278,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "(closure)",
+            "line": 280,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 284,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "resolve_submodule_imports",
+            "line": 292,
+            "complexity": 4,
+            "cognitiveComplexity": 6
+          },
+          {
+            "name": "load_sub_namespaces",
+            "line": 312,
+            "complexity": 10,
+            "cognitiveComplexity": 10
+          },
+          {
+            "name": "(closure)",
+            "line": 325,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 326,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 327,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "(closure)",
+            "line": 328,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 329,
+            "complexity": 3,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "(closure)",
+            "line": 337,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 351,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 351,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 351,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 357,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "load_submodule",
+            "line": 380,
+            "complexity": 4,
+            "cognitiveComplexity": 3
+          },
+          {
+            "name": "(closure)",
+            "line": 407,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 408,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 416,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 420,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "find_package_src_dir",
+            "line": 431,
+            "complexity": 5,
+            "cognitiveComplexity": 5
+          },
+          {
+            "name": "find_module_file",
+            "line": 456,
+            "complexity": 7,
+            "cognitiveComplexity": 13
+          }
+        ]
+      },
+      "issues": [
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/resolve.rs",
+          "line": 1,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-lines",
+          "message": "File has 493 lines (max: 300)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/resolve.rs",
+          "line": 32,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-cognitive-complexity",
+          "message": "Function \"resolve_imports_with_deps\" has a cognitive complexity of 37 (threshold: 30)"
+        }
+      ],
+      "score": {
+        "score": 70,
+        "grade": "C"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/stdlib.rs",
+      "complexity": {
+        "cyclomatic": 196,
+        "cognitive": 4,
+        "functions": [
+          {
+            "name": "is_stdlib_module",
+            "line": 11,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "get_bundled_source",
+            "line": 17,
+            "complexity": 8,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "is_any_stdlib",
+            "line": 30,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "resolve_ufcs_module",
+            "line": 38,
+            "complexity": 2,
+            "cognitiveComplexity": 2
+          },
+          {
+            "name": "resolve_ufcs_candidates",
+            "line": 52,
+            "complexity": 16,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "resolve_ufcs_by_type",
+            "line": 108,
+            "complexity": 9,
+            "cognitiveComplexity": 4
+          },
+          {
+            "name": "min_params",
+            "line": 132,
+            "complexity": 3,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "builtin_effect_fns",
+            "line": 140,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "lookup_sig",
+            "line": 145,
+            "complexity": 196,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "s",
+            "line": 146,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "io_err",
+            "line": 147,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          }
+        ]
+      },
+      "issues": [
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/stdlib.rs",
+          "line": 1,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-lines",
+          "message": "File has 381 lines (max: 300)"
+        },
+        {
+          "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/stdlib.rs",
+          "line": 145,
+          "column": 1,
+          "severity": "warning",
+          "rule": "max-complexity",
+          "message": "Function \"lookup_sig\" has a cyclomatic complexity of 196 (threshold: 30)"
+        }
+      ],
+      "score": {
+        "score": 63,
+        "grade": "C"
+      }
+    },
+    {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/types.rs",
+      "complexity": {
+        "cyclomatic": 28,
+        "cognitive": 10,
+        "functions": [
+          {
+            "name": "format_params",
+            "line": 58,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 59,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "display",
+            "line": 97,
+            "complexity": 17,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "(closure)",
+            "line": 109,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 114,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 118,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "compatible",
+            "line": 128,
+            "complexity": 28,
+            "cognitiveComplexity": 10
+          },
+          {
+            "name": "(closure)",
+            "line": 152,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "(closure)",
+            "line": 157,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "(closure)",
+            "line": 160,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "new",
+            "line": 168,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "push_scope",
+            "line": 188,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "pop_scope",
+            "line": 192,
+            "complexity": 1,
+            "cognitiveComplexity": 0
+          },
+          {
+            "name": "define_var",
+            "line": 196,
+            "complexity": 2,
+            "cognitiveComplexity": 1
+          },
+          {
+            "name": "lookup_var",
+            "line": 202,
+            "complexity": 3,
+            "cognitiveComplexity": 3
+          },
+          {
+            "name": "resolve_named",
+            "line": 211,
+            "complexity": 4,
+            "cognitiveComplexity": 4
+          }
+        ]
+      },
+      "issues": [],
+      "score": {
+        "score": 71,
+        "grade": "C"
+      }
+    }
+  ],
+  "summary": {
+    "totalFiles": 36,
+    "totalIssues": 69,
+    "issuesBySeverity": {
+      "error": 0,
+      "warning": 64,
+      "info": 5
+    },
+    "averageComplexity": 5.220125786163522,
+    "maxComplexity": {
+      "file": "/Users/o6lvl4/workspace/github.com/almide/almide/src/stdlib.rs",
+      "function": "lookup_sig",
+      "complexity": 196
+    }
+  },
+  "score": {
+    "overall": 60,
+    "grade": "C",
+    "distribution": {
+      "B": 1,
+      "F": 0,
+      "C": 9,
+      "A": 12,
+      "D": 14
+    }
+  }
+}

@@ -3,6 +3,22 @@
 use std::process::Command;
 use crate::{compile, compile_with_options, parse_file, find_rustc, emit_rust, emit_ts, check, diagnostic, resolve, fmt, project};
 
+/// Recursively collect all .almd files under a directory.
+fn collect_almd_files(dir: &std::path::Path) -> Vec<String> {
+    let mut files = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if path.is_dir() {
+                files.extend(collect_almd_files(&path));
+            } else if path.extension().map(|e| e == "almd").unwrap_or(false) {
+                files.push(path.to_string_lossy().to_string());
+            }
+        }
+    }
+    files
+}
+
 pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool) -> i32 {
     let rs_code = compile(file, no_check);
 
@@ -105,8 +121,24 @@ pub fn cmd_init() {
 
 pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
     let test_files: Vec<String> = if !file.is_empty() {
-        vec![file.to_string()]
+        let path = std::path::Path::new(file);
+        if path.is_dir() {
+            let mut files = collect_almd_files(path);
+            files.sort();
+            if files.is_empty() {
+                eprintln!("No .almd test files found in {}", file);
+                std::process::exit(1);
+            }
+            files
+        } else {
+            vec![file.to_string()]
+        }
+    } else if std::path::Path::new("test").is_dir() {
+        let mut files = collect_almd_files(std::path::Path::new("test"));
+        files.sort();
+        files
     } else if std::path::Path::new("tests").is_dir() {
+        // Legacy: flat tests/ directory
         let mut files: Vec<String> = std::fs::read_dir("tests")
             .unwrap_or_else(|e| { eprintln!("Failed to read tests/: {}", e); std::process::exit(1); })
             .filter_map(|e| e.ok())
@@ -116,12 +148,12 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
         files.sort();
         files
     } else {
-        eprintln!("No test files found. Create tests/*.almd or specify a file.");
+        eprintln!("No test files found. Create test/*.almd or specify a file/directory.");
         std::process::exit(1);
     };
 
     if test_files.is_empty() {
-        eprintln!("No test files found in tests/");
+        eprintln!("No .almd test files found");
         std::process::exit(1);
     }
 
