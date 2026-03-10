@@ -1,0 +1,113 @@
+// variable_test — Variables and bindings
+
+// ── let (immutable) ──
+
+test "let binding" {
+  let x = 42
+  assert_eq(x, 42)
+}
+
+test "let with type annotation" {
+  let x: Int = 10
+  let s: String = "hello"
+  let b: Bool = true
+  assert_eq(x, 10)
+  assert_eq(s, "hello")
+  assert_eq(b, true)
+}
+
+test "let with complex type annotation" {
+  let xs: List[Int] = [1, 2, 3]
+  let m: Map[String, Int] = map.new()
+  assert_eq(list.len(xs), 3)
+  assert_eq(map.len(m), 0)
+}
+
+// ── var (mutable) ──
+
+test "var and reassignment" {
+  var x = 0
+  assert_eq(x, 0)
+  x = 10
+  assert_eq(x, 10)
+  x = x + 5
+  assert_eq(x, 15)
+}
+
+test "var string reassignment" {
+  var s = "hello"
+  s = s ++ " world"
+  assert_eq(s, "hello world")
+}
+
+// ── index assign ──
+
+test "list index assign" {
+  var xs = [10, 20, 30]
+  xs[1] = 99
+  assert_eq(list.get(xs, 1), some(99))
+  assert_eq(list.get(xs, 0), some(10))
+  assert_eq(list.get(xs, 2), some(30))
+}
+
+test "list index assign with expression" {
+  var xs = [1, 2, 3, 4]
+  let i = 2
+  xs[i] = 100
+  assert_eq(list.get(xs, 2), some(100))
+}
+
+// ── field assign ──
+
+test "record field assign" {
+  var user = { name: "alice", age: 30 }
+  user.age = 31
+  assert_eq(user.age, 31)
+  assert_eq(user.name, "alice")
+}
+
+test "record field assign string" {
+  var config = { host: "localhost", port: 8080 }
+  config.host = "0.0.0.0"
+  assert_eq(config.host, "0.0.0.0")
+  assert_eq(config.port, 8080)
+}
+
+// ── var in for loop ──
+
+test "var accumulation in for" {
+  var sum = 0
+  for x in [1, 2, 3, 4, 5] {
+    sum = sum + x
+  }
+  assert_eq(sum, 15)
+}
+
+test "var list accumulation in for" {
+  var result: List[Int] = []
+  for x in [1, 2, 3] {
+    result = result ++ [x * x]
+  }
+  assert_eq(result, [1, 4, 9])
+}
+
+// ── let shadowing ──
+
+test "let shadowing same name" {
+  let x = 1
+  assert_eq(x, 1)
+  let x = 2
+  assert_eq(x, 2)
+  let x = "now a string"
+  assert_eq(x, "now a string")
+}
+
+test "let shadowing in block" {
+  let x = 10
+  let y = {
+    let x = 20
+    x + 1
+  }
+  assert_eq(x, 10)
+  assert_eq(y, 21)
+}
