@@ -1,6 +1,6 @@
 effect fn main() -> Result[Unit, String] = {
   // Setup: create temp directory structure
-  let dir = "/tmp/.test_fs_walk"
+  let dir = env.temp_dir() ++ "/.test_fs_walk"
   fs.mkdir_p(dir ++ "/sub")
   fs.write(dir ++ "/a.txt", "hello")
   fs.write(dir ++ "/sub/b.txt", "world")

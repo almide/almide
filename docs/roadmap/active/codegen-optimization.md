@@ -2,6 +2,12 @@
 
 Almide generates Rust code that is near-identical in performance to hand-written Rust for numeric workloads (n-body: 1.74s vs Rust 1.69s). However, heap-allocated types (String, List) incur unnecessary clone overhead. The goal is to close this gap **without exposing ownership to the user**.
 
+### Phase 0: Correctness fixes (done) ✅
+
+#### List literal clone
+
+`vec![f1, f2]` moved variables, causing use-after-move if `f1`/`f2` were referenced later. Fixed by emitting `.clone()` for `Ident` expressions inside list literals. This is a correctness band-aid — Phase 1a (move analysis) will make most of these clones unnecessary.
+
 ### Phase 1: Eliminate unnecessary clones (transparent)
 
 No language changes — the emitter generates smarter Rust code.

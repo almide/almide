@@ -197,13 +197,25 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
     } else {
         file.strip_suffix(".almd").unwrap_or("a.out").to_string()
     };
-    let output = output.unwrap_or(&default_output);
+    let output_raw = output.unwrap_or(&default_output);
+
+    // On Windows, auto-append .exe for native builds
+    let output = if cfg!(target_os = "windows") && !is_wasm
+        && !output_raw.ends_with(".exe") && !output_raw.ends_with(".wasm")
+    {
+        format!("{}.exe", output_raw)
+    } else {
+        output_raw.to_string()
+    };
 
     let emit_options = emit_rust::EmitOptions { no_thread_wrap: is_wasm };
     let wasm_target = if is_wasm { Some("wasm") } else { None };
     let rs_code = compile_with_options(file, no_check, &emit_options, wasm_target);
 
-    let tmp_rs = format!("{}.rs", output.strip_suffix(".wasm").unwrap_or(output));
+    let stem = output.strip_suffix(".wasm")
+        .or_else(|| output.strip_suffix(".exe"))
+        .unwrap_or(&output);
+    let tmp_rs = format!("{}.rs", stem);
     if let Err(e) = std::fs::write(&tmp_rs, &rs_code) {
         eprintln!("Failed to write {}: {}", tmp_rs, e);
         std::process::exit(1);
@@ -212,7 +224,7 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
     let mut rustc_cmd = Command::new(&find_rustc());
     rustc_cmd.arg(&tmp_rs)
         .arg("-o")
-        .arg(output)
+        .arg(&output)
         .arg("-C").arg("overflow-checks=no")
         .arg("--edition").arg("2021");
 

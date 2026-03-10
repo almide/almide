@@ -99,7 +99,14 @@ impl Emitter {
             }
 
             Expr::List { elements, .. } => {
-                let elems: Vec<String> = elements.iter().map(|e| self.gen_expr(e)).collect();
+                let elems: Vec<String> = elements.iter().map(|e| {
+                    let code = self.gen_expr(e);
+                    if matches!(e, Expr::Ident { .. }) {
+                        format!("{}.clone()", code)
+                    } else {
+                        code
+                    }
+                }).collect();
                 format!("vec![{}]", elems.join(", "))
             }
             Expr::Record { name, fields, .. } => {

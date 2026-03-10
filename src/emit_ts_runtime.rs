@@ -473,6 +473,7 @@ const MOD_ENV_TS: &str = r#"const __almd_env = {
   cwd(): string { return Deno.cwd(); },
   millis(): number { return Date.now(); },
   sleep_ms(ms: number): void { const end = Date.now() + ms; while (Date.now() < end) {} },
+  temp_dir(): string { return Deno.env.get("TMPDIR") || Deno.env.get("TEMP") || Deno.env.get("TMP") || "/tmp"; },
 };
 "#;
 
@@ -484,6 +485,7 @@ const MOD_ENV_JS: &str = r#"const __almd_env = {
   cwd() { return __node_process.cwd(); },
   millis() { return Date.now(); },
   sleep_ms(ms) { const end = Date.now() + ms; while (Date.now() < end) {} },
+  temp_dir() { return require("os").tmpdir(); },
 };
 "#;
 
