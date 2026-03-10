@@ -28,9 +28,10 @@ impl TsEmitter {
                 format!("return {};", err_body)
             };
 
+            let type_ann = if self.js_mode { "" } else { ": any" };
             let mut lines = vec![format!(
-                "(() => {{ let {}: any; try {{ {} = {}; }} catch (__e) {{ {} }} if ({} instanceof __Err) {{ {} }}",
-                tmp, tmp, subj, catch_convert, tmp, err_return
+                "(() => {{ let {}{}; try {{ {} = {}; }} catch (__e) {{ {} }} if ({} instanceof __Err) {{ {} }}",
+                tmp, type_ann, tmp, subj, catch_convert, tmp, err_return
             )];
             for arm in &ok_arms {
                 self.emit_match_arm(&mut lines, tmp, arm);
