@@ -79,7 +79,7 @@ impl Checker {
     fn register_decls(&mut self, decls: &[ast::Decl], prefix: Option<&str>, is_external: bool) {
         for decl in decls {
             match decl {
-                ast::Decl::Fn { name, params, return_type, effect, r#async, visibility, .. } => {
+                ast::Decl::Fn { name, params, return_type, effect, r#async, visibility, generics, .. } => {
                     if prefix.is_some() {
                         let hidden = match visibility {
                             ast::Visibility::Local => true,
@@ -93,10 +93,22 @@ impl Checker {
                             continue;
                         }
                     }
+                    // Collect generic type parameter names
+                    let generic_names: Vec<String> = generics.as_ref()
+                        .map(|gs| gs.iter().map(|g| g.name.clone()).collect())
+                        .unwrap_or_default();
+                    // Register type params as TypeVar in the type registry during resolution
+                    for gn in &generic_names {
+                        self.env.types.insert(gn.clone(), Ty::TypeVar(gn.clone()));
+                    }
                     let param_tys: Vec<(String, Ty)> = params.iter()
                         .map(|p| (p.name.clone(), self.resolve_type_expr(&p.ty)))
                         .collect();
                     let ret = self.resolve_type_expr(return_type);
+                    // Remove type params from registry after resolution
+                    for gn in &generic_names {
+                        self.env.types.remove(gn);
+                    }
                     let is_effect = effect.unwrap_or(false) || r#async.unwrap_or(false);
                     let key = match prefix {
                         Some(p) => format!("{}.{}", p, name),
@@ -105,9 +117,9 @@ impl Checker {
                     if prefix.is_none() && is_effect {
                         self.env.effect_fns.insert(name.clone());
                     }
-                    self.env.functions.insert(key, FnSig { params: param_tys, ret, is_effect });
+                    self.env.functions.insert(key, FnSig { params: param_tys, ret, is_effect, generics: generic_names });
                 }
-                ast::Decl::Type { name, ty, visibility, .. } => {
+                ast::Decl::Type { name, ty, visibility, generics, .. } => {
                     if prefix.is_some() {
                         let hidden = match visibility {
                             ast::Visibility::Local => true,
@@ -121,7 +133,18 @@ impl Checker {
                             continue;
                         }
                     }
+                    // Register generic type params as TypeVar during resolution
+                    let generic_names: Vec<String> = generics.as_ref()
+                        .map(|gs| gs.iter().map(|g| g.name.clone()).collect())
+                        .unwrap_or_default();
+                    for gn in &generic_names {
+                        self.env.types.insert(gn.clone(), Ty::TypeVar(gn.clone()));
+                    }
                     let mut resolved = self.resolve_type_expr(ty);
+                    // Remove type params from registry after resolution
+                    for gn in &generic_names {
+                        self.env.types.remove(gn);
+                    }
                     if prefix.is_none() {
                         if let Ty::Variant { name: ref mut vname, ref cases } = resolved {
                             *vname = name.clone();
@@ -262,7 +285,7 @@ impl Checker {
     pub(crate) fn check_decl(&mut self, decl: &mut ast::Decl) {
         self.current_decl_line = self.decl_line(decl);
         match decl {
-            ast::Decl::Fn { name, params, return_type, body, effect, extern_attrs, .. } => {
+            ast::Decl::Fn { name, params, return_type, body, effect, extern_attrs, generics, .. } => {
                 // Validate extern completeness: if no body, both targets need @extern
                 // (for now, just check that the current target has coverage)
                 if body.is_none() && extern_attrs.is_empty() {
@@ -291,6 +314,12 @@ impl Checker {
                 }
                 if let Some(body) = body {
                     self.env.push_scope();
+                    // Register generic type params as TypeVars for body checking
+                    if let Some(gs) = generics {
+                        for g in gs {
+                            self.env.types.insert(g.name.clone(), Ty::TypeVar(g.name.clone()));
+                        }
+                    }
                     for p in params {
                         let ty = self.resolve_type_expr(&p.ty);
                         self.env.define_var(&p.name, ty);
@@ -310,7 +339,10 @@ impl Checker {
                     } else {
                         ret_ty.clone()
                     };
-                    if !body_ty.compatible(&effective_ret) && !body_ty.compatible(&ret_ty) {
+                    let resolved_body = self.env.resolve_named(&body_ty);
+                    let resolved_ret = self.env.resolve_named(&effective_ret);
+                    let resolved_ret_full = self.env.resolve_named(&ret_ty);
+                    if !resolved_body.compatible(&resolved_ret) && !resolved_body.compatible(&resolved_ret_full) && !body_ty.compatible(&effective_ret) && !body_ty.compatible(&ret_ty) {
                         self.push_diagnostic(err(
                             format!("function '{}' declared to return {} but body has type {}", name, ret_ty.display(), body_ty.display()),
                             "Change the return type or fix the body expression",
@@ -321,6 +353,12 @@ impl Checker {
                     self.warn_unused_vars_in_scope(&format!("fn {}", name));
                     self.env.current_ret = prev_ret;
                     self.env.in_effect = prev_effect;
+                    // Clean up generic TypeVars from type registry
+                    if let Some(gs) = generics {
+                        for g in gs {
+                            self.env.types.remove(&g.name);
+                        }
+                    }
                     self.env.pop_scope();
                 }
             }
@@ -344,7 +382,14 @@ impl Checker {
             ast::TypeExpr::Simple { name } => match name.as_str() {
                 "Int" => Ty::Int, "Float" => Ty::Float, "String" => Ty::String,
                 "Bool" => Ty::Bool, "Unit" => Ty::Unit, "Path" => Ty::String,
-                other => Ty::Named(other.to_string()),
+                other => {
+                    // Check if this name is a registered type (could be TypeVar from generics)
+                    if let Some(ty) = self.env.types.get(other) {
+                        ty.clone()
+                    } else {
+                        Ty::Named(other.to_string())
+                    }
+                }
             },
             ast::TypeExpr::Generic { name, args } => {
                 let ra: Vec<Ty> = args.iter().map(|a| self.resolve_type_expr(a)).collect();

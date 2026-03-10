@@ -49,7 +49,14 @@ impl Parser {
 
     pub(crate) fn parse_or(&mut self) -> Result<Expr, String> {
         let mut left = self.parse_and()?;
-        while self.check(TokenType::Or) {
+        while self.check(TokenType::Or) || self.check(TokenType::PipePipe) {
+            if self.check(TokenType::PipePipe) {
+                let tok = self.current();
+                return Err(format!(
+                    "'||' is not valid in Almide at line {}:{}\n  Hint: Use 'or' for logical OR. Example: if a or b then ...",
+                    tok.line, tok.col
+                ));
+            }
             let span = Some(self.current_span());
             self.advance();
             self.skip_newlines();
@@ -67,7 +74,14 @@ impl Parser {
 
     fn parse_and(&mut self) -> Result<Expr, String> {
         let mut left = self.parse_comparison()?;
-        while self.check(TokenType::And) {
+        while self.check(TokenType::And) || self.check(TokenType::AmpAmp) {
+            if self.check(TokenType::AmpAmp) {
+                let tok = self.current();
+                return Err(format!(
+                    "'&&' is not valid in Almide at line {}:{}\n  Hint: Use 'and' for logical AND. Example: if a and b then ...",
+                    tok.line, tok.col
+                ));
+            }
             let span = Some(self.current_span());
             self.advance();
             self.skip_newlines();
@@ -229,6 +243,20 @@ impl Parser {
                         resolved_type: None,
                     };
                 }
+            } else if self.check(TokenType::LBracket) && self.peek_type_args_call() {
+                // Call with explicit type arguments: f[Int, String](args)
+                let span = Some(self.current_span());
+                let ta = self.parse_type_args()?;
+                self.expect(TokenType::LParen)?;
+                let args = self.parse_call_args()?;
+                self.expect(TokenType::RParen)?;
+                expr = Expr::Call {
+                    callee: Box::new(expr),
+                    args,
+                    type_args: Some(ta),
+                    span,
+                    resolved_type: None,
+                };
             } else if self.check(TokenType::LParen) {
                 let span = Some(self.current_span());
                 self.advance();
@@ -237,6 +265,7 @@ impl Parser {
                 expr = Expr::Call {
                     callee: Box::new(expr),
                     args,
+                    type_args: None,
                     span,
                     resolved_type: None,
                 };

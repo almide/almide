@@ -48,7 +48,7 @@ impl Emitter {
         }
     }
 
-    pub(crate) fn gen_call(&self, callee: &Expr, args: &[Expr]) -> String {
+    pub(crate) fn gen_call(&self, callee: &Expr, args: &[Expr], type_args: Option<&Vec<crate::ast::TypeExpr>>) -> String {
         // Handle module calls — any depth of nesting
         if let Some((segments, func)) = Self::flatten_member_chain(callee) {
             // Resolve alias on the first segment
@@ -86,7 +86,11 @@ impl Emitter {
 
         if let Expr::Member { object, field, .. } = callee {
             // UFCS: receiver.method(args) => module.method(receiver, args)
-            if let Some(resolved) = Self::resolve_ufcs_module(field) {
+            // Try type-based resolution first (correct for ambiguous methods like len, contains)
+            let resolved = object.resolved_type()
+                .and_then(|rt| crate::stdlib::resolve_ufcs_by_type(field, rt))
+                .or_else(|| Self::resolve_ufcs_module(field));
+            if let Some(resolved) = resolved {
                 let mut new_args = vec![object.as_ref().clone()];
                 new_args.extend(args.iter().cloned());
                 return self.gen_module_call(resolved, field, &new_args);
@@ -150,9 +154,22 @@ impl Emitter {
             }
         }
 
-        let callee_str = self.gen_expr(callee);
+        // For generic variant unit constructors used as Call callee, get raw name
+        // (gen_expr would add "()" which breaks turbofish syntax)
+        let callee_str = match callee {
+            Expr::TypeName { name, .. } if self.generic_variant_unit_ctors.contains(name) => name.clone(),
+            Expr::Ident { name, .. } if self.generic_variant_unit_ctors.contains(name) => crate::emit_common::sanitize(name),
+            _ => self.gen_expr(callee),
+        };
+        let turbofish = match type_args {
+            Some(ta) if !ta.is_empty() => {
+                let types: Vec<String> = ta.iter().map(|t| self.gen_type(t)).collect();
+                format!("::<{}>", types.join(", "))
+            }
+            _ => String::new(),
+        };
         let args_str: Vec<String> = args.iter().map(|a| self.gen_arg(a)).collect();
-        let call = format!("{}({})", callee_str, args_str.join(", "));
+        let call = format!("{}{}({})", callee_str, turbofish, args_str.join(", "));
         // Auto-propagate ? for effect fn calls within effect context (not in tests, not suppressed)
         if self.in_effect && !self.in_test && !self.skip_auto_q.get() {
             if let Expr::Ident { name, .. } = callee {
@@ -179,9 +196,11 @@ impl Emitter {
             .cloned()
             .unwrap_or_else(|| module.to_string());
         if self.user_modules.contains(&resolved_mod) {
+            // Use gen_arg (clone Idents) for user module calls to avoid move errors
+            let user_args_str: Vec<String> = args.iter().map(|a| self.gen_arg(a)).collect();
             let rust_mod = resolved_mod.replace('.', "_");
             let safe_func = crate::emit_common::sanitize(func);
-            let call = format!("{}::{}({})", rust_mod, safe_func, args_str.join(", "));
+            let call = format!("{}::{}({})", rust_mod, safe_func, user_args_str.join(", "));
             if self.in_effect && (self.effect_fns.contains(&func.to_string()) || self.result_fns.contains(&func.to_string())) {
                 return format!("{}?", call);
             }
@@ -212,7 +231,7 @@ impl Emitter {
                 "split" => format!("almide_rt_string_split(&*{}, &*{})", args_str[0], args_str[1]),
                 "join" => format!("almide_rt_string_join(&{}, &*{})", args_str[0], args_str[1]),
                 "len" => format!("almide_rt_string_len(&*{})", args_str[0]),
-                "contains" => format!("almide_rt_string_contains(&*{}, &*{})", args_str[0], args_str[1]),
+                "contains" | "contains?" | "contains_hdlm_qm_" => format!("almide_rt_string_contains(&*{}, &*{})", args_str[0], args_str[1]),
                 "starts_with?" | "starts_with_hdlm_qm_" | "starts_with" => format!("almide_rt_string_starts_with(&*{}, &*{})", args_str[0], args_str[1]),
                 "ends_with?" | "ends_with_hdlm_qm_" | "ends_with" => format!("almide_rt_string_ends_with(&*{}, &*{})", args_str[0], args_str[1]),
                 "slice" => {

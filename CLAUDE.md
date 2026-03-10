@@ -1,3 +1,7 @@
+# Mission
+
+**Almide is the language LLMs can write most accurately.** Every design decision serves one metric: modification survival rate.
+
 # Project Rules
 
 ## Branch Strategy
@@ -80,7 +84,7 @@ When adding or modifying stdlib functions:
 - Add type signature to `src/stdlib.rs`
 - Add Rust codegen to `src/emit_rust/calls.rs`
 - Add TS codegen to `src/emit_ts/expressions.rs` (if applicable)
-- Add UFCS mapping to `stdlib.rs` `resolve_ufcs_module` (if method-callable)
+- Add UFCS mapping to `stdlib.rs` `resolve_ufcs_candidates` (if method-callable)
 - Write a test in `exercises/stdlib-test/`
 
 When modifying codegen:

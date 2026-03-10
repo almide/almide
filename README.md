@@ -21,9 +21,11 @@
 
 ## What is Almide?
 
-Almide is a language for AI to write code directly and efficiently. The design goal is that LLMs can express intent in the fewest tokens and with the least thinking, by providing the right abstractions and eliminating boilerplate.
+Almide is a statically-typed language optimized for AI-generated code. It compiles to Rust, TypeScript, and WebAssembly.
 
-The core thesis: **if AI can write a language reliably, code proliferates → training data grows → AI writes it even better → modules multiply**. Almide is designed to start this flywheel.
+The core metric is **modification survival rate** — how often code still compiles and passes tests after a series of AI-driven modifications. The language achieves this through unambiguous syntax, actionable compiler diagnostics, and a standard library that covers common patterns out of the box.
+
+The flywheel: LLMs write Almide reliably → more code is produced → training data grows → LLMs write it better → the ecosystem expands.
 
 ## Quick Start
 
@@ -55,15 +57,14 @@ Verify the installation:
 
 ```bash
 almide --version
-# almide 0.1.0
+# almide 0.4.0
 ```
 
 ### Hello World
 
 ```almd
-effect fn main(args: List[String]) -> Result[Unit, String] = {
+fn main() -> Unit = {
   println("Hello, world!")
-  ok(())
 }
 ```
 
@@ -71,12 +72,22 @@ effect fn main(args: List[String]) -> Result[Unit, String] = {
 almide run hello.almd
 ```
 
+## Features
+
+- **Multi-target** — Same source compiles to Rust (native binary), TypeScript, or WebAssembly
+- **Generics** — Functions, records, variant types, recursive variants with auto Box wrapping
+- **Pattern matching** — Exhaustive match with variant destructuring
+- **Effect functions** — `effect fn` for explicit error propagation (`Result` auto-wrapping)
+- **Pipeline operator** — `data |> transform |> output`
+- **Module system** — Packages, sub-namespaces, visibility control, diamond dependency resolution
+- **Built-in testing** — `test "name" { assert_eq(a, b) }` with `almide test`
+- **Actionable diagnostics** — Every error includes file:line, context, and a concrete fix suggestion
+
 ## Why Almide?
 
-- **Direct** — The right abstraction for each task, so AI writes intent, not workarounds
-- **Predictable** — One unambiguous way to express each concept, reducing token branching
+- **Predictable** — One canonical way to express each concept, reducing token branching for LLMs
 - **Local** — Understanding any piece of code requires only nearby context
-- **Repairable** — Compiler diagnostics guide toward a unique fix, not multiple possibilities
+- **Repairable** — Compiler diagnostics guide toward a specific fix, not multiple possibilities
 - **Compact** — High semantic density, low syntactic noise
 
 For the full design rationale, see [Design Philosophy](./docs/DESIGN.md).
@@ -84,7 +95,15 @@ For the full design rationale, see [Design Philosophy](./docs/DESIGN.md).
 ## Example
 
 ```almd
-import fs
+type Tree[T] =
+  | Leaf(T)
+  | Node(Tree[T], Tree[T])
+
+fn tree_sum(t: Tree[Int]) -> Int =
+  match t {
+    Leaf(v) => v
+    Node(left, right) => tree_sum(left) + tree_sum(right)
+  }
 
 type AppError =
   | NotFound(String)
@@ -92,21 +111,21 @@ type AppError =
   deriving From
 
 effect fn greet(name: String) -> Result[Unit, AppError] = {
-  guard string.len(name) > 0 else err(NotFound("empty name"))
+  guard name.len() > 0 else err(NotFound("empty name"))
   println("Hello, ${name}!")
   ok(())
 }
 
 effect fn main(args: List[String]) -> Result[Unit, AppError] = {
   let name = match list.get(args, 1) {
-    some(n) => n,
-    none => "world",
+    some(n) => n
+    none => "world"
   }
   greet(name)
 }
 
 test "greet succeeds" {
-  assert_eq(string.len("hello"), 5)
+  assert_eq("hello".len(), 5)
 }
 ```
 
@@ -114,8 +133,8 @@ test "greet succeeds" {
 
 Almide source (`.almd`) is compiled by a pure-Rust compiler to Rust, TypeScript, or WebAssembly.
 
-```almd
-.almd → Lexer → Parser → AST → CodeGen → .rs / .ts / .wasm
+```
+.almd → Lexer → Parser → AST → Type Checker → CodeGen → .rs / .ts / .wasm
 ```
 
 ```bash
@@ -137,7 +156,7 @@ almide app.almd --target ts      # Emit TypeScript source
   <img src="./assets/benchmark.png" alt="MiniGit Benchmark: Almide vs 15 languages" width="720">
 </p>
 
-Tested with the [MiniGit benchmark](https://github.com/almide/benchmark) — Claude Code implements a mini version control system from a spec, with 10 trials per language.
+Tested with the [MiniGit benchmark](https://github.com/almide/benchmark) — Claude Code implements a mini version control system from a spec, with multiple trials per language.
 
 | Language | Total Time | Avg Cost | Pass Rate |
 |----------|-----------|----------|-----------|
@@ -147,25 +166,18 @@ Tested with the [MiniGit benchmark](https://github.com/almide/benchmark) — Cla
 | Rust | 113.7s | $0.54 | 38/40 |
 | **Almide** | **206.3s** | **$0.59** | **8/8** |
 
-Almide's current generation speed gap reflects zero training data, not language quality. Each successful generation adds to the corpus, narrowing the gap over time. See [full results](https://github.com/almide/benchmark) for all 16 languages.
+Almide has no training data in any public LLM corpus yet, so the generation speed gap is expected to narrow as more Almide code enters training sets. See [full results](https://github.com/almide/benchmark) for all 16 languages.
 
-## Edge Performance
+## Native Performance
 
-AI-generated Almide code compiles to native binaries — no runtime, no GC, no interpreter.
+Almide compiles to Rust, which then compiles to native machine code. No runtime, no GC, no interpreter.
 
-| Metric | Almide |
-|--------|--------|
-| Binary size (minigit CLI) | **635 KB** (stripped) |
-| Runtime (100 ops) | **1.6s** |
-| Dependencies | **0** (single static binary) |
+| Metric | Value |
+|--------|-------|
+| Binary size (minigit CLI) | 635 KB (stripped) |
+| Runtime (100 ops) | 1.6s |
+| Dependencies | 0 (single static binary) |
 | WASM target | `almide build app.almd --target wasm` |
-
-Almide compiles to Rust, then to native machine code. The generated binaries are smaller and faster than Go, with no runtime overhead. For edge computing and WebAssembly, this means:
-
-- **Sub-MB binaries** that deploy instantly to CDN edge nodes
-- **Microsecond cold starts** — no interpreter initialization
-- **Zero dependencies** — single binary, no package manager needed at runtime
-- **WASM-native** — compiles to `wasm32-wasip1` without GC or runtime shims
 
 ## Editor Support
 

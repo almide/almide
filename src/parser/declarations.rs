@@ -15,6 +15,16 @@ impl Parser {
     pub(crate) fn parse_import_decl(&mut self) -> Result<Decl, String> {
         let span = self.current_span();
         self.expect(TokenType::Import)?;
+
+        // Detect JS-style `import { name }` — Almide uses `import name`
+        if self.check(TokenType::LBrace) {
+            let tok = self.current();
+            return Err(format!(
+                "Unexpected '{{' in import at line {}:{}\n  Hint: Almide imports don't use braces. Write: import json (not import {{ json }})",
+                tok.line, tok.col
+            ));
+        }
+
         let path = self.parse_module_path()?;
 
         if self.check(TokenType::Dot) && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::LBrace) {
@@ -149,7 +159,7 @@ impl Parser {
         let visibility = self.parse_visibility();
         self.expect(TokenType::Type)?;
         let name = self.expect_type_name()?;
-        let _generics = self.try_parse_generic_params()?;
+        let generics = self.try_parse_generic_params()?;
         self.expect(TokenType::Eq)?;
         self.skip_newlines();
         let ty = self.parse_type_expr()?;
@@ -165,14 +175,14 @@ impl Parser {
             }
             deriving = Some(d);
         }
-        Ok(Decl::Type { name, ty, deriving, visibility, span: Some(span) })
+        Ok(Decl::Type { name, ty, deriving, visibility, generics, span: Some(span) })
     }
 
     fn parse_trait_decl(&mut self) -> Result<Decl, String> {
         let span = self.current_span();
         self.expect(TokenType::Trait)?;
         let name = self.expect_type_name()?;
-        let _generics = self.try_parse_generic_params()?;
+        let generics = self.try_parse_generic_params()?;
         self.expect(TokenType::LBrace)?;
         self.skip_newlines();
         let mut methods: Vec<serde_json::Value> = Vec::new();
@@ -181,7 +191,7 @@ impl Parser {
             self.skip_newlines();
         }
         self.expect(TokenType::RBrace)?;
-        Ok(Decl::Trait { name, methods, span: Some(span) })
+        Ok(Decl::Trait { name, generics, methods, span: Some(span) })
     }
 
     fn parse_trait_method(&mut self) -> Result<serde_json::Value, String> {
@@ -197,7 +207,7 @@ impl Parser {
         }
         self.expect(TokenType::Fn)?;
         let name = self.expect_any_fn_name()?;
-        let _generics = self.try_parse_generic_params()?;
+        let generics = self.try_parse_generic_params()?;
         self.expect(TokenType::LParen)?;
         let params = self.parse_param_list()?;
         self.expect(TokenType::RParen)?;
@@ -234,7 +244,7 @@ impl Parser {
         let span = self.current_span();
         self.expect(TokenType::Impl)?;
         let trait_name = self.expect_type_name()?;
-        let _generics = self.try_parse_generic_params()?;
+        let generics = self.try_parse_generic_params()?;
         self.expect(TokenType::For)?;
         let for_name = self.expect_type_name()?;
         if self.check(TokenType::LBracket) {
@@ -251,6 +261,7 @@ impl Parser {
         Ok(Decl::Impl {
             trait_: trait_name,
             for_: for_name,
+            generics,
             methods,
             span: Some(span),
         })
@@ -274,12 +285,21 @@ impl Parser {
         }
         self.expect(TokenType::Fn)?;
         let name = self.expect_any_fn_name()?;
-        let _generics = self.try_parse_generic_params()?;
+        let generics = self.try_parse_generic_params()?;
         self.expect(TokenType::LParen)?;
         let params = self.parse_param_list()?;
         self.expect(TokenType::RParen)?;
         self.expect(TokenType::Arrow)?;
         let return_type = self.parse_type_expr()?;
+
+        // Detect missing `=` before body: `fn name() -> T { ... }` instead of `fn name() -> T = { ... }`
+        if self.check(TokenType::LBrace) {
+            let tok = self.current();
+            return Err(format!(
+                "Missing '=' before function body at line {}:{}\n  Hint: Almide requires '=' before the body. Write: fn {}(...) -> Type = {{ ... }}",
+                tok.line, tok.col, name
+            ));
+        }
 
         // Body is optional — @extern-only functions have no `= expr`
         let body = if self.check(TokenType::Eq) {
@@ -344,6 +364,7 @@ impl Parser {
             effect: if effect { Some(true) } else { None },
             visibility,
             extern_attrs: Vec::new(),
+            generics,
             params,
             return_type,
             body,

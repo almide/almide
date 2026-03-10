@@ -33,38 +33,97 @@ pub fn is_any_stdlib(name: &str) -> bool {
 
 /// Resolve a method name to its stdlib module (for UFCS / dot syntax).
 /// e.g. `x.trim()` → `string.trim(x)`
+/// For ambiguous methods (exist in multiple modules), returns `None`.
+/// Use `resolve_ufcs_candidates` for those.
 pub fn resolve_ufcs_module(method: &str) -> Option<&'static str> {
+    let candidates = resolve_ufcs_candidates(method);
+    if candidates.is_empty() {
+        None
+    } else {
+        // For single candidate, return it directly.
+        // For ambiguous methods, return the first candidate as a reasonable default.
+        // The Rust emitter uses this; the TS emitter uses resolve_ufcs_candidates() for runtime dispatch.
+        Some(candidates[0])
+    }
+}
+
+/// Return all stdlib modules that contain a given method name.
+/// Used for runtime dispatch when a method is ambiguous (e.g. `len` in string/list/map).
+pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
     match method {
-        "trim" | "split" | "join" | "pad_left"
+        // ── string-only ──
+        "trim" | "split" | "pad_left"
         | "starts_with" | "starts_with_hdlm_qm_" | "starts_with?"
         | "ends_with" | "ends_with_hdlm_qm_" | "ends_with?"
-        | "slice" | "to_bytes" | "contains" | "to_upper" | "to_lower"
+        | "slice" | "to_bytes" | "to_upper" | "to_lower"
         | "to_int" | "replace" | "char_at" | "lines"
-        | "chars" | "index_of" | "repeat" | "from_bytes"
+        | "chars" | "repeat" | "from_bytes"
         | "is_digit?" | "is_digit_hdlm_qm_"
         | "is_alpha?" | "is_alpha_hdlm_qm_"
         | "is_alphanumeric?" | "is_alphanumeric_hdlm_qm_"
         | "is_whitespace?" | "is_whitespace_hdlm_qm_"
-        | "pad_right" | "trim_start" | "trim_end" | "count"
+        | "pad_right" | "trim_start" | "trim_end"
         | "strip_prefix" | "strip_suffix"
-        | "replace_first" | "last_index_of" | "to_float" => Some("string"),
+        | "replace_first" | "last_index_of" | "to_float" => vec!["string"],
 
-        "get" | "get_or" | "sort" | "reverse"
-        | "each" | "map" | "filter" | "find" | "fold"
-        | "any" | "all" | "len"
+        // ── list-only ──
+        "each" | "fold" | "find" | "any" | "all"
         | "enumerate" | "zip" | "flatten" | "take" | "drop"
         | "sort_by" | "unique"
         | "last" | "chunk" | "sum" | "product"
         | "first" | "flat_map"
         | "filter_map" | "take_while" | "drop_while"
-        | "partition" | "reduce" | "group_by" => Some("list"),
+        | "partition" | "reduce" | "group_by" => vec!["list"],
 
-        "to_string" | "to_hex" => Some("int"),
-
+        // ── map-only ──
         "keys" | "values" | "entries" | "merge"
-        | "map_values" => Some("map"),
+        | "map_values" => vec!["map"],
 
-        _ => None,
+        // ── int-only ──
+        "to_string" | "to_hex" => vec!["int"],
+
+        // ── ambiguous: string + list ──
+        "reverse" => vec!["string", "list"],
+        "index_of" => vec!["string", "list"],
+        "join" => vec!["string", "list"],
+        "count" => vec!["string", "list"],
+
+        // ── ambiguous: string + list + map ──
+        "len" => vec!["string", "list", "map"],
+        "contains" | "contains?" | "contains_hdlm_qm_" => vec!["string", "list", "map"],
+        "is_empty?" | "is_empty_hdlm_qm_" => vec!["list", "map"],
+
+        // ── ambiguous: list + map ──
+        "get" | "get_or" => vec!["list", "map"],
+        "sort" => vec!["list"],
+        "map" | "filter" => vec!["list"],
+
+        _ => vec![],
+    }
+}
+
+/// Resolve UFCS module by receiver type (compile-time resolution).
+/// Returns the correct module for a method based on the known type of the receiver.
+/// Returns None if the receiver type doesn't match any candidate, or the type is Unknown.
+pub fn resolve_ufcs_by_type(method: &str, receiver_type: crate::ast::ResolvedType) -> Option<&'static str> {
+    use crate::ast::ResolvedType;
+    let candidates = resolve_ufcs_candidates(method);
+    if candidates.is_empty() {
+        return None;
+    }
+    // Map receiver type to module name
+    let module = match receiver_type {
+        ResolvedType::String => "string",
+        ResolvedType::List => "list",
+        ResolvedType::Map => "map",
+        ResolvedType::Int => "int",
+        ResolvedType::Float => "float",
+        _ => return None, // Unknown, Record, etc. — cannot resolve at compile time
+    };
+    if candidates.contains(&module) {
+        Some(module)
+    } else {
+        None
     }
 }
 
@@ -89,231 +148,231 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
 
     let sig = match (module, func) {
         // ── string ──
-        ("string", "trim") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::String, is_effect: false },
-        ("string", "split") => FnSig { params: vec![(s("s"), Ty::String), (s("sep"), Ty::String)], ret: Ty::List(Box::new(Ty::String)), is_effect: false },
-        ("string", "join") => FnSig { params: vec![(s("list"), Ty::List(Box::new(Ty::String))), (s("sep"), Ty::String)], ret: Ty::String, is_effect: false },
-        ("string", "len") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::Int, is_effect: false },
-        ("string", "pad_left") => FnSig { params: vec![(s("s"), Ty::String), (s("n"), Ty::Int), (s("ch"), Ty::String)], ret: Ty::String, is_effect: false },
-        ("string", "starts_with?") => FnSig { params: vec![(s("s"), Ty::String), (s("prefix"), Ty::String)], ret: Ty::Bool, is_effect: false },
-        ("string", "ends_with?") => FnSig { params: vec![(s("s"), Ty::String), (s("suffix"), Ty::String)], ret: Ty::Bool, is_effect: false },
-        ("string", "contains") | ("string", "contains?") => FnSig { params: vec![(s("s"), Ty::String), (s("sub"), Ty::String)], ret: Ty::Bool, is_effect: false },
-        ("string", "to_upper") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::String, is_effect: false },
-        ("string", "to_lower") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::String, is_effect: false },
-        ("string", "replace") => FnSig { params: vec![(s("s"), Ty::String), (s("from"), Ty::String), (s("to"), Ty::String)], ret: Ty::String, is_effect: false },
-        ("string", "to_int") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::Result(Box::new(Ty::Int), Box::new(Ty::String)), is_effect: false },
-        ("string", "to_bytes") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::List(Box::new(Ty::Int)), is_effect: false },
-        ("string", "char_at") => FnSig { params: vec![(s("s"), Ty::String), (s("i"), Ty::Int)], ret: Ty::Option(Box::new(Ty::String)), is_effect: false },
-        ("string", "slice") => FnSig { params: vec![(s("s"), Ty::String), (s("start"), Ty::Int), (s("end"), Ty::Int)], ret: Ty::String, is_effect: false },
-        ("string", "lines") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::List(Box::new(Ty::String)), is_effect: false },
-        ("string", "chars") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::List(Box::new(Ty::String)), is_effect: false },
-        ("string", "index_of") => FnSig { params: vec![(s("s"), Ty::String), (s("needle"), Ty::String)], ret: Ty::Option(Box::new(Ty::Int)), is_effect: false },
-        ("string", "repeat") => FnSig { params: vec![(s("s"), Ty::String), (s("n"), Ty::Int)], ret: Ty::String, is_effect: false },
-        ("string", "from_bytes") => FnSig { params: vec![(s("bytes"), Ty::List(Box::new(Ty::Int)))], ret: Ty::String, is_effect: false },
-        ("string", "is_digit?") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::Bool, is_effect: false },
-        ("string", "is_alpha?") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::Bool, is_effect: false },
-        ("string", "is_alphanumeric?") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::Bool, is_effect: false },
-        ("string", "is_whitespace?") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::Bool, is_effect: false },
+        ("string", "trim") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::String, is_effect: false },
+        ("string", "split") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String), (s("sep"), Ty::String)], ret: Ty::List(Box::new(Ty::String)), is_effect: false },
+        ("string", "join") => FnSig { generics: vec![], params: vec![(s("list"), Ty::List(Box::new(Ty::String))), (s("sep"), Ty::String)], ret: Ty::String, is_effect: false },
+        ("string", "len") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::Int, is_effect: false },
+        ("string", "pad_left") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String), (s("n"), Ty::Int), (s("ch"), Ty::String)], ret: Ty::String, is_effect: false },
+        ("string", "starts_with?") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String), (s("prefix"), Ty::String)], ret: Ty::Bool, is_effect: false },
+        ("string", "ends_with?") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String), (s("suffix"), Ty::String)], ret: Ty::Bool, is_effect: false },
+        ("string", "contains") | ("string", "contains?") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String), (s("sub"), Ty::String)], ret: Ty::Bool, is_effect: false },
+        ("string", "to_upper") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::String, is_effect: false },
+        ("string", "to_lower") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::String, is_effect: false },
+        ("string", "replace") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String), (s("from"), Ty::String), (s("to"), Ty::String)], ret: Ty::String, is_effect: false },
+        ("string", "to_int") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::Result(Box::new(Ty::Int), Box::new(Ty::String)), is_effect: false },
+        ("string", "to_bytes") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::List(Box::new(Ty::Int)), is_effect: false },
+        ("string", "char_at") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String), (s("i"), Ty::Int)], ret: Ty::Option(Box::new(Ty::String)), is_effect: false },
+        ("string", "slice") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String), (s("start"), Ty::Int), (s("end"), Ty::Int)], ret: Ty::String, is_effect: false },
+        ("string", "lines") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::List(Box::new(Ty::String)), is_effect: false },
+        ("string", "chars") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::List(Box::new(Ty::String)), is_effect: false },
+        ("string", "index_of") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String), (s("needle"), Ty::String)], ret: Ty::Option(Box::new(Ty::Int)), is_effect: false },
+        ("string", "repeat") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String), (s("n"), Ty::Int)], ret: Ty::String, is_effect: false },
+        ("string", "from_bytes") => FnSig { generics: vec![], params: vec![(s("bytes"), Ty::List(Box::new(Ty::Int)))], ret: Ty::String, is_effect: false },
+        ("string", "is_digit?") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::Bool, is_effect: false },
+        ("string", "is_alpha?") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::Bool, is_effect: false },
+        ("string", "is_alphanumeric?") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::Bool, is_effect: false },
+        ("string", "is_whitespace?") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::Bool, is_effect: false },
 
         // ── list ──
-        ("list", "len") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::Int, is_effect: false },
-        ("list", "get") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("i"), Ty::Int)], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: false },
-        ("list", "get_or") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("i"), Ty::Int), (s("default"), Ty::Unknown)], ret: Ty::Unknown, is_effect: false },
-        ("list", "sort") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
-        ("list", "reverse") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
-        ("list", "contains") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("x"), Ty::Unknown)], ret: Ty::Bool, is_effect: false },
-        ("list", "each") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Unit) })], ret: Ty::Unit, is_effect: false },
-        ("list", "map") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Unknown) })], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
-        ("list", "filter") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Bool) })], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
-        ("list", "find") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Bool) })], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: false },
-        ("list", "fold") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("init"), Ty::Unknown), (s("f"), Ty::Fn { params: vec![Ty::Unknown, Ty::Unknown], ret: Box::new(Ty::Unknown) })], ret: Ty::Unknown, is_effect: false },
-        ("list", "any") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Bool) })], ret: Ty::Bool, is_effect: false },
-        ("list", "all") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Bool) })], ret: Ty::Bool, is_effect: false },
-        ("list", "enumerate") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
-        ("list", "zip") => FnSig { params: vec![(s("a"), Ty::List(Box::new(Ty::Unknown))), (s("b"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
-        ("list", "flatten") => FnSig { params: vec![(s("xss"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
-        ("list", "take") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("n"), Ty::Int)], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
-        ("list", "drop") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("n"), Ty::Int)], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
-        ("list", "sort_by") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Unknown) })], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
-        ("list", "unique") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
-        ("list", "index_of") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("x"), Ty::Unknown)], ret: Ty::Option(Box::new(Ty::Int)), is_effect: false },
-        ("list", "last") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: false },
-        ("list", "chunk") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("n"), Ty::Int)], ret: Ty::List(Box::new(Ty::List(Box::new(Ty::Unknown)))), is_effect: false },
-        ("list", "sum") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Int)))], ret: Ty::Int, is_effect: false },
-        ("list", "product") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Int)))], ret: Ty::Int, is_effect: false },
-        ("list", "first") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: false },
-        ("list", "is_empty?") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::Bool, is_effect: false },
-        ("list", "flat_map") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::List(Box::new(Ty::Unknown))) })], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
-        ("list", "min") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: false },
-        ("list", "max") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: false },
-        ("list", "join") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::String))), (s("sep"), Ty::String)], ret: Ty::String, is_effect: false },
-        ("list", "filter_map") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Option(Box::new(Ty::Unknown))) })], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
-        ("list", "take_while") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Bool) })], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
-        ("list", "drop_while") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Bool) })], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
-        ("list", "count") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Bool) })], ret: Ty::Int, is_effect: false },
-        ("list", "partition") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Bool) })], ret: Ty::Unknown, is_effect: false },
-        ("list", "reduce") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown, Ty::Unknown], ret: Box::new(Ty::Unknown) })], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: false },
-        ("list", "group_by") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Unknown) })], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::List(Box::new(Ty::Unknown)))), is_effect: false },
+        ("list", "len") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::Int, is_effect: false },
+        ("list", "get") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("i"), Ty::Int)], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "get_or") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("i"), Ty::Int), (s("default"), Ty::Unknown)], ret: Ty::Unknown, is_effect: false },
+        ("list", "sort") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "reverse") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "contains") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("x"), Ty::Unknown)], ret: Ty::Bool, is_effect: false },
+        ("list", "each") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Unit) })], ret: Ty::Unit, is_effect: false },
+        ("list", "map") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Unknown) })], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "filter") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Bool) })], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "find") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Bool) })], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "fold") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("init"), Ty::Unknown), (s("f"), Ty::Fn { params: vec![Ty::Unknown, Ty::Unknown], ret: Box::new(Ty::Unknown) })], ret: Ty::Unknown, is_effect: false },
+        ("list", "any") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Bool) })], ret: Ty::Bool, is_effect: false },
+        ("list", "all") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Bool) })], ret: Ty::Bool, is_effect: false },
+        ("list", "enumerate") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "zip") => FnSig { generics: vec![], params: vec![(s("a"), Ty::List(Box::new(Ty::Unknown))), (s("b"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "flatten") => FnSig { generics: vec![], params: vec![(s("xss"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "take") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("n"), Ty::Int)], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "drop") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("n"), Ty::Int)], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "sort_by") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Unknown) })], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "unique") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "index_of") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("x"), Ty::Unknown)], ret: Ty::Option(Box::new(Ty::Int)), is_effect: false },
+        ("list", "last") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "chunk") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("n"), Ty::Int)], ret: Ty::List(Box::new(Ty::List(Box::new(Ty::Unknown)))), is_effect: false },
+        ("list", "sum") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Int)))], ret: Ty::Int, is_effect: false },
+        ("list", "product") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Int)))], ret: Ty::Int, is_effect: false },
+        ("list", "first") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "is_empty?") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::Bool, is_effect: false },
+        ("list", "flat_map") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::List(Box::new(Ty::Unknown))) })], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "min") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "max") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "join") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::String))), (s("sep"), Ty::String)], ret: Ty::String, is_effect: false },
+        ("list", "filter_map") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Option(Box::new(Ty::Unknown))) })], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "take_while") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Bool) })], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "drop_while") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Bool) })], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "count") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Bool) })], ret: Ty::Int, is_effect: false },
+        ("list", "partition") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Bool) })], ret: Ty::Unknown, is_effect: false },
+        ("list", "reduce") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown, Ty::Unknown], ret: Box::new(Ty::Unknown) })], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "group_by") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Unknown) })], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::List(Box::new(Ty::Unknown)))), is_effect: false },
 
         // ── map ──
-        ("map", "new") => FnSig { params: vec![], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)), is_effect: false },
-        ("map", "get") => FnSig { params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown))), (s("key"), Ty::Unknown)], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: false },
-        ("map", "get_or") => FnSig { params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown))), (s("key"), Ty::Unknown), (s("default"), Ty::Unknown)], ret: Ty::Unknown, is_effect: false },
-        ("map", "set") => FnSig { params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown))), (s("key"), Ty::Unknown), (s("value"), Ty::Unknown)], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)), is_effect: false },
-        ("map", "contains") => FnSig { params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown))), (s("key"), Ty::Unknown)], ret: Ty::Bool, is_effect: false },
-        ("map", "remove") => FnSig { params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown))), (s("key"), Ty::Unknown)], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)), is_effect: false },
-        ("map", "keys") => FnSig { params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
-        ("map", "values") => FnSig { params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
-        ("map", "len") => FnSig { params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)))], ret: Ty::Int, is_effect: false },
-        ("map", "entries") => FnSig { params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
-        ("map", "from_list") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Unknown) })], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)), is_effect: false },
-        ("map", "merge") => FnSig { params: vec![(s("a"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown))), (s("b"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)))], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)), is_effect: false },
-        ("map", "is_empty?") => FnSig { params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)))], ret: Ty::Bool, is_effect: false },
-        ("map", "map_values") => FnSig { params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Unknown) })], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)), is_effect: false },
-        ("map", "filter") => FnSig { params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown, Ty::Unknown], ret: Box::new(Ty::Bool) })], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)), is_effect: false },
-        ("map", "from_entries") => FnSig { params: vec![(s("entries"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)), is_effect: false },
+        ("map", "new") => FnSig { generics: vec![], params: vec![], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)), is_effect: false },
+        ("map", "get") => FnSig { generics: vec![], params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown))), (s("key"), Ty::Unknown)], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: false },
+        ("map", "get_or") => FnSig { generics: vec![], params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown))), (s("key"), Ty::Unknown), (s("default"), Ty::Unknown)], ret: Ty::Unknown, is_effect: false },
+        ("map", "set") => FnSig { generics: vec![], params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown))), (s("key"), Ty::Unknown), (s("value"), Ty::Unknown)], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)), is_effect: false },
+        ("map", "contains") => FnSig { generics: vec![], params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown))), (s("key"), Ty::Unknown)], ret: Ty::Bool, is_effect: false },
+        ("map", "remove") => FnSig { generics: vec![], params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown))), (s("key"), Ty::Unknown)], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)), is_effect: false },
+        ("map", "keys") => FnSig { generics: vec![], params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("map", "values") => FnSig { generics: vec![], params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("map", "len") => FnSig { generics: vec![], params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)))], ret: Ty::Int, is_effect: false },
+        ("map", "entries") => FnSig { generics: vec![], params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("map", "from_list") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Unknown) })], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)), is_effect: false },
+        ("map", "merge") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown))), (s("b"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)))], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)), is_effect: false },
+        ("map", "is_empty?") => FnSig { generics: vec![], params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)))], ret: Ty::Bool, is_effect: false },
+        ("map", "map_values") => FnSig { generics: vec![], params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown], ret: Box::new(Ty::Unknown) })], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)), is_effect: false },
+        ("map", "filter") => FnSig { generics: vec![], params: vec![(s("m"), Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown))), (s("f"), Ty::Fn { params: vec![Ty::Unknown, Ty::Unknown], ret: Box::new(Ty::Bool) })], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)), is_effect: false },
+        ("map", "from_entries") => FnSig { generics: vec![], params: vec![(s("entries"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)), is_effect: false },
 
         // ── string (additional) ──
-        ("string", "pad_right") => FnSig { params: vec![(s("s"), Ty::String), (s("n"), Ty::Int), (s("ch"), Ty::String)], ret: Ty::String, is_effect: false },
-        ("string", "trim_start") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::String, is_effect: false },
-        ("string", "trim_end") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::String, is_effect: false },
-        ("string", "count") => FnSig { params: vec![(s("s"), Ty::String), (s("sub"), Ty::String)], ret: Ty::Int, is_effect: false },
-        ("string", "is_empty?") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::Bool, is_effect: false },
-        ("string", "reverse") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::String, is_effect: false },
-        ("string", "strip_prefix") => FnSig { params: vec![(s("s"), Ty::String), (s("prefix"), Ty::String)], ret: Ty::Option(Box::new(Ty::String)), is_effect: false },
-        ("string", "strip_suffix") => FnSig { params: vec![(s("s"), Ty::String), (s("suffix"), Ty::String)], ret: Ty::Option(Box::new(Ty::String)), is_effect: false },
-        ("string", "replace_first") => FnSig { params: vec![(s("s"), Ty::String), (s("from"), Ty::String), (s("to"), Ty::String)], ret: Ty::String, is_effect: false },
-        ("string", "last_index_of") => FnSig { params: vec![(s("s"), Ty::String), (s("needle"), Ty::String)], ret: Ty::Option(Box::new(Ty::Int)), is_effect: false },
-        ("string", "to_float") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::Result(Box::new(Ty::Float), Box::new(Ty::String)), is_effect: false },
+        ("string", "pad_right") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String), (s("n"), Ty::Int), (s("ch"), Ty::String)], ret: Ty::String, is_effect: false },
+        ("string", "trim_start") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::String, is_effect: false },
+        ("string", "trim_end") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::String, is_effect: false },
+        ("string", "count") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String), (s("sub"), Ty::String)], ret: Ty::Int, is_effect: false },
+        ("string", "is_empty?") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::Bool, is_effect: false },
+        ("string", "reverse") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::String, is_effect: false },
+        ("string", "strip_prefix") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String), (s("prefix"), Ty::String)], ret: Ty::Option(Box::new(Ty::String)), is_effect: false },
+        ("string", "strip_suffix") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String), (s("suffix"), Ty::String)], ret: Ty::Option(Box::new(Ty::String)), is_effect: false },
+        ("string", "replace_first") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String), (s("from"), Ty::String), (s("to"), Ty::String)], ret: Ty::String, is_effect: false },
+        ("string", "last_index_of") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String), (s("needle"), Ty::String)], ret: Ty::Option(Box::new(Ty::Int)), is_effect: false },
+        ("string", "to_float") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::Result(Box::new(Ty::Float), Box::new(Ty::String)), is_effect: false },
 
         // ── int ──
-        ("int", "to_string") => FnSig { params: vec![(s("n"), Ty::Int)], ret: Ty::String, is_effect: false },
-        ("int", "to_hex") => FnSig { params: vec![(s("n"), Ty::Int)], ret: Ty::String, is_effect: false },
-        ("int", "parse") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::Result(Box::new(Ty::Int), Box::new(Ty::String)), is_effect: false },
-        ("int", "parse_hex") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::Result(Box::new(Ty::Int), Box::new(Ty::String)), is_effect: false },
-        ("int", "abs") => FnSig { params: vec![(s("n"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("int", "min") => FnSig { params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("int", "max") => FnSig { params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("int", "to_string") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Int)], ret: Ty::String, is_effect: false },
+        ("int", "to_hex") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Int)], ret: Ty::String, is_effect: false },
+        ("int", "parse") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::Result(Box::new(Ty::Int), Box::new(Ty::String)), is_effect: false },
+        ("int", "parse_hex") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::Result(Box::new(Ty::Int), Box::new(Ty::String)), is_effect: false },
+        ("int", "abs") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("int", "min") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("int", "max") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
         // bitwise operations
-        ("int", "band") => FnSig { params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("int", "bor") => FnSig { params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("int", "bxor") => FnSig { params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("int", "bshl") => FnSig { params: vec![(s("a"), Ty::Int), (s("n"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("int", "bshr") => FnSig { params: vec![(s("a"), Ty::Int), (s("n"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("int", "bnot") => FnSig { params: vec![(s("a"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("int", "band") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("int", "bor") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("int", "bxor") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("int", "bshl") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int), (s("n"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("int", "bshr") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int), (s("n"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("int", "bnot") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int)], ret: Ty::Int, is_effect: false },
         // wrapping arithmetic (for hash algorithms operating on fixed-width integers)
-        ("int", "wrap_add") => FnSig { params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int), (s("bits"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("int", "wrap_mul") => FnSig { params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int), (s("bits"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("int", "rotate_right") => FnSig { params: vec![(s("a"), Ty::Int), (s("n"), Ty::Int), (s("bits"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("int", "rotate_left") => FnSig { params: vec![(s("a"), Ty::Int), (s("n"), Ty::Int), (s("bits"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("int", "to_u32") => FnSig { params: vec![(s("a"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("int", "to_u8") => FnSig { params: vec![(s("a"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("int", "clamp") => FnSig { params: vec![(s("n"), Ty::Int), (s("lo"), Ty::Int), (s("hi"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("int", "wrap_add") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int), (s("bits"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("int", "wrap_mul") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int), (s("bits"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("int", "rotate_right") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int), (s("n"), Ty::Int), (s("bits"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("int", "rotate_left") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int), (s("n"), Ty::Int), (s("bits"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("int", "to_u32") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("int", "to_u8") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("int", "clamp") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Int), (s("lo"), Ty::Int), (s("hi"), Ty::Int)], ret: Ty::Int, is_effect: false },
 
         // ── float ──
-        ("float", "to_string") => FnSig { params: vec![(s("n"), Ty::Float)], ret: Ty::String, is_effect: false },
-        ("float", "to_int") => FnSig { params: vec![(s("n"), Ty::Float)], ret: Ty::Int, is_effect: false },
-        ("float", "round") => FnSig { params: vec![(s("n"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("float", "floor") => FnSig { params: vec![(s("n"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("float", "ceil") => FnSig { params: vec![(s("n"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("float", "abs") => FnSig { params: vec![(s("n"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("float", "sqrt") => FnSig { params: vec![(s("n"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("float", "parse") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::Result(Box::new(Ty::Float), Box::new(Ty::String)), is_effect: false },
-        ("float", "from_int") => FnSig { params: vec![(s("n"), Ty::Int)], ret: Ty::Float, is_effect: false },
-        ("float", "min") => FnSig { params: vec![(s("a"), Ty::Float), (s("b"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("float", "max") => FnSig { params: vec![(s("a"), Ty::Float), (s("b"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("float", "clamp") => FnSig { params: vec![(s("n"), Ty::Float), (s("lo"), Ty::Float), (s("hi"), Ty::Float)], ret: Ty::Float, is_effect: false },
+        ("float", "to_string") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Float)], ret: Ty::String, is_effect: false },
+        ("float", "to_int") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Float)], ret: Ty::Int, is_effect: false },
+        ("float", "round") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Float)], ret: Ty::Float, is_effect: false },
+        ("float", "floor") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Float)], ret: Ty::Float, is_effect: false },
+        ("float", "ceil") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Float)], ret: Ty::Float, is_effect: false },
+        ("float", "abs") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Float)], ret: Ty::Float, is_effect: false },
+        ("float", "sqrt") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Float)], ret: Ty::Float, is_effect: false },
+        ("float", "parse") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::Result(Box::new(Ty::Float), Box::new(Ty::String)), is_effect: false },
+        ("float", "from_int") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Int)], ret: Ty::Float, is_effect: false },
+        ("float", "min") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Float), (s("b"), Ty::Float)], ret: Ty::Float, is_effect: false },
+        ("float", "max") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Float), (s("b"), Ty::Float)], ret: Ty::Float, is_effect: false },
+        ("float", "clamp") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Float), (s("lo"), Ty::Float), (s("hi"), Ty::Float)], ret: Ty::Float, is_effect: false },
 
         // ── json ──
-        ("json", "parse") => FnSig { params: vec![(s("text"), Ty::String)], ret: Ty::Result(Box::new(Ty::Named(s("Json"))), Box::new(Ty::String)), is_effect: false },
-        ("json", "stringify") => FnSig { params: vec![(s("j"), Ty::Named(s("Json")))], ret: Ty::String, is_effect: false },
-        ("json", "get") => FnSig { params: vec![(s("j"), Ty::Named(s("Json"))), (s("key"), Ty::String)], ret: Ty::Option(Box::new(Ty::Named(s("Json")))), is_effect: false },
-        ("json", "get_string") => FnSig { params: vec![(s("j"), Ty::Named(s("Json"))), (s("key"), Ty::String)], ret: Ty::Option(Box::new(Ty::String)), is_effect: false },
-        ("json", "get_int") => FnSig { params: vec![(s("j"), Ty::Named(s("Json"))), (s("key"), Ty::String)], ret: Ty::Option(Box::new(Ty::Int)), is_effect: false },
-        ("json", "get_bool") => FnSig { params: vec![(s("j"), Ty::Named(s("Json"))), (s("key"), Ty::String)], ret: Ty::Option(Box::new(Ty::Bool)), is_effect: false },
-        ("json", "get_array") => FnSig { params: vec![(s("j"), Ty::Named(s("Json"))), (s("key"), Ty::String)], ret: Ty::Option(Box::new(Ty::List(Box::new(Ty::Named(s("Json")))))), is_effect: false },
-        ("json", "keys") => FnSig { params: vec![(s("j"), Ty::Named(s("Json")))], ret: Ty::List(Box::new(Ty::String)), is_effect: false },
-        ("json", "to_string") => FnSig { params: vec![(s("j"), Ty::Named(s("Json")))], ret: Ty::Option(Box::new(Ty::String)), is_effect: false },
-        ("json", "to_int") => FnSig { params: vec![(s("j"), Ty::Named(s("Json")))], ret: Ty::Option(Box::new(Ty::Int)), is_effect: false },
-        ("json", "from_string") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::Named(s("Json")), is_effect: false },
-        ("json", "from_int") => FnSig { params: vec![(s("n"), Ty::Int)], ret: Ty::Named(s("Json")), is_effect: false },
-        ("json", "from_bool") => FnSig { params: vec![(s("b"), Ty::Bool)], ret: Ty::Named(s("Json")), is_effect: false },
-        ("json", "null") => FnSig { params: vec![], ret: Ty::Named(s("Json")), is_effect: false },
-        ("json", "array") => FnSig { params: vec![(s("items"), Ty::List(Box::new(Ty::Named(s("Json")))))], ret: Ty::Named(s("Json")), is_effect: false },
-        ("json", "from_map") => FnSig { params: vec![(s("m"), Ty::Map(Box::new(Ty::String), Box::new(Ty::Named(s("Json")))))], ret: Ty::Named(s("Json")), is_effect: false },
-        ("json", "get_float") => FnSig { params: vec![(s("j"), Ty::Named(s("Json"))), (s("key"), Ty::String)], ret: Ty::Option(Box::new(Ty::Float)), is_effect: false },
-        ("json", "from_float") => FnSig { params: vec![(s("n"), Ty::Float)], ret: Ty::Named(s("Json")), is_effect: false },
-        ("json", "stringify_pretty") => FnSig { params: vec![(s("j"), Ty::Named(s("Json")))], ret: Ty::String, is_effect: false },
+        ("json", "parse") => FnSig { generics: vec![], params: vec![(s("text"), Ty::String)], ret: Ty::Result(Box::new(Ty::Named(s("Json"))), Box::new(Ty::String)), is_effect: false },
+        ("json", "stringify") => FnSig { generics: vec![], params: vec![(s("j"), Ty::Named(s("Json")))], ret: Ty::String, is_effect: false },
+        ("json", "get") => FnSig { generics: vec![], params: vec![(s("j"), Ty::Named(s("Json"))), (s("key"), Ty::String)], ret: Ty::Option(Box::new(Ty::Named(s("Json")))), is_effect: false },
+        ("json", "get_string") => FnSig { generics: vec![], params: vec![(s("j"), Ty::Named(s("Json"))), (s("key"), Ty::String)], ret: Ty::Option(Box::new(Ty::String)), is_effect: false },
+        ("json", "get_int") => FnSig { generics: vec![], params: vec![(s("j"), Ty::Named(s("Json"))), (s("key"), Ty::String)], ret: Ty::Option(Box::new(Ty::Int)), is_effect: false },
+        ("json", "get_bool") => FnSig { generics: vec![], params: vec![(s("j"), Ty::Named(s("Json"))), (s("key"), Ty::String)], ret: Ty::Option(Box::new(Ty::Bool)), is_effect: false },
+        ("json", "get_array") => FnSig { generics: vec![], params: vec![(s("j"), Ty::Named(s("Json"))), (s("key"), Ty::String)], ret: Ty::Option(Box::new(Ty::List(Box::new(Ty::Named(s("Json")))))), is_effect: false },
+        ("json", "keys") => FnSig { generics: vec![], params: vec![(s("j"), Ty::Named(s("Json")))], ret: Ty::List(Box::new(Ty::String)), is_effect: false },
+        ("json", "to_string") => FnSig { generics: vec![], params: vec![(s("j"), Ty::Named(s("Json")))], ret: Ty::Option(Box::new(Ty::String)), is_effect: false },
+        ("json", "to_int") => FnSig { generics: vec![], params: vec![(s("j"), Ty::Named(s("Json")))], ret: Ty::Option(Box::new(Ty::Int)), is_effect: false },
+        ("json", "from_string") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::Named(s("Json")), is_effect: false },
+        ("json", "from_int") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Int)], ret: Ty::Named(s("Json")), is_effect: false },
+        ("json", "from_bool") => FnSig { generics: vec![], params: vec![(s("b"), Ty::Bool)], ret: Ty::Named(s("Json")), is_effect: false },
+        ("json", "null") => FnSig { generics: vec![], params: vec![], ret: Ty::Named(s("Json")), is_effect: false },
+        ("json", "array") => FnSig { generics: vec![], params: vec![(s("items"), Ty::List(Box::new(Ty::Named(s("Json")))))], ret: Ty::Named(s("Json")), is_effect: false },
+        ("json", "from_map") => FnSig { generics: vec![], params: vec![(s("m"), Ty::Map(Box::new(Ty::String), Box::new(Ty::Named(s("Json")))))], ret: Ty::Named(s("Json")), is_effect: false },
+        ("json", "get_float") => FnSig { generics: vec![], params: vec![(s("j"), Ty::Named(s("Json"))), (s("key"), Ty::String)], ret: Ty::Option(Box::new(Ty::Float)), is_effect: false },
+        ("json", "from_float") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Float)], ret: Ty::Named(s("Json")), is_effect: false },
+        ("json", "stringify_pretty") => FnSig { generics: vec![], params: vec![(s("j"), Ty::Named(s("Json")))], ret: Ty::String, is_effect: false },
 
 
         // ── env ──
-        ("env", "unix_timestamp") => FnSig { params: vec![], ret: Ty::Int, is_effect: true },
-        ("env", "args") => FnSig { params: vec![], ret: Ty::List(Box::new(Ty::String)), is_effect: true },
-        ("env", "get") => FnSig { params: vec![(s("name"), Ty::String)], ret: Ty::Option(Box::new(Ty::String)), is_effect: true },
-        ("env", "set") => FnSig { params: vec![(s("name"), Ty::String), (s("value"), Ty::String)], ret: Ty::Unit, is_effect: true },
-        ("env", "cwd") => FnSig { params: vec![], ret: Ty::Result(Box::new(Ty::String), Box::new(Ty::String)), is_effect: true },
-        ("env", "millis") => FnSig { params: vec![], ret: Ty::Int, is_effect: true },
-        ("env", "sleep_ms") => FnSig { params: vec![(s("ms"), Ty::Int)], ret: Ty::Unit, is_effect: true },
+        ("env", "unix_timestamp") => FnSig { generics: vec![], params: vec![], ret: Ty::Int, is_effect: true },
+        ("env", "args") => FnSig { generics: vec![], params: vec![], ret: Ty::List(Box::new(Ty::String)), is_effect: true },
+        ("env", "get") => FnSig { generics: vec![], params: vec![(s("name"), Ty::String)], ret: Ty::Option(Box::new(Ty::String)), is_effect: true },
+        ("env", "set") => FnSig { generics: vec![], params: vec![(s("name"), Ty::String), (s("value"), Ty::String)], ret: Ty::Unit, is_effect: true },
+        ("env", "cwd") => FnSig { generics: vec![], params: vec![], ret: Ty::Result(Box::new(Ty::String), Box::new(Ty::String)), is_effect: true },
+        ("env", "millis") => FnSig { generics: vec![], params: vec![], ret: Ty::Int, is_effect: true },
+        ("env", "sleep_ms") => FnSig { generics: vec![], params: vec![(s("ms"), Ty::Int)], ret: Ty::Unit, is_effect: true },
 
         // ── process ──
-        ("process", "exec") => FnSig { params: vec![(s("cmd"), Ty::String), (s("args"), Ty::List(Box::new(Ty::String)))], ret: Ty::Result(Box::new(Ty::String), Box::new(Ty::String)), is_effect: true },
-        ("process", "exit") => FnSig { params: vec![(s("code"), Ty::Int)], ret: Ty::Unit, is_effect: true },
-        ("process", "stdin_lines") => FnSig { params: vec![], ret: Ty::Result(Box::new(Ty::List(Box::new(Ty::String))), Box::new(Ty::String)), is_effect: true },
-        ("process", "exec_status") => FnSig { params: vec![(s("cmd"), Ty::String), (s("args"), Ty::List(Box::new(Ty::String)))], ret: Ty::Result(Box::new(Ty::Record { fields: vec![(s("code"), Ty::Int), (s("stdout"), Ty::String), (s("stderr"), Ty::String)] }), Box::new(Ty::String)), is_effect: true },
+        ("process", "exec") => FnSig { generics: vec![], params: vec![(s("cmd"), Ty::String), (s("args"), Ty::List(Box::new(Ty::String)))], ret: Ty::Result(Box::new(Ty::String), Box::new(Ty::String)), is_effect: true },
+        ("process", "exit") => FnSig { generics: vec![], params: vec![(s("code"), Ty::Int)], ret: Ty::Unit, is_effect: true },
+        ("process", "stdin_lines") => FnSig { generics: vec![], params: vec![], ret: Ty::Result(Box::new(Ty::List(Box::new(Ty::String))), Box::new(Ty::String)), is_effect: true },
+        ("process", "exec_status") => FnSig { generics: vec![], params: vec![(s("cmd"), Ty::String), (s("args"), Ty::List(Box::new(Ty::String)))], ret: Ty::Result(Box::new(Ty::Record { fields: vec![(s("code"), Ty::Int), (s("stdout"), Ty::String), (s("stderr"), Ty::String)] }), Box::new(Ty::String)), is_effect: true },
 
         // ── fs ──
-        ("fs", "read_text") => FnSig { params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::String), Box::new(io_err())), is_effect: true },
-        ("fs", "read_bytes") => FnSig { params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::List(Box::new(Ty::Int))), Box::new(io_err())), is_effect: true },
-        ("fs", "write") => FnSig { params: vec![(s("path"), Ty::String), (s("content"), Ty::String)], ret: Ty::Result(Box::new(Ty::Unit), Box::new(io_err())), is_effect: true },
-        ("fs", "write_bytes") => FnSig { params: vec![(s("path"), Ty::String), (s("bytes"), Ty::List(Box::new(Ty::Int)))], ret: Ty::Result(Box::new(Ty::Unit), Box::new(io_err())), is_effect: true },
-        ("fs", "append") => FnSig { params: vec![(s("path"), Ty::String), (s("content"), Ty::String)], ret: Ty::Result(Box::new(Ty::Unit), Box::new(io_err())), is_effect: true },
-        ("fs", "mkdir_p") => FnSig { params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::Unit), Box::new(io_err())), is_effect: true },
-        ("fs", "exists?") => FnSig { params: vec![(s("path"), Ty::String)], ret: Ty::Bool, is_effect: true },
-        ("fs", "read_lines") => FnSig { params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::List(Box::new(Ty::String))), Box::new(io_err())), is_effect: true },
-        ("fs", "remove") => FnSig { params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::Unit), Box::new(io_err())), is_effect: true },
-        ("fs", "list_dir") => FnSig { params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::List(Box::new(Ty::String))), Box::new(io_err())), is_effect: true },
-        ("fs", "is_dir?") => FnSig { params: vec![(s("path"), Ty::String)], ret: Ty::Bool, is_effect: true },
-        ("fs", "is_file?") => FnSig { params: vec![(s("path"), Ty::String)], ret: Ty::Bool, is_effect: true },
-        ("fs", "copy") => FnSig { params: vec![(s("src"), Ty::String), (s("dst"), Ty::String)], ret: Ty::Result(Box::new(Ty::Unit), Box::new(io_err())), is_effect: true },
-        ("fs", "rename") => FnSig { params: vec![(s("src"), Ty::String), (s("dst"), Ty::String)], ret: Ty::Result(Box::new(Ty::Unit), Box::new(io_err())), is_effect: true },
-        ("fs", "walk") => FnSig { params: vec![(s("dir"), Ty::String)], ret: Ty::Result(Box::new(Ty::List(Box::new(Ty::String))), Box::new(io_err())), is_effect: true },
-        ("fs", "stat") => FnSig { params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::Record { fields: vec![(s("size"), Ty::Int), (s("is_dir"), Ty::Bool), (s("is_file"), Ty::Bool), (s("modified"), Ty::Int)] }), Box::new(io_err())), is_effect: true },
+        ("fs", "read_text") => FnSig { generics: vec![], params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::String), Box::new(io_err())), is_effect: true },
+        ("fs", "read_bytes") => FnSig { generics: vec![], params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::List(Box::new(Ty::Int))), Box::new(io_err())), is_effect: true },
+        ("fs", "write") => FnSig { generics: vec![], params: vec![(s("path"), Ty::String), (s("content"), Ty::String)], ret: Ty::Result(Box::new(Ty::Unit), Box::new(io_err())), is_effect: true },
+        ("fs", "write_bytes") => FnSig { generics: vec![], params: vec![(s("path"), Ty::String), (s("bytes"), Ty::List(Box::new(Ty::Int)))], ret: Ty::Result(Box::new(Ty::Unit), Box::new(io_err())), is_effect: true },
+        ("fs", "append") => FnSig { generics: vec![], params: vec![(s("path"), Ty::String), (s("content"), Ty::String)], ret: Ty::Result(Box::new(Ty::Unit), Box::new(io_err())), is_effect: true },
+        ("fs", "mkdir_p") => FnSig { generics: vec![], params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::Unit), Box::new(io_err())), is_effect: true },
+        ("fs", "exists?") => FnSig { generics: vec![], params: vec![(s("path"), Ty::String)], ret: Ty::Bool, is_effect: true },
+        ("fs", "read_lines") => FnSig { generics: vec![], params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::List(Box::new(Ty::String))), Box::new(io_err())), is_effect: true },
+        ("fs", "remove") => FnSig { generics: vec![], params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::Unit), Box::new(io_err())), is_effect: true },
+        ("fs", "list_dir") => FnSig { generics: vec![], params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::List(Box::new(Ty::String))), Box::new(io_err())), is_effect: true },
+        ("fs", "is_dir?") => FnSig { generics: vec![], params: vec![(s("path"), Ty::String)], ret: Ty::Bool, is_effect: true },
+        ("fs", "is_file?") => FnSig { generics: vec![], params: vec![(s("path"), Ty::String)], ret: Ty::Bool, is_effect: true },
+        ("fs", "copy") => FnSig { generics: vec![], params: vec![(s("src"), Ty::String), (s("dst"), Ty::String)], ret: Ty::Result(Box::new(Ty::Unit), Box::new(io_err())), is_effect: true },
+        ("fs", "rename") => FnSig { generics: vec![], params: vec![(s("src"), Ty::String), (s("dst"), Ty::String)], ret: Ty::Result(Box::new(Ty::Unit), Box::new(io_err())), is_effect: true },
+        ("fs", "walk") => FnSig { generics: vec![], params: vec![(s("dir"), Ty::String)], ret: Ty::Result(Box::new(Ty::List(Box::new(Ty::String))), Box::new(io_err())), is_effect: true },
+        ("fs", "stat") => FnSig { generics: vec![], params: vec![(s("path"), Ty::String)], ret: Ty::Result(Box::new(Ty::Record { fields: vec![(s("size"), Ty::Int), (s("is_dir"), Ty::Bool), (s("is_file"), Ty::Bool), (s("modified"), Ty::Int)] }), Box::new(io_err())), is_effect: true },
 
         // ── math ──
-        ("math", "min") => FnSig { params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("math", "max") => FnSig { params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("math", "abs") => FnSig { params: vec![(s("n"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("math", "pow") => FnSig { params: vec![(s("base"), Ty::Int), (s("exp"), Ty::Int)], ret: Ty::Int, is_effect: false },
-        ("math", "pi") => FnSig { params: vec![], ret: Ty::Float, is_effect: false },
-        ("math", "e") => FnSig { params: vec![], ret: Ty::Float, is_effect: false },
-        ("math", "sin") => FnSig { params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("math", "cos") => FnSig { params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("math", "tan") => FnSig { params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("math", "log") => FnSig { params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("math", "exp") => FnSig { params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
-        ("math", "sqrt") => FnSig { params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
+        ("math", "min") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("math", "max") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Int), (s("b"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("math", "abs") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("math", "pow") => FnSig { generics: vec![], params: vec![(s("base"), Ty::Int), (s("exp"), Ty::Int)], ret: Ty::Int, is_effect: false },
+        ("math", "pi") => FnSig { generics: vec![], params: vec![], ret: Ty::Float, is_effect: false },
+        ("math", "e") => FnSig { generics: vec![], params: vec![], ret: Ty::Float, is_effect: false },
+        ("math", "sin") => FnSig { generics: vec![], params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
+        ("math", "cos") => FnSig { generics: vec![], params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
+        ("math", "tan") => FnSig { generics: vec![], params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
+        ("math", "log") => FnSig { generics: vec![], params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
+        ("math", "exp") => FnSig { generics: vec![], params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
+        ("math", "sqrt") => FnSig { generics: vec![], params: vec![(s("x"), Ty::Float)], ret: Ty::Float, is_effect: false },
 
         // ── random ──
-        ("random", "int") => FnSig { params: vec![(s("min"), Ty::Int), (s("max"), Ty::Int)], ret: Ty::Int, is_effect: true },
-        ("random", "float") => FnSig { params: vec![], ret: Ty::Float, is_effect: true },
-        ("random", "choice") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: true },
-        ("random", "shuffle") => FnSig { params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: true },
+        ("random", "int") => FnSig { generics: vec![], params: vec![(s("min"), Ty::Int), (s("max"), Ty::Int)], ret: Ty::Int, is_effect: true },
+        ("random", "float") => FnSig { generics: vec![], params: vec![], ret: Ty::Float, is_effect: true },
+        ("random", "choice") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: true },
+        ("random", "shuffle") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: true },
 
         // ── time: fully migrated to stdlib/time.almd ──
 
         // ── io ──
-        ("io", "read_line") => FnSig { params: vec![], ret: Ty::String, is_effect: true },
-        ("io", "print") => FnSig { params: vec![(s("s"), Ty::String)], ret: Ty::Unit, is_effect: true },
-        ("io", "read_all") => FnSig { params: vec![], ret: Ty::String, is_effect: true },
+        ("io", "read_line") => FnSig { generics: vec![], params: vec![], ret: Ty::String, is_effect: true },
+        ("io", "print") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::Unit, is_effect: true },
+        ("io", "read_all") => FnSig { generics: vec![], params: vec![], ret: Ty::String, is_effect: true },
 
         // ── regex ──
-        ("regex", "match?") => FnSig { params: vec![(s("pat"), Ty::String), (s("s"), Ty::String)], ret: Ty::Bool, is_effect: false },
-        ("regex", "full_match?") => FnSig { params: vec![(s("pat"), Ty::String), (s("s"), Ty::String)], ret: Ty::Bool, is_effect: false },
-        ("regex", "find") => FnSig { params: vec![(s("pat"), Ty::String), (s("s"), Ty::String)], ret: Ty::Option(Box::new(Ty::String)), is_effect: false },
-        ("regex", "find_all") => FnSig { params: vec![(s("pat"), Ty::String), (s("s"), Ty::String)], ret: Ty::List(Box::new(Ty::String)), is_effect: false },
-        ("regex", "replace") => FnSig { params: vec![(s("pat"), Ty::String), (s("s"), Ty::String), (s("rep"), Ty::String)], ret: Ty::String, is_effect: false },
-        ("regex", "replace_first") => FnSig { params: vec![(s("pat"), Ty::String), (s("s"), Ty::String), (s("rep"), Ty::String)], ret: Ty::String, is_effect: false },
-        ("regex", "split") => FnSig { params: vec![(s("pat"), Ty::String), (s("s"), Ty::String)], ret: Ty::List(Box::new(Ty::String)), is_effect: false },
-        ("regex", "captures") => FnSig { params: vec![(s("pat"), Ty::String), (s("s"), Ty::String)], ret: Ty::Option(Box::new(Ty::List(Box::new(Ty::String)))), is_effect: false },
+        ("regex", "match?") => FnSig { generics: vec![], params: vec![(s("pat"), Ty::String), (s("s"), Ty::String)], ret: Ty::Bool, is_effect: false },
+        ("regex", "full_match?") => FnSig { generics: vec![], params: vec![(s("pat"), Ty::String), (s("s"), Ty::String)], ret: Ty::Bool, is_effect: false },
+        ("regex", "find") => FnSig { generics: vec![], params: vec![(s("pat"), Ty::String), (s("s"), Ty::String)], ret: Ty::Option(Box::new(Ty::String)), is_effect: false },
+        ("regex", "find_all") => FnSig { generics: vec![], params: vec![(s("pat"), Ty::String), (s("s"), Ty::String)], ret: Ty::List(Box::new(Ty::String)), is_effect: false },
+        ("regex", "replace") => FnSig { generics: vec![], params: vec![(s("pat"), Ty::String), (s("s"), Ty::String), (s("rep"), Ty::String)], ret: Ty::String, is_effect: false },
+        ("regex", "replace_first") => FnSig { generics: vec![], params: vec![(s("pat"), Ty::String), (s("s"), Ty::String), (s("rep"), Ty::String)], ret: Ty::String, is_effect: false },
+        ("regex", "split") => FnSig { generics: vec![], params: vec![(s("pat"), Ty::String), (s("s"), Ty::String)], ret: Ty::List(Box::new(Ty::String)), is_effect: false },
+        ("regex", "captures") => FnSig { generics: vec![], params: vec![(s("pat"), Ty::String), (s("s"), Ty::String)], ret: Ty::Option(Box::new(Ty::List(Box::new(Ty::String)))), is_effect: false },
 
         _ => return None,
     };

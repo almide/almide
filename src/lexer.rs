@@ -83,6 +83,10 @@ pub enum TokenType {
     Pipe,
     PipeArrow,
     Caret,
+
+    // Error-recovery tokens: common mistakes from other languages
+    AmpAmp,   // && (should be `and`)
+    PipePipe, // || (should be `or`)
     Underscore,
     DotDot,
     DotDotEq,
@@ -573,6 +577,27 @@ impl Lexer {
         let mut value = String::new();
         let mut is_float = false;
 
+        // Accept hex literals (0xFF) — convert to decimal since Almide has no hex syntax
+        if self.chars[self.pos] == '0' && self.pos + 1 < self.chars.len()
+            && (self.chars[self.pos + 1] == 'x' || self.chars[self.pos + 1] == 'X')
+        {
+            self.advance(); // skip '0'
+            self.advance(); // skip 'x'/'X'
+            let mut hex = String::new();
+            while self.pos < self.chars.len() && self.chars[self.pos].is_ascii_hexdigit() {
+                hex.push(self.chars[self.pos]);
+                self.advance();
+            }
+            let dec = i64::from_str_radix(&hex, 16).unwrap_or(0);
+            self.tokens.push(Token {
+                token_type: TokenType::Int,
+                value: dec.to_string(),
+                line: start_line,
+                col: start_col,
+            });
+            return;
+        }
+
         while self.pos < self.chars.len() && self.chars[self.pos].is_ascii_digit() {
             value.push(self.chars[self.pos]);
             self.advance();
@@ -703,6 +728,8 @@ impl Lexer {
             ">=" => Some(TokenType::GtEq),
             "++" => Some(TokenType::PlusPlus),
             "|>" => Some(TokenType::PipeArrow),
+            "&&" => Some(TokenType::AmpAmp),
+            "||" => Some(TokenType::PipePipe),
             _ => Option::None,
         };
         if let Some(tt) = two_char_type {

@@ -174,7 +174,7 @@ impl Parser {
             let name = tok.value.clone();
             self.advance();
             if self.check(TokenType::LBracket) {
-                self.parse_type_args()?;
+                let ta = self.parse_type_args()?;
                 if self.check(TokenType::LParen) {
                     self.advance();
                     let args = self.parse_call_args()?;
@@ -182,6 +182,7 @@ impl Parser {
                     return Ok(Expr::Call {
                         callee: Box::new(Expr::TypeName { name, span, resolved_type: None }),
                         args,
+                        type_args: Some(ta),
                         span,
                         resolved_type: None,
                     });
@@ -195,6 +196,7 @@ impl Parser {
                 return Ok(Expr::Call {
                     callee: Box::new(Expr::TypeName { name, span, resolved_type: None }),
                     args,
+                    type_args: None,
                     span,
                     resolved_type: None,
                 });
@@ -239,6 +241,24 @@ impl Parser {
         if self.check(TokenType::Bang) {
             return Err(format!(
                 "'!' is not valid in Almide at line {}:{}\n  Hint: Use 'not x' for boolean negation, not '!x'.",
+                tok.line, tok.col
+            ));
+        }
+        if self.check(TokenType::Pipe) && self.peek_at(1).map(|t| matches!(t.token_type, TokenType::Ident | TokenType::IdentQ | TokenType::Underscore)).unwrap_or(false) {
+            return Err(format!(
+                "'|x|' closure syntax is not valid in Almide at line {}:{}\n  Hint: Use 'fn(x) => expr' for lambdas. Example: list.map(xs, fn(x) => x + 1)",
+                tok.line, tok.col
+            ));
+        }
+        if self.check(TokenType::PipePipe) {
+            return Err(format!(
+                "'||' is not valid in Almide at line {}:{}\n  Hint: Use 'or' for logical OR. Example: if a or b then ...",
+                tok.line, tok.col
+            ));
+        }
+        if self.check(TokenType::AmpAmp) {
+            return Err(format!(
+                "'&&' is not valid in Almide at line {}:{}\n  Hint: Use 'and' for logical AND. Example: if a and b then ...",
                 tok.line, tok.col
             ));
         }

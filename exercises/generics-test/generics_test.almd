@@ -1,0 +1,98 @@
+// Test user-defined generic functions and types
+
+// ---- Generic Functions ----
+
+fn identity[T](x: T) -> T = x
+
+fn first[T](a: T, _b: T) -> T = a
+
+fn pair[A, B](a: A, b: B) -> (A, B) = (a, b)
+
+fn wrap_list[T](x: T) -> List[T] = [x]
+
+// ---- Generic Types ----
+
+type Stack[T] = { items: List[T], size: Int }
+
+fn stack_new[T]() -> Stack[T] = { items: [], size: 0 }
+
+fn stack_push[T](s: Stack[T], item: T) -> Stack[T] = {
+  { items: s.items ++ [item], size: s.size + 1 }
+}
+
+fn stack_peek[T](s: Stack[T]) -> Option[T] = {
+  if s.size == 0 then none
+  else list.get(s.items, s.size - 1)
+}
+
+type Pair[A, B] = { fst: A, snd: B }
+
+fn make_pair[A, B](a: A, b: B) -> Pair[A, B] = { fst: a, snd: b }
+
+fn swap_pair[A, B](p: Pair[A, B]) -> Pair[B, A] = { fst: p.snd, snd: p.fst }
+
+// ---- Tests ----
+
+test "identity with Int" {
+  assert_eq(identity(42), 42)
+}
+
+test "identity with String" {
+  assert_eq(identity("hello"), "hello")
+}
+
+test "identity with Bool" {
+  assert_eq(identity(true), true)
+}
+
+test "first picks first argument" {
+  assert_eq(first(1, 2), 1)
+  assert_eq(first("a", "b"), "a")
+}
+
+test "pair creates tuple" {
+  let p = pair(1, "hello")
+  assert_eq(p.0, 1)
+  assert_eq(p.1, "hello")
+}
+
+test "wrap_list creates singleton list" {
+  assert_eq(wrap_list(42), [42])
+  assert_eq(wrap_list("x"), ["x"])
+}
+
+test "generic record type Stack" {
+  let s = stack_new()
+  let s = stack_push(s, 10)
+  let s = stack_push(s, 20)
+  let s = stack_push(s, 30)
+  assert_eq(s.size, 3)
+  assert_eq(stack_peek(s), some(30))
+}
+
+test "generic record type Pair" {
+  let p = make_pair(1, "hello")
+  assert_eq(p.fst, 1)
+  assert_eq(p.snd, "hello")
+  let swapped = swap_pair(p)
+  assert_eq(swapped.fst, "hello")
+  assert_eq(swapped.snd, 1)
+}
+
+test "call-site type arguments" {
+  // Explicit type args on generic functions
+  assert_eq(identity[Int](42), 42)
+  assert_eq(identity[String]("hi"), "hi")
+  assert_eq(first[Int](1, 2), 1)
+  let p = pair[Int, String](10, "ten")
+  assert_eq(p.0, 10)
+  assert_eq(p.1, "ten")
+}
+
+test "call-site type args on zero-arg generic" {
+  let s = stack_new[Int]()
+  assert_eq(s.size, 0)
+  let s = stack_push[Int](s, 42)
+  assert_eq(s.size, 1)
+  assert_eq(stack_peek[Int](s), some(42))
+}

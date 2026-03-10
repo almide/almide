@@ -17,6 +17,8 @@ pub enum Ty {
     Fn { params: Vec<Ty>, ret: Box<Ty> },
     Tuple(Vec<Ty>),
     Named(std::string::String),
+    /// Type variable for user-defined generics (e.g., T, U, A, B)
+    TypeVar(std::string::String),
     /// Error recovery — unifies with everything to prevent cascade errors
     Unknown,
 }
@@ -39,6 +41,16 @@ pub struct FnSig {
     pub params: Vec<(std::string::String, Ty)>,
     pub ret: Ty,
     pub is_effect: bool,
+    #[allow(dead_code)]
+    pub generics: Vec<std::string::String>,
+}
+
+/// Convenience macro for creating FnSig without generics (stdlib functions)
+#[macro_export]
+macro_rules! fn_sig {
+    (params: $params:expr, ret: $ret:expr, is_effect: $eff:expr) => {
+        FnSig { params: $params, ret: $ret, is_effect: $eff, generics: vec![] }
+    };
 }
 
 impl FnSig {
@@ -107,6 +119,7 @@ impl Ty {
                 format!("({})", ts.join(", "))
             }
             Ty::Named(n) => n.clone(),
+            Ty::TypeVar(n) => n.clone(),
             Ty::Unknown => "Unknown".into(),
         }
     }
@@ -114,6 +127,10 @@ impl Ty {
     /// Check if two types are compatible (Unknown matches everything)
     pub fn compatible(&self, other: &Ty) -> bool {
         if *self == Ty::Unknown || *other == Ty::Unknown {
+            return true;
+        }
+        // TypeVars are compatible with anything (they represent polymorphic types)
+        if matches!(self, Ty::TypeVar(_)) || matches!(other, Ty::TypeVar(_)) {
             return true;
         }
         match (self, other) {

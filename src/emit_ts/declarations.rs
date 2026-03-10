@@ -110,20 +110,20 @@ impl TsEmitter {
         match decl {
             Decl::Module { path, .. } => format!("// module: {}", path.join(".")),
             Decl::Import { path, .. } => format!("// import: {}", path.join(".")),
-            Decl::Type { name, ty, .. } => {
+            Decl::Type { name, ty, generics, .. } => {
                 if self.js_mode {
                     // In JS mode, skip pure type decls but still generate variant constructors
                     if matches!(ty, TypeExpr::Variant { .. }) {
-                        self.gen_type_decl(name, ty)
+                        self.gen_type_decl(name, ty, generics.as_ref())
                     } else {
                         format!("// type: {}", name)
                     }
                 } else {
-                    self.gen_type_decl(name, ty)
+                    self.gen_type_decl(name, ty, generics.as_ref())
                 }
             }
-            Decl::Fn { name, params, return_type, body, r#async, extern_attrs, .. } => {
-                self.gen_fn_decl(name, params, return_type, body.as_ref(), r#async.unwrap_or(false), extern_attrs)
+            Decl::Fn { name, params, return_type, body, r#async, extern_attrs, generics, .. } => {
+                self.gen_fn_decl(name, params, return_type, body.as_ref(), r#async.unwrap_or(false), extern_attrs, generics.as_ref())
             }
             Decl::Trait { name, .. } => format!("// trait {}", name),
             Decl::Impl { trait_, for_, methods, .. } => {
@@ -151,13 +151,24 @@ impl TsEmitter {
         }
     }
 
-    pub(crate) fn gen_type_decl(&self, name: &str, ty: &TypeExpr) -> String {
+    pub(crate) fn gen_type_decl(&self, name: &str, ty: &TypeExpr, generics: Option<&Vec<crate::ast::GenericParam>>) -> String {
+        let generic_str = if self.js_mode {
+            String::new()
+        } else {
+            match generics {
+                Some(gs) if !gs.is_empty() => {
+                    let gparams: Vec<String> = gs.iter().map(|g| g.name.clone()).collect();
+                    format!("<{}>", gparams.join(", "))
+                }
+                _ => String::new(),
+            }
+        };
         match ty {
             TypeExpr::Record { fields } => {
                 let fs: Vec<String> = fields.iter()
                     .map(|f| format!("  {}: {};", f.name, self.gen_type_expr(&f.ty)))
                     .collect();
-                format!("interface {} {{\n{}\n}}", name, fs.join("\n"))
+                format!("interface {}{} {{\n{}\n}}", name, generic_str, fs.join("\n"))
             }
             TypeExpr::Variant { cases } => {
                 let mut lines = vec![format!("// variant type {}", name)];
@@ -191,9 +202,9 @@ impl TsEmitter {
                 lines.join("\n")
             }
             TypeExpr::Newtype { inner } => {
-                format!("type {} = {} & {{ readonly __brand: \"{}\" }};", name, self.gen_type_expr(inner), name)
+                format!("type {}{} = {} & {{ readonly __brand: \"{}\" }};", name, generic_str, self.gen_type_expr(inner), name)
             }
-            _ => format!("type {} = {};", name, self.gen_type_expr(ty)),
+            _ => format!("type {}{} = {};", name, generic_str, self.gen_type_expr(ty)),
         }
     }
 
@@ -243,9 +254,20 @@ impl TsEmitter {
         }
     }
 
-    fn gen_fn_decl(&self, name: &str, params: &[Param], ret_type: &TypeExpr, body: Option<&Expr>, is_async: bool, extern_attrs: &[ExternAttr]) -> String {
+    fn gen_fn_decl(&self, name: &str, params: &[Param], ret_type: &TypeExpr, body: Option<&Expr>, is_async: bool, extern_attrs: &[ExternAttr], generics: Option<&Vec<crate::ast::GenericParam>>) -> String {
         let async_ = if is_async { "async " } else { "" };
         let sname = Self::sanitize(name);
+        let generic_str = if self.js_mode {
+            String::new()
+        } else {
+            match generics {
+                Some(gs) if !gs.is_empty() => {
+                    let gparams: Vec<String> = gs.iter().map(|g| g.name.clone()).collect();
+                    format!("<{}>", gparams.join(", "))
+                }
+                _ => String::new(),
+            }
+        };
         let params_str: Vec<String> = params.iter()
             .filter(|p| p.name != "self")
             .map(|p| {
@@ -265,24 +287,24 @@ impl TsEmitter {
                 .map(|p| Self::sanitize(&p.name))
                 .collect();
             let call = format!("{}.{}({})", ext.module, ext.function, args.join(", "));
-            return format!("{}function {}({}){} {{\n  return {};\n}}", async_, sname, params_str.join(", "), ret_str, call);
+            return format!("{}function {}{}({}){} {{\n  return {};\n}}", async_, sname, generic_str, params_str.join(", "), ret_str, call);
         }
 
         if let Some(body) = body {
             let body_str = self.gen_expr(body);
             match body {
                 Expr::Block { .. } => {
-                    format!("{}function {}({}){} {}", async_, sname, params_str.join(", "), ret_str, body_str)
+                    format!("{}function {}{}({}){} {}", async_, sname, generic_str, params_str.join(", "), ret_str, body_str)
                 }
                 Expr::DoBlock { .. } => {
-                    format!("{}function {}({}){} {{\n{}\n}}", async_, sname, params_str.join(", "), ret_str, body_str)
+                    format!("{}function {}{}({}){} {{\n{}\n}}", async_, sname, generic_str, params_str.join(", "), ret_str, body_str)
                 }
                 _ => {
-                    format!("{}function {}({}){} {{\n  return {};\n}}", async_, sname, params_str.join(", "), ret_str, body_str)
+                    format!("{}function {}{}({}){} {{\n  return {};\n}}", async_, sname, generic_str, params_str.join(", "), ret_str, body_str)
                 }
             }
         } else {
-            format!("{}function {}({}){} {{\n  throw new Error(\"no body and no @extern for ts target\");\n}}", async_, sname, params_str.join(", "), ret_str)
+            format!("{}function {}{}({}){} {{\n  throw new Error(\"no body and no @extern for ts target\");\n}}", async_, sname, generic_str, params_str.join(", "), ret_str)
         }
     }
 

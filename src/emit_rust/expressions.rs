@@ -58,7 +58,15 @@ impl Emitter {
             }
             Expr::Bool { value, .. } => format!("{}", value),
             Expr::Ident { name, .. } => crate::emit_common::sanitize(name),
-            Expr::TypeName { name, .. } => name.clone(),
+            Expr::TypeName { name, .. } => {
+                // Generic variant unit constructors used standalone (not as Call callee)
+                // need () since they're wrapper functions, not enum values
+                if self.generic_variant_unit_ctors.contains(name) {
+                    format!("{}()", name)
+                } else {
+                    name.clone()
+                }
+            }
             Expr::Unit { .. } => "()".to_string(),
             Expr::None { .. } => "None".to_string(),
             Expr::Some { expr, .. } => format!("Some({})", self.gen_expr(expr)),
@@ -99,7 +107,10 @@ impl Emitter {
                 if let Some(struct_name) = name {
                     format!("{} {{ {} }}", struct_name, fs.join(", "))
                 } else {
-                    format!("{{ {} }}", fs.join(", "))
+                    // Anonymous record: generate a struct with generic type params
+                    let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+                    let struct_name = self.anon_record_name(&field_names);
+                    format!("{} {{ {} }}", struct_name, fs.join(", "))
                 }
             }
 
@@ -119,7 +130,7 @@ impl Emitter {
                 format!("if {} {{ {} }} else {{ {} }}", c, t, e)
             }
 
-            Expr::Call { callee, args, .. } => self.gen_call(callee, args),
+            Expr::Call { callee, args, type_args, .. } => self.gen_call(callee, args, type_args.as_ref()),
 
             Expr::Member { object, field, .. } => {
                 let obj = self.gen_expr(object);
@@ -134,7 +145,7 @@ impl Emitter {
             Expr::Pipe { left, right, .. } => {
                 let l = self.gen_expr(left);
                 match right.as_ref() {
-                    Expr::Call { callee, args, .. } => {
+                    Expr::Call { callee, args, type_args, .. } => {
                         // Reconstruct as a full call with pipe-left as first arg
                         let mut all_args = Vec::new();
                         all_args.push(left.as_ref().clone());
@@ -142,6 +153,7 @@ impl Emitter {
                         let full_call = Expr::Call {
                             callee: callee.clone(),
                             args: all_args,
+                            type_args: type_args.clone(),
                             span: None,
                             resolved_type: None,
                         };
