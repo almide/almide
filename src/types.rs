@@ -91,6 +91,8 @@ pub struct TypeEnv {
     pub local_symbols: std::collections::HashSet<std::string::String>,
     /// Temporarily suppress auto-unwrap of Result (for match on ok/err)
     pub skip_auto_unwrap: bool,
+    /// Variables declared with `var` (mutable). Parameters and `let` are immutable.
+    pub mutable_vars: std::collections::HashSet<std::string::String>,
 }
 
 impl Ty {
@@ -182,6 +184,7 @@ impl TypeEnv {
             module_aliases: std::collections::HashMap::new(),
             local_symbols: std::collections::HashSet::new(),
             skip_auto_unwrap: false,
+            mutable_vars: std::collections::HashSet::new(),
         }
     }
 

@@ -177,7 +177,13 @@ impl Parser {
         self.skip_newlines_into_stmts(&mut initial_comments);
         if self.check(TokenType::RBrace) {
             self.advance();
-            return Ok(Expr::Record { name: None, fields: Vec::new(), span, resolved_type: None });
+            // Empty braces `{}` are an empty block (Unit), not an empty record.
+            return Ok(Expr::Block {
+                stmts: Vec::new(),
+                expr: None,
+                span,
+                resolved_type: None,
+            });
         }
         if self.check(TokenType::DotDotDot) {
             self.advance();
@@ -261,6 +267,37 @@ impl Parser {
             }
         }
         self.expect(TokenType::RBrace)?;
+        Ok(Expr::Block {
+            stmts,
+            expr: final_expr,
+            span,
+            resolved_type: None,
+        })
+    }
+
+    /// Parse a braceless block: a sequence of let/var statements ending in an expression.
+    /// Used for `fn foo() = let x = 1; let y = 2; x + y` without braces.
+    pub(crate) fn parse_braceless_block(&mut self) -> Result<Expr, String> {
+        let span = Some(self.current_span());
+        let mut stmts = Vec::new();
+        let mut final_expr: Option<Box<Expr>> = None;
+
+        loop {
+            if self.check(TokenType::Let) || self.check(TokenType::Var) {
+                let stmt = self.parse_stmt()?;
+                stmts.push(stmt);
+                self.skip_newlines();
+                if self.check(TokenType::Semicolon) {
+                    self.advance();
+                    self.skip_newlines();
+                }
+            } else {
+                let expr = self.parse_expr()?;
+                final_expr = Some(Box::new(expr));
+                break;
+            }
+        }
+
         Ok(Expr::Block {
             stmts,
             expr: final_expr,
