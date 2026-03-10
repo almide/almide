@@ -11,6 +11,7 @@
 - [Proliferation Blockers](roadmap/proliferation-blockers.md)
 - [HTTP Module](roadmap/http.md)
 - [HTTPS Client](roadmap/https.md)
+- [Stdlib Gaps](roadmap/stdlib-gaps.md)
 
 ## In Progress
 
@@ -19,7 +20,6 @@
 - [Codegen Optimization](roadmap/codegen-optimization.md)
 - [Stdlib Self-Hosting](roadmap/stdlib-self-hosting.md)
 - [Stdlib Architecture: 3-Layer Design](roadmap/stdlib-architecture-3-layer-design.md)
-- [Stdlib Gaps](roadmap/stdlib-gaps.md)
 - [LLM Developer Experience](roadmap/llm-developer-experience.md)
 - [Editor & GitHub Integration](roadmap/editor-github-integration.md)
 - [Scaffold & Proliferation Pipeline](roadmap/scaffold-and-proliferation.md)

@@ -272,6 +272,18 @@ impl Emitter {
                 format!("let mut {} = {};", name, self.gen_expr(value))
             }
             Stmt::Assign { name, value, .. } => {
+                // Optimize: s = s ++ expr → s.almide_push_concat(expr)
+                // Avoids clone + alloc; works for both String and Vec via trait dispatch
+                if let Expr::Binary { op, left, right, .. } = value {
+                    if op == "++" {
+                        if let Expr::Ident { name: ref lname, .. } = **left {
+                            if lname == name {
+                                let r = self.gen_expr(right);
+                                return format!("{}.almide_push_concat({});", name, r);
+                            }
+                        }
+                    }
+                }
                 format!("{} = {};", name, self.gen_expr(value))
             }
             Stmt::Guard { cond, else_, .. } => {
