@@ -64,7 +64,7 @@ jobs:
             ok(())
           }
           EOF
-          ./target/release/almide.exe build "$TMPDIR/calc.almd" -o "$TMPDIR/calc.exe"
+          ./target/release/almide.exe build "$TMPDIR/calc.almd" -o "$TMPDIR/calc"
           OUTPUT=$("$TMPDIR/calc.exe")
           if [ "$OUTPUT" = "100" ]; then
             echo "PASS: build + run produced correct output"
