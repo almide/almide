@@ -15,6 +15,15 @@ fn almide_rt_list_get_or<T: Clone>(list: &[T], index: i64, default: T) -> T {
     list.get(index as usize).cloned().unwrap_or(default)
 }
 
+fn almide_rt_list_set<T: Clone>(list: &[T], index: i64, value: T) -> Vec<T> {
+    let mut v = list.to_vec();
+    let i = index as usize;
+    if i < v.len() {
+        v[i] = value;
+    }
+    v
+}
+
 fn almide_rt_list_sort<T: Clone + Ord>(list: &[T]) -> Vec<T> {
     let mut v = list.to_vec();
     v.sort();

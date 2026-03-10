@@ -323,6 +323,7 @@ impl Emitter {
             "len" => format!("almide_rt_list_len(&{})", args_str[0]),
             "get" => format!("almide_rt_list_get(&{}, {})", args_str[0], args_str[1]),
             "get_or" => format!("almide_rt_list_get_or(&{}, {}, {})", args_str[0], args_str[1], args_str[2]),
+            "set" => format!("almide_rt_list_set(&{}, {}, {})", args_str[0], args_str[1], args_str[2]),
             "sort" => format!("almide_rt_list_sort(&{})", args_str[0]),
             "reverse" => format!("almide_rt_list_reverse(&{})", args_str[0]),
             "any" => {

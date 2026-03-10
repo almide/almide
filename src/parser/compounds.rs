@@ -13,9 +13,13 @@ impl Parser {
         self.skip_newlines();
         let then = self.parse_if_branch()?;
         self.skip_newlines();
-        self.expect(TokenType::Else)?;
-        self.skip_newlines();
-        let else_ = self.parse_if_branch()?;
+        let else_ = if self.check(TokenType::Else) {
+            self.advance();
+            self.skip_newlines();
+            self.parse_if_branch()?
+        } else {
+            Expr::Unit { span: span.clone(), resolved_type: None }
+        };
         Ok(Expr::If {
             cond: Box::new(cond),
             then: Box::new(then),
