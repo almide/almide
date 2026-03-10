@@ -242,7 +242,7 @@ fn strip_indent(s: &str) -> String {
 impl Lexer {
     pub fn tokenize(src: &str) -> Vec<Token> {
         let mut lexer = Lexer {
-            chars: src.chars().collect(),
+            chars: src.replace('\r', "").chars().collect(),
             pos: 0,
             line: 1,
             col: 1,

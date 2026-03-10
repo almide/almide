@@ -199,21 +199,52 @@ fn almide_rt_io_read_all() -> Result<String, String> {
 
 // ---- random ----
 
+fn almide_rt_fill_random_bytes(buf: &mut [u8]) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        std::fs::File::open("/dev/urandom")
+            .and_then(|mut f| { use std::io::Read; f.read_exact(buf) })
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(windows)]
+    {
+        #[link(name = "bcrypt")]
+        extern "system" {
+            fn BCryptGenRandom(
+                h_algorithm: *mut std::ffi::c_void,
+                pb_buffer: *mut u8,
+                cb_buffer: u32,
+                dw_flags: u32,
+            ) -> i32;
+        }
+        const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x00000002;
+        let status = unsafe {
+            BCryptGenRandom(
+                std::ptr::null_mut(),
+                buf.as_mut_ptr(),
+                buf.len() as u32,
+                BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+            )
+        };
+        if status == 0 { Ok(()) } else { Err(format!("BCryptGenRandom failed: 0x{:08x}", status)) }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        Err("random: unsupported platform".to_string())
+    }
+}
+
 fn almide_rt_random_int(lo: i64, hi: i64) -> Result<i64, String> {
     let range = (hi - lo + 1) as u64;
     let mut buf = [0u8; 8];
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| { use std::io::Read; f.read_exact(&mut buf) })
-        .map_err(|e| e.to_string())?;
+    almide_rt_fill_random_bytes(&mut buf)?;
     let r = u64::from_le_bytes(buf) % range;
     Ok(lo + r as i64)
 }
 
 fn almide_rt_random_float() -> Result<f64, String> {
     let mut buf = [0u8; 8];
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| { use std::io::Read; f.read_exact(&mut buf) })
-        .map_err(|e| e.to_string())?;
+    almide_rt_fill_random_bytes(&mut buf)?;
     Ok((u64::from_le_bytes(buf) as f64) / (u64::MAX as f64))
 }
 
@@ -222,9 +253,7 @@ fn almide_rt_random_choice<T: Clone>(xs: &[T]) -> Result<Option<T>, String> {
         return Ok(None);
     }
     let mut buf = [0u8; 8];
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| { use std::io::Read; f.read_exact(&mut buf) })
-        .map_err(|e| e.to_string())?;
+    almide_rt_fill_random_bytes(&mut buf)?;
     Ok(Some(xs[(u64::from_le_bytes(buf) as usize) % xs.len()].clone()))
 }
 
@@ -233,9 +262,7 @@ fn almide_rt_random_shuffle<T: Clone>(xs: Vec<T>) -> Result<Vec<T>, String> {
     let n = v.len();
     for i in (1..n).rev() {
         let mut buf = [0u8; 8];
-        std::fs::File::open("/dev/urandom")
-            .and_then(|mut f| { use std::io::Read; f.read_exact(&mut buf) })
-            .map_err(|e| e.to_string())?;
+        almide_rt_fill_random_bytes(&mut buf)?;
         let j = (u64::from_le_bytes(buf) as usize) % (i + 1);
         v.swap(i, j);
     }
