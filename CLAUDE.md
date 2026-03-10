@@ -46,14 +46,18 @@ src/
 ├── check/               Type checker (5 files)
 ├── types.rs             Internal type system (Ty, TypeEnv, FnSig)
 ├── diagnostic.rs        Error reporting with file/line and hints
-├── stdlib.rs            Centralized stdlib definitions
+├── stdlib.rs            UFCS resolution, module registry
+├── generated/           Auto-generated from stdlib/defs/*.toml (DO NOT EDIT)
 ├── emit_common.rs       Shared codegen utilities
 ├── emit_rust/           Rust code generation (5 files)
 ├── emit_ts/             TypeScript code generation (4 files)
 ├── emit_ts_runtime.rs   Embedded JS/TS runtime
 ├── fmt.rs               Code formatter (AST → source)
 └── project.rs           almide.toml, dependency management
+stdlib/defs/             TOML stdlib definitions (14 modules, 203 functions)
 ```
+
+`build.rs` reads `stdlib/defs/*.toml` at compile time and generates type signatures + codegen dispatch into `src/generated/`. See [stdlib/README.md](./stdlib/README.md) for the full spec.
 
 ## Building & Usage
 
@@ -105,10 +109,10 @@ almide test
 ```
 
 When adding or modifying stdlib functions:
-- Add type signature to `src/stdlib.rs`
-- Add Rust codegen to `src/emit_rust/calls.rs`
-- Add TS codegen to `src/emit_ts/expressions.rs` (if applicable)
+- Add/edit the definition in `stdlib/defs/<module>.toml` (type sig + codegen templates)
+- Implement the runtime in `src/emit_rust/core_runtime.txt` (and/or `src/emit_ts_runtime.rs`)
 - Add UFCS mapping to `stdlib.rs` `resolve_ufcs_candidates` (if method-callable)
+- `cargo build` auto-generates all codegen — no manual `stdlib.rs` or `calls.rs` edits needed
 - Write a test in `stdlib/` (as `*_test.almd` or inline `test` block)
 
 When modifying codegen:

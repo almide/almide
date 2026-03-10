@@ -1,0 +1,40 @@
+[serve]
+params = [
+    { name = "port", type = "Int" },
+    { name = "f", type = "Fn[Unknown] -> Unknown" },
+]
+return = "Unit"
+effect = true
+rust = "{ almide_http_serve({port}, |{f.args}| -> Result<AlmideHttpResponse, String> { Ok({ {f.body} }) })?; Ok(()) }"
+
+[response]
+params = [{ name = "status", type = "Int" }, { name = "body", type = "String" }]
+return = "Unknown"
+rust = "AlmideHttpResponse::new({status}, {body}.to_string())"
+ts = "__almd_http.response({status}, {body})"
+
+[json]
+params = [{ name = "status", type = "Int" }, { name = "body", type = "String" }]
+return = "Unknown"
+rust = "AlmideHttpResponse::json({status}, {body}.to_string())"
+ts = "__almd_http.json({status}, {body})"
+
+[with_headers]
+params = [{ name = "status", type = "Int" }, { name = "body", type = "String" }, { name = "headers", type = "Map[String, String]" }]
+return = "Unknown"
+rust = "AlmideHttpResponse::with_headers({status}, {body}.to_string(), {headers})"
+ts = "__almd_http.with_headers({status}, {body}, {headers})"
+
+[get]
+params = [{ name = "url", type = "String" }]
+return = "Result[String, String]"
+effect = true
+rust = "almide_http_get(&{url})?"
+ts = "await __almd_http.get({url})"
+
+[post]
+params = [{ name = "url", type = "String" }, { name = "body", type = "String" }]
+return = "Result[String, String]"
+effect = true
+rust = "almide_http_post(&{url}, &{body})?"
+ts = "await __almd_http.post({url}, {body})"

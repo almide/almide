@@ -1,0 +1,27 @@
+[int]
+params = [{ name = "min", type = "Int" }, { name = "max", type = "Int" }]
+return = "Int"
+effect = true
+rust = "almide_rt_random_int({min}, {max})?"
+ts = "__almd_random.int({min}, {max})"
+
+[float]
+params = []
+return = "Float"
+effect = true
+rust = "almide_rt_random_float()?"
+ts = "__almd_random.float()"
+
+[choice]
+params = [{ name = "xs", type = "List[Unknown]" }]
+return = "Option[Unknown]"
+effect = true
+rust = "almide_rt_random_choice(&{xs})?"
+ts = "__almd_random.choice({xs})"
+
+[shuffle]
+params = [{ name = "xs", type = "List[Unknown]" }]
+return = "List[Unknown]"
+effect = true
+rust = "almide_rt_random_shuffle(({xs}).clone())?"
+ts = "__almd_random.shuffle({xs})"
