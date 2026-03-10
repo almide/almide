@@ -1,0 +1,17 @@
+[read_line]
+params = []
+return = "String"
+effect = true
+rust = "almide_rt_io_read_line()?"
+
+[print]
+params = [{ name = "s", type = "String" }]
+return = "Unit"
+effect = true
+rust = "almide_rt_io_print(&*{s})?"
+
+[read_all]
+params = []
+return = "String"
+effect = true
+rust = "almide_rt_io_read_all()?"

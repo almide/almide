@@ -1,0 +1,49 @@
+["match?"]
+params = [{ name = "pat", type = "String" }, { name = "s", type = "String" }]
+return = "Bool"
+rust = "almide_regex_is_match(&{pat}, &{s})"
+ts = "__almd_regex.match_hdlm_qm_({pat}, {s})"
+aliases = ["match_hdlm_qm_"]
+
+["full_match?"]
+params = [{ name = "pat", type = "String" }, { name = "s", type = "String" }]
+return = "Bool"
+rust = "almide_regex_full_match(&{pat}, &{s})"
+ts = "__almd_regex.full_match_hdlm_qm_({pat}, {s})"
+aliases = ["full_match_hdlm_qm_"]
+
+[find]
+params = [{ name = "pat", type = "String" }, { name = "s", type = "String" }]
+return = "Option[String]"
+rust = "almide_regex_find(&{pat}, &{s})"
+ts = "__almd_regex.find({pat}, {s})"
+
+[find_all]
+params = [{ name = "pat", type = "String" }, { name = "s", type = "String" }]
+return = "List[String]"
+rust = "almide_regex_find_all(&{pat}, &{s})"
+ts = "__almd_regex.find_all({pat}, {s})"
+
+[replace]
+params = [{ name = "pat", type = "String" }, { name = "s", type = "String" }, { name = "rep", type = "String" }]
+return = "String"
+rust = "almide_regex_replace(&{pat}, &{s}, &{rep})"
+ts = "__almd_regex.replace({pat}, {s}, {rep})"
+
+[replace_first]
+params = [{ name = "pat", type = "String" }, { name = "s", type = "String" }, { name = "rep", type = "String" }]
+return = "String"
+rust = "almide_regex_replace_first(&{pat}, &{s}, &{rep})"
+ts = "__almd_regex.replace_first({pat}, {s}, {rep})"
+
+[split]
+params = [{ name = "pat", type = "String" }, { name = "s", type = "String" }]
+return = "List[String]"
+rust = "almide_regex_split(&{pat}, &{s})"
+ts = "__almd_regex.split({pat}, {s})"
+
+[captures]
+params = [{ name = "pat", type = "String" }, { name = "s", type = "String" }]
+return = "Option[List[String]]"
+rust = "almide_regex_captures(&{pat}, &{s})"
+ts = "__almd_regex.captures({pat}, {s})"

@@ -13,7 +13,11 @@ struct FnDef {
     #[serde(default)]
     ufcs: bool,
     rust: String,
-    ts: String,
+    #[serde(default)]
+    ts: Option<String>,
+    /// Sanitized aliases for function names with special chars (e.g. "match?" -> "match_hdlm_qm_")
+    #[serde(default)]
+    aliases: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -130,14 +134,42 @@ fn main() {
                 expr = rust_expr,
             ));
 
-            // Generate TS codegen (same template approach)
-            let ts_expr = render_rust_template(&def.ts, &def.params);
-            ts_arms.push_str(&format!(
-                "            (\"{module}\", \"{func}\") => {expr},\n",
-                module = module_name,
-                func = fn_name,
-                expr = ts_expr,
-            ));
+            // Generate alias arms for Rust codegen (e.g. "match_hdlm_qm_" -> same as "match?")
+            for alias in &def.aliases {
+                sig_arms.push_str(&format!(
+                    "        (\"{module}\", \"{alias}\") => FnSig {{ generics: vec![], params: vec![{params}], ret: {ret}, is_effect: {effect} }},\n",
+                    module = module_name,
+                    alias = alias,
+                    params = params_str.join(", "),
+                    ret = ret_ty,
+                    effect = def.effect,
+                ));
+                rust_arms.push_str(&format!(
+                    "            (\"{module}\", \"{alias}\") => {expr},\n",
+                    module = module_name,
+                    alias = alias,
+                    expr = rust_expr,
+                ));
+            }
+
+            // Generate TS codegen (skip if no ts template)
+            if let Some(ts_template) = &def.ts {
+                let ts_expr = render_rust_template(ts_template, &def.params);
+                ts_arms.push_str(&format!(
+                    "            (\"{module}\", \"{func}\") => {expr},\n",
+                    module = module_name,
+                    func = fn_name,
+                    expr = ts_expr,
+                ));
+                for alias in &def.aliases {
+                    ts_arms.push_str(&format!(
+                        "            (\"{module}\", \"{alias}\") => {expr},\n",
+                        module = module_name,
+                        alias = alias,
+                        expr = ts_expr,
+                    ));
+                }
+            }
         }
     }
 

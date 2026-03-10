@@ -1,0 +1,119 @@
+[to_string]
+params = [{ name = "n", type = "Int" }]
+return = "String"
+rust = "almide_rt_int_to_string({n})"
+ts = "__almd_int.to_string({n})"
+
+[to_hex]
+params = [{ name = "n", type = "Int" }]
+return = "String"
+rust = "almide_rt_int_to_hex({n})"
+ts = "__almd_int.to_hex({n})"
+
+[parse]
+params = [{ name = "s", type = "String" }]
+return = "Result[Int, String]"
+rust = "almide_rt_int_parse(&*{s})"
+ts = "__almd_int.parse({s})"
+
+[parse_hex]
+params = [{ name = "s", type = "String" }]
+return = "Result[Int, String]"
+rust = "almide_rt_int_parse_hex(&*{s})"
+ts = "__almd_int.parse_hex({s})"
+
+[abs]
+params = [{ name = "n", type = "Int" }]
+return = "Int"
+rust = "almide_rt_int_abs({n})"
+ts = "__almd_int.abs({n})"
+
+[min]
+params = [{ name = "a", type = "Int" }, { name = "b", type = "Int" }]
+return = "Int"
+rust = "almide_rt_int_min({a}, {b})"
+ts = "__almd_int.min({a}, {b})"
+
+[max]
+params = [{ name = "a", type = "Int" }, { name = "b", type = "Int" }]
+return = "Int"
+rust = "almide_rt_int_max({a}, {b})"
+ts = "__almd_int.max({a}, {b})"
+
+[band]
+params = [{ name = "a", type = "Int" }, { name = "b", type = "Int" }]
+return = "Int"
+rust = "almide_rt_int_band({a}, {b})"
+ts = "__almd_int.band({a}, {b})"
+
+[bor]
+params = [{ name = "a", type = "Int" }, { name = "b", type = "Int" }]
+return = "Int"
+rust = "almide_rt_int_bor({a}, {b})"
+ts = "__almd_int.bor({a}, {b})"
+
+[bxor]
+params = [{ name = "a", type = "Int" }, { name = "b", type = "Int" }]
+return = "Int"
+rust = "almide_rt_int_bxor({a}, {b})"
+ts = "__almd_int.bxor({a}, {b})"
+
+[bshl]
+params = [{ name = "a", type = "Int" }, { name = "n", type = "Int" }]
+return = "Int"
+rust = "almide_rt_int_bshl({a}, {n})"
+ts = "__almd_int.bshl({a}, {n})"
+
+[bshr]
+params = [{ name = "a", type = "Int" }, { name = "n", type = "Int" }]
+return = "Int"
+rust = "almide_rt_int_bshr({a}, {n})"
+ts = "__almd_int.bshr({a}, {n})"
+
+[bnot]
+params = [{ name = "a", type = "Int" }]
+return = "Int"
+rust = "almide_rt_int_bnot({a})"
+ts = "__almd_int.bnot({a})"
+
+[wrap_add]
+params = [{ name = "a", type = "Int" }, { name = "b", type = "Int" }, { name = "bits", type = "Int" }]
+return = "Int"
+rust = "almide_rt_int_wrap_add({a}, {b}, {bits})"
+ts = "__almd_int.wrap_add({a}, {b}, {bits})"
+
+[wrap_mul]
+params = [{ name = "a", type = "Int" }, { name = "b", type = "Int" }, { name = "bits", type = "Int" }]
+return = "Int"
+rust = "almide_rt_int_wrap_mul({a}, {b}, {bits})"
+ts = "__almd_int.wrap_mul({a}, {b}, {bits})"
+
+[rotate_right]
+params = [{ name = "a", type = "Int" }, { name = "n", type = "Int" }, { name = "bits", type = "Int" }]
+return = "Int"
+rust = "almide_rt_int_rotate_right({a}, {n}, {bits})"
+ts = "__almd_int.rotate_right({a}, {n}, {bits})"
+
+[rotate_left]
+params = [{ name = "a", type = "Int" }, { name = "n", type = "Int" }, { name = "bits", type = "Int" }]
+return = "Int"
+rust = "almide_rt_int_rotate_left({a}, {n}, {bits})"
+ts = "__almd_int.rotate_left({a}, {n}, {bits})"
+
+[to_u32]
+params = [{ name = "a", type = "Int" }]
+return = "Int"
+rust = "almide_rt_int_to_u32({a})"
+ts = "__almd_int.to_u32({a})"
+
+[to_u8]
+params = [{ name = "a", type = "Int" }]
+return = "Int"
+rust = "almide_rt_int_to_u8({a})"
+ts = "__almd_int.to_u8({a})"
+
+[clamp]
+params = [{ name = "n", type = "Int" }, { name = "lo", type = "Int" }, { name = "hi", type = "Int" }]
+return = "Int"
+rust = "almide_rt_int_clamp({n}, {lo}, {hi})"
+ts = "__almd_int.clamp({n}, {lo}, {hi})"

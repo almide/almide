@@ -1,0 +1,71 @@
+[to_string]
+params = [{ name = "n", type = "Float" }]
+return = "String"
+rust = "almide_rt_float_to_string({n})"
+ts = "__almd_float.to_string({n})"
+
+[to_int]
+params = [{ name = "n", type = "Float" }]
+return = "Int"
+rust = "almide_rt_float_to_int({n})"
+ts = "__almd_float.to_int({n})"
+
+[round]
+params = [{ name = "n", type = "Float" }]
+return = "Float"
+rust = "almide_rt_float_round({n})"
+ts = "__almd_float.round({n})"
+
+[floor]
+params = [{ name = "n", type = "Float" }]
+return = "Float"
+rust = "almide_rt_float_floor({n})"
+ts = "__almd_float.floor({n})"
+
+[ceil]
+params = [{ name = "n", type = "Float" }]
+return = "Float"
+rust = "almide_rt_float_ceil({n})"
+ts = "__almd_float.ceil({n})"
+
+[abs]
+params = [{ name = "n", type = "Float" }]
+return = "Float"
+rust = "almide_rt_float_abs({n})"
+ts = "__almd_float.abs({n})"
+
+[sqrt]
+params = [{ name = "n", type = "Float" }]
+return = "Float"
+rust = "almide_rt_float_sqrt({n})"
+ts = "__almd_float.sqrt({n})"
+
+[parse]
+params = [{ name = "s", type = "String" }]
+return = "Result[Float, String]"
+rust = "almide_rt_float_parse(&*{s})?"
+ts = "__almd_float.parse({s})"
+
+[from_int]
+params = [{ name = "n", type = "Int" }]
+return = "Float"
+rust = "almide_rt_float_from_int({n})"
+ts = "__almd_float.from_int({n})"
+
+[min]
+params = [{ name = "a", type = "Float" }, { name = "b", type = "Float" }]
+return = "Float"
+rust = "almide_rt_float_min({a}, {b})"
+ts = "__almd_float.min({a}, {b})"
+
+[max]
+params = [{ name = "a", type = "Float" }, { name = "b", type = "Float" }]
+return = "Float"
+rust = "almide_rt_float_max({a}, {b})"
+ts = "__almd_float.max({a}, {b})"
+
+[clamp]
+params = [{ name = "n", type = "Float" }, { name = "lo", type = "Float" }, { name = "hi", type = "Float" }]
+return = "Float"
+rust = "almide_rt_float_clamp({n}, {lo}, {hi})"
+ts = "__almd_float.clamp({n}, {lo}, {hi})"
