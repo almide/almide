@@ -1,78 +1,178 @@
-# Adding Standard Library Modules
+# Almide Standard Library
 
-Almide has two kinds of stdlib modules: **hardcoded** (implemented in Rust inside the compiler) and **bundled** (written in Almide, embedded at compile time).
+## Architecture
 
-## Bundled modules (preferred for new modules)
+All stdlib functions are defined declaratively in **TOML files** under `stdlib/defs/`.
+At compile time, `build.rs` reads these definitions and generates:
 
-Bundled modules are `.almd` files in this directory. They are compiled into the binary via `include_str!()` and loaded as regular Almide modules at resolution time. No Rust codegen is needed.
+- `src/generated/stdlib_sigs.rs` — Type signatures for the checker
+- `src/generated/emit_rust_calls.rs` — Rust codegen dispatch
+- `src/generated/emit_ts_calls.rs` — TypeScript codegen dispatch
 
-**Examples:** `path.almd`, `time.almd`, `args.almd`, `encoding.almd`
+**Zero hand-written codegen.** Every stdlib function — including closures, optional params, effect functions, and record return types — is driven entirely from TOML.
 
-### Steps to add a bundled module
+## Modules (14 modules, 203 functions)
 
-1. **Create `stdlib/<name>.almd`** with your module code. Use only hardcoded stdlib functions and other bundled modules — no circular dependencies.
+| Module   | Functions | Description                              |
+|----------|-----------|------------------------------------------|
+| string   | 35        | Manipulation, search, encoding, predicates |
+| list     | 40        | Transform, filter, fold, sort, search    |
+| int      | 20        | Arithmetic, parsing, bitwise, conversion |
+| json     | 19        | Parse, stringify, query, transform       |
+| map      | 16        | Key-value operations, filter, transform  |
+| fs       | 16        | File I/O, directory ops, metadata        |
+| float    | 12        | Math, parsing, conversion, predicates    |
+| math     | 12        | Trigonometry, logarithms, constants      |
+| env      | 8         | Environment variables, working directory |
+| regex    | 8         | Match, replace, split, capture           |
+| http     | 6         | Server, client GET/POST, response builders |
+| random   | 4         | Int, float, choice, shuffle              |
+| process  | 4         | Exec, exit, stdin                        |
+| io       | 3         | Print, eprint (Rust-only runtime)        |
 
-2. **Register in `src/stdlib.rs`** — add a case to `get_bundled_source()`:
+### Bundled Almide modules
+
+In addition to the TOML-defined native functions, some modules are written in Almide itself and embedded via `include_str!`:
+
+- `stdlib/args.almd` — Command-line argument parsing
+- `stdlib/path.almd` — Path manipulation
+- `stdlib/time.almd` — Date/time formatting
+- `stdlib/encoding.almd` — Base64, hex encoding
+- `stdlib/hash.almd` — SHA-256
+- `stdlib/term.almd` — Terminal colors (ANSI)
+
+These require no changes to the compiler — they are resolved as regular Almide modules at import time.
+
+## TOML Definition Format
+
+Each `.toml` file defines one module. Each top-level table is a function:
+
+```toml
+[filter]
+params = [
+    { name = "xs", type = "List[Unknown]" },
+    { name = "f", type = "Fn[Unknown] -> Bool" },
+]
+return = "List[Unknown]"
+rust = "almide_rt_list_filter(({xs}).clone(), |{f.args}| {{ {f.clone_bindings}{f.body} }})"
+ts = "__almd_list.filter({xs}, {f.args} => {f.body})"
+```
+
+### Function fields
+
+| Field         | Required | Description                                        |
+|---------------|----------|----------------------------------------------------|
+| `params`      | yes      | Array of `{ name, type }` parameter definitions    |
+| `return`      | yes      | Return type string                                 |
+| `rust`        | yes      | Rust codegen template                              |
+| `ts`          | no       | TypeScript codegen template (omit for Rust-only)   |
+| `effect`      | no       | `true` if this is an effect function               |
+| `rust_effect` | no       | Alternative Rust template for effect context with `?` |
+| `rust_min`    | no       | Rust template when optional params are omitted     |
+| `ts_min`      | no       | TS template when optional params are omitted       |
+| `aliases`     | no       | Sanitized name aliases (e.g. `"is_empty_hdlm_qm_"`) |
+
+### Param fields
+
+| Field      | Required | Description                               |
+|------------|----------|-------------------------------------------|
+| `name`     | yes      | Parameter name                            |
+| `type`     | yes      | Type string (see Type System below)       |
+| `optional` | no       | `true` if this param can be omitted       |
+
+## Type System
+
+Type strings in TOML map directly to the compiler's internal `Ty` enum:
+
+| TOML type string                           | Internal type                  |
+|--------------------------------------------|--------------------------------|
+| `Int`, `Float`, `String`, `Bool`, `Unit`   | Primitives                     |
+| `Unknown`                                  | `Ty::Unknown` (generic slot)   |
+| `List[T]`                                  | `Ty::List(Box<T>)`             |
+| `Option[T]`                                | `Ty::Option(Box<T>)`           |
+| `Result[T, E]`                             | `Ty::Result(Box<T>, Box<E>)`   |
+| `Map[K, V]`                                | `Ty::Map(Box<K>, Box<V>)`      |
+| `Fn[A, B] -> C`                            | `Ty::Fn { params, ret }`       |
+| `{field: Type, ...}`                       | `Ty::Record { fields }`        |
+| `IoError`, `JsonValue`, etc.               | `Ty::Named(name)`              |
+
+### Objective-C Runtime-Inspired Type Encoding
+
+Closure dispatch uses the **type string itself** as the dispatch key, inspired by Objective-C runtime type encodings (`@` = object, `f` = float, `@?` = block).
+
+A parameter typed `Fn[Unknown, Unknown] -> Bool` automatically:
+1. Identifies the param as a closure (via `closure_arity_from_type()`)
+2. Derives arity = 2 from the type string
+3. Enables `{f.args}`, `{f.body}`, `{f.clone_bindings}` placeholders in templates
+
+No separate metadata fields needed. The type IS the encoding.
+
+## Template Placeholders
+
+Templates use `{name}` placeholders that expand to generated code:
+
+| Placeholder          | Expands to                                      |
+|----------------------|-------------------------------------------------|
+| `{param}`            | `args_str[i]` — the emitted expression for param i |
+| `{f.args}`           | Closure parameter names, comma-separated        |
+| `{f.body}`           | Closure body expression                         |
+| `{f.clone_bindings}` | `let x = x.clone(); ` for each closure param   |
+
+Literal braces in Rust templates (e.g. `{ Ok({ {f.body} }) }`) are handled by marker-based escaping — param placeholders are replaced first with `\x00N\x00` markers, then remaining braces are escaped for `format!()`, then markers are restored.
+
+### Effect variants
+
+When a function has both `rust` and `rust_effect`, the generated code checks `in_effect && body.contains("?")` to select the template:
+
+```toml
+[map]
+rust = "almide_rt_list_map(({xs}).clone(), |{f.args}| {{ {f.body} }})"
+rust_effect = "almide_rt_list_map_effect(({xs}).clone(), |{f.args}| -> Result<_, String> {{ Ok({{ {f.body} }}) }})?"
+```
+
+### Optional parameters
+
+Functions with optional params use `rust_min` as fallback when the optional arg is omitted:
+
+```toml
+[slice]
+params = [{ name = "s", type = "String" }, { name = "start", type = "Int" }, { name = "end", type = "Int", optional = true }]
+rust = "almide_rt_string_slice(&*{s}, {start}, Some({end}))"
+rust_min = "almide_rt_string_slice(&*{s}, {start}, None)"
+```
+
+## Adding a New Function
+
+1. Add the definition to `stdlib/defs/<module>.toml`
+2. Implement the runtime function in `src/emit_rust/core_runtime.txt` (and/or `src/emit_ts_runtime.rs`)
+3. Run `cargo build` — codegen is automatic
+4. Add a test in `stdlib/*_test.almd`
+
+No changes needed to `stdlib.rs`, `calls.rs`, or any other compiler source file.
+
+## Adding a New Native Module
+
+1. Create `stdlib/defs/<name>.toml` with function definitions
+2. Add the module name to `STDLIB_MODULES` in `src/stdlib.rs`
+3. If it requires OS access, add to `PLATFORM_MODULES` in `src/check/mod.rs`
+4. Implement runtime functions in `src/emit_rust/core_runtime.txt`
+5. Run `cargo build && almide test`
+
+## Adding a New Bundled Module
+
+Bundled modules are `.almd` files compiled into the binary. No codegen needed.
+
+1. Create `stdlib/<name>.almd`
+2. Register in `src/stdlib.rs` `get_bundled_source()`:
    ```rust
    "mymod" => Some(include_str!("../stdlib/mymod.almd")),
    ```
+3. Write tests in `stdlib/<name>_test.almd`
 
-3. **Write tests** in `exercises/stdlib-test/<name>_test.almd`.
+## Module Classification
 
-4. **Update docs:**
-   - `docs/CHEATSHEET.md` — add function signatures to the stdlib section
-   - `../benchmark/stdlib.md` — full reference (if the module is useful for benchmarks)
-   - `../benchmark/stdlib-extra.md` or a new `stdlib-<name>.md` — modular reference
-
-5. **Run all exercises** to verify nothing breaks:
-   ```bash
-   for f in exercises/*/*.almd; do almide run "$f"; done
-   ```
-
-That's it. No changes to the type checker, emitter, or UFCS tables are needed.
-
-## Hardcoded modules (for primitives and performance-critical ops)
-
-Hardcoded modules have their type signatures and code generation implemented directly in the compiler. This is necessary for operations that can't be expressed in Almide itself (e.g., FFI, memory layout, platform syscalls).
-
-**Examples:** `string`, `list`, `map`, `int`, `float`, `fs`, `env`, `process`, `io`, `json`, `math`, `random`, `regex`
-
-### Steps to add a hardcoded function
-
-1. **`src/stdlib.rs`** — add type signature to `lookup_sig()`:
-   ```rust
-   ("mymod", "my_func") => FnSig { params: vec![...], ret: ..., is_effect: false },
-   ```
-
-2. **`src/stdlib.rs`** — if the function should be callable via UFCS (dot syntax), add it to `resolve_ufcs_module()`:
-   ```rust
-   "my_func" => Some("mymod"),
-   ```
-
-3. **`src/emit_rust/calls.rs`** — add Rust code generation in the module's match arm.
-
-4. **`src/emit_ts/expressions.rs`** — add TypeScript code generation (if applicable).
-
-5. **`src/emit_ts_runtime.rs`** — if the TS implementation needs a runtime helper, add it to both the Deno and Node runtime sections.
-
-6. **Write tests** in `exercises/stdlib-test/`.
-
-7. **Update docs** (same as bundled).
-
-8. **Run all exercises.**
-
-### Adding a new hardcoded module
-
-In addition to the per-function steps above:
-
-- Add the module name to `STDLIB_MODULES` in `src/stdlib.rs`
-- If it's a platform module (requires OS access), add it to `PLATFORM_MODULES` in `src/check/mod.rs` — this will produce a compile error when targeting WASM
-
-## Module classification
-
-| Layer | Available on | Examples |
-|-------|-------------|----------|
-| **core** | All targets including WASM | string, list, map, int, float, math, json, regex, path, time, args, encoding |
-| **platform** | Native only (WASM = compile error) | fs, process, io, env, http, random |
-
-When adding a new module, decide which layer it belongs to. If it requires OS access (file I/O, networking, environment variables, entropy), it's a platform module.
+| Layer        | Available on                     | Modules                                                    |
+|--------------|----------------------------------|------------------------------------------------------------|
+| **core**     | All targets including WASM       | string, list, map, int, float, math, json, regex           |
+| **platform** | Native only (WASM = compile error) | fs, process, io, env, http, random                       |
+| **bundled**  | All targets (pure Almide)        | args, path, time, encoding, hash, term                     |

@@ -42,8 +42,11 @@ fn almide_rt_string_slice(s: &str, start: i64, end: Option<i64>) -> String {
     }
 }
 
-fn almide_rt_string_pad_left(s: &str, width: i64) -> String {
-    format!("{:0>width$}", s, width = width as usize)
+fn almide_rt_string_pad_left(s: &str, width: i64, ch: &str) -> String {
+    let fill = ch.chars().next().unwrap_or(' ');
+    let w = width as usize;
+    if s.len() >= w { return s.to_string(); }
+    format!("{}{}", std::iter::repeat(fill).take(w - s.len()).collect::<String>(), s)
 }
 
 fn almide_rt_string_to_bytes(s: &str) -> Vec<i64> {
