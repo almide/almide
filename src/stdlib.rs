@@ -315,6 +315,7 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         ("env", "cwd") => FnSig { generics: vec![], params: vec![], ret: Ty::Result(Box::new(Ty::String), Box::new(Ty::String)), is_effect: true },
         ("env", "millis") => FnSig { generics: vec![], params: vec![], ret: Ty::Int, is_effect: true },
         ("env", "sleep_ms") => FnSig { generics: vec![], params: vec![(s("ms"), Ty::Int)], ret: Ty::Unit, is_effect: true },
+        ("env", "temp_dir") => FnSig { generics: vec![], params: vec![], ret: Ty::String, is_effect: true },
 
         // ── process ──
         ("process", "exec") => FnSig { generics: vec![], params: vec![(s("cmd"), Ty::String), (s("args"), Ty::List(Box::new(Ty::String)))], ret: Ty::Result(Box::new(Ty::String), Box::new(Ty::String)), is_effect: true },

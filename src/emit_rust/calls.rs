@@ -516,6 +516,7 @@ impl Emitter {
             "cwd" => "almide_rt_env_cwd()?".to_string(),
             "millis" => "almide_rt_env_millis()".to_string(),
             "sleep_ms" => format!("almide_rt_env_sleep_ms({})", args_str[0]),
+            "temp_dir" => "std::env::temp_dir().to_string_lossy().to_string()".to_string(),
             _ => { eprintln!("internal error: no Rust codegen for env.{}() — this is a compiler bug", func); std::process::exit(70); },
         }
     }

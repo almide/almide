@@ -32,14 +32,15 @@ enum Commands {
     /// Create a new Almide project
     Init,
     /// Compile and execute
+    #[command(trailing_var_arg = true)]
     Run {
         /// Source file (default: src/main.almd)
         file: Option<String>,
         /// Skip type checking
         #[arg(long)]
         no_check: bool,
-        /// Arguments passed to the program (use -- to separate)
-        #[arg(last = true)]
+        /// Arguments passed to the program
+        #[arg(allow_hyphen_values = true)]
         program_args: Vec<String>,
     },
     /// Build a binary

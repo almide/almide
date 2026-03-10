@@ -192,7 +192,7 @@ impl Emitter {
         if returns_result {
             self.emitln(&format!("if let Err(e) = {} {{", call));
             self.indent += 1;
-            self.emitln("eprintln!(\"{}\", e);");
+            self.emitln("let _ = e;");
             self.emitln("std::process::exit(1);");
             self.indent -= 1;
             self.emitln("}");

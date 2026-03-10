@@ -227,69 +227,86 @@ test "filter by prefix no match" {
 }
 
 test "load and parse config file" {
-  fs.write("/tmp/almide_test_base.conf", "host=localhost\nport=3000")
-  let result = load_config("/tmp/almide_test_base.conf")
+  let td = env.temp_dir()
+  let f = td ++ "/almide_test_base.conf"
+  fs.write(f, "host=localhost\nport=3000")
+  let result = load_config(f)
   assert_eq(result, ok([["host", "localhost"], ["port", "3000"]]))
 }
 
 test "load config file not found" {
-  assert(match load_config("/tmp/almide_test_nonexistent_file.conf") { err(_e) => true, _ => false })
+  let td = env.temp_dir()
+  assert(match load_config(td ++ "/almide_test_nonexistent_file.conf") { err(_e) => true, _ => false })
 }
 
 test "load config with parse error" {
-  fs.write("/tmp/almide_test_bad.conf", "good=ok\nbadline")
-  assert_eq(load_config("/tmp/almide_test_bad.conf"), err("/tmp/almide_test_bad.conf: line 2: missing '='"))
+  let td = env.temp_dir()
+  let f = td ++ "/almide_test_bad.conf"
+  fs.write(f, "good=ok\nbadline")
+  assert_eq(load_config(f), err(f ++ ": line 2: missing '='"))
 }
 
 test "save config file" {
+  let td = env.temp_dir()
+  let f = td ++ "/almide_test_output.conf"
   let pairs = [["host", "localhost"], ["port", "8080"]]
-  save_config("/tmp/almide_test_output.conf", pairs)
-  let content = fs.read_text("/tmp/almide_test_output.conf")
+  save_config(f, pairs)
+  let content = fs.read_text(f)
   assert_eq(content, "host=localhost\nport=8080")
 }
 
 test "merge two files" {
-  fs.write("/tmp/almide_test_m1.conf", "host=localhost\nport=3000")
-  fs.write("/tmp/almide_test_m2.conf", "port=8080\ndebug=true")
-  let result = merge_files(["/tmp/almide_test_m1.conf", "/tmp/almide_test_m2.conf"])
+  let td = env.temp_dir()
+  let f1 = td ++ "/almide_test_m1.conf"
+  let f2 = td ++ "/almide_test_m2.conf"
+  fs.write(f1, "host=localhost\nport=3000")
+  fs.write(f2, "port=8080\ndebug=true")
+  let result = merge_files([f1, f2])
   assert_eq(result, ok([["host", "localhost"], ["port", "8080"], ["debug", "true"]]))
 }
 
 test "merge three files" {
-  fs.write("/tmp/almide_test_t1.conf", "host=a\nport=1")
-  fs.write("/tmp/almide_test_t2.conf", "port=2\nmode=dev")
-  fs.write("/tmp/almide_test_t3.conf", "mode=prod\nlog=true")
-  let result = merge_files([
-    "/tmp/almide_test_t1.conf",
-    "/tmp/almide_test_t2.conf",
-    "/tmp/almide_test_t3.conf"
-  ])
+  let td = env.temp_dir()
+  let f1 = td ++ "/almide_test_t1.conf"
+  let f2 = td ++ "/almide_test_t2.conf"
+  let f3 = td ++ "/almide_test_t3.conf"
+  fs.write(f1, "host=a\nport=1")
+  fs.write(f2, "port=2\nmode=dev")
+  fs.write(f3, "mode=prod\nlog=true")
+  let result = merge_files([f1, f2, f3])
   assert_eq(result, ok([["host", "a"], ["port", "2"], ["mode", "prod"], ["log", "true"]]))
 }
 
 test "merge files error propagation" {
-  fs.write("/tmp/almide_test_e1.conf", "ok=yes")
-  fs.write("/tmp/almide_test_e2.conf", "badline")
-  assert_eq(merge_files(["/tmp/almide_test_e1.conf", "/tmp/almide_test_e2.conf"]), err("/tmp/almide_test_e2.conf: line 1: missing '='"))
+  let td = env.temp_dir()
+  let f1 = td ++ "/almide_test_e1.conf"
+  let f2 = td ++ "/almide_test_e2.conf"
+  fs.write(f1, "ok=yes")
+  fs.write(f2, "badline")
+  assert_eq(merge_files([f1, f2]), err(f2 ++ ": line 1: missing '='"))
 }
 
 test "merge and save full pipeline" {
-  fs.write("/tmp/almide_test_p1.conf", "host=localhost\nport=3000")
-  fs.write("/tmp/almide_test_p2.conf", "port=8080\ndebug=true")
-  let result = merge_and_save(
-    ["/tmp/almide_test_p1.conf", "/tmp/almide_test_p2.conf"],
-    "/tmp/almide_test_merged.conf"
-  )
+  let td = env.temp_dir()
+  let f1 = td ++ "/almide_test_p1.conf"
+  let f2 = td ++ "/almide_test_p2.conf"
+  let out = td ++ "/almide_test_merged.conf"
+  fs.write(f1, "host=localhost\nport=3000")
+  fs.write(f2, "port=8080\ndebug=true")
+  let result = merge_and_save([f1, f2], out)
   assert_eq(result, ok(3))
-  let content = fs.read_text("/tmp/almide_test_merged.conf")
+  let content = fs.read_text(out)
   assert_eq(content, "host=localhost\nport=8080\ndebug=true")
 }
 
 test "merge and save error propagation" {
-  fs.write("/tmp/almide_test_ep1.conf", "ok=yes")
+  let td = env.temp_dir()
+  let f1 = td ++ "/almide_test_ep1.conf"
+  let out = td ++ "/almide_test_should_not_exist.conf"
+  fs.write(f1, "ok=yes")
   assert(match merge_and_save(
-    ["/tmp/almide_test_ep1.conf", "/tmp/almide_test_nonexistent_file.conf"],
-    "/tmp/almide_test_should_not_exist.conf"
+    [f1, td ++ "/almide_test_nonexistent_file.conf"],
+    out
   ) { err(_e) => true, _ => false })
-  assert_eq(fs.exists?("/tmp/almide_test_should_not_exist.conf"), false)
+  assert_eq(fs.exists?(out), false)
 }

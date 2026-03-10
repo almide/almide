@@ -3,7 +3,7 @@
 effect fn main() -> Result[Unit, String] = {
   // ── fs.is_file? / fs.is_dir? ──
 
-  let tmp_dir = "/tmp/almide_fs_test"
+  let tmp_dir = env.temp_dir() ++ "/almide_fs_test"
   fs.mkdir_p(tmp_dir)
   let tmp_file = tmp_dir ++ "/hello.txt"
   fs.write(tmp_file, "hello")
