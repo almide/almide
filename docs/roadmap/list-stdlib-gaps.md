@@ -11,7 +11,7 @@ len, get, get_or, sort, reverse, contains, each, map, filter, find, fold, any, a
 | Operation | Python | JS | Rust | Haskell | Elixir | Kotlin | Go | Almide |
 |-----------|--------|----|------|---------|--------|--------|----|--------|
 | get by index | `xs[i]` | `xs[i]` | `xs[i]` / `get` | `!!` | `Enum.at` | `get` | `xs[i]` | `get` |
-| **set by index** | `xs[i]=v` | `with(i,v)` | `xs[i]=v` | — | `replace_at` | `set` | `xs[i]=v` | **MISSING** |
+| set by index | `xs[i]=v` | `with(i,v)` | `xs[i]=v` | — | `replace_at` | `set` | `xs[i]=v` | `set` (v0.4.5) |
 | **insert at** | `insert` | `toSpliced` | `insert` | — | `insert_at` | `add(i,v)` | `slices.Insert` | **MISSING** |
 | **remove at** | `pop(i)` | `toSpliced` | `remove` | — | `delete_at` | `removeAt` | `slices.Delete` | **MISSING** |
 | **swap** | — | — | `swap` | — | — | — | — | **MISSING** |
@@ -47,7 +47,7 @@ LLMs generate these constantly. Missing them causes runtime errors or forces ver
 
 | Function | Signature | Present in | Priority |
 |----------|-----------|------------|----------|
-| **set** | `(xs, i, value) -> List[T]` | Python, JS, Rust, Elixir, Kotlin, Go | **Now** (blocks quicksort) |
+| ~~set~~ | `(xs, i, value) -> List[T]` | Python, JS, Rust, Elixir, Kotlin, Go | **Done** (v0.4.5) |
 | **range** | `(start, end) -> List[Int]` | Python, Rust, Haskell, Elixir, Kotlin | **Now** (LLMs default to range-based loops) |
 | **slice** | `(xs, start, end) -> List[T]` | Python, JS, Rust, Elixir, Kotlin, Go | High |
 
