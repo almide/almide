@@ -1,0 +1,103 @@
+name: CI (Windows)
+
+on:
+  push:
+    branches: [ci/windows-test]
+  pull_request:
+    branches: [develop, main]
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: windows-cargo-${{ hashFiles('Cargo.lock', 'Cargo.toml') }}
+          restore-keys: windows-cargo-
+
+      - name: Build compiler
+        run: cargo build --release
+
+      - name: Run Rust unit tests
+        run: cargo test
+
+      - name: Run Almide language tests
+        shell: bash
+        run: ./target/release/almide.exe test
+
+      - name: Smoke test - almide run
+        shell: bash
+        run: |
+          TMPDIR="${RUNNER_TEMP:-/tmp}"
+          cat > "$TMPDIR/hello.almd" <<'EOF'
+          module hello
+          type AppError = | Custom(String) | Io(IoError) deriving From
+          effect fn main(args: List[String]) -> Result[Unit, AppError] = {
+            println("Hello from Windows!")
+            ok(())
+          }
+          EOF
+          ./target/release/almide.exe run "$TMPDIR/hello.almd"
+
+      - name: Smoke test - almide build
+        shell: bash
+        run: |
+          TMPDIR="${RUNNER_TEMP:-/tmp}"
+          cat > "$TMPDIR/calc.almd" <<'EOF'
+          module calc
+          type AppError = | Custom(String) | Io(IoError) deriving From
+          effect fn main(args: List[String]) -> Result[Unit, AppError] = {
+            let x = 42
+            let y = 58
+            println(int.to_string(x + y))
+            ok(())
+          }
+          EOF
+          ./target/release/almide.exe build "$TMPDIR/calc.almd" -o "$TMPDIR/calc"
+          OUTPUT=$("$TMPDIR/calc.exe")
+          if [ "$OUTPUT" = "100" ]; then
+            echo "PASS: build + run produced correct output"
+          else
+            echo "FAIL: expected 100, got $OUTPUT"
+            exit 1
+          fi
+
+      - name: Smoke test - fs operations
+        shell: bash
+        run: |
+          TMPDIR="${RUNNER_TEMP:-/tmp}"
+          cat > "$TMPDIR/fstest.almd" <<'EOF'
+          module fstest
+          type AppError = | Custom(String) | Io(IoError) deriving From
+          effect fn main(args: List[String]) -> Result[Unit, AppError] = {
+            let dir = match env.get("RUNNER_TEMP") { some(d) => d, none => "/tmp" }
+            let testfile = dir ++ "/almide_test.txt"
+            fs.write(testfile, "hello windows")
+            let content = fs.read_text(testfile)
+            if content == "hello windows" then {
+              println("PASS")
+            } else {
+              println("FAIL: " ++ content)
+            }
+            fs.remove(testfile)
+            ok(())
+          }
+          EOF
+          OUTPUT=$(./target/release/almide.exe run "$TMPDIR/fstest.almd")
+          if [ "$OUTPUT" = "PASS" ]; then
+            echo "PASS: fs read/write works on Windows"
+          else
+            echo "FAIL: $OUTPUT"
+            exit 1
+          fi
