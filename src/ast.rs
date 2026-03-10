@@ -223,6 +223,8 @@ pub enum Stmt {
     LetDestructure { pattern: Pattern, value: Expr, #[serde(skip)] span: Option<Span> },
     Var { name: String, #[serde(rename = "type")] ty: Option<TypeExpr>, value: Expr, #[serde(skip)] span: Option<Span> },
     Assign { name: String, value: Expr, #[serde(skip)] span: Option<Span> },
+    IndexAssign { target: String, index: Box<Expr>, value: Expr, #[serde(skip)] span: Option<Span> },
+    FieldAssign { target: String, field: String, value: Expr, #[serde(skip)] span: Option<Span> },
     Guard { cond: Expr, else_: Expr, #[serde(skip)] span: Option<Span> },
     Expr { expr: Expr, #[serde(skip)] span: Option<Span> },
     Comment { text: String },

@@ -237,6 +237,15 @@ impl TsEmitter {
             Stmt::Assign { name, value, .. } => {
                 format!("{} = {};", Self::sanitize(name), self.gen_expr(value))
             }
+            Stmt::IndexAssign { target, index, value, .. } => {
+                let idx = self.gen_expr(index);
+                let val = self.gen_expr(value);
+                format!("{}[{}] = {};", Self::sanitize(target), idx, val)
+            }
+            Stmt::FieldAssign { target, field, value, .. } => {
+                let val = self.gen_expr(value);
+                format!("{}.{} = {};", Self::sanitize(target), field, val)
+            }
             Stmt::Guard { cond, else_, .. } => {
                 let c = self.gen_expr(cond);
                 self.gen_guard_stmt(&c, else_)

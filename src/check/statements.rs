@@ -10,6 +10,8 @@ impl Checker {
             | ast::Stmt::LetDestructure { span, .. }
             | ast::Stmt::Var { span, .. }
             | ast::Stmt::Assign { span, .. }
+            | ast::Stmt::IndexAssign { span, .. }
+            | ast::Stmt::FieldAssign { span, .. }
             | ast::Stmt::Guard { span, .. }
             | ast::Stmt::Expr { span, .. } => span.map(|s| s.line),
             ast::Stmt::Comment { .. } => None,
@@ -70,6 +72,27 @@ impl Checker {
                             format!("{} = ...", name),
                         ));
                     }
+                }
+            }
+            ast::Stmt::IndexAssign { target, index, value, .. } => {
+                self.check_expr(index);
+                self.check_expr(value);
+                if self.env.lookup_var(target).is_none() {
+                    self.push_diagnostic(err(
+                        format!("undefined variable '{}' in index assignment", target),
+                        "Declare the variable with 'var' before assigning to its elements",
+                        format!("{}[...] = ...", target),
+                    ));
+                }
+            }
+            ast::Stmt::FieldAssign { target, value, .. } => {
+                self.check_expr(value);
+                if self.env.lookup_var(target).is_none() {
+                    self.push_diagnostic(err(
+                        format!("undefined variable '{}' in field assignment", target),
+                        "Declare the variable with 'var' before assigning to its fields",
+                        format!("{}.field = ...", target),
+                    ));
                 }
             }
             ast::Stmt::Guard { cond, else_, .. } => {
