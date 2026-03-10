@@ -95,6 +95,7 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
 
         // ── ambiguous: list + map ──
         "get" | "get_or" | "set" => vec!["list", "map"],
+        "swap" => vec!["list"],
         "sort" => vec!["list"],
         "map" | "filter" => vec!["list"],
 
@@ -178,6 +179,7 @@ pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {
         ("list", "get") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("i"), Ty::Int)], ret: Ty::Option(Box::new(Ty::Unknown)), is_effect: false },
         ("list", "get_or") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("i"), Ty::Int), (s("default"), Ty::Unknown)], ret: Ty::Unknown, is_effect: false },
         ("list", "set") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("i"), Ty::Int), (s("value"), Ty::Unknown)], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
+        ("list", "swap") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("i"), Ty::Int), (s("j"), Ty::Int)], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
         ("list", "sort") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
         ("list", "reverse") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown)))], ret: Ty::List(Box::new(Ty::Unknown)), is_effect: false },
         ("list", "contains") => FnSig { generics: vec![], params: vec![(s("xs"), Ty::List(Box::new(Ty::Unknown))), (s("x"), Ty::Unknown)], ret: Ty::Bool, is_effect: false },
