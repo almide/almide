@@ -57,7 +57,7 @@ Verify the installation:
 
 ```bash
 almide --version
-# almide 0.4.4
+# almide 0.4.8
 ```
 
 ### Hello World

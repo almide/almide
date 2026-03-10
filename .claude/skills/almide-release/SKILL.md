@@ -12,14 +12,14 @@ Perform a version bump, build, install, and create a PR from develop to main.
 
 1. **Confirm branch**: Must be on `develop`. Abort if not.
 
-2. **Version bump**: Read current version from `Cargo.toml`, increment patch version (e.g., 0.4.2 → 0.4.3). If the user specified a version level (major/minor/patch) or explicit version, use that instead.
+2. **Version bump**: Read current version from `Cargo.toml`, increment patch version (e.g., 0.4.2 → 0.4.3). If the user specified a version level (major/minor/patch) or explicit version, use that instead. Also update the version in `README.md` (find the `# almide X.Y.Z` line and replace it).
 
 3. **Build**: Run `cargo build --release`. Abort on failure.
 
 4. **Install**: Copy `target/release/almide` to `~/.local/almide/almide`.
 
 5. **Commit & push**:
-   - Stage `Cargo.toml` and `Cargo.lock`
+   - Stage `Cargo.toml`, `Cargo.lock`, and `README.md`
    - Commit with message: `Bump version to X.Y.Z`
    - Push to `origin develop`
 
