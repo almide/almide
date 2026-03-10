@@ -3,7 +3,26 @@ use crate::emit_ts_runtime;
 use super::TsEmitter;
 
 impl TsEmitter {
+    /// Pre-collect generic variant unit constructors from declarations.
+    fn collect_generic_variant_info(&mut self, decls: &[Decl]) {
+        for decl in decls {
+            if let Decl::Type { ty: TypeExpr::Variant { cases }, generics: Some(gs), .. } = decl {
+                if !gs.is_empty() {
+                    for case in cases {
+                        if let VariantCase::Unit { name } = case {
+                            self.generic_variant_unit_ctors.insert(name.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     pub(crate) fn emit_program(&mut self, prog: &Program, modules: &[(String, Program)]) {
+        self.collect_generic_variant_info(&prog.decls);
+        for (_, mod_prog) in modules {
+            self.collect_generic_variant_info(&mod_prog.decls);
+        }
         self.out.push_str(&emit_ts_runtime::full_runtime(self.js_mode));
         self.out.push('\n');
 
@@ -171,11 +190,17 @@ impl TsEmitter {
                 format!("interface {}{} {{\n{}\n}}", name, generic_str, fs.join("\n"))
             }
             TypeExpr::Variant { cases } => {
+                let is_generic = matches!(generics, Some(gs) if !gs.is_empty());
                 let mut lines = vec![format!("// variant type {}", name)];
                 for case in cases {
                     match case {
                         VariantCase::Unit { name: cname } => {
-                            lines.push(format!("const {} = {{ tag: {} }};", cname, Self::json_string(cname)));
+                            if is_generic {
+                                // Generic unit constructors must be functions so they can be called: Nothing()
+                                lines.push(format!("function {}() {{ return {{ tag: {} }}; }}", cname, Self::json_string(cname)));
+                            } else {
+                                lines.push(format!("const {} = {{ tag: {} }};", cname, Self::json_string(cname)));
+                            }
                         }
                         VariantCase::Tuple { name: cname, fields } => {
                             let params: Vec<String> = fields.iter().enumerate()
@@ -313,6 +338,10 @@ impl TsEmitter {
     /// Emit user code for npm target: no inlined runtime, `export` for public functions,
     /// no entry point, no test blocks.
     pub(crate) fn emit_npm_program(&mut self, prog: &Program, modules: &[(String, Program)]) {
+        self.collect_generic_variant_info(&prog.decls);
+        for (_, mod_prog) in modules {
+            self.collect_generic_variant_info(&mod_prog.decls);
+        }
         // Register user modules
         for (mod_name, _) in modules {
             self.user_modules.push(mod_name.clone());

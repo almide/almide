@@ -44,7 +44,13 @@ impl TsEmitter {
             }
             Expr::Bool { value, .. } => format!("{}", value),
             Expr::Ident { name, .. } => Self::sanitize(name),
-            Expr::TypeName { name, .. } => name.clone(),
+            Expr::TypeName { name, .. } => {
+                if self.generic_variant_unit_ctors.contains(name) {
+                    format!("{}()", name)
+                } else {
+                    name.clone()
+                }
+            }
             Expr::Unit { .. } => "undefined".to_string(),
             Expr::None { .. } => "null".to_string(),
             Expr::Some { expr, .. } => self.gen_expr(expr),
@@ -334,7 +340,12 @@ impl TsEmitter {
             }
         }
 
-        let callee_str = self.gen_expr(callee);
+        // For generic unit constructors used as callees, use raw name to avoid double-call
+        let callee_str = match callee {
+            Expr::TypeName { name, .. } if self.generic_variant_unit_ctors.contains(name) => name.clone(),
+            Expr::Ident { name, .. } if self.generic_variant_unit_ctors.contains(name) => Self::sanitize(name),
+            _ => self.gen_expr(callee),
+        };
         // Special case: assert_eq(x, err(e))
         if callee_str == "assert_eq" && args.len() == 2 {
             if let Expr::Err { expr: err_expr, .. } = &args[1] {
