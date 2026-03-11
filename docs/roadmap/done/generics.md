@@ -101,6 +101,18 @@ fn tree_sum(t: Tree[Int]) -> Int =
 - Pattern matching auto-derefs: `Node(__boxed_left, __boxed_right)` + `let left = *__boxed_left;`
 - `tree_map` with closures works correctly across recursive structures
 
+### Stdlib Generics: map.new, map.from_entries, map.from_list ✅
+
+`map.new`, `map.from_entries`, and `map.from_list` previously used `Ty::Unknown` — no type checking on keys/values. Now fully generic:
+
+```almide
+let m = map.new[String, Int]()          // explicit type args
+let m = map.new()                       // inferred from usage
+let m = map.from_entries([("a", 1)])    // K=String, V=Int inferred
+```
+
+Call-site type arguments (`[String, Int]`) are emitted as Rust turbofish (`::<String, i64>`) via `gen_module_call` propagation through generated codegen.
+
 ### Trait Bounds (Future, post-trait system)
 
 ```almide
