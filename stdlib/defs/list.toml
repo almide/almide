@@ -58,34 +58,34 @@ ts = "__almd_list.contains({xs}, {x})"
 type_params = ["A"]
 params = [{ name = "xs", type = "List[A]" }]
 return = "List[(Int, A)]"
-rust = "almide_rt_list_enumerate(({xs}).clone())"
+rust = "almide_rt_list_enumerate(({xs}).to_vec())"
 ts = "__almd_list.enumerate({xs})"
 
 [zip]
 type_params = ["A", "B"]
 params = [{ name = "xs", type = "List[A]" }, { name = "ys", type = "List[B]" }]
 return = "List[(A, B)]"
-rust = "almide_rt_list_zip(({xs}).clone(), ({ys}).clone())"
+rust = "almide_rt_list_zip(({xs}).to_vec(), ({ys}).to_vec())"
 ts = "__almd_list.zip({xs}, {ys})"
 
 [flatten]
 params = [{ name = "xss", type = "List[Unknown]" }]
 return = "List[Unknown]"
-rust = "almide_rt_list_flatten(({xss}).clone())"
+rust = "almide_rt_list_flatten(({xss}).to_vec())"
 ts = "__almd_list.flatten({xss})"
 
 [take]
 type_params = ["A"]
 params = [{ name = "xs", type = "List[A]" }, { name = "n", type = "Int" }]
 return = "List[A]"
-rust = "almide_rt_list_take(({xs}).clone(), {n})"
+rust = "almide_rt_list_take(({xs}).to_vec(), {n})"
 ts = "__almd_list.take({xs}, {n})"
 
 [drop]
 type_params = ["A"]
 params = [{ name = "xs", type = "List[A]" }, { name = "n", type = "Int" }]
 return = "List[A]"
-rust = "almide_rt_list_drop(({xs}).clone(), {n})"
+rust = "almide_rt_list_drop(({xs}).to_vec(), {n})"
 ts = "__almd_list.drop({xs}, {n})"
 
 [unique]
@@ -172,8 +172,8 @@ params = [
     { name = "f", type = "Fn[A] -> B" },
 ]
 return = "List[B]"
-rust = "almide_rt_list_map(({xs}).clone(), |{f.args}| {{ {f.body} }})"
-rust_effect = "almide_rt_list_map_effect(({xs}).clone(), |{f.args}| -> Result<_, String> {{ Ok({{ {f.body} }}) }})?"
+rust = "almide_rt_list_map(({xs}).to_vec(), |{f.args}| {{ {f.body} }})"
+rust_effect = "almide_rt_list_map_effect(({xs}).to_vec(), |{f.args}| -> Result<_, String> {{ Ok({{ {f.body} }}) }})?"
 ts = "__almd_list.map({xs}, {f.args} => {f.body})"
 
 [filter]
@@ -183,7 +183,7 @@ params = [
     { name = "f", type = "Fn[A] -> Bool" },
 ]
 return = "List[A]"
-rust = "almide_rt_list_filter(({xs}).clone(), |{f.args}| {{ {f.clone_bindings}{f.body} }})"
+rust = "almide_rt_list_filter(({xs}).to_vec(), |{f.args}| {{ {f.clone_bindings}{f.body} }})"
 ts = "__almd_list.filter({xs}, {f.args} => {f.body})"
 
 [find]
@@ -193,7 +193,7 @@ params = [
     { name = "f", type = "Fn[A] -> Bool" },
 ]
 return = "Option[A]"
-rust = "almide_rt_list_find(({xs}).clone(), |{f.args}| {{ {f.clone_bindings}{f.body} }})"
+rust = "almide_rt_list_find(({xs}).to_vec(), |{f.args}| {{ {f.clone_bindings}{f.body} }})"
 ts = "__almd_list.find({xs}, {f.args} => {f.body})"
 
 [any]
@@ -233,7 +233,7 @@ params = [
     { name = "f", type = "Fn[A] -> B" },
 ]
 return = "List[A]"
-rust = "almide_rt_list_sort_by(({xs}).clone(), |{f.args}| {{ {f.body} }})"
+rust = "almide_rt_list_sort_by(({xs}).to_vec(), |{f.args}| {{ {f.body} }})"
 ts = "__almd_list.sort_by({xs}, {f.args} => {f.body})"
 
 [flat_map]
@@ -243,8 +243,8 @@ params = [
     { name = "f", type = "Fn[A] -> List[B]" },
 ]
 return = "List[B]"
-rust = "almide_rt_list_flat_map(({xs}).clone(), |{f.args}| {{ {f.body} }})"
-rust_effect = "almide_rt_list_flat_map_effect(({xs}).clone(), |{f.args}| -> Result<Vec<_>, String> {{ Ok({{ {f.body} }}) }})?"
+rust = "almide_rt_list_flat_map(({xs}).to_vec(), |{f.args}| {{ {f.body} }})"
+rust_effect = "almide_rt_list_flat_map_effect(({xs}).to_vec(), |{f.args}| -> Result<Vec<_>, String> {{ Ok({{ {f.body} }}) }})?"
 ts = "__almd_list.flat_map({xs}, {f.args} => {f.body})"
 
 [filter_map]
@@ -254,7 +254,7 @@ params = [
     { name = "f", type = "Fn[A] -> Option[B]" },
 ]
 return = "List[B]"
-rust = "almide_rt_list_filter_map(({xs}).clone(), |{f.args}| {{ {f.body} }})"
+rust = "almide_rt_list_filter_map(({xs}).to_vec(), |{f.args}| {{ {f.body} }})"
 ts = "__almd_list.filter_map({xs}, {f.args} => {f.body})"
 
 [take_while]
@@ -264,7 +264,7 @@ params = [
     { name = "f", type = "Fn[A] -> Bool" },
 ]
 return = "List[A]"
-rust = "almide_rt_list_take_while(({xs}).clone(), |{f.args}| {{ {f.clone_bindings}{f.body} }})"
+rust = "almide_rt_list_take_while(({xs}).to_vec(), |{f.args}| {{ {f.clone_bindings}{f.body} }})"
 ts = "__almd_list.take_while({xs}, {f.args} => {f.body})"
 
 [drop_while]
@@ -274,7 +274,7 @@ params = [
     { name = "f", type = "Fn[A] -> Bool" },
 ]
 return = "List[A]"
-rust = "almide_rt_list_drop_while(({xs}).clone(), |{f.args}| {{ {f.clone_bindings}{f.body} }})"
+rust = "almide_rt_list_drop_while(({xs}).to_vec(), |{f.args}| {{ {f.clone_bindings}{f.body} }})"
 ts = "__almd_list.drop_while({xs}, {f.args} => {f.body})"
 
 [count]
@@ -294,7 +294,7 @@ params = [
     { name = "f", type = "Fn[A] -> Bool" },
 ]
 return = "(List[A], List[A])"
-rust = "almide_rt_list_partition(({xs}).clone(), |{f.args}| {{ {f.clone_bindings}{f.body} }})"
+rust = "almide_rt_list_partition(({xs}).to_vec(), |{f.args}| {{ {f.clone_bindings}{f.body} }})"
 ts = "__almd_list.partition({xs}, {f.args} => {f.body})"
 
 [reduce]
@@ -304,7 +304,7 @@ params = [
     { name = "f", type = "Fn[A, A] -> A" },
 ]
 return = "Option[A]"
-rust = "almide_rt_list_reduce(({xs}).clone(), |{f.args}| {{ {f.body} }})"
+rust = "almide_rt_list_reduce(({xs}).to_vec(), |{f.args}| {{ {f.body} }})"
 ts = "__almd_list.reduce({xs}, ({f.args}) => {f.body})"
 
 [group_by]
@@ -314,7 +314,7 @@ params = [
     { name = "f", type = "Fn[A] -> B" },
 ]
 return = "Map[B, List[A]]"
-rust = "almide_rt_list_group_by(({xs}).clone(), |{f.args}| {{ {f.body} }})"
+rust = "almide_rt_list_group_by(({xs}).to_vec(), |{f.args}| {{ {f.body} }})"
 ts = "__almd_list.group_by({xs}, {f.args} => {f.body})"
 
 [range]
@@ -327,21 +327,21 @@ ts = "__almd_list.range({start}, {end})"
 type_params = ["A"]
 params = [{ name = "xs", type = "List[A]" }, { name = "start", type = "Int" }, { name = "end", type = "Int" }]
 return = "List[A]"
-rust = "almide_rt_list_slice(({xs}).clone(), {start}, {end})"
+rust = "almide_rt_list_slice(({xs}).to_vec(), {start}, {end})"
 ts = "__almd_list.slice({xs}, {start}, {end})"
 
 [insert]
 type_params = ["A"]
 params = [{ name = "xs", type = "List[A]" }, { name = "i", type = "Int" }, { name = "val", type = "A" }]
 return = "List[A]"
-rust = "almide_rt_list_insert(({xs}).clone(), {i}, {val})"
+rust = "almide_rt_list_insert(({xs}).to_vec(), {i}, {val})"
 ts = "__almd_list.insert({xs}, {i}, {val})"
 
 [remove_at]
 type_params = ["A"]
 params = [{ name = "xs", type = "List[A]" }, { name = "i", type = "Int" }]
 return = "List[A]"
-rust = "almide_rt_list_remove_at(({xs}).clone(), {i})"
+rust = "almide_rt_list_remove_at(({xs}).to_vec(), {i})"
 ts = "__almd_list.remove_at({xs}, {i})"
 
 [find_index]
@@ -351,7 +351,7 @@ params = [
     { name = "f", type = "Fn[A] -> Bool" },
 ]
 return = "Option[Int]"
-rust = "almide_rt_list_find_index(({xs}).clone(), |{f.args}| {{ {f.clone_bindings}{f.body} }})"
+rust = "almide_rt_list_find_index(({xs}).to_vec(), |{f.args}| {{ {f.clone_bindings}{f.body} }})"
 ts = "__almd_list.find_index({xs}, {f.args} => {f.body})"
 
 [update]
@@ -362,7 +362,7 @@ params = [
     { name = "f", type = "Fn[A] -> A" },
 ]
 return = "List[A]"
-rust = "almide_rt_list_update(({xs}).clone(), {i}, |{f.args}| {{ {f.body} }})"
+rust = "almide_rt_list_update(({xs}).to_vec(), {i}, |{f.args}| {{ {f.body} }})"
 ts = "__almd_list.update({xs}, {i}, {f.args} => {f.body})"
 
 [repeat]
@@ -380,14 +380,14 @@ params = [
     { name = "f", type = "Fn[B, A] -> B" },
 ]
 return = "List[B]"
-rust = "almide_rt_list_scan(({xs}).clone(), {init}, |{f.args}| {{ {f.body} }})"
+rust = "almide_rt_list_scan(({xs}).to_vec(), {init}, |{f.args}| {{ {f.body} }})"
 ts = "__almd_list.scan({xs}, {init}, ({f.args}) => {f.body})"
 
 [intersperse]
 type_params = ["A"]
 params = [{ name = "xs", type = "List[A]" }, { name = "sep", type = "A" }]
 return = "List[A]"
-rust = "almide_rt_list_intersperse(({xs}).clone(), {sep})"
+rust = "almide_rt_list_intersperse(({xs}).to_vec(), {sep})"
 ts = "__almd_list.intersperse({xs}, {sep})"
 
 [windows]
@@ -412,7 +412,7 @@ params = [
     { name = "f", type = "Fn[A, B] -> C" },
 ]
 return = "List[C]"
-rust = "almide_rt_list_zip_with(({xs}).clone(), ({ys}).clone(), |{f.args}| {{ {f.body} }})"
+rust = "almide_rt_list_zip_with(({xs}).to_vec(), ({ys}).to_vec(), |{f.args}| {{ {f.body} }})"
 ts = "__almd_list.zip_with({xs}, {ys}, ({f.args}) => {f.body})"
 
 [fold]
@@ -423,6 +423,6 @@ params = [
     { name = "f", type = "Fn[B, A] -> B" },
 ]
 return = "B"
-rust = "almide_rt_list_fold(({xs}).clone(), {init}, |{f.args}| {{ {f.body} }})"
-rust_effect = "almide_rt_list_fold_effect(({xs}).clone(), {init}, |{f.args}| -> Result<_, String> {{ Ok({{ {f.body} }}) }})?"
+rust = "almide_rt_list_fold(({xs}).to_vec(), {init}, |{f.args}| {{ {f.body} }})"
+rust_effect = "almide_rt_list_fold_effect(({xs}).to_vec(), {init}, |{f.args}| -> Result<_, String> {{ Ok({{ {f.body} }}) }})?"
 ts = "__almd_list.fold({xs}, {init}, ({f.args}) => {f.body})"

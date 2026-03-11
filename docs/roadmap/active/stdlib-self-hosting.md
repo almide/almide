@@ -256,7 +256,7 @@ Use cases:
 | `float` | `to_fixed(n, decimals)` | ✅ Done (v0.4.8) |
 | `fs` | `walk` ✅, `remove_all` ✅, `file_size` ✅, `temp_dir` ✅, `glob` (deferred) | ✅ Done |
 | `process` | `exec_in(dir, cmd, args)` ✅, `exec_with_stdin` ✅ | ✅ Done |
-| `time` | `format(ts, fmt)`, `parse(s, fmt)` | Planned (.almd) |
+| `time` | `format(ts, fmt)`, `parse_iso(s)`, `weekday_name`, `month_name` | ✅ Done (.almd) |
 | `http` | `get_with_headers` ✅, `request(method, url, body, headers)` ✅ | ✅ Done |
 
 ---

@@ -95,6 +95,8 @@ pub struct TypeEnv {
     pub mutable_vars: std::collections::HashSet<std::string::String>,
     /// Variables that are function parameters (for better error messages).
     pub param_vars: std::collections::HashSet<std::string::String>,
+    /// Declaration locations: variable name -> (line, col)
+    pub var_decl_locs: std::collections::HashMap<std::string::String, (usize, usize)>,
 }
 
 impl Ty {
@@ -257,6 +259,7 @@ impl TypeEnv {
             skip_auto_unwrap: false,
             mutable_vars: std::collections::HashSet::new(),
             param_vars: std::collections::HashSet::new(),
+            var_decl_locs: std::collections::HashMap::new(),
         }
     }
 
@@ -272,6 +275,15 @@ impl TypeEnv {
         if let Some(scope) = self.scopes.last_mut() {
             scope.insert(name.to_string(), ty);
         }
+    }
+
+    pub fn define_var_at(&mut self, name: &str, ty: Ty, line: usize, col: usize) {
+        self.define_var(name, ty);
+        self.var_decl_locs.insert(name.to_string(), (line, col));
+    }
+
+    pub fn var_decl_loc(&self, name: &str) -> Option<(usize, usize)> {
+        self.var_decl_locs.get(name).copied()
     }
 
     pub fn lookup_var(&self, name: &str) -> Option<&Ty> {

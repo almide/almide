@@ -87,7 +87,7 @@ aliases = ["is_empty_hdlm_qm_"]
 type_params = ["K", "V"]
 params = [{ name = "entries", type = "List[(K, V)]" }]
 return = "Map[K, V]"
-rust = "almide_rt_map_from_entries(({entries}).clone())"
+rust = "almide_rt_map_from_entries(({entries}).to_vec())"
 ts = "__almd_map.from_entries({entries})"
 
 # ── Closure-taking functions ──
@@ -99,7 +99,7 @@ params = [
     { name = "f", type = "Fn[A] -> (K, V)" },
 ]
 return = "Map[K, V]"
-rust = "almide_rt_map_from_list(({xs}).clone(), |{f.args}| {{ {f.body} }})"
+rust = "almide_rt_map_from_list(({xs}).to_vec(), |{f.args}| {{ {f.body} }})"
 ts = "__almd_map.from_list({xs}, {f.args} => {f.body})"
 
 [map_values]

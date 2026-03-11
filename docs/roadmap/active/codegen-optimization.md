@@ -1,113 +1,86 @@
 # Codegen Optimization [IN PROGRESS]
 
-Almide generates Rust code that is near-identical in performance to hand-written Rust for numeric workloads (n-body: 1.74s vs Rust 1.69s). However, heap-allocated types (String, List) incur unnecessary clone overhead. The goal is to close this gap **without exposing ownership to the user**.
+Almide generates Rust code that is near-identical in performance to hand-written Rust for numeric workloads (n-body: 1.74s vs Rust 1.69s). However, heap-allocated types (String, List, Map) incur unnecessary clone overhead. The goal is to close this gap **without exposing ownership to the user**.
 
-### Phase 0: Correctness fixes (done) ✅
+### Phase 0: Correctness fixes ✅
 
-#### List literal clone
+`vec![f1, f2]` moved variables, causing use-after-move. Fixed by emitting `.clone()` for Ident expressions inside list literals.
 
-`vec![f1, f2]` moved variables, causing use-after-move if `f1`/`f2` were referenced later. Fixed by emitting `.clone()` for `Ident` expressions inside list literals. This is a correctness band-aid — Phase 1a (move analysis) will make most of these clones unnecessary.
-
-### Phase 1: Eliminate unnecessary clones (transparent)
+### Phase 1: Eliminate unnecessary clones ✅
 
 No language changes — the emitter generates smarter Rust code.
 
-#### 1a. Last-use move analysis
+#### 1a. Single-use move analysis ✅
 
-If a variable's last usage is a function call or assignment, emit it directly instead of `.clone()`.
+Variables used exactly once in a function body skip `.clone()` (safe to move). Conservative: for-loops and lambdas count as multi-use. Parameters always cloned.
 
-```almide
-let name = "hello"
-println(name)        // name is never used again
-```
+#### 1b. String/List concatenation optimization ✅
 
-```rust
-// Before: println!("{}", name.clone());
-// After:  println!("{}", name);          // move, no clone
-```
+`var = var ++ expr` → `push_str` / `.extend()` via `AlmidePushConcat` trait dispatch.
 
-- [ ] Liveness analysis in emitter: track last usage of each variable
-- [ ] Emit `.clone()` only when the variable is used again after the current expression
-- [ ] Handle control flow (if/match branches) conservatively
+### Phase 2: In-place mutation syntax ✅
 
-#### 1b. String concatenation optimization
-
-Detect `var = var ++ expr` pattern and emit `push_str` instead of allocating a new String.
-
-```almide
-var s = ""
-for i in 0..n {
-  s = s ++ "x"
-}
-```
-
-```rust
-// Before: s = format!("{}{}", s.clone(), "x".to_string());
-// After:  s.push_str("x");
-```
-
-- [ ] Detect `Assign { name, value: BinOp(PlusPlus, Ident(same_name), rhs) }` pattern
-- [ ] Emit `{name}.push_str(&{rhs})` for String, `.extend()` for List
-
-### Phase 2: In-place mutation syntax
-
-New syntax for mutating elements of `var` collections and record fields.
-
-#### 2a. List element update ✅
-
-```almide
-var xs = [1, 2, 3]
-xs[1] = 99
-```
-
-```rust
-xs[1] = 99i64;
-```
-
-- [x] Parser: `Stmt::IndexAssign { target, index, value }`
-- [x] Checker: verify target is `var`, element type matches
-- [x] Emitter: direct index assignment (Rust + TS)
-
-#### 2b. Record field update ✅
-
-```almide
-var user = { name: "alice", age: 30 }
-user.age = 31
-```
-
-```rust
-user.age = 31i64;
-```
-
-- [x] Parser: `Stmt::FieldAssign { target, field, value }`
-- [x] Checker: verify target is `var`, field exists, type matches
-- [x] Emitter: direct field assignment (Rust + TS)
-
-### Phase 3: Borrow inference (future)
-
-The compiler infers when a function parameter is read-only and emits `&str` / `&[T]` instead of owned types. Callers no longer need to clone.
-
-```almide
-fn len(s: String) -> Int = string.len(s)
-```
-
-```rust
-// Before: fn len(s: String) -> i64 { s.clone().len() as i64 }
-// After:  fn len(s: &str) -> i64 { s.len() as i64 }
-```
-
-- [ ] Analyze function bodies: does the parameter escape, get stored, or get mutated?
-- [ ] If read-only: emit `&str` for String, `&[T]` for List
-- [ ] Adjust call sites: pass `&x` instead of `x.clone()`
-
-### Priority order
-
-| Step | Difficulty | Impact | User-visible change |
-|---|---|---|---|
-| 1a. Last-use move | Medium | High | None (transparent) |
-| 2a. List element update | Low | High | New syntax `xs[i] = v` |
-| 1b. String concat optimization | Low | Medium | None (transparent) |
-| 2b. Record field update | Low | Medium | New syntax `r.f = v` |
-| 3. Borrow inference | High | High | None (transparent) |
+#### 2a. List element update ✅ — `xs[i] = v`
+#### 2b. Record field update ✅ — `r.f = v`
 
 ---
+
+### Phase 3: Borrow Inference (Lobster-style auto escape analysis)
+
+**Design doc: [borrow-inference-design.md](./borrow-inference-design.md)**
+
+The compiler infers when a function parameter is read-only and emits `&str` / `&[T]` / `&HashMap<K,V>` instead of owned types. Callers pass `&x` instead of `x.clone()`. Zero user-facing changes.
+
+#### 3a. Intra-function escape analysis
+
+For each user-defined function, analyze whether each heap-type parameter escapes:
+
+| Escape condition | Example | Result |
+|---|---|---|
+| Returned | `fn id(s: String) -> String = s` | owned |
+| Stored in collection | `[s, "other"]` | owned |
+| Stored in record | `{ name: s }` | owned |
+| Passed to owned param of another user fn | `other_fn(s)` (if `other_fn.s` is owned) | owned |
+| Captured by lambda | `fn(x) => s ++ x` | owned |
+| Assigned to var | `var x = s` | owned |
+| **None of the above** | `string.len(s)`, `println(s)` | **borrow** |
+
+- [ ] `EscapeAnalysis` pass: walk each fn body, classify params as `Borrow` or `Owned`
+- [ ] Emit `&str` / `&[T]` / `&HashMap<String, T>` for borrow params
+- [ ] Emit `&x` at call sites for borrow params; `x.clone()` or move for owned
+- [ ] Stdlib calls: already take `&str`/`&[T]` — no changes needed
+- [ ] Other user fn calls: conservatively treat as owned (Phase 3b resolves this)
+
+#### 3b. Inter-function fixpoint analysis
+
+A calls B with param `x`. Whether `x` escapes in A depends on B's classification of that param. Requires fixpoint iteration:
+
+```
+1. Initialize all params as Borrow
+2. For each function, analyze escape conditions
+3. If any param changes Borrow → Owned, re-analyze callers
+4. Repeat until no changes (convergence)
+```
+
+- [ ] Build call graph: fn → [callees with param mapping]
+- [ ] Fixpoint loop with worklist algorithm
+- [ ] Handle recursion: params in recursive positions → Owned
+
+#### 3c. Map type borrow
+
+`HashMap<String, T>` → `&HashMap<String, T>`. Simpler than String/List because maps are rarely constructed from parameters.
+
+---
+
+### Priority / Status
+
+| Phase | Status | Impact |
+|---|---|---|
+| 0. Correctness | ✅ Done | Prerequisite |
+| 1a. Single-use move | ✅ Done | High — most common pattern |
+| 1b. Concat optimization | ✅ Done | Medium — loop perf |
+| 2a. List index assign | ✅ Done | High — mutable algorithms |
+| 2b. Field assign | ✅ Done | Medium — record mutation |
+| **3a. Intra-fn borrow** | **Next** | **High — idiomatic Rust** |
+| 3b. Inter-fn fixpoint | After 3a | High — optimal |
+| 3c. Map borrow | After 3b | Low |

@@ -207,6 +207,8 @@ impl Emitter {
         } else {
             name.to_string()
         };
+        let prev_module = self.current_module.take();
+        self.current_module = Some(name.to_string());
         let rust_mod_name = mod_name.replace('.', "_");
         self.emitln(&format!("mod {} {{", rust_mod_name));
         self.indent += 1;
@@ -219,8 +221,22 @@ impl Emitter {
                     let rs_extern = extern_attrs.iter().find(|a| a.target == "rs");
                     let is_effect = effect.unwrap_or(false);
                     let is_async = r#async.unwrap_or(false);
-                    let params_str: Vec<String> = params.iter()
-                        .map(|p| format!("{}: {}", p.name, self.gen_type(&p.ty)))
+                    // Apply borrow inference to module function params
+                    let qualified = format!("{}.{}", name, fn_name);
+                    self.borrowed_params.clear();
+                    let params_str: Vec<String> = params.iter().enumerate()
+                        .map(|(i, p)| {
+                            let ty = self.gen_type(&p.ty);
+                            let ownership = self.borrow_info.param_ownership(&qualified, i);
+                            let ty = if ownership == super::borrow::ParamOwnership::Borrow {
+                                let borrowed = Self::to_borrow_type(&ty);
+                                self.borrowed_params.insert(p.name.clone(), borrowed.clone());
+                                borrowed
+                            } else {
+                                ty
+                            };
+                            format!("{}: {}", p.name, ty)
+                        })
                         .collect();
                     let ret_str = self.gen_type(return_type);
 
@@ -262,6 +278,8 @@ impl Emitter {
                             self.emitln(&call);
                         }
                     } else if let Some(body) = body {
+                        // Analyze single-use for module function body
+                        self.analyze_single_use(body, params);
                         let prev_effect = self.in_effect;
                         self.in_effect = is_effect;
                         let body_code = self.gen_expr(body);
@@ -301,6 +319,7 @@ impl Emitter {
 
         self.indent -= 1;
         self.emitln("}");
+        self.current_module = prev_module;
     }
 
     fn emit_runtime(&mut self) {
@@ -370,6 +389,8 @@ impl Emitter {
             Decl::Test { name, body, .. } => {
                 self.emitln("#[test]");
                 let safe_name = name.chars().map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' }).collect::<String>();
+                self.analyze_single_use(body, &[]);
+                self.borrowed_params.clear();  // Tests have no borrowed params
                 let prev_effect = self.in_effect;
                 let prev_test = self.in_test;
                 self.in_effect = true;
@@ -556,10 +577,20 @@ impl Emitter {
             ret_str.clone()
         };
 
-        let params_str: Vec<String> = params.iter()
-            .filter(|p| p.name != "self")
-            .map(|p| {
+        // Clear borrowed_params for this function
+        self.borrowed_params.clear();
+        let params_str: Vec<String> = params.iter().enumerate()
+            .filter(|(_, p)| p.name != "self")
+            .map(|(i, p)| {
                 let ty = self.gen_type(&p.ty);
+                let ownership = self.borrow_info.param_ownership(name, i);
+                let ty = if ownership == super::borrow::ParamOwnership::Borrow {
+                    let borrowed = Self::to_borrow_type(&ty);
+                    self.borrowed_params.insert(p.name.clone(), borrowed.clone());
+                    borrowed
+                } else {
+                    ty
+                };
                 format!("{}: {}", p.name, ty)
             })
             .collect();
@@ -595,6 +626,9 @@ impl Emitter {
                 self.emitln(&call);
             }
         } else if let Some(body) = body {
+            // Analyze variable usage to skip unnecessary clones
+            self.analyze_single_use(body, params);
+
             let prev_effect = self.in_effect;
             // Treat fn as effect if explicitly marked OR if it returns Result
             self.in_effect = is_effect || ret_str.starts_with("Result<");
@@ -708,11 +742,198 @@ impl Emitter {
         }
     }
 
-    /// Generate expression as function argument — clone Idents to avoid move
+    /// Convert an owned Rust type to its borrowed equivalent.
+    fn to_borrow_type(ty: &str) -> String {
+        if ty == "String" {
+            "&str".to_string()
+        } else if ty.starts_with("Vec<") {
+            format!("&[{}]", &ty[4..ty.len()-1])
+        } else if ty.starts_with("HashMap<") {
+            format!("&{}", ty)
+        } else {
+            ty.to_string()
+        }
+    }
+
+    /// Generate expression as function argument — clone Idents to avoid move.
+    /// If a variable is used exactly once in the function body, skip clone (move is safe).
+    /// If a variable is a borrowed param (&str, &[T]), use .to_owned()/.to_vec() instead of .clone().
     pub(crate) fn gen_arg(&self, expr: &Expr) -> String {
         match expr {
-            Expr::Ident { .. } => format!("{}.clone()", self.gen_expr(expr)),
+            Expr::Ident { name, .. } if self.single_use_vars.contains(name) => {
+                // Single-use: but if it's a borrowed param, we need to convert to owned
+                if let Some(borrow_ty) = self.borrowed_params.get(name) {
+                    let e = self.gen_expr(expr);
+                    Self::borrow_to_owned(&e, borrow_ty)
+                } else {
+                    self.gen_expr(expr)
+                }
+            }
+            Expr::Ident { name, .. } => {
+                if let Some(borrow_ty) = self.borrowed_params.get(name) {
+                    let e = self.gen_expr(expr);
+                    Self::borrow_to_owned(&e, borrow_ty)
+                } else {
+                    format!("{}.clone()", self.gen_expr(expr))
+                }
+            }
             _ => self.gen_expr(expr),
+        }
+    }
+
+    /// Convert a borrowed value to owned: &str → .to_owned(), &[T] → .to_vec(), &HashMap → .clone()
+    fn borrow_to_owned(expr: &str, borrow_ty: &str) -> String {
+        if borrow_ty == "&str" {
+            format!("{}.to_owned()", expr)
+        } else if borrow_ty.starts_with("&[") {
+            format!("{}.to_vec()", expr)
+        } else if borrow_ty.starts_with("&HashMap") {
+            format!("{}.clone()", expr)
+        } else {
+            format!("{}.clone()", expr)
+        }
+    }
+
+    /// Generate argument for a specific callee, considering borrow inference.
+    /// If the callee's param at `idx` is Borrow, pass &x instead of x.clone().
+    pub(crate) fn gen_arg_for(&self, expr: &Expr, callee_name: &str, param_idx: usize) -> String {
+        let ownership = self.borrow_info.param_ownership(callee_name, param_idx);
+        if ownership == super::borrow::ParamOwnership::Borrow {
+            match expr {
+                Expr::Ident { name, .. } if self.borrowed_params.contains_key(name) => {
+                    self.gen_expr(expr)
+                }
+                Expr::Ident { .. } => format!("&{}", self.gen_expr(expr)),
+                _ => {
+                    let e = self.gen_expr(expr);
+                    format!("&({})", e)
+                }
+            }
+        } else {
+            self.gen_arg(expr)
+        }
+    }
+
+    /// Count variable references in an expression tree.
+    /// Used for single-use analysis before function emission.
+    pub(crate) fn count_ident_uses(expr: &Expr, counts: &mut std::collections::HashMap<String, usize>) {
+        match expr {
+            Expr::Ident { name, .. } => {
+                *counts.entry(name.clone()).or_insert(0) += 1;
+            }
+            Expr::Int { .. } | Expr::Float { .. } | Expr::String { .. }
+            | Expr::Bool { .. } | Expr::Unit { .. } | Expr::None { .. }
+            | Expr::Hole { .. } | Expr::Todo { .. } | Expr::Placeholder { .. }
+            | Expr::TypeName { .. } | Expr::InterpolatedString { .. } => {}
+            Expr::List { elements, .. } | Expr::Tuple { elements, .. } => {
+                for e in elements { Self::count_ident_uses(e, counts); }
+            }
+            Expr::Record { fields, .. } => {
+                for f in fields { Self::count_ident_uses(&f.value, counts); }
+            }
+            Expr::SpreadRecord { base, fields, .. } => {
+                Self::count_ident_uses(base, counts);
+                for f in fields { Self::count_ident_uses(&f.value, counts); }
+            }
+            Expr::Binary { left, right, .. } | Expr::Pipe { left, right, .. } => {
+                Self::count_ident_uses(left, counts);
+                Self::count_ident_uses(right, counts);
+            }
+            Expr::Unary { operand, .. } => {
+                Self::count_ident_uses(operand, counts);
+            }
+            Expr::Call { callee, args, .. } => {
+                Self::count_ident_uses(callee, counts);
+                for a in args { Self::count_ident_uses(a, counts); }
+            }
+            Expr::If { cond, then, else_, .. } => {
+                Self::count_ident_uses(cond, counts);
+                // Both branches count — conservative for single-use analysis
+                Self::count_ident_uses(then, counts);
+                Self::count_ident_uses(else_, counts);
+            }
+            Expr::Match { subject, arms, .. } => {
+                Self::count_ident_uses(subject, counts);
+                for arm in arms {
+                    Self::count_ident_uses(&arm.body, counts);
+                }
+            }
+            Expr::Block { stmts, expr, .. } | Expr::DoBlock { stmts, expr, .. } => {
+                for s in stmts { Self::count_ident_uses_in_stmt(s, counts); }
+                if let Some(e) = expr { Self::count_ident_uses(e, counts); }
+            }
+            Expr::ForIn { iterable, body, .. } => {
+                Self::count_ident_uses(iterable, counts);
+                // Loop body executes multiple times — count uses as many to prevent move
+                let mut loop_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+                for s in body { Self::count_ident_uses_in_stmt(s, &mut loop_counts); }
+                for (name, _) in loop_counts {
+                    // Mark as multi-use (used in loop = at least 2)
+                    *counts.entry(name).or_insert(0) += 2;
+                }
+            }
+            Expr::Lambda { body, .. } => {
+                // Lambda may be called multiple times — count captured uses as multi-use
+                let mut lambda_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+                Self::count_ident_uses(body, &mut lambda_counts);
+                for (name, _) in lambda_counts {
+                    *counts.entry(name).or_insert(0) += 2;
+                }
+            }
+            Expr::Member { object, .. } | Expr::TupleIndex { object, .. } => {
+                Self::count_ident_uses(object, counts);
+            }
+            Expr::Range { start, end, .. } => {
+                Self::count_ident_uses(start, counts);
+                Self::count_ident_uses(end, counts);
+            }
+            Expr::Paren { expr, .. } | Expr::Try { expr, .. }
+            | Expr::Await { expr, .. } | Expr::Some { expr, .. }
+            | Expr::Ok { expr, .. } | Expr::Err { expr, .. } => {
+                Self::count_ident_uses(expr, counts);
+            }
+        }
+    }
+
+    fn count_ident_uses_in_stmt(stmt: &Stmt, counts: &mut std::collections::HashMap<String, usize>) {
+        match stmt {
+            Stmt::Let { value, .. } | Stmt::Var { value, .. }
+            | Stmt::LetDestructure { value, .. } | Stmt::Assign { value, .. } => {
+                Self::count_ident_uses(value, counts);
+            }
+            Stmt::IndexAssign { index, value, .. } => {
+                // target is a String (variable name), not an Expr
+                Self::count_ident_uses(index, counts);
+                Self::count_ident_uses(value, counts);
+            }
+            Stmt::FieldAssign { value, .. } => {
+                // target is a String (variable name), not an Expr
+                Self::count_ident_uses(value, counts);
+            }
+            Stmt::Expr { expr, .. } => {
+                Self::count_ident_uses(expr, counts);
+            }
+            Stmt::Guard { cond, else_, .. } => {
+                Self::count_ident_uses(cond, counts);
+                Self::count_ident_uses(else_, counts);
+            }
+            Stmt::Comment { .. } => {}
+        }
+    }
+
+    /// Analyze a function body to find variables used exactly once.
+    /// These are safe to move instead of clone.
+    pub(crate) fn analyze_single_use(&mut self, body: &Expr, params: &[Param]) {
+        let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        Self::count_ident_uses(body, &mut counts);
+        self.single_use_vars.clear();
+        for (name, count) in &counts {
+            // Only optimize variables that:
+            // 1. Are used exactly once
+            // 2. Are NOT function parameters (params are always cloned for safety — caller still owns)
+            if *count == 1 && !params.iter().any(|p| &p.name == name) {
+                self.single_use_vars.insert(name.clone());
+            }
         }
     }
 }

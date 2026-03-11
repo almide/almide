@@ -17,6 +17,7 @@ pub struct Checker {
     pub source_file: Option<String>,
     pub source_text: Option<String>,
     current_decl_line: Option<usize>,
+    current_decl_col: Option<usize>,
     /// Build target (e.g. "rust", "ts", "wasm"). Used to gate platform modules.
     pub target: Option<String>,
 }
@@ -36,6 +37,7 @@ impl Checker {
             source_file: None,
             source_text: None,
             current_decl_line: None,
+            current_decl_col: None,
             target: None,
         };
         c.register_stdlib();
@@ -69,6 +71,9 @@ impl Checker {
         }
         if d.line.is_none() {
             d.line = self.current_decl_line;
+        }
+        if d.col.is_none() {
+            d.col = self.current_decl_col;
         }
         self.diagnostics.push(d);
     }

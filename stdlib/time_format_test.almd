@@ -1,0 +1,39 @@
+import time
+
+fn main() -> Unit = {
+  // Known timestamp: 2024-01-15 10:30:45 UTC = 1705314645
+  let ts = 1705314645
+
+  // format
+  assert(time.format(ts, "%F %T") == "2024-01-15 10:30:45", "format %F %T")
+  assert(time.format(ts, "%Y/%m/%d") == "2024/01/15", "format %Y/%m/%d")
+  assert(time.format(ts, "%a %b %d") == "Mon Jan 15", "format %a %b %d")
+
+  // weekday_name / month_name
+  assert(time.weekday_name(ts) == "Mon", "weekday_name")
+  assert(time.month_name(ts) == "Jan", "month_name")
+
+  // parse_iso date only
+  let date_only = time.parse_iso("2024-01-15")
+  let expected_date = time.from_parts(2024, 1, 15, 0, 0, 0)
+  assert(date_only == some(expected_date), "parse_iso date only")
+
+  // parse_iso full datetime
+  let full = time.parse_iso("2024-01-15T10:30:45Z")
+  assert(full == some(1705314645), "parse_iso datetime")
+
+  // parse_iso space separator
+  let space = time.parse_iso("2024-01-15 10:30:45")
+  assert(space == some(1705314645), "parse_iso space sep")
+
+  // parse_iso invalid
+  assert(time.parse_iso("nope") == none, "parse_iso invalid")
+  assert(time.parse_iso("") == none, "parse_iso empty")
+
+  // roundtrip
+  let iso = time.format(ts, "%F") ++ "T" ++ time.format(ts, "%T") ++ "Z"
+  let parsed = time.parse_iso(iso)
+  assert(parsed == some(ts), "roundtrip")
+
+  println("time format/parse: all tests passed")
+}

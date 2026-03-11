@@ -23,5 +23,5 @@ ts = "__almd_random.choice({xs})"
 params = [{ name = "xs", type = "List[Unknown]" }]
 return = "List[Unknown]"
 effect = true
-rust = "almide_rt_random_shuffle(({xs}).clone())?"
+rust = "almide_rt_random_shuffle(({xs}).to_vec())?"
 ts = "__almd_random.shuffle({xs})"

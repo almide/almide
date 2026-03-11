@@ -129,11 +129,12 @@ impl Emitter {
                     let b = self.gen_expr(&args[1]);
                     let msg = if args.len() >= 3 { Some(self.gen_expr(&args[2])) } else { None };
                     // If one side is an empty list, use .is_empty() check instead
+                    // Use let-binding to avoid evaluating the expression twice
                     if matches!(&args[1], Expr::List { elements, .. } if elements.is_empty()) {
-                        return format!("assert!(({}).is_empty(), \"expected empty list but got {{:?}}\", {})", a, a);
+                        return format!("{{ let __v = {}; assert!(__v.is_empty(), \"expected empty list but got {{:?}}\", __v); }}", a);
                     }
                     if matches!(&args[0], Expr::List { elements, .. } if elements.is_empty()) {
-                        return format!("assert!(({}).is_empty(), \"expected empty list but got {{:?}}\", {})", b, b);
+                        return format!("{{ let __v = {}; assert!(__v.is_empty(), \"expected empty list but got {{:?}}\", __v); }}", b);
                     }
                     if let Some(m) = msg {
                         return format!("assert_eq!({}, {}, \"{{}}\", {})", a, b, m);
@@ -180,7 +181,30 @@ impl Emitter {
             }
             _ => String::new(),
         };
-        let args_str: Vec<String> = args.iter().map(|a| self.gen_arg(a)).collect();
+        // Use borrow-aware arg generation for known function names
+        // When inside a module, qualify with module name for borrow lookup
+        let callee_fn_name: Option<String> = match callee {
+            Expr::Ident { name, .. } => {
+                if let Some(ref mod_name) = self.current_module {
+                    let qualified = format!("{}.{}", mod_name, name);
+                    if self.borrow_info.fn_params.contains_key(&qualified) {
+                        Some(qualified)
+                    } else {
+                        Some(name.clone())
+                    }
+                } else {
+                    Some(name.clone())
+                }
+            }
+            _ => None,
+        };
+        let args_str: Vec<String> = args.iter().enumerate().map(|(i, a)| {
+            if let Some(ref fn_name) = callee_fn_name {
+                self.gen_arg_for(a, fn_name, i)
+            } else {
+                self.gen_arg(a)
+            }
+        }).collect();
         let call = format!("{}{}({})", callee_str, turbofish, args_str.join(", "));
         // Auto-propagate ? for effect fn calls within effect context (not in tests, not suppressed)
         if self.in_effect && !self.in_test && !self.skip_auto_q.get() {
@@ -218,8 +242,11 @@ impl Emitter {
             .cloned()
             .unwrap_or_else(|| module.to_string());
         if self.user_modules.contains(&resolved_mod) {
-            // Use gen_arg (clone Idents) for user module calls to avoid move errors
-            let user_args_str: Vec<String> = args.iter().map(|a| self.gen_arg(a)).collect();
+            // Use borrow-aware arg generation for user module calls
+            let qualified = format!("{}.{}", resolved_mod, func);
+            let user_args_str: Vec<String> = args.iter().enumerate()
+                .map(|(i, a)| self.gen_arg_for(a, &qualified, i))
+                .collect();
             let rust_mod = resolved_mod.replace('.', "_");
             let safe_func = crate::emit_common::sanitize(func);
             let call = format!("{}::{}{}({})", rust_mod, safe_func, turbofish, user_args_str.join(", "));

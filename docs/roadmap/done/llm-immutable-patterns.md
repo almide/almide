@@ -17,8 +17,8 @@ LLMs trained on Python/JS/Go default to mutable algorithms. Almide's immutable l
 ### 1.2 Suggest `var` with shadowing pattern ✅ Already done
 Parameter reassignment error already suggests `var {name}_ = {name}` pattern (v0.4.6).
 
-### 1.3 Rich source location in errors
-Column numbers + caret underline for immutability errors. See [error-diagnostics.md](./error-diagnostics.md).
+### 1.3 Rich source location in errors ✅
+Column numbers + caret underline implemented (v0.4.11). All errors now show `file:line:col` with `^^^` underlines.
 
 ## Remaining — Tier 2 (stdlib patterns)
 

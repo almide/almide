@@ -2,6 +2,7 @@ mod program;
 mod expressions;
 mod calls;
 mod blocks;
+pub mod borrow;
 
 use crate::ast::*;
 
@@ -58,11 +59,19 @@ pub(crate) struct Emitter {
     pub(crate) generic_variant_unit_ctors: std::collections::HashSet<String>,
     /// Constructor args that need Box wrapping (recursive variants): (ctor_name, arg_index)
     pub(crate) boxed_variant_args: std::collections::HashSet<(String, usize)>,
+    /// Variables used only once in the current function body — safe to move instead of clone
+    pub(crate) single_use_vars: std::collections::HashSet<String>,
+    /// Borrow inference results: which params can be passed by reference
+    pub(crate) borrow_info: borrow::BorrowInfo,
+    /// Parameters that are currently borrowed (&str, &[T]) — need .to_owned()/.to_vec() instead of .clone()
+    pub(crate) borrowed_params: std::collections::HashMap<String, String>,
+    /// Current module name (for qualifying intra-module calls in borrow lookup)
+    pub(crate) current_module: Option<String>,
 }
 
 impl Emitter {
     fn new(options: &EmitOptions) -> Self {
-        Self { out: String::new(), indent: 0, in_effect: false, effect_fns: Vec::new(), result_fns: Vec::new(), in_do_block: std::cell::Cell::new(false), user_modules: Vec::new(), in_test: false, no_thread_wrap: options.no_thread_wrap, module_aliases: std::collections::HashMap::new(), skip_auto_q: std::cell::Cell::new(false), anon_record_structs: std::cell::RefCell::new(std::collections::HashMap::new()), anon_record_counter: std::cell::Cell::new(0), named_record_types: std::collections::HashMap::new(), generic_variant_constructors: std::collections::HashMap::new(), generic_variant_unit_ctors: std::collections::HashSet::new(), boxed_variant_args: std::collections::HashSet::new() }
+        Self { out: String::new(), indent: 0, in_effect: false, effect_fns: Vec::new(), result_fns: Vec::new(), in_do_block: std::cell::Cell::new(false), user_modules: Vec::new(), in_test: false, no_thread_wrap: options.no_thread_wrap, module_aliases: std::collections::HashMap::new(), skip_auto_q: std::cell::Cell::new(false), anon_record_structs: std::cell::RefCell::new(std::collections::HashMap::new()), anon_record_counter: std::cell::Cell::new(0), named_record_types: std::collections::HashMap::new(), generic_variant_constructors: std::collections::HashMap::new(), generic_variant_unit_ctors: std::collections::HashSet::new(), boxed_variant_args: std::collections::HashSet::new(), single_use_vars: std::collections::HashSet::new(), borrow_info: borrow::BorrowInfo::new(), borrowed_params: std::collections::HashMap::new(), current_module: None }
     }
 
     pub(crate) fn emit_indent(&mut self) {
@@ -104,6 +113,8 @@ pub fn emit_with_options(program: &Program, modules: &[(String, Program, Option<
     for (alias, target) in import_aliases {
         emitter.module_aliases.insert(alias.clone(), target.clone());
     }
+    // Run borrow inference before emitting
+    emitter.borrow_info = borrow::analyze_program(program, modules);
     emitter.emit_program(program, modules);
     emitter.out
 }

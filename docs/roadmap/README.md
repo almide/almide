@@ -3,9 +3,8 @@
 ## Active
 
 - [Codegen Optimization](active/codegen-optimization.md) — clone elimination, move analysis, borrow inference
-- [Error Diagnostics — Visual](active/error-diagnostics.md) — carets, color, multi-span
-- [LLM Immutable Patterns](active/llm-immutable-patterns.md) — Tier 1 done, Tier 2 done (via list-stdlib-gaps)
-- [Stdlib Self-Hosting](active/stdlib-self-hosting.md) — Phase 1-2a done, 2b/3 remaining
+- [Error Diagnostics — Visual](active/error-diagnostics.md) — color done, carets done, multi-span remaining
+- [Stdlib Self-Hosting](active/stdlib-self-hosting.md) — Phase 0-2b done, time.format/parse done
 
 ## On Hold
 
@@ -36,6 +35,7 @@
 - [Generics](done/generics.md)
 - [HTTP Module](done/http.md) — server, client, multi-target
 - [List Stdlib Gaps](done/list-stdlib-gaps.md) — all 3 tiers complete (52 functions)
+- [LLM Immutable Patterns](done/llm-immutable-patterns.md) — Tier 1-2 complete, caret underlines
 - [Language Test Suite](done/language-test-suite.md)
 - [Literal Syntax Gaps](done/literal-syntax-gaps.md)
 - [Module System v2](done/module-system-v2.md)

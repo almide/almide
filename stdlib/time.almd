@@ -95,3 +95,119 @@ fn from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int = {
   let days = era * 146097 + doe - 719468
   days * 86400 + h * 3600 + min * 60 + s
 }
+
+// Weekday name (English, short)
+fn weekday_name(ts: Int) -> String = {
+  let wd = weekday(ts)
+  match wd {
+    0 => "Mon"
+    1 => "Tue"
+    2 => "Wed"
+    3 => "Thu"
+    4 => "Fri"
+    5 => "Sat"
+    6 => "Sun"
+    _ => "???"
+  }
+}
+
+// Month name (English, short)
+fn month_name(ts: Int) -> String = {
+  let m = month(ts)
+  match m {
+    1 => "Jan"
+    2 => "Feb"
+    3 => "Mar"
+    4 => "Apr"
+    5 => "May"
+    6 => "Jun"
+    7 => "Jul"
+    8 => "Aug"
+    9 => "Sep"
+    10 => "Oct"
+    11 => "Nov"
+    12 => "Dec"
+    _ => "???"
+  }
+}
+
+// Format timestamp using strftime-like pattern
+// Supported: %Y (year), %m (month), %d (day), %H (hour), %M (minute), %S (second)
+//            %a (weekday short), %b (month short), %F (%Y-%m-%d), %T (%H:%M:%S)
+fn format(ts: Int, fmt: String) -> String = {
+  let p = time_parts(ts)
+  let y_str = string.pad_left(int.to_string(p.year), 4, "0")
+  let m_str = string.pad_left(int.to_string(p.month), 2, "0")
+  let d_str = string.pad_left(int.to_string(p.day), 2, "0")
+  let h_str = string.pad_left(int.to_string(p.hour), 2, "0")
+  let mi_str = string.pad_left(int.to_string(p.minute), 2, "0")
+  let s_str = string.pad_left(int.to_string(p.second), 2, "0")
+  let wd_str = weekday_name(ts)
+  let mo_str = month_name(ts)
+  // Replace specifiers (longer patterns first to avoid partial matches)
+  let result = fmt
+  let result = string.replace(result, "%F", y_str ++ "-" ++ m_str ++ "-" ++ d_str)
+  let result = string.replace(result, "%T", h_str ++ ":" ++ mi_str ++ ":" ++ s_str)
+  let result = string.replace(result, "%Y", y_str)
+  let result = string.replace(result, "%m", m_str)
+  let result = string.replace(result, "%d", d_str)
+  let result = string.replace(result, "%H", h_str)
+  let result = string.replace(result, "%M", mi_str)
+  let result = string.replace(result, "%S", s_str)
+  let result = string.replace(result, "%a", wd_str)
+  let result = string.replace(result, "%b", mo_str)
+  result
+}
+
+// Helper: parse a single-char digit string to int (0-9)
+fn digit_val(ch: String) -> Int = {
+  match ch {
+    "0" => 0
+    "1" => 1
+    "2" => 2
+    "3" => 3
+    "4" => 4
+    "5" => 5
+    "6" => 6
+    "7" => 7
+    "8" => 8
+    "9" => 9
+    _ => 0
+  }
+}
+
+// Helper: parse 2-digit number at position
+fn parse2(s: String, pos: Int) -> Int = {
+  let d1 = digit_val(string.slice(s, pos, pos + 1))
+  let d2 = digit_val(string.slice(s, pos + 1, pos + 2))
+  d1 * 10 + d2
+}
+
+// Helper: parse 4-digit number at position
+fn parse4(s: String, pos: Int) -> Int = {
+  let d1 = digit_val(string.slice(s, pos, pos + 1))
+  let d2 = digit_val(string.slice(s, pos + 1, pos + 2))
+  let d3 = digit_val(string.slice(s, pos + 2, pos + 3))
+  let d4 = digit_val(string.slice(s, pos + 3, pos + 4))
+  d1 * 1000 + d2 * 100 + d3 * 10 + d4
+}
+
+// Parse ISO 8601 datetime string (YYYY-MM-DDTHH:MM:SSZ or YYYY-MM-DD HH:MM:SS)
+// Returns Option[Int] (UNIX timestamp) — none if string is too short
+fn parse_iso(s: String) -> Option[Int] = {
+  let len = string.len(s)
+  if len < 10 then none
+  else {
+    let yv = parse4(s, 0)
+    let mv = parse2(s, 5)
+    let dv = parse2(s, 8)
+    if len == 10 then some(from_parts(yv, mv, dv, 0, 0, 0))
+    else if len >= 19 then {
+      let h = parse2(s, 11)
+      let mn = parse2(s, 14)
+      let sec = parse2(s, 17)
+      some(from_parts(yv, mv, dv, h, mn, sec))
+    }
+    else none
+  }
+}
