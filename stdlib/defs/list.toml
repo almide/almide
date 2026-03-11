@@ -354,6 +354,67 @@ return = "Option[Int]"
 rust = "almide_rt_list_find_index(({xs}).clone(), |{f.args}| {{ {f.clone_bindings}{f.body} }})"
 ts = "__almd_list.find_index({xs}, {f.args} => {f.body})"
 
+[update]
+type_params = ["A"]
+params = [
+    { name = "xs", type = "List[A]" },
+    { name = "i", type = "Int" },
+    { name = "f", type = "Fn[A] -> A" },
+]
+return = "List[A]"
+rust = "almide_rt_list_update(({xs}).clone(), {i}, |{f.args}| {{ {f.body} }})"
+ts = "__almd_list.update({xs}, {i}, {f.args} => {f.body})"
+
+[repeat]
+type_params = ["A"]
+params = [{ name = "val", type = "A" }, { name = "n", type = "Int" }]
+return = "List[A]"
+rust = "almide_rt_list_repeat({val}, {n})"
+ts = "__almd_list.repeat({val}, {n})"
+
+[scan]
+type_params = ["A", "B"]
+params = [
+    { name = "xs", type = "List[A]" },
+    { name = "init", type = "B" },
+    { name = "f", type = "Fn[B, A] -> B" },
+]
+return = "List[B]"
+rust = "almide_rt_list_scan(({xs}).clone(), {init}, |{f.args}| {{ {f.body} }})"
+ts = "__almd_list.scan({xs}, {init}, ({f.args}) => {f.body})"
+
+[intersperse]
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }, { name = "sep", type = "A" }]
+return = "List[A]"
+rust = "almide_rt_list_intersperse(({xs}).clone(), {sep})"
+ts = "__almd_list.intersperse({xs}, {sep})"
+
+[windows]
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }, { name = "n", type = "Int" }]
+return = "List[List[A]]"
+rust = "almide_rt_list_windows(&{xs}, {n})"
+ts = "__almd_list.windows({xs}, {n})"
+
+[dedup]
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }]
+return = "List[A]"
+rust = "almide_rt_list_dedup(&{xs})"
+ts = "__almd_list.dedup({xs})"
+
+[zip_with]
+type_params = ["A", "B", "C"]
+params = [
+    { name = "xs", type = "List[A]" },
+    { name = "ys", type = "List[B]" },
+    { name = "f", type = "Fn[A, B] -> C" },
+]
+return = "List[C]"
+rust = "almide_rt_list_zip_with(({xs}).clone(), ({ys}).clone(), |{f.args}| {{ {f.body} }})"
+ts = "__almd_list.zip_with({xs}, {ys}, ({f.args}) => {f.body})"
+
 [fold]
 type_params = ["A", "B"]
 params = [

@@ -110,6 +110,25 @@ fn almide_rt_fs_stat(path: &str) -> Result<AlmideStatResult, String> {
     Ok(AlmideStatResult { size: meta.len() as i64, is_dir: meta.is_dir(), is_file: meta.is_file(), modified })
 }
 
+fn almide_rt_fs_remove_all(path: &str) -> Result<(), String> {
+    let p = std::path::Path::new(path);
+    if p.is_dir() {
+        std::fs::remove_dir_all(p).map_err(|e| e.to_string())
+    } else if p.exists() {
+        std::fs::remove_file(p).map_err(|e| e.to_string())
+    } else {
+        Ok(())
+    }
+}
+
+fn almide_rt_fs_file_size(path: &str) -> Result<i64, String> {
+    std::fs::metadata(path).map(|m| m.len() as i64).map_err(|e| e.to_string())
+}
+
+fn almide_rt_fs_temp_dir() -> String {
+    std::env::temp_dir().to_string_lossy().replace('\\', "/")
+}
+
 // ---- env ----
 
 fn almide_rt_env_unix_timestamp() -> i64 {
@@ -183,6 +202,39 @@ fn almide_rt_process_exec_status(cmd: &str, args: &[String]) -> Result<AlmideExe
             stderr: String::from_utf8_lossy(&out.stderr).to_string(),
         }),
         Err(e) => Err(e.to_string()),
+    }
+}
+
+fn almide_rt_process_exec_in(dir: &str, cmd: &str, args: &[String]) -> Result<String, String> {
+    match std::process::Command::new(cmd).args(args).current_dir(dir).output() {
+        Ok(out) => {
+            if out.status.success() {
+                Ok(String::from_utf8_lossy(&out.stdout).to_string())
+            } else {
+                Err(String::from_utf8_lossy(&out.stderr).to_string())
+            }
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+fn almide_rt_process_exec_with_stdin(cmd: &str, args: &[String], input: &str) -> Result<String, String> {
+    use std::io::Write;
+    let mut child = std::process::Command::new(cmd)
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    if let Some(ref mut stdin) = child.stdin {
+        stdin.write_all(input.as_bytes()).map_err(|e| e.to_string())?;
+    }
+    let out = child.wait_with_output().map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).to_string())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).to_string())
     }
 }
 

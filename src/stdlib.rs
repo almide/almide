@@ -74,7 +74,9 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         | "first" | "flat_map"
         | "filter_map" | "take_while" | "drop_while"
         | "partition" | "reduce" | "group_by"
-        | "insert" | "remove_at" | "find_index" => vec!["list"],
+        | "insert" | "remove_at" | "find_index"
+        | "update" | "scan" | "intersperse"
+        | "windows" | "dedup" | "zip_with" => vec!["list"],
 
         // ── map-only ──
         "keys" | "values" | "entries" | "merge"

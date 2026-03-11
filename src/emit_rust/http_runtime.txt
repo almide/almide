@@ -316,6 +316,39 @@ fn almide_https_curl(url: &str, method: &str, body: Option<&str>) -> Result<Stri
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+fn almide_http_get_with_headers(url: &str, headers: &std::collections::HashMap<String, String>) -> Result<String, String> {
+    let mut cmd = std::process::Command::new("curl");
+    cmd.arg("-s");
+    for (k, v) in headers {
+        cmd.arg("-H").arg(format!("{}: {}", k, v));
+    }
+    cmd.arg(url);
+    let output = cmd.output().map_err(|e| format!("curl not found: {}", e))?;
+    if !output.status.success() {
+        return Err(format!("HTTP request failed: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn almide_http_request(method: &str, url: &str, body: &str, headers: &std::collections::HashMap<String, String>) -> Result<String, String> {
+    let mut cmd = std::process::Command::new("curl");
+    cmd.arg("-s").arg("-X").arg(method);
+    for (k, v) in headers {
+        cmd.arg("-H").arg(format!("{}: {}", k, v));
+    }
+    if !body.is_empty() {
+        cmd.arg("-d").arg(body);
+    }
+    cmd.arg(url);
+    let output = cmd.output().map_err(|e| format!("curl not found: {}", e))?;
+    if !output.status.success() {
+        return Err(format!("HTTP request failed: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn almide_http_parse_url(url: &str) -> Result<(String, u16, String), String> {
     let url = url.strip_prefix("http://").ok_or("Use http:// or https:// URLs")?;
     let (host_port, path) = if let Some(pos) = url.find('/') { (&url[..pos], &url[pos..]) } else { (url, "/") };

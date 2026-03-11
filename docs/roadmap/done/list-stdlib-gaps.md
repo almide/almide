@@ -66,13 +66,13 @@ Nice-to-have. Increases expressiveness for pipeline-heavy code.
 
 | Function | Signature | Present in |
 |----------|-----------|------------|
-| **update** | `(xs, i, f) -> List[T]` | Elixir |
-| **repeat** | `(value, n) -> List[T]` | Python, Rust, Haskell, Elixir |
-| **scan** | `(xs, init, f) -> List[U]` | Python, Rust, Haskell, Elixir, Kotlin |
-| **intersperse** | `(xs, sep) -> List[T]` | Rust, Haskell, Elixir |
-| **windows** | `(xs, n) -> List[List[T]]` | Rust, Kotlin |
-| **dedup** | `(xs) -> List[T]` | Rust, Haskell, Elixir, Go |
-| **zip_with** | `(a, b, f) -> List[U]` | Haskell, Elixir |
+| ~~update~~ | `(xs, i, f) -> List[T]` | Elixir | **Done** (v0.4.8) |
+| ~~repeat~~ | `(value, n) -> List[T]` | Python, Rust, Haskell, Elixir | **Done** (v0.4.8) |
+| ~~scan~~ | `(xs, init, f) -> List[U]` | Python, Rust, Haskell, Elixir, Kotlin | **Done** (v0.4.8) |
+| ~~intersperse~~ | `(xs, sep) -> List[T]` | Rust, Haskell, Elixir | **Done** (v0.4.8) |
+| ~~windows~~ | `(xs, n) -> List[List[T]]` | Rust, Kotlin | **Done** (v0.4.8) |
+| ~~dedup~~ | `(xs) -> List[T]` | Rust, Haskell, Elixir, Go | **Done** (v0.4.8) |
+| ~~zip_with~~ | `(a, b, f) -> List[U]` | Haskell, Elixir | **Done** (v0.4.8) |
 
 ## Implementation order
 

@@ -34,6 +34,7 @@ pub fn gen_generated_call(
             ("fs", "copy") => format!("almide_rt_fs_copy(&*{}, &*{})?", args_str[0], args_str[1]),
             ("fs", "exists?") => format!("almide_rt_fs_exists(&*{})", args_str[0]),
             ("fs", "exists_hdlm_qm_") => format!("almide_rt_fs_exists(&*{})", args_str[0]),
+            ("fs", "file_size") => format!("almide_rt_fs_file_size(&*{})?", args_str[0]),
             ("fs", "is_dir?") => format!("almide_rt_fs_is_dir(&*{})", args_str[0]),
             ("fs", "is_dir_hdlm_qm_") => format!("almide_rt_fs_is_dir(&*{})", args_str[0]),
             ("fs", "is_file?") => format!("almide_rt_fs_is_file(&*{})", args_str[0]),
@@ -44,14 +45,18 @@ pub fn gen_generated_call(
             ("fs", "read_lines") => format!("almide_rt_fs_read_lines(&*{})?", args_str[0]),
             ("fs", "read_text") => format!("almide_rt_fs_read_text(&*{})?", args_str[0]),
             ("fs", "remove") => format!("almide_rt_fs_remove(&*{})?", args_str[0]),
+            ("fs", "remove_all") => format!("almide_rt_fs_remove_all(&*{})?", args_str[0]),
             ("fs", "rename") => format!("almide_rt_fs_rename(&*{}, &*{})?", args_str[0], args_str[1]),
             ("fs", "stat") => format!("almide_rt_fs_stat(&*{})?", args_str[0]),
+            ("fs", "temp_dir") => "almide_rt_fs_temp_dir()".to_string(),
             ("fs", "walk") => format!("almide_rt_fs_walk(&*{})?", args_str[0]),
             ("fs", "write") => format!("almide_rt_fs_write(&*{}, &*{})?", args_str[0], args_str[1]),
             ("fs", "write_bytes") => format!("almide_rt_fs_write_bytes(&*{}, &{})?", args_str[0], args_str[1]),
             ("http", "get") => format!("almide_http_get(&{})?", args_str[0]),
+            ("http", "get_with_headers") => format!("almide_http_get_with_headers(&{}, &{})?", args_str[0], args_str[1]),
             ("http", "json") => format!("AlmideHttpResponse::json({}, {}.to_string())", args_str[0], args_str[1]),
             ("http", "post") => format!("almide_http_post(&{}, &{})?", args_str[0], args_str[1]),
+            ("http", "request") => format!("almide_http_request(&{}, &{}, &{}, &{})?", args_str[0], args_str[1], args_str[2], args_str[3]),
             ("http", "response") => format!("AlmideHttpResponse::new({}, {}.to_string())", args_str[0], args_str[1]),
             ("http", "serve") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
@@ -114,6 +119,7 @@ pub fn gen_generated_call(
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
                 format!("almide_rt_list_count(&{}, |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
             },
+            ("list", "dedup") => format!("almide_rt_list_dedup(&{})", args_str[0]),
             ("list", "drop") => format!("almide_rt_list_drop(({}).clone(), {})", args_str[0], args_str[1]),
             ("list", "drop_while") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
@@ -158,6 +164,7 @@ pub fn gen_generated_call(
             },
             ("list", "index_of") => format!("almide_rt_list_index_of(&{}, &{})", args_str[0], args_str[1]),
             ("list", "insert") => format!("almide_rt_list_insert(({}).clone(), {}, {})", args_str[0], args_str[1], args_str[2]),
+            ("list", "intersperse") => format!("almide_rt_list_intersperse(({}).clone(), {})", args_str[0], args_str[1]),
             ("list", "is_empty?") => format!("almide_rt_list_is_empty(&{})", args_str[0]),
             ("list", "is_empty_hdlm_qm_") => format!("almide_rt_list_is_empty(&{})", args_str[0]),
             ("list", "join") => format!("almide_rt_list_join(&{}, &*{})", args_str[0], args_str[1]),
@@ -180,7 +187,12 @@ pub fn gen_generated_call(
                 format!("almide_rt_list_reduce(({}).clone(), |{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body)
             },
             ("list", "remove_at") => format!("almide_rt_list_remove_at(({}).clone(), {})", args_str[0], args_str[1]),
+            ("list", "repeat") => format!("almide_rt_list_repeat({}, {})", args_str[0], args_str[1]),
             ("list", "reverse") => format!("almide_rt_list_reverse(&{})", args_str[0]),
+            ("list", "scan") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(2, 2);
+                format!("almide_rt_list_scan(({}).clone(), {}, |{}| {{{{ {} }}}})", args_str[0], args_str[1], __cl_f_names.join(", "), __cl_f_body)
+            },
             ("list", "set") => format!("almide_rt_list_set(&{}, {}, {})", args_str[0], args_str[1], args_str[2]),
             ("list", "slice") => format!("almide_rt_list_slice(({}).clone(), {}, {})", args_str[0], args_str[1], args_str[2]),
             ("list", "sort") => format!("almide_rt_list_sort(&{})", args_str[0]),
@@ -196,7 +208,16 @@ pub fn gen_generated_call(
                 format!("almide_rt_list_take_while(({}).clone(), |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
             },
             ("list", "unique") => format!("almide_rt_list_unique(&{})", args_str[0]),
+            ("list", "update") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(2, 1);
+                format!("almide_rt_list_update(({}).clone(), {}, |{}| {{{{ {} }}}})", args_str[0], args_str[1], __cl_f_names.join(", "), __cl_f_body)
+            },
+            ("list", "windows") => format!("almide_rt_list_windows(&{}, {})", args_str[0], args_str[1]),
             ("list", "zip") => format!("almide_rt_list_zip(({}).clone(), ({}).clone())", args_str[0], args_str[1]),
+            ("list", "zip_with") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(2, 2);
+                format!("almide_rt_list_zip_with(({}).clone(), ({}).clone(), |{}| {{{{ {} }}}})", args_str[0], args_str[1], __cl_f_names.join(", "), __cl_f_body)
+            },
             ("map", "contains") => format!("almide_rt_map_contains(&{}, &{})", args_str[0], args_str[1]),
             ("map", "entries") => format!("almide_rt_map_entries(&{})", args_str[0]),
             ("map", "filter") => {
@@ -236,7 +257,9 @@ pub fn gen_generated_call(
             ("math", "sqrt") => format!("almide_rt_math_sqrt({} as f64)", args_str[0]),
             ("math", "tan") => format!("almide_rt_math_tan({} as f64)", args_str[0]),
             ("process", "exec") => format!("almide_rt_process_exec(&*{}, &{{ let __a: Vec<String> = {}; __a }})", args_str[0], args_str[1]),
+            ("process", "exec_in") => format!("almide_rt_process_exec_in(&*{}, &*{}, &{{ let __a: Vec<String> = {}; __a }})", args_str[0], args_str[1], args_str[2]),
             ("process", "exec_status") => format!("almide_rt_process_exec_status(&*{}, &{{ let __a: Vec<String> = {}; __a }})?", args_str[0], args_str[1]),
+            ("process", "exec_with_stdin") => format!("almide_rt_process_exec_with_stdin(&*{}, &{{ let __a: Vec<String> = {}; __a }}, &*{})", args_str[0], args_str[1], args_str[2]),
             ("process", "exit") => format!("almide_rt_process_exit({})", args_str[0]),
             ("process", "stdin_lines") => "almide_rt_process_stdin_lines()?".to_string(),
             ("random", "choice") => format!("almide_rt_random_choice(&{})?", args_str[0]),

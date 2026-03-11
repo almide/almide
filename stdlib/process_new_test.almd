@@ -1,0 +1,12 @@
+test "process.exec_in" {
+  let result = process.exec_in("/tmp", "pwd", [])
+  match result {
+    ok(out) => assert(string.contains?(string.trim(out), "tmp"))
+    err(e) => assert(false)
+  }
+}
+
+test "process.exec_with_stdin" {
+  let result = process.exec_with_stdin("cat", [], "hello world")
+  assert_eq(result, ok("hello world"))
+}

@@ -253,11 +253,10 @@ Use cases:
 
 | Module | Functions | Priority |
 |--------|-----------|----------|
-| `float` | `to_fixed(n, decimals)` | CRITICAL |
-| `fs` | `walk`, `remove_all`, `glob`, `file_size`, `temp_dir` | HIGH |
-| `process` | `exec_in(dir, cmd, args)`, `exec_with_stdin` | HIGH |
-| `time` | `format(ts, fmt)`, `parse(s, fmt)` | HIGH |
-| `http` | fix missing type signatures in stdlib.rs (bug) | HIGH |
-| `http` | `get_with_headers`, `request(method, url, body, headers)` | MEDIUM |
+| `float` | `to_fixed(n, decimals)` | ✅ Done (v0.4.8) |
+| `fs` | `walk` ✅, `remove_all` ✅, `file_size` ✅, `temp_dir` ✅, `glob` (deferred) | ✅ Done |
+| `process` | `exec_in(dir, cmd, args)` ✅, `exec_with_stdin` ✅ | ✅ Done |
+| `time` | `format(ts, fmt)`, `parse(s, fmt)` | Planned (.almd) |
+| `http` | `get_with_headers` ✅, `request(method, url, body, headers)` ✅ | ✅ Done |
 
 ---

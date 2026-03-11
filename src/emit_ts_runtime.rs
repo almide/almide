@@ -50,6 +50,9 @@ const MOD_FS_TS: &str = r#"const __almd_fs = {
   is_file_hdlm_qm_(p: string): boolean { try { return Deno.statSync(p).isFile; } catch { return false; } },
   copy(src: string, dst: string): void { Deno.copyFileSync(src, dst); },
   rename(src: string, dst: string): void { Deno.renameSync(src, dst); },
+  remove_all(p: string): void { try { Deno.removeSync(p, { recursive: true }); } catch {} },
+  file_size(p: string): number { return Deno.statSync(p).size; },
+  temp_dir(): string { return Deno.env.get("TMPDIR") || "/tmp"; },
 };
 "#;
 
@@ -88,6 +91,9 @@ const MOD_FS_JS: &str = r#"const __almd_fs = {
   is_file_hdlm_qm_(p) { try { return require("fs").statSync(p).isFile(); } catch { return false; } },
   copy(src, dst) { require("fs").copyFileSync(src, dst); },
   rename(src, dst) { require("fs").renameSync(src, dst); },
+  remove_all(p) { require("fs").rmSync(p, { recursive: true, force: true }); },
+  file_size(p) { return require("fs").statSync(p).size; },
+  temp_dir() { return require("os").tmpdir().replace(/\\/g, "/"); },
 };
 "#;
 
@@ -224,6 +230,13 @@ const MOD_LIST_TS: &str = r#"const __almd_list = {
   insert<T>(xs: T[], i: number, v: T): T[] { const r = [...xs]; r.splice(i, 0, v); return r; },
   remove_at<T>(xs: T[], i: number): T[] { const r = [...xs]; if (i >= 0 && i < r.length) r.splice(i, 1); return r; },
   find_index<T>(xs: T[], f: (x: T) => boolean): number | null { const i = xs.findIndex(f); return i >= 0 ? i : null; },
+  update<T>(xs: T[], i: number, f: (x: T) => T): T[] { const r = [...xs]; if (i >= 0 && i < r.length) r[i] = f(r[i]); return r; },
+  repeat<T>(v: T, n: number): T[] { return Array(Math.max(0, n)).fill(v); },
+  scan<T, U>(xs: T[], init: U, f: (acc: U, x: T) => U): U[] { let acc = init; return xs.map(x => { acc = f(acc, x); return acc; }); },
+  intersperse<T>(xs: T[], sep: T): T[] { const r: T[] = []; xs.forEach((x, i) => { if (i > 0) r.push(sep); r.push(x); }); return r; },
+  windows<T>(xs: T[], n: number): T[][] { if (n <= 0 || n > xs.length) return []; const r: T[][] = []; for (let i = 0; i <= xs.length - n; i++) r.push(xs.slice(i, i + n)); return r; },
+  dedup<T>(xs: T[]): T[] { const r: T[] = []; for (const x of xs) { if (r.length === 0 || r[r.length - 1] !== x) r.push(x); } return r; },
+  zip_with<A, B, C>(a: A[], b: B[], f: (x: A, y: B) => C): C[] { return a.slice(0, Math.min(a.length, b.length)).map((x, i) => f(x, b[i])); },
 };
 "#;
 
@@ -274,6 +287,13 @@ const MOD_LIST_JS: &str = r#"const __almd_list = {
   insert(xs, i, v) { const r = [...xs]; r.splice(i, 0, v); return r; },
   remove_at(xs, i) { const r = [...xs]; if (i >= 0 && i < r.length) r.splice(i, 1); return r; },
   find_index(xs, f) { const i = xs.findIndex(f); return i >= 0 ? i : null; },
+  update(xs, i, f) { const r = [...xs]; if (i >= 0 && i < r.length) r[i] = f(r[i]); return r; },
+  repeat(v, n) { return Array(Math.max(0, n)).fill(v); },
+  scan(xs, init, f) { let acc = init; return xs.map(x => { acc = f(acc, x); return acc; }); },
+  intersperse(xs, sep) { const r = []; xs.forEach((x, i) => { if (i > 0) r.push(sep); r.push(x); }); return r; },
+  windows(xs, n) { if (n <= 0 || n > xs.length) return []; const r = []; for (let i = 0; i <= xs.length - n; i++) r.push(xs.slice(i, i + n)); return r; },
+  dedup(xs) { const r = []; for (const x of xs) { if (r.length === 0 || r[r.length - 1] !== x) r.push(x); } return r; },
+  zip_with(a, b, f) { return a.slice(0, Math.min(a.length, b.length)).map((x, i) => f(x, b[i])); },
 };
 "#;
 
@@ -510,6 +530,8 @@ const MOD_PROCESS_TS: &str = r#"const __almd_process = {
   exec_status(cmd: string, args: string[]): {code: number, stdout: string, stderr: string} { try { const p = new Deno.Command(cmd, { args, stdout: "piped", stderr: "piped" }); const out = p.outputSync(); return { code: out.code, stdout: new TextDecoder().decode(out.stdout), stderr: new TextDecoder().decode(out.stderr) }; } catch (e) { throw e instanceof Error ? e : new Error(String(e)); } },
   exit(code: number): void { Deno.exit(code); },
   stdin_lines(): string[] { const buf = new Uint8Array(1024 * 1024); const n = Deno.stdin.readSync(buf); return n ? new TextDecoder().decode(buf.subarray(0, n)).split("\n").filter(l => l.length > 0) : []; },
+  exec_in(dir: string, cmd: string, args: string[]): string { try { const p = new Deno.Command(cmd, { args, cwd: dir, stdout: "piped", stderr: "piped" }); const out = p.outputSync(); if (out.success) { return new TextDecoder().decode(out.stdout); } else { const msg = new TextDecoder().decode(out.stderr); throw new Error(msg || "command failed"); } } catch (e) { if (e instanceof Error) throw e; throw new Error(String(e)); } },
+  exec_with_stdin(cmd: string, args: string[], input: string): string { try { const p = new Deno.Command(cmd, { args, stdin: "piped", stdout: "piped", stderr: "piped" }); const child = p.spawn(); const writer = child.stdin.getWriter(); writer.write(new TextEncoder().encode(input)); writer.close(); const out = child.outputSync(); if (out.success) { return new TextDecoder().decode(out.stdout); } else { throw new Error(new TextDecoder().decode(out.stderr) || "command failed"); } } catch (e) { if (e instanceof Error) throw e; throw new Error(String(e)); } },
 };
 "#;
 
@@ -518,6 +540,8 @@ const MOD_PROCESS_JS: &str = r#"const __almd_process = {
   exec_status(cmd, args) { const { spawnSync } = require("child_process"); const r = spawnSync(cmd, args, { encoding: "utf-8" }); if (r.error) throw r.error; return { code: r.status ?? 1, stdout: r.stdout || "", stderr: r.stderr || "" }; },
   exit(code) { __node_process.exit(code); },
   stdin_lines() { return require("fs").readFileSync(0, "utf-8").split("\n").filter(l => l.length > 0); },
+  exec_in(dir, cmd, args) { const { execFileSync } = require("child_process"); try { return execFileSync(cmd, args, { encoding: "utf-8", cwd: dir }); } catch (e) { const msg = e.stderr ? String(e.stderr) : e.message; throw new Error(msg || "command failed"); } },
+  exec_with_stdin(cmd, args, input) { const { execFileSync } = require("child_process"); try { return execFileSync(cmd, args, { encoding: "utf-8", input }); } catch (e) { const msg = e.stderr ? String(e.stderr) : e.message; throw new Error(msg || "command failed"); } },
 };
 "#;
 
@@ -660,6 +684,8 @@ const MOD_HTTP_TS: &str = r#"const __almd_http = {
   with_headers(status: number, body: string, headers: any): any { const h: Record<string, string> = {}; if (headers instanceof Map) { headers.forEach((v: string, k: string) => { h[k] = v; }); } else { Object.assign(h, headers); } return { status, body, headers: h }; },
   async get(url: string): Promise<string> { const r = await fetch(url); if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); },
   async post(url: string, body: string): Promise<string> { const r = await fetch(url, { method: "POST", body, headers: { "content-type": "application/json" } }); if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); },
+  async get_with_headers(url: string, headers: Map<string, string>): Promise<string> { const h: Record<string, string> = {}; headers.forEach((v, k) => { h[k] = v; }); const r = await fetch(url, { headers: h }); if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); },
+  async request(method: string, url: string, body: string, headers: Map<string, string>): Promise<string> { const h: Record<string, string> = {}; headers.forEach((v, k) => { h[k] = v; }); const opts: any = { method, headers: h }; if (body) opts.body = body; const r = await fetch(url, opts); if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); },
 };
 "#;
 
@@ -670,6 +696,8 @@ const MOD_HTTP_JS: &str = r#"const __almd_http = {
   with_headers(status, body, headers) { const h = {}; if (headers instanceof Map) { headers.forEach((v, k) => { h[k] = v; }); } else { Object.assign(h, headers); } return { status, body, headers: h }; },
   async get(url) { return new Promise((resolve, reject) => { const m = url.startsWith("https") ? require("https") : require("http"); m.get(url, (r) => { let d = ""; r.on("data", (c) => d += c); r.on("end", () => r.statusCode >= 400 ? reject(new Error("HTTP " + r.statusCode)) : resolve(d)); }).on("error", reject); }); },
   async post(url, body) { return new Promise((resolve, reject) => { const u = new URL(url); const m = u.protocol === "https:" ? require("https") : require("http"); const req = m.request({ hostname: u.hostname, port: u.port, path: u.pathname + u.search, method: "POST", headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body) } }, (r) => { let d = ""; r.on("data", (c) => d += c); r.on("end", () => r.statusCode >= 400 ? reject(new Error("HTTP " + r.statusCode)) : resolve(d)); }); req.on("error", reject); req.write(body); req.end(); }); },
+  async get_with_headers(url, headers) { const h = {}; headers.forEach((v, k) => { h[k] = v; }); return new Promise((resolve, reject) => { const u = new URL(url); const m = u.protocol === "https:" ? require("https") : require("http"); m.get({ hostname: u.hostname, port: u.port, path: u.pathname + u.search, headers: h }, (r) => { let d = ""; r.on("data", (c) => d += c); r.on("end", () => r.statusCode >= 400 ? reject(new Error("HTTP " + r.statusCode)) : resolve(d)); }).on("error", reject); }); },
+  async request(method, url, body, headers) { const h = {}; headers.forEach((v, k) => { h[k] = v; }); return new Promise((resolve, reject) => { const u = new URL(url); const m = u.protocol === "https:" ? require("https") : require("http"); const req = m.request({ hostname: u.hostname, port: u.port, path: u.pathname + u.search, method, headers: h }, (r) => { let d = ""; r.on("data", (c) => d += c); r.on("end", () => r.statusCode >= 400 ? reject(new Error("HTTP " + r.statusCode)) : resolve(d)); }); req.on("error", reject); if (body) req.write(body); req.end(); }); },
 };
 "#;
 
