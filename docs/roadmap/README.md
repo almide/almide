@@ -4,19 +4,9 @@
 
 - [Codegen Optimization](active/codegen-optimization.md) — clone elimination, move analysis, borrow inference
 - [Error Diagnostics — Visual](active/error-diagnostics.md) — carets, color, multi-span
-- [HTTP Module](active/http.md) — Phase 1 done, Phases 2-4 remaining
-- [HTTPS Client](active/https.md) — design complete, implementation in progress
-- [List Stdlib Gaps](active/list-stdlib-gaps.md)
-- [LLM Immutable Patterns](active/llm-immutable-patterns.md)
-- [Playground Repair](active/playground-repair.md)
-- [Stdlib Architecture: 3-Layer Design](active/stdlib-architecture-3-layer-design.md) — Phase A done, B/C remaining
+- [List Stdlib Gaps](active/list-stdlib-gaps.md) — range, slice, insert, remove_at, find_index
+- [LLM Immutable Patterns](active/llm-immutable-patterns.md) — Tier 1 done, Tier 2 overlaps with list-stdlib-gaps
 - [Stdlib Self-Hosting](active/stdlib-self-hosting.md) — Phase 1-2a done, 2b/3 remaining
-
-## Planned
-
-- [Structured Concurrency](planned/structured-concurrency.md)
-- [Tooling](planned/tooling.md)
-- [Type System Extensions](planned/type-system.md)
 
 ## On Hold
 
@@ -25,12 +15,17 @@
 - [Editor & GitHub Integration](on-hold/editor-github-integration.md)
 - [Interop / FFI](on-hold/interop.md)
 - [LLM Developer Experience](on-hold/llm-developer-experience.md)
+- [LLM Immutable Sugar](on-hold/llm-immutable-sugar.md) — var indexing, `with` expression
 - [Package Registry](on-hold/package-registry.md)
 - [Research: Modification Survival Rate Paper](on-hold/research-modification-survival-rate-paper.md)
 - [Scaffold & Proliferation Pipeline](on-hold/scaffold-and-proliferation.md)
 - [Self-Hosting](on-hold/self-hosting.md) — rewrite compiler in Almide (after spec stabilization)
+- [Stdlib Architecture: 3-Layer Design](on-hold/stdlib-architecture-3-layer-design.md) — Phase A done, B/C remaining
+- [Structured Concurrency](on-hold/structured-concurrency.md)
 - [Syntax Sugar](on-hold/syntax-sugar.md) — range, raw strings, exhaustiveness done; comprehensions pending
+- [Tooling](on-hold/tooling.md)
 - [trait / impl](on-hold/trait-impl.md) — parser done, checker/emitter partial
+- [Type System Extensions](on-hold/type-system.md)
 
 ## Done
 
@@ -40,10 +35,12 @@
 - [Cross-Platform Support](done/cross-platform.md)
 - [Error Diagnostics](done/error-diagnostics.md) — lost mutation, "did you mean?", immutability hints
 - [Generics](done/generics.md)
+- [HTTP Module](done/http.md) — server, client, multi-target
 - [Language Test Suite](done/language-test-suite.md)
 - [Literal Syntax Gaps](done/literal-syntax-gaps.md)
 - [Module System v2](done/module-system-v2.md)
 - [npm Package Target](done/npm-package-target-target-npm.md)
+- [Playground Repair](done/playground-repair.md) — Fix with AI, repair loop, streaming
 - [Proliferation Blockers](done/proliferation-blockers.md)
 - [stdin / Interactive I/O](done/stdin-io.md)
 - [Stdlib Completeness](done/stdlib-completeness.md)
