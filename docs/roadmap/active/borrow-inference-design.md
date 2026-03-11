@@ -1,4 +1,6 @@
-# Borrow Inference — Detailed Design
+# Borrow Inference — Detailed Design [COMPLETE]
+
+All phases implemented. See `src/emit_rust/borrow.rs` for the analysis and `src/emit_rust/program.rs` for codegen integration.
 
 ## Motivation
 
@@ -215,82 +217,15 @@ fn gen_arg(&self, expr: &Expr, callee: &str, param_idx: usize) -> String {
 }
 ```
 
-## Phase 3a Implementation Plan
+## Implementation (Complete)
 
-### Step 1: `src/emit_rust/borrow.rs` — Escape analysis
+- `src/emit_rust/borrow.rs` — Escape analysis + fixpoint iteration
+- `src/emit_rust/program.rs` — `emit_fn_decl` uses `borrowed_params`, `gen_arg_for` for borrow-aware call sites
+- `src/emit_rust/calls.rs` — Module-qualified callee name lookup for intra-module borrow
+- `src/emit_rust/blocks.rs` — Skip `.as_str()` on already-borrowed `&str` match subjects
+- `stdlib/defs/list.toml`, `map.toml`, `random.toml` — `.clone()` → `.to_vec()` for borrowed/owned duality
 
-```rust
-pub fn analyze_program(program: &Program) -> BorrowInfo {
-    let mut info = BorrowInfo::new();
-    for decl in &program.decls {
-        if let Decl::Fn { name, params, body, .. } = decl {
-            let ownerships = analyze_fn(params, body, &info);
-            info.fn_params.insert(name.clone(), ownerships);
-        }
-    }
-    info
-}
-
-fn analyze_fn(params: &[Param], body: &Expr, _info: &BorrowInfo) -> Vec<ParamOwnership> {
-    let heap_params: Vec<&str> = params.iter()
-        .filter(|p| is_heap_type(&p.ty))
-        .map(|p| p.name.as_str())
-        .collect();
-
-    let mut escaped: HashSet<String> = HashSet::new();
-    check_escape(body, &heap_params, &mut escaped);
-
-    params.iter().map(|p| {
-        if !is_heap_type(&p.ty) {
-            ParamOwnership::Owned  // primitives don't need borrow
-        } else if escaped.contains(&p.name) {
-            ParamOwnership::Owned
-        } else {
-            ParamOwnership::Borrow
-        }
-    }).collect()
-}
-```
-
-### Step 2: Wire into `Emitter`
-
-- Add `borrow_info: BorrowInfo` field to `Emitter` struct
-- Run `analyze_program()` before `emit_program()`
-- Use in `emit_fn_decl` (param types) and `gen_arg` (call sites)
-
-### Step 3: Handle stdlib call templates
-
-Current TOML templates use `&*{s}` for stdlib calls:
-```toml
-rust = "almide_rt_string_len(&*{s})"
-```
-
-When `s` is `&str`, `&*s` is redundant but correct (`&*(&str)` = `&str`). So **no TOML changes needed** — the Rust compiler optimizes this away.
-
-For non-reference params (`s: String`), the `&*` coercion still works.
-
-### Step 4: Test strategy
-
-1. Compile all existing tests — must still pass
-2. Inspect generated Rust for key patterns:
-   - `fn process(name: &str, ...)` where appropriate
-   - `process(&name, ...)` at call sites
-3. Verify Rust compiles without warnings
-
-## Phase 3b: Inter-function fixpoint
-
-```
-worklist = all functions
-while worklist not empty:
-    fn = worklist.pop()
-    old = info.fn_params[fn]
-    new = analyze_fn(fn.params, fn.body, info)  // uses callee info
-    if new != old:
-        info.fn_params[fn] = new
-        worklist.extend(callers_of(fn))
-```
-
-Convergence is guaranteed: params can only change Borrow → Owned (monotone lattice), and there are finitely many params.
+Fixpoint convergence: monotone lattice (Borrow → Owned only), max 10 rounds, all 48 tests pass.
 
 ## Edge Cases
 

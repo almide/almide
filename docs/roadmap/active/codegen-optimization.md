@@ -25,13 +25,13 @@ Variables used exactly once in a function body skip `.clone()` (safe to move). C
 
 ---
 
-### Phase 3: Borrow Inference (Lobster-style auto escape analysis)
+### Phase 3: Borrow Inference (Lobster-style auto escape analysis) ✅
 
 **Design doc: [borrow-inference-design.md](./borrow-inference-design.md)**
 
 The compiler infers when a function parameter is read-only and emits `&str` / `&[T]` / `&HashMap<K,V>` instead of owned types. Callers pass `&x` instead of `x.clone()`. Zero user-facing changes.
 
-#### 3a. Intra-function escape analysis
+#### 3a. Intra-function escape analysis ✅
 
 For each user-defined function, analyze whether each heap-type parameter escapes:
 
@@ -45,30 +45,27 @@ For each user-defined function, analyze whether each heap-type parameter escapes
 | Assigned to var | `var x = s` | owned |
 | **None of the above** | `string.len(s)`, `println(s)` | **borrow** |
 
-- [ ] `EscapeAnalysis` pass: walk each fn body, classify params as `Borrow` or `Owned`
-- [ ] Emit `&str` / `&[T]` / `&HashMap<String, T>` for borrow params
-- [ ] Emit `&x` at call sites for borrow params; `x.clone()` or move for owned
-- [ ] Stdlib calls: already take `&str`/`&[T]` — no changes needed
-- [ ] Other user fn calls: conservatively treat as owned (Phase 3b resolves this)
+- [x] `EscapeAnalysis` pass: walk each fn body, classify params as `Borrow` or `Owned`
+- [x] Emit `&str` / `&[T]` / `&HashMap<String, T>` for borrow params
+- [x] Emit `&x` at call sites for borrow params; `x.clone()` or move for owned
+- [x] Stdlib calls: recognized as non-escaping (both `Expr::Ident` builtins and `Expr::Member` module calls)
+- [x] `borrowed_params` tracking in emitter for correct body codegen (`borrow_to_owned`, skip `.as_str()` on `&str`)
 
-#### 3b. Inter-function fixpoint analysis
+#### 3b. Inter-function fixpoint analysis ✅
 
-A calls B with param `x`. Whether `x` escapes in A depends on B's classification of that param. Requires fixpoint iteration:
+A calls B with param `x`. Whether `x` escapes in A depends on B's classification of that param. Fixpoint iteration with monotone lattice (Borrow → Owned only):
 
-```
-1. Initialize all params as Borrow
-2. For each function, analyze escape conditions
-3. If any param changes Borrow → Owned, re-analyze callers
-4. Repeat until no changes (convergence)
-```
+- [x] Fixpoint loop: up to 10 rounds, re-analyze all fns with callee borrow info
+- [x] `check_escape_expr_inner` checks callee param ownership — borrow params don't cause caller escape
+- [x] Module-qualified name lookup for intra-module calls (`current_module` tracking)
+- [x] `main` excluded from analysis (runtime wrapper passes owned args)
+- [x] `borrowed_params` cleared per function/test to prevent leakage
 
-- [ ] Build call graph: fn → [callees with param mapping]
-- [ ] Fixpoint loop with worklist algorithm
-- [ ] Handle recursion: params in recursive positions → Owned
+#### 3c. List/Map type borrow ✅
 
-#### 3c. Map type borrow
-
-`HashMap<String, T>` → `&HashMap<String, T>`. Simpler than String/List because maps are rarely constructed from parameters.
+- [x] `is_heap_type` expanded: `List[T]` → `&[T]`, `Map[K,V]` → `&HashMap<K,V>`
+- [x] TOML stdlib templates: `.clone()` → `.to_vec()` (works for both `Vec<T>` and `&[T]`)
+- [x] Updated `list.toml` (28 occurrences), `map.toml` (2), `random.toml` (1)
 
 ---
 
@@ -81,6 +78,6 @@ A calls B with param `x`. Whether `x` escapes in A depends on B's classification
 | 1b. Concat optimization | ✅ Done | Medium — loop perf |
 | 2a. List index assign | ✅ Done | High — mutable algorithms |
 | 2b. Field assign | ✅ Done | Medium — record mutation |
-| **3a. Intra-fn borrow** | **Next** | **High — idiomatic Rust** |
-| 3b. Inter-fn fixpoint | After 3a | High — optimal |
-| 3c. Map borrow | After 3b | Low |
+| 3a. Intra-fn borrow | ✅ Done | High — idiomatic Rust |
+| 3b. Inter-fn fixpoint | ✅ Done | High — optimal |
+| 3c. List/Map borrow | ✅ Done | Medium — full coverage |

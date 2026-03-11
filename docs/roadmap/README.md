@@ -2,7 +2,7 @@
 
 ## Active
 
-- [Codegen Optimization](active/codegen-optimization.md) — clone elimination, move analysis, borrow inference
+- [Codegen Optimization](active/codegen-optimization.md) — Phase 0-3 complete (move analysis, borrow inference)
 - [Error Diagnostics — Visual](active/error-diagnostics.md) — color done, carets done, multi-span remaining
 - [Stdlib Self-Hosting](active/stdlib-self-hosting.md) — Phase 0-2b done, time.format/parse done
 
