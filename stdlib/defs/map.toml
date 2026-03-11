@@ -1,6 +1,7 @@
 [new]
+type_params = ["K", "V"]
 params = []
-return = "Map[Unknown, Unknown]"
+return = "Map[K, V]"
 rust = "almide_rt_map_new()"
 ts = "__almd_map.new()"
 
@@ -83,20 +84,21 @@ ts = "__almd_map.is_empty_hdlm_qm_({m})"
 aliases = ["is_empty_hdlm_qm_"]
 
 [from_entries]
-params = [{ name = "entries", type = "List[Unknown]" }]
-return = "Map[Unknown, Unknown]"
+type_params = ["K", "V"]
+params = [{ name = "entries", type = "List[(K, V)]" }]
+return = "Map[K, V]"
 rust = "almide_rt_map_from_entries(({entries}).clone())"
 ts = "__almd_map.from_entries({entries})"
 
 # ── Closure-taking functions ──
 
 [from_list]
-type_params = ["A"]
+type_params = ["A", "K", "V"]
 params = [
     { name = "xs", type = "List[A]" },
-    { name = "f", type = "Fn[A] -> Unknown" },
+    { name = "f", type = "Fn[A] -> (K, V)" },
 ]
-return = "Map[Unknown, Unknown]"
+return = "Map[K, V]"
 rust = "almide_rt_map_from_list(({xs}).clone(), |{f.args}| {{ {f.body} }})"
 ts = "__almd_map.from_list({xs}, {f.args} => {f.body})"
 

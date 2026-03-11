@@ -1,0 +1,18 @@
+test "map.new with explicit type args" {
+  let m = map.new[String, Int]()
+  let m = map.set(m, "age", 30)
+  assert_eq(map.get(m, "age"), some(30))
+}
+
+test "map.new inferred from usage" {
+  let m = map.new()
+  let m = map.set(m, "name", "alice")
+  assert_eq(map.get(m, "name"), some("alice"))
+}
+
+test "map.from_entries with typed tuples" {
+  let entries = [("a", 1), ("b", 2)]
+  let m = map.from_entries(entries)
+  assert_eq(map.get(m, "a"), some(1))
+  assert_eq(map.get(m, "b"), some(2))
+}

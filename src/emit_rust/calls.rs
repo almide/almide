@@ -73,7 +73,7 @@ impl Emitter {
                 let is_user = self.user_modules.contains(&dotted);
                 let is_stdlib = !is_user && stdlib::is_stdlib_module(&dotted);
                 if is_user || is_stdlib {
-                    return self.gen_module_call(&dotted, func, args);
+                    return self.gen_module_call(&dotted, func, args, type_args);
                 }
             }
 
@@ -85,7 +85,7 @@ impl Emitter {
                 let is_user = self.user_modules.contains(&resolved_mod);
                 let is_stdlib = !is_user && stdlib::is_stdlib_module(segments[0]);
                 if is_user || is_stdlib {
-                    return self.gen_module_call(segments[0], func, args);
+                    return self.gen_module_call(segments[0], func, args, type_args);
                 }
             }
         }
@@ -99,7 +99,7 @@ impl Emitter {
             if let Some(resolved) = resolved {
                 let mut new_args = vec![object.as_ref().clone()];
                 new_args.extend(args.iter().cloned());
-                return self.gen_module_call(resolved, field, &new_args);
+                return self.gen_module_call(resolved, field, &new_args, None);
             }
             // Fallback: user-defined UFCS — receiver.f(args) => f(receiver, args)
             let receiver = self.gen_expr(object);
@@ -201,8 +201,18 @@ impl Emitter {
         call
     }
 
-    pub(crate) fn gen_module_call(&self, module: &str, func: &str, args: &[Expr]) -> String {
+    pub(crate) fn gen_module_call(&self, module: &str, func: &str, args: &[Expr], type_args: Option<&Vec<crate::ast::TypeExpr>>) -> String {
         let args_str: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
+
+        // Build turbofish string from call-site type arguments
+        let turbofish = match type_args {
+            Some(ta) if !ta.is_empty() => {
+                let types: Vec<String> = ta.iter().map(|t| self.gen_type(t)).collect();
+                format!("::<{}>", types.join(", "))
+            }
+            _ => String::new(),
+        };
+
         // User modules take priority over stdlib (e.g. user's "math" module shadows stdlib "math")
         let resolved_mod = self.module_aliases.get(module)
             .cloned()
@@ -212,7 +222,7 @@ impl Emitter {
             let user_args_str: Vec<String> = args.iter().map(|a| self.gen_arg(a)).collect();
             let rust_mod = resolved_mod.replace('.', "_");
             let safe_func = crate::emit_common::sanitize(func);
-            let call = format!("{}::{}({})", rust_mod, safe_func, user_args_str.join(", "));
+            let call = format!("{}::{}{}({})", rust_mod, safe_func, turbofish, user_args_str.join(", "));
             if self.in_effect && (self.effect_fns.contains(&func.to_string()) || self.result_fns.contains(&func.to_string())) {
                 return format!("{}?", call);
             }
@@ -223,7 +233,13 @@ impl Emitter {
         let inline_lambda_fn = |idx: usize, arity: usize| -> (Vec<String>, String) {
             self.inline_lambda(&args[idx], arity)
         };
-        if let Some(expr) = almide::generated::emit_rust_calls::gen_generated_call(module, func, &args_str, in_effect, &inline_lambda_fn) {
+        if let Some(mut expr) = almide::generated::emit_rust_calls::gen_generated_call(module, func, &args_str, in_effect, &inline_lambda_fn) {
+            // Insert turbofish into generated call expression (before the first '(')
+            if !turbofish.is_empty() {
+                if let Some(paren_pos) = expr.find('(') {
+                    expr.insert_str(paren_pos, &turbofish);
+                }
+            }
             return expr;
         }
         // User-defined module call (all stdlib handled by generated code above)
@@ -231,7 +247,7 @@ impl Emitter {
             .cloned()
             .unwrap_or_else(|| module.to_string());
         let rust_mod = resolved.replace('.', "_");
-        let call = format!("{}::{}({})", rust_mod, func, args_str.join(", "));
+        let call = format!("{}::{}{}({})", rust_mod, func, turbofish, args_str.join(", "));
         if self.in_effect && (self.effect_fns.contains(&func.to_string()) || self.result_fns.contains(&func.to_string())) {
             format!("{}?", call)
         } else {
