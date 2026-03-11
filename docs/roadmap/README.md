@@ -2,7 +2,7 @@
 
 ## Active
 
-- [Stdlib Self-Hosting](active/stdlib-self-hosting.md) — Phase 0-2b done, time.format/parse done
+(None — all current roadmap items complete)
 
 ## On Hold
 
@@ -46,5 +46,6 @@
 - [Stdlib Completeness](done/stdlib-completeness.md)
 - [Stdlib Declarative Codegen](done/stdlib-codegen.md)
 - [Stdlib Gaps](done/stdlib-gaps.md)
+- [Stdlib Self-Hosting](done/stdlib-self-hosting.md) — bundled .almd, path/time/hash/encoding/term migrated
 - [String Handling](done/string-handling.md)
 - [Tuple & Record](done/tuple-record.md)

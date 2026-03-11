@@ -1,4 +1,4 @@
-# Stdlib Self-Hosting [IN PROGRESS]
+# Stdlib Self-Hosting [DONE]
 
 As of v0.2.1, all stdlib functions have been extracted from inline codegen to separated runtime files (see [Stdlib runtime extraction](#stdlib-runtime-extraction-completed-in-v021)). Type signatures remain in `stdlib.rs` and dispatch logic in `calls.rs`. The next goal: **Almide writes its own stdlib in Almide**, achieving automatic multi-target support with zero compiler changes.
 
@@ -234,7 +234,7 @@ Use cases:
 | **0b.** Wrapping arithmetic | `int.wrap_add/wrap_mul/rotate_right/left` | ✅ Done | SHA-256, SHA-1 in pure Almide |
 | **1.** Stdlib package mechanism | resolver + bundled .almd | ✅ Done | args, term, csv, hash, encoding |
 | **2a.** Runtime extraction | all stdlib → runtime files | ✅ Done (v0.2.1) | clean codegen separation |
-| **2b.** Migrate more stdlib to .almd | move pure functions to .almd | Next | shrinks calls.rs further |
+| **2b.** Migrate more stdlib to .almd | path, time fully migrated | ✅ Done | shrinks calls.rs further |
 | **3.** `@extern` FFI | target-specific escape hatch | ✅ Done (v0.2.1) | platform-specific APIs |
 
 ### CLI Stdlib Gaps (to be filled via self-hosting)
