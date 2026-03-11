@@ -153,6 +153,8 @@ impl TsEmitter {
             }
             Expr::Try { expr, .. } => self.gen_expr(expr),
             Expr::Await { expr, .. } => format!("await {}", self.gen_expr(expr)),
+            Expr::Break { .. } => "break".to_string(),
+            Expr::Continue { .. } => "continue".to_string(),
             Expr::Hole { .. } => if self.js_mode { "null /* hole */".to_string() } else { "null as any /* hole */".to_string() },
             Expr::Todo { message, .. } => format!("__throw({})", Self::json_string(message)),
             Expr::Placeholder { .. } => "__placeholder__".to_string(),

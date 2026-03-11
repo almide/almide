@@ -455,6 +455,32 @@ fn main() {
                     expr = expr,
                     expr_e = expr_e,
                 ));
+            } else if !def.effect && def.rust.ends_with('?') {
+                // Pure-but-fallible: template has ? but function is not effect.
+                // Generate conditional: in_effect uses ?, otherwise omit ? (returns raw Result).
+                let (binds, expr_with_q) = render_template_full(&def.rust, &def.params, false);
+                let rust_no_q = def.rust.trim_end_matches('?');
+                let (_, expr_no_q) = render_template_full(rust_no_q, &def.params, false);
+                let mut all_binds = binds.clone();
+                all_binds.dedup();
+                if all_binds.is_empty() {
+                    rust_arms.push_str(&format!(
+                        "            (\"{module}\", \"{func}\") => if in_effect {{ {with_q} }} else {{ {no_q} }},\n",
+                        module = module_name,
+                        func = fn_name,
+                        with_q = expr_with_q,
+                        no_q = expr_no_q,
+                    ));
+                } else {
+                    rust_arms.push_str(&format!(
+                        "            (\"{module}\", \"{func}\") => {{\n{bindings}\n                if in_effect {{ {with_q} }} else {{ {no_q} }}\n            }},\n",
+                        module = module_name,
+                        func = fn_name,
+                        bindings = all_binds.join("\n"),
+                        with_q = expr_with_q,
+                        no_q = expr_no_q,
+                    ));
+                }
             } else {
                 // Simple case
                 let (binds, expr) = render_template_full(&def.rust, &def.params, false);

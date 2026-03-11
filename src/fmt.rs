@@ -397,6 +397,14 @@ fn format_expr(out: &mut String, expr: &Expr, depth: usize) {
             format_expr(out, operand, depth);
         }
 
+        Expr::Break { .. } => {
+            out.push_str("break");
+        }
+
+        Expr::Continue { .. } => {
+            out.push_str("continue");
+        }
+
         Expr::Try { expr: inner, .. } => {
             out.push_str("try ");
             format_expr(out, inner, depth);

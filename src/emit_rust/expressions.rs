@@ -259,6 +259,8 @@ impl Emitter {
                     format!("almide_block_on({})", inner)
                 }
             }
+            Expr::Break { .. } => "break".to_string(),
+            Expr::Continue { .. } => "continue".to_string(),
             Expr::Hole { .. } => "todo!()".to_string(),
             Expr::Todo { message, .. } => format!("todo!(\"{}\")", message),
             Expr::Placeholder { .. } => "_".to_string(),

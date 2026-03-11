@@ -169,7 +169,8 @@ fn check_escape_expr_inner(expr: &Expr, heap_params: &HashSet<String>, escaped: 
         Expr::Int { .. } | Expr::Float { .. } | Expr::String { .. }
         | Expr::Bool { .. } | Expr::Unit { .. } | Expr::None { .. }
         | Expr::Hole { .. } | Expr::Todo { .. } | Expr::Placeholder { .. }
-        | Expr::TypeName { .. } | Expr::InterpolatedString { .. } => {}
+        | Expr::TypeName { .. } | Expr::InterpolatedString { .. }
+        | Expr::Break { .. } | Expr::Continue { .. } => {}
 
         // List literal — any param inside escapes (stored in data structure)
         Expr::List { elements, .. } => {
@@ -371,7 +372,8 @@ fn mark_all_params_filtered(expr: &Expr, params: &HashSet<String>, escaped: &mut
         Expr::Int { .. } | Expr::Float { .. } | Expr::String { .. }
         | Expr::Bool { .. } | Expr::Unit { .. } | Expr::None { .. }
         | Expr::Hole { .. } | Expr::Todo { .. } | Expr::Placeholder { .. }
-        | Expr::TypeName { .. } | Expr::InterpolatedString { .. } => {}
+        | Expr::TypeName { .. } | Expr::InterpolatedString { .. }
+        | Expr::Break { .. } | Expr::Continue { .. } => {}
         Expr::List { elements, .. } | Expr::Tuple { elements, .. } => {
             for e in elements { mark_all_params_filtered(e, params, escaped); }
         }

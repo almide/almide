@@ -115,6 +115,8 @@ pub enum Expr {
     Paren { expr: Box<Expr>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Tuple { elements: Vec<Expr>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Range { start: Box<Expr>, end: Box<Expr>, inclusive: bool, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Break { #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Continue { #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Placeholder { #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Unit { #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     None { #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
@@ -140,6 +142,7 @@ impl Expr {
             | Expr::Binary { span, .. } | Expr::Unary { span, .. }
             | Expr::Paren { span, .. } | Expr::Tuple { span, .. }
             | Expr::Range { span, .. } | Expr::Placeholder { span, .. }
+            | Expr::Break { span, .. } | Expr::Continue { span, .. }
             | Expr::Unit { span, .. } | Expr::None { span, .. }
             | Expr::Some { span, .. } | Expr::Ok { span, .. }
             | Expr::Err { span, .. } => *span,
@@ -164,7 +167,8 @@ impl Expr {
             | Expr::Range { resolved_type, .. } | Expr::Placeholder { resolved_type, .. }
             | Expr::Unit { resolved_type, .. } | Expr::None { resolved_type, .. }
             | Expr::Some { resolved_type, .. } | Expr::Ok { resolved_type, .. }
-            | Expr::Err { resolved_type, .. } => *resolved_type,
+            | Expr::Err { resolved_type, .. }
+            | Expr::Break { resolved_type, .. } | Expr::Continue { resolved_type, .. } => *resolved_type,
         }
     }
 
@@ -186,7 +190,8 @@ impl Expr {
             | Expr::Range { resolved_type, .. } | Expr::Placeholder { resolved_type, .. }
             | Expr::Unit { resolved_type, .. } | Expr::None { resolved_type, .. }
             | Expr::Some { resolved_type, .. } | Expr::Ok { resolved_type, .. }
-            | Expr::Err { resolved_type, .. } => *resolved_type = Some(ty),
+            | Expr::Err { resolved_type, .. }
+            | Expr::Break { resolved_type, .. } | Expr::Continue { resolved_type, .. } => *resolved_type = Some(ty),
         }
     }
 }
