@@ -116,7 +116,8 @@ impl Emitter {
             Expr::Record { name, fields, .. } => {
                 if let Some(struct_name) = name {
                     let fs: Vec<String> = fields.iter().map(|f| {
-                        let val = self.gen_expr(&f.value);
+                        // Use gen_arg for auto-clone on multi-use variables
+                        let val = self.gen_arg(&f.value);
                         if self.boxed_variant_record_fields.contains(&(struct_name.clone(), f.name.clone())) {
                             format!("{}: Box::new({})", f.name, val)
                         } else {
