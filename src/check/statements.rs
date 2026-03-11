@@ -192,7 +192,7 @@ impl Checker {
     const IMMUTABLE_UPDATE_FNS: &'static [(&'static str, &'static str)] = &[
         ("list", "set"), ("list", "swap"), ("list", "push"), ("list", "insert"),
         ("list", "remove"), ("list", "remove_at"), ("list", "sort"), ("list", "reverse"),
-        ("list", "map"), ("list", "filter"), ("list", "take"), ("list", "drop"),
+        ("list", "map"), ("list", "filter"), ("list", "take"), ("list", "drop"), ("list", "slice"),
         ("map", "set"), ("map", "remove"),
         ("string", "replace"), ("string", "replace_first"),
         ("string", "trim"), ("string", "to_lower"), ("string", "to_upper"),

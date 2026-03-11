@@ -48,18 +48,18 @@ LLMs generate these constantly. Missing them causes runtime errors or forces ver
 | Function | Signature | Present in | Priority |
 |----------|-----------|------------|----------|
 | ~~set~~ | `(xs, i, value) -> List[T]` | Python, JS, Rust, Elixir, Kotlin, Go | **Done** (v0.4.5) |
-| **range** | `(start, end) -> List[Int]` | Python, Rust, Haskell, Elixir, Kotlin | **Now** (LLMs default to range-based loops) |
-| **slice** | `(xs, start, end) -> List[T]` | Python, JS, Rust, Elixir, Kotlin, Go | High |
+| ~~range~~ | `(start, end) -> List[Int]` | Python, Rust, Haskell, Elixir, Kotlin | **Done** (v0.4.8) |
+| ~~slice~~ | `(xs, start, end) -> List[T]` | Python, JS, Rust, Elixir, Kotlin, Go | **Done** (v0.4.8) |
 
 ### Tier 2 — Algorithm support
 Needed for sorting, graph, tree manipulation tasks.
 
 | Function | Signature | Present in |
 |----------|-----------|------------|
-| **insert** | `(xs, i, value) -> List[T]` | Python, JS, Rust, Elixir, Kotlin, Go |
-| **remove_at** | `(xs, i) -> List[T]` | Python, JS, Rust, Elixir, Kotlin, Go |
+| ~~insert~~ | `(xs, i, value) -> List[T]` | Python, JS, Rust, Elixir, Kotlin, Go | **Done** (v0.4.8) |
+| ~~remove_at~~ | `(xs, i) -> List[T]` | Python, JS, Rust, Elixir, Kotlin, Go | **Done** (v0.4.8) |
 | ~~swap~~ | `(xs, i, j) -> List[T]` | Rust | **Done** (v0.4.5) |
-| **find_index** | `(xs, f) -> Option[Int]` | Python, JS, Rust, Haskell, Elixir, Kotlin |
+| ~~find_index~~ | `(xs, f) -> Option[Int]` | Python, JS, Rust, Haskell, Elixir, Kotlin | **Done** (v0.4.8) |
 
 ### Tier 3 — Functional transforms
 Nice-to-have. Increases expressiveness for pipeline-heavy code.

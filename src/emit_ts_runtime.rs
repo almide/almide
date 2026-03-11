@@ -219,6 +219,11 @@ const MOD_LIST_TS: &str = r#"const __almd_list = {
   min<T>(xs: T[]): T | null { return xs.length === 0 ? null : xs.reduce((a, b) => a < b ? a : b); },
   max<T>(xs: T[]): T | null { return xs.length === 0 ? null : xs.reduce((a, b) => a > b ? a : b); },
   join(xs: string[], sep: string): string { return xs.join(sep); },
+  range(start: number, end: number): number[] { const r: number[] = []; for (let i = start; i < end; i++) r.push(i); return r; },
+  slice<T>(xs: T[], start: number, end: number): T[] { return xs.slice(start, end); },
+  insert<T>(xs: T[], i: number, v: T): T[] { const r = [...xs]; r.splice(i, 0, v); return r; },
+  remove_at<T>(xs: T[], i: number): T[] { const r = [...xs]; if (i >= 0 && i < r.length) r.splice(i, 1); return r; },
+  find_index<T>(xs: T[], f: (x: T) => boolean): number | null { const i = xs.findIndex(f); return i >= 0 ? i : null; },
 };
 "#;
 
@@ -264,6 +269,11 @@ const MOD_LIST_JS: &str = r#"const __almd_list = {
   min(xs) { return xs.length === 0 ? null : xs.reduce((a, b) => a < b ? a : b); },
   max(xs) { return xs.length === 0 ? null : xs.reduce((a, b) => a > b ? a : b); },
   join(xs, sep) { return xs.join(sep); },
+  range(start, end) { const r = []; for (let i = start; i < end; i++) r.push(i); return r; },
+  slice(xs, start, end) { return xs.slice(start, end); },
+  insert(xs, i, v) { const r = [...xs]; r.splice(i, 0, v); return r; },
+  remove_at(xs, i) { const r = [...xs]; if (i >= 0 && i < r.length) r.splice(i, 1); return r; },
+  find_index(xs, f) { const i = xs.findIndex(f); return i >= 0 ? i : null; },
 };
 "#;
 
@@ -376,6 +386,7 @@ const MOD_FLOAT_TS: &str = r#"const __almd_float = {
   min(a: number, b: number): number { return Math.min(a, b); },
   max(a: number, b: number): number { return Math.max(a, b); },
   clamp(n: number, lo: number, hi: number): number { return Math.max(lo, Math.min(hi, n)); },
+  to_fixed(n: number, decimals: number): string { return n.toFixed(decimals); },
 };
 "#;
 
@@ -392,6 +403,7 @@ const MOD_FLOAT_JS: &str = r#"const __almd_float = {
   min(a, b) { return Math.min(a, b); },
   max(a, b) { return Math.max(a, b); },
   clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); },
+  to_fixed(n, decimals) { return n.toFixed(decimals); },
 };
 "#;
 

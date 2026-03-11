@@ -218,6 +218,35 @@ fn almide_rt_list_group_by<T: Clone, K: std::hash::Hash + Eq + Clone>(list: Vec<
     map
 }
 
+fn almide_rt_list_range(start: i64, end: i64) -> Vec<i64> {
+    (start..end).collect()
+}
+
+fn almide_rt_list_slice<T: Clone>(list: Vec<T>, start: i64, end: i64) -> Vec<T> {
+    let s = (start as usize).min(list.len());
+    let e = (end as usize).min(list.len());
+    if s >= e { return vec![]; }
+    list[s..e].to_vec()
+}
+
+fn almide_rt_list_insert<T: Clone>(list: Vec<T>, index: i64, value: T) -> Vec<T> {
+    let mut v = list;
+    let i = (index as usize).min(v.len());
+    v.insert(i, value);
+    v
+}
+
+fn almide_rt_list_remove_at<T: Clone>(list: Vec<T>, index: i64) -> Vec<T> {
+    let mut v = list;
+    let i = index as usize;
+    if i < v.len() { v.remove(i); }
+    v
+}
+
+fn almide_rt_list_find_index<T: Clone>(list: Vec<T>, f: impl Fn(&T) -> bool) -> Option<i64> {
+    list.iter().position(|x| f(x)).map(|i| i as i64)
+}
+
 // ---- map (lambda-based) ----
 
 fn almide_rt_map_from_list<T, K: std::hash::Hash + Eq, V>(list: Vec<T>, f: impl Fn(T) -> (K, V)) -> HashMap<K, V> {

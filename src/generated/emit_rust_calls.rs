@@ -27,6 +27,7 @@ pub fn gen_generated_call(
             ("float", "parse") => format!("almide_rt_float_parse(&*{})?", args_str[0]),
             ("float", "round") => format!("almide_rt_float_round({})", args_str[0]),
             ("float", "sqrt") => format!("almide_rt_float_sqrt({})", args_str[0]),
+            ("float", "to_fixed") => format!("almide_rt_float_to_fixed({}, {})", args_str[0], args_str[1]),
             ("float", "to_int") => format!("almide_rt_float_to_int({})", args_str[0]),
             ("float", "to_string") => format!("almide_rt_float_to_string({})", args_str[0]),
             ("fs", "append") => format!("almide_rt_fs_append(&*{}, &*{})?", args_str[0], args_str[1]),
@@ -135,6 +136,10 @@ pub fn gen_generated_call(
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
                 format!("almide_rt_list_find(({}).clone(), |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
             },
+            ("list", "find_index") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
+                format!("almide_rt_list_find_index(({}).clone(), |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
+            },
             ("list", "first") => format!("almide_rt_list_first(&{})", args_str[0]),
             ("list", "flat_map") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
@@ -152,6 +157,7 @@ pub fn gen_generated_call(
                 format!("almide_rt_list_group_by(({}).clone(), |{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body)
             },
             ("list", "index_of") => format!("almide_rt_list_index_of(&{}, &{})", args_str[0], args_str[1]),
+            ("list", "insert") => format!("almide_rt_list_insert(({}).clone(), {}, {})", args_str[0], args_str[1], args_str[2]),
             ("list", "is_empty?") => format!("almide_rt_list_is_empty(&{})", args_str[0]),
             ("list", "is_empty_hdlm_qm_") => format!("almide_rt_list_is_empty(&{})", args_str[0]),
             ("list", "join") => format!("almide_rt_list_join(&{}, &*{})", args_str[0], args_str[1]),
@@ -168,12 +174,15 @@ pub fn gen_generated_call(
                 format!("almide_rt_list_partition(({}).clone(), |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
             },
             ("list", "product") => format!("almide_rt_list_product(&{})", args_str[0]),
+            ("list", "range") => format!("almide_rt_list_range({}, {})", args_str[0], args_str[1]),
             ("list", "reduce") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 2);
                 format!("almide_rt_list_reduce(({}).clone(), |{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body)
             },
+            ("list", "remove_at") => format!("almide_rt_list_remove_at(({}).clone(), {})", args_str[0], args_str[1]),
             ("list", "reverse") => format!("almide_rt_list_reverse(&{})", args_str[0]),
             ("list", "set") => format!("almide_rt_list_set(&{}, {}, {})", args_str[0], args_str[1], args_str[2]),
+            ("list", "slice") => format!("almide_rt_list_slice(({}).clone(), {}, {})", args_str[0], args_str[1], args_str[2]),
             ("list", "sort") => format!("almide_rt_list_sort(&{})", args_str[0]),
             ("list", "sort_by") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);

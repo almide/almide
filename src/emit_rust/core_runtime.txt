@@ -300,6 +300,10 @@ fn almide_rt_float_clamp(n: f64, lo: f64, hi: f64) -> f64 {
     n.max(lo).min(hi)
 }
 
+fn almide_rt_float_to_fixed(n: f64, decimals: i64) -> String {
+    format!("{:.prec$}", n, prec = decimals as usize)
+}
+
 // ---- math ----
 
 fn almide_rt_math_min(a: i64, b: i64) -> i64 {

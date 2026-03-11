@@ -317,6 +317,43 @@ return = "Map[B, List[A]]"
 rust = "almide_rt_list_group_by(({xs}).clone(), |{f.args}| {{ {f.body} }})"
 ts = "__almd_list.group_by({xs}, {f.args} => {f.body})"
 
+[range]
+params = [{ name = "start", type = "Int" }, { name = "end", type = "Int" }]
+return = "List[Int]"
+rust = "almide_rt_list_range({start}, {end})"
+ts = "__almd_list.range({start}, {end})"
+
+[slice]
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }, { name = "start", type = "Int" }, { name = "end", type = "Int" }]
+return = "List[A]"
+rust = "almide_rt_list_slice(({xs}).clone(), {start}, {end})"
+ts = "__almd_list.slice({xs}, {start}, {end})"
+
+[insert]
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }, { name = "i", type = "Int" }, { name = "val", type = "A" }]
+return = "List[A]"
+rust = "almide_rt_list_insert(({xs}).clone(), {i}, {val})"
+ts = "__almd_list.insert({xs}, {i}, {val})"
+
+[remove_at]
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }, { name = "i", type = "Int" }]
+return = "List[A]"
+rust = "almide_rt_list_remove_at(({xs}).clone(), {i})"
+ts = "__almd_list.remove_at({xs}, {i})"
+
+[find_index]
+type_params = ["A"]
+params = [
+    { name = "xs", type = "List[A]" },
+    { name = "f", type = "Fn[A] -> Bool" },
+]
+return = "Option[Int]"
+rust = "almide_rt_list_find_index(({xs}).clone(), |{f.args}| {{ {f.clone_bindings}{f.body} }})"
+ts = "__almd_list.find_index({xs}, {f.args} => {f.body})"
+
 [fold]
 type_params = ["A", "B"]
 params = [

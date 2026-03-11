@@ -1,6 +1,12 @@
-# Error Diagnostics — Visual Improvements [PLANNED]
+# Error Diagnostics — Visual Improvements [ACTIVE]
 
 Tier 2+ items split from the original error-diagnostics roadmap. These improve human developer experience but don't affect LLM survival rate.
+
+## Done
+
+### 2.3 Color output ✅ (v0.4.8)
+ANSI colors for error (red), warning (yellow), hint (cyan), source location (blue).
+Auto-detected: colors only when stderr is a TTY.
 
 ## Remaining
 
@@ -28,13 +34,9 @@ error: cannot assign String to variable 'count' of type Int
 ```
 **Effort**: High.
 
-### 2.3 Color output
-ANSI colors for error/warning/hint differentiation.
-**Effort**: Low (cosmetic).
-
 ### 3.1 Unreachable code detection
 ### 3.2 Type narrowing hints
 
 ## Priority
 
-**2.3 Color** → **2.1 Carets** → **2.2 Multi-span** → **3.x Advanced**
+~~2.3 Color~~ → **2.1 Carets** → **2.2 Multi-span** → **3.x Advanced**
