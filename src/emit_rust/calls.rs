@@ -210,8 +210,11 @@ impl Emitter {
                 self.gen_arg(a)
             };
             // Auto-wrap with Box::new for recursive variant constructor args
+            // Skip for generic variants — their wrapper functions already do Box::new
             if let Some(ctor) = variant_ctor_name {
-                if self.boxed_variant_args.contains(&(ctor.to_string(), i)) {
+                if self.boxed_variant_args.contains(&(ctor.to_string(), i))
+                    && !self.generic_variant_constructors.contains_key(ctor)
+                {
                     return format!("Box::new({})", arg_str);
                 }
             }
