@@ -407,6 +407,9 @@ impl Checker {
                     _ => it,
                 }
             }
+
+            ast::Expr::Break { .. } => Ty::Unit,
+            ast::Expr::Continue { .. } => Ty::Unit,
         }
     }
 

@@ -888,7 +888,8 @@ impl Emitter {
             Expr::Int { .. } | Expr::Float { .. } | Expr::String { .. }
             | Expr::Bool { .. } | Expr::Unit { .. } | Expr::None { .. }
             | Expr::Hole { .. } | Expr::Todo { .. } | Expr::Placeholder { .. }
-            | Expr::TypeName { .. } | Expr::InterpolatedString { .. } => {}
+            | Expr::TypeName { .. } | Expr::InterpolatedString { .. }
+            | Expr::Break { .. } | Expr::Continue { .. } => {}
             Expr::List { elements, .. } | Expr::Tuple { elements, .. } => {
                 for e in elements { Self::count_ident_uses(e, counts); }
             }

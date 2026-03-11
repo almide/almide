@@ -46,6 +46,14 @@ impl Parser {
             self.advance();
             return Ok(Expr::Hole { span, resolved_type: None });
         }
+        if self.check(TokenType::Break) {
+            self.advance();
+            return Ok(Expr::Break { span, resolved_type: None });
+        }
+        if self.check(TokenType::Continue) {
+            self.advance();
+            return Ok(Expr::Continue { span, resolved_type: None });
+        }
         if self.check(TokenType::None) {
             self.advance();
             return Ok(Expr::None { span, resolved_type: None });

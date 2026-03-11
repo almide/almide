@@ -205,3 +205,43 @@ test "do guard with accumulation" {
   }
   assert_eq(sum, 15)
 }
+
+// ── do block with guard else break/continue ──
+
+test "do guard else break" {
+  var count = 0
+  do {
+    guard count < 5 else break
+    count = count + 1
+  }
+  assert_eq(count, 5)
+}
+
+test "do guard else break with accumulation" {
+  var i = 0
+  var sum = 0
+  do {
+    guard i < 10 else break
+    sum = sum + i
+    i = i + 1
+  }
+  assert_eq(sum, 45)
+}
+
+test "for guard else continue" {
+  var result = ""
+  for ch in ["a", " ", "b", " ", "c"] {
+    guard ch != " " else continue
+    result = result ++ ch
+  }
+  assert_eq(result, "abc")
+}
+
+test "for guard else break" {
+  var result = ""
+  for ch in ["a", "b", "!", "c", "d"] {
+    guard ch != "!" else break
+    result = result ++ ch
+  }
+  assert_eq(result, "ab")
+}

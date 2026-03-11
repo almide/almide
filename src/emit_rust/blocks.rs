@@ -172,8 +172,10 @@ impl Emitter {
                 match stmt {
                     Stmt::Guard { cond, else_, .. } => {
                         let c = self.gen_expr(cond);
-                        if matches!(else_, Expr::Unit { .. }) || self.is_ok_unit(else_) {
+                        if matches!(else_, Expr::Unit { .. }) || self.is_ok_unit(else_) || matches!(else_, Expr::Break { .. }) {
                             lines.push(format!("    if !({}) {{ break; }}", c));
+                        } else if matches!(else_, Expr::Continue { .. }) {
+                            lines.push(format!("    if !({}) {{ continue; }}", c));
                         } else {
                             let e = self.gen_expr(else_);
                             if e.contains("return ") {
@@ -285,11 +287,17 @@ impl Emitter {
             }
             Stmt::Guard { cond, else_, .. } => {
                 let c = self.gen_expr(cond);
-                let e = self.gen_expr(else_);
-                if e.contains("return ") {
-                    format!("if !({}) {{ {}; }}", c, e)
+                if matches!(else_, Expr::Break { .. }) {
+                    format!("if !({}) {{ break; }}", c)
+                } else if matches!(else_, Expr::Continue { .. }) {
+                    format!("if !({}) {{ continue; }}", c)
                 } else {
-                    format!("if !({}) {{ return {}; }}", c, e)
+                    let e = self.gen_expr(else_);
+                    if e.contains("return ") {
+                        format!("if !({}) {{ {}; }}", c, e)
+                    } else {
+                        format!("if !({}) {{ return {}; }}", c, e)
+                    }
                 }
             }
             Stmt::Expr { expr, .. } => {

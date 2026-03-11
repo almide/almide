@@ -49,6 +49,8 @@ pub enum TokenType {
     Async,
     Await,
     Guard,
+    Break,
+    Continue,
     Local,
     Mod,
     Newtype,
@@ -150,6 +152,8 @@ fn build_keyword_map() -> HashMap<&'static str, TokenType> {
     m.insert("async", TokenType::Async);
     m.insert("await", TokenType::Await);
     m.insert("guard", TokenType::Guard);
+    m.insert("break", TokenType::Break);
+    m.insert("continue", TokenType::Continue);
     m.insert("local", TokenType::Local);
     m.insert("mod", TokenType::Mod);
     m.insert("newtype", TokenType::Newtype);

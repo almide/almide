@@ -139,6 +139,22 @@ impl Checker {
             "ok" => return Ty::Result(Box::new(arg_tys.first().cloned().unwrap_or(Ty::Unit)), Box::new(Ty::Unknown)),
             "err" => return Ty::Result(Box::new(Ty::Unknown), Box::new(arg_tys.first().cloned().unwrap_or(Ty::Unknown))),
             "some" => return Ty::Option(Box::new(arg_tys.first().cloned().unwrap_or(Ty::Unknown))),
+            "unwrap_or" => {
+                if arg_tys.len() != 2 {
+                    self.push_diagnostic(err(
+                        format!("unwrap_or() takes exactly 2 arguments but got {}", arg_tys.len()),
+                        "Use unwrap_or(option_value, default)",
+                        "unwrap_or()",
+                    ));
+                    return Ty::Unknown;
+                }
+                // Extract inner type from Option[T] or Result[T, _]
+                match &arg_tys[0] {
+                    Ty::Option(inner) => return *inner.clone(),
+                    Ty::Result(ok_ty, _) => return *ok_ty.clone(),
+                    _ => return arg_tys[1].clone(),
+                }
+            }
             _ => {}
         }
 

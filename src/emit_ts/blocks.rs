@@ -207,8 +207,10 @@ impl TsEmitter {
             if has_guard {
                 if let Stmt::Guard { cond, else_, .. } = stmt {
                     let c = self.gen_expr(cond);
-                    if Self::is_unit(else_) {
+                    if Self::is_unit(else_) || matches!(else_, Expr::Break { .. }) {
                         lines.push(format!("{}if (!({})) {{ break; }}", ind, c));
+                    } else if matches!(else_, Expr::Continue { .. }) {
+                        lines.push(format!("{}if (!({})) {{ continue; }}", ind, c));
                     } else {
                         lines.push(format!("{}if (!({})) {{ return {}; }}", ind, c, self.gen_expr(else_)));
                     }
@@ -283,6 +285,12 @@ impl TsEmitter {
 
     fn gen_guard_stmt(&self, cond: &str, else_: &Expr) -> String {
         match else_ {
+            Expr::Break { .. } => {
+                return format!("if (!({})) {{ break; }}", cond);
+            }
+            Expr::Continue { .. } => {
+                return format!("if (!({})) {{ continue; }}", cond);
+            }
             Expr::Block { stmts, expr, .. } | Expr::DoBlock { stmts, expr, .. } => {
                 let body_stmts: Vec<String> = stmts.iter()
                     .map(|s| format!("  {}", self.gen_stmt(s)))
