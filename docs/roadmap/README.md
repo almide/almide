@@ -3,12 +3,11 @@
 ## Active
 
 - [Test Coverage](active/test-coverage.md) — 790 cases, target 1500+
-- [Variant Record Fields](active/variant-record-fields.md) — named fields on enum variants
 
 ## On Hold
 
 - [Benchmark Report](on-hold/benchmark-report.md)
-- [Default Field Values](on-hold/default-field-values.md) — optional fields with defaults (depends on Variant Record Fields)
+- [Default Field Values](on-hold/default-field-values.md) — reduce 5 variants to 3, eliminate sentinel `""` pattern
 - [Direct WASM Emission](on-hold/emit-wasm-direct.md)
 - [Editor & GitHub Integration](on-hold/editor-github-integration.md)
 - [Function Reference Passing](on-hold/function-reference-passing.md) — seamless fn-as-argument, reduce closure wrappers
@@ -47,6 +46,7 @@
 - [Playground Repair](done/playground-repair.md) — Fix with AI, repair loop, streaming
 - [Proliferation Blockers](done/proliferation-blockers.md)
 - [Self-Tooling](done/self-tooling.md) — tree-sitter grammar generator, Chrome extension, TextMate grammar
+- [Variant Record Fields](done/variant-record-fields.md) — named fields on enum variants, `..` rest pattern
 - [stdin / Interactive I/O](done/stdin-io.md)
 - [Stdlib Completeness](done/stdlib-completeness.md)
 - [Stdlib Declarative Codegen](done/stdlib-codegen.md)

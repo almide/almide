@@ -1,4 +1,4 @@
-# Variant Record Fields [ACTIVE]
+# Variant Record Fields [DONE]
 
 Allow enum variants to carry named fields (like Rust's struct variants), instead of only positional arguments.
 
