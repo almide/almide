@@ -2,7 +2,6 @@
 
 ## Active
 
-- [Codegen Optimization](active/codegen-optimization.md) — Phase 0-3 complete (move analysis, borrow inference)
 - [Error Diagnostics — Visual](active/error-diagnostics.md) — color done, carets done, multi-span remaining
 - [Stdlib Self-Hosting](active/stdlib-self-hosting.md) — Phase 0-2b done, time.format/parse done
 
@@ -28,6 +27,7 @@
 ## Done
 
 - [CLI Tool Authoring](done/cli-tool-authoring.md) — err() exit, almide run args
+- [Codegen Optimization](done/codegen-optimization.md) — move analysis, borrow inference (Phase 0-3)
 - [Compiler Hardening](done/compiler-hardening.md)
 - [Control Flow Extensions](done/control-flow.md)
 - [Cross-Platform Support](done/cross-platform.md)
