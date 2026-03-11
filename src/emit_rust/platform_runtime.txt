@@ -44,7 +44,7 @@ fn almide_rt_fs_append(path: &str, content: &str) -> Result<(), String> {
 
 fn almide_rt_fs_read_lines(path: &str) -> Result<Vec<String>, String> {
     let s = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    Ok(s.split('\n').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect())
+    Ok(s.split('\n').filter(|s| !s.is_empty()).map(|s| s.trim_end_matches('\r').to_string()).collect())
 }
 
 fn almide_rt_fs_remove(path: &str) -> Result<(), String> {
@@ -88,7 +88,7 @@ fn almide_rt_fs_walk(dir: &str) -> Result<Vec<String>, String> {
         for entry in entries {
             let entry = entry.map_err(|e| e.to_string())?;
             let path = entry.path();
-            results.push(path.to_string_lossy().to_string());
+            results.push(path.to_string_lossy().replace('\\', "/"));
             if path.is_dir() {
                 walk_inner(&path, results)?;
             }
@@ -138,6 +138,17 @@ fn almide_rt_env_millis() -> i64 {
 
 fn almide_rt_env_sleep_ms(ms: i64) {
     std::thread::sleep(std::time::Duration::from_millis(ms as u64));
+}
+
+fn almide_rt_env_temp_dir() -> String {
+    std::env::temp_dir().to_string_lossy().replace('\\', "/")
+}
+
+fn almide_rt_env_os() -> &'static str {
+    if cfg!(target_os = "windows") { "windows" }
+    else if cfg!(target_os = "macos") { "macos" }
+    else if cfg!(target_os = "linux") { "linux" }
+    else { "unknown" }
 }
 
 // ---- process ----

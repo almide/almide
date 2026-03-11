@@ -373,6 +373,13 @@ impl Checker {
                 self.env.in_test = prev_test;
                 self.env.pop_scope();
             }
+            ast::Decl::Module { path, .. } => {
+                self.push_diagnostic(Diagnostic::warning(
+                    format!("'module {}' declaration is deprecated and will be removed in a future version", path.join(".")),
+                    "Remove the 'module' declaration — file path determines the module name",
+                    format!("module {}", path.join(".")),
+                ));
+            }
             _ => {}
         }
     }

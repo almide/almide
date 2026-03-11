@@ -6,6 +6,7 @@ pub fn gen_generated_call(module: &str, func: &str, args_str: &[String]) -> Opti
             ("env", "cwd") => "__almd_env.cwd()".to_string(),
             ("env", "get") => format!("__almd_env.get({})", args_str[0]),
             ("env", "millis") => "__almd_env.millis()".to_string(),
+            ("env", "os") => "__almd_env.os()".to_string(),
             ("env", "set") => format!("__almd_env.set({}, {})", args_str[0], args_str[1]),
             ("env", "sleep_ms") => format!("__almd_env.sleep_ms({})", args_str[0]),
             ("env", "temp_dir") => "__almd_env.temp_dir()".to_string(),

@@ -40,7 +40,8 @@ impl Parser {
         // Legacy module declaration (ignored, package identity comes from almide.toml)
         if self.check(TokenType::Module) {
             program.comment_map.push(std::mem::take(&mut pending));
-            let _ = self.parse_module_decl()?; // parse but discard
+            let module_decl = self.parse_module_decl()?;
+            program.decls.push(module_decl); // kept for deprecation warning in checker
             pending = self.skip_newlines_collect_comments();
         }
 

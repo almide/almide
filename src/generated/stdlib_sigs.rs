@@ -8,6 +8,7 @@ pub fn lookup_generated_sig(module: &str, func: &str) -> Option<FnSig> {
         ("env", "cwd") => FnSig { generics: vec![], params: vec![], ret: Ty::Result(Box::new(Ty::String), Box::new(Ty::String)), is_effect: true },
         ("env", "get") => FnSig { generics: vec![], params: vec![(s("name"), Ty::String)], ret: Ty::Option(Box::new(Ty::String)), is_effect: true },
         ("env", "millis") => FnSig { generics: vec![], params: vec![], ret: Ty::Int, is_effect: true },
+        ("env", "os") => FnSig { generics: vec![], params: vec![], ret: Ty::String, is_effect: false },
         ("env", "set") => FnSig { generics: vec![], params: vec![(s("name"), Ty::String), (s("value"), Ty::String)], ret: Ty::Unit, is_effect: true },
         ("env", "sleep_ms") => FnSig { generics: vec![], params: vec![(s("ms"), Ty::Int)], ret: Ty::Unit, is_effect: true },
         ("env", "temp_dir") => FnSig { generics: vec![], params: vec![], ret: Ty::String, is_effect: true },

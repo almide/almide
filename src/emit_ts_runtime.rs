@@ -27,7 +27,7 @@ const MOD_FS_TS: &str = r#"const __almd_fs = {
   append(p: string, s: string): void { Deno.writeTextFileSync(p, Deno.readTextFileSync(p) + s); },
   mkdir_p(p: string): void { Deno.mkdirSync(p, { recursive: true }); },
   exists_hdlm_qm_(p: string): boolean { try { Deno.statSync(p); return true; } catch { return false; } },
-  read_lines(p: string): string[] { return Deno.readTextFileSync(p).split("\n").filter(l => l.length > 0); },
+  read_lines(p: string): string[] { return Deno.readTextFileSync(p).split("\n").filter(l => l.length > 0).map(l => l.replace(/\r$/, "")); },
   remove(p: string): void { Deno.removeSync(p, { recursive: true }); },
   list_dir(p: string): string[] { return [...Deno.readDirSync(p)].map(e => e.name).sort(); },
   walk(dir: string): string[] {
@@ -62,7 +62,7 @@ const MOD_FS_JS: &str = r#"const __almd_fs = {
   append(p, s) { require("fs").appendFileSync(p, s); },
   mkdir_p(p) { require("fs").mkdirSync(p, { recursive: true }); },
   exists_hdlm_qm_(p) { const fs = require("fs"); try { fs.statSync(p); return true; } catch { return false; } },
-  read_lines(p) { return require("fs").readFileSync(p, "utf-8").split("\n").filter(l => l.length > 0); },
+  read_lines(p) { return require("fs").readFileSync(p, "utf-8").split("\n").filter(l => l.length > 0).map(l => l.replace(/\r$/, "")); },
   remove(p) { const fs = require("fs"); try { const s = fs.statSync(p); if (s.isDirectory()) fs.rmSync(p, { recursive: true }); else fs.unlinkSync(p); } catch(e) { throw e; } },
   list_dir(p) { return require("fs").readdirSync(p).sort(); },
   walk(dir) {
@@ -474,6 +474,7 @@ const MOD_ENV_TS: &str = r#"const __almd_env = {
   millis(): number { return Date.now(); },
   sleep_ms(ms: number): void { const end = Date.now() + ms; while (Date.now() < end) {} },
   temp_dir(): string { return Deno.env.get("TMPDIR") || Deno.env.get("TEMP") || Deno.env.get("TMP") || "/tmp"; },
+  os(): string { return Deno.build.os === "darwin" ? "macos" : Deno.build.os; },
 };
 "#;
 
@@ -486,6 +487,7 @@ const MOD_ENV_JS: &str = r#"const __almd_env = {
   millis() { return Date.now(); },
   sleep_ms(ms) { const end = Date.now() + ms; while (Date.now() < end) {} },
   temp_dir() { return require("os").tmpdir(); },
+  os() { const p = require("os").platform(); return p === "darwin" ? "macos" : p === "win32" ? "windows" : p; },
 };
 "#;
 

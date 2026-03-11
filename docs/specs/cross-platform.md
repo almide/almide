@@ -5,7 +5,7 @@ Almide is a write-once language. Platform differences are handled by the compile
 ## Principles
 
 1. **Source semantics are platform-independent.** The same `.almd` file produces the same behavior on macOS, Linux, and Windows.
-2. **No platform conditionals in user code.** There is no `cfg`, no `#ifdef`, no `env.os()` guard required for basic operations.
+2. **No platform conditionals in user code.** There is no `cfg`, no `#ifdef` required for basic operations. `env.os()` is available for edge cases (e.g., platform-specific shell commands) but should rarely be needed.
 3. **The runtime absorbs OS differences.** Stdlib functions like `random.int()`, `fs.read_text()`, `env.temp_dir()` work identically everywhere.
 
 ## Source File Handling
@@ -87,14 +87,33 @@ No `--` separator is required. Hyphenated arguments like `-v` are also forwarded
 
 When `effect fn main` returns `err(...)`, the program exits with code 1 silently. The error value is not printed to stderr — CLI tools are expected to print their own error messages via `println` before returning.
 
-## Path Separators (Not Yet Normalized)
+## Path Separators
 
-`fs.walk()`, `fs.stat()`, and `fs.list_dir()` currently return OS-native paths (`\` on Windows, `/` on Unix). A future version may normalize to `/` everywhere, following the convention of Deno and Go's `filepath.ToSlash`.
+All path-returning functions normalize to forward slashes (`/`) on all platforms:
+- `fs.walk()` — recursive directory listing, paths use `/`
+- `env.temp_dir()` — returns `/`-normalized temp directory path
+- `fs.list_dir()` — returns filenames only (no separator issue)
+- `fs.stat()` — operates on user-provided paths
+
+This matches the convention of Deno and Go's `filepath.ToSlash`. Users should never see `\` in path outputs.
+
+## Platform Detection
+
+`env.os()` returns a normalized platform name:
+
+| Platform | Return value |
+|----------|-------------|
+| macOS | `"macos"` |
+| Linux | `"linux"` |
+| Windows | `"windows"` |
+| Other | `"unknown"` |
+
+Available in all targets (Rust, TS/Deno, JS/Node). Not an `effect` function — no I/O involved.
 
 ## CI
 
 Windows CI runs on `windows-latest` (GitHub Actions) and covers:
 - `cargo build --release` — compiler builds on MSVC toolchain
 - `cargo test` — Rust unit tests pass
-- `almide test` — all 42 `.almd` test files pass
+- `almide test` — all 43 `.almd` test files pass
 - Smoke tests: `almide run`, `almide build`, fs operations

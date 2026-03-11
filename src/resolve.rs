@@ -265,6 +265,10 @@ fn load_module(
     // Module System v2: load sub-namespace files for packages
     // If this module was loaded from mod.almd (or lib.almd), also load sibling .almd files as sub-namespaces
     let file_name = file_path.file_name().and_then(|f| f.to_str()).unwrap_or("");
+    if file_name == "lib.almd" {
+        eprintln!("warning: 'lib.almd' is deprecated as package entry point, rename to 'mod.almd'");
+        eprintln!("  --> {}", file_path.display());
+    }
     if file_name == "mod.almd" || file_name == "lib.almd" {
         if let Some(src_dir) = file_path.parent() {
             load_sub_namespaces(name, src_dir, &pkg_id, base_dir, dep_paths, loaded, loaded_names, loading)?;
