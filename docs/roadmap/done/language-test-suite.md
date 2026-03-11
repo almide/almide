@@ -1,6 +1,6 @@
-# Language Test Suite [IN PROGRESS]
+# Language Test Suite [DONE]
 
-Almide の言語機能を体系的にテストするスイート。`exercises/lang-test/` に配置。
+Almide の言語機能を体系的にテストするスイート。`lang/` に配置。
 
 ## Goal
 

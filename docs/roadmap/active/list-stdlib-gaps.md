@@ -2,7 +2,7 @@
 
 Almide's `list` module compared against 7 languages. All operations are immutable (return new list).
 
-## Current (38 functions)
+## Current (40 functions)
 
 len, get, get_or, sort, reverse, contains, each, map, filter, find, fold, any, all, enumerate, zip, flatten, take, drop, sort_by, unique, index_of, last, chunk, sum, product, first, is_empty?, flat_map, min, max, join, filter_map, take_while, drop_while, count, partition, reduce, group_by
 
@@ -14,7 +14,7 @@ len, get, get_or, sort, reverse, contains, each, map, filter, find, fold, any, a
 | set by index | `xs[i]=v` | `with(i,v)` | `xs[i]=v` | — | `replace_at` | `set` | `xs[i]=v` | `set` (v0.4.5) |
 | **insert at** | `insert` | `toSpliced` | `insert` | — | `insert_at` | `add(i,v)` | `slices.Insert` | **MISSING** |
 | **remove at** | `pop(i)` | `toSpliced` | `remove` | — | `delete_at` | `removeAt` | `slices.Delete` | **MISSING** |
-| **swap** | — | — | `swap` | — | — | — | — | **MISSING** |
+| ~~swap~~ | — | — | `swap` | — | — | — | — | `swap` (v0.4.5) |
 | **update at** | — | — | — | — | `update_at` | — | — | **MISSING** |
 | **slice** | `xs[a:b]` | `slice` | `&xs[a..b]` | — | `Enum.slice` | `subList` | `xs[a:b]` | **MISSING** |
 | **range** | `range` | — | `0..n` | `[1..n]` | `Range` | `IntRange` | — | **MISSING** |
@@ -58,7 +58,7 @@ Needed for sorting, graph, tree manipulation tasks.
 |----------|-----------|------------|
 | **insert** | `(xs, i, value) -> List[T]` | Python, JS, Rust, Elixir, Kotlin, Go |
 | **remove_at** | `(xs, i) -> List[T]` | Python, JS, Rust, Elixir, Kotlin, Go |
-| **swap** | `(xs, i, j) -> List[T]` | Rust |
+| ~~swap~~ | `(xs, i, j) -> List[T]` | Rust | **Done** (v0.4.5) |
 | **find_index** | `(xs, f) -> Option[Int]` | Python, JS, Rust, Haskell, Elixir, Kotlin |
 
 ### Tier 3 — Functional transforms

@@ -5,24 +5,25 @@
 - [Codegen Optimization](active/codegen-optimization.md) — clone elimination, move analysis, borrow inference
 - [Cross-Platform Support](active/cross-platform.md) — Windows CI, CRLF, path normalization
 - [Error Diagnostics](active/error-diagnostics.md)
-- [Language Test Suite](active/language-test-suite.md)
+- [HTTP Module](active/http.md) — Phase 1 done, Phases 2-4 remaining
+- [HTTPS Client](active/https.md) — design complete, implementation in progress
 - [List Stdlib Gaps](active/list-stdlib-gaps.md)
-- [Literal Syntax Gaps](active/literal-syntax-gaps.md)
 - [LLM Immutable Patterns](active/llm-immutable-patterns.md)
+- [Module System v2](active/module-system-v2.md) — core done, edge cases remaining
 - [Playground Repair](active/playground-repair.md)
-- [Benchmark Report](active/benchmark-report.md)
+- [Stdlib Architecture: 3-Layer Design](active/stdlib-architecture-3-layer-design.md) — Phase A done, B/C remaining
+- [Stdlib Self-Hosting](active/stdlib-self-hosting.md) — Phase 1-2a done, 2b/3 remaining
+- [Syntax Sugar](active/syntax-sugar.md) — range, raw strings, exhaustiveness done; comprehensions pending
+- [trait / impl](active/trait-impl.md) — parser done, checker/emitter partial
 
 ## Planned
 
-- [trait / impl](planned/trait-impl.md)
-- [Type System Extensions](planned/type-system.md)
-- [Syntax Sugar](planned/syntax-sugar.md)
-- [Stdlib Declarative Codegen](planned/stdlib-codegen.md)
+- [Benchmark Report](planned/benchmark-report.md)
 - [Direct WASM Emission](planned/emit-wasm-direct.md)
-- [npm Package Target](planned/npm-package-target-target-npm.md)
 - [Interop / FFI](planned/interop.md)
 - [Structured Concurrency](planned/structured-concurrency.md)
 - [Tooling](planned/tooling.md)
+- [Type System Extensions](planned/type-system.md)
 - [Other](planned/other.md)
 
 ## On Hold
@@ -39,14 +40,13 @@
 - [Compiler Hardening](done/compiler-hardening.md)
 - [Control Flow Extensions](done/control-flow.md)
 - [Generics](done/generics.md)
-- [HTTP Module](done/http.md)
-- [HTTPS Client](done/https.md)
-- [Module System v2](done/module-system-v2.md)
+- [Language Test Suite](done/language-test-suite.md)
+- [Literal Syntax Gaps](done/literal-syntax-gaps.md)
+- [npm Package Target](done/npm-package-target-target-npm.md)
 - [Proliferation Blockers](done/proliferation-blockers.md)
 - [stdin / Interactive I/O](done/stdin-io.md)
-- [Stdlib Architecture: 3-Layer Design](done/stdlib-architecture-3-layer-design.md)
 - [Stdlib Completeness](done/stdlib-completeness.md)
+- [Stdlib Declarative Codegen](done/stdlib-codegen.md)
 - [Stdlib Gaps](done/stdlib-gaps.md)
-- [Stdlib Self-Hosting](done/stdlib-self-hosting.md)
 - [String Handling](done/string-handling.md)
 - [Tuple & Record](done/tuple-record.md)

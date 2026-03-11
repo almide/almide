@@ -1,4 +1,4 @@
-# npm Package Target [PLANNED]
+# npm Package Target [DONE]
 
 Compile Almide code into a publish-ready npm package. Write libraries in Almide and distribute them to the JS ecosystem via `almide build --target npm`.
 

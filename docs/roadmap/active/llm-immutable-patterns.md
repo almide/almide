@@ -81,13 +81,13 @@ error: cannot reassign immutable binding 'arr'
 
 ### Tier 2 — Stdlib patterns for immutable algorithms (medium-term)
 
-#### 2.1 `list.swap` — immutable swap
+#### 2.1 ~~`list.swap` — immutable swap~~ ✅ Done (v0.4.5)
 ```
 fn swap(xs: List[T], i: Int, j: Int) -> List[T]
 ```
 Most common missing primitive. Quicksort, selection sort, heap operations all need this.
 
-**Effort**: Low. `list.set(list.set(xs, i, get(xs, j)), j, get(xs, i))`.
+**Implemented in v0.4.5** with full Rust + TS codegen.
 
 #### 2.2 `list.update` — functional update at index
 ```

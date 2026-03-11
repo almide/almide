@@ -1,4 +1,4 @@
-# HTTP Module [DONE]
+# HTTP Module [IN PROGRESS]
 
 ## Current Status (v0.1)
 Self-contained HTTP/1.1 server on std::net. Zero dependencies.

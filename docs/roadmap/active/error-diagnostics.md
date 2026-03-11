@@ -1,6 +1,6 @@
 # Error Diagnostics [IN PROGRESS]
 
-## Current State (v0.4.6)
+## Current State (v0.4.11)
 
 What we have:
 - Line numbers in errors (`--> file.almd:12`)
@@ -26,7 +26,7 @@ What we lack vs Rust:
 | "did you mean?" | Y | N | Y | N | N |
 | Multiple errors per run | Y | Y | Y | Y | Y (checker) |
 | Unused variable warning | Y | Error | Y | N | Y (`_` prefix) |
-| Immutable reassign | Y | N/A | N | N | Y (v0.4.6) |
+| Immutable reassign | Y | N/A | N | N | Y (v0.4.11) |
 | Lost mutation warning | N | N | N | N | N |
 | Color output | Y | N | Y | Y | N |
 
