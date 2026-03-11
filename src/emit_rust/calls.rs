@@ -198,12 +198,24 @@ impl Emitter {
             }
             _ => None,
         };
+        // Check if callee is a variant constructor that needs Box wrapping
+        let variant_ctor_name: Option<&str> = match callee {
+            Expr::TypeName { name, .. } => Some(name.as_str()),
+            _ => None,
+        };
         let args_str: Vec<String> = args.iter().enumerate().map(|(i, a)| {
-            if let Some(ref fn_name) = callee_fn_name {
+            let arg_str = if let Some(ref fn_name) = callee_fn_name {
                 self.gen_arg_for(a, fn_name, i)
             } else {
                 self.gen_arg(a)
+            };
+            // Auto-wrap with Box::new for recursive variant constructor args
+            if let Some(ctor) = variant_ctor_name {
+                if self.boxed_variant_args.contains(&(ctor.to_string(), i)) {
+                    return format!("Box::new({})", arg_str);
+                }
             }
+            arg_str
         }).collect();
         let call = format!("{}{}({})", callee_str, turbofish, args_str.join(", "));
         // Auto-propagate ? for effect fn calls within effect context (not in tests, not suppressed)
