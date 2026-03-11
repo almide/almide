@@ -434,6 +434,53 @@ impl Lexer {
         while self.pos < self.chars.len() && self.chars[self.pos] != '"' {
             if self.chars[self.pos] == '$' && self.peek(1) == '{' {
                 has_interpolation = true;
+                // Skip interpolation block, tracking brace depth and nested strings
+                value.push('$');
+                self.advance();
+                value.push('{');
+                self.advance();
+                let mut depth = 1;
+                while self.pos < self.chars.len() && depth > 0 {
+                    let ch = self.chars[self.pos];
+                    if ch == '{' {
+                        depth += 1;
+                        value.push(ch);
+                        self.advance();
+                    } else if ch == '}' {
+                        depth -= 1;
+                        if depth > 0 {
+                            value.push(ch);
+                        } else {
+                            value.push('}');
+                        }
+                        self.advance();
+                    } else if ch == '"' {
+                        // Nested string literal inside interpolation
+                        value.push('"');
+                        self.advance();
+                        while self.pos < self.chars.len() && self.chars[self.pos] != '"' {
+                            if self.chars[self.pos] == '\\' {
+                                value.push('\\');
+                                self.advance();
+                                if self.pos < self.chars.len() {
+                                    value.push(self.chars[self.pos]);
+                                    self.advance();
+                                }
+                            } else {
+                                value.push(self.chars[self.pos]);
+                                self.advance();
+                            }
+                        }
+                        if self.pos < self.chars.len() {
+                            value.push('"');
+                            self.advance(); // skip closing "
+                        }
+                    } else {
+                        value.push(ch);
+                        self.advance();
+                    }
+                }
+                continue;
             }
             if self.chars[self.pos] == '\\' {
                 self.advance();
@@ -527,6 +574,54 @@ impl Lexer {
 
             if !is_raw && self.chars[self.pos] == '$' && self.peek(1) == '{' {
                 has_interpolation = true;
+                // Skip interpolation block, tracking brace depth and nested strings
+                raw_content.push('$');
+                self.advance();
+                raw_content.push('{');
+                self.advance();
+                let mut depth = 1;
+                while self.pos < self.chars.len() && depth > 0 {
+                    let ch = self.chars[self.pos];
+                    if ch == '{' {
+                        depth += 1;
+                        raw_content.push(ch);
+                        self.advance();
+                    } else if ch == '}' {
+                        depth -= 1;
+                        raw_content.push('}');
+                        self.advance();
+                    } else if ch == '"' {
+                        // Nested string literal inside interpolation
+                        raw_content.push('"');
+                        self.advance();
+                        while self.pos < self.chars.len() && self.chars[self.pos] != '"' {
+                            if self.chars[self.pos] == '\\' {
+                                raw_content.push('\\');
+                                self.advance();
+                                if self.pos < self.chars.len() {
+                                    raw_content.push(self.chars[self.pos]);
+                                    self.advance();
+                                }
+                            } else {
+                                raw_content.push(self.chars[self.pos]);
+                                self.advance();
+                            }
+                        }
+                        if self.pos < self.chars.len() {
+                            raw_content.push('"');
+                            self.advance(); // skip closing "
+                        }
+                    } else if ch == '\n' {
+                        raw_content.push('\n');
+                        self.pos += 1;
+                        self.line += 1;
+                        self.col = 1;
+                    } else {
+                        raw_content.push(ch);
+                        self.advance();
+                    }
+                }
+                continue;
             }
 
             if self.chars[self.pos] == '\n' {

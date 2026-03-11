@@ -35,11 +35,14 @@ impl Emitter {
                     let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
                     self.named_record_types.insert(field_names, name.clone());
                 }
-                Decl::Type { name: enum_name, ty: TypeExpr::Variant { cases }, generics: Some(gs), .. } if !gs.is_empty() => {
+                Decl::Type { name: enum_name, ty: TypeExpr::Variant { cases }, generics, .. } => {
+                    let has_generics = matches!(generics, Some(gs) if !gs.is_empty());
                     for case in cases {
                         let ctor_name = match case {
                             VariantCase::Unit { name } => {
-                                self.generic_variant_unit_ctors.insert(name.clone());
+                                if has_generics {
+                                    self.generic_variant_unit_ctors.insert(name.clone());
+                                }
                                 name.clone()
                             }
                             VariantCase::Tuple { name, fields } => {
@@ -60,7 +63,9 @@ impl Emitter {
                                 name.clone()
                             }
                         };
-                        self.generic_variant_constructors.insert(ctor_name, enum_name.clone());
+                        if has_generics {
+                            self.generic_variant_constructors.insert(ctor_name, enum_name.clone());
+                        }
                     }
                 }
                 _ => {}
@@ -122,9 +127,53 @@ impl Emitter {
         self.emitln(anon_record_placeholder);
         self.emitln("");
 
+        // Collect variant and record type names per module for cross-module imports
+        let mut module_variant_types: Vec<(String, Vec<String>)> = Vec::new();
+        let mut module_record_types: Vec<(String, Vec<String>)> = Vec::new();
+        for (mod_name, mod_prog, pkg_id, _) in modules {
+            let rust_mod = if let Some(pid) = pkg_id {
+                pid.mod_name().replace('.', "_")
+            } else {
+                mod_name.replace('.', "_")
+            };
+            let mut variant_names = Vec::new();
+            let mut record_names = Vec::new();
+            for decl in &mod_prog.decls {
+                match decl {
+                    Decl::Type { name, ty: TypeExpr::Variant { .. }, .. } => {
+                        variant_names.push(name.clone());
+                    }
+                    Decl::Type { name, ty: TypeExpr::Record { .. }, .. } => {
+                        record_names.push(name.clone());
+                    }
+                    _ => {}
+                }
+            }
+            module_variant_types.push((rust_mod.clone(), variant_names));
+            module_record_types.push((rust_mod, record_names));
+        }
+
         // Emit imported modules as `mod name { ... }`
         for (mod_name, mod_prog, pkg_id, _) in modules {
-            self.emit_user_module(mod_name, mod_prog, pkg_id.as_ref());
+            self.emit_user_module(mod_name, mod_prog, pkg_id.as_ref(), &module_variant_types, &module_record_types);
+            self.emitln("");
+        }
+
+        // Import variant types from modules into top-level scope
+        for (rust_mod, variant_names) in &module_variant_types {
+            for vname in variant_names {
+                self.emitln(&format!("use {}::{};", rust_mod, vname));
+                self.emitln(&format!("use {}::{}::*;", rust_mod, vname));
+            }
+        }
+        // Import record types from modules into top-level scope
+        for (rust_mod, record_names) in &module_record_types {
+            for rname in record_names {
+                self.emitln(&format!("use {}::{};", rust_mod, rname));
+            }
+        }
+        if !module_variant_types.iter().all(|(_, v)| v.is_empty())
+            || !module_record_types.iter().all(|(_, r)| r.is_empty()) {
             self.emitln("");
         }
 
@@ -201,7 +250,7 @@ impl Emitter {
         }
     }
 
-    fn emit_user_module(&mut self, name: &str, prog: &Program, pkg_id: Option<&crate::project::PkgId>) {
+    fn emit_user_module(&mut self, name: &str, prog: &Program, pkg_id: Option<&crate::project::PkgId>, module_variant_types: &[(String, Vec<String>)], module_record_types: &[(String, Vec<String>)]) {
         let mod_name = if let Some(pid) = pkg_id {
             pid.mod_name()
         } else {
@@ -213,6 +262,21 @@ impl Emitter {
         self.emitln(&format!("mod {} {{", rust_mod_name));
         self.indent += 1;
         self.emitln("use super::*;");
+        // Import variant types from other user modules
+        for (other_mod, variant_names) in module_variant_types {
+            if other_mod == &rust_mod_name { continue; }
+            for vname in variant_names {
+                self.emitln(&format!("use super::{}::{};", other_mod, vname));
+                self.emitln(&format!("use super::{}::{}::*;", other_mod, vname));
+            }
+        }
+        // Import record types from other user modules
+        for (other_mod, record_names) in module_record_types {
+            if other_mod == &rust_mod_name { continue; }
+            for rname in record_names {
+                self.emitln(&format!("use super::{}::{};", other_mod, rname));
+            }
+        }
         self.emitln("");
 
         for decl in &prog.decls {

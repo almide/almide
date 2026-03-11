@@ -2,7 +2,8 @@
 
 ## Active
 
-(None — all current roadmap items complete)
+- [Self-Tooling in Almide](active/self-tooling.md) — tree-sitter grammar generator done, Chrome extension next
+- [Test Coverage](active/test-coverage.md) — 790 cases, target 1500+
 
 ## On Hold
 

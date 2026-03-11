@@ -46,6 +46,10 @@ impl Emitter {
                         fmt.push_str("{{");
                     } else if c == '}' {
                         fmt.push_str("}}");
+                    } else if c == '"' {
+                        fmt.push_str("\\\"");
+                    } else if c == '\\' {
+                        fmt.push_str("\\\\");
                     } else {
                         fmt.push(c);
                     }
