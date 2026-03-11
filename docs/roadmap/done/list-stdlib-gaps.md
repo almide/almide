@@ -2,7 +2,7 @@
 
 Almide's `list` module compared against 7 languages. All operations are immutable (return new list).
 
-## Current (38 functions)
+## Current (40 functions)
 
 len, get, get_or, sort, reverse, contains, each, map, filter, find, fold, any, all, enumerate, zip, flatten, take, drop, sort_by, unique, index_of, last, chunk, sum, product, first, is_empty?, flat_map, min, max, join, filter_map, take_while, drop_while, count, partition, reduce, group_by
 
@@ -14,7 +14,7 @@ len, get, get_or, sort, reverse, contains, each, map, filter, find, fold, any, a
 | set by index | `xs[i]=v` | `with(i,v)` | `xs[i]=v` | — | `replace_at` | `set` | `xs[i]=v` | `set` (v0.4.5) |
 | **insert at** | `insert` | `toSpliced` | `insert` | — | `insert_at` | `add(i,v)` | `slices.Insert` | **MISSING** |
 | **remove at** | `pop(i)` | `toSpliced` | `remove` | — | `delete_at` | `removeAt` | `slices.Delete` | **MISSING** |
-| **swap** | — | — | `swap` | — | — | — | — | **MISSING** |
+| ~~swap~~ | — | — | `swap` | — | — | — | — | `swap` (v0.4.5) |
 | **update at** | — | — | — | — | `update_at` | — | — | **MISSING** |
 | **slice** | `xs[a:b]` | `slice` | `&xs[a..b]` | — | `Enum.slice` | `subList` | `xs[a:b]` | **MISSING** |
 | **range** | `range` | — | `0..n` | `[1..n]` | `Range` | `IntRange` | — | **MISSING** |
@@ -48,31 +48,31 @@ LLMs generate these constantly. Missing them causes runtime errors or forces ver
 | Function | Signature | Present in | Priority |
 |----------|-----------|------------|----------|
 | ~~set~~ | `(xs, i, value) -> List[T]` | Python, JS, Rust, Elixir, Kotlin, Go | **Done** (v0.4.5) |
-| **range** | `(start, end) -> List[Int]` | Python, Rust, Haskell, Elixir, Kotlin | **Now** (LLMs default to range-based loops) |
-| **slice** | `(xs, start, end) -> List[T]` | Python, JS, Rust, Elixir, Kotlin, Go | High |
+| ~~range~~ | `(start, end) -> List[Int]` | Python, Rust, Haskell, Elixir, Kotlin | **Done** (v0.4.8) |
+| ~~slice~~ | `(xs, start, end) -> List[T]` | Python, JS, Rust, Elixir, Kotlin, Go | **Done** (v0.4.8) |
 
 ### Tier 2 — Algorithm support
 Needed for sorting, graph, tree manipulation tasks.
 
 | Function | Signature | Present in |
 |----------|-----------|------------|
-| **insert** | `(xs, i, value) -> List[T]` | Python, JS, Rust, Elixir, Kotlin, Go |
-| **remove_at** | `(xs, i) -> List[T]` | Python, JS, Rust, Elixir, Kotlin, Go |
-| **swap** | `(xs, i, j) -> List[T]` | Rust |
-| **find_index** | `(xs, f) -> Option[Int]` | Python, JS, Rust, Haskell, Elixir, Kotlin |
+| ~~insert~~ | `(xs, i, value) -> List[T]` | Python, JS, Rust, Elixir, Kotlin, Go | **Done** (v0.4.8) |
+| ~~remove_at~~ | `(xs, i) -> List[T]` | Python, JS, Rust, Elixir, Kotlin, Go | **Done** (v0.4.8) |
+| ~~swap~~ | `(xs, i, j) -> List[T]` | Rust | **Done** (v0.4.5) |
+| ~~find_index~~ | `(xs, f) -> Option[Int]` | Python, JS, Rust, Haskell, Elixir, Kotlin | **Done** (v0.4.8) |
 
 ### Tier 3 — Functional transforms
 Nice-to-have. Increases expressiveness for pipeline-heavy code.
 
 | Function | Signature | Present in |
 |----------|-----------|------------|
-| **update** | `(xs, i, f) -> List[T]` | Elixir |
-| **repeat** | `(value, n) -> List[T]` | Python, Rust, Haskell, Elixir |
-| **scan** | `(xs, init, f) -> List[U]` | Python, Rust, Haskell, Elixir, Kotlin |
-| **intersperse** | `(xs, sep) -> List[T]` | Rust, Haskell, Elixir |
-| **windows** | `(xs, n) -> List[List[T]]` | Rust, Kotlin |
-| **dedup** | `(xs) -> List[T]` | Rust, Haskell, Elixir, Go |
-| **zip_with** | `(a, b, f) -> List[U]` | Haskell, Elixir |
+| ~~update~~ | `(xs, i, f) -> List[T]` | Elixir | **Done** (v0.4.8) |
+| ~~repeat~~ | `(value, n) -> List[T]` | Python, Rust, Haskell, Elixir | **Done** (v0.4.8) |
+| ~~scan~~ | `(xs, init, f) -> List[U]` | Python, Rust, Haskell, Elixir, Kotlin | **Done** (v0.4.8) |
+| ~~intersperse~~ | `(xs, sep) -> List[T]` | Rust, Haskell, Elixir | **Done** (v0.4.8) |
+| ~~windows~~ | `(xs, n) -> List[List[T]]` | Rust, Kotlin | **Done** (v0.4.8) |
+| ~~dedup~~ | `(xs) -> List[T]` | Rust, Haskell, Elixir, Go | **Done** (v0.4.8) |
+| ~~zip_with~~ | `(a, b, f) -> List[U]` | Haskell, Elixir | **Done** (v0.4.8) |
 
 ## Implementation order
 

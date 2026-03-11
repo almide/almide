@@ -19,6 +19,20 @@ effect = true
 rust = "almide_rt_process_stdin_lines()?"
 ts = "__almd_process.stdin_lines()"
 
+[exec_in]
+params = [{ name = "dir", type = "String" }, { name = "cmd", type = "String" }, { name = "args", type = "List[String]" }]
+return = "Result[String, String]"
+effect = true
+rust = "almide_rt_process_exec_in(&*{dir}, &*{cmd}, &{ let __a: Vec<String> = {args}; __a })"
+ts = "__almd_process.exec_in({dir}, {cmd}, {args})"
+
+[exec_with_stdin]
+params = [{ name = "cmd", type = "String" }, { name = "args", type = "List[String]" }, { name = "input", type = "String" }]
+return = "Result[String, String]"
+effect = true
+rust = "almide_rt_process_exec_with_stdin(&*{cmd}, &{ let __a: Vec<String> = {args}; __a }, &*{input})"
+ts = "__almd_process.exec_with_stdin({cmd}, {args}, {input})"
+
 [exec_status]
 params = [{ name = "cmd", type = "String" }, { name = "args", type = "List[String]" }]
 return = "Result[{code: Int, stdout: String, stderr: String}, String]"

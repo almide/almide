@@ -34,11 +34,13 @@ impl Emitter {
         }
         let subj = self.gen_expr(subject);
         self.skip_auto_q.set(prev);
+        // Check if the subject is a borrowed param (already &str)
+        let subj_is_borrowed = matches!(subject, Expr::Ident { name, .. } if self.borrowed_params.contains_key(name));
         let subj_expr = if Self::has_string_in_option_pattern(arms) {
             // match option { some("x") => ... } needs as_deref()
             format!("{}.as_deref()", subj)
-        } else if Self::has_bare_string_literal(arms) {
-            // match string { "/" => ... } needs as_str()
+        } else if Self::has_bare_string_literal(arms) && !subj_is_borrowed {
+            // match string { "/" => ... } needs as_str() (but not if already &str)
             format!("{}.as_str()", subj)
         } else {
             subj

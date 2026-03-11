@@ -64,6 +64,12 @@ return = "Float"
 rust = "almide_rt_float_max({a}, {b})"
 ts = "__almd_float.max({a}, {b})"
 
+[to_fixed]
+params = [{ name = "n", type = "Float" }, { name = "decimals", type = "Int" }]
+return = "String"
+rust = "almide_rt_float_to_fixed({n}, {decimals})"
+ts = "__almd_float.to_fixed({n}, {decimals})"
+
 [clamp]
 params = [{ name = "n", type = "Float" }, { name = "lo", type = "Float" }, { name = "hi", type = "Float" }]
 return = "Float"

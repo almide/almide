@@ -234,7 +234,7 @@ Use cases:
 | **0b.** Wrapping arithmetic | `int.wrap_add/wrap_mul/rotate_right/left` | ✅ Done | SHA-256, SHA-1 in pure Almide |
 | **1.** Stdlib package mechanism | resolver + bundled .almd | ✅ Done | args, term, csv, hash, encoding |
 | **2a.** Runtime extraction | all stdlib → runtime files | ✅ Done (v0.2.1) | clean codegen separation |
-| **2b.** Migrate more stdlib to .almd | move pure functions to .almd | Next | shrinks calls.rs further |
+| **2b.** Migrate more stdlib to .almd | path, time fully migrated | ✅ Done | shrinks calls.rs further |
 | **3.** `@extern` FFI | target-specific escape hatch | ✅ Done (v0.2.1) | platform-specific APIs |
 
 ### CLI Stdlib Gaps (to be filled via self-hosting)
@@ -253,11 +253,10 @@ Use cases:
 
 | Module | Functions | Priority |
 |--------|-----------|----------|
-| `float` | `to_fixed(n, decimals)` | CRITICAL |
-| `fs` | `walk`, `remove_all`, `glob`, `file_size`, `temp_dir` | HIGH |
-| `process` | `exec_in(dir, cmd, args)`, `exec_with_stdin` | HIGH |
-| `time` | `format(ts, fmt)`, `parse(s, fmt)` | HIGH |
-| `http` | fix missing type signatures in stdlib.rs (bug) | HIGH |
-| `http` | `get_with_headers`, `request(method, url, body, headers)` | MEDIUM |
+| `float` | `to_fixed(n, decimals)` | ✅ Done (v0.4.8) |
+| `fs` | `walk` ✅, `remove_all` ✅, `file_size` ✅, `temp_dir` ✅, `glob` (deferred) | ✅ Done |
+| `process` | `exec_in(dir, cmd, args)` ✅, `exec_with_stdin` ✅ | ✅ Done |
+| `time` | `format(ts, fmt)`, `parse_iso(s)`, `weekday_name`, `month_name` | ✅ Done (.almd) |
+| `http` | `get_with_headers` ✅, `request(method, url, body, headers)` ✅ | ✅ Done |
 
 ---

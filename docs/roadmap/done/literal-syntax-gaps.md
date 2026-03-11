@@ -1,4 +1,6 @@
-# Literal Syntax Gaps
+# Literal Syntax Gaps [DONE]
+
+All items implemented as of v0.4.7.
 
 Almide's literal syntax compared against 7 languages (Python, JS, Rust, Haskell, Go, Kotlin, Swift).
 

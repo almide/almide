@@ -17,6 +17,7 @@ pub struct Checker {
     pub source_file: Option<String>,
     pub source_text: Option<String>,
     current_decl_line: Option<usize>,
+    current_decl_col: Option<usize>,
     /// Build target (e.g. "rust", "ts", "wasm"). Used to gate platform modules.
     pub target: Option<String>,
 }
@@ -36,6 +37,7 @@ impl Checker {
             source_file: None,
             source_text: None,
             current_decl_line: None,
+            current_decl_col: None,
             target: None,
         };
         c.register_stdlib();
@@ -69,6 +71,9 @@ impl Checker {
         }
         if d.line.is_none() {
             d.line = self.current_decl_line;
+        }
+        if d.col.is_none() {
+            d.col = self.current_decl_col;
         }
         self.diagnostics.push(d);
     }
@@ -320,9 +325,10 @@ impl Checker {
                             self.env.types.insert(g.name.clone(), Ty::TypeVar(g.name.clone()));
                         }
                     }
-                    for p in params {
+                    for p in params.iter() {
                         let ty = self.resolve_type_expr(&p.ty);
                         self.env.define_var(&p.name, ty);
+                        self.env.param_vars.insert(p.name.clone());
                     }
                     let ret_ty = self.resolve_type_expr(return_type);
                     let prev_ret = self.env.current_ret.take();
@@ -351,6 +357,8 @@ impl Checker {
                     }
                     // Warn about unused variables (skip _ prefixed)
                     self.warn_unused_vars_in_scope(&format!("fn {}", name));
+                    // Warn when list params are mutated but not in return type (Tier 1.1)
+                    self.check_lost_list_return(name, params, &ret_ty, body);
                     self.env.current_ret = prev_ret;
                     self.env.in_effect = prev_effect;
                     // Clean up generic TypeVars from type registry
@@ -359,6 +367,8 @@ impl Checker {
                             self.env.types.remove(&g.name);
                         }
                     }
+                    // Clean up parameter tracking (scope is about to be popped)
+                    self.env.param_vars.clear();
                     self.env.pop_scope();
                 }
             }
@@ -372,6 +382,13 @@ impl Checker {
                 self.env.in_effect = prev;
                 self.env.in_test = prev_test;
                 self.env.pop_scope();
+            }
+            ast::Decl::Module { path, .. } => {
+                self.push_diagnostic(Diagnostic::warning(
+                    format!("'module {}' declaration is deprecated and will be removed in a future version", path.join(".")),
+                    "Remove the 'module' declaration — file path determines the module name",
+                    format!("module {}", path.join(".")),
+                ));
             }
             _ => {}
         }
@@ -536,4 +553,249 @@ impl Checker {
             self.env.effect_fns.insert(name.to_string());
         }
     }
+
+    /// Suggest similar names for "did you mean?" errors.
+    pub(crate) fn suggest_similar(&self, name: &str, kind: &str) -> Option<String> {
+        let candidates: Vec<&str> = match kind {
+            "function" => self.env.functions.keys().map(|s| s.as_str())
+                .chain(["println", "eprintln", "assert", "assert_eq", "assert_ne", "ok", "err", "some"].iter().copied())
+                .collect(),
+            "variable" => self.env.scopes.iter().rev()
+                .flat_map(|s| s.keys().map(|k| k.as_str()))
+                .collect(),
+            _ => return None,
+        };
+        let mut best: Option<(&str, usize)> = None;
+        let threshold = (name.len().max(1) * 2 / 5).max(1).min(3);
+        for c in &candidates {
+            let d = levenshtein(name, c);
+            if d > 0 && d <= threshold {
+                if best.is_none() || d < best.unwrap().1 {
+                    best = Some((c, d));
+                }
+            }
+        }
+        best.map(|(s, _)| s.to_string())
+    }
+
+    /// Suggest similar module function names.
+    pub(crate) fn suggest_module_fn(&self, module: &str, func: &str) -> Option<String> {
+        let candidates = stdlib::module_functions(module);
+        let mut best: Option<(&str, usize)> = None;
+        // Allow up to 40% of the longer string's length as threshold (min 1, max 3)
+        let threshold = (func.len().max(1) * 2 / 5).max(1).min(3);
+        for c in &candidates {
+            let d = levenshtein(func, c);
+            if d > 0 && d <= threshold {
+                if best.is_none() || d < best.unwrap().1 {
+                    best = Some((c, d));
+                }
+            }
+        }
+        // Also check substring containment (e.g., "length" → "len" if func contains candidate)
+        if best.is_none() {
+            for c in &candidates {
+                if func.contains(c) || c.contains(func) {
+                    best = Some((c, 0));
+                    break;
+                }
+            }
+        }
+        best.map(|(s, _)| s.to_string())
+    }
+
+    /// List mutation functions whose first arg is the collection being modified.
+    const LIST_MUTATION_FNS: &'static [&'static str] = &[
+        "set", "swap", "push", "insert", "remove_at", "sort", "reverse",
+    ];
+
+    /// Check if a function modifies list-typed parameters but doesn't return them.
+    /// Suggests tuple return pattern when mutations would otherwise be lost.
+    fn check_lost_list_return(&mut self, name: &str, params: &[ast::Param], ret_ty: &Ty, body: &ast::Expr) {
+        // Collect list-typed parameter names
+        let list_params: std::collections::HashSet<String> = params.iter()
+            .filter(|p| matches!(self.resolve_type_expr(&p.ty), Ty::List(_)))
+            .map(|p| p.name.clone())
+            .collect();
+        if list_params.is_empty() {
+            return;
+        }
+        // Check if return type already contains a List
+        if Self::ty_contains_list(ret_ty) {
+            return;
+        }
+        // Walk body to find list mutation calls on parameters
+        let mut mutated_params = std::collections::HashSet::new();
+        Self::find_list_mutations(body, &list_params, &mut mutated_params);
+        if mutated_params.is_empty() {
+            return;
+        }
+        let param_names: Vec<&str> = mutated_params.iter().map(|s| s.as_str()).collect();
+        let hint = if param_names.len() == 1 {
+            let p = param_names[0];
+            format!(
+                "'{}' is modified via list.set/swap/push but not included in the return type. \
+                 Return the modified list alongside the result: -> ({}, {})",
+                p, "List[T]", ret_ty.display()
+            )
+        } else {
+            format!(
+                "{} are modified but not returned. Use a tuple return to include them.",
+                param_names.join(", ")
+            )
+        };
+        self.push_diagnostic(Diagnostic::warning(
+            format!("function '{}' modifies list parameter(s) but doesn't return them", name),
+            hint,
+            format!("fn {}", name),
+        ));
+    }
+
+    /// Check if a Ty contains a List anywhere (direct, in tuple, result, option, etc.)
+    fn ty_contains_list(ty: &Ty) -> bool {
+        match ty {
+            Ty::List(_) => true,
+            Ty::Tuple(elems) => elems.iter().any(Self::ty_contains_list),
+            Ty::Result(ok, err) => Self::ty_contains_list(ok) || Self::ty_contains_list(err),
+            Ty::Option(inner) => Self::ty_contains_list(inner),
+            _ => false,
+        }
+    }
+
+    /// Walk an expression tree to find `list.set(param, ...)` / `param.set(...)` calls.
+    fn find_list_mutations(expr: &ast::Expr, list_params: &std::collections::HashSet<String>, out: &mut std::collections::HashSet<String>) {
+        match expr {
+            ast::Expr::Call { callee, args, .. } => {
+                if let ast::Expr::Member { object, field, .. } = callee.as_ref() {
+                    let func = field.as_str();
+                    if Self::LIST_MUTATION_FNS.contains(&func) {
+                        // Module call: list.set(param, ...)
+                        if let ast::Expr::Ident { name: module, .. } = object.as_ref() {
+                            if module == "list" {
+                                if let Some(ast::Expr::Ident { name: arg0, .. }) = args.first() {
+                                    if list_params.contains(arg0) {
+                                        out.insert(arg0.clone());
+                                    }
+                                }
+                            }
+                        }
+                        // UFCS: param.set(...)
+                        if let ast::Expr::Ident { name: receiver, .. } = object.as_ref() {
+                            if list_params.contains(receiver) {
+                                out.insert(receiver.clone());
+                            }
+                        }
+                    }
+                }
+                // Recurse into callee and args
+                Self::find_list_mutations(callee, list_params, out);
+                for a in args {
+                    Self::find_list_mutations(a, list_params, out);
+                }
+            }
+            ast::Expr::Block { stmts, expr, .. } | ast::Expr::DoBlock { stmts, expr, .. } => {
+                for s in stmts {
+                    Self::find_list_mutations_in_stmt(s, list_params, out);
+                }
+                if let Some(e) = expr {
+                    Self::find_list_mutations(e, list_params, out);
+                }
+            }
+            ast::Expr::If { cond, then, else_, .. } => {
+                Self::find_list_mutations(cond, list_params, out);
+                Self::find_list_mutations(then, list_params, out);
+                Self::find_list_mutations(else_, list_params, out);
+            }
+            ast::Expr::Match { subject, arms, .. } => {
+                Self::find_list_mutations(subject, list_params, out);
+                for arm in arms {
+                    Self::find_list_mutations(&arm.body, list_params, out);
+                }
+            }
+            ast::Expr::ForIn { iterable, body, .. } => {
+                Self::find_list_mutations(iterable, list_params, out);
+                for s in body {
+                    Self::find_list_mutations_in_stmt(s, list_params, out);
+                }
+            }
+            ast::Expr::Binary { left, right, .. } | ast::Expr::Pipe { left, right, .. } => {
+                Self::find_list_mutations(left, list_params, out);
+                Self::find_list_mutations(right, list_params, out);
+            }
+            ast::Expr::Unary { operand, .. } | ast::Expr::Paren { expr: operand, .. }
+            | ast::Expr::Try { expr: operand, .. } | ast::Expr::Await { expr: operand, .. }
+            | ast::Expr::Some { expr: operand, .. } | ast::Expr::Ok { expr: operand, .. }
+            | ast::Expr::Err { expr: operand, .. } => {
+                Self::find_list_mutations(operand, list_params, out);
+            }
+            ast::Expr::Lambda { body, .. } => {
+                Self::find_list_mutations(body, list_params, out);
+            }
+            ast::Expr::Tuple { elements, .. } | ast::Expr::List { elements, .. } => {
+                for e in elements {
+                    Self::find_list_mutations(e, list_params, out);
+                }
+            }
+            ast::Expr::Member { object, .. } | ast::Expr::TupleIndex { object, .. } => {
+                Self::find_list_mutations(object, list_params, out);
+            }
+            ast::Expr::Record { fields, .. } => {
+                for f in fields {
+                    Self::find_list_mutations(&f.value, list_params, out);
+                }
+            }
+            ast::Expr::SpreadRecord { base, fields, .. } => {
+                Self::find_list_mutations(base, list_params, out);
+                for f in fields {
+                    Self::find_list_mutations(&f.value, list_params, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn find_list_mutations_in_stmt(stmt: &ast::Stmt, list_params: &std::collections::HashSet<String>, out: &mut std::collections::HashSet<String>) {
+        match stmt {
+            ast::Stmt::Let { value, .. } | ast::Stmt::Var { value, .. } => {
+                Self::find_list_mutations(value, list_params, out);
+            }
+            ast::Stmt::Assign { value, .. } => {
+                Self::find_list_mutations(value, list_params, out);
+            }
+            ast::Stmt::IndexAssign { index, value, .. } => {
+                Self::find_list_mutations(index, list_params, out);
+                Self::find_list_mutations(value, list_params, out);
+            }
+            ast::Stmt::FieldAssign { value, .. } => {
+                Self::find_list_mutations(value, list_params, out);
+            }
+            ast::Stmt::Expr { expr, .. } => {
+                Self::find_list_mutations(expr, list_params, out);
+            }
+            ast::Stmt::Guard { cond, else_, .. } => {
+                Self::find_list_mutations(cond, list_params, out);
+                Self::find_list_mutations(else_, list_params, out);
+            }
+            ast::Stmt::LetDestructure { value, .. } => {
+                Self::find_list_mutations(value, list_params, out);
+            }
+            ast::Stmt::Comment { .. } => {}
+        }
+    }
+}
+
+fn levenshtein(a: &str, b: &str) -> usize {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    let (m, n) = (a.len(), b.len());
+    let mut prev: Vec<usize> = (0..=n).collect();
+    let mut curr = vec![0; n + 1];
+    for i in 1..=m {
+        curr[0] = i;
+        for j in 1..=n {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[n]
 }

@@ -55,7 +55,7 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         "trim" | "split" | "pad_left"
         | "starts_with" | "starts_with_hdlm_qm_" | "starts_with?"
         | "ends_with" | "ends_with_hdlm_qm_" | "ends_with?"
-        | "slice" | "to_bytes" | "to_upper" | "to_lower"
+        | "to_bytes" | "to_upper" | "to_lower"
         | "to_int" | "replace" | "char_at" | "lines"
         | "chars" | "repeat" | "from_bytes"
         | "is_digit?" | "is_digit_hdlm_qm_"
@@ -73,7 +73,10 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         | "last" | "chunk" | "sum" | "product"
         | "first" | "flat_map"
         | "filter_map" | "take_while" | "drop_while"
-        | "partition" | "reduce" | "group_by" => vec!["list"],
+        | "partition" | "reduce" | "group_by"
+        | "insert" | "remove_at" | "find_index"
+        | "update" | "scan" | "intersperse"
+        | "windows" | "dedup" | "zip_with" => vec!["list"],
 
         // ── map-only ──
         "keys" | "values" | "entries" | "merge"
@@ -82,11 +85,15 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         // ── int-only ──
         "to_string" | "to_hex" => vec!["int"],
 
+        // ── float-only ──
+        "to_fixed" | "round" | "floor" | "ceil" | "sqrt" => vec!["float"],
+
         // ── ambiguous: string + list ──
         "reverse" => vec!["string", "list"],
         "index_of" => vec!["string", "list"],
         "join" => vec!["string", "list"],
         "count" => vec!["string", "list"],
+        "slice" => vec!["string", "list"],
 
         // ── ambiguous: string + list + map ──
         "len" => vec!["string", "list", "map"],
@@ -140,6 +147,11 @@ pub fn min_params(module: &str, func: &str) -> Option<usize> {
 /// Names of built-in effect functions (not module-scoped).
 pub fn builtin_effect_fns() -> Vec<&'static str> {
     vec!["println", "eprintln"]
+}
+
+/// Return all function names in a stdlib module (for "did you mean?" suggestions).
+pub fn module_functions(module: &str) -> Vec<&'static str> {
+    crate::generated::stdlib_sigs::generated_module_functions(module)
 }
 
 /// Look up a stdlib function's type signature.

@@ -1,4 +1,4 @@
-# Syntax Sugar [PLANNED]
+# Syntax Sugar [IN PROGRESS]
 
 ## Range Literals
 ```almide

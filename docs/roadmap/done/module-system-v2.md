@@ -145,13 +145,13 @@ parser.parse(...)            // OK
 
 - [x] Resolver: support `import pkg` loading `mod.almd` + sub-namespace files
 - [x] Resolver: support `import pkg.submodule` for direct sub-module access
-- [ ] Checker: validate cross-package access respects `mod.almd` boundary
+- [x] Checker: validate cross-package access respects `mod.almd` boundary (handled by resolver — sub-namespaces loaded as `pkg.file`)
 - [x] CLI: `almide init` template — remove `module main` from generated code
 - [x] CLI: `almide fmt` without args — format all `src/**/*.almd` recursively
 - [x] CLI: `almide --help` and `almide --version`
 - [x] CLI: `--dry-run` → `--check` rename for `almide fmt` (keep `--dry-run` as alias)
 - [x] CLI: `almide build --release` (opt-level=2)
-- [ ] Deprecation warning for `module` declarations
-- [ ] Deprecation warning for `lib.almd` as package entry (suggest rename to `mod.almd`)
+- [x] Deprecation warning for `module` declarations
+- [x] Deprecation warning for `lib.almd` as package entry (suggest rename to `mod.almd`)
 
 ---

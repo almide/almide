@@ -253,6 +253,7 @@ fn resolve_file(file: Option<String>) -> String {
 }
 
 fn main() {
+    almide::diagnostic::init_color();
     // Legacy mode: `almide file.almd [--target X]` → rewrite as `almide emit file.almd [--target X]`
     let raw_args: Vec<String> = std::env::args().collect();
     if raw_args.len() >= 2

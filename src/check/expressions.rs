@@ -25,14 +25,17 @@ fn ty_to_resolved(ty: &Ty) -> ResolvedType {
 
 impl Checker {
     pub(crate) fn check_expr(&mut self, expr: &mut ast::Expr) -> Ty {
-        // Update current line from expression span for precise error positions
+        // Update current line/col from expression span for precise error positions
         let prev_line = self.current_decl_line;
+        let prev_col = self.current_decl_col;
         if let Some(span) = expr.span() {
             self.current_decl_line = Some(span.line);
+            self.current_decl_col = Some(span.col);
         }
         let ty = self.check_expr_inner(expr);
         expr.set_resolved_type(ty_to_resolved(&ty));
         self.current_decl_line = prev_line;
+        self.current_decl_col = prev_col;
         ty
     }
 
@@ -70,6 +73,19 @@ impl Checker {
                 }
                 if matches!(name.as_str(), "println" | "eprintln") {
                     return Ty::Fn { params: vec![Ty::String], ret: Box::new(Ty::Unit) };
+                }
+                // Don't emit error for names that might be constructors or forward-declared
+                if !self.env.constructors.contains_key(name) && !name.starts_with(char::is_uppercase) {
+                    let hint = if let Some(suggestion) = self.suggest_similar(name, "variable") {
+                        format!("Did you mean '{}'?", suggestion)
+                    } else {
+                        "Check the variable name and make sure it is defined before this expression".to_string()
+                    };
+                    self.push_diagnostic(err(
+                        format!("undefined variable '{}'", name),
+                        hint,
+                        format!("{}", name),
+                    ));
                 }
                 Ty::Unknown
             }
@@ -115,10 +131,17 @@ impl Checker {
                 let tt = self.check_expr(then);
                 let et = self.check_expr(else_);
                 if !tt.compatible(&et) {
-                    self.push_diagnostic(err(
+                    let mut diag = err(
                         format!("if branches have different types: then is {}, else is {}", tt.display(), et.display()),
                         "Both branches must have the same type", "if expression",
-                    ));
+                    );
+                    if let Some(then_span) = then.span() {
+                        diag.secondary.push(crate::diagnostic::SecondarySpan {
+                            line: then_span.line, col: Some(then_span.col),
+                            label: format!("this is {}", tt.display()),
+                        });
+                    }
+                    self.push_diagnostic(diag);
                 }
                 tt
             }
@@ -133,6 +156,7 @@ impl Checker {
                 let st = self.check_expr(subject);
                 self.env.skip_auto_unwrap = prev_skip;
                 let mut result_ty: Option<Ty> = None;
+                let first_arm_span = arms.first().and_then(|a| a.body.span());
                 for arm in arms.iter_mut() {
                     self.env.push_scope();
                     self.check_pattern(&arm.pattern, &st);
@@ -154,10 +178,18 @@ impl Checker {
                                 _ => false,
                             };
                         if !compat {
-                            self.push_diagnostic(err(
+                            let mut diag = err(
                                 format!("match arm has type {} but previous arms have type {}", at.display(), prev.display()),
                                 "All match arms must have the same type", "match expression",
-                            ));
+                            );
+                            // Show the first arm's location as secondary
+                            if let Some(first_span) = first_arm_span {
+                                diag.secondary.push(crate::diagnostic::SecondarySpan {
+                                    line: first_span.line, col: Some(first_span.col),
+                                    label: format!("first arm is {}", prev.display()),
+                                });
+                            }
+                            self.push_diagnostic(diag);
                         }
                         if matches!(at, Ty::Result(_, _)) && !matches!(prev.clone(), Ty::Result(_, _)) {
                             *prev = at;

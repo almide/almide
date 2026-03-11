@@ -4,8 +4,8 @@ use super::{Checker, err};
 
 impl Checker {
     pub(crate) fn check_stmt(&mut self, stmt: &mut ast::Stmt) {
-        // Update current line from statement span for better error positions
-        let stmt_line = match stmt {
+        // Update current line/col from statement span for better error positions
+        let stmt_span = match stmt {
             ast::Stmt::Let { span, .. }
             | ast::Stmt::LetDestructure { span, .. }
             | ast::Stmt::Var { span, .. }
@@ -13,15 +13,17 @@ impl Checker {
             | ast::Stmt::IndexAssign { span, .. }
             | ast::Stmt::FieldAssign { span, .. }
             | ast::Stmt::Guard { span, .. }
-            | ast::Stmt::Expr { span, .. } => span.map(|s| s.line),
+            | ast::Stmt::Expr { span, .. } => *span,
             ast::Stmt::Comment { .. } => None,
         };
         let prev_line = self.current_decl_line;
-        if let Some(line) = stmt_line {
-            self.current_decl_line = Some(line);
+        let prev_col = self.current_decl_col;
+        if let Some(s) = stmt_span {
+            self.current_decl_line = Some(s.line);
+            self.current_decl_col = Some(s.col);
         }
         match stmt {
-            ast::Stmt::Let { name, ty, value, .. } => {
+            ast::Stmt::Let { name, ty, value, span, .. } => {
                 let vt = self.check_expr(value);
                 let vt = if self.env.in_do_block {
                     match vt {
@@ -40,9 +42,13 @@ impl Checker {
                     }
                     t
                 } else { vt };
-                self.env.define_var(name, dt);
+                if let Some(s) = span {
+                    self.env.define_var_at(name, dt, s.line, s.col);
+                } else {
+                    self.env.define_var(name, dt);
+                }
             }
-            ast::Stmt::Var { name, ty, value, .. } => {
+            ast::Stmt::Var { name, ty, value, span, .. } => {
                 let vt = self.check_expr(value);
                 let dt = if let Some(te) = ty {
                     let t = self.resolve_type_expr(te);
@@ -55,7 +61,11 @@ impl Checker {
                     }
                     t
                 } else { vt };
-                self.env.define_var(name, dt);
+                if let Some(s) = span {
+                    self.env.define_var_at(name, dt, s.line, s.col);
+                } else {
+                    self.env.define_var(name, dt);
+                }
                 self.env.mutable_vars.insert(name.clone());
             }
             ast::Stmt::LetDestructure { pattern, value, .. } => {
@@ -67,17 +77,39 @@ impl Checker {
                 let vt = self.check_expr(value);
                 if let Some(var_ty) = self.env.lookup_var(name).cloned() {
                     if !self.env.mutable_vars.contains(name) {
-                        self.push_diagnostic(err(
+                        let hint = if self.env.param_vars.contains(name) {
+                            format!("'{}' is a function parameter (immutable). Use a local copy: var {0}_ = {0}", name)
+                        } else {
+                            format!("Use 'var {0} = ...' instead of 'let {0} = ...' to declare a mutable variable", name)
+                        };
+                        let mut diag = err(
                             format!("cannot reassign immutable binding '{}'", name),
-                            "Use 'var' instead of 'let' to declare a mutable variable, or use a different name",
+                            hint,
                             format!("{} = ...", name),
-                        ));
+                        );
+                        // Show declaration site as secondary span
+                        if let Some((decl_line, decl_col)) = self.env.var_decl_loc(name) {
+                            diag.secondary.push(crate::diagnostic::SecondarySpan {
+                                line: decl_line,
+                                col: Some(decl_col),
+                                label: format!("'{}' declared as immutable here", name),
+                            });
+                        }
+                        self.push_diagnostic(diag);
                     } else if !var_ty.compatible(&vt) {
-                        self.push_diagnostic(err(
+                        let mut diag = err(
                             format!("cannot assign {} to variable '{}' of type {}", vt.display(), name, var_ty.display()),
                             "Assignment must match the variable's declared type",
                             format!("{} = ...", name),
-                        ));
+                        );
+                        if let Some((decl_line, decl_col)) = self.env.var_decl_loc(name) {
+                            diag.secondary.push(crate::diagnostic::SecondarySpan {
+                                line: decl_line,
+                                col: Some(decl_col),
+                                label: format!("declared as {} here", var_ty.display()),
+                            });
+                        }
+                        self.push_diagnostic(diag);
                     }
                 }
             }
@@ -112,10 +144,15 @@ impl Checker {
                 }
                 self.check_expr(else_);
             }
-            ast::Stmt::Expr { expr, .. } => { self.check_expr(expr); }
+            ast::Stmt::Expr { expr, .. } => {
+                self.check_expr(expr);
+                // Warn about discarded return values from immutable update functions
+                self.check_discarded_mutation(expr);
+            }
             ast::Stmt::Comment { .. } => {}
         }
         self.current_decl_line = prev_line;
+        self.current_decl_col = prev_col;
     }
 
     pub(crate) fn check_pattern(&mut self, pattern: &ast::Pattern, subject_ty: &Ty) {
@@ -176,6 +213,88 @@ impl Checker {
                     }
                 }
             }
+        }
+    }
+
+    /// Functions whose return value should never be discarded (immutable update pattern).
+    const IMMUTABLE_UPDATE_FNS: &'static [(&'static str, &'static str)] = &[
+        ("list", "set"), ("list", "swap"), ("list", "push"), ("list", "insert"),
+        ("list", "remove"), ("list", "remove_at"), ("list", "sort"), ("list", "reverse"),
+        ("list", "map"), ("list", "filter"), ("list", "take"), ("list", "drop"), ("list", "slice"),
+        ("map", "set"), ("map", "remove"),
+        ("string", "replace"), ("string", "replace_first"),
+        ("string", "trim"), ("string", "to_lower"), ("string", "to_upper"),
+    ];
+
+    fn is_immutable_update(module: &str, func: &str) -> bool {
+        Self::IMMUTABLE_UPDATE_FNS.iter().any(|(m, f)| *m == module && *f == func)
+    }
+
+    fn mutation_hint(module: &str, func: &str) -> String {
+        match (module, func) {
+            ("list", "set") | ("list", "swap") | ("list", "insert") | ("list", "remove_at") =>
+                format!("{}.{}() returns a new list — assign it: xs = {}.{}(xs, ...)", module, func, module, func),
+            ("list", "push") =>
+                "list.push() returns a new list — assign it: xs = list.push(xs, item)".to_string(),
+            ("list", "sort") | ("list", "reverse") =>
+                format!("{}.{}() returns a new list — assign it: xs = {}.{}(xs)", module, func, module, func),
+            ("list", "map") | ("list", "filter") | ("list", "take") | ("list", "drop") =>
+                format!("{}.{}() returns a new list — assign the result", module, func),
+            ("map", "set") =>
+                "map.set() returns a new map — assign it: m = map.set(m, key, value)".to_string(),
+            ("map", "remove") =>
+                "map.remove() returns a new map — assign it: m = map.remove(m, key)".to_string(),
+            _ =>
+                format!("{}.{}() returns a new value — the result is discarded here", module, func),
+        }
+    }
+
+    /// Check if a statement-level expression discards the return value of an immutable update function.
+    /// Handles both `list.set(xs, i, v)` (module call) and `xs.set(i, v)` (UFCS).
+    fn check_discarded_mutation(&mut self, expr: &ast::Expr) {
+        use crate::diagnostic::Diagnostic;
+        if let ast::Expr::Call { callee, .. } = expr {
+            if let ast::Expr::Member { object, field, .. } = callee.as_ref() {
+                let func = field.as_str();
+                // Direct module call: list.set(xs, i, v)
+                if let ast::Expr::Ident { name: module, .. } = object.as_ref() {
+                    if Self::is_immutable_update(module, func) {
+                        self.push_diagnostic(Diagnostic::warning(
+                            format!("return value of {}.{}() is unused", module, func),
+                            Self::mutation_hint(module, func),
+                            format!("{}.{}()", module, func),
+                        ));
+                        return;
+                    }
+                }
+                // UFCS call: xs.push(42) — resolve module from receiver type
+                let receiver_ty = self.infer_receiver_type(object);
+                let module = match &receiver_ty {
+                    Some(Ty::List(_)) => Some("list"),
+                    Some(Ty::Map(_, _)) => Some("map"),
+                    Some(Ty::String) => Some("string"),
+                    _ => None,
+                };
+                if let Some(module) = module {
+                    if Self::is_immutable_update(module, func) {
+                        self.push_diagnostic(Diagnostic::warning(
+                            format!("return value of .{}() is unused", func),
+                            Self::mutation_hint(module, func),
+                            format!(".{}()", func),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    /// Quick type inference for a receiver expression (for UFCS lost mutation detection).
+    fn infer_receiver_type(&self, expr: &ast::Expr) -> Option<Ty> {
+        match expr {
+            ast::Expr::Ident { name, .. } => self.env.lookup_var(name).cloned(),
+            ast::Expr::List { .. } => Some(Ty::List(Box::new(Ty::Unknown))),
+            ast::Expr::String { .. } | ast::Expr::InterpolatedString { .. } => Some(Ty::String),
+            _ => None,
         }
     }
 }

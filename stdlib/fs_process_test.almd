@@ -40,9 +40,13 @@ effect fn main() -> Result[Unit, String] = {
   assert_eq(string.trim(stdout), "hello world", "echo stdout")
   println("process.exec_status success: ok (stderr=" ++ stderr ++ ")")
 
-  let result2 = process.exec_status("false", [])
-  let { code, stdout, stderr } = result2
-  assert(code != 0, "false should exit non-zero, got " ++ int.to_string(code))
+  // Cross-platform non-zero exit: env.os() dispatches to platform-appropriate command
+  let fail_result = match env.os() {
+    "windows" => process.exec_status("cmd", ["/c", "exit", "1"])
+    _ => process.exec_status("false", [])
+  }
+  let { code, stdout, stderr } = fail_result
+  assert(code != 0, "should exit non-zero, got " ++ int.to_string(code))
   println("process.exec_status non-zero: ok")
 
   // ── cleanup ──

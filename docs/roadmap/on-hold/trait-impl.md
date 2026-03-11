@@ -1,4 +1,4 @@
-# trait / impl [PLANNED]
+# trait / impl [IN PROGRESS]
 
 Parser support is complete (`trait` / `impl` declarations are parsed and stored in AST). Checker and emitter are not yet implemented.
 
