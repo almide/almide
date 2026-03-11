@@ -2,7 +2,6 @@
 
 ## Active
 
-- [Error Diagnostics — Visual](active/error-diagnostics.md) — color done, carets done, multi-span remaining
 - [Stdlib Self-Hosting](active/stdlib-self-hosting.md) — Phase 0-2b done, time.format/parse done
 
 ## On Hold
@@ -32,6 +31,7 @@
 - [Control Flow Extensions](done/control-flow.md)
 - [Cross-Platform Support](done/cross-platform.md)
 - [Error Diagnostics](done/error-diagnostics.md) — lost mutation, "did you mean?", immutability hints
+- [Error Diagnostics — Visual](done/error-diagnostics-visual.md) — color, carets, multi-span
 - [Generics](done/generics.md)
 - [HTTP Module](done/http.md) — server, client, multi-target
 - [List Stdlib Gaps](done/list-stdlib-gaps.md) — all 3 tiers complete (52 functions)
