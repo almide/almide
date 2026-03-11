@@ -11,34 +11,34 @@
 - [Playground Repair](active/playground-repair.md)
 - [Stdlib Architecture: 3-Layer Design](active/stdlib-architecture-3-layer-design.md) — Phase A done, B/C remaining
 - [Stdlib Self-Hosting](active/stdlib-self-hosting.md) — Phase 1-2a done, 2b/3 remaining
-- [Syntax Sugar](active/syntax-sugar.md) — range, raw strings, exhaustiveness done; comprehensions pending
 
 ## Planned
 
-- [Benchmark Report](planned/benchmark-report.md)
-- [Direct WASM Emission](planned/emit-wasm-direct.md)
-- [Interop / FFI](planned/interop.md)
 - [Structured Concurrency](planned/structured-concurrency.md)
 - [Tooling](planned/tooling.md)
 - [Type System Extensions](planned/type-system.md)
-- [Other](planned/other.md)
 
 ## On Hold
 
-- [LLM Developer Experience](on-hold/llm-developer-experience.md)
+- [Benchmark Report](on-hold/benchmark-report.md)
+- [Direct WASM Emission](on-hold/emit-wasm-direct.md)
 - [Editor & GitHub Integration](on-hold/editor-github-integration.md)
-- [Scaffold & Proliferation Pipeline](on-hold/scaffold-and-proliferation.md)
+- [Interop / FFI](on-hold/interop.md)
+- [LLM Developer Experience](on-hold/llm-developer-experience.md)
+- [Package Registry](on-hold/package-registry.md)
 - [Research: Modification Survival Rate Paper](on-hold/research-modification-survival-rate-paper.md)
+- [Scaffold & Proliferation Pipeline](on-hold/scaffold-and-proliferation.md)
 - [Self-Hosting](on-hold/self-hosting.md) — rewrite compiler in Almide (after spec stabilization)
+- [Syntax Sugar](on-hold/syntax-sugar.md) — range, raw strings, exhaustiveness done; comprehensions pending
 - [trait / impl](on-hold/trait-impl.md) — parser done, checker/emitter partial
 
 ## Done
 
 - [CLI Tool Authoring](done/cli-tool-authoring.md) — err() exit, almide run args
 - [Compiler Hardening](done/compiler-hardening.md)
-- [Error Diagnostics](done/error-diagnostics.md) — lost mutation, "did you mean?", immutability hints
 - [Control Flow Extensions](done/control-flow.md)
 - [Cross-Platform Support](done/cross-platform.md)
+- [Error Diagnostics](done/error-diagnostics.md) — lost mutation, "did you mean?", immutability hints
 - [Generics](done/generics.md)
 - [Language Test Suite](done/language-test-suite.md)
 - [Literal Syntax Gaps](done/literal-syntax-gaps.md)
