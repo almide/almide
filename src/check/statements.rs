@@ -117,7 +117,11 @@ impl Checker {
                 }
                 self.check_expr(else_);
             }
-            ast::Stmt::Expr { expr, .. } => { self.check_expr(expr); }
+            ast::Stmt::Expr { expr, .. } => {
+                self.check_expr(expr);
+                // Warn about discarded return values from immutable update functions
+                self.check_discarded_mutation(expr);
+            }
             ast::Stmt::Comment { .. } => {}
         }
         self.current_decl_line = prev_line;
@@ -181,6 +185,88 @@ impl Checker {
                     }
                 }
             }
+        }
+    }
+
+    /// Functions whose return value should never be discarded (immutable update pattern).
+    const IMMUTABLE_UPDATE_FNS: &'static [(&'static str, &'static str)] = &[
+        ("list", "set"), ("list", "swap"), ("list", "push"), ("list", "insert"),
+        ("list", "remove"), ("list", "remove_at"), ("list", "sort"), ("list", "reverse"),
+        ("list", "map"), ("list", "filter"), ("list", "take"), ("list", "drop"),
+        ("map", "set"), ("map", "remove"),
+        ("string", "replace"), ("string", "replace_first"),
+        ("string", "trim"), ("string", "to_lower"), ("string", "to_upper"),
+    ];
+
+    fn is_immutable_update(module: &str, func: &str) -> bool {
+        Self::IMMUTABLE_UPDATE_FNS.iter().any(|(m, f)| *m == module && *f == func)
+    }
+
+    fn mutation_hint(module: &str, func: &str) -> String {
+        match (module, func) {
+            ("list", "set") | ("list", "swap") | ("list", "insert") | ("list", "remove_at") =>
+                format!("{}.{}() returns a new list — assign it: xs = {}.{}(xs, ...)", module, func, module, func),
+            ("list", "push") =>
+                "list.push() returns a new list — assign it: xs = list.push(xs, item)".to_string(),
+            ("list", "sort") | ("list", "reverse") =>
+                format!("{}.{}() returns a new list — assign it: xs = {}.{}(xs)", module, func, module, func),
+            ("list", "map") | ("list", "filter") | ("list", "take") | ("list", "drop") =>
+                format!("{}.{}() returns a new list — assign the result", module, func),
+            ("map", "set") =>
+                "map.set() returns a new map — assign it: m = map.set(m, key, value)".to_string(),
+            ("map", "remove") =>
+                "map.remove() returns a new map — assign it: m = map.remove(m, key)".to_string(),
+            _ =>
+                format!("{}.{}() returns a new value — the result is discarded here", module, func),
+        }
+    }
+
+    /// Check if a statement-level expression discards the return value of an immutable update function.
+    /// Handles both `list.set(xs, i, v)` (module call) and `xs.set(i, v)` (UFCS).
+    fn check_discarded_mutation(&mut self, expr: &ast::Expr) {
+        use crate::diagnostic::Diagnostic;
+        if let ast::Expr::Call { callee, .. } = expr {
+            if let ast::Expr::Member { object, field, .. } = callee.as_ref() {
+                let func = field.as_str();
+                // Direct module call: list.set(xs, i, v)
+                if let ast::Expr::Ident { name: module, .. } = object.as_ref() {
+                    if Self::is_immutable_update(module, func) {
+                        self.push_diagnostic(Diagnostic::warning(
+                            format!("return value of {}.{}() is unused", module, func),
+                            Self::mutation_hint(module, func),
+                            format!("{}.{}()", module, func),
+                        ));
+                        return;
+                    }
+                }
+                // UFCS call: xs.push(42) — resolve module from receiver type
+                let receiver_ty = self.infer_receiver_type(object);
+                let module = match &receiver_ty {
+                    Some(Ty::List(_)) => Some("list"),
+                    Some(Ty::Map(_, _)) => Some("map"),
+                    Some(Ty::String) => Some("string"),
+                    _ => None,
+                };
+                if let Some(module) = module {
+                    if Self::is_immutable_update(module, func) {
+                        self.push_diagnostic(Diagnostic::warning(
+                            format!("return value of .{}() is unused", func),
+                            Self::mutation_hint(module, func),
+                            format!(".{}()", func),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    /// Quick type inference for a receiver expression (for UFCS lost mutation detection).
+    fn infer_receiver_type(&self, expr: &ast::Expr) -> Option<Ty> {
+        match expr {
+            ast::Expr::Ident { name, .. } => self.env.lookup_var(name).cloned(),
+            ast::Expr::List { .. } => Some(Ty::List(Box::new(Ty::Unknown))),
+            ast::Expr::String { .. } | ast::Expr::InterpolatedString { .. } => Some(Ty::String),
+            _ => None,
         }
     }
 }

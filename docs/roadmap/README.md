@@ -3,7 +3,7 @@
 ## Active
 
 - [Codegen Optimization](active/codegen-optimization.md) — clone elimination, move analysis, borrow inference
-- [Error Diagnostics](active/error-diagnostics.md)
+- [Error Diagnostics — Visual](active/error-diagnostics.md) — carets, color, multi-span
 - [HTTP Module](active/http.md) — Phase 1 done, Phases 2-4 remaining
 - [HTTPS Client](active/https.md) — design complete, implementation in progress
 - [List Stdlib Gaps](active/list-stdlib-gaps.md)
@@ -36,6 +36,7 @@
 
 - [CLI Tool Authoring](done/cli-tool-authoring.md) — err() exit, almide run args
 - [Compiler Hardening](done/compiler-hardening.md)
+- [Error Diagnostics](done/error-diagnostics.md) — lost mutation, "did you mean?", immutability hints
 - [Control Flow Extensions](done/control-flow.md)
 - [Cross-Platform Support](done/cross-platform.md)
 - [Generics](done/generics.md)
