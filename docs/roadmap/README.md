@@ -2,14 +2,16 @@
 
 ## Active
 
-- [Self-Tooling in Almide](active/self-tooling.md) — tree-sitter grammar generator done, Chrome extension next
 - [Test Coverage](active/test-coverage.md) — 790 cases, target 1500+
+- [Variant Record Fields](active/variant-record-fields.md) — named fields on enum variants
 
 ## On Hold
 
 - [Benchmark Report](on-hold/benchmark-report.md)
+- [Default Field Values](on-hold/default-field-values.md) — optional fields with defaults (depends on Variant Record Fields)
 - [Direct WASM Emission](on-hold/emit-wasm-direct.md)
 - [Editor & GitHub Integration](on-hold/editor-github-integration.md)
+- [Function Reference Passing](on-hold/function-reference-passing.md) — seamless fn-as-argument, reduce closure wrappers
 - [Interop / FFI](on-hold/interop.md)
 - [LLM Developer Experience](on-hold/llm-developer-experience.md)
 - [LLM Immutable Sugar](on-hold/llm-immutable-sugar.md) — var indexing, `with` expression
@@ -21,6 +23,7 @@
 - [Structured Concurrency](on-hold/structured-concurrency.md)
 - [Syntax Sugar](on-hold/syntax-sugar.md) — range, raw strings, exhaustiveness done; comprehensions pending
 - [Tooling](on-hold/tooling.md)
+- [Trailing Lambda / Builder DSL](on-hold/trailing-lambda-builder.md) — Kotlin-style trailing lambda, builder patterns
 - [trait / impl](on-hold/trait-impl.md) — parser done, checker/emitter partial
 - [Type System Extensions](on-hold/type-system.md)
 
@@ -43,6 +46,7 @@
 - [npm Package Target](done/npm-package-target-target-npm.md)
 - [Playground Repair](done/playground-repair.md) — Fix with AI, repair loop, streaming
 - [Proliferation Blockers](done/proliferation-blockers.md)
+- [Self-Tooling](done/self-tooling.md) — tree-sitter grammar generator, Chrome extension, TextMate grammar
 - [stdin / Interactive I/O](done/stdin-io.md)
 - [Stdlib Completeness](done/stdlib-completeness.md)
 - [Stdlib Declarative Codegen](done/stdlib-codegen.md)

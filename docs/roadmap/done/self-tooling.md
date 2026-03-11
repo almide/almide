@@ -1,4 +1,4 @@
-# Self-Tooling: Editor Tools Written in Almide [ACTIVE]
+# Self-Tooling: Editor Tools Written in Almide [DONE]
 
 Demonstrate that Almide's entire editor ecosystem can be written in Almide itself, produced by AI from scratch. This proves the mission: "LLMs can mass-produce an ecosystem in Almide."
 
