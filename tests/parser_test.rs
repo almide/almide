@@ -18,10 +18,11 @@ fn parse_expr(input: &str) -> Expr {
 
 #[test]
 fn parse_module() {
-    // module declaration is parsed but discarded (package identity comes from almide.toml)
+    // module declaration is parsed and kept in decls (deprecated, emits warning)
     let prog = parse("module app\nfn f() -> Int = 1");
-    assert!(prog.module.is_none()); // discarded
-    assert_eq!(prog.decls.len(), 1); // fn still parsed
+    assert_eq!(prog.decls.len(), 2); // Module + Fn
+    assert!(matches!(&prog.decls[0], Decl::Module { .. }));
+    assert!(matches!(&prog.decls[1], Decl::Fn { .. }));
 }
 
 #[test]
@@ -37,7 +38,7 @@ fn parse_import() {
 
 #[test]
 fn parse_simple_fn() {
-    let prog = parse("module app\nfn add(a: Int, b: Int) -> Int = a + b");
+    let prog = parse("fn add(a: Int, b: Int) -> Int = a + b");
     assert_eq!(prog.decls.len(), 1);
     if let Decl::Fn { name, params, .. } = &prog.decls[0] {
         assert_eq!(name, "add");
@@ -51,7 +52,7 @@ fn parse_simple_fn() {
 
 #[test]
 fn parse_effect_fn() {
-    let prog = parse("module app\neffect fn main(args: List[String]) -> Result[Unit, String] = ok(())");
+    let prog = parse("effect fn main(args: List[String]) -> Result[Unit, String] = ok(())");
     if let Decl::Fn { name, effect, .. } = &prog.decls[0] {
         assert_eq!(name, "main");
         assert_eq!(*effect, Some(true));
@@ -62,7 +63,7 @@ fn parse_effect_fn() {
 
 #[test]
 fn parse_test_decl() {
-    let prog = parse("module app\ntest \"basic\" {\n  assert(true)\n}");
+    let prog = parse("test \"basic\" {\n  assert(true)\n}");
     assert_eq!(prog.decls.len(), 1);
     if let Decl::Test { name, .. } = &prog.decls[0] {
         assert_eq!(name, "basic");
@@ -75,7 +76,7 @@ fn parse_test_decl() {
 
 #[test]
 fn parse_tuple_type() {
-    let prog = parse("module app\nfn foo() -> (Int, String) = (1, \"x\")");
+    let prog = parse("fn foo() -> (Int, String) = (1, \"x\")");
     if let Decl::Fn { return_type, .. } = &prog.decls[0] {
         if let TypeExpr::Tuple { elements } = return_type {
             assert_eq!(elements.len(), 2);
@@ -89,7 +90,7 @@ fn parse_tuple_type() {
 
 #[test]
 fn parse_fn_type() {
-    let prog = parse("module app\nfn apply(f: fn(Int) -> Int, x: Int) -> Int = f(x)");
+    let prog = parse("fn apply(f: fn(Int) -> Int, x: Int) -> Int = f(x)");
     if let Decl::Fn { params, .. } = &prog.decls[0] {
         if let TypeExpr::Fn { params: fp, .. } = &params[0].ty {
             assert_eq!(fp.len(), 1);
@@ -103,7 +104,7 @@ fn parse_fn_type() {
 
 #[test]
 fn parse_generic_type() {
-    let prog = parse("module app\nfn foo(xs: List[Int]) -> Option[Int] = list.get(xs, 0)");
+    let prog = parse("fn foo(xs: List[Int]) -> Option[Int] = list.get(xs, 0)");
     if let Decl::Fn { params, return_type, .. } = &prog.decls[0] {
         if let TypeExpr::Generic { name, args } = &params[0].ty {
             assert_eq!(name, "List");
@@ -125,7 +126,7 @@ fn parse_generic_type() {
 
 #[test]
 fn parse_variant_type() {
-    let prog = parse("module app\ntype Color =\n  | Red\n  | Green\n  | Blue\n  | Custom(Int, Int, Int)");
+    let prog = parse("type Color =\n  | Red\n  | Green\n  | Blue\n  | Custom(Int, Int, Int)");
     if let Decl::Type { name, ty, .. } = &prog.decls[0] {
         assert_eq!(name, "Color");
         if let TypeExpr::Variant { cases } = ty {
@@ -237,8 +238,7 @@ fn parse_record_literal() {
 
 #[test]
 fn parse_for_in() {
-    let prog = parse("module app\neffect fn main(_a: List[String]) -> Result[Unit, String] = {\n  for x in xs {\n    println(x)\n  }\n  ok(())\n}");
-    // Just verify it parses without error
+    let prog = parse("effect fn main(_a: List[String]) -> Result[Unit, String] = {\n  for x in xs {\n    println(x)\n  }\n  ok(())\n}");
     assert_eq!(prog.decls.len(), 1);
 }
 
@@ -284,7 +284,7 @@ fn parse_empty_program() {
 
 #[test]
 fn parse_multiple_fns() {
-    let prog = parse("module app\nfn a() -> Int = 1\nfn b() -> Int = 2\nfn c() -> Int = 3");
+    let prog = parse("fn a() -> Int = 1\nfn b() -> Int = 2\nfn c() -> Int = 3");
     assert_eq!(prog.decls.len(), 3);
 }
 
@@ -317,31 +317,27 @@ fn parse_ok_err() {
 
 #[test]
 fn parse_recovers_from_errors() {
-    let input = "module app\nfn good() -> Int = 1\nfn bad( -> Int = 2\nfn also_good() -> Int = 3";
+    let input = "fn good() -> Int = 1\nfn bad( -> Int = 2\nfn also_good() -> Int = 3";
     let tokens = Lexer::tokenize(input);
     let mut parser = Parser::new(tokens);
     let prog = parser.parse().expect("should return partial program");
-    // Should have recovered and parsed at least 2 good declarations
     assert!(prog.decls.len() >= 2, "expected at least 2 decls, got {}", prog.decls.len());
-    // Should have collected errors
     assert!(!parser.errors.is_empty(), "expected parse errors to be collected");
 }
 
 #[test]
 fn parse_multiple_errors() {
-    let input = "module app\nfn a( -> Int = 1\nfn b( -> Int = 2\nfn c() -> Int = 3";
+    let input = "fn a( -> Int = 1\nfn b( -> Int = 2\nfn c() -> Int = 3";
     let tokens = Lexer::tokenize(input);
     let mut parser = Parser::new(tokens);
     let prog = parser.parse().expect("should return partial program");
-    // Should have collected 2 errors
     assert!(parser.errors.len() >= 2, "expected at least 2 errors, got {}", parser.errors.len());
-    // Should still parse the valid declaration
     assert!(!prog.decls.is_empty(), "expected at least 1 valid decl");
 }
 
 #[test]
 fn parse_no_errors_for_valid_program() {
-    let tokens = Lexer::tokenize("module app\nfn a() -> Int = 1\nfn b() -> Int = 2");
+    let tokens = Lexer::tokenize("fn a() -> Int = 1\nfn b() -> Int = 2");
     let mut parser = Parser::new(tokens);
     let _prog = parser.parse().expect("parse failed");
     assert!(parser.errors.is_empty());
@@ -352,10 +348,12 @@ fn parse_no_errors_for_valid_program() {
 #[test]
 fn decl_spans_are_present() {
     let prog = parse("module app\nimport fs\nfn add(a: Int, b: Int) -> Int = a + b\ntype Color =\n  | Red\n  | Blue\ntest \"basic\" {\n  assert(true)\n}");
-    // module
-    if let Some(Decl::Module { span, .. }) = &prog.module {
+    // module (now in decls[0])
+    if let Decl::Module { span, .. } = &prog.decls[0] {
         let s = span.expect("module should have span");
         assert_eq!(s.line, 1);
+    } else {
+        panic!("expected module decl at decls[0]");
     }
     // import
     if let Decl::Import { span, .. } = &prog.imports[0] {
@@ -363,17 +361,17 @@ fn decl_spans_are_present() {
         assert_eq!(s.line, 2);
     }
     // fn
-    if let Decl::Fn { span, .. } = &prog.decls[0] {
+    if let Decl::Fn { span, .. } = &prog.decls[1] {
         let s = span.expect("fn should have span");
         assert_eq!(s.line, 3);
     }
     // type
-    if let Decl::Type { span, .. } = &prog.decls[1] {
+    if let Decl::Type { span, .. } = &prog.decls[2] {
         let s = span.expect("type should have span");
         assert_eq!(s.line, 4);
     }
     // test
-    if let Decl::Test { span, .. } = &prog.decls[2] {
+    if let Decl::Test { span, .. } = &prog.decls[3] {
         let s = span.expect("test should have span");
         assert_eq!(s.line, 7);
     }

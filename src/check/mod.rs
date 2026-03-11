@@ -323,6 +323,7 @@ impl Checker {
                     for p in params {
                         let ty = self.resolve_type_expr(&p.ty);
                         self.env.define_var(&p.name, ty);
+                        self.env.param_vars.insert(p.name.clone());
                     }
                     let ret_ty = self.resolve_type_expr(return_type);
                     let prev_ret = self.env.current_ret.take();
@@ -359,6 +360,8 @@ impl Checker {
                             self.env.types.remove(&g.name);
                         }
                     }
+                    // Clean up parameter tracking (scope is about to be popped)
+                    self.env.param_vars.clear();
                     self.env.pop_scope();
                 }
             }
@@ -543,4 +546,70 @@ impl Checker {
             self.env.effect_fns.insert(name.to_string());
         }
     }
+
+    /// Suggest similar names for "did you mean?" errors.
+    pub(crate) fn suggest_similar(&self, name: &str, kind: &str) -> Option<String> {
+        let candidates: Vec<&str> = match kind {
+            "function" => self.env.functions.keys().map(|s| s.as_str())
+                .chain(["println", "eprintln", "assert", "assert_eq", "assert_ne", "ok", "err", "some"].iter().copied())
+                .collect(),
+            "variable" => self.env.scopes.iter().rev()
+                .flat_map(|s| s.keys().map(|k| k.as_str()))
+                .collect(),
+            _ => return None,
+        };
+        let mut best: Option<(&str, usize)> = None;
+        let threshold = (name.len().max(1) * 2 / 5).max(1).min(3);
+        for c in &candidates {
+            let d = levenshtein(name, c);
+            if d > 0 && d <= threshold {
+                if best.is_none() || d < best.unwrap().1 {
+                    best = Some((c, d));
+                }
+            }
+        }
+        best.map(|(s, _)| s.to_string())
+    }
+
+    /// Suggest similar module function names.
+    pub(crate) fn suggest_module_fn(&self, module: &str, func: &str) -> Option<String> {
+        let candidates = stdlib::module_functions(module);
+        let mut best: Option<(&str, usize)> = None;
+        // Allow up to 40% of the longer string's length as threshold (min 1, max 3)
+        let threshold = (func.len().max(1) * 2 / 5).max(1).min(3);
+        for c in &candidates {
+            let d = levenshtein(func, c);
+            if d > 0 && d <= threshold {
+                if best.is_none() || d < best.unwrap().1 {
+                    best = Some((c, d));
+                }
+            }
+        }
+        // Also check substring containment (e.g., "length" → "len" if func contains candidate)
+        if best.is_none() {
+            for c in &candidates {
+                if func.contains(c) || c.contains(func) {
+                    best = Some((c, 0));
+                    break;
+                }
+            }
+        }
+        best.map(|(s, _)| s.to_string())
+    }
+}
+
+fn levenshtein(a: &str, b: &str) -> usize {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    let (m, n) = (a.len(), b.len());
+    let mut prev: Vec<usize> = (0..=n).collect();
+    let mut curr = vec![0; n + 1];
+    for i in 1..=m {
+        curr[0] = i;
+        for j in 1..=n {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[n]
 }

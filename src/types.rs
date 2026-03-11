@@ -93,6 +93,8 @@ pub struct TypeEnv {
     pub skip_auto_unwrap: bool,
     /// Variables declared with `var` (mutable). Parameters and `let` are immutable.
     pub mutable_vars: std::collections::HashSet<std::string::String>,
+    /// Variables that are function parameters (for better error messages).
+    pub param_vars: std::collections::HashSet<std::string::String>,
 }
 
 impl Ty {
@@ -254,6 +256,7 @@ impl TypeEnv {
             local_symbols: std::collections::HashSet::new(),
             skip_auto_unwrap: false,
             mutable_vars: std::collections::HashSet::new(),
+            param_vars: std::collections::HashSet::new(),
         }
     }
 

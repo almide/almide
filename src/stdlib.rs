@@ -142,6 +142,11 @@ pub fn builtin_effect_fns() -> Vec<&'static str> {
     vec!["println", "eprintln"]
 }
 
+/// Return all function names in a stdlib module (for "did you mean?" suggestions).
+pub fn module_functions(module: &str) -> Vec<&'static str> {
+    crate::generated::stdlib_sigs::generated_module_functions(module)
+}
+
 /// Look up a stdlib function's type signature.
 /// All signatures are auto-generated from stdlib/defs/*.toml
 pub fn lookup_sig(module: &str, func: &str) -> Option<FnSig> {

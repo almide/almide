@@ -190,6 +190,17 @@ impl Checker {
             return ty;
         }
 
+        // Emit "did you mean?" for undefined functions
+        let hint = if let Some(suggestion) = self.suggest_similar(name, "function") {
+            format!("Did you mean '{}'?", suggestion)
+        } else {
+            "Check the function name and make sure it is defined before this call".to_string()
+        };
+        self.push_diagnostic(err(
+            format!("undefined function '{}'", name),
+            hint,
+            format!("call to {}()", name),
+        ));
         Ty::Unknown
     }
 
@@ -336,6 +347,20 @@ impl Checker {
                 }
                 return ret;
             }
+        }
+
+        // Emit "did you mean?" for undefined module functions
+        if stdlib::is_stdlib_module(module) || self.env.user_modules.contains(&resolved_module) {
+            let hint = if let Some(suggestion) = self.suggest_module_fn(module, func) {
+                format!("Did you mean '{}.{}'?", module, suggestion)
+            } else {
+                format!("Module '{}' has no function named '{}'", module, func)
+            };
+            self.push_diagnostic(err(
+                format!("undefined function '{}.{}'", module, func),
+                hint,
+                format!("{}.{}()", module, func),
+            ));
         }
 
         Ty::Unknown

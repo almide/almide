@@ -71,6 +71,19 @@ impl Checker {
                 if matches!(name.as_str(), "println" | "eprintln") {
                     return Ty::Fn { params: vec![Ty::String], ret: Box::new(Ty::Unit) };
                 }
+                // Don't emit error for names that might be constructors or forward-declared
+                if !self.env.constructors.contains_key(name) && !name.starts_with(char::is_uppercase) {
+                    let hint = if let Some(suggestion) = self.suggest_similar(name, "variable") {
+                        format!("Did you mean '{}'?", suggestion)
+                    } else {
+                        "Check the variable name and make sure it is defined before this expression".to_string()
+                    };
+                    self.push_diagnostic(err(
+                        format!("undefined variable '{}'", name),
+                        hint,
+                        format!("{}", name),
+                    ));
+                }
                 Ty::Unknown
             }
 

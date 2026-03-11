@@ -12,7 +12,6 @@
 - [Stdlib Architecture: 3-Layer Design](active/stdlib-architecture-3-layer-design.md) — Phase A done, B/C remaining
 - [Stdlib Self-Hosting](active/stdlib-self-hosting.md) — Phase 1-2a done, 2b/3 remaining
 - [Syntax Sugar](active/syntax-sugar.md) — range, raw strings, exhaustiveness done; comprehensions pending
-- [trait / impl](active/trait-impl.md) — parser done, checker/emitter partial
 
 ## Planned
 
@@ -31,6 +30,7 @@
 - [Scaffold & Proliferation Pipeline](on-hold/scaffold-and-proliferation.md)
 - [Research: Modification Survival Rate Paper](on-hold/research-modification-survival-rate-paper.md)
 - [Self-Hosting](on-hold/self-hosting.md) — rewrite compiler in Almide (after spec stabilization)
+- [trait / impl](on-hold/trait-impl.md) — parser done, checker/emitter partial
 
 ## Done
 

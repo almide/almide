@@ -230,3 +230,23 @@ pub fn lookup_generated_sig(module: &str, func: &str) -> Option<FnSig> {
     };
     Some(sig)
 }
+
+pub fn generated_module_functions(module: &str) -> Vec<&'static str> {
+    match module {
+        "env" => vec!["args", "cwd", "get", "millis", "os", "set", "sleep_ms", "temp_dir", "unix_timestamp"],
+        "float" => vec!["abs", "ceil", "clamp", "floor", "from_int", "max", "min", "parse", "round", "sqrt", "to_int", "to_string"],
+        "fs" => vec!["append", "copy", "exists?", "is_dir?", "is_file?", "list_dir", "mkdir_p", "read_bytes", "read_lines", "read_text", "remove", "rename", "stat", "walk", "write", "write_bytes"],
+        "http" => vec!["get", "json", "post", "response", "serve", "with_headers"],
+        "int" => vec!["abs", "band", "bnot", "bor", "bshl", "bshr", "bxor", "clamp", "max", "min", "parse", "parse_hex", "rotate_left", "rotate_right", "to_hex", "to_string", "to_u32", "to_u8", "wrap_add", "wrap_mul"],
+        "io" => vec!["print", "read_all", "read_line"],
+        "json" => vec!["array", "from_bool", "from_float", "from_int", "from_map", "from_string", "get", "get_array", "get_bool", "get_float", "get_int", "get_string", "keys", "null", "parse", "stringify", "stringify_pretty", "to_int", "to_string"],
+        "list" => vec!["all", "any", "chunk", "contains", "count", "drop", "drop_while", "each", "enumerate", "filter", "filter_map", "find", "first", "flat_map", "flatten", "fold", "get", "get_or", "group_by", "index_of", "is_empty?", "join", "last", "len", "map", "max", "min", "partition", "product", "reduce", "reverse", "set", "sort", "sort_by", "sum", "swap", "take", "take_while", "unique", "zip"],
+        "map" => vec!["contains", "entries", "filter", "from_entries", "from_list", "get", "get_or", "is_empty?", "keys", "len", "map_values", "merge", "new", "remove", "set", "values"],
+        "math" => vec!["abs", "cos", "e", "exp", "log", "max", "min", "pi", "pow", "sin", "sqrt", "tan"],
+        "process" => vec!["exec", "exec_status", "exit", "stdin_lines"],
+        "random" => vec!["choice", "float", "int", "shuffle"],
+        "regex" => vec!["captures", "find", "find_all", "full_match?", "match?", "replace", "replace_first", "split"],
+        "string" => vec!["char_at", "chars", "contains?", "count", "ends_with?", "from_bytes", "index_of", "is_alpha?", "is_alphanumeric?", "is_digit?", "is_empty?", "is_whitespace?", "join", "last_index_of", "len", "lines", "pad_left", "pad_right", "repeat", "replace", "replace_first", "reverse", "slice", "split", "starts_with?", "strip_prefix", "strip_suffix", "to_bytes", "to_float", "to_int", "to_lower", "to_upper", "trim", "trim_end", "trim_start"],
+        _ => vec![],
+    }
+}

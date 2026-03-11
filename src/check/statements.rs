@@ -67,9 +67,14 @@ impl Checker {
                 let vt = self.check_expr(value);
                 if let Some(var_ty) = self.env.lookup_var(name).cloned() {
                     if !self.env.mutable_vars.contains(name) {
+                        let hint = if self.env.param_vars.contains(name) {
+                            format!("'{}' is a function parameter (immutable). Use a local copy: var {0}_ = {0}", name)
+                        } else {
+                            format!("Use 'var {0} = ...' instead of 'let {0} = ...' to declare a mutable variable", name)
+                        };
                         self.push_diagnostic(err(
                             format!("cannot reassign immutable binding '{}'", name),
-                            "Use 'var' instead of 'let' to declare a mutable variable, or use a different name",
+                            hint,
                             format!("{} = ...", name),
                         ));
                     } else if !var_ty.compatible(&vt) {
