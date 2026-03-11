@@ -69,7 +69,7 @@ pub enum Pattern {
     Ident { name: String },
     Literal { value: Box<Expr> },
     Constructor { name: String, args: Vec<Pattern> },
-    RecordPattern { name: String, fields: Vec<FieldPattern> },
+    RecordPattern { name: String, fields: Vec<FieldPattern>, rest: bool },
     Tuple { elements: Vec<Pattern> },
     Some { inner: Box<Pattern> },
     None,

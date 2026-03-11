@@ -1,0 +1,53 @@
+type Pat =
+  | Match { scope: String, regex: String }
+  | BeginEnd { scope: String, begin: String, end_pat: String, patterns: List[Pat] }
+  | Include(String)
+  | Empty
+
+fn describe(p: Pat) -> String = match p {
+  Match { scope, regex } => "match: ${scope} ${regex}"
+  BeginEnd { scope, patterns, .. } => "begin-end: ${scope} (${int.to_string(list.len(patterns))} sub)"
+  Include(r) => "include: ${r}"
+  Empty => "empty"
+}
+
+test "basic variant record construction and matching" {
+  let p = Match { scope: "keyword", regex: "\\bfn\\b" }
+  assert_eq(describe(p), "match: keyword \\bfn\\b")
+
+  let p2 = Include("#comment")
+  assert_eq(describe(p2), "include: #comment")
+
+  assert_eq(describe(Empty), "empty")
+}
+
+test "nested variant record" {
+  let inner = Match { scope: "string", regex: "\".*\"" }
+  let outer = BeginEnd {
+    scope: "block",
+    begin: "\\{",
+    end_pat: "\\}",
+    patterns: [inner, Include("#ref")]
+  }
+  assert_eq(describe(outer), "begin-end: block (2 sub)")
+}
+
+test "variant record in list" {
+  let pats = [
+    Match { scope: "keyword", regex: "\\blet\\b" },
+    Match { scope: "type", regex: "\\bInt\\b" },
+    Include("#other")
+  ]
+  assert_eq(list.len(pats), 3)
+  let result = list.map(pats, fn(p) => describe(p))
+  assert_eq(result, ["match: keyword \\blet\\b", "match: type \\bInt\\b", "include: #other"])
+}
+
+// Record variant with a function that constructs it
+fn make_match(s: String, r: String) -> Pat =
+  Match { scope: s, regex: r }
+
+test "variant record from function" {
+  let p = make_match("num", "\\d+")
+  assert_eq(describe(p), "match: num \\d+")
+}

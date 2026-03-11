@@ -1,5 +1,5 @@
 use crate::ast::{self, ResolvedType};
-use crate::types::Ty;
+use crate::types::{Ty, VariantPayload};
 use super::{Checker, err};
 
 fn ty_to_resolved(ty: &Ty) -> ResolvedType {
@@ -110,8 +110,49 @@ impl Checker {
                 Ty::List(Box::new(first_ty))
             }
 
-            ast::Expr::Record { fields, .. } => Ty::Record {
-                fields: fields.iter_mut().map(|f| (f.name.clone(), self.check_expr(&mut f.value))).collect(),
+            ast::Expr::Record { name, fields, .. } => {
+                // Check if this is a variant record constructor
+                if let Some(cname) = name.as_ref() {
+                    if let Some((vname, case)) = self.env.constructors.get(cname.as_str()).cloned() {
+                        if let VariantPayload::Record(expected_fields) = &case.payload {
+                            // Type-check each field
+                            for f in fields.iter_mut() {
+                                let actual_ty = self.check_expr(&mut f.value);
+                                if let Some((_, expected_ty)) = expected_fields.iter().find(|(n, _)| n == &f.name) {
+                                    if !expected_ty.compatible(&actual_ty) {
+                                        self.push_diagnostic(err(
+                                            format!("field '{}' expects {} but got {}", f.name, expected_ty.display(), actual_ty.display()),
+                                            &format!("In variant constructor {}", cname), "variant record construction",
+                                        ));
+                                    }
+                                } else {
+                                    self.push_diagnostic(err(
+                                        format!("unknown field '{}' in variant {}", f.name, cname),
+                                        &format!("{} does not have a field '{}'", cname, f.name), "variant record construction",
+                                    ));
+                                }
+                            }
+                            // Check for missing fields
+                            for (fname, _) in expected_fields {
+                                if !fields.iter().any(|f| f.name == *fname) {
+                                    self.push_diagnostic(err(
+                                        format!("missing field '{}' in variant constructor {}", fname, cname),
+                                        &format!("Add field '{}' to the constructor", fname), "variant record construction",
+                                    ));
+                                }
+                            }
+                            // Look up the full variant type
+                            if let Some(ty) = self.env.types.get(&vname) {
+                                return ty.clone();
+                            }
+                            return Ty::Named(vname);
+                        }
+                    }
+                }
+                // Plain record
+                Ty::Record {
+                    fields: fields.iter_mut().map(|f| (f.name.clone(), self.check_expr(&mut f.value))).collect(),
+                }
             },
 
             ast::Expr::SpreadRecord { base, fields, .. } => {

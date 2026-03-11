@@ -671,7 +671,7 @@ fn format_pattern(out: &mut String, pat: &Pattern) {
                 out.push(')');
             }
         }
-        Pattern::RecordPattern { name, fields } => {
+        Pattern::RecordPattern { name, fields, rest } => {
             out.push_str(name);
             out.push_str(" { ");
             for (i, f) in fields.iter().enumerate() {
@@ -681,6 +681,10 @@ fn format_pattern(out: &mut String, pat: &Pattern) {
                     out.push_str(": ");
                     format_pattern(out, p);
                 }
+            }
+            if *rest {
+                if !fields.is_empty() { out.push_str(", "); }
+                out.push_str("..");
             }
             out.push_str(" }");
         }

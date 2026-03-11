@@ -190,7 +190,7 @@ impl Checker {
                     self.check_pattern(pat, ty);
                 }
             }
-            ast::Pattern::RecordPattern { name, fields } => {
+            ast::Pattern::RecordPattern { name, fields, .. } => {
                 // Look up field types from variant constructor or subject record type
                 let field_type_map: Vec<(String, Ty)> = if !name.is_empty() {
                     if let Some((_, case)) = self.env.constructors.get(name).cloned() {
