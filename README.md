@@ -33,7 +33,7 @@ The flywheel: LLMs write Almide reliably → more code is produced → training 
 
 ### Prerequisites
 
-- [Rust](https://rustup.rs/) (stable, 1.80+)
+- [Rust](https://rustup.rs/) (stable, 1.85+)
 
 ### Install from source
 
@@ -81,7 +81,7 @@ almide run hello.almd
 - **Top-level constants** — `let PI = 3.14` at module scope, compile-time evaluated
 - **Pipeline operator** — `data |> transform |> output`
 - **Module system** — Packages, sub-namespaces, visibility control, diamond dependency resolution
-- **Built-in testing** — `test "name" { assert_eq(a, b) }` with `almide test`
+- **Built-in testing** — `test "name" { assert_eq(a, b) }` with `almide test` (1500+ language tests)
 - **Actionable diagnostics** — Every error includes file:line, context, and a concrete fix suggestion
 
 ## Why Almide?
@@ -138,7 +138,7 @@ test "greet succeeds" {
 Almide source (`.almd`) is compiled by a pure-Rust compiler to Rust, TypeScript, or WebAssembly.
 
 ```
-.almd → Lexer → Parser → AST → Type Checker → CodeGen → .rs / .ts / .wasm
+.almd → Lexer → Parser → AST → Type Checker → IR Lowering → CodeGen → .rs / .ts / .wasm
 ```
 
 ```bash
@@ -188,7 +188,6 @@ Almide compiles to Rust, which then compiles to native machine code. No runtime,
 Install syntax highlighting from [almide/almide-editors](https://github.com/almide/almide-editors):
 
 - **VS Code** — Download `.vsix` from [Releases](https://github.com/almide/almide-editors/releases), then `code --install-extension almide-lang-*.vsix`
-- **Chrome** — Highlights `.almd` files on GitHub and `` ```almd `` code blocks on any website. See [install instructions](https://github.com/almide/almide-editors#chrome-extension--almide-highlight)
 
 ## Documentation
 
@@ -197,7 +196,7 @@ Install syntax highlighting from [almide/almide-editors](https://github.com/almi
 - [docs/GRAMMAR.md](./docs/GRAMMAR.md) — EBNF grammar + stdlib reference
 - [docs/CHEATSHEET.md](./docs/CHEATSHEET.md) — Quick reference for AI code generation
 - [docs/DESIGN.md](./docs/DESIGN.md) — Design philosophy and trade-offs
-- [docs/ROADMAP.md](./docs/ROADMAP.md) — Language evolution plans
+- [docs/roadmap/](./docs/roadmap/README.md) — Language evolution plans
 
 ## Contributing
 
