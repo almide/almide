@@ -298,6 +298,40 @@ fn emit_do_guard_ok_value_ts() {
     );
 }
 
+// ---- Unit variant as value (no parentheses) ----
+
+#[test]
+fn emit_unit_variant_no_parens_js() {
+    let out = parse_and_emit_js(
+        "module app\ntype Token =\n  | Heading(Int, String)\n  | Divider\nfn f() -> Token = if true then Divider else Heading(1, \"hi\")",
+    );
+    let code = user_code(&out);
+    // Divider is a const, should NOT be called as Divider()
+    assert!(
+        !code.contains("Divider()"),
+        "unit variant should not have parens, got:\n{}",
+        code
+    );
+    assert!(
+        code.contains("Divider"),
+        "should reference Divider, got:\n{}",
+        code
+    );
+}
+
+#[test]
+fn emit_tuple_variant_with_parens_js() {
+    let out = parse_and_emit_js(
+        "module app\ntype Token =\n  | Heading(Int, String)\n  | Divider\nfn f() -> Token = Heading(1, \"hi\")",
+    );
+    let code = user_code(&out);
+    assert!(
+        code.contains("Heading(1"),
+        "tuple variant should have parens, got:\n{}",
+        code
+    );
+}
+
 // ---- Some/None ----
 
 #[test]

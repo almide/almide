@@ -255,6 +255,10 @@ impl TsEmitter {
                         return format!("(() => {{ let __v; try {{ __v = {}; }} catch (__e) {{ __v = new __Err(__e instanceof Error ? __e.message : String(__e)); }} assert_eq({}, __v); }})()", other, err_val);
                     }
                 }
+                // Unit variants (no payload) are const values, not functions — emit bare identifier
+                if args.is_empty() && self.unit_variant_names.contains(name) {
+                    return callee_str;
+                }
                 let args_str: Vec<String> = args.iter().map(|a| self.gen_ir_expr(a)).collect();
                 format!("{}({})", callee_str, args_str.join(", "))
             }
