@@ -11,3 +11,5 @@ pub mod types;
 pub mod diagnostic;
 pub mod fmt;
 pub mod generated;
+pub mod ir;
+pub mod lower;

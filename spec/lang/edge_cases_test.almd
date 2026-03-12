@@ -1,0 +1,389 @@
+// edge_cases_test — Edge cases and boundary values
+
+// ── Empty collections ──
+
+test "empty list length" {
+  let xs: List[Int] = []
+  assert_eq(list.len(xs), 0)
+}
+
+test "empty list map and filter" {
+  let xs: List[Int] = []
+  assert_eq(list.map(xs, fn(x) => x * 2), [])
+  assert_eq(list.filter(xs, fn(x) => x > 0), [])
+}
+
+test "empty list fold" {
+  let xs: List[Int] = []
+  assert_eq(list.fold(xs, 0, fn(acc, x) => acc + x), 0)
+}
+
+test "list get out of bounds returns none" {
+  let xs = [1, 2, 3]
+  assert_eq(list.get(xs, -1), none)
+  assert_eq(list.get(xs, 3), none)
+  assert_eq(list.get(xs, 100), none)
+}
+
+test "empty map operations" {
+  let m: Map[String, Int] = map.new()
+  assert_eq(map.len(m), 0)
+  assert_eq(map.get(m, "x"), none)
+  assert_eq(map.contains(m, "x"), false)
+}
+
+// ── Empty string ──
+
+test "empty string operations" {
+  assert_eq(string.len(""), 0)
+  assert_eq(string.trim(""), "")
+  assert_eq(string.to_upper(""), "")
+  assert_eq(string.to_lower(""), "")
+  assert_eq(string.reverse(""), "")
+  assert_eq(string.contains("", ""), true)
+}
+
+test "empty string split" {
+  let parts = string.split("", ",")
+  assert_eq(parts, [""])
+}
+
+// ── Large numbers ──
+
+test "large integer arithmetic" {
+  let big = 1000000000
+  assert_eq(big * 2, 2000000000)
+  assert_eq(big + big, 2000000000)
+}
+
+test "negative arithmetic" {
+  assert_eq(-1 * -1, 1)
+  assert_eq(-100 + 50, -50)
+  assert_eq(-10 * 10, -100)
+}
+
+// ── Nested compound types ──
+
+test "list of lists" {
+  let matrix = [[1, 2], [3, 4], [5, 6]]
+  assert_eq(list.len(matrix), 3)
+  assert_eq(list.get(matrix, 0), some([1, 2]))
+  assert_eq(list.get(matrix, 1), some([3, 4]))
+}
+
+test "list of records" {
+  let users = [
+    { name: "alice", age: 30 },
+    { name: "bob", age: 25 },
+  ]
+  assert_eq(list.len(users), 2)
+  let first = match list.get(users, 0) {
+    some(u) => u.name,
+    none => "",
+  }
+  assert_eq(first, "alice")
+}
+
+test "record with list field" {
+  let data = { items: [1, 2, 3], count: 3 }
+  assert_eq(list.len(data.items), data.count)
+  assert_eq(data.items, [1, 2, 3])
+}
+
+test "nested option" {
+  let x = some(some(42))
+  let result = match x {
+    some(inner) => match inner {
+      some(v) => v,
+      none => 0,
+    },
+    none => 0,
+  }
+  assert_eq(result, 42)
+}
+
+// ── Single element collections ──
+
+test "single element list" {
+  let xs = [42]
+  assert_eq(list.len(xs), 1)
+  assert_eq(list.get(xs, 0), some(42))
+  assert_eq(list.map(xs, fn(x) => x * 2), [84])
+}
+
+test "single entry map" {
+  let m = map.new()
+  let m = map.set(m, "only", 1)
+  assert_eq(map.len(m), 1)
+  assert_eq(map.get(m, "only"), some(1))
+}
+
+// ── String edge cases ──
+
+test "string with special characters" {
+  let s = "hello\nworld\ttab"
+  assert_eq(string.contains(s, "\n"), true)
+  assert_eq(string.contains(s, "\t"), true)
+}
+
+test "string repeat zero" {
+  assert_eq(string.repeat("abc", 0), "")
+}
+
+test "string char_at boundaries" {
+  let s = "ab"
+  assert_eq(string.char_at(s, 0), some("a"))
+  assert_eq(string.char_at(s, 1), some("b"))
+  assert_eq(string.char_at(s, 2), none)
+}
+
+// ── Boolean edge cases ──
+
+test "chained logical operators" {
+  assert_eq(true and true and true, true)
+  assert_eq(true and true and false, false)
+  assert_eq(false or false or true, true)
+  assert_eq(false or false or false, false)
+}
+
+test "mixed logical operators" {
+  assert_eq(true and false or true, true)
+  assert_eq(false or true and false, false)
+}
+
+// ── Concat edge cases ──
+
+test "list concat with empty" {
+  let xs = [1, 2, 3]
+  let empty: List[Int] = []
+  assert_eq(xs ++ empty, xs)
+  assert_eq(empty ++ xs, xs)
+  assert_eq(empty ++ empty, empty)
+}
+
+test "string concat chain" {
+  let result = "" ++ "" ++ "a" ++ "" ++ "b" ++ ""
+  assert_eq(result, "ab")
+}
+
+// ── Additional edge case tests ──
+
+test "long string" {
+  let s = string.repeat("x", 100)
+  assert_eq(string.len(s), 100)
+  assert_eq(string.char_at(s, 99), some("x"))
+}
+
+test "deeply nested if expression" {
+  let x = 7
+  let r = if x == 1 then "a"
+    else if x == 2 then "b"
+    else if x == 3 then "c"
+    else if x == 4 then "d"
+    else if x == 5 then "e"
+    else if x == 6 then "f"
+    else if x == 7 then "g"
+    else "h"
+  assert_eq(r, "g")
+}
+
+test "many-element list" {
+  var xs: List[Int] = []
+  for i in 0..50 {
+    xs = xs ++ [i]
+  }
+  assert_eq(list.len(xs), 50)
+  assert_eq(list.get(xs, 0), some(0))
+  assert_eq(list.get(xs, 49), some(49))
+  assert_eq(list.sum(xs), 1225)
+}
+
+test "string with escape sequences" {
+  let s = "line1\nline2\nline3"
+  let lines = string.lines(s)
+  assert_eq(list.len(lines), 3)
+  assert_eq(list.get(lines, 0), some("line1"))
+}
+
+test "record with many fields" {
+  let r = { f1: 1, f2: 2, f3: 3, f4: 4, f5: 5, f6: 6, f7: 7, f8: 8 }
+  assert_eq(r.f1 + r.f8, 9)
+  assert_eq(r.f4, 4)
+}
+
+test "chained list operations" {
+  let result = [5, 3, 1, 4, 2]
+    |> list.sort()
+    |> list.reverse()
+    |> list.take(3)
+  assert_eq(result, [5, 4, 3])
+}
+
+test "multiple operations in one expression" {
+  let result = (10 + 20) * 3 - 5 + 100 / 4
+  assert_eq(result, 110)
+}
+
+test "nested option unwrap chain" {
+  let x = some(some(some(1)))
+  let a = match x { some(v) => v, none => none }
+  let b = match a { some(v) => v, none => none }
+  assert_eq(b, some(1))
+}
+
+test "list of options" {
+  let xs: List[Option[Int]] = [some(1), none, some(3), none, some(5)]
+  let present = list.filter_map(xs, fn(x) => x)
+  assert_eq(present, [1, 3, 5])
+}
+
+test "map from entries" {
+  let entries = [("a", 1), ("b", 2), ("c", 3)]
+  let m = map.from_entries(entries)
+  assert_eq(map.len(m), 3)
+  assert_eq(map.get(m, "b"), some(2))
+}
+
+test "list partition" {
+  let (evens, odds) = list.partition([1, 2, 3, 4, 5, 6], fn(x) => x % 2 == 0)
+  assert_eq(evens, [2, 4, 6])
+  assert_eq(odds, [1, 3, 5])
+}
+
+test "list flat_map" {
+  let xs = [1, 2, 3]
+  let result = list.flat_map(xs, fn(x) => [x, x * 10])
+  assert_eq(result, [1, 10, 2, 20, 3, 30])
+}
+
+test "string chars and join" {
+  let s = "hello"
+  let chars = string.chars(s)
+  assert_eq(chars, ["h", "e", "l", "l", "o"])
+  let rejoined = string.join(chars, "-")
+  assert_eq(rejoined, "h-e-l-l-o")
+}
+
+test "int abs min max clamp" {
+  assert_eq(int.abs(-42), 42)
+  assert_eq(int.abs(42), 42)
+  assert_eq(int.min(3, 7), 3)
+  assert_eq(int.max(3, 7), 7)
+  assert_eq(int.clamp(5, 1, 10), 5)
+  assert_eq(int.clamp(-5, 1, 10), 1)
+  assert_eq(int.clamp(15, 1, 10), 10)
+}
+
+test "float rounding functions" {
+  assert_eq(float.floor(3.7), 3.0)
+  assert_eq(float.ceil(3.2), 4.0)
+  assert_eq(float.round(3.5), 4.0)
+  assert_eq(float.abs(-2.5), 2.5)
+}
+
+test "list sum and product" {
+  assert_eq(list.sum([1, 2, 3, 4, 5]), 15)
+  assert_eq(list.sum([]), 0)
+  assert_eq(list.product([1, 2, 3, 4]), 24)
+  assert_eq(list.product([]), 1)
+}
+
+test "list first and last" {
+  assert_eq(list.first([10, 20, 30]), some(10))
+  assert_eq(list.last([10, 20, 30]), some(30))
+  let empty: List[Int] = []
+  assert_eq(list.first(empty), none)
+  assert_eq(list.last(empty), none)
+}
+
+test "list index_of" {
+  assert_eq(list.index_of([10, 20, 30], 20), some(1))
+  assert_eq(list.index_of([10, 20, 30], 99), none)
+}
+
+test "list slice" {
+  assert_eq(list.slice([1, 2, 3, 4, 5], 1, 4), [2, 3, 4])
+  assert_eq(list.slice([1, 2, 3], 0, 3), [1, 2, 3])
+}
+
+test "list take_while and drop_while" {
+  assert_eq(list.take_while([1, 2, 3, 4, 5], fn(x) => x < 4), [1, 2, 3])
+  assert_eq(list.drop_while([1, 2, 3, 4, 5], fn(x) => x < 4), [4, 5])
+}
+
+test "list count" {
+  assert_eq(list.count([1, 2, 3, 4, 5], fn(x) => x % 2 == 0), 2)
+  assert_eq(list.count([1, 2, 3], fn(x) => x > 0), 3)
+}
+
+test "list reduce" {
+  assert_eq(list.reduce([1, 2, 3, 4], fn(a, b) => a + b), some(10))
+  let empty: List[Int] = []
+  assert_eq(list.reduce(empty, fn(a, b) => a + b), none)
+}
+
+test "list min and max" {
+  assert_eq(list.min([5, 3, 8, 1, 4]), some(1))
+  assert_eq(list.max([5, 3, 8, 1, 4]), some(8))
+  let empty: List[Int] = []
+  assert_eq(list.min(empty), none)
+}
+
+test "list dedup" {
+  assert_eq(list.dedup([1, 1, 2, 2, 3, 3, 3, 1]), [1, 2, 3, 1])
+  assert_eq(list.dedup([1, 2, 3]), [1, 2, 3])
+}
+
+test "list intersperse" {
+  assert_eq(list.intersperse([1, 2, 3], 0), [1, 0, 2, 0, 3])
+  assert_eq(list.intersperse([1], 0), [1])
+}
+
+test "list repeat" {
+  assert_eq(list.repeat(0, 5), [0, 0, 0, 0, 0])
+  assert_eq(list.repeat("x", 3), ["x", "x", "x"])
+}
+
+test "list scan" {
+  assert_eq(list.scan([1, 2, 3, 4], 0, fn(acc, x) => acc + x), [1, 3, 6, 10])
+}
+
+test "list zip_with" {
+  assert_eq(list.zip_with([1, 2, 3], [10, 20, 30], fn(a, b) => a + b), [11, 22, 33])
+}
+
+test "map get_or" {
+  let m = map.set(map.new(), "a", 1)
+  assert_eq(map.get_or(m, "a", 0), 1)
+  assert_eq(map.get_or(m, "b", 99), 99)
+}
+
+test "map set overwrites" {
+  let m = map.set(map.new(), "a", 1)
+  let m = map.set(m, "a", 99)
+  assert_eq(map.get(m, "a"), some(99))
+  assert_eq(map.len(m), 1)
+}
+
+test "int to_string and parse" {
+  assert_eq(int.to_string(42), "42")
+  assert_eq(int.to_string(-1), "-1")
+  assert_eq(int.to_string(0), "0")
+}
+
+test "float to_string" {
+  assert_eq(float.to_string(3.14), "3.14")
+  assert_eq(float.to_string(0.0), "0.0")
+}
+
+test "float from_int" {
+  assert_eq(float.from_int(42), 42.0)
+  assert_eq(float.from_int(0), 0.0)
+  assert_eq(float.from_int(-5), -5.0)
+}
+
+test "float clamp" {
+  assert_eq(float.clamp(5.0, 0.0, 10.0), 5.0)
+  assert_eq(float.clamp(-1.0, 0.0, 10.0), 0.0)
+  assert_eq(float.clamp(15.0, 0.0, 10.0), 10.0)
+}

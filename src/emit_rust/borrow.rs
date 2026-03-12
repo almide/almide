@@ -1,9 +1,10 @@
-/// Borrow inference: Lobster-style automatic escape analysis.
+/// Borrow inference: Lobster-style automatic escape analysis on typed IR.
 /// Determines which function parameters can be passed by reference (&str, &[T])
 /// instead of by value (String, Vec<T>), eliminating unnecessary clones.
 
 use std::collections::{HashMap, HashSet};
-use crate::ast::*;
+use almide::ir::*;
+use almide::types::Ty;
 
 /// Ownership classification for a function parameter.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -34,40 +35,46 @@ impl BorrowInfo {
     }
 }
 
-/// Check if a TypeExpr represents a heap-allocated type that benefits from borrowing.
-fn is_heap_type(ty: &TypeExpr) -> bool {
-    match ty {
-        TypeExpr::Simple { name } => name == "String",
-        TypeExpr::Generic { name, .. } => name == "List" || name == "Map",
-        _ => false,
-    }
+/// Check if a Ty represents a heap-allocated type that benefits from borrowing.
+fn is_heap_type(ty: &Ty) -> bool {
+    matches!(ty, Ty::String | Ty::List(_) | Ty::Map(_, _))
 }
 
-/// Analyze all functions in a program and its modules.
+/// Analyze all functions in an IrProgram and its module IrPrograms.
 /// Uses fixpoint iteration: starts with all params as Borrow, then refines
 /// using inter-procedure analysis until stable.
-pub fn analyze_program(program: &Program, modules: &[(String, Program, Option<crate::project::PkgId>, bool)]) -> BorrowInfo {
-    // Collect all function declarations (name → (params, body))
-    let mut fn_decls: Vec<(String, &[Param], &Expr)> = Vec::new();
-    for decl in &program.decls {
-        if let Decl::Fn { name, params, body: Some(body), .. } = decl {
-            if name == "main" { continue; }
-            fn_decls.push((name.clone(), params, body));
-        }
+pub fn analyze_program(
+    ir: &IrProgram,
+    module_irs: &HashMap<String, IrProgram>,
+) -> BorrowInfo {
+    let mut fn_decls: Vec<(String, Vec<(VarId, bool)>, &IrExpr, &VarTable)> = Vec::new();
+
+    for f in &ir.functions {
+        if f.name == "main" { continue; }
+        let params: Vec<(VarId, bool)> = f.params.iter()
+            .map(|(vid, ty)| (*vid, is_heap_type(ty)))
+            .collect();
+        fn_decls.push((f.name.clone(), params, &f.body, &ir.var_table));
     }
-    for (mod_name, mod_prog, _, _) in modules {
-        for decl in &mod_prog.decls {
-            if let Decl::Fn { name, params, body: Some(body_expr), .. } = decl {
-                let qualified = format!("{}.{}", mod_name, name);
-                fn_decls.push((qualified, params, body_expr));
-            }
+
+    for (mod_name, mod_ir) in module_irs {
+        for f in &mod_ir.functions {
+            let qualified = format!("{}.{}", mod_name, f.name);
+            let params: Vec<(VarId, bool)> = f.params.iter()
+                .map(|(vid, ty)| (*vid, is_heap_type(ty)))
+                .collect();
+            fn_decls.push((qualified, params, &f.body, &mod_ir.var_table));
         }
     }
 
     // Initial pass: analyze without inter-procedure info
     let mut info = BorrowInfo::new();
-    for (name, params, body) in &fn_decls {
-        let ownerships = analyze_fn(params, body);
+    for (name, params, body, _vt) in &fn_decls {
+        let heap_vars: HashSet<VarId> = params.iter()
+            .filter(|(_, is_heap)| *is_heap)
+            .map(|(vid, _)| *vid)
+            .collect();
+        let ownerships = analyze_fn(params, &heap_vars, body);
         info.fn_params.insert(name.clone(), ownerships);
     }
 
@@ -75,12 +82,14 @@ pub fn analyze_program(program: &Program, modules: &[(String, Program, Option<cr
     // Convergence guaranteed: params can only change Borrow → Owned (monotone)
     for _ in 0..10 {
         let mut changed = false;
-        for (name, params, body) in &fn_decls {
-            let ownerships = analyze_fn_with_info(params, body, &info);
+        for (name, params, body, vt) in &fn_decls {
+            let heap_vars: HashSet<VarId> = params.iter()
+                .filter(|(_, is_heap)| *is_heap)
+                .map(|(vid, _)| *vid)
+                .collect();
+            let ownerships = analyze_fn_ip(params, &heap_vars, body, &info, vt);
             if let Some(old) = info.fn_params.get(name) {
-                if *old != ownerships {
-                    changed = true;
-                }
+                if *old != ownerships { changed = true; }
             }
             info.fn_params.insert(name.clone(), ownerships);
         }
@@ -91,376 +100,359 @@ pub fn analyze_program(program: &Program, modules: &[(String, Program, Option<cr
 }
 
 /// Analyze a single function: for each heap-type param, determine if it escapes.
-fn analyze_fn(params: &[Param], body: &Expr) -> Vec<ParamOwnership> {
-    // Collect names of heap-type parameters
-    let heap_params: HashSet<String> = params.iter()
-        .filter(|p| is_heap_type(&p.ty))
-        .map(|p| p.name.clone())
-        .collect();
-
-    if heap_params.is_empty() {
-        // No heap params — all Owned (no borrow needed for primitives)
+fn analyze_fn(
+    params: &[(VarId, bool)],
+    heap_vars: &HashSet<VarId>,
+    body: &IrExpr,
+) -> Vec<ParamOwnership> {
+    if heap_vars.is_empty() {
         return params.iter().map(|_| ParamOwnership::Owned).collect();
     }
-
-    // Find which heap params escape
     let mut escaped = HashSet::new();
-    check_escape_expr(body, &heap_params, &mut escaped, true);
-
-    params.iter().map(|p| {
-        if !is_heap_type(&p.ty) {
-            ParamOwnership::Owned // primitives: no need to borrow (they're Copy)
-        } else if escaped.contains(&p.name) {
-            ParamOwnership::Owned
-        } else {
-            ParamOwnership::Borrow
-        }
+    check_escape_expr(body, heap_vars, &mut escaped, true, None);
+    params.iter().map(|(vid, is_heap)| {
+        if !is_heap { ParamOwnership::Owned }
+        else if escaped.contains(vid) { ParamOwnership::Owned }
+        else { ParamOwnership::Borrow }
     }).collect()
 }
 
 /// Analyze with inter-procedure info: user fn calls check callee's borrow info
 /// to determine if args escape (instead of conservatively marking all as escaped).
-fn analyze_fn_with_info(params: &[Param], body: &Expr, info: &BorrowInfo) -> Vec<ParamOwnership> {
-    let heap_params: HashSet<String> = params.iter()
-        .filter(|p| is_heap_type(&p.ty))
-        .map(|p| p.name.clone())
-        .collect();
-
-    if heap_params.is_empty() {
+fn analyze_fn_ip(
+    params: &[(VarId, bool)],
+    heap_vars: &HashSet<VarId>,
+    body: &IrExpr,
+    info: &BorrowInfo,
+    _vt: &VarTable,
+) -> Vec<ParamOwnership> {
+    if heap_vars.is_empty() {
         return params.iter().map(|_| ParamOwnership::Owned).collect();
     }
-
     let mut escaped = HashSet::new();
-    check_escape_expr_ip(body, &heap_params, &mut escaped, true, info);
-
-    params.iter().map(|p| {
-        if !is_heap_type(&p.ty) {
-            ParamOwnership::Owned
-        } else if escaped.contains(&p.name) {
-            ParamOwnership::Owned
-        } else {
-            ParamOwnership::Borrow
-        }
+    check_escape_expr(body, heap_vars, &mut escaped, true, Some(info));
+    params.iter().map(|(vid, is_heap)| {
+        if !is_heap { ParamOwnership::Owned }
+        else if escaped.contains(vid) { ParamOwnership::Owned }
+        else { ParamOwnership::Borrow }
     }).collect()
 }
 
-/// Inter-procedure escape analysis: delegates to check_escape_expr with borrow info.
-fn check_escape_expr_ip(expr: &Expr, heap_params: &HashSet<String>, escaped: &mut HashSet<String>, is_tail: bool, info: &BorrowInfo) {
-    check_escape_expr_inner(expr, heap_params, escaped, is_tail, Some(info));
-}
-
-/// Check if any heap params escape through an expression (no inter-procedure info).
-fn check_escape_expr(expr: &Expr, heap_params: &HashSet<String>, escaped: &mut HashSet<String>, is_tail: bool) {
-    check_escape_expr_inner(expr, heap_params, escaped, is_tail, None);
-}
-
-/// Unified escape analysis. When `info` is Some, uses inter-procedure callee
-/// borrow info to avoid conservatively marking user fn args as escaped.
-fn check_escape_expr_inner(expr: &Expr, heap_params: &HashSet<String>, escaped: &mut HashSet<String>, is_tail: bool, info: Option<&BorrowInfo>) {
-    match expr {
-        // Direct use of a param in return position → escapes
-        Expr::Ident { name, .. } => {
-            if is_tail && heap_params.contains(name) {
-                escaped.insert(name.clone());
+/// Check if any heap param VarIds escape through an expression.
+fn check_escape_expr(
+    expr: &IrExpr,
+    heap_vars: &HashSet<VarId>,
+    escaped: &mut HashSet<VarId>,
+    is_tail: bool,
+    info: Option<&BorrowInfo>,
+) {
+    match &expr.kind {
+        IrExprKind::Var { id } => {
+            if is_tail && heap_vars.contains(id) {
+                escaped.insert(*id);
             }
         }
 
         // Literals — no escape
-        Expr::Int { .. } | Expr::Float { .. } | Expr::String { .. }
-        | Expr::Bool { .. } | Expr::Unit { .. } | Expr::None { .. }
-        | Expr::Hole { .. } | Expr::Todo { .. } | Expr::Placeholder { .. }
-        | Expr::TypeName { .. } | Expr::InterpolatedString { .. }
-        | Expr::Break { .. } | Expr::Continue { .. } => {}
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
+        | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::OptionNone
+        | IrExprKind::Hole | IrExprKind::Todo { .. }
+        | IrExprKind::Break | IrExprKind::Continue => {}
 
-        // List literal — any param inside escapes (stored in data structure)
-        Expr::List { elements, .. } => {
-            for e in elements {
-                mark_all_params(e, heap_params, escaped);
+        // StringInterp — no escape (params used for display only)
+        IrExprKind::StringInterp { parts } => {
+            for part in parts {
+                if let IrStringPart::Expr { expr: e } = part {
+                    check_escape_expr(e, heap_vars, escaped, false, info);
+                }
             }
         }
 
-        // Tuple — same as list (stored in data structure)
-        Expr::Tuple { elements, .. } => {
-            for e in elements {
-                mark_all_params(e, heap_params, escaped);
-            }
+        // Collections — params stored in data structures escape
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
+            for e in elements { mark_all(e, heap_vars, escaped); }
         }
 
-        // Record — fields store values, params escape
-        Expr::Record { fields, .. } => {
-            for f in fields {
-                mark_all_params(&f.value, heap_params, escaped);
-            }
+        IrExprKind::Record { fields, .. } => {
+            for (_, e) in fields { mark_all(e, heap_vars, escaped); }
         }
 
-        Expr::SpreadRecord { base, fields, .. } => {
-            mark_all_params(base, heap_params, escaped);
-            for f in fields {
-                mark_all_params(&f.value, heap_params, escaped);
-            }
+        IrExprKind::SpreadRecord { base, fields } => {
+            mark_all(base, heap_vars, escaped);
+            for (_, e) in fields { mark_all(e, heap_vars, escaped); }
         }
 
-        // Binary ops: ++ consumes ownership; others are OK for borrows
-        Expr::Binary { op, left, right, .. } => {
-            if op == "++" {
-                mark_all_params(left, heap_params, escaped);
-                mark_all_params(right, heap_params, escaped);
+        // Binary ops: Concat consumes ownership; others are OK
+        IrExprKind::BinOp { op, left, right } => {
+            if matches!(op, BinOp::ConcatStr | BinOp::ConcatList) {
+                mark_all(left, heap_vars, escaped);
+                mark_all(right, heap_vars, escaped);
             } else {
-                check_escape_expr_inner(left, heap_params, escaped, false, info);
-                check_escape_expr_inner(right, heap_params, escaped, false, info);
+                check_escape_expr(left, heap_vars, escaped, false, info);
+                check_escape_expr(right, heap_vars, escaped, false, info);
             }
         }
 
-        Expr::Unary { operand, .. } => {
-            check_escape_expr_inner(operand, heap_params, escaped, false, info);
+        IrExprKind::UnOp { operand, .. } => {
+            check_escape_expr(operand, heap_vars, escaped, false, info);
         }
 
-        // Function call — check if callee borrows its args
-        Expr::Call { callee, args, .. } => {
-            check_escape_expr_inner(callee, heap_params, escaped, false, info);
-            // Identify safe calls: builtins and stdlib module calls
-            let is_safe = match callee.as_ref() {
-                Expr::Ident { name, .. } => matches!(name.as_str(),
+        // Calls — check callee's borrow info
+        IrExprKind::Call { target, args, .. } => {
+            let is_safe = match target {
+                CallTarget::Named { name } => matches!(name.as_str(),
                     "println" | "eprintln" | "assert" | "assert_eq" | "assert_ne"
                 ),
-                Expr::Member { object, .. } => {
-                    if let Expr::Ident { name, .. } = object.as_ref() {
-                        crate::stdlib::is_stdlib_module(name)
-                    } else {
-                        false
-                    }
+                CallTarget::Module { module, .. } => {
+                    almide::stdlib::is_stdlib_module(module)
                 }
                 _ => false,
             };
+
             if is_safe {
-                for a in args { check_escape_expr_inner(a, heap_params, escaped, false, info); }
+                for a in args { check_escape_expr(a, heap_vars, escaped, false, info); }
             } else if let Some(borrow_info) = info {
-                // Inter-procedure: check each arg against callee's param ownership
-                let callee_name = match callee.as_ref() {
-                    Expr::Ident { name, .. } => Some(name.as_str()),
+                let callee_name = match target {
+                    CallTarget::Named { name } => Some(name.clone()),
+                    CallTarget::Module { module, func } => Some(format!("{}.{}", module, func)),
                     _ => None,
                 };
+                match target {
+                    CallTarget::Method { object, .. } => check_escape_expr(object, heap_vars, escaped, false, info),
+                    CallTarget::Computed { callee } => check_escape_expr(callee, heap_vars, escaped, false, info),
+                    _ => {}
+                }
                 for (i, a) in args.iter().enumerate() {
-                    if let Some(fn_name) = callee_name {
+                    if let Some(ref fn_name) = callee_name {
                         let ownership = borrow_info.param_ownership(fn_name, i);
                         if ownership == ParamOwnership::Borrow {
-                            // Callee borrows this param — arg doesn't escape
-                            check_escape_expr_inner(a, heap_params, escaped, false, info);
+                            check_escape_expr(a, heap_vars, escaped, false, info);
                         } else {
-                            // Callee owns this param — arg escapes
-                            mark_all_params(a, heap_params, escaped);
+                            mark_all(a, heap_vars, escaped);
                         }
                     } else {
-                        mark_all_params(a, heap_params, escaped);
+                        mark_all(a, heap_vars, escaped);
                     }
                 }
             } else {
-                // Conservative: user fn args escape
-                for a in args { mark_all_params(a, heap_params, escaped); }
+                match target {
+                    CallTarget::Method { object, .. } => check_escape_expr(object, heap_vars, escaped, false, info),
+                    CallTarget::Computed { callee } => check_escape_expr(callee, heap_vars, escaped, false, info),
+                    _ => {}
+                }
+                for a in args { mark_all(a, heap_vars, escaped); }
             }
         }
 
-        Expr::If { cond, then, else_, .. } => {
-            check_escape_expr_inner(cond, heap_params, escaped, false, info);
-            check_escape_expr_inner(then, heap_params, escaped, is_tail, info);
-            check_escape_expr_inner(else_, heap_params, escaped, is_tail, info);
+        IrExprKind::If { cond, then, else_ } => {
+            check_escape_expr(cond, heap_vars, escaped, false, info);
+            check_escape_expr(then, heap_vars, escaped, is_tail, info);
+            check_escape_expr(else_, heap_vars, escaped, is_tail, info);
         }
 
-        Expr::Match { subject, arms, .. } => {
-            check_escape_expr_inner(subject, heap_params, escaped, false, info);
+        IrExprKind::Match { subject, arms } => {
+            check_escape_expr(subject, heap_vars, escaped, false, info);
             for arm in arms {
-                check_escape_expr_inner(&arm.body, heap_params, escaped, is_tail, info);
+                check_escape_expr(&arm.body, heap_vars, escaped, is_tail, info);
             }
         }
 
-        Expr::Block { stmts, expr, .. } | Expr::DoBlock { stmts, expr, .. } => {
-            for s in stmts { check_escape_stmt(s, heap_params, escaped); }
+        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+            for s in stmts { check_escape_stmt(s, heap_vars, escaped, info); }
             if let Some(e) = expr {
-                check_escape_expr_inner(e, heap_params, escaped, is_tail, info);
+                check_escape_expr(e, heap_vars, escaped, is_tail, info);
             }
         }
 
-        Expr::ForIn { iterable, body, .. } => {
-            check_escape_expr_inner(iterable, heap_params, escaped, false, info);
-            for s in body { check_escape_stmt(s, heap_params, escaped); }
+        IrExprKind::ForIn { iterable, body, .. } => {
+            check_escape_expr(iterable, heap_vars, escaped, false, info);
+            for s in body { check_escape_stmt(s, heap_vars, escaped, info); }
         }
 
-        Expr::Lambda { body, params: lparams, .. } => {
-            let shadow: HashSet<String> = lparams.iter().map(|p| p.name.clone()).collect();
-            let filtered: HashSet<String> = heap_params.difference(&shadow).cloned().collect();
-            mark_all_params_filtered(body, &filtered, escaped);
+        IrExprKind::While { cond, body } => {
+            check_escape_expr(cond, heap_vars, escaped, false, info);
+            for s in body { check_escape_stmt(s, heap_vars, escaped, info); }
         }
 
-        Expr::Member { object, .. } | Expr::TupleIndex { object, .. } => {
-            check_escape_expr_inner(object, heap_params, escaped, false, info);
+        IrExprKind::Lambda { params, body } => {
+            let shadow: HashSet<VarId> = params.iter().map(|(vid, _)| *vid).collect();
+            let filtered: HashSet<VarId> = heap_vars.difference(&shadow).cloned().collect();
+            mark_all_filtered(body, &filtered, escaped);
         }
 
-        Expr::IndexAccess { object, index, .. } => {
-            check_escape_expr_inner(object, heap_params, escaped, false, info);
-            check_escape_expr_inner(index, heap_params, escaped, false, info);
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
+            check_escape_expr(object, heap_vars, escaped, false, info);
         }
 
-        Expr::While { cond, body, .. } => {
-            check_escape_expr_inner(cond, heap_params, escaped, false, info);
-            for s in body { check_escape_stmt(s, heap_params, escaped); }
+        IrExprKind::IndexAccess { object, index } => {
+            check_escape_expr(object, heap_vars, escaped, false, info);
+            check_escape_expr(index, heap_vars, escaped, false, info);
         }
 
-        Expr::Pipe { left, right, .. } => {
-            check_escape_expr_inner(left, heap_params, escaped, false, info);
-            check_escape_expr_inner(right, heap_params, escaped, is_tail, info);
+        IrExprKind::Range { start, end, .. } => {
+            check_escape_expr(start, heap_vars, escaped, false, info);
+            check_escape_expr(end, heap_vars, escaped, false, info);
         }
 
-        Expr::Range { start, end, .. } => {
-            check_escape_expr_inner(start, heap_params, escaped, false, info);
-            check_escape_expr_inner(end, heap_params, escaped, false, info);
-        }
-
-        Expr::Some { expr, .. } | Expr::Ok { expr, .. } | Expr::Err { expr, .. } => {
+        IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
+        | IrExprKind::OptionSome { expr: e } => {
             if is_tail {
-                mark_all_params(expr, heap_params, escaped);
+                mark_all(e, heap_vars, escaped);
             } else {
-                check_escape_expr_inner(expr, heap_params, escaped, false, info);
+                check_escape_expr(e, heap_vars, escaped, false, info);
             }
         }
 
-        Expr::Paren { expr, .. } => {
-            check_escape_expr_inner(expr, heap_params, escaped, is_tail, info);
-        }
-
-        Expr::Try { expr, .. } | Expr::Await { expr, .. } => {
-            check_escape_expr_inner(expr, heap_params, escaped, is_tail, info);
+        IrExprKind::Try { expr: e } | IrExprKind::Await { expr: e } => {
+            check_escape_expr(e, heap_vars, escaped, is_tail, info);
         }
     }
 }
 
-/// Check escape in a statement. Statements are never in tail position.
-fn check_escape_stmt(stmt: &Stmt, heap_params: &HashSet<String>, escaped: &mut HashSet<String>) {
-    match stmt {
-        Stmt::Let { value, .. } | Stmt::Var { value, .. }
-        | Stmt::LetDestructure { value, .. } => {
-            // Var assignment: if RHS is a param, it escapes (stored in mutable var)
-            if matches!(stmt, Stmt::Var { .. }) {
-                mark_all_params(value, heap_params, escaped);
+/// Check escape in a statement.
+fn check_escape_stmt(
+    stmt: &IrStmt,
+    heap_vars: &HashSet<VarId>,
+    escaped: &mut HashSet<VarId>,
+    info: Option<&BorrowInfo>,
+) {
+    match &stmt.kind {
+        IrStmtKind::Bind { value, mutability, .. } => {
+            if *mutability == Mutability::Var {
+                mark_all(value, heap_vars, escaped);
             } else {
-                check_escape_expr(value, heap_params, escaped, false);
+                // Let binding: treat as tail-like (param flowing into binding may need owned)
+                check_escape_expr(value, heap_vars, escaped, true, info);
             }
         }
-        Stmt::Assign { value, .. } => {
-            // Assignment to var: value escapes
-            mark_all_params(value, heap_params, escaped);
+        IrStmtKind::BindDestructure { value, .. } => {
+            check_escape_expr(value, heap_vars, escaped, true, info);
         }
-        Stmt::IndexAssign { index, value, .. } => {
-            check_escape_expr(index, heap_params, escaped, false);
-            mark_all_params(value, heap_params, escaped);
+        IrStmtKind::Assign { value, .. } => {
+            mark_all(value, heap_vars, escaped);
         }
-        Stmt::FieldAssign { value, .. } => {
-            mark_all_params(value, heap_params, escaped);
+        IrStmtKind::IndexAssign { index, value, .. } => {
+            check_escape_expr(index, heap_vars, escaped, false, info);
+            mark_all(value, heap_vars, escaped);
         }
-        Stmt::Expr { expr, .. } => {
-            check_escape_expr(expr, heap_params, escaped, false);
+        IrStmtKind::FieldAssign { value, .. } => {
+            mark_all(value, heap_vars, escaped);
         }
-        Stmt::Guard { cond, else_, .. } => {
-            check_escape_expr(cond, heap_params, escaped, false);
-            check_escape_expr(else_, heap_params, escaped, false);
+        IrStmtKind::Expr { expr } => {
+            check_escape_expr(expr, heap_vars, escaped, false, info);
         }
-        Stmt::Comment { .. } => {}
+        IrStmtKind::Guard { cond, else_ } => {
+            check_escape_expr(cond, heap_vars, escaped, false, info);
+            check_escape_expr(else_, heap_vars, escaped, false, info);
+        }
+        IrStmtKind::Comment { .. } => {}
     }
 }
 
-/// Mark all heap params that appear anywhere in the expression as escaped.
-fn mark_all_params(expr: &Expr, heap_params: &HashSet<String>, escaped: &mut HashSet<String>) {
-    mark_all_params_filtered(expr, heap_params, escaped);
+/// Mark all heap VarIds that appear anywhere in the expression as escaped.
+fn mark_all(expr: &IrExpr, heap_vars: &HashSet<VarId>, escaped: &mut HashSet<VarId>) {
+    mark_all_filtered(expr, heap_vars, escaped);
 }
 
-fn mark_all_params_filtered(expr: &Expr, params: &HashSet<String>, escaped: &mut HashSet<String>) {
-    match expr {
-        Expr::Ident { name, .. } => {
-            if params.contains(name) {
-                escaped.insert(name.clone());
+fn mark_all_filtered(expr: &IrExpr, vars: &HashSet<VarId>, escaped: &mut HashSet<VarId>) {
+    match &expr.kind {
+        IrExprKind::Var { id } => {
+            if vars.contains(id) { escaped.insert(*id); }
+        }
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
+        | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::OptionNone
+        | IrExprKind::Hole | IrExprKind::Todo { .. }
+        | IrExprKind::Break | IrExprKind::Continue => {}
+
+        IrExprKind::StringInterp { parts } => {
+            for part in parts {
+                if let IrStringPart::Expr { expr: e } = part {
+                    mark_all_filtered(e, vars, escaped);
+                }
             }
         }
-        Expr::Int { .. } | Expr::Float { .. } | Expr::String { .. }
-        | Expr::Bool { .. } | Expr::Unit { .. } | Expr::None { .. }
-        | Expr::Hole { .. } | Expr::Todo { .. } | Expr::Placeholder { .. }
-        | Expr::TypeName { .. } | Expr::InterpolatedString { .. }
-        | Expr::Break { .. } | Expr::Continue { .. } => {}
-        Expr::List { elements, .. } | Expr::Tuple { elements, .. } => {
-            for e in elements { mark_all_params_filtered(e, params, escaped); }
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
+            for e in elements { mark_all_filtered(e, vars, escaped); }
         }
-        Expr::Record { fields, .. } => {
-            for f in fields { mark_all_params_filtered(&f.value, params, escaped); }
+        IrExprKind::Record { fields, .. } => {
+            for (_, e) in fields { mark_all_filtered(e, vars, escaped); }
         }
-        Expr::SpreadRecord { base, fields, .. } => {
-            mark_all_params_filtered(base, params, escaped);
-            for f in fields { mark_all_params_filtered(&f.value, params, escaped); }
+        IrExprKind::SpreadRecord { base, fields } => {
+            mark_all_filtered(base, vars, escaped);
+            for (_, e) in fields { mark_all_filtered(e, vars, escaped); }
         }
-        Expr::Binary { left, right, .. } | Expr::Pipe { left, right, .. } => {
-            mark_all_params_filtered(left, params, escaped);
-            mark_all_params_filtered(right, params, escaped);
+        IrExprKind::BinOp { left, right, .. } => {
+            mark_all_filtered(left, vars, escaped);
+            mark_all_filtered(right, vars, escaped);
         }
-        Expr::Unary { operand, .. } => mark_all_params_filtered(operand, params, escaped),
-        Expr::Call { callee, args, .. } => {
-            mark_all_params_filtered(callee, params, escaped);
-            for a in args { mark_all_params_filtered(a, params, escaped); }
+        IrExprKind::UnOp { operand, .. } => mark_all_filtered(operand, vars, escaped),
+        IrExprKind::Call { target, args, .. } => {
+            match target {
+                CallTarget::Method { object, .. } => mark_all_filtered(object, vars, escaped),
+                CallTarget::Computed { callee } => mark_all_filtered(callee, vars, escaped),
+                _ => {}
+            }
+            for a in args { mark_all_filtered(a, vars, escaped); }
         }
-        Expr::If { cond, then, else_, .. } => {
-            mark_all_params_filtered(cond, params, escaped);
-            mark_all_params_filtered(then, params, escaped);
-            mark_all_params_filtered(else_, params, escaped);
+        IrExprKind::If { cond, then, else_ } => {
+            mark_all_filtered(cond, vars, escaped);
+            mark_all_filtered(then, vars, escaped);
+            mark_all_filtered(else_, vars, escaped);
         }
-        Expr::Match { subject, arms, .. } => {
-            mark_all_params_filtered(subject, params, escaped);
-            for arm in arms { mark_all_params_filtered(&arm.body, params, escaped); }
+        IrExprKind::Match { subject, arms } => {
+            mark_all_filtered(subject, vars, escaped);
+            for arm in arms { mark_all_filtered(&arm.body, vars, escaped); }
         }
-        Expr::Block { stmts, expr, .. } | Expr::DoBlock { stmts, expr, .. } => {
-            for s in stmts { mark_all_params_in_stmt(s, params, escaped); }
-            if let Some(e) = expr { mark_all_params_filtered(e, params, escaped); }
+        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+            for s in stmts { mark_all_in_stmt(s, vars, escaped); }
+            if let Some(e) = expr { mark_all_filtered(e, vars, escaped); }
         }
-        Expr::ForIn { iterable, body, .. } => {
-            mark_all_params_filtered(iterable, params, escaped);
-            for s in body { mark_all_params_in_stmt(s, params, escaped); }
+        IrExprKind::ForIn { iterable, body, .. } => {
+            mark_all_filtered(iterable, vars, escaped);
+            for s in body { mark_all_in_stmt(s, vars, escaped); }
         }
-        Expr::Lambda { body, .. } => mark_all_params_filtered(body, params, escaped),
-        Expr::Member { object, .. } | Expr::TupleIndex { object, .. } => {
-            mark_all_params_filtered(object, params, escaped);
+        IrExprKind::While { cond, body } => {
+            mark_all_filtered(cond, vars, escaped);
+            for s in body { mark_all_in_stmt(s, vars, escaped); }
         }
-        Expr::IndexAccess { object, index, .. } => {
-            mark_all_params_filtered(object, params, escaped);
-            mark_all_params_filtered(index, params, escaped);
+        IrExprKind::Lambda { body, .. } => mark_all_filtered(body, vars, escaped),
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
+            mark_all_filtered(object, vars, escaped);
         }
-        Expr::While { cond, body, .. } => {
-            mark_all_params_filtered(cond, params, escaped);
-            for s in body { mark_all_params_in_stmt(s, params, escaped); }
+        IrExprKind::IndexAccess { object, index } => {
+            mark_all_filtered(object, vars, escaped);
+            mark_all_filtered(index, vars, escaped);
         }
-        Expr::Range { start, end, .. } => {
-            mark_all_params_filtered(start, params, escaped);
-            mark_all_params_filtered(end, params, escaped);
+        IrExprKind::Range { start, end, .. } => {
+            mark_all_filtered(start, vars, escaped);
+            mark_all_filtered(end, vars, escaped);
         }
-        Expr::Paren { expr, .. } | Expr::Try { expr, .. } | Expr::Await { expr, .. }
-        | Expr::Some { expr, .. } | Expr::Ok { expr, .. } | Expr::Err { expr, .. } => {
-            mark_all_params_filtered(expr, params, escaped);
+        IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
+        | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
+        | IrExprKind::Await { expr: e } => {
+            mark_all_filtered(e, vars, escaped);
         }
     }
 }
 
-fn mark_all_params_in_stmt(stmt: &Stmt, params: &HashSet<String>, escaped: &mut HashSet<String>) {
-    match stmt {
-        Stmt::Let { value, .. } | Stmt::Var { value, .. }
-        | Stmt::LetDestructure { value, .. } | Stmt::Assign { value, .. } => {
-            mark_all_params_filtered(value, params, escaped);
+fn mark_all_in_stmt(stmt: &IrStmt, vars: &HashSet<VarId>, escaped: &mut HashSet<VarId>) {
+    match &stmt.kind {
+        IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
+        | IrStmtKind::Assign { value, .. } => {
+            mark_all_filtered(value, vars, escaped);
         }
-        Stmt::IndexAssign { index, value, .. } => {
-            mark_all_params_filtered(index, params, escaped);
-            mark_all_params_filtered(value, params, escaped);
+        IrStmtKind::IndexAssign { index, value, .. } => {
+            mark_all_filtered(index, vars, escaped);
+            mark_all_filtered(value, vars, escaped);
         }
-        Stmt::FieldAssign { value, .. } => {
-            mark_all_params_filtered(value, params, escaped);
+        IrStmtKind::FieldAssign { value, .. } => {
+            mark_all_filtered(value, vars, escaped);
         }
-        Stmt::Expr { expr, .. } => mark_all_params_filtered(expr, params, escaped),
-        Stmt::Guard { cond, else_, .. } => {
-            mark_all_params_filtered(cond, params, escaped);
-            mark_all_params_filtered(else_, params, escaped);
+        IrStmtKind::Expr { expr } => mark_all_filtered(expr, vars, escaped),
+        IrStmtKind::Guard { cond, else_ } => {
+            mark_all_filtered(cond, vars, escaped);
+            mark_all_filtered(else_, vars, escaped);
         }
-        Stmt::Comment { .. } => {}
+        IrStmtKind::Comment { .. } => {}
     }
 }

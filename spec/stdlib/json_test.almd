@@ -1,0 +1,233 @@
+// Comprehensive json module tests
+import json
+
+// ── from_string / from_int / from_bool / null ──
+
+test "json.from_string creates string value" {
+  let j = json.from_string("hello")
+  assert_eq(json.to_string(j), some("hello"))
+}
+
+test "json.from_int creates int value" {
+  let j = json.from_int(42)
+  assert_eq(json.to_int(j), some(42))
+}
+
+test "json.from_bool creates bool value" {
+  let j = json.from_bool(true)
+  let s = json.stringify(j)
+  assert_eq(s, "true")
+}
+
+test "json.from_bool false" {
+  let j = json.from_bool(false)
+  assert_eq(json.stringify(j), "false")
+}
+
+test "json.null creates null" {
+  let j = json.null()
+  assert_eq(json.stringify(j), "null")
+}
+
+// ── stringify ──
+
+test "json.stringify string" {
+  let j = json.from_string("test")
+  let s = json.stringify(j)
+  assert_eq(s, "\"test\"")
+}
+
+test "json.stringify int" {
+  let j = json.from_int(100)
+  assert_eq(json.stringify(j), "100")
+}
+
+test "json.stringify null" {
+  assert_eq(json.stringify(json.null()), "null")
+}
+
+// ── array ──
+
+test "json.array creates array" {
+  let arr = json.array([json.from_int(1), json.from_int(2), json.from_int(3)])
+  let s = json.stringify(arr)
+  assert_eq(s, "[1,2,3]")
+}
+
+test "json.array empty" {
+  let arr = json.array([])
+  assert_eq(json.stringify(arr), "[]")
+}
+
+test "json.array mixed types" {
+  let arr = json.array([json.from_string("hi"), json.from_int(42), json.from_bool(true)])
+  let s = json.stringify(arr)
+  assert(string.contains(s, "\"hi\""))
+  assert(string.contains(s, "42"))
+  assert(string.contains(s, "true"))
+}
+
+// ── from_map / from_map with keys ──
+
+test "json.from_map basic" {
+  let m = map.set(map.set(map.new(), "name", json.from_string("Alice")), "age", json.from_int(30))
+  let j = json.from_map(m)
+  assert_eq(json.get_string(j, "name"), some("Alice"))
+  assert_eq(json.get_int(j, "age"), some(30))
+}
+
+// ── to_string / to_int ──
+
+test "json.to_string on non-string" {
+  let j = json.from_int(42)
+  assert_eq(json.to_string(j), none)
+}
+
+test "json.to_int on non-int" {
+  let j = json.from_string("hello")
+  assert_eq(json.to_int(j), none)
+}
+
+test "json.to_int on int" {
+  let j = json.from_int(99)
+  assert_eq(json.to_int(j), some(99))
+}
+
+test "json.to_string on string" {
+  let j = json.from_string("world")
+  assert_eq(json.to_string(j), some("world"))
+}
+
+// ── keys ──
+
+test "json.keys on object" {
+  let m = map.set(map.set(map.new(), "b", json.from_int(2)), "a", json.from_int(1))
+  let j = json.from_map(m)
+  let ks = json.keys(j)
+  assert(list.contains(ks, "a"))
+  assert(list.contains(ks, "b"))
+}
+
+test "json.keys on non-object" {
+  let j = json.from_int(42)
+  assert_eq(json.keys(j), [])
+}
+
+// ── get ──
+
+test "json.get existing key via get_int" {
+  let m = map.set(map.new(), "x", json.from_int(10))
+  let j = json.from_map(m)
+  assert_eq(json.get_int(j, "x"), some(10))
+}
+
+test "json.get missing key via get_int" {
+  let m = map.set(map.new(), "x", json.from_int(10))
+  let j = json.from_map(m)
+  assert_eq(json.get_int(j, "y"), none)
+}
+
+// ── get_string / get_int / get_bool ──
+
+test "json.get_string from object" {
+  let m = map.set(map.new(), "name", json.from_string("Bob"))
+  let j = json.from_map(m)
+  assert_eq(json.get_string(j, "name"), some("Bob"))
+}
+
+test "json.get_string wrong type" {
+  let m = map.set(map.new(), "val", json.from_int(42))
+  let j = json.from_map(m)
+  assert_eq(json.get_string(j, "val"), none)
+}
+
+test "json.get_int from object" {
+  let m = map.set(map.new(), "count", json.from_int(5))
+  let j = json.from_map(m)
+  assert_eq(json.get_int(j, "count"), some(5))
+}
+
+test "json.get_int wrong type" {
+  let m = map.set(map.new(), "val", json.from_string("hello"))
+  let j = json.from_map(m)
+  assert_eq(json.get_int(j, "val"), none)
+}
+
+test "json.get_bool from object" {
+  let m = map.set(map.new(), "active", json.from_bool(true))
+  let j = json.from_map(m)
+  assert_eq(json.get_bool(j, "active"), some(true))
+}
+
+test "json.get_bool false value" {
+  let m = map.set(map.new(), "flag", json.from_bool(false))
+  let j = json.from_map(m)
+  assert_eq(json.get_bool(j, "flag"), some(false))
+}
+
+// ── get_array ──
+
+test "json.get_array via stringify" {
+  let arr = json.array([json.from_int(1), json.from_int(2)])
+  let m = map.set(map.new(), "items", arr)
+  let j = json.from_map(m)
+  let s = json.stringify(j)
+  assert(string.contains(s, "[1,2]"))
+}
+
+// ── from_float / get_float ──
+
+test "json.from_float truncates to int" {
+  let j = json.from_float(3.14)
+  let s = json.stringify(j)
+  assert_eq(s, "3")
+}
+
+test "json.get_float from object" {
+  let m = map.set(map.new(), "pi", json.from_float(3.14))
+  let j = json.from_map(m)
+  let f = json.get_float(j, "pi")
+  assert(f != none)
+}
+
+test "json.get_float missing key" {
+  let m = map.set(map.new(), "x", json.from_int(1))
+  let j = json.from_map(m)
+  assert_eq(json.get_float(j, "y"), none)
+}
+
+// ── stringify_pretty ──
+
+test "json.stringify_pretty null" {
+  assert_eq(json.stringify_pretty(json.null()), "null")
+}
+
+test "json.stringify_pretty int" {
+  assert_eq(json.stringify_pretty(json.from_int(42)), "42")
+}
+
+test "json.stringify_pretty object has newlines" {
+  let m = map.set(map.new(), "key", json.from_string("value"))
+  let j = json.from_map(m)
+  let pretty = json.stringify_pretty(j)
+  assert(string.contains(pretty, "\n"))
+}
+
+// ── roundtrip: build and inspect ──
+
+test "json roundtrip object" {
+  let m = map.set(map.set(map.new(), "a", json.from_int(1)), "b", json.from_string("two"))
+  let j = json.from_map(m)
+  let s = json.stringify(j)
+  assert(string.contains(s, "\"a\""))
+  assert(string.contains(s, "\"two\""))
+}
+
+test "json nested object via get_int" {
+  let inner = map.set(map.new(), "y", json.from_int(2))
+  let outer = map.set(map.new(), "inner", json.from_map(inner))
+  let j = json.from_map(outer)
+  let s = json.stringify(j)
+  assert(string.contains(s, "\"y\""))
+  assert(string.contains(s, "2"))
+}

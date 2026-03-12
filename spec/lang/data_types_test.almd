@@ -1,0 +1,296 @@
+// data_types_test — Data types
+
+// ── Record ──
+
+test "record literal and field access" {
+  let user = { name: "alice", age: 30 }
+  assert_eq(user.name, "alice")
+  assert_eq(user.age, 30)
+}
+
+test "nested record" {
+  let data = { user: { name: "bob" }, score: 100 }
+  assert_eq(data.user.name, "bob")
+  assert_eq(data.score, 100)
+}
+
+test "record spread" {
+  let base = { name: "alice", age: 30 }
+  let updated = { ...base, age: 31 }
+  assert_eq(updated.name, "alice")
+  assert_eq(updated.age, 31)
+}
+
+// ── Tuple ──
+
+test "tuple literal and index access" {
+  let t = (1, "hello", true)
+  assert_eq(t.0, 1)
+  assert_eq(t.1, "hello")
+  assert_eq(t.2, true)
+}
+
+test "tuple pair" {
+  let p = (10, 20)
+  assert_eq(p.0 + p.1, 30)
+}
+
+test "tuple destructure" {
+  let (a, b) = (1, 2)
+  assert_eq(a, 1)
+  assert_eq(b, 2)
+}
+
+test "tuple destructure three" {
+  let (x, y, z) = ("a", "b", "c")
+  assert_eq(x, "a")
+  assert_eq(y, "b")
+  assert_eq(z, "c")
+}
+
+// ── Variant ──
+
+type Color = | Red | Green | Blue
+
+type Shape =
+  | Circle(Float)
+  | Rect(Float, Float)
+
+fn color_name(c: Color) -> String = match c {
+  Red => "red",
+  Green => "green",
+  Blue => "blue",
+}
+
+fn area(s: Shape) -> Float = match s {
+  Circle(r) => 3.14 * r * r,
+  Rect(w, h) => w * h,
+}
+
+test "variant zero-arg constructor" {
+  assert_eq(color_name(Red), "red")
+  assert_eq(color_name(Blue), "blue")
+}
+
+test "variant with tuple payload" {
+  let c = Circle(1.0)
+  let r = Rect(3.0, 4.0)
+  assert_eq(area(c), 3.14)
+  assert_eq(area(r), 12.0)
+}
+
+// ── Option ──
+
+test "Option some and none" {
+  let x = some(42)
+  let y: Option[Int] = none
+  assert_eq(x, some(42))
+  assert_eq(y, none)
+}
+
+test "Option match" {
+  let val = some("hi")
+  let result = match val {
+    some(s) => s,
+    none => "empty",
+  }
+  assert_eq(result, "hi")
+}
+
+// ── Result ──
+
+test "Result ok and err" {
+  let x: Result[Int, String] = ok(10)
+  let y: Result[Int, String] = err("fail")
+  assert_eq(x, ok(10))
+  assert_eq(y, err("fail"))
+}
+
+// ── List ──
+
+test "list literal" {
+  let xs = [1, 2, 3]
+  assert_eq(list.len(xs), 3)
+  assert_eq(list.get(xs, 0), some(1))
+  assert_eq(list.get(xs, 2), some(3))
+}
+
+test "list get out of bounds" {
+  let xs = [10, 20]
+  assert_eq(list.get(xs, 5), none)
+}
+
+test "list map" {
+  let xs = [1, 2, 3]
+  let ys = list.map(xs, fn(x) => x * 2)
+  assert_eq(ys, [2, 4, 6])
+}
+
+test "list filter" {
+  let xs = [1, 2, 3, 4, 5]
+  let evens = list.filter(xs, fn(x) => x % 2 == 0)
+  assert_eq(evens, [2, 4])
+}
+
+test "list fold" {
+  let xs = [1, 2, 3, 4]
+  let sum = list.fold(xs, 0, fn(acc, x) => acc + x)
+  assert_eq(sum, 10)
+}
+
+// ── Map ──
+
+test "map basic operations" {
+  let m = map.new()
+  let m = map.set(m, "a", 1)
+  let m = map.set(m, "b", 2)
+  assert_eq(map.get(m, "a"), some(1))
+  assert_eq(map.get(m, "b"), some(2))
+  assert_eq(map.get(m, "c"), none)
+  assert_eq(map.len(m), 2)
+}
+
+test "map contains and remove" {
+  let m = map.new()
+  let m = map.set(m, "x", 10)
+  assert_eq(map.contains(m, "x"), true)
+  assert_eq(map.contains(m, "y"), false)
+  let m = map.remove(m, "x")
+  assert_eq(map.contains(m, "x"), false)
+}
+
+// ── Additional data type tests ──
+
+test "deeply nested record" {
+  let data = {
+    level1: {
+      level2: {
+        value: 42
+      }
+    }
+  }
+  assert_eq(data.level1.level2.value, 42)
+}
+
+test "record with many fields" {
+  let r = { a: 1, b: 2, c: 3, d: 4, e: 5 }
+  assert_eq(r.a + r.b + r.c + r.d + r.e, 15)
+}
+
+test "list of records operations" {
+  let users = [
+    { name: "alice", score: 90 },
+    { name: "bob", score: 85 },
+    { name: "carol", score: 95 },
+  ]
+  let names = list.map(users, fn(u) => u.name)
+  assert_eq(names, ["alice", "bob", "carol"])
+  let high_scorers = list.filter(users, fn(u) => u.score >= 90)
+  assert_eq(list.len(high_scorers), 2)
+}
+
+test "record with option field" {
+  let item = { name: "widget", description: some("A useful widget") }
+  let no_desc: Option[String] = none
+  let item2 = { name: "gadget", description: no_desc }
+  assert_eq(item.description, some("A useful widget"))
+  assert_eq(item2.description, none)
+}
+
+test "variant holding record" {
+  let c = Circle(3.14)
+  let r = Rect(10.0, 5.0)
+  assert_eq(area(c), 3.14 * 3.14 * 3.14)
+  assert_eq(area(r), 50.0)
+}
+
+test "tuple of different types" {
+  let t = (42, "hello", true, 3.14)
+  assert_eq(t.0, 42)
+  assert_eq(t.1, "hello")
+  assert_eq(t.2, true)
+  assert_eq(t.3, 3.14)
+}
+
+test "empty list typed" {
+  let xs: List[String] = []
+  assert_eq(list.len(xs), 0)
+  assert_eq(xs ++ ["hello"], ["hello"])
+}
+
+test "list reverse" {
+  assert_eq(list.reverse([1, 2, 3]), [3, 2, 1])
+  assert_eq(list.reverse(["a", "b", "c"]), ["c", "b", "a"])
+}
+
+test "list contains" {
+  assert_eq(list.contains([1, 2, 3], 2), true)
+  assert_eq(list.contains([1, 2, 3], 4), false)
+  assert_eq(list.contains(["a", "b"], "a"), true)
+}
+
+test "list sort" {
+  assert_eq(list.sort([5, 3, 1, 4, 2]), [1, 2, 3, 4, 5])
+  assert_eq(list.sort(["c", "a", "b"]), ["a", "b", "c"])
+}
+
+test "list unique" {
+  assert_eq(list.unique([1, 2, 2, 3, 3, 3]), [1, 2, 3])
+  assert_eq(list.unique(["a", "a", "b"]), ["a", "b"])
+}
+
+test "list take and drop" {
+  assert_eq(list.take([1, 2, 3, 4, 5], 3), [1, 2, 3])
+  assert_eq(list.drop([1, 2, 3, 4, 5], 3), [4, 5])
+}
+
+test "map keys and values" {
+  let m = map.new()
+  let m = map.set(m, "a", 1)
+  let m = map.set(m, "b", 2)
+  let keys = list.sort(map.keys(m))
+  assert_eq(keys, ["a", "b"])
+  let vals = list.sort(map.values(m))
+  assert_eq(vals, [1, 2])
+}
+
+test "map merge" {
+  let m1 = map.set(map.new(), "a", 1)
+  let m2 = map.set(map.new(), "b", 2)
+  let merged = map.merge(m1, m2)
+  assert_eq(map.get(merged, "a"), some(1))
+  assert_eq(map.get(merged, "b"), some(2))
+  assert_eq(map.len(merged), 2)
+}
+
+test "record spread override multiple" {
+  let base = { x: 1, y: 2, z: 3 }
+  let updated = { ...base, x: 10, z: 30 }
+  assert_eq(updated.x, 10)
+  assert_eq(updated.y, 2)
+  assert_eq(updated.z, 30)
+}
+
+test "list insert" {
+  assert_eq(list.insert([1, 3, 4], 1, 2), [1, 2, 3, 4])
+}
+
+test "list remove_at" {
+  assert_eq(list.remove_at([1, 2, 3], 1), [1, 3])
+}
+
+test "list set" {
+  assert_eq(list.set([10, 20, 30], 1, 99), [10, 99, 30])
+}
+
+test "list swap" {
+  assert_eq(list.swap([1, 2, 3], 0, 2), [3, 2, 1])
+}
+
+test "map entries" {
+  let m = map.set(map.set(map.new(), "a", 1), "b", 2)
+  let entries = list.sort_by(map.entries(m), fn(e) => e.0)
+  assert_eq(list.len(entries), 2)
+  assert_eq(list.get(entries, 0), some(("a", 1)))
+  assert_eq(list.get(entries, 1), some(("b", 2)))
+}

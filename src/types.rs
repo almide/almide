@@ -1,7 +1,8 @@
 /// Internal resolved type representation for the Almide type checker.
 /// Distinct from ast::TypeExpr which is a syntactic node.
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum Ty {
     Int,
     Float,
@@ -16,20 +17,21 @@ pub enum Ty {
     Variant { name: std::string::String, cases: Vec<VariantCase> },
     Fn { params: Vec<Ty>, ret: Box<Ty> },
     Tuple(Vec<Ty>),
-    Named(std::string::String),
+    Named(std::string::String, Vec<Ty>),
     /// Type variable for user-defined generics (e.g., T, U, A, B)
     TypeVar(std::string::String),
     /// Error recovery — unifies with everything to prevent cascade errors
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct VariantCase {
     pub name: std::string::String,
     pub payload: VariantPayload,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum VariantPayload {
     Unit,
     Tuple(Vec<Ty>),
@@ -139,7 +141,14 @@ impl Ty {
                 let ts: Vec<_> = tys.iter().map(|t| t.display()).collect();
                 format!("({})", ts.join(", "))
             }
-            Ty::Named(n) => n.clone(),
+            Ty::Named(n, args) => {
+                if args.is_empty() {
+                    n.clone()
+                } else {
+                    let ts: Vec<_> = args.iter().map(|t| t.display()).collect();
+                    format!("{}[{}]", n, ts.join(", "))
+                }
+            }
             Ty::TypeVar(n) => n.clone(),
             Ty::Unknown => "Unknown".into(),
         }
@@ -164,10 +173,10 @@ impl Ty {
             (Ty::Option(a), Ty::Option(b)) => a.compatible(b),
             (Ty::Result(a1, a2), Ty::Result(b1, b2)) => a1.compatible(b1) && a2.compatible(b2),
             (Ty::Map(k1, v1), Ty::Map(k2, v2)) => k1.compatible(k2) && v1.compatible(v2),
-            (Ty::Named(a), Ty::Named(b)) => a == b,
+            (Ty::Named(a, _), Ty::Named(b, _)) => a == b,
             (Ty::Variant { name: a, .. }, Ty::Variant { name: b, .. }) => a == b,
-            (Ty::Named(a), Ty::Variant { name: b, .. }) => a == b,
-            (Ty::Variant { name: a, .. }, Ty::Named(b)) => a == b,
+            (Ty::Named(a, _), Ty::Variant { name: b, .. }) => a == b,
+            (Ty::Variant { name: a, .. }, Ty::Named(b, _)) => a == b,
             (Ty::Fn { params: p1, ret: r1 }, Ty::Fn { params: p2, ret: r2 }) => {
                 p1.len() == p2.len()
                     && p1.iter().zip(p2.iter()).all(|(a, b)| a.compatible(b))
@@ -250,6 +259,9 @@ pub fn substitute(ty: &Ty, bindings: &std::collections::HashMap<std::string::Str
         Ty::Record { fields } => Ty::Record {
             fields: fields.iter().map(|(n, t)| (n.clone(), substitute(t, bindings))).collect(),
         },
+        Ty::Named(name, args) if !args.is_empty() => {
+            Ty::Named(name.clone(), args.iter().map(|a| substitute(a, bindings)).collect())
+        }
         _ => ty.clone(),
     }
 }
@@ -313,14 +325,74 @@ impl TypeEnv {
 
     pub fn resolve_named(&self, ty: &Ty) -> Ty {
         match ty {
-            Ty::Named(name) => {
+            Ty::Named(name, args) => {
                 if let Some(resolved) = self.types.get(name) {
-                    resolved.clone()
+                    if args.is_empty() {
+                        resolved.clone()
+                    } else {
+                        // Build substitution from generic params to concrete args
+                        // Extract generic param names from the resolved type's TypeVars
+                        let mut param_names = Vec::new();
+                        Self::collect_typevars(resolved, &mut param_names);
+                        let mut bindings = std::collections::HashMap::new();
+                        for (i, arg) in args.iter().enumerate() {
+                            if let Some(name) = param_names.get(i) {
+                                bindings.insert(name.clone(), arg.clone());
+                            }
+                        }
+                        if bindings.is_empty() {
+                            resolved.clone()
+                        } else {
+                            substitute(resolved, &bindings)
+                        }
+                    }
                 } else {
                     ty.clone()
                 }
             }
             _ => ty.clone(),
+        }
+    }
+
+    /// Collect unique TypeVar names from a type in the order they first appear
+    fn collect_typevars(ty: &Ty, out: &mut Vec<std::string::String>) {
+        match ty {
+            Ty::TypeVar(name) => {
+                if !out.contains(name) {
+                    out.push(name.clone());
+                }
+            }
+            Ty::List(inner) | Ty::Option(inner) => Self::collect_typevars(inner, out),
+            Ty::Result(a, b) | Ty::Map(a, b) => {
+                Self::collect_typevars(a, out);
+                Self::collect_typevars(b, out);
+            }
+            Ty::Record { fields } => {
+                for (_, t) in fields {
+                    Self::collect_typevars(t, out);
+                }
+            }
+            Ty::Variant { cases, .. } => {
+                for c in cases {
+                    match &c.payload {
+                        VariantPayload::Tuple(tys) => {
+                            for t in tys { Self::collect_typevars(t, out); }
+                        }
+                        VariantPayload::Record(fs) => {
+                            for (_, t, _) in fs { Self::collect_typevars(t, out); }
+                        }
+                        VariantPayload::Unit => {}
+                    }
+                }
+            }
+            Ty::Fn { params, ret } => {
+                for p in params { Self::collect_typevars(p, out); }
+                Self::collect_typevars(ret, out);
+            }
+            Ty::Tuple(tys) => {
+                for t in tys { Self::collect_typevars(t, out); }
+            }
+            _ => {}
         }
     }
 }

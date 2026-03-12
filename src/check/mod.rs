@@ -50,6 +50,8 @@ pub struct Checker {
     current_decl_col: Option<usize>,
     /// Build target (e.g. "rust", "ts", "wasm"). Used to gate platform modules.
     pub target: Option<String>,
+    /// Full Ty for every expression, keyed by (line, col) span.
+    pub expr_types: std::collections::HashMap<(usize, usize), Ty>,
 }
 
 /// Modules that require a native runtime (OS access). Not available on WASM.
@@ -69,6 +71,7 @@ impl Checker {
             current_decl_line: None,
             current_decl_col: None,
             target: None,
+            expr_types: std::collections::HashMap::new(),
         };
         c.register_stdlib();
         c
@@ -307,6 +310,18 @@ impl Checker {
         }
     }
 
+    /// Type-check a module program's function bodies (for IR lowering).
+    /// Returns a separate `expr_types` map to avoid span collisions with the main program.
+    pub fn check_module_bodies(&mut self, prog: &mut ast::Program) -> std::collections::HashMap<(usize, usize), Ty> {
+        let saved = std::mem::take(&mut self.expr_types);
+        for decl in prog.decls.iter_mut() {
+            self.check_decl(decl);
+        }
+        let module_types = std::mem::take(&mut self.expr_types);
+        self.expr_types = saved;
+        module_types
+    }
+
     /// Register a user-level import alias (import pkg as alias).
     pub fn register_alias(&mut self, alias: &str, target: &str) {
         self.env.module_aliases.insert(alias.to_string(), target.to_string());
@@ -539,7 +554,7 @@ impl Checker {
                     if let Some(ty) = self.env.types.get(other) {
                         ty.clone()
                     } else {
-                        Ty::Named(other.to_string())
+                        Ty::Named(other.to_string(), vec![])
                     }
                 }
             },
@@ -551,7 +566,7 @@ impl Checker {
                     "Result" if ra.len() == 2 => Ty::Result(Box::new(ra[0].clone()), Box::new(ra[1].clone())),
                     "Map" if ra.len() == 2 => Ty::Map(Box::new(ra[0].clone()), Box::new(ra[1].clone())),
                     "Set" => Ty::List(Box::new(ra.first().cloned().unwrap_or(Ty::Unknown))),
-                    _ => Ty::Named(name.clone()),
+                    _ => Ty::Named(name.clone(), ra),
                 }
             }
             ast::TypeExpr::Record { fields } => Ty::Record {

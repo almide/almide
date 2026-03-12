@@ -1,0 +1,234 @@
+// operator_test — Operators beyond basic arithmetic
+
+// ── Pipe operator ──
+
+fn double(x: Int) -> Int = x * 2
+fn add_one(x: Int) -> Int = x + 1
+
+test "pipe basic" {
+  let result = 5 |> double
+  assert_eq(result, 10)
+}
+
+test "pipe chain" {
+  let result = 3 |> double |> add_one |> double
+  assert_eq(result, 14)
+}
+
+test "pipe into function call with args" {
+  let xs = [3, 1, 2]
+  let result = xs |> list.map(fn(x) => x * 10)
+  assert_eq(result, [30, 10, 20])
+}
+
+test "pipe chain list operations" {
+  let result = [1, 2, 3, 4, 5]
+    |> list.filter(fn(x) => x % 2 == 0)
+    |> list.map(fn(x) => x * 10)
+  assert_eq(result, [20, 40])
+}
+
+// ── String concatenation (++) ──
+
+test "string concat operator" {
+  assert_eq("foo" ++ "bar", "foobar")
+  assert_eq("" ++ "", "")
+  assert_eq("a" ++ "b" ++ "c", "abc")
+}
+
+// ── List concatenation (++) ──
+
+test "list concat operator" {
+  assert_eq([1, 2] ++ [3], [1, 2, 3])
+  assert_eq([1] ++ [2] ++ [3], [1, 2, 3])
+}
+
+// ── Deep equality (==, !=) ──
+
+test "deep equality on lists" {
+  assert_eq([1, 2, 3] == [1, 2, 3], true)
+  assert_eq([1, 2] == [1, 3], false)
+  assert_eq([1, 2] != [1, 3], true)
+}
+
+test "deep equality on records" {
+  let a = { x: 1, y: "hello" }
+  let b = { x: 1, y: "hello" }
+  let c = { x: 2, y: "hello" }
+  assert_eq(a == b, true)
+  assert_eq(a != c, true)
+}
+
+test "deep equality on nested structures" {
+  let a = { items: [1, 2], name: "test" }
+  let b = { items: [1, 2], name: "test" }
+  assert_eq(a == b, true)
+}
+
+test "equality on Option" {
+  assert_eq(some(1) == some(1), true)
+  assert_eq(some(1) != some(2), true)
+  let x: Option[Int] = none
+  assert_eq(x == none, true)
+}
+
+// ── Power / XOR (^) ──
+
+test "float power" {
+  assert_eq(2.0 ^ 3.0, 8.0)
+  assert_eq(3.0 ^ 2.0, 9.0)
+  assert_eq(4.0 ^ 0.5, 2.0)
+}
+
+test "int xor" {
+  assert_eq(5 ^ 3, 6)
+  assert_eq(0 ^ 0, 0)
+  assert_eq(255 ^ 255, 0)
+}
+
+// ── Bitwise operations (stdlib) ──
+
+test "bitwise and or xor" {
+  assert_eq(int.band(0xFF, 0x0F), 15)
+  assert_eq(int.bor(0xF0, 0x0F), 255)
+  assert_eq(int.bxor(0xFF, 0x0F), 240)
+}
+
+test "bitwise shift" {
+  assert_eq(int.bshl(1, 8), 256)
+  assert_eq(int.bshr(256, 8), 1)
+}
+
+test "bitwise not" {
+  assert_eq(int.band(int.bnot(0), 0xFF), 255)
+}
+
+// ── String interpolation ──
+
+test "string interpolation basic" {
+  let name = "world"
+  assert_eq("hello ${name}", "hello world")
+}
+
+test "string interpolation with expression" {
+  let x = 10
+  assert_eq("value: ${int.to_string(x + 5)}", "value: 15")
+}
+
+test "string interpolation multiple" {
+  let a = "foo"
+  let b = "bar"
+  assert_eq("${a}-${b}", "foo-bar")
+}
+
+// ── Comparison operators ──
+
+test "string comparison" {
+  assert_eq("a" < "b", true)
+  assert_eq("b" > "a", true)
+  assert_eq("abc" <= "abc", true)
+  assert_eq("abc" >= "abc", true)
+}
+
+test "float comparison" {
+  assert_eq(1.0 < 2.0, true)
+  assert_eq(2.0 > 1.0, true)
+  assert_eq(1.5 <= 1.5, true)
+  assert_eq(1.5 >= 1.5, true)
+}
+
+// ── Additional operator tests ──
+
+test "pipe chain multiple" {
+  // 1 -> add_one -> 2 -> double -> 4 -> add_one -> 5 -> double -> 10
+  let result = 1 |> add_one |> double |> add_one |> double
+  assert_eq(result, 10)
+}
+
+test "pipe with list sort and reverse" {
+  let result = [3, 1, 4, 1, 5] |> list.sort() |> list.reverse()
+  assert_eq(result, [5, 4, 3, 1, 1])
+}
+
+test "pipe with string operations" {
+  let result = "  Hello World  " |> string.trim() |> string.to_lower()
+  assert_eq(result, "hello world")
+}
+
+test "int xor properties" {
+  assert_eq(42 ^ 42, 0)
+  assert_eq(42 ^ 0, 42)
+  assert_eq(0 ^ 42, 42)
+  assert_eq((5 ^ 3) ^ 3, 5)
+}
+
+test "float power edge cases" {
+  assert_eq(0.0 ^ 1.0, 0.0)
+  assert_eq(1.0 ^ 0.0, 1.0)
+  assert_eq(2.0 ^ 1.0, 2.0)
+  assert_eq(100.0 ^ 0.5, 10.0)
+}
+
+test "concat with empty string" {
+  let s = "hello"
+  assert_eq(s ++ "", s)
+  assert_eq("" ++ s, s)
+  assert_eq("" ++ "" ++ "" ++ s ++ "" ++ "", s)
+}
+
+test "concat with empty list" {
+  let xs = [1, 2, 3]
+  let empty: List[Int] = []
+  assert_eq(xs ++ empty, xs)
+  assert_eq(empty ++ xs, xs)
+  assert_eq(empty ++ empty, empty)
+}
+
+test "string interpolation with boolean" {
+  let b = true
+  assert_eq("flag: ${b}", "flag: true")
+  let b2 = false
+  assert_eq("flag: ${b2}", "flag: false")
+}
+
+test "string interpolation with record field" {
+  let user = { name: "alice", age: 30 }
+  assert_eq("user: ${user.name}", "user: alice")
+}
+
+test "deep equality on nested records" {
+  let a = { x: { y: 1 }, z: [1, 2] }
+  let b = { x: { y: 1 }, z: [1, 2] }
+  let c = { x: { y: 2 }, z: [1, 2] }
+  assert_eq(a == b, true)
+  assert_eq(a != c, true)
+}
+
+test "bitwise shift larger values" {
+  assert_eq(int.bshl(1, 0), 1)
+  assert_eq(int.bshl(1, 10), 1024)
+  assert_eq(int.bshr(1024, 5), 32)
+}
+
+test "comparison on equal values" {
+  assert_eq(5 < 5, false)
+  assert_eq(5 > 5, false)
+  assert_eq(5 <= 5, true)
+  assert_eq(5 >= 5, true)
+  assert_eq(5 == 5, true)
+  assert_eq(5 != 5, false)
+}
+
+test "operator precedence multiply vs add" {
+  assert_eq(2 + 3 * 4 + 5, 19)
+  assert_eq(10 - 2 * 3 + 4, 8)
+  assert_eq(100 / 10 * 2, 20)
+}
+
+test "equality on result" {
+  let a: Result[Int, String] = ok(42)
+  let b: Result[Int, String] = ok(42)
+  let c: Result[Int, String] = err("x")
+  assert_eq(a == b, true)
+  assert_eq(a != c, true)
+}

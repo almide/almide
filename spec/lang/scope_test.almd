@@ -1,0 +1,282 @@
+// scope_test — Scoping rules
+
+// ── Block scope ──
+
+test "block scope isolates variables" {
+  let x = 1
+  let y = {
+    let x = 99
+    x + 1
+  }
+  assert_eq(x, 1)
+  assert_eq(y, 100)
+}
+
+test "nested block scope" {
+  let a = 10
+  let b = {
+    let c = {
+      a + 5
+    }
+    c * 2
+  }
+  assert_eq(b, 30)
+}
+
+// ── Let shadowing ──
+
+test "let shadowing same scope" {
+  let x = 1
+  let x = x + 10
+  let x = x * 2
+  assert_eq(x, 22)
+}
+
+test "let shadowing different type" {
+  let x = 42
+  let x = "now a string"
+  assert_eq(x, "now a string")
+}
+
+// ── For loop variable scope ──
+
+test "for loop variable does not leak" {
+  var total = 0
+  for x in [1, 2, 3] {
+    total = total + x
+  }
+  // x is not accessible here
+  assert_eq(total, 6)
+}
+
+test "for loop variable shadows outer" {
+  let x = 999
+  var sum = 0
+  for x in [10, 20, 30] {
+    sum = sum + x
+  }
+  assert_eq(x, 999)
+  assert_eq(sum, 60)
+}
+
+// ── Match arm binding scope ──
+
+test "match binding scoped to arm" {
+  let val = some(42)
+  let result = match val {
+    some(n) => n + 1,
+    none => 0,
+  }
+  assert_eq(result, 43)
+}
+
+test "match binding does not leak" {
+  let x = "outer"
+  let _ = match some(10) {
+    some(x) => x * 2,
+    none => 0,
+  }
+  assert_eq(x, "outer")
+}
+
+// ── Closure captures ──
+
+fn make_counter(start: Int) -> fn(Int) -> Int = {
+  fn(step) => start + step
+}
+
+test "closure captures value at definition" {
+  let counter = make_counter(100)
+  assert_eq(counter(1), 101)
+  assert_eq(counter(5), 105)
+}
+
+test "closure captures multiple values" {
+  let a = 10
+  let b = 20
+  let f = fn(x: Int) => a + b + x
+  assert_eq(f(3), 33)
+}
+
+test "nested closure" {
+  let base = 5
+  let outer = fn(x: Int) => {
+    let inner = fn(y: Int) => base + x + y
+    inner(1)
+  }
+  assert_eq(outer(10), 16)
+}
+
+// ── Additional scope tests ──
+
+test "deeply nested blocks" {
+  let a = 1
+  let b = {
+    let c = {
+      let d = {
+        a + 10
+      }
+      d * 2
+    }
+    c + 1
+  }
+  assert_eq(b, 23)
+}
+
+test "shadowing in nested blocks" {
+  let x = "outer"
+  let result = {
+    let x = "inner1"
+    let inner = {
+      let x = "inner2"
+      x
+    }
+    inner
+  }
+  assert_eq(result, "inner2")
+  assert_eq(x, "outer")
+}
+
+test "closure in for loop" {
+  let multiplier = 10
+  var results: List[Int] = []
+  for x in [1, 2, 3] {
+    let f = fn(v: Int) => v * multiplier
+    results = results ++ [f(x)]
+  }
+  assert_eq(results, [10, 20, 30])
+}
+
+test "closure in match arm" {
+  let factor = 5
+  let x = some(3)
+  let result = match x {
+    some(n) => {
+      let f = fn(v: Int) => v * factor
+      f(n)
+    },
+    none => 0,
+  }
+  assert_eq(result, 15)
+}
+
+test "scope in if-else blocks" {
+  let x = 10
+  let result = if x > 5 then {
+    let y = x * 2
+    y + 1
+  } else {
+    let y = x * 3
+    y + 1
+  }
+  assert_eq(result, 21)
+}
+
+test "var mutation visible after block" {
+  var x = 0
+  for i in 1..=5 {
+    x = x + i
+  }
+  assert_eq(x, 15)
+  let after_loop = x + 10
+  assert_eq(after_loop, 25)
+}
+
+test "for loop body scope isolation" {
+  let prefix = "item"
+  var items: List[String] = []
+  for i in 0..3 {
+    let label = prefix ++ int.to_string(i)
+    items = items ++ [label]
+  }
+  assert_eq(items, ["item0", "item1", "item2"])
+}
+
+test "closure captures let not var snapshot" {
+  let base = 42
+  let f = fn(x: Int) => base + x
+  assert_eq(f(1), 43)
+  assert_eq(f(10), 52)
+}
+
+test "match binding does not shadow outer" {
+  let name = "global"
+  let result = match some(100) {
+    some(name) => name + 1,
+    none => 0,
+  }
+  assert_eq(result, 101)
+  assert_eq(name, "global")
+}
+
+test "nested for loop scoping" {
+  var total = 0
+  for i in [1, 2, 3] {
+    for j in [10, 20] {
+      let product = i * j
+      total = total + product
+    }
+  }
+  assert_eq(total, 180)
+}
+
+test "block expression as argument" {
+  let result = int.abs({
+    let a = -5
+    let b = -3
+    a + b
+  })
+  assert_eq(result, 8)
+}
+
+test "deeply nested closure capture" {
+  let a = 1
+  let f = fn(x: Int) => {
+    let b = 2
+    let g = fn(y: Int) => {
+      let c = 3
+      let h = fn(z: Int) => a + b + c + x + y + z
+      h(6)
+    }
+    g(5)
+  }
+  assert_eq(f(4), 21)
+}
+
+test "shadowing in do block" {
+  let x = 100
+  var sum = 0
+  var i = 0
+  do {
+    guard i < 3 else break
+    let x = i * 10
+    sum = sum + x
+    i = i + 1
+  }
+  assert_eq(sum, 30)
+  assert_eq(x, 100)
+}
+
+test "let in nested if" {
+  let x = 10
+  let result = if x > 5 then {
+    let y = if x > 8 then { let z = x + 1; z } else { 0 }
+    y * 2
+  } else {
+    -1
+  }
+  assert_eq(result, 22)
+}
+
+test "closure in list.filter" {
+  let threshold = 3
+  let xs = [1, 2, 3, 4, 5]
+  let result = list.filter(xs, fn(x) => x > threshold)
+  assert_eq(result, [4, 5])
+}
+
+test "closure in list.fold" {
+  let factor = 10
+  let result = list.fold([1, 2, 3], 0, fn(acc, x) => acc + x * factor)
+  assert_eq(result, 60)
+}

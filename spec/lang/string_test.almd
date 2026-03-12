@@ -1,0 +1,289 @@
+// string_test — String features (interpolation, heredoc, escapes)
+
+// ── String interpolation ──
+
+test "interpolation basic" {
+  let name = "world"
+  assert_eq("hello ${name}", "hello world")
+}
+
+test "interpolation with expression" {
+  let x = 10
+  assert_eq("result: ${int.to_string(x * 2)}", "result: 20")
+}
+
+test "interpolation with function call" {
+  let xs = [1, 2, 3]
+  assert_eq("len=${int.to_string(list.len(xs))}", "len=3")
+}
+
+test "interpolation multiple vars" {
+  let first = "Alice"
+  let last = "Smith"
+  assert_eq("${first} ${last}", "Alice Smith")
+}
+
+test "interpolation nested in expression" {
+  let a = 3
+  let b = 4
+  assert_eq("${int.to_string(a)}+${int.to_string(b)}=${int.to_string(a + b)}", "3+4=7")
+}
+
+test "interpolation with empty string" {
+  let s = ""
+  assert_eq("before${s}after", "beforeafter")
+}
+
+// ── Heredoc ──
+
+test "heredoc basic" {
+  let text = """
+    line one
+    line two
+  """
+  assert_eq(text, "line one\nline two")
+}
+
+test "heredoc with interpolation" {
+  let name = "Bob"
+  let msg = """
+    Hello, ${name}!
+    Goodbye.
+  """
+  assert_eq(msg, "Hello, Bob!\nGoodbye.")
+}
+
+test "heredoc single line" {
+  let s = """hello"""
+  assert_eq(s, "hello")
+}
+
+test "heredoc empty" {
+  let s = """
+  """
+  assert_eq(s, "")
+}
+
+test "heredoc preserves relative indent" {
+  let code = """
+    if true {
+      yes
+    }
+  """
+  assert_eq(code, "if true {\n  yes\n}")
+}
+
+// ── Escape sequences ──
+
+test "escape newline" {
+  let s = "a\nb"
+  assert_eq(string.len(s), 3)
+  assert_eq(string.contains(s, "\n"), true)
+}
+
+test "escape tab" {
+  let s = "a\tb"
+  assert_eq(string.contains(s, "\t"), true)
+}
+
+test "escape backslash" {
+  let s = "a\\b"
+  assert_eq(string.len(s), 3)
+}
+
+test "escape double quote" {
+  let s = "say \"hi\""
+  assert_eq(string.contains(s, "\""), true)
+}
+
+// ── String operations ──
+
+test "string length" {
+  assert_eq(string.len("hello"), 5)
+  assert_eq(string.len(""), 0)
+}
+
+test "string contains" {
+  assert_eq(string.contains("hello world", "world"), true)
+  assert_eq(string.contains("hello", "xyz"), false)
+}
+
+test "string starts_with and ends_with" {
+  assert_eq(string.starts_with("hello", "he"), true)
+  assert_eq(string.ends_with("hello", "lo"), true)
+  assert_eq(string.starts_with("hello", "lo"), false)
+}
+
+test "string trim" {
+  assert_eq(string.trim("  hello  "), "hello")
+  assert_eq(string.trim("no_space"), "no_space")
+}
+
+test "string split and join" {
+  let parts = string.split("a,b,c", ",")
+  assert_eq(parts, ["a", "b", "c"])
+  assert_eq(string.join(parts, "-"), "a-b-c")
+}
+
+test "string replace" {
+  assert_eq(string.replace("hello world", "world", "there"), "hello there")
+}
+
+test "string to_upper and to_lower" {
+  assert_eq(string.to_upper("hello"), "HELLO")
+  assert_eq(string.to_lower("HELLO"), "hello")
+}
+
+test "string reverse" {
+  assert_eq(string.reverse("abc"), "cba")
+  assert_eq(string.reverse(""), "")
+}
+
+test "string repeat" {
+  assert_eq(string.repeat("ab", 3), "ababab")
+  assert_eq(string.repeat("x", 0), "")
+}
+
+test "string char_at" {
+  assert_eq(string.char_at("hello", 0), some("h"))
+  assert_eq(string.char_at("hello", 4), some("o"))
+  assert_eq(string.char_at("hello", 10), none)
+}
+
+test "string index_of" {
+  assert_eq(string.index_of("hello", "ll"), some(2))
+  assert_eq(string.index_of("hello", "xyz"), none)
+}
+
+// ── Additional string tests ──
+
+test "string slice" {
+  assert_eq(string.slice("hello world", 0, 5), "hello")
+  assert_eq(string.slice("hello world", 6, 11), "world")
+  assert_eq(string.slice("abcdef", 2, 4), "cd")
+}
+
+test "string pad_left" {
+  assert_eq(string.pad_left("42", 5, "0"), "00042")
+  assert_eq(string.pad_left("hello", 3, " "), "hello")
+}
+
+test "string pad_right" {
+  assert_eq(string.pad_right("hi", 5, "."), "hi...")
+  assert_eq(string.pad_right("hello", 3, " "), "hello")
+}
+
+test "string trim_start and trim_end" {
+  assert_eq(string.trim_start("  hello  "), "hello  ")
+  assert_eq(string.trim_end("  hello  "), "  hello")
+}
+
+test "string count" {
+  assert_eq(string.count("banana", "a"), 3)
+  assert_eq(string.count("hello", "l"), 2)
+  assert_eq(string.count("hello", "z"), 0)
+}
+
+test "string lines" {
+  let text = "line1\nline2\nline3"
+  assert_eq(string.lines(text), ["line1", "line2", "line3"])
+}
+
+test "string chars" {
+  assert_eq(string.chars("abc"), ["a", "b", "c"])
+  assert_eq(string.chars(""), [])
+}
+
+test "string replace multiple occurrences" {
+  assert_eq(string.replace("aaa", "a", "bb"), "bbbbbb")
+  assert_eq(string.replace("hello", "l", "r"), "herro")
+}
+
+test "string replace_first" {
+  assert_eq(string.replace_first("aaa", "a", "b"), "baa")
+}
+
+test "string strip_prefix and strip_suffix" {
+  assert_eq(string.strip_prefix("hello world", "hello "), some("world"))
+  assert_eq(string.strip_prefix("hello", "world"), none)
+  assert_eq(string.strip_suffix("hello.txt", ".txt"), some("hello"))
+  assert_eq(string.strip_suffix("hello", ".txt"), none)
+}
+
+test "string last_index_of" {
+  assert_eq(string.last_index_of("abcabc", "a"), some(3))
+  assert_eq(string.last_index_of("abcabc", "z"), none)
+}
+
+test "string to_bytes and from_bytes" {
+  let bytes = string.to_bytes("ABC")
+  assert_eq(bytes, [65, 66, 67])
+  let s = string.from_bytes([72, 105])
+  assert_eq(s, "Hi")
+}
+
+test "string interpolation chained" {
+  let a = 1
+  let b = 2
+  let c = 3
+  assert_eq("${int.to_string(a)}-${int.to_string(b)}-${int.to_string(c)}", "1-2-3")
+}
+
+test "heredoc with multiple interpolations" {
+  let x = 10
+  let y = 20
+  let msg = """
+    x = ${int.to_string(x)}
+    y = ${int.to_string(y)}
+    sum = ${int.to_string(x + y)}
+  """
+  assert_eq(msg, "x = 10\ny = 20\nsum = 30")
+}
+
+test "escape sequences mixed" {
+  let s = "tab\there\nnewline\\backslash"
+  assert_eq(string.contains(s, "\t"), true)
+  assert_eq(string.contains(s, "\n"), true)
+  assert_eq(string.contains(s, "\\"), true)
+}
+
+test "string is_empty" {
+  assert_eq(string.is_empty?(""), true)
+  assert_eq(string.is_empty?("hello"), false)
+}
+
+test "string is_whitespace" {
+  assert_eq(string.is_whitespace?("   "), true)
+  assert_eq(string.is_whitespace?("hello"), false)
+}
+
+test "string to_upper to_lower idempotent" {
+  let s = "Hello World"
+  assert_eq(string.to_lower(string.to_lower(s)), string.to_lower(s))
+  assert_eq(string.to_upper(string.to_upper(s)), string.to_upper(s))
+}
+
+test "string contains self" {
+  let s = "test"
+  assert_eq(string.contains(s, s), true)
+  assert_eq(string.contains(s, ""), true)
+}
+
+test "string split with multiple separators" {
+  assert_eq(string.split("a::b::c", "::"), ["a", "b", "c"])
+  assert_eq(string.split("hello", "xyz"), ["hello"])
+}
+
+test "string join empty" {
+  let empty: List[String] = []
+  assert_eq(string.join(empty, ","), "")
+  assert_eq(string.join(["a"], ","), "a")
+}
+
+test "string repeat one" {
+  assert_eq(string.repeat("abc", 1), "abc")
+}
+
+test "string slice empty result" {
+  assert_eq(string.slice("hello", 2, 2), "")
+}

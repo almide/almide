@@ -151,7 +151,7 @@ impl TsEmitter {
                 if effect.unwrap_or(false) {
                     self.in_effect.set(true);
                 }
-                let result = self.gen_fn_decl(name, params, return_type, body.as_ref(), r#async.unwrap_or(false), extern_attrs, generics.as_ref());
+                let result = self.gen_fn_decl(name, params, return_type, r#async.unwrap_or(false), extern_attrs, generics.as_ref());
                 self.in_effect.set(prev);
                 result
             }
@@ -163,10 +163,11 @@ impl TsEmitter {
                 }
                 lines.join("\n")
             }
-            Decl::Test { name, body, .. } => {
+            Decl::Test { name, .. } => {
                 let prev_test = self.in_test.get();
                 self.in_test.set(true);
-                let body_str = self.gen_expr(body);
+                let ir_fn = self.find_ir_function(name).expect("IR required for codegen").clone();
+                let body_str = self.gen_ir_expr(&ir_fn.body);
                 self.in_test.set(prev_test);
                 if self.js_mode {
                     let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
@@ -180,8 +181,9 @@ impl TsEmitter {
                     format!("Deno.test({}, () => {});", Self::json_string(name), body_str)
                 }
             }
-            Decl::TopLet { name, value, .. } => {
-                let val_str = self.gen_expr(value);
+            Decl::TopLet { name, .. } => {
+                let ir_tl = self.find_ir_top_let(name).expect("IR required for codegen").clone();
+                let val_str = self.gen_ir_expr(&ir_tl.value);
                 if self.js_mode {
                     format!("var {} = {};", name, val_str)
                 } else {
@@ -301,7 +303,7 @@ impl TsEmitter {
         }
     }
 
-    fn gen_fn_decl(&self, name: &str, params: &[Param], ret_type: &TypeExpr, body: Option<&Expr>, is_async: bool, extern_attrs: &[ExternAttr], generics: Option<&Vec<crate::ast::GenericParam>>) -> String {
+    fn gen_fn_decl(&self, name: &str, params: &[Param], ret_type: &TypeExpr, is_async: bool, extern_attrs: &[ExternAttr], generics: Option<&Vec<crate::ast::GenericParam>>) -> String {
         let async_ = if is_async { "async " } else { "" };
         let sname = Self::sanitize(name);
         let generic_str = if self.js_mode {
@@ -337,13 +339,17 @@ impl TsEmitter {
             return format!("{}function {}{}({}){} {{\n  return {};\n}}", async_, sname, generic_str, params_str.join(", "), ret_str, call);
         }
 
-        if let Some(body) = body {
-            let body_str = self.gen_expr(body);
-            match body {
-                Expr::Block { .. } => {
+        if let Some(ir_fn) = self.find_ir_function(name) {
+            let ir_fn = ir_fn.clone();
+            let prev = self.in_effect.get();
+            if ir_fn.is_effect { self.in_effect.set(true); }
+            let body_str = self.gen_ir_expr(&ir_fn.body);
+            self.in_effect.set(prev);
+            match &ir_fn.body.kind {
+                crate::ir::IrExprKind::Block { .. } => {
                     format!("{}function {}{}({}){} {}", async_, sname, generic_str, params_str.join(", "), ret_str, body_str)
                 }
-                Expr::DoBlock { .. } => {
+                crate::ir::IrExprKind::DoBlock { .. } => {
                     format!("{}function {}{}({}){} {{\n{}\n}}", async_, sname, generic_str, params_str.join(", "), ret_str, body_str)
                 }
                 _ => {
@@ -351,8 +357,19 @@ impl TsEmitter {
                 }
             }
         } else {
-            format!("{}function {}{}({}){} {{\n  throw new Error(\"no body and no @extern for ts target\");\n}}", async_, sname, generic_str, params_str.join(", "), ret_str)
+            unreachable!("IR required for codegen");
         }
+    }
+
+    /// Find an IR function by name
+    fn find_ir_function(&self, name: &str) -> Option<&crate::ir::IrFunction> {
+        self.ir_program.as_ref()?.functions.iter().find(|f| f.name == name)
+    }
+
+    /// Find an IR top-level let by name
+    fn find_ir_top_let(&self, name: &str) -> Option<&crate::ir::IrTopLet> {
+        let ir = self.ir_program.as_ref()?;
+        ir.top_lets.iter().find(|tl| ir.var_table.get(tl.var).name == name)
     }
 
     // ── npm package emission ──

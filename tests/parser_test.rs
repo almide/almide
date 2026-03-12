@@ -343,6 +343,360 @@ fn parse_no_errors_for_valid_program() {
     assert!(parser.errors.is_empty());
 }
 
+// ---- Declarations: TopLet ----
+
+#[test]
+fn parse_top_let() {
+    let prog = parse("let pi = 3");
+    assert_eq!(prog.decls.len(), 1);
+    assert!(matches!(&prog.decls[0], Decl::TopLet { name, .. } if name == "pi"));
+}
+
+#[test]
+fn parse_top_let_with_type() {
+    let prog = parse("let pi: Float = 3.14");
+    if let Decl::TopLet { name, ty, .. } = &prog.decls[0] {
+        assert_eq!(name, "pi");
+        assert!(ty.is_some());
+    } else {
+        panic!("expected TopLet");
+    }
+}
+
+// ---- Declarations: Record type ----
+
+#[test]
+fn parse_record_type() {
+    let prog = parse("type Point = { x: Int, y: Int }");
+    if let Decl::Type { name, ty, .. } = &prog.decls[0] {
+        assert_eq!(name, "Point");
+        assert!(matches!(ty, TypeExpr::Record { fields } if fields.len() == 2));
+    } else {
+        panic!("expected type decl");
+    }
+}
+
+// ---- Declarations: Variant with record fields ----
+
+#[test]
+fn parse_variant_record_case() {
+    let prog = parse("type Msg =\n  | Click { x: Int, y: Int }\n  | Key(String)");
+    if let Decl::Type { ty: TypeExpr::Variant { cases }, .. } = &prog.decls[0] {
+        assert_eq!(cases.len(), 2);
+        assert!(matches!(&cases[0], VariantCase::Record { name, fields } if name == "Click" && fields.len() == 2));
+        assert!(matches!(&cases[1], VariantCase::Tuple { name, fields } if name == "Key" && fields.len() == 1));
+    } else {
+        panic!("expected variant type");
+    }
+}
+
+// ---- Declarations: Impl ----
+
+#[test]
+fn parse_type_and_fn() {
+    let prog = parse("type Point = { x: Int, y: Int }\nfn origin() -> Point = { x: 0, y: 0 }");
+    assert_eq!(prog.decls.len(), 2);
+    assert!(matches!(&prog.decls[0], Decl::Type { .. }));
+    assert!(matches!(&prog.decls[1], Decl::Fn { .. }));
+}
+
+// ---- Statements ----
+
+#[test]
+fn parse_let_stmt_in_block() {
+    let prog = parse("fn f() -> Int = {\n  let x = 1\n  x\n}");
+    assert_eq!(prog.decls.len(), 1);
+}
+
+#[test]
+fn parse_var_stmt() {
+    let prog = parse("fn f() -> Int = {\n  var x = 1\n  x = 2\n  x\n}");
+    assert_eq!(prog.decls.len(), 1);
+}
+
+#[test]
+fn parse_guard_stmt() {
+    let prog = parse("fn f(x: Int) -> Int = {\n  guard x > 0 else 0\n  x\n}");
+    assert_eq!(prog.decls.len(), 1);
+}
+
+// ---- Expressions: while ----
+
+#[test]
+fn parse_while_loop() {
+    let prog = parse("fn f() -> Int = {\n  var x = 0\n  while x < 10 {\n    x = x + 1\n  }\n  x\n}");
+    assert_eq!(prog.decls.len(), 1);
+}
+
+// ---- Expressions: do block ----
+
+#[test]
+fn parse_do_block() {
+    let prog = parse("effect fn f() -> Result[Int, String] = do {\n  let x = ok(1)\n  ok(x)\n}");
+    assert_eq!(prog.decls.len(), 1);
+}
+
+// ---- Expressions: try ----
+
+#[test]
+fn parse_try_expr() {
+    let prog = parse("effect fn f(x: Result[Int, String]) -> Result[Int, String] = {\n  let v = try x\n  ok(v)\n}");
+    assert_eq!(prog.decls.len(), 1);
+}
+
+// ---- Expressions: todo ----
+
+#[test]
+fn parse_todo_expr() {
+    let expr = parse_expr("todo(\"not implemented\")");
+    assert!(matches!(expr, Expr::Todo { .. }));
+}
+
+// ---- Expressions: member access ----
+
+#[test]
+fn parse_member_access() {
+    let expr = parse_expr("point.x");
+    assert!(matches!(expr, Expr::Member { .. }));
+}
+
+// ---- Expressions: index access ----
+
+#[test]
+fn parse_index_access() {
+    let expr = parse_expr("xs[0]");
+    assert!(matches!(expr, Expr::IndexAccess { .. }));
+}
+
+// ---- Expressions: method call ----
+
+#[test]
+fn parse_method_call() {
+    let expr = parse_expr("xs.len()");
+    if let Expr::Call { callee, .. } = &expr {
+        assert!(matches!(callee.as_ref(), Expr::Member { .. }));
+    } else {
+        panic!("expected call, got {:?}", expr);
+    }
+}
+
+// ---- Expressions: spread record ----
+
+#[test]
+fn parse_spread_record() {
+    let expr = parse_expr("{ ...base, x: 1 }");
+    assert!(matches!(expr, Expr::SpreadRecord { .. }));
+}
+
+// ---- Expressions: unary negation ----
+
+#[test]
+fn parse_unary_negation() {
+    let expr = parse_expr("-x");
+    if let Expr::Unary { op, .. } = &expr {
+        assert_eq!(op, "-");
+    } else {
+        panic!("expected unary, got {:?}", expr);
+    }
+}
+
+// ---- Expressions: not ----
+
+#[test]
+fn parse_not_expr() {
+    let expr = parse_expr("not true");
+    if let Expr::Unary { op, .. } = &expr {
+        assert_eq!(op, "not");
+    } else {
+        panic!("expected unary not, got {:?}", expr);
+    }
+}
+
+// ---- Expressions: empty list ----
+
+#[test]
+fn parse_empty_list() {
+    let expr = parse_expr("[]");
+    if let Expr::List { elements, .. } = &expr {
+        assert!(elements.is_empty());
+    } else {
+        panic!("expected list");
+    }
+}
+
+// ---- Expressions: none literal ----
+
+#[test]
+fn parse_none_literal() {
+    let expr = parse_expr("none");
+    assert!(matches!(expr, Expr::None { .. }));
+}
+
+// ---- Expressions: some literal ----
+
+#[test]
+fn parse_some_literal() {
+    let expr = parse_expr("some(42)");
+    assert!(matches!(expr, Expr::Some { .. }));
+}
+
+// ---- Expressions: boolean literals ----
+
+#[test]
+fn parse_bool_literals() {
+    assert!(matches!(parse_expr("true"), Expr::Bool { value: true, .. }));
+    assert!(matches!(parse_expr("false"), Expr::Bool { value: false, .. }));
+}
+
+// ---- Expressions: string literal ----
+
+#[test]
+fn parse_string_literal() {
+    let expr = parse_expr("\"hello\"");
+    assert!(matches!(expr, Expr::String { .. }));
+}
+
+// ---- Expressions: float literal ----
+
+#[test]
+fn parse_float_literal() {
+    let expr = parse_expr("3.14");
+    assert!(matches!(expr, Expr::Float { .. }));
+}
+
+// ---- Expressions: call with no args ----
+
+#[test]
+fn parse_call_no_args() {
+    let expr = parse_expr("f()");
+    if let Expr::Call { args, .. } = &expr {
+        assert!(args.is_empty());
+    } else {
+        panic!("expected call");
+    }
+}
+
+// ---- Expressions: nested call ----
+
+#[test]
+fn parse_nested_calls() {
+    let expr = parse_expr("f(g(x))");
+    assert!(matches!(expr, Expr::Call { .. }));
+}
+
+// ---- Expressions: lambda with typed param ----
+
+#[test]
+fn parse_typed_lambda() {
+    let expr = parse_expr("fn(x: Int) => x + 1");
+    if let Expr::Lambda { params, .. } = &expr {
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].name, "x");
+    } else {
+        panic!("expected lambda");
+    }
+}
+
+// ---- Patterns: wildcard ----
+
+#[test]
+fn parse_wildcard_pattern() {
+    let expr = parse_expr("match x {\n  _ => 0\n}");
+    if let Expr::Match { arms, .. } = &expr {
+        assert!(matches!(&arms[0].pattern, Pattern::Wildcard));
+    } else {
+        panic!("expected match");
+    }
+}
+
+// ---- Patterns: literal ----
+
+#[test]
+fn parse_literal_pattern() {
+    let expr = parse_expr("match x {\n  0 => \"zero\"\n  _ => \"other\"\n}");
+    if let Expr::Match { arms, .. } = &expr {
+        assert!(matches!(&arms[0].pattern, Pattern::Literal { .. }));
+    } else {
+        panic!("expected match");
+    }
+}
+
+// ---- Patterns: ok/err ----
+
+#[test]
+fn parse_ok_err_pattern() {
+    let expr = parse_expr("match r {\n  ok(v) => v\n  err(e) => 0\n}");
+    if let Expr::Match { arms, .. } = &expr {
+        assert!(matches!(&arms[0].pattern, Pattern::Ok { .. }));
+        assert!(matches!(&arms[1].pattern, Pattern::Err { .. }));
+    } else {
+        panic!("expected match");
+    }
+}
+
+// ---- Operator precedence ----
+
+#[test]
+fn parse_precedence_mul_over_add() {
+    let expr = parse_expr("1 + 2 * 3");
+    if let Expr::Binary { op, right, .. } = &expr {
+        assert_eq!(op, "+");
+        assert!(matches!(right.as_ref(), Expr::Binary { op, .. } if op == "*"));
+    } else {
+        panic!("expected binary");
+    }
+}
+
+#[test]
+fn parse_precedence_comparison() {
+    let expr = parse_expr("a + b > c + d");
+    if let Expr::Binary { op, .. } = &expr {
+        assert_eq!(op, ">");
+    } else {
+        panic!("expected comparison");
+    }
+}
+
+#[test]
+fn parse_precedence_and_or() {
+    let expr = parse_expr("a and b or c");
+    // or has lower precedence than and
+    if let Expr::Binary { op, .. } = &expr {
+        assert_eq!(op, "or");
+    } else {
+        panic!("expected or");
+    }
+}
+
+// ---- Chained pipes ----
+
+#[test]
+fn parse_chained_pipe() {
+    let expr = parse_expr("xs |> f() |> g()");
+    assert!(matches!(expr, Expr::Pipe { .. }));
+}
+
+// ---- Import with alias ----
+
+#[test]
+fn parse_import_alias() {
+    let prog = parse("import json as j");
+    if let Decl::Import { path, alias, .. } = &prog.imports[0] {
+        assert_eq!(path, &["json"]);
+        assert_eq!(alias.as_deref(), Some("j"));
+    } else {
+        panic!("expected import");
+    }
+}
+
+// ---- Import basic ----
+
+#[test]
+fn parse_import_basic() {
+    let prog = parse("import math");
+    assert!(!prog.imports.is_empty(), "should parse import");
+}
+
 // ---- Span information ----
 
 #[test]

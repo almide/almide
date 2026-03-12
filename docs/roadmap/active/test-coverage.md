@@ -1,6 +1,8 @@
-# Test Coverage [ACTIVE]
+# Language Test Coverage (`almide test`) [ACTIVE]
 
-Current: 48 test files, 790 test cases. All passing.
+`.almd` language-level tests. Separate from Rust compiler tests (`cargo test`, see [rust-test-coverage.md](./rust-test-coverage.md)).
+
+Current: 59 test files, 1501 test cases. All passing.
 
 ## Goal
 
@@ -10,8 +12,8 @@ Reach **1500+ test cases** with systematic coverage of all language features and
 
 | Area | Current | Target | Notes |
 |------|---------|--------|-------|
-| Language features (lang/) | ~300 | 500 | expressions, control flow, data types, pattern matching |
-| Stdlib (stdlib/) | ~400 | 700 | all 203 functions, edge cases |
+| Language features (lang/) | 502 | 500 | done: expressions, control flow, data types, pattern matching, scope, errors |
+| Stdlib (stdlib/) | 693 | 700 | string(88), list(114), map(28), int(35), float(45), math(33), json(35), regex(34), pipe(20), etc. |
 | Codegen correctness | ~50 | 150 | borrow inference, move analysis, generics emit |
 | Error diagnostics | ~40 | 100 | every error path produces correct message |
 | Cross-target (Rust + TS) | 0 | 50 | same .almd runs on both targets, same output |
@@ -46,6 +48,7 @@ Reach **1500+ test cases** with systematic coverage of all language features and
 
 Track with `almide test 2>&1 | grep "^test " | wc -l` after each release.
 
-| Version | Test Files | Test Cases |
-|---------|-----------|------------|
-| v0.5.0 | 48 | 790 |
+| Version | Test Files | Test Cases | Notes |
+|---------|-----------|------------|-------|
+| v0.5.0 | 48 | 790 | |
+| v0.5.5 | 59 | 1501 | lang 502, stdlib 693, +8 new stdlib test files |

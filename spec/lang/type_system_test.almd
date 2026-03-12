@@ -1,0 +1,361 @@
+// type_system_test — Type system features
+
+// ── Variant types ──
+
+type Direction = | North | South | East | West
+
+fn dir_to_string(d: Direction) -> String = match d {
+  North => "N",
+  South => "S",
+  East => "E",
+  West => "W",
+}
+
+test "variant zero-arg" {
+  assert_eq(dir_to_string(North), "N")
+  assert_eq(dir_to_string(West), "W")
+}
+
+type Expr =
+  | Num(Int)
+  | Add(Int, Int)
+  | Neg(Int)
+
+fn eval(e: Expr) -> Int = match e {
+  Num(n) => n,
+  Add(a, b) => a + b,
+  Neg(n) => -n,
+}
+
+test "variant with tuple payload" {
+  assert_eq(eval(Num(42)), 42)
+  assert_eq(eval(Add(10, 20)), 30)
+  assert_eq(eval(Neg(5)), -5)
+}
+
+// ── Generic functions ──
+
+fn identity[T](x: T) -> T = x
+
+fn first[T](a: T, _b: T) -> T = a
+
+fn pair[A, B](a: A, b: B) -> (A, B) = (a, b)
+
+test "generic function identity" {
+  assert_eq(identity(42), 42)
+  assert_eq(identity("hello"), "hello")
+  assert_eq(identity(true), true)
+}
+
+test "generic function multiple type params" {
+  let p = pair(1, "one")
+  assert_eq(p.0, 1)
+  assert_eq(p.1, "one")
+}
+
+test "explicit type arguments" {
+  assert_eq(identity[Int](99), 99)
+  assert_eq(identity[String]("hi"), "hi")
+  assert_eq(first[Int](1, 2), 1)
+}
+
+// ── Generic record types ──
+
+type Stack[T] = { items: List[T], size: Int }
+
+fn stack_new[T]() -> Stack[T] = { items: [], size: 0 }
+
+fn stack_push[T](s: Stack[T], item: T) -> Stack[T] =
+  { items: s.items ++ [item], size: s.size + 1 }
+
+fn stack_peek[T](s: Stack[T]) -> Option[T] =
+  if s.size == 0 then none
+  else list.get(s.items, s.size - 1)
+
+test "generic record type" {
+  let s = stack_new[Int]()
+  let s = stack_push(s, 10)
+  let s = stack_push(s, 20)
+  assert_eq(s.size, 2)
+  assert_eq(stack_peek(s), some(20))
+}
+
+type Pair[A, B] = { fst: A, snd: B }
+
+fn make_pair[A, B](a: A, b: B) -> Pair[A, B] = { fst: a, snd: b }
+
+fn swap_pair[A, B](p: Pair[A, B]) -> Pair[B, A] = { fst: p.snd, snd: p.fst }
+
+test "generic record swap" {
+  let p = make_pair(1, "one")
+  let s = swap_pair(p)
+  assert_eq(s.fst, "one")
+  assert_eq(s.snd, 1)
+}
+
+// ── Generic variant types ──
+
+type Maybe[T] =
+  | Just(T)
+  | Nothing
+
+fn maybe_map[A, B](m: Maybe[A], f: fn(A) -> B) -> Maybe[B] =
+  match m {
+    Just(v) => Just(f(v)),
+    Nothing => Nothing,
+  }
+
+test "generic variant Just and Nothing" {
+  let x = Just(42)
+  let y = Nothing[Int]()
+  match x {
+    Just(v) => assert_eq(v, 42),
+    Nothing => assert(false, "expected Just"),
+  }
+  match y {
+    Just(_) => assert(false, "expected Nothing"),
+    Nothing => assert(true),
+  }
+}
+
+test "generic variant map" {
+  let m = Just(5)
+  let doubled = maybe_map(m, fn(x: Int) => x * 2)
+  match doubled {
+    Just(v) => assert_eq(v, 10),
+    Nothing => assert(false, "expected Just"),
+  }
+}
+
+// ── Comparison on generic types ──
+
+fn max_of[T](a: T, b: T) -> T = if a > b then a else b
+
+test "comparison on type variable" {
+  assert_eq(max_of(3, 7), 7)
+  assert_eq(max_of(10, 2), 10)
+  assert_eq(max_of("banana", "apple"), "banana")
+}
+
+// ── Named record types ──
+
+type Point = { x: Float, y: Float }
+
+fn distance(a: Point, b: Point) -> Float =
+  float.sqrt((b.x - a.x) ^ 2.0 + (b.y - a.y) ^ 2.0)
+
+test "named record type" {
+  let p: Point = { x: 0.0, y: 0.0 }
+  let q: Point = { x: 3.0, y: 4.0 }
+  assert_eq(distance(p, q), 5.0)
+}
+
+// ── Option and Result ──
+
+test "Option type" {
+  let x: Option[Int] = some(10)
+  let y: Option[Int] = none
+  assert_eq(x, some(10))
+  assert_eq(y, none)
+}
+
+test "Result type" {
+  let x: Result[Int, String] = ok(42)
+  let y: Result[Int, String] = err("bad")
+  assert_eq(x, ok(42))
+  assert_eq(y, err("bad"))
+}
+
+// ── Function types ──
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int = f(x)
+
+test "function type as parameter" {
+  let result = apply(fn(x) => x * 3, 10)
+  assert_eq(result, 30)
+}
+
+fn make_adder(n: Int) -> fn(Int) -> Int = fn(x) => x + n
+
+test "function type as return" {
+  let add5 = make_adder(5)
+  assert_eq(add5(10), 15)
+  assert_eq(add5(0), 5)
+}
+
+// ── Tuple types ──
+
+fn halves(s: String) -> (String, Int) = {
+  let n = string.len(s)
+  (s, n)
+}
+
+test "tuple return type" {
+  let (s, n) = halves("abcd")
+  assert_eq(s, "abcd")
+  assert_eq(n, 4)
+}
+
+// ── Additional type system tests ──
+
+fn wrap[T](x: T) -> Option[T] = some(x)
+
+fn unwrap_or[T](opt: Option[T], default: T) -> T =
+  match opt {
+    some(v) => v,
+    none => default,
+  }
+
+test "generic wrap and unwrap" {
+  assert_eq(unwrap_or(wrap(42), 0), 42)
+  assert_eq(unwrap_or(wrap("hi"), ""), "hi")
+  assert_eq(unwrap_or[Int](none, 99), 99)
+}
+
+fn map_result[A, B](r: Result[A, String], f: fn(A) -> B) -> Result[B, String] =
+  match r {
+    ok(v) => ok(f(v)),
+    err(e) => err(e),
+  }
+
+test "generic result mapping" {
+  let r: Result[Int, String] = ok(5)
+  let mapped = map_result(r, fn(x) => x * 2)
+  assert_eq(mapped, ok(10))
+  let e: Result[Int, String] = err("fail")
+  let mapped2 = map_result(e, fn(x) => x * 2)
+  assert_eq(mapped2, err("fail"))
+}
+
+type Tree[T] =
+  | Leaf(T)
+  | Node(T, List[T])
+
+fn tree_value[T](t: Tree[T]) -> T = match t {
+  Leaf(v) => v,
+  Node(v, _) => v,
+}
+
+test "generic variant type" {
+  let t1 = Leaf(42)
+  let t2 = Node("root", ["a", "b", "c"])
+  assert_eq(tree_value(t1), 42)
+  assert_eq(tree_value(t2), "root")
+}
+
+fn option_chain[A, B](opt: Option[A], f: fn(A) -> Option[B]) -> Option[B] =
+  match opt {
+    some(v) => f(v),
+    none => none,
+  }
+
+test "option chaining" {
+  let x = some(10)
+  let result = option_chain(x, fn(n) => if n > 5 then some(n * 2) else none)
+  assert_eq(result, some(20))
+  let result2 = option_chain(x, fn(n) => if n > 20 then some(n * 2) else none)
+  assert_eq(result2, none)
+  let empty: Option[Int] = none
+  let result3 = option_chain(empty, fn(n) => some(n * 2))
+  assert_eq(result3, none)
+}
+
+type Container[T] = { items: List[T], label: String }
+
+fn container_len[T](c: Container[T]) -> Int = list.len(c.items)
+
+fn container_add[T](c: Container[T], item: T) -> Container[T] =
+  { items: c.items ++ [item], label: c.label }
+
+fn make_container[T](label: String) -> Container[T] = { items: [], label: label }
+
+test "generic record operations" {
+  let c = make_container[Int]("numbers")
+  let c = container_add(c, 1)
+  let c = container_add(c, 2)
+  let c = container_add(c, 3)
+  assert_eq(c.label, "numbers")
+}
+
+type Either[A, B] =
+  | Left(A)
+  | Right(B)
+
+fn either_map_right[A, B, C](e: Either[A, B], f: fn(B) -> C) -> Either[A, C] =
+  match e {
+    Left(a) => Left(a),
+    Right(b) => Right(f(b)),
+  }
+
+fn make_right(n: Int) -> Either[String, Int] = Right(n)
+fn make_left(s: String) -> Either[String, Int] = Left(s)
+
+test "generic variant with map right" {
+  let e1 = make_right(5)
+  let mapped = either_map_right(e1, fn(x) => x * 10)
+  let r1 = match mapped {
+    Right(v) => v,
+    Left(_) => -1,
+  }
+  assert_eq(r1, 50)
+}
+
+test "generic variant with map left" {
+  let e2 = make_left("error")
+  let mapped2 = either_map_right(e2, fn(x) => x * 10)
+  let r2 = match mapped2 {
+    Left(s) => s,
+    Right(_) => "unexpected",
+  }
+  assert_eq(r2, "error")
+}
+
+fn head_or[T](xs: List[T], default: T) -> T =
+  match list.get(xs, 0) {
+    some(v) => v,
+    none => default,
+  }
+
+test "generic function with list param" {
+  assert_eq(head_or([1, 2, 3], 0), 1)
+  assert_eq(head_or([], 99), 99)
+  assert_eq(head_or(["a", "b"], "z"), "a")
+}
+
+fn const_fn[A, B](a: A, _b: B) -> A = a
+
+test "generic function ignoring param" {
+  assert_eq(const_fn(42, "ignored"), 42)
+  assert_eq(const_fn("kept", 999), "kept")
+  assert_eq(const_fn(true, [1, 2, 3]), true)
+}
+
+test "stack push and peek multiple" {
+  let s = stack_new[String]()
+  let s = stack_push(s, "a")
+  let s = stack_push(s, "b")
+  let s = stack_push(s, "c")
+  assert_eq(s.size, 3)
+  assert_eq(s.items, ["a", "b", "c"])
+}
+
+test "maybe map chain" {
+  let m = Just(3)
+  let result = maybe_map(maybe_map(m, fn(x: Int) => x + 1), fn(x: Int) => x * 10)
+  match result {
+    Just(v) => assert_eq(v, 40),
+    Nothing => assert(false, "expected Just"),
+  }
+}
+
+test "named record type with spread" {
+  let p1: Point = { x: 1.0, y: 2.0 }
+  let p2: Point = { ...p1, y: 5.0 }
+  assert_eq(p2.x, 1.0)
+  assert_eq(p2.y, 5.0)
+}
+
+test "max_of with more values" {
+  assert_eq(max_of(max_of(1, 5), max_of(3, 2)), 5)
+  assert_eq(max_of("z", "a"), "z")
+}

@@ -244,7 +244,7 @@ impl Checker {
                 }
                 VariantPayload::Record(_) => {}
             }
-            return Ty::Named(type_name);
+            return Ty::Named(type_name, vec![]);
         }
         Ty::Unknown
     }

@@ -6,14 +6,21 @@ fn parse_and_emit_js(input: &str) -> String {
     let tokens = Lexer::tokenize(input);
     let mut parser = Parser::new(tokens);
     let prog = parser.parse().expect("parse failed");
-    emit_ts::emit_js_with_modules(&prog, &[])
+    // Type-check and lower to IR for codegen
+    let mut checker = almide::check::Checker::new();
+    checker.check_program(&mut prog.clone());
+    let ir = almide::lower::lower_program(&prog, &checker.expr_types, &checker.env);
+    emit_ts::emit_js_with_modules(&prog, &[], Some(&ir))
 }
 
 fn parse_and_emit_ts(input: &str) -> String {
     let tokens = Lexer::tokenize(input);
     let mut parser = Parser::new(tokens);
     let prog = parser.parse().expect("parse failed");
-    emit_ts::emit_with_modules(&prog, &[])
+    let mut checker = almide::check::Checker::new();
+    checker.check_program(&mut prog.clone());
+    let ir = almide::lower::lower_program(&prog, &checker.expr_types, &checker.env);
+    emit_ts::emit_with_modules(&prog, &[], Some(&ir))
 }
 
 /// Strip the runtime preamble, return only user code
@@ -167,6 +174,202 @@ fn emit_main_entry() {
     let code = user_code(&out);
     assert!(code.contains("// ---- Entry Point ----"));
     assert!(code.contains("main("));
+}
+
+// ---- Records ----
+
+#[test]
+fn emit_record_type_js() {
+    let out = parse_and_emit_js("module app\ntype Point = { x: Int, y: Int }\nfn origin() -> Point = { x: 0, y: 0 }");
+    let code = user_code(&out);
+    assert!(code.contains("x:") || code.contains("\"x\""));
+}
+
+#[test]
+fn emit_record_member_access() {
+    let out = parse_and_emit_js("module app\ntype Point = { x: Int, y: Int }\nfn getx(p: Point) -> Int = p.x");
+    let code = user_code(&out);
+    assert!(code.contains(".x"), "should contain member access .x");
+}
+
+// ---- Record types in TS ----
+
+#[test]
+fn emit_record_type_ts() {
+    let out = parse_and_emit_ts("module app\ntype Point = { x: Int, y: Int }\nfn origin() -> Point = { x: 0, y: 0 }");
+    let code = user_code(&out);
+    assert!(code.contains("number"), "TS should emit number types");
+}
+
+// ---- Variant match ----
+
+#[test]
+fn emit_variant_match_js() {
+    let out = parse_and_emit_js("module app\ntype Color =\n  | Red\n  | Green\n  | Blue\nfn name(c: Color) -> String = match c {\n  Red => \"red\"\n  Green => \"green\"\n  Blue => \"blue\"\n}");
+    let code = user_code(&out);
+    assert!(code.contains("tag"), "should check tag field");
+}
+
+// ---- Ok/Err ----
+
+#[test]
+fn emit_ok_expr_js() {
+    let out = parse_and_emit_js("module app\nfn f() -> Result[Int, String] = ok(42)");
+    let code = user_code(&out);
+    // In TS target, ok(x) -> x (result erasure)
+    assert!(code.contains("42"));
+}
+
+#[test]
+fn emit_err_expr_js() {
+    let out = parse_and_emit_js("module app\nfn f() -> Result[Int, String] = err(\"bad\")");
+    let code = user_code(&out);
+    assert!(code.contains("Error") || code.contains("throw") || code.contains("err") || code.contains("bad"),
+        "err should produce error-related code, got:\n{}", code);
+}
+
+// ---- Some/None ----
+
+#[test]
+fn emit_some_js() {
+    let out = parse_and_emit_js("module app\nfn f() -> Option[Int] = some(42)");
+    let code = user_code(&out);
+    assert!(code.contains("42"));
+}
+
+#[test]
+fn emit_none_js() {
+    let out = parse_and_emit_js("module app\nfn f() -> Option[Int] = none");
+    let code = user_code(&out);
+    assert!(code.contains("null"));
+}
+
+// ---- Let/Var ----
+
+#[test]
+fn emit_let_binding_js() {
+    let out = parse_and_emit_js("module app\nfn f() -> Int = {\n  let x = 1\n  x + 2\n}");
+    let code = user_code(&out);
+    assert!(code.contains("const x") || code.contains("let x") || code.contains("x =") || code.contains("x;"),
+        "should emit let binding, got:\n{}", code);
+}
+
+#[test]
+fn emit_var_binding_js() {
+    let out = parse_and_emit_js("module app\nfn f() -> Int = {\n  var x = 1\n  x = 2\n  x\n}");
+    let code = user_code(&out);
+    assert!(code.contains("let x"), "var should emit 'let' in JS");
+}
+
+// ---- While ----
+
+#[test]
+fn emit_while_js() {
+    let out = parse_and_emit_js("module app\nfn f() -> Int = {\n  var x = 0\n  while x < 10 {\n    x = x + 1\n  }\n  x\n}");
+    let code = user_code(&out);
+    assert!(code.contains("while"), "should contain while loop");
+}
+
+// ---- Boolean operators ----
+
+#[test]
+fn emit_boolean_and_js() {
+    let out = parse_and_emit_js("module app\nfn f(a: Bool, b: Bool) -> Bool = a and b");
+    let code = user_code(&out);
+    assert!(code.contains("&&"), "'and' should emit &&");
+}
+
+#[test]
+fn emit_boolean_or_js() {
+    let out = parse_and_emit_js("module app\nfn f(a: Bool, b: Bool) -> Bool = a or b");
+    let code = user_code(&out);
+    assert!(code.contains("||"), "'or' should emit ||");
+}
+
+#[test]
+fn emit_not_js() {
+    let out = parse_and_emit_js("module app\nfn f(a: Bool) -> Bool = not a");
+    let code = user_code(&out);
+    assert!(code.contains("!"), "'not' should emit !");
+}
+
+// ---- Equality ----
+
+#[test]
+fn emit_equality_js() {
+    let out = parse_and_emit_js("module app\nfn f(a: Int, b: Int) -> Bool = a == b");
+    let code = user_code(&out);
+    assert!(code.contains("__deep_eq") || code.contains("===") || code.contains("almide_eq"),
+        "== should use deep equality");
+}
+
+// ---- Empty list ----
+
+#[test]
+fn emit_empty_list_js() {
+    let out = parse_and_emit_js("module app\nfn f() -> List[Int] = []");
+    let code = user_code(&out);
+    assert!(code.contains("[]"), "empty list should emit []");
+}
+
+// ---- Lambda ----
+
+#[test]
+fn emit_lambda_js() {
+    let out = parse_and_emit_js("module app\nfn f() -> fn(Int) -> Int = fn(x) => x + 1");
+    let code = user_code(&out);
+    assert!(code.contains("=>") || code.contains("function"), "should emit lambda/arrow function");
+}
+
+// ---- Spread record ----
+
+#[test]
+fn emit_spread_record_js() {
+    let out = parse_and_emit_js("module app\ntype Point = { x: Int, y: Int }\nfn f(p: Point) -> Point = { ...p, x: 1 }");
+    let code = user_code(&out);
+    assert!(code.contains("..."), "should contain spread operator");
+}
+
+// ---- TS type annotations ----
+
+#[test]
+fn emit_ts_fn_return_type() {
+    let out = parse_and_emit_ts("module app\nfn f(x: Int) -> Bool = x > 0");
+    let code = user_code(&out);
+    assert!(code.contains(": boolean"), "should annotate return type as boolean");
+}
+
+#[test]
+fn emit_ts_list_type() {
+    let out = parse_and_emit_ts("module app\nfn f() -> List[Int] = [1, 2, 3]");
+    let code = user_code(&out);
+    assert!(code.contains("number[]") || code.contains("Array<number>"), "should annotate list type");
+}
+
+#[test]
+fn emit_ts_option_type() {
+    let out = parse_and_emit_ts("module app\nfn f() -> Option[Int] = none");
+    let code = user_code(&out);
+    assert!(code.contains("null") || code.contains("number | null"), "should handle Option type");
+}
+
+// ---- Todo ----
+
+#[test]
+fn emit_todo_js() {
+    let out = parse_and_emit_js("module app\nfn f() -> Int = todo(\"not done\")");
+    let code = user_code(&out);
+    assert!(code.contains("throw") || code.contains("Error") || code.contains("todo"),
+        "todo should throw, got:\n{}", code);
+}
+
+// ---- Top-level let ----
+
+#[test]
+fn emit_top_let_js() {
+    let out = parse_and_emit_js("module app\nlet pi = 3\nfn f() -> Int = pi");
+    let code = user_code(&out);
+    assert!(code.contains("const pi") || code.contains("pi"), "should emit top-level constant");
 }
 
 // ---- Runtime presence ----

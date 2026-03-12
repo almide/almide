@@ -76,6 +76,217 @@ fn fmt_tuple_pattern() {
     assert!(out.contains("(a, b) =>"));
 }
 
+// ---- Idempotency ----
+
+#[test]
+fn fmt_idempotent_simple_fn() {
+    let input = "fn add(a: Int, b: Int) -> Int = a + b";
+    let first = roundtrip(input);
+    let second = roundtrip(&first);
+    assert_eq!(first, second, "formatter should be idempotent");
+}
+
+#[test]
+fn fmt_idempotent_match() {
+    let input = "fn f(x: Option[Int]) -> Int = match x {\n  some(v) => v\n  none => 0\n}";
+    let first = roundtrip(input);
+    let second = roundtrip(&first);
+    assert_eq!(first, second);
+}
+
+#[test]
+fn fmt_idempotent_block() {
+    let input = "fn f() -> Int = {\n  let x = 1\n  let y = 2\n  x + y\n}";
+    let first = roundtrip(input);
+    let second = roundtrip(&first);
+    assert_eq!(first, second);
+}
+
+#[test]
+fn fmt_idempotent_variant_type() {
+    let input = "type Shape =\n  | Circle(Float)\n  | Rect(Float, Float)";
+    let first = roundtrip(input);
+    let second = roundtrip(&first);
+    assert_eq!(first, second);
+}
+
+// ---- Records ----
+
+#[test]
+fn fmt_record_type() {
+    let out = roundtrip("type Point = { x: Int, y: Int }");
+    assert!(out.contains("type Point ="));
+    assert!(out.contains("x: Int"));
+    assert!(out.contains("y: Int"));
+}
+
+#[test]
+fn fmt_record_literal() {
+    let out = roundtrip("fn f() -> { x: Int, y: Int } = { x: 1, y: 2 }");
+    assert!(out.contains("{ x: 1, y: 2 }"));
+}
+
+#[test]
+fn fmt_empty_record() {
+    let out = roundtrip("fn f() -> { x: Int } = {}");
+    // Empty record should parse and format without crashing
+    assert!(out.contains("fn f"), "should contain function, got:\n{}", out);
+}
+
+// ---- Spread record ----
+
+#[test]
+fn fmt_spread_record() {
+    let out = roundtrip("fn f(p: { x: Int, y: Int }) -> { x: Int, y: Int } = { ...p, x: 1 }");
+    assert!(out.contains("...p"));
+    assert!(out.contains("x: 1"));
+}
+
+// ---- Lists ----
+
+#[test]
+fn fmt_empty_list() {
+    let out = roundtrip("fn f() -> List[Int] = []");
+    assert!(out.contains("[]"));
+}
+
+#[test]
+fn fmt_list_literal() {
+    let out = roundtrip("fn f() -> List[Int] = [1, 2, 3]");
+    assert!(out.contains("[1, 2, 3]"));
+}
+
+// ---- Expressions ----
+
+#[test]
+fn fmt_pipe() {
+    let out = roundtrip("fn f(xs: List[Int]) -> List[Int] = xs |> list.filter(fn(x) => x > 0)");
+    assert!(out.contains("|>"));
+}
+
+#[test]
+fn fmt_binary_ops() {
+    let out = roundtrip("fn f(a: Int, b: Int) -> Int = a + b * 2");
+    assert!(out.contains("a + b * 2"));
+}
+
+#[test]
+fn fmt_concat_ops() {
+    let out = roundtrip("fn f() -> String = \"hello\" ++ \" world\"");
+    assert!(out.contains("++"));
+}
+
+#[test]
+fn fmt_unary_negation() {
+    let out = roundtrip("fn f(x: Int) -> Int = -x");
+    assert!(out.contains("-x"));
+}
+
+#[test]
+fn fmt_not() {
+    let out = roundtrip("fn f(x: Bool) -> Bool = not x");
+    assert!(out.contains("not x"));
+}
+
+#[test]
+fn fmt_range() {
+    let out = roundtrip("fn f() -> List[Int] = 0..10");
+    assert!(out.contains("0..10"));
+}
+
+#[test]
+fn fmt_range_inclusive() {
+    let out = roundtrip("fn f() -> List[Int] = 1..=10");
+    assert!(out.contains("1..=10"));
+}
+
+// ---- Result/Option ----
+
+#[test]
+fn fmt_ok_err() {
+    let out = roundtrip("fn f() -> Result[Int, String] = ok(42)");
+    assert!(out.contains("ok(42)"));
+    let out = roundtrip("fn f() -> Result[Int, String] = err(\"bad\")");
+    assert!(out.contains("err(\"bad\")"));
+}
+
+#[test]
+fn fmt_some_none() {
+    let out = roundtrip("fn f() -> Option[Int] = some(42)");
+    assert!(out.contains("some(42)"));
+    let out = roundtrip("fn f() -> Option[Int] = none");
+    assert!(out.contains("none"));
+}
+
+// ---- Declarations ----
+
+#[test]
+fn fmt_effect_fn() {
+    let out = roundtrip("effect fn main(args: List[String]) -> Result[Unit, String] = ok(())");
+    assert!(out.contains("effect fn main"));
+}
+
+#[test]
+fn fmt_top_let() {
+    let out = roundtrip("let pi = 3");
+    assert!(out.contains("let pi = 3"));
+}
+
+// ---- Member/Index access ----
+
+#[test]
+fn fmt_member_access() {
+    let out = roundtrip("fn f(p: { x: Int }) -> Int = p.x");
+    assert!(out.contains("p.x"));
+}
+
+#[test]
+fn fmt_index_access() {
+    let out = roundtrip("fn f(xs: List[Int]) -> Int = xs[0]");
+    assert!(out.contains("xs[0]"));
+}
+
+// ---- While ----
+
+#[test]
+fn fmt_while() {
+    let out = roundtrip("fn f() -> Int = {\n  var x = 0\n  while x < 10 {\n    x = x + 1\n  }\n  x\n}");
+    assert!(out.contains("while"));
+}
+
+// ---- Generic types ----
+
+#[test]
+fn fmt_generic_type() {
+    let out = roundtrip("fn f(x: List[Option[Int]]) -> List[Option[Int]] = x");
+    assert!(out.contains("List[Option[Int]]"));
+}
+
+// ---- Fn type ----
+
+#[test]
+fn fmt_fn_type() {
+    let out = roundtrip("fn apply(f: fn(Int) -> Int, x: Int) -> Int = f(x)");
+    assert!(out.contains("fn(Int) -> Int") || out.contains("(Int) -> Int"));
+}
+
+// ---- Todo ----
+
+#[test]
+fn fmt_todo() {
+    let out = roundtrip("fn f() -> Int = todo(\"not done\")");
+    assert!(out.contains("todo(\"not done\")"));
+}
+
+// ---- Impl block ----
+
+#[test]
+fn fmt_impl_block() {
+    // NOTE: formatter does not yet emit impl blocks; verify it doesn't crash
+    let out = roundtrip("type Greeter = { name: String }\nimpl Greeter {\n  fn greet(self: Greeter) -> String = self.name\n}");
+    assert!(out.contains("Greeter"), "should at least contain the type, got:\n{}", out);
+}
+
 // ---- Comment preservation ----
 
 #[test]

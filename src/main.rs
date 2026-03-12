@@ -119,6 +119,9 @@ enum Commands {
         /// Emit AST as JSON
         #[arg(long)]
         emit_ast: bool,
+        /// Emit typed IR as JSON
+        #[arg(long)]
+        emit_ir: bool,
         /// Skip type checking
         #[arg(long)]
         no_check: bool,
@@ -161,10 +164,10 @@ fn parse_file(file: &str) -> ast::Program {
 }
 
 fn compile(file: &str, no_check: bool) -> String {
-    compile_with_options(file, no_check, &emit_rust::EmitOptions::default(), None)
+    compile_with_options(file, no_check, &emit_rust::EmitOptions::default(), None).0
 }
 
-fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::EmitOptions, build_target: Option<&str>) -> String {
+fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::EmitOptions, build_target: Option<&str>) -> (String, Option<almide::ir::IrProgram>) {
     let mut program = parse_file(file);
 
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
@@ -181,7 +184,7 @@ fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::Em
         vec![]
     };
 
-    let resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
+    let mut resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
         .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
 
     let import_aliases: Vec<(String, String)> = program.imports.iter().filter_map(|imp| {
@@ -199,6 +202,8 @@ fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::Em
         }
     }).collect();
 
+    let mut ir_program = None;
+    let mut module_irs = std::collections::HashMap::new();
     if !no_check {
         let source_text = std::fs::read_to_string(file).unwrap_or_default();
         let mut checker = check::Checker::new();
@@ -226,9 +231,19 @@ fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::Em
         for d in diagnostics.iter().filter(|d| d.level == diagnostic::Level::Warning) {
             eprintln!("{}", d.display_with_source(&source_text));
         }
+        // Lower to IR after successful type checking
+        ir_program = Some(almide::lower::lower_program(&program, &checker.expr_types, &checker.env));
+        // Lower user modules to IR (skip TOML-defined stdlib — they use generated codegen)
+        for (name, mod_prog, _, _) in &mut resolved.modules {
+            if almide::stdlib::is_stdlib_module(name) { continue; }
+            let mod_types = checker.check_module_bodies(mod_prog);
+            let mod_ir = almide::lower::lower_program(mod_prog, &mod_types, &checker.env);
+            module_irs.insert(name.clone(), mod_ir);
+        }
     }
 
-    emit_rust::emit_with_options(&program, &resolved.modules, emit_options, &import_aliases)
+    let code = emit_rust::emit_with_options(&program, &resolved.modules, emit_options, &import_aliases, ir_program.as_ref(), &module_irs);
+    (code, ir_program)
 }
 
 fn collect_almd_files(dir: &std::path::Path, out: &mut Vec<String>) {
@@ -348,8 +363,8 @@ fn dispatch(cli: Cli) {
                 eprintln!("No almide.toml found");
             }
         }
-        Commands::Emit { file, target, emit_ast, no_check } => {
-            cli::cmd_emit(&file, &target, emit_ast, no_check);
+        Commands::Emit { file, target, emit_ast, emit_ir, no_check } => {
+            cli::cmd_emit(&file, &target, emit_ast, emit_ir, no_check);
         }
     }
 }
