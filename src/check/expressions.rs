@@ -17,7 +17,7 @@ fn ty_to_resolved(ty: &Ty) -> ResolvedType {
         Ty::Variant { .. } => ResolvedType::Variant,
         Ty::Fn { .. } => ResolvedType::Fn,
         Ty::Tuple(_) => ResolvedType::Tuple,
-        Ty::Named(_) => ResolvedType::Named,
+        Ty::Named(..) => ResolvedType::Named,
         Ty::TypeVar(_) => ResolvedType::Named,
         Ty::Unknown => ResolvedType::Unknown,
     }
@@ -103,7 +103,7 @@ impl Checker {
                     return ty;
                 }
                 if self.env.constructors.contains_key(name) { return Ty::Unknown; }
-                Ty::Named(name.clone())
+                Ty::Named(name.clone(), vec![])
             }
 
             ast::Expr::List { elements, .. } => {
@@ -164,7 +164,7 @@ impl Checker {
                             if let Some(ty) = self.env.types.get(&vname) {
                                 return ty.clone();
                             }
-                            return Ty::Named(vname);
+                            return Ty::Named(vname, vec![]);
                         }
                     }
                 }

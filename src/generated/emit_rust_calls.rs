@@ -127,7 +127,7 @@ pub fn gen_generated_call(
             },
             ("list", "each") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
-                format!("almide_rt_list_each(&{}, |{}| {{{{ {} ; }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body)
+                format!("almide_rt_list_each(&{}, |{}| {{{{ {}{} ; }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
             },
             ("list", "enumerate") => format!("almide_rt_list_enumerate(({}).to_vec())", args_str[0]),
             ("list", "filter") => {
@@ -136,7 +136,7 @@ pub fn gen_generated_call(
             },
             ("list", "filter_map") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
-                format!("almide_rt_list_filter_map(({}).to_vec(), |{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body)
+                format!("almide_rt_list_filter_map(({}).to_vec(), |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
             },
             ("list", "find") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
@@ -149,18 +149,18 @@ pub fn gen_generated_call(
             ("list", "first") => format!("almide_rt_list_first(&{})", args_str[0]),
             ("list", "flat_map") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
-                if in_effect && __cl_f_body.contains("?") { format!("almide_rt_list_flat_map_effect(({}).to_vec(), |{}| -> Result<Vec<_>, String> {{{{ Ok({{{{ {} }}}}) }}}})?", args_str[0], __cl_f_names.join(", "), __cl_f_body) } else { format!("almide_rt_list_flat_map(({}).to_vec(), |{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body) }
+                if in_effect && __cl_f_body.contains("?") { format!("almide_rt_list_flat_map_effect(({}).to_vec(), |{}| -> Result<Vec<_>, String> {{{{ Ok({{{{ {}{} }}}}) }}}})?", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body) } else { format!("almide_rt_list_flat_map(({}).to_vec(), |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body) }
             },
             ("list", "flatten") => format!("almide_rt_list_flatten(({}).to_vec())", args_str[0]),
             ("list", "fold") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(2, 2);
-                if in_effect && __cl_f_body.contains("?") { format!("almide_rt_list_fold_effect(({}).to_vec(), {}, |{}| -> Result<_, String> {{{{ Ok({{{{ {} }}}}) }}}})?", args_str[0], args_str[1], __cl_f_names.join(", "), __cl_f_body) } else { format!("almide_rt_list_fold(({}).to_vec(), {}, |{}| {{{{ {} }}}})", args_str[0], args_str[1], __cl_f_names.join(", "), __cl_f_body) }
+                if in_effect && __cl_f_body.contains("?") { format!("almide_rt_list_fold_effect(({}).to_vec(), {}, |{}| -> Result<_, String> {{{{ Ok({{{{ {}{} }}}}) }}}})?", args_str[0], args_str[1], __cl_f_names.join(", "), __cl_f_names.iter().map(|n| format!("let {} = {}.clone(); ", n, n)).collect::<Vec<_>>().join(""), __cl_f_body) } else { format!("almide_rt_list_fold(({}).to_vec(), {}, |{}| {{{{ {}{} }}}})", args_str[0], args_str[1], __cl_f_names.join(", "), __cl_f_names.iter().map(|n| format!("let {} = {}.clone(); ", n, n)).collect::<Vec<_>>().join(""), __cl_f_body) }
             },
             ("list", "get") => format!("almide_rt_list_get(&{}, {})", args_str[0], args_str[1]),
             ("list", "get_or") => format!("almide_rt_list_get_or(&{}, {}, {})", args_str[0], args_str[1], args_str[2]),
             ("list", "group_by") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
-                format!("almide_rt_list_group_by(({}).to_vec(), |{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body)
+                format!("almide_rt_list_group_by(({}).to_vec(), |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
             },
             ("list", "index_of") => format!("almide_rt_list_index_of(&{}, &{})", args_str[0], args_str[1]),
             ("list", "insert") => format!("almide_rt_list_insert(({}).to_vec(), {}, {})", args_str[0], args_str[1], args_str[2]),
@@ -172,7 +172,7 @@ pub fn gen_generated_call(
             ("list", "len") => format!("almide_rt_list_len(&{})", args_str[0]),
             ("list", "map") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
-                if in_effect && __cl_f_body.contains("?") { format!("almide_rt_list_map_effect(({}).to_vec(), |{}| -> Result<_, String> {{{{ Ok({{{{ {} }}}}) }}}})?", args_str[0], __cl_f_names.join(", "), __cl_f_body) } else { format!("almide_rt_list_map(({}).to_vec(), |{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body) }
+                if in_effect && __cl_f_body.contains("?") { format!("almide_rt_list_map_effect(({}).to_vec(), |{}| -> Result<_, String> {{{{ Ok({{{{ {}{} }}}}) }}}})?", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body) } else { format!("almide_rt_list_map(({}).to_vec(), |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body) }
             },
             ("list", "max") => format!("almide_rt_list_max(&{})", args_str[0]),
             ("list", "min") => format!("almide_rt_list_min(&{})", args_str[0]),
@@ -184,21 +184,21 @@ pub fn gen_generated_call(
             ("list", "range") => format!("almide_rt_list_range({}, {})", args_str[0], args_str[1]),
             ("list", "reduce") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 2);
-                format!("almide_rt_list_reduce(({}).to_vec(), |{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body)
+                format!("almide_rt_list_reduce(({}).to_vec(), |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_names.iter().map(|n| format!("let {} = {}.clone(); ", n, n)).collect::<Vec<_>>().join(""), __cl_f_body)
             },
             ("list", "remove_at") => format!("almide_rt_list_remove_at(({}).to_vec(), {})", args_str[0], args_str[1]),
             ("list", "repeat") => format!("almide_rt_list_repeat({}, {})", args_str[0], args_str[1]),
             ("list", "reverse") => format!("almide_rt_list_reverse(&{})", args_str[0]),
             ("list", "scan") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(2, 2);
-                format!("almide_rt_list_scan(({}).to_vec(), {}, |{}| {{{{ {} }}}})", args_str[0], args_str[1], __cl_f_names.join(", "), __cl_f_body)
+                format!("almide_rt_list_scan(({}).to_vec(), {}, |{}| {{{{ {}{} }}}})", args_str[0], args_str[1], __cl_f_names.join(", "), __cl_f_names.iter().map(|n| format!("let {} = {}.clone(); ", n, n)).collect::<Vec<_>>().join(""), __cl_f_body)
             },
             ("list", "set") => format!("almide_rt_list_set(&{}, {}, {})", args_str[0], args_str[1], args_str[2]),
             ("list", "slice") => format!("almide_rt_list_slice(({}).to_vec(), {}, {})", args_str[0], args_str[1], args_str[2]),
             ("list", "sort") => format!("almide_rt_list_sort(&{})", args_str[0]),
             ("list", "sort_by") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
-                format!("almide_rt_list_sort_by(({}).to_vec(), |{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body)
+                format!("almide_rt_list_sort_by(({}).to_vec(), |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
             },
             ("list", "sum") => format!("almide_rt_list_sum(&{})", args_str[0]),
             ("list", "swap") => format!("almide_rt_list_swap(&{}, {}, {})", args_str[0], args_str[1], args_str[2]),
@@ -210,13 +210,13 @@ pub fn gen_generated_call(
             ("list", "unique") => format!("almide_rt_list_unique(&{})", args_str[0]),
             ("list", "update") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(2, 1);
-                format!("almide_rt_list_update(({}).to_vec(), {}, |{}| {{{{ {} }}}})", args_str[0], args_str[1], __cl_f_names.join(", "), __cl_f_body)
+                format!("almide_rt_list_update(({}).to_vec(), {}, |{}| {{{{ {}{} }}}})", args_str[0], args_str[1], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
             },
             ("list", "windows") => format!("almide_rt_list_windows(&{}, {})", args_str[0], args_str[1]),
             ("list", "zip") => format!("almide_rt_list_zip(({}).to_vec(), ({}).to_vec())", args_str[0], args_str[1]),
             ("list", "zip_with") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(2, 2);
-                format!("almide_rt_list_zip_with(({}).to_vec(), ({}).to_vec(), |{}| {{{{ {} }}}})", args_str[0], args_str[1], __cl_f_names.join(", "), __cl_f_body)
+                format!("almide_rt_list_zip_with(({}).to_vec(), ({}).to_vec(), |{}| {{{{ {}{} }}}})", args_str[0], args_str[1], __cl_f_names.join(", "), __cl_f_names.iter().map(|n| format!("let {} = {}.clone(); ", n, n)).collect::<Vec<_>>().join(""), __cl_f_body)
             },
             ("map", "contains") => format!("almide_rt_map_contains(&{}, &{})", args_str[0], args_str[1]),
             ("map", "entries") => format!("almide_rt_map_entries(&{})", args_str[0]),
@@ -227,7 +227,7 @@ pub fn gen_generated_call(
             ("map", "from_entries") => format!("almide_rt_map_from_entries(({}).to_vec())", args_str[0]),
             ("map", "from_list") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
-                format!("almide_rt_map_from_list(({}).to_vec(), |{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body)
+                format!("almide_rt_map_from_list(({}).to_vec(), |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
             },
             ("map", "get") => format!("almide_rt_map_get(&{}, &{})", args_str[0], args_str[1]),
             ("map", "get_or") => format!("almide_rt_map_get_or(&{}, &{}, {})", args_str[0], args_str[1], args_str[2]),

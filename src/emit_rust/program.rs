@@ -100,11 +100,11 @@ impl Emitter {
         }
     }
 
-    /// Collect top-level let constant names so they can be referenced without clone.
+    /// Collect top-level let names. The bool (needs_deref) is set later during emit.
     fn collect_top_lets(&mut self, decls: &[Decl]) {
         for decl in decls {
             if let Decl::TopLet { name, .. } = decl {
-                self.top_let_names.insert(name.clone());
+                self.top_let_names.insert(name.clone(), false);
             }
         }
     }
@@ -456,10 +456,23 @@ impl Emitter {
                     let ty_str = if let Some(te) = ty {
                         self.gen_type(te)
                     } else {
-                        self.ir_ty_to_rust(&ir_tl.ty)
+                        // Infer type from the IR expression when checker type is Int but value is float
+                        let inferred = self.ir_ty_to_rust(&ir_tl.ty);
+                        // If the value contains float literals/ops, use f64
+                        if inferred == "i64" && self.ir_expr_contains_float(&ir_tl.value) {
+                            "f64".to_string()
+                        } else {
+                            inferred
+                        }
                     };
                     let val_str = self.gen_ir_expr(&ir_tl.value);
-                    self.emitln(&format!("const {}: {} = {};", name, ty_str, val_str));
+                    let use_lazy = ty_str == "String" || !self.ir_expr_is_const(&ir_tl.value);
+                    if use_lazy {
+                        self.top_let_names.insert(name.clone(), true);
+                        self.emitln(&format!("static {}: std::sync::LazyLock<{}> = std::sync::LazyLock::new(|| {});", name, ty_str, val_str));
+                    } else {
+                        self.emitln(&format!("const {}: {} = {};", name, ty_str, val_str));
+                    }
                 }
             }
             Decl::Impl { trait_, for_, methods, .. } => {
@@ -742,6 +755,30 @@ impl Emitter {
     fn find_ir_top_let(&self, name: &str) -> Option<&almide::ir::IrTopLet> {
         let ir = self.ir_program.as_ref()?;
         ir.top_lets.iter().find(|tl| ir.var_table.get(tl.var).name == name)
+    }
+
+    /// Check if an IR expression is a simple const-evaluable literal
+    fn ir_expr_is_const(&self, expr: &almide::ir::IrExpr) -> bool {
+        use almide::ir::IrExprKind;
+        matches!(&expr.kind,
+            IrExprKind::LitInt { .. } |
+            IrExprKind::LitFloat { .. } |
+            IrExprKind::LitBool { .. } |
+            IrExprKind::Unit
+        )
+    }
+
+    /// Check if an IR expression tree contains any float values
+    fn ir_expr_contains_float(&self, expr: &almide::ir::IrExpr) -> bool {
+        use almide::ir::IrExprKind;
+        match &expr.kind {
+            IrExprKind::LitFloat { .. } => true,
+            IrExprKind::BinOp { left, right, .. } => {
+                self.ir_expr_contains_float(left) || self.ir_expr_contains_float(right)
+            }
+            IrExprKind::UnOp { operand, .. } => self.ir_expr_contains_float(operand),
+            _ => false,
+        }
     }
 
     /// Emit function body from IR

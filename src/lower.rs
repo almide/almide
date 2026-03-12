@@ -894,7 +894,7 @@ fn resolve_type_expr(te: &ast::TypeExpr) -> Ty {
             "String" => Ty::String,
             "Bool" => Ty::Bool,
             "Unit" => Ty::Unit,
-            other => Ty::Named(other.to_string()),
+            other => Ty::Named(other.to_string(), vec![]),
         },
         ast::TypeExpr::Generic { name, args } => match name.as_str() {
             "List" if args.len() == 1 => Ty::List(Box::new(resolve_type_expr(&args[0]))),
@@ -907,7 +907,7 @@ fn resolve_type_expr(te: &ast::TypeExpr) -> Ty {
                 Box::new(resolve_type_expr(&args[0])),
                 Box::new(resolve_type_expr(&args[1])),
             ),
-            other => Ty::Named(other.to_string()),
+            other => Ty::Named(other.to_string(), args.iter().map(resolve_type_expr).collect()),
         },
         ast::TypeExpr::Tuple { elements } => {
             Ty::Tuple(elements.iter().map(resolve_type_expr).collect())

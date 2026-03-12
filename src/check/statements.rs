@@ -33,7 +33,10 @@ impl Checker {
                 } else { vt };
                 let dt = if let Some(te) = ty {
                     let t = self.resolve_type_expr(te);
-                    if !t.compatible(&vt) {
+                    // Resolve Named types (e.g., Container[Int] → Record { items: List[Int], label: String })
+                    // so structural comparison works with anonymous record literals
+                    let t_resolved = self.env.resolve_named(&t);
+                    if !t_resolved.compatible(&vt) {
                         self.push_diagnostic(err(
                             format!("cannot assign {} to variable '{}' of type {}", vt.display(), name, t.display()),
                             "Change the type annotation or the value",
@@ -52,7 +55,8 @@ impl Checker {
                 let vt = self.check_expr(value);
                 let dt = if let Some(te) = ty {
                     let t = self.resolve_type_expr(te);
-                    if !t.compatible(&vt) {
+                    let t_resolved = self.env.resolve_named(&t);
+                    if !t_resolved.compatible(&vt) {
                         self.push_diagnostic(err(
                             format!("cannot assign {} to variable '{}' of type {}", vt.display(), name, t.display()),
                             "Change the type annotation or the value",

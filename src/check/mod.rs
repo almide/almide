@@ -554,7 +554,7 @@ impl Checker {
                     if let Some(ty) = self.env.types.get(other) {
                         ty.clone()
                     } else {
-                        Ty::Named(other.to_string())
+                        Ty::Named(other.to_string(), vec![])
                     }
                 }
             },
@@ -566,7 +566,7 @@ impl Checker {
                     "Result" if ra.len() == 2 => Ty::Result(Box::new(ra[0].clone()), Box::new(ra[1].clone())),
                     "Map" if ra.len() == 2 => Ty::Map(Box::new(ra[0].clone()), Box::new(ra[1].clone())),
                     "Set" => Ty::List(Box::new(ra.first().cloned().unwrap_or(Ty::Unknown))),
-                    _ => Ty::Named(name.clone()),
+                    _ => Ty::Named(name.clone(), ra),
                 }
             }
             ast::TypeExpr::Record { fields } => Ty::Record {

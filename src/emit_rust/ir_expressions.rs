@@ -12,7 +12,14 @@ impl Emitter {
 
             IrExprKind::Var { id } => {
                 let info = self.ir_var_table().get(*id);
-                crate::emit_common::sanitize(&info.name)
+                let name = crate::emit_common::sanitize(&info.name);
+                // Top-level let: LazyLock needs deref+clone
+                if let Some(&needs_deref) = self.top_let_names.get(&info.name) {
+                    if needs_deref {
+                        return format!("(*{}).clone()", name);
+                    }
+                }
+                name
             }
 
             IrExprKind::BinOp { op, left, right } => self.gen_ir_binary(*op, left, right),
@@ -123,7 +130,22 @@ impl Emitter {
             }
 
             IrExprKind::Tuple { elements } => {
-                let parts: Vec<String> = elements.iter().map(|e| self.gen_ir_expr(e)).collect();
+                // Collect all VarId references across all tuple elements
+                let mut var_counts: std::collections::HashMap<VarId, usize> = std::collections::HashMap::new();
+                for e in elements {
+                    Self::count_vars_in_expr(e, &mut var_counts);
+                }
+                // For vars used more than once: clone at the first top-level Var position
+                let mut cloned: std::collections::HashSet<VarId> = std::collections::HashSet::new();
+                let parts: Vec<String> = elements.iter().map(|e| {
+                    if let IrExprKind::Var { id } = &e.kind {
+                        if *var_counts.get(id).unwrap_or(&0) > 1 && cloned.insert(*id) {
+                            let name = crate::emit_common::sanitize(&self.ir_var_table().get(*id).name);
+                            return format!("{}.clone()", name);
+                        }
+                    }
+                    self.gen_ir_expr(e)
+                }).collect();
                 format!("({})", parts.join(", "))
             }
 
@@ -524,6 +546,114 @@ impl Emitter {
         }
     }
 
+    /// Count all variable references in an expression (for multi-use detection in tuples)
+    fn count_vars_in_expr(expr: &IrExpr, counts: &mut std::collections::HashMap<VarId, usize>) {
+        match &expr.kind {
+            IrExprKind::Var { id } => { *counts.entry(*id).or_insert(0) += 1; }
+            IrExprKind::Call { args, .. } => {
+                for a in args { Self::count_vars_in_expr(a, counts); }
+            }
+            IrExprKind::BinOp { left, right, .. } => {
+                Self::count_vars_in_expr(left, counts);
+                Self::count_vars_in_expr(right, counts);
+            }
+            IrExprKind::UnOp { operand, .. } => Self::count_vars_in_expr(operand, counts),
+            IrExprKind::Member { object, .. } => Self::count_vars_in_expr(object, counts),
+            IrExprKind::IndexAccess { object, index } => {
+                Self::count_vars_in_expr(object, counts);
+                Self::count_vars_in_expr(index, counts);
+            }
+            IrExprKind::If { cond, then, else_, .. } => {
+                Self::count_vars_in_expr(cond, counts);
+                Self::count_vars_in_expr(then, counts);
+                Self::count_vars_in_expr(else_, counts);
+            }
+            IrExprKind::Tuple { elements } | IrExprKind::List { elements } => {
+                for e in elements { Self::count_vars_in_expr(e, counts); }
+            }
+            IrExprKind::Record { fields, .. } => {
+                for (_, v) in fields { Self::count_vars_in_expr(v, counts); }
+            }
+            _ => {}
+        }
+    }
+
+    /// Count how many times a VarId is referenced in an IR expression tree
+    fn count_var_uses(var: VarId, expr: &IrExpr) -> usize {
+        match &expr.kind {
+            IrExprKind::Var { id } => if *id == var { 1 } else { 0 },
+            IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } |
+            IrExprKind::LitBool { .. } | IrExprKind::LitStr { .. } |
+            IrExprKind::Unit | IrExprKind::Hole | IrExprKind::Todo { .. } |
+            IrExprKind::Break | IrExprKind::Continue | IrExprKind::OptionNone => 0,
+            IrExprKind::BinOp { left, right, .. } => {
+                Self::count_var_uses(var, left) + Self::count_var_uses(var, right)
+            }
+            IrExprKind::UnOp { operand, .. } => Self::count_var_uses(var, operand),
+            IrExprKind::Call { args, .. } => {
+                args.iter().map(|a| Self::count_var_uses(var, a)).sum()
+            }
+            IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
+                elements.iter().map(|e| Self::count_var_uses(var, e)).sum()
+            }
+            IrExprKind::Record { fields, .. } | IrExprKind::SpreadRecord { fields, .. } => {
+                fields.iter().map(|(_, v)| Self::count_var_uses(var, v)).sum()
+            }
+            IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
+                Self::count_var_uses(var, object)
+            }
+            IrExprKind::IndexAccess { object, index } => {
+                Self::count_var_uses(var, object) + Self::count_var_uses(var, index)
+            }
+            IrExprKind::If { cond, then, else_, .. } => {
+                Self::count_var_uses(var, cond) + Self::count_var_uses(var, then) + Self::count_var_uses(var, else_)
+            }
+            IrExprKind::Match { subject, arms } => {
+                Self::count_var_uses(var, subject) + arms.iter().map(|a| Self::count_var_uses(var, &a.body)).sum::<usize>()
+            }
+            IrExprKind::Block { stmts, expr, .. } | IrExprKind::DoBlock { stmts, expr, .. } => {
+                let s: usize = stmts.iter().map(|st| Self::count_var_uses_stmt(var, st)).sum();
+                s + expr.as_ref().map_or(0, |e| Self::count_var_uses(var, e))
+            }
+            IrExprKind::ForIn { body, iterable, .. } => {
+                Self::count_var_uses(var, iterable) + body.iter().map(|st| Self::count_var_uses_stmt(var, st)).sum::<usize>()
+            }
+            IrExprKind::While { cond, body } => {
+                Self::count_var_uses(var, cond) + body.iter().map(|st| Self::count_var_uses_stmt(var, st)).sum::<usize>()
+            }
+            IrExprKind::Lambda { body, .. } => Self::count_var_uses(var, body),
+            IrExprKind::StringInterp { parts } => {
+                parts.iter().map(|p| match p {
+                    IrStringPart::Expr { expr } => Self::count_var_uses(var, expr),
+                    _ => 0,
+                }).sum()
+            }
+            IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e } |
+            IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e } |
+            IrExprKind::Await { expr: e } => Self::count_var_uses(var, e),
+            IrExprKind::Range { start, end, .. } => {
+                Self::count_var_uses(var, start) + Self::count_var_uses(var, end)
+            }
+        }
+    }
+
+    fn count_var_uses_stmt(var: VarId, stmt: &IrStmt) -> usize {
+        match &stmt.kind {
+            IrStmtKind::Bind { value, .. } => Self::count_var_uses(var, value),
+            IrStmtKind::BindDestructure { value, .. } => Self::count_var_uses(var, value),
+            IrStmtKind::Assign { value, .. } => Self::count_var_uses(var, value),
+            IrStmtKind::IndexAssign { index, value, .. } => {
+                Self::count_var_uses(var, index) + Self::count_var_uses(var, value)
+            }
+            IrStmtKind::FieldAssign { value, .. } => Self::count_var_uses(var, value),
+            IrStmtKind::Guard { cond, else_ } => {
+                Self::count_var_uses(var, cond) + Self::count_var_uses(var, else_)
+            }
+            IrStmtKind::Expr { expr } => Self::count_var_uses(var, expr),
+            IrStmtKind::Comment { .. } => 0,
+        }
+    }
+
     /// Auto-append ? for effect fn calls
     fn ir_maybe_auto_q(&self, call: &str, name: &str) -> String {
         if self.in_effect && !self.in_test && !self.skip_auto_q.get() {
@@ -545,8 +675,11 @@ impl Emitter {
             IrExprKind::Var { id } => {
                 let info = self.ir_var_table().get(*id);
                 let name = crate::emit_common::sanitize(&info.name);
-                // Top-level let constants: no clone needed
-                if self.top_let_names.contains(&info.name) {
+                // Top-level let: const needs no clone, LazyLock needs deref+clone
+                if let Some(&needs_deref) = self.top_let_names.get(&info.name) {
+                    if needs_deref {
+                        return format!("(*{}).clone()", name);
+                    }
                     return name;
                 }
                 // Single-use: safe to move

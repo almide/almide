@@ -99,7 +99,7 @@ params = [
     { name = "f", type = "Fn[A] -> (K, V)" },
 ]
 return = "Map[K, V]"
-rust = "almide_rt_map_from_list(({xs}).to_vec(), |{f.args}| {{ {f.body} }})"
+rust = "almide_rt_map_from_list(({xs}).to_vec(), |{f.args}| {{ {f.clone_bindings}{f.body} }})"
 ts = "__almd_map.from_list({xs}, {f.args} => {f.body})"
 
 [map_values]

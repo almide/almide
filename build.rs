@@ -169,7 +169,7 @@ fn parse_type(s: &str, type_params: &[String]) -> String {
                 .collect();
             format!("Ty::Record {{ fields: vec![{}] }}", fields.join(", "))
         }
-        other => format!("Ty::Named(s(\"{}\"))", other),
+        other => format!("Ty::Named(s(\"{}\"), vec![])", other),
     }
 }
 

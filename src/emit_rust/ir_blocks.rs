@@ -350,6 +350,10 @@ impl Emitter {
             Ty::Map(k, v) if is_empty_collection || matches!(k.as_ref(), Ty::Unknown | Ty::TypeVar(_)) || matches!(v.as_ref(), Ty::Unknown | Ty::TypeVar(_)) => {
                 Some(format!("HashMap<{}, {}>", self.ir_ty_to_rust(k), self.ir_ty_to_rust(v)))
             }
+            // Annotate user-defined generic types (e.g., Either<String, i64>)
+            Ty::Named(_, args) if !args.is_empty() => {
+                Some(self.ir_ty_to_rust(ty))
+            }
             _ => None,
         }
     }
@@ -401,7 +405,14 @@ impl Emitter {
                 let ts: Vec<String> = elems.iter().map(|e| self.ir_ty_to_rust(e)).collect();
                 format!("({})", ts.join(", "))
             }
-            Ty::Named(name) => name.clone(),
+            Ty::Named(name, args) => {
+                if args.is_empty() {
+                    name.clone()
+                } else {
+                    let ts: Vec<String> = args.iter().map(|a| self.ir_ty_to_rust(a)).collect();
+                    format!("{}<{}>", name, ts.join(", "))
+                }
+            }
             Ty::TypeVar(_) => "_".to_string(),
             Ty::Fn { params, ret } => {
                 let ps: Vec<String> = params.iter().map(|p| self.ir_ty_to_rust(p)).collect();
