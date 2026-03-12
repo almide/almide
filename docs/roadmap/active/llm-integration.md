@@ -89,7 +89,25 @@ model = "claude-sonnet-4-20250514"
 - [ ] Almide API 設計 → 実装 → テスト生成パイプライン
 - [ ] `gh repo create` + push 統合
 
-### Phase 3: `almide explain`
+### Phase 3: `almide pilot` — パス最適化 (Constrained Decoding)
+
+LLM のトークン生成をコンパイラがリアルタイムでガイドする。生成中の各トークンをパーサー/型チェッカーで検証し、不正なトークンを即座に却下・修正候補を返す。
+
+```
+LLM → トークン生成 → almide parser (incremental) → 有効？
+                                                      ├─ Yes → accept, 次へ
+                                                      └─ No  → 有効な継続候補を返す → LLM が再選択
+```
+
+- [ ] インクリメンタルパーサー API（部分入力から「次に有効なトークン集合」を返す）
+- [ ] 型チェッカーのストリーミングモード（部分AST上で型推論を走らせる）
+- [ ] `almide pilot serve` — LSP-like JSON-RPC サーバーとして起動、外部 LLM から呼び出し可能
+- [ ] speculation buffer: 不正トークンを backtrack し、有効な継続をヒントとして返す
+- [ ] ベンチマーク: constrained decoding あり/なしでのコンパイル成功率・生成速度比較
+
+**Why:** `almide fix` は「書いた後に直す」。pilot は「書く瞬間に正しくする」。MoonBit が先行実装しているが、Almide のシンプルな文法と型システムなら実装コストは低い。マルチターゲット（Rust + TS）の型情報を使えるのは Almide 固有の強み。
+
+### Phase 4: `almide explain`
 - [ ] 関数単位の説明生成
 - [ ] Markdown 出力
 
