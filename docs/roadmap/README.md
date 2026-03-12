@@ -2,12 +2,12 @@
 
 ## Active
 
+- [Default Field Values](active/default-field-values.md) — reduce 5 variants to 3, eliminate sentinel `""` pattern
 - [Test Coverage](active/test-coverage.md) — 790 cases, target 1500+
 
 ## On Hold
 
 - [Benchmark Report](on-hold/benchmark-report.md)
-- [Default Field Values](on-hold/default-field-values.md) — reduce 5 variants to 3, eliminate sentinel `""` pattern
 - [Direct WASM Emission](on-hold/emit-wasm-direct.md)
 - [Editor & GitHub Integration](on-hold/editor-github-integration.md)
 - [Function Reference Passing](on-hold/function-reference-passing.md) — seamless fn-as-argument, reduce closure wrappers
