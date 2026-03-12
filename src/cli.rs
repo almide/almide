@@ -378,7 +378,7 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
         vec![]
     };
 
-    let resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
+    let mut resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
         .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
 
     // Extract user-level import aliases (import pkg as alias, or implicit aliases for multi-segment imports)
@@ -430,6 +430,15 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
     let ir_program = checker_opt.as_ref().map(|checker| {
         almide::lower::lower_program(&program, &checker.expr_types, &checker.env)
     });
+    let mut module_irs = std::collections::HashMap::new();
+    if let Some(checker) = &mut checker_opt {
+        for (name, mod_prog, _, _) in &mut resolved.modules {
+            if almide::stdlib::is_stdlib_module(name) { continue; }
+            let mod_types = checker.check_module_bodies(mod_prog);
+            let mod_ir = almide::lower::lower_program(mod_prog, &mod_types, &checker.env);
+            module_irs.insert(name.clone(), mod_ir);
+        }
+    }
 
     if emit_ir {
         let ir = ir_program.expect("checker must have run for emit_ir");
@@ -442,7 +451,7 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
         println!("{}", json);
     } else {
         let code = match target {
-            "rust" | "rs" => emit_rust::emit_with_options(&program, &resolved.modules, &emit_rust::EmitOptions::default(), &import_aliases, ir_program.as_ref()),
+            "rust" | "rs" => emit_rust::emit_with_options(&program, &resolved.modules, &emit_rust::EmitOptions::default(), &import_aliases, ir_program.as_ref(), &module_irs),
             "ts" | "typescript" => {
                 // Convert to legacy format for emit_ts (no PkgId support)
                 let legacy_modules: Vec<(String, crate::ast::Program)> = resolved.modules.iter()

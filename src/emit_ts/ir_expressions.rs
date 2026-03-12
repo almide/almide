@@ -73,7 +73,7 @@ impl TsEmitter {
             IrExprKind::Break => "break".to_string(),
             IrExprKind::Continue => "continue".to_string(),
 
-            IrExprKind::Call { target, args } => self.gen_ir_call(target, args),
+            IrExprKind::Call { target, args, .. } => self.gen_ir_call(target, args),
 
             IrExprKind::List { elements } => {
                 let elems: Vec<String> = elements.iter().map(|e| self.gen_ir_expr(e)).collect();

@@ -151,7 +151,7 @@ impl TsEmitter {
                 if effect.unwrap_or(false) {
                     self.in_effect.set(true);
                 }
-                let result = self.gen_fn_decl(name, params, return_type, body.as_ref(), r#async.unwrap_or(false), extern_attrs, generics.as_ref());
+                let result = self.gen_fn_decl(name, params, return_type, r#async.unwrap_or(false), extern_attrs, generics.as_ref());
                 self.in_effect.set(prev);
                 result
             }
@@ -166,12 +166,8 @@ impl TsEmitter {
             Decl::Test { name, .. } => {
                 let prev_test = self.in_test.get();
                 self.in_test.set(true);
-                let body_str = if let Some(ir_fn) = self.find_ir_function(name) {
-                    let ir_fn = ir_fn.clone();
-                    self.gen_ir_expr(&ir_fn.body)
-                } else {
-                    "(() => { throw new Error(\"test IR not available\"); })()".to_string()
-                };
+                let ir_fn = self.find_ir_function(name).expect("IR required for codegen").clone();
+                let body_str = self.gen_ir_expr(&ir_fn.body);
                 self.in_test.set(prev_test);
                 if self.js_mode {
                     let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
@@ -186,12 +182,8 @@ impl TsEmitter {
                 }
             }
             Decl::TopLet { name, .. } => {
-                let val_str = if let Some(ir_tl) = self.find_ir_top_let(name) {
-                    let ir_tl = ir_tl.clone();
-                    self.gen_ir_expr(&ir_tl.value)
-                } else {
-                    "undefined /* top-level let IR not available */".to_string()
-                };
+                let ir_tl = self.find_ir_top_let(name).expect("IR required for codegen").clone();
+                let val_str = self.gen_ir_expr(&ir_tl.value);
                 if self.js_mode {
                     format!("var {} = {};", name, val_str)
                 } else {
@@ -311,7 +303,7 @@ impl TsEmitter {
         }
     }
 
-    fn gen_fn_decl(&self, name: &str, params: &[Param], ret_type: &TypeExpr, body: Option<&Expr>, is_async: bool, extern_attrs: &[ExternAttr], generics: Option<&Vec<crate::ast::GenericParam>>) -> String {
+    fn gen_fn_decl(&self, name: &str, params: &[Param], ret_type: &TypeExpr, is_async: bool, extern_attrs: &[ExternAttr], generics: Option<&Vec<crate::ast::GenericParam>>) -> String {
         let async_ = if is_async { "async " } else { "" };
         let sname = Self::sanitize(name);
         let generic_str = if self.js_mode {
@@ -365,7 +357,7 @@ impl TsEmitter {
                 }
             }
         } else {
-            format!("{}function {}{}({}){} {{\n  throw new Error(\"no body and no @extern for ts target\");\n}}", async_, sname, generic_str, params_str.join(", "), ret_str)
+            unreachable!("IR required for codegen");
         }
     }
 

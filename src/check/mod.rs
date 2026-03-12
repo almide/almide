@@ -310,6 +310,18 @@ impl Checker {
         }
     }
 
+    /// Type-check a module program's function bodies (for IR lowering).
+    /// Returns a separate `expr_types` map to avoid span collisions with the main program.
+    pub fn check_module_bodies(&mut self, prog: &mut ast::Program) -> std::collections::HashMap<(usize, usize), Ty> {
+        let saved = std::mem::take(&mut self.expr_types);
+        for decl in prog.decls.iter_mut() {
+            self.check_decl(decl);
+        }
+        let module_types = std::mem::take(&mut self.expr_types);
+        self.expr_types = saved;
+        module_types
+    }
+
     /// Register a user-level import alias (import pkg as alias).
     pub fn register_alias(&mut self, alias: &str, target: &str) {
         self.env.module_aliases.insert(alias.to_string(), target.to_string());

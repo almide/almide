@@ -56,11 +56,12 @@ AST → Checker → IR (fully typed) → Emit Rust
 
 ## Phases
 
-- [ ] Phase 1: IR type definitions (`src/ir.rs`) + expression lowering (literals, binop, if, block)
-- [ ] Phase 2: Call/UFCS/pipe lowering, InterpolatedString resolution
-- [ ] Phase 3: Control flow (match, for, while, do-block, guard) + statements + declarations
-- [ ] Phase 4: Analysis passes on IR (borrow, single-use, concat→push)
-- [ ] Phase 5: Rust emitter from IR
-- [ ] Phase 6: TS emitter from IR
+- [x] Phase 1: IR type definitions (`src/ir.rs`) + expression lowering (literals, binop, if, block)
+- [x] Phase 2: Call/UFCS/pipe lowering, InterpolatedString resolution
+- [x] Phase 3: Control flow (match, for, while, do-block, guard) + statements + declarations
+- [x] Phase 4: Analysis passes on IR (borrow, single-use, concat→push)
+- [x] Phase 5: Rust emitter from IR
+- [x] Phase 6: TS emitter from IR
+- [x] Phase 6b: User module IR lowering (multi-segment paths, aliases, bundled stdlib)
 - [ ] Phase 7: WASM emitter from IR (see emit-wasm-direct.md)
 - [ ] Phase 8: Remove old AST-direct codegen, remove ResolvedType

@@ -73,7 +73,7 @@ impl Emitter {
             IrExprKind::Break => "break".to_string(),
             IrExprKind::Continue => "continue".to_string(),
 
-            IrExprKind::Call { target, args } => self.gen_ir_call(target, args),
+            IrExprKind::Call { target, args, type_args } => self.gen_ir_call(target, args, type_args),
 
             IrExprKind::List { elements } => {
                 let elems: Vec<String> = elements.iter().map(|e| {
@@ -352,7 +352,7 @@ impl Emitter {
         }
     }
 
-    pub(crate) fn gen_ir_call(&self, target: &CallTarget, args: &[IrExpr]) -> String {
+    pub(crate) fn gen_ir_call(&self, target: &CallTarget, args: &[IrExpr], type_args: &[almide::types::Ty]) -> String {
         match target {
             CallTarget::Named { name } => {
                 match name.as_str() {
@@ -408,12 +408,20 @@ impl Emitter {
                     _ => {}
                 }
 
+                // Turbofish for generic calls with explicit type args
+                let turbofish = if !type_args.is_empty() {
+                    let tys: Vec<String> = type_args.iter().map(|t| self.ir_ty_to_rust(t)).collect();
+                    format!("::<{}>", tys.join(", "))
+                } else {
+                    String::new()
+                };
+
                 // Generic variant unit constructor
                 if self.generic_variant_unit_ctors.contains(name) {
                     let args_str: Vec<String> = args.iter().enumerate().map(|(i, a)| {
                         self.gen_ir_arg_for(a, name, i)
                     }).collect();
-                    let call = format!("{}({})", name, args_str.join(", "));
+                    let call = format!("{}{}({})", name, turbofish, args_str.join(", "));
                     return self.ir_maybe_auto_q(&call, name);
                 }
 
@@ -435,7 +443,7 @@ impl Emitter {
                         arg_str
                     }
                 }).collect();
-                let call = format!("{}({})", callee_str, args_str.join(", "));
+                let call = format!("{}{}({})", callee_str, turbofish, args_str.join(", "));
                 self.ir_maybe_auto_q(&call, name)
             }
 
@@ -468,7 +476,12 @@ impl Emitter {
         if self.user_modules.contains(&resolved_mod) {
             let rust_mod = resolved_mod.replace('.', "_");
             let safe_func = crate::emit_common::sanitize(func);
-            let call = format!("{}::{}({})", rust_mod, safe_func, args_str.join(", "));
+            // Apply borrow inference using qualified name (module.func)
+            let qualified = format!("{}.{}", resolved_mod, func);
+            let borrow_args: Vec<String> = ir_args.iter().enumerate().map(|(i, a)| {
+                self.gen_ir_arg_for(a, &qualified, i)
+            }).collect();
+            let call = format!("{}::{}({})", rust_mod, safe_func, borrow_args.join(", "));
             if self.in_effect && (self.effect_fns.contains(&func.to_string()) || self.result_fns.contains(&func.to_string())) {
                 return format!("{}?", call);
             }
@@ -556,7 +569,19 @@ impl Emitter {
 
     /// Generate argument for a specific callee, considering borrow inference
     pub(crate) fn gen_ir_arg_for(&self, expr: &IrExpr, callee_name: &str, param_idx: usize) -> String {
-        let ownership = self.borrow_info.param_ownership(callee_name, param_idx);
+        // Try qualified name first (module.func) for module-internal calls
+        let qualified;
+        let lookup_name = if let Some(ref module) = self.current_module {
+            qualified = format!("{}.{}", module, callee_name);
+            if self.borrow_info.fn_params.contains_key(&qualified) {
+                &qualified
+            } else {
+                callee_name
+            }
+        } else {
+            callee_name
+        };
+        let ownership = self.borrow_info.param_ownership(lookup_name, param_idx);
         if ownership == super::borrow::ParamOwnership::Borrow {
             match &expr.kind {
                 IrExprKind::Var { id } => {
@@ -595,7 +620,7 @@ impl Emitter {
         }
     }
 
-    fn ir_is_pow2_64(&self, expr: &IrExpr) -> bool {
+    fn ir_is_pow2_64(&self, _expr: &IrExpr) -> bool {
         // 2^64 = 18446744073709551616, but as i64 this wraps
         // In IR, large literals are stored as i64, so check for the wrapped value
         false // IR stores i64, so 2^64 can't be represented — handled at AST level
@@ -656,7 +681,7 @@ impl Emitter {
                 for s in stmts { Self::count_ir_var_uses_in_stmt(s, counts); }
                 if let Some(e) = expr { Self::count_ir_var_uses(e, counts); }
             }
-            IrExprKind::Call { target, args } => {
+            IrExprKind::Call { target, args, .. } => {
                 match target {
                     CallTarget::Method { object, .. } => Self::count_ir_var_uses(object, counts),
                     CallTarget::Computed { callee } => Self::count_ir_var_uses(callee, counts),

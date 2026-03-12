@@ -177,7 +177,7 @@ pub enum IrExprKind {
     Continue,
 
     // ── Calls (fully resolved) ──
-    Call { target: CallTarget, args: Vec<IrExpr> },
+    Call { target: CallTarget, args: Vec<IrExpr>, #[serde(default, skip_serializing_if = "Vec::is_empty")] type_args: Vec<Ty> },
 
     // ── Collections ──
     List { elements: Vec<IrExpr> },

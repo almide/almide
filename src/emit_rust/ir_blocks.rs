@@ -326,9 +326,13 @@ impl Emitter {
         });
         match ty {
             // Annotate Result when both type params are known (not Unknown)
-            // Skip annotation when either param is Unknown (Rust can infer from context)
+            // Skip in effect/do-block context: auto-? may unwrap the Result, making
+            // the annotation incorrect (annotated type vs actual unwrapped type)
             Ty::Result(ok, err) => {
                 if matches!(ok.as_ref(), Ty::Unknown) || matches!(err.as_ref(), Ty::Unknown) {
+                    None
+                } else if (self.in_effect || self.in_do_block.get()) && value.map_or(false, |v| self.ir_value_gets_auto_q(v)) {
+                    // Skip: auto-? unwraps the Result, so annotation would be wrong
                     None
                 } else {
                     Some(format!("Result<{}, {}>", self.ir_ty_to_rust(ok), self.ir_ty_to_rust(err)))
@@ -350,8 +354,38 @@ impl Emitter {
         }
     }
 
+    /// Check if an IR value expression would get auto-? appended by codegen,
+    /// making the actual runtime type the unwrapped T instead of Result<T, E>.
+    fn ir_value_gets_auto_q(&self, expr: &IrExpr) -> bool {
+        match &expr.kind {
+            IrExprKind::Try { .. } => true,
+            IrExprKind::Call { target, .. } => {
+                let name = match target {
+                    CallTarget::Named { name } => name.as_str(),
+                    CallTarget::Module { func, .. } => func.as_str(),
+                    _ => return false,
+                };
+                if self.in_effect && !self.in_test {
+                    if self.effect_fns.contains(&name.to_string()) { return true; }
+                }
+                if self.in_do_block.get() {
+                    if self.result_fns.contains(&name.to_string()) || self.effect_fns.contains(&name.to_string()) { return true; }
+                }
+                false
+            }
+            // If any branch gets auto-?, the whole if/block produces unwrapped T
+            IrExprKind::If { then, else_, .. } => {
+                self.ir_value_gets_auto_q(then) || self.ir_value_gets_auto_q(else_)
+            }
+            IrExprKind::Block { expr: Some(e), .. } | IrExprKind::DoBlock { expr: Some(e), .. } => {
+                self.ir_value_gets_auto_q(e)
+            }
+            _ => false,
+        }
+    }
+
     /// Convert IR Ty to Rust type string
-    fn ir_ty_to_rust(&self, ty: &almide::types::Ty) -> String {
+    pub(crate) fn ir_ty_to_rust(&self, ty: &almide::types::Ty) -> String {
         use almide::types::Ty;
         match ty {
             Ty::Int => "i64".to_string(),

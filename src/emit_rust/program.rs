@@ -292,7 +292,7 @@ impl Emitter {
 
         for decl in &prog.decls {
             match decl {
-                Decl::Fn { name: fn_name, params, return_type, body, effect, r#async, visibility, extern_attrs, generics, .. } => {
+                Decl::Fn { name: fn_name, params, return_type, effect, r#async, visibility, extern_attrs, generics, .. } => {
                     let rs_extern = extern_attrs.iter().find(|a| a.target == "rs");
                     let is_effect = effect.unwrap_or(false);
                     let is_async = r#async.unwrap_or(false);
@@ -352,15 +352,19 @@ impl Emitter {
                         } else {
                             self.emitln(&call);
                         }
-                    } else if let Some(ir_fn) = self.find_ir_function(fn_name) {
+                    } else if let Some(ir_fn) = self.find_module_ir_function(name, fn_name) {
                         let ir_fn = ir_fn.clone();
+                        // Temporarily swap ir_program to module's IR (for VarTable access)
+                        let saved_ir = self.ir_program.take();
+                        self.ir_program = self.module_irs.get(name).cloned();
                         self.analyze_ir_single_use(&ir_fn.body, &ir_fn.params);
                         let prev_effect = self.in_effect;
                         self.in_effect = is_effect || ret_str.starts_with("Result<");
                         self.emit_ir_fn_body(&ir_fn.body, is_effect, &ret_str, ret_str == "()" || ret_str == "Result<(), String>");
                         self.in_effect = prev_effect;
+                        self.ir_program = saved_ir;
                     } else {
-                        self.emitln("unimplemented!(\"no body and no @extern for rs target\")");
+                        unreachable!("IR required for codegen");
                     }
 
                     self.indent -= 1;
@@ -382,6 +386,11 @@ impl Emitter {
         self.indent -= 1;
         self.emitln("}");
         self.current_module = prev_module;
+    }
+
+    fn find_module_ir_function(&self, module_name: &str, fn_name: &str) -> Option<&almide::ir::IrFunction> {
+        let ir = self.module_irs.get(module_name)?;
+        ir.functions.iter().find(|f| f.name == fn_name)
     }
 
     fn emit_runtime(&mut self) {
@@ -440,23 +449,18 @@ impl Emitter {
                 self.emit_type_decl(name, ty, deriving, generics.as_ref());
             }
             Decl::Fn { name, params, return_type, body, effect, r#async, extern_attrs, generics, .. } => {
-                self.emit_fn_decl(name, params, return_type, body.as_ref(), effect.unwrap_or(false), r#async.unwrap_or(false), extern_attrs, generics.as_ref());
+                self.emit_fn_decl(name, params, return_type, effect.unwrap_or(false), r#async.unwrap_or(false), extern_attrs, generics.as_ref());
             }
-            Decl::TopLet { name, ty, value, .. } => {
-                let ty_str = if let Some(te) = ty {
-                    self.gen_type(te)
-                } else {
-                    self.infer_const_rust_type(value)
-                };
-                // Try IR for value expression
-                let val_str = if let Some(ir_tl) = self.find_ir_top_let(name) {
-                    let ir_tl = ir_tl.clone();
-                    self.gen_ir_expr(&ir_tl.value)
-                } else {
-                    // Fallback for --no-check
-                    format!("unimplemented!(\"top-level let IR not available\")")
-                };
-                self.emitln(&format!("const {}: {} = {};", name, ty_str, val_str));
+            Decl::TopLet { name, ty, .. } => {
+                if let Some(ir_tl) = self.find_ir_top_let(name).cloned() {
+                    let ty_str = if let Some(te) = ty {
+                        self.gen_type(te)
+                    } else {
+                        self.ir_ty_to_rust(&ir_tl.ty)
+                    };
+                    let val_str = self.gen_ir_expr(&ir_tl.value);
+                    self.emitln(&format!("const {}: {} = {};", name, ty_str, val_str));
+                }
             }
             Decl::Impl { trait_, for_, methods, .. } => {
                 self.emitln(&format!("// impl {} for {}", trait_, for_));
@@ -492,7 +496,7 @@ impl Emitter {
                 } else {
                     self.emitln(&format!("fn test_{}() {{", safe_name));
                     self.indent += 1;
-                    self.emitln("unimplemented!(\"test IR not available\");");
+                    unreachable!("IR required for codegen");
                 }
                 self.indent -= 1;
                 self.emitln("}");
@@ -644,7 +648,7 @@ impl Emitter {
         }
     }
 
-    fn emit_fn_decl(&mut self, name: &str, params: &[Param], ret_type: &TypeExpr, body: Option<&Expr>, is_effect: bool, is_async: bool, extern_attrs: &[ExternAttr], generics: Option<&Vec<crate::ast::GenericParam>>) {
+    fn emit_fn_decl(&mut self, name: &str, params: &[Param], ret_type: &TypeExpr, is_effect: bool, is_async: bool, extern_attrs: &[ExternAttr], generics: Option<&Vec<crate::ast::GenericParam>>) {
         let fn_name = if name == "main" { "almide_main".to_string() } else { crate::emit_common::sanitize(name) };
         let ret_str = self.gen_type(ret_type);
         let is_unit_ret = ret_str == "()";
@@ -722,7 +726,7 @@ impl Emitter {
 
             self.in_effect = prev_effect;
         } else {
-            self.emitln("unimplemented!(\"no body and no @extern for rs target\")");
+            unreachable!("IR required for codegen");
         }
 
         self.indent -= 1;
@@ -842,27 +846,6 @@ impl Emitter {
     }
 
     /// Infer Rust const type from a constant expression (for top-level let without annotation).
-    fn infer_const_rust_type(&self, expr: &Expr) -> String {
-        match expr {
-            Expr::Int { .. } => "i64".to_string(),
-            Expr::Float { .. } => "f64".to_string(),
-            Expr::String { .. } => "&str".to_string(),
-            Expr::Bool { .. } => "bool".to_string(),
-            Expr::Unary { op, operand, .. } if op == "-" => self.infer_const_rust_type(operand),
-            Expr::Binary { op, left, right, .. } => {
-                if op == "++" {
-                    "&str".to_string()
-                } else {
-                    let lt = self.infer_const_rust_type(left);
-                    let rt = self.infer_const_rust_type(right);
-                    if lt == "f64" || rt == "f64" { "f64".to_string() } else { lt }
-                }
-            }
-            Expr::Paren { expr: inner, .. } => self.infer_const_rust_type(inner),
-            _ => "i64".to_string(), // fallback
-        }
-    }
-
     /// Convert an owned Rust type to its borrowed equivalent.
     fn to_borrow_type(ty: &str) -> String {
         if ty == "String" {
