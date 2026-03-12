@@ -10,8 +10,11 @@ impl TsEmitter {
                 let is_generic = matches!(generics, Some(gs) if !gs.is_empty());
                 for case in cases {
                     match case {
-                        VariantCase::Unit { name } if is_generic => {
-                            self.generic_variant_unit_ctors.insert(name.clone());
+                        VariantCase::Unit { name } => {
+                            self.unit_variant_names.insert(name.clone());
+                            if is_generic {
+                                self.generic_variant_unit_ctors.insert(name.clone());
+                            }
                         }
                         VariantCase::Record { name, .. } => {
                             self.variant_constructors.insert(name.clone());

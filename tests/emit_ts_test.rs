@@ -228,6 +228,110 @@ fn emit_err_expr_js() {
         "err should produce error-related code, got:\n{}", code);
 }
 
+// ---- Do-block with guard ----
+
+#[test]
+fn emit_do_guard_ok_unit_js() {
+    let out = parse_and_emit_js(
+        "module app\nfn f() -> Unit = {\n  var i = 0\n  do {\n    guard i < 5 else ok(())\n    i = i + 1\n  }\n}",
+    );
+    let code = user_code(&out);
+    assert!(code.contains("while"), "do-block should emit while loop");
+    assert!(code.contains("break"), "guard else ok(()) should emit break");
+}
+
+#[test]
+fn emit_do_guard_ok_value_js() {
+    let out = parse_and_emit_js(
+        "module app\neffect fn f() -> Result[Int, String] = {\n  var count = 0\n  do {\n    guard count < 10 else ok(count)\n    count = count + 1\n  }\n}",
+    );
+    let code = user_code(&out);
+    assert!(code.contains("while"), "do-block should emit while loop");
+    assert!(
+        code.contains("return count") || code.contains("return (count)"),
+        "guard else ok(count) should emit return count, got:\n{}",
+        code
+    );
+    // Must NOT emit break for non-unit ok value
+    let guard_line = code.lines().find(|l| l.contains("if (!("));
+    if let Some(line) = guard_line {
+        assert!(
+            !line.contains("break"),
+            "guard else ok(count) must NOT emit break, got: {}",
+            line
+        );
+    }
+}
+
+#[test]
+fn emit_do_guard_err_js() {
+    let out = parse_and_emit_js(
+        "module app\neffect fn f() -> Result[Int, String] = {\n  var i = 0\n  do {\n    guard i < 10 else err(\"too many\")\n    i = i + 1\n  }\n}",
+    );
+    let code = user_code(&out);
+    assert!(
+        code.contains("throw") || code.contains("Error"),
+        "guard else err should emit throw, got:\n{}",
+        code
+    );
+}
+
+#[test]
+fn emit_do_guard_break_js() {
+    let out = parse_and_emit_js(
+        "module app\nfn f() -> Unit = {\n  var i = 0\n  do {\n    guard i < 5 else break\n    i = i + 1\n  }\n}",
+    );
+    let code = user_code(&out);
+    assert!(code.contains("break"), "guard else break should emit break");
+}
+
+#[test]
+fn emit_do_guard_ok_value_ts() {
+    let out = parse_and_emit_ts(
+        "module app\neffect fn f() -> Result[Int, String] = {\n  var count = 0\n  do {\n    guard count < 10 else ok(count)\n    count = count + 1\n  }\n}",
+    );
+    let code = user_code(&out);
+    assert!(
+        code.contains("return count") || code.contains("return (count)"),
+        "TS: guard else ok(count) should emit return count, got:\n{}",
+        code
+    );
+}
+
+// ---- Unit variant as value (no parentheses) ----
+
+#[test]
+fn emit_unit_variant_no_parens_js() {
+    let out = parse_and_emit_js(
+        "module app\ntype Token =\n  | Heading(Int, String)\n  | Divider\nfn f() -> Token = if true then Divider else Heading(1, \"hi\")",
+    );
+    let code = user_code(&out);
+    // Divider is a const, should NOT be called as Divider()
+    assert!(
+        !code.contains("Divider()"),
+        "unit variant should not have parens, got:\n{}",
+        code
+    );
+    assert!(
+        code.contains("Divider"),
+        "should reference Divider, got:\n{}",
+        code
+    );
+}
+
+#[test]
+fn emit_tuple_variant_with_parens_js() {
+    let out = parse_and_emit_js(
+        "module app\ntype Token =\n  | Heading(Int, String)\n  | Divider\nfn f() -> Token = Heading(1, \"hi\")",
+    );
+    let code = user_code(&out);
+    assert!(
+        code.contains("Heading(1"),
+        "tuple variant should have parens, got:\n{}",
+        code
+    );
+}
+
 // ---- Some/None ----
 
 #[test]
