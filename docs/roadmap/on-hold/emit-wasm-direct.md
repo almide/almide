@@ -237,6 +237,43 @@ Playground を `compile_to_js` → `eval` から `compile_to_wasm` → `WebAssem
 - ランタイムがWASMバイナリ内に含まれる
 - `patchRuntimeForBrowser` のハック不要
 
+## WASM + JS Glue 同時出力戦略
+
+WASM 直接出力の最大の可能性は、**WASM バイナリとそれを繋ぐ JS グルーコードの両方を Almide コンパイラが出力する**こと。
+
+```
+almide source (.almd)
+  ├→ .wasm  (計算ロジック: stdlib含む全ランタイム)
+  └→ .js    (グルーコード: WASM import/export バインディング、ブラウザAPI連携)
+```
+
+### 何が変わるか
+
+**今**: stdlib runtime は JS で手書き (`emit_ts_runtime.rs` 内の `__almd_string` 等)
+**将来**: stdlib を Almide 自身で実装 → WASM にコンパイル → JS グルーがブラウザ API と繋ぐ
+
+- `string.trim` や `list.map` の実装が Almide コードになる（セルフホスティングの第一歩）
+- ブラウザ API (DOM, fetch, Date.now 等) へのアクセスは WASM import として定義し、JS グルーが提供
+- `@extern(ts, ...)` が既にあるため、グルーコード生成の設計基盤は整っている
+
+### wasm-bindgen との類似性
+
+Rust の wasm-bindgen が `#[wasm_bindgen]` から .wasm + .js を生成するのと同じパターン。
+Almide では `@extern(ts, ...)` が同じ役割を果たし、コンパイラが両方の出力を制御する。
+
+### MoonBit との差別化
+
+MoonBit は WASM GC proposal に賭けており、JS との連携レイヤーが薄い。
+Almide が「WASM + JS グルーを一体で出力」できれば、Web フロントエンドとの親和性で明確に差別化できる。
+JS エコシステム（npm パッケージ、ブラウザ API）との相互運用が自然に実現する。
+
+### Playground への波及
+
+この戦略が実現すれば:
+- Playground は `compile_to_wasm()` → `.wasm` + `.js` を受け取り、`WebAssembly.instantiate` で即実行
+- stdlib は WASM バイナリ内に含まれるため、bundled module の問題が解消
+- platform 依存の関数も JS グルー経由で polyfill 可能（`env.unix_timestamp()` → `Date.now()`）
+
 ## リスク・判断ポイント
 
 ### やる価値がある場合
