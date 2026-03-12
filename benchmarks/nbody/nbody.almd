@@ -13,10 +13,10 @@ effect fn main() -> Unit = {
   let args = env.args()
   let n = if list.len(args) > 1 then {
     match list.get(args, 1) {
-      some(s) => match int.parse(s) { ok(v) => v, err(_) => 50000000 }
-      none => 50000000
+      some(s) => match int.parse(s) { ok(v) => v, err(_) => 1000 }
+      none => 1000
     }
-  } else 50000000
+  } else 1000
 
   // Positions
   var s_x  = 0.0;  var s_y  = 0.0;  var s_z  = 0.0
