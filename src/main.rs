@@ -56,6 +56,12 @@ enum Commands {
         /// Optimize for performance (opt-level=2)
         #[arg(long)]
         release: bool,
+        /// Maximum performance: native CPU, fast-math, opt-level=3, LTO
+        #[arg(long)]
+        fast: bool,
+        /// Use unchecked index access (unsafe, no bounds checking)
+        #[arg(long)]
+        unchecked_index: bool,
         /// Skip type checking
         #[arg(long)]
         no_check: bool,
@@ -278,9 +284,9 @@ fn dispatch(cli: Cli) {
             let file = resolve_file(file);
             cli::cmd_run(&file, &program_args, no_check);
         }
-        Commands::Build { file, o, target, release, no_check } => {
+        Commands::Build { file, o, target, release, fast, unchecked_index, no_check } => {
             let file = resolve_file(file);
-            cli::cmd_build(&file, o.as_deref(), target.as_deref(), release, no_check);
+            cli::cmd_build(&file, o.as_deref(), target.as_deref(), release || fast, fast, unchecked_index, no_check);
         }
         Commands::Test { file, run, no_check } => {
             let file_str = file.as_deref().unwrap_or("");
