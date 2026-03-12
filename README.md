@@ -169,9 +169,10 @@ Tested with the [MiniGit benchmark](https://github.com/almide/benchmark) — Cla
 | Go | 102.0s | $0.50 | 46/46 |
 | Rust | 113.7s | $0.54 | 38/40 |
 | TypeScript | 133.0s | $0.62 | 40/40 |
-| **Almide** | **239.1s** | **$1.13** | **20/20** |
+| **Almide (no warmup)** | **239.1s** | **$1.13** | **20/20** |
+| **Almide (with warmup)** | **261.6s** | **$1.03** | **20/20** |
 
-Almide has no training data in any public LLM corpus yet — the generation speed gap is expected to narrow as more Almide code enters training sets. Despite being slower, Almide achieves **100% pass rate** with zero failures across 20 trials. See [full results](https://github.com/almide/benchmark) for all 16 languages.
+Almide has no training data in any public LLM corpus yet — the generation speed gap is expected to narrow as more Almide code enters training sets. Despite being slower, Almide achieves **100% pass rate** with zero failures across 40 trials (20 no-warmup + 20 warmup). See [full results](https://github.com/almide/benchmark) for all 16 languages.
 
 ## Native Performance
 
