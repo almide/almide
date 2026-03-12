@@ -206,6 +206,103 @@ test "do guard with accumulation" {
   assert_eq(sum, 15)
 }
 
+// ── do block with guard returning non-unit value ──
+
+effect fn find_first_negative(xs: List[Int]) -> Result[Int, String] = {
+  var i = 0
+  do {
+    guard i < list.len(xs) else err("no negative found")
+    let v = match list.get(xs, i) {
+      some(x) => x,
+      none => 0,
+    }
+    guard v >= 0 else ok(v)
+    i = i + 1
+  }
+}
+
+test "do guard else ok with int value" {
+  let result = find_first_negative([1, 2, -3, 4])
+  assert_eq(result, ok(-3))
+}
+
+test "do guard else err when not found" {
+  let result = find_first_negative([1, 2, 3])
+  assert_eq(result, err("no negative found"))
+}
+
+effect fn count_until(limit: Int) -> Result[Int, String] = {
+  guard limit > 0 else err("limit must be positive")
+  var count = 0
+  do {
+    guard count < limit else ok(count)
+    count = count + 1
+  }
+}
+
+test "do guard else ok returns accumulated count" {
+  assert_eq(count_until(5), ok(5))
+  assert_eq(count_until(1), ok(1))
+  assert_eq(count_until(0), err("limit must be positive"))
+}
+
+effect fn sum_until_threshold(xs: List[Int], threshold: Int) -> Result[Int, String] = {
+  var sum = 0
+  var i = 0
+  do {
+    guard i < list.len(xs) else ok(sum)
+    let v = match list.get(xs, i) {
+      some(x) => x,
+      none => 0,
+    }
+    sum = sum + v
+    guard sum <= threshold else ok(sum)
+    i = i + 1
+  }
+}
+
+test "do guard ok returns sum at threshold" {
+  assert_eq(sum_until_threshold([1, 2, 3, 4, 5], 6), ok(10))
+  assert_eq(sum_until_threshold([1, 2, 3, 4, 5], 100), ok(15))
+  assert_eq(sum_until_threshold([1, 2, 3, 4, 5], 3), ok(6))
+}
+
+effect fn collatz_steps(n: Int) -> Result[Int, String] = {
+  guard n > 0 else err("only positive integers")
+  var current = n
+  var count = 0
+  do {
+    guard current != 1 else ok(count)
+    current = if current % 2 == 0 then current / 2 else current * 3 + 1
+    count = count + 1
+  }
+}
+
+test "do guard ok with collatz sequence" {
+  assert_eq(collatz_steps(1), ok(0))
+  assert_eq(collatz_steps(16), ok(4))
+  assert_eq(collatz_steps(-1), err("only positive integers"))
+}
+
+effect fn find_index_of(xs: List[String], target: String) -> Result[Int, String] = {
+  var i = 0
+  do {
+    guard i < list.len(xs) else err("not found: " ++ target)
+    let v = match list.get(xs, i) {
+      some(x) => x,
+      none => "",
+    }
+    guard v != target else ok(i)
+    i = i + 1
+  }
+}
+
+test "do guard ok returns index" {
+  assert_eq(find_index_of(["a", "b", "c"], "b"), ok(1))
+  assert_eq(find_index_of(["a", "b", "c"], "c"), ok(2))
+  assert_eq(find_index_of(["a", "b", "c"], "d"), err("not found: d"))
+}
+
 // ── do block with guard else break/continue ──
 
 test "do guard else break" {

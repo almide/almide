@@ -105,6 +105,91 @@ test "do guard with accumulator" {
   assert_eq(total, 15)
 }
 
+// ── do block guard with non-unit ok value ──
+
+effect fn hamming_distance(a: String, b: String) -> Result[Int, String] = {
+  guard string.len(a) == string.len(b) else err("strands must be same length")
+  let chars_a = string.chars(a)
+  let chars_b = string.chars(b)
+  let len = list.len(chars_a)
+  var count = 0
+  var i = 0
+  do {
+    guard i < len else ok(count)
+    let ca = match list.get(chars_a, i) {
+      some(c) => c,
+      none => "",
+    }
+    let cb = match list.get(chars_b, i) {
+      some(c) => c,
+      none => "",
+    }
+    if ca != cb then { count = count + 1 } else { () }
+    i = i + 1
+  }
+}
+
+test "do guard ok with hamming distance" {
+  assert_eq(hamming_distance("GAGCCTACTAACGGGAT", "CATCGTAATGACGGCCT"), ok(7))
+  assert_eq(hamming_distance("", ""), ok(0))
+  assert_eq(hamming_distance("A", "A"), ok(0))
+  assert_eq(hamming_distance("AB", "BA"), ok(2))
+}
+
+test "do guard ok hamming error on different lengths" {
+  assert_eq(hamming_distance("AB", "ABC"), err("strands must be same length"))
+}
+
+effect fn binary_search(xs: List[Int], target: Int) -> Result[Int, String] = {
+  var lo = 0
+  var hi = list.len(xs) - 1
+  do {
+    guard lo <= hi else err("not found")
+    let mid = (lo + hi) / 2
+    let v = match list.get(xs, mid) {
+      some(x) => x,
+      none => 0,
+    }
+    guard v != target else ok(mid)
+    if v < target then { lo = mid + 1 } else { hi = mid - 1 }
+  }
+}
+
+test "do guard ok with binary search" {
+  assert_eq(binary_search([1, 3, 5, 7, 9], 5), ok(2))
+  assert_eq(binary_search([1, 3, 5, 7, 9], 1), ok(0))
+  assert_eq(binary_search([1, 3, 5, 7, 9], 9), ok(4))
+  assert_eq(binary_search([1, 3, 5, 7, 9], 4), err("not found"))
+}
+
+effect fn first_duplicate(xs: List[Int]) -> Result[Int, String] = {
+  var i = 0
+  do {
+    guard i < list.len(xs) else err("no duplicates")
+    let a = match list.get(xs, i) {
+      some(x) => x,
+      none => 0,
+    }
+    var j = i + 1
+    do {
+      guard j < list.len(xs) else ok(())
+      let b = match list.get(xs, j) {
+        some(x) => x,
+        none => 0,
+      }
+      guard a != b else ok(a)
+      j = j + 1
+    }
+    i = i + 1
+  }
+}
+
+test "do guard ok nested do blocks" {
+  assert_eq(first_duplicate([1, 2, 3, 2, 4]), ok(2))
+  assert_eq(first_duplicate([5, 1, 5]), ok(5))
+  assert_eq(first_duplicate([1, 2, 3]), err("no duplicates"))
+}
+
 // ── guard else err ──
 
 effect fn require_nonempty(s: String) -> Result[String, String] = {
