@@ -81,7 +81,7 @@ There is **no** null literal for missing values. Absence is represented by `none
 ### 1.4 Reserved Words
 
 ```
-import type trait impl for fn let var
+import type trait impl for fn let var while
 if then else match
 ok err some none
 try do
@@ -139,7 +139,9 @@ text
 ```
 Program   ::= ImportDecl* TopDecl*
 
-TopDecl   ::= TypeDecl | TraitDecl | ImplDecl | FnDecl | TestDecl
+TopDecl   ::= TypeDecl | TraitDecl | ImplDecl | FnDecl | TestDecl | TopLetDecl
+
+TopLetDecl ::= "let" Name [":" Type] "=" Expr    (* module-scope constant *)
 
 Stmt      ::= LetStmt | VarStmt | AssignStmt | Expr
 
@@ -151,9 +153,12 @@ Expr      ::= Literal
             | ListExpr
             | CallExpr
             | MemberExpr
+            | IndexExpr
             | PipeExpr
             | IfExpr
             | MatchExpr
+            | ForInExpr
+            | WhileExpr
             | BlockExpr
             | DoExpr
             | LambdaExpr
@@ -470,6 +475,24 @@ Rationale: The `!` suffix from v0.2 (`read_text!`) embedded meta-information in 
 - Call sites simply call the function normally
 - The compiler only needs to detect calls from non-`effect fn` to `effect fn`
 
+### 8.2 Top-Level let -- Module-Scope Constants
+
+```
+TopLetDecl ::= "let" Name (":" TypeExpr)? "=" Expr
+```
+
+```
+let PI = 3.14159265358979323846
+let MAX_RETRIES = 3
+let GREETING = "Hello, world"
+```
+
+Top-level `let` declares module-scope constants. They are evaluated at compile time when possible:
+- Numeric literals and simple expressions → Rust `const`
+- String and complex expressions → Rust `static LazyLock<T>`
+
+This replaces the previous pattern of using functions as constants (`fn PI() -> Float = 3.14`).
+
 ---
 
 ## 9. Statements
@@ -688,10 +711,48 @@ let bob = { ...alice, name: "bob" }      // age is inherited from alice
 ### 10.8 List Expressions
 
 ```
-ListExpr ::= "[" ExprList? "]"
+ListExpr    ::= "[" ExprList? "]"
+IndexExpr   ::= Expr "[" Expr "]"
 ```
 
-### 10.9 Pipe
+Index read: `xs[i]` returns `Option[T]` — `some(value)` if in bounds, `none` otherwise.
+Index write: `xs[i] = v` (var only) modifies the list in place.
+
+### 10.9 for...in Expression
+
+```
+ForInExpr ::= "for" Pattern "in" Expr "{" Stmt* "}"
+```
+
+```
+for item in items {
+  println(item)
+}
+
+for (i, item) in list.enumerate(items) {
+  println(int.to_string(i) ++ ": " ++ item)
+}
+```
+
+Iterates over a list. The loop body is `Unit`-typed. Use `for...in` for simple list iteration.
+
+### 10.10 while Expression
+
+```
+WhileExpr ::= "while" Expr "{" Stmt* "}"
+```
+
+```
+var i = 0
+while i < 10 {
+  println(int.to_string(i))
+  i = i + 1
+}
+```
+
+Loops while the condition is true. The loop body is `Unit`-typed. Use `while` for condition-based loops, `do { guard ... }` when you need to return a value from the loop.
+
+### 10.11 Pipe
 
 ```
 PipeExpr ::= Expr "|>" Expr

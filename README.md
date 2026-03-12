@@ -33,7 +33,7 @@ The flywheel: LLMs write Almide reliably → more code is produced → training 
 
 ### Prerequisites
 
-- [Rust](https://rustup.rs/) (stable, 1.80+)
+- [Rust](https://rustup.rs/) (stable, 1.85+)
 
 ### Install from source
 
@@ -57,7 +57,7 @@ Verify the installation:
 
 ```bash
 almide --version
-# almide 0.5.6
+# almide 0.5.7
 ```
 
 ### Hello World
@@ -81,7 +81,7 @@ almide run hello.almd
 - **Top-level constants** — `let PI = 3.14` at module scope, compile-time evaluated
 - **Pipeline operator** — `data |> transform |> output`
 - **Module system** — Packages, sub-namespaces, visibility control, diamond dependency resolution
-- **Built-in testing** — `test "name" { assert_eq(a, b) }` with `almide test`
+- **Built-in testing** — `test "name" { assert_eq(a, b) }` with `almide test` (1500+ language tests)
 - **Actionable diagnostics** — Every error includes file:line, context, and a concrete fix suggestion
 
 ## Why Almide?
@@ -138,7 +138,7 @@ test "greet succeeds" {
 Almide source (`.almd`) is compiled by a pure-Rust compiler to Rust, TypeScript, or WebAssembly.
 
 ```
-.almd → Lexer → Parser → AST → Type Checker → CodeGen → .rs / .ts / .wasm
+.almd → Lexer → Parser → AST → Type Checker → IR Lowering → CodeGen → .rs / .ts / .wasm
 ```
 
 ```bash
@@ -165,12 +165,14 @@ Tested with the [MiniGit benchmark](https://github.com/almide/benchmark) — Cla
 | Language | Total Time | Avg Cost | Pass Rate |
 |----------|-----------|----------|-----------|
 | Ruby | 73.1s | $0.36 | 40/40 |
-| Python | 74.6s | $0.38 | 40/40 |
-| TypeScript | 133.0s | $0.62 | 40/40 |
+| Python | 77.5s | $0.39 | 48/48 |
+| Go | 102.0s | $0.50 | 46/46 |
 | Rust | 113.7s | $0.54 | 38/40 |
-| **Almide** | **206.3s** | **$0.59** | **8/8** |
+| TypeScript | 133.0s | $0.62 | 40/40 |
+| **Almide (no warmup)** | **239.1s** | **$1.13** | **20/20** |
+| **Almide (with warmup)** | **261.6s** | **$1.03** | **20/20** |
 
-Almide has no training data in any public LLM corpus yet, so the generation speed gap is expected to narrow as more Almide code enters training sets. See [full results](https://github.com/almide/benchmark) for all 16 languages.
+Almide has no training data in any public LLM corpus yet — the generation speed gap is expected to narrow as more Almide code enters training sets. Despite being slower, Almide achieves **100% pass rate** with zero failures across 40 trials (20 no-warmup + 20 warmup). See [full results](https://github.com/almide/benchmark) for all 16 languages.
 
 ## Native Performance
 
@@ -188,7 +190,6 @@ Almide compiles to Rust, which then compiles to native machine code. No runtime,
 Install syntax highlighting from [almide/almide-editors](https://github.com/almide/almide-editors):
 
 - **VS Code** — Download `.vsix` from [Releases](https://github.com/almide/almide-editors/releases), then `code --install-extension almide-lang-*.vsix`
-- **Chrome** — Highlights `.almd` files on GitHub and `` ```almd `` code blocks on any website. See [install instructions](https://github.com/almide/almide-editors#chrome-extension--almide-highlight)
 
 ## Documentation
 
@@ -197,7 +198,7 @@ Install syntax highlighting from [almide/almide-editors](https://github.com/almi
 - [docs/GRAMMAR.md](./docs/GRAMMAR.md) — EBNF grammar + stdlib reference
 - [docs/CHEATSHEET.md](./docs/CHEATSHEET.md) — Quick reference for AI code generation
 - [docs/DESIGN.md](./docs/DESIGN.md) — Design philosophy and trade-offs
-- [docs/ROADMAP.md](./docs/ROADMAP.md) — Language evolution plans
+- [docs/roadmap/](./docs/roadmap/README.md) — Language evolution plans
 
 ## Contributing
 

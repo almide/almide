@@ -19,7 +19,7 @@ import { json }                import json
 struct Foo { x: Int }          type Foo = { x: Int }
 x.len()                        WORKS! (UFCS — auto-resolves by type)
 try { } catch(e) { }          match result { Ok(v) => ..., Err(e) => ... }
-while cond { }                 do { guard cond else ok(()) ... }
+while cond { ... }             while cond { ... }  (SAME — while IS supported)
 ```
 
 ## Quick Patterns
@@ -45,8 +45,8 @@ let x = if n > 0 then "pos" else "neg"
 
 // Match
 let name = match list.get(args, 1) {
-  Some(v) => v,
-  None => "default",
+  some(v) => v,
+  none => "default",
 }
 
 // Lambda
@@ -60,9 +60,23 @@ for (i, item) in list.enumerate(items) {
   println(int.to_string(i) ++ ": " ++ item)
 }
 
+// While loop
+var i = 0
+while i < 10 {
+  println(int.to_string(i))
+  i = i + 1
+}
+
+// Top-level constant
+let PI = 3.14159265358979323846
+
 // Mutable state
 var count = 0
 count = count + 1
+
+// List index read
+let xs = [10, 20, 30]
+let second = xs[1]       // 20 (returns Option[T])
 
 // Guard (early exit)
 guard list.len(args) > 1 else err("need args")

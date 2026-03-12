@@ -1,6 +1,6 @@
 # Architecture
 
-Almide is a ~7,600-line pure-Rust compiler. Zero runtime dependencies — `serde` and `serde_json` are the only crates, used for AST serialization.
+Almide is a ~23,000-line pure-Rust compiler. Zero runtime dependencies — `serde` and `serde_json` are the only crates, used for AST serialization.
 
 ## Pipeline
 
@@ -28,8 +28,13 @@ Source (.almd)
 └─────────┘     (for error display)
     │
     ▼
+┌──────────┐
+│ Lowering │   AST → Typed IR
+└──────────┘
+    │
+    ▼
 ┌──────────────┐
-│   Emitter    │
+│   Emitter    │   IR → target code
 │  ┌────────┐  │
 │  │  Rust  │  │──▶  .rs  ──▶  rustc  ──▶  native binary / WASM
 │  ├────────┤  │
@@ -66,20 +71,23 @@ src/
 │   ├── operators.rs     Binary/unary operator type rules
 │   └── statements.rs    Statement checking, pattern binding
 ├── types.rs             Internal type representation (Ty enum, TypeEnv, FnSig)
+├── ir.rs                Typed IR definitions (IrExpr, IrStmt, IrDecl)
+├── lower.rs             AST → IR lowering (typed intermediate representation)
 ├── diagnostic.rs        Structured errors with file/line, hint, source display
 ├── stdlib.rs            Centralized stdlib definitions (signatures, UFCS, modules)
+├── generated/           Auto-generated from stdlib/defs/*.toml (DO NOT EDIT)
 ├── emit_common.rs       Shared codegen utilities (sanitize)
-├── emit_rust/           Rust code generation
+├── emit_rust/           Rust code generation (IR-based)
 │   ├── mod.rs           Emitter struct, EmitOptions, entry points
 │   ├── program.rs       Declarations, runtime preamble, main wrapper
-│   ├── expressions.rs   Expression → Rust translation
-│   ├── calls.rs         Module call mapping (fs, string, list, map, env, process, ...)
-│   └── blocks.rs        Blocks, do-blocks, for-in, match arms
-├── emit_ts/             TypeScript/JavaScript code generation
+│   ├── ir_expressions.rs  IR expression → Rust translation
+│   ├── ir_blocks.rs     IR blocks, do-blocks, for-in, match arms
+│   └── calls.rs         Module call mapping (fs, string, list, map, env, process, ...)
+├── emit_ts/             TypeScript/JavaScript code generation (IR-based)
 │   ├── mod.rs           TsEmitter struct, entry points
 │   ├── declarations.rs  Fn/type/test declarations
-│   ├── expressions.rs   Expression → TS translation
-│   └── blocks.rs        Blocks, match, for-in
+│   ├── ir_expressions.rs  IR expression → TS translation
+│   └── ir_blocks.rs     IR blocks, match, for-in
 ├── emit_ts_runtime.rs   Embedded JS/TS stdlib runtime (Deno + Node)
 ├── fmt.rs               Code formatter (AST → formatted source)
 └── project.rs           almide.toml parsing, git-based dependency management
@@ -95,9 +103,16 @@ Almide targets LLM-generated code. Correctness matters more than compile speed. 
 - Zero-effort access to WASM via `--target wasm32-wasip1`
 - Sub-MB static binaries with no runtime
 
-### Why no traits or generics (yet)?
+### Why a typed IR?
 
-Almide's type system is intentionally simple. For LLM code generation, a flat module system with UFCS is more predictable than trait resolution. The type checker uses `Ty::Unknown` to handle generic containers — `List[T]`, `Option[T]`, `Result[T, E]` work, but user-defined generics don't exist yet. This is a deliberate scope limit, not an oversight.
+The compiler originally emitted code directly from the AST, but this led to duplicated logic between Rust and TS emitters. The IR (intermediate representation) sits between the type checker and codegen, providing a normalized, typed tree. This enables:
+- Shared optimizations (borrow analysis, clone insertion) applied once
+- Easier addition of new targets
+- Clearer separation between language semantics and target-specific codegen
+
+### Generics
+
+Almide supports generics for type declarations (`type Pair[A, B] = { first: A, second: B }`) and all stdlib containers. User-defined generic functions are not yet supported — this is a deliberate scope limit, not an oversight. The type checker preserves generic type arguments through `Ty::Named(name, args)` for accurate codegen.
 
 ### Why directory modules?
 
@@ -121,7 +136,7 @@ This is designed for LLM auto-repair — the model reads the error, applies the 
 When Almide compiles and runs a program, it goes through two compilation stages:
 
 ```
-.almd → [Almide compiler] → .rs → [rustc] → binary → execute
+.almd → [Almide compiler] → IR → .rs → [rustc] → binary → execute
 ```
 
 The `rustc` optimization level differs by command:
@@ -167,22 +182,33 @@ Almide's generated code competes at the Rust/C++ tier because **it is Rust** —
 
 ## Testing
 
-```bash
-almide test               # Run tests/ directory
-almide run file.almd      # Compile + execute (tests embedded in source)
-almide check file.almd    # Type check only
+```
+spec/                  Almide language tests (almide test spec/)
+├── lang/              Language feature tests (expr, control flow, types, ...)
+├── stdlib/            Stdlib module tests (string, list, map, ...)
+└── integration/       Multi-module tests (generics, modules, extern)
+tests/                 Rust compiler unit tests (cargo test, auto-discovery)
+exercises/             Exercism-style programs (integration tests)
 ```
 
-The `exercises/` directory contains 17 Exercism-style programs (affine-cipher, bob, collatz, config-merger, etc.) that serve as integration tests. CI runs all of them on every push.
+```bash
+almide test                      # All .almd tests (recursive)
+almide test spec/lang/           # Language tests only
+almide test spec/stdlib/         # Stdlib tests only
+cargo test                       # Rust compiler tests
+```
+
+CI runs all exercises on every push across Rust, TS, JS, and WASM targets.
 
 ## Stats
 
 | Metric | Value |
 |--------|-------|
-| Total source | ~7,600 lines of Rust |
-| Dependencies | 2 (serde, serde_json) |
-| Max file size | ~750 lines (lexer.rs) |
-| Stdlib modules | 17 (string, list, map, int, float, char, fs, env, path, json, http, math, random, regex, time, io, process) |
+| Total source | ~23,000 lines of Rust |
+| Dependencies | 4 (serde, serde_json, clap, semver) |
+| Stdlib modules | 14 (string, list, map, int, float, fs, env, path, json, math, random, regex, time, io, process, encoding, args, bitwise, hash, csv, http) |
 | Targets | Rust, TypeScript, JavaScript, WASM |
-| Exercises | 18 programs with embedded tests |
+| Language tests | 1,500+ (.almd) |
+| Compiler tests | 470 (cargo test) |
+| Exercises | 15 programs with embedded tests |
 | n-body benchmark | 1.74s (Rust-equivalent, opt-level=2) |
