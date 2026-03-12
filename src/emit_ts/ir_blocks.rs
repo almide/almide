@@ -238,7 +238,13 @@ impl TsEmitter {
             if has_guard {
                 if let IrStmtKind::Guard { cond, else_ } = &stmt.kind {
                     let c = self.gen_ir_expr(cond);
-                    if matches!(&else_.kind, IrExprKind::Unit | IrExprKind::ResultOk { .. } | IrExprKind::Break) {
+                    if let IrExprKind::ResultOk { expr: ok_val } = &else_.kind {
+                        if matches!(&ok_val.kind, IrExprKind::Unit) {
+                            lines.push(format!("{}if (!({})) {{ break; }}", ind, c));
+                        } else {
+                            lines.push(format!("{}if (!({})) {{ return {}; }}", ind, c, self.gen_ir_expr(ok_val)));
+                        }
+                    } else if matches!(&else_.kind, IrExprKind::Unit | IrExprKind::Break) {
                         lines.push(format!("{}if (!({})) {{ break; }}", ind, c));
                     } else if matches!(&else_.kind, IrExprKind::Continue) {
                         lines.push(format!("{}if (!({})) {{ continue; }}", ind, c));
