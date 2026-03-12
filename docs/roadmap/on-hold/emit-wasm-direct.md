@@ -261,11 +261,36 @@ almide source (.almd)
 Rust の wasm-bindgen が `#[wasm_bindgen]` から .wasm + .js を生成するのと同じパターン。
 Almide では `@extern(ts, ...)` が同じ役割を果たし、コンパイラが両方の出力を制御する。
 
+### クロスプラットフォームフレームワークからの知見
+
+この「コアロジック + プラットフォームブリッジ」のアーキテクチャは、クロスプラットフォームフレームワークが長年磨いてきたパターンと同じ。
+
+| フレームワーク | コア | ブリッジ | 学べること |
+|---------------|------|---------|-----------|
+| **React Native** | JS (Hermes) | JSI → Native Modules | 初期の非同期ブリッジ (JSON serialize) は遅すぎた → JSI で同期的な直接呼び出しに進化。**教訓: ブリッジのオーバーヘッドは最小限に** |
+| **Flutter** | Dart (AOT) | Platform Channels → FFI | Dart VM がレンダリングまで持つ。OS API だけ Platform Channel 経由。**教訓: コアが自律的なほどブリッジ依存が減り安定する** |
+| **Kotlin Multiplatform** | Kotlin Common | expect/actual | 共通コードに `expect` 宣言、各プラットフォームが `actual` 実装。**教訓: Almide の `@extern` と同じ設計。型安全な境界が重要** |
+| **Capacitor (Ionic)** | Web (JS) | Native Plugin Bridge | Web 技術をコアに据え、ネイティブはプラグインとして挿す。**教訓: Web-first でもネイティブ拡張可能な設計は強い** |
+| **.NET MAUI / Blazor** | C# (IL/WASM) | JS interop | Blazor WASM は .NET を WASM で動かし、JS interop でブラウザ API を呼ぶ。**教訓: WASM+JS interop のオーバーヘッドは実用上問題にならない** |
+
+**共通するパターン**:
+1. コアロジックはプラットフォーム非依存な言語/ランタイムに閉じる
+2. プラットフォーム固有の機能は明示的な境界（ブリッジ/チャネル/extern）を通す
+3. ブリッジは薄く・型安全に保つ（厚いブリッジは性能とデバッグの両方で問題になる）
+4. コアの自律性が高いほど、ブリッジ呼び出し頻度が下がり、性能が安定する
+
+**Almide への適用**:
+- WASM = コア（計算・stdlib・ビジネスロジック）、JS グルー = ブリッジ（ブラウザ API・DOM・fetch）
+- `@extern(ts, ...)` = Kotlin の `expect/actual`、Flutter の Platform Channel に相当
+- React Native の失敗（初期の非同期ブリッジ）を踏まえ、WASM ↔ JS 間の呼び出しは同期的・低オーバーヘッドに設計する
+- Flutter の成功（コアが自律的）を踏まえ、stdlib を可能な限り WASM 側に置き、JS 呼び出しを最小化する
+
 ### MoonBit との差別化
 
 MoonBit は WASM GC proposal に賭けており、JS との連携レイヤーが薄い。
 Almide が「WASM + JS グルーを一体で出力」できれば、Web フロントエンドとの親和性で明確に差別化できる。
 JS エコシステム（npm パッケージ、ブラウザ API）との相互運用が自然に実現する。
+上記フレームワークの知見が示すように、「コアの自律性 + 薄いブリッジ」の組み合わせが最も持続可能なアーキテクチャ。
 
 ### Playground への波及
 
