@@ -383,23 +383,26 @@ fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
 
 fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
     match stmt {
-        ast::Stmt::Let { name, value, span, .. } => {
+        ast::Stmt::Let { name, ty: declared_ty, value, span, .. } => {
             let ir_value = lower_expr(ctx, value);
-            let ty = ir_value.ty.clone();
+            // Prefer declared type annotation over inferred type (avoids Unknown for none, empty list, etc.)
+            let ty = declared_ty.as_ref()
+                .map(|t| resolve_type_expr(t))
+                .unwrap_or_else(|| ir_value.ty.clone());
             let var = ctx.define_var(name, ty.clone(), Mutability::Let, *span);
             IrStmt { kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty, value: ir_value }, span: *span }
         }
-        ast::Stmt::Var { name, value, span, .. } => {
+        ast::Stmt::Var { name, ty: declared_ty, value, span, .. } => {
             let ir_value = lower_expr(ctx, value);
-            let ty = ir_value.ty.clone();
+            let ty = declared_ty.as_ref()
+                .map(|t| resolve_type_expr(t))
+                .unwrap_or_else(|| ir_value.ty.clone());
             let var = ctx.define_var(name, ty.clone(), Mutability::Var, *span);
             IrStmt { kind: IrStmtKind::Bind { var, mutability: Mutability::Var, ty, value: ir_value }, span: *span }
         }
         ast::Stmt::LetDestructure { pattern, value, span } => {
             let ir_value = lower_expr(ctx, value);
-            ctx.push_scope();
             let ir_pattern = lower_pattern(ctx, pattern);
-            ctx.pop_scope();
             IrStmt { kind: IrStmtKind::BindDestructure { pattern: ir_pattern, value: ir_value }, span: *span }
         }
         ast::Stmt::Assign { name, value, span } => {
@@ -600,6 +603,22 @@ fn lower_pipe(ctx: &mut LowerCtx, left: IrExpr, right: &ast::Expr, ty: Ty, span:
             }
         }
         // `a |> f` → `f(a)` — call right as function with left as sole arg
+        ast::Expr::Ident { name, .. } | ast::Expr::TypeName { name, .. } => {
+            if ctx.lookup_var(name).is_some() {
+                // Variable holding a function — use Computed call
+                let callee_ir = lower_expr(ctx, right);
+                ctx.mk(IrExprKind::Call {
+                    target: CallTarget::Computed { callee: Box::new(callee_ir) },
+                    args: vec![left],
+                }, ty, span)
+            } else {
+                // Named function — use Named call directly
+                ctx.mk(IrExprKind::Call {
+                    target: CallTarget::Named { name: name.clone() },
+                    args: vec![left],
+                }, ty, span)
+            }
+        }
         _ => {
             let callee_ir = lower_expr(ctx, right);
             ctx.mk(IrExprKind::Call {

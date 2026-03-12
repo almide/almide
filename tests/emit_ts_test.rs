@@ -6,14 +6,21 @@ fn parse_and_emit_js(input: &str) -> String {
     let tokens = Lexer::tokenize(input);
     let mut parser = Parser::new(tokens);
     let prog = parser.parse().expect("parse failed");
-    emit_ts::emit_js_with_modules(&prog, &[], None)
+    // Type-check and lower to IR for codegen
+    let mut checker = almide::check::Checker::new();
+    checker.check_program(&mut prog.clone());
+    let ir = almide::lower::lower_program(&prog, &checker.expr_types, &checker.env);
+    emit_ts::emit_js_with_modules(&prog, &[], Some(&ir))
 }
 
 fn parse_and_emit_ts(input: &str) -> String {
     let tokens = Lexer::tokenize(input);
     let mut parser = Parser::new(tokens);
     let prog = parser.parse().expect("parse failed");
-    emit_ts::emit_with_modules(&prog, &[], None)
+    let mut checker = almide::check::Checker::new();
+    checker.check_program(&mut prog.clone());
+    let ir = almide::lower::lower_program(&prog, &checker.expr_types, &checker.env);
+    emit_ts::emit_with_modules(&prog, &[], Some(&ir))
 }
 
 /// Strip the runtime preamble, return only user code

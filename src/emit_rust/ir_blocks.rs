@@ -9,7 +9,7 @@ impl Emitter {
                 let val = self.gen_ir_expr(value);
                 let mut_kw = if *mutability == Mutability::Var { "let mut" } else { "let" };
                 // Emit type annotation for Result, Option, empty collections
-                let ty_str = self.ir_ty_annotation(ty);
+                let ty_str = self.ir_ty_annotation(ty, Some(value));
                 if let Some(t) = ty_str {
                     format!("{} {}: {} = {};", mut_kw, name, t, val)
                 } else {
@@ -315,20 +315,36 @@ impl Emitter {
 
     /// Generate Rust type annotation for IR types that need it.
     /// Only annotates types that Rust cannot infer (empty collections, Option/Result in some contexts).
-    fn ir_ty_annotation(&self, ty: &almide::types::Ty) -> Option<String> {
+    fn ir_ty_annotation(&self, ty: &almide::types::Ty, value: Option<&IrExpr>) -> Option<String> {
         use almide::types::Ty;
+        let is_empty_collection = value.map_or(false, |v| match &v.kind {
+            IrExprKind::List { elements } => elements.is_empty(),
+            IrExprKind::Call { target: CallTarget::Module { func, .. }, args, .. } => {
+                func == "new" && args.is_empty()
+            }
+            _ => false,
+        });
         match ty {
-            // Don't annotate Result — Rust infers it, and auto-? changes the type
-            Ty::Result(_, _) => None,
+            // Annotate Result when both type params are known (not Unknown)
+            // Skip annotation when either param is Unknown (Rust can infer from context)
+            Ty::Result(ok, err) => {
+                if matches!(ok.as_ref(), Ty::Unknown) || matches!(err.as_ref(), Ty::Unknown) {
+                    None
+                } else {
+                    Some(format!("Result<{}, {}>", self.ir_ty_to_rust(ok), self.ir_ty_to_rust(err)))
+                }
+            }
             Ty::Option(inner) => {
                 let inner_str = self.ir_ty_to_rust(inner);
                 Some(format!("Option<{}>", inner_str))
             }
-            Ty::List(inner) if matches!(inner.as_ref(), Ty::Unknown) => {
-                Some("Vec<_>".to_string())
+            // Annotate List when empty or inner type is unknown
+            Ty::List(inner) if is_empty_collection || matches!(inner.as_ref(), Ty::Unknown | Ty::TypeVar(_)) => {
+                Some(format!("Vec<{}>", self.ir_ty_to_rust(inner)))
             }
-            Ty::Map(k, v) if matches!(k.as_ref(), Ty::Unknown) || matches!(v.as_ref(), Ty::Unknown) => {
-                Some("HashMap<_, _>".to_string())
+            // Annotate Map when empty or types are unknown
+            Ty::Map(k, v) if is_empty_collection || matches!(k.as_ref(), Ty::Unknown | Ty::TypeVar(_)) || matches!(v.as_ref(), Ty::Unknown | Ty::TypeVar(_)) => {
+                Some(format!("HashMap<{}, {}>", self.ir_ty_to_rust(k), self.ir_ty_to_rust(v)))
             }
             _ => None,
         }
@@ -352,7 +368,7 @@ impl Emitter {
                 format!("({})", ts.join(", "))
             }
             Ty::Named(name) => name.clone(),
-            Ty::TypeVar(name) => name.clone(),
+            Ty::TypeVar(_) => "_".to_string(),
             Ty::Fn { params, ret } => {
                 let ps: Vec<String> = params.iter().map(|p| self.ir_ty_to_rust(p)).collect();
                 format!("impl Fn({}) -> {} + Clone", ps.join(", "), self.ir_ty_to_rust(ret))

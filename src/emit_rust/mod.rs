@@ -1,7 +1,4 @@
 mod program;
-mod expressions;
-mod calls;
-mod blocks;
 mod ir_expressions;
 mod ir_blocks;
 pub mod borrow;

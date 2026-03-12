@@ -420,6 +420,10 @@ impl Emitter {
                 let callee_str = crate::emit_common::sanitize(name);
                 // Check for variant constructor Box wrapping
                 let is_variant_ctor = name.chars().next().map_or(false, |c| c.is_uppercase());
+                // Unit variant constructor (no args, uppercase name) — emit without parens
+                if is_variant_ctor && args.is_empty() {
+                    return callee_str;
+                }
                 let args_str: Vec<String> = args.iter().enumerate().map(|(i, a)| {
                     let arg_str = self.gen_ir_arg_for(a, name, i);
                     if is_variant_ctor

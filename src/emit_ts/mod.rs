@@ -1,6 +1,4 @@
 mod declarations;
-mod expressions;
-mod blocks;
 mod ir_expressions;
 mod ir_blocks;
 
@@ -44,18 +42,6 @@ impl TsEmitter {
     }
 
     // Helpers
-
-    pub(crate) fn needs_iife(expr: &Expr) -> bool {
-        matches!(expr, Expr::Block { .. } | Expr::DoBlock { .. })
-    }
-
-    pub(crate) fn is_unit(expr: &Expr) -> bool {
-        match expr {
-            Expr::Unit { .. } => true,
-            Expr::Ok { expr, .. } | Expr::Some { expr, .. } => matches!(expr.as_ref(), Expr::Unit { .. }),
-            _ => false,
-        }
-    }
 
     pub(crate) fn sanitize(name: &str) -> String {
         crate::emit_common::sanitize(name)
