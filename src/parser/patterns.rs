@@ -87,7 +87,15 @@ impl Parser {
                 self.advance();
                 self.skip_newlines();
                 let mut fields = Vec::new();
+                let mut rest = false;
                 while !self.check(TokenType::RBrace) {
+                    if self.check(TokenType::DotDot) {
+                        self.advance();
+                        rest = true;
+                        if self.check(TokenType::Comma) { self.advance(); }
+                        self.skip_newlines();
+                        break;
+                    }
                     let field_name = self.expect_ident()?;
                     if self.check(TokenType::Colon) {
                         self.advance();
@@ -108,7 +116,7 @@ impl Parser {
                     }
                 }
                 self.expect(TokenType::RBrace)?;
-                return Ok(Pattern::RecordPattern { name, fields });
+                return Ok(Pattern::RecordPattern { name, fields, rest });
             }
             return Ok(Pattern::Constructor { name, args: Vec::new() });
         }

@@ -3,15 +3,20 @@ use crate::emit_ts_runtime;
 use super::TsEmitter;
 
 impl TsEmitter {
-    /// Pre-collect generic variant unit constructors from declarations.
+    /// Pre-collect variant info from declarations.
     fn collect_generic_variant_info(&mut self, decls: &[Decl]) {
         for decl in decls {
-            if let Decl::Type { ty: TypeExpr::Variant { cases }, generics: Some(gs), .. } = decl {
-                if !gs.is_empty() {
-                    for case in cases {
-                        if let VariantCase::Unit { name } = case {
+            if let Decl::Type { ty: TypeExpr::Variant { cases }, generics, .. } = decl {
+                let is_generic = matches!(generics, Some(gs) if !gs.is_empty());
+                for case in cases {
+                    match case {
+                        VariantCase::Unit { name } if is_generic => {
                             self.generic_variant_unit_ctors.insert(name.clone());
                         }
+                        VariantCase::Record { name, .. } => {
+                            self.variant_constructors.insert(name.clone());
+                        }
+                        _ => {}
                     }
                 }
             }

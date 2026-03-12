@@ -216,6 +216,10 @@ fn format_type_expr(out: &mut String, ty: &TypeExpr, _depth: usize) {
                             out.push_str(&f.name);
                             out.push_str(": ");
                             format_type_expr(out, &f.ty, _depth);
+                            if let Some(ref default) = f.default {
+                                out.push_str(" = ");
+                                format_expr(out, default, _depth);
+                            }
                         }
                         out.push_str(" }");
                     }
@@ -671,7 +675,7 @@ fn format_pattern(out: &mut String, pat: &Pattern) {
                 out.push(')');
             }
         }
-        Pattern::RecordPattern { name, fields } => {
+        Pattern::RecordPattern { name, fields, rest } => {
             out.push_str(name);
             out.push_str(" { ");
             for (i, f) in fields.iter().enumerate() {
@@ -681,6 +685,10 @@ fn format_pattern(out: &mut String, pat: &Pattern) {
                     out.push_str(": ");
                     format_pattern(out, p);
                 }
+            }
+            if *rest {
+                if !fields.is_empty() { out.push_str(", "); }
+                out.push_str("..");
             }
             out.push_str(" }");
         }

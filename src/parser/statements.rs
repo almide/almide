@@ -67,7 +67,7 @@ impl Parser {
                 .map(|n| FieldPattern { name: n, pattern: None })
                 .collect();
             return Ok(Stmt::LetDestructure {
-                pattern: Pattern::RecordPattern { name: String::new(), fields },
+                pattern: Pattern::RecordPattern { name: String::new(), fields, rest: false },
                 value, span: Some(span),
             });
         }

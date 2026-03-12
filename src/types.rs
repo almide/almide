@@ -29,11 +29,24 @@ pub struct VariantCase {
     pub payload: VariantPayload,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum VariantPayload {
     Unit,
     Tuple(Vec<Ty>),
-    Record(Vec<(std::string::String, Ty)>),
+    Record(Vec<(std::string::String, Ty, Option<crate::ast::Expr>)>),
+}
+
+impl PartialEq for VariantPayload {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (VariantPayload::Unit, VariantPayload::Unit) => true,
+            (VariantPayload::Tuple(a), VariantPayload::Tuple(b)) => a == b,
+            (VariantPayload::Record(a), VariantPayload::Record(b)) => {
+                a.len() == b.len() && a.iter().zip(b.iter()).all(|((n1, t1, _), (n2, t2, _))| n1 == n2 && t1 == t2)
+            }
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

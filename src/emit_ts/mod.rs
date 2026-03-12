@@ -15,6 +15,8 @@ pub(crate) struct TsEmitter {
     pub(crate) used_stdlib: RefCell<HashSet<String>>,
     /// Generic variant unit constructors — need `()` when used as standalone expressions
     pub(crate) generic_variant_unit_ctors: HashSet<String>,
+    /// Variant record constructor names — need `tag` field in TS output
+    pub(crate) variant_constructors: HashSet<String>,
     /// True when inside an effect fn body (err() should throw for auto-? propagation)
     pub(crate) in_effect: Cell<bool>,
     /// True when inside a test block (effect fn calls should be caught and wrapped as __Err)
@@ -30,6 +32,7 @@ impl TsEmitter {
             user_modules: Vec::new(),
             used_stdlib: RefCell::new(HashSet::new()),
             generic_variant_unit_ctors: HashSet::new(),
+            variant_constructors: HashSet::new(),
             in_effect: Cell::new(false),
             in_test: Cell::new(false),
         }

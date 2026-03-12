@@ -101,15 +101,22 @@ impl Emitter {
                 let ps: Vec<String> = elements.iter().map(|p| self.gen_pattern(p)).collect();
                 format!("({})", ps.join(", "))
             }
-            Pattern::RecordPattern { name, fields } => {
-                let fs: Vec<String> = fields.iter().map(|f| {
+            Pattern::RecordPattern { name, fields, rest } => {
+                let mut fs: Vec<String> = fields.iter().map(|f| {
                     if let Some(p) = &f.pattern {
                         format!("{}: {}", f.name, self.gen_pattern(p))
                     } else {
                         f.name.clone()
                     }
                 }).collect();
-                format!("{} {{ {} }}", name, fs.join(", "))
+                if *rest { fs.push("..".to_string()); }
+                // For generic variant constructors, qualify with enum name
+                let qualified = if let Some(enum_name) = self.generic_variant_constructors.get(name) {
+                    format!("{}::{}", enum_name, name)
+                } else {
+                    name.clone()
+                };
+                format!("{} {{ {} }}", qualified, fs.join(", "))
             }
         }
     }

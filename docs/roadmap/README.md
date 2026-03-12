@@ -2,7 +2,6 @@
 
 ## Active
 
-- [Self-Tooling in Almide](active/self-tooling.md) — tree-sitter grammar generator done, Chrome extension next
 - [Test Coverage](active/test-coverage.md) — 790 cases, target 1500+
 
 ## On Hold
@@ -10,6 +9,7 @@
 - [Benchmark Report](on-hold/benchmark-report.md)
 - [Direct WASM Emission](on-hold/emit-wasm-direct.md)
 - [Editor & GitHub Integration](on-hold/editor-github-integration.md)
+- [Function Reference Passing](on-hold/function-reference-passing.md) — low priority, verbose form is always correct
 - [Interop / FFI](on-hold/interop.md)
 - [LLM Developer Experience](on-hold/llm-developer-experience.md)
 - [LLM Immutable Sugar](on-hold/llm-immutable-sugar.md) — var indexing, `with` expression
@@ -21,6 +21,7 @@
 - [Structured Concurrency](on-hold/structured-concurrency.md)
 - [Syntax Sugar](on-hold/syntax-sugar.md) — range, raw strings, exhaustiveness done; comprehensions pending
 - [Tooling](on-hold/tooling.md)
+- [Trailing Lambda / Builder DSL](on-hold/trailing-lambda-builder.md) — won't do, solve with stdlib instead
 - [trait / impl](on-hold/trait-impl.md) — parser done, checker/emitter partial
 - [Type System Extensions](on-hold/type-system.md)
 
@@ -29,6 +30,7 @@
 - [CLI Tool Authoring](done/cli-tool-authoring.md) — err() exit, almide run args
 - [Codegen Optimization](done/codegen-optimization.md) — move analysis, borrow inference (Phase 0-3)
 - [Compiler Hardening](done/compiler-hardening.md)
+- [Default Field Values](done/default-field-values.md) — `field: Type = expr`, 5 variants → 3
 - [Control Flow Extensions](done/control-flow.md)
 - [Cross-Platform Support](done/cross-platform.md)
 - [Error Diagnostics](done/error-diagnostics.md) — lost mutation, "did you mean?", immutability hints
@@ -43,6 +45,8 @@
 - [npm Package Target](done/npm-package-target-target-npm.md)
 - [Playground Repair](done/playground-repair.md) — Fix with AI, repair loop, streaming
 - [Proliferation Blockers](done/proliferation-blockers.md)
+- [Self-Tooling](done/self-tooling.md) — tree-sitter grammar generator, Chrome extension, TextMate grammar
+- [Variant Record Fields](done/variant-record-fields.md) — named fields on enum variants, `..` rest pattern
 - [stdin / Interactive I/O](done/stdin-io.md)
 - [Stdlib Completeness](done/stdlib-completeness.md)
 - [Stdlib Declarative Codegen](done/stdlib-codegen.md)

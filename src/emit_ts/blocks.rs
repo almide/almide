@@ -137,7 +137,7 @@ impl TsEmitter {
                 let cond = if conds.is_empty() { "true".to_string() } else { conds.join(" && ") };
                 (cond, bindings)
             }
-            Pattern::RecordPattern { name, fields } => {
+            Pattern::RecordPattern { name, fields, .. } => {
                 let mut conds = vec![format!("{}?.tag === {}", expr, Self::json_string(name))];
                 let mut bindings = vec![];
                 for f in fields {

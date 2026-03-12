@@ -54,6 +54,8 @@ pub struct FieldType {
     pub name: String,
     #[serde(rename = "type")]
     pub ty: TypeExpr,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<Expr>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,7 +71,7 @@ pub enum Pattern {
     Ident { name: String },
     Literal { value: Box<Expr> },
     Constructor { name: String, args: Vec<Pattern> },
-    RecordPattern { name: String, fields: Vec<FieldPattern> },
+    RecordPattern { name: String, fields: Vec<FieldPattern>, rest: bool },
     Tuple { elements: Vec<Pattern> },
     Some { inner: Box<Pattern> },
     None,

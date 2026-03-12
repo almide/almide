@@ -114,10 +114,25 @@ impl Emitter {
                 format!("vec![{}]", elems.join(", "))
             }
             Expr::Record { name, fields, .. } => {
-                let fs: Vec<String> = fields.iter().map(|f| format!("{}: {}", f.name, self.gen_expr(&f.value))).collect();
                 if let Some(struct_name) = name {
-                    format!("{} {{ {} }}", struct_name, fs.join(", "))
+                    let fs: Vec<String> = fields.iter().map(|f| {
+                        // Use gen_arg for auto-clone on multi-use variables
+                        let val = self.gen_arg(&f.value);
+                        if self.boxed_variant_record_fields.contains(&(struct_name.clone(), f.name.clone())) {
+                            format!("{}: Box::new({})", f.name, val)
+                        } else {
+                            format!("{}: {}", f.name, val)
+                        }
+                    }).collect();
+                    // For generic variant constructors, qualify with enum name
+                    let qualified = if let Some(enum_name) = self.generic_variant_constructors.get(struct_name) {
+                        format!("{}::{}", enum_name, struct_name)
+                    } else {
+                        struct_name.clone()
+                    };
+                    format!("{} {{ {} }}", qualified, fs.join(", "))
                 } else {
+                    let fs: Vec<String> = fields.iter().map(|f| format!("{}: {}", f.name, self.gen_expr(&f.value))).collect();
                     // Anonymous record: generate a struct with generic type params
                     let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
                     let struct_name = self.anon_record_name(&field_names);

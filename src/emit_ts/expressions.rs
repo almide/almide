@@ -60,10 +60,18 @@ impl TsEmitter {
                 let elems: Vec<String> = elements.iter().map(|e| self.gen_expr(e)).collect();
                 format!("[{}]", elems.join(", "))
             }
-            Expr::Record { fields, .. } => { // name ignored in TS — records are plain objects
+            Expr::Record { name, fields, .. } => {
                 let fs: Vec<String> = fields.iter()
                     .map(|f| format!("{}: {}", f.name, self.gen_expr(&f.value)))
                     .collect();
+                // If this is a variant record constructor, add a tag field
+                if let Some(cname) = name.as_ref() {
+                    if self.variant_constructors.contains(cname.as_str()) {
+                        let mut all = vec![format!("tag: {}", Self::json_string(cname))];
+                        all.extend(fs);
+                        return format!("{{ {} }}", all.join(", "));
+                    }
+                }
                 format!("{{ {} }}", fs.join(", "))
             }
             Expr::SpreadRecord { base, fields, .. } => {

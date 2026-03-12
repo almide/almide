@@ -58,6 +58,7 @@ impl Emitter {
                                 for (i, f) in fields.iter().enumerate() {
                                     if Self::type_references_name(&f.ty, enum_name) {
                                         self.boxed_variant_args.insert((name.clone(), i));
+                                        self.boxed_variant_record_fields.insert((name.clone(), f.name.clone()));
                                     }
                                 }
                                 name.clone()
