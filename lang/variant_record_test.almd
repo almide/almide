@@ -51,3 +51,96 @@ test "variant record from function" {
   let p = make_match("num", "\\d+")
   assert_eq(describe(p), "match: num \\d+")
 }
+
+// ── Additional variant record tests ──
+
+test "variant record equality" {
+  let a = Match { scope: "kw", regex: "fn" }
+  let b = Match { scope: "kw", regex: "fn" }
+  assert_eq(a == b, true)
+}
+
+test "variant record inequality" {
+  let a = Match { scope: "kw", regex: "fn" }
+  let b = Match { scope: "kw", regex: "let" }
+  assert_eq(a != b, true)
+}
+
+test "variant record empty variant" {
+  let e = Empty
+  assert_eq(describe(e), "empty")
+  let e2 = Empty
+  assert_eq(e == e2, true)
+}
+
+test "variant record match with binding" {
+  let p = Match { scope: "string", regex: "\".*\"" }
+  let scope = match p {
+    Match { scope, .. } => scope,
+    _ => "unknown",
+  }
+  assert_eq(scope, "string")
+}
+
+test "variant record include in list" {
+  let includes = [Include("#a"), Include("#b"), Include("#c")]
+  let descs = list.map(includes, fn(p) => describe(p))
+  assert_eq(descs, ["include: #a", "include: #b", "include: #c"])
+}
+
+fn count_matches(pats: List[Pat]) -> Int = {
+  var count = 0
+  for p in pats {
+    let is_match = match p {
+      Match { .. } => true,
+      _ => false,
+    }
+    if is_match then { count = count + 1 } else { () }
+  }
+  count
+}
+
+test "variant record count by type" {
+  let pats = [
+    Match { scope: "kw", regex: "fn" },
+    Include("#ref"),
+    Match { scope: "type", regex: "Int" },
+    Empty,
+  ]
+  assert_eq(count_matches(pats), 2)
+}
+
+fn extract_scopes(pats: List[Pat]) -> List[String] =
+  list.filter_map(pats, fn(p) => match p {
+    Match { scope, .. } => some(scope),
+    BeginEnd { scope, .. } => some(scope),
+    _ => none,
+  })
+
+test "variant record extract fields" {
+  let pats = [
+    Match { scope: "keyword", regex: "fn" },
+    Include("#x"),
+    BeginEnd { scope: "block", begin: "{", end_pat: "}", patterns: [] },
+    Empty,
+  ]
+  let scopes = extract_scopes(pats)
+  assert_eq(scopes, ["keyword", "block"])
+}
+
+test "variant record deeply nested" {
+  let inner1 = Match { scope: "s1", regex: "r1" }
+  let inner2 = Match { scope: "s2", regex: "r2" }
+  let mid = BeginEnd { scope: "mid", begin: "(", end_pat: ")", patterns: [inner1, inner2] }
+  let outer = BeginEnd { scope: "outer", begin: "[", end_pat: "]", patterns: [mid, Include("#end")] }
+  assert_eq(describe(outer), "begin-end: outer (2 sub)")
+}
+
+test "variant record make and match round trip" {
+  let p = make_match("test_scope", "test_regex")
+  let result = match p {
+    Match { scope, regex } => scope ++ ":" ++ regex,
+    _ => "other",
+  }
+  assert_eq(result, "test_scope:test_regex")
+}

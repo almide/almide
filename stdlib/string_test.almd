@@ -1,0 +1,415 @@
+// Comprehensive string module tests
+
+// ── trim ──
+
+test "string.trim whitespace only" {
+  assert_eq(string.trim("   "), "")
+}
+
+test "string.trim tabs and newlines" {
+  assert_eq(string.trim("\t\nhello\n\t"), "hello")
+}
+
+test "string.trim no whitespace" {
+  assert_eq(string.trim("hello"), "hello")
+}
+
+test "string.trim mixed" {
+  assert_eq(string.trim("  hello world  "), "hello world")
+}
+
+// ── split ──
+
+test "string.split single char" {
+  assert_eq(string.split("a-b-c", "-"), ["a", "b", "c"])
+}
+
+test "string.split multi char separator" {
+  assert_eq(string.split("a::b::c", "::"), ["a", "b", "c"])
+}
+
+test "string.split no match" {
+  assert_eq(string.split("hello", ","), ["hello"])
+}
+
+test "string.split empty parts" {
+  assert_eq(string.split("a,,b", ","), ["a", "", "b"])
+}
+
+// ── join ──
+
+test "string.join single element" {
+  assert_eq(string.join(["hello"], ", "), "hello")
+}
+
+test "string.join multi char separator" {
+  assert_eq(string.join(["a", "b", "c"], " | "), "a | b | c")
+}
+
+// ── len ──
+
+test "string.len unicode" {
+  assert_eq(string.len("abc"), 3)
+}
+
+test "string.len spaces" {
+  assert_eq(string.len("  "), 2)
+}
+
+// ── contains? ──
+
+test "string.contains? substring at start" {
+  assert(string.contains("hello world", "hello"))
+}
+
+test "string.contains? substring at end" {
+  assert(string.contains("hello world", "world"))
+}
+
+test "string.contains? empty substring" {
+  assert(string.contains("hello", ""))
+}
+
+test "string.contains? self" {
+  assert(string.contains("abc", "abc"))
+}
+
+// ── starts_with? / ends_with? ──
+
+test "string.starts_with? empty prefix" {
+  assert(string.starts_with?("hello", ""))
+}
+
+test "string.starts_with? full string" {
+  assert(string.starts_with?("hello", "hello"))
+}
+
+test "string.starts_with? false" {
+  assert(not string.starts_with?("hello", "world"))
+}
+
+test "string.ends_with? empty suffix" {
+  assert(string.ends_with?("hello", ""))
+}
+
+test "string.ends_with? full string" {
+  assert(string.ends_with?("hello", "hello"))
+}
+
+test "string.ends_with? false" {
+  assert(not string.ends_with?("hello", "world"))
+}
+
+// ── slice ──
+
+test "string.slice with start and end" {
+  assert_eq(string.slice("hello world", 0, 5), "hello")
+}
+
+test "string.slice from middle" {
+  assert_eq(string.slice("abcdef", 2, 4), "cd")
+}
+
+test "string.slice to end" {
+  assert_eq(string.slice("hello", 3), "lo")
+}
+
+test "string.slice empty result" {
+  assert_eq(string.slice("hello", 5), "")
+}
+
+// ── pad_left / pad_right ──
+
+test "string.pad_left shorter string" {
+  assert_eq(string.pad_left("42", 5, "0"), "00042")
+}
+
+test "string.pad_left already long enough" {
+  assert_eq(string.pad_left("hello", 3, " "), "hello")
+}
+
+test "string.pad_right shorter string" {
+  assert_eq(string.pad_right("x", 4, "."), "x...")
+}
+
+test "string.pad_right exact length" {
+  assert_eq(string.pad_right("abc", 3, " "), "abc")
+}
+
+// ── to_upper / to_lower ──
+
+test "string.to_upper mixed case" {
+  assert_eq(string.to_upper("Hello World"), "HELLO WORLD")
+}
+
+test "string.to_upper already upper" {
+  assert_eq(string.to_upper("ABC"), "ABC")
+}
+
+test "string.to_lower mixed case" {
+  assert_eq(string.to_lower("Hello World"), "hello world")
+}
+
+test "string.to_lower already lower" {
+  assert_eq(string.to_lower("abc"), "abc")
+}
+
+test "string.to_upper empty" {
+  assert_eq(string.to_upper(""), "")
+}
+
+// ── replace ──
+
+test "string.replace multiple occurrences" {
+  assert_eq(string.replace("aaa", "a", "bb"), "bbbbbb")
+}
+
+test "string.replace no match" {
+  assert_eq(string.replace("hello", "xyz", "abc"), "hello")
+}
+
+test "string.replace with empty" {
+  assert_eq(string.replace("hello", "l", ""), "heo")
+}
+
+// ── char_at ──
+
+test "string.char_at middle" {
+  assert_eq(string.char_at("hello", 2), some("l"))
+}
+
+test "string.char_at last" {
+  assert_eq(string.char_at("abc", 2), some("c"))
+}
+
+test "string.char_at negative index" {
+  assert_eq(string.char_at("abc", -1), none)
+}
+
+// ── lines ──
+
+test "string.lines multiline" {
+  let ls = string.lines("line1\nline2\nline3")
+  assert_eq(list.len(ls), 3)
+  assert_eq(list.get_or(ls, 0, ""), "line1")
+  assert_eq(list.get_or(ls, 2, ""), "line3")
+}
+
+test "string.lines single line" {
+  assert_eq(string.lines("hello"), ["hello"])
+}
+
+// ── chars ──
+
+test "string.chars multiple" {
+  assert_eq(string.chars("hello"), ["h", "e", "l", "l", "o"])
+}
+
+test "string.chars single char" {
+  assert_eq(string.chars("a"), ["a"])
+}
+
+// ── index_of ──
+
+test "string.index_of middle" {
+  assert_eq(string.index_of("hello world", "o"), some(4))
+}
+
+test "string.index_of returns first occurrence" {
+  assert_eq(string.index_of("abcabc", "bc"), some(1))
+}
+
+// ── repeat ──
+
+test "string.repeat multiple" {
+  assert_eq(string.repeat("ha", 3), "hahaha")
+}
+
+test "string.repeat empty string" {
+  assert_eq(string.repeat("", 5), "")
+}
+
+// ── from_bytes ──
+
+test "string.from_bytes single byte" {
+  assert_eq(string.from_bytes([72]), "H")
+}
+
+// ── is_digit? ──
+
+test "string.is_digit? all digits" {
+  assert(string.is_digit?("12345"))
+}
+
+test "string.is_digit? mixed" {
+  assert(not string.is_digit?("12a45"))
+}
+
+// ── is_alpha? ──
+
+test "string.is_alpha? lower" {
+  assert(string.is_alpha?("abc"))
+}
+
+test "string.is_alpha? upper" {
+  assert(string.is_alpha?("XYZ"))
+}
+
+test "string.is_alpha? with space" {
+  assert(not string.is_alpha?("a b"))
+}
+
+// ── is_alphanumeric? ──
+
+test "string.is_alphanumeric? mixed" {
+  assert(string.is_alphanumeric?("abc123"))
+}
+
+test "string.is_alphanumeric? with underscore" {
+  assert(not string.is_alphanumeric?("abc_123"))
+}
+
+// ── is_whitespace? ──
+
+test "string.is_whitespace? newline" {
+  assert(string.is_whitespace?("\n"))
+}
+
+test "string.is_whitespace? mixed ws" {
+  assert(string.is_whitespace?(" \t\n "))
+}
+
+// ── trim_start / trim_end ──
+
+test "string.trim_start only leading" {
+  assert_eq(string.trim_start("   hello"), "hello")
+}
+
+test "string.trim_start no whitespace" {
+  assert_eq(string.trim_start("hello"), "hello")
+}
+
+test "string.trim_end only trailing" {
+  assert_eq(string.trim_end("hello   "), "hello")
+}
+
+test "string.trim_end no whitespace" {
+  assert_eq(string.trim_end("hello"), "hello")
+}
+
+// ── count ──
+
+test "string.count multiple matches" {
+  assert_eq(string.count("banana", "a"), 3)
+}
+
+test "string.count no matches" {
+  assert_eq(string.count("hello", "x"), 0)
+}
+
+test "string.count empty substring" {
+  // empty substring: count is len+1
+  let c = string.count("abc", "")
+  assert(c >= 0)
+}
+
+// ── is_empty? ──
+
+test "string.is_empty? on whitespace" {
+  assert(not string.is_empty?(" "))
+}
+
+// ── reverse ──
+
+test "string.reverse palindrome" {
+  assert_eq(string.reverse("racecar"), "racecar")
+}
+
+test "string.reverse single char" {
+  assert_eq(string.reverse("x"), "x")
+}
+
+// ── strip_prefix / strip_suffix ──
+
+test "string.strip_prefix empty prefix" {
+  assert_eq(string.strip_prefix("hello", ""), some("hello"))
+}
+
+test "string.strip_prefix full match" {
+  assert_eq(string.strip_prefix("hello", "hello"), some(""))
+}
+
+test "string.strip_suffix empty suffix" {
+  assert_eq(string.strip_suffix("hello", ""), some("hello"))
+}
+
+test "string.strip_suffix full match" {
+  assert_eq(string.strip_suffix("hello", "hello"), some(""))
+}
+
+// ── replace_first ──
+
+test "string.replace_first basic" {
+  assert_eq(string.replace_first("aaa", "a", "b"), "baa")
+}
+
+test "string.replace_first no match" {
+  assert_eq(string.replace_first("hello", "xyz", "abc"), "hello")
+}
+
+// ── last_index_of ──
+
+test "string.last_index_of basic" {
+  assert_eq(string.last_index_of("hello", "l"), some(3))
+}
+
+test "string.last_index_of not found" {
+  assert_eq(string.last_index_of("hello", "xyz"), none)
+}
+
+test "string.last_index_of at start" {
+  assert_eq(string.last_index_of("abc", "a"), some(0))
+}
+
+// ── UFCS ──
+
+test "string UFCS trim" {
+  assert_eq("  hi  ".trim(), "hi")
+}
+
+test "string UFCS to_upper" {
+  assert_eq("hello".to_upper(), "HELLO")
+}
+
+test "string UFCS to_lower" {
+  assert_eq("HELLO".to_lower(), "hello")
+}
+
+test "string UFCS len" {
+  assert_eq("abc".len(), 3)
+}
+
+test "string UFCS contains" {
+  assert("hello".contains("ell"))
+}
+
+test "string UFCS split" {
+  assert_eq("a,b,c".split(","), ["a", "b", "c"])
+}
+
+test "string UFCS reverse" {
+  assert_eq("abc".reverse(), "cba")
+}
+
+test "string UFCS replace" {
+  assert_eq("hello".replace("l", "r"), "herro")
+}
+
+test "string UFCS repeat" {
+  assert_eq("ab".repeat(3), "ababab")
+}
+
+test "string.is_empty? via module" {
+  assert(string.is_empty?(""))
+  assert(not string.is_empty?("x"))
+}

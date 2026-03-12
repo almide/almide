@@ -136,3 +136,99 @@ test "float comparison" {
   assert_eq(1.5 <= 1.5, true)
   assert_eq(1.5 >= 1.5, true)
 }
+
+// ── Additional operator tests ──
+
+test "pipe chain multiple" {
+  // 1 -> add_one -> 2 -> double -> 4 -> add_one -> 5 -> double -> 10
+  let result = 1 |> add_one |> double |> add_one |> double
+  assert_eq(result, 10)
+}
+
+test "pipe with list sort and reverse" {
+  let result = [3, 1, 4, 1, 5] |> list.sort() |> list.reverse()
+  assert_eq(result, [5, 4, 3, 1, 1])
+}
+
+test "pipe with string operations" {
+  let result = "  Hello World  " |> string.trim() |> string.to_lower()
+  assert_eq(result, "hello world")
+}
+
+test "int xor properties" {
+  assert_eq(42 ^ 42, 0)
+  assert_eq(42 ^ 0, 42)
+  assert_eq(0 ^ 42, 42)
+  assert_eq((5 ^ 3) ^ 3, 5)
+}
+
+test "float power edge cases" {
+  assert_eq(0.0 ^ 1.0, 0.0)
+  assert_eq(1.0 ^ 0.0, 1.0)
+  assert_eq(2.0 ^ 1.0, 2.0)
+  assert_eq(100.0 ^ 0.5, 10.0)
+}
+
+test "concat with empty string" {
+  let s = "hello"
+  assert_eq(s ++ "", s)
+  assert_eq("" ++ s, s)
+  assert_eq("" ++ "" ++ "" ++ s ++ "" ++ "", s)
+}
+
+test "concat with empty list" {
+  let xs = [1, 2, 3]
+  let empty: List[Int] = []
+  assert_eq(xs ++ empty, xs)
+  assert_eq(empty ++ xs, xs)
+  assert_eq(empty ++ empty, empty)
+}
+
+test "string interpolation with boolean" {
+  let b = true
+  assert_eq("flag: ${b}", "flag: true")
+  let b2 = false
+  assert_eq("flag: ${b2}", "flag: false")
+}
+
+test "string interpolation with record field" {
+  let user = { name: "alice", age: 30 }
+  assert_eq("user: ${user.name}", "user: alice")
+}
+
+test "deep equality on nested records" {
+  let a = { x: { y: 1 }, z: [1, 2] }
+  let b = { x: { y: 1 }, z: [1, 2] }
+  let c = { x: { y: 2 }, z: [1, 2] }
+  assert_eq(a == b, true)
+  assert_eq(a != c, true)
+}
+
+test "bitwise shift larger values" {
+  assert_eq(int.bshl(1, 0), 1)
+  assert_eq(int.bshl(1, 10), 1024)
+  assert_eq(int.bshr(1024, 5), 32)
+}
+
+test "comparison on equal values" {
+  assert_eq(5 < 5, false)
+  assert_eq(5 > 5, false)
+  assert_eq(5 <= 5, true)
+  assert_eq(5 >= 5, true)
+  assert_eq(5 == 5, true)
+  assert_eq(5 != 5, false)
+}
+
+test "operator precedence multiply vs add" {
+  assert_eq(2 + 3 * 4 + 5, 19)
+  assert_eq(10 - 2 * 3 + 4, 8)
+  assert_eq(100 / 10 * 2, 20)
+}
+
+test "equality on result" {
+  let a: Result[Int, String] = ok(42)
+  let b: Result[Int, String] = ok(42)
+  let c: Result[Int, String] = err("x")
+  assert_eq(a == b, true)
+  assert_eq(a != c, true)
+}

@@ -111,3 +111,155 @@ test "let shadowing in block" {
   assert_eq(x, 10)
   assert_eq(y, 21)
 }
+
+// ── Additional variable tests ──
+
+test "var in do guard loop" {
+  var x = 1
+  do {
+    guard x < 100 else break
+    x = x * 2
+  }
+  assert_eq(x, 128)
+}
+
+test "multiple vars" {
+  var a = 0
+  var b = 0
+  var c = 0
+  for i in 1..=10 {
+    a = a + 1
+    b = b + i
+    c = c + i * i
+  }
+  assert_eq(a, 10)
+  assert_eq(b, 55)
+  assert_eq(c, 385)
+}
+
+test "let with record value" {
+  let user = { name: "alice", age: 30, active: true }
+  assert_eq(user.name, "alice")
+  assert_eq(user.age, 30)
+  assert_eq(user.active, true)
+}
+
+test "let record destructure" {
+  let point = { x: 10, y: 20 }
+  let { x, y } = point
+  assert_eq(x, 10)
+  assert_eq(y, 20)
+}
+
+test "var list build in for" {
+  var xs: List[String] = []
+  for i in 0..5 {
+    xs = xs ++ [int.to_string(i)]
+  }
+  assert_eq(xs, ["0", "1", "2", "3", "4"])
+}
+
+test "nested field assign" {
+  var data = { inner: { value: 0 } }
+  data.inner = { value: 42 }
+  assert_eq(data.inner.value, 42)
+}
+
+test "var boolean toggle" {
+  var flag = false
+  flag = not flag
+  assert_eq(flag, true)
+  flag = not flag
+  assert_eq(flag, false)
+}
+
+test "let in for loop body" {
+  var sum = 0
+  for x in [10, 20, 30] {
+    let doubled = x * 2
+    sum = sum + doubled
+  }
+  assert_eq(sum, 120)
+}
+
+test "var swap pattern" {
+  var a = 1
+  var b = 2
+  let temp = a
+  a = b
+  b = temp
+  assert_eq(a, 2)
+  assert_eq(b, 1)
+}
+
+test "var string building" {
+  var result = ""
+  for i in 1..=5 {
+    if i > 1 then { result = result ++ ", " } else { () }
+    result = result ++ int.to_string(i)
+  }
+  assert_eq(result, "1, 2, 3, 4, 5")
+}
+
+test "var index assign multiple" {
+  var xs = [0, 0, 0, 0, 0]
+  for i in 0..5 {
+    xs[i] = i * 10
+  }
+  assert_eq(xs, [0, 10, 20, 30, 40])
+}
+
+test "let with option value" {
+  let x: Option[Int] = some(42)
+  let y: Option[Int] = none
+  assert_eq(x, some(42))
+  assert_eq(y, none)
+}
+
+test "let with list type" {
+  let nums: List[Int] = [1, 2, 3]
+  let strs: List[String] = ["a", "b"]
+  assert_eq(list.len(nums), 3)
+  assert_eq(list.len(strs), 2)
+}
+
+test "var counter decrement" {
+  var n = 10
+  do {
+    guard n > 0 else break
+    n = n - 1
+  }
+  assert_eq(n, 0)
+}
+
+test "let shadowing with computation" {
+  let x = 10
+  let x = x * x
+  let x = x + 1
+  assert_eq(x, 101)
+}
+
+test "var with map" {
+  var m: Map[String, Int] = map.new()
+  m = map.set(m, "a", 1)
+  m = map.set(m, "b", 2)
+  assert_eq(map.len(m), 2)
+  assert_eq(map.get(m, "a"), some(1))
+}
+
+test "let with float" {
+  let x: Float = 3.14
+  assert_eq(x > 3.0, true)
+  assert_eq(x < 4.0, true)
+}
+
+test "var accumulate string in do" {
+  var result = ""
+  var i = 0
+  do {
+    guard i < 3 else break
+    result = result ++ int.to_string(i)
+    i = i + 1
+  }
+  assert_eq(result, "012")
+}

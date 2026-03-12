@@ -68,3 +68,61 @@ test "list.sum and list.product" {
   assert_eq(list.sum([]), 0)
   assert_eq(list.product([]), 1)
 }
+
+// ── Additional coverage ──
+
+test "int.parse large number" {
+  assert_eq(int.parse("999999"), ok(999999))
+}
+
+test "int.parse_hex mixed case" {
+  assert_eq(int.parse_hex("Ab"), ok(171))
+}
+
+test "int.abs large negative" {
+  assert_eq(int.abs(-999), 999)
+}
+
+test "int.min first smaller" {
+  assert_eq(int.min(1, 100), 1)
+}
+
+test "int.max second larger" {
+  assert_eq(int.max(1, 100), 100)
+}
+
+test "string.count single occurrence" {
+  assert_eq(string.count("hello", "h"), 1)
+}
+
+test "string.pad_right with dot" {
+  assert_eq(string.pad_right("ab", 5, "."), "ab...")
+}
+
+test "string.trim_start tabs" {
+  assert_eq(string.trim_start("\t\thello"), "hello")
+}
+
+test "string.trim_end newlines" {
+  assert_eq(string.trim_end("hello\n\n"), "hello")
+}
+
+test "list.index_of first element" {
+  assert_eq(list.index_of([1, 2, 3], 1), some(0))
+}
+
+test "list.last of strings" {
+  assert_eq(list.last(["a", "b", "c"]), some("c"))
+}
+
+test "list.chunk single element chunks" {
+  assert_eq(list.chunk([1, 2, 3], 1), [[1], [2], [3]])
+}
+
+test "list.sum single element" {
+  assert_eq(list.sum([42]), 42)
+}
+
+test "list.product of two" {
+  assert_eq(list.product([3, 7]), 21)
+}

@@ -1,0 +1,151 @@
+// Tests for complex pipe chains combining multiple stdlib modules
+
+test "pipe: map then filter" {
+  let result = [1, 2, 3, 4, 5]
+    |> list.map(fn(x) => x * 2)
+    |> list.filter(fn(x) => x > 4)
+  assert_eq(result, [6, 8, 10])
+}
+
+test "pipe: filter then map then sum" {
+  let result = [1, 2, 3, 4, 5, 6]
+    |> list.filter(fn(x) => x % 2 == 0)
+    |> list.map(fn(x) => x * x)
+    |> list.sum()
+  assert_eq(result, 56)
+}
+
+test "pipe: string split then map then join" {
+  let result = "hello world foo"
+    |> string.split(" ")
+    |> list.map(fn(s) => string.to_upper(s))
+    |> string.join(" ")
+  assert_eq(result, "HELLO WORLD FOO")
+}
+
+test "pipe: string to chars then reverse then join" {
+  let result = "hello"
+    |> string.chars()
+    |> list.reverse()
+    |> string.join("")
+  assert_eq(result, "olleh")
+}
+
+test "pipe: list to unique then sort" {
+  let result = [3, 1, 2, 1, 3, 2]
+    |> list.unique()
+    |> list.sort()
+  assert_eq(result, [1, 2, 3])
+}
+
+test "pipe: filter_map then take" {
+  let result = [1, 2, 3, 4, 5, 6, 7, 8]
+    |> list.filter_map(fn(x) => if x % 2 == 0 then some(x * 10) else none)
+    |> list.take(3)
+  assert_eq(result, [20, 40, 60])
+}
+
+test "pipe: enumerate then collect evens" {
+  let items = ["a", "b", "c", "d", "e"]
+  var evens: List[String] = []
+  for (i, v) in list.enumerate(items) {
+    evens = if i % 2 == 0 then evens ++ [v] else evens
+  }
+  assert_eq(evens, ["a", "c", "e"])
+}
+
+test "pipe: sort_by then take" {
+  let result = ["banana", "fig", "apple", "cherry"]
+    |> list.sort_by(fn(s) => string.len(s))
+    |> list.take(2)
+  assert_eq(result, ["fig", "apple"])
+}
+
+test "pipe: flat_map then unique" {
+  let result = [[1, 2], [2, 3], [3, 4]]
+    |> list.flatten()
+    |> list.unique()
+  assert_eq(result, [1, 2, 3, 4])
+}
+
+test "pipe: map then fold" {
+  let result = [1, 2, 3, 4]
+    |> list.map(fn(x) => x * x)
+    |> list.fold(0, fn(acc, x) => acc + x)
+  assert_eq(result, 30)
+}
+
+test "pipe: string processing chain" {
+  let result = "  Hello, World!  "
+    |> string.trim()
+    |> string.to_lower()
+    |> string.replace(",", "")
+    |> string.replace("!", "")
+  assert_eq(result, "hello world")
+}
+
+test "pipe: take_while then len" {
+  let result = [1, 2, 3, 10, 20, 30]
+    |> list.take_while(fn(x) => x < 10)
+    |> list.len()
+  assert_eq(result, 3)
+}
+
+test "pipe: map keys to values" {
+  let m = map.set(map.set(map.set(map.new(), "a", 1), "b", 2), "c", 3)
+  let result = m
+    |> map.values()
+    |> list.sort()
+    |> list.sum()
+  assert_eq(result, 6)
+}
+
+test "pipe: chunk then map" {
+  let result = [1, 2, 3, 4, 5, 6]
+    |> list.chunk(2)
+    |> list.map(fn(chunk) => list.sum(chunk))
+  assert_eq(result, [3, 7, 11])
+}
+
+test "pipe: zip_with then sum" {
+  let xs = [1, 2, 3]
+  let ys = [10, 20, 30]
+  let result = list.zip_with(xs, ys, fn(a, b) => a + b)
+    |> list.sum()
+  assert_eq(result, 66)
+}
+
+test "pipe: intersperse then join" {
+  let result = ["red", "green", "blue"]
+    |> list.intersperse(",")
+    |> string.join("")
+  assert_eq(result, "red,green,blue")
+}
+
+test "pipe: windows then map to sums" {
+  let result = [1, 2, 3, 4, 5]
+    |> list.windows(3)
+    |> list.map(fn(w) => list.sum(w))
+  assert_eq(result, [6, 9, 12])
+}
+
+test "pipe: drop then take slice" {
+  let result = [10, 20, 30, 40, 50]
+    |> list.drop(1)
+    |> list.take(3)
+  assert_eq(result, [20, 30, 40])
+}
+
+test "pipe: partition then count" {
+  let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  let result = list.partition(data, fn(x) => x % 2 == 0)
+  assert_eq(list.len(result.0), 5)
+  assert_eq(list.len(result.1), 5)
+}
+
+test "pipe: scan then last" {
+  let result = [1, 2, 3, 4, 5]
+    |> list.scan(0, fn(acc, x) => acc + x)
+    |> list.last()
+  assert_eq(result, some(15))
+}

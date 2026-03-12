@@ -119,3 +119,168 @@ test "guard else err success" {
 test "guard else err failure" {
   assert_eq(require_nonempty(""), err("empty string"))
 }
+
+// ── Additional error tests ──
+
+effect fn safe_divide(a: Int, b: Int) -> Result[Int, String] = {
+  guard b != 0 else err("division by zero")
+  ok(a / b)
+}
+
+test "guard else err division" {
+  assert_eq(safe_divide(10, 2), ok(5))
+  assert_eq(safe_divide(10, 0), err("division by zero"))
+}
+
+effect fn chain_divide(a: Int, b: Int, c: Int) -> Result[Int, String] = {
+  let x = safe_divide(a, b)
+  let y = safe_divide(x, c)
+  ok(y)
+}
+
+test "chained effect fn calls" {
+  assert_eq(chain_divide(100, 5, 2), ok(10))
+  assert_eq(chain_divide(100, 0, 2), err("division by zero"))
+  assert_eq(chain_divide(100, 5, 0), err("division by zero"))
+}
+
+effect fn validate_range(n: Int, lo: Int, hi: Int) -> Result[Int, String] = {
+  guard n >= lo else err("too low")
+  guard n <= hi else err("too high")
+  ok(n)
+}
+
+test "multiple guards in sequence" {
+  assert_eq(validate_range(5, 1, 10), ok(5))
+  assert_eq(validate_range(0, 1, 10), err("too low"))
+  assert_eq(validate_range(11, 1, 10), err("too high"))
+}
+
+effect fn parse_and_validate(s: String) -> Result[Int, String] = {
+  let n = parse_int(s)
+  let valid = validate_positive(n)
+  let ranged = validate_range(valid, 1, 100)
+  ok(ranged)
+}
+
+test "nested effect fn chain" {
+  assert_eq(parse_and_validate("50"), ok(50))
+  assert_eq(parse_and_validate("-5"), err("must be positive"))
+  assert_eq(parse_and_validate("200"), err("too high"))
+}
+
+test "match on result in let" {
+  let r: Result[Int, String] = ok(42)
+  let value = match r {
+    ok(v) => v,
+    err(_) => 0,
+  }
+  assert_eq(value, 42)
+}
+
+test "result equality" {
+  let a: Result[Int, String] = ok(1)
+  let b: Result[Int, String] = ok(1)
+  let c: Result[Int, String] = ok(2)
+  assert_eq(a == b, true)
+  assert_eq(a != c, true)
+}
+
+effect fn validate_string(s: String) -> Result[String, String] = {
+  let nonempty = require_nonempty(s)
+  guard string.len(nonempty) <= 10 else err("too long")
+  ok(nonempty)
+}
+
+test "effect fn calling other effect fn" {
+  assert_eq(validate_string("hello"), ok("hello"))
+  assert_eq(validate_string(""), err("empty string"))
+  assert_eq(validate_string("this is a very long string"), err("too long"))
+}
+
+test "do guard with var and result" {
+  var sum = 0
+  var i = 1
+  do {
+    guard i <= 10 else ok(())
+    if i % 2 == 0 then { sum = sum + i } else { () }
+    i = i + 1
+  }
+  assert_eq(sum, 30)
+}
+
+effect fn try_parse_list(strs: List[String]) -> Result[List[Int], String] = {
+  var result: List[Int] = []
+  for s in strs {
+    let n = parse_int(s)
+    result = result ++ [n]
+  }
+  ok(result)
+}
+
+test "effect fn with loop" {
+  assert_eq(try_parse_list(["1", "2", "3"]), ok([1, 2, 3]))
+}
+
+test "guard with complex boolean condition" {
+  var count = 0
+  var x = 1
+  do {
+    guard x < 100 and count < 10 else break
+    x = x * 2
+    count = count + 1
+  }
+  assert_eq(x, 128)
+  assert_eq(count, 7)
+}
+
+effect fn classify(n: Int) -> Result[String, String] = {
+  let valid = validate_positive(n)
+  let result = if valid > 100 then "big"
+    else if valid > 10 then "medium"
+    else "small"
+  ok(result)
+}
+
+test "effect fn with conditional return" {
+  assert_eq(classify(5), ok("small"))
+  assert_eq(classify(50), ok("medium"))
+  assert_eq(classify(200), ok("big"))
+  assert_eq(classify(-1), err("must be positive"))
+}
+
+effect fn require_length(s: String, min: Int) -> Result[String, String] = {
+  guard string.len(s) >= min else err("too short: min ${int.to_string(min)}")
+  ok(s)
+}
+
+test "guard with interpolated error message" {
+  assert_eq(require_length("hi", 2), ok("hi"))
+  assert_eq(require_length("hi", 5), err("too short: min 5"))
+}
+
+effect fn sum_parsed(strs: List[String]) -> Result[Int, String] = {
+  var total = 0
+  for s in strs {
+    let n = parse_int(s)
+    total = total + n
+  }
+  ok(total)
+}
+
+test "effect fn with loop accumulation" {
+  assert_eq(sum_parsed(["1", "2", "3"]), ok(6))
+}
+
+test "result match in for loop" {
+  var results: List[String] = []
+  let items: List[Result[Int, String]] = [ok(1), err("bad"), ok(3)]
+  for item in items {
+    let label = match item {
+      ok(v) => "ok:" ++ int.to_string(v),
+      err(e) => "err:" ++ e,
+    }
+    results = results ++ [label]
+  }
+  assert_eq(results, ["ok:1", "err:bad", "ok:3"])
+}

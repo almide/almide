@@ -1,0 +1,159 @@
+// Comprehensive int module tests
+
+// ── to_string ──
+
+test "int.to_string positive" {
+  assert_eq(int.to_string(123), "123")
+}
+
+test "int.to_string negative" {
+  assert_eq(int.to_string(-42), "-42")
+}
+
+test "int.to_string zero" {
+  assert_eq(int.to_string(0), "0")
+}
+
+test "int.to_string large" {
+  assert_eq(int.to_string(1000000), "1000000")
+}
+
+// ── to_hex ──
+
+test "int.to_hex small" {
+  assert_eq(int.to_hex(10), "a")
+}
+
+test "int.to_hex 16" {
+  assert_eq(int.to_hex(16), "10")
+}
+
+test "int.to_hex large" {
+  assert_eq(int.to_hex(65535), "ffff")
+}
+
+test "int.to_hex zero" {
+  assert_eq(int.to_hex(0), "0")
+}
+
+// ── parse ──
+
+test "int.parse positive" {
+  assert_eq(int.parse("100"), ok(100))
+}
+
+test "int.parse negative" {
+  assert_eq(int.parse("-50"), ok(-50))
+}
+
+test "int.parse zero" {
+  assert_eq(int.parse("0"), ok(0))
+}
+
+test "int.parse empty string fails" {
+  let result = int.parse("")
+  assert(result != ok(0))
+}
+
+test "int.parse float string fails" {
+  let result = int.parse("3.14")
+  assert(result != ok(3))
+}
+
+// ── parse_hex ──
+
+test "int.parse_hex lowercase" {
+  assert_eq(int.parse_hex("a"), ok(10))
+}
+
+test "int.parse_hex uppercase" {
+  assert_eq(int.parse_hex("FF"), ok(255))
+}
+
+test "int.parse_hex zero" {
+  assert_eq(int.parse_hex("0"), ok(0))
+}
+
+test "int.parse_hex large" {
+  assert_eq(int.parse_hex("ffff"), ok(65535))
+}
+
+// ── abs ──
+
+test "int.abs negative" {
+  assert_eq(int.abs(-100), 100)
+}
+
+test "int.abs positive" {
+  assert_eq(int.abs(100), 100)
+}
+
+test "int.abs zero" {
+  assert_eq(int.abs(0), 0)
+}
+
+// ── min / max ──
+
+test "int.min equal" {
+  assert_eq(int.min(5, 5), 5)
+}
+
+test "int.max equal" {
+  assert_eq(int.max(5, 5), 5)
+}
+
+test "int.min with zero" {
+  assert_eq(int.min(0, -5), -5)
+}
+
+test "int.max with zero" {
+  assert_eq(int.max(0, -5), 0)
+}
+
+test "int.min large numbers" {
+  assert_eq(int.min(1000000, 999999), 999999)
+}
+
+test "int.max large numbers" {
+  assert_eq(int.max(1000000, 999999), 1000000)
+}
+
+// ── clamp ──
+
+test "int.clamp within range" {
+  assert_eq(int.clamp(5, 0, 10), 5)
+}
+
+test "int.clamp below range" {
+  assert_eq(int.clamp(-5, 0, 10), 0)
+}
+
+test "int.clamp above range" {
+  assert_eq(int.clamp(15, 0, 10), 10)
+}
+
+test "int.clamp at lower bound" {
+  assert_eq(int.clamp(0, 0, 10), 0)
+}
+
+test "int.clamp at upper bound" {
+  assert_eq(int.clamp(10, 0, 10), 10)
+}
+
+test "int.clamp negative range" {
+  assert_eq(int.clamp(0, -10, -1), -1)
+}
+
+// ── UFCS ──
+
+test "int UFCS to_string" {
+  assert_eq(42.to_string(), "42")
+}
+
+test "int UFCS to_hex" {
+  assert_eq(255.to_hex(), "ff")
+}
+
+test "int.abs via module negative" {
+  assert_eq(int.abs(-7), 7)
+}

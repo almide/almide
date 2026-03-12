@@ -137,3 +137,117 @@ test "regex validates section headers" {
   assert(not regex.full_match?(r"\[([a-zA-Z_][a-zA-Z0-9_]*)\]", "[2bad]"))
   assert(not regex.full_match?(r"\[([a-zA-Z_][a-zA-Z0-9_]*)\]", "server"))
 }
+
+// ============================================================
+// regex.match? — additional edge cases
+// ============================================================
+
+test "regex.match? empty string" {
+  assert(not regex.match?(r"\d+", ""))
+}
+
+test "regex.match? anchored start" {
+  assert(regex.match?("^hello", "hello world"))
+  assert(not regex.match?("^hello", "say hello"))
+}
+
+test "regex.match? anchored end" {
+  assert(regex.match?("world$", "hello world"))
+  assert(not regex.match?("world$", "world hello"))
+}
+
+test "regex.match? with plus quantifier" {
+  assert(regex.match?("a+", "aaa"))
+  assert(not regex.match?("a+", "bbb"))
+}
+
+// ============================================================
+// regex.full_match? — additional patterns
+// ============================================================
+
+test "regex.full_match? email-like pattern" {
+  assert(regex.full_match?(r"[a-zA-Z0-9.]+@[a-zA-Z0-9]+\.[a-zA-Z]+", "test@example.com"))
+  assert(not regex.full_match?(r"[a-zA-Z0-9.]+@[a-zA-Z0-9]+\.[a-zA-Z]+", "not-an-email"))
+}
+
+test "regex.full_match? ip-like pattern" {
+  assert(regex.full_match?(r"\d+\.\d+\.\d+\.\d+", "192.168.1.1"))
+  assert(not regex.full_match?(r"\d+\.\d+\.\d+\.\d+", "192.168.1"))
+}
+
+// ============================================================
+// regex.find — edge cases
+// ============================================================
+
+test "regex.find empty pattern" {
+  assert_eq(regex.find("", "hello"), some(""))
+}
+
+test "regex.find first word" {
+  assert_eq(regex.find("[a-z]+", "hello world"), some("hello"))
+}
+
+// ============================================================
+// regex.find_all — edge cases
+// ============================================================
+
+test "regex.find_all single match" {
+  assert_eq(regex.find_all(r"\d+", "abc42def"), ["42"])
+}
+
+test "regex.find_all word extraction" {
+  assert_eq(regex.find_all("[A-Z][a-z]+", "Hello World Foo"), ["Hello", "World", "Foo"])
+}
+
+// ============================================================
+// regex.replace — additional cases
+// ============================================================
+
+test "regex.replace no match" {
+  assert_eq(regex.replace(r"\d+", "hello world", "X"), "hello world")
+}
+
+test "regex.replace all characters" {
+  assert_eq(regex.replace(".", "abc", "X"), "XXX")
+}
+
+// ============================================================
+// regex.replace_first — edge cases
+// ============================================================
+
+test "regex.replace_first no match" {
+  assert_eq(regex.replace_first(r"\d+", "hello", "X"), "hello")
+}
+
+test "regex.replace_first single occurrence" {
+  assert_eq(regex.replace_first(r"\d+", "abc42", "X"), "abcX")
+}
+
+// ============================================================
+// regex.split — edge cases
+// ============================================================
+
+test "regex.split no match" {
+  assert_eq(regex.split(r"\d+", "hello"), ["hello"])
+}
+
+test "regex.split at start and end" {
+  let result = regex.split(r"\d+", "1abc2def3")
+  assert_eq(list.len(result), 4)
+}
+
+// ============================================================
+// regex.captures — additional patterns
+// ============================================================
+
+test "regex.captures single group" {
+  assert_eq(regex.captures(r"hello (\w+)", "hello world"), some(["world"]))
+}
+
+test "regex.captures three groups" {
+  assert_eq(regex.captures(r"(\d+)-(\d+)-(\d+)", "2024-01-15"), some(["2024", "01", "15"]))
+}
+
+test "regex.captures no groups returns none" {
+  assert_eq(regex.captures(r"\d+", "42"), none)
+}
