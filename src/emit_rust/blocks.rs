@@ -269,12 +269,19 @@ impl Emitter {
                 format!("let mut {} = {};", name, self.gen_expr(value))
             }
             Stmt::Assign { name, value, .. } => {
-                // Optimize: s = s ++ expr → s.almide_push_concat(expr)
+                // Optimize: s = s ++ expr → s.almide_push_concat(expr) or s.push(x)
                 // Avoids clone + alloc; works for both String and Vec via trait dispatch
                 if let Expr::Binary { op, left, right, .. } = value {
                     if op == "++" {
                         if let Expr::Ident { name: ref lname, .. } = **left {
                             if lname == name {
+                                // Further optimize: s = s ++ [single_elem] → s.push(elem)
+                                if let Expr::List { elements, .. } = right.as_ref() {
+                                    if elements.len() == 1 {
+                                        let elem = self.gen_arg(&elements[0]);
+                                        return format!("{}.push({});", name, elem);
+                                    }
+                                }
                                 let r = self.gen_expr(right);
                                 return format!("{}.almide_push_concat({});", name, r);
                             }
@@ -286,7 +293,11 @@ impl Emitter {
             Stmt::IndexAssign { target, index, value, .. } => {
                 let idx = self.gen_expr(index);
                 let val = self.gen_expr(value);
-                format!("{}[{} as usize] = {};", target, idx, val)
+                if self.fast_mode {
+                    format!("unsafe {{ *{}.get_unchecked_mut({} as usize) = {}; }}", target, idx, val)
+                } else {
+                    format!("{}[{} as usize] = {};", target, idx, val)
+                }
             }
             Stmt::FieldAssign { target, field, value, .. } => {
                 let val = self.gen_expr(value);

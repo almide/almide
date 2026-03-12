@@ -274,6 +274,22 @@ impl Emitter {
                     format!("almide_block_on({})", inner)
                 }
             }
+            Expr::IndexAccess { object, index, .. } => {
+                let obj = self.gen_expr(object);
+                let idx = self.gen_expr(index);
+                if self.fast_mode {
+                    format!("unsafe {{ *{}.get_unchecked({} as usize) }}", obj, idx)
+                } else {
+                    format!("{}[{} as usize]", obj, idx)
+                }
+            }
+            Expr::While { cond, body, .. } => {
+                let c = self.gen_expr(cond);
+                let stmts_str: Vec<String> = body.iter()
+                    .map(|s| format!("  {}", self.gen_stmt(s)))
+                    .collect();
+                format!("while {} {{\n{}\n}}", c, stmts_str.join("\n"))
+            }
             Expr::Break { .. } => "break".to_string(),
             Expr::Continue { .. } => "continue".to_string(),
             Expr::Hole { .. } => "todo!()".to_string(),
@@ -296,8 +312,12 @@ impl Emitter {
             Expr::Paren { expr: inner, .. } => format!("({})", self.gen_expr_as_float(inner)),
             _ => {
                 let e = self.gen_expr(expr);
-                // `as f64` is a no-op if already f64, safe to always add
-                format!("({} as f64)", e)
+                // Skip cast if the expression is already known to be Float
+                if expr.resolved_type() == Some(crate::ast::ResolvedType::Float) {
+                    e
+                } else {
+                    format!("({} as f64)", e)
+                }
             }
         }
     }

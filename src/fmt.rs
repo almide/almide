@@ -381,6 +381,13 @@ fn format_expr(out: &mut String, expr: &Expr, depth: usize) {
             out.push_str(&index.to_string());
         }
 
+        Expr::IndexAccess { object, index, .. } => {
+            format_expr(out, object, depth);
+            out.push('[');
+            format_expr(out, index, depth);
+            out.push(']');
+        }
+
         Expr::Pipe { left, right, .. } => {
             format_expr(out, left, depth);
             out.push_str(" |> ");
@@ -529,6 +536,17 @@ fn format_expr(out: &mut String, expr: &Expr, depth: usize) {
             }
             out.push_str(" in ");
             format_expr(out, iterable, depth);
+            out.push_str(" {\n");
+            for s in body {
+                format_stmt(out, s, depth + 1);
+            }
+            out.push_str(&indent(depth));
+            out.push('}');
+        }
+
+        Expr::While { cond, body, .. } => {
+            out.push_str("while ");
+            format_expr(out, cond, depth);
             out.push_str(" {\n");
             for s in body {
                 format_stmt(out, s, depth + 1);
@@ -734,6 +752,7 @@ fn is_short_expr(expr: &Expr) -> bool {
         | Expr::Paren { expr, .. } => is_short_expr(expr),
         Expr::Tuple { elements, .. } => elements.len() <= 4 && elements.iter().all(is_short_expr),
         Expr::Call { args, .. } => args.len() <= 2 && args.iter().all(is_short_expr),
+        Expr::IndexAccess { object, index, .. } => is_short_expr(object) && is_short_expr(index),
         Expr::Binary { left, right, .. } => is_short_expr(left) && is_short_expr(right),
         Expr::Unary { operand, .. } => is_short_expr(operand),
         _ => false,

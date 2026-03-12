@@ -1,0 +1,97 @@
+// FFT Benchmark — Iterative Cooley-Tukey (in-place)
+// Same algorithm as MoonBit's benchmark-fft for direct comparison
+
+import math
+import env
+import int
+import float
+
+fn pi() -> Float = 3.14159265358979323846
+
+effect fn main() -> Unit = {
+  let args = env.args()
+  let size = if list.len(args) > 1 then {
+    match list.get(args, 1) {
+      some(s) => match int.parse(s) { ok(v) => v, err(_) => 20 }
+      none => 20
+    }
+  } else 20
+
+  let n = math.pow(2, size)
+
+  // Generate input signal (interleaved: [re0, im0, re1, im1, ...])
+  var data: List[Float] = []
+  for i in 0..n {
+    let theta = float.from_int(i) / float.from_int(n) * pi()
+    let re = 1.0 * math.cos(10.0 * theta) + 0.5 * math.cos(25.0 * theta)
+    let im = 1.0 * math.sin(10.0 * theta) + 0.5 * math.sin(25.0 * theta)
+    data = data ++ [float.round(re * 100.0) / 100.0]
+    data = data ++ [float.round(im * 100.0) / 100.0]
+  }
+
+  let start = env.millis()
+
+  // Bit-reversal permutation
+  var j = 0
+  for i in 1..n {
+    var bit = n / 2
+    while bit > 0 and j >= bit {
+      j = j - bit
+      bit = bit / 2
+    }
+    j = j + bit
+    if i < j then {
+      let ti = 2 * i
+      let tj = 2 * j
+      let tmp_re = data[ti]
+      let tmp_im = data[ti + 1]
+      data[ti] = data[tj]
+      data[ti + 1] = data[tj + 1]
+      data[tj] = tmp_re
+      data[tj + 1] = tmp_im
+    } else ()
+  }
+
+  // Butterfly passes
+  var len = 2
+  while len <= n {
+    let ang = -2.0 * pi() / float.from_int(len)
+    let wn_re = math.cos(ang)
+    let wn_im = math.sin(ang)
+    var i = 0
+    while i < n {
+      var w_re = 1.0
+      var w_im = 0.0
+      for k in 0..(len / 2) {
+        let ui = 2 * (i + k)
+        let vi = 2 * (i + k + len / 2)
+        let u_re = data[ui]
+        let u_im = data[ui + 1]
+        let vr = data[vi]
+        let vim = data[vi + 1]
+        let v_re = w_re * vr - w_im * vim
+        let v_im = w_re * vim + w_im * vr
+        data[ui] = u_re + v_re
+        data[ui + 1] = u_im + v_im
+        data[vi] = u_re - v_re
+        data[vi + 1] = u_im - v_im
+        let new_w_re = w_re * wn_re - w_im * wn_im
+        let new_w_im = w_re * wn_im + w_im * wn_re
+        w_re = new_w_re
+        w_im = new_w_im
+      }
+      i = i + len
+    }
+    len = len * 2
+  }
+
+  // Normalize
+  let factor = 1.0 / math.sqrt(float.from_int(n))
+  for i in 0..(2 * n) {
+    data[i] = data[i] * factor
+  }
+
+  let elapsed = env.millis() - start
+  println("size: 2^${int.to_string(size)} = ${int.to_string(n)}")
+  println("execution time: ${int.to_string(elapsed)} ms")
+}

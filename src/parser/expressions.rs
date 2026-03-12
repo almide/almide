@@ -257,6 +257,17 @@ impl Parser {
                     span,
                     resolved_type: None,
                 };
+            } else if self.check(TokenType::LBracket) && !self.newline_before_current() {
+                let span = Some(self.current_span());
+                self.advance(); // skip [
+                let index = self.parse_expr()?;
+                self.expect(TokenType::RBracket)?;
+                expr = Expr::IndexAccess {
+                    object: Box::new(expr),
+                    index: Box::new(index),
+                    span,
+                    resolved_type: None,
+                };
             } else if self.check(TokenType::LParen) && !self.newline_before_current() {
                 let span = Some(self.current_span());
                 self.advance();

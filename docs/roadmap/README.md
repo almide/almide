@@ -2,7 +2,10 @@
 
 ## Active
 
+- [Const Declarations](active/const-declarations.md) — `const PI = 3.14`, eliminate `fn X() -> T` workaround
+- [List Index Read](active/list-index-read.md) — `xs[i]` for reads, matching existing `xs[i] = v` writes
 - [Test Coverage](active/test-coverage.md) — 790 cases, target 1500+
+- [While Loop](active/while-loop.md) — `while condition { }`, replace `do { guard ... else break }` boilerplate
 
 ## On Hold
 

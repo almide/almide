@@ -51,6 +51,7 @@ pub enum TokenType {
     Guard,
     Break,
     Continue,
+    While,
     Local,
     Mod,
     Newtype,
@@ -154,6 +155,7 @@ fn build_keyword_map() -> HashMap<&'static str, TokenType> {
     m.insert("guard", TokenType::Guard);
     m.insert("break", TokenType::Break);
     m.insert("continue", TokenType::Continue);
+    m.insert("while", TokenType::While);
     m.insert("local", TokenType::Local);
     m.insert("mod", TokenType::Mod);
     m.insert("newtype", TokenType::Newtype);

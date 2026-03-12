@@ -390,15 +390,15 @@ impl Emitter {
     fn emit_runtime(&mut self) {
         self.emitln("use std::collections::HashMap;");
         self.emitln("trait AlmideConcat<Rhs> { type Output; fn concat(self, rhs: Rhs) -> Self::Output; }");
-        self.emitln("impl AlmideConcat<String> for String { type Output = String; fn concat(self, rhs: String) -> String { format!(\"{}{}\", self, rhs) } }");
-        self.emitln("impl AlmideConcat<&str> for String { type Output = String; fn concat(self, rhs: &str) -> String { format!(\"{}{}\", self, rhs) } }");
-        self.emitln("impl AlmideConcat<String> for &str { type Output = String; fn concat(self, rhs: String) -> String { format!(\"{}{}\", self, rhs) } }");
-        self.emitln("impl AlmideConcat<&str> for &str { type Output = String; fn concat(self, rhs: &str) -> String { format!(\"{}{}\", self, rhs) } }");
-        self.emitln("impl<T: Clone> AlmideConcat<Vec<T>> for Vec<T> { type Output = Vec<T>; fn concat(self, rhs: Vec<T>) -> Vec<T> { let mut r = self; r.extend(rhs); r } }");
+        self.emitln("impl AlmideConcat<String> for String { type Output = String; #[inline(always)] fn concat(self, rhs: String) -> String { format!(\"{}{}\", self, rhs) } }");
+        self.emitln("impl AlmideConcat<&str> for String { type Output = String; #[inline(always)] fn concat(self, rhs: &str) -> String { format!(\"{}{}\", self, rhs) } }");
+        self.emitln("impl AlmideConcat<String> for &str { type Output = String; #[inline(always)] fn concat(self, rhs: String) -> String { format!(\"{}{}\", self, rhs) } }");
+        self.emitln("impl AlmideConcat<&str> for &str { type Output = String; #[inline(always)] fn concat(self, rhs: &str) -> String { format!(\"{}{}\", self, rhs) } }");
+        self.emitln("impl<T: Clone> AlmideConcat<Vec<T>> for Vec<T> { type Output = Vec<T>; #[inline(always)] fn concat(self, rhs: Vec<T>) -> Vec<T> { let mut r = self; r.extend(rhs); r } }");
         self.emitln("trait AlmidePushConcat<Rhs> { fn almide_push_concat(&mut self, rhs: Rhs); }");
-        self.emitln("impl AlmidePushConcat<String> for String { fn almide_push_concat(&mut self, rhs: String) { self.push_str(&rhs); } }");
-        self.emitln("impl AlmidePushConcat<&str> for String { fn almide_push_concat(&mut self, rhs: &str) { self.push_str(rhs); } }");
-        self.emitln("impl<T: Clone> AlmidePushConcat<Vec<T>> for Vec<T> { fn almide_push_concat(&mut self, rhs: Vec<T>) { self.extend(rhs); } }");
+        self.emitln("impl AlmidePushConcat<String> for String { #[inline(always)] fn almide_push_concat(&mut self, rhs: String) { self.push_str(&rhs); } }");
+        self.emitln("impl AlmidePushConcat<&str> for String { #[inline(always)] fn almide_push_concat(&mut self, rhs: &str) { self.push_str(rhs); } }");
+        self.emitln("impl<T: Clone> AlmidePushConcat<Vec<T>> for Vec<T> { #[inline(always)] fn almide_push_concat(&mut self, rhs: Vec<T>) { self.extend(rhs); } }");
         self.emitln("macro_rules! almide_eq { ($a:expr, $b:expr) => { ($a) == ($b) }; }");
         self.emitln("macro_rules! almide_ne { ($a:expr, $b:expr) => { ($a) != ($b) }; }");
         self.emitln("");
@@ -948,6 +948,18 @@ impl Emitter {
             }
             Expr::Member { object, .. } | Expr::TupleIndex { object, .. } => {
                 Self::count_ident_uses(object, counts);
+            }
+            Expr::IndexAccess { object, index, .. } => {
+                Self::count_ident_uses(object, counts);
+                Self::count_ident_uses(index, counts);
+            }
+            Expr::While { cond, body, .. } => {
+                Self::count_ident_uses(cond, counts);
+                let mut loop_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+                for s in body { Self::count_ident_uses_in_stmt(s, &mut loop_counts); }
+                for (name, _) in loop_counts {
+                    *counts.entry(name).or_insert(0) += 2;
+                }
             }
             Expr::Range { start, end, .. } => {
                 Self::count_ident_uses(start, counts);

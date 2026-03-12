@@ -161,6 +161,18 @@ impl TsEmitter {
             }
             Expr::Try { expr, .. } => self.gen_expr(expr),
             Expr::Await { expr, .. } => format!("await {}", self.gen_expr(expr)),
+            Expr::IndexAccess { object, index, .. } => {
+                let obj = self.gen_expr(object);
+                let idx = self.gen_expr(index);
+                format!("{}[{}]", obj, idx)
+            }
+            Expr::While { cond, body, .. } => {
+                let c = self.gen_expr(cond);
+                let stmts_str: Vec<String> = body.iter()
+                    .map(|s| format!("  {}", self.gen_stmt(s)))
+                    .collect();
+                format!("while ({}) {{\n{}\n}}", c, stmts_str.join("\n"))
+            }
             Expr::Break { .. } => "break".to_string(),
             Expr::Continue { .. } => "continue".to_string(),
             Expr::Hole { .. } => if self.js_mode { "null /* hole */".to_string() } else { "null as any /* hole */".to_string() },
