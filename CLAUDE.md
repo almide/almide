@@ -68,8 +68,8 @@ almide run app.almd              # Compile + execute
 almide build app.almd -o app     # Build binary
 almide build app.almd --target wasm  # Build WASM
 almide test                      # Find all .almd with test blocks (recursive)
-almide test lang/                # Run tests in a directory
-almide test lang/expr_test.almd  # Run a single test file
+almide test spec/lang/           # Run tests in a directory
+almide test spec/lang/expr_test.almd  # Run a single test file
 almide test --run "pattern"      # Filter tests by name
 almide check app.almd            # Type check only
 almide fmt app.almd              # Format source
@@ -87,17 +87,18 @@ almide app.almd --emit-ast       # Emit AST as JSON
 - **Test files**: Use `*_test.almd` suffix for dedicated test files (convention)
 
 ```
-lang/                Language feature tests (*_test.almd)
-stdlib/              Stdlib source + tests side by side (*_test.almd)
-tests/               Rust compiler unit tests (.rs)
-exercises/           Exercism-style exercises (may contain inline tests)
+spec/
+├── lang/            Language feature tests (*_test.almd)
+├── stdlib/          Stdlib tests (*_test.almd)
+└── integration/     Multi-module / integration tests
+tests/               Rust compiler unit tests (.rs, Cargo auto-discovery)
 ```
 
 Run tests:
 ```bash
 almide test                      # All .almd with test blocks (recursive)
-almide test lang/                # Language tests only
-almide test stdlib/              # Stdlib tests only
+almide test spec/lang/           # Language tests only
+almide test spec/stdlib/         # Stdlib tests only
 ```
 
 ## Testing Rules
@@ -113,7 +114,7 @@ When adding or modifying stdlib functions:
 - Implement the runtime in `src/emit_rust/core_runtime.txt` (and/or `src/emit_ts_runtime.rs`)
 - Add UFCS mapping to `stdlib.rs` `resolve_ufcs_candidates` (if method-callable)
 - `cargo build` auto-generates all codegen — no manual `stdlib.rs` or `calls.rs` edits needed
-- Write a test in `stdlib/` (as `*_test.almd` or inline `test` block)
+- Write a test in `spec/stdlib/` (as `*_test.almd` or inline `test` block)
 
 When modifying codegen:
 - Test ownership: variables used after `for...in` must still work
