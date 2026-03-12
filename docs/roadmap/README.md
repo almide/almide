@@ -3,14 +3,15 @@
 ## Active
 
 - [Const Declarations](active/const-declarations.md) — `const PI = 3.14`, eliminate `fn X() -> T` workaround
+- [Direct WASM Emission](active/emit-wasm-direct.md) — `.almd → WASM bytecode` without rustc
 - [List Index Read](active/list-index-read.md) — `xs[i]` for reads, matching existing `xs[i] = v` writes
 - [Test Coverage](active/test-coverage.md) — 790 cases, target 1500+
+- [Typed IR](active/typed-ir.md) — intermediate representation between checker and codegen
 - [While Loop](active/while-loop.md) — `while condition { }`, replace `do { guard ... else break }` boilerplate
 
 ## On Hold
 
 - [Benchmark Report](on-hold/benchmark-report.md)
-- [Direct WASM Emission](on-hold/emit-wasm-direct.md)
 - [Editor & GitHub Integration](on-hold/editor-github-integration.md)
 - [Function Reference Passing](on-hold/function-reference-passing.md) — low priority, verbose form is always correct
 - [Interop / FFI](on-hold/interop.md)
