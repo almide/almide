@@ -2,7 +2,7 @@
 
 ## Active
 
-- [Const Declarations](active/const-declarations.md) — `const PI = 3.14`, eliminate `fn X() -> T` workaround
+- [Top-Level Let](active/const-declarations.md) — `let PI = 3.14` at module scope, eliminate `fn X() -> T` workaround
 - [Direct WASM Emission](active/emit-wasm-direct.md) — `.almd → WASM bytecode` without rustc
 - [List Index Read](active/list-index-read.md) — `xs[i]` for reads, matching existing `xs[i] = v` writes
 - [Test Coverage](active/test-coverage.md) — 790 cases, target 1500+

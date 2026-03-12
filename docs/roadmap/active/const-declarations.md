@@ -1,87 +1,72 @@
-# Const Declarations [ACTIVE]
+# Top-Level Let [ACTIVE]
 
 ## The Problem
 
-Self-tooling and benchmarks exposed a recurring pattern: constant values expressed as zero-argument functions.
+Constant values require zero-argument functions as a workaround:
 
 ```almide
-fn PI() -> Float = 3.141592653589793
-fn SOLAR_MASS() -> Float = 4.0 * PI() * PI()
-fn DAYS_PER_YEAR() -> Float = 365.24
+fn pi() -> Float = 3.14159265358979323846
+fn solar_mass() -> Float = 4.0 * pi() * pi()
+fn days_per_year() -> Float = 365.24
 ```
 
-This works — LLVM inlines everything — but it's dishonest. These aren't functions. They take no arguments, have no effects, and always return the same value. The `fn` keyword signals "computation" when the reality is "name for a value."
-
-### Why this matters for LLMs
-
-1. **LLMs must remember `()` on every use** — `SOLAR_MASS` vs `SOLAR_MASS()`. Forgetting parentheses is a top-5 LLM error pattern across all languages
-2. **Type signature is noise** — `-> Float =` adds tokens with zero information (the type is obvious from the literal)
-3. **`fn` implies callable** — LLMs sometimes try to pass these as higher-order functions (`list.map(items, SOLAR_MASS)`) because they look like functions
-
-### Why NOT top-level `let`
-
-```almide
-// ❌ Top-level let — rejected
-let PI = 3.141592653589793
-let sm = solar_mass()  // when is this evaluated? can it fail?
-```
-
-- **Evaluation order is ambiguous** — "when does this run?" is not obvious (lazy? eager? module load?)
-- **Opens the door to top-level effects** — `let data = fs.read_text("config.json")` at module scope is a footgun
-- **Two ways to bind** — `let` inside functions and `let` at top level look the same but behave differently
-- **LLMs must learn scoping rules** — "can I reference another top-level let? in what order?" becomes a new error source
-
-Top-level `let` is the wrong abstraction. The real need is narrower: **naming compile-time constants.**
+This works — LLVM inlines everything — but:
+1. **`()` on every use** — `solar_mass()` not `solar_mass`. Forgetting `()` is a top-5 LLM error
+2. **`fn` implies computation** — LLMs sometimes pass these as higher-order functions
+3. **8+ tokens per declaration** — `fn X() -> T = v` vs `let X = v` (3 tokens)
 
 ## Design
 
+Allow `let` at module scope, restricted to constant expressions. No new keyword — same `let` that already exists inside functions.
+
 ```almide
-const PI = 3.141592653589793
-const DAYS_PER_YEAR = 365.24
-const SOLAR_MASS = 4.0 * PI * PI
+let PI = 3.14159265358979323846
+let SOLAR_MASS = 4.0 * PI * PI
+let DAYS_PER_YEAR = 365.24
+
+effect fn main() -> Unit = {
+  let mass = 9.547e-04 * SOLAR_MASS   // no () needed
+}
 ```
+
+Inspired by Swift, which uses `let` uniformly for both local bindings and module-level constants.
 
 ### Rules
 
-- `const` declares a module-level named constant
-- No parentheses on use: `SOLAR_MASS`, not `SOLAR_MASS()`
-- Value must be a compile-time constant expression (same restriction as default field values):
+- `let` at module scope declares a compile-time constant
+- Value must be a **constant expression**:
   - Literals: `0`, `3.14`, `"hello"`, `true`, `false`, `none`
   - Empty collections: `[]`
-  - Arithmetic on other `const` values: `4.0 * PI * PI`
-  - Unary negation: `-1`
-- No function calls, no effects, no runtime values
-- Type is inferred from the expression (no annotation needed)
-- Optional type annotation for clarity: `const PI: Float = 3.14`
-- Constants are always visible within the module; `pub const` for cross-module access
-- UPPER_SNAKE_CASE by convention (not enforced — LLMs already default to it)
+  - References to other top-level `let` values (declared earlier)
+  - Arithmetic on constants: `4.0 * PI * PI`
+  - String concatenation on constants: `PREFIX ++ ".almide"`
+  - Unary negation: `-1`, `-3.14`
+- **Not allowed**: function calls, effect expressions, runtime values, `if`, `some()`, `ok()`
+- Type inferred from expression; optional annotation: `let PI: Float = 3.14`
+- Forward references prohibited — must reference values declared earlier in the same module
+- `pub let` for cross-module access (same as `pub fn`)
+- UPPER_SNAKE_CASE by convention (not enforced)
 
-### What the code becomes
+### Why not `const`
 
-Before:
+- `let` is already in the language — zero new concepts for LLMs
+- No "should I use `const` or `fn`?" decision
+- Swift proves this works: one keyword for both local bindings and module constants
+- `const` adds a keyword that solves only the `()` problem — the cost/benefit doesn't justify it
+
+### Why not unrestricted top-level `let`
+
 ```almide
-fn solar_mass() -> Float = 4.0 * 3.141592653589793 * 3.141592653589793
-
-effect fn main() -> Unit = {
-  let sm = solar_mass()
-  let j_m = 9.54791938424326609e-04 * sm
-  // ... use sm everywhere in hot loop
-}
+let data = fs.read_text("config.json")  // ← this must NOT be allowed
 ```
 
-After:
-```almide
-const PI = 3.141592653589793
-const SOLAR_MASS = 4.0 * PI * PI
-const DAYS_PER_YEAR = 365.24
+- Evaluation order becomes ambiguous ("when does this run?")
+- Opens the door to top-level side effects
+- Rust codegen would require `lazy_static` / `static` — complexity for no gain
 
-effect fn main() -> Unit = {
-  let j_m = 9.54791938424326609e-04 * SOLAR_MASS
-  // SOLAR_MASS usable directly — no () needed, no local caching needed
-}
-```
+Restricting to constant expressions eliminates all these issues. The compiler can evaluate or inline everything at compile time.
 
-### Const expressions: what's allowed
+### Constant expressions: what's allowed
 
 | Expression | Allowed | Example |
 |-----------|---------|---------|
@@ -91,58 +76,79 @@ effect fn main() -> Unit = {
 | `none` | Yes | `none` |
 | Empty list | Yes | `[]` |
 | Unary negation | Yes | `-1`, `-3.14` |
-| Binary arithmetic on consts | Yes | `4.0 * PI * PI` |
-| String concat on consts | Yes | `PREFIX ++ ".almide"` |
+| Arithmetic on constants | Yes | `4.0 * PI * PI` |
+| String concat on constants | Yes | `PREFIX ++ ".almide"` |
+| Reference to earlier top-level `let` | Yes | `SOLAR_MASS` (if declared above) |
 | Function call | **No** | `math.sqrt(2.0)` |
-| Variable reference | **No** | `some_var` |
-| `some(x)` / `ok(x)` | **No** | wrapping requires runtime dispatch |
+| Variable reference (local) | **No** | `some_var` |
+| `some(x)` / `ok(x)` | **No** | wrapping requires runtime context |
+| `if`/`match` | **No** | keep it simple |
 
-### Why allow `const` arithmetic
+## Codegen
 
-`SOLAR_MASS = 4.0 * PI * PI` is the single most common pattern in scientific/benchmark code. Forbidding it forces either:
-- Hardcoding `39.4784176...` (loses intent, LLMs can't verify)
-- Using `fn` workaround (back to the original problem)
+### Rust
+```rust
+// let PI = 3.14  →
+const PI: f64 = 3.14;
 
-The compiler evaluates `const` expressions at compile time (constant folding). No runtime cost, no evaluation order ambiguity.
+// let SOLAR_MASS = 4.0 * PI * PI  →
+const SOLAR_MASS: f64 = 4.0 * PI * PI;
+```
 
-## Semantics
+Direct mapping to Rust `const`. Rust's const evaluator handles arithmetic.
 
-- Constants are evaluated at compile time by the checker
-- The evaluated value is inlined at every use site
-- No runtime allocation, no function call overhead
-- Codegen:
-  - **Rust**: `const PI: f64 = 3.141592653589793;` (or inlined literal)
-  - **TS**: `const PI = 3.141592653589793;` (module-level `const`)
-- Constants can reference other constants declared earlier in the same module
-- Cross-module: `import foo` then `foo.PI` (same as current function access)
+### TypeScript
+```typescript
+// let PI = 3.14  →
+const PI = 3.14;
 
-## Impact on LLM accuracy
+// let SOLAR_MASS = 4.0 * PI * PI  →
+const SOLAR_MASS = 4.0 * PI * PI;
+```
 
-| Metric | `fn` workaround | `const` |
-|--------|----------------|---------|
-| Tokens per constant declaration | 8+ (`fn X() -> T = v`) | 3 (`const X = v`) |
+Direct mapping to JS `const`.
+
+## Impact
+
+### N-body benchmark (before → after)
+
+```almide
+// Before: 7 fn declarations, () on every use
+fn pi() -> Float = 3.14159265358979323846
+fn solar_mass() -> Float = 4.0 * pi() * pi()
+fn days_per_year() -> Float = 365.24
+
+let j_mass = 9.54791938424326609e-04 * solar_mass()
+let j_vx = -2.76742510726862411e-03 * days_per_year()
+
+// After: clean, no ()
+let PI = 3.14159265358979323846
+let SOLAR_MASS = 4.0 * PI * PI
+let DAYS_PER_YEAR = 365.24
+
+let j_mass = 9.54791938424326609e-04 * SOLAR_MASS
+let j_vx = -2.76742510726862411e-03 * DAYS_PER_YEAR
+```
+
+### LLM accuracy
+
+| Metric | `fn` workaround | top-level `let` |
+|--------|----------------|-----------------|
+| Tokens per declaration | 8+ (`fn X() -> T = v`) | 3 (`let X = v`) |
 | Tokens per use | 2 (`X()`) | 1 (`X`) |
-| Parenthesis-forgetting errors | Common | Impossible |
-| Callable confusion | Possible | Impossible |
-| Evaluation order ambiguity | None (function) | None (compile-time) |
-
-For the n-body benchmark alone, `const` eliminates 12 tokens in declarations and ~40 parentheses in the hot loop.
-
-## Restrictions (explicit non-goals)
-
-- **No `const fn`** — function-level constants remain `let`. No new concept needed.
-- **No lazy evaluation** — consts are always compile-time. No `lazy val` or `static`.
-- **No mutable statics** — `var` at top level is never allowed.
-- **No complex expressions** — `const X = if ... then ... else ...` is not allowed. Keep it simple.
+| Parenthesis errors | Common | Impossible |
+| New concepts for LLM | None | None |
+| Keyword to learn | None (already knows `fn`) | None (already knows `let`) |
 
 ## Tasks
 
-- [ ] AST: add `Decl::Const { name, ty: Option<TypeExpr>, value: Expr, visibility }`
-- [ ] Parser: parse `const NAME = expr` and `pub const NAME: Type = expr`
-- [ ] Checker: evaluate const expression at compile time, validate compile-time-constant restriction
-- [ ] Checker: register constants in scope (accessible without `()`)
-- [ ] Checker: allow const-to-const references (ordered)
+- [ ] AST: add `Decl::TopLet { name, ty: Option<TypeExpr>, value: Expr, visibility, span }`
+- [ ] Parser: parse `let NAME = expr` and `pub let NAME: Type = expr` at module scope
+- [ ] Checker: validate value is a constant expression
+- [ ] Checker: register top-level `let` in scope (accessible as a value, not a function)
+- [ ] Checker: resolve references to earlier top-level `let` values
 - [ ] Emit Rust: `const NAME: type = value;` at module level
 - [ ] Emit TS: `const NAME = value;` at module level
-- [ ] Formatter: preserve `const` declarations
-- [ ] Tests: basic consts, const arithmetic, cross-const references, type errors, non-const rejection
+- [ ] Formatter: preserve top-level `let` declarations
+- [ ] Tests: basic top-level let, const arithmetic, cross-reference, type errors, non-const rejection
+- [ ] Update n-body benchmark to use top-level `let`
