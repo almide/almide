@@ -73,11 +73,13 @@ pub(crate) struct Emitter {
     pub(crate) current_module: Option<String>,
     /// Fast mode: emit unchecked index access for maximum performance
     pub(crate) fast_mode: bool,
+    /// Top-level let constant names (no clone needed when referencing)
+    pub(crate) top_let_names: std::collections::HashSet<String>,
 }
 
 impl Emitter {
     fn new(options: &EmitOptions) -> Self {
-        Self { out: String::new(), indent: 0, in_effect: false, effect_fns: Vec::new(), result_fns: Vec::new(), in_do_block: std::cell::Cell::new(false), user_modules: Vec::new(), in_test: false, no_thread_wrap: options.no_thread_wrap, module_aliases: std::collections::HashMap::new(), skip_auto_q: std::cell::Cell::new(false), anon_record_structs: std::cell::RefCell::new(std::collections::HashMap::new()), anon_record_counter: std::cell::Cell::new(0), named_record_types: std::collections::HashMap::new(), generic_variant_constructors: std::collections::HashMap::new(), generic_variant_unit_ctors: std::collections::HashSet::new(), boxed_variant_args: std::collections::HashSet::new(), boxed_variant_record_fields: std::collections::HashSet::new(), single_use_vars: std::collections::HashSet::new(), borrow_info: borrow::BorrowInfo::new(), borrowed_params: std::collections::HashMap::new(), current_module: None, fast_mode: options.fast_mode }
+        Self { out: String::new(), indent: 0, in_effect: false, effect_fns: Vec::new(), result_fns: Vec::new(), in_do_block: std::cell::Cell::new(false), user_modules: Vec::new(), in_test: false, no_thread_wrap: options.no_thread_wrap, module_aliases: std::collections::HashMap::new(), skip_auto_q: std::cell::Cell::new(false), anon_record_structs: std::cell::RefCell::new(std::collections::HashMap::new()), anon_record_counter: std::cell::Cell::new(0), named_record_types: std::collections::HashMap::new(), generic_variant_constructors: std::collections::HashMap::new(), generic_variant_unit_ctors: std::collections::HashSet::new(), boxed_variant_args: std::collections::HashSet::new(), boxed_variant_record_fields: std::collections::HashSet::new(), single_use_vars: std::collections::HashSet::new(), borrow_info: borrow::BorrowInfo::new(), borrowed_params: std::collections::HashMap::new(), current_module: None, fast_mode: options.fast_mode, top_let_names: std::collections::HashSet::new() }
     }
 
     pub(crate) fn emit_indent(&mut self) {

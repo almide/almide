@@ -110,6 +110,8 @@ pub struct TypeEnv {
     pub param_vars: std::collections::HashSet<std::string::String>,
     /// Declaration locations: variable name -> (line, col)
     pub var_decl_locs: std::collections::HashMap<std::string::String, (usize, usize)>,
+    /// Top-level `let` constants: name -> type
+    pub top_lets: std::collections::HashMap<std::string::String, Ty>,
 }
 
 impl Ty {
@@ -273,6 +275,7 @@ impl TypeEnv {
             mutable_vars: std::collections::HashSet::new(),
             param_vars: std::collections::HashSet::new(),
             var_decl_locs: std::collections::HashMap::new(),
+            top_lets: std::collections::HashMap::new(),
         }
     }
 

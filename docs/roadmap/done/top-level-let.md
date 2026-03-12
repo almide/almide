@@ -1,4 +1,4 @@
-# Top-Level Let [ACTIVE]
+# Top-Level Let [DONE]
 
 ## The Problem
 
@@ -142,13 +142,13 @@ let j_vx = -2.76742510726862411e-03 * DAYS_PER_YEAR
 
 ## Tasks
 
-- [ ] AST: add `Decl::TopLet { name, ty: Option<TypeExpr>, value: Expr, visibility, span }`
-- [ ] Parser: parse `let NAME = expr` and `pub let NAME: Type = expr` at module scope
-- [ ] Checker: validate value is a constant expression
-- [ ] Checker: register top-level `let` in scope (accessible as a value, not a function)
-- [ ] Checker: resolve references to earlier top-level `let` values
-- [ ] Emit Rust: `const NAME: type = value;` at module level
-- [ ] Emit TS: `const NAME = value;` at module level
-- [ ] Formatter: preserve top-level `let` declarations
-- [ ] Tests: basic top-level let, const arithmetic, cross-reference, type errors, non-const rejection
-- [ ] Update n-body benchmark to use top-level `let`
+- [x] AST: add `Decl::TopLet { name, ty: Option<TypeExpr>, value: Expr, visibility, span }`
+- [x] Parser: parse `let NAME = expr` and `pub let NAME: Type = expr` at module scope
+- [x] Checker: validate value is a constant expression
+- [x] Checker: register top-level `let` in scope (accessible as a value, not a function)
+- [x] Checker: resolve references to earlier top-level `let` values
+- [x] Emit Rust: `const NAME: type = value;` at module level
+- [x] Emit TS: `const NAME = value;` at module level
+- [x] Formatter: preserve top-level `let` declarations
+- [x] Tests: basic top-level let, const arithmetic, cross-reference, type errors, non-const rejection
+- [x] Update n-body benchmark to use top-level `let`

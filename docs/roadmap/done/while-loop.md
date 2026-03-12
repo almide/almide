@@ -1,4 +1,4 @@
-# While Loop [ACTIVE]
+# While Loop [DONE]
 
 ## The Problem
 
@@ -186,12 +186,12 @@ while len <= n {
 
 ## Tasks
 
-- [ ] Lexer: add `While` keyword token
-- [ ] AST: add `Stmt::While { condition: Expr, body: Vec<Stmt>, span }` (or `Expr::While`)
-- [ ] Parser: parse `while expr { stmts }`
-- [ ] Checker: validate condition is `Bool`, check body
-- [ ] Emit Rust: `while condition { body }`
-- [ ] Emit TS: `while (condition) { body }`
-- [ ] Formatter: preserve `while` syntax
-- [ ] Tests: basic while, nested while, break/continue in while, while true, while false
-- [ ] Update FFT benchmark to use `while`
+- [x] Lexer: add `While` keyword token
+- [x] AST: `Expr::While { cond, body, span }` (implemented as Expr, not Stmt)
+- [x] Parser: parse `while expr { stmts }`
+- [x] Checker: validate condition is `Bool`, check body
+- [x] Emit Rust: `while condition { body }`
+- [x] Emit TS: `while (condition) { body }`
+- [x] Formatter: preserve `while` syntax
+- [x] Tests: basic while, nested while, break/continue in while
+- [x] FFT benchmark already uses `while`

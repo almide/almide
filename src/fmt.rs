@@ -100,6 +100,22 @@ fn format_decl(out: &mut String, decl: &Decl, depth: usize) {
                 }
             }
         }
+        Decl::TopLet { name, ty, value, visibility, .. } => {
+            out.push_str(&ind);
+            match visibility {
+                Visibility::Local => out.push_str("local "),
+                Visibility::Mod => out.push_str("mod "),
+                Visibility::Public => {}
+            }
+            out.push_str("let ");
+            out.push_str(name);
+            if let Some(te) = ty {
+                out.push_str(": ");
+                format_type_expr(out, te, depth);
+            }
+            out.push_str(" = ");
+            format_expr(out, value, depth);
+        }
         Decl::Fn { name, effect, r#async, visibility, params, return_type, body, extern_attrs, .. } => {
             // Emit @extern annotations
             for attr in extern_attrs {

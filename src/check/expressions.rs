@@ -68,6 +68,10 @@ impl Checker {
                     self.env.used_vars.insert(name.clone());
                     return ty;
                 }
+                // Check top-level let constants
+                if let Some(ty) = self.env.top_lets.get(name).cloned() {
+                    return ty;
+                }
                 if let Some(sig) = self.env.functions.get(name) {
                     return Ty::Fn { params: sig.params.iter().map(|(_, t)| t.clone()).collect(), ret: Box::new(sig.ret.clone()) };
                 }
@@ -91,6 +95,10 @@ impl Checker {
             }
 
             ast::Expr::TypeName { name, .. } => {
+                // Check top-level let constants (UPPER_CASE names are parsed as TypeName)
+                if let Some(ty) = self.env.top_lets.get(name).cloned() {
+                    return ty;
+                }
                 if self.env.constructors.contains_key(name) { return Ty::Unknown; }
                 Ty::Named(name.clone())
             }

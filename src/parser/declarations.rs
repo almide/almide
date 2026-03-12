@@ -81,10 +81,25 @@ impl Parser {
         if self.check(TokenType::Impl) {
             return self.parse_impl_decl();
         }
+        // Top-level `let` (module-scope constant): `let NAME = expr` or `pub let NAME: Type = expr`
+        if self.check(TokenType::Let) {
+            return self.parse_top_let(Visibility::Public);
+        }
         if self.check(TokenType::Fn) || self.check(TokenType::Pub) || self.check(TokenType::Effect) || self.check(TokenType::Async) || self.check(TokenType::Local) || self.check(TokenType::Mod) {
-            // local/mod can precede both fn and type
-            if (self.check(TokenType::Local) || self.check(TokenType::Mod)) && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Type) {
-                return self.parse_type_decl();
+            // `pub let` — public top-level constant
+            if self.check(TokenType::Pub) && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Let) {
+                self.advance(); // consume `pub`
+                return self.parse_top_let(Visibility::Public);
+            }
+            // local/mod can precede let, fn, and type
+            if self.check(TokenType::Local) || self.check(TokenType::Mod) {
+                if self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Type) {
+                    return self.parse_type_decl();
+                }
+                if self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Let) {
+                    let vis = self.parse_visibility();
+                    return self.parse_top_let(vis);
+                }
             }
             return self.parse_fn_decl();
         }
@@ -99,13 +114,30 @@ impl Parser {
             "class" | "struct" => "\n  Hint: Use 'type Name = { field: Type, ... }' for record types, or 'type Name = | Case1 | Case2' for variants.",
             "def" | "func" | "function" => "\n  Hint: Use 'fn name(...) -> Type = expr' or 'effect fn name(...) -> Result[T, E] = expr'.",
             "while" | "for" | "loop" => "\n  Hint: Almide has no top-level loops. Define a function with 'fn' or 'effect fn'.",
-            "const" | "val" => "\n  Hint: Use 'let' for immutable bindings, 'var' for mutable ones (inside functions).",
+            "const" | "val" => "\n  Hint: Use 'let NAME = value' for top-level constants, or 'let' inside functions for local bindings.",
             _ => "",
         };
         Err(format!(
-            "Expected top-level declaration (fn, effect fn, type, trait, impl, test) at line {}:{} (got {:?} '{}'){}",
+            "Expected top-level declaration (fn, effect fn, type, let, trait, impl, test) at line {}:{} (got {:?} '{}'){}",
             tok.line, tok.col, tok.token_type, tok.value, hint
         ))
+    }
+
+    fn parse_top_let(&mut self, visibility: Visibility) -> Result<Decl, String> {
+        let span = self.current_span();
+        self.expect(TokenType::Let)?;
+        let name = self.expect_any_name()?;
+        // Optional type annotation: `let NAME: Type = expr`
+        let ty = if self.check(TokenType::Colon) {
+            self.advance();
+            Some(self.parse_type_expr()?)
+        } else {
+            None
+        };
+        self.expect(TokenType::Eq)?;
+        self.skip_newlines();
+        let value = self.parse_expr()?;
+        Ok(Decl::TopLet { name, ty, value, visibility, span: Some(span) })
     }
 
     fn collect_extern_attrs(&mut self) -> Result<Vec<ExternAttr>, String> {

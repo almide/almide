@@ -57,7 +57,7 @@ Verify the installation:
 
 ```bash
 almide --version
-# almide 0.5.4
+# almide 0.5.5
 ```
 
 ### Hello World
@@ -78,6 +78,7 @@ almide run hello.almd
 - **Generics** — Functions, records, variant types, recursive variants with auto Box wrapping
 - **Pattern matching** — Exhaustive match with variant destructuring
 - **Effect functions** — `effect fn` for explicit error propagation (`Result` auto-wrapping)
+- **Top-level constants** — `let PI = 3.14` at module scope, compile-time evaluated
 - **Pipeline operator** — `data |> transform |> output`
 - **Module system** — Packages, sub-namespaces, visibility control, diamond dependency resolution
 - **Built-in testing** — `test "name" { assert_eq(a, b) }` with `almide test`
@@ -95,6 +96,9 @@ For the full design rationale, see [Design Philosophy](./docs/DESIGN.md).
 ## Example
 
 ```almd
+let PI = 3.14159265358979323846
+let SOLAR_MASS = 4.0 * PI * PI
+
 type Tree[T] =
   | Leaf(T)
   | Node(Tree[T], Tree[T])

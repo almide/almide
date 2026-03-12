@@ -5,7 +5,9 @@ import math
 import env
 import int
 
-fn solar_mass() -> Float = 4.0 * 3.141592653589793 * 3.141592653589793
+let PI = 3.141592653589793
+let SOLAR_MASS = 4.0 * PI * PI
+let DAYS_PER_YEAR = 365.24
 
 effect fn main() -> Unit = {
   let args = env.args()
@@ -15,9 +17,6 @@ effect fn main() -> Unit = {
       none => 50000000
     }
   } else 50000000
-
-  let sm = solar_mass()
-  let dpy = 365.24
 
   // Positions
   var s_x  = 0.0;  var s_y  = 0.0;  var s_z  = 0.0
@@ -36,33 +35,33 @@ effect fn main() -> Unit = {
 
   // Velocities
   var s_vx = 0.0;  var s_vy = 0.0;  var s_vz = 0.0
-  var j_vx = 1.66007664274403694e-03 * dpy
-  var j_vy = 7.69901118419740425e-03 * dpy
-  var j_vz = -6.90460016972063023e-05 * dpy
-  var a_vx = -2.76742510726862411e-03 * dpy
-  var a_vy = 4.99852801234917238e-03 * dpy
-  var a_vz = 2.30417297573763929e-05 * dpy
-  var u_vx = 2.96460137564761618e-03 * dpy
-  var u_vy = 2.37847173959480950e-03 * dpy
-  var u_vz = -2.96589568540237556e-05 * dpy
-  var n_vx = 2.68067772490389322e-03 * dpy
-  var n_vy = 1.62824170038242295e-03 * dpy
-  var n_vz = -9.51592254519715870e-05 * dpy
+  var j_vx = 1.66007664274403694e-03 * DAYS_PER_YEAR
+  var j_vy = 7.69901118419740425e-03 * DAYS_PER_YEAR
+  var j_vz = -6.90460016972063023e-05 * DAYS_PER_YEAR
+  var a_vx = -2.76742510726862411e-03 * DAYS_PER_YEAR
+  var a_vy = 4.99852801234917238e-03 * DAYS_PER_YEAR
+  var a_vz = 2.30417297573763929e-05 * DAYS_PER_YEAR
+  var u_vx = 2.96460137564761618e-03 * DAYS_PER_YEAR
+  var u_vy = 2.37847173959480950e-03 * DAYS_PER_YEAR
+  var u_vz = -2.96589568540237556e-05 * DAYS_PER_YEAR
+  var n_vx = 2.68067772490389322e-03 * DAYS_PER_YEAR
+  var n_vy = 1.62824170038242295e-03 * DAYS_PER_YEAR
+  var n_vz = -9.51592254519715870e-05 * DAYS_PER_YEAR
 
   // Masses
-  let j_m = 9.54791938424326609e-04 * sm
-  let a_m = 2.85885980666130812e-04 * sm
-  let u_m = 4.36624404335156298e-05 * sm
-  let n_m = 5.15138902046611451e-05 * sm
+  let j_m = 9.54791938424326609e-04 * SOLAR_MASS
+  let a_m = 2.85885980666130812e-04 * SOLAR_MASS
+  let u_m = 4.36624404335156298e-05 * SOLAR_MASS
+  let n_m = 5.15138902046611451e-05 * SOLAR_MASS
 
   // Offset momentum
-  s_vx = 0.0 - (j_vx * j_m + a_vx * a_m + u_vx * u_m + n_vx * n_m) / sm
-  s_vy = 0.0 - (j_vy * j_m + a_vy * a_m + u_vy * u_m + n_vy * n_m) / sm
-  s_vz = 0.0 - (j_vz * j_m + a_vz * a_m + u_vz * u_m + n_vz * n_m) / sm
+  s_vx = 0.0 - (j_vx * j_m + a_vx * a_m + u_vx * u_m + n_vx * n_m) / SOLAR_MASS
+  s_vy = 0.0 - (j_vy * j_m + a_vy * a_m + u_vy * u_m + n_vy * n_m) / SOLAR_MASS
+  s_vz = 0.0 - (j_vz * j_m + a_vz * a_m + u_vz * u_m + n_vz * n_m) / SOLAR_MASS
 
   // Energy before
   println(float.to_fixed(energy(
-    s_x, s_y, s_z, s_vx, s_vy, s_vz, sm,
+    s_x, s_y, s_z, s_vx, s_vy, s_vz,
     j_x, j_y, j_z, j_vx, j_vy, j_vz, j_m,
     a_x, a_y, a_z, a_vx, a_vy, a_vz, a_m,
     u_x, u_y, u_z, u_vx, u_vy, u_vz, u_m,
@@ -78,7 +77,7 @@ effect fn main() -> Unit = {
     let inv = 1.0 / math.sqrt(dsq)
     let mag = dt * inv * inv * inv
     s_vx = s_vx - dx * j_m * mag;  s_vy = s_vy - dy * j_m * mag;  s_vz = s_vz - dz * j_m * mag
-    j_vx = j_vx + dx * sm * mag;  j_vy = j_vy + dy * sm * mag;  j_vz = j_vz + dz * sm * mag
+    j_vx = j_vx + dx * SOLAR_MASS * mag;  j_vy = j_vy + dy * SOLAR_MASS * mag;  j_vz = j_vz + dz * SOLAR_MASS * mag
 
     // Sun-Saturn
     let dx = s_x - a_x;  let dy = s_y - a_y;  let dz = s_z - a_z
@@ -86,7 +85,7 @@ effect fn main() -> Unit = {
     let inv = 1.0 / math.sqrt(dsq)
     let mag = dt * inv * inv * inv
     s_vx = s_vx - dx * a_m * mag;  s_vy = s_vy - dy * a_m * mag;  s_vz = s_vz - dz * a_m * mag
-    a_vx = a_vx + dx * sm * mag;  a_vy = a_vy + dy * sm * mag;  a_vz = a_vz + dz * sm * mag
+    a_vx = a_vx + dx * SOLAR_MASS * mag;  a_vy = a_vy + dy * SOLAR_MASS * mag;  a_vz = a_vz + dz * SOLAR_MASS * mag
 
     // Sun-Uranus
     let dx = s_x - u_x;  let dy = s_y - u_y;  let dz = s_z - u_z
@@ -94,7 +93,7 @@ effect fn main() -> Unit = {
     let inv = 1.0 / math.sqrt(dsq)
     let mag = dt * inv * inv * inv
     s_vx = s_vx - dx * u_m * mag;  s_vy = s_vy - dy * u_m * mag;  s_vz = s_vz - dz * u_m * mag
-    u_vx = u_vx + dx * sm * mag;  u_vy = u_vy + dy * sm * mag;  u_vz = u_vz + dz * sm * mag
+    u_vx = u_vx + dx * SOLAR_MASS * mag;  u_vy = u_vy + dy * SOLAR_MASS * mag;  u_vz = u_vz + dz * SOLAR_MASS * mag
 
     // Sun-Neptune
     let dx = s_x - n_x;  let dy = s_y - n_y;  let dz = s_z - n_z
@@ -102,7 +101,7 @@ effect fn main() -> Unit = {
     let inv = 1.0 / math.sqrt(dsq)
     let mag = dt * inv * inv * inv
     s_vx = s_vx - dx * n_m * mag;  s_vy = s_vy - dy * n_m * mag;  s_vz = s_vz - dz * n_m * mag
-    n_vx = n_vx + dx * sm * mag;  n_vy = n_vy + dy * sm * mag;  n_vz = n_vz + dz * sm * mag
+    n_vx = n_vx + dx * SOLAR_MASS * mag;  n_vy = n_vy + dy * SOLAR_MASS * mag;  n_vz = n_vz + dz * SOLAR_MASS * mag
 
     // Jupiter-Saturn
     let dx = j_x - a_x;  let dy = j_y - a_y;  let dz = j_z - a_z
@@ -162,7 +161,7 @@ effect fn main() -> Unit = {
 
   // Energy after
   println(float.to_fixed(energy(
-    s_x, s_y, s_z, s_vx, s_vy, s_vz, sm,
+    s_x, s_y, s_z, s_vx, s_vy, s_vz,
     j_x, j_y, j_z, j_vx, j_vy, j_vz, j_m,
     a_x, a_y, a_z, a_vx, a_vy, a_vz, a_m,
     u_x, u_y, u_z, u_vx, u_vy, u_vz, u_m,
@@ -171,21 +170,21 @@ effect fn main() -> Unit = {
 }
 
 fn energy(
-  s_x: Float, s_y: Float, s_z: Float, s_vx: Float, s_vy: Float, s_vz: Float, sm: Float,
+  s_x: Float, s_y: Float, s_z: Float, s_vx: Float, s_vy: Float, s_vz: Float,
   j_x: Float, j_y: Float, j_z: Float, j_vx: Float, j_vy: Float, j_vz: Float, j_m: Float,
   a_x: Float, a_y: Float, a_z: Float, a_vx: Float, a_vy: Float, a_vz: Float, a_m: Float,
   u_x: Float, u_y: Float, u_z: Float, u_vx: Float, u_vy: Float, u_vz: Float, u_m: Float,
   n_x: Float, n_y: Float, n_z: Float, n_vx: Float, n_vy: Float, n_vz: Float, n_m: Float
 ) -> Float = {
-  let ke = 0.5 * sm * (s_vx * s_vx + s_vy * s_vy + s_vz * s_vz)
+  let ke = 0.5 * SOLAR_MASS * (s_vx * s_vx + s_vy * s_vy + s_vz * s_vz)
          + 0.5 * j_m * (j_vx * j_vx + j_vy * j_vy + j_vz * j_vz)
          + 0.5 * a_m * (a_vx * a_vx + a_vy * a_vy + a_vz * a_vz)
          + 0.5 * u_m * (u_vx * u_vx + u_vy * u_vy + u_vz * u_vz)
          + 0.5 * n_m * (n_vx * n_vx + n_vy * n_vy + n_vz * n_vz)
-  let pe = sm * j_m / dist(s_x, s_y, s_z, j_x, j_y, j_z)
-         + sm * a_m / dist(s_x, s_y, s_z, a_x, a_y, a_z)
-         + sm * u_m / dist(s_x, s_y, s_z, u_x, u_y, u_z)
-         + sm * n_m / dist(s_x, s_y, s_z, n_x, n_y, n_z)
+  let pe = SOLAR_MASS * j_m / dist(s_x, s_y, s_z, j_x, j_y, j_z)
+         + SOLAR_MASS * a_m / dist(s_x, s_y, s_z, a_x, a_y, a_z)
+         + SOLAR_MASS * u_m / dist(s_x, s_y, s_z, u_x, u_y, u_z)
+         + SOLAR_MASS * n_m / dist(s_x, s_y, s_z, n_x, n_y, n_z)
          + j_m * a_m / dist(j_x, j_y, j_z, a_x, a_y, a_z)
          + j_m * u_m / dist(j_x, j_y, j_z, u_x, u_y, u_z)
          + j_m * n_m / dist(j_x, j_y, j_z, n_x, n_y, n_z)

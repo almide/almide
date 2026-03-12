@@ -284,6 +284,7 @@ pub enum Decl {
         body: Option<Expr>,
         #[serde(skip)] span: Option<Span>,
     },
+    TopLet { name: String, #[serde(rename = "type")] ty: Option<TypeExpr>, value: Expr, #[serde(default)] visibility: Visibility, #[serde(skip)] span: Option<Span> },
     Trait { name: String, #[serde(default)] generics: Option<Vec<GenericParam>>, methods: Vec<serde_json::Value>, #[serde(skip)] span: Option<Span> },
     Impl { trait_: String, for_: String, #[serde(default)] generics: Option<Vec<GenericParam>>, methods: Vec<Decl>, #[serde(skip)] span: Option<Span> },
     Strict { mode: String, #[serde(skip)] span: Option<Span> },
