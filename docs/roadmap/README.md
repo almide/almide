@@ -11,7 +11,7 @@
 - [Direct WASM Emission](on-hold/emit-wasm-direct.md) — `.almd → WASM bytecode` without rustc
 - [Editor & GitHub Integration](on-hold/editor-github-integration.md)
 - [Function Reference Passing](on-hold/function-reference-passing.md) — low priority, verbose form is always correct
-- [Interop / FFI](on-hold/interop.md)
+- [Rainbow FFI](on-hold/rainbow-ffi.md) — Rust, JS, C, Python, Swift, Kotlin, Erlang FFI
 - [LLM Developer Experience](on-hold/llm-developer-experience.md)
 - [LLM Immutable Sugar](on-hold/llm-immutable-sugar.md) — var indexing, `with` expression
 - [Package Registry](on-hold/package-registry.md)
