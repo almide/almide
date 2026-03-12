@@ -124,6 +124,16 @@ for key in map.keys(config) {
 ```
 **Prefer `for...in` over `do { guard ... }` for iterating lists.**
 
+### While loop
+```
+var i = 0
+while i < 10 {
+  println(int.to_string(i))
+  i = i + 1
+}
+```
+**Use `while` for condition-based loops. Use `do { guard ... }` only when you need to return a value from the loop.**
+
 ### Range
 ```
 0..5            // [0, 1, 2, 3, 4]  (exclusive end)
@@ -172,6 +182,8 @@ create_user("alice", age: 30)          // mixed positional + named
 ```
 [1, 2, 3]
 []                         // empty list (there is NO list.new())
+xs[0]                      // index read (returns Option[T])
+xs[i] = value              // index write (var only)
 ```
 
 ### String interpolation
@@ -191,6 +203,14 @@ let sql = """
 ```
 
 ## Statements
+
+### Top-level let (module-scope constant)
+```
+let PI = 3.14159265358979323846
+let MAX_RETRIES = 3
+let GREETING = "Hello"
+```
+Top-level `let` is evaluated at compile time (const) or via `LazyLock` (for non-const expressions like String).
 
 ### let / var
 ```
@@ -361,12 +381,8 @@ The runtime calls `main(args)` where `args` includes the program name at index 0
 
 ## Complete example
 ```
-module app
-
 import fs
-import env
-import string
-import list
+import json
 
 type AppError =
   | NotFound(String)

@@ -3,13 +3,15 @@
 ```ebnf
 program     = import* decl*
 import      = "import" IDENT
-decl        = type_decl | fn_decl
+decl        = type_decl | fn_decl | top_let
 type_decl   = "type" IDENT "=" "|" variant ("|" variant)* "deriving" "From"
 variant     = IDENT "(" type ("," type)* ")"
 fn_decl     = ["effect"] "fn" IDENT "(" params ")" "->" type "=" expr
+top_let     = "let" IDENT [":" type] "=" expr       (* module-scope constant *)
 type        = "Int" | "String" | "Bool" | "Unit" | IDENT | IDENT "[" type ("," type)* "]"
-expr        = block | if_expr | match_expr | for_in | do_expr | guard | let | var | assign | binary | call | literal
+expr        = block | if_expr | match_expr | for_in | while_expr | do_expr | guard | let | var | assign | binary | call | literal
 for_in      = "for" IDENT "in" expr "{" stmt* "}"  (* iterate over list/collection *)
+while_expr  = "while" expr "{" stmt* "}"            (* loop while condition is true *)
 block       = "{" stmt* expr "}"
 if_expr     = "if" expr "then" expr "else" expr       (* else is MANDATORY *)
 match_expr  = "match" expr "{" arm ("," arm)* "}"
@@ -28,29 +30,20 @@ literal     = INT | STRING | "true" | "false" | "ok" "(" expr ")" | "err" "(" ex
                                (* string interpolation: "hello ${name}" *)
 ```
 
-## Stdlib
+## Stdlib (summary — see CHEATSHEET.md for full reference)
 
 ```
-fs.read_text(path)->String  fs.read_lines(path)->List  fs.write(path,s)  fs.mkdir_p(path)  fs.exists?(path)->Bool  fs.append(path,s)  fs.remove(path)  fs.list_dir(path)->List
-string.trim(s) split(s,d)->List join(xs,d) len(s)->Int lines(s)->List pad_left(s,w,c) slice(s,start) to_bytes(s)->List[Int]
-list.get(xs,i)->Option  get_or(xs,i,default)->T  len(xs)->Int  sort(xs)  reverse(xs)  contains(xs,v)->Bool
-list.any(xs,fn(x)=>b)  all(xs,fn(x)=>b)  map(xs,fn(x)=>e)  filter(xs,fn(x)=>b)  fold(xs,init,fn(a,x)=>e)
-map.new()->Map  get(m,k)->Option  get_or(m,k,default)->V  set(m,k,v)->Map  contains(m,k)->Bool
-map.remove(m,k)->Map  keys(m)->List  values(m)->List  len(m)->Int  entries(m)->List  from_list(xs,fn)
-json.parse(text)->Result[Json]  stringify(j)->String  get(j,k)->Option[Json]
-json.get_string(j,k)->Option  get_int(j,k)->Option  get_bool(j,k)->Option  get_array(j,k)->Option
-json.keys(j)->List  from_string(s)  from_int(n)  from_bool(b)  null()  array(xs)  from_map(m)
-path.join(base,child)  dirname(p)  basename(p)  extension(p)->Option  is_absolute?(p)->Bool
-int.to_string(n)  int.to_hex(n)
-env.unix_timestamp()->Int
-println(s)  (* no print, only println *)
+Auto-imported: string, list, map, int, float, fs, path, env, process, io
+Import required: json, math, random, time, regex, encoding, args, hash, csv, bitwise, http
 ```
+
+See [CHEATSHEET.md](./CHEATSHEET.md) for the complete stdlib function reference (203 functions across 14+ modules).
 
 ## Notes
 
 - `int`, `string`, `list`, `map`, `path`, and `env` are auto-imported — no `import` needed. `fs` and `json` require explicit import.
-- No `while`, `return`, `class`, `null`, `!` — use Almide alternatives
-- `for x in xs { ... }` for iterating lists; `do { guard ... }` for dynamic break conditions
+- No `return`, `class`, `null`, `!` — use Almide alternatives
+- `for x in xs { ... }` for iterating lists; `while cond { ... }` for condition-based loops; `do { guard ... }` for dynamic break with values
 - `if` always requires `else`
 - `effect fn` marks functions with side effects
 - All errors via `Result[T, E]`, all optionals via `Option[T]`
