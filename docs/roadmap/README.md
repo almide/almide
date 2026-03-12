@@ -3,6 +3,7 @@
 ## Active
 
 - [Error Recovery](active/error-recovery.md) — Multi-error reporting, structured parser errors, statement/expression-level recovery
+- [LLM Integration](active/llm-integration.md) — `almide forge` (library generation), `almide fix` (self-repair), `almide explain`
 
 ## On Hold
 
