@@ -165,12 +165,13 @@ Tested with the [MiniGit benchmark](https://github.com/almide/benchmark) — Cla
 | Language | Total Time | Avg Cost | Pass Rate |
 |----------|-----------|----------|-----------|
 | Ruby | 73.1s | $0.36 | 40/40 |
-| Python | 74.6s | $0.38 | 40/40 |
-| TypeScript | 133.0s | $0.62 | 40/40 |
+| Python | 77.5s | $0.39 | 48/48 |
+| Go | 102.0s | $0.50 | 46/46 |
 | Rust | 113.7s | $0.54 | 38/40 |
-| **Almide** | **206.3s** | **$0.59** | **8/8** |
+| TypeScript | 133.0s | $0.62 | 40/40 |
+| **Almide** | **239.1s** | **$1.13** | **20/20** |
 
-Almide has no training data in any public LLM corpus yet, so the generation speed gap is expected to narrow as more Almide code enters training sets. See [full results](https://github.com/almide/benchmark) for all 16 languages.
+Almide has no training data in any public LLM corpus yet — the generation speed gap is expected to narrow as more Almide code enters training sets. Despite being slower, Almide achieves **100% pass rate** with zero failures across 20 trials. See [full results](https://github.com/almide/benchmark) for all 16 languages.
 
 ## Native Performance
 
