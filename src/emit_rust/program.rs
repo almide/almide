@@ -100,9 +100,19 @@ impl Emitter {
         }
     }
 
+    /// Collect top-level let constant names so they can be referenced without clone.
+    fn collect_top_lets(&mut self, decls: &[Decl]) {
+        for decl in decls {
+            if let Decl::TopLet { name, .. } = decl {
+                self.top_let_names.insert(name.clone());
+            }
+        }
+    }
+
     pub(crate) fn emit_program(&mut self, prog: &Program, modules: &[(String, Program, Option<crate::project::PkgId>, bool)]) {
         self.collect_fn_info(&prog.decls);
         self.collect_named_records(&prog.decls);
+        self.collect_top_lets(&prog.decls);
         for (_, mod_prog, _, _) in modules {
             self.collect_fn_info(&mod_prog.decls);
             self.collect_named_records(&mod_prog.decls);
@@ -390,15 +400,15 @@ impl Emitter {
     fn emit_runtime(&mut self) {
         self.emitln("use std::collections::HashMap;");
         self.emitln("trait AlmideConcat<Rhs> { type Output; fn concat(self, rhs: Rhs) -> Self::Output; }");
-        self.emitln("impl AlmideConcat<String> for String { type Output = String; fn concat(self, rhs: String) -> String { format!(\"{}{}\", self, rhs) } }");
-        self.emitln("impl AlmideConcat<&str> for String { type Output = String; fn concat(self, rhs: &str) -> String { format!(\"{}{}\", self, rhs) } }");
-        self.emitln("impl AlmideConcat<String> for &str { type Output = String; fn concat(self, rhs: String) -> String { format!(\"{}{}\", self, rhs) } }");
-        self.emitln("impl AlmideConcat<&str> for &str { type Output = String; fn concat(self, rhs: &str) -> String { format!(\"{}{}\", self, rhs) } }");
-        self.emitln("impl<T: Clone> AlmideConcat<Vec<T>> for Vec<T> { type Output = Vec<T>; fn concat(self, rhs: Vec<T>) -> Vec<T> { let mut r = self; r.extend(rhs); r } }");
+        self.emitln("impl AlmideConcat<String> for String { type Output = String; #[inline(always)] fn concat(self, rhs: String) -> String { format!(\"{}{}\", self, rhs) } }");
+        self.emitln("impl AlmideConcat<&str> for String { type Output = String; #[inline(always)] fn concat(self, rhs: &str) -> String { format!(\"{}{}\", self, rhs) } }");
+        self.emitln("impl AlmideConcat<String> for &str { type Output = String; #[inline(always)] fn concat(self, rhs: String) -> String { format!(\"{}{}\", self, rhs) } }");
+        self.emitln("impl AlmideConcat<&str> for &str { type Output = String; #[inline(always)] fn concat(self, rhs: &str) -> String { format!(\"{}{}\", self, rhs) } }");
+        self.emitln("impl<T: Clone> AlmideConcat<Vec<T>> for Vec<T> { type Output = Vec<T>; #[inline(always)] fn concat(self, rhs: Vec<T>) -> Vec<T> { let mut r = self; r.extend(rhs); r } }");
         self.emitln("trait AlmidePushConcat<Rhs> { fn almide_push_concat(&mut self, rhs: Rhs); }");
-        self.emitln("impl AlmidePushConcat<String> for String { fn almide_push_concat(&mut self, rhs: String) { self.push_str(&rhs); } }");
-        self.emitln("impl AlmidePushConcat<&str> for String { fn almide_push_concat(&mut self, rhs: &str) { self.push_str(rhs); } }");
-        self.emitln("impl<T: Clone> AlmidePushConcat<Vec<T>> for Vec<T> { fn almide_push_concat(&mut self, rhs: Vec<T>) { self.extend(rhs); } }");
+        self.emitln("impl AlmidePushConcat<String> for String { #[inline(always)] fn almide_push_concat(&mut self, rhs: String) { self.push_str(&rhs); } }");
+        self.emitln("impl AlmidePushConcat<&str> for String { #[inline(always)] fn almide_push_concat(&mut self, rhs: &str) { self.push_str(rhs); } }");
+        self.emitln("impl<T: Clone> AlmidePushConcat<Vec<T>> for Vec<T> { #[inline(always)] fn almide_push_concat(&mut self, rhs: Vec<T>) { self.extend(rhs); } }");
         self.emitln("macro_rules! almide_eq { ($a:expr, $b:expr) => { ($a) == ($b) }; }");
         self.emitln("macro_rules! almide_ne { ($a:expr, $b:expr) => { ($a) != ($b) }; }");
         self.emitln("");
@@ -444,6 +454,15 @@ impl Emitter {
             }
             Decl::Fn { name, params, return_type, body, effect, r#async, extern_attrs, generics, .. } => {
                 self.emit_fn_decl(name, params, return_type, body.as_ref(), effect.unwrap_or(false), r#async.unwrap_or(false), extern_attrs, generics.as_ref());
+            }
+            Decl::TopLet { name, ty, value, .. } => {
+                let ty_str = if let Some(te) = ty {
+                    self.gen_type(te)
+                } else {
+                    self.infer_const_rust_type(value)
+                };
+                let val_str = self.gen_expr(value);
+                self.emitln(&format!("const {}: {} = {};", name, ty_str, val_str));
             }
             Decl::Impl { trait_, for_, methods, .. } => {
                 self.emitln(&format!("// impl {} for {}", trait_, for_));
@@ -807,6 +826,28 @@ impl Emitter {
         }
     }
 
+    /// Infer Rust const type from a constant expression (for top-level let without annotation).
+    fn infer_const_rust_type(&self, expr: &Expr) -> String {
+        match expr {
+            Expr::Int { .. } => "i64".to_string(),
+            Expr::Float { .. } => "f64".to_string(),
+            Expr::String { .. } => "&str".to_string(),
+            Expr::Bool { .. } => "bool".to_string(),
+            Expr::Unary { op, operand, .. } if op == "-" => self.infer_const_rust_type(operand),
+            Expr::Binary { op, left, right, .. } => {
+                if op == "++" {
+                    "&str".to_string()
+                } else {
+                    let lt = self.infer_const_rust_type(left);
+                    let rt = self.infer_const_rust_type(right);
+                    if lt == "f64" || rt == "f64" { "f64".to_string() } else { lt }
+                }
+            }
+            Expr::Paren { expr: inner, .. } => self.infer_const_rust_type(inner),
+            _ => "i64".to_string(), // fallback
+        }
+    }
+
     /// Convert an owned Rust type to its borrowed equivalent.
     fn to_borrow_type(ty: &str) -> String {
         if ty == "String" {
@@ -825,6 +866,10 @@ impl Emitter {
     /// If a variable is a borrowed param (&str, &[T]), use .to_owned()/.to_vec() instead of .clone().
     pub(crate) fn gen_arg(&self, expr: &Expr) -> String {
         match expr {
+            // Top-level let constants are Copy (numeric/bool) or &str — no clone needed
+            Expr::Ident { name, .. } | Expr::TypeName { name, .. } if self.top_let_names.contains(name) => {
+                self.gen_expr(expr)
+            }
             Expr::Ident { name, .. } if self.single_use_vars.contains(name) => {
                 // Single-use: but if it's a borrowed param, we need to convert to owned
                 if let Some(borrow_ty) = self.borrowed_params.get(name) {
@@ -948,6 +993,18 @@ impl Emitter {
             }
             Expr::Member { object, .. } | Expr::TupleIndex { object, .. } => {
                 Self::count_ident_uses(object, counts);
+            }
+            Expr::IndexAccess { object, index, .. } => {
+                Self::count_ident_uses(object, counts);
+                Self::count_ident_uses(index, counts);
+            }
+            Expr::While { cond, body, .. } => {
+                Self::count_ident_uses(cond, counts);
+                let mut loop_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+                for s in body { Self::count_ident_uses_in_stmt(s, &mut loop_counts); }
+                for (name, _) in loop_counts {
+                    *counts.entry(name).or_insert(0) += 2;
+                }
             }
             Expr::Range { start, end, .. } => {
                 Self::count_ident_uses(start, counts);

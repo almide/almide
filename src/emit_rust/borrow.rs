@@ -295,6 +295,16 @@ fn check_escape_expr_inner(expr: &Expr, heap_params: &HashSet<String>, escaped: 
             check_escape_expr_inner(object, heap_params, escaped, false, info);
         }
 
+        Expr::IndexAccess { object, index, .. } => {
+            check_escape_expr_inner(object, heap_params, escaped, false, info);
+            check_escape_expr_inner(index, heap_params, escaped, false, info);
+        }
+
+        Expr::While { cond, body, .. } => {
+            check_escape_expr_inner(cond, heap_params, escaped, false, info);
+            for s in body { check_escape_stmt(s, heap_params, escaped); }
+        }
+
         Expr::Pipe { left, right, .. } => {
             check_escape_expr_inner(left, heap_params, escaped, false, info);
             check_escape_expr_inner(right, heap_params, escaped, is_tail, info);
@@ -413,6 +423,14 @@ fn mark_all_params_filtered(expr: &Expr, params: &HashSet<String>, escaped: &mut
         Expr::Lambda { body, .. } => mark_all_params_filtered(body, params, escaped),
         Expr::Member { object, .. } | Expr::TupleIndex { object, .. } => {
             mark_all_params_filtered(object, params, escaped);
+        }
+        Expr::IndexAccess { object, index, .. } => {
+            mark_all_params_filtered(object, params, escaped);
+            mark_all_params_filtered(index, params, escaped);
+        }
+        Expr::While { cond, body, .. } => {
+            mark_all_params_filtered(cond, params, escaped);
+            for s in body { mark_all_params_in_stmt(s, params, escaped); }
         }
         Expr::Range { start, end, .. } => {
             mark_all_params_filtered(start, params, escaped);

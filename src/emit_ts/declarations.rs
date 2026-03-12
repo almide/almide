@@ -180,6 +180,14 @@ impl TsEmitter {
                     format!("Deno.test({}, () => {});", Self::json_string(name), body_str)
                 }
             }
+            Decl::TopLet { name, value, .. } => {
+                let val_str = self.gen_expr(value);
+                if self.js_mode {
+                    format!("var {} = {};", name, val_str)
+                } else {
+                    format!("const {} = {};", name, val_str)
+                }
+            }
             Decl::Strict { mode, .. } => format!("// strict {}", mode),
         }
     }

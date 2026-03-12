@@ -68,6 +68,10 @@ impl Checker {
                     self.env.used_vars.insert(name.clone());
                     return ty;
                 }
+                // Check top-level let constants
+                if let Some(ty) = self.env.top_lets.get(name).cloned() {
+                    return ty;
+                }
                 if let Some(sig) = self.env.functions.get(name) {
                     return Ty::Fn { params: sig.params.iter().map(|(_, t)| t.clone()).collect(), ret: Box::new(sig.ret.clone()) };
                 }
@@ -91,6 +95,10 @@ impl Checker {
             }
 
             ast::Expr::TypeName { name, .. } => {
+                // Check top-level let constants (UPPER_CASE names are parsed as TypeName)
+                if let Some(ty) = self.env.top_lets.get(name).cloned() {
+                    return ty;
+                }
                 if self.env.constructors.contains_key(name) { return Ty::Unknown; }
                 Ty::Named(name.clone())
             }
@@ -455,6 +463,45 @@ impl Checker {
                     Ty::Result(ok, _) => *ok.clone(),
                     _ => it,
                 }
+            }
+
+            ast::Expr::IndexAccess { object, index, .. } => {
+                let ot = self.check_expr(object);
+                let it = self.check_expr(index);
+                if !matches!(it, Ty::Int | Ty::Unknown) {
+                    self.push_diagnostic(err(
+                        format!("index must be Int, got {}", it.display()),
+                        "Use an Int value for list indexing",
+                        "xs[i]",
+                    ));
+                }
+                match &ot {
+                    Ty::List(inner) => *inner.clone(),
+                    Ty::Unknown => Ty::Unknown,
+                    _ => {
+                        self.push_diagnostic(err(
+                            format!("cannot index into type {}", ot.display()),
+                            "Indexing with [] is only supported for List[T]",
+                            "xs[i]",
+                        ));
+                        Ty::Unknown
+                    }
+                }
+            }
+
+            ast::Expr::While { cond, body, .. } => {
+                let ct = self.check_expr(cond);
+                if !ct.compatible(&Ty::Bool) {
+                    self.push_diagnostic(err(
+                        format!("while condition has type {} but expected Bool", ct.display()),
+                        "The condition must be a Bool expression",
+                        "while expression",
+                    ));
+                }
+                self.env.push_scope();
+                for s in body.iter_mut() { self.check_stmt(s); }
+                self.env.pop_scope();
+                Ty::Unit
             }
 
             ast::Expr::Break { .. } => Ty::Unit,

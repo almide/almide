@@ -22,6 +22,25 @@ fn is_const_expr(expr: &ast::Expr) -> bool {
     }
 }
 
+/// Check if an expression is a valid top-level constant expression.
+/// More permissive than `is_const_expr`: allows references to other top-level lets
+/// and arithmetic/string-concat on constants.
+fn is_top_let_const_expr(expr: &ast::Expr, known_consts: &std::collections::HashSet<String>) -> bool {
+    match expr {
+        ast::Expr::Int { .. } | ast::Expr::Float { .. } | ast::Expr::String { .. }
+        | ast::Expr::Bool { .. } | ast::Expr::Unit { .. } | ast::Expr::None { .. } => true,
+        ast::Expr::List { elements, .. } => elements.is_empty(),
+        ast::Expr::Unary { op, operand, .. } if op == "-" => is_top_let_const_expr(operand, known_consts),
+        ast::Expr::Ident { name, .. } | ast::Expr::TypeName { name, .. } => known_consts.contains(name),
+        ast::Expr::Binary { op, left, right, .. } => {
+            let valid_op = matches!(op.as_str(), "+" | "-" | "*" | "/" | "%" | "++" );
+            valid_op && is_top_let_const_expr(left, known_consts) && is_top_let_const_expr(right, known_consts)
+        }
+        ast::Expr::Paren { expr: inner, .. } => is_top_let_const_expr(inner, known_consts),
+        _ => false,
+    }
+}
+
 pub struct Checker {
     pub env: TypeEnv,
     pub diagnostics: Vec<Diagnostic>,
@@ -66,6 +85,7 @@ impl Checker {
             ast::Decl::Fn { span, .. }
             | ast::Decl::Test { span, .. }
             | ast::Decl::Type { span, .. }
+            | ast::Decl::TopLet { span, .. }
             | ast::Decl::Module { span, .. }
             | ast::Decl::Import { span, .. }
             | ast::Decl::Trait { span, .. }
@@ -203,8 +223,73 @@ impl Checker {
                     };
                     self.env.types.insert(key, resolved);
                 }
+                ast::Decl::TopLet { name, ty, value, visibility, .. } => {
+                    if prefix.is_some() {
+                        let hidden = match visibility {
+                            ast::Visibility::Local => true,
+                            ast::Visibility::Mod => is_external,
+                            ast::Visibility::Public => false,
+                        };
+                        if hidden {
+                            if let Some(p) = prefix {
+                                self.env.local_symbols.insert(format!("{}.{}", p, name));
+                            }
+                            continue;
+                        }
+                    }
+                    let resolved_ty = if let Some(te) = ty {
+                        self.resolve_type_expr(te)
+                    } else {
+                        self.infer_const_type(value)
+                    };
+                    let key = match prefix {
+                        Some(p) => format!("{}.{}", p, name),
+                        None => name.clone(),
+                    };
+                    self.env.top_lets.insert(key, resolved_ty);
+                }
                 _ => {}
             }
+        }
+    }
+
+    /// Infer the type of a constant expression (for top-level let without annotation).
+    fn infer_const_type(&self, expr: &ast::Expr) -> Ty {
+        match expr {
+            ast::Expr::Int { .. } => Ty::Int,
+            ast::Expr::Float { .. } => Ty::Float,
+            ast::Expr::String { .. } => Ty::String,
+            ast::Expr::Bool { .. } => Ty::Bool,
+            ast::Expr::Unit { .. } => Ty::Unit,
+            ast::Expr::None { .. } => Ty::Option(Box::new(Ty::Unknown)),
+            ast::Expr::List { .. } => Ty::List(Box::new(Ty::Unknown)),
+            ast::Expr::Unary { op, operand, .. } if op == "-" => self.infer_const_type(operand),
+            ast::Expr::Ident { name, .. } | ast::Expr::TypeName { name, .. } => {
+                // Reference to another top-level let
+                if let Some(ty) = self.env.top_lets.get(name) {
+                    ty.clone()
+                } else {
+                    Ty::Unknown
+                }
+            }
+            ast::Expr::Binary { op, left, right, .. } => {
+                if op == "++" {
+                    // Concat: could be String or List
+                    let lt = self.infer_const_type(left);
+                    if matches!(lt, Ty::String) { Ty::String } else { lt }
+                } else {
+                    // Arithmetic: infer from operands (Float wins over Int)
+                    let lt = self.infer_const_type(left);
+                    let rt = self.infer_const_type(right);
+                    if matches!(lt, Ty::Float) || matches!(rt, Ty::Float) {
+                        Ty::Float
+                    } else {
+                        lt
+                    }
+                }
+            }
+            ast::Expr::Paren { expr: inner, .. } => self.infer_const_type(inner),
+            _ => Ty::Unknown,
         }
     }
 
@@ -421,6 +506,17 @@ impl Checker {
                 self.env.in_effect = prev;
                 self.env.in_test = prev_test;
                 self.env.pop_scope();
+            }
+            ast::Decl::TopLet { name, value, .. } => {
+                // Validate that value is a constant expression
+                let known_consts: std::collections::HashSet<String> = self.env.top_lets.keys().cloned().collect();
+                if !is_top_let_const_expr(value, &known_consts) {
+                    self.push_diagnostic(err(
+                        format!("top-level 'let {}' value must be a constant expression", name),
+                        "Allowed: literals, references to earlier top-level let values, arithmetic on constants, string concatenation (++)",
+                        format!("let {}", name),
+                    ));
+                }
             }
             ast::Decl::Module { path, .. } => {
                 self.push_diagnostic(Diagnostic::warning(

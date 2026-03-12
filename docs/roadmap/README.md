@@ -2,12 +2,14 @@
 
 ## Active
 
+- [Direct WASM Emission](active/emit-wasm-direct.md) — `.almd → WASM bytecode` without rustc
+- [List Index Read](active/list-index-read.md) — `xs[i]` for reads, matching existing `xs[i] = v` writes
 - [Test Coverage](active/test-coverage.md) — 790 cases, target 1500+
+- [Typed IR](active/typed-ir.md) — intermediate representation between checker and codegen
 
 ## On Hold
 
 - [Benchmark Report](on-hold/benchmark-report.md)
-- [Direct WASM Emission](on-hold/emit-wasm-direct.md)
 - [Editor & GitHub Integration](on-hold/editor-github-integration.md)
 - [Function Reference Passing](on-hold/function-reference-passing.md) — low priority, verbose form is always correct
 - [Interop / FFI](on-hold/interop.md)
@@ -46,7 +48,9 @@
 - [Playground Repair](done/playground-repair.md) — Fix with AI, repair loop, streaming
 - [Proliferation Blockers](done/proliferation-blockers.md)
 - [Self-Tooling](done/self-tooling.md) — tree-sitter grammar generator, Chrome extension, TextMate grammar
+- [Top-Level Let](done/top-level-let.md) — `let PI = 3.14` at module scope, no more `fn X() -> T` workaround
 - [Variant Record Fields](done/variant-record-fields.md) — named fields on enum variants, `..` rest pattern
+- [While Loop](done/while-loop.md) — `while condition { }`, universal loop syntax
 - [stdin / Interactive I/O](done/stdin-io.md)
 - [Stdlib Completeness](done/stdlib-completeness.md)
 - [Stdlib Declarative Codegen](done/stdlib-codegen.md)

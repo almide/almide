@@ -175,7 +175,7 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
     eprintln!("\nAll {} test file(s) passed", test_files.len());
 }
 
-pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release: bool, no_check: bool) {
+pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release: bool, fast: bool, unchecked_index: bool, no_check: bool) {
     let is_npm = matches!(target, Some("npm"));
     let is_wasm = matches!(target, Some("wasm" | "wasm32" | "wasi"));
 
@@ -208,7 +208,7 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
         output_raw.to_string()
     };
 
-    let emit_options = emit_rust::EmitOptions { no_thread_wrap: is_wasm };
+    let emit_options = emit_rust::EmitOptions { no_thread_wrap: is_wasm, fast_mode: unchecked_index };
     let wasm_target = if is_wasm { Some("wasm") } else { None };
     let rs_code = compile_with_options(file, no_check, &emit_options, wasm_target);
 
@@ -232,6 +232,12 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
         rustc_cmd.arg("--target").arg("wasm32-wasip1")
             .arg("-C").arg("opt-level=s")
             .arg("-C").arg("lto=yes");
+    } else if fast {
+        rustc_cmd.arg("-C").arg("opt-level=3")
+            .arg("-C").arg("target-cpu=native")
+            .arg("-C").arg("llvm-args=-fp-contract=fast")
+            .arg("-C").arg("lto=thin")
+            .arg("-C").arg("codegen-units=1");
     } else if release {
         rustc_cmd.arg("-C").arg("opt-level=2");
     }

@@ -106,6 +106,32 @@ impl Parser {
         if self.check(TokenType::Fn) && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::LParen) {
             return self.parse_lambda();
         }
+        if self.check(TokenType::While) {
+            let span = Some(self.current_span());
+            self.advance(); // skip 'while'
+            self.skip_newlines();
+            let cond = self.parse_expr()?;
+            self.skip_newlines();
+            self.expect(TokenType::LBrace)?;
+            let mut stmts = Vec::new();
+            self.skip_newlines_into_stmts(&mut stmts);
+            while !self.check(TokenType::RBrace) {
+                let stmt = self.parse_stmt()?;
+                stmts.push(stmt);
+                self.skip_newlines_into_stmts(&mut stmts);
+                if self.check(TokenType::Semicolon) {
+                    self.advance();
+                    self.skip_newlines_into_stmts(&mut stmts);
+                }
+            }
+            self.expect(TokenType::RBrace)?;
+            return Ok(Expr::While {
+                cond: Box::new(cond),
+                body: stmts,
+                span,
+                resolved_type: None,
+            });
+        }
         if self.check(TokenType::For) {
             self.advance();
             // Support `for (a, b) in ...` tuple destructuring
@@ -272,7 +298,7 @@ impl Parser {
         }
         if self.check(TokenType::Ident) {
             let rejected_hint = match tok.value.as_str() {
-                "while" | "loop" => Some("Almide has no 'while' or 'loop'. Use 'do { guard COND else ok(()) ... }' for loops."),
+                "loop" => Some("Almide has no 'loop'. Use 'while true { ... }' or 'do { guard COND else ok(()) ... }' for loops."),
                 "return" => Some("Almide has no 'return'. The last expression in a block is the return value. Use 'guard ... else' for early returns."),
                 "print" => Some("Use 'println(s)' instead of 'print'. There is no 'print' function in Almide."),
                 "null" | "nil" => Some("Almide has no null. Use Option[T] with 'some(v)' / 'none'."),
@@ -294,7 +320,7 @@ impl Parser {
         }
 
         let hint = match tok.value.as_str() {
-            "while" | "loop" => "\n  Hint: Almide has no 'while' or 'loop'. Use 'do { guard COND else ok(()) ... }' for loops.",
+            "loop" => "\n  Hint: Almide has no 'loop'. Use 'while true { ... }' or 'do { guard COND else ok(()) ... }' for loops.",
             "for" => "\n  Hint: Use 'list.each(xs, fn(x) => ...)' or 'do { guard ... }' instead of 'for'.",
             "return" => "\n  Hint: Almide has no 'return'. The last expression in a block is the return value. Use 'guard ... else' for early returns.",
             "null" | "nil" | "None" => "\n  Hint: Almide has no null. Use Option[T] with 'some(v)' / 'none'.",

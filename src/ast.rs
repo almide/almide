@@ -101,12 +101,14 @@ pub enum Expr {
     Call { callee: Box<Expr>, args: Vec<Expr>, #[serde(default)] type_args: Option<Vec<TypeExpr>>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Member { object: Box<Expr>, field: String, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     TupleIndex { object: Box<Expr>, index: usize, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    IndexAccess { object: Box<Expr>, index: Box<Expr>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Pipe { left: Box<Expr>, right: Box<Expr>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     If { cond: Box<Expr>, then: Box<Expr>, else_: Box<Expr>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Match { subject: Box<Expr>, arms: Vec<MatchArm>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Block { stmts: Vec<Stmt>, expr: Option<Box<Expr>>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     DoBlock { stmts: Vec<Stmt>, expr: Option<Box<Expr>>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     ForIn { var: String, var_tuple: Option<Vec<String>>, iterable: Box<Expr>, body: Vec<Stmt>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    While { cond: Box<Expr>, body: Vec<Stmt>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Lambda { params: Vec<LambdaParam>, body: Box<Expr>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Hole { #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Todo { message: String, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
@@ -135,10 +137,10 @@ impl Expr {
             | Expr::Ident { span, .. } | Expr::TypeName { span, .. }
             | Expr::List { span, .. } | Expr::Record { span, .. }
             | Expr::SpreadRecord { span, .. } | Expr::Call { span, .. }
-            | Expr::Member { span, .. } | Expr::TupleIndex { span, .. } | Expr::Pipe { span, .. }
+            | Expr::Member { span, .. } | Expr::TupleIndex { span, .. } | Expr::IndexAccess { span, .. } | Expr::Pipe { span, .. }
             | Expr::If { span, .. } | Expr::Match { span, .. }
             | Expr::Block { span, .. } | Expr::DoBlock { span, .. }
-            | Expr::ForIn { span, .. } | Expr::Lambda { span, .. }
+            | Expr::ForIn { span, .. } | Expr::While { span, .. } | Expr::Lambda { span, .. }
             | Expr::Hole { span, .. } | Expr::Todo { span, .. }
             | Expr::Try { span, .. } | Expr::Await { span, .. }
             | Expr::Binary { span, .. } | Expr::Unary { span, .. }
@@ -158,10 +160,10 @@ impl Expr {
             | Expr::Ident { resolved_type, .. } | Expr::TypeName { resolved_type, .. }
             | Expr::List { resolved_type, .. } | Expr::Record { resolved_type, .. }
             | Expr::SpreadRecord { resolved_type, .. } | Expr::Call { resolved_type, .. }
-            | Expr::Member { resolved_type, .. } | Expr::TupleIndex { resolved_type, .. } | Expr::Pipe { resolved_type, .. }
+            | Expr::Member { resolved_type, .. } | Expr::TupleIndex { resolved_type, .. } | Expr::IndexAccess { resolved_type, .. } | Expr::Pipe { resolved_type, .. }
             | Expr::If { resolved_type, .. } | Expr::Match { resolved_type, .. }
             | Expr::Block { resolved_type, .. } | Expr::DoBlock { resolved_type, .. }
-            | Expr::ForIn { resolved_type, .. } | Expr::Lambda { resolved_type, .. }
+            | Expr::ForIn { resolved_type, .. } | Expr::While { resolved_type, .. } | Expr::Lambda { resolved_type, .. }
             | Expr::Hole { resolved_type, .. } | Expr::Todo { resolved_type, .. }
             | Expr::Try { resolved_type, .. } | Expr::Await { resolved_type, .. }
             | Expr::Binary { resolved_type, .. } | Expr::Unary { resolved_type, .. }
@@ -181,10 +183,10 @@ impl Expr {
             | Expr::Ident { resolved_type, .. } | Expr::TypeName { resolved_type, .. }
             | Expr::List { resolved_type, .. } | Expr::Record { resolved_type, .. }
             | Expr::SpreadRecord { resolved_type, .. } | Expr::Call { resolved_type, .. }
-            | Expr::Member { resolved_type, .. } | Expr::TupleIndex { resolved_type, .. } | Expr::Pipe { resolved_type, .. }
+            | Expr::Member { resolved_type, .. } | Expr::TupleIndex { resolved_type, .. } | Expr::IndexAccess { resolved_type, .. } | Expr::Pipe { resolved_type, .. }
             | Expr::If { resolved_type, .. } | Expr::Match { resolved_type, .. }
             | Expr::Block { resolved_type, .. } | Expr::DoBlock { resolved_type, .. }
-            | Expr::ForIn { resolved_type, .. } | Expr::Lambda { resolved_type, .. }
+            | Expr::ForIn { resolved_type, .. } | Expr::While { resolved_type, .. } | Expr::Lambda { resolved_type, .. }
             | Expr::Hole { resolved_type, .. } | Expr::Todo { resolved_type, .. }
             | Expr::Try { resolved_type, .. } | Expr::Await { resolved_type, .. }
             | Expr::Binary { resolved_type, .. } | Expr::Unary { resolved_type, .. }
@@ -282,6 +284,7 @@ pub enum Decl {
         body: Option<Expr>,
         #[serde(skip)] span: Option<Span>,
     },
+    TopLet { name: String, #[serde(rename = "type")] ty: Option<TypeExpr>, value: Expr, #[serde(default)] visibility: Visibility, #[serde(skip)] span: Option<Span> },
     Trait { name: String, #[serde(default)] generics: Option<Vec<GenericParam>>, methods: Vec<serde_json::Value>, #[serde(skip)] span: Option<Span> },
     Impl { trait_: String, for_: String, #[serde(default)] generics: Option<Vec<GenericParam>>, methods: Vec<Decl>, #[serde(skip)] span: Option<Span> },
     Strict { mode: String, #[serde(skip)] span: Option<Span> },
