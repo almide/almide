@@ -1,4 +1,4 @@
-# Trailing Lambda / Builder DSL [ON HOLD]
+# Trailing Lambda / Builder DSL [ON HOLD — WON'T DO]
 
 Explore Kotlin-style trailing lambda or builder patterns for structured data construction.
 
@@ -17,8 +17,9 @@ json {
 }
 ```
 
-## Notes
+## Why won't do
 
-- Low priority — may not be worth the language complexity
-- Could be addressed by a good JSON stdlib module instead of language-level syntax
-- Trailing lambda (last arg as block) is a smaller, more general feature that enables builder patterns
+- **Increases language surface area** — same thing writable two ways lowers modification survival rate
+- **The real problem is stdlib, not syntax** — a good `json` stdlib module solves this without new grammar
+- **LLMs must learn when to use trailing lambda** — another decision point = another error source
+- Almide's value is a small, predictable grammar that LLMs can master completely

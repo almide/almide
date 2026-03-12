@@ -10,7 +10,7 @@
 - [Benchmark Report](on-hold/benchmark-report.md)
 - [Direct WASM Emission](on-hold/emit-wasm-direct.md)
 - [Editor & GitHub Integration](on-hold/editor-github-integration.md)
-- [Function Reference Passing](on-hold/function-reference-passing.md) — seamless fn-as-argument, reduce closure wrappers
+- [Function Reference Passing](on-hold/function-reference-passing.md) — low priority, verbose form is always correct
 - [Interop / FFI](on-hold/interop.md)
 - [LLM Developer Experience](on-hold/llm-developer-experience.md)
 - [LLM Immutable Sugar](on-hold/llm-immutable-sugar.md) — var indexing, `with` expression
@@ -22,7 +22,7 @@
 - [Structured Concurrency](on-hold/structured-concurrency.md)
 - [Syntax Sugar](on-hold/syntax-sugar.md) — range, raw strings, exhaustiveness done; comprehensions pending
 - [Tooling](on-hold/tooling.md)
-- [Trailing Lambda / Builder DSL](on-hold/trailing-lambda-builder.md) — Kotlin-style trailing lambda, builder patterns
+- [Trailing Lambda / Builder DSL](on-hold/trailing-lambda-builder.md) — won't do, solve with stdlib instead
 - [trait / impl](on-hold/trait-impl.md) — parser done, checker/emitter partial
 - [Type System Extensions](on-hold/type-system.md)
 
