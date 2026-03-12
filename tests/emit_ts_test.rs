@@ -6,14 +6,14 @@ fn parse_and_emit_js(input: &str) -> String {
     let tokens = Lexer::tokenize(input);
     let mut parser = Parser::new(tokens);
     let prog = parser.parse().expect("parse failed");
-    emit_ts::emit_js_with_modules(&prog, &[])
+    emit_ts::emit_js_with_modules(&prog, &[], None)
 }
 
 fn parse_and_emit_ts(input: &str) -> String {
     let tokens = Lexer::tokenize(input);
     let mut parser = Parser::new(tokens);
     let prog = parser.parse().expect("parse failed");
-    emit_ts::emit_with_modules(&prog, &[])
+    emit_ts::emit_with_modules(&prog, &[], None)
 }
 
 /// Strip the runtime preamble, return only user code

@@ -337,6 +337,26 @@ impl TsEmitter {
             return format!("{}function {}{}({}){} {{\n  return {};\n}}", async_, sname, generic_str, params_str.join(", "), ret_str, call);
         }
 
+        // Try IR-based codegen
+        if let Some(ir_fn) = self.find_ir_function(name) {
+            let ir_fn = ir_fn.clone();
+            let prev = self.in_effect.get();
+            if ir_fn.is_effect { self.in_effect.set(true); }
+            let body_str = self.gen_ir_expr(&ir_fn.body);
+            self.in_effect.set(prev);
+            return match &ir_fn.body.kind {
+                crate::ir::IrExprKind::Block { .. } => {
+                    format!("{}function {}{}({}){} {}", async_, sname, generic_str, params_str.join(", "), ret_str, body_str)
+                }
+                crate::ir::IrExprKind::DoBlock { .. } => {
+                    format!("{}function {}{}({}){} {{\n{}\n}}", async_, sname, generic_str, params_str.join(", "), ret_str, body_str)
+                }
+                _ => {
+                    format!("{}function {}{}({}){} {{\n  return {};\n}}", async_, sname, generic_str, params_str.join(", "), ret_str, body_str)
+                }
+            };
+        }
+
         if let Some(body) = body {
             let body_str = self.gen_expr(body);
             match body {
@@ -353,6 +373,11 @@ impl TsEmitter {
         } else {
             format!("{}function {}{}({}){} {{\n  throw new Error(\"no body and no @extern for ts target\");\n}}", async_, sname, generic_str, params_str.join(", "), ret_str)
         }
+    }
+
+    /// Find an IR function by name
+    fn find_ir_function(&self, name: &str) -> Option<&crate::ir::IrFunction> {
+        self.ir_program.as_ref()?.functions.iter().find(|f| f.name == name)
     }
 
     // ── npm package emission ──

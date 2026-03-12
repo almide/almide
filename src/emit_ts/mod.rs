@@ -1,6 +1,8 @@
 mod declarations;
 mod expressions;
 mod blocks;
+mod ir_expressions;
+mod ir_blocks;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
@@ -21,6 +23,8 @@ pub(crate) struct TsEmitter {
     pub(crate) in_effect: Cell<bool>,
     /// True when inside a test block (effect fn calls should be caught and wrapped as __Err)
     pub(crate) in_test: Cell<bool>,
+    /// Typed IR program (available when type checking succeeded)
+    pub(crate) ir_program: Option<crate::ir::IrProgram>,
 }
 
 impl TsEmitter {
@@ -35,6 +39,7 @@ impl TsEmitter {
             variant_constructors: HashSet::new(),
             in_effect: Cell::new(false),
             in_test: Cell::new(false),
+            ir_program: None,
         }
     }
 
@@ -88,15 +93,17 @@ impl TsEmitter {
     }
 }
 
-pub fn emit_with_modules(program: &Program, modules: &[(String, Program)]) -> String {
+pub fn emit_with_modules(program: &Program, modules: &[(String, Program)], ir: Option<&crate::ir::IrProgram>) -> String {
     let mut emitter = TsEmitter::new();
+    emitter.ir_program = ir.cloned();
     emitter.emit_program(program, modules);
     emitter.out
 }
 
-pub fn emit_js_with_modules(program: &Program, modules: &[(String, Program)]) -> String {
+pub fn emit_js_with_modules(program: &Program, modules: &[(String, Program)], ir: Option<&crate::ir::IrProgram>) -> String {
     let mut emitter = TsEmitter::new();
     emitter.js_mode = true;
+    emitter.ir_program = ir.cloned();
     emitter.emit_program(program, modules);
     emitter.out
 }

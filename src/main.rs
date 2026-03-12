@@ -164,10 +164,10 @@ fn parse_file(file: &str) -> ast::Program {
 }
 
 fn compile(file: &str, no_check: bool) -> String {
-    compile_with_options(file, no_check, &emit_rust::EmitOptions::default(), None)
+    compile_with_options(file, no_check, &emit_rust::EmitOptions::default(), None).0
 }
 
-fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::EmitOptions, build_target: Option<&str>) -> String {
+fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::EmitOptions, build_target: Option<&str>) -> (String, Option<almide::ir::IrProgram>) {
     let mut program = parse_file(file);
 
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
@@ -202,6 +202,7 @@ fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::Em
         }
     }).collect();
 
+    let mut ir_program = None;
     if !no_check {
         let source_text = std::fs::read_to_string(file).unwrap_or_default();
         let mut checker = check::Checker::new();
@@ -229,9 +230,12 @@ fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::Em
         for d in diagnostics.iter().filter(|d| d.level == diagnostic::Level::Warning) {
             eprintln!("{}", d.display_with_source(&source_text));
         }
+        // Lower to IR after successful type checking
+        ir_program = Some(almide::lower::lower_program(&program, &checker.expr_types, &checker.env));
     }
 
-    emit_rust::emit_with_options(&program, &resolved.modules, emit_options, &import_aliases)
+    let code = emit_rust::emit_with_options(&program, &resolved.modules, emit_options, &import_aliases, ir_program.as_ref());
+    (code, ir_program)
 }
 
 fn collect_almd_files(dir: &std::path::Path, out: &mut Vec<String>) {

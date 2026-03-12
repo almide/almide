@@ -709,12 +709,22 @@ impl Emitter {
             } else {
                 self.emitln(&call);
             }
+        } else if let Some(ir_fn) = self.find_ir_function(name) {
+            // IR-based codegen path
+            let ir_fn = ir_fn.clone();
+            self.analyze_ir_single_use(&ir_fn.body, &ir_fn.params);
+
+            let prev_effect = self.in_effect;
+            self.in_effect = is_effect || ret_str.starts_with("Result<");
+
+            self.emit_ir_fn_body(&ir_fn.body, is_effect, &ret_str, is_unit_ret);
+
+            self.in_effect = prev_effect;
         } else if let Some(body) = body {
-            // Analyze variable usage to skip unnecessary clones
+            // AST-based codegen fallback (--no-check or edge cases)
             self.analyze_single_use(body, params);
 
             let prev_effect = self.in_effect;
-            // Treat fn as effect if explicitly marked OR if it returns Result
             self.in_effect = is_effect || ret_str.starts_with("Result<");
 
             match body {
@@ -777,6 +787,72 @@ impl Emitter {
 
         self.indent -= 1;
         self.emitln("}");
+    }
+
+    /// Find an IR function by name
+    fn find_ir_function(&self, name: &str) -> Option<&almide::ir::IrFunction> {
+        self.ir_program.as_ref()?.functions.iter().find(|f| f.name == name)
+    }
+
+    /// Emit function body from IR
+    fn emit_ir_fn_body(&mut self, body: &almide::ir::IrExpr, is_effect: bool, ret_str: &str, is_unit_ret: bool) {
+        use almide::ir::IrExprKind;
+        match &body.kind {
+            IrExprKind::Block { stmts, expr: final_expr } => {
+                for stmt in stmts {
+                    let s = self.gen_ir_stmt(stmt);
+                    self.emitln(&s);
+                }
+                let ret_is_result = ret_str.starts_with("Result<");
+                if is_effect {
+                    if ret_is_result {
+                        if let Some(fe) = final_expr {
+                            let already_result = matches!(&fe.kind,
+                                IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
+                                | IrExprKind::Match { .. } | IrExprKind::If { .. }
+                            );
+                            let e = self.gen_ir_expr(fe);
+                            if already_result {
+                                self.emitln(&e);
+                            } else {
+                                self.emitln(&format!("Ok({})", e));
+                            }
+                        } else {
+                            self.emitln("Ok(())");
+                        }
+                    } else if let Some(fe) = final_expr {
+                        if is_unit_ret {
+                            let e = self.gen_ir_expr(fe);
+                            self.emitln(&format!("{};", e));
+                            self.emitln("Ok(())");
+                        } else {
+                            let e = self.gen_ir_expr(fe);
+                            self.emitln(&format!("Ok({})", e));
+                        }
+                    } else {
+                        self.emitln("Ok(())");
+                    }
+                } else {
+                    if let Some(fe) = final_expr {
+                        let e = self.gen_ir_expr(fe);
+                        self.emitln(&e);
+                    }
+                }
+            }
+            _ => {
+                let expr = self.gen_ir_expr(body);
+                if is_effect {
+                    let ret_is_result = ret_str.starts_with("Result<");
+                    if ret_is_result {
+                        self.emitln(&expr);
+                    } else {
+                        self.emitln(&format!("Ok({})", expr));
+                    }
+                } else {
+                    self.emitln(&expr);
+                }
+            }
+        }
     }
 
     pub(crate) fn emit_stmts(&mut self, stmts: &[Stmt]) {
@@ -892,7 +968,7 @@ impl Emitter {
     }
 
     /// Convert a borrowed value to owned: &str → .to_owned(), &[T] → .to_vec(), &HashMap → .clone()
-    fn borrow_to_owned(expr: &str, borrow_ty: &str) -> String {
+    pub(crate) fn borrow_to_owned(expr: &str, borrow_ty: &str) -> String {
         if borrow_ty == "&str" {
             format!("{}.to_owned()", expr)
         } else if borrow_ty.starts_with("&[") {

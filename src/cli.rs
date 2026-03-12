@@ -210,7 +210,7 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
 
     let emit_options = emit_rust::EmitOptions { no_thread_wrap: is_wasm, fast_mode: unchecked_index };
     let wasm_target = if is_wasm { Some("wasm") } else { None };
-    let rs_code = compile_with_options(file, no_check, &emit_options, wasm_target);
+    let (rs_code, _ir) = compile_with_options(file, no_check, &emit_options, wasm_target);
 
     let stem = output.strip_suffix(".wasm")
         .or_else(|| output.strip_suffix(".exe"))
@@ -426,9 +426,13 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
         checker_opt = Some(checker);
     }
 
+    // Lower to IR if checker ran
+    let ir_program = checker_opt.as_ref().map(|checker| {
+        almide::lower::lower_program(&program, &checker.expr_types, &checker.env)
+    });
+
     if emit_ir {
-        let checker = checker_opt.expect("checker must have run for emit_ir");
-        let ir = almide::lower::lower_program(&program, &checker.expr_types, &checker.env);
+        let ir = ir_program.expect("checker must have run for emit_ir");
         let json = serde_json::to_string_pretty(&ir)
             .unwrap_or_else(|e| { eprintln!("JSON serialize error: {}", e); std::process::exit(1); });
         println!("{}", json);
@@ -438,19 +442,19 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
         println!("{}", json);
     } else {
         let code = match target {
-            "rust" | "rs" => emit_rust::emit_with_options(&program, &resolved.modules, &emit_rust::EmitOptions::default(), &import_aliases),
+            "rust" | "rs" => emit_rust::emit_with_options(&program, &resolved.modules, &emit_rust::EmitOptions::default(), &import_aliases, ir_program.as_ref()),
             "ts" | "typescript" => {
                 // Convert to legacy format for emit_ts (no PkgId support)
                 let legacy_modules: Vec<(String, crate::ast::Program)> = resolved.modules.iter()
                     .map(|(n, p, _, _)| (n.clone(), p.clone()))
                     .collect();
-                emit_ts::emit_with_modules(&program, &legacy_modules)
+                emit_ts::emit_with_modules(&program, &legacy_modules, ir_program.as_ref())
             }
             "js" | "javascript" => {
                 let legacy_modules: Vec<(String, crate::ast::Program)> = resolved.modules.iter()
                     .map(|(n, p, _, _)| (n.clone(), p.clone()))
                     .collect();
-                emit_ts::emit_js_with_modules(&program, &legacy_modules)
+                emit_ts::emit_js_with_modules(&program, &legacy_modules, ir_program.as_ref())
             }
             other => { eprintln!("Unknown target: {}. Use rust, ts, or js.", other); std::process::exit(1); }
         };
