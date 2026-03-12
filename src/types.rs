@@ -1,7 +1,8 @@
 /// Internal resolved type representation for the Almide type checker.
 /// Distinct from ast::TypeExpr which is a syntactic node.
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum Ty {
     Int,
     Float,
@@ -23,13 +24,14 @@ pub enum Ty {
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct VariantCase {
     pub name: std::string::String,
     pub payload: VariantPayload,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum VariantPayload {
     Unit,
     Tuple(Vec<Ty>),

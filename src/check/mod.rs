@@ -50,6 +50,8 @@ pub struct Checker {
     current_decl_col: Option<usize>,
     /// Build target (e.g. "rust", "ts", "wasm"). Used to gate platform modules.
     pub target: Option<String>,
+    /// Full Ty for every expression, keyed by (line, col) span.
+    pub expr_types: std::collections::HashMap<(usize, usize), Ty>,
 }
 
 /// Modules that require a native runtime (OS access). Not available on WASM.
@@ -69,6 +71,7 @@ impl Checker {
             current_decl_line: None,
             current_decl_col: None,
             target: None,
+            expr_types: std::collections::HashMap::new(),
         };
         c.register_stdlib();
         c

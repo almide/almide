@@ -1,0 +1,792 @@
+/// AST → Typed IR lowering pass.
+///
+/// Desugars:
+/// - Pipes `a |> f(b)` → `Call(f, [a, b])`
+/// - UFCS `x.method(y)` → `ModuleCall("module", "method", [x, y])`
+/// - String interpolation → `StringInterp { parts }`
+/// - Operators → type-dispatched `BinOp` / `UnOp`
+/// - Pattern variables → `VarId` bindings
+///
+/// Every IR node carries full `Ty` from the checker's `expr_types` map.
+
+use std::collections::HashMap;
+use crate::ast;
+use crate::ir::*;
+use crate::types::{Ty, TypeEnv};
+
+// ── Context ─────────────────────────────────────────────────────
+
+pub struct LowerCtx<'a> {
+    pub var_table: VarTable,
+    scopes: Vec<HashMap<String, VarId>>,
+    expr_types: &'a HashMap<(usize, usize), Ty>,
+    env: &'a TypeEnv,
+}
+
+impl<'a> LowerCtx<'a> {
+    pub fn new(expr_types: &'a HashMap<(usize, usize), Ty>, env: &'a TypeEnv) -> Self {
+        LowerCtx {
+            var_table: VarTable::new(),
+            scopes: vec![HashMap::new()],
+            expr_types,
+            env,
+        }
+    }
+
+    fn push_scope(&mut self) { self.scopes.push(HashMap::new()); }
+    fn pop_scope(&mut self) { self.scopes.pop(); }
+
+    fn define_var(&mut self, name: &str, ty: Ty, mutability: Mutability, span: Option<ast::Span>) -> VarId {
+        let id = self.var_table.alloc(name.to_string(), ty, mutability, span);
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.insert(name.to_string(), id);
+        }
+        id
+    }
+
+    fn lookup_var(&self, name: &str) -> Option<VarId> {
+        for scope in self.scopes.iter().rev() {
+            if let Some(&id) = scope.get(name) {
+                return Some(id);
+            }
+        }
+        None
+    }
+
+    fn expr_ty(&self, expr: &ast::Expr) -> Ty {
+        expr.span()
+            .and_then(|s| self.expr_types.get(&(s.line, s.col)).cloned())
+            .unwrap_or(Ty::Unknown)
+    }
+
+    fn mk(&self, kind: IrExprKind, ty: Ty, span: Option<ast::Span>) -> IrExpr {
+        IrExpr { kind, ty, span }
+    }
+
+    /// Check if a name refers to a module (stdlib or user-defined).
+    fn is_module(&self, name: &str) -> bool {
+        crate::stdlib::is_any_stdlib(name) || self.env.user_modules.contains(name)
+    }
+}
+
+// ── Program lowering ────────────────────────────────────────────
+
+pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<(usize, usize), Ty>, env: &TypeEnv) -> IrProgram {
+    let mut ctx = LowerCtx::new(expr_types, env);
+    let mut functions = Vec::new();
+    let mut top_lets = Vec::new();
+
+    for decl in &prog.decls {
+        match decl {
+            ast::Decl::Fn { name, params, body: Some(body), effect, r#async, span, .. } => {
+                functions.push(lower_fn(&mut ctx, name, params, body,
+                    effect.unwrap_or(false), r#async.unwrap_or(false), false, *span));
+            }
+            ast::Decl::Test { name, body, span, .. } => {
+                functions.push(lower_fn(&mut ctx, name, &[], body, false, false, true, *span));
+            }
+            ast::Decl::TopLet { name, value, span, .. } => {
+                let ty = ctx.expr_ty(value);
+                let var = ctx.define_var(name, ty.clone(), Mutability::Let, *span);
+                let ir_value = lower_expr(&mut ctx, value);
+                top_lets.push(IrTopLet { var, ty, value: ir_value });
+            }
+            ast::Decl::Impl { methods, .. } => {
+                for m in methods {
+                    if let ast::Decl::Fn { name, params, body: Some(body), effect, r#async, span, .. } = m {
+                        functions.push(lower_fn(&mut ctx, name, params, body,
+                            effect.unwrap_or(false), r#async.unwrap_or(false), false, *span));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    IrProgram { functions, top_lets, var_table: ctx.var_table }
+}
+
+fn lower_fn(
+    ctx: &mut LowerCtx, name: &str, params: &[ast::Param], body: &ast::Expr,
+    is_effect: bool, is_async: bool, is_test: bool, _span: Option<ast::Span>,
+) -> IrFunction {
+    ctx.push_scope();
+    let ir_params: Vec<(VarId, Ty)> = params.iter().map(|p| {
+        let ty = resolve_type_expr(&p.ty);
+        let var = ctx.define_var(&p.name, ty.clone(), Mutability::Let, None);
+        (var, ty)
+    }).collect();
+    let ir_body = lower_expr(ctx, body);
+    // Use declared return type from env if available, else body type
+    let ret_ty = ctx.env.functions.get(name)
+        .map(|sig| sig.ret.clone())
+        .unwrap_or_else(|| ir_body.ty.clone());
+    ctx.pop_scope();
+    IrFunction { name: name.to_string(), params: ir_params, ret_ty, body: ir_body, is_effect, is_async, is_test }
+}
+
+// ── Expression lowering ─────────────────────────────────────────
+
+fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
+    let ty = ctx.expr_ty(expr);
+    let span = expr.span();
+
+    match expr {
+        // ── Literals ──
+        ast::Expr::Int { raw, .. } => {
+            ctx.mk(IrExprKind::LitInt { value: raw.parse().unwrap_or(0) }, ty, span)
+        }
+        ast::Expr::Float { value: v, .. } => ctx.mk(IrExprKind::LitFloat { value: *v }, ty, span),
+        ast::Expr::String { value: v, .. } => ctx.mk(IrExprKind::LitStr { value: v.clone() }, ty, span),
+        ast::Expr::Bool { value: v, .. } => ctx.mk(IrExprKind::LitBool { value: *v }, ty, span),
+        ast::Expr::Unit { .. } => ctx.mk(IrExprKind::Unit, ty, span),
+
+        // ── String interpolation → parsed parts ──
+        ast::Expr::InterpolatedString { value, .. } => {
+            let parts = lower_string_interp(ctx, value);
+            ctx.mk(IrExprKind::StringInterp { parts }, ty, span)
+        }
+
+        // ── Variables ──
+        ast::Expr::Ident { name, .. } => {
+            if let Some(id) = ctx.lookup_var(name) {
+                ctx.mk(IrExprKind::Var { id }, ty, span)
+            } else {
+                // Could be a free function reference or constructor
+                ctx.mk(IrExprKind::Call {
+                    target: CallTarget::Named { name: name.clone() },
+                    args: vec![],
+                }, ty, span)
+            }
+        }
+        ast::Expr::TypeName { name, .. } => {
+            if let Some(id) = ctx.lookup_var(name) {
+                ctx.mk(IrExprKind::Var { id }, ty, span)
+            } else {
+                // Constructor or type reference
+                ctx.mk(IrExprKind::Call {
+                    target: CallTarget::Named { name: name.clone() },
+                    args: vec![],
+                }, ty, span)
+            }
+        }
+
+        // ── Paren (strip) ──
+        ast::Expr::Paren { expr: inner, .. } => lower_expr(ctx, inner),
+
+        // ── Operators (type-dispatched) ──
+        ast::Expr::Binary { op, left, right, .. } => {
+            let left_ir = lower_expr(ctx, left);
+            let right_ir = lower_expr(ctx, right);
+            match resolve_bin_op(op, &left_ir.ty) {
+                Some(bin_op) => ctx.mk(IrExprKind::BinOp {
+                    op: bin_op, left: Box::new(left_ir), right: Box::new(right_ir),
+                }, ty, span),
+                None => ctx.mk(IrExprKind::Unit, ty, span), // unreachable after checker
+            }
+        }
+        ast::Expr::Unary { op, operand, .. } => {
+            let operand_ir = lower_expr(ctx, operand);
+            match resolve_un_op(op, &operand_ir.ty) {
+                Some(un_op) => ctx.mk(IrExprKind::UnOp {
+                    op: un_op, operand: Box::new(operand_ir),
+                }, ty, span),
+                None => ctx.mk(IrExprKind::Unit, ty, span),
+            }
+        }
+
+        // ── Control flow ──
+        ast::Expr::If { cond, then, else_, .. } => {
+            let c = lower_expr(ctx, cond);
+            let t = lower_expr(ctx, then);
+            let e = lower_expr(ctx, else_);
+            IrExpr { kind: IrExprKind::If {
+                cond: Box::new(c), then: Box::new(t), else_: Box::new(e),
+            }, ty, span }
+        }
+
+        ast::Expr::Match { subject, arms, .. } => {
+            let subject_ir = lower_expr(ctx, subject);
+            let arms_ir: Vec<IrMatchArm> = arms.iter().map(|arm| {
+                ctx.push_scope();
+                let pattern = lower_pattern(ctx, &arm.pattern);
+                let guard = arm.guard.as_ref().map(|g| lower_expr(ctx, g));
+                let body = lower_expr(ctx, &arm.body);
+                ctx.pop_scope();
+                IrMatchArm { pattern, guard, body }
+            }).collect();
+            ctx.mk(IrExprKind::Match { subject: Box::new(subject_ir), arms: arms_ir }, ty, span)
+        }
+
+        ast::Expr::Block { stmts, expr: tail, .. } => {
+            ctx.push_scope();
+            let ir_stmts: Vec<IrStmt> = stmts.iter().map(|s| lower_stmt(ctx, s)).collect();
+            let ir_tail = tail.as_ref().map(|e| Box::new(lower_expr(ctx, e)));
+            ctx.pop_scope();
+            ctx.mk(IrExprKind::Block { stmts: ir_stmts, expr: ir_tail }, ty, span)
+        }
+
+        ast::Expr::DoBlock { stmts, expr: tail, .. } => {
+            ctx.push_scope();
+            let ir_stmts: Vec<IrStmt> = stmts.iter().map(|s| lower_stmt(ctx, s)).collect();
+            let ir_tail = tail.as_ref().map(|e| Box::new(lower_expr(ctx, e)));
+            ctx.pop_scope();
+            ctx.mk(IrExprKind::DoBlock { stmts: ir_stmts, expr: ir_tail }, ty, span)
+        }
+
+        // ── Loops ──
+        ast::Expr::ForIn { var, var_tuple, iterable, body, .. } => {
+            let iterable_ir = lower_expr(ctx, iterable);
+            ctx.push_scope();
+            let elem_ty = match &iterable_ir.ty {
+                Ty::List(inner) => *inner.clone(),
+                Ty::Map(k, _) => *k.clone(),
+                _ => Ty::Unknown,
+            };
+            let var_tuple_ids = if let Some(names) = var_tuple {
+                let ids: Vec<VarId> = names.iter().map(|n|
+                    ctx.define_var(n, Ty::Unknown, Mutability::Let, None)
+                ).collect();
+                Some(ids)
+            } else {
+                None
+            };
+            let var_id = ctx.define_var(var, elem_ty, Mutability::Let, None);
+            let body_ir: Vec<IrStmt> = body.iter().map(|s| lower_stmt(ctx, s)).collect();
+            ctx.pop_scope();
+            ctx.mk(IrExprKind::ForIn {
+                var: var_id, var_tuple: var_tuple_ids, iterable: Box::new(iterable_ir), body: body_ir,
+            }, ty, span)
+        }
+
+        ast::Expr::While { cond, body, .. } => {
+            let cond_ir = lower_expr(ctx, cond);
+            ctx.push_scope();
+            let body_ir: Vec<IrStmt> = body.iter().map(|s| lower_stmt(ctx, s)).collect();
+            ctx.pop_scope();
+            ctx.mk(IrExprKind::While { cond: Box::new(cond_ir), body: body_ir }, ty, span)
+        }
+
+        ast::Expr::Break { .. } => ctx.mk(IrExprKind::Break, ty, span),
+        ast::Expr::Continue { .. } => ctx.mk(IrExprKind::Continue, ty, span),
+
+        // ── Pipe (desugar to Call) ──
+        ast::Expr::Pipe { left, right, .. } => {
+            let left_ir = lower_expr(ctx, left);
+            lower_pipe(ctx, left_ir, right, ty, span)
+        }
+
+        // ── Calls (with UFCS / module resolution) ──
+        ast::Expr::Call { callee, args, .. } => lower_call(ctx, callee, args, ty, span),
+
+        // ── Member access (non-call) ──
+        ast::Expr::Member { object, field, .. } => {
+            let obj_ir = lower_expr(ctx, object);
+            ctx.mk(IrExprKind::Member { object: Box::new(obj_ir), field: field.clone() }, ty, span)
+        }
+
+        // ── Collections ──
+        ast::Expr::List { elements, .. } => {
+            let elems: Vec<IrExpr> = elements.iter().map(|e| lower_expr(ctx, e)).collect();
+            ctx.mk(IrExprKind::List { elements: elems }, ty, span)
+        }
+
+        ast::Expr::Record { name, fields, .. } => {
+            let fs: Vec<(String, IrExpr)> = fields.iter()
+                .map(|f| (f.name.clone(), lower_expr(ctx, &f.value)))
+                .collect();
+            ctx.mk(IrExprKind::Record { name: name.clone(), fields: fs }, ty, span)
+        }
+
+        ast::Expr::SpreadRecord { base, fields, .. } => {
+            let base_ir = lower_expr(ctx, base);
+            let fs: Vec<(String, IrExpr)> = fields.iter()
+                .map(|f| (f.name.clone(), lower_expr(ctx, &f.value)))
+                .collect();
+            ctx.mk(IrExprKind::SpreadRecord { base: Box::new(base_ir), fields: fs }, ty, span)
+        }
+
+        ast::Expr::Tuple { elements, .. } => {
+            let elems: Vec<IrExpr> = elements.iter().map(|e| lower_expr(ctx, e)).collect();
+            ctx.mk(IrExprKind::Tuple { elements: elems }, ty, span)
+        }
+
+        ast::Expr::Range { start, end, inclusive, .. } => {
+            let s = lower_expr(ctx, start);
+            let e = lower_expr(ctx, end);
+            IrExpr { kind: IrExprKind::Range {
+                start: Box::new(s), end: Box::new(e), inclusive: *inclusive,
+            }, ty, span }
+        }
+
+        // ── Access ──
+        ast::Expr::TupleIndex { object, index, .. } => {
+            let obj_ir = lower_expr(ctx, object);
+            ctx.mk(IrExprKind::TupleIndex { object: Box::new(obj_ir), index: *index }, ty, span)
+        }
+
+        ast::Expr::IndexAccess { object, index, .. } => {
+            let o = lower_expr(ctx, object);
+            let i = lower_expr(ctx, index);
+            IrExpr { kind: IrExprKind::IndexAccess {
+                object: Box::new(o), index: Box::new(i),
+            }, ty, span }
+        }
+
+        // ── Lambda ──
+        ast::Expr::Lambda { params, body, .. } => {
+            ctx.push_scope();
+            let ir_params: Vec<(VarId, Ty)> = params.iter().map(|p| {
+                let pty = p.ty.as_ref().map(|t| resolve_type_expr(t)).unwrap_or(Ty::Unknown);
+                let var = ctx.define_var(&p.name, pty.clone(), Mutability::Let, None);
+                (var, pty)
+            }).collect();
+            let body_ir = lower_expr(ctx, body);
+            ctx.pop_scope();
+            ctx.mk(IrExprKind::Lambda {
+                params: ir_params, body: Box::new(body_ir),
+            }, ty, span)
+        }
+
+        // ── Result / Option ──
+        ast::Expr::Ok { expr: inner, .. } => {
+            let v = lower_expr(ctx, inner);
+            IrExpr { kind: IrExprKind::ResultOk { expr: Box::new(v) }, ty, span }
+        }
+        ast::Expr::Err { expr: inner, .. } => {
+            let v = lower_expr(ctx, inner);
+            IrExpr { kind: IrExprKind::ResultErr { expr: Box::new(v) }, ty, span }
+        }
+        ast::Expr::Some { expr: inner, .. } => {
+            let v = lower_expr(ctx, inner);
+            IrExpr { kind: IrExprKind::OptionSome { expr: Box::new(v) }, ty, span }
+        }
+        ast::Expr::None { .. } => IrExpr { kind: IrExprKind::OptionNone, ty, span },
+
+        ast::Expr::Try { expr: inner, .. } => {
+            let v = lower_expr(ctx, inner);
+            IrExpr { kind: IrExprKind::Try { expr: Box::new(v) }, ty, span }
+        }
+        ast::Expr::Await { expr: inner, .. } => {
+            let v = lower_expr(ctx, inner);
+            IrExpr { kind: IrExprKind::Await { expr: Box::new(v) }, ty, span }
+        }
+
+        // ── Misc ──
+        ast::Expr::Hole { .. } => ctx.mk(IrExprKind::Hole, ty, span),
+        ast::Expr::Todo { message, .. } => ctx.mk(IrExprKind::Todo { message: message.clone() }, ty, span),
+        ast::Expr::Placeholder { .. } => ctx.mk(IrExprKind::Hole, ty, span),
+    }
+}
+
+// ── Statement lowering ──────────────────────────────────────────
+
+fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
+    match stmt {
+        ast::Stmt::Let { name, value, span, .. } => {
+            let ir_value = lower_expr(ctx, value);
+            let ty = ir_value.ty.clone();
+            let var = ctx.define_var(name, ty.clone(), Mutability::Let, *span);
+            IrStmt { kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty, value: ir_value }, span: *span }
+        }
+        ast::Stmt::Var { name, value, span, .. } => {
+            let ir_value = lower_expr(ctx, value);
+            let ty = ir_value.ty.clone();
+            let var = ctx.define_var(name, ty.clone(), Mutability::Var, *span);
+            IrStmt { kind: IrStmtKind::Bind { var, mutability: Mutability::Var, ty, value: ir_value }, span: *span }
+        }
+        ast::Stmt::LetDestructure { pattern, value, span } => {
+            let ir_value = lower_expr(ctx, value);
+            ctx.push_scope();
+            let ir_pattern = lower_pattern(ctx, pattern);
+            ctx.pop_scope();
+            IrStmt { kind: IrStmtKind::BindDestructure { pattern: ir_pattern, value: ir_value }, span: *span }
+        }
+        ast::Stmt::Assign { name, value, span } => {
+            let ir_value = lower_expr(ctx, value);
+            if let Some(var) = ctx.lookup_var(name) {
+                IrStmt { kind: IrStmtKind::Assign { var, value: ir_value }, span: *span }
+            } else {
+                // Unresolved assign — wrap as expression
+                IrStmt { kind: IrStmtKind::Expr { expr: ir_value }, span: *span }
+            }
+        }
+        ast::Stmt::IndexAssign { target, index, value, span } => {
+            let index_ir = lower_expr(ctx, index);
+            let value_ir = lower_expr(ctx, value);
+            if let Some(var) = ctx.lookup_var(target) {
+                IrStmt { kind: IrStmtKind::IndexAssign { target: var, index: index_ir, value: value_ir }, span: *span }
+            } else {
+                IrStmt { kind: IrStmtKind::Expr { expr: value_ir }, span: *span }
+            }
+        }
+        ast::Stmt::FieldAssign { target, field, value, span } => {
+            let value_ir = lower_expr(ctx, value);
+            if let Some(var) = ctx.lookup_var(target) {
+                IrStmt { kind: IrStmtKind::FieldAssign { target: var, field: field.clone(), value: value_ir }, span: *span }
+            } else {
+                IrStmt { kind: IrStmtKind::Expr { expr: value_ir }, span: *span }
+            }
+        }
+        ast::Stmt::Guard { cond, else_, span } => {
+            let cond_ir = lower_expr(ctx, cond);
+            let else_ir = lower_expr(ctx, else_);
+            IrStmt { kind: IrStmtKind::Guard { cond: cond_ir, else_: else_ir }, span: *span }
+        }
+        ast::Stmt::Expr { expr, span } => {
+            IrStmt { kind: IrStmtKind::Expr { expr: lower_expr(ctx, expr) }, span: *span }
+        }
+        ast::Stmt::Comment { text } => {
+            IrStmt { kind: IrStmtKind::Comment { text: text.clone() }, span: None }
+        }
+    }
+}
+
+// ── Pattern lowering ────────────────────────────────────────────
+
+fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern) -> IrPattern {
+    match pat {
+        ast::Pattern::Wildcard => IrPattern::Wildcard,
+        ast::Pattern::Ident { name } => {
+            let var = ctx.define_var(name, Ty::Unknown, Mutability::Let, None);
+            IrPattern::Bind { var }
+        }
+        ast::Pattern::Literal { value } => {
+            let expr = lower_expr(ctx, value);
+            IrPattern::Literal { expr }
+        }
+        ast::Pattern::Constructor { name, args } => {
+            let ir_args: Vec<IrPattern> = args.iter().map(|p| lower_pattern(ctx, p)).collect();
+            IrPattern::Constructor { name: name.clone(), args: ir_args }
+        }
+        ast::Pattern::RecordPattern { name, fields, rest } => {
+            let ir_fields: Vec<IrFieldPattern> = fields.iter().map(|f| {
+                IrFieldPattern {
+                    name: f.name.clone(),
+                    pattern: f.pattern.as_ref().map(|p| lower_pattern(ctx, p)),
+                }
+            }).collect();
+            // Auto-bind fields without explicit patterns
+            for f in fields {
+                if f.pattern.is_none() {
+                    ctx.define_var(&f.name, Ty::Unknown, Mutability::Let, None);
+                }
+            }
+            IrPattern::RecordPattern { name: name.clone(), fields: ir_fields, rest: *rest }
+        }
+        ast::Pattern::Tuple { elements } => {
+            IrPattern::Tuple { elements: elements.iter().map(|p| lower_pattern(ctx, p)).collect() }
+        }
+        ast::Pattern::Some { inner } => {
+            IrPattern::Some { inner: Box::new(lower_pattern(ctx, inner)) }
+        }
+        ast::Pattern::None => IrPattern::None,
+        ast::Pattern::Ok { inner } => {
+            IrPattern::Ok { inner: Box::new(lower_pattern(ctx, inner)) }
+        }
+        ast::Pattern::Err { inner } => {
+            IrPattern::Err { inner: Box::new(lower_pattern(ctx, inner)) }
+        }
+    }
+}
+
+// ── Call resolution (UFCS, modules, constructors) ───────────────
+
+fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Expr], ty: Ty, span: Option<ast::Span>) -> IrExpr {
+    let ir_args: Vec<IrExpr> = args.iter().map(|a| lower_expr(ctx, a)).collect();
+
+    match callee {
+        // module.func(args) or receiver.method(args)
+        ast::Expr::Member { object, field, .. } => {
+            // Case 1: Direct module call — `string.trim(x)`, `math.sqrt(x)`
+            if let ast::Expr::Ident { name: mod_name, .. } = object.as_ref() {
+                if ctx.is_module(mod_name) {
+                    return ctx.mk(IrExprKind::Call {
+                        target: CallTarget::Module { module: mod_name.clone(), func: field.clone() },
+                        args: ir_args,
+                    }, ty, span);
+                }
+            }
+
+            // Case 2: UFCS — `x.trim()` where trim is a stdlib method
+            let obj_ty = ctx.expr_ty(object);
+            let resolved_type = match &obj_ty {
+                Ty::String => Some(ast::ResolvedType::String),
+                Ty::Int => Some(ast::ResolvedType::Int),
+                Ty::Float => Some(ast::ResolvedType::Float),
+                Ty::List(_) => Some(ast::ResolvedType::List),
+                Ty::Map(_, _) => Some(ast::ResolvedType::Map),
+                Ty::Bool => Some(ast::ResolvedType::Bool),
+                _ => None,
+            };
+
+            // Try type-based resolution first (compile-time, zero-cost)
+            let module = resolved_type
+                .and_then(|rt| crate::stdlib::resolve_ufcs_by_type(field, rt))
+                .or_else(|| {
+                    let candidates = crate::stdlib::resolve_ufcs_candidates(field);
+                    if candidates.len() == 1 { Some(candidates[0]) } else { None }
+                });
+
+            if let Some(module) = module {
+                // UFCS resolved: prepend receiver as first arg
+                let obj_ir = lower_expr(ctx, object);
+                let mut all_args = vec![obj_ir];
+                all_args.extend(ir_args);
+                return ctx.mk(IrExprKind::Call {
+                    target: CallTarget::Module { module: module.to_string(), func: field.clone() },
+                    args: all_args,
+                }, ty, span);
+            }
+
+            // Case 3: Unresolved method — emitter decides UFCS vs method call
+            let obj_ir = lower_expr(ctx, object);
+            ctx.mk(IrExprKind::Call {
+                target: CallTarget::Method { object: Box::new(obj_ir), method: field.clone() },
+                args: ir_args,
+            }, ty, span)
+        }
+
+        // Constructor call — `Red`, `Node(1, left, right)`
+        ast::Expr::TypeName { name, .. } => {
+            ctx.mk(IrExprKind::Call {
+                target: CallTarget::Named { name: name.clone() },
+                args: ir_args,
+            }, ty, span)
+        }
+
+        // Free function call — `foo(x)`, `println(x)`
+        ast::Expr::Ident { name, .. } => {
+            ctx.mk(IrExprKind::Call {
+                target: CallTarget::Named { name: name.clone() },
+                args: ir_args,
+            }, ty, span)
+        }
+
+        // Computed callee — `(some_expr)(args)`
+        _ => {
+            let callee_ir = lower_expr(ctx, callee);
+            ctx.mk(IrExprKind::Call {
+                target: CallTarget::Computed { callee: Box::new(callee_ir) },
+                args: ir_args,
+            }, ty, span)
+        }
+    }
+}
+
+// ── Pipe desugaring ─────────────────────────────────────────────
+
+fn lower_pipe(ctx: &mut LowerCtx, left: IrExpr, right: &ast::Expr, ty: Ty, span: Option<ast::Span>) -> IrExpr {
+    match right {
+        // `a |> f(b)` → substitute placeholder or prepend left as first arg
+        ast::Expr::Call { callee, args, .. } => {
+            let has_placeholder = args.iter().any(|a| matches!(a, ast::Expr::Placeholder { .. }));
+
+            if has_placeholder {
+                // `a |> f(_, b)` → `f(a, b)` — substitute placeholder with left
+                let ir_args: Vec<IrExpr> = args.iter().map(|a| {
+                    if matches!(a, ast::Expr::Placeholder { .. }) {
+                        left.clone()
+                    } else {
+                        lower_expr(ctx, a)
+                    }
+                }).collect();
+                lower_call_with_args(ctx, callee, ir_args, ty, span)
+            } else {
+                // `a |> f(b)` → `f(a, b)` — prepend left
+                let mut ir_args = vec![left];
+                ir_args.extend(args.iter().map(|a| lower_expr(ctx, a)));
+                lower_call_with_args(ctx, callee, ir_args, ty, span)
+            }
+        }
+        // `a |> f` → `f(a)` — call right as function with left as sole arg
+        _ => {
+            let callee_ir = lower_expr(ctx, right);
+            ctx.mk(IrExprKind::Call {
+                target: CallTarget::Computed { callee: Box::new(callee_ir) },
+                args: vec![left],
+            }, ty, span)
+        }
+    }
+}
+
+/// Like lower_call but with pre-computed IrExpr args (for pipe desugaring).
+fn lower_call_with_args(ctx: &mut LowerCtx, callee: &ast::Expr, ir_args: Vec<IrExpr>, ty: Ty, span: Option<ast::Span>) -> IrExpr {
+    match callee {
+        ast::Expr::Member { object, field, .. } => {
+            // Check module call
+            if let ast::Expr::Ident { name: mod_name, .. } = object.as_ref() {
+                if ctx.is_module(mod_name) {
+                    return ctx.mk(IrExprKind::Call {
+                        target: CallTarget::Module { module: mod_name.clone(), func: field.clone() },
+                        args: ir_args,
+                    }, ty, span);
+                }
+            }
+            // Check UFCS
+            let obj_ty = ctx.expr_ty(object);
+            let resolved_type = ty_to_resolved(&obj_ty);
+            let module = resolved_type
+                .and_then(|rt| crate::stdlib::resolve_ufcs_by_type(field, rt))
+                .or_else(|| {
+                    let c = crate::stdlib::resolve_ufcs_candidates(field);
+                    if c.len() == 1 { Some(c[0]) } else { None }
+                });
+
+            if let Some(module) = module {
+                let obj_ir = lower_expr(ctx, object);
+                let mut all_args = vec![obj_ir];
+                all_args.extend(ir_args);
+                return ctx.mk(IrExprKind::Call {
+                    target: CallTarget::Module { module: module.to_string(), func: field.clone() },
+                    args: all_args,
+                }, ty, span);
+            }
+
+            let obj_ir = lower_expr(ctx, object);
+            ctx.mk(IrExprKind::Call {
+                target: CallTarget::Method { object: Box::new(obj_ir), method: field.clone() },
+                args: ir_args,
+            }, ty, span)
+        }
+        ast::Expr::Ident { name, .. } => {
+            ctx.mk(IrExprKind::Call {
+                target: CallTarget::Named { name: name.clone() },
+                args: ir_args,
+            }, ty, span)
+        }
+        ast::Expr::TypeName { name, .. } => {
+            ctx.mk(IrExprKind::Call {
+                target: CallTarget::Named { name: name.clone() },
+                args: ir_args,
+            }, ty, span)
+        }
+        _ => {
+            let callee_ir = lower_expr(ctx, callee);
+            ctx.mk(IrExprKind::Call {
+                target: CallTarget::Computed { callee: Box::new(callee_ir) },
+                args: ir_args,
+            }, ty, span)
+        }
+    }
+}
+
+// ── String interpolation parsing ────────────────────────────────
+
+fn lower_string_interp(ctx: &mut LowerCtx, raw: &str) -> Vec<IrStringPart> {
+    let mut parts = Vec::new();
+    let mut chars = raw.chars().peekable();
+    let mut lit = String::new();
+
+    while let Some(c) = chars.next() {
+        if c == '$' && chars.peek() == Some(&'{') {
+            chars.next(); // skip {
+            if !lit.is_empty() {
+                parts.push(IrStringPart::Lit { value: std::mem::take(&mut lit) });
+            }
+            let mut expr_str = String::new();
+            let mut depth = 1;
+            while let Some(ch) = chars.next() {
+                if ch == '{' { depth += 1; }
+                if ch == '}' { depth -= 1; if depth == 0 { break; } }
+                expr_str.push(ch);
+            }
+            // Re-parse the expression and lower it
+            let tokens = crate::lexer::Lexer::tokenize(&expr_str);
+            let mut parser = crate::parser::Parser::new(tokens);
+            if let Ok(parsed) = parser.parse_single_expr() {
+                let ir_expr = lower_expr(ctx, &parsed);
+                parts.push(IrStringPart::Expr { expr: ir_expr });
+            } else {
+                // Parse failed — keep as literal
+                parts.push(IrStringPart::Lit { value: format!("${{{}}}", expr_str) });
+            }
+        } else {
+            lit.push(c);
+        }
+    }
+    if !lit.is_empty() {
+        parts.push(IrStringPart::Lit { value: lit });
+    }
+    parts
+}
+
+// ── Helpers ─────────────────────────────────────────────────────
+
+fn resolve_bin_op(op: &str, left_ty: &Ty) -> Option<BinOp> {
+    Some(match op {
+        "+" => if matches!(left_ty, Ty::Float) { BinOp::AddFloat } else { BinOp::AddInt },
+        "-" => if matches!(left_ty, Ty::Float) { BinOp::SubFloat } else { BinOp::SubInt },
+        "*" => if matches!(left_ty, Ty::Float) { BinOp::MulFloat } else { BinOp::MulInt },
+        "/" => if matches!(left_ty, Ty::Float) { BinOp::DivFloat } else { BinOp::DivInt },
+        "%" => if matches!(left_ty, Ty::Float) { BinOp::ModFloat } else { BinOp::ModInt },
+        "^" => if matches!(left_ty, Ty::Int) { BinOp::XorInt } else { BinOp::PowFloat },
+        "++" => if matches!(left_ty, Ty::List(_)) { BinOp::ConcatList } else { BinOp::ConcatStr },
+        "==" => BinOp::Eq,
+        "!=" => BinOp::Neq,
+        "<" => BinOp::Lt,
+        ">" => BinOp::Gt,
+        "<=" => BinOp::Lte,
+        ">=" => BinOp::Gte,
+        "and" => BinOp::And,
+        "or" => BinOp::Or,
+        _ => return None,
+    })
+}
+
+fn resolve_un_op(op: &str, operand_ty: &Ty) -> Option<UnOp> {
+    Some(match op {
+        "-" => if matches!(operand_ty, Ty::Float) { UnOp::NegFloat } else { UnOp::NegInt },
+        "not" => UnOp::Not,
+        _ => return None,
+    })
+}
+
+fn ty_to_resolved(ty: &Ty) -> Option<ast::ResolvedType> {
+    Some(match ty {
+        Ty::Int => ast::ResolvedType::Int,
+        Ty::Float => ast::ResolvedType::Float,
+        Ty::String => ast::ResolvedType::String,
+        Ty::Bool => ast::ResolvedType::Bool,
+        Ty::List(_) => ast::ResolvedType::List,
+        Ty::Map(_, _) => ast::ResolvedType::Map,
+        _ => return None,
+    })
+}
+
+fn resolve_type_expr(te: &ast::TypeExpr) -> Ty {
+    match te {
+        ast::TypeExpr::Simple { name } => match name.as_str() {
+            "Int" => Ty::Int,
+            "Float" => Ty::Float,
+            "String" => Ty::String,
+            "Bool" => Ty::Bool,
+            "Unit" => Ty::Unit,
+            other => Ty::Named(other.to_string()),
+        },
+        ast::TypeExpr::Generic { name, args } => match name.as_str() {
+            "List" if args.len() == 1 => Ty::List(Box::new(resolve_type_expr(&args[0]))),
+            "Option" if args.len() == 1 => Ty::Option(Box::new(resolve_type_expr(&args[0]))),
+            "Result" if args.len() == 2 => Ty::Result(
+                Box::new(resolve_type_expr(&args[0])),
+                Box::new(resolve_type_expr(&args[1])),
+            ),
+            "Map" if args.len() == 2 => Ty::Map(
+                Box::new(resolve_type_expr(&args[0])),
+                Box::new(resolve_type_expr(&args[1])),
+            ),
+            other => Ty::Named(other.to_string()),
+        },
+        ast::TypeExpr::Tuple { elements } => {
+            Ty::Tuple(elements.iter().map(resolve_type_expr).collect())
+        }
+        ast::TypeExpr::Fn { params, ret } => Ty::Fn {
+            params: params.iter().map(resolve_type_expr).collect(),
+            ret: Box::new(resolve_type_expr(ret)),
+        },
+        ast::TypeExpr::Record { fields } => Ty::Record {
+            fields: fields.iter().map(|f| (f.name.clone(), resolve_type_expr(&f.ty))).collect(),
+        },
+        _ => Ty::Unknown,
+    }
+}

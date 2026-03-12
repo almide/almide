@@ -34,6 +34,9 @@ impl Checker {
         }
         let ty = self.check_expr_inner(expr);
         expr.set_resolved_type(ty_to_resolved(&ty));
+        if let Some(span) = expr.span() {
+            self.expr_types.insert((span.line, span.col), ty.clone());
+        }
         self.current_decl_line = prev_line;
         self.current_decl_col = prev_col;
         ty

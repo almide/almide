@@ -119,6 +119,9 @@ enum Commands {
         /// Emit AST as JSON
         #[arg(long)]
         emit_ast: bool,
+        /// Emit typed IR as JSON
+        #[arg(long)]
+        emit_ir: bool,
         /// Skip type checking
         #[arg(long)]
         no_check: bool,
@@ -348,8 +351,8 @@ fn dispatch(cli: Cli) {
                 eprintln!("No almide.toml found");
             }
         }
-        Commands::Emit { file, target, emit_ast, no_check } => {
-            cli::cmd_emit(&file, &target, emit_ast, no_check);
+        Commands::Emit { file, target, emit_ast, emit_ir, no_check } => {
+            cli::cmd_emit(&file, &target, emit_ast, emit_ir, no_check);
         }
     }
 }

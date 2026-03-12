@@ -360,7 +360,7 @@ fn cmd_build_npm(file: &str, out_dir: &str, no_check: bool) {
     }
 }
 
-pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, no_check: bool) {
+pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_check: bool) {
     let mut program = parse_file(file);
     let source_text = std::fs::read_to_string(file).unwrap_or_default();
 
@@ -397,7 +397,10 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, no_check: bool) {
         }
     }).collect();
 
-    if !no_check && !emit_ast {
+    // Run checker if needed (always for emit_ir, otherwise when !no_check && !emit_ast)
+    let run_check = emit_ir || (!no_check && !emit_ast);
+    let mut checker_opt: Option<check::Checker> = None;
+    if run_check {
         let mut checker = check::Checker::new();
         checker.set_source(file, &source_text);
         for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
@@ -420,9 +423,16 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, no_check: bool) {
         for d in diagnostics.iter().filter(|d| d.level == diagnostic::Level::Warning) {
             eprintln!("{}", d.display_with_source(&source_text));
         }
+        checker_opt = Some(checker);
     }
 
-    if emit_ast {
+    if emit_ir {
+        let checker = checker_opt.expect("checker must have run for emit_ir");
+        let ir = almide::lower::lower_program(&program, &checker.expr_types, &checker.env);
+        let json = serde_json::to_string_pretty(&ir)
+            .unwrap_or_else(|e| { eprintln!("JSON serialize error: {}", e); std::process::exit(1); });
+        println!("{}", json);
+    } else if emit_ast {
         let json = serde_json::to_string_pretty(&program)
             .unwrap_or_else(|e| { eprintln!("JSON serialize error: {}", e); std::process::exit(1); });
         println!("{}", json);
