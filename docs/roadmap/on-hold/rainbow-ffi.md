@@ -95,20 +95,59 @@ Swift, Kotlin, Ruby, Erlang — 各言語の FFI メカニズムを活用。
 - [ ] Ruby: native extension via Rust (rb-sys)
 - [ ] Erlang: NIF (Rustler) or Port protocol
 
+## Rust Universal Host — 多言語同居
+
+通常の FFI は「1ビルド = 1ターゲット」だが、Rust ターゲットをユニバーサルホストとして使うことで、**1つのバイナリに複数言語のライブラリを同居**させられる。
+
+```
+almide (--target rust) → single binary
+  ├─ Rust crate  → 直接リンク
+  ├─ C library   → unsafe FFI (標準)
+  ├─ Python      → PyO3 でランタイム埋め込み
+  ├─ JavaScript  → deno_core / v8 埋め込み
+  ├─ Ruby        → rb-sys でネイティブ拡張
+  ├─ Swift       → C ABI 経由ブリッジ
+  ├─ Kotlin      → JNI / GraalVM
+  └─ Erlang      → Rustler NIF
+```
+
+```almide
+// 同じファイルで Rust crate と Python ライブラリを同時に使う
+extern "rust" fn compress(data: String) -> String
+  from "zstd"
+
+extern "python" fn sentiment(text: String) -> Float
+  from "textblob"
+
+fn analyze(text: String) -> String = {
+  let score = sentiment(text)       // Python (PyO3 経由)
+  let packed = compress(text)       // Rust (直接リンク)
+  "score=${float.to_string(score)}, size=${int.to_string(string.len(packed))}"
+}
+```
+
+**仕組み:** Rust は他言語のランタイムを埋め込める。PyO3 で Python、deno_core で JS、rb-sys で Ruby — これらを Rust バイナリの中で同時に動かせる。Almide のコンパイラは `extern` 宣言を見て必要なランタイム埋め込みコードを自動生成する。
+
+**制約:**
+- バイナリサイズが増加する（Python ランタイムだけで ~30MB）
+- 各言語ランタイムの初期化コストがある
+- Web ターゲット（`--target js`）では Rust ホスト統合は使えない。代わりに WASM + 各言語の Web 対応版（Pyodide 等）を使う
+
 ## MoonBit との差別化
 
 MoonBit は Python FFI を「エコシステム継承」として推進している。Almide は Rust + JS の二刀流をベースに、より多くの言語エコシステムを横断的に吸収する。
 
-MoonBit: Python FFI → エコシステム継承
-Almide: Rainbow FFI → 全言語エコシステム吸収
+MoonBit: Python FFI → 1言語のエコシステム継承
+Almide: Rainbow FFI → Rust ホストで全言語エコシステム同居
 
 ## 前提条件
 
 - Phase 1-2 は現在のコンパイラアーキテクチャで実装可能
 - Phase 3 は Rust ターゲットの unsafe ブロック生成が必要
 - Phase 4-5 は各ランタイムとの統合が必要で、実装コストが高い
+- Rust Universal Host は Phase 1 + 3 以降の組み合わせで段階的に実現
 - `almide forge` との連携: FFI バインディングも自動生成可能にする
 
 ## Priority
 
-Rust FFI ≧ JS FFI > C ABI > Python > exotic targets
+Rust FFI ≧ JS FFI > C ABI > Rust Universal Host > Python > exotic targets
