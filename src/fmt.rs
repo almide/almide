@@ -216,6 +216,10 @@ fn format_type_expr(out: &mut String, ty: &TypeExpr, _depth: usize) {
                             out.push_str(&f.name);
                             out.push_str(": ");
                             format_type_expr(out, &f.ty, _depth);
+                            if let Some(ref default) = f.default {
+                                out.push_str(" = ");
+                                format_expr(out, default, _depth);
+                            }
                         }
                         out.push_str(" }");
                     }

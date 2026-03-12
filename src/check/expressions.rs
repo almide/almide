@@ -115,10 +115,10 @@ impl Checker {
                 if let Some(cname) = name.as_ref() {
                     if let Some((vname, case)) = self.env.constructors.get(cname.as_str()).cloned() {
                         if let VariantPayload::Record(expected_fields) = &case.payload {
-                            // Type-check each field
+                            // Type-check each provided field
                             for f in fields.iter_mut() {
                                 let actual_ty = self.check_expr(&mut f.value);
-                                if let Some((_, expected_ty)) = expected_fields.iter().find(|(n, _)| n == &f.name) {
+                                if let Some((_, expected_ty, _)) = expected_fields.iter().find(|(n, _, _)| n == &f.name) {
                                     if !expected_ty.compatible(&actual_ty) {
                                         self.push_diagnostic(err(
                                             format!("field '{}' expects {} but got {}", f.name, expected_ty.display(), actual_ty.display()),
@@ -132,13 +132,21 @@ impl Checker {
                                     ));
                                 }
                             }
-                            // Check for missing fields
-                            for (fname, _) in expected_fields {
+                            // Check for missing fields — fill in defaults or report error
+                            for (fname, _, default) in expected_fields {
                                 if !fields.iter().any(|f| f.name == *fname) {
-                                    self.push_diagnostic(err(
-                                        format!("missing field '{}' in variant constructor {}", fname, cname),
-                                        &format!("Add field '{}' to the constructor", fname), "variant record construction",
-                                    ));
+                                    if let Some(default_expr) = default {
+                                        // Fill in the default value
+                                        fields.push(crate::ast::FieldInit {
+                                            name: fname.clone(),
+                                            value: default_expr.clone(),
+                                        });
+                                    } else {
+                                        self.push_diagnostic(err(
+                                            format!("missing field '{}' in variant constructor {}", fname, cname),
+                                            &format!("Add field '{}' to the constructor", fname), "variant record construction",
+                                        ));
+                                    }
                                 }
                             }
                             // Look up the full variant type

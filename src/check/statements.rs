@@ -195,7 +195,7 @@ impl Checker {
                 let field_type_map: Vec<(String, Ty)> = if !name.is_empty() {
                     if let Some((_, case)) = self.env.constructors.get(name).cloned() {
                         if let VariantPayload::Record(rec_fields) = case.payload {
-                            rec_fields
+                            rec_fields.into_iter().map(|(n, t, _)| (n, t)).collect()
                         } else { vec![] }
                     } else { vec![] }
                 } else if let Ty::Record { fields: rec_fields } = subject_ty {

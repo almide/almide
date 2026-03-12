@@ -2,7 +2,6 @@
 
 ## Active
 
-- [Default Field Values](active/default-field-values.md) — reduce 5 variants to 3, eliminate sentinel `""` pattern
 - [Test Coverage](active/test-coverage.md) — 790 cases, target 1500+
 
 ## On Hold
@@ -31,6 +30,7 @@
 - [CLI Tool Authoring](done/cli-tool-authoring.md) — err() exit, almide run args
 - [Codegen Optimization](done/codegen-optimization.md) — move analysis, borrow inference (Phase 0-3)
 - [Compiler Hardening](done/compiler-hardening.md)
+- [Default Field Values](done/default-field-values.md) — `field: Type = expr`, 5 variants → 3
 - [Control Flow Extensions](done/control-flow.md)
 - [Cross-Platform Support](done/cross-platform.md)
 - [Error Diagnostics](done/error-diagnostics.md) — lost mutation, "did you mean?", immutability hints

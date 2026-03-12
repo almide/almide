@@ -157,7 +157,13 @@ impl Parser {
             let field_name = self.expect_ident()?;
             self.expect(TokenType::Colon)?;
             let field_type = self.parse_type_expr()?;
-            fields.push(FieldType { name: field_name, ty: field_type });
+            let default = if self.check(TokenType::Eq) {
+                self.advance();
+                Some(self.parse_expr()?)
+            } else {
+                None
+            };
+            fields.push(FieldType { name: field_name, ty: field_type, default });
             self.skip_newlines();
             if self.check(TokenType::Comma) {
                 self.advance();

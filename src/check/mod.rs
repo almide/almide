@@ -11,6 +11,17 @@ use crate::diagnostic::Diagnostic;
 use crate::stdlib;
 use crate::types::{Ty, TypeEnv, FnSig, VariantCase, VariantPayload};
 
+/// Check if an expression is a compile-time constant (allowed as default field value).
+fn is_const_expr(expr: &ast::Expr) -> bool {
+    match expr {
+        ast::Expr::Int { .. } | ast::Expr::Float { .. } | ast::Expr::String { .. }
+        | ast::Expr::Bool { .. } | ast::Expr::Unit { .. } | ast::Expr::None { .. } => true,
+        ast::Expr::List { elements, .. } => elements.is_empty(),
+        ast::Expr::Unary { op, operand, .. } if op == "-" => is_const_expr(operand),
+        _ => false,
+    }
+}
+
 pub struct Checker {
     pub env: TypeEnv,
     pub diagnostics: Vec<Diagnostic>,
@@ -146,6 +157,34 @@ impl Checker {
                         self.env.types.insert(gn.clone(), Ty::TypeVar(gn.clone()));
                     }
                     let mut resolved = self.resolve_type_expr(ty);
+                    // Validate default field constraints on variant record fields
+                    if let ast::TypeExpr::Variant { cases: ast_cases } = ty {
+                        for c in ast_cases {
+                            if let ast::VariantCase::Record { name: vname, fields } = c {
+                                let mut seen_default = false;
+                                for f in fields {
+                                    if f.default.is_some() {
+                                        seen_default = true;
+                                        if let Some(ref d) = f.default {
+                                            if !is_const_expr(d) {
+                                                self.push_diagnostic(err(
+                                                    format!("default value for field '{}' in {} must be a compile-time constant", f.name, vname),
+                                                    "Allowed: literals, [], \"\", 0, true, false, none",
+                                                    "default field value",
+                                                ));
+                                            }
+                                        }
+                                    } else if seen_default {
+                                        self.push_diagnostic(err(
+                                            format!("field '{}' in {} without default must come before fields with defaults", f.name, vname),
+                                            "Move fields without defaults to the top",
+                                            "default field value",
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
                     // Remove type params from registry after resolution
                     for gn in &generic_names {
                         self.env.types.remove(gn);
@@ -439,7 +478,7 @@ impl Checker {
                     },
                     ast::VariantCase::Record { name, fields } => VariantCase {
                         name: name.clone(),
-                        payload: VariantPayload::Record(fields.iter().map(|f| (f.name.clone(), self.resolve_type_expr(&f.ty))).collect()),
+                        payload: VariantPayload::Record(fields.iter().map(|f| (f.name.clone(), self.resolve_type_expr(&f.ty), f.default.clone())).collect()),
                     },
                 }).collect();
                 Ty::Variant { name: String::new(), cases: cs }

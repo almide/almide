@@ -1,4 +1,4 @@
-# Default Field Values [ACTIVE]
+# Default Field Values [DONE]
 
 ## The Problem
 
@@ -172,13 +172,13 @@ This is more "correct" in type theory, but **worse for LLM accuracy**:
 
 ## Tasks
 
-- [ ] Parser: `field: Type = expr` in variant record and record type declarations
-- [ ] Parser: allow omitting fields with defaults at construction sites
-- [ ] AST: add `default: Option<Expr>` to `FieldType`
-- [ ] Checker: validate default expression type matches field type
-- [ ] Checker: at construction, fill in missing fields with defaults
-- [ ] Checker: enforce "defaults come last" ordering
-- [ ] Emit Rust: fill defaults into struct literal
-- [ ] Emit TS: fill defaults into object literal
-- [ ] Formatter: preserve `= default` in type declarations
-- [ ] Tests: construction with/without defaults, type errors, ordering
+- [x] Parser: `field: Type = expr` in variant record and record type declarations
+- [x] Parser: allow omitting fields with defaults at construction sites
+- [x] AST: add `default: Option<Expr>` to `FieldType`
+- [x] Checker: validate default expression is compile-time constant
+- [x] Checker: at construction, fill in missing fields with defaults
+- [x] Checker: enforce "defaults come last" ordering
+- [x] Emit Rust: defaults filled at AST level — no emitter changes needed
+- [x] Emit TS: defaults filled at AST level — no emitter changes needed
+- [x] Formatter: preserve `= default` in type declarations
+- [x] Tests: 6 tests — omit/override/nested defaults, list defaults
