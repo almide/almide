@@ -2,6 +2,7 @@
 
 ## Active
 
+- [Hint System Architecture](active/hint-system.md) — Pluggable hint registry, separate hint modules from parser core
 - [LLM Integration](active/llm-integration.md) — `almide forge` (library generation), `almide fix` (self-repair), `almide explain`
 
 ## On Hold

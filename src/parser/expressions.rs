@@ -305,6 +305,23 @@ impl Parser {
             self.parse_one_call_arg(&mut args)?;
         }
         self.skip_newlines();
+        // Detect missing comma between arguments
+        if !self.check(TokenType::RParen) && !self.check(TokenType::EOF) {
+            let tok = self.current();
+            let is_expr_start = matches!(tok.token_type,
+                TokenType::Int | TokenType::Float | TokenType::String
+                | TokenType::InterpolatedString | TokenType::True | TokenType::False
+                | TokenType::Ident | TokenType::TypeName | TokenType::LParen
+                | TokenType::LBracket | TokenType::LBrace | TokenType::Minus
+                | TokenType::None | TokenType::Some | TokenType::Fn
+            );
+            if is_expr_start {
+                return Err(format!(
+                    "Missing ',' between function arguments at line {}:{}\n  Hint: Add a comma after each argument. Example: f(a, b, c)",
+                    tok.line, tok.col
+                ));
+            }
+        }
         Ok(args)
     }
 
