@@ -231,3 +231,22 @@ test "json nested object via get_int" {
   assert(string.contains(s, "\"y\""))
   assert(string.contains(s, "2"))
 }
+
+// ── json.parse in pure function ──
+
+fn safe_extract(data: String) -> String =
+  match json.parse(data) {
+    ok(obj) => json.get_string(obj, "text").unwrap_or("")
+    err(_) => ""
+  }
+
+test "json.parse in pure function" {
+  assert_eq(safe_extract("{\"text\": \"hello\"}"), "hello")
+  assert_eq(safe_extract("invalid json"), "")
+}
+
+test "json.parse with unwrap_or UFCS" {
+  let obj = json.parse("{\"n\": 42}")
+  assert_eq(json.get_int(obj, "n").unwrap_or(0), 42)
+  assert_eq(json.get_int(obj, "missing").unwrap_or(99), 99)
+}

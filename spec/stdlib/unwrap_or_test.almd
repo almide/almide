@@ -1,0 +1,44 @@
+// unwrap_or — builtin function and UFCS tests
+
+// ── Direct call form ──
+
+test "unwrap_or some returns value" {
+  assert_eq(unwrap_or(some(42), 0), 42)
+}
+
+test "unwrap_or none returns default" {
+  assert_eq(unwrap_or(none, 99), 99)
+}
+
+test "unwrap_or string" {
+  assert_eq(unwrap_or(some("hello"), "default"), "hello")
+  assert_eq(unwrap_or(none, "default"), "default")
+}
+
+// ── UFCS form ──
+
+test "unwrap_or UFCS some" {
+  assert_eq(some(42).unwrap_or(0), 42)
+}
+
+test "unwrap_or UFCS none" {
+  let x: Option[Int] = none
+  assert_eq(x.unwrap_or(99), 99)
+}
+
+test "unwrap_or UFCS string" {
+  assert_eq(some("hello").unwrap_or("default"), "hello")
+}
+
+// ── With stdlib functions returning Option ──
+
+test "unwrap_or with list.get" {
+  let xs = [10, 20, 30]
+  assert_eq(list.get(xs, 1).unwrap_or(0), 20)
+  assert_eq(list.get(xs, 99).unwrap_or(0), 0)
+}
+
+test "unwrap_or with string.index_of" {
+  assert_eq(string.index_of("hello", "ell").unwrap_or(0 - 1), 1)
+  assert_eq(string.index_of("hello", "xyz").unwrap_or(0 - 1), 0 - 1)
+}

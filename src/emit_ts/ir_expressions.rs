@@ -313,6 +313,11 @@ impl TsEmitter {
             CallTarget::Method { object, method } => {
                 // Fallback method call — UFCS should already be resolved to Module
                 let obj_str = self.gen_ir_expr(object);
+                // Built-in method calls
+                if method == "unwrap_or" && args.len() == 1 {
+                    let default = self.gen_ir_expr(&args[0]);
+                    return format!("unwrap_or({}, {})", obj_str, default);
+                }
                 let args_str: Vec<String> = args.iter().map(|a| self.gen_ir_expr(a)).collect();
                 let mut all_args = vec![obj_str];
                 all_args.extend(args_str);

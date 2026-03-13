@@ -505,6 +505,11 @@ impl Emitter {
 
             CallTarget::Method { object, method } => {
                 let obj = self.gen_ir_expr(object);
+                // Built-in method calls that map to Rust method syntax
+                if method == "unwrap_or" && args.len() == 1 {
+                    let default = self.gen_ir_expr(&args[0]);
+                    return format!("({}).unwrap_or({})", obj, default);
+                }
                 let rest: Vec<String> = args.iter().map(|a| self.gen_ir_expr(a)).collect();
                 let mut all_args = vec![obj];
                 all_args.extend(rest);
@@ -539,7 +544,7 @@ impl Emitter {
             return call;
         }
         // Try auto-generated codegen with lambda inlining from IR args
-        let in_effect = self.in_effect;
+        let in_effect = self.in_effect || self.in_do_block.get();
         let inline_lambda_fn = |idx: usize, arity: usize| -> (Vec<String>, String) {
             self.ir_inline_lambda(&ir_args[idx], arity)
         };
