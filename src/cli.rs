@@ -384,7 +384,21 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
     let import_aliases: Vec<(String, String)> = program.imports.iter().filter_map(|imp| {
         if let crate::ast::Decl::Import { path, alias, .. } = imp {
             if let Some(a) = alias {
-                Some((a.clone(), path.join(".")))
+                // For self-imports, the target is the canonical module name (last segment or package name),
+                // not the dotted path, because resolved.modules stores canonical names
+                let is_self_import = path.first().map(|s| s.as_str()) == Some("self");
+                let target = if is_self_import && path.len() >= 2 {
+                    path.last().unwrap().clone()
+                } else if is_self_import {
+                    // import self as alias → target is the package name (loaded from resolved modules)
+                    resolved.modules.iter()
+                        .find(|(_, _, _, is_self)| *is_self)
+                        .map(|(name, _, _, _)| name.clone())
+                        .unwrap_or_else(|| path.join("."))
+                } else {
+                    path.join(".")
+                };
+                Some((a.clone(), target))
             } else if path.len() > 1 && path.first().map(|s| s.as_str()) != Some("self") {
                 let last = path.last().expect("path.len() > 1 checked above").clone();
                 Some((last, path.join(".")))

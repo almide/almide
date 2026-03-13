@@ -35,6 +35,10 @@ import pkg                      -- load package + all sub-namespaces
 import pkg.sub                  -- load specific sub-module only
 import pkg as alias             -- alias the entire package
 import pkg.sub as alias         -- alias a specific sub-module
+import self                     -- load own package entry point (mod.almd)
+import self as alias            -- load own entry point with alias
+import self.sub                 -- load sub-module within own package
+import self.sub as alias        -- load sub-module with alias
 ```
 
 ### Prohibited
@@ -138,7 +142,69 @@ m.add(5, 5)       -- same module, also works
 
 ---
 
-## 5. Diamond Dependency
+## 5. `import self` — Package Entry Point Access
+
+`import self` loads the package's own `src/mod.almd`, allowing `main.almd` to reference functions defined in the library entry point.
+
+### Motivation
+
+A package with both a library (`mod.almd`) and a CLI (`main.almd`) needs `main.almd` to access `mod.almd`'s pub functions. `import self.mod` is not possible because `mod` is a keyword. `import self` solves this.
+
+### Syntax
+
+```almide
+// main.almd — access own package entry point
+import self                      // accessible as package name (from almide.toml)
+import self as grammar           // accessible via alias
+
+grammar.keyword_groups()         // calls pub fn from mod.almd
+```
+
+### Resolution
+
+1. `import self` requires `src/mod.almd` to exist. If absent: compile error with hint.
+2. The module name defaults to the `name` field in `almide.toml`. If no alias and no `almide.toml`, falls back to `"self"`.
+3. With `as alias`, the alias takes precedence for code references — the canonical module name (package name) is used internally.
+
+### Example: Library + CLI Package
+
+```
+almide-grammar/
+  almide.toml           [package] name = "almide_grammar"
+  src/
+    mod.almd            pub fn keyword_groups() -> List[KeywordGroup]
+    main.almd           import self as grammar
+```
+
+```almide
+// mod.almd — library entry point (imported externally as almide_grammar)
+pub fn keyword_groups() -> List[KeywordGroup] = [...]
+
+// main.almd — CLI
+import self as grammar
+effect fn main() -> Unit = {
+  for group in grammar.keyword_groups() {
+    println(group.category)
+  }
+}
+```
+
+External consumers:
+```almide
+import almide_grammar
+almide_grammar.keyword_groups()
+```
+
+### Errors
+
+| Case | Error |
+|---|---|
+| `import self` without `almide.toml` | `cannot resolve 'import self': no almide.toml found` |
+| `import self` without `src/mod.almd` | `cannot resolve 'import self': no src/mod.almd` |
+
+---
+
+## 6. Diamond Dependency
 
 When multiple packages depend on the same leaf package, it is loaded exactly once.
 
@@ -161,7 +227,7 @@ dmod_d.shared()    -- "from D"           (direct access also works)
 
 ---
 
-## 6. Sub-module Imports
+## 7. Sub-module Imports
 
 Sub-modules can import other packages (both stdlib and user packages). Their imports are resolved recursively during the parent package's loading.
 
@@ -176,7 +242,7 @@ fn describe(s: String) -> String = extlib.pub_fn() ++ ": " ++ s   -- uses user p
 
 ---
 
-## 7. Visibility
+## 8. Visibility
 
 Three visibility levels control access across module boundaries:
 
@@ -201,7 +267,7 @@ The compiler tracks whether a module is a self-import (same project, via `import
 
 ---
 
-## 8. Effect Functions Across Modules
+## 9. Effect Functions Across Modules
 
 Effect functions (`effect fn`) from external packages are callable in effect context:
 
@@ -222,7 +288,7 @@ In effect context, `Result[T, E]` return values from module calls are auto-unwra
 
 ---
 
-## 9. Package Without mod.almd
+## 10. Package Without mod.almd
 
 A package directory may omit `mod.almd`. In that case, there is no top-level namespace — only direct sub-module imports work:
 
@@ -238,7 +304,7 @@ p.parse("hello")                -- works
 
 ---
 
-## 10. Foreign Function Interface (`@extern`)
+## 11. Foreign Function Interface (`@extern`)
 
 The `@extern` attribute allows functions to delegate to target-specific implementations.
 
@@ -296,7 +362,7 @@ Rust runtime functions follow `almide_rt_<module>_<func>()` naming. TS runtime u
 
 ---
 
-## 11. Compiler Pipeline
+## 12. Compiler Pipeline
 
 ### Resolve Phase (`src/resolve.rs`)
 
@@ -329,7 +395,7 @@ Rust runtime functions follow `almide_rt_<module>_<func>()` naming. TS runtime u
 
 ---
 
-## 12. File Resolution Order
+## 13. File Resolution Order
 
 When resolving `import pkg`, the compiler searches in order:
 

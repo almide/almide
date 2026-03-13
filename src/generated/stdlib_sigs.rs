@@ -200,6 +200,7 @@ pub fn lookup_generated_sig(module: &str, func: &str) -> Option<FnSig> {
         ("regex", "replace") => FnSig { generics: vec![], params: vec![(s("pat"), Ty::String), (s("s"), Ty::String), (s("rep"), Ty::String)], ret: Ty::String, is_effect: false },
         ("regex", "replace_first") => FnSig { generics: vec![], params: vec![(s("pat"), Ty::String), (s("s"), Ty::String), (s("rep"), Ty::String)], ret: Ty::String, is_effect: false },
         ("regex", "split") => FnSig { generics: vec![], params: vec![(s("pat"), Ty::String), (s("s"), Ty::String)], ret: Ty::List(Box::new(Ty::String)), is_effect: false },
+        ("string", "capitalize") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::String, is_effect: false },
         ("string", "char_at") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String), (s("i"), Ty::Int)], ret: Ty::Option(Box::new(Ty::String)), is_effect: false },
         ("string", "chars") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::List(Box::new(Ty::String)), is_effect: false },
         ("string", "contains?") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String), (s("sub"), Ty::String)], ret: Ty::Bool, is_effect: false },
@@ -266,7 +267,7 @@ pub fn generated_module_functions(module: &str) -> Vec<&'static str> {
         "process" => vec!["exec", "exec_in", "exec_status", "exec_with_stdin", "exit", "stdin_lines"],
         "random" => vec!["choice", "float", "int", "shuffle"],
         "regex" => vec!["captures", "find", "find_all", "full_match?", "match?", "replace", "replace_first", "split"],
-        "string" => vec!["char_at", "chars", "contains?", "count", "ends_with?", "from_bytes", "index_of", "is_alpha?", "is_alphanumeric?", "is_digit?", "is_empty?", "is_whitespace?", "join", "last_index_of", "len", "lines", "pad_left", "pad_right", "repeat", "replace", "replace_first", "reverse", "slice", "split", "starts_with?", "strip_prefix", "strip_suffix", "to_bytes", "to_float", "to_int", "to_lower", "to_upper", "trim", "trim_end", "trim_start"],
+        "string" => vec!["capitalize", "char_at", "chars", "contains?", "count", "ends_with?", "from_bytes", "index_of", "is_alpha?", "is_alphanumeric?", "is_digit?", "is_empty?", "is_whitespace?", "join", "last_index_of", "len", "lines", "pad_left", "pad_right", "repeat", "replace", "replace_first", "reverse", "slice", "split", "starts_with?", "strip_prefix", "strip_suffix", "to_bytes", "to_float", "to_int", "to_lower", "to_upper", "trim", "trim_end", "trim_start"],
         _ => vec![],
     }
 }

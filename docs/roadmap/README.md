@@ -1,6 +1,6 @@
 # Almide Roadmap
 
-- [2026 Ergonomics Roadmap](2026-ergonomics.md) — Ergonomics improvements derived from self-tooling
+- [2026 Ergonomics Roadmap](2026-ergonomics.md) — ✅ All 3 items complete: `do` pure fn, `unwrap_or` UFCS, `json.parse` auto-`?`
 
 ## Active
 
@@ -71,3 +71,5 @@
 - [Error Recovery](done/error-recovery.md) — Multi-error reporting, statement/expression-level recovery, error AST nodes, common typo detection
 - [While Loop](done/while-loop.md) — `while condition { }`, universal loop syntax
 - [Hint System](done/hint-system.md) — Pluggable hint registry, 5 modules, 61 tests, catalog
+- [`import self`](done/import-self-entry.md) — `main.almd` can access `mod.almd` pub definitions via `import self`
+- [2026 Ergonomics](2026-ergonomics.md) — `do` block pure fn support, `guard else break/continue`, `unwrap_or` UFCS fix, `json.parse` auto-`?` fix

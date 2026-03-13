@@ -55,7 +55,7 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         "trim" | "split" | "pad_left"
         | "starts_with" | "starts_with_hdlm_qm_" | "starts_with?"
         | "ends_with" | "ends_with_hdlm_qm_" | "ends_with?"
-        | "to_bytes" | "to_upper" | "to_lower"
+        | "to_bytes" | "to_upper" | "to_lower" | "capitalize"
         | "to_int" | "replace" | "char_at" | "lines"
         | "chars" | "repeat" | "from_bytes"
         | "is_digit?" | "is_digit_hdlm_qm_"

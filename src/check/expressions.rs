@@ -105,6 +105,11 @@ impl Checker {
                 if matches!(name.as_str(), "println" | "eprintln") {
                     return Ty::Fn { params: vec![Ty::String], ret: Box::new(Ty::Unit) };
                 }
+                // Module names (user modules or aliases) are valid as identifiers in member/call context
+                if self.env.user_modules.contains(name) || self.env.module_aliases.contains_key(name)
+                    || crate::stdlib::is_stdlib_module(name) {
+                    return Ty::Unknown;
+                }
                 // Don't emit error for names that might be constructors or forward-declared
                 if !self.env.constructors.contains_key(name) && !name.starts_with(char::is_uppercase) {
                     let hint = if let Some(suggestion) = self.suggest_similar(name, "variable") {
@@ -450,7 +455,8 @@ impl Checker {
             ast::Expr::Member { object, field, .. } => {
                 // Track module usage for unused import detection
                 if let ast::Expr::Ident { name, .. } = object.as_ref() {
-                    if crate::stdlib::is_stdlib_module(name) || self.env.user_modules.contains(name) {
+                    if crate::stdlib::is_stdlib_module(name) || self.env.user_modules.contains(name)
+                        || self.env.module_aliases.contains_key(name) {
                         self.env.used_modules.insert(name.clone());
                     }
                 }

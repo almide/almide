@@ -529,11 +529,19 @@ impl Emitter {
         let resolved_mod = self.module_aliases.get(module)
             .cloned()
             .unwrap_or_else(|| module.to_string());
-        if self.user_modules.contains(&resolved_mod) {
-            let rust_mod = resolved_mod.replace('.', "_");
+        // Check both the resolved name and the original name for user module membership
+        let is_user_mod = self.user_modules.contains(&resolved_mod) || self.user_modules.contains(&module.to_string());
+        if is_user_mod {
+            // Use the name that's actually in user_modules for Rust module path
+            let actual_mod = if self.user_modules.contains(&resolved_mod) {
+                &resolved_mod
+            } else {
+                module
+            };
+            let rust_mod = actual_mod.replace('.', "_");
             let safe_func = crate::emit_common::sanitize(func);
             // Apply borrow inference using qualified name (module.func)
-            let qualified = format!("{}.{}", resolved_mod, func);
+            let qualified = format!("{}.{}", actual_mod, func);
             let borrow_args: Vec<String> = ir_args.iter().enumerate().map(|(i, a)| {
                 self.gen_ir_arg_for(a, &qualified, i)
             }).collect();

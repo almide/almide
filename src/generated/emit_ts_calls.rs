@@ -171,6 +171,7 @@ pub fn gen_generated_call(module: &str, func: &str, args_str: &[String]) -> Opti
             ("regex", "replace") => format!("__almd_regex.replace({}, {}, {})", args_str[0], args_str[1], args_str[2]),
             ("regex", "replace_first") => format!("__almd_regex.replace_first({}, {}, {})", args_str[0], args_str[1], args_str[2]),
             ("regex", "split") => format!("__almd_regex.split({}, {})", args_str[0], args_str[1]),
+            ("string", "capitalize") => format!("__almd_string.capitalize({})", args_str[0]),
             ("string", "char_at") => format!("__almd_string.char_at({}, {})", args_str[0], args_str[1]),
             ("string", "chars") => format!("__almd_string.chars({})", args_str[0]),
             ("string", "contains?") => format!("__almd_string.contains_hdlm_qm_({}, {})", args_str[0], args_str[1]),

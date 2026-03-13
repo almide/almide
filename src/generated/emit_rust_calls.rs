@@ -276,6 +276,7 @@ pub fn gen_generated_call(
             ("regex", "replace") => format!("almide_regex_replace(&{}, &{}, &{})", args_str[0], args_str[1], args_str[2]),
             ("regex", "replace_first") => format!("almide_regex_replace_first(&{}, &{}, &{})", args_str[0], args_str[1], args_str[2]),
             ("regex", "split") => format!("almide_regex_split(&{}, &{})", args_str[0], args_str[1]),
+            ("string", "capitalize") => format!("almide_rt_string_capitalize(&*{})", args_str[0]),
             ("string", "char_at") => format!("almide_rt_string_char_at(&*{}, {})", args_str[0], args_str[1]),
             ("string", "chars") => format!("almide_rt_string_chars(&*{})", args_str[0]),
             ("string", "contains?") => format!("almide_rt_string_contains(&*{}, &*{})", args_str[0], args_str[1]),
