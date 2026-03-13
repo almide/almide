@@ -1,4 +1,5 @@
 use almide::ir::*;
+use almide::types::Ty;
 use super::Emitter;
 
 impl Emitter {
@@ -220,7 +221,15 @@ impl Emitter {
                             }
                         }
                         IrStringPart::Expr { expr } => {
-                            fmt.push_str("{}");
+                            // Use Debug ({:?}) only for compound types that lack Display:
+                            // List, Option, Result, Map, Tuple, Record, Variant
+                            // Everything else uses Display ({}) — including String, Int, Float, Bool, Unknown
+                            let use_debug = Self::needs_debug_format(&expr.ty);
+                            if use_debug {
+                                fmt.push_str("{:?}");
+                            } else {
+                                fmt.push_str("{}");
+                            }
                             args.push(self.gen_ir_expr(expr));
                         }
                     }
@@ -943,6 +952,19 @@ impl Emitter {
             if *count == 1 && !param_ids.contains(id) {
                 self.single_use_vars.insert(var_table.get(*id).name.clone());
             }
+        }
+    }
+
+    fn needs_debug_format(ty: &Ty) -> bool {
+        match ty {
+            Ty::List(_) | Ty::Option(_) | Ty::Result(_, _) |
+            Ty::Map(_, _) | Ty::Tuple(_) | Ty::Record { .. } |
+            Ty::Variant { .. } => true,
+            Ty::Named(name, _) => {
+                // Built-in type names use Display, user-defined types use Debug
+                !matches!(name.as_str(), "String" | "Int" | "Float" | "Bool")
+            }
+            _ => false,
         }
     }
 }
