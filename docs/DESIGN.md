@@ -42,6 +42,27 @@ Almide optimizes for **minimal thinking tokens**: the less an LLM has to branch 
 
 This means the LLM can generate code by looking only at the current function's signature and its imports — no global analysis required.
 
+## Async: Boring on Purpose
+
+Almide keeps async boring on purpose: explicit fork, explicit join, automatic cancellation, and the same fail-fast semantics as `do`.
+
+Three language constructs only:
+
+- **`async fn`** — declares an asynchronous function (implicitly `effect`)
+- **`await expr`** — resolves `Future[T]` to `T` (one operation, always explicit)
+- **`async let x = expr`** — starts a concurrent task, binds a single-use handle
+
+Everything else (`race`, `timeout`, `sleep`) is a stdlib function, not syntax.
+
+The rules are minimal:
+
+- `await x` consumes the handle — a second `await x` is a compile error
+- Inside `do`: any task failure cancels all siblings, then propagates the error
+- Scope exit with un-awaited handles triggers automatic cancellation
+- No unstructured `spawn` — all concurrency is scoped
+
+This mirrors `do` exactly: `do` exits on the first `Result` error; `async let` + `do` exits on the first failed task. Sequential and concurrent code follow the same fail-fast rule.
+
 ## UFCS: Why Two Forms is Acceptable
 
 `f(x, y)` and `x.f(y)` are equivalent, which superficially adds a synonym. We accept this because:
