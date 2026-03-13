@@ -182,6 +182,15 @@ fn check_escape_expr(
             for (_, e) in fields { mark_all(e, heap_vars, escaped); }
         }
 
+        IrExprKind::MapLiteral { entries } => {
+            for (k, v) in entries {
+                mark_all(k, heap_vars, escaped);
+                mark_all(v, heap_vars, escaped);
+            }
+        }
+
+        IrExprKind::EmptyMap => {}
+
         // Binary ops: Concat consumes ownership; others are OK
         IrExprKind::BinOp { op, left, right } => {
             if matches!(op, BinOp::ConcatStr | BinOp::ConcatList) {
@@ -381,6 +390,13 @@ fn mark_all_filtered(expr: &IrExpr, vars: &HashSet<VarId>, escaped: &mut HashSet
             mark_all_filtered(base, vars, escaped);
             for (_, e) in fields { mark_all_filtered(e, vars, escaped); }
         }
+        IrExprKind::MapLiteral { entries } => {
+            for (k, v) in entries {
+                mark_all_filtered(k, vars, escaped);
+                mark_all_filtered(v, vars, escaped);
+            }
+        }
+        IrExprKind::EmptyMap => {}
         IrExprKind::BinOp { left, right, .. } => {
             mark_all_filtered(left, vars, escaped);
             mark_all_filtered(right, vars, escaped);

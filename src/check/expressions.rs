@@ -150,6 +150,42 @@ impl Checker {
                 Ty::List(Box::new(first_ty))
             }
 
+            ast::Expr::EmptyMap { .. } => {
+                if let Some(Ty::Map(k, v)) = expected {
+                    Ty::Map(k.clone(), v.clone())
+                } else {
+                    self.push_diagnostic(err(
+                        "cannot infer Map type from empty literal [:]",
+                        "Add a type annotation: let m: Map[K, V] = [:]",
+                        "empty map literal",
+                    ));
+                    Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown))
+                }
+            }
+
+            ast::Expr::MapLiteral { entries, .. } => {
+                let (first_key, first_val) = &mut entries[0];
+                let key_ty = self.check_expr(first_key);
+                let val_ty = self.check_expr(first_val);
+                for (i, (k, v)) in entries.iter_mut().enumerate().skip(1) {
+                    let kt = self.check_expr(k);
+                    let vt = self.check_expr(v);
+                    if !key_ty.compatible(&kt) {
+                        self.push_diagnostic(err(
+                            format!("map key at index {} has type {} but expected {}", i, kt.display(), key_ty.display()),
+                            "All map keys must have the same type", "map literal",
+                        ));
+                    }
+                    if !val_ty.compatible(&vt) {
+                        self.push_diagnostic(err(
+                            format!("map value at index {} has type {} but expected {}", i, vt.display(), val_ty.display()),
+                            "All map values must have the same type", "map literal",
+                        ));
+                    }
+                }
+                Ty::Map(Box::new(key_ty), Box::new(val_ty))
+            }
+
             ast::Expr::Record { name, fields, .. } => {
                 // Check if this is a variant record constructor
                 if let Some(cname) = name.as_ref() {
@@ -339,7 +375,13 @@ impl Checker {
                 self.env.push_scope();
                 let elem_ty = match &it {
                     Ty::List(inner) => *inner.clone(),
-                    Ty::Map(k, _) => *k.clone(),
+                    Ty::Map(k, v) => {
+                        if var_tuple.is_some() {
+                            Ty::Tuple(vec![*k.clone(), *v.clone()])
+                        } else {
+                            *k.clone()
+                        }
+                    }
                     _ if matches!(it, Ty::Unknown) => Ty::Unknown,
                     _ => {
                         self.push_diagnostic(err(
@@ -500,21 +542,33 @@ impl Checker {
             ast::Expr::IndexAccess { object, index, .. } => {
                 let ot = self.check_expr(object);
                 let it = self.check_expr(index);
-                if !matches!(it, Ty::Int | Ty::Unknown) {
-                    self.push_diagnostic(err(
-                        format!("index must be Int, got {}", it.display()),
-                        "Use an Int value for list indexing",
-                        "xs[i]",
-                    ));
-                }
                 match &ot {
-                    Ty::List(inner) => *inner.clone(),
+                    Ty::List(inner) => {
+                        if !matches!(it, Ty::Int | Ty::Unknown) {
+                            self.push_diagnostic(err(
+                                format!("list index must be Int, got {}", it.display()),
+                                "Use an Int value for list indexing",
+                                "xs[i]",
+                            ));
+                        }
+                        *inner.clone()
+                    }
+                    Ty::Map(k, v) => {
+                        if !it.compatible(k) && !matches!(it, Ty::Unknown) {
+                            self.push_diagnostic(err(
+                                format!("map key type is {} but got {}", k.display(), it.display()),
+                                "Key type must match the Map's key type",
+                                "m[key]",
+                            ));
+                        }
+                        Ty::Option(v.clone())
+                    }
                     Ty::Unknown => Ty::Unknown,
                     _ => {
                         self.push_diagnostic(err(
                             format!("cannot index into type {}", ot.display()),
-                            "Indexing with [] is only supported for List[T]",
-                            "xs[i]",
+                            "Indexing with [] is supported for List[T] and Map[K, V]",
+                            "xs[i] or m[key]",
                         ));
                         Ty::Unknown
                     }

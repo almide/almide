@@ -310,14 +310,55 @@ impl Parser {
         let span = Some(self.current_span());
         self.expect(TokenType::LBracket)?;
         self.skip_newlines();
-        let mut elements = Vec::new();
-        while !self.check(TokenType::RBracket) {
-            elements.push(self.parse_expr()?);
+
+        // [] → empty List
+        if self.check(TokenType::RBracket) {
+            self.advance();
+            return Ok(Expr::List { elements: vec![], span, resolved_type: None });
+        }
+
+        // [:] → empty Map
+        if self.check(TokenType::Colon) {
+            self.advance();
+            self.expect(TokenType::RBracket)?;
+            return Ok(Expr::EmptyMap { span, resolved_type: None });
+        }
+
+        // Parse first expression, then decide List vs Map
+        let first = self.parse_expr()?;
+        self.skip_newlines();
+
+        if self.check(TokenType::Colon) {
+            // Map literal: [key: value, ...]
+            self.advance();
             self.skip_newlines();
-            if self.check(TokenType::Comma) {
+            let first_value = self.parse_expr()?;
+            self.skip_newlines();
+            let mut entries = vec![(first, first_value)];
+            while self.check(TokenType::Comma) {
                 self.advance();
                 self.skip_newlines();
+                if self.check(TokenType::RBracket) { break; } // trailing comma
+                let key = self.parse_expr()?;
+                self.skip_newlines();
+                self.expect(TokenType::Colon)?;
+                self.skip_newlines();
+                let value = self.parse_expr()?;
+                self.skip_newlines();
+                entries.push((key, value));
             }
+            self.expect(TokenType::RBracket)?;
+            return Ok(Expr::MapLiteral { entries, span, resolved_type: None });
+        }
+
+        // List literal: [expr, ...]
+        let mut elements = vec![first];
+        while self.check(TokenType::Comma) {
+            self.advance();
+            self.skip_newlines();
+            if self.check(TokenType::RBracket) { break; }
+            elements.push(self.parse_expr()?);
+            self.skip_newlines();
         }
         self.expect(TokenType::RBracket)?;
         Ok(Expr::List { elements, span, resolved_type: None })

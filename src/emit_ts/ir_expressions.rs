@@ -80,6 +80,15 @@ impl TsEmitter {
                 format!("[{}]", elems.join(", "))
             }
 
+            IrExprKind::EmptyMap => "__almd_map.new()".to_string(),
+
+            IrExprKind::MapLiteral { entries } => {
+                let pairs: Vec<String> = entries.iter().map(|(k, v)| {
+                    format!("[{}, {}]", self.gen_ir_expr(k), self.gen_ir_expr(v))
+                }).collect();
+                format!("new Map([{}])", pairs.join(", "))
+            }
+
             IrExprKind::Record { name, fields } => {
                 let fs: Vec<String> = fields.iter()
                     .map(|(fname, fval)| format!("{}: {}", fname, self.gen_ir_expr(fval)))
@@ -131,7 +140,11 @@ impl TsEmitter {
             }
 
             IrExprKind::IndexAccess { object, index } => {
-                format!("{}[{}]", self.gen_ir_expr(object), self.gen_ir_expr(index))
+                if matches!(object.ty, crate::types::Ty::Map(_, _)) {
+                    format!("__almd_map.get({}, {})", self.gen_ir_expr(object), self.gen_ir_expr(index))
+                } else {
+                    format!("{}[{}]", self.gen_ir_expr(object), self.gen_ir_expr(index))
+                }
             }
 
             IrExprKind::Lambda { params, body } => {

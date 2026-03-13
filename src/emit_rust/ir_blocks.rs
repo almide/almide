@@ -52,7 +52,10 @@ impl Emitter {
                 let name = self.ir_var_table().get(*target).name.clone();
                 let idx = self.gen_ir_expr(index);
                 let val = self.gen_ir_expr(value);
-                if self.fast_mode {
+                let target_ty = &self.ir_var_table().get(*target).ty;
+                if matches!(target_ty, almide::types::Ty::Map(_, _)) {
+                    format!("{}.insert({}, {});", name, idx, val)
+                } else if self.fast_mode {
                     format!("unsafe {{ *{}.get_unchecked_mut({} as usize) = {}; }}", name, idx, val)
                 } else {
                     format!("{}[{} as usize] = {};", name, idx, val)
@@ -319,6 +322,7 @@ impl Emitter {
         use almide::types::Ty;
         let is_empty_collection = value.map_or(false, |v| match &v.kind {
             IrExprKind::List { elements } => elements.is_empty(),
+            IrExprKind::EmptyMap => true,
             IrExprKind::Call { target: CallTarget::Module { func, .. }, args, .. } => {
                 func == "new" && args.is_empty()
             }

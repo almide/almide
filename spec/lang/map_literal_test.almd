@@ -1,0 +1,87 @@
+// Map literal syntax tests
+
+test "empty map with type annotation" {
+  let m: Map[String, Int] = [:]
+  assert_eq(m.len(), 0)
+  assert(m.is_empty?())
+}
+
+test "map literal with entries" {
+  let m = ["a": 1, "b": 2, "c": 3]
+  assert_eq(m.len(), 3)
+  assert_eq(m.get("a"), some(1))
+  assert_eq(m.get("b"), some(2))
+  assert_eq(m.get("c"), some(3))
+}
+
+test "map literal single entry" {
+  let m = ["key": "value"]
+  assert_eq(m.get("key"), some("value"))
+}
+
+test "map set on empty map" {
+  let m: Map[String, Int] = [:]
+  let m2 = m.set("x", 42)
+  assert_eq(m2.get("x"), some(42))
+}
+
+test "map literal with trailing comma" {
+  let m = [
+    "host": "localhost",
+    "port": "8080",
+  ]
+  assert_eq(m.get("host"), some("localhost"))
+  assert_eq(m.get("port"), some("8080"))
+}
+
+test "map keys and values" {
+  let m = ["a": 1, "b": 2]
+  let ks = m.keys()
+  assert_eq(ks.len(), 2)
+  assert(ks.contains("a"))
+  assert(ks.contains("b"))
+}
+
+// --- Index access: m[key] returns Option[V] ---
+
+test "map index access returns some" {
+  let m = ["x": 10, "y": 20]
+  assert_eq(m["x"], some(10))
+  assert_eq(m["y"], some(20))
+}
+
+test "map index access returns none for missing key" {
+  let m = ["a": 1]
+  assert_eq(m["z"], none)
+}
+
+// --- Direct iteration: for (k, v) in m ---
+
+test "for (k, v) in map" {
+  let m = ["a": 1, "b": 2]
+  var sum = 0
+  for (k, v) in m {
+    sum = sum + v
+  }
+  assert_eq(sum, 3)
+}
+
+test "for key in map iterates keys" {
+  let m = ["x": 10, "y": 20]
+  var count = 0
+  for k in m {
+    count = count + 1
+  }
+  assert_eq(count, 2)
+}
+
+// --- Mutable index assignment: m[key] = val ---
+
+test "map index assign on var" {
+  var m = ["a": 1]
+  m["b"] = 2
+  m["a"] = 10
+  assert_eq(m["a"], some(10))
+  assert_eq(m["b"], some(2))
+  assert_eq(m.len(), 2)
+}

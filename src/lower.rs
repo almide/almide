@@ -263,7 +263,13 @@ fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             ctx.push_scope();
             let elem_ty = match &iterable_ir.ty {
                 Ty::List(inner) => *inner.clone(),
-                Ty::Map(k, _) => *k.clone(),
+                Ty::Map(k, v) => {
+                    if var_tuple.is_some() {
+                        Ty::Tuple(vec![*k.clone(), *v.clone()])
+                    } else {
+                        *k.clone()
+                    }
+                }
                 _ => Ty::Unknown,
             };
             let var_tuple_ids = if let Some(names) = var_tuple {
@@ -312,6 +318,17 @@ fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         ast::Expr::List { elements, .. } => {
             let elems: Vec<IrExpr> = elements.iter().map(|e| lower_expr(ctx, e)).collect();
             ctx.mk(IrExprKind::List { elements: elems }, ty, span)
+        }
+
+        ast::Expr::EmptyMap { .. } => {
+            ctx.mk(IrExprKind::EmptyMap, ty, span)
+        }
+
+        ast::Expr::MapLiteral { entries, .. } => {
+            let ir_entries: Vec<(IrExpr, IrExpr)> = entries.iter()
+                .map(|(k, v)| (lower_expr(ctx, k), lower_expr(ctx, v)))
+                .collect();
+            ctx.mk(IrExprKind::MapLiteral { entries: ir_entries }, ty, span)
         }
 
         ast::Expr::Record { name, fields, .. } => {

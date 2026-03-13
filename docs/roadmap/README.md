@@ -63,4 +63,5 @@
 - [Tuple & Record](done/tuple-record.md)
 - [Typed IR](done/typed-ir.md) — IR-based codegen, AST-direct codegen removed
 - [Variant Record Fields](done/variant-record-fields.md) — named fields on enum variants, `..` rest pattern
+- [Map Literal](done/map-literal.md) — Swift-style `[:]` / `["key": value]` syntax
 - [While Loop](done/while-loop.md) — `while condition { }`, universal loop syntax

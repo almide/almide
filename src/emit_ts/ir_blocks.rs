@@ -25,7 +25,12 @@ impl TsEmitter {
             }
             IrStmtKind::IndexAssign { target, index, value } => {
                 let name = Self::sanitize(&self.ir_var_table().get(*target).name);
-                format!("{}[{}] = {};", name, self.gen_ir_expr(index), self.gen_ir_expr(value))
+                let target_ty = &self.ir_var_table().get(*target).ty;
+                if matches!(target_ty, crate::types::Ty::Map(_, _)) {
+                    format!("{}.set({}, {});", name, self.gen_ir_expr(index), self.gen_ir_expr(value))
+                } else {
+                    format!("{}[{}] = {};", name, self.gen_ir_expr(index), self.gen_ir_expr(value))
+                }
             }
             IrStmtKind::FieldAssign { target, field, value } => {
                 let name = Self::sanitize(&self.ir_var_table().get(*target).name);
