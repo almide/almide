@@ -2,7 +2,6 @@
 
 ## Active
 
-- [Hint System Architecture](active/hint-system.md) — Pluggable hint registry, separate hint modules from parser core
 - [LLM Integration](active/llm-integration.md) — `almide forge` (library generation), `almide fix` (self-repair), `almide explain`
 - [Structured Concurrency](active/structured-concurrency.md) — Layer 2: `async let` / `await` for scoped parallel execution
 - [Grammar Codegen](active/grammar-codegen.md) — Single source of truth for tokens/precedence, auto-generate tree-sitter + TextMate + lexer
@@ -67,6 +66,7 @@
 - [Typed IR](done/typed-ir.md) — IR-based codegen, AST-direct codegen removed
 - [Variant Record Fields](done/variant-record-fields.md) — named fields on enum variants, `..` rest pattern
 - [Map Literal](done/map-literal.md) — `[:]` / `["key": value]` syntax, index access, direct iteration
-- [Eq Protocol](on-hold/trait-impl.md) — automatic `==` for all value types, `Fn` types rejected
+- [Eq Protocol](done/eq-protocol.md) — automatic `==` for all value types, `Fn` types rejected
 - [Error Recovery](done/error-recovery.md) — Multi-error reporting, statement/expression-level recovery, error AST nodes, common typo detection
 - [While Loop](done/while-loop.md) — `while condition { }`, universal loop syntax
+- [Hint System](done/hint-system.md) — Pluggable hint registry, 5 modules, 61 tests, catalog
