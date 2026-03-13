@@ -1,0 +1,146 @@
+// codegen_effect_fn_test — Effect function error propagation edge cases
+
+// ── Effect fn calling multiple effect fns in sequence ──
+
+effect fn parse_int_strict(s: String) -> Result[Int, String] = {
+  let n = string.to_int(s)
+  ok(n)
+}
+
+effect fn validate_even(n: Int) -> Result[Int, String] = {
+  guard n % 2 == 0 else err("not even: ${int.to_string(n)}")
+  ok(n)
+}
+
+effect fn validate_positive(n: Int) -> Result[Int, String] = {
+  guard n > 0 else err("not positive: ${int.to_string(n)}")
+  ok(n)
+}
+
+effect fn parse_positive_even(s: String) -> Result[Int, String] = {
+  let n = parse_int_strict(s)
+  let n = validate_positive(n)
+  let n = validate_even(n)
+  ok(n)
+}
+
+test "chained effect fn all pass" {
+  assert_eq(parse_positive_even("42"), ok(42))
+}
+
+test "chained effect fn fails at parse" {
+  let result = parse_positive_even("xyz")
+  match result {
+    ok(_) => assert(false, "should fail"),
+    err(_) => assert(true),
+  }
+}
+
+test "chained effect fn fails at positive check" {
+  assert_eq(parse_positive_even("-4"), err("not positive: -4"))
+}
+
+test "chained effect fn fails at even check" {
+  assert_eq(parse_positive_even("7"), err("not even: 7"))
+}
+
+// ── Effect fn with loop and early return ──
+
+effect fn find_first_even(xs: List[String]) -> Result[Int, String] = {
+  var i = 0
+  do {
+    guard i < list.len(xs) else err("no even number found")
+    let s = match list.get(xs, i) {
+      some(v) => v,
+      none => "",
+    }
+    let n = parse_int_strict(s)
+    guard n % 2 != 0 else ok(n)
+    i = i + 1
+  }
+}
+
+test "effect fn with loop finds even" {
+  assert_eq(find_first_even(["1", "3", "4", "6"]), ok(4))
+}
+
+test "effect fn with loop no even found" {
+  assert_eq(find_first_even(["1", "3", "5"]), err("no even number found"))
+}
+
+// ── Effect fn with if-else returning Result ──
+
+effect fn classify_number(s: String) -> Result[String, String] = {
+  let n = parse_int_strict(s)
+  let label = if n > 100 then "large"
+    else if n > 10 then "medium"
+    else if n > 0 then "small"
+    else "non-positive"
+  ok(label)
+}
+
+test "effect fn with conditional classification" {
+  assert_eq(classify_number("150"), ok("large"))
+  assert_eq(classify_number("50"), ok("medium"))
+  assert_eq(classify_number("5"), ok("small"))
+  assert_eq(classify_number("0"), ok("non-positive"))
+}
+
+// ── Effect fn with match on intermediate result ──
+
+effect fn process_item(item: String) -> Result[String, String] = {
+  let n = parse_int_strict(item)
+  let category = match n {
+    _ if n < 0 => "negative",
+    0 => "zero",
+    _ if n < 10 => "single-digit",
+    _ => "multi-digit",
+  }
+  ok("${item} is ${category}")
+}
+
+test "effect fn with match on unwrapped value" {
+  assert_eq(process_item("0"), ok("0 is zero"))
+  assert_eq(process_item("-5"), ok("-5 is negative"))
+  assert_eq(process_item("7"), ok("7 is single-digit"))
+  assert_eq(process_item("42"), ok("42 is multi-digit"))
+}
+
+// ── Effect fn accumulating results in a loop ──
+
+effect fn sum_strings(strs: List[String]) -> Result[Int, String] = {
+  var total = 0
+  for s in strs {
+    let n = parse_int_strict(s)
+    total = total + n
+  }
+  ok(total)
+}
+
+test "effect fn loop accumulation success" {
+  assert_eq(sum_strings(["10", "20", "30"]), ok(60))
+}
+
+test "effect fn loop accumulation empty" {
+  assert_eq(sum_strings([]), ok(0))
+}
+
+// ── Effect fn with guard in loop body ──
+
+effect fn sum_positive_strings(strs: List[String]) -> Result[Int, String] = {
+  var total = 0
+  for s in strs {
+    let n = parse_int_strict(s)
+    let _ = validate_positive(n)
+    total = total + n
+  }
+  ok(total)
+}
+
+test "effect fn guard in loop all positive" {
+  assert_eq(sum_positive_strings(["1", "2", "3"]), ok(6))
+}
+
+test "effect fn guard in loop negative fails" {
+  assert_eq(sum_positive_strings(["1", "-2", "3"]), err("not positive: -2"))
+}

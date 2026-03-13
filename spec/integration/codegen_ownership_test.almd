@@ -1,0 +1,144 @@
+// codegen_ownership_test — Ownership and variable reuse edge cases for Rust codegen
+
+// ── Variable used after for loop ──
+
+test "list used after for loop" {
+  let xs = [1, 2, 3, 4, 5]
+  var sum = 0
+  for x in xs {
+    sum = sum + x
+  }
+  assert_eq(sum, 15)
+  assert_eq(list.len(xs), 5)
+  assert_eq(xs, [1, 2, 3, 4, 5])
+}
+
+// ── Variable used in multiple operations ──
+
+test "list used in multiple sequential operations" {
+  let xs = [5, 3, 1, 4, 2]
+  let sorted = list.sort(xs)
+  let reversed = list.reverse(xs)
+  let doubled = list.map(xs, fn(x) => x * 2)
+  let filtered = list.filter(xs, fn(x) => x > 3)
+  assert_eq(sorted, [1, 2, 3, 4, 5])
+  assert_eq(reversed, [2, 4, 1, 3, 5])
+  assert_eq(doubled, [10, 6, 2, 8, 4])
+  assert_eq(filtered, [5, 4])
+}
+
+// ── String used after operations ──
+
+test "string used in multiple operations" {
+  let s = "hello world"
+  let upper = string.to_upper(s)
+  let lower = string.to_lower(s)
+  let parts = string.split(s, " ")
+  let contains_hello = string.contains(s, "hello")
+  assert_eq(upper, "HELLO WORLD")
+  assert_eq(lower, "hello world")
+  assert_eq(parts, ["hello", "world"])
+  assert_eq(contains_hello, true)
+  assert_eq(s, "hello world")
+}
+
+// ── Record used after field access ──
+
+test "record field access multiple times" {
+  let r = { name: "alice", age: 30, active: true }
+  assert_eq(r.name, "alice")
+  assert_eq(r.age, 30)
+  assert_eq(r.active, true)
+  // spread after access
+  let spread = { ...r, age: 31 }
+  assert_eq(spread.name, "alice")
+  assert_eq(spread.age, 31)
+}
+
+// ── Variable used in both if branches and after ──
+
+test "variable used in both branches and after" {
+  let xs = [1, 2, 3]
+  let result = if list.len(xs) > 2 then list.sum(xs) else 0
+  assert_eq(result, 6)
+  assert_eq(list.len(xs), 3)
+  let mapped = list.map(xs, fn(x) => x + 10)
+  assert_eq(mapped, [11, 12, 13])
+}
+
+// ── Variable used inside match and after ──
+
+test "variable used in match arms and after" {
+  let xs = [10, 20, 30]
+  let msg = match list.len(xs) {
+    0 => "empty",
+    1 => "one",
+    _ => "many: ${int.to_string(list.sum(xs))}",
+  }
+  assert_eq(msg, "many: 60")
+  assert_eq(list.get(xs, 0), some(10))
+}
+
+// ── Var reassigned in loop body ──
+
+test "var reassigned multiple times" {
+  var state = { count: 0, total: 0 }
+  for x in [10, 20, 30] {
+    state = { count: state.count + 1, total: state.total + x }
+  }
+  assert_eq(state.count, 3)
+  assert_eq(state.total, 60)
+}
+
+// ── Option used multiple times ──
+
+test "option value used across operations" {
+  let opt = some([1, 2, 3])
+  let result = match opt {
+    some(xs) => {
+      let len = list.len(xs)
+      let sum = list.sum(xs)
+      (len, sum)
+    },
+    none => (0, 0),
+  }
+  assert_eq(result, (3, 6))
+}
+
+// ── List concat with reuse ──
+
+test "list concat preserves originals" {
+  let a = [1, 2]
+  let b = [3, 4]
+  let c = a ++ b
+  let d = b ++ a
+  assert_eq(c, [1, 2, 3, 4])
+  assert_eq(d, [3, 4, 1, 2])
+  assert_eq(a, [1, 2])
+  assert_eq(b, [3, 4])
+}
+
+// ── Variable used in closure and after ──
+
+test "variable used in closure and then directly" {
+  let data = [1, 2, 3, 4, 5]
+  let evens = list.filter(data, fn(x) => x % 2 == 0)
+  let sum = list.sum(data)
+  assert_eq(evens, [2, 4])
+  assert_eq(sum, 15)
+  assert_eq(list.len(data), 5)
+}
+
+// ── Map used after multiple operations ──
+
+test "map used after multiple operations" {
+  let m = map.from_entries([("a", 1), ("b", 2), ("c", 3)])
+  let keys = list.sort(map.keys(m))
+  let values = list.sort(map.values(m))
+  let has_a = map.contains(m, "a")
+  let get_b = map.get(m, "b")
+  assert_eq(keys, ["a", "b", "c"])
+  assert_eq(values, [1, 2, 3])
+  assert_eq(has_a, true)
+  assert_eq(get_b, some(2))
+}

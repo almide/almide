@@ -1,0 +1,122 @@
+// codegen_variant_record_test — Variant with record payload edge cases
+
+// ── Variant with record payload and default fields ──
+
+type Event =
+  | Click { x: Int, y: Int, button: String = "left" }
+  | KeyPress { key: String, ctrl: Bool = false, shift: Bool = false }
+  | Resize { width: Int, height: Int }
+  | Close
+
+fn event_label(e: Event) -> String = match e {
+  Click { button, .. } => "click:${button}",
+  KeyPress { key, ctrl, shift } => {
+    let mods = if ctrl then "ctrl+" else ""
+    let mods = if shift then mods ++ "shift+" else mods
+    "key:${mods}${key}"
+  },
+  Resize { width, height } => "resize:${int.to_string(width)}x${int.to_string(height)}",
+  Close => "close",
+}
+
+test "variant record with all defaults" {
+  let e = Click { x: 100, y: 200 }
+  assert_eq(event_label(e), "click:left")
+}
+
+test "variant record override default" {
+  let e = Click { x: 50, y: 50, button: "right" }
+  assert_eq(event_label(e), "click:right")
+}
+
+test "variant record with bool defaults" {
+  let e1 = KeyPress { key: "a" }
+  assert_eq(event_label(e1), "key:a")
+  let e2 = KeyPress { key: "c", ctrl: true }
+  assert_eq(event_label(e2), "key:ctrl+c")
+  let e3 = KeyPress { key: "z", ctrl: true, shift: true }
+  assert_eq(event_label(e3), "key:ctrl+shift+z")
+}
+
+test "variant record no defaults" {
+  let e = Resize { width: 1920, height: 1080 }
+  assert_eq(event_label(e), "resize:1920x1080")
+}
+
+test "variant record zero-arg constructor" {
+  assert_eq(event_label(Close), "close")
+}
+
+// ── List of variant records with heterogeneous constructors ──
+
+test "list of mixed variant records" {
+  let events = [
+    Click { x: 0, y: 0 },
+    KeyPress { key: "enter" },
+    Resize { width: 800, height: 600 },
+    Close,
+    Click { x: 10, y: 20, button: "middle" },
+  ]
+  let labels = list.map(events, fn(e) => event_label(e))
+  assert_eq(list.len(labels), 5)
+  assert_eq(list.get(labels, 0), some("click:left"))
+  assert_eq(list.get(labels, 3), some("close"))
+  assert_eq(list.get(labels, 4), some("click:middle"))
+}
+
+// ── Filtering variant records by constructor ──
+
+fn is_click(e: Event) -> Bool = match e {
+  Click { .. } => true,
+  _ => false,
+}
+
+test "filter variant records by constructor" {
+  let events = [
+    Click { x: 1, y: 1 },
+    KeyPress { key: "a" },
+    Click { x: 2, y: 2 },
+    Close,
+  ]
+  let clicks = list.filter(events, fn(e) => is_click(e))
+  assert_eq(list.len(clicks), 2)
+}
+
+// ── Extracting fields from variant records ──
+
+fn extract_click_positions(events: List[Event]) -> List[(Int, Int)] =
+  list.filter_map(events, fn(e) => match e {
+    Click { x, y, .. } => some((x, y)),
+    _ => none,
+  })
+
+test "extract fields from variant records" {
+  let events = [
+    Click { x: 10, y: 20 },
+    KeyPress { key: "b" },
+    Click { x: 30, y: 40, button: "right" },
+  ]
+  let positions = extract_click_positions(events)
+  assert_eq(positions, [(10, 20), (30, 40)])
+}
+
+// ── Nested variant records ──
+
+type Widget =
+  | Button { label: String, on_click: Event }
+  | Panel { title: String, children: List[Widget] }
+  | Spacer
+
+fn widget_name(w: Widget) -> String = match w {
+  Button { label, .. } => "btn:${label}",
+  Panel { title, children } => "panel:${title}(${int.to_string(list.len(children))})",
+  Spacer => "spacer",
+}
+
+test "nested variant records widget tree" {
+  let btn1 = Button { label: "OK", on_click: Click { x: 0, y: 0 } }
+  let btn2 = Button { label: "Cancel", on_click: Close }
+  let panel = Panel { title: "dialog", children: [btn1, Spacer, btn2] }
+  assert_eq(widget_name(panel), "panel:dialog(3)")
+  assert_eq(widget_name(btn1), "btn:OK")
+}
