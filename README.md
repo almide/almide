@@ -57,7 +57,7 @@ Verify the installation:
 
 ```bash
 almide --version
-# almide 0.5.8
+# almide 0.5.9
 ```
 
 ### Hello World
@@ -78,6 +78,8 @@ almide run hello.almd
 - **Generics** — Functions, records, variant types, recursive variants with auto Box wrapping
 - **Pattern matching** — Exhaustive match with variant destructuring
 - **Effect functions** — `effect fn` for explicit error propagation (`Result` auto-wrapping)
+- **Bidirectional type inference** — Type annotations flow into expressions (`let xs: List[Int] = []`)
+- **Map literals** — `["key": value]` syntax with `m[key]` access and `for (k, v) in m` iteration
 - **Top-level constants** — `let PI = 3.14` at module scope, compile-time evaluated
 - **Pipeline operator** — `data |> transform |> output`
 - **Module system** — Packages, sub-namespaces, visibility control, diamond dependency resolution

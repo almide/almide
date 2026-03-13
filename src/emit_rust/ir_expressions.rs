@@ -1,4 +1,5 @@
 use almide::ir::*;
+use almide::types::Ty;
 use super::Emitter;
 
 impl Emitter {
@@ -94,6 +95,19 @@ impl Emitter {
                 format!("vec![{}]", elems.join(", "))
             }
 
+            IrExprKind::EmptyMap => {
+                "HashMap::new()".to_string()
+            }
+
+            IrExprKind::MapLiteral { entries } => {
+                let pairs: Vec<String> = entries.iter().map(|(k, v)| {
+                    let kc = self.gen_ir_arg(k);
+                    let vc = self.gen_ir_arg(v);
+                    format!("({}, {})", kc, vc)
+                }).collect();
+                format!("vec![{}].into_iter().collect::<HashMap<_, _>>()", pairs.join(", "))
+            }
+
             IrExprKind::Record { name, fields } => {
                 if let Some(struct_name) = name {
                     let fs: Vec<String> = fields.iter().map(|(fname, fval)| {
@@ -172,7 +186,10 @@ impl Emitter {
             IrExprKind::IndexAccess { object, index } => {
                 let obj = self.gen_ir_expr(object);
                 let idx = self.gen_ir_expr(index);
-                if self.fast_mode {
+                if matches!(object.ty, almide::types::Ty::Map(_, _)) {
+                    // Map index: m[key] → map.get(m, key) → Option<V>
+                    format!("almide_rt_map_get(&{}, &{})", obj, idx)
+                } else if self.fast_mode {
                     format!("unsafe {{ *{}.get_unchecked({} as usize) }}", obj, idx)
                 } else {
                     format!("{}[{} as usize]", obj, idx)
@@ -204,7 +221,15 @@ impl Emitter {
                             }
                         }
                         IrStringPart::Expr { expr } => {
-                            fmt.push_str("{}");
+                            // Use Debug ({:?}) only for compound types that lack Display:
+                            // List, Option, Result, Map, Tuple, Record, Variant
+                            // Everything else uses Display ({}) — including String, Int, Float, Bool, Unknown
+                            let use_debug = Self::needs_debug_format(&expr.ty);
+                            if use_debug {
+                                fmt.push_str("{:?}");
+                            } else {
+                                fmt.push_str("{}");
+                            }
                             args.push(self.gen_ir_expr(expr));
                         }
                     }
@@ -574,6 +599,12 @@ impl Emitter {
             IrExprKind::Record { fields, .. } => {
                 for (_, v) in fields { Self::count_vars_in_expr(v, counts); }
             }
+            IrExprKind::MapLiteral { entries } => {
+                for (k, v) in entries {
+                    Self::count_vars_in_expr(k, counts);
+                    Self::count_vars_in_expr(v, counts);
+                }
+            }
             _ => {}
         }
     }
@@ -585,7 +616,8 @@ impl Emitter {
             IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } |
             IrExprKind::LitBool { .. } | IrExprKind::LitStr { .. } |
             IrExprKind::Unit | IrExprKind::Hole | IrExprKind::Todo { .. } |
-            IrExprKind::Break | IrExprKind::Continue | IrExprKind::OptionNone => 0,
+            IrExprKind::Break | IrExprKind::Continue | IrExprKind::OptionNone |
+            IrExprKind::EmptyMap => 0,
             IrExprKind::BinOp { left, right, .. } => {
                 Self::count_var_uses(var, left) + Self::count_var_uses(var, right)
             }
@@ -598,6 +630,9 @@ impl Emitter {
             }
             IrExprKind::Record { fields, .. } | IrExprKind::SpreadRecord { fields, .. } => {
                 fields.iter().map(|(_, v)| Self::count_var_uses(var, v)).sum()
+            }
+            IrExprKind::MapLiteral { entries } => {
+                entries.iter().map(|(k, v)| Self::count_var_uses(var, k) + Self::count_var_uses(var, v)).sum()
             }
             IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
                 Self::count_var_uses(var, object)
@@ -790,7 +825,8 @@ impl Emitter {
             IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
             | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::OptionNone
             | IrExprKind::Hole | IrExprKind::Todo { .. }
-            | IrExprKind::Break | IrExprKind::Continue => {}
+            | IrExprKind::Break | IrExprKind::Continue
+            | IrExprKind::EmptyMap => {}
 
             IrExprKind::BinOp { left, right, .. } => {
                 Self::count_ir_var_uses(left, counts);
@@ -831,6 +867,12 @@ impl Emitter {
             IrExprKind::SpreadRecord { base, fields } => {
                 Self::count_ir_var_uses(base, counts);
                 for (_, e) in fields { Self::count_ir_var_uses(e, counts); }
+            }
+            IrExprKind::MapLiteral { entries } => {
+                for (k, v) in entries {
+                    Self::count_ir_var_uses(k, counts);
+                    Self::count_ir_var_uses(v, counts);
+                }
             }
             IrExprKind::Range { start, end, .. } => {
                 Self::count_ir_var_uses(start, counts);
@@ -910,6 +952,19 @@ impl Emitter {
             if *count == 1 && !param_ids.contains(id) {
                 self.single_use_vars.insert(var_table.get(*id).name.clone());
             }
+        }
+    }
+
+    fn needs_debug_format(ty: &Ty) -> bool {
+        match ty {
+            Ty::List(_) | Ty::Option(_) | Ty::Result(_, _) |
+            Ty::Map(_, _) | Ty::Tuple(_) | Ty::Record { .. } |
+            Ty::Variant { .. } => true,
+            Ty::Named(name, _) => {
+                // Built-in type names use Display, user-defined types use Debug
+                !matches!(name.as_str(), "String" | "Int" | "Float" | "Bool")
+            }
+            _ => false,
         }
     }
 }

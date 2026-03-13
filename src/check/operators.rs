@@ -49,7 +49,24 @@ impl Checker {
                     Ty::Unknown
                 }
             }
-            "==" | "!=" | "<" | ">" | "<=" | ">=" => Ty::Bool,
+            "==" | "!=" => {
+                if !self.env.is_eq(left) {
+                    self.push_diagnostic(err(
+                        format!("'{}' cannot compare type {} — function types are not comparable", op, left.display()),
+                        "Only value types (Int, String, List, records, variants, ...) support equality",
+                        format!("operator '{}'", op),
+                    ));
+                }
+                if !self.env.is_eq(right) {
+                    self.push_diagnostic(err(
+                        format!("'{}' cannot compare type {} — function types are not comparable", op, right.display()),
+                        "Only value types (Int, String, List, records, variants, ...) support equality",
+                        format!("operator '{}'", op),
+                    ));
+                }
+                Ty::Bool
+            }
+            "<" | ">" | "<=" | ">=" => Ty::Bool,
             "and" | "or" => {
                 if !left.compatible(&Ty::Bool) {
                     self.push_diagnostic(err(

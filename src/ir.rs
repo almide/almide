@@ -181,6 +181,8 @@ pub enum IrExprKind {
 
     // ── Collections ──
     List { elements: Vec<IrExpr> },
+    MapLiteral { entries: Vec<(IrExpr, IrExpr)> },
+    EmptyMap,
     Record { name: Option<String>, fields: Vec<(String, IrExpr)> },
     SpreadRecord { base: Box<IrExpr>, fields: Vec<(String, IrExpr)> },
     Tuple { elements: Vec<IrExpr> },

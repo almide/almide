@@ -25,6 +25,10 @@ fn ty_to_resolved(ty: &Ty) -> ResolvedType {
 
 impl Checker {
     pub(crate) fn check_expr(&mut self, expr: &mut ast::Expr) -> Ty {
+        self.check_expr_with(expr, None)
+    }
+
+    pub(crate) fn check_expr_with(&mut self, expr: &mut ast::Expr, expected: Option<&Ty>) -> Ty {
         // Update current line/col from expression span for precise error positions
         let prev_line = self.current_decl_line;
         let prev_col = self.current_decl_col;
@@ -32,7 +36,7 @@ impl Checker {
             self.current_decl_line = Some(span.line);
             self.current_decl_col = Some(span.col);
         }
-        let ty = self.check_expr_inner(expr);
+        let ty = self.check_expr_inner(expr, expected);
         expr.set_resolved_type(ty_to_resolved(&ty));
         if let Some(span) = expr.span() {
             self.expr_types.insert((span.line, span.col), ty.clone());
@@ -42,7 +46,7 @@ impl Checker {
         ty
     }
 
-    fn check_expr_inner(&mut self, expr: &mut ast::Expr) -> Ty {
+    fn check_expr_inner(&mut self, expr: &mut ast::Expr, expected: Option<&Ty>) -> Ty {
         match expr {
             ast::Expr::Int { .. } => Ty::Int,
             ast::Expr::Float { .. } => Ty::Float,
@@ -53,7 +57,13 @@ impl Checker {
             }
             ast::Expr::Bool { .. } => Ty::Bool,
             ast::Expr::Unit { .. } => Ty::Unit,
-            ast::Expr::None { .. } => Ty::Option(Box::new(Ty::Unknown)),
+            ast::Expr::None { .. } => {
+                if let Some(Ty::Option(inner)) = expected {
+                    Ty::Option(inner.clone())
+                } else {
+                    Ty::Option(Box::new(Ty::Unknown))
+                }
+            }
             ast::Expr::Hole { .. } | ast::Expr::Todo { .. } | ast::Expr::Placeholder { .. } => Ty::Unknown,
             ast::Expr::Some { expr: inner, .. } => Ty::Option(Box::new(self.check_expr(inner))),
             ast::Expr::Ok { expr: inner, .. } => {
@@ -61,10 +71,23 @@ impl Checker {
                 if !self.env.in_effect && matches!(inner_ty, Ty::Unit) {
                     Ty::Unit
                 } else {
-                    Ty::Result(Box::new(inner_ty), Box::new(Ty::Unknown))
+                    // Use expected type to infer error half
+                    let err_ty = match expected {
+                        Some(Ty::Result(_, e)) => *e.clone(),
+                        _ => Ty::Unknown,
+                    };
+                    Ty::Result(Box::new(inner_ty), Box::new(err_ty))
                 }
             }
-            ast::Expr::Err { expr: inner, .. } => Ty::Result(Box::new(Ty::Unknown), Box::new(self.check_expr(inner))),
+            ast::Expr::Err { expr: inner, .. } => {
+                let err_ty = self.check_expr(inner);
+                // Use expected type to infer ok half
+                let ok_ty = match expected {
+                    Some(Ty::Result(o, _)) => *o.clone(),
+                    _ => Ty::Unknown,
+                };
+                Ty::Result(Box::new(ok_ty), Box::new(err_ty))
+            }
 
             ast::Expr::Ident { name, .. } => {
                 if let Some(ty) = self.env.lookup_var(name).cloned() {
@@ -107,7 +130,13 @@ impl Checker {
             }
 
             ast::Expr::List { elements, .. } => {
-                if elements.is_empty() { return Ty::List(Box::new(Ty::Unknown)); }
+                if elements.is_empty() {
+                    return if let Some(Ty::List(inner)) = expected {
+                        Ty::List(inner.clone())
+                    } else {
+                        Ty::List(Box::new(Ty::Unknown))
+                    };
+                }
                 let first_ty = self.check_expr(&mut elements[0]);
                 for (i, elem) in elements.iter_mut().enumerate().skip(1) {
                     let et = self.check_expr(elem);
@@ -119,6 +148,56 @@ impl Checker {
                     }
                 }
                 Ty::List(Box::new(first_ty))
+            }
+
+            ast::Expr::EmptyMap { .. } => {
+                if let Some(Ty::Map(k, v)) = expected {
+                    if !self.env.is_hash(k) {
+                        self.push_diagnostic(err(
+                            format!("Map key type {} is not hashable", k.display()),
+                            "Use String, Int, or Bool as Map keys — Float and function types cannot be keys",
+                            "empty map literal",
+                        ));
+                    }
+                    Ty::Map(k.clone(), v.clone())
+                } else {
+                    self.push_diagnostic(err(
+                        "cannot infer Map type from empty literal [:]",
+                        "Add a type annotation: let m: Map[K, V] = [:]",
+                        "empty map literal",
+                    ));
+                    Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown))
+                }
+            }
+
+            ast::Expr::MapLiteral { entries, .. } => {
+                let (first_key, first_val) = &mut entries[0];
+                let key_ty = self.check_expr(first_key);
+                let val_ty = self.check_expr(first_val);
+                for (i, (k, v)) in entries.iter_mut().enumerate().skip(1) {
+                    let kt = self.check_expr(k);
+                    let vt = self.check_expr(v);
+                    if !key_ty.compatible(&kt) {
+                        self.push_diagnostic(err(
+                            format!("map key at index {} has type {} but expected {}", i, kt.display(), key_ty.display()),
+                            "All map keys must have the same type", "map literal",
+                        ));
+                    }
+                    if !val_ty.compatible(&vt) {
+                        self.push_diagnostic(err(
+                            format!("map value at index {} has type {} but expected {}", i, vt.display(), val_ty.display()),
+                            "All map values must have the same type", "map literal",
+                        ));
+                    }
+                }
+                if !self.env.is_hash(&key_ty) {
+                    self.push_diagnostic(err(
+                        format!("Map key type {} is not hashable", key_ty.display()),
+                        "Use String, Int, or Bool as Map keys — Float and function types cannot be keys",
+                        "map literal",
+                    ));
+                }
+                Ty::Map(Box::new(key_ty), Box::new(val_ty))
             }
 
             ast::Expr::Record { name, fields, .. } => {
@@ -188,8 +267,8 @@ impl Checker {
                         "The condition must be a Bool expression", "if expression",
                     ));
                 }
-                let tt = self.check_expr(then);
-                let et = self.check_expr(else_);
+                let tt = self.check_expr_with(then, expected);
+                let et = self.check_expr_with(else_, expected);
                 if !tt.compatible(&et) {
                     let mut diag = err(
                         format!("if branches have different types: then is {}, else is {}", tt.display(), et.display()),
@@ -229,7 +308,7 @@ impl Checker {
                             ));
                         }
                     }
-                    let at = self.check_expr(&mut arm.body);
+                    let at = self.check_expr_with(&mut arm.body, expected);
                     if let Some(ref mut prev) = result_ty {
                         let compat = prev.compatible(&at)
                             || match (prev.clone(), &at) {
@@ -267,7 +346,7 @@ impl Checker {
             ast::Expr::Block { stmts, expr, .. } => {
                 self.env.push_scope();
                 for s in stmts.iter_mut() { self.check_stmt(s); }
-                let ty = expr.as_mut().map(|e| self.check_expr(e)).unwrap_or(Ty::Unit);
+                let ty = expr.as_mut().map(|e| self.check_expr_with(e, expected)).unwrap_or(Ty::Unit);
                 self.warn_unused_vars_in_scope("block");
                 self.env.pop_scope();
                 ty
@@ -278,7 +357,7 @@ impl Checker {
                 let prev_do = self.env.in_do_block;
                 self.env.in_do_block = true;
                 for s in stmts.iter_mut() { self.check_stmt(s); }
-                let _ty = expr.as_mut().map(|e| self.check_expr(e)).unwrap_or(Ty::Unit);
+                let _ty = expr.as_mut().map(|e| self.check_expr_with(e, expected)).unwrap_or(Ty::Unit);
                 self.warn_unused_vars_in_scope("do block");
                 self.env.in_do_block = prev_do;
                 self.env.pop_scope();
@@ -310,7 +389,13 @@ impl Checker {
                 self.env.push_scope();
                 let elem_ty = match &it {
                     Ty::List(inner) => *inner.clone(),
-                    Ty::Map(k, _) => *k.clone(),
+                    Ty::Map(k, v) => {
+                        if var_tuple.is_some() {
+                            Ty::Tuple(vec![*k.clone(), *v.clone()])
+                        } else {
+                            *k.clone()
+                        }
+                    }
                     _ if matches!(it, Ty::Unknown) => Ty::Unknown,
                     _ => {
                         self.push_diagnostic(err(
@@ -439,7 +524,7 @@ impl Checker {
                 }
             }
 
-            ast::Expr::Paren { expr: inner, .. } => self.check_expr(inner),
+            ast::Expr::Paren { expr: inner, .. } => self.check_expr_with(inner, expected),
             ast::Expr::Tuple { elements, .. } => {
                 let tys: Vec<Ty> = elements.iter_mut().map(|e| self.check_expr(e)).collect();
                 Ty::Tuple(tys)
@@ -471,21 +556,33 @@ impl Checker {
             ast::Expr::IndexAccess { object, index, .. } => {
                 let ot = self.check_expr(object);
                 let it = self.check_expr(index);
-                if !matches!(it, Ty::Int | Ty::Unknown) {
-                    self.push_diagnostic(err(
-                        format!("index must be Int, got {}", it.display()),
-                        "Use an Int value for list indexing",
-                        "xs[i]",
-                    ));
-                }
                 match &ot {
-                    Ty::List(inner) => *inner.clone(),
+                    Ty::List(inner) => {
+                        if !matches!(it, Ty::Int | Ty::Unknown) {
+                            self.push_diagnostic(err(
+                                format!("list index must be Int, got {}", it.display()),
+                                "Use an Int value for list indexing",
+                                "xs[i]",
+                            ));
+                        }
+                        *inner.clone()
+                    }
+                    Ty::Map(k, v) => {
+                        if !it.compatible(k) && !matches!(it, Ty::Unknown) {
+                            self.push_diagnostic(err(
+                                format!("map key type is {} but got {}", k.display(), it.display()),
+                                "Key type must match the Map's key type",
+                                "m[key]",
+                            ));
+                        }
+                        Ty::Option(v.clone())
+                    }
                     Ty::Unknown => Ty::Unknown,
                     _ => {
                         self.push_diagnostic(err(
                             format!("cannot index into type {}", ot.display()),
-                            "Indexing with [] is only supported for List[T]",
-                            "xs[i]",
+                            "Indexing with [] is supported for List[T] and Map[K, V]",
+                            "xs[i] or m[key]",
                         ));
                         Ty::Unknown
                     }

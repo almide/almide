@@ -263,18 +263,36 @@ fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             ctx.push_scope();
             let elem_ty = match &iterable_ir.ty {
                 Ty::List(inner) => *inner.clone(),
-                Ty::Map(k, _) => *k.clone(),
+                Ty::Map(k, v) => {
+                    if var_tuple.is_some() {
+                        Ty::Tuple(vec![*k.clone(), *v.clone()])
+                    } else {
+                        *k.clone()
+                    }
+                }
                 _ => Ty::Unknown,
             };
             let var_tuple_ids = if let Some(names) = var_tuple {
-                let ids: Vec<VarId> = names.iter().map(|n|
-                    ctx.define_var(n, Ty::Unknown, Mutability::Let, None)
+                // Extract element types from the tuple type for each destructured variable
+                let tuple_inner = match &elem_ty {
+                    Ty::Tuple(tys) => tys.clone(),
+                    _ => vec![Ty::Unknown; names.len()],
+                };
+                let ids: Vec<VarId> = names.iter().enumerate().map(|(i, n)|
+                    ctx.define_var(n, tuple_inner.get(i).cloned().unwrap_or(Ty::Unknown), Mutability::Let, None)
                 ).collect();
                 Some(ids)
             } else {
                 None
             };
-            let var_id = ctx.define_var(var, elem_ty, Mutability::Let, None);
+            // For tuple destructuring, use a synthetic name to avoid shadowing
+            // the first destructured variable (var == first tuple element name)
+            let var_name = if var_tuple.is_some() {
+                format!("__for_tuple_{}", var)
+            } else {
+                var.clone()
+            };
+            let var_id = ctx.define_var(&var_name, elem_ty, Mutability::Let, None);
             let body_ir: Vec<IrStmt> = body.iter().map(|s| lower_stmt(ctx, s)).collect();
             ctx.pop_scope();
             ctx.mk(IrExprKind::ForIn {
@@ -312,6 +330,17 @@ fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         ast::Expr::List { elements, .. } => {
             let elems: Vec<IrExpr> = elements.iter().map(|e| lower_expr(ctx, e)).collect();
             ctx.mk(IrExprKind::List { elements: elems }, ty, span)
+        }
+
+        ast::Expr::EmptyMap { .. } => {
+            ctx.mk(IrExprKind::EmptyMap, ty, span)
+        }
+
+        ast::Expr::MapLiteral { entries, .. } => {
+            let ir_entries: Vec<(IrExpr, IrExpr)> = entries.iter()
+                .map(|(k, v)| (lower_expr(ctx, k), lower_expr(ctx, v)))
+                .collect();
+            ctx.mk(IrExprKind::MapLiteral { entries: ir_entries }, ty, span)
         }
 
         ast::Expr::Record { name, fields, .. } => {
@@ -813,7 +842,13 @@ fn lower_string_interp(ctx: &mut LowerCtx, raw: &str) -> Vec<IrStringPart> {
             let tokens = crate::lexer::Lexer::tokenize(&expr_str);
             let mut parser = crate::parser::Parser::new(tokens);
             if let Ok(parsed) = parser.parse_single_expr() {
-                let ir_expr = lower_expr(ctx, &parsed);
+                let mut ir_expr = lower_expr(ctx, &parsed);
+                // Fix type: re-parsed expressions have bogus spans (1,1) which
+                // cause expr_types lookup to return wrong types. For Var nodes,
+                // use the authoritative type from VarTable instead.
+                if let IrExprKind::Var { id } = &ir_expr.kind {
+                    ir_expr.ty = ctx.var_table.get(*id).ty.clone();
+                }
                 parts.push(IrStringPart::Expr { expr: ir_expr });
             } else {
                 // Parse failed — keep as literal

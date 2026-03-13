@@ -96,6 +96,8 @@ pub enum Expr {
     Ident { name: String, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     TypeName { name: String, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     List { elements: Vec<Expr>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    MapLiteral { entries: Vec<(Expr, Expr)>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    EmptyMap { #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Record { name: Option<String>, fields: Vec<FieldInit>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     SpreadRecord { base: Box<Expr>, fields: Vec<FieldInit>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Call { callee: Box<Expr>, args: Vec<Expr>, #[serde(default)] type_args: Option<Vec<TypeExpr>>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
@@ -135,7 +137,8 @@ impl Expr {
             Expr::Int { span, .. } | Expr::Float { span, .. } | Expr::String { span, .. }
             | Expr::InterpolatedString { span, .. } | Expr::Bool { span, .. }
             | Expr::Ident { span, .. } | Expr::TypeName { span, .. }
-            | Expr::List { span, .. } | Expr::Record { span, .. }
+            | Expr::List { span, .. } | Expr::MapLiteral { span, .. } | Expr::EmptyMap { span, .. }
+            | Expr::Record { span, .. }
             | Expr::SpreadRecord { span, .. } | Expr::Call { span, .. }
             | Expr::Member { span, .. } | Expr::TupleIndex { span, .. } | Expr::IndexAccess { span, .. } | Expr::Pipe { span, .. }
             | Expr::If { span, .. } | Expr::Match { span, .. }
@@ -158,7 +161,8 @@ impl Expr {
             Expr::Int { resolved_type, .. } | Expr::Float { resolved_type, .. } | Expr::String { resolved_type, .. }
             | Expr::InterpolatedString { resolved_type, .. } | Expr::Bool { resolved_type, .. }
             | Expr::Ident { resolved_type, .. } | Expr::TypeName { resolved_type, .. }
-            | Expr::List { resolved_type, .. } | Expr::Record { resolved_type, .. }
+            | Expr::List { resolved_type, .. } | Expr::MapLiteral { resolved_type, .. } | Expr::EmptyMap { resolved_type, .. }
+            | Expr::Record { resolved_type, .. }
             | Expr::SpreadRecord { resolved_type, .. } | Expr::Call { resolved_type, .. }
             | Expr::Member { resolved_type, .. } | Expr::TupleIndex { resolved_type, .. } | Expr::IndexAccess { resolved_type, .. } | Expr::Pipe { resolved_type, .. }
             | Expr::If { resolved_type, .. } | Expr::Match { resolved_type, .. }
@@ -181,7 +185,8 @@ impl Expr {
             Expr::Int { resolved_type, .. } | Expr::Float { resolved_type, .. } | Expr::String { resolved_type, .. }
             | Expr::InterpolatedString { resolved_type, .. } | Expr::Bool { resolved_type, .. }
             | Expr::Ident { resolved_type, .. } | Expr::TypeName { resolved_type, .. }
-            | Expr::List { resolved_type, .. } | Expr::Record { resolved_type, .. }
+            | Expr::List { resolved_type, .. } | Expr::MapLiteral { resolved_type, .. } | Expr::EmptyMap { resolved_type, .. }
+            | Expr::Record { resolved_type, .. }
             | Expr::SpreadRecord { resolved_type, .. } | Expr::Call { resolved_type, .. }
             | Expr::Member { resolved_type, .. } | Expr::TupleIndex { resolved_type, .. } | Expr::IndexAccess { resolved_type, .. } | Expr::Pipe { resolved_type, .. }
             | Expr::If { resolved_type, .. } | Expr::Match { resolved_type, .. }

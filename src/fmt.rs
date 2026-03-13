@@ -336,6 +336,36 @@ fn format_expr(out: &mut String, expr: &Expr, depth: usize) {
             }
         }
 
+        Expr::EmptyMap { .. } => {
+            out.push_str("[:]");
+        }
+
+        Expr::MapLiteral { entries, .. } => {
+            let short = entries.len() <= 3 && entries.iter().all(|(k, v)| is_short_expr(k) && is_short_expr(v));
+            if short {
+                out.push('[');
+                for (i, (k, v)) in entries.iter().enumerate() {
+                    if i > 0 { out.push_str(", "); }
+                    format_expr(out, k, depth);
+                    out.push_str(": ");
+                    format_expr(out, v, depth);
+                }
+                out.push(']');
+            } else {
+                out.push_str("[\n");
+                for (i, (k, v)) in entries.iter().enumerate() {
+                    out.push_str(&indent(depth + 1));
+                    format_expr(out, k, depth + 1);
+                    out.push_str(": ");
+                    format_expr(out, v, depth + 1);
+                    if i < entries.len() - 1 { out.push(','); }
+                    out.push('\n');
+                }
+                out.push_str(&indent(depth));
+                out.push(']');
+            }
+        }
+
         Expr::Record { name, fields, .. } => {
             if let Some(n) = name {
                 out.push_str(n);

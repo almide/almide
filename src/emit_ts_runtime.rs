@@ -732,10 +732,10 @@ function __div(a: any, b: any): any {
 }
 function println(s: string): void { console.log(s); }
 function eprintln(s: string): void { console.error(s); }
-class __Err { constructor(public message: string) {} }
+class __Err { constructor(public message: string, public value?: any) {} }
 function __deep_eq(a: any, b: any): boolean {
   if (a === b) return true;
-  if (a instanceof __Err && b instanceof __Err) return a.message === b.message;
+  if (a instanceof __Err && b instanceof __Err) return __deep_eq(a.value, b.value);
   if (a instanceof __Err || b instanceof __Err) return false;
   if (Array.isArray(a) && Array.isArray(b)) {
     if (a.length !== b.length) return false;
@@ -791,10 +791,10 @@ function __div(a, b) {
 }
 function println(s) { console.log(s); }
 function eprintln(s) { console.error(s); }
-class __Err { constructor(message) { this.message = message; } }
+class __Err { constructor(message, value) { this.message = message; this.value = value !== undefined ? value : message; } }
 function __deep_eq(a, b) {
   if (a === b) return true;
-  if (a instanceof __Err && b instanceof __Err) return a.message === b.message;
+  if (a instanceof __Err && b instanceof __Err) return __deep_eq(a.value, b.value);
   if (a instanceof __Err || b instanceof __Err) return false;
   if (Array.isArray(a) && Array.isArray(b)) {
     if (a.length !== b.length) return false;

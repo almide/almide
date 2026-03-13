@@ -17,6 +17,7 @@ fn is_const_expr(expr: &ast::Expr) -> bool {
         ast::Expr::Int { .. } | ast::Expr::Float { .. } | ast::Expr::String { .. }
         | ast::Expr::Bool { .. } | ast::Expr::Unit { .. } | ast::Expr::None { .. } => true,
         ast::Expr::List { elements, .. } => elements.is_empty(),
+        ast::Expr::EmptyMap { .. } => true,
         ast::Expr::Unary { op, operand, .. } if op == "-" => is_const_expr(operand),
         _ => false,
     }
@@ -30,6 +31,7 @@ fn is_top_let_const_expr(expr: &ast::Expr, known_consts: &std::collections::Hash
         ast::Expr::Int { .. } | ast::Expr::Float { .. } | ast::Expr::String { .. }
         | ast::Expr::Bool { .. } | ast::Expr::Unit { .. } | ast::Expr::None { .. } => true,
         ast::Expr::List { elements, .. } => elements.is_empty(),
+        ast::Expr::EmptyMap { .. } => true,
         ast::Expr::Unary { op, operand, .. } if op == "-" => is_top_let_const_expr(operand, known_consts),
         ast::Expr::Ident { name, .. } | ast::Expr::TypeName { name, .. } => known_consts.contains(name),
         ast::Expr::Binary { op, left, right, .. } => {
@@ -266,6 +268,7 @@ impl Checker {
             ast::Expr::Unit { .. } => Ty::Unit,
             ast::Expr::None { .. } => Ty::Option(Box::new(Ty::Unknown)),
             ast::Expr::List { .. } => Ty::List(Box::new(Ty::Unknown)),
+            ast::Expr::EmptyMap { .. } => Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)),
             ast::Expr::Unary { op, operand, .. } if op == "-" => self.infer_const_type(operand),
             ast::Expr::Ident { name, .. } | ast::Expr::TypeName { name, .. } => {
                 // Reference to another top-level let
@@ -474,7 +477,7 @@ impl Checker {
                     let prev_effect = self.env.in_effect;
                     self.env.current_ret = Some(ret_ty.clone());
                     self.env.in_effect = effect.unwrap_or(false);
-                    let body_ty = self.check_expr(body);
+                    let body_ty = self.check_expr_with(body, Some(&ret_ty));
                     let is_effect = effect.unwrap_or(false);
                     let effective_ret = if is_effect {
                         match &ret_ty {
@@ -886,6 +889,13 @@ impl Checker {
                     Self::find_list_mutations(e, list_params, out);
                 }
             }
+            ast::Expr::MapLiteral { entries, .. } => {
+                for (k, v) in entries {
+                    Self::find_list_mutations(k, list_params, out);
+                    Self::find_list_mutations(v, list_params, out);
+                }
+            }
+            ast::Expr::EmptyMap { .. } => {}
             ast::Expr::Member { object, .. } | ast::Expr::TupleIndex { object, .. } => {
                 Self::find_list_mutations(object, list_params, out);
             }

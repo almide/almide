@@ -10,7 +10,7 @@ fn_decl     = ["effect"] "fn" IDENT "(" params ")" "->" type "=" expr
 top_let     = "let" IDENT [":" type] "=" expr       (* module-scope constant *)
 type        = "Int" | "String" | "Bool" | "Unit" | IDENT | IDENT "[" type ("," type)* "]"
 expr        = block | if_expr | match_expr | for_in | while_expr | do_expr | guard | let | var | assign | binary | call | literal
-for_in      = "for" IDENT "in" expr "{" stmt* "}"  (* iterate over list/collection *)
+for_in      = "for" (IDENT | "(" IDENT "," IDENT ")") "in" expr "{" stmt* "}"
 while_expr  = "while" expr "{" stmt* "}"            (* loop while condition is true *)
 block       = "{" stmt* expr "}"
 if_expr     = "if" expr "then" expr "else" expr       (* else is MANDATORY *)
@@ -26,7 +26,11 @@ binary      = expr OP expr    (* OP: + - * / % ^ == != < > <= >= ++ and or *)
                                (* ++ for string/list concat, ^ for XOR, not for boolean neg *)
 call        = IDENT "(" args ")" | IDENT "." IDENT "(" args ")"
 lambda      = "fn" "(" params ")" "=>" expr
+list_lit    = "[" (expr ("," expr)*)? "]"            (* list: [1, 2, 3] or [] *)
+map_lit     = "[" expr ":" expr ("," expr ":" expr)* "]"  (* map: ["a": 1, "b": 2] *)
+              | "[" ":" "]"                          (* empty map: [:] *)
 literal     = INT | STRING | "true" | "false" | "ok" "(" expr ")" | "err" "(" expr ")"
+              | list_lit | map_lit
                                (* string interpolation: "hello ${name}" *)
 ```
 
@@ -43,7 +47,8 @@ See [CHEATSHEET.md](./CHEATSHEET.md) for the complete stdlib function reference 
 
 - `int`, `string`, `list`, `map`, `path`, and `env` are auto-imported — no `import` needed. `fs` and `json` require explicit import.
 - No `return`, `class`, `null`, `!` — use Almide alternatives
-- `for x in xs { ... }` for iterating lists; `while cond { ... }` for condition-based loops; `do { guard ... }` for dynamic break with values
+- `for x in xs { ... }` for iterating lists; `for (k, v) in m { ... }` for maps; `while cond { ... }` for condition-based loops; `do { guard ... }` for dynamic break with values
+- Map literal: `["key": value]`, empty map: `[:]` (with type annotation)
 - `if` always requires `else`
 - `effect fn` marks functions with side effects
 - All errors via `Result[T, E]`, all optionals via `Option[T]`

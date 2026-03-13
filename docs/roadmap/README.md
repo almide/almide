@@ -23,7 +23,7 @@
 - [Syntax Sugar](on-hold/syntax-sugar.md) — range, raw strings, exhaustiveness done; comprehensions pending
 - [Tooling](on-hold/tooling.md)
 - [Trailing Lambda / Builder DSL](on-hold/trailing-lambda-builder.md) — won't do, solve with stdlib instead
-- [trait / impl](on-hold/trait-impl.md) — parser done, checker/emitter partial
+- [Built-in Protocols](on-hold/trait-impl.md) — Show (`show(x)`), Hash (Map key constraint) remaining; all automatic
 - [Type System Extensions](on-hold/type-system.md)
 
 ## Done
@@ -63,4 +63,6 @@
 - [Tuple & Record](done/tuple-record.md)
 - [Typed IR](done/typed-ir.md) — IR-based codegen, AST-direct codegen removed
 - [Variant Record Fields](done/variant-record-fields.md) — named fields on enum variants, `..` rest pattern
+- [Map Literal](done/map-literal.md) — `[:]` / `["key": value]` syntax, index access, direct iteration
+- [Eq Protocol](on-hold/trait-impl.md) — automatic `==` for all value types, `Fn` types rejected
 - [While Loop](done/while-loop.md) — `while condition { }`, universal loop syntax
