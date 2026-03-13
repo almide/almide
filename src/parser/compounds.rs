@@ -52,6 +52,7 @@ impl Parser {
         self.skip_newlines();
         let subject = self.parse_or()?;
         self.skip_newlines();
+        let open = self.current().clone();
         self.expect(TokenType::LBrace)?;
         let mut leading = self.skip_newlines_collect_comments();
         let mut arms = Vec::new();
@@ -66,7 +67,7 @@ impl Parser {
                 leading.extend(more);
             }
         }
-        self.expect(TokenType::RBrace)?;
+        self.expect_closing(TokenType::RBrace, open.line, open.col, "match block")?;
         Ok(Expr::Match {
             subject: Box::new(subject),
             arms,
@@ -91,6 +92,7 @@ impl Parser {
     pub(crate) fn parse_lambda(&mut self) -> Result<Expr, String> {
         let span = Some(self.current_span());
         self.expect(TokenType::Fn)?;
+        let open = self.current().clone();
         self.expect(TokenType::LParen)?;
         let mut params = Vec::new();
         if !self.check(TokenType::RParen) {
@@ -100,7 +102,7 @@ impl Parser {
                 params.push(self.parse_lambda_param()?);
             }
         }
-        self.expect(TokenType::RParen)?;
+        self.expect_closing(TokenType::RParen, open.line, open.col, "lambda parameters")?;
         self.expect(TokenType::FatArrow)?;
         self.skip_newlines();
         let body = self.parse_expr()?;
@@ -137,6 +139,7 @@ impl Parser {
 
     pub(crate) fn parse_do_block(&mut self) -> Result<Expr, String> {
         let span = Some(self.current_span());
+        let open = self.current().clone();
         self.expect(TokenType::LBrace)?;
         let mut stmts = Vec::new();
         self.skip_newlines_into_stmts(&mut stmts);
@@ -161,7 +164,7 @@ impl Parser {
                 stmts.extend(trailing);
             }
         }
-        self.expect(TokenType::RBrace)?;
+        self.expect_closing(TokenType::RBrace, open.line, open.col, "do block")?;
         Ok(Expr::DoBlock {
             stmts,
             expr: final_expr,
@@ -172,6 +175,7 @@ impl Parser {
 
     pub(crate) fn parse_brace_expr(&mut self) -> Result<Expr, String> {
         let span = Some(self.current_span());
+        let open = self.current().clone();
         self.expect(TokenType::LBrace)?;
         let mut initial_comments = Vec::new();
         self.skip_newlines_into_stmts(&mut initial_comments);
@@ -205,7 +209,7 @@ impl Parser {
                 });
             }
             self.skip_newlines();
-            self.expect(TokenType::RBrace)?;
+            self.expect_closing(TokenType::RBrace, open.line, open.col, "spread record")?;
             return Ok(Expr::SpreadRecord {
                 base: Box::new(base),
                 fields,
@@ -240,7 +244,7 @@ impl Parser {
                     self.skip_newlines();
                 }
             }
-            self.expect(TokenType::RBrace)?;
+            self.expect_closing(TokenType::RBrace, open.line, open.col, "record literal")?;
             return Ok(Expr::Record { name: None, fields, span, resolved_type: None });
         }
 
@@ -276,7 +280,7 @@ impl Parser {
                 }
             }
         }
-        self.expect(TokenType::RBrace)?;
+        self.expect_closing(TokenType::RBrace, open.line, open.col, "block")?;
         Ok(Expr::Block {
             stmts,
             expr: final_expr,
@@ -318,6 +322,7 @@ impl Parser {
 
     pub(crate) fn parse_list_expr(&mut self) -> Result<Expr, String> {
         let span = Some(self.current_span());
+        let open = self.current().clone();
         self.expect(TokenType::LBracket)?;
         self.skip_newlines();
 
@@ -330,7 +335,7 @@ impl Parser {
         // [:] → empty Map
         if self.check(TokenType::Colon) {
             self.advance();
-            self.expect(TokenType::RBracket)?;
+            self.expect_closing(TokenType::RBracket, open.line, open.col, "empty map")?;
             return Ok(Expr::EmptyMap { span, resolved_type: None });
         }
 
@@ -357,7 +362,7 @@ impl Parser {
                 self.skip_newlines();
                 entries.push((key, value));
             }
-            self.expect(TokenType::RBracket)?;
+            self.expect_closing(TokenType::RBracket, open.line, open.col, "map literal")?;
             return Ok(Expr::MapLiteral { entries, span, resolved_type: None });
         }
 
@@ -370,7 +375,7 @@ impl Parser {
             elements.push(self.parse_expr()?);
             self.skip_newlines();
         }
-        self.expect(TokenType::RBracket)?;
+        self.expect_closing(TokenType::RBracket, open.line, open.col, "list literal")?;
         Ok(Expr::List { elements, span, resolved_type: None })
     }
 }

@@ -29,6 +29,7 @@ impl Parser {
 
         if self.check(TokenType::Dot) && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::LBrace) {
             self.advance();
+            let open = self.current().clone();
             self.expect(TokenType::LBrace)?;
             let mut names = Vec::new();
             names.push(self.expect_any_name()?);
@@ -39,7 +40,7 @@ impl Parser {
                 }
                 names.push(self.expect_any_name()?);
             }
-            self.expect(TokenType::RBrace)?;
+            self.expect_closing(TokenType::RBrace, open.line, open.col, "selective import")?;
             return Ok(Decl::Import { path, names: Some(names), alias: None, span: Some(span) });
         }
 
@@ -153,6 +154,7 @@ impl Parser {
                 return Err(format!("Expected 'extern' after '@' at line {}:{}", tok.line, tok.col));
             }
             self.advance(); // skip "extern"
+            let open_ext = self.current().clone();
             self.expect(TokenType::LParen)?;
             let target = self.expect_ident()?;
             self.expect(TokenType::Comma)?;
@@ -175,7 +177,7 @@ impl Parser {
                 self.advance();
                 val
             };
-            self.expect(TokenType::RParen)?;
+            self.expect_closing(TokenType::RParen, open_ext.line, open_ext.col, "@extern annotation")?;
             attrs.push(ExternAttr { target, module, function });
             self.skip_newlines();
         }
@@ -219,6 +221,7 @@ impl Parser {
         self.expect(TokenType::Trait)?;
         let name = self.expect_type_name()?;
         let generics = self.try_parse_generic_params()?;
+        let open = self.current().clone();
         self.expect(TokenType::LBrace)?;
         self.skip_newlines();
         let mut methods: Vec<serde_json::Value> = Vec::new();
@@ -226,7 +229,7 @@ impl Parser {
             methods.push(self.parse_trait_method()?);
             self.skip_newlines();
         }
-        self.expect(TokenType::RBrace)?;
+        self.expect_closing(TokenType::RBrace, open.line, open.col, "trait body")?;
         Ok(Decl::Trait { name, generics, methods, span: Some(span) })
     }
 
@@ -244,9 +247,10 @@ impl Parser {
         self.expect(TokenType::Fn)?;
         let name = self.expect_any_fn_name()?;
         let _generics = self.try_parse_generic_params()?;
+        let open_tm = self.current().clone();
         self.expect(TokenType::LParen)?;
         let params = self.parse_param_list()?;
-        self.expect(TokenType::RParen)?;
+        self.expect_closing(TokenType::RParen, open_tm.line, open_tm.col, "trait method parameters")?;
         self.expect(TokenType::Arrow)?;
         let return_type = self.parse_type_expr()?;
 
@@ -286,6 +290,7 @@ impl Parser {
         if self.check(TokenType::LBracket) {
             self.parse_type_args()?;
         }
+        let open_impl = self.current().clone();
         self.expect(TokenType::LBrace)?;
         self.skip_newlines();
         let mut methods = Vec::new();
@@ -293,7 +298,7 @@ impl Parser {
             methods.push(self.parse_fn_decl()?);
             self.skip_newlines();
         }
-        self.expect(TokenType::RBrace)?;
+        self.expect_closing(TokenType::RBrace, open_impl.line, open_impl.col, "impl body")?;
         Ok(Decl::Impl {
             trait_: trait_name,
             for_: for_name,
@@ -322,9 +327,10 @@ impl Parser {
         self.expect(TokenType::Fn)?;
         let name = self.expect_any_fn_name()?;
         let generics = self.try_parse_generic_params()?;
+        let open_fn = self.current().clone();
         self.expect(TokenType::LParen)?;
         let params = self.parse_param_list()?;
-        self.expect(TokenType::RParen)?;
+        self.expect_closing(TokenType::RParen, open_fn.line, open_fn.col, "function parameters")?;
         self.expect(TokenType::Arrow)?;
         let return_type = self.parse_type_expr()?;
 

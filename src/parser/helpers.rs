@@ -241,6 +241,49 @@ impl Parser {
         ))
     }
 
+    /// Expect a closing delimiter, providing the opening delimiter's position for better error messages.
+    /// On failure, produces a Diagnostic with a secondary span pointing to where the delimiter was opened.
+    pub(crate) fn expect_closing(&mut self, close: TokenType, open_line: usize, open_col: usize, context: &str) -> Result<&Token, String> {
+        if self.check(close.clone()) {
+            return Ok(self.advance());
+        }
+        let tok_line = self.current().line;
+        let tok_col = self.current().col;
+        let close_name = match close {
+            TokenType::RParen => "')'",
+            TokenType::RBracket => "']'",
+            TokenType::RBrace => "'}'",
+            _ => "closing delimiter",
+        };
+        let open_name = match close {
+            TokenType::RParen => "'('",
+            TokenType::RBracket => "'['",
+            TokenType::RBrace => "'{'",
+            _ => "opening delimiter",
+        };
+        let msg = format!(
+            "Expected {} to close {} opened at line {}:{}",
+            close_name, context, open_line, open_col
+        );
+        let hint = format!(
+            "Add {} or check for a missing delimiter inside the {}",
+            close_name, context
+        );
+        let mut diag = self.diag_error(&msg, &hint, "");
+        diag.secondary.push(crate::diagnostic::SecondarySpan {
+            line: open_line,
+            col: Some(open_col),
+            label: format!("{} opened here", open_name),
+        });
+        // Return as Err(String) for compatibility with existing error propagation,
+        // but also push the rich diagnostic so it can be displayed with source context.
+        self.errors.push(diag);
+        Err(format!(
+            "{} at line {}:{}",
+            msg, tok_line, tok_col
+        ))
+    }
+
     pub(crate) fn skip_newlines(&mut self) {
         while self.check(TokenType::Newline) || self.check(TokenType::Comment) {
             self.advance();
