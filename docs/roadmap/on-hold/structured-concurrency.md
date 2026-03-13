@@ -10,6 +10,7 @@ Layer 2 of Almide's async model. Provides structured task lifecycle management o
 - **Cancellation propagation** — parent cancelled → children stop too
 - **No task leaks** — structurally impossible in AI-generated code
 - **Composes with `do` blocks** — error propagation works inside concurrent scopes
+- **Minimal syntax delta** — sequential → parallel is adding one word (`async` before `let`)
 
 ## Why This Matters
 
@@ -22,100 +23,113 @@ Layer 2 of Almide's async model. Provides structured task lifecycle management o
 
 Almide can guarantee at the language level what others do at the library level.
 
-## Syntax Design
+## Syntax Design: `async let` (Swift-inspired)
 
-### concurrent — parallel execution, wait for all
+### Core: `async let` for parallel execution
+
+`async let` forks a task at the declaration site. `await` joins at the use site.
 
 ```almide
 async fn load_dashboard(user_id: String) -> Dashboard =
   do {
-    concurrent {
-      let profile = await fetch_profile(user_id)
-      let posts = await fetch_posts(user_id)
-      let stats = await fetch_stats(user_id)
-    }
-    // all three complete before reaching here
-    // any failure → cancel siblings → propagate error
-    Dashboard { profile, posts, stats }
+    async let profile = fetch_profile(user_id)
+    async let posts = fetch_posts(user_id)
+    async let stats = fetch_stats(user_id)
+    Dashboard { await profile, await posts, await stats }
   }
 ```
 
-### race — first to complete wins, cancel the rest
+Sequential → parallel is a one-word change:
 
 ```almide
-async fn fetch_fastest(url: String) -> Response =
-  race {
-    await fetch_via_cdn(url)
-    await fetch_direct(url)
-  }
+// Sequential
+let a = fetch_a()
+let b = fetch_b()
+
+// Parallel
+async let a = fetch_a()
+async let b = fetch_b()
 ```
 
-### timeout — scoped deadline
+### Semantics
 
-```almide
-async fn fetch_safe(url: String) -> Result[Response, TimeoutError] =
-  timeout 5s {
-    await http.get(url)
-  }
-```
+- `async let x = expr` — immediately starts evaluating `expr` as a concurrent task
+- `await x` — suspends until the task completes and returns its value
+- Scope exit with un-awaited bindings → automatic cancellation
+- Inside `do` block: any task failure → cancel siblings → propagate error
+- No new keywords — `async` and `let` are both existing
 
-### Composition — concurrent + do + await
+### Comparison with Swift
+
+| | Swift | Almide |
+|---|---|---|
+| Fork | `async let a = fetchA()` | `async let a = fetch_a()` |
+| Join | `await a` | `await a` |
+| Error handling | `try await a` (explicit per use) | `do` block handles all errors automatically |
+| Scope exit | Un-awaited tasks auto-cancelled | Same |
+| race/timeout | `TaskGroup` (manual) | `race()` / `timeout()` stdlib functions |
+
+Almide's advantage: `do` block absorbs error handling, so no `try` noise at every join point.
+
+### Composition with `do` blocks
 
 ```almide
 async fn checkout(cart: Cart) -> Result[Order, AppError] =
   do {
-    concurrent {
-      let stock = await verify_stock(cart.items)
-      let payment = await authorize_payment(cart.total)
-    }
-    // both must succeed — if either fails, the other is cancelled
-    await finalize_order(stock, payment)
+    async let stock = verify_stock(cart.items)
+    async let payment = authorize_payment(cart.total)
+    // both must succeed — if either fails, the other is cancelled, do propagates error
+    await finalize_order(await stock, await payment)
   }
 ```
 
-## Alternative: Function-based API (simpler, less powerful)
+### race / timeout — stdlib functions, not syntax
 
-The SPEC currently defines function-based variants. These are a valid MVP:
+No new syntax needed. These are async stdlib functions:
 
 ```almide
-let results = await parallel([fetch(url1), fetch(url2)])
-let fastest = await race([fetch_cache(key), fetch_db(key)])
-let data = await timeout(5000, fetch(url))
-```
+// Race — first to complete wins, rest cancelled
+let fastest = await race(fetch_cache(key), fetch_db(key))
 
-**Trade-off:** Function-based requires `List[Async[T]]` (homogeneous types). Block-based `concurrent {}` supports heterogeneous bindings (profile + posts + stats with different types). Recommend implementing function-based first, block-based later.
+// Timeout — fail if not complete within duration
+let data = await timeout(5s, fetch(url))
+
+// Sleep
+await sleep(100ms)
+```
 
 ## Codegen Strategy
 
 | Syntax | Rust output | TS output |
 |--------|-------------|-----------|
-| `concurrent { }` | `tokio::join!()` or `futures::join!()` | `Promise.all([])` + destructure |
-| `race { }` | `tokio::select!` | `Promise.race([])` |
-| `timeout T { }` | `tokio::time::timeout(Duration, fut)` | `Promise.race([task, sleep(ms)])` |
-| `parallel(list)` | `futures::future::join_all()` | `Promise.all(list)` |
+| `async let x = expr` | `let x = tokio::spawn(async { expr })` | `const x = expr()` (Promise, no await) |
+| `await x` | `x.await?` (join handle) | `await x` |
+| `race(a, b)` | `tokio::select!` | `Promise.race([a, b])` |
+| `timeout(d, f)` | `tokio::time::timeout(d, f)` | `Promise.race([f, sleep(d).then(throw)])` |
 
 ### Cancellation
 
 - **Rust**: Drop the `JoinHandle` → future is cancelled. `select!` handles this natively.
 - **TS**: `AbortController` + `AbortSignal` threaded through. Requires runtime cooperation.
-- **WASM**: Single-threaded — `concurrent` degrades to sequential execution. `race` picks first resolved microtask.
+- **WASM**: Single-threaded — `async let` degrades to eager evaluation. `race` picks first resolved microtask.
 
 ## Implementation Phases
 
-### Phase 1: Function-based primitives (MVP)
+### Phase 1: `async let` + `await` codegen
 
-- [ ] Add `parallel`, `race`, `timeout`, `sleep` as stdlib async functions
-- [ ] Rust codegen: `join_all`, `select!`, `tokio::time::timeout`
-- [ ] TS codegen: `Promise.all`, `Promise.race`, `setTimeout` wrapper
+- [ ] Parse `async let` as a new binding form in declarations
+- [ ] Type check: `async let x: T` produces a future/handle, `await x` yields `T`
+- [ ] Rust codegen: `tokio::spawn` + `.await`
+- [ ] TS codegen: unawaited Promise + `await`
 - [ ] Replace `almide_block_on` busy-wait with proper tokio runtime
+- [ ] Scope exit cancellation: drop handles for un-awaited bindings
 - [ ] Tests in `spec/lang/async_test.almd`
 
-### Phase 2: Block-based syntax
+### Phase 2: `race` / `timeout` / `sleep` stdlib
 
-- [ ] Parse `concurrent { }`, `race { }`, `timeout T { }` as expressions
-- [ ] Type check: concurrent bindings available after block, heterogeneous types
-- [ ] Codegen: expand to join/select with destructuring
-- [ ] Cancellation semantics: drop/abort on scope exit
+- [ ] Add `race`, `timeout`, `sleep` as stdlib async functions
+- [ ] Rust codegen: `tokio::select!`, `tokio::time::timeout`, `tokio::time::sleep`
+- [ ] TS codegen: `Promise.race`, `setTimeout` wrapper
 
 ### Phase 3: Async streams
 
@@ -130,4 +144,4 @@ let data = await timeout(5000, fetch(url))
 
 ## Status
 
-Not started. Layer 1 (async/await) is implemented. Function-based API is the recommended starting point.
+Not started. Layer 1 (async/await) is implemented.
