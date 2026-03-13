@@ -1,6 +1,6 @@
 # Design Philosophy
 
-Almide optimizes for **minimal thinking tokens**: the less an LLM has to branch over syntax, semantics, repair strategies, or missing abstractions, the faster, cheaper, and more reliable code generation becomes. This means both removing ambiguity *and* providing the right tools so the AI does not need to improvise around missing abstractions.
+Almide optimizes for **minimal thinking tokens**: the less an LLM has to branch over syntax, semantics, repair strategies, or missing abstractions, the faster, cheaper, and more reliable code generation becomes. This means reducing branching during generation, completion, and repair, while providing the right tools so the AI does not need to improvise around missing abstractions.
 
 ## Syntax Ambiguity Removed
 
@@ -59,7 +59,7 @@ Two loop constructs, each with a clear purpose:
 - **`for x in xs { ... }`** — iterate over a collection. The natural choice for lists and map keys. Effect-compatible (I/O inside the loop body is fine).
 - **`do { guard ... else ... }`** — loop with dynamic break conditions (e.g., linked-list traversal, reading until EOF). `guard condition else break_expr` is the only way to exit.
 
-Benchmark data showed that forcing all iteration through `do { guard }` caused LLMs to write 5-8 extra lines of index management boilerplate. `for...in` eliminates this entirely.
+In our tests, forcing all iteration through `do { guard }` consistently caused extra index-management boilerplate. `for...in` eliminates this entirely.
 
 ## Compiler Diagnostics: Single Likely Fix
 
@@ -92,7 +92,7 @@ The standard library follows strict naming rules to minimize LLM guessing:
 | Return type consistency | Fallible lookups return `Option`, fallible I/O returns `Result`, infallible pure conversions return plain values | `list.get() -> Option[T]`, `fs.read_text() -> Result[String, FsError]` (effect fn) |
 | No synonyms | One name per operation, no aliases | `len` not `length`/`size`/`count` |
 | Symmetric pairs | Matching names for inverse operations | `read_text`/`write`, `split`/`join`, `to_string`/`to_int` |
-| No method overloading | Same operation names are reused only when the semantics match across modules | `string.len` and `list.len` both mean "count elements" |
+| No semantic name drift | Same operation names are reused only when the semantics match across modules | `string.len` and `list.len` both mean "count elements" |
 
 ## What Almide Sacrifices
 
