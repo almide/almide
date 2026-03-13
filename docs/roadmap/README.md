@@ -8,6 +8,7 @@
 - [Structured Concurrency](active/structured-concurrency.md) — Layer 2: `async let` / `await` for scoped parallel execution
 - [Grammar Codegen](active/grammar-codegen.md) — Single source of truth for tokens/precedence, auto-generate tree-sitter + TextMate + lexer
 - [UFCS Type Resolution](active/ufcs-type-resolution.md) — Fix ambiguous UFCS on member access / call chains (`g.words.len()`, `xs.map(f).join(",")`)
+- [Lambda Type Inference](active/lambda-type-inference.md) — Bidirectional inference for lambda params (`xs.map(fn(x) => x.len())` without annotation)
 - [JSON Builder API](active/json-builder-api.md) — `json.object` + short constructors (`json.s/i/f/b`) for ergonomic JSON construction
 
 ## On Hold
