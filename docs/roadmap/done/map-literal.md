@@ -2,7 +2,7 @@
 
 ## Goal
 
-Add Swift-style Map literal syntax to the language, enabling bidirectional type inference for empty Maps.
+Add Map literal syntax to the language, enabling bidirectional type inference for empty Maps.
 
 ## Syntax
 

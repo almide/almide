@@ -117,9 +117,12 @@ for x in xs {
   println(x)
 }
 
-for key in map.keys(config) {
-  let val = match map.get(config, key) { some(v) => v, none => "" }
-  println(key ++ " = " ++ val)
+for (k, v) in config {
+  println(k ++ " = " ++ v)
+}
+
+for key in m {
+  println(key)           // iterates keys only
 }
 ```
 **Prefer `for...in` over `do { guard ... }` for iterating lists.**
@@ -182,8 +185,17 @@ create_user("alice", age: 30)          // mixed positional + named
 ```
 [1, 2, 3]
 []                         // empty list (there is NO list.new())
-xs[0]                      // index read (returns Option[T])
+xs[0]                      // index read
 xs[i] = value              // index write (var only)
+```
+
+### Map
+```
+["a": 1, "b": 2]          // map literal
+[:]                        // empty map (requires type annotation)
+let m: Map[String, Int] = [:]
+m["key"]                   // index read (returns Option[V])
+m["key"] = value           // index write (var only)
 ```
 
 ### String interpolation
@@ -364,7 +376,7 @@ The runtime calls `main(args)` where `args` includes the program name at index 0
 - No null — use `Option[T]`
 - No inheritance — use trait + impl
 - No macros, no operator overloading, no implicit conversions
-- Empty list = `[]` (no `list.new()` or `list.empty()`), empty map = `map.new()`
+- Empty list = `[]`, empty map = `[:]` (with type annotation)
 - `_` is ONLY for match wildcard patterns, never as a variable name
 - The stdlib functions listed above are exhaustive — no other functions exist
 - Use `for x in xs { ... }` for iteration, NOT `do { var i = 0; guard ... }`
@@ -372,8 +384,9 @@ The runtime calls `main(args)` where `args` includes the program name at index 0
 ## Common mistakes (DO NOT)
 - `list[1, 2, 3]` → **WRONG**. Write `[1, 2, 3]`. `list` is a module, not a type constructor
 - `each(xs, f)` → **WRONG**. Write `list.each(xs, f)`. All stdlib functions need module prefix
-- `map[K, V]` as a value → **WRONG**. Write `map.new()` to create an empty map
+- `map[K, V]` as a value → **WRONG**. Write `[:]` with type annotation to create an empty map
 - `List.new()` → **WRONG**. Write `[]`. There is no `new()` for List
+- `{"a": 1}` as a map → **WRONG**. Write `["a": 1]`. Braces `{}` are for records/blocks, brackets `[]` for lists and maps
 - `string.length(s)` → **WRONG**. Write `string.len(s)`. No synonyms
 - `println(x)` where x is Int → **WRONG**. Write `println(int.to_string(x))`. No implicit conversion
 - `1 :: 2 :: []` → **WRONG**. Write `[1, 2]`. There is no cons operator `::`
