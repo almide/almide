@@ -1,5 +1,7 @@
 # Almide Roadmap
 
+- [2026 Ergonomics Roadmap](2026-ergonomics.md) — Ergonomics improvements derived from self-tooling
+
 ## Active
 
 - [LLM Integration](active/llm-integration.md) — `almide forge` (library generation), `almide fix` (self-repair), `almide explain`
@@ -9,7 +11,6 @@
 ## On Hold
 
 - [Benchmark Report](on-hold/benchmark-report.md)
-- [Cross-Target AOT Compilation](on-hold/cross-target-aot.md) — Compile to native binary via Rust, TS via Deno/Bun, WASM via wasm-pack
 - [Direct WASM Emission](on-hold/emit-wasm-direct.md) — `.almd → WASM bytecode` without rustc
 - [Editor & GitHub Integration](on-hold/editor-github-integration.md)
 - [Function Reference Passing](on-hold/function-reference-passing.md) — low priority, verbose form is always correct
