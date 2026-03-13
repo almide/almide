@@ -7,6 +7,7 @@
 - [LLM Integration](active/llm-integration.md) — `almide forge` (library generation), `almide fix` (self-repair), `almide explain`
 - [Structured Concurrency](active/structured-concurrency.md) — Layer 2: `async let` / `await` for scoped parallel execution
 - [Grammar Codegen](active/grammar-codegen.md) — Single source of truth for tokens/precedence, auto-generate tree-sitter + TextMate + lexer
+- [UFCS Type Resolution](active/ufcs-type-resolution.md) — Fix ambiguous UFCS on member access / call chains (`g.words.len()`, `xs.map(f).join(",")`)
 
 ## On Hold
 

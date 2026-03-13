@@ -21,6 +21,9 @@ pub struct LowerCtx<'a> {
     scopes: Vec<HashMap<String, VarId>>,
     expr_types: &'a HashMap<(usize, usize), Ty>,
     env: &'a TypeEnv,
+    /// When true, skip span-based type lookups (used for re-parsed string interpolation
+    /// expressions whose bogus spans would match wrong entries in expr_types).
+    skip_span_lookup: bool,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -29,6 +32,7 @@ impl<'a> LowerCtx<'a> {
             var_table: VarTable::new(),
             scopes: vec![HashMap::new()],
             expr_types,
+            skip_span_lookup: false,
             env,
         }
     }
@@ -54,9 +58,82 @@ impl<'a> LowerCtx<'a> {
     }
 
     fn expr_ty(&self, expr: &ast::Expr) -> Ty {
-        expr.span()
-            .and_then(|s| self.expr_types.get(&(s.line, s.col)).cloned())
-            .unwrap_or(Ty::Unknown)
+        // First try the checker's span-based type lookup (skip for re-parsed interpolation exprs)
+        if !self.skip_span_lookup {
+            let ty = expr.span()
+                .and_then(|s| self.expr_types.get(&(s.line, s.col)).cloned())
+                .unwrap_or(Ty::Unknown);
+            if !matches!(ty, Ty::Unknown) {
+                return ty;
+            }
+        }
+        // Fallback: infer type from the expression structure
+        self.infer_expr_ty(expr)
+    }
+
+    /// Structural type inference when the checker's span-based lookup fails.
+    /// This handles cases where the span doesn't match (e.g., cross-module expressions).
+    fn infer_expr_ty(&self, expr: &ast::Expr) -> Ty {
+        match expr {
+            ast::Expr::Ident { name, .. } => {
+                if let Some(var_id) = self.lookup_var(name) {
+                    return self.var_table.get(var_id).ty.clone();
+                }
+                Ty::Unknown
+            }
+            ast::Expr::Member { object, field, .. } => {
+                let obj_ty = self.expr_ty(object);
+                self.resolve_field_ty(&obj_ty, field)
+            }
+            ast::Expr::Call { callee, .. } => {
+                // For module calls (e.g., grammar.keyword_groups()), look up the function sig
+                if let ast::Expr::Member { object, field, .. } = callee.as_ref() {
+                    if let Some((mod_path, func)) = flatten_module_call(self, object, field) {
+                        // Look up return type from function sig
+                        let key = format!("{}.{}", mod_path, func);
+                        if let Some(sig) = self.env.functions.get(&key) {
+                            return sig.ret.clone();
+                        }
+                    }
+                }
+                Ty::Unknown
+            }
+            ast::Expr::String { .. } | ast::Expr::InterpolatedString { .. } => Ty::String,
+            ast::Expr::Int { .. } => Ty::Int,
+            ast::Expr::Float { .. } => Ty::Float,
+            ast::Expr::Bool { .. } => Ty::Bool,
+            ast::Expr::List { .. } => Ty::List(Box::new(Ty::Unknown)),
+            _ => Ty::Unknown,
+        }
+    }
+
+    /// Resolve the type of a field access on a known object type.
+    fn resolve_field_ty(&self, obj_ty: &Ty, field: &str) -> Ty {
+        match obj_ty {
+            Ty::Record { fields, .. } => {
+                for (fname, fty) in fields {
+                    if fname == field { return fty.clone(); }
+                }
+                Ty::Unknown
+            }
+            Ty::Named(name, _) => {
+                // Look up type definition from the checker's environment.
+                // Try direct name first, then module-qualified name (e.g., "grammar.TypeName")
+                // since cross-module types are stored with module prefix.
+                if let Some(def) = self.env.types.get(name) {
+                    return self.resolve_field_ty(def, field);
+                }
+                // Try module-qualified lookup: scan for "*.TypeName"
+                let suffix = format!(".{}", name);
+                for (key, def) in &self.env.types {
+                    if key.ends_with(&suffix) {
+                        return self.resolve_field_ty(def, field);
+                    }
+                }
+                Ty::Unknown
+            }
+            _ => Ty::Unknown,
+        }
     }
 
     fn mk(&self, kind: IrExprKind, ty: Ty, span: Option<ast::Span>) -> IrExpr {
@@ -574,6 +651,12 @@ fn flatten_module_call(ctx: &LowerCtx, object: &ast::Expr, func: &str) -> Option
     }
     segments.reverse();
 
+    // If the first segment is a local variable, it's not a module call.
+    // Local variables shadow module names (e.g., `let args = env.args(); args.len()`)
+    if ctx.lookup_var(segments[0]).is_some() {
+        return None;
+    }
+
     // Resolve the first segment through module aliases (e.g., "m" → "mylib")
     let resolved_first = ctx.env.module_aliases.get(segments[0])
         .map(|s| s.as_str())
@@ -842,14 +925,16 @@ fn lower_string_interp(ctx: &mut LowerCtx, raw: &str) -> Vec<IrStringPart> {
                 if ch == '}' { depth -= 1; if depth == 0 { break; } }
                 expr_str.push(ch);
             }
-            // Re-parse the expression and lower it
+            // Re-parse the expression and lower it.
+            // Skip span-based type lookups — re-parsed expressions have bogus spans (1,1)
+            // that would match wrong entries in the checker's expr_types map.
             let tokens = crate::lexer::Lexer::tokenize(&expr_str);
             let mut parser = crate::parser::Parser::new(tokens);
             if let Ok(parsed) = parser.parse_single_expr() {
+                ctx.skip_span_lookup = true;
                 let mut ir_expr = lower_expr(ctx, &parsed);
-                // Fix type: re-parsed expressions have bogus spans (1,1) which
-                // cause expr_types lookup to return wrong types. For Var nodes,
-                // use the authoritative type from VarTable instead.
+                ctx.skip_span_lookup = false;
+                // Fix type: for simple Var nodes, use the authoritative type from VarTable.
                 if let IrExprKind::Var { id } = &ir_expr.kind {
                     ir_expr.ty = ctx.var_table.get(*id).ty.clone();
                 }
