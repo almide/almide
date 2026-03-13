@@ -9,6 +9,7 @@
 - [Grammar Codegen](active/grammar-codegen.md) — Single source of truth for tokens/precedence, auto-generate tree-sitter + TextMate + lexer
 - [Lambda Type Inference](active/lambda-type-inference.md) — Bidirectional inference for lambda params (`xs.map(fn(x) => x.len())` without annotation)
 - [Codec Protocol & JSON](active/codec-and-json.md) — `deriving Codec` + JSON as first format, 5-phase roadmap
+- [Type System Extensions](active/type-system.md) — Row polymorphism, union types, container protocols (LLM-friendly HKT), structural generic bounds
 
 ## On Hold
 
@@ -25,7 +26,6 @@
 - [Syntax Sugar](on-hold/syntax-sugar.md) — range, exhaustiveness done; comprehensions, raw strings, block comments pending
 - [Tooling](on-hold/tooling.md)
 - [Built-in Protocols](on-hold/trait-impl.md) — Eq, Hash done; Show (`show(x)`) remaining
-- [Type System Extensions](on-hold/type-system.md) — Open records & row polymorphism (replaces trait/impl)
 
 ## Done
 

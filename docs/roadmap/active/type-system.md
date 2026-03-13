@@ -1,4 +1,6 @@
-# Type System Extensions
+# Type System Extensions [ACTIVE]
+
+The type system is Almide's primary lever for surpassing other AI-targeted languages. The goal: **catch more errors at compile time without making the language harder for LLMs to write.** Every feature below follows one rule — the compiler gets smarter, the syntax stays simple.
 
 ## Stdlib Generics Migration (Unknown → TypeVar)
 
@@ -451,6 +453,371 @@ let xs: List[Int] = []
 
 This requires bidirectional type checking (expected type flows into the expression).
 
+## Inline Union Types [PLANNED]
+
+### Overview
+
+Lightweight anonymous unions for return types and error types, without declaring a separate `type` definition.
+
+### Why this matters
+
+Currently, returning one of several types requires a full variant declaration:
+
+```almide
+// Current — must declare a type even for one-off use
+type ParseResult = | IntVal(Int) | FloatVal(Float) | StrVal(String)
+
+fn parse_value(s: String) -> ParseResult = ...
+```
+
+With union types:
+
+```almide
+// Proposed — inline, no declaration needed
+fn parse_value(s: String) -> Int | Float | String = ...
+```
+
+### Design
+
+**Union types are closed, untagged, and flattened:**
+
+```almide
+// Type syntax
+Int | String                    // two members
+Int | Float | String            // three members (flat, not nested)
+Result[Data, NotFound | Timeout | AuthError]  // union in error position
+
+// Match must cover all members
+fn handle(x: Int | String) -> String =
+  match x {
+    i: Int => int.to_string(i)
+    s: String => s
+  }
+```
+
+**Restriction: union members must be distinguishable at runtime:**
+
+```almide
+Int | String          // OK — different runtime types
+Int | Float           // OK — different runtime types
+Int | Int             // error — duplicate
+List[Int] | List[String]  // error — indistinguishable at runtime (both are arrays)
+```
+
+This restriction exists because:
+- LLMs don't need to think about runtime type tags — the compiler handles it
+- Rust codegen uses `enum` with discriminant; TS codegen uses type guards
+- Keeps `match` exhaustiveness checking straightforward
+
+### Union vs Variant — when to use which
+
+| | Union (`A | B`) | Variant (`type X = A(T) \| B(U)`) |
+|---|---|---|
+| Declaration needed | No | Yes |
+| Named constructors | No | Yes (`A(...)`, `B(...)`) |
+| Same-type members | Not allowed | Allowed (`A(Int) \| B(Int)`) |
+| Best for | Return types, error types | Domain modeling |
+
+**Rule of thumb:** If members have different types and no semantic name is needed, use union. Otherwise, use variant.
+
+### Interaction with effect fn
+
+Union types work naturally with `Result` and `effect fn`:
+
+```almide
+type NotFound { path: String }
+type PermissionDenied { path: String }
+
+// Union in error position
+effect fn read_config(path: String) -> Result[Config, NotFound | PermissionDenied] = {
+  guard fs.exists?(path) else err(NotFound { path })
+  guard fs.readable?(path) else err(PermissionDenied { path })
+  let text = fs.read_text(path)
+  ok(parse_config(text))
+}
+```
+
+### Interaction with open records
+
+Union types compose with row polymorphism:
+
+```almide
+// Accept anything that has a name field, return String or Int
+fn get_id(x: { name: String, id: Int, .. }) -> String | Int =
+  if x.name == "admin" { x.name } else { x.id }
+```
+
+### Codegen strategy
+
+| Target | Strategy |
+|--------|----------|
+| **TypeScript** | Direct — TS has native union types (`string \| number`) |
+| **Rust** | Generate anonymous enum: `enum Union_Int_String { V0(i64), V1(String) }` with match arms |
+
+### Implementation phases
+
+#### Phase 1: Basic union types
+
+- [ ] Add `Ty::Union(Vec<Ty>)` to type system
+- [ ] Parse `A | B | C` in type position (return types, let bindings, parameters)
+- [ ] Flatten nested unions: `(A | B) | C` → `A | B | C`
+- [ ] Reject duplicate/indistinguishable members
+- [ ] Exhaustiveness checking in `match`
+
+#### Phase 2: Union + Result integration
+
+- [ ] `Result[T, E1 | E2]` works with `match` on error variants
+- [ ] `?` propagation with union error types
+- [ ] Auto-widening: `err(NotFound(...))` accepted where `NotFound | Timeout` expected
+
+#### Phase 3: Type narrowing
+
+- [ ] After `match` arm, type is narrowed to the matched member
+- [ ] `if x is Int` narrows type in the branch body (future syntax)
+
+---
+
+## Higher-Kinded Types (Container Protocols) [PLANNED]
+
+### The problem with traditional HKT
+
+HKT in Haskell/Scala requires users to:
+1. Understand `F[_]` as a "type-level function"
+2. Choose between `Functor`, `Applicative`, `Monad`, `Traversable`
+3. Write `instance` / `impl` for each combination
+4. Navigate a deep class hierarchy
+
+LLMs fail at all four. The abstraction vocabulary is too large, and choosing the wrong level (e.g., `Functor` when `Monad` is needed) causes cascading errors.
+
+### Almide's approach: Built-in Container Protocols
+
+Instead of user-defined type classes, Almide provides a **fixed set of compiler-known protocols** that describe what operations a type constructor supports. Users never write `Functor` or `Monad`. They write `Mappable` or `Chainable` — concrete, verb-based names with a single meaning.
+
+```almide
+// LLM writes this:
+fn double_all[F: Mappable](xs: F[Int]) -> F[Int] =
+  xs.map(fn(x) => x * 2)
+
+double_all([1, 2, 3])       // List[Int] → [2, 4, 6]
+double_all(some(5))          // Option[Int] → some(10)
+double_all(ok(7))            // Result[Int, E] → ok(14)
+```
+
+```almide
+// NOT what Almide does:
+fn double_all[F[_]: Functor](xs: F[Int]) -> F[Int]   // ← no
+```
+
+### Built-in container protocols
+
+| Protocol | Provides | Types | Haskell equivalent |
+|----------|----------|-------|-------------------|
+| `Mappable` | `map(f)` | List, Option, Result, Map(values) | Functor |
+| `Chainable` | `flat_map(f)` | List, Option, Result | Monad (bind only) |
+| `Filterable` | `filter(f)` | List, Option, Map | MonadPlus (partial) |
+| `Foldable` | `fold(init, f)`, `reduce(f)` | List, Option | Foldable |
+| `Iterable` | `for x in xs` | List, Map, Range | Traversable (partial) |
+
+**That's it. Five protocols. No hierarchy. No user-defined additions.**
+
+### Why this works for LLMs
+
+| Traditional HKT | Almide Container Protocols |
+|---|---|
+| Choose from Functor / Applicative / Monad / ... | Choose from 5 concrete names |
+| Write `instance Functor MyType where ...` | Nothing — compiler auto-derives |
+| `F[_]` syntax with kind inference | `F: Mappable` — same as any bound |
+| Abstraction hierarchy to memorize | Flat list, no hierarchy |
+| User-defined instances can conflict | No user instances → no conflicts |
+
+The key insight: **LLMs don't need to define new abstractions over type constructors.** They need to write functions that work across List/Option/Result. A fixed vocabulary of 5 protocols covers 95% of use cases.
+
+### Syntax design
+
+```almide
+// Single protocol bound
+fn transform[F: Mappable, A, B](xs: F[A], f: Fn[A] -> B) -> F[B] =
+  xs.map(f)
+
+// Multiple protocol bounds
+fn collect_positive[F: Mappable + Filterable](xs: F[Int]) -> F[Int] =
+  xs.filter(fn(x) => x > 0)
+
+// Combining with structural bounds (row poly)
+fn named_items[F: Mappable, T: { name: String, .. }](xs: F[T]) -> F[String] =
+  xs.map(fn(x) => x.name)
+```
+
+### What `F: Mappable` means internally
+
+`F: Mappable` is syntactic sugar. The compiler expands it:
+
+```
+F: Mappable  →  F is one of { List, Option, Result, Map }
+                AND F has map : (F[A], Fn[A] -> B) -> F[B]
+```
+
+At codegen time, the compiler monomorphizes — one concrete function per actual type used:
+
+```rust
+// Almide: fn transform[F: Mappable, A, B](xs: F[A], f: Fn[A] -> B) -> F[B]
+// Called with List[Int] and Option[Int]:
+
+// Generated Rust:
+fn transform_list<A, B>(xs: Vec<A>, f: impl Fn(A) -> B) -> Vec<B> { xs.into_iter().map(f).collect() }
+fn transform_option<A, B>(xs: Option<A>, f: impl Fn(A) -> B) -> Option<B> { xs.map(f) }
+```
+
+### User-defined Mappable types
+
+Users can make their own types work with container protocols by defining the required function:
+
+```almide
+type Tree[A] =
+  | Leaf(A)
+  | Node(Tree[A], Tree[A])
+  deriving Mappable   // compiler checks that map is defined
+
+fn map[A, B](tree: Tree[A], f: Fn[A] -> B) -> Tree[B] =
+  match tree {
+    Leaf(x) => Leaf(f(x))
+    Node(l, r) => Node(map(l, f), map(r, f))
+  }
+
+// Now works with container-generic functions:
+fn double_all[F: Mappable](xs: F[Int]) -> F[Int] = xs.map(fn(x) => x * 2)
+double_all(Node(Leaf(1), Leaf(2)))  // Node(Leaf(2), Leaf(4))
+```
+
+`deriving Mappable` is a **conformance declaration**, not an `impl` block. It tells the compiler "check that `map` exists for this type with the right signature." The user writes a plain function, not a trait implementation.
+
+### Why `deriving` and not auto-detect
+
+Auto-detection ("if a `map` function exists, it's Mappable") creates ambiguity:
+- What if `map` exists but has the wrong signature?
+- What if `map` is imported from another module?
+- LLMs can't predict whether their type is Mappable without explicit declaration
+
+`deriving Mappable` is a single line that makes intent explicit. The compiler validates it.
+
+### Interaction with UFCS
+
+Container protocol methods are resolved via UFCS, same as today:
+
+```almide
+[1, 2, 3].map(fn(x) => x * 2)    // already works
+some(5).map(fn(x) => x + 1)       // already works
+tree.map(fn(x) => x * 2)          // works after deriving Mappable
+```
+
+No new dispatch mechanism needed. UFCS already resolves `.map()` by receiver type.
+
+### What this does NOT include
+
+| Feature | Why excluded |
+|---------|-------------|
+| User-defined protocols | One new protocol = vocabulary expansion = LLM accuracy drop |
+| Protocol hierarchy (`Chainable extends Mappable`) | Hierarchy navigation is LLMs' weakness |
+| Associated types | `type Item` inside protocols adds indirection |
+| Default implementations | "Which implementation runs?" is a common LLM confusion |
+| Monad transformers | `OptionT[List, A]` is the #1 abstraction-hell pattern |
+
+### Design references
+
+| Language | Approach | What Almide takes |
+|----------|----------|-------------------|
+| **Rust** | Trait system + GATs | Monomorphization strategy |
+| **Swift** | Protocol with associated types | `deriving` conformance declaration |
+| **OCaml (modular implicits)** | First-class modules as type classes | Fixed module set, no user extension |
+| **1ML** | Modules as first-class values | Type constructor polymorphism without HKT syntax |
+| **Koka** | Effect handlers with type constructors | Verb-based naming (not math-based) |
+
+### Implementation phases
+
+#### Phase 1: Built-in protocols (no user types)
+
+- [ ] Define 5 protocols as compiler-internal concepts (not user-visible declarations)
+- [ ] Parse `F: Mappable` as a generic bound (extends existing `GenericParam.bounds`)
+- [ ] Type checker: `F: Mappable` constrains `F` to `{List, Option, Result, Map}`
+- [ ] Monomorphize at codegen: generate one function per actual container type used
+- [ ] Error message: "Type String does not satisfy Mappable — only List, Option, Result, Map are Mappable"
+
+#### Phase 2: User-defined conformance
+
+- [ ] Parse `deriving Mappable` on `type` declarations
+- [ ] Checker validates that a matching `map` function exists with correct signature
+- [ ] Add user-defined types to the set of types satisfying each protocol
+- [ ] UFCS resolution includes user-defined map/flat_map/filter
+
+#### Phase 3: Multi-param type constructors
+
+- [ ] `Map[K, V]` as `Mappable` over values (key fixed): `map.map(m, fn(v) => ...)` maps values
+- [ ] `Result[T, E]` as `Mappable` over `T` (error type fixed)
+- [ ] Partial application of type constructors at the type level
+
+### Undecided questions
+
+**Q1: Should protocols compose?**
+
+```almide
+// Option A: flat, no composition
+fn process[F: Mappable, F: Filterable](xs: F[Int]) -> F[Int]
+
+// Option B: combined bound
+fn process[F: Mappable + Filterable](xs: F[Int]) -> F[Int]
+```
+
+Leaning toward Option B — `+` is familiar from other languages and doesn't introduce hierarchy.
+
+**Q2: Should `Chainable` require `Mappable`?**
+
+In theory, every Monad is a Functor. But making this explicit introduces hierarchy. Current answer: **no** — keep them independent. If a function needs both, write both bounds. Flat is better than deep.
+
+**Q3: `deriving` syntax for multiple protocols?**
+
+```almide
+type Tree[A] = ...
+  deriving Mappable, Foldable   // comma-separated
+```
+
+Or separate lines? Leaning toward comma-separated for conciseness.
+
+---
+
+## Competitive Analysis: Type System Power
+
+How Almide's type system compares after all planned extensions are implemented:
+
+| Feature | Almide (planned) | vibe-lang | TypeScript | Rust |
+|---------|------------------|-----------|------------|------|
+| Row polymorphism | **Yes** (PureScript-style) | No | Structural subtyping (weaker) | No |
+| Union types | **Yes** (inline) | No | Yes (but unsound) | No (tagged enum only) |
+| Structural generic bounds | **Yes** (`T: { field, .. }`) | Trait bounds | No | Trait bounds |
+| Effect tracking | Binary (pure/effect) | Effect rows (richer) | None | None |
+| Variance | Intentionally none | Full | Full | Full |
+| HKT | **Yes** (container protocols) | Partial | No | No (GAT workaround) |
+| Dependent types | No | No | Conditional types (limited) | No |
+
+### Where Almide will be uniquely strong
+
+1. **Row polymorphism + union types + structural bounds** — this combination doesn't exist in any mainstream language. PureScript has row poly but no inline unions. TypeScript has unions but no row poly. Almide will have both.
+
+2. **No trait/impl/interface ceremony** — structural bounds (`T: { field, .. }`) replace the entire trait system. Zero boilerplate for generic constraints.
+
+3. **LLM-optimized tradeoffs** — no variance (eliminates covariance/contravariance errors), container protocols instead of open HKT (eliminates `Functor`/`Monad` confusion), binary effect tracking (eliminates effect row annotation errors). Every omission is intentional.
+
+### What Almide deliberately does NOT pursue
+
+| Feature | Why not |
+|---------|---------|
+| Effect row polymorphism | LLMs must choose which effects to annotate → error source |
+| Open HKT (user-defined type classes) | `Functor[F[_]]` with user instances is the #1 type error source for LLMs |
+| Implicit parameters / type classes | Hidden resolution → LLM can't predict what gets passed |
+| Variance annotations | `in`/`out` annotations are a decision point LLMs frequently get wrong |
+| Dependent types | Type-level computation is LLMs' weakest area |
+
+---
+
 ## Priority
 
-Open records (Phase 1-2) > structured error types > type annotation > open records (Phase 3-4)
+Open records (Phase 1-2) > union types (Phase 1) > container protocols (Phase 1) > structured error types > type annotation > open records (Phase 3-4) > union types (Phase 2-3) > container protocols (Phase 2-3)
