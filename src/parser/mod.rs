@@ -2,6 +2,7 @@ mod compounds;
 mod declarations;
 mod expressions;
 mod helpers;
+pub mod hints;
 mod patterns;
 mod primary;
 mod statements;
@@ -26,6 +27,29 @@ impl Parser {
     pub fn with_file(mut self, file: &str) -> Self {
         self.file = Some(file.to_string());
         self
+    }
+
+    /// Check all hint modules for a matching hint at the current position.
+    pub(crate) fn check_hint(&self, expected: Option<crate::lexer::TokenType>, scope: hints::HintScope) -> Option<hints::HintResult> {
+        let prev = if self.pos > 0 { Some(&self.tokens[self.pos - 1]) } else { None };
+        let ctx = hints::HintContext {
+            expected,
+            got: self.current(),
+            prev,
+            scope,
+        };
+        hints::check_hint(&ctx)
+    }
+
+    /// Check hints and return an Err with the hint message if found, otherwise a generic error.
+    pub(crate) fn check_hint_or_err(&self, expected: Option<crate::lexer::TokenType>, scope: hints::HintScope, default_msg: &str) -> String {
+        if let Some(result) = self.check_hint(expected, scope) {
+            let tok = self.current();
+            let msg = result.message.as_deref().unwrap_or(default_msg);
+            format!("{} at line {}:{}\n  Hint: {}", msg, tok.line, tok.col, result.hint)
+        } else {
+            default_msg.to_string()
+        }
     }
 
     /// Create a Diagnostic error with file/line/col from the current token.

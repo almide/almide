@@ -282,46 +282,17 @@ impl Parser {
             }
             return Ok(Expr::TypeName { name, span, resolved_type: None });
         }
-        if self.check(TokenType::Bang) {
-            return Err(format!(
-                "'!' is not valid in Almide at line {}:{}\n  Hint: Use 'not x' for boolean negation, not '!x'.",
-                tok.line, tok.col
-            ));
-        }
+        // |x| closure syntax (needs lookahead — kept inline)
         if self.check(TokenType::Pipe) && self.peek_at(1).map(|t| matches!(t.token_type, TokenType::Ident | TokenType::IdentQ | TokenType::Underscore)).unwrap_or(false) {
             return Err(format!(
                 "'|x|' closure syntax is not valid in Almide at line {}:{}\n  Hint: Use 'fn(x) => expr' for lambdas. Example: list.map(xs, fn(x) => x + 1)",
                 tok.line, tok.col
             ));
         }
-        if self.check(TokenType::PipePipe) {
-            return Err(format!(
-                "'||' is not valid in Almide at line {}:{}\n  Hint: Use 'or' for logical OR. Example: if a or b then ...",
-                tok.line, tok.col
-            ));
-        }
-        if self.check(TokenType::AmpAmp) {
-            return Err(format!(
-                "'&&' is not valid in Almide at line {}:{}\n  Hint: Use 'and' for logical AND. Example: if a and b then ...",
-                tok.line, tok.col
-            ));
-        }
-        if self.check(TokenType::Ident) {
-            let rejected_hint = match tok.value.as_str() {
-                "loop" => Some("Almide has no 'loop'. Use 'while true { ... }' or 'do { guard COND else ok(()) ... }' for loops."),
-                "return" => Some("Almide has no 'return'. The last expression in a block is the return value. Use 'guard ... else' for early returns."),
-                "print" => Some("Use 'println(s)' instead of 'print'. There is no 'print' function in Almide."),
-                "null" | "nil" => Some("Almide has no null. Use Option[T] with 'some(v)' / 'none'."),
-                "throw" => Some("Almide has no exceptions. Use Result[T, E] with 'ok(v)' / 'err(e)'."),
-                "catch" | "except" => Some("Almide has no try/catch. Use 'match' on Result values instead."),
-                _ => None,
-            };
-            if let Some(hint) = rejected_hint {
-                return Err(format!(
-                    "'{}' is not valid in Almide at line {}:{}\n  Hint: {}",
-                    tok.value, tok.line, tok.col, hint
-                ));
-            }
+        // Check hint system for rejected operators and keywords from other languages
+        if let Some(result) = self.check_hint(None, super::hints::HintScope::Expression) {
+            let msg = result.message.unwrap_or_else(|| format!("'{}' is not valid here", tok.value));
+            return Err(format!("{} at line {}:{}\n  Hint: {}", msg, tok.line, tok.col, result.hint));
         }
         if self.check(TokenType::Ident) || self.check(TokenType::IdentQ) {
             let name = tok.value.clone();
@@ -329,20 +300,9 @@ impl Parser {
             return Ok(Expr::Ident { name, span, resolved_type: None });
         }
 
-        let hint = match tok.value.as_str() {
-            "loop" => "\n  Hint: Almide has no 'loop'. Use 'while true { ... }' or 'do { guard COND else ok(()) ... }' for loops.",
-            "for" => "\n  Hint: Use 'list.each(xs, fn(x) => ...)' or 'do { guard ... }' instead of 'for'.",
-            "return" => "\n  Hint: Almide has no 'return'. The last expression in a block is the return value. Use 'guard ... else' for early returns.",
-            "null" | "nil" | "None" => "\n  Hint: Almide has no null. Use Option[T] with 'some(v)' / 'none'.",
-            "throw" => "\n  Hint: Almide has no exceptions. Use Result[T, E] with 'ok(v)' / 'err(e)'.",
-            "catch" | "except" => "\n  Hint: Almide has no try/catch. Use 'match' on Result values instead.",
-            "class" | "struct" => "\n  Hint: Use 'type Name = { field: Type, ... }' for record types.",
-            "print" => "\n  Hint: Use 'println(s)' instead of 'print'. There is no 'print' function in Almide.",
-            _ => "",
-        };
         Err(format!(
-            "Expected expression at line {}:{} (got {:?} '{}'){}",
-            tok.line, tok.col, tok.token_type, tok.value, hint
+            "Expected expression at line {}:{} (got {:?} '{}')",
+            tok.line, tok.col, tok.token_type, tok.value
         ))
     }
 }

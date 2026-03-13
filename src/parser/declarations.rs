@@ -111,20 +111,13 @@ impl Parser {
             return self.parse_test_decl();
         }
         let tok = self.current();
-        let hint = match tok.value.as_str() {
-            "class" | "struct" => "\n  Hint: Use 'type Name = { field: Type, ... }' for record types, or 'type Name = | Case1 | Case2' for variants.",
-            "def" | "func" | "function" | "fun" | "proc" => "\n  Hint: Use 'fn name(...) -> Type = expr' or 'effect fn name(...) -> Result[T, E] = expr'.",
-            "while" | "for" | "loop" => "\n  Hint: Almide has no top-level loops. Define a function with 'fn' or 'effect fn'.",
-            "const" | "val" | "var" => "\n  Hint: Use 'let NAME = value' for top-level constants, or 'let' inside functions for local bindings.",
-            "enum" | "data" | "sealed" | "union" => "\n  Hint: Use 'type Name = | Case1(T) | Case2(T)' for variant types.",
-            "interface" | "protocol" | "abstract" => "\n  Hint: Use 'trait Name { ... }' for traits.",
-            "return" => "\n  Hint: Almide functions return the last expression — no 'return' keyword needed.",
-            "import" => "\n  Hint: All imports must come before other declarations.",
-            _ => "",
-        };
+        if let Some(result) = self.check_hint(None, super::hints::HintScope::TopLevel) {
+            let msg = result.message.as_deref().unwrap_or("Unexpected token at top level");
+            return Err(format!("{} at line {}:{}\n  Hint: {}", msg, tok.line, tok.col, result.hint));
+        }
         Err(format!(
-            "Expected top-level declaration (fn, effect fn, type, let, trait, impl, test) at line {}:{} (got {:?} '{}'){}",
-            tok.line, tok.col, tok.token_type, tok.value, hint
+            "Expected top-level declaration (fn, effect fn, type, let, trait, impl, test) at line {}:{} (got {:?} '{}')",
+            tok.line, tok.col, tok.token_type, tok.value
         ))
     }
 

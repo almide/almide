@@ -82,11 +82,8 @@ impl Parser {
 
         // Detect `let mut` (Rust style) — hint to use `var` instead
         if self.check(TokenType::Ident) && self.current().value == "mut" {
-            let tok = self.current();
-            return Err(format!(
-                "'let mut' is not valid in Almide at line {}:{}\n  Hint: Use 'var' for mutable variables. Example: var x = 0",
-                tok.line, tok.col
-            ));
+            return Err(self.check_hint_or_err(Some(TokenType::Ident), super::hints::HintScope::Block,
+                "'let mut' is not valid in Almide"));
         }
 
         // Allow `let _ = expr` to discard values

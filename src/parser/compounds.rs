@@ -364,19 +364,10 @@ impl Parser {
             }
             // Detect missing comma in map literal
             if !self.check(TokenType::RBracket) && !self.check(TokenType::EOF) {
-                let tok = self.current();
-                let is_expr_start = matches!(tok.token_type,
-                    TokenType::Int | TokenType::Float | TokenType::String
-                    | TokenType::InterpolatedString | TokenType::True | TokenType::False
-                    | TokenType::Ident | TokenType::TypeName | TokenType::LParen
-                    | TokenType::LBracket | TokenType::LBrace | TokenType::Minus
-                    | TokenType::None | TokenType::Some
-                );
-                if is_expr_start {
-                    return Err(format!(
-                        "Missing ',' between map entries at line {}:{}\n  Hint: Add a comma after each entry. Example: [\"a\": 1, \"b\": 2]",
-                        tok.line, tok.col
-                    ));
+                if let Some(result) = self.check_hint(None, super::hints::HintScope::MapLiteral) {
+                    let tok = self.current();
+                    let msg = result.message.as_deref().unwrap_or("Unexpected token in map");
+                    return Err(format!("{} at line {}:{}\n  Hint: {}", msg, tok.line, tok.col, result.hint));
                 }
             }
             self.expect_closing(TokenType::RBracket, open.line, open.col, "map literal")?;
@@ -394,19 +385,10 @@ impl Parser {
         }
         // Detect missing comma: next token is an expression start but not ']'
         if !self.check(TokenType::RBracket) && !self.check(TokenType::EOF) {
-            let tok = self.current();
-            let is_expr_start = matches!(tok.token_type,
-                TokenType::Int | TokenType::Float | TokenType::String
-                | TokenType::InterpolatedString | TokenType::True | TokenType::False
-                | TokenType::Ident | TokenType::TypeName | TokenType::LParen
-                | TokenType::LBracket | TokenType::LBrace | TokenType::Minus
-                | TokenType::None | TokenType::Some
-            );
-            if is_expr_start {
-                return Err(format!(
-                    "Missing ',' before this element at line {}:{}\n  Hint: Add a comma after the previous element. Example: [a, b, c]",
-                    tok.line, tok.col
-                ));
+            if let Some(result) = self.check_hint(None, super::hints::HintScope::ListLiteral) {
+                let tok = self.current();
+                let msg = result.message.as_deref().unwrap_or("Unexpected token in list");
+                return Err(format!("{} at line {}:{}\n  Hint: {}", msg, tok.line, tok.col, result.hint));
             }
         }
         self.expect_closing(TokenType::RBracket, open.line, open.col, "list literal")?;
