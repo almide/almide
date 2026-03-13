@@ -1,5 +1,7 @@
 # Bidirectional Type Inference for Lambda Parameters [ACTIVE]
 
+**Status**: 部分実装済み。チェッカーに expected type からの推論フィルタリングが追加されているが、lowerer への伝播が未完了。行番号は一部ズレあり（本文中で更新済み）。
+
 ## Problem
 
 Lambda parameters without type annotations receive `Ty::Unknown`. This breaks ambiguous UFCS inside lambdas:
@@ -51,7 +53,7 @@ Arguments are checked **before** being matched against the function signature. T
 |------|-------|------|
 | `src/check/expressions.rs` | 432-451 | Lambda checking — params default to `Ty::Unknown` |
 | `src/check/calls.rs` | 33-109 | `check_call` — args checked before signature matching |
-| `src/check/calls.rs` | 293-312 | `check_module_call` — unification with TypeVars |
+| `src/check/calls.rs` | 384-436 | `check_module_call` — unification with TypeVars |
 | `src/types.rs` | 199-242 | `unify()` — TypeVar binding infrastructure |
 | `src/types.rs` | 244-270 | `substitute()` — type substitution |
 | `src/lower.rs` | 466-478 | Lambda lowering — params from checker or `Ty::Unknown` |

@@ -1,4 +1,4 @@
-# Trailing Lambda / Builder DSL [ON HOLD — WON'T DO]
+# Trailing Lambda / Builder DSL [WON'T DO]
 
 Explore Kotlin-style trailing lambda or builder patterns for structured data construction.
 

@@ -7,7 +7,6 @@
 - [LLM Integration](active/llm-integration.md) — `almide forge` (library generation), `almide fix` (self-repair), `almide explain`
 - [Structured Concurrency](active/structured-concurrency.md) — Layer 2: `async let` / `await` for scoped parallel execution
 - [Grammar Codegen](active/grammar-codegen.md) — Single source of truth for tokens/precedence, auto-generate tree-sitter + TextMate + lexer
-- [UFCS Type Resolution](active/ufcs-type-resolution.md) — Fix ambiguous UFCS on member access / call chains (`g.words.len()`, `xs.map(f).join(",")`)
 - [Lambda Type Inference](active/lambda-type-inference.md) — Bidirectional inference for lambda params (`xs.map(fn(x) => x.len())` without annotation)
 - [JSON Builder API](active/json-builder-api.md) — `json.object` + short constructors (`json.s/i/f/b`) for ergonomic JSON construction
 
@@ -16,20 +15,16 @@
 - [Benchmark Report](on-hold/benchmark-report.md)
 - [Direct WASM Emission](on-hold/emit-wasm-direct.md) — `.almd → WASM bytecode` without rustc
 - [Editor & GitHub Integration](on-hold/editor-github-integration.md)
-- [Function Reference Passing](on-hold/function-reference-passing.md) — low priority, verbose form is always correct
 - [Rainbow FFI](on-hold/rainbow-ffi.md) — Rust, JS, C, Python, Swift, Kotlin, Erlang FFI
-- [LLM Developer Experience](on-hold/llm-developer-experience.md)
 - [LLM Immutable Sugar](on-hold/llm-immutable-sugar.md) — var indexing, `with` expression
 - [Package Registry](on-hold/package-registry.md)
 - [Research: Modification Survival Rate Paper](on-hold/research-modification-survival-rate-paper.md)
-- [Scaffold & Proliferation Pipeline](on-hold/scaffold-and-proliferation.md)
 - [Self-Hosting](on-hold/self-hosting.md) — rewrite compiler in Almide (after spec stabilization)
 - [Stdlib Architecture: 3-Layer Design](on-hold/stdlib-architecture-3-layer-design.md) — Phase A done, B/C remaining
 - [Supervision & Actors](on-hold/supervision-and-actors.md) — Layer 3: typed actors, channels, supervision trees (stdlib)
-- [Syntax Sugar](on-hold/syntax-sugar.md) — range, raw strings, exhaustiveness done; comprehensions pending
+- [Syntax Sugar](on-hold/syntax-sugar.md) — range, exhaustiveness done; comprehensions, raw strings, block comments pending
 - [Tooling](on-hold/tooling.md)
-- [Trailing Lambda / Builder DSL](on-hold/trailing-lambda-builder.md) — won't do, solve with stdlib instead
-- [Built-in Protocols](on-hold/trait-impl.md) — Show (`show(x)`), Hash (Map key constraint) remaining; all automatic
+- [Built-in Protocols](on-hold/trait-impl.md) — Eq, Hash done; Show (`show(x)`) remaining
 - [Type System Extensions](on-hold/type-system.md) — Open records & row polymorphism (replaces trait/impl)
 
 ## Done
@@ -75,4 +70,9 @@
 - [While Loop](done/while-loop.md) — `while condition { }`, universal loop syntax
 - [Hint System](done/hint-system.md) — Pluggable hint registry, 5 modules, 61 tests, catalog
 - [`import self`](done/import-self-entry.md) — `main.almd` can access `mod.almd` pub definitions via `import self`
+- [UFCS Type Resolution](done/ufcs-type-resolution.md) — Recursive type inference in lowerer for member access UFCS (`g.words.len()`)
+- [LLM Developer Experience](done/llm-developer-experience.md) — UFCS done; remaining merged into LLM Integration
+- [Scaffold & Proliferation](done/scaffold-and-proliferation.md) — Merged into LLM Integration as `almide forge`
+- [Trailing Lambda / Builder DSL](done/trailing-lambda-builder.md) — Won't do; stdlib approach preferred
+- [Function Reference Passing](done/function-reference-passing.md) — Won't do; verbose form is always correct
 - [2026 Ergonomics](2026-ergonomics.md) — `do` block pure fn support, `guard else break/continue`, `unwrap_or` UFCS fix, `json.parse` auto-`?` fix

@@ -1,4 +1,6 @@
-# Function Reference Passing [ON HOLD — LOW PRIORITY]
+# Function Reference Passing [WON'T DO]
+
+> Verbose form (`fn(x) => f(x)`) is always correct and LLM-friendly. Not worth the complexity.
 
 Make passing named functions as arguments seamless, eliminating unnecessary closure wrappers.
 

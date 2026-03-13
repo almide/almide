@@ -1,6 +1,6 @@
 # Syntax Sugar [IN PROGRESS]
 
-## Range Literals
+## Range Literals ✅
 ```almide
 let xs = 0..10        // [0, 1, 2, ..., 9]
 let ys = 0..=10       // [0, 1, 2, ..., 10]
@@ -24,8 +24,8 @@ fn greet(name: String, greeting: String = "Hello") -> String =
 http.response(status: 200, body: "OK")
 ```
 
-## Exhaustiveness Checking for Pattern Match
-Detects at compile time when a match on a variant type does not cover all cases.
+## Exhaustiveness Checking for Pattern Match ✅
+Detects at compile time when a match on a variant type does not cover all cases. Implemented in `src/check/mod.rs`.
 
 ```almide
 type Color = Red | Green | Blue
@@ -52,4 +52,4 @@ let path = r"C:\Users\test"
 ```
 
 ## Priority
-Range literals > exhaustiveness checking > block comments > list comprehensions > default arguments > raw strings
+~~Range literals~~ ✅ > ~~exhaustiveness checking~~ ✅ > block comments > list comprehensions > default arguments > raw strings

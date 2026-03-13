@@ -1,4 +1,4 @@
-# UFCS Type Resolution for Ambiguous Methods [ACTIVE]
+# UFCS Type Resolution for Ambiguous Methods [DONE]
 
 ## Problem
 

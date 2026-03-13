@@ -12,7 +12,7 @@
 |----------|----------|--------|
 | `Eq` | `==` / `!=` on all value types. `Fn` rejected | **Done** |
 | `Show` | `show(x)` → String for all value types. `Fn` rejected | Planned |
-| `Hash` | Map key constraint. `Fn` and `Float` rejected | Planned |
+| `Hash` | Map key constraint. `Fn` and `Float` rejected | **Done** |
 | `From` | Error type conversions via `deriving From` | **Done** |
 
 ## Eq Protocol (Done)
@@ -65,9 +65,9 @@ What is Show:
 - String interpolation: should `"value is ${x}"` auto-call `show(x)` for non-String types? Currently requires explicit conversion. If yes, this massively improves ergonomics
 - Debug vs display: should `show(Red)` produce `"Red"` (debug-style) or allow user customization? Almide answer: always debug-style, no customization. One way to do things
 
-## Hash Protocol (Planned)
+## Hash Protocol (Done)
 
-**Automatic.** The compiler determines hashability from the type structure. No `deriving Hash` needed.
+**Automatic.** The compiler determines hashability from the type structure. No `deriving Hash` needed. Implemented via `is_hash()` in `src/types.rs` with Float rejection and cycle detection.
 
 ```almide
 type Color = | Red | Green | Blue
