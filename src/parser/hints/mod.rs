@@ -3,6 +3,7 @@ pub mod keyword_typo;
 pub mod delimiter;
 pub mod operator;
 pub mod syntax_guide;
+pub mod catalog;
 
 use crate::lexer::{Token, TokenType};
 
@@ -31,6 +32,8 @@ pub struct HintContext<'a> {
     pub got: &'a Token,
     /// The previous token (if available).
     pub prev: Option<&'a Token>,
+    /// The next token (lookahead, if available).
+    pub next: Option<&'a Token>,
     /// The scope in which the error occurred.
     pub scope: HintScope,
 }

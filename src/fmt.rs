@@ -271,14 +271,44 @@ fn format_expr(out: &mut String, expr: &Expr, depth: usize) {
         Expr::String { value, .. } => out.push_str(&format!("{:?}", value)),
         Expr::InterpolatedString { value, .. } => {
             out.push('"');
-            for ch in value.chars() {
-                match ch {
-                    '\n' => out.push_str("\\n"),
-                    '\t' => out.push_str("\\t"),
-                    '\\' => out.push_str("\\\\"),
-                    '"' => out.push_str("\\\""),
-                    other => out.push(other),
+            let mut depth = 0u32;
+            let chars: Vec<char> = value.chars().collect();
+            let mut i = 0;
+            while i < chars.len() {
+                let ch = chars[i];
+                if ch == '$' && i + 1 < chars.len() && chars[i + 1] == '{' {
+                    out.push('$');
+                    out.push('{');
+                    depth += 1;
+                    i += 2;
+                    continue;
                 }
+                if depth > 0 && ch == '{' {
+                    depth += 1;
+                    out.push(ch);
+                    i += 1;
+                    continue;
+                }
+                if depth > 0 && ch == '}' {
+                    depth -= 1;
+                    out.push(ch);
+                    i += 1;
+                    continue;
+                }
+                if depth > 0 {
+                    // Inside interpolation expression — emit verbatim
+                    out.push(ch);
+                } else {
+                    // Outside interpolation — escape special characters
+                    match ch {
+                        '\n' => out.push_str("\\n"),
+                        '\t' => out.push_str("\\t"),
+                        '\\' => out.push_str("\\\\"),
+                        '"' => out.push_str("\\\""),
+                        other => out.push(other),
+                    }
+                }
+                i += 1;
             }
             out.push('"');
         }

@@ -56,6 +56,38 @@ fn check_rejected_ident(name: &str) -> Option<HintResult> {
             message: Some(format!("'{}' is not valid in Almide", name)),
             hint: "Almide has no try/catch. Use 'match' on Result values instead.".into(),
         }),
+        "self" | "this" => Some(HintResult {
+            message: Some(format!("'{}' is not valid in Almide", name)),
+            hint: "Almide has no 'self' or 'this'. Pass the value as the first parameter. Example: fn greet(user: User) -> String".into(),
+        }),
+        "new" => Some(HintResult {
+            message: Some("'new' is not needed in Almide".into()),
+            hint: "Construct records directly: Type { field: value }. Example: User { name: \"Taro\", age: 25 }".into(),
+        }),
+        "void" => Some(HintResult {
+            message: Some("'void' does not exist in Almide".into()),
+            hint: "Use 'Unit' for functions that return nothing. Example: fn log(msg: String) -> Unit".into(),
+        }),
+        "undefined" => Some(HintResult {
+            message: Some("'undefined' does not exist in Almide".into()),
+            hint: "Almide has no undefined. Use Option[T] with 'some(v)' / 'none'.".into(),
+        }),
+        "switch" => Some(HintResult {
+            message: Some("'switch' is not valid in Almide".into()),
+            hint: "Use 'match' for pattern matching. Example: match value { pattern -> result }".into(),
+        }),
+        "elif" | "elsif" | "elseif" => Some(HintResult {
+            message: Some(format!("'{}' is not valid in Almide", name)),
+            hint: "Use nested 'if/then/else'. Example: if a then x else if b then y else z".into(),
+        }),
+        "extends" | "implements" | "inherit" | "inherits" => Some(HintResult {
+            message: Some(format!("'{}' is not valid in Almide", name)),
+            hint: "Almide uses structural typing. No inheritance or interfaces — use open records: { field: Type, .. }".into(),
+        }),
+        "lambda" => Some(HintResult {
+            message: Some("'lambda' is not valid in Almide".into()),
+            hint: "Use 'fn(x) => expr' for lambdas. Example: list.map(xs, fn(x) => x + 1)".into(),
+        }),
         _ => None,
     }
 }

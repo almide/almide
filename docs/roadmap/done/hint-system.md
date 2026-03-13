@@ -50,32 +50,28 @@ src/parser/
 | `helpers.rs` `expect_closing()` | セカンダリスパン生成はヒントと別のメカニズム |
 | `declarations.rs` import `{` detection | パース構造依存のチェック |
 
-## Remaining Work
+## Completed Phases
 
-### Phase 3: ヒントのテスト基盤
+### Phase 3: テスト基盤 — DONE (v0.5.12)
 
-各ヒントモジュールに対応するテーブル駆動テスト:
+テーブル駆動テスト 43件 → 全5モジュールをカバー。正常系・異常系・スコープ検証。
 
-```rust
-#[test]
-fn missing_comma_in_list() {
-    assert_hint(
-        "[1 2 3]",
-        HintScope::ListLiteral,
-        "Missing ',' between list elements",
-    );
-}
-```
+### Phase 4: 拡張 — DONE
 
-### Phase 4: 拡張
+- ✅ `HintContext` に `next: Option<&Token>` を追加
+- ✅ `|x|` closure ヒントを `primary.rs` インラインから `operator.rs` に移行（lookahead使用）
+- ✅ セミコロンヒント追加（`operator.rs`）
+- ✅ LLMエラーパターン11件追加（`syntax_guide.rs`）: `self`/`this`, `new`, `void`, `undefined`, `switch`, `elif`/`elsif`/`elseif`, `extends`/`implements`, `lambda`
+- ✅ ヒントカタログ (`catalog.rs`) — 全ヒント一覧を `all_hints()` で取得可能
+- ✅ テスト 61件（+18件追加）
 
-- HintContext に `next: Option<&Token>` を追加して `|x|` closure チェックも移行可能に
-- ヒントカタログ（どんなヒントがあるか一覧）の自動生成
-- LLMエラーパターン分析に基づく新しいヒントモジュール追加
+## Status
+
+**All phases complete.** This roadmap item can be moved to Done.
 
 ## Priority
 
-**P0** — Phase 1-2 完了。Phase 3 (テスト基盤) は次のプライオリティ。
+This item is complete. Consider moving to `done/`.
 
 ## Reference
 
