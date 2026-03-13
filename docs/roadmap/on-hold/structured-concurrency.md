@@ -56,11 +56,31 @@ Note: `async fn` returns `Future[T]`. Calling it without `await` or `async let` 
 
 ### Semantics
 
-- `async let x = expr` — immediately starts evaluating `expr` as a concurrent task
-- `await x` — suspends until the task completes and returns its value
-- Scope exit with un-awaited bindings → automatic cancellation
-- Inside `do` block: any task failure → cancel siblings → propagate error
-- No new keywords — `async` and `let` are both existing
+- `async let x = expr` — immediately starts evaluating `expr` as a concurrent task. `x` is a `Future[T]` handle.
+- `await x` — suspends until the task completes and returns its value. **Consumes** the handle.
+- `await x` a second time is a **compile error** (handle is already consumed). To reuse the value, bind it: `let v = await x; use(v, v)`.
+- Scope exit with un-awaited bindings → automatic cancellation.
+- Inside `do` block: any task failure → **cancel all sibling tasks** → propagate error. Partial success is not observable.
+- No new keywords — `async` and `let` are both existing.
+
+### Failure and cancellation rules
+
+```almide
+do {
+  async let a = fetch_a()   // starts
+  async let b = fetch_b()   // starts
+  async let c = fetch_c()   // starts
+  use(await a, await b, await c)
+}
+// If a fails: b and c are cancelled. do propagates a's error.
+// If b fails: a and c are cancelled. do propagates b's error.
+// This matches do's existing behavior: first error exits the block.
+```
+
+**Rationale:**
+- Consistent with `do` — `do` exits on the first `Result` error, so `async let` + `do` exits on the first failed task.
+- AI doesn't need to write cleanup logic for partially-succeeded parallel operations.
+- "All succeed or all fail" is the simplest mental model.
 
 ### Comparison with Swift
 
