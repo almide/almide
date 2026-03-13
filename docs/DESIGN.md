@@ -1,6 +1,6 @@
 # Design Philosophy
 
-Almide optimizes for **minimal thinking tokens**: the less an LLM has to branch over syntax, semantics, repair strategies, or missing abstractions, the faster, cheaper, and more reliable code generation becomes. This means both removing ambiguity *and* providing the right tools so the AI never has to improvise.
+Almide optimizes for **minimal thinking tokens**: the less an LLM has to branch over syntax, semantics, repair strategies, or missing abstractions, the faster, cheaper, and more reliable code generation becomes. This means both removing ambiguity *and* providing the right tools so the AI does not need to improvise around missing abstractions.
 
 ## Syntax Ambiguity Removed
 
@@ -9,8 +9,8 @@ Almide optimizes for **minimal thinking tokens**: the less an LLM has to branch 
 | Null handling | `null`, `nil`, `None`, `undefined` | `Option[T]` only | Eliminates null-check hallucination |
 | Error handling | `throw`, `try/catch`, `panic`, error codes | `Result[T, E]` only | Error path always visible in types |
 | Generics | `<T>` (ambiguous with `<` `>`) | `[T]` | No parser ambiguity with comparisons |
-| Loops | `while`, `for`, `loop`, `forEach`, recursion | `for x in xs { }` + `do { guard ... }` | Iteration for collections, guard for dynamic conditions |
-| Early exit | `return`, `break`, `continue`, `throw` | Last expression + `guard ... else` | No early-return confusion |
+| Loops | `while`, `for`, `loop`, `forEach`, recursion | `for x in xs { }` for collection iteration, `do { guard ... }` for condition-driven repetition | Each form has one purpose |
+| Early exit | `return`, `break`, `continue`, `throw` | Last expression only; `guard ... else` is the canonical structured escape hatch | No early-return confusion |
 | Lambdas | `=>`, `->`, `lambda`, `fn`, `\x ->`, blocks | `fn(x) => expr` only | One syntax, zero alternatives |
 | Statement termination | `;`, optional `;`, ASI rules | Newline-separated | No insertion ambiguity |
 | Conditionals | `if` with optional `else`, ternary `?:` | `if/then/else` (else mandatory) | No dangling-else |
@@ -27,7 +27,7 @@ Almide optimizes for **minimal thinking tokens**: the less an LLM has to branch 
 | Overloading | None — each function name has exactly one definition | No ad-hoc dispatch resolution |
 | Implicit conversions | None — `int.to_string(n)`, never auto-coerce | Every conversion visible in source |
 | Trait/interface lookup | No traits, no implicit instances | No global instance search |
-| Method resolution | Canonical resolution is module-qualified function form. Surface syntax may omit the module for auto-imported core modules, and may use UFCS (`x.f(y)`) as chaining sugar. | Resolution is always local — no method lookup tables |
+| Method resolution | Canonical resolution is module-qualified function form; UFCS is parse-time sugar for chaining | Resolution is always local — no method lookup tables |
 | Declaration order | Functions can reference each other freely | No forward-declaration confusion |
 | Import style | `import module` only — no `from`, no `*`, no aliasing. Core modules (`int`, `string`, `list`, `map`, `env`) are auto-imported; only `fs` needs explicit import | One import form, zero variation |
 
@@ -87,12 +87,12 @@ The standard library follows strict naming rules to minimize LLM guessing:
 
 | Convention | Rule | Example |
 |---|---|---|
-| Module prefix | Always explicit: `module.function()` | `string.len(s)`, `list.get(xs, i)`, `map.get(m, k)` (core modules auto-imported) |
+| Module prefix | Canonical form is `module.function()`; core modules may omit the prefix in surface syntax | `string.len(s)`, `list.get(xs, i)`, `map.get(m, k)` (core modules auto-imported) |
 | Predicate suffix | `?` for boolean-returning functions | `fs.exists?(path)`, `string.contains?(s, sub)` |
 | Return type consistency | Fallible lookups return `Option`, fallible I/O returns `Result`, infallible pure conversions return plain values | `list.get() -> Option[T]`, `fs.read_text() -> Result[String, FsError]` (effect fn) |
 | No synonyms | One name per operation, no aliases | `len` not `length`/`size`/`count` |
 | Symmetric pairs | Matching names for inverse operations | `read_text`/`write`, `split`/`join`, `to_string`/`to_int` |
-| No method overloading | Same name never appears in two modules with different semantics | `string.len` and `list.len` both mean "count elements" |
+| No method overloading | Same operation names are reused only when the semantics match across modules | `string.len` and `list.len` both mean "count elements" |
 
 ## What Almide Sacrifices
 
