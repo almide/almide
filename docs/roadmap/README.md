@@ -23,7 +23,7 @@
 - [Syntax Sugar](on-hold/syntax-sugar.md) — range, raw strings, exhaustiveness done; comprehensions pending
 - [Tooling](on-hold/tooling.md)
 - [Trailing Lambda / Builder DSL](on-hold/trailing-lambda-builder.md) — won't do, solve with stdlib instead
-- [Built-in Protocols](on-hold/trait-impl.md) — Show, Hash remaining; no user-defined traits
+- [Built-in Protocols](on-hold/trait-impl.md) — Show (`show(x)`), Hash (Map key constraint) remaining; all automatic
 - [Type System Extensions](on-hold/type-system.md)
 
 ## Done
