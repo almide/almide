@@ -428,6 +428,7 @@ fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         ast::Expr::Hole { .. } => ctx.mk(IrExprKind::Hole, ty, span),
         ast::Expr::Todo { message, .. } => ctx.mk(IrExprKind::Todo { message: message.clone() }, ty, span),
         ast::Expr::Placeholder { .. } => ctx.mk(IrExprKind::Hole, ty, span),
+        ast::Expr::Error { .. } => ctx.mk(IrExprKind::Unit, Ty::Unknown, span),
     }
 }
 
@@ -493,6 +494,9 @@ fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
         }
         ast::Stmt::Comment { text } => {
             IrStmt { kind: IrStmtKind::Comment { text: text.clone() }, span: None }
+        }
+        ast::Stmt::Error { span } => {
+            IrStmt { kind: IrStmtKind::Comment { text: "/* error */".to_string() }, span: *span }
         }
     }
 }

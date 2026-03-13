@@ -14,7 +14,7 @@ impl Checker {
             | ast::Stmt::FieldAssign { span, .. }
             | ast::Stmt::Guard { span, .. }
             | ast::Stmt::Expr { span, .. } => *span,
-            ast::Stmt::Comment { .. } => None,
+            ast::Stmt::Comment { .. } | ast::Stmt::Error { .. } => None,
         };
         let prev_line = self.current_decl_line;
         let prev_col = self.current_decl_col;
@@ -155,7 +155,7 @@ impl Checker {
                 // Warn about discarded return values from immutable update functions
                 self.check_discarded_mutation(expr);
             }
-            ast::Stmt::Comment { .. } => {}
+            ast::Stmt::Comment { .. } | ast::Stmt::Error { .. } => {}
         }
         self.current_decl_line = prev_line;
         self.current_decl_col = prev_col;

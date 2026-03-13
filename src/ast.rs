@@ -129,6 +129,8 @@ pub enum Expr {
     Some { expr: Box<Expr>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Ok { expr: Box<Expr>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Err { expr: Box<Expr>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    /// Placeholder for a parse error — allows partial AST construction.
+    Error { #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
 }
 
 impl Expr {
@@ -152,7 +154,8 @@ impl Expr {
             | Expr::Break { span, .. } | Expr::Continue { span, .. }
             | Expr::Unit { span, .. } | Expr::None { span, .. }
             | Expr::Some { span, .. } | Expr::Ok { span, .. }
-            | Expr::Err { span, .. } => *span,
+            | Expr::Err { span, .. }
+            | Expr::Error { span, .. } => *span,
         }
     }
 
@@ -176,7 +179,8 @@ impl Expr {
             | Expr::Unit { resolved_type, .. } | Expr::None { resolved_type, .. }
             | Expr::Some { resolved_type, .. } | Expr::Ok { resolved_type, .. }
             | Expr::Err { resolved_type, .. }
-            | Expr::Break { resolved_type, .. } | Expr::Continue { resolved_type, .. } => *resolved_type,
+            | Expr::Break { resolved_type, .. } | Expr::Continue { resolved_type, .. }
+            | Expr::Error { resolved_type, .. } => *resolved_type,
         }
     }
 
@@ -200,7 +204,8 @@ impl Expr {
             | Expr::Unit { resolved_type, .. } | Expr::None { resolved_type, .. }
             | Expr::Some { resolved_type, .. } | Expr::Ok { resolved_type, .. }
             | Expr::Err { resolved_type, .. }
-            | Expr::Break { resolved_type, .. } | Expr::Continue { resolved_type, .. } => *resolved_type = Some(ty),
+            | Expr::Break { resolved_type, .. } | Expr::Continue { resolved_type, .. }
+            | Expr::Error { resolved_type, .. } => *resolved_type = Some(ty),
         }
     }
 }
@@ -242,6 +247,8 @@ pub enum Stmt {
     Guard { cond: Expr, else_: Expr, #[serde(skip)] span: Option<Span> },
     Expr { expr: Expr, #[serde(skip)] span: Option<Span> },
     Comment { text: String },
+    /// Placeholder for a parse error — allows partial AST construction.
+    Error { #[serde(skip)] span: Option<Span> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

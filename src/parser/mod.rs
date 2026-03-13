@@ -9,16 +9,63 @@ mod types;
 
 use crate::lexer::Token;
 use crate::ast::*;
+use crate::diagnostic::Diagnostic;
 
 pub struct Parser {
     pub(crate) tokens: Vec<Token>,
     pub(crate) pos: usize,
-    pub errors: Vec<String>,
+    pub errors: Vec<Diagnostic>,
+    pub(crate) file: Option<String>,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, pos: 0, errors: Vec::new() }
+        Parser { tokens, pos: 0, errors: Vec::new(), file: None }
+    }
+
+    pub fn with_file(mut self, file: &str) -> Self {
+        self.file = Some(file.to_string());
+        self
+    }
+
+    /// Create a Diagnostic error with file/line/col from the current token.
+    pub(crate) fn diag_error(&self, message: impl Into<String>, hint: impl Into<String>, context: impl Into<String>) -> Diagnostic {
+        let mut d = Diagnostic::error(message, hint, context);
+        let tok = self.current();
+        if let Some(f) = &self.file {
+            d.file = Some(f.clone());
+        }
+        d.line = Some(tok.line);
+        d.col = Some(tok.col);
+        d
+    }
+
+    /// Convert a legacy String error (from parse methods that still return Result<T, String>)
+    /// into a Diagnostic, extracting line:col if present in the message.
+    pub(crate) fn string_to_diagnostic(&self, msg: &str) -> Diagnostic {
+        // Try to extract "at line N:M" from the message
+        let (line, col) = if let Some(idx) = msg.find("at line ") {
+            let rest = &msg[idx + 8..];
+            let nums: Vec<&str> = rest.splitn(3, |c: char| !c.is_ascii_digit()).collect();
+            let l = nums.first().and_then(|s| s.parse::<usize>().ok());
+            let c = nums.get(1).and_then(|s| s.parse::<usize>().ok());
+            (l, c)
+        } else {
+            (None, None)
+        };
+        // Split hint from message (our format uses "\n  Hint: ...")
+        let (message, hint) = if let Some(idx) = msg.find("\n  Hint: ") {
+            (msg[..idx].to_string(), msg[idx + 9..].to_string())
+        } else {
+            (msg.to_string(), String::new())
+        };
+        let mut d = Diagnostic::error(message, hint, "");
+        if let Some(f) = &self.file {
+            d.file = Some(f.clone());
+        }
+        d.line = line;
+        d.col = col;
+        d
     }
 
     pub fn parse_single_expr(&mut self) -> Result<Expr, String> {
@@ -66,7 +113,7 @@ impl Parser {
                     program.decls.push(decl);
                 }
                 Err(msg) => {
-                    self.errors.push(msg);
+                    self.errors.push(self.string_to_diagnostic(&msg));
                     // Skip to next declaration boundary
                     self.skip_to_next_decl();
                 }
@@ -82,10 +129,40 @@ impl Parser {
         // If we collected errors but also parsed some declarations, return the partial program.
         // If no declarations were parsed and there are errors, return the first error.
         if !self.errors.is_empty() && program.decls.is_empty() && program.module.is_none() {
-            return Err(self.errors.join("\n"));
+            let messages: Vec<String> = self.errors.iter().map(|d| d.display()).collect();
+            return Err(messages.join("\n"));
         }
 
         Ok(program)
+    }
+
+    /// Skip tokens until we reach a token that could start a new statement within a block.
+    /// Stops at: newline followed by statement-starting keyword, `}`, or EOF.
+    pub(crate) fn skip_to_next_stmt(&mut self) {
+        use crate::lexer::TokenType;
+        loop {
+            let tt = &self.current().token_type;
+            match tt {
+                TokenType::EOF | TokenType::RBrace => break,
+                TokenType::Newline => {
+                    self.advance();
+                    let next_tt = &self.current().token_type;
+                    if matches!(next_tt,
+                        TokenType::Let | TokenType::Var | TokenType::Guard
+                        | TokenType::If | TokenType::Match | TokenType::For
+                        | TokenType::While | TokenType::Do
+                        | TokenType::Ident | TokenType::TypeName
+                        | TokenType::RBrace | TokenType::EOF
+                        // Also stop at declaration keywords (we may have exited a block)
+                        | TokenType::Fn | TokenType::Effect | TokenType::Async
+                        | TokenType::Type | TokenType::Test | TokenType::Pub
+                    ) {
+                        break;
+                    }
+                }
+                _ => { self.advance(); }
+            }
+        }
     }
 
     /// Skip tokens until we reach a token that could start a new top-level declaration.

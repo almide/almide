@@ -257,8 +257,7 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
 }
 
 fn cmd_build_npm(file: &str, out_dir: &str, no_check: bool) {
-    let mut program = parse_file(file);
-    let source_text = std::fs::read_to_string(file).unwrap_or_default();
+    let (mut program, source_text, parse_errors) = parse_file(file);
 
     // Resolve dependencies
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
@@ -361,8 +360,7 @@ fn cmd_build_npm(file: &str, out_dir: &str, no_check: bool) {
 }
 
 pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_check: bool) {
-    let mut program = parse_file(file);
-    let source_text = std::fs::read_to_string(file).unwrap_or_default();
+    let (mut program, source_text, parse_errors) = parse_file(file);
 
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
@@ -472,8 +470,7 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
 }
 
 pub fn cmd_check(file: &str) {
-    let mut program = parse_file(file);
-    let source_text = std::fs::read_to_string(file).unwrap_or_default();
+    let (mut program, source_text, parse_errors) = parse_file(file);
 
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
@@ -503,14 +500,17 @@ pub fn cmd_check(file: &str) {
         eprintln!("{}", d.display_with_source(&source_text));
     }
 
-    let errors: Vec<_> = diagnostics.iter()
+    // Combine parse errors + checker errors
+    let mut all_errors: Vec<&diagnostic::Diagnostic> = parse_errors.iter().collect();
+    let checker_errors: Vec<_> = diagnostics.iter()
         .filter(|d| d.level == diagnostic::Level::Error)
         .collect();
-    if !errors.is_empty() {
-        for d in &errors {
+    all_errors.extend(checker_errors);
+    if !all_errors.is_empty() {
+        for d in &all_errors {
             eprintln!("{}", d.display_with_source(&source_text));
         }
-        eprintln!("\n{} error(s) found", errors.len());
+        eprintln!("\n{} error(s) found", all_errors.len());
         std::process::exit(1);
     }
 
@@ -519,7 +519,7 @@ pub fn cmd_check(file: &str) {
 
 pub fn cmd_fmt(files: &[String], write_back: bool) {
     for file in files {
-        let program = parse_file(file);
+        let (program, _, _) = parse_file(file);
         let formatted = fmt::format_program(&program);
         if write_back {
             std::fs::write(file, &formatted)

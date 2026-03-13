@@ -114,8 +114,30 @@ impl Parser {
             (TokenType::RParen, TokenType::LAngle, _) => {
                 "Use [] for generics, not <>. Example: List[String], Result[T, E]".into()
             }
+            (TokenType::Then, TokenType::Eq, _) => {
+                "Did you mean '=='? Use '==' for comparison. Write: if x == 5 then ...".into()
+            }
             (TokenType::Then, _, _) => {
                 "if requires 'then'. Write: if condition then expr else expr".into()
+            }
+            // Missing closing delimiter
+            (TokenType::RParen, _, _) => {
+                "Missing ')'. Check for an unclosed '(' earlier in this expression".into()
+            }
+            (TokenType::RBracket, _, _) => {
+                "Missing ']'. Check for an unclosed '[' earlier in this expression".into()
+            }
+            (TokenType::RBrace, _, _) => {
+                "Missing '}'. Check for an unclosed '{' earlier in this block".into()
+            }
+            // Missing `=` before value
+            (TokenType::Eq, TokenType::Ident, _) | (TokenType::Eq, TokenType::Int, _)
+            | (TokenType::Eq, TokenType::String, _) | (TokenType::Eq, TokenType::LBrace, _) => {
+                "Missing '=' before value. Write: let x = value".into()
+            }
+            // Arrow hint
+            (TokenType::Arrow, TokenType::Eq, _) => {
+                "Use '->' for return type, not '='. Write: fn name() -> Type = body".into()
             }
             _ => String::new(),
         }

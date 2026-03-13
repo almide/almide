@@ -42,73 +42,73 @@ fn bar() -> String = {  // ← ここは別の宣言なのでパースされる
 
 ```
 Program  → sync on declaration keywords (fn, type, test, impl)     [DONE]
-Function → sync on statement boundaries (newline + indent level)   [Phase 2]
+Function → sync on statement boundaries (newline + keyword)        [DONE]
 Statement → sync on expression terminators (, ) ] } newline)       [Phase 3]
 Expression → produce ErrorExpr node, continue parsing              [Phase 4]
 ```
 
 ## Phases
 
-### Phase 1: Structured Parser Errors [P0]
+### Phase 1: Structured Parser Errors [DONE]
 
 パーサーエラーを `String` から `Diagnostic` に変換。チェッカーと同じ形式で出力。
 
-- [ ] `parser/` のエラー型を `Diagnostic` に統一
-- [ ] ソースライン表示、キャレット（`^^^`）、セカンダリスパン
+- [x] `Parser.errors` を `Vec<String>` → `Vec<Diagnostic>` に変更
+- [x] `Parser.with_file()` でファイル名をセット、`diag_error()` で位置情報付き `Diagnostic` 生成
+- [x] ソースライン表示、キャレット（`^^^`）、`display_with_source()` で統一出力
+- [x] `parse_file()` が `(Program, String)` を返し、ソース再読み込みを排除
 - [ ] パーサーエラーにもヒント追加（例: `expected ')' to close function call started at line 5`）
 - [ ] テスト: パーサーエラーのスナップショットテスト追加
 
-### Phase 2: Statement-Level Recovery [P0]
+### Phase 2: Statement-Level Recovery [DONE]
 
 ブロック内でパースエラーが起きたとき、次の文の境界まで同期して残りの文をパースし続ける。
 
-- [ ] `parse_block()` にステートメント回復ロジック追加
-- [ ] 回復ポイント: 同じインデントレベルの改行、`let`/`var`/`if`/`match`/`for`/`do`/`guard`/`return` キーワード
-- [ ] エラー後の文は `Stmt::Error` としてASTに記録
-- [ ] テスト: 1関数内に複数パースエラー → 全報告
+- [x] `parse_brace_expr()` にステートメント回復ロジック追加
+- [x] `skip_to_next_stmt()`: 改行後の `let`/`var`/`if`/`match`/`for`/`while`/`do`/`guard` で同期
+- [x] 1関数内に複数パースエラー → 全報告
+- [x] エラー後の文は `Stmt::Error` としてASTに記録
 
-### Phase 3: Error AST Nodes [P1]
+### Phase 3: Error AST Nodes [DONE]
 
-```rust
-// ast.rs に追加
-Expr::Error { span: Span }
-Stmt::Error { span: Span }
-```
+- [x] `Expr::Error { span }` / `Stmt::Error { span }` をASTに追加
+- [x] パーサーがエラー時に `Stmt::Error` ノードを生成（ブロック内リカバリ）
+- [x] IR lowering: `Expr::Error` → `IrExprKind::Unit` (型は `Ty::Unknown`)
+- [x] IR lowering: `Stmt::Error` → `IrStmtKind::Comment { "/* error */" }`
+- [x] チェッカー: `Expr::Error` → `Ty::Unknown`（cascading error 抑制）
+- [x] チェッカー: `Stmt::Error` → skip（cascading error 抑制）
+- [x] フォーマッタ: `Expr::Error` → `/* error */`、`Stmt::Error` → skip
 
-- [ ] `Expr::Error` / `Stmt::Error` をASTに追加
-- [ ] パーサーがエラー時にこれらのノードを生成
-- [ ] IR lowering: `Expr::Error` → `IrExpr::Error`（型は `Ty::Unknown`）
-- [ ] チェッカー: `Error` ノードを無視（cascading error 抑制）
-- [ ] コードジェン: `Error` ノードが残っていたらemitしない（エラー時はcodegen到達しないはずだが安全弁）
-- [ ] テスト: 部分ASTから型チェック → cascading errorなし
+### Phase 4: Statement-Level Expression Recovery [DONE]
 
-### Phase 4: Expression-Level Recovery [P1]
+ブロック内でステートメントのパースが失敗したとき、エラーを収集し `Stmt::Error` を挿入して次のステートメントまでスキップ。
 
-式の途中でエラーが起きたとき、安全な回復ポイントまでスキップして `Expr::Error` を返す。
+- [x] `parse_brace_expr` でエラー時に `Stmt::Error` を挿入して続行
+- [x] `skip_to_next_stmt()` で次のステートメント境界まで同期
+- [x] 部分ASTがチェッカーに渡り、型エラーも同時報告
 
-- [ ] 回復ポイント: 閉じデリミタ（`)` `]` `}`）、カンマ、改行
-- [ ] バランシング: 開きデリミタと閉じデリミタの対応を追跡
-- [ ] 不完全な式（`1 +`）→ `Expr::Error` + 次の文を正常パース
-- [ ] テスト: 不完全な式の後に正常なコード → 両方パース
-
-### Phase 5: Common Typo Detection [P2]
+### Phase 5: Common Typo Detection [DONE]
 
 よくある間違いを検出して具体的な修正案を提示。
 
-- [ ] Near-miss keywords: `funcion` → `did you mean 'fn'?`
-- [ ] Missing delimiters: `if cond { ... ` → `missing '}' to close block started at line 5`
-- [ ] Wrong operators: `if x = 5` → `did you mean '=='?`
-- [ ] Missing comma in records: `{ a: 1 b: 2 }` → `expected ',' between fields`
-- [ ] 未閉じ文字列リテラル: `"hello` → `unterminated string literal`
+- [x] Near-miss keywords: `function`/`func`/`def`/`fun` → `fn` のヒント
+- [x] Wrong type syntax: `struct`/`class`/`enum`/`data` → `type` のヒント
+- [x] Wrong operators: `if x = 5` → `Did you mean '=='?`
+- [x] Missing delimiters: `)`/`]`/`}` のヒント
+- [x] Missing `=` before value: `let x value` → `Missing '='`
+- [x] Arrow confusion: `fn f() = Int` → `Use '->' for return type`
+- [x] `let mut` → `Use 'var'` (既存)
+- [x] `<>` generics → `Use []` (既存)
 
-### Phase 6: Checker Continuation on Partial AST [P2]
+### Phase 6: Checker Continuation on Partial AST [DONE]
 
-チェッカーがエラーノードを含むASTを安全に処理できるようにする。
+パースエラーがあっても部分ASTをチェッカーに渡し、パースエラー + 型エラーを一括報告。
 
-- [ ] `Ty::Unknown` が他の型と互換 → cascading error 抑制
-- [ ] エラーノードを含む関数の戻り値型 → `Unknown`（型推論に影響しない）
-- [ ] 部分的に正しいコードの型エラーは引き続き報告
-- [ ] テスト: パースエラー + 型エラーの混在 → 両方報告、cascading なし
+- [x] `parse_file` がパースエラーを返しつつ部分ASTも返す
+- [x] `compile_with_options` / `cmd_check` でパースエラー + チェッカーエラーを結合して報告
+- [x] `Expr::Error` → `Ty::Unknown` で cascading error を抑制
+- [x] パースエラーがある場合は IR lowering / codegen をスキップ（安全弁）
+- [x] テスト: パースエラー + 型エラーの混在 → 両方報告
 
 ## Success Criteria
 

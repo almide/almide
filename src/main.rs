@@ -141,25 +141,21 @@ fn find_rustc() -> String {
     "rustc".to_string()
 }
 
-fn parse_file(file: &str) -> ast::Program {
+fn parse_file(file: &str) -> (ast::Program, String, Vec<diagnostic::Diagnostic>) {
     let input = std::fs::read_to_string(file)
         .unwrap_or_else(|e| { eprintln!("Error reading {}: {}", file, e); std::process::exit(1); });
 
     if file.ends_with(".json") {
-        serde_json::from_str(&input)
-            .unwrap_or_else(|e| { eprintln!("JSON parse error: {}", e); std::process::exit(1); })
+        let prog = serde_json::from_str(&input)
+            .unwrap_or_else(|e| { eprintln!("JSON parse error: {}", e); std::process::exit(1); });
+        (prog, input, Vec::new())
     } else {
         let tokens = lexer::Lexer::tokenize(&input);
-        let mut parser = parser::Parser::new(tokens);
+        let mut parser = parser::Parser::new(tokens).with_file(file);
         let prog = parser.parse()
-            .unwrap_or_else(|e| { eprintln!("Parse error: {}", e); std::process::exit(1); });
-        if !parser.errors.is_empty() {
-            for e in &parser.errors {
-                eprintln!("Parse error: {}", e);
-            }
-            std::process::exit(1);
-        }
-        prog
+            .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+        let parse_errors = std::mem::take(&mut parser.errors);
+        (prog, input, parse_errors)
     }
 }
 
@@ -168,7 +164,8 @@ fn compile(file: &str, no_check: bool) -> String {
 }
 
 fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::EmitOptions, build_target: Option<&str>) -> (String, Option<almide::ir::IrProgram>) {
-    let mut program = parse_file(file);
+    let (mut program, source_text, parse_errors) = parse_file(file);
+    let has_parse_errors = !parse_errors.is_empty();
 
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
@@ -205,7 +202,6 @@ fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::Em
     let mut ir_program = None;
     let mut module_irs = std::collections::HashMap::new();
     if !no_check {
-        let source_text = std::fs::read_to_string(file).unwrap_or_default();
         let mut checker = check::Checker::new();
         checker.set_source(file, &source_text);
         if let Some(t) = build_target {
@@ -218,21 +214,26 @@ fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::Em
             checker.register_alias(alias, target);
         }
         let diagnostics = checker.check_program(&mut program);
-        let errors: Vec<_> = diagnostics.iter()
+        // Combine parse errors + checker errors
+        let mut all_errors: Vec<&diagnostic::Diagnostic> = parse_errors.iter().collect();
+        let checker_errors: Vec<_> = diagnostics.iter()
             .filter(|d| d.level == diagnostic::Level::Error)
             .collect();
-        if !errors.is_empty() {
-            for d in &errors {
+        all_errors.extend(checker_errors);
+        if !all_errors.is_empty() {
+            for d in &all_errors {
                 eprintln!("{}", d.display_with_source(&source_text));
             }
-            eprintln!("\n{} error(s) found", errors.len());
+            eprintln!("\n{} error(s) found", all_errors.len());
             std::process::exit(1);
         }
         for d in diagnostics.iter().filter(|d| d.level == diagnostic::Level::Warning) {
             eprintln!("{}", d.display_with_source(&source_text));
         }
-        // Lower to IR after successful type checking
-        ir_program = Some(almide::lower::lower_program(&program, &checker.expr_types, &checker.env));
+        // Lower to IR only if no parse errors (partial AST can't produce valid IR)
+        if !has_parse_errors {
+            ir_program = Some(almide::lower::lower_program(&program, &checker.expr_types, &checker.env));
+        }
         // Lower user modules to IR (skip TOML-defined stdlib — they use generated codegen)
         for (name, mod_prog, _, _) in &mut resolved.modules {
             if almide::stdlib::is_stdlib_module(name) { continue; }

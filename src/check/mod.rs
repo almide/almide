@@ -939,7 +939,7 @@ impl Checker {
             ast::Stmt::LetDestructure { value, .. } => {
                 Self::find_list_mutations(value, list_params, out);
             }
-            ast::Stmt::Comment { .. } => {}
+            ast::Stmt::Comment { .. } | ast::Stmt::Error { .. } => {}
         }
     }
 }
