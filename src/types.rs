@@ -114,6 +114,8 @@ pub struct TypeEnv {
     pub var_decl_locs: std::collections::HashMap<std::string::String, (usize, usize)>,
     /// Top-level `let` constants: name -> type
     pub top_lets: std::collections::HashMap<std::string::String, Ty>,
+    /// Types that implement the Eq protocol (via `deriving Eq`)
+    pub eq_types: std::collections::HashSet<std::string::String>,
 }
 
 impl Ty {
@@ -288,6 +290,51 @@ impl TypeEnv {
             param_vars: std::collections::HashSet::new(),
             var_decl_locs: std::collections::HashMap::new(),
             top_lets: std::collections::HashMap::new(),
+            eq_types: std::collections::HashSet::new(),
+        }
+    }
+
+    /// Check if a type implements the Eq protocol.
+    /// Primitives are implicitly Eq. Container types are Eq if their elements are.
+    /// User-defined types require `deriving Eq`. Function types are never Eq.
+    /// Check if a type supports equality (`==`, `!=`).
+    /// All value types are Eq by default. Only function types are not.
+    pub fn is_eq(&self, ty: &Ty) -> bool {
+        let mut seen = std::collections::HashSet::new();
+        self.is_eq_inner(ty, &mut seen)
+    }
+
+    fn is_eq_inner(&self, ty: &Ty, seen: &mut std::collections::HashSet<std::string::String>) -> bool {
+        match ty {
+            Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit => true,
+            Ty::List(inner) | Ty::Option(inner) => self.is_eq_inner(inner, seen),
+            Ty::Result(ok, err) => self.is_eq_inner(ok, seen) && self.is_eq_inner(err, seen),
+            Ty::Map(k, v) => self.is_eq_inner(k, seen) && self.is_eq_inner(v, seen),
+            Ty::Tuple(tys) => tys.iter().all(|t| self.is_eq_inner(t, seen)),
+            Ty::Record { fields } => fields.iter().all(|(_, t)| self.is_eq_inner(t, seen)),
+            Ty::Variant { name, cases, .. } => {
+                if !seen.insert(name.clone()) {
+                    return true; // Recursive type — assume Eq to break cycle
+                }
+                cases.iter().all(|c| match &c.payload {
+                    crate::types::VariantPayload::Unit => true,
+                    crate::types::VariantPayload::Tuple(tys) => tys.iter().all(|t| self.is_eq_inner(t, seen)),
+                    crate::types::VariantPayload::Record(fs) => fs.iter().all(|(_, t, _)| self.is_eq_inner(t, seen)),
+                })
+            }
+            Ty::Named(name, _) => {
+                if !seen.insert(name.clone()) {
+                    return true; // Recursive type
+                }
+                if let Some(resolved) = self.types.get(name) {
+                    self.is_eq_inner(resolved, seen)
+                } else {
+                    true
+                }
+            }
+            Ty::Fn { .. } => false,
+            Ty::TypeVar(_) => true,
+            Ty::Unknown => true,
         }
     }
 
