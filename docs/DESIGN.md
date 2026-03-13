@@ -24,12 +24,12 @@ Almide optimizes for **minimal thinking tokens**: the less an LLM has to branch 
 |---|---|---|
 | Name resolution | Core modules (`int`, `string`, `list`, `map`, `env`) are auto-imported; only `fs` requires explicit `import` | LLM never guesses at available names; core operations always work |
 | Type inference | Local only — annotations required on function signatures | No inference across distant definitions |
-| Overloading | None — each function name has exactly one definition | No ad-hoc dispatch resolution |
+| Overloading | None — names do not participate in ad-hoc overload resolution | No dispatch ambiguity |
 | Implicit conversions | None — `int.to_string(n)`, never auto-coerce | Every conversion visible in source |
 | Trait/interface lookup | No traits, no implicit instances | No global instance search |
 | Method resolution | Canonical resolution is module-qualified function form; UFCS is parse-time sugar for chaining | Resolution is always local — no method lookup tables |
 | Declaration order | Functions can reference each other freely | No forward-declaration confusion |
-| Import style | `import module` only — no `from`, no `*`, no aliasing. Core modules (`int`, `string`, `list`, `map`, `env`) are auto-imported; only `fs` needs explicit import | One import form, zero variation |
+| Import style | `import module` only — no `from`, no `*`, no aliasing; core modules are auto-imported | One import form, zero variation |
 
 ## The `effect` System as Generation Space Reducer
 
