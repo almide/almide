@@ -1,6 +1,6 @@
 # Design Philosophy
 
-Almide optimizes for **minimal thinking tokens** — the less an LLM has to reason about workarounds, syntax alternatives, or missing abstractions, the faster and cheaper code generation becomes. This means both removing ambiguity *and* providing the right tools so the AI never has to improvise.
+Almide optimizes for **minimal thinking tokens**: the less an LLM has to branch over syntax, semantics, repair strategies, or missing abstractions, the faster, cheaper, and more reliable code generation becomes. This means both removing ambiguity *and* providing the right tools so the AI never has to improvise.
 
 ## Syntax Ambiguity Removed
 
@@ -15,7 +15,7 @@ Almide optimizes for **minimal thinking tokens** — the less an LLM has to reas
 | Statement termination | `;`, optional `;`, ASI rules | Newline-separated | No insertion ambiguity |
 | Conditionals | `if` with optional `else`, ternary `?:` | `if/then/else` (else mandatory) | No dangling-else |
 | Side effects | Implicit anywhere | `effect fn` annotation required | Restricts callable set at each point |
-| Operator meaning | Overloading, implicit coercion | Fixed meaning, no overloading | Operators always resolve identically |
+| Operator meaning | Overloading, implicit coercion | Operators have fixed built-in meanings only. No user-defined overloading, no implicit coercion | Operators always resolve identically |
 | Type conversions | Implicit widening, coercion | Explicit only | No hidden type changes |
 
 ## Semantic Ambiguity Removed
@@ -27,7 +27,7 @@ Almide optimizes for **minimal thinking tokens** — the less an LLM has to reas
 | Overloading | None — each function name has exactly one definition | No ad-hoc dispatch resolution |
 | Implicit conversions | None — `int.to_string(n)`, never auto-coerce | Every conversion visible in source |
 | Trait/interface lookup | No traits, no implicit instances | No global instance search |
-| Method resolution | UFCS with canonical function form (`module.fn(args)`) | Module prefix makes resolution local |
+| Method resolution | Canonical resolution is module-qualified function form. Surface syntax may omit the module for auto-imported core modules, and may use UFCS (`x.f(y)`) as chaining sugar. | Resolution is always local — no method lookup tables |
 | Declaration order | Functions can reference each other freely | No forward-declaration confusion |
 | Import style | `import module` only — no `from`, no `*`, no aliasing. Core modules (`int`, `string`, `list`, `map`, `env`) are auto-imported; only `fs` needs explicit import | One import form, zero variation |
 
@@ -46,7 +46,8 @@ This means the LLM can generate code by looking only at the current function's s
 
 `f(x, y)` and `x.f(y)` are equivalent, which superficially adds a synonym. We accept this because:
 
-- **Canonical form is function style**: `module.fn(args)` — the module prefix makes resolution unambiguous
+- **Canonical resolution is module-qualified function form**: `module.fn(args)` — the module prefix makes resolution unambiguous
+- **Surface syntax may omit the module** for auto-imported core modules (e.g., `len(s)` instead of `string.len(s)`)
 - **Method form is syntactic sugar for chaining only**: `x.f(y).g(z)` reads left-to-right
 - The compiler does not need method lookup — it rewrites `x.f(y)` to `f(x, y)` at parse time
 - A future formatter will normalize to canonical form, eliminating style drift
@@ -88,7 +89,7 @@ The standard library follows strict naming rules to minimize LLM guessing:
 |---|---|---|
 | Module prefix | Always explicit: `module.function()` | `string.len(s)`, `list.get(xs, i)`, `map.get(m, k)` (core modules auto-imported) |
 | Predicate suffix | `?` for boolean-returning functions | `fs.exists?(path)`, `string.contains?(s, sub)` |
-| Return type consistency | Fallible lookups return `Option`, I/O returns `Result` | `list.get() -> Option`, `fs.read_text() -> String` (effect fn) |
+| Return type consistency | Fallible lookups return `Option`, fallible I/O returns `Result`, infallible pure conversions return plain values | `list.get() -> Option[T]`, `fs.read_text() -> Result[String, FsError]` (effect fn) |
 | No synonyms | One name per operation, no aliases | `len` not `length`/`size`/`count` |
 | Symmetric pairs | Matching names for inverse operations | `read_text`/`write`, `split`/`join`, `to_string`/`to_int` |
 | No method overloading | Same name never appears in two modules with different semantics | `string.len` and `list.len` both mean "count elements" |
@@ -100,9 +101,9 @@ These are intentional trade-offs — things we gave up to make LLM generation re
 | Sacrificed | Why |
 |---|---|
 | Raw expressiveness | Each concept has one idiomatic way to write it. Almide provides the right abstraction (e.g., `map`, `for...in`) but not multiple ways to achieve the same thing. |
-| Operator overloading | `+` always means integer addition or is not valid. No custom operators. |
+| Operator overloading | Operators have fixed built-in meanings only. No user-defined overloading, no implicit coercion. |
 | Metaprogramming | No macros, no reflection, no code generation. The language surface is fixed. |
-| Ad-hoc polymorphism | No traits, no typeclasses. Functions are monomorphic. Generics are limited to built-in containers. |
+| Ad-hoc polymorphism | No traits, no typeclasses, and no ad-hoc polymorphism. Parametric generics exist, but constraints are structural (`T: { field: Type, .. }`), not resolved through global instances. |
 | Named/default arguments | All arguments are positional. No optionality, no reordering. |
 | Multiple return styles | No `return` keyword. The last expression is always the value. No exceptions. |
 | Syntax sugar variety | One way to write each construct. No shorthand forms, no alternative spellings. |
