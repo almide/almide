@@ -248,6 +248,20 @@ impl Checker {
                             format!("{}({})", name, exp),
                             format!("constructor {}", name),
                         ));
+                    } else {
+                        for (i, (ety, aty)) in expected.iter().zip(arg_tys.iter()).enumerate() {
+                            if !ety.compatible(aty) {
+                                let hint = Self::hint_with_conversion(
+                                    &format!("Pass a value of type {}", ety.display()),
+                                    ety, aty,
+                                );
+                                self.push_diagnostic(err(
+                                    format!("constructor '{}' argument {} expects {} but got {}", name, i + 1, ety.display(), aty.display()),
+                                    hint,
+                                    format!("constructor {}", name),
+                                ));
+                            }
+                        }
                     }
                 }
                 VariantPayload::Record(_) => {}

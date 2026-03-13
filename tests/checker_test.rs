@@ -576,3 +576,59 @@ fn hint_no_conversion_for_unrelated_types() {
     assert!(!hints[0].contains("to_string") && !hints[0].contains("to_int") && !hints[0].contains("to_float"),
         "should not suggest conversion for unrelated types, got: {}", hints[0]);
 }
+
+// ---- Multi-error recovery ----
+
+#[test]
+fn multi_error_block_statements() {
+    // Multiple independent errors in a block should all be reported
+    let errs = errors("fn f() -> Unit = {\n  let x: Int = \"hello\"\n  let y: String = 42\n  ()\n}");
+    assert!(errs.len() >= 2, "should report errors for both let bindings, got: {:?}", errs);
+    assert!(errs.iter().any(|e| e.contains("'x'")), "should report error for x: {:?}", errs);
+    assert!(errs.iter().any(|e| e.contains("'y'")), "should report error for y: {:?}", errs);
+}
+
+#[test]
+fn multi_error_function_args() {
+    // All wrong arguments should be reported, not just the first
+    let errs = errors("fn add(a: Int, b: Int, c: Int) -> Int = a + b + c\nfn f() -> Int = add(\"x\", true, \"y\")");
+    assert!(errs.len() >= 3, "should report errors for all 3 args, got: {:?}", errs);
+}
+
+#[test]
+fn multi_error_across_functions() {
+    // Errors in one function should not prevent checking another
+    let errs = errors("fn f() -> Int = \"hello\"\nfn g() -> String = 42");
+    assert!(errs.len() >= 2, "should report errors in both functions, got: {:?}", errs);
+    assert!(errs.iter().any(|e| e.contains("'f'")), "should report error for f: {:?}", errs);
+    assert!(errs.iter().any(|e| e.contains("'g'")), "should report error for g: {:?}", errs);
+}
+
+#[test]
+fn multi_error_println_calls() {
+    // Multiple statement-level errors should all be reported
+    let errs = errors("effect fn main(_a: List[String]) -> Result[Unit, String] = {\n  println(42)\n  println(true)\n  ok(())\n}");
+    assert!(errs.len() >= 2, "should report errors for both println calls, got: {:?}", errs);
+}
+
+#[test]
+fn multi_error_no_cascade_from_unknown() {
+    // An undefined function should not cause cascading errors on its result
+    let errs = errors("fn f() -> Int = {\n  let x = undefined_fn()\n  let y = x + 1\n  y\n}");
+    assert_eq!(errs.len(), 1, "should report only the undefined function error, got: {:?}", errs);
+    assert!(errs[0].contains("undefined"), "error should be about undefined function: {}", errs[0]);
+}
+
+#[test]
+fn multi_error_constructor_arg_types() {
+    // Constructor calls should check argument types and report all mismatches
+    let errs = errors("type Shape =\n  | Circle(Float)\n  | Rect(Float, Float)\nfn f() -> Shape = Rect(\"x\", true)");
+    assert!(errs.len() >= 2, "should report errors for both constructor args, got: {:?}", errs);
+}
+
+#[test]
+fn multi_error_mixed_stmt_types() {
+    // Binary op error + let type error should both be reported
+    let errs = errors("fn f(a: Int) -> Unit = {\n  let x = a + \"hello\"\n  let y = a - true\n  ()\n}");
+    assert!(errs.len() >= 2, "should report both binary op errors, got: {:?}", errs);
+}
