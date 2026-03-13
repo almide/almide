@@ -64,7 +64,8 @@ impl Checker {
                     Ty::Option(Box::new(Ty::Unknown))
                 }
             }
-            ast::Expr::Hole { .. } | ast::Expr::Todo { .. } | ast::Expr::Placeholder { .. } => Ty::Unknown,
+            ast::Expr::Hole { .. } | ast::Expr::Todo { .. } | ast::Expr::Placeholder { .. }
+            | ast::Expr::Error { .. } => Ty::Unknown,
             ast::Expr::Some { expr: inner, .. } => Ty::Option(Box::new(self.check_expr(inner))),
             ast::Expr::Ok { expr: inner, .. } => {
                 let inner_ty = self.check_expr(inner);

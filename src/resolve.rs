@@ -114,7 +114,7 @@ fn load_bundled_module(
     let program = p.parse()
         .map_err(|e| format!("parse error in bundled stdlib '{}': {}", name, e))?;
     if !p.errors.is_empty() {
-        return Err(format!("parse error in bundled stdlib '{}': {}", name, p.errors.join("\n")));
+        return Err(format!("parse error in bundled stdlib '{}': {}", name, p.errors.iter().map(|d| d.display()).collect::<Vec<_>>().join("\n")));
     }
 
     // Recursively resolve this module's imports
@@ -164,7 +164,7 @@ fn load_self_module(
     let program = parser.parse()
         .map_err(|e| format!("parse error in module 'self.{}': {}", mod_path.join("."), e))?;
     if !parser.errors.is_empty() {
-        return Err(format!("parse error in module 'self.{}': {}", mod_path.join("."), parser.errors.join("\n")));
+        return Err(format!("parse error in module 'self.{}': {}", mod_path.join("."), parser.errors.iter().map(|d| d.display()).collect::<Vec<_>>().join("\n")));
     }
 
     // Recursively resolve this module's imports
@@ -245,7 +245,7 @@ fn load_module(
     let program = parser.parse()
         .map_err(|e| format!("parse error in module '{}': {}", name, e))?;
     if !parser.errors.is_empty() {
-        return Err(format!("parse error in module '{}': {}", name, parser.errors.join("\n")));
+        return Err(format!("parse error in module '{}': {}", name, parser.errors.iter().map(|d| d.display()).collect::<Vec<_>>().join("\n")));
     }
 
     // Recursively resolve this module's imports (depth-first -> leaves first)
@@ -287,7 +287,7 @@ fn parse_almd_file(file_path: &Path, display_name: &str) -> Result<ast::Program,
     let program = parser.parse()
         .map_err(|e| format!("parse error in sub-module '{}': {}", display_name, e))?;
     if !parser.errors.is_empty() {
-        return Err(format!("parse error in sub-module '{}': {}", display_name, parser.errors.join("\n")));
+        return Err(format!("parse error in sub-module '{}': {}", display_name, parser.errors.iter().map(|d| d.display()).collect::<Vec<_>>().join("\n")));
     }
     Ok(program)
 }
@@ -423,7 +423,7 @@ fn load_submodule(
     let program = parser.parse()
         .map_err(|e| format!("parse error in sub-module '{}.{}': {}", pkg_name, sub_path.join("."), e))?;
     if !parser.errors.is_empty() {
-        return Err(format!("parse error in sub-module '{}.{}': {}", pkg_name, sub_path.join("."), parser.errors.join("\n")));
+        return Err(format!("parse error in sub-module '{}.{}': {}", pkg_name, sub_path.join("."), parser.errors.iter().map(|d| d.display()).collect::<Vec<_>>().join("\n")));
     }
 
     loaded_names.insert(mod_name.to_string());

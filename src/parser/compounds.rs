@@ -246,24 +246,34 @@ impl Parser {
 
         let mut stmts = initial_comments;
         let mut final_expr: Option<Box<Expr>> = None;
-        while !self.check(TokenType::RBrace) {
-            let stmt = self.parse_stmt()?;
-            let mut trailing = Vec::new();
-            self.skip_newlines_into_stmts(&mut trailing);
-            if self.check(TokenType::Semicolon) {
-                self.advance();
-                self.skip_newlines_into_stmts(&mut trailing);
-            }
-            if self.check(TokenType::RBrace) {
-                if let Stmt::Expr { expr, .. } = stmt {
-                    final_expr = Some(Box::new(expr));
-                } else {
-                    stmts.push(stmt);
+        while !self.check(TokenType::RBrace) && !self.check(TokenType::EOF) {
+            match self.parse_stmt() {
+                Ok(stmt) => {
+                    let mut trailing = Vec::new();
+                    self.skip_newlines_into_stmts(&mut trailing);
+                    if self.check(TokenType::Semicolon) {
+                        self.advance();
+                        self.skip_newlines_into_stmts(&mut trailing);
+                    }
+                    if self.check(TokenType::RBrace) {
+                        if let Stmt::Expr { expr, .. } = stmt {
+                            final_expr = Some(Box::new(expr));
+                        } else {
+                            stmts.push(stmt);
+                        }
+                        stmts.extend(trailing);
+                    } else {
+                        stmts.push(stmt);
+                        stmts.extend(trailing);
+                    }
                 }
-                stmts.extend(trailing);
-            } else {
-                stmts.push(stmt);
-                stmts.extend(trailing);
+                Err(msg) => {
+                    // Collect the error, insert Error node, skip to next statement boundary
+                    let err_span = Some(self.current_span());
+                    self.errors.push(self.string_to_diagnostic(&msg));
+                    self.skip_to_next_stmt();
+                    stmts.push(Stmt::Error { span: err_span });
+                }
             }
         }
         self.expect(TokenType::RBrace)?;

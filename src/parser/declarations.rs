@@ -112,9 +112,13 @@ impl Parser {
         let tok = self.current();
         let hint = match tok.value.as_str() {
             "class" | "struct" => "\n  Hint: Use 'type Name = { field: Type, ... }' for record types, or 'type Name = | Case1 | Case2' for variants.",
-            "def" | "func" | "function" => "\n  Hint: Use 'fn name(...) -> Type = expr' or 'effect fn name(...) -> Result[T, E] = expr'.",
+            "def" | "func" | "function" | "fun" | "proc" => "\n  Hint: Use 'fn name(...) -> Type = expr' or 'effect fn name(...) -> Result[T, E] = expr'.",
             "while" | "for" | "loop" => "\n  Hint: Almide has no top-level loops. Define a function with 'fn' or 'effect fn'.",
-            "const" | "val" => "\n  Hint: Use 'let NAME = value' for top-level constants, or 'let' inside functions for local bindings.",
+            "const" | "val" | "var" => "\n  Hint: Use 'let NAME = value' for top-level constants, or 'let' inside functions for local bindings.",
+            "enum" | "data" | "sealed" | "union" => "\n  Hint: Use 'type Name = | Case1(T) | Case2(T)' for variant types.",
+            "interface" | "protocol" | "abstract" => "\n  Hint: Use 'trait Name { ... }' for traits.",
+            "return" => "\n  Hint: Almide functions return the last expression — no 'return' keyword needed.",
+            "import" => "\n  Hint: All imports must come before other declarations.",
             _ => "",
         };
         Err(format!(

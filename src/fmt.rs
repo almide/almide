@@ -275,6 +275,7 @@ fn format_expr(out: &mut String, expr: &Expr, depth: usize) {
         Expr::None { .. } => out.push_str("none"),
         Expr::Hole { .. } => out.push_str("_"),
         Expr::Placeholder { .. } => out.push_str("_"),
+        Expr::Error { .. } => out.push_str("/* error */"),
         Expr::Todo { message, .. } => {
             if message.is_empty() {
                 out.push_str("todo");
@@ -694,6 +695,7 @@ fn format_stmt(out: &mut String, stmt: &Stmt, depth: usize) {
             out.push('\n');
             return;
         }
+        Stmt::Error { .. } => { return; }
     }
     out.push_str(";\n");
 }
