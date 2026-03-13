@@ -4,6 +4,7 @@
 
 - [Hint System Architecture](active/hint-system.md) — Pluggable hint registry, separate hint modules from parser core
 - [LLM Integration](active/llm-integration.md) — `almide forge` (library generation), `almide fix` (self-repair), `almide explain`
+- [Structured Concurrency](active/structured-concurrency.md) — Layer 2: `async let` / `await` for scoped parallel execution
 
 ## On Hold
 
@@ -20,7 +21,6 @@
 - [Scaffold & Proliferation Pipeline](on-hold/scaffold-and-proliferation.md)
 - [Self-Hosting](on-hold/self-hosting.md) — rewrite compiler in Almide (after spec stabilization)
 - [Stdlib Architecture: 3-Layer Design](on-hold/stdlib-architecture-3-layer-design.md) — Phase A done, B/C remaining
-- [Structured Concurrency](on-hold/structured-concurrency.md) — Layer 2: `concurrent`/`race`/`timeout` on top of async/await
 - [Supervision & Actors](on-hold/supervision-and-actors.md) — Layer 3: typed actors, channels, supervision trees (stdlib)
 - [Syntax Sugar](on-hold/syntax-sugar.md) — range, raw strings, exhaustiveness done; comprehensions pending
 - [Tooling](on-hold/tooling.md)

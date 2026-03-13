@@ -1,8 +1,22 @@
-# Structured Concurrency [ON HOLD]
+# Structured Concurrency [ACTIVE]
+
+## Philosophy
+
+> **Almide keeps async boring on purpose: explicit fork, explicit join, automatic cancellation, and the same fail-fast semantics as `do`.**
+
+Non-goals: novel concurrency syntax, implicit parallelism, actor primitives in the language. Almide's async is intentionally conservative — readable, hard to break, easy to implement.
 
 ## Overview
 
-Layer 2 of Almide's async model. Provides structured task lifecycle management on top of existing `async fn` / `await` (Layer 1). All concurrent work has a clear scope — tasks cannot outlive their parent, eliminating task leaks.
+Layer 2 of Almide's async model. Three language constructs only:
+
+| Construct | Purpose |
+|-----------|---------|
+| `async fn` | Declares an async function (implicitly `effect`) |
+| `await expr` | Resolves `Future[T]` to `T` — one operation, always explicit |
+| `async let x = expr` | Starts a concurrent task, binds a single-use handle |
+
+Everything else (`race`, `timeout`, `sleep`) is a stdlib function, not syntax.
 
 ## Design Principles
 
@@ -11,21 +25,11 @@ Layer 2 of Almide's async model. Provides structured task lifecycle management o
 - **No task leaks** — structurally impossible in AI-generated code
 - **Composes with `do` blocks** — error propagation works inside concurrent scopes
 - **Minimal syntax delta** — sequential → parallel is adding one word (`async` before `let`)
+- **Boring on purpose** — no novel concurrency constructs; consistency over cleverness
 
-## Why This Matters
+## Core Syntax
 
-| Existing system | What it lacks |
-|-----------------|---------------|
-| Go goroutines | No structured scope — goroutines leak freely |
-| Erlang processes | Linked but not scoped — lifecycle is explicit, not structural |
-| JS Promise.all | No cancellation — rejected promises don't stop siblings |
-| Rust tokio | `JoinSet` exists but isn't a language-level guarantee |
-
-Almide can guarantee at the language level what others do at the library level.
-
-## Syntax Design: `async let` (Swift-inspired)
-
-### Core: `async let` for parallel execution
+### `async let` for parallel execution
 
 `async let` forks a task at the declaration site. `await` joins at the use site.
 
@@ -54,7 +58,19 @@ use(await a, await b)
 
 Note: `async fn` returns `Future[T]`. Calling it without `await` or `async let` creates an unevaluated future. `await` resolves it (sequential). `async let` starts it immediately and binds a handle (parallel).
 
-### Semantics
+## Semantics
+
+### `await`: one operation
+
+`await` is a single operation: **`Future[T]` → `T`**.
+
+- `await fetch_user(id)` — `fetch_user` returns `Future[Result[User, E]]`, `await` unwraps the future
+- `async let x = expr` — `x` is a `Future[T]` (task handle), `await x` joins it
+- Inside `do` block: `await` unwraps the future, `do` propagates the `Result`
+
+This unification means `await` always does one thing: resolve a future. Error handling is always `do`'s job.
+
+### `async let`: task lifecycle
 
 - `async let x = expr` — immediately starts evaluating `expr` as a concurrent task. `x` is a `Future[T]` handle.
 - `await x` — suspends until the task completes and returns its value. **Consumes** the handle.
@@ -63,7 +79,7 @@ Note: `async fn` returns `Future[T]`. Calling it without `await` or `async let` 
 - Inside `do` block: any task failure → **cancel all sibling tasks** → propagate error. Partial success is not observable.
 - No new keywords — `async` and `let` are both existing.
 
-### Failure and cancellation rules
+### Failure and cancellation
 
 ```almide
 do {
@@ -77,10 +93,17 @@ do {
 // This matches do's existing behavior: first error exits the block.
 ```
 
+**Rules:**
+
+1. `do` exits on the first `Result` error → `async let` + `do` exits on the first failed task
+2. All sibling tasks are cancelled before error propagation
+3. Scope exit (normal or error) cancels all un-awaited handles
+4. Partial success is never observable — all succeed or all fail
+
 **Rationale:**
-- Consistent with `do` — `do` exits on the first `Result` error, so `async let` + `do` exits on the first failed task.
-- AI doesn't need to write cleanup logic for partially-succeeded parallel operations.
-- "All succeed or all fail" is the simplest mental model.
+- Consistent with `do` — sequential and concurrent code follow the same fail-fast rule
+- AI doesn't need to write cleanup logic for partially-succeeded parallel operations
+- "All succeed or all fail" is the simplest mental model
 
 ### Comparison with Swift
 
@@ -94,7 +117,7 @@ do {
 
 Almide's advantage: `do` block absorbs error handling, so no `try` noise at every join point.
 
-### Composition with `do` blocks
+## Composition with `do` blocks
 
 ```almide
 async fn checkout(cart: Cart) -> Result[Order, AppError] =
@@ -106,7 +129,7 @@ async fn checkout(cart: Cart) -> Result[Order, AppError] =
   }
 ```
 
-### race / timeout — stdlib functions, not syntax
+## race / timeout — stdlib functions, not syntax
 
 No new syntax needed. These are async stdlib functions:
 
@@ -120,16 +143,6 @@ let data = await timeout(5s, fetch(url))
 // Sleep
 await sleep(100ms)
 ```
-
-## `await` semantics
-
-`await` is a single operation: **`Future[T]` → `T`**.
-
-- `await fetch_user(id)` — `fetch_user` returns `Future[Result[User, E]]`, `await` unwraps the future
-- `async let x = expr` — `x` is a `Future[T]` (task handle), `await x` joins it
-- Inside `do` block: `await` unwraps the future, `do` propagates the `Result`
-
-This unification means `await` always does one thing: resolve a future. Error handling is always `do`'s job.
 
 ## Codegen Strategy
 
@@ -153,11 +166,12 @@ This unification means `await` always does one thing: resolve a future. Error ha
 ### Phase 1: `async let` + `await` codegen
 
 - [ ] Parse `async let` as a new binding form in declarations
-- [ ] Type check: `async let x: T` produces a future/handle, `await x` yields `T`
+- [ ] Type check: `async let x: T` produces `Future[T]` handle, `await x` yields `T`, second `await x` is compile error
 - [ ] Rust codegen: scoped task handle + join (single-threaded executor initially, tokio later)
 - [ ] TS codegen: runtime-managed task handle with AbortController
 - [ ] Replace `almide_block_on` busy-wait with proper async executor
 - [ ] Scope exit cancellation: drop handles for un-awaited bindings
+- [ ] Sibling cancellation on failure within `do` blocks
 - [ ] Tests in `spec/lang/async_test.almd`
 
 ### Phase 2: `race` / `timeout` / `sleep` stdlib
@@ -165,6 +179,7 @@ This unification means `await` always does one thing: resolve a future. Error ha
 - [ ] Add `race`, `timeout`, `sleep` as stdlib async functions
 - [ ] Rust codegen: `tokio::select!`, `tokio::time::timeout`, `tokio::time::sleep`
 - [ ] TS codegen: `Promise.race`, `setTimeout` wrapper
+- [ ] Tests in `spec/stdlib/async_test.almd`
 
 ### Phase 3: Async streams
 
@@ -177,8 +192,8 @@ This unification means `await` always does one thing: resolve a future. Error ha
 ## Dependencies
 
 - Layer 1 (`async fn` / `await`) — DONE
-- Rust codegen needs tokio (or async-std) runtime instead of `almide_block_on`
+- Rust codegen needs async executor instead of `almide_block_on`
 
 ## Status
 
-Not started. Layer 1 (async/await) is implemented.
+Design complete. Implementation not started. Layer 1 (async/await) is implemented.
