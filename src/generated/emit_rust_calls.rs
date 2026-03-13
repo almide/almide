@@ -276,6 +276,29 @@ pub fn gen_generated_call(
             ("regex", "replace") => format!("almide_regex_replace(&{}, &{}, &{})", args_str[0], args_str[1], args_str[2]),
             ("regex", "replace_first") => format!("almide_regex_replace_first(&{}, &{}, &{})", args_str[0], args_str[1], args_str[2]),
             ("regex", "split") => format!("almide_regex_split(&{}, &{})", args_str[0], args_str[1]),
+            ("result", "and_then") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
+                format!("({}).and_then(|{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body)
+            },
+            ("result", "is_err?") => format!("({}).is_err()", args_str[0]),
+            ("result", "is_err_hdlm_qm_") => format!("({}).is_err()", args_str[0]),
+            ("result", "is_ok?") => format!("({}).is_ok()", args_str[0]),
+            ("result", "is_ok_hdlm_qm_") => format!("({}).is_ok()", args_str[0]),
+            ("result", "map") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
+                format!("({}).map(|{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body)
+            },
+            ("result", "map_err") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
+                format!("({}).map_err(|{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body)
+            },
+            ("result", "to_err_option") => format!("({}).err()", args_str[0]),
+            ("result", "to_option") => format!("({}).ok()", args_str[0]),
+            ("result", "unwrap_or") => format!("({}).unwrap_or({})", args_str[0], args_str[1]),
+            ("result", "unwrap_or_else") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
+                format!("({}).unwrap_or_else(|{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body)
+            },
             ("string", "capitalize") => format!("almide_rt_string_capitalize(&*{})", args_str[0]),
             ("string", "char_at") => format!("almide_rt_string_char_at(&*{}, {})", args_str[0], args_str[1]),
             ("string", "chars") => format!("almide_rt_string_chars(&*{})", args_str[0]),

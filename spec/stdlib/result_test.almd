@@ -1,0 +1,79 @@
+import result
+
+test "result.map transforms ok value" {
+  let r: Result[Int, String] = ok(42)
+  let mapped = result.map(r, fn(x) => x * 2)
+  assert_eq(mapped, ok(84))
+}
+
+test "result.map_err passes ok through" {
+  let r: Result[Int, String] = ok(10)
+  let mapped = result.map_err(r, fn(e) => "wrapped: " ++ e)
+  assert_eq(mapped, ok(10))
+}
+
+test "result.and_then chains ok" {
+  let r: Result[Int, String] = ok(5)
+  let chained = result.and_then(r, fn(x) => ok(x + 10))
+  assert_eq(chained, ok(15))
+}
+
+test "result.and_then chains to err" {
+  let r: Result[Int, String] = ok(5)
+  let chained: Result[Int, String] = result.and_then(r, fn(_x) => err("failed"))
+  assert_eq(chained, err("failed"))
+}
+
+test "result.unwrap_or returns ok value" {
+  let r: Result[Int, String] = ok(42)
+  let v = result.unwrap_or(r, 0)
+  assert_eq(v, 42)
+}
+
+test "result.unwrap_or returns default on err" {
+  let r: Result[Int, String] = err("bad")
+  let v = result.unwrap_or(r, 0)
+  assert_eq(v, 0)
+}
+
+test "result.is_ok? true for ok" {
+  let r: Result[Int, String] = ok(1)
+  assert(result.is_ok?(r))
+}
+
+test "result.is_err? true for err" {
+  let r: Result[Int, String] = err("oops")
+  assert(result.is_err?(r))
+}
+
+test "result.to_option converts ok" {
+  let r: Result[Int, String] = ok(42)
+  assert_eq(result.to_option(r), some(42))
+}
+
+test "result.to_option returns none for err" {
+  let r: Result[Int, String] = err("bad")
+  assert_eq(result.to_option(r), none)
+}
+
+test "result.to_err_option returns none for ok" {
+  let r: Result[Int, String] = ok(42)
+  assert_eq(result.to_err_option(r), none)
+}
+
+test "result.to_err_option returns some for err" {
+  let r: Result[Int, String] = err("bad")
+  assert_eq(result.to_err_option(r), some("bad"))
+}
+
+test "result.unwrap_or_else returns ok value" {
+  let r: Result[Int, String] = ok(42)
+  let v = result.unwrap_or_else(r, fn(_e) => 0)
+  assert_eq(v, 42)
+}
+
+test "result.unwrap_or_else calls fn on err" {
+  let r: Result[Int, String] = err("missing")
+  let v = result.unwrap_or_else(r, fn(e) => string.len(e))
+  assert_eq(v, 7)
+}

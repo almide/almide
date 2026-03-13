@@ -823,6 +823,27 @@ function __assert_throws(fn, expectedMsg) {
 }
 "#;
 
+// ──────────────────────────────── result ────────────────────────────────
+
+// Result erasure: ok(x) → x, err(e) → throw. These functions only see ok values
+// at runtime. Functions like unwrap_or/is_ok? are identity/constant in TS because
+// err values are already thrown before reaching these calls.
+const MOD_RESULT_TS: &str = r#"function __almd_result_unwrap_or<A>(v: A, _d: A): A { return v; }
+function __almd_result_unwrap_or_else<A>(v: A, _f: (e: any) => A): A { return v; }
+function __almd_result_is_ok(_v: any): boolean { return true; }
+function __almd_result_is_err(_v: any): boolean { return false; }
+function __almd_result_to_option<A>(v: A): A | null { return v; }
+function __almd_result_to_err_option(_v: any): any { return null; }
+"#;
+
+const MOD_RESULT_JS: &str = r#"function __almd_result_unwrap_or(v, _d) { return v; }
+function __almd_result_unwrap_or_else(v, _f) { return v; }
+function __almd_result_is_ok(_v) { return true; }
+function __almd_result_is_err(_v) { return false; }
+function __almd_result_to_option(v) { return v; }
+function __almd_result_to_err_option(_v) { return null; }
+"#;
+
 // ──────────────────────────────── Registry ────────────────────────────────
 
 /// A runtime module with TS (Deno) and JS (Node.js) source variants.
@@ -850,6 +871,7 @@ pub static ALL_MODULES: &[RuntimeModule] = &[
     RuntimeModule { name: "io",      ts_source: MOD_IO_TS,      js_source: MOD_IO_JS },
     RuntimeModule { name: "time",    ts_source: MOD_TIME_TS,    js_source: MOD_TIME_JS },
     RuntimeModule { name: "http",    ts_source: MOD_HTTP_TS,    js_source: MOD_HTTP_JS },
+    RuntimeModule { name: "result",  ts_source: MOD_RESULT_TS,  js_source: MOD_RESULT_JS },
 ];
 
 /// Compose the full runtime string (backwards compatible with --target ts/js).

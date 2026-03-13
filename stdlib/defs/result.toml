@@ -1,0 +1,76 @@
+[map]
+type_params = ["A", "B", "E"]
+params = [
+    { name = "r", type = "Result[A, E]" },
+    { name = "f", type = "Fn[A] -> B" },
+]
+return = "Result[B, E]"
+rust = "({r}).map(|{f.args}| {{ {f.body} }})"
+ts = "(({f.args}) => {f.body})({r})"
+
+[map_err]
+type_params = ["A", "E", "F"]
+params = [
+    { name = "r", type = "Result[A, E]" },
+    { name = "f", type = "Fn[E] -> F" },
+]
+return = "Result[A, F]"
+rust = "({r}).map_err(|{f.args}| {{ {f.body} }})"
+ts = "{r}"
+
+[and_then]
+type_params = ["A", "B", "E"]
+params = [
+    { name = "r", type = "Result[A, E]" },
+    { name = "f", type = "Fn[A] -> Result[B, E]" },
+]
+return = "Result[B, E]"
+rust = "({r}).and_then(|{f.args}| {{ {f.body} }})"
+ts = "(({f.args}) => {f.body})({r})"
+
+[unwrap_or]
+type_params = ["A", "E"]
+params = [{ name = "r", type = "Result[A, E]" }, { name = "default", type = "A" }]
+return = "A"
+rust = "({r}).unwrap_or({default})"
+ts = "__almd_result_unwrap_or({r}, {default})"
+
+[unwrap_or_else]
+type_params = ["A", "E"]
+params = [
+    { name = "r", type = "Result[A, E]" },
+    { name = "f", type = "Fn[E] -> A" },
+]
+return = "A"
+rust = "({r}).unwrap_or_else(|{f.args}| {{ {f.body} }})"
+ts = "__almd_result_unwrap_or_else({r}, ({f.args}) => {f.body})"
+
+["is_ok?"]
+type_params = ["A", "E"]
+params = [{ name = "r", type = "Result[A, E]" }]
+return = "Bool"
+rust = "({r}).is_ok()"
+ts = "__almd_result_is_ok({r})"
+aliases = ["is_ok_hdlm_qm_"]
+
+["is_err?"]
+type_params = ["A", "E"]
+params = [{ name = "r", type = "Result[A, E]" }]
+return = "Bool"
+rust = "({r}).is_err()"
+ts = "__almd_result_is_err({r})"
+aliases = ["is_err_hdlm_qm_"]
+
+[to_option]
+type_params = ["A", "E"]
+params = [{ name = "r", type = "Result[A, E]" }]
+return = "Option[A]"
+rust = "({r}).ok()"
+ts = "__almd_result_to_option({r})"
+
+[to_err_option]
+type_params = ["A", "E"]
+params = [{ name = "r", type = "Result[A, E]" }]
+return = "Option[E]"
+rust = "({r}).err()"
+ts = "__almd_result_to_err_option({r})"
