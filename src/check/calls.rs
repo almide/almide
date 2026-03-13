@@ -118,9 +118,13 @@ impl Checker {
                         format!("{}()", name),
                     ));
                 } else if !arg_tys[0].compatible(&Ty::String) {
+                    let hint = Self::hint_with_conversion(
+                        &format!("{}() requires a String argument", name),
+                        &Ty::String, &arg_tys[0],
+                    );
                     self.push_diagnostic(err(
                         format!("{}() requires String but got {}", name, arg_tys[0].display()),
-                        "Use int.to_string(n) to convert to String first",
+                        hint,
                         format!("{}()", name),
                     ));
                 }
@@ -176,9 +180,13 @@ impl Checker {
             } else {
                 for (i, ((pname, pty), aty)) in sig.params.iter().zip(arg_tys.iter()).enumerate() {
                     if !pty.compatible(aty) {
+                        let hint = Self::hint_with_conversion(
+                            &format!("Pass a value of type {}", pty.display()),
+                            pty, aty,
+                        );
                         self.push_diagnostic(err(
                             format!("argument '{}' (position {}) expects {} but got {}", pname, i + 1, pty.display(), aty.display()),
-                            format!("Pass a value of type {}", pty.display()),
+                            hint,
                             format!("call to {}()", name),
                         ));
                     }
@@ -275,9 +283,13 @@ impl Checker {
                     if !unify(pty, aty, &mut bindings) {
                         // Substitute known bindings into param type for better error messages
                         let display_ty = substitute(pty, &bindings);
+                        let hint = Self::hint_with_conversion(
+                            &format!("Pass a value of type {}", display_ty.display()),
+                            &display_ty, aty,
+                        );
                         self.push_diagnostic(err(
                             format!("{}.{}() argument '{}' (position {}) expects {} but got {}", module, func, pname, i + 1, display_ty.display(), aty.display()),
-                            format!("Pass a value of type {}", display_ty.display()),
+                            hint,
                             format!("{}.{}()", module, func),
                         ));
                     }
@@ -339,9 +351,13 @@ impl Checker {
                 } else {
                     for (i, ((pname, pty), aty)) in sig.params.iter().zip(arg_tys.iter()).enumerate() {
                         if !pty.compatible(aty) {
+                            let hint = Self::hint_with_conversion(
+                                &format!("Pass a value of type {}", pty.display()),
+                                pty, aty,
+                            );
                             self.push_diagnostic(err(
                                 format!("{}.{}() argument '{}' (position {}) expects {} but got {}", module, func, pname, i + 1, pty.display(), aty.display()),
-                                format!("Pass a value of type {}", pty.display()),
+                                hint,
                                 format!("{}.{}()", module, func),
                             ));
                         }

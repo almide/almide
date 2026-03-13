@@ -14,6 +14,25 @@ fn check(input: &str) -> Vec<(Level, String)> {
     diags.into_iter().map(|d| (d.level, d.message)).collect()
 }
 
+fn check_with_hints(input: &str) -> Vec<(Level, String, String)> {
+    let tokens = Lexer::tokenize(input);
+    let mut parser = Parser::new(tokens);
+    let mut prog = parser.parse().expect("parse failed");
+    let diags = {
+        let mut checker = Checker::new();
+        checker.check_program(&mut prog)
+    };
+    diags.into_iter().map(|d| (d.level, d.message, d.hint)).collect()
+}
+
+fn error_hints(input: &str) -> Vec<String> {
+    check_with_hints(input)
+        .into_iter()
+        .filter(|(l, _, _)| *l == Level::Error)
+        .map(|(_, _, h)| h)
+        .collect()
+}
+
 fn errors(input: &str) -> Vec<String> {
     check(input)
         .into_iter()
@@ -483,4 +502,77 @@ fn check_while_loop() {
     has_no_errors(
         "fn f() -> Int = {\n  var x = 0\n  while x < 10 {\n    x = x + 1\n  }\n  x\n}"
     );
+}
+
+// ---- Type conversion suggestions ----
+
+#[test]
+fn hint_int_to_string_return() {
+    let hints = error_hints("fn f() -> String = 42");
+    assert!(!hints.is_empty(), "should have an error");
+    assert!(hints[0].contains("int.to_string"), "hint should suggest int.to_string, got: {}", hints[0]);
+}
+
+#[test]
+fn hint_int_to_string_let() {
+    let hints = error_hints("fn f() -> Unit = {\n  let x: String = 42\n  ()\n}");
+    assert!(!hints.is_empty(), "should have an error");
+    assert!(hints[0].contains("int.to_string"), "hint should suggest int.to_string, got: {}", hints[0]);
+}
+
+#[test]
+fn hint_float_to_int_return() {
+    let hints = error_hints("fn f() -> Int = 3.14");
+    assert!(!hints.is_empty(), "should have an error");
+    assert!(hints[0].contains("to_int"), "hint should suggest to_int, got: {}", hints[0]);
+}
+
+#[test]
+fn hint_int_to_float_return() {
+    let hints = error_hints("fn f() -> Float = 42");
+    assert!(!hints.is_empty(), "should have an error");
+    assert!(hints[0].contains("to_float"), "hint should suggest to_float, got: {}", hints[0]);
+}
+
+#[test]
+fn hint_string_to_int_return() {
+    let hints = error_hints("fn f() -> Int = \"42\"");
+    assert!(!hints.is_empty(), "should have an error");
+    assert!(hints[0].contains("int.parse"), "hint should suggest int.parse, got: {}", hints[0]);
+}
+
+#[test]
+fn hint_bool_to_string_return() {
+    let hints = error_hints("fn f() -> String = true");
+    assert!(!hints.is_empty(), "should have an error");
+    assert!(hints[0].contains("to_string"), "hint should suggest to_string, got: {}", hints[0]);
+}
+
+#[test]
+fn hint_int_to_string_println() {
+    let hints = error_hints("effect fn main(_a: List[String]) -> Result[Unit, String] = {\n  println(42)\n  ok(())\n}");
+    assert!(!hints.is_empty(), "should have an error");
+    assert!(hints[0].contains("int.to_string"), "hint should suggest int.to_string for println, got: {}", hints[0]);
+}
+
+#[test]
+fn hint_int_to_string_fn_arg() {
+    let hints = error_hints("fn greet(name: String) -> String = name\nfn f() -> String = greet(42)");
+    assert!(!hints.is_empty(), "should have an error");
+    assert!(hints[0].contains("int.to_string"), "hint should suggest int.to_string for fn arg, got: {}", hints[0]);
+}
+
+#[test]
+fn hint_no_conversion_for_same_type() {
+    // No error means no hint needed
+    has_no_errors("fn f() -> Int = 42");
+}
+
+#[test]
+fn hint_no_conversion_for_unrelated_types() {
+    let hints = error_hints("fn f() -> List[Int] = 42");
+    assert!(!hints.is_empty(), "should have an error");
+    // Should NOT contain conversion suggestions for unrelated types
+    assert!(!hints[0].contains("to_string") && !hints[0].contains("to_int") && !hints[0].contains("to_float"),
+        "should not suggest conversion for unrelated types, got: {}", hints[0]);
 }

@@ -211,9 +211,13 @@ impl Checker {
                                 let actual_ty = self.check_expr(&mut f.value);
                                 if let Some((_, expected_ty, _)) = expected_fields.iter().find(|(n, _, _)| n == &f.name) {
                                     if !expected_ty.compatible(&actual_ty) {
+                                        let hint = Self::hint_with_conversion(
+                                            &format!("In variant constructor {}", cname),
+                                            expected_ty, &actual_ty,
+                                        );
                                         self.push_diagnostic(err(
                                             format!("field '{}' expects {} but got {}", f.name, expected_ty.display(), actual_ty.display()),
-                                            &format!("In variant constructor {}", cname), "variant record construction",
+                                            hint, "variant record construction",
                                         ));
                                     }
                                 } else {
