@@ -2,12 +2,12 @@
 
 ## Active
 
-- [Error Recovery](active/error-recovery.md) — Multi-error reporting, structured parser errors, statement/expression-level recovery
 - [LLM Integration](active/llm-integration.md) — `almide forge` (library generation), `almide fix` (self-repair), `almide explain`
 
 ## On Hold
 
 - [Benchmark Report](on-hold/benchmark-report.md)
+- [Cross-Target AOT Compilation](on-hold/cross-target-aot.md) — Compile to native binary via Rust, TS via Deno/Bun, WASM via wasm-pack
 - [Direct WASM Emission](on-hold/emit-wasm-direct.md) — `.almd → WASM bytecode` without rustc
 - [Editor & GitHub Integration](on-hold/editor-github-integration.md)
 - [Function Reference Passing](on-hold/function-reference-passing.md) — low priority, verbose form is always correct
@@ -65,4 +65,5 @@
 - [Variant Record Fields](done/variant-record-fields.md) — named fields on enum variants, `..` rest pattern
 - [Map Literal](done/map-literal.md) — `[:]` / `["key": value]` syntax, index access, direct iteration
 - [Eq Protocol](on-hold/trait-impl.md) — automatic `==` for all value types, `Fn` types rejected
+- [Error Recovery](done/error-recovery.md) — Multi-error reporting, statement/expression-level recovery, error AST nodes, common typo detection
 - [While Loop](done/while-loop.md) — `while condition { }`, universal loop syntax

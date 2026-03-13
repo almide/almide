@@ -259,9 +259,10 @@ impl Parser {
                 };
             } else if self.check(TokenType::LBracket) && !self.newline_before_current() {
                 let span = Some(self.current_span());
+                let open = self.current().clone();
                 self.advance(); // skip [
                 let index = self.parse_expr()?;
-                self.expect(TokenType::RBracket)?;
+                self.expect_closing(TokenType::RBracket, open.line, open.col, "index access")?;
                 expr = Expr::IndexAccess {
                     object: Box::new(expr),
                     index: Box::new(index),
@@ -270,9 +271,10 @@ impl Parser {
                 };
             } else if self.check(TokenType::LParen) && !self.newline_before_current() {
                 let span = Some(self.current_span());
+                let open = self.current().clone();
                 self.advance();
                 let args = self.parse_call_args()?;
-                self.expect(TokenType::RParen)?;
+                self.expect_closing(TokenType::RParen, open.line, open.col, "function call")?;
                 expr = Expr::Call {
                     callee: Box::new(expr),
                     args,

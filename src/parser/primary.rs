@@ -60,31 +60,35 @@ impl Parser {
         }
         if self.check(TokenType::Some) {
             self.advance();
+            let open = self.current().clone();
             self.expect(TokenType::LParen)?;
             let expr = self.parse_expr()?;
-            self.expect(TokenType::RParen)?;
+            self.expect_closing(TokenType::RParen, open.line, open.col, "some()")?;
             return Ok(Expr::Some { expr: Box::new(expr), span, resolved_type: None });
         }
         if self.check(TokenType::Ok) {
             self.advance();
+            let open = self.current().clone();
             self.expect(TokenType::LParen)?;
             let expr = self.parse_expr()?;
-            self.expect(TokenType::RParen)?;
+            self.expect_closing(TokenType::RParen, open.line, open.col, "ok()")?;
             return Ok(Expr::Ok { expr: Box::new(expr), span, resolved_type: None });
         }
         if self.check(TokenType::Err) {
             self.advance();
+            let open = self.current().clone();
             self.expect(TokenType::LParen)?;
             let expr = self.parse_expr()?;
-            self.expect(TokenType::RParen)?;
+            self.expect_closing(TokenType::RParen, open.line, open.col, "err()")?;
             return Ok(Expr::Err { expr: Box::new(expr), span, resolved_type: None });
         }
         if self.check(TokenType::Todo) {
             self.advance();
+            let open = self.current().clone();
             self.expect(TokenType::LParen)?;
             let msg = self.current().value.clone();
             self.expect(TokenType::String)?;
-            self.expect(TokenType::RParen)?;
+            self.expect_closing(TokenType::RParen, open.line, open.col, "todo()")?;
             return Ok(Expr::Todo { message: msg, span, resolved_type: None });
         }
         if self.check(TokenType::Try) {
@@ -112,6 +116,7 @@ impl Parser {
             self.skip_newlines();
             let cond = self.parse_expr()?;
             self.skip_newlines();
+            let open = self.current().clone();
             self.expect(TokenType::LBrace)?;
             let mut stmts = Vec::new();
             self.skip_newlines_into_stmts(&mut stmts);
@@ -124,7 +129,7 @@ impl Parser {
                     self.skip_newlines_into_stmts(&mut stmts);
                 }
             }
-            self.expect(TokenType::RBrace)?;
+            self.expect_closing(TokenType::RBrace, open.line, open.col, "while body")?;
             return Ok(Expr::While {
                 cond: Box::new(cond),
                 body: stmts,
@@ -152,6 +157,7 @@ impl Parser {
             };
             self.expect(TokenType::In)?;
             let iterable = self.parse_expr()?;
+            let open_for = self.current().clone();
             self.expect(TokenType::LBrace)?;
             let mut stmts = Vec::new();
             self.skip_newlines_into_stmts(&mut stmts);
@@ -163,7 +169,7 @@ impl Parser {
                     self.skip_newlines_into_stmts(&mut stmts);
                 }
             }
-            self.expect(TokenType::RBrace)?;
+            self.expect_closing(TokenType::RBrace, open_for.line, open_for.col, "for body")?;
             return Ok(Expr::ForIn {
                 var: var_name,
                 var_tuple,
@@ -184,6 +190,7 @@ impl Parser {
             return self.parse_list_expr();
         }
         if self.check(TokenType::LParen) {
+            let open = self.current().clone();
             self.advance();
             if self.check(TokenType::RParen) {
                 self.advance();
@@ -198,10 +205,10 @@ impl Parser {
                     if self.check(TokenType::RParen) { break; } // trailing comma
                     elements.push(self.parse_expr()?);
                 }
-                self.expect(TokenType::RParen)?;
+                self.expect_closing(TokenType::RParen, open.line, open.col, "tuple")?;
                 return Ok(Expr::Tuple { elements, span, resolved_type: None });
             }
-            self.expect(TokenType::RParen)?;
+            self.expect_closing(TokenType::RParen, open.line, open.col, "parenthesized expression")?;
             return Ok(Expr::Paren { expr: Box::new(first), span, resolved_type: None });
         }
         if self.check(TokenType::TypeName) {
@@ -210,9 +217,10 @@ impl Parser {
             if self.check(TokenType::LBracket) {
                 let ta = self.parse_type_args()?;
                 if self.check(TokenType::LParen) {
+                    let open_call = self.current().clone();
                     self.advance();
                     let args = self.parse_call_args()?;
-                    self.expect(TokenType::RParen)?;
+                    self.expect_closing(TokenType::RParen, open_call.line, open_call.col, "constructor call")?;
                     return Ok(Expr::Call {
                         callee: Box::new(Expr::TypeName { name, span, resolved_type: None }),
                         args,
@@ -224,9 +232,10 @@ impl Parser {
                 return Ok(Expr::TypeName { name, span, resolved_type: None });
             }
             if self.check(TokenType::LParen) {
+                let open_call = self.current().clone();
                 self.advance();
                 let args = self.parse_call_args()?;
-                self.expect(TokenType::RParen)?;
+                self.expect_closing(TokenType::RParen, open_call.line, open_call.col, "constructor call")?;
                 return Ok(Expr::Call {
                     callee: Box::new(Expr::TypeName { name, span, resolved_type: None }),
                     args,
@@ -241,6 +250,7 @@ impl Parser {
                 if self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Ident)
                     && self.peek_at(2).map(|t| &t.token_type) == Some(&TokenType::Colon)
                 {
+                    let open_rec = self.current().clone();
                     self.advance(); // consume {
                     let mut fields = Vec::new();
                     while !self.check(TokenType::RBrace) {
@@ -266,7 +276,7 @@ impl Parser {
                             self.skip_newlines();
                         }
                     }
-                    self.expect(TokenType::RBrace)?;
+                    self.expect_closing(TokenType::RBrace, open_rec.line, open_rec.col, "record construction")?;
                     return Ok(Expr::Record { name: Some(name), fields, span, resolved_type: None });
                 }
             }

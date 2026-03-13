@@ -111,7 +111,13 @@ impl Checker {
         if d.col.is_none() {
             d.col = self.current_decl_col;
         }
-        self.diagnostics.push(d);
+        // Deduplicate: skip if same message + line + col already reported
+        let dominated = self.diagnostics.iter().any(|existing| {
+            existing.message == d.message && existing.line == d.line && existing.col == d.col
+        });
+        if !dominated {
+            self.diagnostics.push(d);
+        }
     }
 
     /// Register function and type declarations into the environment.
