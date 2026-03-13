@@ -1,0 +1,83 @@
+// Bidirectional type inference tests
+
+// --- Empty container with type annotation ---
+
+test "empty list with type annotation" {
+  let xs: List[Int] = []
+  assert_eq(xs.len(), 0)
+  let ys = xs ++ [1, 2, 3]
+  assert_eq(ys, [1, 2, 3])
+}
+
+test "empty list of strings" {
+  let xs: List[String] = []
+  let result = xs ++ ["hello"]
+  assert_eq(result, ["hello"])
+}
+
+// --- Structured error types ---
+
+type MathError =
+  | DivideByZero
+  | Overflow(String)
+  | NegativeInput(Int)
+
+effect fn safe_div(a: Int, b: Int) -> Result[Int, MathError] = {
+  guard b != 0 else err(DivideByZero)
+  ok(a / b)
+}
+
+effect fn safe_sqrt(x: Int) -> Result[Int, MathError] = {
+  guard x >= 0 else err(NegativeInput(x))
+  ok(x)
+}
+
+test "structured error - ok path" {
+  assert_eq(safe_div(10, 2), ok(5))
+}
+
+test "structured error - divide by zero" {
+  assert_eq(safe_div(10, 0), err(DivideByZero))
+}
+
+test "structured error - negative input" {
+  assert_eq(safe_sqrt(-5), err(NegativeInput(-5)))
+}
+
+test "structured error - overflow variant" {
+  let e: Result[Int, MathError] = err(Overflow("too big"))
+  match e {
+    ok(_) => assert(false),
+    err(Overflow(msg)) => assert_eq(msg, "too big"),
+    err(_) => assert(false),
+  }
+}
+
+// --- Match on structured errors ---
+
+effect fn compute(a: Int, b: Int) -> Result[String, MathError] = {
+  match safe_div(a, b) {
+    ok(v) => ok(int.to_string(v)),
+    err(DivideByZero) => ok("infinity"),
+    err(e) => err(e),
+  }
+}
+
+test "match on structured error" {
+  assert_eq(compute(10, 2), ok("5"))
+  assert_eq(compute(10, 0), ok("infinity"))
+}
+
+// --- Expected type flows through if/match/block ---
+
+effect fn classify(x: Int) -> Result[String, MathError] = {
+  if x > 0 then ok("positive")
+  else if x == 0 then ok("zero")
+  else err(NegativeInput(x))
+}
+
+test "expected type through if branches" {
+  assert_eq(classify(5), ok("positive"))
+  assert_eq(classify(0), ok("zero"))
+  assert_eq(classify(-3), err(NegativeInput(-3)))
+}

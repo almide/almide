@@ -170,15 +170,43 @@ impl TsEmitter {
     }
 
     fn gen_ir_err(&self, expr: &IrExpr) -> String {
-        let msg = self.gen_ir_err_msg(expr);
-        if self.in_effect.get() {
-            format!("__throw({})", msg)
+        // Check if this is a structured error (variant constructor)
+        let is_variant = match &expr.kind {
+            IrExprKind::Call { target: CallTarget::Named { name }, .. } =>
+                name.chars().next().map_or(false, |c| c.is_uppercase()),
+            IrExprKind::Var { id } => {
+                let name = &self.ir_var_table().get(*id).name;
+                name.chars().next().map_or(false, |c| c.is_uppercase())
+            }
+            _ => false,
+        };
+
+        if is_variant {
+            // Structured error: preserve variant object
+            let val = self.gen_ir_expr(expr);
+            let msg = self.gen_ir_err_msg_string(expr);
+            if self.in_effect.get() {
+                // Throw an Error with message, but attach value for catch handlers
+                format!("(() => {{ const __e = new Error({}); __e.__almd_value = {}; throw __e; }})()", msg, val)
+            } else {
+                format!("new __Err({}, {})", msg, val)
+            }
         } else {
-            format!("new __Err({})", msg)
+            // Simple string error
+            let msg = self.gen_ir_err_msg_string(expr);
+            if self.in_effect.get() {
+                format!("__throw({})", msg)
+            } else {
+                format!("new __Err({})", msg)
+            }
         }
     }
 
     pub(crate) fn gen_ir_err_msg(&self, expr: &IrExpr) -> String {
+        self.gen_ir_err_msg_string(expr)
+    }
+
+    fn gen_ir_err_msg_string(&self, expr: &IrExpr) -> String {
         match &expr.kind {
             IrExprKind::LitStr { value } => Self::json_string(value),
             IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
@@ -247,12 +275,12 @@ impl TsEmitter {
                     if matches!(&args[1].kind, IrExprKind::ResultErr { .. }) {
                         let other = self.gen_ir_expr(&args[0]);
                         let err_val = self.gen_ir_expr(&args[1]);
-                        return format!("(() => {{ let __v; try {{ __v = {}; }} catch (__e) {{ __v = new __Err(__e instanceof Error ? __e.message : String(__e)); }} assert_eq(__v, {}); }})()", other, err_val);
+                        return format!("(() => {{ let __v; try {{ __v = {}; }} catch (__e) {{ __v = new __Err(__e instanceof Error ? __e.message : String(__e), __e.__almd_value); }} assert_eq(__v, {}); }})()", other, err_val);
                     }
                     if matches!(&args[0].kind, IrExprKind::ResultErr { .. }) {
                         let other = self.gen_ir_expr(&args[1]);
                         let err_val = self.gen_ir_expr(&args[0]);
-                        return format!("(() => {{ let __v; try {{ __v = {}; }} catch (__e) {{ __v = new __Err(__e instanceof Error ? __e.message : String(__e)); }} assert_eq({}, __v); }})()", other, err_val);
+                        return format!("(() => {{ let __v; try {{ __v = {}; }} catch (__e) {{ __v = new __Err(__e instanceof Error ? __e.message : String(__e), __e.__almd_value); }} assert_eq({}, __v); }})()", other, err_val);
                     }
                 }
                 // Unit variants (no payload) are const values, not functions — emit bare identifier

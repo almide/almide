@@ -24,7 +24,8 @@ impl Checker {
         }
         match stmt {
             ast::Stmt::Let { name, ty, value, span, .. } => {
-                let vt = self.check_expr(value);
+                let expected_ty = ty.as_ref().map(|te| self.resolve_type_expr(te));
+                let vt = self.check_expr_with(value, expected_ty.as_ref());
                 let vt = if self.env.in_do_block {
                     match vt {
                         Ty::Result(ok, _) => *ok,
@@ -32,7 +33,7 @@ impl Checker {
                     }
                 } else { vt };
                 let dt = if let Some(te) = ty {
-                    let t = self.resolve_type_expr(te);
+                    let t = expected_ty.clone().unwrap_or_else(|| self.resolve_type_expr(te));
                     // Resolve Named types (e.g., Container[Int] → Record { items: List[Int], label: String })
                     // so structural comparison works with anonymous record literals
                     let t_resolved = self.env.resolve_named(&t);
@@ -52,9 +53,10 @@ impl Checker {
                 }
             }
             ast::Stmt::Var { name, ty, value, span, .. } => {
-                let vt = self.check_expr(value);
+                let expected_ty = ty.as_ref().map(|te| self.resolve_type_expr(te));
+                let vt = self.check_expr_with(value, expected_ty.as_ref());
                 let dt = if let Some(te) = ty {
-                    let t = self.resolve_type_expr(te);
+                    let t = expected_ty.clone().unwrap_or_else(|| self.resolve_type_expr(te));
                     let t_resolved = self.env.resolve_named(&t);
                     if !t_resolved.compatible(&vt) {
                         self.push_diagnostic(err(

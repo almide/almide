@@ -474,7 +474,7 @@ impl Checker {
                     let prev_effect = self.env.in_effect;
                     self.env.current_ret = Some(ret_ty.clone());
                     self.env.in_effect = effect.unwrap_or(false);
-                    let body_ty = self.check_expr(body);
+                    let body_ty = self.check_expr_with(body, Some(&ret_ty));
                     let is_effect = effect.unwrap_or(false);
                     let effective_ret = if is_effect {
                         match &ret_ty {

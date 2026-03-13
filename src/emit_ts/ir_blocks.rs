@@ -9,7 +9,7 @@ impl TsEmitter {
                 let val = self.gen_ir_expr(value);
                 let is_call = matches!(&value.kind, IrExprKind::Call { .. });
                 if self.in_test.get() && !self.in_effect.get() && is_call {
-                    format!("var {}; try {{ {} = {}; }} catch (__e) {{ {} = new __Err(__e instanceof Error ? __e.message : String(__e)); }}", name, name, val, name)
+                    format!("var {}; try {{ {} = {}; }} catch (__e) {{ {} = new __Err(__e instanceof Error ? __e.message : String(__e), __e.__almd_value); }}", name, name, val, name)
                 } else if *mutability == Mutability::Var {
                     format!("let {} = {};", name, val)
                 } else {
@@ -47,8 +47,23 @@ impl TsEmitter {
             IrExprKind::Break => format!("if (!({})) {{ break; }}", cond),
             IrExprKind::Continue => format!("if (!({})) {{ continue; }}", cond),
             IrExprKind::ResultErr { expr } => {
+                // Check if this is a structured error (variant constructor)
+                let is_variant = match &expr.kind {
+                    IrExprKind::Call { target: CallTarget::Named { name }, .. } =>
+                        name.chars().next().map_or(false, |c| c.is_uppercase()),
+                    IrExprKind::Var { id } => {
+                        let name = &self.ir_var_table().get(*id).name;
+                        name.chars().next().map_or(false, |c| c.is_uppercase())
+                    }
+                    _ => false,
+                };
                 let msg = self.gen_ir_err_msg(expr);
-                format!("if (!({})) {{ throw new Error({}); }}", cond, msg)
+                if is_variant {
+                    let val = self.gen_ir_expr(expr);
+                    format!("if (!({})) {{ const __e = new Error({}); __e.__almd_value = {}; throw __e; }}", cond, msg, val)
+                } else {
+                    format!("if (!({})) {{ throw new Error({}); }}", cond, msg)
+                }
             }
             IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
                 let body_stmts: Vec<String> = stmts.iter()
@@ -71,26 +86,19 @@ impl TsEmitter {
 
         let err_arm = arms.iter().find(|a| matches!(&a.pattern, IrPattern::Err { .. }));
 
-        if let Some(err_arm) = err_arm {
+        if let Some(_err_arm) = err_arm {
             let ok_arms: Vec<&IrMatchArm> = arms.iter().filter(|a| !matches!(&a.pattern, IrPattern::Err { .. })).collect();
-            let err_body = self.gen_ir_expr_value(&err_arm.body);
-            let err_binding = if let IrPattern::Err { inner } = &err_arm.pattern {
-                if let IrPattern::Bind { var } = inner.as_ref() {
-                    Some(self.ir_var_table().get(*var).name.clone())
-                } else { None }
-            } else { None };
+            let err_arms: Vec<&IrMatchArm> = arms.iter().filter(|a| matches!(&a.pattern, IrPattern::Err { .. })).collect();
 
-            let catch_convert = format!("{} = new __Err(__e instanceof Error ? __e.message : String(__e));", tmp);
-            let err_return = if let Some(ref binding) = err_binding {
-                format!("const {} = {}.message; return {};", binding, tmp, err_body)
-            } else {
-                format!("return {};", err_body)
-            };
+            let catch_convert = format!("{} = new __Err(__e instanceof Error ? __e.message : String(__e), __e.__almd_value);", tmp);
+
+            // Build err handling with multiple err arms
+            let err_handling = self.gen_err_arm_chain(&err_arms, tmp);
 
             let type_ann = if self.js_mode { "" } else { ": any" };
             let mut lines = vec![format!(
                 "(() => {{ let {}{}; try {{ {} = {}; }} catch (__e) {{ {} }} if ({} instanceof __Err) {{ {} }}",
-                tmp, type_ann, tmp, subj, catch_convert, tmp, err_return
+                tmp, type_ann, tmp, subj, catch_convert, tmp, err_handling
             )];
             for arm in &ok_arms {
                 self.emit_ir_match_arm(&mut lines, tmp, arm);
@@ -111,6 +119,47 @@ impl TsEmitter {
         }
         lines.push(format!("}})({})", subj));
         lines.join("\n")
+    }
+
+    /// Generate chained if-else for multiple err arms in a match
+    fn gen_err_arm_chain(&self, err_arms: &[&IrMatchArm], tmp: &str) -> String {
+        let val_expr = format!("{}.value", tmp);
+        let mut parts = Vec::new();
+
+        for arm in err_arms {
+            if let IrPattern::Err { inner } = &arm.pattern {
+                let body_str = self.gen_ir_expr_value(&arm.body);
+                match inner.as_ref() {
+                    IrPattern::Wildcard => {
+                        parts.push(format!("return {};", body_str));
+                    }
+                    IrPattern::Bind { var } => {
+                        let name = self.ir_var_table().get(*var).name.clone();
+                        parts.push(format!("{{ const {} = {}; return {}; }}", name, val_expr, body_str));
+                    }
+                    _ => {
+                        // Constructor pattern or nested — use gen_ir_pattern_cond on .value
+                        let (cond, bindings) = self.gen_ir_pattern_cond(&val_expr, inner);
+                        let bind_str: String = bindings.iter()
+                            .map(|b| format!("const {} = {};", b.0, b.1))
+                            .collect::<Vec<_>>().join(" ");
+                        if cond == "true" {
+                            if bind_str.is_empty() {
+                                parts.push(format!("return {};", body_str));
+                            } else {
+                                parts.push(format!("{{ {} return {}; }}", bind_str, body_str));
+                            }
+                        } else if bind_str.is_empty() {
+                            parts.push(format!("if ({}) return {};", cond, body_str));
+                        } else {
+                            parts.push(format!("if ({}) {{ {} return {}; }}", cond, bind_str, body_str));
+                        }
+                    }
+                }
+            }
+        }
+
+        parts.join(" ")
     }
 
     fn ir_is_unconditional_pattern(pat: &IrPattern) -> bool {
@@ -258,7 +307,7 @@ impl TsEmitter {
             // Auto-propagate __Err in do blocks
             if let IrStmtKind::Bind { var, .. } = &stmt.kind {
                 let san = Self::sanitize(&self.ir_var_table().get(*var).name);
-                lines.push(format!("{}if ({} instanceof __Err) throw new Error({}.message);", ind, san, san));
+                lines.push(format!("{}if ({} instanceof __Err) {{ const __re = new Error({}.message); __re.__almd_value = {}.value; throw __re; }}", ind, san, san, san));
             }
         }
 
