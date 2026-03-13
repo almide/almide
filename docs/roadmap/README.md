@@ -26,7 +26,7 @@
 - [Tooling](on-hold/tooling.md)
 - [Trailing Lambda / Builder DSL](on-hold/trailing-lambda-builder.md) — won't do, solve with stdlib instead
 - [Built-in Protocols](on-hold/trait-impl.md) — Show (`show(x)`), Hash (Map key constraint) remaining; all automatic
-- [Type System Extensions](on-hold/type-system.md)
+- [Type System Extensions](on-hold/type-system.md) — Open records & row polymorphism (replaces trait/impl)
 
 ## Done
 

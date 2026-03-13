@@ -56,28 +56,334 @@ These are not solvable by the current TypeVar/unification approach — each requ
 
 ---
 
-## Trait Bounds on Generics [PLANNED]
+## Open Records & Row Polymorphism [PLANNED]
+
+### Overview
+
+Almide adopts row polymorphism instead of trait/impl or interface. The core principle:
+
+> **Write only the fields you need. The rest are preserved, never lost.**
+
+Surface syntax looks like structural subtyping (simple, familiar). Internal semantics use row polymorphism (type information is never discarded). No interface declaration. No impl block. No trait bounds.
+
+### Why this over trait/impl
+
+| | trait/impl | Almide open records |
+|---|---|---|
+| AI error: forgot to declare interface | possible | **impossible** (no declaration) |
+| AI error: forgot impl | possible | **impossible** (no impl) |
+| AI error: wrong trait bounds | possible | **impossible** (same syntax as record type) |
+| AI error: type name mismatch | possible | **impossible** (checked by structure, not name) |
+| Type info after passing | preserved | **preserved** (row variable keeps remaining fields) |
+| Learning cost | trait, impl, bounds, orphan rule | `{ field: Type, .. }` — same syntax as records |
+
+### Three forms of record types
 
 ```almide
-// Future syntax
-fn sort[T: Ord](xs: List[T]) -> List[T] = ...
+{ name: String }           // closed — exactly these fields, nothing more
+{ name: String, .. }       // open — these fields + anything else (anonymous row)
+{ name: String, ..R }      // open with named row — extra fields preserved in type R
 ```
 
-Depends on trait system maturation. Currently all type variables accept anything — auto-derived Rust bounds (`Clone + Debug + PartialEq + PartialOrd`) handle the backend.
+### Core semantics
 
-## Full Trait Implementation [PLANNED]
-
-Keywords exist in lexer/parser, but type checking and code generation are incomplete.
+**Open records accept any value with the required fields:**
 
 ```almide
-trait Show {
-  fn show(self) -> String
+type Dog { name: String, age: Int, breed: String }
+type Cat { name: String, lives: Int }
+
+fn greet(a: { name: String, .. }) -> String = "Hello, {a.name}"
+
+greet(Dog { name: "Pochi", age: 3, breed: "Shiba" })  // OK
+greet(Cat { name: "Tama", lives: 9 })                  // OK
+greet({ name: "Anonymous" })                            // OK
+```
+
+**Named rows preserve type information through functions:**
+
+```almide
+// Without named row — input type info lost in return type
+fn rename(x: { name: String, .. }, new_name: String) -> { name: String, .. } =
+  x { name = new_name }
+
+// With named row — full type preserved
+fn rename[R](x: { name: String, ..R }, new_name: String) -> { name: String, ..R } =
+  x { name = new_name }
+
+let dog = Dog { name: "Pochi", age: 3, breed: "Shiba" }
+let dog2 = rename(dog, "Jiro")
+dog2.breed  // OK — breed is preserved via ..R
+dog2.age    // OK — age is preserved via ..R
+```
+
+This is the key difference from TypeScript's structural subtyping: **fields never disappear**.
+
+**Depth matching — nested records work structurally:**
+
+```almide
+fn get_port(app: { config: { port: Int, .. }, .. }) -> Int = app.config.port
+
+type App { config: { port: Int, host: String }, db: { url: String } }
+get_port(app)  // OK — config has port
+```
+
+**Function fields are exact match** — no covariance/contravariance:
+
+```almide
+type Repo { get_user: fn(String) -> Result[User, String] }
+
+// fn(String) -> Result[AdminUser, String] does NOT satisfy Repo.get_user
+// even if AdminUser has all User fields. Exact match only.
+// This keeps the rules clean and avoids variance confusion for AI.
+```
+
+### Pipe chains preserve types
+
+This is where row polymorphism shines. Each step preserves all fields:
+
+```almide
+fn rename[R](x: { name: String, ..R }, n: String) -> { name: String, ..R } =
+  x { name = n }
+
+fn set_age[R](x: { age: Int, ..R }, a: Int) -> { age: Int, ..R } =
+  x { age = a }
+
+fn display_name(x: { name: String, .. }) -> String = x.name
+
+// Full chain — type never degrades
+user
+  |> rename("Jiro")
+  |> set_age(30)
+  |> display_name()   // OK — name still available after set_age
+```
+
+With structural subtyping, `set_age` would lose the `name` field. With row polymorphism, it's preserved.
+
+### Shape aliases with `type`
+
+Named types serve as shape aliases. Type checking is structural — the name is for readability only.
+
+```almide
+type Named = { name: String, .. }
+type UserRepo = {
+  get_user: fn(String) -> Result[User, String],
+  save_user: fn(User) -> Result[Unit, String],
 }
 
-impl Show for Point {
-  fn show(self) -> String = "${self.x}, ${self.y}"
+fn greet(a: Named) -> String = "Hello, {a.name}"
+// Any record with name: String passes, regardless of its declared type name
+```
+
+### Generic bounds via structural types
+
+```almide
+fn sort_by_name[T: { name: String, .. }](list: List[T]) -> List[T] =
+  list.sort_by(|x| x.name)
+
+fn summarize[T: { name: String, age: Int, .. }](items: List[T]) -> List[String] =
+  items.map(|x| "{x.name}: {x.age}")
+```
+
+`T: { name: String, .. }` replaces trait bounds. Same syntax as record types. Nothing new to learn.
+
+### Dependency injection via record destructuring
+
+```almide
+type UserRepo = {
+  get_user: fn(String) -> Result[User, String],
+  save_user: fn(User) -> Result[Unit, String],
+}
+
+// Destructure in parameters — no prefix needed
+fn checkout({ get_user, save_user }: UserRepo, order: Order) -> Result[Receipt, String] =
+  do {
+    let user = get_user(order.user_id)
+    save_user(user)
+    ok(Receipt { id: "r1" })
+  }
+
+// Production
+checkout({
+  get_user: |id| db.query("SELECT * FROM users WHERE id = ?", id),
+  save_user: |user| db.insert("users", user),
+}, order)
+
+// Test — only provide what the function actually uses
+test "checkout success" {
+  checkout({
+    get_user: |_| ok(User { name: "Taro", age: 25 }),
+    save_user: |_| ok(()),
+  }, mock_order)
 }
 ```
+
+Open records mean partial records work if the function only destructures some fields:
+
+```almide
+// This function only uses get_user
+fn find_user({ get_user }: { get_user: fn(String) -> Result[User, String], .. }, id: String) -> Result[User, String] =
+  get_user(id)
+
+// Can pass a full UserRepo — extra fields preserved
+find_user(full_repo, "123")
+// Can also pass a minimal record
+find_user({ get_user: |_| ok(mock_user) }, "123")
+```
+
+### Deep dependencies: explicit threading
+
+Dependencies are always passed as arguments. No implicit injection.
+
+```almide
+fn checkout({ get_user }: UserRepo, order: Order) -> Result[Receipt, String] =
+  do {
+    let user = get_user(order.user_id)
+    validate_order({ get_user }, user, order)  // pass it through
+  }
+
+fn validate_order({ get_user }: { get_user: fn(String) -> Result[User, String], .. }, user: User, order: Order) -> Result[Unit, String] =
+  do {
+    let fresh = get_user(user.id)
+    // ...
+    ok(())
+  }
+```
+
+This is verbose, but:
+- Every dependency is visible in the function signature
+- AI never wonders "where does this function come from?"
+- No hidden state, no spooky action at a distance
+
+**Scoped context injection (`uses` / `with`)** is a potential future extension for cross-cutting concerns (logging, config), but is intentionally deferred. The current design prioritizes explicitness: one rule, one mechanism.
+
+### Sort / Eq / Ord / Hash — no traits needed
+
+Primitives (Int, String, Float, Bool) are always Eq, Ord, and Hash. No declaration needed.
+
+Sorting uses key functions:
+
+```almide
+users.sort_by(|u| u.age)
+users.sort_by(|u| (u.last_name, u.first_name))  // tuple key = multi-field sort
+scores.sort_by(|s| -s.value)                      // descending
+```
+
+Map keys must be structurally primitive (compiler validates):
+
+```almide
+let m: Map[String, User] = [:]                        // OK
+let m: Map[{id: Int, name: String}, User] = [:]       // OK — all fields primitive
+let m: Map[List[Int], User] = [:]                      // compile error
+```
+
+### Immutability
+
+Records are immutable. Updates return new values with row preservation:
+
+```almide
+let older = user { age = user.age + 1 }   // all other fields preserved
+let renamed = user { name = "Jiro" }       // all other fields preserved
+```
+
+Optional fields use `Option[T]`, not special syntax:
+
+```almide
+type User { name: String, email: Option[String] }
+
+fn send_email(u: { email: Option[String], .. }) -> Result[Unit, String] =
+  match u.email {
+    Some(addr) -> mail.send(addr, "Hello")
+    None -> err("no email")
+  }
+```
+
+### UFCS interaction
+
+Open records work with UFCS. If the first parameter matches structurally, method-style call works:
+
+```almide
+fn greet(a: { name: String, .. }) -> String = "Hello, {a.name}"
+
+Dog { name: "Pochi", age: 3, breed: "Shiba" }.greet()  // OK via UFCS
+```
+
+### Codegen strategy
+
+| Target | Strategy |
+|--------|----------|
+| **TypeScript** | Direct — TS already has structural typing. Row variables erased (TS doesn't need them). |
+| **Rust** | Monomorphization — generate concrete function per actual type. No trait objects, no vtable. Zero runtime cost. |
+
+Rust example:
+
+```
+fn greet(a: { name: String, .. }) called with Dog and Cat
+↓
+fn greet_Dog(a: &Dog) -> String { format!("Hello, {}", a.name) }
+fn greet_Cat(a: &Cat) -> String { format!("Hello, {}", a.name) }
+```
+
+### Implementation phases
+
+#### Phase 1: Open records (anonymous row)
+
+- [ ] Parse `{ field: Type, .. }` as open record type
+- [ ] Field matching in checker: value has required fields → passes
+- [ ] Allow named types to satisfy open record parameter types
+- [ ] Anonymous record types in function parameters
+- [ ] Error messages: "Type Dog is missing field 'email' required by { email: String, .. }"
+
+#### Phase 2: Named rows + shape aliases
+
+- [ ] Parse `{ field: Type, ..R }` with named row variable
+- [ ] Row unification: input `..R` and output `..R` share the same row
+- [ ] `type Name = { field: Type, .. }` as shape alias (structural, not nominal)
+- [ ] Record destructuring in function parameters
+- [ ] Nested structural checks: `{ config: { port: Int, .. }, .. }`
+
+#### Phase 3: Generic bounds
+
+- [ ] `T: { field: Type, .. }` in generic constraints
+- [ ] Structural bounds in stdlib functions (sort_by_name, etc.)
+- [ ] Monomorphization for Rust codegen
+
+#### Phase 4: Function field types + DI
+
+- [ ] Records with function-typed fields
+- [ ] Exact match for function fields (no variance)
+- [ ] DI pattern: destructured function fields as callable bindings
+
+#### Intentionally deferred
+
+- Field deletion / row subtraction
+- Complex row-level constraints (Lacks, Cons)
+- Function field covariance / contravariance
+- Scoped context injection (`uses` / `with`)
+
+### What this replaces
+
+| Old plan (trait/impl) | New plan (open records) |
+|-----------------------|------------------------|
+| `trait Show { fn show(self) -> String }` | `fn show(x: { .., .. }) -> String` or stdlib auto-Show |
+| `impl Show for Point { ... }` | Not needed — Point has the fields, it works |
+| `fn sort[T: Ord](xs: List[T])` | `fn sort_by[T](xs: List[T], key: fn(T) -> K)` with key function |
+| `trait Hash` for Map keys | Compiler validates key type is structurally primitive |
+| Full trait implementation | **Not planned** — open records cover the use cases |
+
+### Design references
+
+| Language | Approach | Almide learns from |
+|----------|----------|-------------------|
+| **PureScript** | Row polymorphism (`{ name :: String \| r }`) | Theoretical gold standard — row variables preserve all type info |
+| **TypeScript** | Structural subtyping (`{ name: string }`) | Surface UX — familiar, minimal syntax |
+| **SML#** | Record polymorphism (`#{ field: type }`) | Academic reference — field-based generic constraints |
+| **Elm** | Restricted row poly (`{ a \| name : String }`) | Simplicity — keep it minimal |
+| **Go** | Structural interfaces | Method-based only — Almide does field-based, which is more general |
+
+Almide's position: **PureScript's power, TypeScript's ergonomics.**
+
+---
 
 ## Structured Error Types [PLANNED]
 
@@ -103,4 +409,4 @@ This requires bidirectional type checking (expected type flows into the expressi
 
 ## Priority
 
-Structured error types > type annotation on empty containers > trait bounds > full trait implementation
+Open records (Phase 1-2) > structured error types > type annotation > open records (Phase 3-4)
