@@ -51,11 +51,8 @@ impl Parser {
         let mut left = self.parse_and()?;
         while self.check(TokenType::Or) || self.check(TokenType::PipePipe) {
             if self.check(TokenType::PipePipe) {
-                let tok = self.current();
-                return Err(format!(
-                    "'||' is not valid in Almide at line {}:{}\n  Hint: Use 'or' for logical OR. Example: if a or b then ...",
-                    tok.line, tok.col
-                ));
+                return Err(self.check_hint_or_err(None, super::hints::HintScope::Expression,
+                    "'||' is not valid in Almide"));
             }
             let span = Some(self.current_span());
             self.advance();
@@ -76,11 +73,8 @@ impl Parser {
         let mut left = self.parse_comparison()?;
         while self.check(TokenType::And) || self.check(TokenType::AmpAmp) {
             if self.check(TokenType::AmpAmp) {
-                let tok = self.current();
-                return Err(format!(
-                    "'&&' is not valid in Almide at line {}:{}\n  Hint: Use 'and' for logical AND. Example: if a and b then ...",
-                    tok.line, tok.col
-                ));
+                return Err(self.check_hint_or_err(None, super::hints::HintScope::Expression,
+                    "'&&' is not valid in Almide"));
             }
             let span = Some(self.current_span());
             self.advance();
@@ -305,6 +299,14 @@ impl Parser {
             self.parse_one_call_arg(&mut args)?;
         }
         self.skip_newlines();
+        // Detect missing comma between arguments
+        if !self.check(TokenType::RParen) && !self.check(TokenType::EOF) {
+            if let Some(result) = self.check_hint(None, super::hints::HintScope::CallArgs) {
+                let tok = self.current();
+                let msg = result.message.as_deref().unwrap_or("Unexpected token in arguments");
+                return Err(format!("{} at line {}:{}\n  Hint: {}", msg, tok.line, tok.col, result.hint));
+            }
+        }
         Ok(args)
     }
 

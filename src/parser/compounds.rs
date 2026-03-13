@@ -362,6 +362,14 @@ impl Parser {
                 self.skip_newlines();
                 entries.push((key, value));
             }
+            // Detect missing comma in map literal
+            if !self.check(TokenType::RBracket) && !self.check(TokenType::EOF) {
+                if let Some(result) = self.check_hint(None, super::hints::HintScope::MapLiteral) {
+                    let tok = self.current();
+                    let msg = result.message.as_deref().unwrap_or("Unexpected token in map");
+                    return Err(format!("{} at line {}:{}\n  Hint: {}", msg, tok.line, tok.col, result.hint));
+                }
+            }
             self.expect_closing(TokenType::RBracket, open.line, open.col, "map literal")?;
             return Ok(Expr::MapLiteral { entries, span, resolved_type: None });
         }
@@ -374,6 +382,14 @@ impl Parser {
             if self.check(TokenType::RBracket) { break; }
             elements.push(self.parse_expr()?);
             self.skip_newlines();
+        }
+        // Detect missing comma: next token is an expression start but not ']'
+        if !self.check(TokenType::RBracket) && !self.check(TokenType::EOF) {
+            if let Some(result) = self.check_hint(None, super::hints::HintScope::ListLiteral) {
+                let tok = self.current();
+                let msg = result.message.as_deref().unwrap_or("Unexpected token in list");
+                return Err(format!("{} at line {}:{}\n  Hint: {}", msg, tok.line, tok.col, result.hint));
+            }
         }
         self.expect_closing(TokenType::RBracket, open.line, open.col, "list literal")?;
         Ok(Expr::List { elements, span, resolved_type: None })
