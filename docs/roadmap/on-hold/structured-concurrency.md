@@ -98,19 +98,31 @@ let data = await timeout(5s, fetch(url))
 await sleep(100ms)
 ```
 
+## `await` semantics
+
+`await` is a single operation: **`Future[T]` → `T`**.
+
+- `await fetch_user(id)` — `fetch_user` returns `Future[Result[User, E]]`, `await` unwraps the future
+- `async let x = expr` — `x` is a `Future[T]` (task handle), `await x` joins it
+- Inside `do` block: `await` unwraps the future, `do` propagates the `Result`
+
+This unification means `await` always does one thing: resolve a future. Error handling is always `do`'s job.
+
 ## Codegen Strategy
 
-| Syntax | Rust output | TS output |
-|--------|-------------|-----------|
-| `async let x = expr` | `let x = tokio::spawn(async { expr })` | `const x = expr()` (Promise, no await) |
-| `await x` | `x.await?` (join handle) | `await x` |
-| `race(a, b)` | `tokio::select!` | `Promise.race([a, b])` |
-| `timeout(d, f)` | `tokio::time::timeout(d, f)` | `Promise.race([f, sleep(d).then(throw)])` |
+**Important:** The codegen table describes semantic equivalents, not literal lowering. The actual runtime abstraction may differ from these specific APIs.
+
+| Syntax | Rust | TS |
+|--------|------|-----|
+| `async let x = expr` | Scoped task handle (runtime-managed spawn within scope) | Runtime-managed task handle with `AbortController` |
+| `await x` | Join task handle, propagate error | `await` task handle |
+| `race(a, b)` | Select first completed, cancel rest | `Promise.race` + abort remaining |
+| `timeout(d, f)` | Deadline-scoped execution | `Promise.race([f, deadline])` + abort on timeout |
 
 ### Cancellation
 
-- **Rust**: Drop the `JoinHandle` → future is cancelled. `select!` handles this natively.
-- **TS**: `AbortController` + `AbortSignal` threaded through. Requires runtime cooperation.
+- **Rust**: `async let` lowers to a scoped task handle. Scope exit drops the handle → future is cancelled. Initial implementation may use a single-threaded executor; tokio integration is a later optimization. Avoids `tokio::spawn` directly to prevent `Send + 'static` constraints on simple `async let` usage.
+- **TS**: `AbortController` + `AbortSignal` per task handle. Scope exit triggers `abort()`. Requires a thin Almide runtime layer over raw Promises to manage lifecycle.
 - **WASM**: Single-threaded — `async let` degrades to eager evaluation. `race` picks first resolved microtask.
 
 ## Implementation Phases
@@ -119,9 +131,9 @@ await sleep(100ms)
 
 - [ ] Parse `async let` as a new binding form in declarations
 - [ ] Type check: `async let x: T` produces a future/handle, `await x` yields `T`
-- [ ] Rust codegen: `tokio::spawn` + `.await`
-- [ ] TS codegen: unawaited Promise + `await`
-- [ ] Replace `almide_block_on` busy-wait with proper tokio runtime
+- [ ] Rust codegen: scoped task handle + join (single-threaded executor initially, tokio later)
+- [ ] TS codegen: runtime-managed task handle with AbortController
+- [ ] Replace `almide_block_on` busy-wait with proper async executor
 - [ ] Scope exit cancellation: drop handles for un-awaited bindings
 - [ ] Tests in `spec/lang/async_test.almd`
 

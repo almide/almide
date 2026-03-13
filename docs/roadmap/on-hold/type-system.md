@@ -85,6 +85,19 @@ Surface syntax looks like structural subtyping (simple, familiar). Internal sema
 { name: String, ..R }      // open with named row — extra fields preserved in type R
 ```
 
+### Critical rule: records are closed by default
+
+**`{ name: String }` does NOT accept `{ name: String, age: Int }`.** This is different from TypeScript, where all object types are structurally open. In Almide:
+
+- `{ name: String }` = closed. Exactly `name` and nothing else.
+- `{ name: String, .. }` = open. `name` plus whatever else.
+
+Users coming from TypeScript will expect open-by-default. Almide is closed-by-default because:
+- Explicit `..` forces the programmer to declare intent ("I accept extra fields")
+- Row variables (`..R`) only make sense when openness is opt-in
+- AI-generated code benefits from explicitness: if `..` is missing, the compiler catches unintended width
+- Closed records enable better monomorphization (Rust codegen knows the exact layout)
+
 ### Core semantics
 
 **Open records accept any value with the required fields:**
@@ -129,6 +142,8 @@ get_port(app)  // OK — config has port
 ```
 
 **Function fields are exact match** — no covariance/contravariance:
+
+> **Records are structural, but function types are exact match. Variance is not introduced.**
 
 ```almide
 type Repo { get_user: fn(String) -> Result[User, String] }
@@ -230,6 +245,33 @@ find_user(full_repo, "123")
 // Can also pass a minimal record
 find_user({ get_user: |_| ok(mock_user) }, "123")
 ```
+
+### Open row DI: accept extra dependencies without losing them
+
+Dependency records can also be open. This is important when the repo carries extra fields (logger, metrics, config) that this function doesn't need but shouldn't discard:
+
+```almide
+fn checkout[R](
+  { get_user, save_user }: { get_user: fn(String) -> Result[User, String], save_user: fn(User) -> Result[Unit, String], ..R },
+  order: Order,
+) -> Result[Receipt, String] =
+  do {
+    let user = get_user(order.user_id)
+    save_user(user)
+    ok(Receipt { id: "r1" })
+  }
+
+// Full app context with logger, metrics, etc.
+let ctx = {
+  get_user: db.get_user,
+  save_user: db.save,
+  log: logger.info,
+  metrics: metrics.record,
+}
+checkout(ctx, order)  // OK — get_user and save_user are used, log and metrics are preserved via ..R
+```
+
+> **Dependencies are data, passed as records. Required functions are destructured. Extra dependencies are preserved via open row.**
 
 ### Deep dependencies: explicit threading
 
