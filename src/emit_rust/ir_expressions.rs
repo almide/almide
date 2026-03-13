@@ -175,7 +175,11 @@ impl Emitter {
 
             IrExprKind::Member { object, field } => {
                 let obj = self.gen_ir_expr(object);
-                format!("{}.{}", obj, field)
+                if Self::is_copy_ty(&expr.ty) {
+                    format!("{}.{}", obj, field)
+                } else {
+                    format!("{}.{}.clone()", obj, field)
+                }
             }
 
             IrExprKind::TupleIndex { object, index } => {
@@ -568,6 +572,19 @@ impl Emitter {
             } else {
                 (vec!["__a".to_string(), "__b".to_string()], format!("({})(__a, __b.clone())", f))
             }
+        }
+    }
+
+    /// Returns true if the Almide type maps to a Copy type in Rust.
+    /// Primitives (i64, f64, bool, ()) are Copy.
+    /// Option<T> and tuples are Copy when their inner types are Copy.
+    pub(crate) fn is_copy_ty(ty: &almide::types::Ty) -> bool {
+        use almide::types::Ty;
+        match ty {
+            Ty::Int | Ty::Float | Ty::Bool | Ty::Unit => true,
+            Ty::Option(inner) => Self::is_copy_ty(inner),
+            Ty::Tuple(elems) => elems.iter().all(|e| Self::is_copy_ty(e)),
+            _ => false,
         }
     }
 

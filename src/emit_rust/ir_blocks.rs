@@ -111,10 +111,16 @@ impl Emitter {
             false
         };
 
+        // Clone variable subjects to avoid use-after-move when matched multiple times
+        let subj_is_var = matches!(&subject.kind, IrExprKind::Var { .. });
+        let subj_needs_clone = subj_is_var && !Self::is_copy_ty(&subject.ty);
+
         let subj_expr = if has_string_in_option {
             format!("{}.as_deref()", subj)
         } else if has_bare_string && !subj_is_borrowed {
             format!("{}.as_str()", subj)
+        } else if subj_needs_clone {
+            format!("{}.clone()", subj)
         } else {
             subj
         };

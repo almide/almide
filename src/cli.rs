@@ -55,6 +55,7 @@ pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool) -> i32
         .arg(&bin_path)
         .arg("-C").arg("overflow-checks=no")
         .arg("-C").arg("opt-level=1")
+        .arg("-C").arg("incremental=")
         .arg("--edition").arg("2021");
     if is_test_only {
         rustc_cmd.arg("--test");
