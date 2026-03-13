@@ -338,6 +338,48 @@ impl TypeEnv {
         }
     }
 
+    /// Check if a type is hashable (can be used as a Map key).
+    /// All value types except Float and Fn are hashable.
+    pub fn is_hash(&self, ty: &Ty) -> bool {
+        let mut seen = std::collections::HashSet::new();
+        self.is_hash_inner(ty, &mut seen)
+    }
+
+    fn is_hash_inner(&self, ty: &Ty, seen: &mut std::collections::HashSet<std::string::String>) -> bool {
+        match ty {
+            Ty::Int | Ty::String | Ty::Bool | Ty::Unit => true,
+            Ty::Float => false,
+            Ty::List(inner) | Ty::Option(inner) => self.is_hash_inner(inner, seen),
+            Ty::Result(ok, err) => self.is_hash_inner(ok, seen) && self.is_hash_inner(err, seen),
+            Ty::Map(_, _) => false, // Maps themselves are not hashable
+            Ty::Tuple(tys) => tys.iter().all(|t| self.is_hash_inner(t, seen)),
+            Ty::Record { fields } => fields.iter().all(|(_, t)| self.is_hash_inner(t, seen)),
+            Ty::Variant { name, cases, .. } => {
+                if !seen.insert(name.clone()) {
+                    return true;
+                }
+                cases.iter().all(|c| match &c.payload {
+                    crate::types::VariantPayload::Unit => true,
+                    crate::types::VariantPayload::Tuple(tys) => tys.iter().all(|t| self.is_hash_inner(t, seen)),
+                    crate::types::VariantPayload::Record(fs) => fs.iter().all(|(_, t, _)| self.is_hash_inner(t, seen)),
+                })
+            }
+            Ty::Named(name, _) => {
+                if !seen.insert(name.clone()) {
+                    return true;
+                }
+                if let Some(resolved) = self.types.get(name) {
+                    self.is_hash_inner(resolved, seen)
+                } else {
+                    true
+                }
+            }
+            Ty::Fn { .. } => false,
+            Ty::TypeVar(_) => true,
+            Ty::Unknown => true,
+        }
+    }
+
     pub fn push_scope(&mut self) {
         self.scopes.push(std::collections::HashMap::new());
     }

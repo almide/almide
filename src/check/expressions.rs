@@ -152,6 +152,13 @@ impl Checker {
 
             ast::Expr::EmptyMap { .. } => {
                 if let Some(Ty::Map(k, v)) = expected {
+                    if !self.env.is_hash(k) {
+                        self.push_diagnostic(err(
+                            format!("Map key type {} is not hashable", k.display()),
+                            "Use String, Int, or Bool as Map keys — Float and function types cannot be keys",
+                            "empty map literal",
+                        ));
+                    }
                     Ty::Map(k.clone(), v.clone())
                 } else {
                     self.push_diagnostic(err(
@@ -182,6 +189,13 @@ impl Checker {
                             "All map values must have the same type", "map literal",
                         ));
                     }
+                }
+                if !self.env.is_hash(&key_ty) {
+                    self.push_diagnostic(err(
+                        format!("Map key type {} is not hashable", key_ty.display()),
+                        "Use String, Int, or Bool as Map keys — Float and function types cannot be keys",
+                        "map literal",
+                    ));
                 }
                 Ty::Map(Box::new(key_ty), Box::new(val_ty))
             }

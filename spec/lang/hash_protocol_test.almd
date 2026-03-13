@@ -1,0 +1,23 @@
+// Hash protocol: Map keys must be hashable (no Float, no Fn)
+
+test "string keys work" {
+  let m = ["a": 1, "b": 2]
+  assert_eq(m["a"], some(1))
+}
+
+test "int keys work" {
+  let m = [1: "one", 2: "two"]
+  assert_eq(m[1], some("one"))
+}
+
+test "bool keys work" {
+  let m = [true: "yes", false: "no"]
+  assert_eq(m[true], some("yes"))
+}
+
+test "option keys work" {
+  let m: Map[String, Int] = [:]
+  var m2 = m
+  m2["x"] = 10
+  assert_eq(m2["x"], some(10))
+}
