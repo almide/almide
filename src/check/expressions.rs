@@ -431,7 +431,12 @@ impl Checker {
 
             ast::Expr::Lambda { params, body, .. } => {
                 self.env.push_scope();
-                let pts: Vec<Ty> = params.iter().map(|p| {
+                // Extract expected param/ret types for bidirectional inference
+                let (expected_params, expected_ret) = match expected {
+                    Some(Ty::Fn { params: ep, ret: er }) => (Some(ep.as_slice()), Some(er.as_ref())),
+                    _ => (None, None),
+                };
+                let pts: Vec<Ty> = params.iter().enumerate().map(|(i, p)| {
                     if let Some(names) = &p.tuple_names {
                         let tuple_ty = p.ty.as_ref().map(|te| self.resolve_type_expr(te)).unwrap_or(Ty::Unknown);
                         let tys = self.resolve_tuple_elements(&tuple_ty, names.len(), format!("fn({}) => ...", p.name));
@@ -440,12 +445,24 @@ impl Checker {
                         }
                         Ty::Tuple(tys)
                     } else {
-                        let ty = p.ty.as_ref().map(|te| self.resolve_type_expr(te)).unwrap_or(Ty::Unknown);
+                        let ty = if let Some(te) = &p.ty {
+                            self.resolve_type_expr(te)
+                        } else if let Some(ep) = expected_params {
+                            let inferred = ep.get(i).cloned().unwrap_or(Ty::Unknown);
+                            // Only use inferred type if it's concrete (not TypeVar/Unknown)
+                            if matches!(inferred, Ty::TypeVar(_) | Ty::Unknown) {
+                                Ty::Unknown
+                            } else {
+                                inferred
+                            }
+                        } else {
+                            Ty::Unknown
+                        };
                         self.env.define_var(&p.name, ty.clone());
                         ty
                     }
                 }).collect();
-                let ret = self.check_expr(body);
+                let ret = self.check_expr_with(body, expected_ret);
                 self.env.pop_scope();
                 Ty::Fn { params: pts, ret: Box::new(ret) }
             }

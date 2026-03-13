@@ -31,7 +31,7 @@ impl Checker {
     }
 
     pub(crate) fn check_call(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr]) -> Ty {
-        let arg_tys: Vec<Ty> = args.iter_mut().map(|a| self.check_expr(a)).collect();
+        let has_lambda = args.iter().any(|a| matches!(a, ast::Expr::Lambda { .. }));
 
         // Module System v2: handle nested member access (any depth)
         if let Some((segments, func)) = Self::flatten_member_chain(callee) {
@@ -53,6 +53,7 @@ impl Checker {
                     if first != segments[0] {
                         self.env.used_modules.insert(segments[0].to_string());
                     }
+                    let arg_tys = self.check_args_with_inference(args, has_lambda, Some((&dotted, func)), None, 0);
                     return self.check_module_call(&dotted, func, &arg_tys);
                 }
             }
@@ -63,17 +64,26 @@ impl Checker {
                     .cloned()
                     .unwrap_or_else(|| segments[0].to_string());
                 if self.env.user_modules.contains(&resolved_first) || stdlib::is_stdlib_module(segments[0]) {
+                    let arg_tys = self.check_args_with_inference(args, has_lambda, Some((segments[0], func)), None, 0);
                     return self.check_module_call(segments[0], func, &arg_tys);
                 }
                 // Not a module — fall through to type-check the callee (UFCS will resolve via resolved_type)
             }
         }
 
+        // Direct call — check args with inference from user function signature
         if let ast::Expr::Ident { name, .. } = callee {
+            let user_sig = if has_lambda { self.env.functions.get(name).cloned() } else { None };
+            let arg_tys = if let Some(ref sig) = user_sig {
+                self.check_args_with_fn_params(args, &sig.params, 0)
+            } else {
+                args.iter_mut().map(|a| self.check_expr(a)).collect()
+            };
             return self.check_direct_call(name, &arg_tys);
         }
 
         if let ast::Expr::TypeName { name, .. } = callee {
+            let arg_tys: Vec<Ty> = args.iter_mut().map(|a| self.check_expr(a)).collect();
             return self.check_constructor_call(name, &arg_tys);
         }
 
@@ -91,21 +101,121 @@ impl Checker {
             if let Some(module) = module {
                 let candidates = stdlib::resolve_ufcs_candidates(field);
                 if candidates.contains(&module) {
-                    // Prepend receiver as first arg
+                    // Check args with bidirectional inference, receiver is sig.params[0]
+                    let arg_tys = self.check_args_with_inference(args, has_lambda, Some((module, field)), Some(&receiver_ty), 1);
                     let mut full_arg_tys = vec![receiver_ty];
                     full_arg_tys.extend(arg_tys);
                     return self.check_module_call(module, field, &full_arg_tys);
                 }
             }
-            // Not a UFCS call — return Unknown
+            // Not a UFCS call — check remaining args and return Unknown
+            for a in args.iter_mut() { self.check_expr(a); }
             return Ty::Unknown;
         }
 
+        let arg_tys: Vec<Ty> = args.iter_mut().map(|a| self.check_expr(a)).collect();
         let ct = self.check_expr(callee);
         match &ct {
             Ty::Fn { ret, .. } => *ret.clone(),
-            _ => Ty::Unknown,
+            _ => { let _ = arg_tys; Ty::Unknown },
         }
+    }
+
+    /// Check arguments with bidirectional type inference for lambda parameters.
+    /// For module/stdlib calls: looks up the function signature, checks non-lambda args first
+    /// to bind TypeVars, then checks lambda args with expected types from the signature.
+    /// `sig_offset`: 0 for module calls (args align with sig.params), 1 for UFCS (receiver is sig.params[0]).
+    fn check_args_with_inference(
+        &mut self,
+        args: &mut [ast::Expr],
+        has_lambda: bool,
+        call: Option<(&str, &str)>,
+        receiver_ty: Option<&Ty>,
+        sig_offset: usize,
+    ) -> Vec<Ty> {
+        if !has_lambda {
+            return args.iter_mut().map(|a| self.check_expr(a)).collect();
+        }
+
+        // Look up stdlib signature
+        let sig = call.and_then(|(module, func)| stdlib::lookup_sig(module, func));
+        if let Some(sig) = sig {
+            // Seed bindings from receiver type (for UFCS)
+            let mut bindings = std::collections::HashMap::new();
+            if let Some(recv) = receiver_ty {
+                if !sig.params.is_empty() {
+                    unify(&sig.params[0].1, recv, &mut bindings);
+                }
+            }
+            return self.two_pass_check(args, &sig.params, sig_offset, bindings);
+        }
+
+        // Try user-defined module function
+        if let Some((module, func)) = call {
+            let key = format!("{}.{}", module, func);
+            if let Some(user_sig) = self.env.functions.get(&key).cloned() {
+                let mut bindings = std::collections::HashMap::new();
+                if let Some(recv) = receiver_ty {
+                    if !user_sig.params.is_empty() {
+                        unify(&user_sig.params[0].1, recv, &mut bindings);
+                    }
+                }
+                return self.two_pass_check(args, &user_sig.params, sig_offset, bindings);
+            }
+        }
+
+        args.iter_mut().map(|a| self.check_expr(a)).collect()
+    }
+
+    /// Check arguments with bidirectional inference using user function params (no TypeVars).
+    fn check_args_with_fn_params(
+        &mut self,
+        args: &mut [ast::Expr],
+        params: &[(String, Ty)],
+        sig_offset: usize,
+    ) -> Vec<Ty> {
+        self.two_pass_check(args, params, sig_offset, std::collections::HashMap::new())
+    }
+
+    /// Two-pass argument checking: non-lambda args first (to collect TypeVar bindings),
+    /// then lambda args with expected types derived from the signature.
+    fn two_pass_check(
+        &mut self,
+        args: &mut [ast::Expr],
+        sig_params: &[(String, Ty)],
+        sig_offset: usize,
+        mut bindings: std::collections::HashMap<String, Ty>,
+    ) -> Vec<Ty> {
+        let mut arg_tys = vec![None; args.len()];
+
+        // Pass 1: check non-lambda args, collect TypeVar bindings
+        for (i, arg) in args.iter_mut().enumerate() {
+            if !matches!(arg, ast::Expr::Lambda { .. }) {
+                let ty = self.check_expr(arg);
+                let sig_idx = i + sig_offset;
+                if sig_idx < sig_params.len() {
+                    unify(&sig_params[sig_idx].1, &ty, &mut bindings);
+                }
+                arg_tys[i] = Some(ty);
+            }
+        }
+
+        // Pass 2: check lambda args with substituted expected types
+        for (i, arg) in args.iter_mut().enumerate() {
+            if matches!(arg, ast::Expr::Lambda { .. }) {
+                let sig_idx = i + sig_offset;
+                let expected = if sig_idx < sig_params.len() {
+                    let sub = substitute(&sig_params[sig_idx].1, &bindings);
+                    if matches!(sub, Ty::TypeVar(_) | Ty::Unknown) { None } else { Some(sub) }
+                } else {
+                    None
+                };
+                let ty = self.check_expr_with(arg, expected.as_ref());
+                arg_tys[i] = Some(ty);
+            }
+        }
+
+        arg_tys.into_iter().map(|t| t.unwrap_or(Ty::Unknown)).collect()
     }
 
     fn check_direct_call(&mut self, name: &str, arg_tys: &[Ty]) -> Ty {

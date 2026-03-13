@@ -86,13 +86,37 @@ impl<'a> LowerCtx<'a> {
                 self.resolve_field_ty(&obj_ty, field)
             }
             ast::Expr::Call { callee, .. } => {
-                // For module calls (e.g., grammar.keyword_groups()), look up the function sig
                 if let ast::Expr::Member { object, field, .. } = callee.as_ref() {
+                    // Try direct module call (e.g., grammar.keyword_groups())
                     if let Some((mod_path, func)) = flatten_module_call(self, object, field) {
-                        // Look up return type from function sig
                         let key = format!("{}.{}", mod_path, func);
                         if let Some(sig) = self.env.functions.get(&key) {
                             return sig.ret.clone();
+                        }
+                        // Try stdlib signature
+                        if let Some(sig) = crate::stdlib::lookup_sig(&mod_path, &func) {
+                            let mut bindings = std::collections::HashMap::new();
+                            // No receiver unification for direct module calls
+                            return crate::types::substitute(&sig.ret, &bindings);
+                        }
+                    }
+                    // Try UFCS: infer object type, determine module, look up signature
+                    let obj_ty = self.expr_ty(object);
+                    let module = match &obj_ty {
+                        Ty::String => Some("string"),
+                        Ty::List(_) => Some("list"),
+                        Ty::Map(_, _) => Some("map"),
+                        Ty::Int => Some("int"),
+                        Ty::Float => Some("float"),
+                        _ => None,
+                    };
+                    if let Some(module) = module {
+                        if let Some(sig) = crate::stdlib::lookup_sig(module, field) {
+                            let mut bindings = std::collections::HashMap::new();
+                            if !sig.params.is_empty() {
+                                crate::types::unify(&sig.params[0].1, &obj_ty, &mut bindings);
+                            }
+                            return crate::types::substitute(&sig.ret, &bindings);
                         }
                     }
                 }
@@ -465,8 +489,19 @@ fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         // ── Lambda ──
         ast::Expr::Lambda { params, body, .. } => {
             ctx.push_scope();
-            let ir_params: Vec<(VarId, Ty)> = params.iter().map(|p| {
-                let pty = p.ty.as_ref().map(|t| resolve_type_expr(t)).unwrap_or(Ty::Unknown);
+            // Extract inferred param types from checker's lambda type (bidirectional inference)
+            let inferred_param_tys = match &ty {
+                Ty::Fn { params: fn_params, .. } => Some(fn_params.as_slice()),
+                _ => None,
+            };
+            let ir_params: Vec<(VarId, Ty)> = params.iter().enumerate().map(|(i, p)| {
+                let pty = if let Some(te) = &p.ty {
+                    resolve_type_expr(te)
+                } else if let Some(fn_params) = inferred_param_tys {
+                    fn_params.get(i).cloned().unwrap_or(Ty::Unknown)
+                } else {
+                    Ty::Unknown
+                };
                 let var = ctx.define_var(&p.name, pty.clone(), Mutability::Let, None);
                 (var, pty)
             }).collect();
