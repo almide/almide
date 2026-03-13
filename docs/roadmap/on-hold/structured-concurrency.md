@@ -42,14 +42,17 @@ async fn load_dashboard(user_id: String) -> Dashboard =
 Sequential → parallel is a one-word change:
 
 ```almide
-// Sequential
-let a = fetch_a()
-let b = fetch_b()
+// Sequential — await each result before starting the next
+let a = await fetch_a()
+let b = await fetch_b()
 
-// Parallel
+// Parallel — start all, then await results
 async let a = fetch_a()
 async let b = fetch_b()
+use(await a, await b)
 ```
+
+Note: `async fn` returns `Future[T]`. Calling it without `await` or `async let` creates an unevaluated future. `await` resolves it (sequential). `async let` starts it immediately and binds a handle (parallel).
 
 ### Semantics
 
@@ -145,9 +148,11 @@ This unification means `await` always does one thing: resolve a future. Error ha
 
 ### Phase 3: Async streams
 
-- [ ] `async fn* generator() -> Stream[T]` or similar
-- [ ] `for await item in stream { }` syntax
+- [ ] `Stream[T]` type for async iteration
+- [ ] Consumption via stdlib: `stream.for_each(|item| ...)`, `stream.map(...)`, `stream.collect()`
+- [ ] `loop { let item = await stream.next() }` for manual iteration
 - [ ] Backpressure via bounded channels
+- [ ] Note: `for await x in stream { }` syntax is NOT planned. Prefer stdlib functions over new syntax to keep the language small.
 
 ## Dependencies
 

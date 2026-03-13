@@ -142,9 +142,7 @@ async fn pipeline() -> Unit =
 
       // consumer
       let consumer = async {
-        for await entry in ch.receive() {
-          process(entry)
-        }
+        ch.receive().for_each(|entry| process(entry))
       }
     }
   }
@@ -209,7 +207,7 @@ Receiver.try_receive() -> Result[T, Empty]
 
 - Layer 1 (`async fn` / `await`) — DONE
 - Layer 2 (structured concurrency) — required for `concurrent` in actor patterns
-- Async streams (`for await`) — required for `Actor.receive()` and `Channel.receive()`
+- Async streams (`Stream[T]` type) — required for `Actor.receive()` and `Channel.receive()`
 
 ## References
 

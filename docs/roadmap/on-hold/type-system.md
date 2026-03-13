@@ -328,6 +328,8 @@ let older = user { age = user.age + 1 }   // all other fields preserved
 let renamed = user { name = "Jiro" }       // all other fields preserved
 ```
 
+**Row preservation rule:** `x { field = value }` preserves x's row. If `x: { name: String, ..R }`, then `x { name = "Jiro" }` has type `{ name: String, ..R }`. The update only replaces the specified field's value; all other fields and the row variable remain intact. This is what makes pipe chains type-safe.
+
 Optional fields use `Option[T]`, not special syntax:
 
 ```almide
