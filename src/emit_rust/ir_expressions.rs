@@ -493,11 +493,8 @@ impl Emitter {
                         format!("Box::new({})", arg_str)
                     } else if let Some(ref open_recs) = open_record_info {
                         // Check if this arg position needs open record projection
-                        if let Some((_, struct_name, field_names)) = open_recs.iter().find(|(idx, _, _)| *idx == i) {
-                            let fields: Vec<String> = field_names.iter()
-                                .map(|f| format!("{f}: {arg}.{f}.clone()", f = f, arg = arg_str))
-                                .collect();
-                            format!("{} {{ {} }}", struct_name, fields.join(", "))
+                        if let Some((_, struct_name, field_infos)) = open_recs.iter().find(|(idx, _, _)| *idx == i) {
+                            Self::gen_open_record_projection(struct_name, field_infos, &arg_str)
                         } else {
                             arg_str
                         }
@@ -648,6 +645,21 @@ impl Emitter {
             }
             _ => {}
         }
+    }
+
+    /// Generate open record projection code, recursively handling nested open records.
+    fn gen_open_record_projection(struct_name: &str, field_infos: &[super::OpenFieldInfo], arg: &str) -> String {
+        let fields: Vec<String> = field_infos.iter().map(|fi| {
+            if let Some((nested_struct, nested_infos)) = &fi.nested {
+                // Nested open record: recursively project
+                let inner_arg = format!("{}.{}", arg, fi.name);
+                let nested = Self::gen_open_record_projection(nested_struct, nested_infos, &inner_arg);
+                format!("{}: {}", fi.name, nested)
+            } else {
+                format!("{f}: {arg}.{f}.clone()", f = fi.name, arg = arg)
+            }
+        }).collect();
+        format!("{} {{ {} }}", struct_name, fields.join(", "))
     }
 
     /// Count how many times a VarId is referenced in an IR expression tree

@@ -359,34 +359,40 @@ Dog { name: "Pochi", age: 3, breed: "Shiba" }.greet()  // OK via UFCS
 | Target | Strategy |
 |--------|----------|
 | **TypeScript** | Direct — TS already has structural typing. Row variables erased (TS doesn't need them). |
-| **Rust** | Monomorphization — generate concrete function per actual type. No trait objects, no vtable. Zero runtime cost. |
+| **Rust** | Field projection — callers project required fields into an `AlmdRec` struct. Single function body, no monomorphization needed. Zero-cost at compile time. |
 
 Rust example:
 
 ```
-fn greet(a: { name: String, .. }) called with Dog and Cat
-↓
-fn greet_Dog(a: &Dog) -> String { format!("Hello, {}", a.name) }
-fn greet_Cat(a: &Cat) -> String { format!("Hello, {}", a.name) }
+fn greet(a: { name: String, .. }) → fn greet(a: AlmdRec0<String>)
+
+// Call sites project fields:
+greet(dog)  →  greet(AlmdRec0 { name: dog.name.clone() })
+greet(cat)  →  greet(AlmdRec0 { name: cat.name.clone() })
+
+// Open→open chain: chain_a({ name, breed, .. }) calls chain_b({ name, .. })
+chain_b(x)  →  chain_b(AlmdRec0 { name: x.name.clone() })
 ```
 
 ### Implementation phases
 
-#### Phase 1: Open records (anonymous row)
+#### Phase 1: Open records (anonymous row) — DONE
 
-- [ ] Parse `{ field: Type, .. }` as open record type
-- [ ] Field matching in checker: value has required fields → passes
-- [ ] Allow named types to satisfy open record parameter types
-- [ ] Anonymous record types in function parameters
-- [ ] Error messages: "Type Dog is missing field 'email' required by { email: String, .. }"
+- [x] Parse `{ field: Type, .. }` as open record type
+- [x] Field matching in checker: value has required fields → passes
+- [x] Allow named types to satisfy open record parameter types
+- [x] Anonymous record types in function parameters
+- [x] Error messages: "Type Dog is missing field 'email' required by { email: String, .. }"
+- [x] Separate `OpenRecord` AST/Ty variant (not a bool flag — compiler enforces exhaustive handling)
+- [x] Open→open chain calling with field projection codegen
 
 #### Phase 2: Named rows + shape aliases
 
 - [ ] Parse `{ field: Type, ..R }` with named row variable
 - [ ] Row unification: input `..R` and output `..R` share the same row
-- [ ] `type Name = { field: Type, .. }` as shape alias (structural, not nominal)
+- [x] `type Name = { field: Type, .. }` as shape alias (structural, not nominal)
 - [ ] Record destructuring in function parameters
-- [ ] Nested structural checks: `{ config: { port: Int, .. }, .. }`
+- [x] Nested structural checks: `{ config: { port: Int, .. }, .. }` with recursive field projection
 
 #### Phase 3: Generic bounds
 

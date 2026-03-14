@@ -55,3 +55,27 @@ test "open record chain calling" {
   let dog = Dog { name: "Rex", breed: "Lab" };
   assert_eq(chain_a(dog), "Rex")
 }
+
+// Shape alias
+type Named = { name: String, .. }
+
+fn greet_named(who: Named) -> String = "Hi, ${who.name}!"
+
+test "shape alias accepts named type" {
+  let dog = Dog { name: "Max", breed: "Poodle" };
+  assert_eq(greet_named(dog), "Hi, Max!")
+}
+
+test "shape alias accepts anonymous record" {
+  assert_eq(greet_named({ name: "Alice", age: 30 }), "Hi, Alice!")
+}
+
+// Nested open records
+type App = { config: { port: Int, host: String }, db: { url: String } }
+
+fn get_port(app: { config: { port: Int, .. }, .. }) -> Int = app.config.port
+
+test "nested open record" {
+  let app = App { config: { port: 8080, host: "localhost" }, db: { url: "pg://localhost" } };
+  assert_eq(get_port(app), 8080)
+}

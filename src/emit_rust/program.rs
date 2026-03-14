@@ -35,6 +35,9 @@ impl Emitter {
                     let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
                     self.named_record_types.insert(field_names, name.clone());
                 }
+                Decl::Type { name, ty: TypeExpr::OpenRecord { fields }, .. } => {
+                    self.open_record_aliases.insert(name.clone(), fields.clone());
+                }
                 Decl::Type { name: enum_name, ty: TypeExpr::Variant { cases }, generics, .. } => {
                     let has_generics = matches!(generics, Some(gs) if !gs.is_empty());
                     for case in cases {
@@ -655,6 +658,18 @@ impl Emitter {
                     }
                 }
             }
+            TypeExpr::OpenRecord { fields } => {
+                // Shape alias: type Named = { name: String, .. }
+                // Emit as a type alias to the generated AlmdRec struct
+                let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+                let struct_name = self.fresh_anon_record_name(&field_names);
+                let type_args: Vec<String> = fields.iter().map(|f| self.gen_type(&f.ty)).collect();
+                if type_args.is_empty() {
+                    self.emitln(&format!("{}type {}{} = {};", vis, name, generic_str, struct_name));
+                } else {
+                    self.emitln(&format!("{}type {}{} = {}<{}>;", vis, name, generic_str, struct_name, type_args.join(", ")));
+                }
+            }
             _ => {
                 self.emitln(&format!("// type {} (unsupported)", name));
             }
@@ -682,16 +697,24 @@ impl Emitter {
         // Clear borrowed_params for this function
         self.borrowed_params.clear();
         // Track open record params for call-site projection
-        let mut fn_open_records: Vec<(usize, String, Vec<String>)> = Vec::new();
+        let mut fn_open_records: Vec<(usize, String, Vec<super::OpenFieldInfo>)> = Vec::new();
         let params_str: Vec<String> = params.iter().enumerate()
             .filter(|(_, p)| p.name != "self")
             .map(|(i, p)| {
-                // Open record params: emit as a generated struct type and track for call-site projection
-                if let TypeExpr::OpenRecord { fields } = &p.ty {
+                // Open record params: detect from AST directly or via shape alias
+                let open_fields = match &p.ty {
+                    TypeExpr::OpenRecord { fields } => Some(fields.clone()),
+                    TypeExpr::Simple { name } => {
+                        self.open_record_aliases.get(name).cloned()
+                    }
+                    _ => None,
+                };
+                if let Some(fields) = open_fields {
+                    let field_infos = self.build_open_field_infos(&fields);
                     let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
                     let struct_name = self.fresh_anon_record_name(&field_names);
                     let type_args: Vec<String> = fields.iter().map(|f| self.gen_type(&f.ty)).collect();
-                    fn_open_records.push((i, struct_name.clone(), field_names));
+                    fn_open_records.push((i, struct_name.clone(), field_infos));
                     let ty = if type_args.is_empty() {
                         struct_name
                     } else {
@@ -914,6 +937,41 @@ impl Emitter {
             }
             TypeExpr::Newtype { inner } => self.gen_type(inner),
             TypeExpr::Variant { cases: _ } => "/* variant */".to_string(),
+        }
+    }
+
+    /// Build OpenFieldInfo recursively for nested open record projection.
+    fn build_open_field_infos(&self, fields: &[crate::ast::FieldType]) -> Vec<super::OpenFieldInfo> {
+        fields.iter().map(|f| {
+            let nested = match &f.ty {
+                TypeExpr::OpenRecord { fields: inner } => {
+                    let inner_infos = self.build_open_field_infos(inner);
+                    let inner_names: Vec<String> = inner.iter().map(|f| f.name.clone()).collect();
+                    let struct_name = self.fresh_anon_record_name(&inner_names);
+                    Some((struct_name, inner_infos))
+                }
+                _ => None,
+            };
+            super::OpenFieldInfo { name: f.name.clone(), nested }
+        }).collect()
+    }
+
+    /// Convert an internal Ty to a TypeExpr (for open record fields detected via IR).
+    fn ty_to_type_expr(&self, ty: &crate::types::Ty) -> crate::ast::TypeExpr {
+        use crate::types::Ty;
+        use crate::ast::TypeExpr;
+        match ty {
+            Ty::Int => TypeExpr::Simple { name: "Int".to_string() },
+            Ty::Float => TypeExpr::Simple { name: "Float".to_string() },
+            Ty::String => TypeExpr::Simple { name: "String".to_string() },
+            Ty::Bool => TypeExpr::Simple { name: "Bool".to_string() },
+            Ty::Unit => TypeExpr::Simple { name: "Unit".to_string() },
+            Ty::List(inner) => TypeExpr::Generic { name: "List".to_string(), args: vec![self.ty_to_type_expr(inner)] },
+            Ty::Option(inner) => TypeExpr::Generic { name: "Option".to_string(), args: vec![self.ty_to_type_expr(inner)] },
+            Ty::Result(ok, err) => TypeExpr::Generic { name: "Result".to_string(), args: vec![self.ty_to_type_expr(ok), self.ty_to_type_expr(err)] },
+            Ty::Map(k, v) => TypeExpr::Generic { name: "Map".to_string(), args: vec![self.ty_to_type_expr(k), self.ty_to_type_expr(v)] },
+            Ty::Named(n, _) => TypeExpr::Simple { name: n.clone() },
+            _ => TypeExpr::Simple { name: "Unknown".to_string() },
         }
     }
 
