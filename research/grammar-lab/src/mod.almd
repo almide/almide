@@ -150,8 +150,14 @@ effect fn run_experiment() -> Result[Unit, String] = {
           // Extract code from response, strip any test blocks LLM may have included
           let modified_code = strip_test_blocks(extract_code(llm_response))
 
+          // Save raw LLM output for debugging/analysis
+          let output_dir = "outputs/${experiment_name}/${model_name}/${variant_name}"
+          fs.mkdir_p(output_dir)
+          fs.write("${output_dir}/${task_name}_${int.to_string(trial_num)}_raw.almd", modified_code)
+
           // Transpile if needed (convert experimental syntax to current syntax for compilation)
           let compilable_code = transpile(modified_code, transpile_mode)
+          fs.write("${output_dir}/${task_name}_${int.to_string(trial_num)}_compiled.almd", compilable_code)
 
           // Evaluate: write to temp file, compile, test
           let eval_result = evaluate(compilable_code, test_code, task_name)
@@ -344,47 +350,74 @@ fn transpile(code: String, mode: String) -> String =
   }
 
 fn transpile_line_paren_to_fn(line: String) -> String = {
-  // Find all occurrences of ") =>" and check if preceded by "fn("
-  // Simple approach: replace known patterns
-  // "(x) =>" -> "fn(x) =>" but "fn(x) =>" stays
-  var result = line
+  // Generic approach: find ") =>" and look backwards for matching "("
+  // If "(" is not preceded by "fn" or a keyword, insert "fn"
+  // Handles any parameter names without enumeration
 
-  // Replace ") => " pattern where not preceded by fn
-  // We do this by first marking fn( cases, then adding fn to bare ( cases
-  // Simpler: just add fn before every "(" that's followed by idents and ") =>"
-  // and then fix double fn
+  if not string.contains(line, ") =>") then {
+    line
+  } else {
+    // Find all ") =>" positions
+    var positions: List[Int] = []
+    var si = 0
+    let line_len = string.len(line)
+    while si + 4 <= line_len {
+      if string.slice(line, si, si + 4) == ") =>" then {
+        positions = positions ++ [si]
+        si = si + 4
+      } else {
+        si = si + 1
+      }
+    }
 
-  // Step 1: Find ") =>" positions and work backwards
-  // For simplicity, use string.replace for common patterns
-  // The LLM will use consistent param names from the examples
+    if list.len(positions) == 0 then {
+      line
+    } else {
+      // For each ") =>" find matching "(" by scanning backwards
+      var insert_positions: List[Int] = []
+      for close_pos in positions {
+        var depth = 1
+        var j = close_pos - 1
+        var open_pos = -1
+        while j >= 0 and depth > 0 {
+          let ch = string.slice(line, j, j + 1)
+          if ch == ")" then { depth = depth + 1 }
+          else if ch == "(" then {
+            depth = depth - 1
+            if depth == 0 then { open_pos = j } else { () }
+          } else { () }
+          j = j - 1
+        }
 
-  // Single char params
-  let singles = ["a", "b", "c", "e", "f", "i", "k", "n", "p", "r", "s", "u", "v", "x", "y"]
-  for s in singles {
-    result = string.replace(result, "(${s}) =>", "fn(${s}) =>")
+        if open_pos >= 0 then {
+          // Check character before "(" — if alpha/underscore, it's part of a word (some, fn, etc.)
+          let skip = if open_pos >= 1 then {
+            let prev = string.slice(line, open_pos - 1, open_pos)
+            string.contains("abcdefghijklmnopqrstuvwxyz_", prev)
+          } else {
+            false
+          }
+          if not skip then {
+            insert_positions = insert_positions ++ [open_pos]
+          } else { () }
+        } else { () }
+      }
+
+      // Insert "fn" at positions (reverse order to preserve indices)
+      if list.len(insert_positions) == 0 then {
+        line
+      } else {
+        let sorted = insert_positions |> list.sort() |> list.reverse()
+        var result = line
+        for pos in sorted {
+          let before = string.slice(result, 0, pos)
+          let after = string.slice(result, pos, string.len(result))
+          result = before ++ "fn" ++ after
+        }
+        result
+      }
+    }
   }
-
-  // Common multi-char params
-  let words = ["acc", "item", "user", "val", "key", "elem", "prev", "curr", "name", "row", "col"]
-  for w in words {
-    result = string.replace(result, "(${w}) =>", "fn(${w}) =>")
-  }
-
-  // Two params: common combos
-  let pairs = [
-    "(acc, x)", "(acc, u)", "(acc, p)", "(acc, i)", "(acc, s)",
-    "(acc, item)", "(acc, val)", "(acc, n)", "(acc, e)",
-    "(a, b)", "(x, y)", "(k, v)", "(key, val)",
-  ]
-  for pair in pairs {
-    result = string.replace(result, "${pair} =>", "fn${pair} =>")
-  }
-
-  // Fix double fn
-  result = string.replace(result, "fn(fn(", "fn(")
-  result = string.replace(result, "fnfn(", "fn(")
-
-  result
 }
 
 // ── Code Extraction ──
