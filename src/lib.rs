@@ -14,3 +14,4 @@ pub mod generated;
 pub mod ir;
 pub mod lower;
 pub mod mono;
+pub mod optimize;

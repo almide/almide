@@ -263,6 +263,11 @@ fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::Em
         }
     }
 
+    // Optimize IR: constant folding + dead code elimination
+    if let Some(ref mut ir) = ir_program {
+        almide::optimize::optimize_program(ir);
+    }
+
     // Monomorphize row-polymorphic functions (Rust target only)
     if let Some(ref mut ir) = ir_program {
         almide::mono::monomorphize(ir);
