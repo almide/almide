@@ -3,7 +3,7 @@
 
 use crate::ast;
 use crate::types::{Ty, VariantPayload};
-use super::types::{InferTy, TyVarId};
+use super::types::InferTy;
 use super::Checker;
 
 impl Checker {

@@ -45,7 +45,7 @@ impl Checker {
         }
     }
 
-    fn check_named_call(&mut self, name: &str, arg_tys: &[InferTy]) -> InferTy {
+    pub(crate) fn check_named_call(&mut self, name: &str, arg_tys: &[InferTy]) -> InferTy {
         // Builtins that accept any types
         match name {
             "println" | "eprintln" => {
