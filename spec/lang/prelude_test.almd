@@ -1,0 +1,33 @@
+// Test that prelude modules work without import
+// No import statements in this file — all module calls use prelude.
+
+test "int.parse works without import" {
+  assert_eq(int.parse("42"), ok(42))
+}
+
+test "string.trim works without import" {
+  assert_eq(string.trim("  hello  "), "hello")
+}
+
+test "list.reverse works without import" {
+  assert_eq(list.reverse([1, 2, 3]), [3, 2, 1])
+}
+
+test "math.abs works without import" {
+  assert_eq(math.abs(-5), 5)
+}
+
+test "map.len works without import" {
+  let m = ["a": 1, "b": 2]
+  assert_eq(m.len(), 2)
+}
+
+test "float.round works without import" {
+  assert_eq(float.round(3.7), 4.0)
+}
+
+test "result.map works without import" {
+  let r: Result[Int, String] = ok(42)
+  let mapped = result.map(r, (x) => x * 2)
+  assert_eq(mapped, ok(84))
+}
