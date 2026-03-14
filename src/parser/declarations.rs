@@ -381,14 +381,14 @@ impl Parser {
                         }
                         body = Expr::Block {
                             stmts: new_stmts,
-                            expr: Some(Box::new(Expr::Ok { expr: Box::new(Expr::Unit { span: None, resolved_type: None }), span: None, resolved_type: None })),
-                            span: None, resolved_type: None,
+                            expr: Some(Box::new(Expr::Ok { expr: Box::new(Expr::Unit { id: self.next_id(), span: None, resolved_type: None }), id: self.next_id(), span: None, resolved_type: None })),
+                            id: self.next_id(), span: None, resolved_type: None,
                         };
                     } else if expr.is_none() {
                         body = Expr::Block {
                             stmts: effective_stmts,
                             expr: effective_expr,
-                            span: None, resolved_type: None,
+                            id: self.next_id(), span: None, resolved_type: None,
                         };
                     }
                 }

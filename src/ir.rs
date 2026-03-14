@@ -71,6 +71,7 @@ impl VarTable {
     pub fn new() -> Self { VarTable { entries: Vec::new() } }
 
     pub fn alloc(&mut self, name: String, ty: Ty, mutability: Mutability, span: Option<Span>) -> VarId {
+        debug_assert!(self.entries.len() < u32::MAX as usize, "too many variables");
         let id = VarId(self.entries.len() as u32);
         self.entries.push(VarInfo { name, ty, mutability, span, use_count: 0 });
         id
@@ -421,6 +422,339 @@ pub struct IrProgram {
     pub modules: Vec<IrModule>,
 }
 
+// ── Unknown type detection (post-pass) ──────────────────────────
+
+/// A warning about Ty::Unknown surviving into the IR.
+#[derive(Debug)]
+pub struct UnknownTypeWarning {
+    pub fn_name: String,
+    pub span: Option<Span>,
+    pub ty: Ty,
+    pub context: &'static str,
+}
+
+/// Scan an IR program for any Ty::Unknown that survived lowering.
+/// Returns a list of warnings (not errors) for diagnostic reporting.
+pub fn collect_unknown_warnings(program: &IrProgram) -> Vec<UnknownTypeWarning> {
+    let mut warnings = Vec::new();
+    for f in &program.functions {
+        check_expr_for_unknown(&f.body, &f.name, &mut warnings);
+        for p in &f.params {
+            if p.ty.contains_unknown() {
+                warnings.push(UnknownTypeWarning {
+                    fn_name: f.name.clone(),
+                    span: None,
+                    ty: p.ty.clone(),
+                    context: "function parameter",
+                });
+            }
+        }
+        if f.ret_ty.contains_unknown() {
+            warnings.push(UnknownTypeWarning {
+                fn_name: f.name.clone(),
+                span: None,
+                ty: f.ret_ty.clone(),
+                context: "function return type",
+            });
+        }
+    }
+    for tl in &program.top_lets {
+        if tl.ty.contains_unknown() {
+            warnings.push(UnknownTypeWarning {
+                fn_name: "<top-level>".to_string(),
+                span: None,
+                ty: tl.ty.clone(),
+                context: "top-level let binding",
+            });
+        }
+    }
+    warnings
+}
+
+fn check_expr_for_unknown(expr: &IrExpr, fn_name: &str, warnings: &mut Vec<UnknownTypeWarning>) {
+    if expr.ty.contains_unknown() {
+        warnings.push(UnknownTypeWarning {
+            fn_name: fn_name.to_string(),
+            span: expr.span,
+            ty: expr.ty.clone(),
+            context: "expression",
+        });
+        // Don't recurse into children — one warning per subtree is enough
+        return;
+    }
+    // Recurse into children
+    match &expr.kind {
+        IrExprKind::Block { stmts, expr: tail } | IrExprKind::DoBlock { stmts, expr: tail } => {
+            for s in stmts { check_stmt_for_unknown(s, fn_name, warnings); }
+            if let Some(t) = tail { check_expr_for_unknown(t, fn_name, warnings); }
+        }
+        IrExprKind::Call { target, args, .. } => {
+            if let CallTarget::Computed { callee } = target {
+                check_expr_for_unknown(callee, fn_name, warnings);
+            }
+            if let CallTarget::Method { object, .. } = target {
+                check_expr_for_unknown(object, fn_name, warnings);
+            }
+            for a in args { check_expr_for_unknown(a, fn_name, warnings); }
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            check_expr_for_unknown(cond, fn_name, warnings);
+            check_expr_for_unknown(then, fn_name, warnings);
+            check_expr_for_unknown(else_, fn_name, warnings);
+        }
+        IrExprKind::BinOp { left, right, .. } => {
+            check_expr_for_unknown(left, fn_name, warnings);
+            check_expr_for_unknown(right, fn_name, warnings);
+        }
+        IrExprKind::UnOp { operand, .. } => {
+            check_expr_for_unknown(operand, fn_name, warnings);
+        }
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
+            for e in elements { check_expr_for_unknown(e, fn_name, warnings); }
+        }
+        IrExprKind::Lambda { body, .. } => {
+            check_expr_for_unknown(body, fn_name, warnings);
+        }
+        IrExprKind::Match { subject, arms } => {
+            check_expr_for_unknown(subject, fn_name, warnings);
+            for a in arms { check_expr_for_unknown(&a.body, fn_name, warnings); }
+        }
+        IrExprKind::IndexAccess { object, index } => {
+            check_expr_for_unknown(object, fn_name, warnings);
+            check_expr_for_unknown(index, fn_name, warnings);
+        }
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
+            check_expr_for_unknown(object, fn_name, warnings);
+        }
+        IrExprKind::Try { expr } | IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
+        | IrExprKind::OptionSome { expr } | IrExprKind::Await { expr } => {
+            check_expr_for_unknown(expr, fn_name, warnings);
+        }
+        IrExprKind::Record { fields, .. } => {
+            for (_, v) in fields { check_expr_for_unknown(v, fn_name, warnings); }
+        }
+        IrExprKind::SpreadRecord { base, fields } => {
+            check_expr_for_unknown(base, fn_name, warnings);
+            for (_, v) in fields { check_expr_for_unknown(v, fn_name, warnings); }
+        }
+        IrExprKind::MapLiteral { entries } => {
+            for (k, v) in entries {
+                check_expr_for_unknown(k, fn_name, warnings);
+                check_expr_for_unknown(v, fn_name, warnings);
+            }
+        }
+        IrExprKind::StringInterp { parts } => {
+            for p in parts {
+                match p {
+                    IrStringPart::Expr { expr } => check_expr_for_unknown(expr, fn_name, warnings),
+                    IrStringPart::Lit { .. } => {}
+                }
+            }
+        }
+        IrExprKind::Range { start, end, .. } => {
+            check_expr_for_unknown(start, fn_name, warnings);
+            check_expr_for_unknown(end, fn_name, warnings);
+        }
+        IrExprKind::ForIn { iterable, body, .. } => {
+            check_expr_for_unknown(iterable, fn_name, warnings);
+            for s in body { check_stmt_for_unknown(s, fn_name, warnings); }
+        }
+        IrExprKind::While { cond, body } => {
+            check_expr_for_unknown(cond, fn_name, warnings);
+            for s in body { check_stmt_for_unknown(s, fn_name, warnings); }
+        }
+        // Leaf nodes — no children
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
+        | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::Var { .. }
+        | IrExprKind::EmptyMap | IrExprKind::OptionNone | IrExprKind::Break
+        | IrExprKind::Continue | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
+    }
+}
+
+fn check_stmt_for_unknown(stmt: &IrStmt, fn_name: &str, warnings: &mut Vec<UnknownTypeWarning>) {
+    match &stmt.kind {
+        IrStmtKind::Bind { value, ty, .. } => {
+            if ty.contains_unknown() {
+                warnings.push(UnknownTypeWarning {
+                    fn_name: fn_name.to_string(),
+                    span: stmt.span,
+                    ty: ty.clone(),
+                    context: "let binding",
+                });
+            }
+            check_expr_for_unknown(value, fn_name, warnings);
+        }
+        IrStmtKind::BindDestructure { value, .. } => {
+            check_expr_for_unknown(value, fn_name, warnings);
+        }
+        IrStmtKind::Assign { value, .. } => {
+            check_expr_for_unknown(value, fn_name, warnings);
+        }
+        IrStmtKind::IndexAssign { index, value, .. } => {
+            check_expr_for_unknown(index, fn_name, warnings);
+            check_expr_for_unknown(value, fn_name, warnings);
+        }
+        IrStmtKind::FieldAssign { value, .. } => {
+            check_expr_for_unknown(value, fn_name, warnings);
+        }
+        IrStmtKind::Guard { cond, else_ } => {
+            check_expr_for_unknown(cond, fn_name, warnings);
+            check_expr_for_unknown(else_, fn_name, warnings);
+        }
+        IrStmtKind::Expr { expr } => {
+            check_expr_for_unknown(expr, fn_name, warnings);
+        }
+        IrStmtKind::Comment { .. } => {}
+    }
+}
+
+// ── Constant folding (post-pass) ─────────────────────────────────
+
+/// Fold constant expressions in the IR program.
+/// e.g. LitInt(1) + LitInt(2) → LitInt(3)
+pub fn constant_fold(program: &mut IrProgram) {
+    for f in &mut program.functions {
+        fold_expr(&mut f.body);
+    }
+    for tl in &mut program.top_lets {
+        fold_expr(&mut tl.value);
+    }
+}
+
+fn fold_expr(expr: &mut IrExpr) {
+    // Recurse first (bottom-up)
+    match &mut expr.kind {
+        IrExprKind::BinOp { left, right, .. } => {
+            fold_expr(left);
+            fold_expr(right);
+        }
+        IrExprKind::UnOp { operand, .. } => fold_expr(operand),
+        IrExprKind::Block { stmts, expr: tail } => {
+            for s in stmts { fold_stmt(s); }
+            if let Some(t) = tail { fold_expr(t); }
+        }
+        IrExprKind::DoBlock { stmts, expr: tail } => {
+            for s in stmts { fold_stmt(s); }
+            if let Some(t) = tail { fold_expr(t); }
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            fold_expr(cond);
+            fold_expr(then);
+            fold_expr(else_);
+        }
+        IrExprKind::Call { args, .. } => {
+            for a in args { fold_expr(a); }
+        }
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
+            for e in elements { fold_expr(e); }
+        }
+        IrExprKind::Lambda { body, .. } => fold_expr(body),
+        IrExprKind::Match { subject, arms } => {
+            fold_expr(subject);
+            for a in arms { fold_expr(&mut a.body); }
+        }
+        IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
+        | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
+        | IrExprKind::Await { expr } => fold_expr(expr),
+        IrExprKind::Record { fields, .. } => {
+            for (_, v) in fields { fold_expr(v); }
+        }
+        IrExprKind::SpreadRecord { base, fields } => {
+            fold_expr(base);
+            for (_, v) in fields { fold_expr(v); }
+        }
+        IrExprKind::Range { start, end, .. } => {
+            fold_expr(start);
+            fold_expr(end);
+        }
+        IrExprKind::IndexAccess { object, index } => {
+            fold_expr(object);
+            fold_expr(index);
+        }
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => fold_expr(object),
+        IrExprKind::MapLiteral { entries } => {
+            for (k, v) in entries { fold_expr(k); fold_expr(v); }
+        }
+        IrExprKind::StringInterp { parts } => {
+            for p in parts {
+                if let IrStringPart::Expr { expr: e } = p { fold_expr(e); }
+            }
+        }
+        _ => {}
+    }
+
+    // Now try to fold this node
+    let folded = match &expr.kind {
+        IrExprKind::BinOp { op, left, right } => {
+            match (&left.kind, &right.kind) {
+                (IrExprKind::LitInt { value: a }, IrExprKind::LitInt { value: b }) => {
+                    match op {
+                        BinOp::AddInt => Some(IrExprKind::LitInt { value: a.wrapping_add(*b) }),
+                        BinOp::SubInt => Some(IrExprKind::LitInt { value: a.wrapping_sub(*b) }),
+                        BinOp::MulInt => Some(IrExprKind::LitInt { value: a.wrapping_mul(*b) }),
+                        BinOp::DivInt if *b != 0 => Some(IrExprKind::LitInt { value: a / b }),
+                        BinOp::ModInt if *b != 0 => Some(IrExprKind::LitInt { value: a % b }),
+                        _ => None,
+                    }
+                }
+                (IrExprKind::LitFloat { value: a }, IrExprKind::LitFloat { value: b }) => {
+                    match op {
+                        BinOp::AddFloat => Some(IrExprKind::LitFloat { value: a + b }),
+                        BinOp::SubFloat => Some(IrExprKind::LitFloat { value: a - b }),
+                        BinOp::MulFloat => Some(IrExprKind::LitFloat { value: a * b }),
+                        BinOp::DivFloat if *b != 0.0 => Some(IrExprKind::LitFloat { value: a / b }),
+                        _ => None,
+                    }
+                }
+                (IrExprKind::LitStr { value: a }, IrExprKind::LitStr { value: b }) => {
+                    match op {
+                        BinOp::ConcatStr => Some(IrExprKind::LitStr { value: format!("{}{}", a, b) }),
+                        _ => None,
+                    }
+                }
+                (IrExprKind::LitBool { value: a }, IrExprKind::LitBool { value: b }) => {
+                    match op {
+                        BinOp::And => Some(IrExprKind::LitBool { value: *a && *b }),
+                        BinOp::Or => Some(IrExprKind::LitBool { value: *a || *b }),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            }
+        }
+        IrExprKind::UnOp { op, operand } => {
+            match (&op, &operand.kind) {
+                (UnOp::NegInt, IrExprKind::LitInt { value }) => Some(IrExprKind::LitInt { value: -value }),
+                (UnOp::NegFloat, IrExprKind::LitFloat { value }) => Some(IrExprKind::LitFloat { value: -value }),
+                (UnOp::Not, IrExprKind::LitBool { value }) => Some(IrExprKind::LitBool { value: !value }),
+                _ => None,
+            }
+        }
+        _ => None,
+    };
+
+    if let Some(kind) = folded {
+        expr.kind = kind;
+    }
+}
+
+fn fold_stmt(stmt: &mut IrStmt) {
+    match &mut stmt.kind {
+        IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
+        | IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => fold_expr(value),
+        IrStmtKind::IndexAssign { index, value, .. } => {
+            fold_expr(index);
+            fold_expr(value);
+        }
+        IrStmtKind::Guard { cond, else_ } => {
+            fold_expr(cond);
+            fold_expr(else_);
+        }
+        IrStmtKind::Expr { expr } => fold_expr(expr),
+        IrStmtKind::Comment { .. } => {}
+    }
+}
+
 // ── Use-count computation (post-pass) ───────────────────────────
 
 /// Walk the entire IR program and count variable uses, storing results in VarTable.
@@ -558,6 +892,44 @@ fn count_uses_in_stmt(stmt: &IrStmt, table: &mut VarTable) {
         }
         IrStmtKind::Comment { .. } => {}
     }
+}
+
+/// Collect warnings for unused variables.
+/// Skips: `_` prefixed names, function parameters, pattern bindings (span is None).
+pub fn collect_unused_var_warnings(program: &IrProgram, file: &str) -> Vec<crate::diagnostic::Diagnostic> {
+    // Collect all parameter VarIds to exclude them
+    let mut param_ids: HashSet<u32> = HashSet::new();
+    for func in &program.functions {
+        for p in &func.params {
+            param_ids.insert(p.var.0);
+        }
+    }
+
+    let mut warnings = Vec::new();
+    for i in 0..program.var_table.len() {
+        let info = &program.var_table.entries[i];
+
+        // Skip _ prefixed (intentionally unused)
+        if info.name.starts_with('_') { continue; }
+
+        // Skip parameters
+        if param_ids.contains(&(i as u32)) { continue; }
+
+        // Skip variables without span (pattern bindings, loop vars, etc.)
+        if info.span.is_none() { continue; }
+
+        // Skip if used
+        if info.use_count > 0 { continue; }
+
+        let span = info.span.unwrap();
+        let diag = crate::diagnostic::Diagnostic::warning(
+            format!("unused variable '{}'", info.name),
+            format!("Prefix with '_' to suppress: _{}", info.name),
+            "",
+        ).at(file, span.line);
+        warnings.push(diag);
+    }
+    warnings
 }
 
 /// Classify a top-level let value: simple literals are `Const`, everything else is `Lazy`.

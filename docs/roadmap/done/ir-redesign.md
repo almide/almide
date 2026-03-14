@@ -1,6 +1,6 @@
-# Codegen IR Redesign [ACTIVE]
+# Codegen IR Redesign [DONE]
 
-Self-contained typed IR — codegen が AST を一切参照せず、IR のみで完全なコード生成を行えるようにする。
+Self-contained typed IR — codegen が AST を一切参照せず、IR のみで完全なコード生成を行う。Phase 1〜5 全完了。
 
 ## Why
 
@@ -14,28 +14,20 @@ Self-contained typed IR — codegen が AST を一切参照せず、IR のみで
 | Module 処理の脆弱性 | cross-module type import を AST の `Decl` から再構築 |
 | Monomorphization 不可 | IR に generics 情報がなく、instantiation-based codegen を組めない |
 
-## Current state
+## Current state (Phase 5 complete — all done)
 
 ```
 IrProgram {
-    functions: Vec<IrFunction>,    // 関数本体のみ
-    top_lets: Vec<IrTopLet>,       // 値のみ、const/lazy 区別なし
-    var_table: VarTable,           // name, ty, mutability のみ
+    functions: Vec<IrFunction>,     // IrParam (borrow, open_record), generics, extern_attrs
+    type_decls: Vec<IrTypeDecl>,    // Record, Variant (boxed_args), Alias, visibility
+    top_lets: Vec<IrTopLet>,        // TopLetKind::Const | Lazy
+    var_table: VarTable,            // name, ty, mutability, use_count
+    modules: Vec<IrModule>,         // imported modules (self-contained IR)
 }
-// 型宣言なし、モジュール情報なし、分析結果なし
 ```
 
-Emitter の side-channel フィールド (25+):
-
-- `effect_fns`, `result_fns` — 関数分類
-- `named_record_types` — field set → struct name
-- `generic_variant_constructors`, `generic_variant_unit_ctors` — variant info
-- `boxed_variant_args`, `boxed_variant_record_fields` — recursive variant boxing
-- `single_use_vars` — move vs clone 判定
-- `borrow_info`, `borrowed_params` — borrow inference 結果
-- `top_let_names` — const/lazy 分類
-- `open_record_params`, `open_record_aliases` — open record projection
-- `anon_record_structs`, `anon_record_counter` — 生成中の状態（これは残る）
+**Phase 1〜5 全完了。Rust emitter・TS emitter 共に `use crate::ast::*` を排除。**
+codegen は IR (`&IrProgram`) のみを入力として受け取り、AST を一切参照しない。
 
 ## Target state
 
@@ -196,43 +188,40 @@ pub struct IrModule {
 
 ## Implementation phases
 
-### Phase 1: IrTypeDecl
+### Phase 1: IrTypeDecl ✅
 
-最もインパクトが大きい変更。型宣言を IR に載せ、codegen の AST 直接読みを排除。
+型宣言を IR に載せ、codegen の AST 直接読みを排除。
 
-- [ ] `ir.rs`: `IrTypeDecl`, `IrTypeDeclKind`, `IrFieldDecl`, `IrVariantDecl`, `IrVariantKind` 追加
-- [ ] `ir.rs`: `IrProgram` に `type_decls: Vec<IrTypeDecl>` 追加
-- [ ] `lower.rs`: `Decl::Type` → `IrTypeDecl` 変換ロジック
-- [ ] `lower.rs`: boxed_args / boxed_record_fields 計算を lowering 時に実行
-- [ ] `emit_rust/program.rs`: `emit_type_decl` を `IrTypeDecl` ベースに書き換え
-- [ ] `emit_rust/program.rs`: `collect_named_records` を IR ベースに変更
-- [ ] Emitter から `boxed_variant_args`, `boxed_variant_record_fields`, `generic_variant_constructors`, `generic_variant_unit_ctors`, `open_record_aliases` 削除
-- [ ] テスト: `cargo test` + `almide test` 全パス
+- [x] `ir.rs`: `IrTypeDecl`, `IrTypeDeclKind`, `IrFieldDecl`, `IrVariantDecl`, `IrVariantKind` 追加
+- [x] `ir.rs`: `IrProgram` に `type_decls: Vec<IrTypeDecl>` 追加
+- [x] `lower.rs`: `Decl::Type` → `IrTypeDecl` 変換ロジック
+- [x] `lower.rs`: boxed_args / boxed_record_fields 計算を lowering 時に実行
+- [x] `emit_rust/program.rs`: `emit_type_decl` を `IrTypeDecl` ベースに書き換え (`emit_ir_type_decl`)
+- [x] `emit_rust/program.rs`: `collect_named_records` を IR ベースに変更
+- [x] テスト: `cargo test` + `almide test` 全パス
 
-### Phase 2: IrFunction enrichment
+### Phase 2: IrFunction enrichment ✅
 
-- [ ] `ir.rs`: `IrParam` struct 追加（`var`, `ty`, `borrow`, `open_record`）
-- [ ] `ir.rs`: `IrFunction::params` を `Vec<IrParam>` に変更
-- [ ] `ir.rs`: `IrFunction` に `generics`, `extern_attrs` 追加
-- [ ] `ir.rs`: `ParamBorrow`, `OpenRecordInfo` 追加
-- [ ] `lower.rs`: 関数 lowering 時に generics, extern_attrs を伝播
-- [ ] `borrow.rs`: 分析結果を `IrParam::borrow` に書き込む post-pass
-- [ ] `emit_rust/program.rs`: `emit_fn_decl` を `IrFunction` ベースに書き換え
-- [ ] Emitter から `borrow_info`, `borrowed_params`, `open_record_params` 削除
-- [ ] テスト: 全パス
+- [x] `ir.rs`: `IrParam` struct 追加（`var`, `ty`, `name`, `borrow`, `open_record`）
+- [x] `ir.rs`: `IrFunction::params` を `Vec<IrParam>` に変更
+- [x] `ir.rs`: `IrFunction` に `generics`, `extern_attrs`, `visibility` 追加
+- [x] `ir.rs`: `ParamBorrow`, `OpenRecordInfo`, `OpenFieldInfo` 追加
+- [x] `lower.rs`: 関数 lowering 時に generics, extern_attrs を伝播
+- [x] `borrow.rs`: 分析結果を `IrParam::borrow` に書き込む post-pass
+- [x] `emit_rust/program.rs`: `emit_ir_fn_decl` で IrFunction ベース codegen
+- [x] テスト: 全パス
 
-### Phase 3: Analysis embedding
+### Phase 3: Analysis embedding ✅
 
-- [ ] `ir.rs`: `VarInfo` に `use_count: u32` 追加
-- [ ] `lower.rs` or post-pass: use count 計算
-- [ ] `ir.rs`: `IrTopLet` に `kind: TopLetKind` 追加
-- [ ] `lower.rs`: top-level let の const/lazy 分類
-- [ ] Emitter から `single_use_vars`, `top_let_names` 削除
-- [ ] テスト: 全パス
+- [x] `ir.rs`: `VarInfo` に `use_count: u32` 追加
+- [x] `ir.rs`: `compute_use_counts` post-pass（全 IR ツリーを走査）
+- [x] `ir.rs`: `IrTopLet` に `kind: TopLetKind` 追加（Const vs Lazy）
+- [x] `ir.rs`: `classify_top_let_kind` で literal → Const, expression → Lazy
+- [x] テスト: 全パス
 
-### Phase 4: IrModule
+### Phase 4: IrModule ✅
 
-- [x] `ir.rs`: `IrModule` struct 追加
+- [x] `ir.rs`: `IrModule` struct 追加（name, versioned_name, type_decls, functions, top_lets, var_table）
 - [x] `ir.rs`: `IrProgram` に `modules: Vec<IrModule>` 追加
 - [x] `lower.rs`: imported module の Program → IrModule 変換 (`lower_module`)
 - [x] `emit_rust/program.rs`: `emit_program` が IR modules から cross-module type info を構築
@@ -240,18 +229,29 @@ pub struct IrModule {
 - [x] `emit_rust/program.rs`: `emit_user_module` が IR module の VarTable を使用
 - [x] `emit_rust/borrow.rs`: `analyze_program` が IR modules を優先使用
 - [x] `main.rs`, `cli.rs`: `compile_with_options`/`cmd_emit` が IrProgram.modules を populated
-- [ ] `emit_with_options` のシグネチャ変更: `&IrProgram` のみ受け取る (Phase 5 で完了予定)
-- [ ] Emitter から `module_irs`, `user_modules` 削除 (Phase 5 で完了予定)
 - [x] テスト: 全パス
 
-### Phase 5: AST removal from codegen
+### Phase 5: AST removal from codegen ✅
 
-- [ ] `emit_rust/program.rs`: `use crate::ast::*` 削除
-- [ ] `emit_rust/program.rs`: `emit_program` が `&IrProgram` のみ受け取る
-- [ ] `emit_rust/ir_expressions.rs`: AST 依存箇所の排除
-- [ ] `emit_ts/`: 同様の IR 化（TypeScript emitter）
-- [ ] 全 codegen ファイルから AST import 除去を確認
-- [ ] テスト: 全パス
+全 codegen から `use crate::ast::*` を排除。Emitter は IR のみで完全なコード生成を行う。
+
+**Rust emitter (5a):**
+- [x] `open_record_aliases` を `Vec<FieldType>` → `Vec<(String, Ty)>` に変更、IR (`IrTypeDeclKind::Alias`) から構築
+- [x] `emit_program()` の AST フォールバック分岐を全削除（`ast_decl_map`, `has_unknown_ret` 含む）
+- [x] AST 関数削除: `collect_fn_info`, `collect_named_records`, `collect_open_record_aliases`, `emit_decl`, `emit_type_decl`, `emit_type_decl_vis`, `emit_fn_decl`, `emit_user_module`, `gen_type`, `gen_type_boxed`, `type_references_name`, `build_open_field_infos`, `ty_to_type_expr`, `ty_contains_unknown`, `count_var_uses`
+- [x] `emit_with_options` シグネチャ: `(ir: &IrProgram, options, import_aliases, module_irs)` に変更
+- [x] `emit_rust/mod.rs`, `emit_rust/program.rs`: `use crate::ast::*` 削除
+
+**TS emitter (5b):**
+- [x] `ir_ty_to_ts(&Ty)` 追加（`gen_type_expr` の IR 版）
+- [x] IR ベース宣言: `collect_generic_variant_info_from_ir`, `gen_ir_type_decl`, `gen_ir_fn_decl`, `gen_ir_test`, `emit_ir_user_module`
+- [x] `emit_program()`, `emit_npm_program()`, `generate_dts()` を IR ベースに書き換え
+- [x] Entry point シグネチャ: `emit_with_modules(ir: &IrProgram)`, `emit_npm_package(ir: &IrProgram, config)` に変更
+- [x] AST 関数削除: `collect_generic_variant_info`, `gen_decl`, `gen_type_decl`, `gen_type_expr`, `gen_fn_decl`, `emit_user_module`
+- [x] `emit_ts/mod.rs`, `emit_ts/declarations.rs`: `use crate::ast::*` 削除
+
+- [x] `cli.rs`, `main.rs` の呼び出し側更新
+- [x] テスト: `cargo test` (567 tests) + `almide test` (66 files) 全パス
 
 ## Monomorphization readiness
 

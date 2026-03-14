@@ -93,7 +93,8 @@ pub fn analyze_program(
 
     // Fixpoint iteration: re-analyze with callee borrow info
     // Convergence guaranteed: params can only change Borrow → Owned (monotone)
-    for _ in 0..10 {
+    let max_iterations = std::cmp::max(fn_decls.len(), 20);
+    for iteration in 0..max_iterations {
         let mut changed = false;
         for (name, params, body, vt) in &fn_decls {
             let heap_vars: HashSet<VarId> = params.iter()
@@ -107,6 +108,9 @@ pub fn analyze_program(
             info.fn_params.insert(name.clone(), ownerships);
         }
         if !changed { break; }
+        if iteration == max_iterations - 1 {
+            eprintln!("warning: borrow analysis did not converge after {} iterations", max_iterations);
+        }
     }
 
     info

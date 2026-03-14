@@ -12,16 +12,48 @@ use crate::lexer::Token;
 use crate::ast::*;
 use crate::diagnostic::Diagnostic;
 
+const MAX_DEPTH: usize = 500;
+
 pub struct Parser {
     pub(crate) tokens: Vec<Token>,
     pub(crate) pos: usize,
     pub errors: Vec<Diagnostic>,
     pub(crate) file: Option<String>,
+    pub(crate) next_expr_id: u32,
+    pub(crate) depth: usize,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, pos: 0, errors: Vec::new(), file: None }
+        Parser { tokens, pos: 0, errors: Vec::new(), file: None, next_expr_id: 0, depth: 0 }
+    }
+
+    pub(crate) fn next_id(&mut self) -> crate::ast::ExprId {
+        let id = crate::ast::ExprId(self.next_expr_id);
+        self.next_expr_id += 1;
+        id
+    }
+
+    pub fn expr_id_counter(&self) -> u32 { self.next_expr_id }
+
+    /// Check and increment recursion depth. Returns Err if too deep.
+    pub(crate) fn enter_depth(&mut self) -> Result<(), String> {
+        self.depth += 1;
+        if self.depth > MAX_DEPTH {
+            Err("expression nesting too deep (max 500)".to_string())
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(crate) fn exit_depth(&mut self) {
+        self.depth = self.depth.saturating_sub(1);
+    }
+
+    pub fn new_with_id_offset(tokens: Vec<crate::lexer::Token>, id_offset: u32) -> Self {
+        let mut p = Self::new(tokens);
+        p.next_expr_id = id_offset;
+        p
     }
 
     pub fn with_file(mut self, file: &str) -> Self {

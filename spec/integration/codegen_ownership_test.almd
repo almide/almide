@@ -19,8 +19,8 @@ test "list used in multiple sequential operations" {
   let xs = [5, 3, 1, 4, 2]
   let sorted = list.sort(xs)
   let reversed = list.reverse(xs)
-  let doubled = list.map(xs, fn(x) => x * 2)
-  let filtered = list.filter(xs, fn(x) => x > 3)
+  let doubled = list.map(xs, (x) => x * 2)
+  let filtered = list.filter(xs, (x) => x > 3)
   assert_eq(sorted, [1, 2, 3, 4, 5])
   assert_eq(reversed, [2, 4, 1, 3, 5])
   assert_eq(doubled, [10, 6, 2, 8, 4])
@@ -62,7 +62,7 @@ test "variable used in both branches and after" {
   let result = if list.len(xs) > 2 then list.sum(xs) else 0
   assert_eq(result, 6)
   assert_eq(list.len(xs), 3)
-  let mapped = list.map(xs, fn(x) => x + 10)
+  let mapped = list.map(xs, (x) => x + 10)
   assert_eq(mapped, [11, 12, 13])
 }
 
@@ -122,7 +122,7 @@ test "list concat preserves originals" {
 
 test "variable used in closure and then directly" {
   let data = [1, 2, 3, 4, 5]
-  let evens = list.filter(data, fn(x) => x % 2 == 0)
+  let evens = list.filter(data, (x) => x % 2 == 0)
   let sum = list.sum(data)
   assert_eq(evens, [2, 4])
   assert_eq(sum, 15)

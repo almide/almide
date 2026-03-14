@@ -81,3 +81,22 @@ A calls B with param `x`. Whether `x` escapes in A depends on B's classification
 | 3a. Intra-fn borrow | ✅ Done | High — idiomatic Rust |
 | 3b. Inter-fn fixpoint | ✅ Done | High — optimal |
 | 3c. List/Map borrow | ✅ Done | Medium — full coverage |
+
+---
+
+### Next: Phase 4
+
+Remaining clone reduction opportunities identified in [clone-reduction.md](../active/clone-reduction.md):
+- For-in unconditional clone
+- List/tuple element clone (use-count aware)
+- Member access clone (single-use awareness)
+- Match subject clone (post-match liveness)
+- Record spread clone (single-use move)
+- Field-level borrow analysis
+
+Additional codegen refinements in [codegen-refinement.md](../active/codegen-refinement.md):
+- let mut → let refinement
+- `#[inline]` hints
+- Constant folding
+- String literal context awareness
+- Light dead code elimination

@@ -2,6 +2,22 @@ use serde::{Deserialize, Serialize};
 
 // Almide AST types — mirrors src/ast.ts
 
+/// Unique expression identifier. Eliminates span-collision bugs in type lookups.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub struct ExprId(pub u32);
+
+/// Generator for fresh ExprIds. Used by parser and sub-parsers.
+#[derive(Debug, Clone)]
+pub struct ExprIdGen {
+    next: u32,
+}
+impl ExprIdGen {
+    pub fn new() -> Self { ExprIdGen { next: 0 } }
+    pub fn from(start: u32) -> Self { ExprIdGen { next: start } }
+    pub fn next(&mut self) -> ExprId { let id = ExprId(self.next); self.next += 1; id }
+    pub fn current(&self) -> u32 { self.next }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Span {
     pub line: usize,
@@ -40,6 +56,7 @@ pub enum TypeExpr {
     Tuple { elements: Vec<TypeExpr> },
     Newtype { inner: Box<TypeExpr> },
     Variant { cases: Vec<VariantCase> },
+    Union { members: Vec<TypeExpr> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,6 +80,9 @@ pub struct FieldType {
 pub struct GenericParam {
     pub name: String,
     pub bounds: Option<Vec<String>>,
+    /// Structural type constraint (e.g., `T: { name: String, .. }`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub structural_bound: Option<TypeExpr>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,52 +109,77 @@ pub struct FieldPattern {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Expr {
-    Int { value: serde_json::Value, raw: String, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Float { value: f64, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    String { value: String, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    InterpolatedString { value: String, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Bool { value: bool, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Ident { name: String, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    TypeName { name: String, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    List { elements: Vec<Expr>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    MapLiteral { entries: Vec<(Expr, Expr)>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    EmptyMap { #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Record { name: Option<String>, fields: Vec<FieldInit>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    SpreadRecord { base: Box<Expr>, fields: Vec<FieldInit>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Call { callee: Box<Expr>, args: Vec<Expr>, #[serde(default)] type_args: Option<Vec<TypeExpr>>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Member { object: Box<Expr>, field: String, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    TupleIndex { object: Box<Expr>, index: usize, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    IndexAccess { object: Box<Expr>, index: Box<Expr>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Pipe { left: Box<Expr>, right: Box<Expr>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    If { cond: Box<Expr>, then: Box<Expr>, else_: Box<Expr>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Match { subject: Box<Expr>, arms: Vec<MatchArm>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Block { stmts: Vec<Stmt>, expr: Option<Box<Expr>>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    DoBlock { stmts: Vec<Stmt>, expr: Option<Box<Expr>>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    ForIn { var: String, var_tuple: Option<Vec<String>>, iterable: Box<Expr>, body: Vec<Stmt>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    While { cond: Box<Expr>, body: Vec<Stmt>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Lambda { params: Vec<LambdaParam>, body: Box<Expr>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Hole { #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Todo { message: String, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Try { expr: Box<Expr>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Await { expr: Box<Expr>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Binary { op: String, left: Box<Expr>, right: Box<Expr>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Unary { op: String, operand: Box<Expr>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Paren { expr: Box<Expr>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Tuple { elements: Vec<Expr>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Range { start: Box<Expr>, end: Box<Expr>, inclusive: bool, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Break { #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Continue { #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Placeholder { #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Unit { #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    None { #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Some { expr: Box<Expr>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Ok { expr: Box<Expr>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Err { expr: Box<Expr>, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Int { value: serde_json::Value, raw: String, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Float { value: f64, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    String { value: String, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    InterpolatedString { value: String, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Bool { value: bool, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Ident { name: String, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    TypeName { name: String, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    List { elements: Vec<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    MapLiteral { entries: Vec<(Expr, Expr)>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    EmptyMap { #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Record { name: Option<String>, fields: Vec<FieldInit>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    SpreadRecord { base: Box<Expr>, fields: Vec<FieldInit>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Call { callee: Box<Expr>, args: Vec<Expr>, #[serde(default)] type_args: Option<Vec<TypeExpr>>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Member { object: Box<Expr>, field: String, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    TupleIndex { object: Box<Expr>, index: usize, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    IndexAccess { object: Box<Expr>, index: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Pipe { left: Box<Expr>, right: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    If { cond: Box<Expr>, then: Box<Expr>, else_: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Match { subject: Box<Expr>, arms: Vec<MatchArm>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Block { stmts: Vec<Stmt>, expr: Option<Box<Expr>>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    DoBlock { stmts: Vec<Stmt>, expr: Option<Box<Expr>>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    ForIn { var: String, var_tuple: Option<Vec<String>>, iterable: Box<Expr>, body: Vec<Stmt>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    While { cond: Box<Expr>, body: Vec<Stmt>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Lambda { params: Vec<LambdaParam>, body: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Hole { #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Todo { message: String, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Try { expr: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Await { expr: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Binary { op: String, left: Box<Expr>, right: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Unary { op: String, operand: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Paren { expr: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Tuple { elements: Vec<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Range { start: Box<Expr>, end: Box<Expr>, inclusive: bool, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Break { #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Continue { #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Placeholder { #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Unit { #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    None { #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Some { expr: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Ok { expr: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Err { expr: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     /// Placeholder for a parse error — allows partial AST construction.
-    Error { #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Error { #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
 }
 
 impl Expr {
+    pub fn id(&self) -> ExprId {
+        match self {
+            Expr::Int { id, .. } | Expr::Float { id, .. } | Expr::String { id, .. }
+            | Expr::InterpolatedString { id, .. } | Expr::Bool { id, .. }
+            | Expr::Ident { id, .. } | Expr::TypeName { id, .. }
+            | Expr::List { id, .. } | Expr::MapLiteral { id, .. } | Expr::EmptyMap { id, .. }
+            | Expr::Record { id, .. }
+            | Expr::SpreadRecord { id, .. } | Expr::Call { id, .. }
+            | Expr::Member { id, .. } | Expr::TupleIndex { id, .. } | Expr::IndexAccess { id, .. } | Expr::Pipe { id, .. }
+            | Expr::If { id, .. } | Expr::Match { id, .. }
+            | Expr::Block { id, .. } | Expr::DoBlock { id, .. }
+            | Expr::ForIn { id, .. } | Expr::While { id, .. } | Expr::Lambda { id, .. }
+            | Expr::Hole { id, .. } | Expr::Todo { id, .. }
+            | Expr::Try { id, .. } | Expr::Await { id, .. }
+            | Expr::Binary { id, .. } | Expr::Unary { id, .. }
+            | Expr::Paren { id, .. } | Expr::Tuple { id, .. }
+            | Expr::Range { id, .. } | Expr::Placeholder { id, .. }
+            | Expr::Break { id, .. } | Expr::Continue { id, .. }
+            | Expr::Unit { id, .. } | Expr::None { id, .. }
+            | Expr::Some { id, .. } | Expr::Ok { id, .. }
+            | Expr::Err { id, .. }
+            | Expr::Error { id, .. } => *id,
+        }
+    }
+
     pub fn span(&self) -> Option<Span> {
         match self {
             Expr::Int { span, .. } | Expr::Float { span, .. } | Expr::String { span, .. }

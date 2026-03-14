@@ -5,7 +5,7 @@ test "sort_by_name alphabetical" {
     Item { name: "Banana", price: 80 },
   ]
   let sorted = sort_by_name(items)
-  let names = list.map(sorted, fn(i) => i.name)
+  let names = list.map(sorted, (i) => i.name)
   assert_eq(names, ["Apple", "Banana", "Cherry"])
 }
 

@@ -1,0 +1,142 @@
+// ---- Datetime Runtime ----
+// Pure Rust date/time functions using Howard Hinnant's date algorithms.
+// DateTime is represented as i64 Unix timestamp (seconds since 1970-01-01 UTC).
+
+#[inline]
+fn almide_rt_datetime_now() -> Result<i64, String> {
+    Ok(std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_secs() as i64)
+}
+
+fn almide_rt_datetime_parts(ts: i64) -> (i64, i64, i64, i64, i64, i64) {
+    let second = ((ts % 60) + 60) % 60;
+    let mins = ts.div_euclid(60);
+    let minute = ((mins % 60) + 60) % 60;
+    let hrs = mins.div_euclid(60);
+    let hour = ((hrs % 24) + 24) % 24;
+    let days = hrs.div_euclid(24);
+
+    // Howard Hinnant's date algorithms
+    let days = days + 719468;
+    let era = days.div_euclid(146097);
+    let doe = days - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+
+    (y, m, d, hour, minute, second)
+}
+
+#[inline]
+fn almide_rt_datetime_from_parts(y: i64, m: i64, d: i64, h: i64, min: i64, s: i64) -> i64 {
+    let (y, m) = if m <= 2 { (y - 1, m + 9) } else { (y, m - 3) };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * m + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+    days * 86400 + h * 3600 + min * 60 + s
+}
+
+#[inline]
+fn almide_rt_datetime_parse_iso(s: &str) -> Result<i64, String> {
+    let bytes = s.as_bytes();
+    if bytes.len() < 10 {
+        return Err(format!("invalid ISO 8601 datetime: {}", s));
+    }
+    let parse2 = |i: usize| -> Result<i64, String> {
+        let d1 = bytes.get(i).and_then(|b| (*b as char).to_digit(10)).ok_or_else(|| format!("invalid digit at position {}", i))? as i64;
+        let d2 = bytes.get(i+1).and_then(|b| (*b as char).to_digit(10)).ok_or_else(|| format!("invalid digit at position {}", i+1))? as i64;
+        Ok(d1 * 10 + d2)
+    };
+    let parse4 = |i: usize| -> Result<i64, String> {
+        let d1 = bytes.get(i).and_then(|b| (*b as char).to_digit(10)).ok_or_else(|| format!("invalid digit at position {}", i))? as i64;
+        let d2 = bytes.get(i+1).and_then(|b| (*b as char).to_digit(10)).ok_or_else(|| format!("invalid digit at position {}", i+1))? as i64;
+        let d3 = bytes.get(i+2).and_then(|b| (*b as char).to_digit(10)).ok_or_else(|| format!("invalid digit at position {}", i+2))? as i64;
+        let d4 = bytes.get(i+3).and_then(|b| (*b as char).to_digit(10)).ok_or_else(|| format!("invalid digit at position {}", i+3))? as i64;
+        Ok(d1 * 1000 + d2 * 100 + d3 * 10 + d4)
+    };
+    let y = parse4(0)?;
+    let m = parse2(5)?;
+    let d = parse2(8)?;
+    if bytes.len() == 10 {
+        return Ok(almide_rt_datetime_from_parts(y, m, d, 0, 0, 0));
+    }
+    if bytes.len() >= 19 {
+        let h = parse2(11)?;
+        let min = parse2(14)?;
+        let sec = parse2(17)?;
+        return Ok(almide_rt_datetime_from_parts(y, m, d, h, min, sec));
+    }
+    Err(format!("invalid ISO 8601 datetime: {}", s))
+}
+
+#[inline]
+fn almide_rt_datetime_to_iso(ts: i64) -> String {
+    let (y, m, d, h, mi, s) = almide_rt_datetime_parts(ts);
+    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, m, d, h, mi, s)
+}
+
+fn almide_rt_datetime_format(ts: i64, pattern: &str) -> String {
+    let (y, m, d, h, mi, s) = almide_rt_datetime_parts(ts);
+    let wd = almide_rt_datetime_weekday_num(ts);
+    let wd_name = match wd { 0 => "Mon", 1 => "Tue", 2 => "Wed", 3 => "Thu", 4 => "Fri", 5 => "Sat", _ => "Sun" };
+    let mo_name = match m { 1 => "Jan", 2 => "Feb", 3 => "Mar", 4 => "Apr", 5 => "May", 6 => "Jun", 7 => "Jul", 8 => "Aug", 9 => "Sep", 10 => "Oct", 11 => "Nov", _ => "Dec" };
+
+    let result = pattern.to_string();
+    let result = result.replace("%F", &format!("{:04}-{:02}-{:02}", y, m, d));
+    let result = result.replace("%T", &format!("{:02}:{:02}:{:02}", h, mi, s));
+    let result = result.replace("%Y", &format!("{:04}", y));
+    let result = result.replace("%m", &format!("{:02}", m));
+    let result = result.replace("%d", &format!("{:02}", d));
+    let result = result.replace("%H", &format!("{:02}", h));
+    let result = result.replace("%M", &format!("{:02}", mi));
+    let result = result.replace("%S", &format!("{:02}", s));
+    let result = result.replace("%a", wd_name);
+    let result = result.replace("%b", mo_name);
+    result
+}
+
+#[inline(always)]
+fn almide_rt_datetime_year(ts: i64) -> i64 { almide_rt_datetime_parts(ts).0 }
+
+#[inline(always)]
+fn almide_rt_datetime_month(ts: i64) -> i64 { almide_rt_datetime_parts(ts).1 }
+
+#[inline(always)]
+fn almide_rt_datetime_day(ts: i64) -> i64 { almide_rt_datetime_parts(ts).2 }
+
+#[inline(always)]
+fn almide_rt_datetime_hour(ts: i64) -> i64 { almide_rt_datetime_parts(ts).3 }
+
+#[inline(always)]
+fn almide_rt_datetime_minute(ts: i64) -> i64 { almide_rt_datetime_parts(ts).4 }
+
+#[inline(always)]
+fn almide_rt_datetime_second(ts: i64) -> i64 { almide_rt_datetime_parts(ts).5 }
+
+fn almide_rt_datetime_weekday_num(ts: i64) -> i64 {
+    // 0 = Monday, 6 = Sunday
+    let days = ts.div_euclid(86400);
+    ((days + 3) % 7 + 7) % 7
+}
+
+fn almide_rt_datetime_weekday(ts: i64) -> String {
+    match almide_rt_datetime_weekday_num(ts) {
+        0 => "Monday".to_string(),
+        1 => "Tuesday".to_string(),
+        2 => "Wednesday".to_string(),
+        3 => "Thursday".to_string(),
+        4 => "Friday".to_string(),
+        5 => "Saturday".to_string(),
+        _ => "Sunday".to_string(),
+    }
+}
+
+// ---- End Datetime Runtime ----

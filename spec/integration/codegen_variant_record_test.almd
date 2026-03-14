@@ -57,7 +57,7 @@ test "list of mixed variant records" {
     Close,
     Click { x: 10, y: 20, button: "middle" },
   ]
-  let labels = list.map(events, fn(e) => event_label(e))
+  let labels = list.map(events, (e) => event_label(e))
   assert_eq(list.len(labels), 5)
   assert_eq(list.get(labels, 0), some("click:left"))
   assert_eq(list.get(labels, 3), some("close"))
@@ -78,14 +78,14 @@ test "filter variant records by constructor" {
     Click { x: 2, y: 2 },
     Close,
   ]
-  let clicks = list.filter(events, fn(e) => is_click(e))
+  let clicks = list.filter(events, (e) => is_click(e))
   assert_eq(list.len(clicks), 2)
 }
 
 // ── Extracting fields from variant records ──
 
 fn extract_click_positions(events: List[Event]) -> List[(Int, Int)] =
-  list.filter_map(events, fn(e) => match e {
+  list.filter_map(events, (e) => match e {
     Click { x, y, .. } => some((x, y)),
     _ => none,
   })

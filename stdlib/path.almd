@@ -26,7 +26,7 @@ fn dirname(p: String) -> String = {
 
 fn basename(p: String) -> String = {
   let parts = string.split(p, "/")
-  let filtered = list.filter(parts, fn(s) => string.len(s) > 0)
+  let filtered = list.filter(parts, (s) => string.len(s) > 0)
   match list.last(filtered) {
     some(name) => name
     none => ""
@@ -60,9 +60,9 @@ fn normalize(p: String) -> String = {
   let absolute = string.starts_with?(p, "/")
   let segments = string.split(p, "/")
   // Filter out empty segments (from //) and "." segments
-  let cleaned = list.filter(segments, fn(s) => string.len(s) > 0 and s != ".")
+  let cleaned = list.filter(segments, (s) => string.len(s) > 0 and s != ".")
   // Fold left, building a reversed list of resolved segments
-  let resolved = list.fold(cleaned, [], fn(acc, seg) => {
+  let resolved = list.fold(cleaned, [], (acc, seg) => {
     if seg == ".." then {
       let acc_len = list.len(acc)
       if acc_len == 0 then {

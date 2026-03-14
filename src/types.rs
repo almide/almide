@@ -19,6 +19,8 @@ pub enum Ty {
     Fn { params: Vec<Ty>, ret: Box<Ty> },
     Tuple(Vec<Ty>),
     Named(std::string::String, Vec<Ty>),
+    /// Inline union type (e.g., Int | String). Members are sorted and deduplicated.
+    Union(Vec<Ty>),
     /// Type variable for user-defined generics (e.g., T, U, A, B)
     TypeVar(std::string::String),
     /// Error recovery — unifies with everything to prevent cascade errors
@@ -59,13 +61,15 @@ pub struct FnSig {
     pub is_effect: bool,
     #[allow(dead_code)]
     pub generics: Vec<std::string::String>,
+    /// Structural bounds for generics: TypeVar name → OpenRecord constraint type
+    pub structural_bounds: std::collections::HashMap<std::string::String, Ty>,
 }
 
 /// Convenience macro for creating FnSig without generics (stdlib functions)
 #[macro_export]
 macro_rules! fn_sig {
     (params: $params:expr, ret: $ret:expr, is_effect: $eff:expr) => {
-        FnSig { params: $params, ret: $ret, is_effect: $eff, generics: vec![] }
+        FnSig { params: $params, ret: $ret, is_effect: $eff, generics: vec![], structural_bounds: std::collections::HashMap::new() }
     };
 }
 
@@ -117,6 +121,8 @@ pub struct TypeEnv {
     pub top_lets: std::collections::HashMap<std::string::String, Ty>,
     /// Types that implement the Eq protocol (via `deriving Eq`)
     pub eq_types: std::collections::HashSet<std::string::String>,
+    /// Structural bounds for generic type parameters: TypeVar name → OpenRecord constraint
+    pub structural_bounds: std::collections::HashMap<std::string::String, Ty>,
 }
 
 impl Ty {
@@ -156,8 +162,62 @@ impl Ty {
                     format!("{}[{}]", n, ts.join(", "))
                 }
             }
+            Ty::Union(members) => {
+                let ms: Vec<_> = members.iter().map(|t| t.display()).collect();
+                ms.join(" | ")
+            }
             Ty::TypeVar(n) => n.clone(),
             Ty::Unknown => "Unknown".into(),
+        }
+    }
+
+    /// Returns true if this type is or contains Ty::Unknown anywhere in its structure.
+    pub fn contains_unknown(&self) -> bool {
+        match self {
+            Ty::Unknown => true,
+            Ty::List(inner) | Ty::Option(inner) => inner.contains_unknown(),
+            Ty::Result(ok, err) => ok.contains_unknown() || err.contains_unknown(),
+            Ty::Map(k, v) => k.contains_unknown() || v.contains_unknown(),
+            Ty::Tuple(tys) => tys.iter().any(|t| t.contains_unknown()),
+            Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| t.contains_unknown()),
+            Ty::Fn { params, ret } => params.iter().any(|t| t.contains_unknown()) || ret.contains_unknown(),
+            Ty::Named(_, args) => args.iter().any(|t| t.contains_unknown()),
+            Ty::Variant { cases, .. } => cases.iter().any(|c| match &c.payload {
+                VariantPayload::Unit => false,
+                VariantPayload::Tuple(tys) => tys.iter().any(|t| t.contains_unknown()),
+                VariantPayload::Record(fs) => fs.iter().any(|(_, t, _)| t.contains_unknown()),
+            }),
+            Ty::Union(members) => members.iter().any(|t| t.contains_unknown()),
+            Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit | Ty::TypeVar(_) => false,
+        }
+    }
+
+    /// Construct a normalized union type: flatten nested unions, deduplicate, sort.
+    /// Returns the inner type if only one member remains.
+    pub fn union(mut members: Vec<Ty>) -> Ty {
+        // Flatten nested unions
+        let mut flat = Vec::new();
+        for m in members.drain(..) {
+            if let Ty::Union(inner) = m {
+                flat.extend(inner);
+            } else {
+                flat.push(m);
+            }
+        }
+        // Deduplicate
+        flat.dedup();
+        let mut unique = Vec::new();
+        for t in flat {
+            if !unique.contains(&t) {
+                unique.push(t);
+            }
+        }
+        // Sort by display name for canonical ordering
+        unique.sort_by(|a, b| a.display().cmp(&b.display()));
+        match unique.len() {
+            0 => Ty::Unit,
+            1 => unique.into_iter().next().unwrap(),
+            _ => Ty::Union(unique),
         }
     }
 
@@ -206,8 +266,28 @@ impl Ty {
             (Ty::Tuple(a), Ty::Tuple(b)) => {
                 a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.compatible(y))
             }
+            // Union: a concrete type is compatible with a union if it matches any member
+            (Ty::Union(members), other) => members.iter().any(|m| m.compatible(other)),
+            (other, Ty::Union(members)) => members.iter().any(|m| other.compatible(m)),
             _ => false,
         }
+    }
+}
+
+/// Check if binding TypeVar `var` to `ty` would create an infinite type.
+/// Only detects direct self-recursion: T = List[T], T = Option[T], etc.
+/// Does NOT reject cases where a same-named TypeVar appears from a different scope
+/// (e.g., binding A to List[(A, B)] where A is from the caller's generic context).
+/// Full scope-aware occurs check requires scoped TypeVar IDs (future work).
+fn occurs_in(var: &str, ty: &Ty) -> bool {
+    match ty {
+        Ty::TypeVar(_) => false, // bare TypeVar is never a recursive occurrence
+        Ty::List(inner) | Ty::Option(inner) => matches!(inner.as_ref(), Ty::TypeVar(n) if n == var),
+        Ty::Result(a, b) | Ty::Map(a, b) => {
+            matches!(a.as_ref(), Ty::TypeVar(n) if n == var)
+            || matches!(b.as_ref(), Ty::TypeVar(n) if n == var)
+        }
+        _ => false,
     }
 }
 
@@ -223,10 +303,17 @@ pub fn unify(sig_ty: &Ty, actual_ty: &Ty, bindings: &mut std::collections::HashM
         if let Some(bound) = bindings.get(name) {
             return bound.compatible(actual_ty);
         } else {
+            // Occurs check: prevent infinite types like T = List[T]
+            if occurs_in(name, actual_ty) {
+                return false;
+            }
             bindings.insert(name.clone(), actual_ty.clone());
             return true;
         }
     }
+    // When actual is a TypeVar, it represents an unresolved polymorphic type.
+    // Accept it (polymorphic types are compatible with anything) but don't bind —
+    // the TypeVar will be resolved when the concrete call happens.
     if matches!(actual_ty, Ty::TypeVar(_)) {
         return true;
     }
@@ -252,6 +339,13 @@ pub fn unify(sig_ty: &Ty, actual_ty: &Ty, bindings: &mut std::collections::HashM
         (Ty::Tuple(a), Ty::Tuple(b)) => {
             a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| unify(x, y, bindings))
         }
+        // Named types with type args: unify each arg to bind TypeVars
+        (Ty::Named(a, a_args), Ty::Named(b, b_args)) if a == b && a_args.len() == b_args.len() => {
+            a_args.iter().zip(b_args.iter()).all(|(x, y)| unify(x, y, bindings))
+        }
+        // Union: actual type is compatible if it matches any member
+        (Ty::Union(members), _) => members.iter().any(|m| unify(m, actual_ty, bindings)),
+        (_, Ty::Union(members)) => members.iter().any(|m| unify(sig_ty, m, bindings)),
         _ => sig_ty.compatible(actual_ty),
     }
 }
@@ -279,10 +373,26 @@ pub fn substitute(ty: &Ty, bindings: &std::collections::HashMap<std::string::Str
         Ty::OpenRecord { fields } => Ty::OpenRecord {
             fields: fields.iter().map(|(n, t)| (n.clone(), substitute(t, bindings))).collect(),
         },
+        Ty::Union(members) => Ty::union(members.iter().map(|m| substitute(m, bindings)).collect()),
         Ty::Named(name, args) if !args.is_empty() => {
             Ty::Named(name.clone(), args.iter().map(|a| substitute(a, bindings)).collect())
         }
         _ => ty.clone(),
+    }
+}
+
+/// Check if a type contains any unbound TypeVars.
+pub fn contains_typevar(ty: &Ty) -> bool {
+    match ty {
+        Ty::TypeVar(_) => true,
+        Ty::List(inner) | Ty::Option(inner) => contains_typevar(inner),
+        Ty::Result(a, b) | Ty::Map(a, b) => contains_typevar(a) || contains_typevar(b),
+        Ty::Tuple(elems) => elems.iter().any(contains_typevar),
+        Ty::Fn { params, ret } => params.iter().any(contains_typevar) || contains_typevar(ret),
+        Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| contains_typevar(t)),
+        Ty::Union(members) => members.iter().any(contains_typevar),
+        Ty::Named(_, args) => args.iter().any(contains_typevar),
+        _ => false,
     }
 }
 
@@ -309,6 +419,7 @@ impl TypeEnv {
             var_decl_locs: std::collections::HashMap::new(),
             top_lets: std::collections::HashMap::new(),
             eq_types: std::collections::HashSet::new(),
+            structural_bounds: std::collections::HashMap::new(),
         }
     }
 
@@ -350,6 +461,7 @@ impl TypeEnv {
                     true
                 }
             }
+            Ty::Union(members) => members.iter().all(|m| self.is_eq_inner(m, seen)),
             Ty::Fn { .. } => false,
             Ty::TypeVar(_) => true,
             Ty::Unknown => true,
@@ -392,6 +504,7 @@ impl TypeEnv {
                     true
                 }
             }
+            Ty::Union(members) => members.iter().all(|m| self.is_hash_inner(m, seen)),
             Ty::Fn { .. } => false,
             Ty::TypeVar(_) => true,
             Ty::Unknown => true,
@@ -431,8 +544,16 @@ impl TypeEnv {
     }
 
     pub fn resolve_named(&self, ty: &Ty) -> Ty {
+        self.resolve_named_with_seen(ty, &mut std::collections::HashSet::new())
+    }
+
+    fn resolve_named_with_seen(&self, ty: &Ty, seen: &mut std::collections::HashSet<std::string::String>) -> Ty {
         match ty {
             Ty::Named(name, args) => {
+                // Cycle detection: prevent infinite recursion on recursive type aliases
+                if !seen.insert(name.clone()) {
+                    return ty.clone();
+                }
                 if let Some(resolved) = self.types.get(name) {
                     if args.is_empty() {
                         resolved.clone()

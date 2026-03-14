@@ -349,8 +349,10 @@ fn almide_rt_map_len<K, V>(map: &HashMap<K, V>) -> i64 {
     map.len() as i64
 }
 
-fn almide_rt_map_entries<K: Clone, V: Clone>(map: &HashMap<K, V>) -> Vec<(K, V)> {
-    map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+fn almide_rt_map_entries<K: Clone + Ord, V: Clone>(map: &HashMap<K, V>) -> Vec<(K, V)> {
+    let mut entries: Vec<(K, V)> = map.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+    entries
 }
 
 fn almide_rt_map_merge<K: std::hash::Hash + Eq + Clone, V: Clone>(base: &HashMap<K, V>, other: &HashMap<K, V>) -> HashMap<K, V> {

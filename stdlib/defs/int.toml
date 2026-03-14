@@ -1,124 +1,166 @@
 [to_string]
+description = "Convert an integer to its decimal string representation."
+example = "int.to_string(42) // => \"42\""
 params = [{ name = "n", type = "Int" }]
 return = "String"
 rust = "almide_rt_int_to_string({n})"
 ts = "__almd_int.to_string({n})"
 
 [to_hex]
+description = "Convert an integer to its hexadecimal string representation (lowercase)."
+example = "int.to_hex(255) // => \"ff\""
 params = [{ name = "n", type = "Int" }]
 return = "String"
 rust = "almide_rt_int_to_hex({n})"
 ts = "__almd_int.to_hex({n})"
 
 [parse]
+description = "Parse a decimal string into an integer. Returns err if the string is not a valid integer."
+example = "int.parse(\"42\") // => ok(42)"
 params = [{ name = "s", type = "String" }]
 return = "Result[Int, String]"
 rust = "almide_rt_int_parse(&*{s})"
 ts = "__almd_int.parse({s})"
 
 [parse_hex]
+description = "Parse a hexadecimal string into an integer. Returns err if the string is not valid hex."
+example = "int.parse_hex(\"ff\") // => ok(255)"
 params = [{ name = "s", type = "String" }]
 return = "Result[Int, String]"
 rust = "almide_rt_int_parse_hex(&*{s})"
 ts = "__almd_int.parse_hex({s})"
 
 [abs]
+description = "Return the absolute value of an integer."
+example = "int.abs(-5) // => 5"
 params = [{ name = "n", type = "Int" }]
 return = "Int"
 rust = "almide_rt_int_abs({n})"
 ts = "__almd_int.abs({n})"
 
 [min]
+description = "Return the smaller of two integers."
+example = "int.min(3, 7) // => 3"
 params = [{ name = "a", type = "Int" }, { name = "b", type = "Int" }]
 return = "Int"
 rust = "almide_rt_int_min({a}, {b})"
 ts = "__almd_int.min({a}, {b})"
 
 [max]
+description = "Return the larger of two integers."
+example = "int.max(3, 7) // => 7"
 params = [{ name = "a", type = "Int" }, { name = "b", type = "Int" }]
 return = "Int"
 rust = "almide_rt_int_max({a}, {b})"
 ts = "__almd_int.max({a}, {b})"
 
 [band]
+description = "Bitwise AND of two integers."
+example = "int.band(0b1100, 0b1010) // => 0b1000"
 params = [{ name = "a", type = "Int" }, { name = "b", type = "Int" }]
 return = "Int"
 rust = "almide_rt_int_band({a}, {b})"
 ts = "__almd_int.band({a}, {b})"
 
 [bor]
+description = "Bitwise OR of two integers."
+example = "int.bor(0b1100, 0b1010) // => 0b1110"
 params = [{ name = "a", type = "Int" }, { name = "b", type = "Int" }]
 return = "Int"
 rust = "almide_rt_int_bor({a}, {b})"
 ts = "__almd_int.bor({a}, {b})"
 
 [bxor]
+description = "Bitwise XOR of two integers."
+example = "int.bxor(0b1100, 0b1010) // => 0b0110"
 params = [{ name = "a", type = "Int" }, { name = "b", type = "Int" }]
 return = "Int"
 rust = "almide_rt_int_bxor({a}, {b})"
 ts = "__almd_int.bxor({a}, {b})"
 
 [bshl]
+description = "Bitwise shift left."
+example = "int.bshl(1, 3) // => 8"
 params = [{ name = "a", type = "Int" }, { name = "n", type = "Int" }]
 return = "Int"
 rust = "almide_rt_int_bshl({a}, {n})"
 ts = "__almd_int.bshl({a}, {n})"
 
 [bshr]
+description = "Bitwise shift right (arithmetic)."
+example = "int.bshr(8, 2) // => 2"
 params = [{ name = "a", type = "Int" }, { name = "n", type = "Int" }]
 return = "Int"
 rust = "almide_rt_int_bshr({a}, {n})"
 ts = "__almd_int.bshr({a}, {n})"
 
 [bnot]
+description = "Bitwise NOT (complement) of an integer."
+example = "int.bnot(0) // => -1"
 params = [{ name = "a", type = "Int" }]
 return = "Int"
 rust = "almide_rt_int_bnot({a})"
 ts = "__almd_int.bnot({a})"
 
 [wrap_add]
+description = "Wrapping addition within a given bit width. Overflow wraps around."
+example = "int.wrap_add(255, 1, 8) // => 0"
 params = [{ name = "a", type = "Int" }, { name = "b", type = "Int" }, { name = "bits", type = "Int" }]
 return = "Int"
 rust = "almide_rt_int_wrap_add({a}, {b}, {bits})"
 ts = "__almd_int.wrap_add({a}, {b}, {bits})"
 
 [wrap_mul]
+description = "Wrapping multiplication within a given bit width. Overflow wraps around."
+example = "int.wrap_mul(16, 16, 8) // => 0"
 params = [{ name = "a", type = "Int" }, { name = "b", type = "Int" }, { name = "bits", type = "Int" }]
 return = "Int"
 rust = "almide_rt_int_wrap_mul({a}, {b}, {bits})"
 ts = "__almd_int.wrap_mul({a}, {b}, {bits})"
 
 [rotate_right]
+description = "Rotate bits right within a given bit width."
+example = "int.rotate_right(1, 1, 8) // => 128"
 params = [{ name = "a", type = "Int" }, { name = "n", type = "Int" }, { name = "bits", type = "Int" }]
 return = "Int"
 rust = "almide_rt_int_rotate_right({a}, {n}, {bits})"
 ts = "__almd_int.rotate_right({a}, {n}, {bits})"
 
 [rotate_left]
+description = "Rotate bits left within a given bit width."
+example = "int.rotate_left(128, 1, 8) // => 1"
 params = [{ name = "a", type = "Int" }, { name = "n", type = "Int" }, { name = "bits", type = "Int" }]
 return = "Int"
 rust = "almide_rt_int_rotate_left({a}, {n}, {bits})"
 ts = "__almd_int.rotate_left({a}, {n}, {bits})"
 
 [to_u32]
+description = "Truncate an integer to an unsigned 32-bit value (mask to 0..4294967295)."
+example = "int.to_u32(300) // => 300"
 params = [{ name = "a", type = "Int" }]
 return = "Int"
 rust = "almide_rt_int_to_u32({a})"
 ts = "__almd_int.to_u32({a})"
 
 [to_u8]
+description = "Truncate an integer to an unsigned 8-bit value (mask to 0..255)."
+example = "int.to_u8(300) // => 44"
 params = [{ name = "a", type = "Int" }]
 return = "Int"
 rust = "almide_rt_int_to_u8({a})"
 ts = "__almd_int.to_u8({a})"
 
 [clamp]
+description = "Clamp an integer to the range [lo, hi]."
+example = "int.clamp(15, 0, 10) // => 10"
 params = [{ name = "n", type = "Int" }, { name = "lo", type = "Int" }, { name = "hi", type = "Int" }]
 return = "Int"
 rust = "almide_rt_int_clamp({n}, {lo}, {hi})"
 ts = "__almd_int.clamp({n}, {lo}, {hi})"
 
 [to_float]
+description = "Convert an integer to a floating-point number."
+example = "int.to_float(42) // => 42.0"
 params = [{ name = "n", type = "Int" }]
 return = "Float"
 rust = "almide_rt_int_to_float({n})"

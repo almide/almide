@@ -129,6 +129,122 @@ fn almide_rt_fs_temp_dir() -> String {
     std::env::temp_dir().to_string_lossy().replace('\\', "/")
 }
 
+fn almide_rt_fs_glob(pattern: &str) -> Result<Vec<String>, String> {
+    fn glob_inner(base: &std::path::Path, parts: &[&str], results: &mut Vec<String>) -> Result<(), String> {
+        if parts.is_empty() { return Ok(()); }
+        let part = parts[0];
+        let rest = &parts[1..];
+        if part == "**" {
+            // Match zero or more directories
+            if !rest.is_empty() {
+                glob_inner(base, rest, results)?;
+            }
+            if base.is_dir() {
+                let entries = std::fs::read_dir(base).map_err(|e| e.to_string())?;
+                for entry in entries {
+                    let entry = entry.map_err(|e| e.to_string())?;
+                    let path = entry.path();
+                    if path.is_dir() {
+                        glob_inner(&path, parts, results)?;
+                    }
+                }
+            }
+        } else if base.is_dir() {
+            let entries = std::fs::read_dir(base).map_err(|e| e.to_string())?;
+            for entry in entries {
+                let entry = entry.map_err(|e| e.to_string())?;
+                let name = entry.file_name().to_string_lossy().to_string();
+                if glob_match_part(part, &name) {
+                    let path = entry.path();
+                    if rest.is_empty() {
+                        results.push(path.to_string_lossy().replace('\\', "/"));
+                    } else if path.is_dir() {
+                        glob_inner(&path, rest, results)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    fn glob_match_part(pattern: &str, name: &str) -> bool {
+        if pattern == "*" { return true; }
+        let pat_bytes = pattern.as_bytes();
+        let name_bytes = name.as_bytes();
+        let mut pi = 0;
+        let mut ni = 0;
+        let mut star_pi = usize::MAX;
+        let mut star_ni = 0;
+        while ni < name_bytes.len() {
+            if pi < pat_bytes.len() && (pat_bytes[pi] == b'?' || pat_bytes[pi] == name_bytes[ni]) {
+                pi += 1; ni += 1;
+            } else if pi < pat_bytes.len() && pat_bytes[pi] == b'*' {
+                star_pi = pi; star_ni = ni; pi += 1;
+            } else if star_pi != usize::MAX {
+                pi = star_pi + 1; star_ni += 1; ni = star_ni;
+            } else {
+                return false;
+            }
+        }
+        while pi < pat_bytes.len() && pat_bytes[pi] == b'*' { pi += 1; }
+        pi == pat_bytes.len()
+    }
+    // Split pattern into base dir and glob parts
+    let normalized = pattern.replace('\\', "/");
+    let parts: Vec<&str> = normalized.split('/').collect();
+    let mut base = String::new();
+    let mut glob_start = 0;
+    for (i, part) in parts.iter().enumerate() {
+        if part.contains('*') || part.contains('?') {
+            glob_start = i;
+            break;
+        }
+        if i > 0 { base.push('/'); }
+        base.push_str(part);
+        glob_start = i + 1;
+    }
+    if base.is_empty() { base = ".".to_string(); }
+    let glob_parts: Vec<&str> = parts[glob_start..].to_vec();
+    let mut results = Vec::new();
+    if glob_parts.is_empty() {
+        if std::path::Path::new(&base).exists() {
+            results.push(base);
+        }
+    } else {
+        glob_inner(std::path::Path::new(&base), &glob_parts, &mut results)?;
+    }
+    results.sort();
+    Ok(results)
+}
+
+fn almide_rt_fs_create_temp_file(prefix: &str) -> Result<String, String> {
+    let dir = std::env::temp_dir();
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
+    let name = format!("{}{}", prefix, stamp);
+    let path = dir.join(name);
+    std::fs::write(&path, "").map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().replace('\\', "/"))
+}
+
+fn almide_rt_fs_create_temp_dir(prefix: &str) -> Result<String, String> {
+    let dir = std::env::temp_dir();
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
+    let name = format!("{}{}", prefix, stamp);
+    let path = dir.join(name);
+    std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().replace('\\', "/"))
+}
+
+fn almide_rt_fs_is_symlink(path: &str) -> bool {
+    std::fs::symlink_metadata(path).map(|m| m.file_type().is_symlink()).unwrap_or(false)
+}
+
+fn almide_rt_fs_modified_at(path: &str) -> Result<i64, String> {
+    let meta = std::fs::metadata(path).map_err(|e| e.to_string())?;
+    meta.modified().map_err(|e| e.to_string())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).map_err(|e| e.to_string()))
+        .map(|d| d.as_secs() as i64)
+}
+
 // ---- env ----
 
 fn almide_rt_env_unix_timestamp() -> i64 {
@@ -336,4 +452,179 @@ fn almide_rt_random_shuffle<T: Clone>(xs: Vec<T>) -> Result<Vec<T>, String> {
         v.swap(i, j);
     }
     Ok(v)
+}
+
+// ---- log ----
+
+fn almide_rt_log_debug(msg: &str) { eprintln!("[DEBUG] {}", msg); }
+fn almide_rt_log_info(msg: &str) { eprintln!("[INFO] {}", msg); }
+fn almide_rt_log_warn(msg: &str) { eprintln!("[WARN] {}", msg); }
+fn almide_rt_log_error(msg: &str) { eprintln!("[ERROR] {}", msg); }
+
+fn almide_rt_log_debug_with(msg: &str, fields: &[(String, String)]) { let kv: Vec<String> = fields.iter().map(|(k, v)| format!("{}={}", k, v)).collect(); eprintln!("[DEBUG] {} {}", msg, kv.join(" ")); }
+fn almide_rt_log_info_with(msg: &str, fields: &[(String, String)]) { let kv: Vec<String> = fields.iter().map(|(k, v)| format!("{}={}", k, v)).collect(); eprintln!("[INFO] {} {}", msg, kv.join(" ")); }
+fn almide_rt_log_warn_with(msg: &str, fields: &[(String, String)]) { let kv: Vec<String> = fields.iter().map(|(k, v)| format!("{}={}", k, v)).collect(); eprintln!("[WARN] {} {}", msg, kv.join(" ")); }
+fn almide_rt_log_error_with(msg: &str, fields: &[(String, String)]) { let kv: Vec<String> = fields.iter().map(|(k, v)| format!("{}={}", k, v)).collect(); eprintln!("[ERROR] {} {}", msg, kv.join(" ")); }
+
+// ---- crypto ----
+
+fn almide_rt_crypto_random_bytes(n: i64) -> Result<Vec<i64>, String> {
+    let mut buf = vec![0u8; n as usize];
+    almide_rt_fill_random_bytes(&mut buf)?;
+    Ok(buf.into_iter().map(|b| b as i64).collect())
+}
+
+fn almide_rt_crypto_random_hex(n: i64) -> Result<String, String> {
+    let mut buf = vec![0u8; n as usize];
+    almide_rt_fill_random_bytes(&mut buf)?;
+    Ok(buf.iter().map(|b| format!("{:02x}", b)).collect())
+}
+
+fn almide_rt_crypto_hmac_sha256(key: &str, data: &str) -> Result<String, String> {
+    // HMAC-SHA256: RFC 2104
+    let block_size = 64usize;
+    let key_bytes = key.as_bytes();
+    let mut padded_key = vec![0u8; block_size];
+    if key_bytes.len() > block_size {
+        // Hash key if longer than block size
+        let hashed = almide_rt_sha256_bytes(key_bytes);
+        padded_key[..hashed.len()].copy_from_slice(&hashed);
+    } else {
+        padded_key[..key_bytes.len()].copy_from_slice(key_bytes);
+    }
+    let mut ipad = vec![0x36u8; block_size];
+    let mut opad = vec![0x5cu8; block_size];
+    for i in 0..block_size {
+        ipad[i] ^= padded_key[i];
+        opad[i] ^= padded_key[i];
+    }
+    ipad.extend_from_slice(data.as_bytes());
+    let inner_hash = almide_rt_sha256_bytes(&ipad);
+    opad.extend_from_slice(&inner_hash);
+    let result = almide_rt_sha256_bytes(&opad);
+    Ok(result.iter().map(|b| format!("{:02x}", b)).collect())
+}
+
+fn almide_rt_crypto_hmac_verify(key: &str, data: &str, signature: &str) -> Result<bool, String> {
+    let computed = almide_rt_crypto_hmac_sha256(key, data)?;
+    // Constant-time comparison
+    let a = computed.as_bytes();
+    let b = signature.as_bytes();
+    if a.len() != b.len() { return Ok(false); }
+    let mut diff = 0u8;
+    for i in 0..a.len() {
+        diff |= a[i] ^ b[i];
+    }
+    Ok(diff == 0)
+}
+
+fn almide_rt_sha256_bytes(data: &[u8]) -> Vec<u8> {
+    let k: [u32; 64] = [
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    ];
+    let mut h: [u32; 8] = [
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+        0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+    ];
+    // Padding
+    let bit_len = (data.len() as u64) * 8;
+    let mut msg = data.to_vec();
+    msg.push(0x80);
+    while msg.len() % 64 != 56 { msg.push(0); }
+    msg.extend_from_slice(&bit_len.to_be_bytes());
+    // Process blocks
+    for chunk in msg.chunks(64) {
+        let mut w = [0u32; 64];
+        for i in 0..16 {
+            w[i] = u32::from_be_bytes([chunk[i*4], chunk[i*4+1], chunk[i*4+2], chunk[i*4+3]]);
+        }
+        for i in 16..64 {
+            let s0 = w[i-15].rotate_right(7) ^ w[i-15].rotate_right(18) ^ (w[i-15] >> 3);
+            let s1 = w[i-2].rotate_right(17) ^ w[i-2].rotate_right(19) ^ (w[i-2] >> 10);
+            w[i] = w[i-16].wrapping_add(s0).wrapping_add(w[i-7]).wrapping_add(s1);
+        }
+        let (mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut hh) =
+            (h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7]);
+        for i in 0..64 {
+            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let ch = (e & f) ^ ((!e) & g);
+            let t1 = hh.wrapping_add(s1).wrapping_add(ch).wrapping_add(k[i]).wrapping_add(w[i]);
+            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let maj = (a & b) ^ (a & c) ^ (b & c);
+            let t2 = s0.wrapping_add(maj);
+            hh = g; g = f; f = e; e = d.wrapping_add(t1);
+            d = c; c = b; b = a; a = t1.wrapping_add(t2);
+        }
+        h[0] = h[0].wrapping_add(a); h[1] = h[1].wrapping_add(b);
+        h[2] = h[2].wrapping_add(c); h[3] = h[3].wrapping_add(d);
+        h[4] = h[4].wrapping_add(e); h[5] = h[5].wrapping_add(f);
+        h[6] = h[6].wrapping_add(g); h[7] = h[7].wrapping_add(hh);
+    }
+    let mut result = Vec::with_capacity(32);
+    for v in &h { result.extend_from_slice(&v.to_be_bytes()); }
+    result
+}
+
+// ---- test ----
+
+fn almide_rt_test_assert_throws(f: impl Fn() -> (), expected: &str) {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f()));
+    match result {
+        Ok(()) => panic!("assert_throws: expected error '{}' but function succeeded", expected),
+        Err(e) => {
+            let msg = if let Some(s) = e.downcast_ref::<String>() {
+                s.clone()
+            } else if let Some(s) = e.downcast_ref::<&str>() {
+                s.to_string()
+            } else {
+                format!("{:?}", e)
+            };
+            if !msg.contains(expected) {
+                panic!("assert_throws: expected error containing '{}' but got '{}'", expected, msg);
+            }
+        }
+    }
+}
+
+fn almide_rt_test_assert_contains(haystack: &str, needle: &str) {
+    if !haystack.contains(needle) {
+        panic!("assert_contains failed\n  expected to contain: {:?}\n  in: {:?}", needle, haystack);
+    }
+}
+
+fn almide_rt_test_assert_approx(a: f64, b: f64, tolerance: f64) {
+    if (a - b).abs() > tolerance {
+        panic!("assert_approx failed\n  left:  {}\n  right: {}\n  diff:  {} > tolerance {}", a, b, (a - b).abs(), tolerance);
+    }
+}
+
+fn almide_rt_test_assert_gt(a: i64, b: i64) {
+    if a <= b {
+        panic!("assert_gt failed: {} is not greater than {}", a, b);
+    }
+}
+
+fn almide_rt_test_assert_lt(a: i64, b: i64) {
+    if a >= b {
+        panic!("assert_lt failed: {} is not less than {}", a, b);
+    }
+}
+
+fn almide_rt_test_assert_some(opt: &Option<String>) {
+    if opt.is_none() {
+        panic!("assert_some failed: got none");
+    }
+}
+
+fn almide_rt_test_assert_ok(result: &Result<String, String>) {
+    if let Err(e) = result {
+        panic!("assert_ok failed: got err({})", e);
+    }
 }

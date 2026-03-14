@@ -87,7 +87,7 @@ test "default fields - list of shapes with defaults" {
     Rect { width: 2.0, height: 3.0 },
     Group { label: "g" },
   ]
-  let descriptions = list.map(shapes, fn(s) => describe(s))
+  let descriptions = list.map(shapes, (s) => describe(s))
   assert_eq(list.len(descriptions), 3)
   assert_eq(list.get(descriptions, 0), some("circle r=1.0"))
   assert_eq(list.get(descriptions, 2), some("g (0 items)"))

@@ -1,23 +1,23 @@
 type Task = { title: String, done: Bool }
 
 fn pending(tasks: List[Task]) -> List[Task] =
-  tasks |> list.filter(fn(t) => not t.done)
+  tasks |> list.filter((t) => not t.done)
 
 fn done_count(tasks: List[Task]) -> Int =
-  tasks |> list.count(fn(t) => t.done)
+  tasks |> list.count((t) => t.done)
 
 fn summary(tasks: List[Task]) -> List[String] =
   tasks
-    |> list.map(fn(t) => {
+    |> list.map((t) => {
       let status = if t.done then "done" else "todo"
       "${t.title} [${status}]"
     })
 
 fn find_task(tasks: List[Task], title: String) -> Option[Task] =
-  tasks |> list.find(fn(t) => t.title == title)
+  tasks |> list.find((t) => t.title == title)
 
 fn mark_done(tasks: List[Task], title: String) -> List[Task] =
-  tasks |> list.map(fn(t) =>
+  tasks |> list.map((t) =>
     if t.title == title then Task { title: t.title, done: true }
     else t
   )

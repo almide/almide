@@ -104,24 +104,24 @@ test "list.contains" {
 
 test "list.map" {
   let xs = [1, 2, 3]
-  let doubled = list.map(xs, fn(x) => x * 2)
+  let doubled = list.map(xs, (x) => x * 2)
   assert_eq(doubled, [2, 4, 6])
 }
 
 test "list.filter" {
   let xs = [1, 2, 3, 4, 5]
-  let evens = list.filter(xs, fn(x) => x % 2 == 0)
+  let evens = list.filter(xs, (x) => x % 2 == 0)
   assert_eq(evens, [2, 4])
 }
 
 test "list.find" {
   let xs = ["a", "bb", "ccc"]
-  assert_eq(list.find(xs, fn(x) => string.len(x) > 1), some("bb"))
-  assert_eq(list.find(xs, fn(x) => string.len(x) > 10), none)
+  assert_eq(list.find(xs, (x) => string.len(x) > 1), some("bb"))
+  assert_eq(list.find(xs, (x) => string.len(x) > 10), none)
 }
 
 test "list.fold" {
-  let sum = list.fold([1, 2, 3, 4], 0, fn(acc, x) => acc + x)
+  let sum = list.fold([1, 2, 3, 4], 0, (acc, x) => acc + x)
   assert_eq(sum, 10)
 }
 
@@ -287,13 +287,13 @@ test "list.reverse" {
 }
 
 test "list.any" {
-  assert(list.any([1, 2, 3], fn(x) => x == 2))
-  assert(not list.any([1, 2, 3], fn(x) => x == 5))
+  assert(list.any([1, 2, 3], (x) => x == 2))
+  assert(not list.any([1, 2, 3], (x) => x == 5))
 }
 
 test "list.all" {
-  assert(list.all([2, 4, 6], fn(x) => x % 2 == 0))
-  assert(not list.all([2, 3, 6], fn(x) => x % 2 == 0))
+  assert(list.all([2, 4, 6], (x) => x % 2 == 0))
+  assert(not list.all([2, 3, 6], (x) => x % 2 == 0))
 }
 
 // ============================================================
@@ -312,13 +312,13 @@ test "map.get_or" {
 
 test "simple hash fold" {
   let data = string.to_bytes("test")
-  let h = list.fold(data, 5381, fn(h, b) => h * 33 + b)
+  let h = list.fold(data, 5381, (h, b) => h * 33 + b)
   assert(h > 0, "hash should be positive")
 }
 
 test "hash deterministic" {
-  let h1 = list.fold(string.to_bytes("hello"), 5381, fn(h, b) => h * 33 + b)
-  let h2 = list.fold(string.to_bytes("hello"), 5381, fn(h, b) => h * 33 + b)
+  let h1 = list.fold(string.to_bytes("hello"), 5381, (h, b) => h * 33 + b)
+  let h2 = list.fold(string.to_bytes("hello"), 5381, (h, b) => h * 33 + b)
   assert_eq(h1, h2)
 }
 
@@ -529,7 +529,7 @@ test "list.drop all" {
 // ============================================================
 
 test "list.sort_by string length" {
-  let result = list.sort_by(["bb", "a", "ccc"], fn(s) => string.len(s))
+  let result = list.sort_by(["bb", "a", "ccc"], (s) => string.len(s))
   assert_eq(result, ["a", "bb", "ccc"])
 }
 

@@ -7,14 +7,14 @@ fn flag?(name: String) -> Bool = {
   let args = env.args()
   let long = "--" ++ name
   let short = "-" ++ string.slice(name, 0, 1)
-  list.any(args, fn(a) => a == long or a == short)
+  list.any(args, (a) => a == long or a == short)
 }
 
 fn option(name: String) -> Option[String] = {
   let args = env.args()
   let long = "--" ++ name
   let eq_prefix = long ++ "="
-  let eq_match = list.find(args, fn(a) => string.starts_with?(a, eq_prefix))
+  let eq_match = list.find(args, (a) => string.starts_with?(a, eq_prefix))
   match eq_match {
     some(a) => string.strip_prefix(a, eq_prefix)
     none => {
@@ -35,7 +35,7 @@ fn option_or(name: String, fallback: String) -> String =
 
 fn positional() -> List[String] = {
   let args = list.drop(env.args(), 1)
-  list.filter(args, fn(a) => not string.starts_with?(a, "-"))
+  list.filter(args, (a) => not string.starts_with?(a, "-"))
 }
 
 fn positional_at(i: Int) -> Option[String] =

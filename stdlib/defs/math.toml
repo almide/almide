@@ -1,124 +1,166 @@
 [min]
+description = "Return the smaller of two integers."
+example = "math.min(3, 7) // => 3"
 params = [{ name = "a", type = "Int" }, { name = "b", type = "Int" }]
 return = "Int"
 rust = "almide_rt_math_min({a}, {b})"
 ts = "__almd_math.min({a}, {b})"
 
 [max]
+description = "Return the larger of two integers."
+example = "math.max(3, 7) // => 7"
 params = [{ name = "a", type = "Int" }, { name = "b", type = "Int" }]
 return = "Int"
 rust = "almide_rt_math_max({a}, {b})"
 ts = "__almd_math.max({a}, {b})"
 
 [abs]
+description = "Return the absolute value of an integer."
+example = "math.abs(-5) // => 5"
 params = [{ name = "n", type = "Int" }]
 return = "Int"
 rust = "almide_rt_math_abs({n})"
 ts = "__almd_math.abs({n})"
 
 [pow]
+description = "Raise an integer base to an integer exponent."
+example = "math.pow(2, 10) // => 1024"
 params = [{ name = "base", type = "Int" }, { name = "exp", type = "Int" }]
 return = "Int"
 rust = "almide_rt_math_pow({base}, {exp})"
 ts = "__almd_math.pow({base}, {exp})"
 
 [pi]
+description = "Return the mathematical constant pi (3.14159...)."
+example = "math.pi() // => 3.141592653589793"
 params = []
 return = "Float"
 rust = "almide_rt_math_pi()"
 ts = "__almd_math.pi()"
 
 [e]
+description = "Return Euler's number e (2.71828...)."
+example = "math.e() // => 2.718281828459045"
 params = []
 return = "Float"
 rust = "almide_rt_math_e()"
 ts = "__almd_math.e()"
 
 [sin]
+description = "Return the sine of an angle in radians."
+example = "math.sin(0.0) // => 0.0"
 params = [{ name = "x", type = "Float" }]
 return = "Float"
 rust = "almide_rt_math_sin({x})"
 ts = "__almd_math.sin({x})"
 
 [cos]
+description = "Return the cosine of an angle in radians."
+example = "math.cos(0.0) // => 1.0"
 params = [{ name = "x", type = "Float" }]
 return = "Float"
 rust = "almide_rt_math_cos({x})"
 ts = "__almd_math.cos({x})"
 
 [tan]
+description = "Return the tangent of an angle in radians."
+example = "math.tan(0.0) // => 0.0"
 params = [{ name = "x", type = "Float" }]
 return = "Float"
 rust = "almide_rt_math_tan({x})"
 ts = "__almd_math.tan({x})"
 
 [log]
+description = "Return the natural logarithm (base e) of a float."
+example = "math.log(1.0) // => 0.0"
 params = [{ name = "x", type = "Float" }]
 return = "Float"
 rust = "almide_rt_math_log({x})"
 ts = "__almd_math.log({x})"
 
 [exp]
+description = "Return e raised to the given power."
+example = "math.exp(1.0) // => 2.718281828459045"
 params = [{ name = "x", type = "Float" }]
 return = "Float"
 rust = "almide_rt_math_exp({x})"
 ts = "__almd_math.exp({x})"
 
 [sqrt]
+description = "Return the square root of a float."
+example = "math.sqrt(16.0) // => 4.0"
 params = [{ name = "x", type = "Float" }]
 return = "Float"
 rust = "almide_rt_math_sqrt({x})"
 ts = "__almd_math.sqrt({x})"
 
 [log10]
+description = "Return the base-10 logarithm of a float."
+example = "math.log10(100.0) // => 2.0"
 params = [{ name = "x", type = "Float" }]
 return = "Float"
 rust = "almide_rt_math_log10({x})"
 ts = "Math.log10({x})"
 
 [log2]
+description = "Return the base-2 logarithm of a float."
+example = "math.log2(8.0) // => 3.0"
 params = [{ name = "x", type = "Float" }]
 return = "Float"
 rust = "almide_rt_math_log2({x})"
 ts = "Math.log2({x})"
 
 [sign]
+description = "Return the sign of an integer: -1, 0, or 1."
+example = "math.sign(-42) // => -1"
 params = [{ name = "n", type = "Int" }]
 return = "Int"
 rust = "almide_rt_math_sign({n})"
 ts = "Math.sign({n})"
 
 [fmin]
+description = "Return the smaller of two floats."
+example = "math.fmin(1.5, 2.5) // => 1.5"
 params = [{ name = "a", type = "Float" }, { name = "b", type = "Float" }]
 return = "Float"
 rust = "almide_rt_math_fmin({a}, {b})"
 ts = "Math.min({a}, {b})"
 
 [fmax]
+description = "Return the larger of two floats."
+example = "math.fmax(1.5, 2.5) // => 2.5"
 params = [{ name = "a", type = "Float" }, { name = "b", type = "Float" }]
 return = "Float"
 rust = "almide_rt_math_fmax({a}, {b})"
 ts = "Math.max({a}, {b})"
 
 [fpow]
+description = "Raise a float base to a float exponent."
+example = "math.fpow(2.0, 0.5) // => 1.4142135623730951"
 params = [{ name = "base", type = "Float" }, { name = "exp", type = "Float" }]
 return = "Float"
 rust = "almide_rt_math_fpow({base}, {exp})"
 ts = "Math.pow({base}, {exp})"
 
 [factorial]
+description = "Return the factorial of a non-negative integer."
+example = "math.factorial(5) // => 120"
 params = [{ name = "n", type = "Int" }]
 return = "Int"
 rust = "almide_rt_math_factorial({n})"
 ts = "__almd_math.factorial({n})"
 
 [choose]
+description = "Return the binomial coefficient C(n, k) = n! / (k! * (n-k)!)."
+example = "math.choose(5, 2) // => 10"
 params = [{ name = "n", type = "Int" }, { name = "k", type = "Int" }]
 return = "Int"
 rust = "almide_rt_math_choose({n}, {k})"
 ts = "__almd_math.choose({n}, {k})"
 
 [log_gamma]
+description = "Return the natural logarithm of the gamma function at x."
+example = "math.log_gamma(5.0) // => 3.178..."
 params = [{ name = "x", type = "Float" }]
 return = "Float"
 rust = "almide_rt_math_log_gamma({x})"

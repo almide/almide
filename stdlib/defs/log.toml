@@ -1,0 +1,71 @@
+[debug]
+description = "Log a debug message to stderr."
+example = 'log.debug("cache hit")'
+params = [{ name = "msg", type = "String" }]
+return = "Unit"
+effect = true
+rust = "almide_rt_log_debug(&*{msg})"
+ts = "__almd_log.debug({msg})"
+
+[info]
+description = "Log an info message to stderr."
+example = 'log.info("server started")'
+params = [{ name = "msg", type = "String" }]
+return = "Unit"
+effect = true
+rust = "almide_rt_log_info(&*{msg})"
+ts = "__almd_log.info({msg})"
+
+[warn]
+description = "Log a warning message to stderr."
+example = 'log.warn("disk space low")'
+params = [{ name = "msg", type = "String" }]
+return = "Unit"
+effect = true
+rust = "almide_rt_log_warn(&*{msg})"
+ts = "__almd_log.warn({msg})"
+
+[error]
+description = "Log an error message to stderr."
+example = 'log.error("connection failed")'
+params = [{ name = "msg", type = "String" }]
+return = "Unit"
+effect = true
+rust = "almide_rt_log_error(&*{msg})"
+ts = "__almd_log.error({msg})"
+
+[debug_with]
+description = "Log a debug message with structured key-value fields."
+example = 'log.debug_with("cache hit", [("key", cache_key)])'
+params = [{ name = "msg", type = "String" }, { name = "fields", type = "List[(String, String)]" }]
+return = "Unit"
+effect = true
+rust = "almide_rt_log_debug_with(&*{msg}, &{fields})"
+ts = "__almd_log.debug_with({msg}, {fields})"
+
+[info_with]
+description = "Log an info message with structured key-value fields."
+example = 'log.info_with("user login", [("user_id", id), ("ip", addr)])'
+params = [{ name = "msg", type = "String" }, { name = "fields", type = "List[(String, String)]" }]
+return = "Unit"
+effect = true
+rust = "almide_rt_log_info_with(&*{msg}, &{fields})"
+ts = "__almd_log.info_with({msg}, {fields})"
+
+[warn_with]
+description = "Log a warning message with structured key-value fields."
+example = 'log.warn_with("slow query", [("duration_ms", "500")])'
+params = [{ name = "msg", type = "String" }, { name = "fields", type = "List[(String, String)]" }]
+return = "Unit"
+effect = true
+rust = "almide_rt_log_warn_with(&*{msg}, &{fields})"
+ts = "__almd_log.warn_with({msg}, {fields})"
+
+[error_with]
+description = "Log an error message with structured key-value fields."
+example = 'log.error_with("read failed", [("path", path), ("error", e)])'
+params = [{ name = "msg", type = "String" }, { name = "fields", type = "List[(String, String)]" }]
+return = "Unit"
+effect = true
+rust = "almide_rt_log_error_with(&*{msg}, &{fields})"
+ts = "__almd_log.error_with({msg}, {fields})"

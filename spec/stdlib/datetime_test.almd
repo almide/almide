@@ -1,0 +1,175 @@
+// datetime module tests
+import datetime
+
+// Known timestamp: 2024-01-15 10:30:45 UTC = 1705311045
+
+// ── from_parts / to_unix ──
+
+test "datetime.from_parts produces correct timestamp" {
+  let ts = datetime.from_parts(2024, 1, 15, 10, 30, 45)
+  assert_eq(ts, 1705314645)
+}
+
+test "datetime.to_unix is identity" {
+  let ts = datetime.from_parts(2024, 1, 15, 10, 30, 45)
+  assert_eq(datetime.to_unix(ts), ts)
+}
+
+test "datetime.from_unix is identity" {
+  let ts = datetime.from_parts(2024, 1, 15, 10, 30, 45)
+  assert_eq(datetime.from_unix(ts), ts)
+}
+
+// ── Part access ──
+
+test "datetime.year" {
+  let ts = datetime.from_parts(2024, 1, 15, 10, 30, 45)
+  assert_eq(datetime.year(ts), 2024)
+}
+
+test "datetime.month" {
+  let ts = datetime.from_parts(2024, 1, 15, 10, 30, 45)
+  assert_eq(datetime.month(ts), 1)
+}
+
+test "datetime.day" {
+  let ts = datetime.from_parts(2024, 1, 15, 10, 30, 45)
+  assert_eq(datetime.day(ts), 15)
+}
+
+test "datetime.hour" {
+  let ts = datetime.from_parts(2024, 1, 15, 10, 30, 45)
+  assert_eq(datetime.hour(ts), 10)
+}
+
+test "datetime.minute" {
+  let ts = datetime.from_parts(2024, 1, 15, 10, 30, 45)
+  assert_eq(datetime.minute(ts), 30)
+}
+
+test "datetime.second" {
+  let ts = datetime.from_parts(2024, 1, 15, 10, 30, 45)
+  assert_eq(datetime.second(ts), 45)
+}
+
+test "datetime.weekday" {
+  // 2024-01-15 is Monday
+  let ts = datetime.from_parts(2024, 1, 15, 10, 30, 45)
+  assert_eq(datetime.weekday(ts), "Monday")
+}
+
+// ── Formatting ──
+
+test "datetime.to_iso" {
+  let ts = datetime.from_parts(2024, 1, 15, 10, 30, 45)
+  assert_eq(datetime.to_iso(ts), "2024-01-15T10:30:45Z")
+}
+
+test "datetime.format date only" {
+  let ts = datetime.from_parts(2024, 1, 15, 10, 30, 45)
+  assert_eq(datetime.format(ts, "%Y-%m-%d"), "2024-01-15")
+}
+
+test "datetime.format time only" {
+  let ts = datetime.from_parts(2024, 1, 15, 10, 30, 45)
+  assert_eq(datetime.format(ts, "%H:%M:%S"), "10:30:45")
+}
+
+test "datetime.format shortcuts" {
+  let ts = datetime.from_parts(2024, 1, 15, 10, 30, 45)
+  assert_eq(datetime.format(ts, "%F"), "2024-01-15")
+  assert_eq(datetime.format(ts, "%T"), "10:30:45")
+}
+
+test "datetime.format with weekday and month" {
+  let ts = datetime.from_parts(2024, 1, 15, 10, 30, 45)
+  assert_eq(datetime.format(ts, "%a %b %d"), "Mon Jan 15")
+}
+
+// ── Parsing ──
+
+test "datetime.parse_iso full" {
+  let ts = datetime.from_parts(2024, 1, 15, 10, 30, 45)
+  let parsed = datetime.parse_iso("2024-01-15T10:30:45Z")
+  assert_eq(parsed, ts)
+}
+
+test "datetime.parse_iso date only" {
+  let parsed = datetime.parse_iso("2024-01-15")
+  let expected = datetime.from_parts(2024, 1, 15, 0, 0, 0)
+  assert_eq(parsed, expected)
+}
+
+// ── Arithmetic ──
+
+test "datetime.add_days" {
+  let ts = datetime.from_parts(2024, 1, 15, 10, 30, 45)
+  let next_day = datetime.add_days(ts, 1)
+  assert_eq(datetime.day(next_day), 16)
+  assert_eq(datetime.hour(next_day), 10)
+}
+
+test "datetime.add_hours" {
+  let ts = datetime.from_parts(2024, 1, 15, 10, 30, 45)
+  let later = datetime.add_hours(ts, 5)
+  assert_eq(datetime.hour(later), 15)
+}
+
+test "datetime.add_minutes" {
+  let ts = datetime.from_parts(2024, 1, 15, 10, 30, 45)
+  let later = datetime.add_minutes(ts, 45)
+  assert_eq(datetime.hour(later), 11)
+  assert_eq(datetime.minute(later), 15)
+}
+
+test "datetime.add_seconds" {
+  let ts = datetime.from_parts(2024, 1, 15, 10, 30, 45)
+  let later = datetime.add_seconds(ts, 20)
+  assert_eq(datetime.second(later), 5)
+  assert_eq(datetime.minute(later), 31)
+}
+
+test "datetime.diff_seconds" {
+  let ts = datetime.from_parts(2024, 1, 15, 10, 30, 45)
+  let ts2 = datetime.add_hours(ts, 2)
+  assert_eq(datetime.diff_seconds(ts2, ts), 7200)
+}
+
+test "datetime.is_before?" {
+  let ts = datetime.from_parts(2024, 1, 15, 10, 30, 45)
+  let ts2 = datetime.add_days(ts, 1)
+  assert(datetime.is_before?(ts, ts2))
+  assert(not datetime.is_before?(ts2, ts))
+}
+
+test "datetime.is_after?" {
+  let ts = datetime.from_parts(2024, 1, 15, 10, 30, 45)
+  let ts2 = datetime.add_days(ts, 1)
+  assert(datetime.is_after?(ts2, ts))
+  assert(not datetime.is_after?(ts, ts2))
+}
+
+// ── Edge cases ──
+
+test "datetime.from_parts epoch" {
+  let epoch = datetime.from_parts(1970, 1, 1, 0, 0, 0)
+  assert_eq(epoch, 0)
+}
+
+test "datetime.from_parts roundtrip" {
+  let ts = datetime.from_parts(2024, 1, 15, 10, 30, 45)
+  let y = datetime.year(ts)
+  let m = datetime.month(ts)
+  let d = datetime.day(ts)
+  let h = datetime.hour(ts)
+  let min = datetime.minute(ts)
+  let sec = datetime.second(ts)
+  let roundtrip = datetime.from_parts(y, m, d, h, min, sec)
+  assert_eq(roundtrip, ts)
+}
+
+test "datetime.add_days negative" {
+  let ts = datetime.from_parts(2024, 1, 15, 10, 30, 45)
+  let yesterday = datetime.add_days(ts, -1)
+  assert_eq(datetime.day(yesterday), 14)
+}

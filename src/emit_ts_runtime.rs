@@ -53,6 +53,62 @@ const MOD_FS_TS: &str = r#"const __almd_fs = {
   remove_all(p: string): void { try { Deno.removeSync(p, { recursive: true }); } catch {} },
   file_size(p: string): number { return Deno.statSync(p).size; },
   temp_dir(): string { return Deno.env.get("TMPDIR") || "/tmp"; },
+  glob(pattern: string): string[] {
+    const results: string[] = [];
+    const parts = pattern.split("/");
+    let base = "";
+    let gi = 0;
+    for (let i = 0; i < parts.length; i++) {
+      if (parts[i].includes("*") || parts[i].includes("?")) { gi = i; break; }
+      base += (i > 0 ? "/" : "") + parts[i];
+      gi = i + 1;
+    }
+    if (!base) base = ".";
+    const globParts = parts.slice(gi);
+    function match1(pat: string, name: string): boolean {
+      if (pat === "*") return true;
+      let pi = 0, ni = 0, sp = -1, sn = 0;
+      while (ni < name.length) {
+        if (pi < pat.length && (pat[pi] === "?" || pat[pi] === name[ni])) { pi++; ni++; }
+        else if (pi < pat.length && pat[pi] === "*") { sp = pi; sn = ni; pi++; }
+        else if (sp >= 0) { pi = sp + 1; sn++; ni = sn; }
+        else return false;
+      }
+      while (pi < pat.length && pat[pi] === "*") pi++;
+      return pi === pat.length;
+    }
+    function inner(dir: string, gp: string[]) {
+      if (gp.length === 0) return;
+      const part = gp[0], rest = gp.slice(1);
+      if (part === "**") {
+        if (rest.length) inner(dir, rest);
+        try { for (const e of Deno.readDirSync(dir)) { if (e.isDirectory) inner(dir + "/" + e.name, gp); } } catch {}
+      } else {
+        try {
+          for (const e of Deno.readDirSync(dir)) {
+            if (match1(part, e.name)) {
+              const p = dir + "/" + e.name;
+              if (rest.length === 0) results.push(p);
+              else if (e.isDirectory) inner(p, rest);
+            }
+          }
+        } catch {}
+      }
+    }
+    if (globParts.length === 0) { try { Deno.statSync(base); results.push(base); } catch {} }
+    else inner(base, globParts);
+    return results.sort();
+  },
+  create_temp_file(prefix: string): string {
+    const p = Deno.makeTempFileSync({ prefix });
+    return p.replace(/\\/g, "/");
+  },
+  create_temp_dir(prefix: string): string {
+    const p = Deno.makeTempDirSync({ prefix });
+    return p.replace(/\\/g, "/");
+  },
+  is_symlink_hdlm_qm_(p: string): boolean { try { return Deno.lstatSync(p).isSymlink; } catch { return false; } },
+  modified_at(p: string): number { const s = Deno.statSync(p); return Math.floor((s.mtime?.getTime() ?? 0) / 1000); },
 };
 "#;
 
@@ -94,6 +150,66 @@ const MOD_FS_JS: &str = r#"const __almd_fs = {
   remove_all(p) { require("fs").rmSync(p, { recursive: true, force: true }); },
   file_size(p) { return require("fs").statSync(p).size; },
   temp_dir() { return require("os").tmpdir().replace(/\\/g, "/"); },
+  glob(pattern) {
+    const fs = require("fs"), path = require("path");
+    const results = [];
+    const parts = pattern.split("/");
+    var base = "", gi = 0;
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i].includes("*") || parts[i].includes("?")) { gi = i; break; }
+      base += (i > 0 ? "/" : "") + parts[i];
+      gi = i + 1;
+    }
+    if (!base) base = ".";
+    const globParts = parts.slice(gi);
+    function match1(pat, name) {
+      if (pat === "*") return true;
+      var pi = 0, ni = 0, sp = -1, sn = 0;
+      while (ni < name.length) {
+        if (pi < pat.length && (pat[pi] === "?" || pat[pi] === name[ni])) { pi++; ni++; }
+        else if (pi < pat.length && pat[pi] === "*") { sp = pi; sn = ni; pi++; }
+        else if (sp >= 0) { pi = sp + 1; sn++; ni = sn; }
+        else return false;
+      }
+      while (pi < pat.length && pat[pi] === "*") pi++;
+      return pi === pat.length;
+    }
+    function inner(dir, gp) {
+      if (gp.length === 0) return;
+      var part = gp[0], rest = gp.slice(1);
+      if (part === "**") {
+        if (rest.length) inner(dir, rest);
+        try { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { if (e.isDirectory()) inner(dir + "/" + e.name, gp); } } catch {}
+      } else {
+        try {
+          for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+            if (match1(part, e.name)) {
+              var p = dir + "/" + e.name;
+              if (rest.length === 0) results.push(p);
+              else if (e.isDirectory()) inner(p, rest);
+            }
+          }
+        } catch {}
+      }
+    }
+    if (globParts.length === 0) { try { fs.statSync(base); results.push(base); } catch {} }
+    else inner(base, globParts);
+    return results.sort();
+  },
+  create_temp_file(prefix) {
+    const os = require("os"), fs = require("fs"), path = require("path");
+    const p = path.join(os.tmpdir(), prefix + Date.now() + Math.random().toString(36).slice(2));
+    fs.writeFileSync(p, "");
+    return p.replace(/\\/g, "/");
+  },
+  create_temp_dir(prefix) {
+    const os = require("os"), fs = require("fs"), path = require("path");
+    const p = path.join(os.tmpdir(), prefix + Date.now() + Math.random().toString(36).slice(2));
+    fs.mkdirSync(p, { recursive: true });
+    return p.replace(/\\/g, "/");
+  },
+  is_symlink_hdlm_qm_(p) { try { return require("fs").lstatSync(p).isSymbolicLink(); } catch { return false; } },
+  modified_at(p) { return Math.floor(require("fs").statSync(p).mtimeMs / 1000); },
 };
 "#;
 
@@ -749,14 +865,16 @@ const HELPERS_TS: &str = r#"function __bigop(op: string, a: any, b: any): any {
   if (typeof a === "bigint" || typeof b === "bigint") {
     const ba = typeof a === "bigint" ? a : BigInt(a);
     const bb = typeof b === "bigint" ? b : BigInt(b);
+    let r: bigint;
     switch(op) {
-      case "^": return ba ^ bb;
-      case "*": return ba * bb;
-      case "%": return ba % bb;
-      case "+": return ba + bb;
-      case "-": return ba - bb;
-      default: return ba;
+      case "^": r = ba ^ bb; break;
+      case "*": r = ba * bb; break;
+      case "%": r = ba % bb; break;
+      case "+": r = ba + bb; break;
+      case "-": r = ba - bb; break;
+      default: r = ba;
     }
+    return BigInt.asIntN(64, r);
   }
   switch(op) {
     case "^": return a ^ b; case "*": return a * b; case "%": return a % b;
@@ -767,7 +885,7 @@ function __div(a: any, b: any): any {
   if (typeof a === "bigint" || typeof b === "bigint") {
     const ba = typeof a === "bigint" ? a : BigInt(a);
     const bb = typeof b === "bigint" ? b : BigInt(b);
-    return ba / bb;
+    return BigInt.asIntN(64, ba / bb);
   }
   const r = a / b;
   return (Number.isInteger(a) && Number.isInteger(b)) ? Math.trunc(r) : r;
@@ -782,6 +900,11 @@ function __deep_eq(a: any, b: any): boolean {
   if (Array.isArray(a) && Array.isArray(b)) {
     if (a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) { if (!__deep_eq(a[i], b[i])) return false; }
+    return true;
+  }
+  if (a instanceof Map && b instanceof Map) {
+    if (a.size !== b.size) return false;
+    for (const [k, v] of a) { if (!b.has(k) || !__deep_eq(v, b.get(k))) return false; }
     return true;
   }
   if (a && b && typeof a === "object" && typeof b === "object") {
@@ -808,14 +931,16 @@ const HELPERS_JS: &str = r#"function __bigop(op, a, b) {
   if (typeof a === "bigint" || typeof b === "bigint") {
     const ba = typeof a === "bigint" ? a : BigInt(a);
     const bb = typeof b === "bigint" ? b : BigInt(b);
+    var r;
     switch(op) {
-      case "^": return ba ^ bb;
-      case "*": return ba * bb;
-      case "%": return ba % bb;
-      case "+": return ba + bb;
-      case "-": return ba - bb;
-      default: return ba;
+      case "^": r = ba ^ bb; break;
+      case "*": r = ba * bb; break;
+      case "%": r = ba % bb; break;
+      case "+": r = ba + bb; break;
+      case "-": r = ba - bb; break;
+      default: r = ba;
     }
+    return BigInt.asIntN(64, r);
   }
   switch(op) {
     case "^": return a ^ b; case "*": return a * b; case "%": return a % b;
@@ -826,7 +951,7 @@ function __div(a, b) {
   if (typeof a === "bigint" || typeof b === "bigint") {
     const ba = typeof a === "bigint" ? a : BigInt(a);
     const bb = typeof b === "bigint" ? b : BigInt(b);
-    return ba / bb;
+    return BigInt.asIntN(64, ba / bb);
   }
   const r = a / b;
   return (Number.isInteger(a) && Number.isInteger(b)) ? Math.trunc(r) : r;
@@ -841,6 +966,11 @@ function __deep_eq(a, b) {
   if (Array.isArray(a) && Array.isArray(b)) {
     if (a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) { if (!__deep_eq(a[i], b[i])) return false; }
+    return true;
+  }
+  if (a instanceof Map && b instanceof Map) {
+    if (a.size !== b.size) return false;
+    for (const [k, v] of a) { if (!b.has(k) || !__deep_eq(v, b.get(k))) return false; }
     return true;
   }
   if (a && b && typeof a === "object" && typeof b === "object") {
@@ -884,6 +1014,242 @@ function __almd_result_to_option(v) { return v; }
 function __almd_result_to_err_option(_v) { return null; }
 "#;
 
+// ──────────────────────────────── error ────────────────────────────────
+
+// Error module: context/message are mostly no-ops in TS due to result erasure.
+// Errors are thrown as exceptions, so only `chain` does real work.
+const MOD_ERROR_TS: &str = r#"const __almd_error = {
+  chain(outer: string, cause: string): string { return outer + ": " + cause; },
+  message(_r: any): string { return ""; },
+};
+"#;
+
+const MOD_ERROR_JS: &str = r#"const __almd_error = {
+  chain(outer, cause) { return outer + ": " + cause; },
+  message(_r) { return ""; },
+};
+"#;
+
+// ──────────────────────────────── datetime ────────────────────────────────
+
+const MOD_DATETIME_TS: &str = r#"const __almd_datetime = {
+  now(): number { return Math.floor(Date.now() / 1000); },
+  from_parts(y: number, m: number, d: number, h: number, min: number, s: number): number { return Math.floor(Date.UTC(y, m - 1, d, h, min, s) / 1000); },
+  parse_iso(s: string): number { const d = new Date(s); if (isNaN(d.getTime())) throw new Error(`invalid ISO 8601 datetime: ${s}`); return Math.floor(d.getTime() / 1000); },
+  format(ts: number, pattern: string): string { const d = new Date(ts * 1000); const pad = (n: number, w: number = 2) => String(n).padStart(w, "0"); const Y = pad(d.getUTCFullYear(), 4); const m = pad(d.getUTCMonth() + 1); const dd = pad(d.getUTCDate()); const H = pad(d.getUTCHours()); const M = pad(d.getUTCMinutes()); const S = pad(d.getUTCSeconds()); const days = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]; const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]; const wd = d.getUTCDay(); const a = days[wd === 0 ? 6 : wd - 1]; const b = months[d.getUTCMonth()]; return pattern.replace("%F", `${Y}-${m}-${dd}`).replace("%T", `${H}:${M}:${S}`).replace("%Y", Y).replace("%m", m).replace("%d", dd).replace("%H", H).replace("%M", M).replace("%S", S).replace("%a", a).replace("%b", b); },
+  to_iso(ts: number): string { const d = new Date(ts * 1000); const pad = (n: number, w: number = 2) => String(n).padStart(w, "0"); return `${pad(d.getUTCFullYear(), 4)}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}Z`; },
+  year(ts: number): number { return new Date(ts * 1000).getUTCFullYear(); },
+  month(ts: number): number { return new Date(ts * 1000).getUTCMonth() + 1; },
+  day(ts: number): number { return new Date(ts * 1000).getUTCDate(); },
+  hour(ts: number): number { return new Date(ts * 1000).getUTCHours(); },
+  minute(ts: number): number { return new Date(ts * 1000).getUTCMinutes(); },
+  second(ts: number): number { return new Date(ts * 1000).getUTCSeconds(); },
+  weekday(ts: number): string { const days = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"]; return days[new Date(ts * 1000).getUTCDay()]; },
+};
+"#;
+
+const MOD_DATETIME_JS: &str = r#"const __almd_datetime = {
+  now() { return Math.floor(Date.now() / 1000); },
+  from_parts(y, m, d, h, min, s) { return Math.floor(Date.UTC(y, m - 1, d, h, min, s) / 1000); },
+  parse_iso(s) { const d = new Date(s); if (isNaN(d.getTime())) throw new Error(`invalid ISO 8601 datetime: ${s}`); return Math.floor(d.getTime() / 1000); },
+  format(ts, pattern) { const d = new Date(ts * 1000); const pad = (n, w = 2) => String(n).padStart(w, "0"); const Y = pad(d.getUTCFullYear(), 4); const m = pad(d.getUTCMonth() + 1); const dd = pad(d.getUTCDate()); const H = pad(d.getUTCHours()); const M = pad(d.getUTCMinutes()); const S = pad(d.getUTCSeconds()); const days = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]; const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]; const wd = d.getUTCDay(); const a = days[wd === 0 ? 6 : wd - 1]; const b = months[d.getUTCMonth()]; return pattern.replace("%F", `${Y}-${m}-${dd}`).replace("%T", `${H}:${M}:${S}`).replace("%Y", Y).replace("%m", m).replace("%d", dd).replace("%H", H).replace("%M", M).replace("%S", S).replace("%a", a).replace("%b", b); },
+  to_iso(ts) { const d = new Date(ts * 1000); const pad = (n, w = 2) => String(n).padStart(w, "0"); return `${pad(d.getUTCFullYear(), 4)}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}Z`; },
+  year(ts) { return new Date(ts * 1000).getUTCFullYear(); },
+  month(ts) { return new Date(ts * 1000).getUTCMonth() + 1; },
+  day(ts) { return new Date(ts * 1000).getUTCDate(); },
+  hour(ts) { return new Date(ts * 1000).getUTCHours(); },
+  minute(ts) { return new Date(ts * 1000).getUTCMinutes(); },
+  second(ts) { return new Date(ts * 1000).getUTCSeconds(); },
+  weekday(ts) { const days = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"]; return days[new Date(ts * 1000).getUTCDay()]; },
+};
+"#;
+
+const MOD_TESTING_TS: &str = r#"const __almd_testing = {
+  assert_throws(f: () => void, expected: string): void {
+    try { f(); throw new Error("__no_throw__"); }
+    catch (e: any) {
+      if (e.message === "__no_throw__") throw new Error(`assert_throws: expected error '${expected}' but function succeeded`);
+      if (!e.message.includes(expected)) throw new Error(`assert_throws: expected error containing '${expected}' but got '${e.message}'`);
+    }
+  },
+  assert_contains(haystack: string, needle: string): void {
+    if (!haystack.includes(needle)) throw new Error(`assert_contains failed\n  expected to contain: "${needle}"\n  in: "${haystack}"`);
+  },
+  assert_approx(a: number, b: number, tolerance: number): void {
+    if (Math.abs(a - b) > tolerance) throw new Error(`assert_approx failed\n  left:  ${a}\n  right: ${b}\n  diff:  ${Math.abs(a - b)} > tolerance ${tolerance}`);
+  },
+  assert_gt(a: number, b: number): void {
+    if (a <= b) throw new Error(`assert_gt failed: ${a} is not greater than ${b}`);
+  },
+  assert_lt(a: number, b: number): void {
+    if (a >= b) throw new Error(`assert_lt failed: ${a} is not less than ${b}`);
+  },
+  assert_some(opt: any): void {
+    if (opt === null || opt === undefined) throw new Error("assert_some failed: got none");
+  },
+  assert_ok(result: any): void {
+    if (result instanceof __Err) throw new Error(`assert_ok failed: got err(${result.message})`);
+  },
+};
+"#;
+
+const MOD_TESTING_JS: &str = r#"const __almd_testing = {
+  assert_throws(f, expected) {
+    try { f(); throw new Error("__no_throw__"); }
+    catch (e) {
+      if (e.message === "__no_throw__") throw new Error("assert_throws: expected error '" + expected + "' but function succeeded");
+      if (!e.message.includes(expected)) throw new Error("assert_throws: expected error containing '" + expected + "' but got '" + e.message + "'");
+    }
+  },
+  assert_contains(haystack, needle) {
+    if (!haystack.includes(needle)) throw new Error("assert_contains failed\n  expected to contain: \"" + needle + "\"\n  in: \"" + haystack + "\"");
+  },
+  assert_approx(a, b, tolerance) {
+    if (Math.abs(a - b) > tolerance) throw new Error("assert_approx failed\n  left:  " + a + "\n  right: " + b + "\n  diff:  " + Math.abs(a - b) + " > tolerance " + tolerance);
+  },
+  assert_gt(a, b) {
+    if (a <= b) throw new Error("assert_gt failed: " + a + " is not greater than " + b);
+  },
+  assert_lt(a, b) {
+    if (a >= b) throw new Error("assert_lt failed: " + a + " is not less than " + b);
+  },
+  assert_some(opt) {
+    if (opt === null || opt === undefined) throw new Error("assert_some failed: got none");
+  },
+  assert_ok(result) {
+    if (result instanceof __Err) throw new Error("assert_ok failed: got err(" + result.message + ")");
+  },
+};
+"#;
+
+const MOD_CRYPTO_TS: &str = r#"const __almd_crypto = {
+  random_bytes(n: number): number[] {
+    const buf = new Uint8Array(n);
+    crypto.getRandomValues(buf);
+    return Array.from(buf);
+  },
+  random_hex(n: number): string {
+    const buf = new Uint8Array(n);
+    crypto.getRandomValues(buf);
+    return Array.from(buf).map(b => b.toString(16).padStart(2, "0")).join("");
+  },
+  async hmac_sha256(key: string, data: string): Promise<string> {
+    const enc = new TextEncoder();
+    const k = await crypto.subtle.importKey("raw", enc.encode(key), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const sig = await crypto.subtle.sign("HMAC", k, enc.encode(data));
+    return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
+  },
+  async hmac_verify(key: string, data: string, signature: string): Promise<boolean> {
+    const computed = await __almd_crypto.hmac_sha256(key, data);
+    if (computed.length !== signature.length) return false;
+    let diff = 0;
+    for (let i = 0; i < computed.length; i++) diff |= computed.charCodeAt(i) ^ signature.charCodeAt(i);
+    return diff === 0;
+  },
+};
+"#;
+
+const MOD_CRYPTO_JS: &str = r#"const __almd_crypto = {
+  random_bytes(n) {
+    return Array.from(require("crypto").randomBytes(n));
+  },
+  random_hex(n) {
+    return require("crypto").randomBytes(n).toString("hex");
+  },
+  hmac_sha256(key, data) {
+    const h = require("crypto").createHmac("sha256", key);
+    h.update(data);
+    return h.digest("hex");
+  },
+  hmac_verify(key, data, signature) {
+    const computed = __almd_crypto.hmac_sha256(key, data);
+    if (computed.length !== signature.length) return false;
+    return require("crypto").timingSafeEqual(Buffer.from(computed), Buffer.from(signature));
+  },
+};
+"#;
+
+const MOD_UUID_TS: &str = r#"const __almd_uuid = {
+  v4(): string {
+    return crypto.randomUUID();
+  },
+  v5(namespace: string, name: string): string {
+    // v5 requires SHA-1 — simplified implementation
+    const data = namespace.replace(/-/g, "") + name;
+    let hash = 0;
+    for (let i = 0; i < data.length; i++) {
+      hash = ((hash << 5) - hash + data.charCodeAt(i)) | 0;
+    }
+    const hex = Math.abs(hash).toString(16).padStart(32, "0").slice(0, 32);
+    return `${hex.slice(0,8)}-${hex.slice(8,12)}-5${hex.slice(13,16)}-${(parseInt(hex.slice(16,18),16) & 0x3F | 0x80).toString(16)}${hex.slice(18,20)}-${hex.slice(20,32)}`;
+  },
+  parse(s: string): string {
+    if (!__almd_uuid.is_valid(s)) throw new Error(`invalid UUID: ${s}`);
+    return s.toLowerCase();
+  },
+  is_valid(s: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s.trim());
+  },
+  nil(): string { return "00000000-0000-0000-0000-000000000000"; },
+  version(s: string): number {
+    if (!__almd_uuid.is_valid(s)) throw new Error(`invalid UUID: ${s}`);
+    return parseInt(s.charAt(14), 16);
+  },
+};
+"#;
+
+const MOD_UUID_JS: &str = r#"const __almd_uuid = {
+  v4() {
+    return require("crypto").randomUUID();
+  },
+  v5(namespace, name) {
+    const data = namespace.replace(/-/g, "") + name;
+    let hash = 0;
+    for (let i = 0; i < data.length; i++) {
+      hash = ((hash << 5) - hash + data.charCodeAt(i)) | 0;
+    }
+    const hex = Math.abs(hash).toString(16).padStart(32, "0").slice(0, 32);
+    return `${hex.slice(0,8)}-${hex.slice(8,12)}-5${hex.slice(13,16)}-${(parseInt(hex.slice(16,18),16) & 0x3F | 0x80).toString(16)}${hex.slice(18,20)}-${hex.slice(20,32)}`;
+  },
+  parse(s) {
+    if (!__almd_uuid.is_valid(s)) throw new Error("invalid UUID: " + s);
+    return s.toLowerCase();
+  },
+  is_valid(s) {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s.trim());
+  },
+  nil() { return "00000000-0000-0000-0000-000000000000"; },
+  version(s) {
+    if (!__almd_uuid.is_valid(s)) throw new Error("invalid UUID: " + s);
+    return parseInt(s.charAt(14), 16);
+  },
+};
+"#;
+
+const MOD_LOG_TS: &str = r#"const __almd_log = {
+  debug(msg: string): void { console.error(`[DEBUG] ${msg}`); },
+  info(msg: string): void { console.error(`[INFO] ${msg}`); },
+  warn(msg: string): void { console.error(`[WARN] ${msg}`); },
+  error(msg: string): void { console.error(`[ERROR] ${msg}`); },
+  debug_with(msg: string, fields: [string, string][]): void { const kv = fields.map(([k,v]) => `${k}=${v}`).join(" "); console.error(`[DEBUG] ${msg} ${kv}`); },
+  info_with(msg: string, fields: [string, string][]): void { const kv = fields.map(([k,v]) => `${k}=${v}`).join(" "); console.error(`[INFO] ${msg} ${kv}`); },
+  warn_with(msg: string, fields: [string, string][]): void { const kv = fields.map(([k,v]) => `${k}=${v}`).join(" "); console.error(`[WARN] ${msg} ${kv}`); },
+  error_with(msg: string, fields: [string, string][]): void { const kv = fields.map(([k,v]) => `${k}=${v}`).join(" "); console.error(`[ERROR] ${msg} ${kv}`); },
+};
+"#;
+
+const MOD_LOG_JS: &str = r#"const __almd_log = {
+  debug(msg) { console.error("[DEBUG] " + msg); },
+  info(msg) { console.error("[INFO] " + msg); },
+  warn(msg) { console.error("[WARN] " + msg); },
+  error(msg) { console.error("[ERROR] " + msg); },
+  debug_with(msg, fields) { var kv = fields.map(function(f) { return f[0] + "=" + f[1]; }).join(" "); console.error("[DEBUG] " + msg + " " + kv); },
+  info_with(msg, fields) { var kv = fields.map(function(f) { return f[0] + "=" + f[1]; }).join(" "); console.error("[INFO] " + msg + " " + kv); },
+  warn_with(msg, fields) { var kv = fields.map(function(f) { return f[0] + "=" + f[1]; }).join(" "); console.error("[WARN] " + msg + " " + kv); },
+  error_with(msg, fields) { var kv = fields.map(function(f) { return f[0] + "=" + f[1]; }).join(" "); console.error("[ERROR] " + msg + " " + kv); },
+};
+"#;
+
 // ──────────────────────────────── Registry ────────────────────────────────
 
 /// A runtime module with TS (Deno) and JS (Node.js) source variants.
@@ -912,6 +1278,12 @@ pub static ALL_MODULES: &[RuntimeModule] = &[
     RuntimeModule { name: "time",    ts_source: MOD_TIME_TS,    js_source: MOD_TIME_JS },
     RuntimeModule { name: "http",    ts_source: MOD_HTTP_TS,    js_source: MOD_HTTP_JS },
     RuntimeModule { name: "result",  ts_source: MOD_RESULT_TS,  js_source: MOD_RESULT_JS },
+    RuntimeModule { name: "error",    ts_source: MOD_ERROR_TS,    js_source: MOD_ERROR_JS },
+    RuntimeModule { name: "datetime", ts_source: MOD_DATETIME_TS, js_source: MOD_DATETIME_JS },
+    RuntimeModule { name: "testing",  ts_source: MOD_TESTING_TS,  js_source: MOD_TESTING_JS },
+    RuntimeModule { name: "crypto",   ts_source: MOD_CRYPTO_TS,   js_source: MOD_CRYPTO_JS },
+    RuntimeModule { name: "uuid",     ts_source: MOD_UUID_TS,     js_source: MOD_UUID_JS },
+    RuntimeModule { name: "log",      ts_source: MOD_LOG_TS,      js_source: MOD_LOG_JS },
 ];
 
 /// Compose the full runtime string (backwards compatible with --target ts/js).

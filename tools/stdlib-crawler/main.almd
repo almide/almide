@@ -1,0 +1,83 @@
+// stdlib-crawler: Collect stdlib function encyclopedia from other languages.
+//
+// Usage:
+//   almide run tools/stdlib-crawler/main.almd -- python --list
+//   almide run tools/stdlib-crawler/main.almd -- python datetime
+
+effect fn main() -> Unit = do {
+  let args = env.args()
+  guard list.len(args) >= 2 else err("Usage: stdlib-crawler <language> <module|--list>")
+
+  let language = args[0]
+  let command = args[1]
+
+  match language {
+    "python" =>
+      if command == "--list" then
+        python_list_modules()
+      else
+        python_collect_module(command)
+    _ => {
+      eprintln("Unsupported language: {language}")
+      process.exit(1)
+    }
+  }
+}
+
+// ── Python: list all stdlib modules ─────────────────
+
+effect fn python_list_modules() -> Unit = do {
+  let script = string.join([
+    "import sys, json",
+    "names = sorted(sys.stdlib_module_names - {'__main__', '__phello__', '_thread'})",
+    "names = [n for n in names if not n.startswith('_')]",
+    "for n in names: print(n)"
+  ], "\n")
+  let output = process.exec("python3", ["-c", script])
+  let lines = string.split(output, "\n")
+  let count = list.len(list.filter(lines, fn(l) => string.len(l) > 0))
+  println("Python stdlib: {int.to_string(count)} modules")
+  println(output)
+}
+
+// ── Python: collect a single module ─────────────────
+
+effect fn python_collect_module(mod_name: String) -> Unit = do {
+  let script = string.join([
+    "import sys,json,inspect,importlib",
+    "mod_name=sys.argv[1]",
+    "try:",
+    "    mod=importlib.import_module(mod_name)",
+    "except ImportError as e:",
+    "    print(json.dumps({'language':'python','module':mod_name,'error':str(e)}))",
+    "    sys.exit(0)",
+    "functions=[]",
+    "classes=[]",
+    "for name,obj in inspect.getmembers(mod):",
+    "    if name.startswith('_'): continue",
+    "    if inspect.isfunction(obj) or inspect.isbuiltin(obj):",
+    "        try: sig=str(inspect.signature(obj))",
+    "        except: sig=''",
+    "        doc=(obj.__doc__ or '').strip().split(chr(10))[0][:200]",
+    "        functions.append({'name':name,'signature':sig,'description':doc})",
+    "    elif inspect.isclass(obj) and getattr(obj,'__module__','')==mod_name:",
+    "        methods=[]",
+    "        for mname,mobj in inspect.getmembers(obj):",
+    "            if mname.startswith('_') and mname!='__init__': continue",
+    "            if not callable(mobj): continue",
+    "            try: sig=str(inspect.signature(mobj))",
+    "            except: sig=''",
+    "            doc=(mobj.__doc__ or '').strip().split(chr(10))[0][:200]",
+    "            methods.append({'name':mname,'signature':sig,'description':doc})",
+    "        cdoc=(obj.__doc__ or '').strip().split(chr(10))[0][:200]",
+    "        classes.append({'name':name,'description':cdoc,'methods':methods})",
+    "mod_doc=(mod.__doc__ or '').strip().split(chr(10))[0][:200]",
+    "total=len(functions)+sum(len(c['methods']) for c in classes)",
+    "result={'language':'python','version':sys.version.split()[0],'module':mod_name,'description':mod_doc,'function_count':total,'functions':functions,'classes':classes}",
+    "print(json.dumps(result,ensure_ascii=False))"
+  ], "\n")
+  let output = process.exec("python3", ["-c", script, mod_name])
+  let parsed = json.parse(output)
+  let pretty = json.stringify_pretty(parsed)
+  println(pretty)
+}

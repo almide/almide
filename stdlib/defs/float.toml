@@ -1,88 +1,118 @@
 [to_string]
+description = "Convert a float to its string representation."
+example = "float.to_string(3.14) // => \"3.14\""
 params = [{ name = "n", type = "Float" }]
 return = "String"
 rust = "almide_rt_float_to_string({n})"
 ts = "__almd_float.to_string({n})"
 
 [to_int]
+description = "Truncate a float to an integer (rounds toward zero)."
+example = "float.to_int(3.9) // => 3"
 params = [{ name = "n", type = "Float" }]
 return = "Int"
 rust = "almide_rt_float_to_int({n})"
 ts = "__almd_float.to_int({n})"
 
 [round]
+description = "Round a float to the nearest integer value (as Float)."
+example = "float.round(3.6) // => 4.0"
 params = [{ name = "n", type = "Float" }]
 return = "Float"
 rust = "almide_rt_float_round({n})"
 ts = "__almd_float.round({n})"
 
 [floor]
+description = "Round a float down to the nearest integer value (as Float)."
+example = "float.floor(3.9) // => 3.0"
 params = [{ name = "n", type = "Float" }]
 return = "Float"
 rust = "almide_rt_float_floor({n})"
 ts = "__almd_float.floor({n})"
 
 [ceil]
+description = "Round a float up to the nearest integer value (as Float)."
+example = "float.ceil(3.1) // => 4.0"
 params = [{ name = "n", type = "Float" }]
 return = "Float"
 rust = "almide_rt_float_ceil({n})"
 ts = "__almd_float.ceil({n})"
 
 [abs]
+description = "Return the absolute value of a float."
+example = "float.abs(-2.5) // => 2.5"
 params = [{ name = "n", type = "Float" }]
 return = "Float"
 rust = "almide_rt_float_abs({n})"
 ts = "__almd_float.abs({n})"
 
 [sqrt]
+description = "Return the square root of a float."
+example = "float.sqrt(9.0) // => 3.0"
 params = [{ name = "n", type = "Float" }]
 return = "Float"
 rust = "almide_rt_float_sqrt({n})"
 ts = "__almd_float.sqrt({n})"
 
 [parse]
+description = "Parse a string into a float. Returns err if the string is not a valid number."
+example = "float.parse(\"3.14\") // => ok(3.14)"
 params = [{ name = "s", type = "String" }]
 return = "Result[Float, String]"
 rust = "almide_rt_float_parse(&*{s})?"
 ts = "__almd_float.parse({s})"
 
 [from_int]
+description = "Convert an integer to a float."
+example = "float.from_int(42) // => 42.0"
 params = [{ name = "n", type = "Int" }]
 return = "Float"
 rust = "almide_rt_float_from_int({n})"
 ts = "__almd_float.from_int({n})"
 
 [min]
+description = "Return the smaller of two floats."
+example = "float.min(1.5, 2.5) // => 1.5"
 params = [{ name = "a", type = "Float" }, { name = "b", type = "Float" }]
 return = "Float"
 rust = "almide_rt_float_min({a}, {b})"
 ts = "__almd_float.min({a}, {b})"
 
 [max]
+description = "Return the larger of two floats."
+example = "float.max(1.5, 2.5) // => 2.5"
 params = [{ name = "a", type = "Float" }, { name = "b", type = "Float" }]
 return = "Float"
 rust = "almide_rt_float_max({a}, {b})"
 ts = "__almd_float.max({a}, {b})"
 
 [to_fixed]
+description = "Format a float with a fixed number of decimal places."
+example = "float.to_fixed(3.14159, 2) // => \"3.14\""
 params = [{ name = "n", type = "Float" }, { name = "decimals", type = "Int" }]
 return = "String"
 rust = "almide_rt_float_to_fixed({n}, {decimals})"
 ts = "__almd_float.to_fixed({n}, {decimals})"
 
 [clamp]
+description = "Clamp a float to the range [lo, hi]."
+example = "float.clamp(15.0, 0.0, 10.0) // => 10.0"
 params = [{ name = "n", type = "Float" }, { name = "lo", type = "Float" }, { name = "hi", type = "Float" }]
 return = "Float"
 rust = "almide_rt_float_clamp({n}, {lo}, {hi})"
 ts = "__almd_float.clamp({n}, {lo}, {hi})"
 
 [sign]
+description = "Return the sign of a float: -1.0, 0.0, or 1.0."
+example = "float.sign(-3.5) // => -1.0"
 params = [{ name = "n", type = "Float" }]
 return = "Float"
 rust = "almide_rt_float_sign({n})"
 ts = "Math.sign({n})"
 
 ["is_nan?"]
+description = "Check if a float is NaN (not a number)."
+example = "float.is_nan?(0.0 / 0.0) // => true"
 params = [{ name = "n", type = "Float" }]
 return = "Bool"
 rust = "({n}).is_nan()"
@@ -90,6 +120,8 @@ ts = "Number.isNaN({n})"
 aliases = ["is_nan_hdlm_qm_"]
 
 ["is_infinite?"]
+description = "Check if a float is positive or negative infinity."
+example = "float.is_infinite?(1.0 / 0.0) // => true"
 params = [{ name = "n", type = "Float" }]
 return = "Bool"
 rust = "({n}).is_infinite()"

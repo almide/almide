@@ -60,13 +60,13 @@ test "list.is_empty? false" {
 
 test "list.flat_map basic" {
   let xs = [1, 2, 3]
-  let result = list.flat_map(xs, fn(x) => [x, x * 10])
+  let result = list.flat_map(xs, (x) => [x, x * 10])
   assert_eq(result, [1, 10, 2, 20, 3, 30])
 }
 
 test "list.flat_map with strings" {
   let xs = ["ab", "cd"]
-  let result = list.flat_map(xs, fn(s) => string.chars(s))
+  let result = list.flat_map(xs, (s) => string.chars(s))
   assert_eq(result, ["a", "b", "c", "d"])
 }
 

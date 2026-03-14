@@ -39,7 +39,7 @@ test "variant record in list" {
     Include("#other")
   ]
   assert_eq(list.len(pats), 3)
-  let result = list.map(pats, fn(p) => describe(p))
+  let result = list.map(pats, (p) => describe(p))
   assert_eq(result, ["match: keyword \\blet\\b", "match: type \\bInt\\b", "include: #other"])
 }
 
@@ -84,7 +84,7 @@ test "variant record match with binding" {
 
 test "variant record include in list" {
   let includes = [Include("#a"), Include("#b"), Include("#c")]
-  let descs = list.map(includes, fn(p) => describe(p))
+  let descs = list.map(includes, (p) => describe(p))
   assert_eq(descs, ["include: #a", "include: #b", "include: #c"])
 }
 
@@ -111,7 +111,7 @@ test "variant record count by type" {
 }
 
 fn extract_scopes(pats: List[Pat]) -> List[String] =
-  list.filter_map(pats, fn(p) => match p {
+  list.filter_map(pats, (p) => match p {
     Match { scope, .. } => some(scope),
     BeginEnd { scope, .. } => some(scope),
     _ => none,

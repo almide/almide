@@ -1,0 +1,68 @@
+name: Feature Branch CI
+
+# Lightweight CI for agent feature branches.
+# Build + cargo test + exercises only. No cross-platform, TS, JS, WASM.
+
+on:
+  push:
+    branches:
+      - '*/[a-z]*'        # dolphin/*, shark/*, octopus/*, squid/*, clownfish/*
+      - 'feature/**'
+      - 'worktree-*/**'
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - 'LICENSE'
+      - '.tasks/**'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.89.0"
+
+jobs:
+  build-and-test:
+    name: Build & Test (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: feature-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: feature-cargo-${{ env.RUST_TOOLCHAIN }}-
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Cargo tests
+        run: cargo test
+
+      - name: Run exercises (Rust target)
+        run: |
+          ALMIDE=./target/release/almide
+          failed=0; passed=0
+          for f in exercises/*/*.almd; do
+            case "$f" in *_error_test.almd) continue;; esac
+            if $ALMIDE run "$f" 2>&1; then
+              passed=$((passed + 1))
+            else
+              echo "FAIL: $f"
+              failed=$((failed + 1))
+            fi
+          done
+          echo "::notice::Rust target: $passed passed, $failed failed"
+          [ $failed -eq 0 ]
+
+      - name: Emit check (smoke)
+        run: |
+          ALMIDE=./target/release/almide
+          $ALMIDE exercises/pangram/pangram.almd --target rust > /dev/null && echo "Rust emit OK"
+          $ALMIDE exercises/pangram/pangram.almd --target ts   > /dev/null && echo "TS emit OK"

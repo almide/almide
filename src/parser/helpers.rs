@@ -68,6 +68,37 @@ impl Parser {
         }
     }
 
+    /// Look ahead to check if `(...)` is followed by `=>` — indicating a paren-style lambda.
+    /// Handles: `() =>`, `(x) =>`, `(x, y) =>`, `(x: T) =>`, `((a, b)) =>`
+    pub(crate) fn peek_paren_lambda(&self) -> bool {
+        if self.current().token_type != TokenType::LParen {
+            return false;
+        }
+        let mut depth = 1;
+        let mut i = 1; // skip the opening `(`
+        loop {
+            let tok = match self.peek_at(i) {
+                Some(t) => t,
+                None => return false,
+            };
+            match tok.token_type {
+                TokenType::LParen => depth += 1,
+                TokenType::RParen => {
+                    depth -= 1;
+                    if depth == 0 {
+                        // Check if next token after `)` is `=>`
+                        return self.peek_at(i + 1)
+                            .map(|t| t.token_type == TokenType::FatArrow)
+                            .unwrap_or(false);
+                    }
+                }
+                TokenType::EOF => return false,
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+
     pub(crate) fn check(&self, token_type: TokenType) -> bool {
         self.current().token_type == token_type
     }

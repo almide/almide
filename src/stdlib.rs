@@ -2,10 +2,10 @@
 /// Both the type checker (check.rs) and code generator (emit_rust.rs) reference this module
 /// to avoid duplicating function signatures, module lists, and UFCS mappings.
 
-use crate::types::{Ty, FnSig};
+use crate::types::FnSig;
 
 /// All built-in stdlib module names (hardcoded in the compiler).
-pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "http", "process", "math", "random", "regex", "io", "result"];
+pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "http", "process", "math", "random", "regex", "io", "result", "error", "datetime", "testing", "crypto", "uuid", "log", "mime"];
 
 /// Check if a module name is a hardcoded stdlib module.
 pub fn is_stdlib_module(name: &str) -> bool {
@@ -22,6 +22,10 @@ pub fn get_bundled_source(name: &str) -> Option<&'static str> {
         "encoding" => Some(include_str!("../stdlib/encoding.almd")),
         "hash" => Some(include_str!("../stdlib/hash.almd")),
         "term" => Some(include_str!("../stdlib/term.almd")),
+        "url" => Some(include_str!("../stdlib/url.almd")),
+        "toml" => Some(include_str!("../stdlib/toml.almd")),
+        "csv" => Some(include_str!("../stdlib/csv.almd")),
+        "compress" => Some(include_str!("../stdlib/compress.almd")),
         _ => None,
     }
 }
@@ -62,6 +66,9 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         | "is_alpha?" | "is_alpha_hdlm_qm_"
         | "is_alphanumeric?" | "is_alphanumeric_hdlm_qm_"
         | "is_whitespace?" | "is_whitespace_hdlm_qm_"
+        | "is_upper?" | "is_upper_hdlm_qm_"
+        | "is_lower?" | "is_lower_hdlm_qm_"
+        | "codepoint" | "from_codepoint" | "char_count"
         | "pad_right" | "trim_start" | "trim_end"
         | "strip_prefix" | "strip_suffix"
         | "replace_first" | "last_index_of" => vec!["string"],
@@ -95,6 +102,13 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         | "is_ok?" | "is_ok_hdlm_qm_"
         | "is_err?" | "is_err_hdlm_qm_"
         | "to_err_option" => vec!["result"],
+
+        // ── error-only ──
+        "context" => vec!["error"],
+
+        // ── datetime-only ──
+        "is_before?" | "is_before_hdlm_qm_"
+        | "is_after?" | "is_after_hdlm_qm_" => vec!["datetime"],
 
         // ── ambiguous: string + list ──
         "reverse" => vec!["string", "list"],

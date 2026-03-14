@@ -1,11 +1,15 @@
 [exec]
+description = "Execute a command and return its stdout as a string"
+example = 'let output = process.exec("ls", ["-la"])'
 params = [{ name = "cmd", type = "String" }, { name = "args", type = "List[String]" }]
 return = "Result[String, String]"
 effect = true
-rust = "almide_rt_process_exec(&*{cmd}, &{ let __a: Vec<String> = {args}; __a })"
+rust = "almide_rt_process_exec(&*{cmd}, &{ let __a: Vec<String> = {args}; __a })?"
 ts = "__almd_process.exec({cmd}, {args})"
 
 [exit]
+description = "Exit the process with the given status code"
+example = 'process.exit(1)'
 params = [{ name = "code", type = "Int" }]
 return = "Unit"
 effect = true
@@ -13,6 +17,8 @@ rust = "almide_rt_process_exit({code})"
 ts = "__almd_process.exit({code})"
 
 [stdin_lines]
+description = "Read all lines from standard input"
+example = 'let lines = process.stdin_lines()'
 params = []
 return = "Result[List[String], String]"
 effect = true
@@ -20,20 +26,26 @@ rust = "almide_rt_process_stdin_lines()?"
 ts = "__almd_process.stdin_lines()"
 
 [exec_in]
+description = "Execute a command in a specific working directory"
+example = 'let output = process.exec_in("/tmp", "pwd", [])'
 params = [{ name = "dir", type = "String" }, { name = "cmd", type = "String" }, { name = "args", type = "List[String]" }]
 return = "Result[String, String]"
 effect = true
-rust = "almide_rt_process_exec_in(&*{dir}, &*{cmd}, &{ let __a: Vec<String> = {args}; __a })"
+rust = "almide_rt_process_exec_in(&*{dir}, &*{cmd}, &{ let __a: Vec<String> = {args}; __a })?"
 ts = "__almd_process.exec_in({dir}, {cmd}, {args})"
 
 [exec_with_stdin]
+description = "Execute a command with input piped to its stdin"
+example = 'let output = process.exec_with_stdin("cat", [], "hello")'
 params = [{ name = "cmd", type = "String" }, { name = "args", type = "List[String]" }, { name = "input", type = "String" }]
 return = "Result[String, String]"
 effect = true
-rust = "almide_rt_process_exec_with_stdin(&*{cmd}, &{ let __a: Vec<String> = {args}; __a }, &*{input})"
+rust = "almide_rt_process_exec_with_stdin(&*{cmd}, &{ let __a: Vec<String> = {args}; __a }, &*{input})?"
 ts = "__almd_process.exec_with_stdin({cmd}, {args}, {input})"
 
 [exec_status]
+description = "Execute a command and return exit code, stdout, and stderr"
+example = 'let r = process.exec_status("ls", []) // {code, stdout, stderr}'
 params = [{ name = "cmd", type = "String" }, { name = "args", type = "List[String]" }]
 return = "Result[{code: Int, stdout: String, stderr: String}, String]"
 effect = true

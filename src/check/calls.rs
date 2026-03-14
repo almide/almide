@@ -73,6 +73,12 @@ impl Checker {
 
         // Direct call — check args with inference from user function signature
         if let ast::Expr::Ident { name, .. } = callee {
+            // assert_eq/assert_ne: use first arg's type as expected for second arg (bidirectional)
+            if (name == "assert_eq" || name == "assert_ne") && args.len() == 2 {
+                let first_ty = self.check_expr(&mut args[0]);
+                let second_ty = self.check_expr_with(&mut args[1], Some(&first_ty));
+                return self.check_direct_call(name, &[first_ty, second_ty]);
+            }
             let user_sig = if has_lambda { self.env.functions.get(name).cloned() } else { None };
             let arg_tys = if let Some(ref sig) = user_sig {
                 self.check_args_with_fn_params(args, &sig.params, 0)
@@ -133,12 +139,13 @@ impl Checker {
         receiver_ty: Option<&Ty>,
         sig_offset: usize,
     ) -> Vec<Ty> {
-        if !has_lambda {
+        // Look up stdlib signature
+        let sig = call.and_then(|(module, func)| stdlib::lookup_sig(module, func));
+
+        if !has_lambda && sig.is_none() {
             return args.iter_mut().map(|a| self.check_expr(a)).collect();
         }
 
-        // Look up stdlib signature
-        let sig = call.and_then(|(module, func)| stdlib::lookup_sig(module, func));
         if let Some(sig) = sig {
             // Seed bindings from receiver type (for UFCS)
             let mut bindings = std::collections::HashMap::new();
@@ -191,8 +198,14 @@ impl Checker {
         // Pass 1: check non-lambda args, collect TypeVar bindings
         for (i, arg) in args.iter_mut().enumerate() {
             if !matches!(arg, ast::Expr::Lambda { .. }) {
-                let ty = self.check_expr(arg);
                 let sig_idx = i + sig_offset;
+                let expected = if sig_idx < sig_params.len() {
+                    let sub = substitute(&sig_params[sig_idx].1, &bindings);
+                    if matches!(sub, Ty::TypeVar(_) | Ty::Unknown) { None } else { Some(sub) }
+                } else {
+                    None
+                };
+                let ty = self.check_expr_with(arg, expected.as_ref());
                 if sig_idx < sig_params.len() {
                     unify(&sig_params[sig_idx].1, &ty, &mut bindings);
                 }
@@ -250,8 +263,24 @@ impl Checker {
                 return Ty::Unit;
             }
             "assert_eq" | "assert_ne" => return Ty::Unit,
-            "ok" => return Ty::Result(Box::new(arg_tys.first().cloned().unwrap_or(Ty::Unit)), Box::new(Ty::Unknown)),
-            "err" => return Ty::Result(Box::new(Ty::Unknown), Box::new(arg_tys.first().cloned().unwrap_or(Ty::Unknown))),
+            "ok" => {
+                let ok_ty = arg_tys.first().cloned().unwrap_or(Ty::Unit);
+                // Infer error type from enclosing function's return type
+                let err_ty = match &self.env.current_ret {
+                    Some(Ty::Result(_, e)) => *e.clone(),
+                    _ => Ty::Unknown,
+                };
+                return Ty::Result(Box::new(ok_ty), Box::new(err_ty));
+            }
+            "err" => {
+                let err_ty = arg_tys.first().cloned().unwrap_or(Ty::Unknown);
+                // Infer ok type from enclosing function's return type
+                let ok_ty = match &self.env.current_ret {
+                    Some(Ty::Result(o, _)) => *o.clone(),
+                    _ => Ty::Unknown,
+                };
+                return Ty::Result(Box::new(ok_ty), Box::new(err_ty));
+            }
             "some" => return Ty::Option(Box::new(arg_tys.first().cloned().unwrap_or(Ty::Unknown))),
             "unwrap_or" => {
                 if arg_tys.len() != 2 {
@@ -306,8 +335,39 @@ impl Checker {
                     }
                 }
             }
-            let ret = sig.ret.clone();
-            if self.env.in_effect && !self.env.in_test && !self.env.skip_auto_unwrap {
+            // Unify parameters against args to bind TypeVars
+            let mut bindings = std::collections::HashMap::new();
+            for ((_, pty), aty) in sig.params.iter().zip(arg_tys.iter()) {
+                // For TypeVars with structural bounds, check the arg satisfies
+                // the constraint and bind the TypeVar to the concrete arg type
+                if let Ty::TypeVar(tv_name) = pty {
+                    if let Some(bound) = sig.structural_bounds.get(tv_name) {
+                        let resolved_aty = self.env.resolve_named(aty);
+                        if bound.compatible(&resolved_aty) || bound.compatible(aty) {
+                            bindings.insert(tv_name.clone(), aty.clone());
+                        } else {
+                            self.push_diagnostic(err(
+                                format!("type {} does not satisfy bound {} for type parameter {}", aty.display(), bound.display(), tv_name),
+                                format!("The value must have fields matching {}", bound.display()),
+                                format!("call to {}()", name),
+                            ));
+                        }
+                    } else {
+                        unify(pty, aty, &mut bindings);
+                    }
+                } else {
+                    unify(pty, aty, &mut bindings);
+                }
+            }
+            let ret = if bindings.is_empty() {
+                sig.ret.clone()
+            } else {
+                substitute(&sig.ret, &bindings)
+            };
+            // Note: unresolved TypeVars in return type are allowed — they may be
+            // resolved by downstream usage (e.g., `let s = stack_new(); stack_push(s, 10)`).
+            // The codegen handles this via Rust's own type inference.
+            if self.should_auto_unwrap_user() {
                 if let Ty::Result(ok_ty, _) = &ret {
                     return *ok_ty.clone();
                 }
@@ -431,8 +491,7 @@ impl Checker {
                         format!("{}.{}()", module, func),
                     ));
                 }
-                // Stdlib calls always have hardcoded `?` in codegen, so always unwrap Result
-                if self.env.in_effect {
+                if self.should_auto_unwrap_stdlib() {
                     if let Ty::Result(ok_ty, _) = &ret {
                         return *ok_ty.clone();
                     }
@@ -448,7 +507,7 @@ impl Checker {
                 ));
             }
             let ret = sig.ret.clone();
-            if self.env.in_effect {
+            if self.should_auto_unwrap_stdlib() {
                 if let Ty::Result(ok_ty, _) = &ret {
                     return *ok_ty.clone();
                 }
@@ -503,8 +562,7 @@ impl Checker {
                     ));
                 }
                 let ret = sig.ret.clone();
-                // In effect context, auto-unwrap Result (same as stdlib)
-                if self.env.in_effect {
+                if self.should_auto_unwrap_stdlib() {
                     if let Ty::Result(ok_ty, _) = &ret {
                         return *ok_ty.clone();
                     }
@@ -530,6 +588,19 @@ impl Checker {
         Ty::Unknown
     }
 
+    /// Whether the current context should auto-unwrap Result types from user function calls.
+    /// In effect context, not in test, and not suppressed by skip_auto_unwrap (for match arms).
+    fn should_auto_unwrap_user(&self) -> bool {
+        self.env.in_effect && !self.env.in_test && !self.env.skip_auto_unwrap
+    }
+
+    /// Whether the current context should auto-unwrap Result types from stdlib/module calls.
+    /// Always unwraps in effect context unless suppressed by skip_auto_unwrap (for match arms).
+    /// Note: tests ARE effect contexts and DO auto-unwrap stdlib calls (codegen always adds `?`).
+    fn should_auto_unwrap_stdlib(&self) -> bool {
+        self.env.in_effect && !self.env.skip_auto_unwrap
+    }
+
     /// Check type compatibility, resolving Named types when comparing against open records.
     pub(crate) fn is_compatible(&self, param_ty: &Ty, arg_ty: &Ty) -> bool {
         if param_ty.compatible(arg_ty) {
@@ -547,9 +618,9 @@ impl Checker {
 
     /// Get missing fields when an argument doesn't satisfy an open record parameter.
     fn open_record_missing_fields(&self, param_ty: &Ty, arg_ty: &Ty) -> Option<Vec<String>> {
-        if let Ty::OpenRecord { fields: required } = param_ty {
+        if let Ty::OpenRecord { fields: required, .. } = param_ty {
             let resolved = self.env.resolve_named(arg_ty);
-            if let Ty::Record { fields: actual } | Ty::OpenRecord { fields: actual } = &resolved {
+            if let Ty::Record { fields: actual } | Ty::OpenRecord { fields: actual, .. } = &resolved {
                 let missing: Vec<String> = required.iter()
                     .filter(|(n, t)| !actual.iter().any(|(an, at)| an == n && t.compatible(at)))
                     .map(|(n, t)| format!("{}: {}", n, t.display()))
@@ -563,6 +634,12 @@ impl Checker {
     }
 
     pub(crate) fn check_member_access(&mut self, obj_ty: &Ty, field: &str) -> Ty {
+        // Handle TypeVar with structural bound: T: { name: String, .. }
+        if let Ty::TypeVar(tv_name) = obj_ty {
+            if let Some(bound) = self.env.structural_bounds.get(tv_name).cloned() {
+                return self.check_member_access(&bound, field);
+            }
+        }
         let resolved = self.env.resolve_named(obj_ty);
         match &resolved {
             Ty::Record { fields } | Ty::OpenRecord { fields } => {
@@ -582,3 +659,4 @@ impl Checker {
         }
     }
 }
+

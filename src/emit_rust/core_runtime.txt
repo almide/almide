@@ -144,6 +144,31 @@ fn almide_rt_string_is_whitespace(s: &str) -> bool {
 }
 
 #[inline]
+fn almide_rt_string_is_upper(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| !c.is_alphabetic() || c.is_uppercase())
+}
+
+#[inline]
+fn almide_rt_string_is_lower(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| !c.is_alphabetic() || c.is_lowercase())
+}
+
+#[inline]
+fn almide_rt_string_codepoint(s: &str) -> Option<i64> {
+    s.chars().next().map(|c| c as i64)
+}
+
+#[inline]
+fn almide_rt_string_from_codepoint(n: i64) -> String {
+    char::from_u32(n as u32).map(|c| c.to_string()).unwrap_or_default()
+}
+
+#[inline]
+fn almide_rt_string_char_count(s: &str) -> i64 {
+    s.chars().count() as i64
+}
+
+#[inline]
 fn almide_rt_string_pad_right(s: String, width: i64, ch: &str) -> String {
     let n = width as usize;
     if s.len() >= n {
@@ -484,6 +509,22 @@ fn almide_rt_math_choose(n: i64, k: i64) -> i64 {
         result = result * (n - i as i64) / (i as i64 + 1);
     }
     result
+}
+
+// ---- error ----
+
+#[inline]
+fn almide_rt_error_chain(outer: &str, cause: &str) -> String {
+    format!("{}: {}", outer, cause)
+}
+
+fn almide_rt_error_context<T>(r: Result<T, String>, msg: &str) -> Result<T, String> {
+    r.map_err(|e| format!("{}: {}", msg, e))
+}
+
+#[inline]
+fn almide_rt_error_message<T>(r: Result<T, String>) -> String {
+    r.err().unwrap_or_default()
 }
 
 fn almide_rt_math_log_gamma(x: f64) -> f64 {

@@ -19,26 +19,25 @@ use crate::types::{Ty, TypeEnv};
 pub struct LowerCtx<'a> {
     pub var_table: VarTable,
     scopes: Vec<HashMap<String, VarId>>,
-    expr_types: &'a HashMap<(usize, usize), Ty>,
+    expr_types: &'a HashMap<crate::ast::ExprId, Ty>,
     env: &'a TypeEnv,
-    /// When true, skip span-based type lookups (used for re-parsed string interpolation
-    /// expressions whose bogus spans would match wrong entries in expr_types).
-    skip_span_lookup: bool,
 }
 
 impl<'a> LowerCtx<'a> {
-    pub fn new(expr_types: &'a HashMap<(usize, usize), Ty>, env: &'a TypeEnv) -> Self {
+    pub fn new(expr_types: &'a HashMap<crate::ast::ExprId, Ty>, env: &'a TypeEnv) -> Self {
         LowerCtx {
             var_table: VarTable::new(),
             scopes: vec![HashMap::new()],
             expr_types,
-            skip_span_lookup: false,
             env,
         }
     }
 
     fn push_scope(&mut self) { self.scopes.push(HashMap::new()); }
-    fn pop_scope(&mut self) { self.scopes.pop(); }
+    fn pop_scope(&mut self) {
+        debug_assert!(self.scopes.len() > 1, "scope underflow: attempted to pop the root scope");
+        self.scopes.pop();
+    }
 
     fn define_var(&mut self, name: &str, ty: Ty, mutability: Mutability, span: Option<ast::Span>) -> VarId {
         let id = self.var_table.alloc(name.to_string(), ty, mutability, span);
@@ -58,11 +57,8 @@ impl<'a> LowerCtx<'a> {
     }
 
     fn expr_ty(&self, expr: &ast::Expr) -> Ty {
-        // First try the checker's span-based type lookup (skip for re-parsed interpolation exprs)
-        if !self.skip_span_lookup {
-            let ty = expr.span()
-                .and_then(|s| self.expr_types.get(&(s.line, s.col)).cloned())
-                .unwrap_or(Ty::Unknown);
+        // Look up the checker's type by ExprId
+        if let Some(ty) = self.expr_types.get(&expr.id()).cloned() {
             if !matches!(ty, Ty::Unknown) {
                 return ty;
             }
@@ -71,8 +67,8 @@ impl<'a> LowerCtx<'a> {
         self.infer_expr_ty(expr)
     }
 
-    /// Structural type inference when the checker's span-based lookup fails.
-    /// This handles cases where the span doesn't match (e.g., cross-module expressions).
+    /// Structural type inference when the ExprId lookup fails.
+    /// This handles re-parsed interpolation expressions and cross-module expressions.
     fn infer_expr_ty(&self, expr: &ast::Expr) -> Ty {
         match expr {
             ast::Expr::Ident { name, .. } => {
@@ -95,7 +91,7 @@ impl<'a> LowerCtx<'a> {
                         }
                         // Try stdlib signature
                         if let Some(sig) = crate::stdlib::lookup_sig(&mod_path, &func) {
-                            let mut bindings = std::collections::HashMap::new();
+                            let bindings = std::collections::HashMap::new();
                             // No receiver unification for direct module calls
                             return crate::types::substitute(&sig.ret, &bindings);
                         }
@@ -173,11 +169,11 @@ impl<'a> LowerCtx<'a> {
 
 // ── Program lowering ────────────────────────────────────────────
 
-pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<(usize, usize), Ty>, env: &TypeEnv) -> IrProgram {
+pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprId, Ty>, env: &TypeEnv) -> IrProgram {
     lower_program_with_prefix(prog, expr_types, env, None)
 }
 
-fn lower_program_with_prefix(prog: &ast::Program, expr_types: &HashMap<(usize, usize), Ty>, env: &TypeEnv, external_prefix: Option<&str>) -> IrProgram {
+fn lower_program_with_prefix(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprId, Ty>, env: &TypeEnv, external_prefix: Option<&str>) -> IrProgram {
     let mut ctx = LowerCtx::new(expr_types, env);
     let mut functions = Vec::new();
     let mut top_lets = Vec::new();
@@ -235,7 +231,16 @@ fn lower_program_with_prefix(prog: &ast::Program, expr_types: &HashMap<(usize, u
     }
 
     let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, modules: Vec::new() };
+    crate::ir::constant_fold(&mut program);
     crate::ir::compute_use_counts(&mut program);
+
+    // Detect Unknown types surviving into IR (diagnostic, not fatal)
+    let unknown_warnings = crate::ir::collect_unknown_warnings(&program);
+    for w in &unknown_warnings {
+        let loc = w.span.map(|s| format!(" at line {}", s.line)).unwrap_or_default();
+        eprintln!("warning: type Unknown in IR{} (in fn {}, {}): {}", loc, w.fn_name, w.context, w.ty.display());
+    }
+
     program
 }
 
@@ -244,7 +249,7 @@ fn lower_program_with_prefix(prog: &ast::Program, expr_types: &HashMap<(usize, u
 pub fn lower_module(
     name: &str,
     prog: &ast::Program,
-    expr_types: &HashMap<(usize, usize), Ty>,
+    expr_types: &HashMap<crate::ast::ExprId, Ty>,
     env: &TypeEnv,
     versioned_name: Option<String>,
 ) -> crate::ir::IrModule {
@@ -1129,14 +1134,13 @@ fn lower_string_interp(ctx: &mut LowerCtx, raw: &str) -> Vec<IrStringPart> {
                 expr_str.push(ch);
             }
             // Re-parse the expression and lower it.
-            // Skip span-based type lookups — re-parsed expressions have bogus spans (1,1)
-            // that would match wrong entries in the checker's expr_types map.
+            // Use a high ExprId offset so re-parsed expressions don't collide with
+            // the main program's ExprIds — they'll miss in expr_types and fall
+            // through to infer_expr_ty().
             let tokens = crate::lexer::Lexer::tokenize(&expr_str);
-            let mut parser = crate::parser::Parser::new(tokens);
+            let mut parser = crate::parser::Parser::new_with_id_offset(tokens, u32::MAX / 2);
             if let Ok(parsed) = parser.parse_single_expr() {
-                ctx.skip_span_lookup = true;
                 let mut ir_expr = lower_expr(ctx, &parsed);
-                ctx.skip_span_lookup = false;
                 // Fix type: for simple Var nodes, use the authoritative type from VarTable.
                 if let IrExprKind::Var { id } = &ir_expr.kind {
                     ir_expr.ty = ctx.var_table.get(*id).ty.clone();

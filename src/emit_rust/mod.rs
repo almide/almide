@@ -2,8 +2,9 @@ mod program;
 mod ir_expressions;
 mod ir_blocks;
 pub mod borrow;
-
-use crate::ast::*;
+pub mod rust_ir;
+pub mod render;
+pub mod lower_rust;
 
 pub(crate) const JSON_RUNTIME: &str = include_str!("json_runtime.txt");
 pub(crate) const HTTP_RUNTIME: &str = include_str!("http_runtime.txt");
@@ -13,6 +14,8 @@ pub(crate) const IO_RUNTIME: &str = include_str!("io_runtime.txt");
 pub(crate) const PLATFORM_RUNTIME: &str = include_str!("platform_runtime.txt");
 pub(crate) const COLLECTION_RUNTIME: &str = include_str!("collection_runtime.txt");
 pub(crate) const CORE_RUNTIME: &str = include_str!("core_runtime.txt");
+pub(crate) const DATETIME_RUNTIME: &str = include_str!("datetime_runtime.txt");
+pub(crate) const UUID_RUNTIME: &str = include_str!("uuid_runtime.txt");
 
 /// Info about an open record field, with optional nested open record projection.
 #[derive(Debug, Clone)]
@@ -35,7 +38,7 @@ impl Default for EmitOptions {
     }
 }
 
-pub(crate) struct Emitter {
+pub(crate) struct Emitter<'ir> {
     pub(crate) out: String,
     pub(crate) indent: usize,
     /// Track if we're inside an effect function (for ? operator)
@@ -82,20 +85,22 @@ pub(crate) struct Emitter {
     pub(crate) fast_mode: bool,
     /// Top-level let names. Value = true if emitted as LazyLock (needs deref+clone on reference)
     pub(crate) top_let_names: std::collections::HashMap<String, bool>,
-    /// Typed IR program (available when type checking succeeded)
-    pub(crate) ir_program: Option<almide::ir::IrProgram>,
-    /// Typed IR for imported user modules (module_name → IrProgram)
-    pub(crate) module_irs: std::collections::HashMap<String, almide::ir::IrProgram>,
+    /// Typed IR program (borrowed from caller)
+    pub(crate) ir_program: &'ir almide::ir::IrProgram,
+    /// Current VarTable for codegen (switches between main and module VarTables)
+    pub(crate) current_var_table: &'ir almide::ir::VarTable,
+    /// Typed IR for imported user modules (borrowed from caller)
+    pub(crate) module_irs: &'ir std::collections::HashMap<String, almide::ir::IrProgram>,
     /// Open record params: fn_name → [(param_index, struct_name, field_infos)]
     /// Each field_info: (field_name, optional nested open record info)
     pub(crate) open_record_params: std::collections::HashMap<String, Vec<(usize, String, Vec<OpenFieldInfo>)>>,
-    /// Shape aliases that resolve to open records: alias_name → field types
-    pub(crate) open_record_aliases: std::collections::HashMap<String, Vec<crate::ast::FieldType>>,
+    /// Shape aliases that resolve to open records: alias_name → [(field_name, Ty)]
+    pub(crate) open_record_aliases: std::collections::HashMap<String, Vec<(String, crate::types::Ty)>>,
 }
 
-impl Emitter {
-    fn new(options: &EmitOptions) -> Self {
-        Self { out: String::new(), indent: 0, in_effect: false, effect_fns: Vec::new(), result_fns: Vec::new(), in_do_block: std::cell::Cell::new(false), user_modules: Vec::new(), in_test: false, no_thread_wrap: options.no_thread_wrap, module_aliases: std::collections::HashMap::new(), skip_auto_q: std::cell::Cell::new(false), anon_record_structs: std::cell::RefCell::new(std::collections::HashMap::new()), anon_record_counter: std::cell::Cell::new(0), named_record_types: std::collections::HashMap::new(), generic_variant_constructors: std::collections::HashMap::new(), generic_variant_unit_ctors: std::collections::HashSet::new(), boxed_variant_args: std::collections::HashSet::new(), boxed_variant_record_fields: std::collections::HashSet::new(), single_use_vars: std::collections::HashSet::new(), borrow_info: borrow::BorrowInfo::new(), borrowed_params: std::collections::HashMap::new(), current_module: None, fast_mode: options.fast_mode, top_let_names: std::collections::HashMap::new(), ir_program: None, module_irs: std::collections::HashMap::new(), open_record_params: std::collections::HashMap::new(), open_record_aliases: std::collections::HashMap::new() }
+impl<'ir> Emitter<'ir> {
+    fn new(options: &EmitOptions, ir: &'ir almide::ir::IrProgram, module_irs: &'ir std::collections::HashMap<String, almide::ir::IrProgram>) -> Self {
+        Self { out: String::new(), indent: 0, in_effect: false, effect_fns: Vec::new(), result_fns: Vec::new(), in_do_block: std::cell::Cell::new(false), user_modules: Vec::new(), in_test: false, no_thread_wrap: options.no_thread_wrap, module_aliases: std::collections::HashMap::new(), skip_auto_q: std::cell::Cell::new(false), anon_record_structs: std::cell::RefCell::new(std::collections::HashMap::new()), anon_record_counter: std::cell::Cell::new(0), named_record_types: std::collections::HashMap::new(), generic_variant_constructors: std::collections::HashMap::new(), generic_variant_unit_ctors: std::collections::HashSet::new(), boxed_variant_args: std::collections::HashSet::new(), boxed_variant_record_fields: std::collections::HashSet::new(), single_use_vars: std::collections::HashSet::new(), borrow_info: borrow::BorrowInfo::new(), borrowed_params: std::collections::HashMap::new(), current_module: None, fast_mode: options.fast_mode, top_let_names: std::collections::HashMap::new(), ir_program: ir, current_var_table: &ir.var_table, module_irs, open_record_params: std::collections::HashMap::new(), open_record_aliases: std::collections::HashMap::new() }
     }
 
     pub(crate) fn emit_indent(&mut self) {
@@ -137,19 +142,21 @@ impl Emitter {
     }
 }
 
-pub fn emit_with_options(program: &Program, modules: &[(String, Program, Option<crate::project::PkgId>, bool)], options: &EmitOptions, import_aliases: &[(String, String)], ir: Option<&almide::ir::IrProgram>, module_irs: &std::collections::HashMap<String, almide::ir::IrProgram>) -> String {
-    let mut emitter = Emitter::new(options);
+/// New pipeline: IR → RustIR → String. Stateless, no Emitter.
+/// Currently experimental — use `emit_with_options` for production.
+pub fn emit_via_rust_ir(ir: &almide::ir::IrProgram) -> String {
+    let rust_prog = lower_rust::lower_program(ir);
+    render::render_program(&rust_prog)
+}
+
+pub fn emit_with_options(ir: &almide::ir::IrProgram, options: &EmitOptions, import_aliases: &[(String, String)], module_irs: &std::collections::HashMap<String, almide::ir::IrProgram>) -> String {
+    let mut emitter = Emitter::new(options, ir, module_irs);
     // Register user-level import aliases (import pkg as alias)
     for (alias, target) in import_aliases {
         emitter.module_aliases.insert(alias.clone(), target.clone());
     }
-    // Store IR for codegen
-    emitter.ir_program = ir.cloned();
-    emitter.module_irs = module_irs.clone();
     // Run borrow inference on IR
-    if let Some(ir_prog) = ir {
-        emitter.borrow_info = borrow::analyze_program(ir_prog, module_irs);
-    }
-    emitter.emit_program(program, modules);
+    emitter.borrow_info = borrow::analyze_program(ir, module_irs);
+    emitter.emit_program();
     emitter.out
 }

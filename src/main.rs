@@ -81,6 +81,9 @@ enum Commands {
     Check {
         /// Source file (default: src/main.almd)
         file: Option<String>,
+        /// Treat warnings as errors
+        #[arg(long)]
+        deny_warnings: bool,
     },
     /// Format source files
     Fmt {
@@ -260,7 +263,13 @@ fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::Em
         }
     }
 
-    let code = emit_rust::emit_with_options(&program, &resolved.modules, emit_options, &import_aliases, ir_program.as_ref(), &module_irs);
+    // Monomorphize row-polymorphic functions (Rust target only)
+    if let Some(ref mut ir) = ir_program {
+        almide::mono::monomorphize(ir);
+    }
+
+    let ir = ir_program.as_ref().expect("IR required for codegen");
+    let code = emit_rust::emit_with_options(ir, emit_options, &import_aliases, &module_irs);
     (code, ir_program)
 }
 
@@ -325,9 +334,9 @@ fn dispatch(cli: Cli) {
             let file_str = file.as_deref().unwrap_or("");
             cli::cmd_test(file_str, no_check, run.as_deref());
         }
-        Commands::Check { file } => {
+        Commands::Check { file, deny_warnings } => {
             let file = resolve_file(file);
-            cli::cmd_check(&file);
+            cli::cmd_check(&file, deny_warnings);
         }
         Commands::Fmt { files, check, dry_run } => {
             let write_back = !check && !dry_run;

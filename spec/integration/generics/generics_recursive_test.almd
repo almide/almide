@@ -39,6 +39,6 @@ fn main() -> Unit = {
   println("test 4: " ++ int.to_string(tree_size(t3)))
 
   // Test 5: tree_map
-  let t4 = tree_map(t2, fn(x: Int) => x * 10)
+  let t4 = tree_map(t2, (x: Int) => x * 10)
   println("test 5: " ++ int.to_string(tree_sum(t4)))
 }

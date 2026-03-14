@@ -115,12 +115,12 @@ test "list of named records with operations" {
     { name: "bob", email: none },
     { name: "carol", email: some("c@d.com") },
   ]
-  let with_email = list.filter(users, fn(u) => match u.email {
+  let with_email = list.filter(users, (u) => match u.email {
     some(_) => true,
     none => false,
   })
   assert_eq(list.len(with_email), 2)
-  let names = list.map(users, fn(u) => u.name)
+  let names = list.map(users, (u) => u.name)
   assert_eq(names, ["alice", "bob", "carol"])
 }
 
@@ -142,8 +142,8 @@ test "record in higher-order function" {
     { name: "banana", price: 80 },
     { name: "cherry", price: 300 },
   ]
-  let total = list.fold(items, 0, fn(acc, item) => acc + item.price)
+  let total = list.fold(items, 0, (acc, item) => acc + item.price)
   assert_eq(total, 530)
-  let expensive = list.filter(items, fn(item) => item.price > 100)
+  let expensive = list.filter(items, (item) => item.price > 100)
   assert_eq(list.len(expensive), 2)
 }

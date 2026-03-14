@@ -1,4 +1,6 @@
 ["match?"]
+description = "Check if a pattern matches anywhere in a string."
+example = 'regex.match?("[0-9]+", "abc123") // => true'
 params = [{ name = "pat", type = "String" }, { name = "s", type = "String" }]
 return = "Bool"
 rust = "almide_regex_is_match(&{pat}, &{s})"
@@ -6,6 +8,8 @@ ts = "__almd_regex.match_hdlm_qm_({pat}, {s})"
 aliases = ["match_hdlm_qm_"]
 
 ["full_match?"]
+description = "Check if a pattern matches the entire string."
+example = 'regex.full_match?("[0-9]+", "123") // => true'
 params = [{ name = "pat", type = "String" }, { name = "s", type = "String" }]
 return = "Bool"
 rust = "almide_regex_full_match(&{pat}, &{s})"
@@ -13,36 +17,48 @@ ts = "__almd_regex.full_match_hdlm_qm_({pat}, {s})"
 aliases = ["full_match_hdlm_qm_"]
 
 [find]
+description = "Find the first match of a pattern in a string."
+example = 'regex.find("[0-9]+", "abc123def") // => some("123")'
 params = [{ name = "pat", type = "String" }, { name = "s", type = "String" }]
 return = "Option[String]"
 rust = "almide_regex_find(&{pat}, &{s})"
 ts = "__almd_regex.find({pat}, {s})"
 
 [find_all]
+description = "Find all non-overlapping matches of a pattern."
+example = 'regex.find_all("[0-9]+", "a1b2c3") // => ["1", "2", "3"]'
 params = [{ name = "pat", type = "String" }, { name = "s", type = "String" }]
 return = "List[String]"
 rust = "almide_regex_find_all(&{pat}, &{s})"
 ts = "__almd_regex.find_all({pat}, {s})"
 
 [replace]
+description = "Replace all matches of a pattern with a replacement string."
+example = 'regex.replace("[0-9]+", "a1b2", "X") // => "aXbX"'
 params = [{ name = "pat", type = "String" }, { name = "s", type = "String" }, { name = "rep", type = "String" }]
 return = "String"
 rust = "almide_regex_replace(&{pat}, &{s}, &{rep})"
 ts = "__almd_regex.replace({pat}, {s}, {rep})"
 
 [replace_first]
+description = "Replace the first match of a pattern."
+example = 'regex.replace_first("[0-9]+", "a1b2", "X") // => "aXb2"'
 params = [{ name = "pat", type = "String" }, { name = "s", type = "String" }, { name = "rep", type = "String" }]
 return = "String"
 rust = "almide_regex_replace_first(&{pat}, &{s}, &{rep})"
 ts = "__almd_regex.replace_first({pat}, {s}, {rep})"
 
 [split]
+description = "Split a string by a regex pattern."
+example = 'regex.split("[,;]", "a,b;c") // => ["a", "b", "c"]'
 params = [{ name = "pat", type = "String" }, { name = "s", type = "String" }]
 return = "List[String]"
 rust = "almide_regex_split(&{pat}, &{s})"
 ts = "__almd_regex.split({pat}, {s})"
 
 [captures]
+description = "Extract capture groups from the first match."
+example = 'regex.captures("(\\w+)@(\\w+)", "user@host") // => some(["user@host", "user", "host"])'
 params = [{ name = "pat", type = "String" }, { name = "s", type = "String" }]
 return = "Option[List[String]]"
 rust = "almide_regex_captures(&{pat}, &{s})"

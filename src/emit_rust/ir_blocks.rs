@@ -1,7 +1,8 @@
 use almide::ir::*;
+use almide::types::Ty;
 use super::Emitter;
 
-impl Emitter {
+impl<'ir> Emitter<'ir> {
     pub(crate) fn gen_ir_stmt(&self, stmt: &IrStmt) -> String {
         match &stmt.kind {
             IrStmtKind::Bind { var, mutability, ty, value } => {
@@ -21,8 +22,25 @@ impl Emitter {
                     let val = self.gen_ir_expr(value);
                     let tmp = "__ds";
                     let mut lines = vec![format!("let {} = {};", tmp, val)];
+                    // Build field type map from value's record type
+                    let field_types: std::collections::HashMap<&str, &crate::types::Ty> = match &value.ty {
+                        crate::types::Ty::Record { fields: rf } => rf.iter().map(|(n, t)| (n.as_str(), t)).collect(),
+                        _ => std::collections::HashMap::new(),
+                    };
                     for f in fields {
-                        lines.push(format!("let {} = {}.{}.clone();", f.name, tmp, f.name));
+                        let is_copy = field_types.get(f.name.as_str())
+                            .map(|t| Self::is_copy_type(t))
+                            .unwrap_or(false);
+                        // Check if the bound variable is single-use
+                        let is_single_use = f.pattern.as_ref()
+                            .and_then(|p| if let IrPattern::Bind { var } = p { Some(var) } else { None })
+                            .map(|var| self.single_use_vars.contains(var))
+                            .unwrap_or(false);
+                        if is_copy || is_single_use {
+                            lines.push(format!("let {} = {}.{};", f.name, tmp, f.name));
+                        } else {
+                            lines.push(format!("let {} = {}.{}.clone();", f.name, tmp, f.name));
+                        }
                     }
                     lines.join("\n    ")
                 } else {
@@ -56,7 +74,7 @@ impl Emitter {
                 if matches!(target_ty, almide::types::Ty::Map(_, _)) {
                     format!("{}.insert({}, {});", name, idx, val)
                 } else if self.fast_mode {
-                    format!("unsafe {{ *{}.get_unchecked_mut({} as usize) = {}; }}", name, idx, val)
+                    format!("{{ debug_assert!({idx} >= 0 && ({idx} as usize) < {name}.len()); unsafe {{ *{name}.get_unchecked_mut({idx} as usize) = {val}; }} }}", name=name, idx=idx, val=val)
                 } else {
                     format!("{}[{} as usize] = {};", name, idx, val)
                 }
@@ -74,7 +92,10 @@ impl Emitter {
                     format!("if !({}) {{ continue; }}", c)
                 } else {
                     let e = self.gen_ir_expr(else_);
-                    if e.contains("return ") {
+                    // ResultErr in effect context already generates "return Err(...)"
+                    let already_returns = matches!(&else_.kind, IrExprKind::ResultErr { .. })
+                        && self.in_effect && !self.in_test && !self.in_do_block.get();
+                    if already_returns {
                         format!("if !({}) {{ {}; }}", c, e)
                     } else {
                         format!("if !({}) {{ return {}; }}", c, e)
@@ -165,10 +186,10 @@ impl Emitter {
                     let ps: Vec<String> = args.iter().enumerate().map(|(i, p)| {
                         let inner = self.gen_ir_pattern(p);
                         if self.boxed_variant_args.contains(&(name.clone(), i)) {
-                            if let IrPattern::Bind { .. } = p {
-                                format!("__boxed_{}", inner)
-                            } else {
-                                inner
+                            match p {
+                                IrPattern::Bind { .. } => format!("__boxed_{}", inner),
+                                IrPattern::Wildcard => inner, // `_` matches Box<T> fine
+                                _ => format!("box {}", inner), // nested pattern needs box deref
                             }
                         } else {
                             inner
@@ -243,7 +264,9 @@ impl Emitter {
                             lines.push(format!("    if !({}) {{ continue; }}", c));
                         } else {
                             let e = self.gen_ir_expr(else_);
-                            if e.contains("return ") {
+                            let already_returns = matches!(&else_.kind, IrExprKind::ResultErr { .. })
+                                && self.in_effect && !self.in_test && !self.in_do_block.get();
+                            if already_returns {
                                 lines.push(format!("    if !({}) {{ {}; }}", c, e));
                             } else {
                                 lines.push(format!("    if !({}) {{ return {}; }}", c, e));
@@ -489,5 +512,10 @@ impl Emitter {
             Ty::Unknown => "_".to_string(),
             _ => self.ir_ty_to_rust(ty),
         }
+    }
+
+    /// Check if a type is Copy in Rust (no .clone() needed).
+    fn is_copy_type(ty: &Ty) -> bool {
+        matches!(ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit)
     }
 }

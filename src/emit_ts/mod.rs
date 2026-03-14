@@ -4,7 +4,6 @@ mod ir_blocks;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
-use crate::ast::*;
 
 pub(crate) struct TsEmitter {
     pub(crate) out: String,
@@ -82,18 +81,18 @@ impl TsEmitter {
     }
 }
 
-pub fn emit_with_modules(program: &Program, modules: &[(String, Program)], ir: Option<&crate::ir::IrProgram>) -> String {
+pub fn emit_with_modules(ir: &crate::ir::IrProgram) -> String {
     let mut emitter = TsEmitter::new();
-    emitter.ir_program = ir.cloned();
-    emitter.emit_program(program, modules);
+    emitter.ir_program = Some(ir.clone());
+    emitter.emit_program();
     emitter.out
 }
 
-pub fn emit_js_with_modules(program: &Program, modules: &[(String, Program)], ir: Option<&crate::ir::IrProgram>) -> String {
+pub fn emit_js_with_modules(ir: &crate::ir::IrProgram) -> String {
     let mut emitter = TsEmitter::new();
     emitter.js_mode = true;
-    emitter.ir_program = ir.cloned();
-    emitter.emit_program(program, modules);
+    emitter.ir_program = Some(ir.clone());
+    emitter.emit_program();
     emitter.out
 }
 
@@ -116,13 +115,14 @@ pub struct NpmConfig {
 }
 
 /// Emit an npm-publishable package from an Almide program.
-pub fn emit_npm_package(program: &Program, modules: &[(String, Program)], config: &NpmConfig) -> NpmOutput {
+pub fn emit_npm_package(ir: &crate::ir::IrProgram, config: &NpmConfig) -> NpmOutput {
     use crate::emit_ts_runtime;
 
     let mut emitter = TsEmitter::new();
     emitter.js_mode = true;
     emitter.npm_mode = true;
-    emitter.emit_npm_program(program, modules);
+    emitter.ir_program = Some(ir.clone());
+    emitter.emit_npm_program();
     let user_code = std::mem::take(&mut emitter.out);
 
     let used = emitter.used_stdlib.borrow();
@@ -153,7 +153,7 @@ pub fn emit_npm_package(program: &Program, modules: &[(String, Program)], config
     let index_js = format!("{}{}", imports, clean_code);
 
     // Generate index.d.ts
-    let index_dts = emitter.generate_dts(program);
+    let index_dts = emitter.generate_dts();
 
     // Generate runtime files
     let mut runtime_files = Vec::new();

@@ -4,6 +4,13 @@ use super::Parser;
 
 impl Parser {
     pub(crate) fn parse_type_expr(&mut self) -> Result<TypeExpr, String> {
+        self.enter_depth()?;
+        let result = self.parse_type_expr_inner();
+        self.exit_depth();
+        result
+    }
+
+    fn parse_type_expr_inner(&mut self) -> Result<TypeExpr, String> {
         if self.check(TokenType::Newtype) {
             self.advance();
             let inner = self.parse_type_expr()?;
@@ -107,16 +114,19 @@ impl Parser {
 
     fn try_parse_inline_variant(&mut self, first_name: String, first_args: Vec<TypeExpr>) -> Result<TypeExpr, String> {
         let mut cases = Vec::new();
+        let mut all_simple = first_args.is_empty();
         if !first_args.is_empty() {
-            cases.push(VariantCase::Tuple { name: first_name, fields: first_args });
+            cases.push(VariantCase::Tuple { name: first_name.clone(), fields: first_args });
         } else {
-            cases.push(VariantCase::Unit { name: first_name });
+            cases.push(VariantCase::Unit { name: first_name.clone() });
         }
+        let mut simple_names = vec![first_name];
         while self.check(TokenType::Pipe) {
             self.advance();
             self.skip_newlines();
             let case_name = self.expect_type_name()?;
             if self.check(TokenType::LParen) {
+                all_simple = false;
                 self.advance();
                 let mut fields = Vec::new();
                 if !self.check(TokenType::RParen) {
@@ -129,16 +139,26 @@ impl Parser {
                 self.expect(TokenType::RParen)?;
                 cases.push(VariantCase::Tuple { name: case_name, fields });
             } else if self.check(TokenType::LBrace) {
+                all_simple = false;
                 self.advance();
                 let fields = self.parse_field_type_list()?;
                 self.expect(TokenType::RBrace)?;
                 cases.push(VariantCase::Record { name: case_name, fields });
             } else {
-                cases.push(VariantCase::Unit { name: case_name });
+                cases.push(VariantCase::Unit { name: case_name.clone() });
+                simple_names.push(case_name);
             }
             self.skip_newlines();
         }
-        Ok(TypeExpr::Variant { cases })
+        // If all cases are simple names without payloads, produce Union instead of Variant
+        if all_simple {
+            let members = simple_names.into_iter()
+                .map(|n| TypeExpr::Simple { name: n })
+                .collect();
+            Ok(TypeExpr::Union { members })
+        } else {
+            Ok(TypeExpr::Variant { cases })
+        }
     }
 
     fn parse_record_type(&mut self) -> Result<TypeExpr, String> {
@@ -253,17 +273,24 @@ impl Parser {
     fn parse_generic_param(&mut self) -> Result<GenericParam, String> {
         let name = self.expect_type_name()?;
         let mut bounds = Vec::new();
+        let mut structural_bound = None;
         if self.check(TokenType::Colon) {
             self.advance();
-            bounds.push(self.expect_type_name()?);
-            while self.check(TokenType::Plus) {
-                self.advance();
+            // Check for structural bound: `T: { name: String, .. }`
+            if self.check(TokenType::LBrace) {
+                structural_bound = Some(self.parse_record_type()?);
+            } else {
                 bounds.push(self.expect_type_name()?);
+                while self.check(TokenType::Plus) {
+                    self.advance();
+                    bounds.push(self.expect_type_name()?);
+                }
             }
         }
         Ok(GenericParam {
             name,
             bounds: if bounds.is_empty() { None } else { Some(bounds) },
+            structural_bound,
         })
     }
 }

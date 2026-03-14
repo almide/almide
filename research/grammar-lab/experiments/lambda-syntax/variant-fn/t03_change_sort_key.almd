@@ -1,10 +1,10 @@
 type Item = { name: String, price: Int }
 
 fn sort_by_price(items: List[Item]) -> List[Item] =
-  items |> list.sort_by(fn(item) => item.price)
+  items |> list.sort_by((item) => item.price)
 
 fn cheapest(items: List[Item]) -> Option[Item] =
   sort_by_price(items) |> list.first()
 
 fn item_names(items: List[Item]) -> List[String] =
-  items |> list.map(fn(item) => item.name)
+  items |> list.map((item) => item.name)

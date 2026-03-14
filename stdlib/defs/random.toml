@@ -1,4 +1,6 @@
 [int]
+description = "Generate a random integer between min and max (inclusive)."
+example = 'random.int(1, 100) // => 42'
 params = [{ name = "min", type = "Int" }, { name = "max", type = "Int" }]
 return = "Int"
 effect = true
@@ -6,6 +8,8 @@ rust = "almide_rt_random_int({min}, {max})?"
 ts = "__almd_random.int({min}, {max})"
 
 [float]
+description = "Generate a random float between 0.0 and 1.0."
+example = 'random.float() // => 0.7321'
 params = []
 return = "Float"
 effect = true
@@ -13,15 +17,21 @@ rust = "almide_rt_random_float()?"
 ts = "__almd_random.float()"
 
 [choice]
-params = [{ name = "xs", type = "List[Unknown]" }]
-return = "Option[Unknown]"
+description = "Pick a random element from a list, or none if empty."
+example = 'random.choice(["a", "b", "c"]) // => some("b")'
+type_params = ["T"]
+params = [{ name = "xs", type = "List[T]" }]
+return = "Option[T]"
 effect = true
 rust = "almide_rt_random_choice(&{xs})?"
 ts = "__almd_random.choice({xs})"
 
 [shuffle]
-params = [{ name = "xs", type = "List[Unknown]" }]
-return = "List[Unknown]"
+description = "Return a randomly shuffled copy of a list."
+example = 'random.shuffle([1, 2, 3]) // => [3, 1, 2]'
+type_params = ["T"]
+params = [{ name = "xs", type = "List[T]" }]
+return = "List[T]"
 effect = true
 rust = "almide_rt_random_shuffle(({xs}).to_vec())?"
 ts = "__almd_random.shuffle({xs})"

@@ -1,4 +1,6 @@
 [new]
+description = "Create an empty map."
+example = 'let m = map.new()'
 type_params = ["K", "V"]
 params = []
 return = "Map[K, V]"
@@ -6,6 +8,8 @@ rust = "almide_rt_map_new()"
 ts = "__almd_map.new()"
 
 [get]
+description = "Get a value by key. Returns none if the key doesn't exist."
+example = 'map.get(m, "name")'
 type_params = ["K", "V"]
 params = [{ name = "m", type = "Map[K, V]" }, { name = "key", type = "K" }]
 return = "Option[V]"
@@ -13,6 +17,8 @@ rust = "almide_rt_map_get(&{m}, &{key})"
 ts = "__almd_map.get({m}, {key})"
 
 [get_or]
+description = "Get a value by key, returning a default if the key doesn't exist."
+example = 'map.get_or(m, "name", "unknown")'
 type_params = ["K", "V"]
 params = [{ name = "m", type = "Map[K, V]" }, { name = "key", type = "K" }, { name = "default", type = "V" }]
 return = "V"
@@ -20,6 +26,8 @@ rust = "almide_rt_map_get_or(&{m}, &{key}, {default})"
 ts = "__almd_map.get_or({m}, {key}, {default})"
 
 [set]
+description = "Return a new map with the key set to value. Immutable — does not modify the original."
+example = 'let m2 = map.set(m, "name", "Alice")'
 type_params = ["K", "V"]
 params = [{ name = "m", type = "Map[K, V]" }, { name = "key", type = "K" }, { name = "value", type = "V" }]
 return = "Map[K, V]"
@@ -27,6 +35,8 @@ rust = "almide_rt_map_set(&{m}, {key}, {value})"
 ts = "__almd_map.set({m}, {key}, {value})"
 
 [contains]
+description = "Check if a key exists in the map."
+example = 'map.contains(m, "name")'
 type_params = ["K", "V"]
 params = [{ name = "m", type = "Map[K, V]" }, { name = "key", type = "K" }]
 return = "Bool"
@@ -34,6 +44,8 @@ rust = "almide_rt_map_contains(&{m}, &{key})"
 ts = "__almd_map.contains({m}, {key})"
 
 [remove]
+description = "Return a new map with the key removed. Immutable — does not modify the original."
+example = 'let m2 = map.remove(m, "temp")'
 type_params = ["K", "V"]
 params = [{ name = "m", type = "Map[K, V]" }, { name = "key", type = "K" }]
 return = "Map[K, V]"
@@ -41,6 +53,8 @@ rust = "almide_rt_map_remove(&{m}, &{key})"
 ts = "__almd_map.remove({m}, {key})"
 
 [keys]
+description = "Get all keys as a sorted list."
+example = 'map.keys(m)'
 type_params = ["K", "V"]
 params = [{ name = "m", type = "Map[K, V]" }]
 return = "List[K]"
@@ -48,6 +62,8 @@ rust = "almide_rt_map_keys(&{m})"
 ts = "__almd_map.keys({m})"
 
 [values]
+description = "Get all values as a list."
+example = 'map.values(m)'
 type_params = ["K", "V"]
 params = [{ name = "m", type = "Map[K, V]" }]
 return = "List[V]"
@@ -55,6 +71,8 @@ rust = "almide_rt_map_values(&{m})"
 ts = "__almd_map.values({m})"
 
 [len]
+description = "Get the number of key-value pairs in the map."
+example = 'map.len(m)'
 type_params = ["K", "V"]
 params = [{ name = "m", type = "Map[K, V]" }]
 return = "Int"
@@ -62,6 +80,8 @@ rust = "almide_rt_map_len(&{m})"
 ts = "__almd_map.len({m})"
 
 [entries]
+description = "Get all key-value pairs as a list of tuples, sorted by key."
+example = 'map.entries(m)'
 type_params = ["K", "V"]
 params = [{ name = "m", type = "Map[K, V]" }]
 return = "List[(K, V)]"
@@ -69,6 +89,8 @@ rust = "almide_rt_map_entries(&{m})"
 ts = "__almd_map.entries({m})"
 
 [merge]
+description = "Merge two maps. Keys in the second map override keys in the first."
+example = 'map.merge(base, overrides)'
 type_params = ["K", "V"]
 params = [{ name = "a", type = "Map[K, V]" }, { name = "b", type = "Map[K, V]" }]
 return = "Map[K, V]"
@@ -76,6 +98,8 @@ rust = "almide_rt_map_merge(&{a}, &{b})"
 ts = "__almd_map.merge({a}, {b})"
 
 ["is_empty?"]
+description = "Check if the map has no entries."
+example = 'map.is_empty?(m)'
 type_params = ["K", "V"]
 params = [{ name = "m", type = "Map[K, V]" }]
 return = "Bool"
@@ -84,6 +108,8 @@ ts = "__almd_map.is_empty_hdlm_qm_({m})"
 aliases = ["is_empty_hdlm_qm_"]
 
 [from_entries]
+description = "Create a map from a list of (key, value) tuples."
+example = 'map.from_entries([("a", 1), ("b", 2)])'
 type_params = ["K", "V"]
 params = [{ name = "entries", type = "List[(K, V)]" }]
 return = "Map[K, V]"
@@ -93,6 +119,8 @@ ts = "__almd_map.from_entries({entries})"
 # ── Closure-taking functions ──
 
 [from_list]
+description = "Create a map by applying a function to each element that returns a (key, value) pair."
+example = 'map.from_list(["a", "b"], fn(s) => (s, string.len(s)))'
 type_params = ["A", "K", "V"]
 params = [
     { name = "xs", type = "List[A]" },
@@ -103,6 +131,8 @@ rust = "almide_rt_map_from_list(({xs}).to_vec(), |{f.args}| {{ {f.clone_bindings
 ts = "__almd_map.from_list({xs}, {f.args} => {f.body})"
 
 [map_values]
+description = "Transform all values in the map using a function, keeping keys unchanged."
+example = 'map.map_values(m, fn(v) => v * 2)'
 type_params = ["K", "V", "B"]
 params = [
     { name = "m", type = "Map[K, V]" },
@@ -113,6 +143,8 @@ rust = "almide_rt_map_map_values(&{m}, |{f.args}| {{ {f.clone_bindings}{f.body} 
 ts = "__almd_map.map_values({m}, {f.args} => {f.body})"
 
 [filter]
+description = "Return a new map containing only entries where the predicate returns true."
+example = 'map.filter(m, fn(k, v) => v > 0)'
 type_params = ["K", "V"]
 params = [
     { name = "m", type = "Map[K, V]" },

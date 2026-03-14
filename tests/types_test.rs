@@ -472,6 +472,7 @@ fn fn_sig_format_params() {
         ret: Ty::Bool,
         is_effect: false,
         generics: vec![],
+        structural_bounds: std::collections::HashMap::new(),
     };
     assert_eq!(sig.format_params(), "a: Int, b: String");
 }
@@ -483,6 +484,7 @@ fn fn_sig_format_params_empty() {
         ret: Ty::Unit,
         is_effect: false,
         generics: vec![],
+        structural_bounds: std::collections::HashMap::new(),
     };
     assert_eq!(sig.format_params(), "");
 }

@@ -2,6 +2,33 @@ use crate::ast::{self, ResolvedType};
 use crate::types::{Ty, VariantPayload};
 use super::{Checker, err};
 
+/// Replace Ty::Unknown parts in `ty` with corresponding parts from `expected`.
+/// e.g. Result[Int, Unknown] + expected Result[Int, String] → Result[Int, String]
+fn refine_unknown(ty: &Ty, expected: &Ty) -> Ty {
+    match (ty, expected) {
+        (Ty::Unknown, _) => expected.clone(),
+        (Ty::Result(ok, err), Ty::Result(eok, eerr)) => {
+            let ok = if matches!(ok.as_ref(), Ty::Unknown) { eok.clone() } else { ok.clone() };
+            let err = if matches!(err.as_ref(), Ty::Unknown) { eerr.clone() } else { err.clone() };
+            Ty::Result(ok, err)
+        }
+        (Ty::Option(inner), Ty::Option(einner)) => {
+            let inner = if matches!(inner.as_ref(), Ty::Unknown) { einner.clone() } else { inner.clone() };
+            Ty::Option(inner)
+        }
+        (Ty::List(inner), Ty::List(einner)) => {
+            let inner = if matches!(inner.as_ref(), Ty::Unknown) { einner.clone() } else { inner.clone() };
+            Ty::List(inner)
+        }
+        (Ty::Map(k, v), Ty::Map(ek, ev)) => {
+            let k = if matches!(k.as_ref(), Ty::Unknown) { ek.clone() } else { k.clone() };
+            let v = if matches!(v.as_ref(), Ty::Unknown) { ev.clone() } else { v.clone() };
+            Ty::Map(k, v)
+        }
+        _ => ty.clone(),
+    }
+}
+
 fn ty_to_resolved(ty: &Ty) -> ResolvedType {
     match ty {
         Ty::Int => ResolvedType::Int,
@@ -17,6 +44,7 @@ fn ty_to_resolved(ty: &Ty) -> ResolvedType {
         Ty::Variant { .. } => ResolvedType::Variant,
         Ty::Fn { .. } => ResolvedType::Fn,
         Ty::Tuple(_) => ResolvedType::Tuple,
+        Ty::Union(_) => ResolvedType::Named,
         Ty::Named(..) => ResolvedType::Named,
         Ty::TypeVar(_) => ResolvedType::Named,
         Ty::Unknown => ResolvedType::Unknown,
@@ -37,10 +65,10 @@ impl Checker {
             self.current_decl_col = Some(span.col);
         }
         let ty = self.check_expr_inner(expr, expected);
+        // Refine Unknown parts using expected type (e.g. ok(x) → Result[T, E] from context)
+        let ty = if let Some(exp) = expected { refine_unknown(&ty, exp) } else { ty };
         expr.set_resolved_type(ty_to_resolved(&ty));
-        if let Some(span) = expr.span() {
-            self.expr_types.insert((span.line, span.col), ty.clone());
-        }
+        self.expr_types.insert(expr.id(), ty.clone());
         self.current_decl_line = prev_line;
         self.current_decl_col = prev_col;
         ty
@@ -206,62 +234,7 @@ impl Checker {
                 Ty::Map(Box::new(key_ty), Box::new(val_ty))
             }
 
-            ast::Expr::Record { name, fields, .. } => {
-                // Check if this is a variant record constructor
-                if let Some(cname) = name.as_ref() {
-                    if let Some((vname, case)) = self.env.constructors.get(cname.as_str()).cloned() {
-                        if let VariantPayload::Record(expected_fields) = &case.payload {
-                            // Type-check each provided field
-                            for f in fields.iter_mut() {
-                                let actual_ty = self.check_expr(&mut f.value);
-                                if let Some((_, expected_ty, _)) = expected_fields.iter().find(|(n, _, _)| n == &f.name) {
-                                    if !expected_ty.compatible(&actual_ty) {
-                                        let hint = Self::hint_with_conversion(
-                                            &format!("In variant constructor {}", cname),
-                                            expected_ty, &actual_ty,
-                                        );
-                                        self.push_diagnostic(err(
-                                            format!("field '{}' expects {} but got {}", f.name, expected_ty.display(), actual_ty.display()),
-                                            hint, "variant record construction",
-                                        ));
-                                    }
-                                } else {
-                                    self.push_diagnostic(err(
-                                        format!("unknown field '{}' in variant {}", f.name, cname),
-                                        &format!("{} does not have a field '{}'", cname, f.name), "variant record construction",
-                                    ));
-                                }
-                            }
-                            // Check for missing fields — fill in defaults or report error
-                            for (fname, _, default) in expected_fields {
-                                if !fields.iter().any(|f| f.name == *fname) {
-                                    if let Some(default_expr) = default {
-                                        // Fill in the default value
-                                        fields.push(crate::ast::FieldInit {
-                                            name: fname.clone(),
-                                            value: default_expr.clone(),
-                                        });
-                                    } else {
-                                        self.push_diagnostic(err(
-                                            format!("missing field '{}' in variant constructor {}", fname, cname),
-                                            &format!("Add field '{}' to the constructor", fname), "variant record construction",
-                                        ));
-                                    }
-                                }
-                            }
-                            // Look up the full variant type
-                            if let Some(ty) = self.env.types.get(&vname) {
-                                return ty.clone();
-                            }
-                            return Ty::Named(vname, vec![]);
-                        }
-                    }
-                }
-                // Plain record
-                Ty::Record {
-                    fields: fields.iter_mut().map(|f| (f.name.clone(), self.check_expr(&mut f.value))).collect(),
-                }
-            },
+            ast::Expr::Record { name, fields, .. } => self.check_record_expr(name, fields),
 
             ast::Expr::SpreadRecord { base, fields, .. } => {
                 let bt = self.check_expr(base);
@@ -269,89 +242,9 @@ impl Checker {
                 bt
             }
 
-            ast::Expr::If { cond, then, else_, .. } => {
-                let ct = self.check_expr(cond);
-                if !ct.compatible(&Ty::Bool) {
-                    self.push_diagnostic(err(
-                        format!("if condition has type {} but expected Bool", ct.display()),
-                        "The condition must be a Bool expression", "if expression",
-                    ));
-                }
-                let tt = self.check_expr_with(then, expected);
-                let et = self.check_expr_with(else_, expected);
-                if !tt.compatible(&et) {
-                    let mut diag = err(
-                        format!("if branches have different types: then is {}, else is {}", tt.display(), et.display()),
-                        "Both branches must have the same type", "if expression",
-                    );
-                    if let Some(then_span) = then.span() {
-                        diag.secondary.push(crate::diagnostic::SecondarySpan {
-                            line: then_span.line, col: Some(then_span.col),
-                            label: format!("this is {}", tt.display()),
-                        });
-                    }
-                    self.push_diagnostic(diag);
-                }
-                tt
-            }
+            ast::Expr::If { cond, then, else_, .. } => self.check_if_expr(cond, then, else_, expected),
 
-            ast::Expr::Match { subject, arms, .. } => {
-                // Suppress auto-unwrap when matching on ok/err (caller handles Result explicitly)
-                let has_result_arms = arms.iter().any(|a| matches!(&a.pattern, ast::Pattern::Ok { .. } | ast::Pattern::Err { .. }));
-                let prev_skip = self.env.skip_auto_unwrap;
-                if has_result_arms {
-                    self.env.skip_auto_unwrap = true;
-                }
-                let st = self.check_expr(subject);
-                self.env.skip_auto_unwrap = prev_skip;
-                let mut result_ty: Option<Ty> = None;
-                let first_arm_span = arms.first().and_then(|a| a.body.span());
-                for arm in arms.iter_mut() {
-                    self.env.push_scope();
-                    self.check_pattern(&arm.pattern, &st);
-                    if let Some(ref mut guard) = arm.guard {
-                        let gt = self.check_expr(guard);
-                        if !gt.compatible(&Ty::Bool) {
-                            self.push_diagnostic(err(
-                                format!("match guard has type {} but expected Bool", gt.display()),
-                                "Guard conditions must be Bool", "match arm",
-                            ));
-                        }
-                    }
-                    let at = self.check_expr_with(&mut arm.body, expected);
-                    if let Some(ref mut prev) = result_ty {
-                        let compat = prev.compatible(&at)
-                            || match (prev.clone(), &at) {
-                                (Ty::Result(ok_ty, _), non_result) if !matches!(non_result, Ty::Result(_, _)) => ok_ty.compatible(non_result),
-                                (_, Ty::Result(ok_ty, _)) if !matches!(prev.clone(), Ty::Result(_, _)) => prev.compatible(&ok_ty),
-                                _ => false,
-                            };
-                        if !compat {
-                            let mut diag = err(
-                                format!("match arm has type {} but previous arms have type {}", at.display(), prev.display()),
-                                "All match arms must have the same type", "match expression",
-                            );
-                            // Show the first arm's location as secondary
-                            if let Some(first_span) = first_arm_span {
-                                diag.secondary.push(crate::diagnostic::SecondarySpan {
-                                    line: first_span.line, col: Some(first_span.col),
-                                    label: format!("first arm is {}", prev.display()),
-                                });
-                            }
-                            self.push_diagnostic(diag);
-                        }
-                        if matches!(at, Ty::Result(_, _)) && !matches!(prev.clone(), Ty::Result(_, _)) {
-                            *prev = at;
-                        }
-                    } else {
-                        result_ty = Some(at);
-                    }
-                    self.env.pop_scope();
-                }
-                // Exhaustiveness check
-                self.check_match_exhaustiveness(&st, arms);
-                result_ty.unwrap_or(Ty::Unknown)
-            }
+            ast::Expr::Match { subject, arms, .. } => self.check_match_expr(subject, arms, expected),
 
             ast::Expr::Block { stmts, expr, .. } => {
                 self.env.push_scope();
@@ -394,78 +287,9 @@ impl Checker {
                 Ty::List(Box::new(Ty::Int))
             }
 
-            ast::Expr::ForIn { var, var_tuple, iterable, body, .. } => {
-                let it = self.check_expr(iterable);
-                self.env.push_scope();
-                let elem_ty = match &it {
-                    Ty::List(inner) => *inner.clone(),
-                    Ty::Map(k, v) => {
-                        if var_tuple.is_some() {
-                            Ty::Tuple(vec![*k.clone(), *v.clone()])
-                        } else {
-                            *k.clone()
-                        }
-                    }
-                    _ if matches!(it, Ty::Unknown) => Ty::Unknown,
-                    _ => {
-                        self.push_diagnostic(err(
-                            format!("cannot iterate over type {}", it.display()),
-                            "for...in requires a List, Map, or Range",
-                            format!("for {} in ...", var),
-                        ));
-                        Ty::Unknown
-                    }
-                };
-                if let Some(names) = var_tuple {
-                    let tys = self.resolve_tuple_elements(&elem_ty, names.len(), format!("for ({}) in ...", names.join(", ")));
-                    for (name, ty) in names.iter().zip(tys) {
-                        self.env.define_var(name, ty);
-                    }
-                } else {
-                    self.env.define_var(var, elem_ty);
-                }
-                for s in body.iter_mut() { self.check_stmt(s); }
-                self.env.pop_scope();
-                Ty::Unit
-            }
+            ast::Expr::ForIn { var, var_tuple, iterable, body, .. } => self.check_for_in_expr(var, var_tuple, iterable, body),
 
-            ast::Expr::Lambda { params, body, .. } => {
-                self.env.push_scope();
-                // Extract expected param/ret types for bidirectional inference
-                let (expected_params, expected_ret) = match expected {
-                    Some(Ty::Fn { params: ep, ret: er }) => (Some(ep.as_slice()), Some(er.as_ref())),
-                    _ => (None, None),
-                };
-                let pts: Vec<Ty> = params.iter().enumerate().map(|(i, p)| {
-                    if let Some(names) = &p.tuple_names {
-                        let tuple_ty = p.ty.as_ref().map(|te| self.resolve_type_expr(te)).unwrap_or(Ty::Unknown);
-                        let tys = self.resolve_tuple_elements(&tuple_ty, names.len(), format!("fn({}) => ...", p.name));
-                        for (name, ty) in names.iter().zip(tys.iter()) {
-                            self.env.define_var(name, ty.clone());
-                        }
-                        Ty::Tuple(tys)
-                    } else {
-                        let ty = if let Some(te) = &p.ty {
-                            self.resolve_type_expr(te)
-                        } else if let Some(ep) = expected_params {
-                            let inferred = ep.get(i).cloned().unwrap_or(Ty::Unknown);
-                            // Only use inferred type if it's concrete (not TypeVar/Unknown)
-                            if matches!(inferred, Ty::TypeVar(_) | Ty::Unknown) {
-                                Ty::Unknown
-                            } else {
-                                inferred
-                            }
-                        } else {
-                            Ty::Unknown
-                        };
-                        self.env.define_var(&p.name, ty.clone());
-                        ty
-                    }
-                }).collect();
-                let ret = self.check_expr_with(body, expected_ret);
-                self.env.pop_scope();
-                Ty::Fn { params: pts, ret: Box::new(ret) }
-            }
+            ast::Expr::Lambda { params, body, .. } => self.check_lambda_expr(params, body, expected),
 
             ast::Expr::Call { callee, args, .. } => self.check_call(callee, args),
 
@@ -581,41 +405,7 @@ impl Checker {
                 }
             }
 
-            ast::Expr::IndexAccess { object, index, .. } => {
-                let ot = self.check_expr(object);
-                let it = self.check_expr(index);
-                match &ot {
-                    Ty::List(inner) => {
-                        if !matches!(it, Ty::Int | Ty::Unknown) {
-                            self.push_diagnostic(err(
-                                format!("list index must be Int, got {}", it.display()),
-                                "Use an Int value for list indexing",
-                                "xs[i]",
-                            ));
-                        }
-                        *inner.clone()
-                    }
-                    Ty::Map(k, v) => {
-                        if !it.compatible(k) && !matches!(it, Ty::Unknown) {
-                            self.push_diagnostic(err(
-                                format!("map key type is {} but got {}", k.display(), it.display()),
-                                "Key type must match the Map's key type",
-                                "m[key]",
-                            ));
-                        }
-                        Ty::Option(v.clone())
-                    }
-                    Ty::Unknown => Ty::Unknown,
-                    _ => {
-                        self.push_diagnostic(err(
-                            format!("cannot index into type {}", ot.display()),
-                            "Indexing with [] is supported for List[T] and Map[K, V]",
-                            "xs[i] or m[key]",
-                        ));
-                        Ty::Unknown
-                    }
-                }
-            }
+            ast::Expr::IndexAccess { object, index, .. } => self.check_index_access_expr(object, index),
 
             ast::Expr::While { cond, body, .. } => {
                 let ct = self.check_expr(cond);
@@ -637,6 +427,240 @@ impl Checker {
         }
     }
 
+    fn check_record_expr(&mut self, name: &Option<String>, fields: &mut Vec<ast::FieldInit>) -> Ty {
+        if let Some(cname) = name.as_ref() {
+            if let Some((vname, case)) = self.env.constructors.get(cname.as_str()).cloned() {
+                if let VariantPayload::Record(expected_fields) = &case.payload {
+                    for f in fields.iter_mut() {
+                        let actual_ty = self.check_expr(&mut f.value);
+                        if let Some((_, expected_ty, _)) = expected_fields.iter().find(|(n, _, _)| n == &f.name) {
+                            if !expected_ty.compatible(&actual_ty) {
+                                let hint = Self::hint_with_conversion(
+                                    &format!("In variant constructor {}", cname),
+                                    expected_ty, &actual_ty,
+                                );
+                                self.push_diagnostic(err(
+                                    format!("field '{}' expects {} but got {}", f.name, expected_ty.display(), actual_ty.display()),
+                                    hint, "variant record construction",
+                                ));
+                            }
+                        } else {
+                            self.push_diagnostic(err(
+                                format!("unknown field '{}' in variant {}", f.name, cname),
+                                &format!("{} does not have a field '{}'", cname, f.name), "variant record construction",
+                            ));
+                        }
+                    }
+                    for (fname, _, default) in expected_fields {
+                        if !fields.iter().any(|f| f.name == *fname) {
+                            if let Some(default_expr) = default {
+                                fields.push(crate::ast::FieldInit {
+                                    name: fname.clone(),
+                                    value: default_expr.clone(),
+                                });
+                            } else {
+                                self.push_diagnostic(err(
+                                    format!("missing field '{}' in variant constructor {}", fname, cname),
+                                    &format!("Add field '{}' to the constructor", fname), "variant record construction",
+                                ));
+                            }
+                        }
+                    }
+                    if let Some(ty) = self.env.types.get(&vname) {
+                        return ty.clone();
+                    }
+                    return Ty::Named(vname, vec![]);
+                }
+            }
+        }
+        Ty::Record {
+            fields: fields.iter_mut().map(|f| (f.name.clone(), self.check_expr(&mut f.value))).collect(),
+        }
+    }
+
+    fn check_match_expr(&mut self, subject: &mut ast::Expr, arms: &mut Vec<ast::MatchArm>, expected: Option<&Ty>) -> Ty {
+        let has_result_arms = arms.iter().any(|a| matches!(&a.pattern, ast::Pattern::Ok { .. } | ast::Pattern::Err { .. }));
+        let prev_skip = self.env.skip_auto_unwrap;
+        if has_result_arms {
+            self.env.skip_auto_unwrap = true;
+        }
+        let st = self.check_expr(subject);
+        self.env.skip_auto_unwrap = prev_skip;
+        let mut result_ty: Option<Ty> = None;
+        let first_arm_span = arms.first().and_then(|a| a.body.span());
+        for arm in arms.iter_mut() {
+            self.env.push_scope();
+            self.check_pattern(&arm.pattern, &st);
+            if let Some(ref mut guard) = arm.guard {
+                let gt = self.check_expr(guard);
+                if !gt.compatible(&Ty::Bool) {
+                    self.push_diagnostic(err(
+                        format!("match guard has type {} but expected Bool", gt.display()),
+                        "Guard conditions must be Bool", "match arm",
+                    ));
+                }
+            }
+            let at = self.check_expr_with(&mut arm.body, expected);
+            if let Some(ref mut prev) = result_ty {
+                let compat = prev.compatible(&at)
+                    || match (prev.clone(), &at) {
+                        (Ty::Result(ok_ty, _), non_result) if !matches!(non_result, Ty::Result(_, _)) => ok_ty.compatible(non_result),
+                        (_, Ty::Result(ok_ty, _)) if !matches!(prev.clone(), Ty::Result(_, _)) => prev.compatible(&ok_ty),
+                        _ => false,
+                    };
+                if !compat {
+                    let mut diag = err(
+                        format!("match arm has type {} but previous arms have type {}", at.display(), prev.display()),
+                        "All match arms must have the same type", "match expression",
+                    );
+                    if let Some(first_span) = first_arm_span {
+                        diag.secondary.push(crate::diagnostic::SecondarySpan {
+                            line: first_span.line, col: Some(first_span.col),
+                            label: format!("first arm is {}", prev.display()),
+                        });
+                    }
+                    self.push_diagnostic(diag);
+                }
+                if matches!(at, Ty::Result(_, _)) && !matches!(prev.clone(), Ty::Result(_, _)) {
+                    *prev = at;
+                }
+            } else {
+                result_ty = Some(at);
+            }
+            self.env.pop_scope();
+        }
+        self.check_match_exhaustiveness(&st, arms);
+        result_ty.unwrap_or(Ty::Unknown)
+    }
+
+    fn check_if_expr(&mut self, cond: &mut ast::Expr, then: &mut ast::Expr, else_: &mut ast::Expr, expected: Option<&Ty>) -> Ty {
+        let ct = self.check_expr(cond);
+        if !ct.compatible(&Ty::Bool) {
+            self.push_diagnostic(err(
+                format!("if condition has type {} but expected Bool", ct.display()),
+                "The condition must be a Bool expression", "if expression",
+            ));
+        }
+        let tt = self.check_expr_with(then, expected);
+        let et = self.check_expr_with(else_, expected);
+        if !tt.compatible(&et) {
+            let mut diag = err(
+                format!("if branches have different types: then is {}, else is {}", tt.display(), et.display()),
+                "Both branches must have the same type", "if expression",
+            );
+            if let Some(then_span) = then.span() {
+                diag.secondary.push(crate::diagnostic::SecondarySpan {
+                    line: then_span.line, col: Some(then_span.col),
+                    label: format!("this is {}", tt.display()),
+                });
+            }
+            self.push_diagnostic(diag);
+        }
+        tt
+    }
+
+    fn check_for_in_expr(&mut self, var: &str, var_tuple: &Option<Vec<String>>, iterable: &mut ast::Expr, body: &mut Vec<ast::Stmt>) -> Ty {
+        let it = self.check_expr(iterable);
+        self.env.push_scope();
+        let elem_ty = match &it {
+            Ty::List(inner) => *inner.clone(),
+            Ty::Map(k, v) => {
+                if var_tuple.is_some() {
+                    Ty::Tuple(vec![*k.clone(), *v.clone()])
+                } else {
+                    *k.clone()
+                }
+            }
+            _ if matches!(it, Ty::Unknown) => Ty::Unknown,
+            _ => {
+                self.push_diagnostic(err(
+                    format!("cannot iterate over type {}", it.display()),
+                    "for...in requires a List, Map, or Range",
+                    format!("for {} in ...", var),
+                ));
+                Ty::Unknown
+            }
+        };
+        if let Some(names) = var_tuple {
+            let tys = self.resolve_tuple_elements(&elem_ty, names.len(), format!("for ({}) in ...", names.join(", ")));
+            for (name, ty) in names.iter().zip(tys) {
+                self.env.define_var(name, ty);
+            }
+        } else {
+            self.env.define_var(var, elem_ty);
+        }
+        for s in body.iter_mut() { self.check_stmt(s); }
+        self.env.pop_scope();
+        Ty::Unit
+    }
+
+    fn check_lambda_expr(&mut self, params: &mut Vec<ast::LambdaParam>, body: &mut ast::Expr, expected: Option<&Ty>) -> Ty {
+        self.env.push_scope();
+        let (expected_params, expected_ret) = match expected {
+            Some(Ty::Fn { params: ep, ret: er }) => (Some(ep.as_slice()), Some(er.as_ref())),
+            _ => (None, None),
+        };
+        let pts: Vec<Ty> = params.iter().enumerate().map(|(i, p)| {
+            if let Some(names) = &p.tuple_names {
+                let tuple_ty = p.ty.as_ref().map(|te| self.resolve_type_expr(te)).unwrap_or(Ty::Unknown);
+                let tys = self.resolve_tuple_elements(&tuple_ty, names.len(), format!("fn({}) => ...", p.name));
+                for (name, ty) in names.iter().zip(tys.iter()) {
+                    self.env.define_var(name, ty.clone());
+                }
+                Ty::Tuple(tys)
+            } else {
+                let ty = if let Some(te) = &p.ty {
+                    self.resolve_type_expr(te)
+                } else if let Some(ep) = expected_params {
+                    ep.get(i).cloned().unwrap_or(Ty::Unknown)
+                } else {
+                    Ty::Unknown
+                };
+                self.env.define_var(&p.name, ty.clone());
+                ty
+            }
+        }).collect();
+        let ret = self.check_expr_with(body, expected_ret);
+        self.env.pop_scope();
+        Ty::Fn { params: pts, ret: Box::new(ret) }
+    }
+
+    fn check_index_access_expr(&mut self, object: &mut ast::Expr, index: &mut ast::Expr) -> Ty {
+        let ot = self.check_expr(object);
+        let it = self.check_expr(index);
+        match &ot {
+            Ty::List(inner) => {
+                if !matches!(it, Ty::Int | Ty::Unknown) {
+                    self.push_diagnostic(err(
+                        format!("list index must be Int, got {}", it.display()),
+                        "Use an Int value for list indexing",
+                        "xs[i]",
+                    ));
+                }
+                *inner.clone()
+            }
+            Ty::Map(k, v) => {
+                if !it.compatible(k) && !matches!(it, Ty::Unknown) {
+                    self.push_diagnostic(err(
+                        format!("map key type is {} but got {}", k.display(), it.display()),
+                        "Key type must match the Map's key type",
+                        "m[key]",
+                    ));
+                }
+                Ty::Option(v.clone())
+            }
+            Ty::Unknown => Ty::Unknown,
+            _ => {
+                self.push_diagnostic(err(
+                    format!("cannot index into type {}", ot.display()),
+                    "Indexing with [] is supported for List[T] and Map[K, V]",
+                    "xs[i] or m[key]",
+                ));
+                Ty::Unknown
+            }
+        }
+    }
+
     /// Validate interpolated expressions inside `"...${expr}..."` strings.
     fn check_interpolated_string(&mut self, value: &str, span: Option<&ast::Span>) {
         let mut chars = value.chars().peekable();
@@ -652,8 +676,10 @@ impl Checker {
                 }
                 // Parse the interpolated expression
                 let tokens = crate::lexer::Lexer::tokenize(&expr_str);
-                let mut parser = crate::parser::Parser::new(tokens);
-                match parser.parse_single_expr() {
+                let mut parser = crate::parser::Parser::new_with_id_offset(tokens, self.next_expr_id);
+                let result = parser.parse_single_expr();
+                self.next_expr_id = parser.expr_id_counter();
+                match result {
                     Ok(mut parsed_expr) => {
                         // Type-check the expression
                         self.check_expr(&mut parsed_expr);

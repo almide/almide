@@ -52,8 +52,10 @@ pub struct Checker {
     current_decl_col: Option<usize>,
     /// Build target (e.g. "rust", "ts", "wasm"). Used to gate platform modules.
     pub target: Option<String>,
-    /// Full Ty for every expression, keyed by (line, col) span.
-    pub expr_types: std::collections::HashMap<(usize, usize), Ty>,
+    /// Full Ty for every expression, keyed by ExprId.
+    pub expr_types: std::collections::HashMap<crate::ast::ExprId, Ty>,
+    /// Counter for generating fresh ExprIds in sub-parsers (e.g. string interpolation).
+    pub next_expr_id: u32,
 }
 
 /// Modules that require a native runtime (OS access). Not available on WASM.
@@ -74,6 +76,7 @@ impl Checker {
             current_decl_col: None,
             target: None,
             expr_types: std::collections::HashMap::new(),
+            next_expr_id: 0,
         };
         c.register_stdlib();
         c
@@ -127,141 +130,143 @@ impl Checker {
         for decl in decls {
             match decl {
                 ast::Decl::Fn { name, params, return_type, effect, r#async, visibility, generics, .. } => {
-                    if prefix.is_some() {
-                        let hidden = match visibility {
-                            ast::Visibility::Local => true,
-                            ast::Visibility::Mod => is_external,
-                            ast::Visibility::Public => false,
-                        };
-                        if hidden {
-                            if let Some(p) = prefix {
-                                self.env.local_symbols.insert(format!("{}.{}", p, name));
-                            }
-                            continue;
-                        }
-                    }
-                    // Collect generic type parameter names
-                    let generic_names: Vec<String> = generics.as_ref()
-                        .map(|gs| gs.iter().map(|g| g.name.clone()).collect())
-                        .unwrap_or_default();
-                    // Register type params as TypeVar in the type registry during resolution
-                    for gn in &generic_names {
-                        self.env.types.insert(gn.clone(), Ty::TypeVar(gn.clone()));
-                    }
-                    let param_tys: Vec<(String, Ty)> = params.iter()
-                        .map(|p| (p.name.clone(), self.resolve_type_expr(&p.ty)))
-                        .collect();
-                    let ret = self.resolve_type_expr(return_type);
-                    // Remove type params from registry after resolution
-                    for gn in &generic_names {
-                        self.env.types.remove(gn);
-                    }
-                    let is_effect = effect.unwrap_or(false) || r#async.unwrap_or(false);
-                    let key = match prefix {
-                        Some(p) => format!("{}.{}", p, name),
-                        None => name.clone(),
-                    };
-                    if prefix.is_none() && is_effect {
-                        self.env.effect_fns.insert(name.clone());
-                    }
-                    self.env.functions.insert(key, FnSig { params: param_tys, ret, is_effect, generics: generic_names });
+                    self.register_fn_decl(name, params, return_type, *effect, *r#async, visibility, generics, prefix, is_external);
                 }
                 ast::Decl::Type { name, ty, visibility, generics, .. } => {
-                    if prefix.is_some() {
-                        let hidden = match visibility {
-                            ast::Visibility::Local => true,
-                            ast::Visibility::Mod => is_external,
-                            ast::Visibility::Public => false,
-                        };
-                        if hidden {
-                            if let Some(p) = prefix {
-                                self.env.local_symbols.insert(format!("{}.{}", p, name));
-                            }
-                            continue;
-                        }
-                    }
-                    // Register generic type params as TypeVar during resolution
-                    let generic_names: Vec<String> = generics.as_ref()
-                        .map(|gs| gs.iter().map(|g| g.name.clone()).collect())
-                        .unwrap_or_default();
-                    for gn in &generic_names {
-                        self.env.types.insert(gn.clone(), Ty::TypeVar(gn.clone()));
-                    }
-                    let mut resolved = self.resolve_type_expr(ty);
-                    // Validate default field constraints on variant record fields
-                    if let ast::TypeExpr::Variant { cases: ast_cases } = ty {
-                        for c in ast_cases {
-                            if let ast::VariantCase::Record { name: vname, fields } = c {
-                                let mut seen_default = false;
-                                for f in fields {
-                                    if f.default.is_some() {
-                                        seen_default = true;
-                                        if let Some(ref d) = f.default {
-                                            if !is_const_expr(d) {
-                                                self.push_diagnostic(err(
-                                                    format!("default value for field '{}' in {} must be a compile-time constant", f.name, vname),
-                                                    "Allowed: literals, [], \"\", 0, true, false, none",
-                                                    "default field value",
-                                                ));
-                                            }
-                                        }
-                                    } else if seen_default {
-                                        self.push_diagnostic(err(
-                                            format!("field '{}' in {} without default must come before fields with defaults", f.name, vname),
-                                            "Move fields without defaults to the top",
-                                            "default field value",
-                                        ));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    // Remove type params from registry after resolution
-                    for gn in &generic_names {
-                        self.env.types.remove(gn);
-                    }
-                    if prefix.is_none() {
-                        if let Ty::Variant { name: ref mut vname, ref cases } = resolved {
-                            *vname = name.clone();
-                            for case in cases {
-                                self.env.constructors.insert(case.name.clone(), (name.clone(), case.clone()));
-                            }
-                        }
-                    }
-                    let key = match prefix {
-                        Some(p) => format!("{}.{}", p, name),
-                        None => name.clone(),
-                    };
-                    self.env.types.insert(key, resolved);
+                    self.register_type_decl(name, ty, visibility, generics, prefix, is_external);
                 }
                 ast::Decl::TopLet { name, ty, value, visibility, .. } => {
-                    if prefix.is_some() {
-                        let hidden = match visibility {
-                            ast::Visibility::Local => true,
-                            ast::Visibility::Mod => is_external,
-                            ast::Visibility::Public => false,
-                        };
-                        if hidden {
-                            if let Some(p) = prefix {
-                                self.env.local_symbols.insert(format!("{}.{}", p, name));
-                            }
-                            continue;
-                        }
-                    }
-                    let resolved_ty = if let Some(te) = ty {
-                        self.resolve_type_expr(te)
-                    } else {
-                        self.infer_const_type(value)
-                    };
-                    let key = match prefix {
-                        Some(p) => format!("{}.{}", p, name),
-                        None => name.clone(),
-                    };
-                    self.env.top_lets.insert(key, resolved_ty);
+                    self.register_top_let_decl(name, ty.as_ref(), value, visibility, prefix, is_external);
                 }
                 _ => {}
             }
         }
+    }
+
+    fn is_hidden_by_visibility(&mut self, visibility: &ast::Visibility, prefix: Option<&str>, name: &str, is_external: bool) -> bool {
+        if prefix.is_none() { return false; }
+        let hidden = match visibility {
+            ast::Visibility::Local => true,
+            ast::Visibility::Mod => is_external,
+            ast::Visibility::Public => false,
+        };
+        if hidden {
+            if let Some(p) = prefix {
+                self.env.local_symbols.insert(format!("{}.{}", p, name));
+            }
+        }
+        hidden
+    }
+
+    fn register_fn_decl(&mut self, name: &str, params: &[ast::Param], return_type: &ast::TypeExpr,
+                        effect: Option<bool>, r#async: Option<bool>, visibility: &ast::Visibility,
+                        generics: &Option<Vec<ast::GenericParam>>, prefix: Option<&str>, is_external: bool) {
+        if self.is_hidden_by_visibility(visibility, prefix, name, is_external) { return; }
+        let generic_names: Vec<String> = generics.as_ref()
+            .map(|gs| gs.iter().map(|g| g.name.clone()).collect())
+            .unwrap_or_default();
+        let mut sb = std::collections::HashMap::new();
+        if let Some(gs) = generics {
+            for g in gs {
+                if let Some(ref bound_te) = g.structural_bound {
+                    let bound_ty = self.resolve_type_expr(bound_te);
+                    let bound_ty = match bound_ty {
+                        Ty::Record { fields } => Ty::OpenRecord { fields },
+                        other => other,
+                    };
+                    sb.insert(g.name.clone(), bound_ty);
+                }
+            }
+        }
+        for gn in &generic_names {
+            self.env.types.insert(gn.clone(), Ty::TypeVar(gn.clone()));
+        }
+        let param_tys: Vec<(String, Ty)> = params.iter()
+            .map(|p| (p.name.clone(), self.resolve_type_expr(&p.ty)))
+            .collect();
+        let ret = self.resolve_type_expr(return_type);
+        for gn in &generic_names {
+            self.env.types.remove(gn);
+        }
+        let is_effect = effect.unwrap_or(false) || r#async.unwrap_or(false);
+        let key = match prefix {
+            Some(p) => format!("{}.{}", p, name),
+            None => name.to_string(),
+        };
+        if prefix.is_none() && is_effect {
+            self.env.effect_fns.insert(name.to_string());
+        }
+        self.env.functions.insert(key, FnSig { params: param_tys, ret, is_effect, generics: generic_names, structural_bounds: sb });
+    }
+
+    fn register_type_decl(&mut self, name: &str, ty: &ast::TypeExpr, visibility: &ast::Visibility,
+                          generics: &Option<Vec<ast::GenericParam>>, prefix: Option<&str>, is_external: bool) {
+        if self.is_hidden_by_visibility(visibility, prefix, name, is_external) { return; }
+        let generic_names: Vec<String> = generics.as_ref()
+            .map(|gs| gs.iter().map(|g| g.name.clone()).collect())
+            .unwrap_or_default();
+        for gn in &generic_names {
+            self.env.types.insert(gn.clone(), Ty::TypeVar(gn.clone()));
+        }
+        let mut resolved = self.resolve_type_expr(ty);
+        if let ast::TypeExpr::Variant { cases: ast_cases } = ty {
+            for c in ast_cases {
+                if let ast::VariantCase::Record { name: vname, fields } = c {
+                    let mut seen_default = false;
+                    for f in fields {
+                        if f.default.is_some() {
+                            seen_default = true;
+                            if let Some(ref d) = f.default {
+                                if !is_const_expr(d) {
+                                    self.push_diagnostic(err(
+                                        format!("default value for field '{}' in {} must be a compile-time constant", f.name, vname),
+                                        "Allowed: literals, [], \"\", 0, true, false, none",
+                                        "default field value",
+                                    ));
+                                }
+                            }
+                        } else if seen_default {
+                            self.push_diagnostic(err(
+                                format!("field '{}' in {} without default must come before fields with defaults", f.name, vname),
+                                "Move fields without defaults to the top",
+                                "default field value",
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        for gn in &generic_names {
+            self.env.types.remove(gn);
+        }
+        if prefix.is_none() {
+            if let Ty::Variant { name: ref mut vname, ref cases } = resolved {
+                *vname = name.to_string();
+                for case in cases {
+                    self.env.constructors.insert(case.name.clone(), (name.to_string(), case.clone()));
+                }
+            }
+        }
+        let key = match prefix {
+            Some(p) => format!("{}.{}", p, name),
+            None => name.to_string(),
+        };
+        self.env.types.insert(key, resolved);
+    }
+
+    fn register_top_let_decl(&mut self, name: &str, ty: Option<&ast::TypeExpr>, value: &ast::Expr,
+                             visibility: &ast::Visibility, prefix: Option<&str>, is_external: bool) {
+        if self.is_hidden_by_visibility(visibility, prefix, name, is_external) { return; }
+        let resolved_ty = if let Some(te) = ty {
+            self.resolve_type_expr(te)
+        } else {
+            self.infer_const_type(value)
+        };
+        let key = match prefix {
+            Some(p) => format!("{}.{}", p, name),
+            None => name.to_string(),
+        };
+        self.env.top_lets.insert(key, resolved_ty);
     }
 
     /// Infer the type of a constant expression (for top-level let without annotation).
@@ -320,8 +325,8 @@ impl Checker {
     }
 
     /// Type-check a module program's function bodies (for IR lowering).
-    /// Returns a separate `expr_types` map to avoid span collisions with the main program.
-    pub fn check_module_bodies(&mut self, prog: &mut ast::Program) -> std::collections::HashMap<(usize, usize), Ty> {
+    /// Returns a separate `expr_types` map to avoid id collisions with the main program.
+    pub fn check_module_bodies(&mut self, prog: &mut ast::Program) -> std::collections::HashMap<crate::ast::ExprId, Ty> {
         let saved = std::mem::take(&mut self.expr_types);
         for decl in prog.decls.iter_mut() {
             self.check_decl(decl);
@@ -439,90 +444,7 @@ impl Checker {
         self.current_decl_line = self.decl_line(decl);
         match decl {
             ast::Decl::Fn { name, params, return_type, body, effect, extern_attrs, generics, .. } => {
-                // Validate extern completeness: if no body, both targets need @extern
-                // (for now, just check that the current target has coverage)
-                if body.is_none() && extern_attrs.is_empty() {
-                    self.push_diagnostic(err(
-                        format!("function '{}' has no body and no @extern declarations", name),
-                        "Add a body with '= expr' or add @extern annotations",
-                        format!("fn {}", name),
-                    ));
-                }
-                if body.is_none() {
-                    // Validate that both targets are covered
-                    let has_rs = extern_attrs.iter().any(|a| a.target == "rs");
-                    let has_ts = extern_attrs.iter().any(|a| a.target == "ts");
-                    if !has_rs || !has_ts {
-                        let missing: Vec<&str> = [("rs", has_rs), ("ts", has_ts)]
-                            .iter()
-                            .filter(|(_, has)| !has)
-                            .map(|(t, _)| *t)
-                            .collect();
-                        self.push_diagnostic(err(
-                            format!("function '{}' has no body and is missing @extern for: {}", name, missing.join(", ")),
-                            "Add a body as fallback or add the missing @extern declarations",
-                            format!("fn {}", name),
-                        ));
-                    }
-                }
-                if let Some(body) = body {
-                    self.env.push_scope();
-                    // Register generic type params as TypeVars for body checking
-                    if let Some(gs) = generics {
-                        for g in gs {
-                            self.env.types.insert(g.name.clone(), Ty::TypeVar(g.name.clone()));
-                        }
-                    }
-                    for p in params.iter() {
-                        let ty = self.resolve_type_expr(&p.ty);
-                        self.env.define_var(&p.name, ty);
-                        self.env.param_vars.insert(p.name.clone());
-                    }
-                    let ret_ty = self.resolve_type_expr(return_type);
-                    let prev_ret = self.env.current_ret.take();
-                    let prev_effect = self.env.in_effect;
-                    self.env.current_ret = Some(ret_ty.clone());
-                    self.env.in_effect = effect.unwrap_or(false);
-                    let body_ty = self.check_expr_with(body, Some(&ret_ty));
-                    let is_effect = effect.unwrap_or(false);
-                    let effective_ret = if is_effect {
-                        match &ret_ty {
-                            Ty::Result(ok_ty, _) => *ok_ty.clone(),
-                            _ => ret_ty.clone(),
-                        }
-                    } else {
-                        ret_ty.clone()
-                    };
-                    let resolved_body = self.env.resolve_named(&body_ty);
-                    let resolved_ret = self.env.resolve_named(&effective_ret);
-                    let resolved_ret_full = self.env.resolve_named(&ret_ty);
-                    if !resolved_body.compatible(&resolved_ret) && !resolved_body.compatible(&resolved_ret_full) && !body_ty.compatible(&effective_ret) && !body_ty.compatible(&ret_ty) {
-                        let hint = Self::hint_with_conversion(
-                            "Change the return type or fix the body expression",
-                            &ret_ty, &body_ty,
-                        );
-                        self.push_diagnostic(err(
-                            format!("function '{}' declared to return {} but body has type {}", name, ret_ty.display(), body_ty.display()),
-                            hint,
-                            format!("fn {}", name),
-                        ));
-                    }
-                    // Warn about unused variables (skip _ prefixed)
-                    self.warn_unused_vars_in_scope(&format!("fn {}", name));
-                    // Warn when list params are mutated but not in return type (Tier 1.1)
-                    self.check_lost_list_return(name, params, &ret_ty, body);
-                    self.env.current_ret = prev_ret;
-                    self.env.in_effect = prev_effect;
-                    // Clean up generic TypeVars from type registry
-                    if let Some(gs) = generics {
-                        for g in gs {
-                            self.env.types.remove(&g.name);
-                        }
-                    }
-                    // Clean up parameter tracking (scope is about to be popped)
-                    self.env.param_vars.clear();
-                    self.env.pop_scope();
-                }
+                self.check_fn_decl_body(name, params, return_type, body, *effect, extern_attrs, generics);
             }
             ast::Decl::Test { body, .. } => {
                 self.env.push_scope();
@@ -554,6 +476,102 @@ impl Checker {
                 ));
             }
             _ => {}
+        }
+    }
+
+    fn check_fn_decl_body(&mut self, name: &str, params: &[ast::Param], return_type: &ast::TypeExpr,
+                          body: &mut Option<ast::Expr>, effect: Option<bool>,
+                          extern_attrs: &[ast::ExternAttr], generics: &Option<Vec<ast::GenericParam>>) {
+        // Warn about @extern type safety: compiler trusts declared signature without verification
+        if !extern_attrs.is_empty() {
+            self.push_diagnostic(crate::diagnostic::Diagnostic::warning(
+                format!("function '{}' uses @extern — type signature is not verified at the FFI boundary", name),
+                "Ensure the external function's actual types match the declared signature. Mismatches cause undefined behavior in Rust target.",
+                format!("fn {}", name),
+            ));
+        }
+        if body.is_none() && extern_attrs.is_empty() {
+            self.push_diagnostic(err(
+                format!("function '{}' has no body and no @extern declarations", name),
+                "Add a body with '= expr' or add @extern annotations",
+                format!("fn {}", name),
+            ));
+        }
+        if body.is_none() {
+            let has_rs = extern_attrs.iter().any(|a| a.target == "rs");
+            let has_ts = extern_attrs.iter().any(|a| a.target == "ts");
+            if !has_rs || !has_ts {
+                let missing: Vec<&str> = [("rs", has_rs), ("ts", has_ts)]
+                    .iter().filter(|(_, has)| !has).map(|(t, _)| *t).collect();
+                self.push_diagnostic(err(
+                    format!("function '{}' has no body and is missing @extern for: {}", name, missing.join(", ")),
+                    "Add a body as fallback or add the missing @extern declarations",
+                    format!("fn {}", name),
+                ));
+            }
+        }
+        if let Some(body) = body {
+            self.env.push_scope();
+            if let Some(gs) = generics {
+                for g in gs {
+                    self.env.types.insert(g.name.clone(), Ty::TypeVar(g.name.clone()));
+                    if let Some(ref bound_te) = g.structural_bound {
+                        let bound_ty = self.resolve_type_expr(bound_te);
+                        // Structural bounds are open records: {name: String} means "has at least field name"
+                        let bound_ty = match bound_ty {
+                            Ty::Record { fields } => Ty::OpenRecord { fields },
+                            other => other,
+                        };
+                        self.env.structural_bounds.insert(g.name.clone(), bound_ty);
+                    }
+                }
+            }
+            for p in params.iter() {
+                let ty = self.resolve_type_expr(&p.ty);
+                self.env.define_var(&p.name, ty);
+                self.env.param_vars.insert(p.name.clone());
+            }
+            let ret_ty = self.resolve_type_expr(return_type);
+            let prev_ret = self.env.current_ret.take();
+            let prev_effect = self.env.in_effect;
+            self.env.current_ret = Some(ret_ty.clone());
+            self.env.in_effect = effect.unwrap_or(false);
+            let body_ty = self.check_expr_with(body, Some(&ret_ty));
+            let is_effect = effect.unwrap_or(false);
+            let effective_ret = if is_effect {
+                match &ret_ty {
+                    Ty::Result(ok_ty, _) => *ok_ty.clone(),
+                    _ => ret_ty.clone(),
+                }
+            } else {
+                ret_ty.clone()
+            };
+            let resolved_body = self.env.resolve_named(&body_ty);
+            let resolved_ret = self.env.resolve_named(&effective_ret);
+            let resolved_ret_full = self.env.resolve_named(&ret_ty);
+            if !resolved_body.compatible(&resolved_ret) && !resolved_body.compatible(&resolved_ret_full) && !body_ty.compatible(&effective_ret) && !body_ty.compatible(&ret_ty) {
+                let hint = Self::hint_with_conversion(
+                    "Change the return type or fix the body expression",
+                    &ret_ty, &body_ty,
+                );
+                self.push_diagnostic(err(
+                    format!("function '{}' declared to return {} but body has type {}", name, ret_ty.display(), body_ty.display()),
+                    hint,
+                    format!("fn {}", name),
+                ));
+            }
+            self.warn_unused_vars_in_scope(&format!("fn {}", name));
+            self.check_lost_list_return(name, params, &ret_ty, body);
+            self.env.current_ret = prev_ret;
+            self.env.in_effect = prev_effect;
+            if let Some(gs) = generics {
+                for g in gs {
+                    self.env.types.remove(&g.name);
+                    self.env.structural_bounds.remove(&g.name);
+                }
+            }
+            self.env.param_vars.clear();
+            self.env.pop_scope();
         }
     }
 
@@ -596,6 +614,10 @@ impl Checker {
                 elements.iter().map(|e| self.resolve_type_expr(e)).collect(),
             ),
             ast::TypeExpr::Newtype { inner } => self.resolve_type_expr(inner),
+            ast::TypeExpr::Union { members } => {
+                let tys: Vec<Ty> = members.iter().map(|m| self.resolve_type_expr(m)).collect();
+                Ty::union(tys)
+            }
             ast::TypeExpr::Variant { cases } => {
                 let cs: Vec<VariantCase> = cases.iter().map(|c| match c {
                     ast::VariantCase::Unit { name } => VariantCase { name: name.clone(), payload: VariantPayload::Unit },
@@ -659,7 +681,7 @@ impl Checker {
             } else {
                 format!("Add arms for {}, or use '_' as a catch-all", missing_list)
             };
-            self.push_diagnostic(Diagnostic::warning(
+            self.push_diagnostic(Diagnostic::error(
                 format!("non-exhaustive match: missing {}", missing_list),
                 hint,
                 "match expression",

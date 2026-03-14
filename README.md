@@ -83,7 +83,7 @@ almide run hello.almd
 - **Top-level constants** — `let PI = 3.14` at module scope, compile-time evaluated
 - **Pipeline operator** — `data |> transform |> output`
 - **Module system** — Packages, sub-namespaces, visibility control, diamond dependency resolution
-- **Built-in testing** — `test "name" { assert_eq(a, b) }` with `almide test` (1500+ language tests)
+- **Built-in testing** — `test "name" { assert_eq(a, b) }` with `almide test` (1,700+ language tests)
 - **Actionable diagnostics** — Every error includes file:line, context, and a concrete fix suggestion
 
 ## Why Almide?
@@ -140,8 +140,10 @@ test "greet succeeds" {
 Almide source (`.almd`) is compiled by a pure-Rust compiler to Rust, TypeScript, or WebAssembly.
 
 ```
-.almd → Lexer → Parser → AST → Type Checker → IR Lowering → CodeGen → .rs / .ts / .wasm
+.almd → Lexer → Parser → AST → Type Checker → Lowering → IR → CodeGen → .rs / .ts / .wasm
 ```
+
+Codegen operates solely on the typed IR — it never references the AST.
 
 ```bash
 almide run app.almd              # Compile + execute

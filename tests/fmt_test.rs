@@ -60,8 +60,8 @@ fn fmt_test_decl() {
 
 #[test]
 fn fmt_lambda() {
-    let out = roundtrip("module app\nfn f() -> fn(Int) -> Int = fn(x) => x + 1");
-    assert!(out.contains("fn(x) => x + 1"));
+    let out = roundtrip("module app\nfn f() -> fn(Int) -> Int = (x) => x + 1");
+    assert!(out.contains("(x) => x + 1"));
 }
 
 #[test]

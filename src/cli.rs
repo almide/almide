@@ -1,7 +1,20 @@
 /// CLI command implementations.
 
 use std::process::Command;
+use std::hash::{Hash, Hasher};
 use crate::{compile, compile_with_options, parse_file, find_rustc, emit_rust, emit_ts, check, diagnostic, resolve, fmt, project};
+
+/// Compute a 64-bit hash of a byte slice (using DefaultHasher).
+fn hash64(data: &[u8]) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    data.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Cache directory for incremental compilation.
+fn incremental_cache_dir() -> std::path::PathBuf {
+    std::path::PathBuf::from(".almide/cache")
+}
 
 /// Recursively collect .almd files that contain `test` blocks.
 fn collect_test_files(dir: &std::path::Path) -> Vec<String> {
@@ -38,35 +51,52 @@ pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool) -> i32
         std::process::exit(1);
     }
 
-    let rs_path = tmp_dir.join("main.rs");
-    let bin_path = tmp_dir.join("main");
-
-    if let Err(e) = std::fs::write(&rs_path, &rs_code) {
-        eprintln!("Failed to write {}: {}", rs_path.display(), e);
-        std::process::exit(1);
-    }
+    let file_stem = file.replace('/', "_").replace('.', "_");
+    let rs_path = tmp_dir.join(format!("{}.rs", file_stem));
+    let bin_path = tmp_dir.join(&file_stem);
 
     // Detect test-only files (no main function)
     let is_test_only = !rs_code.contains("\nfn almide_main(") && !rs_code.contains("\nfn main(");
 
-    let mut rustc_cmd = Command::new(&find_rustc());
-    rustc_cmd.arg(&rs_path)
-        .arg("-o")
-        .arg(&bin_path)
-        .arg("-C").arg("overflow-checks=no")
-        .arg("-C").arg("opt-level=1")
-        .arg("-C").arg("incremental=")
-        .arg("--edition").arg("2021");
-    if is_test_only {
-        rustc_cmd.arg("--test");
-    }
-    let rustc = rustc_cmd.output()
-        .unwrap_or_else(|e| { eprintln!("Failed to run rustc: {}", e); std::process::exit(1); });
+    // Incremental: hash generated Rust code + test mode, skip rustc if unchanged
+    let hash_input = format!("{}:test={}", &rs_code, is_test_only);
+    let code_hash = format!("{:016x}", hash64(hash_input.as_bytes()));
+    let cache = incremental_cache_dir();
+    let hash_file = cache.join(format!("{}.hash", file.replace('/', "_").replace('.', "_")));
 
-    if !rustc.status.success() {
-        let stderr = String::from_utf8_lossy(&rustc.stderr);
-        eprintln!("Compile error:\n{}", stderr);
-        return 1;
+    let cache_hit = hash_file.exists()
+        && bin_path.exists()
+        && std::fs::read_to_string(&hash_file).ok().as_deref() == Some(&code_hash);
+
+    if !cache_hit {
+        if let Err(e) = std::fs::write(&rs_path, &rs_code) {
+            eprintln!("Failed to write {}: {}", rs_path.display(), e);
+            std::process::exit(1);
+        }
+
+        let mut rustc_cmd = Command::new(&find_rustc());
+        rustc_cmd.arg(&rs_path)
+            .arg("-o")
+            .arg(&bin_path)
+            .arg("-C").arg("overflow-checks=no")
+            .arg("-C").arg("opt-level=1")
+            .arg("-C").arg("incremental=")
+            .arg("--edition").arg("2021");
+        if is_test_only {
+            rustc_cmd.arg("--test");
+        }
+        let rustc = rustc_cmd.output()
+            .unwrap_or_else(|e| { eprintln!("Failed to run rustc: {}", e); std::process::exit(1); });
+
+        if !rustc.status.success() {
+            let stderr = String::from_utf8_lossy(&rustc.stderr);
+            eprintln!("Compile error:\n{}", stderr);
+            return 1;
+        }
+
+        // Save hash on successful compile
+        let _ = std::fs::create_dir_all(&cache);
+        let _ = std::fs::write(&hash_file, &code_hash);
     }
 
     let status = Command::new(&bin_path)
@@ -257,8 +287,8 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
     eprintln!("Built {}", output);
 }
 
-fn cmd_build_npm(file: &str, out_dir: &str, no_check: bool) {
-    let (mut program, source_text, parse_errors) = parse_file(file);
+fn cmd_build_npm(file: &str, out_dir: &str, _no_check: bool) {
+    let (mut program, source_text, _parse_errors) = parse_file(file);
 
     // Resolve dependencies
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
@@ -278,20 +308,28 @@ fn cmd_build_npm(file: &str, out_dir: &str, no_check: bool) {
     let resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
         .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
 
-    // Type check unless --no-check
-    if !no_check {
-        let mut checker = check::Checker::new();
-        checker.set_source(file, &source_text);
-        for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
-            checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
+    // Type check (always needed for IR lowering)
+    let mut checker = check::Checker::new();
+    checker.set_source(file, &source_text);
+    for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
+        checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
+    }
+    let diagnostics = checker.check_program(&mut program);
+    if diagnostics.iter().any(|d| d.level == diagnostic::Level::Error) {
+        for d in &diagnostics {
+            eprintln!("{}", d.display_with_source(&source_text));
         }
-        let diagnostics = checker.check_program(&mut program);
-        if diagnostics.iter().any(|d| d.level == diagnostic::Level::Error) {
-            for d in &diagnostics {
-                eprintln!("{}", d.display_with_source(&source_text));
-            }
-            std::process::exit(1);
-        }
+        std::process::exit(1);
+    }
+
+    // Lower to IR
+    let mut ir_program = almide::lower::lower_program(&program, &checker.expr_types, &checker.env);
+    for (name, mod_prog, pkg_id, _) in &resolved.modules {
+        if almide::stdlib::is_stdlib_module(name) { continue; }
+        let mod_types = checker.check_module_bodies(&mut mod_prog.clone());
+        let versioned = pkg_id.as_ref().map(|pid| pid.mod_name());
+        let mod_ir_module = almide::lower::lower_module(name, &mod_prog, &mod_types, &checker.env, versioned);
+        ir_program.modules.push(mod_ir_module);
     }
 
     // Read package metadata from almide.toml (or use defaults)
@@ -310,11 +348,7 @@ fn cmd_build_npm(file: &str, out_dir: &str, no_check: bool) {
         version: pkg_version,
     };
 
-    let legacy_modules: Vec<(String, crate::ast::Program)> = resolved.modules.iter()
-        .map(|(n, p, _, _)| (n.clone(), p.clone()))
-        .collect();
-
-    let output = emit_ts::emit_npm_package(&program, &legacy_modules, &config);
+    let output = emit_ts::emit_npm_package(&ir_program, &config);
 
     // Write files
     let out_path = std::path::Path::new(out_dir);
@@ -361,7 +395,7 @@ fn cmd_build_npm(file: &str, out_dir: &str, no_check: bool) {
 }
 
 pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_check: bool) {
-    let (mut program, source_text, parse_errors) = parse_file(file);
+    let (mut program, source_text, _parse_errors) = parse_file(file);
 
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
@@ -469,19 +503,21 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
         println!("{}", json);
     } else {
         let code = match target {
-            "rust" | "rs" => emit_rust::emit_with_options(&program, &resolved.modules, &emit_rust::EmitOptions::default(), &import_aliases, ir_program.as_ref(), &module_irs),
+            "rust" | "rs" => {
+                let ir = ir_program.as_ref().expect("IR required for Rust codegen");
+                emit_rust::emit_with_options(ir, &emit_rust::EmitOptions::default(), &import_aliases, &module_irs)
+            }
+            "rust-ir" => {
+                let ir = ir_program.as_ref().expect("IR required for RustIR codegen");
+                emit_rust::emit_via_rust_ir(ir)
+            }
             "ts" | "typescript" => {
-                // Convert to legacy format for emit_ts (no PkgId support)
-                let legacy_modules: Vec<(String, crate::ast::Program)> = resolved.modules.iter()
-                    .map(|(n, p, _, _)| (n.clone(), p.clone()))
-                    .collect();
-                emit_ts::emit_with_modules(&program, &legacy_modules, ir_program.as_ref())
+                let ir = ir_program.as_ref().expect("IR required for TS codegen");
+                emit_ts::emit_with_modules(ir)
             }
             "js" | "javascript" => {
-                let legacy_modules: Vec<(String, crate::ast::Program)> = resolved.modules.iter()
-                    .map(|(n, p, _, _)| (n.clone(), p.clone()))
-                    .collect();
-                emit_ts::emit_js_with_modules(&program, &legacy_modules, ir_program.as_ref())
+                let ir = ir_program.as_ref().expect("IR required for JS codegen");
+                emit_ts::emit_js_with_modules(ir)
             }
             other => { eprintln!("Unknown target: {}. Use rust, ts, or js.", other); std::process::exit(1); }
         };
@@ -489,7 +525,7 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
     }
 }
 
-pub fn cmd_check(file: &str) {
+pub fn cmd_check(file: &str, deny_warnings: bool) {
     let (mut program, source_text, parse_errors) = parse_file(file);
 
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
@@ -516,7 +552,10 @@ pub fn cmd_check(file: &str) {
     }
     let diagnostics = checker.check_program(&mut program);
 
-    for d in diagnostics.iter().filter(|d| d.level == diagnostic::Level::Warning) {
+    let warnings: Vec<_> = diagnostics.iter()
+        .filter(|d| d.level == diagnostic::Level::Warning)
+        .collect();
+    for d in &warnings {
         eprintln!("{}", d.display_with_source(&source_text));
     }
 
@@ -526,6 +565,15 @@ pub fn cmd_check(file: &str) {
         .filter(|d| d.level == diagnostic::Level::Error)
         .collect();
     all_errors.extend(checker_errors);
+    if deny_warnings && !warnings.is_empty() {
+        // Treat warnings as errors
+        for d in &all_errors {
+            eprintln!("{}", d.display_with_source(&source_text));
+        }
+        let total = all_errors.len() + warnings.len();
+        eprintln!("\n{} error(s) found (--deny-warnings: {} warning(s) treated as errors)", total, warnings.len());
+        std::process::exit(1);
+    }
     if !all_errors.is_empty() {
         for d in &all_errors {
             eprintln!("{}", d.display_with_source(&source_text));
@@ -552,12 +600,22 @@ pub fn cmd_fmt(files: &[String], write_back: bool) {
 }
 
 pub fn cmd_clean() {
-    let cache = project::cache_dir();
-    if cache.exists() {
-        std::fs::remove_dir_all(&cache)
+    let mut cleaned = false;
+    let dep_cache = project::cache_dir();
+    if dep_cache.exists() {
+        std::fs::remove_dir_all(&dep_cache)
             .unwrap_or_else(|e| { eprintln!("Failed to clean cache: {}", e); std::process::exit(1); });
-        eprintln!("Cleaned {}", cache.display());
-    } else {
-        eprintln!("Cache directory does not exist: {}", cache.display());
+        eprintln!("Cleaned {}", dep_cache.display());
+        cleaned = true;
+    }
+    let inc_cache = incremental_cache_dir();
+    if inc_cache.exists() {
+        std::fs::remove_dir_all(&inc_cache)
+            .unwrap_or_else(|e| { eprintln!("Failed to clean incremental cache: {}", e); std::process::exit(1); });
+        eprintln!("Cleaned {}", inc_cache.display());
+        cleaned = true;
+    }
+    if !cleaned {
+        eprintln!("No cache to clean");
     }
 }

@@ -72,6 +72,79 @@ impl AlmideHttpResponse {
 }
 
 // =============================================
+// Request accessors
+// =============================================
+fn almide_http_req_method(req: &AlmideHttpRequest) -> String {
+    req.method.clone()
+}
+
+fn almide_http_req_path(req: &AlmideHttpRequest) -> String {
+    req.path.clone()
+}
+
+fn almide_http_req_body(req: &AlmideHttpRequest) -> String {
+    req.body.clone()
+}
+
+fn almide_http_req_header(req: &AlmideHttpRequest, key: &str) -> Option<String> {
+    req.headers.get(key).cloned()
+}
+
+fn almide_http_query_params(req: &AlmideHttpRequest) -> HashMap<String, String> {
+    let mut params = HashMap::new();
+    if let Some(pos) = req.path.find('?') {
+        let query = &req.path[pos + 1..];
+        for pair in query.split('&') {
+            if let Some(eq) = pair.find('=') {
+                params.insert(pair[..eq].to_string(), pair[eq + 1..].to_string());
+            } else if !pair.is_empty() {
+                params.insert(pair.to_string(), String::new());
+            }
+        }
+    }
+    params
+}
+
+// =============================================
+// Response builder helpers
+// =============================================
+fn almide_http_redirect(url: &str, code: i64) -> AlmideHttpResponse {
+    let mut headers = HashMap::new();
+    headers.insert("Location".to_string(), url.to_string());
+    AlmideHttpResponse { status: code, headers, body: String::new() }
+}
+
+fn almide_http_set_status(mut resp: AlmideHttpResponse, code: i64) -> AlmideHttpResponse {
+    resp.status = code;
+    resp
+}
+
+fn almide_http_get_body(resp: &AlmideHttpResponse) -> String {
+    resp.body.clone()
+}
+
+fn almide_http_set_header(mut resp: AlmideHttpResponse, key: &str, value: &str) -> AlmideHttpResponse {
+    resp.headers.insert(key.to_string(), value.to_string());
+    resp
+}
+
+fn almide_http_get_header(resp: &AlmideHttpResponse, key: &str) -> Option<String> {
+    resp.headers.get(key).cloned()
+}
+
+fn almide_http_set_cookie(mut resp: AlmideHttpResponse, name: &str, value: &str) -> AlmideHttpResponse {
+    let existing = resp.headers.get("Set-Cookie").cloned();
+    let cookie = format!("{}={}", name, value);
+    let header_value = if let Some(existing) = existing {
+        format!("{}, {}", existing, cookie)
+    } else {
+        cookie
+    };
+    resp.headers.insert("Set-Cookie".to_string(), header_value);
+    resp
+}
+
+// =============================================
 // Native runtime (std::net, threads)
 // =============================================
 #[cfg(not(target_arch = "wasm32"))]
@@ -214,7 +287,26 @@ where F: Fn(AlmideHttpRequest) -> Result<AlmideHttpResponse, String> + 'static
 #[cfg(target_arch = "wasm32")]
 #[no_mangle]
 pub extern "C" fn almide_http_handle(req_ptr: *const u8, req_len: usize) -> u64 {
-    let req_json = unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(req_ptr, req_len)) };
+    if req_ptr.is_null() || req_len > isize::MAX as usize {
+        let resp = AlmideHttpResponse::new(400, "Invalid request pointer".into());
+        let json = resp.to_json();
+        let ptr = json.as_ptr() as u64;
+        let len = json.len() as u64;
+        std::mem::forget(json);
+        return (ptr << 32) | len;
+    }
+    let req_bytes = unsafe { std::slice::from_raw_parts(req_ptr, req_len) };
+    let req_json = match std::str::from_utf8(req_bytes) {
+        Ok(s) => s,
+        Err(_) => {
+            let resp = AlmideHttpResponse::new(400, "Invalid UTF-8 in request".into());
+            let json = resp.to_json();
+            let ptr = json.as_ptr() as u64;
+            let len = json.len() as u64;
+            std::mem::forget(json);
+            return (ptr << 32) | len;
+        }
+    };
 
     // Parse request from JSON
     let req = match almide_json_parse(req_json) {
@@ -271,6 +363,9 @@ pub extern "C" fn almide_alloc(len: usize) -> *mut u8 {
 #[cfg(target_arch = "wasm32")]
 #[no_mangle]
 pub extern "C" fn almide_dealloc(ptr: *mut u8, len: usize) {
+    if ptr.is_null() || len == 0 || len > isize::MAX as usize {
+        return;
+    }
     unsafe { drop(Vec::from_raw_parts(ptr, len, len)); }
 }
 
@@ -349,6 +444,21 @@ fn almide_http_request(method: &str, url: &str, body: &str, headers: &std::colle
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+fn almide_http_put(url: &str, body: &str) -> Result<String, String> {
+    almide_http_request("PUT", url, body, &HashMap::new())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn almide_http_patch(url: &str, body: &str) -> Result<String, String> {
+    almide_http_request("PATCH", url, body, &HashMap::new())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn almide_http_delete(url: &str) -> Result<String, String> {
+    almide_http_request("DELETE", url, "", &HashMap::new())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn almide_http_parse_url(url: &str) -> Result<(String, u16, String), String> {
     let url = url.strip_prefix("http://").ok_or("Use http:// or https:// URLs")?;
     let (host_port, path) = if let Some(pos) = url.find('/') { (&url[..pos], &url[pos..]) } else { (url, "/") };
@@ -401,6 +511,9 @@ fn almide_wasm_fetch(url: &str, method: &str, body: &str) -> Result<String, Stri
         )
     };
     if rc != 0 { return Err("fetch failed".into()); }
+    if resp_ptr.is_null() || resp_len > isize::MAX as usize {
+        return Err("invalid response from host".into());
+    }
     let bytes = unsafe { std::slice::from_raw_parts(resp_ptr, resp_len) };
     Ok(String::from_utf8_lossy(bytes).to_string())
 }

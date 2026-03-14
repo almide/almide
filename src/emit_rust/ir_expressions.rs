@@ -2,7 +2,7 @@ use almide::ir::*;
 use almide::types::Ty;
 use super::Emitter;
 
-impl Emitter {
+impl<'ir> Emitter<'ir> {
     pub(crate) fn gen_ir_expr(&self, expr: &IrExpr) -> String {
         match &expr.kind {
             IrExprKind::LitInt { value } => format!("{}i64", value),
@@ -67,7 +67,18 @@ impl Emitter {
                     format!("for {binding} in {range} {{\n{}\n}}", stmts_str.join("\n"))
                 } else {
                     let iter_str = self.gen_ir_expr(iterable);
-                    format!("for {binding} in ({iter_str}).clone() {{\n{}\n}}", stmts_str.join("\n"))
+                    // Skip clone for single-use variables (they can be moved)
+                    let needs_clone = if let IrExprKind::Var { id } = &iterable.kind {
+                        !self.single_use_vars.contains(id)
+                    } else {
+                        // Non-variable expressions (e.g., function calls) are temporaries — no clone needed
+                        false
+                    };
+                    if needs_clone {
+                        format!("for {binding} in ({iter_str}).clone() {{\n{}\n}}", stmts_str.join("\n"))
+                    } else {
+                        format!("for {binding} in {iter_str} {{\n{}\n}}", stmts_str.join("\n"))
+                    }
                 }
             }
 
@@ -166,10 +177,15 @@ impl Emitter {
             IrExprKind::Range { start, end, inclusive } => {
                 let s = self.gen_ir_expr(start);
                 let e = self.gen_ir_expr(end);
+                // Use the element type from the IR expression's type (List[T] → Vec<T>)
+                let elem_ty = match &expr.ty {
+                    Ty::List(inner) => self.ir_ty_to_rust(inner),
+                    _ => self.ir_ty_to_rust(&start.ty),
+                };
                 if *inclusive {
-                    format!("({s}..={e}).collect::<Vec<i64>>()")
+                    format!("({s}..={e}).collect::<Vec<{elem_ty}>>()")
                 } else {
-                    format!("({s}..{e}).collect::<Vec<i64>>()")
+                    format!("({s}..{e}).collect::<Vec<{elem_ty}>>()")
                 }
             }
 
@@ -194,9 +210,14 @@ impl Emitter {
                     // Map index: m[key] → map.get(m, key) → Option<V>
                     format!("almide_rt_map_get(&{}, &{})", obj, idx)
                 } else if self.fast_mode {
-                    format!("unsafe {{ *{}.get_unchecked({} as usize) }}", obj, idx)
+                    format!("{{ debug_assert!({idx} >= 0 && ({idx} as usize) < {obj}.len()); unsafe {{ *{obj}.get_unchecked({idx} as usize) }} }}", obj=obj, idx=idx)
                 } else {
-                    format!("{}[{} as usize]", obj, idx)
+                    let elem_is_copy = matches!(&object.ty, Ty::List(inner) if Self::is_copy_ty(inner));
+                    if elem_is_copy {
+                        format!("{}[{} as usize]", obj, idx)
+                    } else {
+                        format!("{}[{} as usize].clone()", obj, idx)
+                    }
                 }
             }
 
@@ -245,20 +266,26 @@ impl Emitter {
                 }
             }
 
-            IrExprKind::ResultOk { expr } => {
+            IrExprKind::ResultOk { expr: inner } => {
                 if self.in_do_block.get() {
-                    self.gen_ir_expr(expr)
-                } else if self.in_effect {
-                    format!("Ok({})", self.gen_ir_expr(expr))
-                } else if matches!(&expr.kind, IrExprKind::Unit) {
+                    self.gen_ir_expr(inner)
+                } else if matches!(&inner.kind, IrExprKind::Unit) && !self.in_effect {
                     "()".to_string()
                 } else {
-                    format!("Ok({})", self.gen_ir_expr(expr))
+                    let inner_code = self.gen_ir_expr(inner);
+                    // Add turbofish when err type is Unknown (Rust can't infer it)
+                    if let Ty::Result(_, err) = &expr.ty {
+                        if matches!(err.as_ref(), Ty::Unknown | Ty::TypeVar(_)) {
+                            let ok_ty = self.ir_ty_to_rust(&inner.ty);
+                            return format!("Ok::<{}, String>({})", ok_ty, inner_code);
+                        }
+                    }
+                    format!("Ok({})", inner_code)
                 }
             }
-            IrExprKind::ResultErr { expr } => {
-                let msg = self.gen_ir_expr(expr);
-                let needs_to_string = matches!(&expr.kind,
+            IrExprKind::ResultErr { expr: inner } => {
+                let msg = self.gen_ir_expr(inner);
+                let needs_to_string = matches!(&inner.kind,
                     IrExprKind::LitStr { .. } | IrExprKind::StringInterp { .. });
                 let val = if needs_to_string {
                     format!("{}.to_string()", msg)
@@ -294,6 +321,46 @@ impl Emitter {
     }
 
     pub(crate) fn gen_ir_binary(&self, op: BinOp, left: &IrExpr, right: &IrExpr) -> String {
+        // Constant folding: evaluate binary ops on integer literals at compile time
+        if let (IrExprKind::LitInt { value: lv }, IrExprKind::LitInt { value: rv }) = (&left.kind, &right.kind) {
+            let result = match op {
+                BinOp::AddInt => Some(lv.wrapping_add(*rv)),
+                BinOp::SubInt => Some(lv.wrapping_sub(*rv)),
+                BinOp::MulInt => Some(lv.wrapping_mul(*rv)),
+                BinOp::DivInt if *rv != 0 => Some(lv / rv),
+                BinOp::ModInt if *rv != 0 => Some(lv % rv),
+                _ => None,
+            };
+            if let Some(v) = result {
+                return format!("{}i64", v);
+            }
+        }
+        // Constant folding: float literals
+        if let (IrExprKind::LitFloat { value: lv }, IrExprKind::LitFloat { value: rv }) = (&left.kind, &right.kind) {
+            let result = match op {
+                BinOp::AddFloat => Some(lv + rv),
+                BinOp::SubFloat => Some(lv - rv),
+                BinOp::MulFloat => Some(lv * rv),
+                BinOp::DivFloat if *rv != 0.0 => Some(lv / rv),
+                _ => None,
+            };
+            if let Some(v) = result {
+                return format!("{:?}f64", v);
+            }
+        }
+        // Constant folding: boolean comparisons on int literals
+        if let (IrExprKind::LitInt { value: lv }, IrExprKind::LitInt { value: rv }) = (&left.kind, &right.kind) {
+            let result = match op {
+                BinOp::Lt => Some(lv < rv),
+                BinOp::Lte => Some(lv <= rv),
+                BinOp::Gt => Some(lv > rv),
+                BinOp::Gte => Some(lv >= rv),
+                _ => None,
+            };
+            if let Some(v) = result {
+                return format!("{}", v);
+            }
+        }
         match op {
             BinOp::AddInt | BinOp::SubInt => {
                 let l = self.gen_ir_expr(left);
@@ -662,86 +729,6 @@ impl Emitter {
         format!("{} {{ {} }}", struct_name, fields.join(", "))
     }
 
-    /// Count how many times a VarId is referenced in an IR expression tree
-    fn count_var_uses(var: VarId, expr: &IrExpr) -> usize {
-        match &expr.kind {
-            IrExprKind::Var { id } => if *id == var { 1 } else { 0 },
-            IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } |
-            IrExprKind::LitBool { .. } | IrExprKind::LitStr { .. } |
-            IrExprKind::Unit | IrExprKind::Hole | IrExprKind::Todo { .. } |
-            IrExprKind::Break | IrExprKind::Continue | IrExprKind::OptionNone |
-            IrExprKind::EmptyMap => 0,
-            IrExprKind::BinOp { left, right, .. } => {
-                Self::count_var_uses(var, left) + Self::count_var_uses(var, right)
-            }
-            IrExprKind::UnOp { operand, .. } => Self::count_var_uses(var, operand),
-            IrExprKind::Call { args, .. } => {
-                args.iter().map(|a| Self::count_var_uses(var, a)).sum()
-            }
-            IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
-                elements.iter().map(|e| Self::count_var_uses(var, e)).sum()
-            }
-            IrExprKind::Record { fields, .. } | IrExprKind::SpreadRecord { fields, .. } => {
-                fields.iter().map(|(_, v)| Self::count_var_uses(var, v)).sum()
-            }
-            IrExprKind::MapLiteral { entries } => {
-                entries.iter().map(|(k, v)| Self::count_var_uses(var, k) + Self::count_var_uses(var, v)).sum()
-            }
-            IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
-                Self::count_var_uses(var, object)
-            }
-            IrExprKind::IndexAccess { object, index } => {
-                Self::count_var_uses(var, object) + Self::count_var_uses(var, index)
-            }
-            IrExprKind::If { cond, then, else_, .. } => {
-                Self::count_var_uses(var, cond) + Self::count_var_uses(var, then) + Self::count_var_uses(var, else_)
-            }
-            IrExprKind::Match { subject, arms } => {
-                Self::count_var_uses(var, subject) + arms.iter().map(|a| Self::count_var_uses(var, &a.body)).sum::<usize>()
-            }
-            IrExprKind::Block { stmts, expr, .. } | IrExprKind::DoBlock { stmts, expr, .. } => {
-                let s: usize = stmts.iter().map(|st| Self::count_var_uses_stmt(var, st)).sum();
-                s + expr.as_ref().map_or(0, |e| Self::count_var_uses(var, e))
-            }
-            IrExprKind::ForIn { body, iterable, .. } => {
-                Self::count_var_uses(var, iterable) + body.iter().map(|st| Self::count_var_uses_stmt(var, st)).sum::<usize>()
-            }
-            IrExprKind::While { cond, body } => {
-                Self::count_var_uses(var, cond) + body.iter().map(|st| Self::count_var_uses_stmt(var, st)).sum::<usize>()
-            }
-            IrExprKind::Lambda { body, .. } => Self::count_var_uses(var, body),
-            IrExprKind::StringInterp { parts } => {
-                parts.iter().map(|p| match p {
-                    IrStringPart::Expr { expr } => Self::count_var_uses(var, expr),
-                    _ => 0,
-                }).sum()
-            }
-            IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e } |
-            IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e } |
-            IrExprKind::Await { expr: e } => Self::count_var_uses(var, e),
-            IrExprKind::Range { start, end, .. } => {
-                Self::count_var_uses(var, start) + Self::count_var_uses(var, end)
-            }
-        }
-    }
-
-    fn count_var_uses_stmt(var: VarId, stmt: &IrStmt) -> usize {
-        match &stmt.kind {
-            IrStmtKind::Bind { value, .. } => Self::count_var_uses(var, value),
-            IrStmtKind::BindDestructure { value, .. } => Self::count_var_uses(var, value),
-            IrStmtKind::Assign { value, .. } => Self::count_var_uses(var, value),
-            IrStmtKind::IndexAssign { index, value, .. } => {
-                Self::count_var_uses(var, index) + Self::count_var_uses(var, value)
-            }
-            IrStmtKind::FieldAssign { value, .. } => Self::count_var_uses(var, value),
-            IrStmtKind::Guard { cond, else_ } => {
-                Self::count_var_uses(var, cond) + Self::count_var_uses(var, else_)
-            }
-            IrStmtKind::Expr { expr } => Self::count_var_uses(var, expr),
-            IrStmtKind::Comment { .. } => 0,
-        }
-    }
-
     /// Auto-append ? for effect fn calls
     fn ir_maybe_auto_q(&self, call: &str, name: &str) -> String {
         if self.in_effect && !self.in_test && !self.skip_auto_q.get() {
@@ -823,9 +810,9 @@ impl Emitter {
         }
     }
 
-    /// Access the IR var table (panics if IR is not available)
+    /// Access the current IR var table
     pub(crate) fn ir_var_table(&self) -> &almide::ir::VarTable {
-        &self.ir_program.as_ref().expect("IR must be available for IR codegen").var_table
+        self.current_var_table
     }
 
     /// Check if an IR expression involves big integers

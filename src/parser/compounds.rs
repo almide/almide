@@ -18,12 +18,13 @@ impl Parser {
             self.skip_newlines();
             self.parse_if_branch()?
         } else {
-            Expr::Unit { span: span.clone(), resolved_type: None }
+            Expr::Unit { id: self.next_id(), span: span.clone(), resolved_type: None }
         };
         Ok(Expr::If {
             cond: Box::new(cond),
             then: Box::new(then),
             else_: Box::new(else_),
+            id: self.next_id(),
             span,
             resolved_type: None,
         })
@@ -39,6 +40,7 @@ impl Parser {
             return Ok(Expr::Block {
                 stmts: vec![Stmt::Assign { name, value, span: None }],
                 expr: None,
+                id: self.next_id(),
                 span,
                 resolved_type: None,
             });
@@ -71,6 +73,7 @@ impl Parser {
         Ok(Expr::Match {
             subject: Box::new(subject),
             arms,
+            id: self.next_id(),
             span,
             resolved_type: None,
         })
@@ -89,6 +92,33 @@ impl Parser {
         Ok(MatchArm { pattern, guard, body, comments: Vec::new() })
     }
 
+    /// Parse paren-style lambda: `(params) => expr`
+    pub(crate) fn parse_paren_lambda(&mut self) -> Result<Expr, String> {
+        let span = Some(self.current_span());
+        let open = self.current().clone();
+        self.expect(TokenType::LParen)?;
+        let mut params = Vec::new();
+        if !self.check(TokenType::RParen) {
+            params.push(self.parse_lambda_param()?);
+            while self.check(TokenType::Comma) {
+                self.advance();
+                params.push(self.parse_lambda_param()?);
+            }
+        }
+        self.expect_closing(TokenType::RParen, open.line, open.col, "lambda parameters")?;
+        self.expect(TokenType::FatArrow)?;
+        self.skip_newlines();
+        let body = self.parse_expr()?;
+        Ok(Expr::Lambda {
+            params,
+            body: Box::new(body),
+            id: self.next_id(),
+            span,
+            resolved_type: None,
+        })
+    }
+
+    /// Parse fn-style lambda (legacy): `fn(params) => expr`
     pub(crate) fn parse_lambda(&mut self) -> Result<Expr, String> {
         let span = Some(self.current_span());
         self.expect(TokenType::Fn)?;
@@ -109,6 +139,7 @@ impl Parser {
         Ok(Expr::Lambda {
             params,
             body: Box::new(body),
+            id: self.next_id(),
             span,
             resolved_type: None,
         })
@@ -168,6 +199,7 @@ impl Parser {
         Ok(Expr::DoBlock {
             stmts,
             expr: final_expr,
+            id: self.next_id(),
             span,
             resolved_type: None,
         })
@@ -185,6 +217,7 @@ impl Parser {
             return Ok(Expr::Block {
                 stmts: Vec::new(),
                 expr: None,
+                id: self.next_id(),
                 span,
                 resolved_type: None,
             });
@@ -213,6 +246,7 @@ impl Parser {
             return Ok(Expr::SpreadRecord {
                 base: Box::new(base),
                 fields,
+                id: self.next_id(),
                 span,
                 resolved_type: None,
             });
@@ -235,7 +269,7 @@ impl Parser {
                 } else {
                     fields.push(FieldInit {
                         name: field_name.clone(),
-                        value: Expr::Ident { name: field_name, span: None, resolved_type: None },
+                        value: Expr::Ident { name: field_name, id: self.next_id(), span: None, resolved_type: None },
                     });
                 }
                 self.skip_newlines();
@@ -245,7 +279,7 @@ impl Parser {
                 }
             }
             self.expect_closing(TokenType::RBrace, open.line, open.col, "record literal")?;
-            return Ok(Expr::Record { name: None, fields, span, resolved_type: None });
+            return Ok(Expr::Record { name: None, fields, id: self.next_id(), span, resolved_type: None });
         }
 
         let mut stmts = initial_comments;
@@ -284,6 +318,7 @@ impl Parser {
         Ok(Expr::Block {
             stmts,
             expr: final_expr,
+            id: self.next_id(),
             span,
             resolved_type: None,
         })
@@ -322,6 +357,7 @@ impl Parser {
         Ok(Expr::Block {
             stmts,
             expr: final_expr,
+            id: self.next_id(),
             span,
             resolved_type: None,
         })
@@ -348,14 +384,14 @@ impl Parser {
         // [] → empty List
         if self.check(TokenType::RBracket) {
             self.advance();
-            return Ok(Expr::List { elements: vec![], span, resolved_type: None });
+            return Ok(Expr::List { elements: vec![], id: self.next_id(), span, resolved_type: None });
         }
 
         // [:] → empty Map
         if self.check(TokenType::Colon) {
             self.advance();
             self.expect_closing(TokenType::RBracket, open.line, open.col, "empty map")?;
-            return Ok(Expr::EmptyMap { span, resolved_type: None });
+            return Ok(Expr::EmptyMap { id: self.next_id(), span, resolved_type: None });
         }
 
         // Parse first expression, then decide List vs Map
@@ -390,7 +426,7 @@ impl Parser {
                 }
             }
             self.expect_closing(TokenType::RBracket, open.line, open.col, "map literal")?;
-            return Ok(Expr::MapLiteral { entries, span, resolved_type: None });
+            return Ok(Expr::MapLiteral { entries, id: self.next_id(), span, resolved_type: None });
         }
 
         // List literal: [expr, ...]
@@ -411,6 +447,6 @@ impl Parser {
             }
         }
         self.expect_closing(TokenType::RBracket, open.line, open.col, "list literal")?;
-        Ok(Expr::List { elements, span, resolved_type: None })
+        Ok(Expr::List { elements, id: self.next_id(), span, resolved_type: None })
     }
 }

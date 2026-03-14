@@ -1,0 +1,157 @@
+// Container UFCS tests — verify method-style calls on List, String, Map
+
+// ── List UFCS: Mappable ──
+
+test "list.map via UFCS" {
+  assert_eq([1, 2, 3].map(fn(x) => x * 2), [2, 4, 6])
+}
+
+test "list.flat_map via UFCS" {
+  assert_eq([1, 2].flat_map(fn(x) => [x, x * 10]), [1, 10, 2, 20])
+}
+
+// ── List UFCS: Filterable ──
+
+test "list.filter via UFCS" {
+  assert_eq([1, 2, 3, 4, 5].filter(fn(x) => x > 3), [4, 5])
+}
+
+// ── List UFCS: Foldable ──
+
+test "list.fold via UFCS" {
+  assert_eq([1, 2, 3, 4].fold(0, fn(acc, x) => acc + x), 10)
+}
+
+// ── List UFCS: Iterable ──
+
+test "list.find via UFCS" {
+  assert_eq([1, 2, 3].find(fn(x) => x > 1), some(2))
+}
+
+test "list.any via UFCS" {
+  assert_eq([1, 2, 3].any(fn(x) => x > 2), true)
+  assert_eq([1, 2, 3].any(fn(x) => x > 5), false)
+}
+
+test "list.all via UFCS" {
+  assert_eq([2, 4, 6].all(fn(x) => x % 2 == 0), true)
+  assert_eq([2, 3, 6].all(fn(x) => x % 2 == 0), false)
+}
+
+// ── List UFCS: Chainable ──
+
+test "list method chaining" {
+  let result = [5, 3, 1, 4, 2]
+    .sort()
+    .filter(fn(x) => x > 1)
+    .map(fn(x) => x * 100)
+    .take(3)
+  assert_eq(result, [200, 300, 400])
+}
+
+test "list filter-map chain" {
+  let result = [1, 2, 3, 4, 5]
+    .filter(fn(x) => x % 2 != 0)
+    .map(fn(x) => x * 10)
+  assert_eq(result, [10, 30, 50])
+}
+
+// ── List UFCS: Collection ops ──
+
+test "list.take and list.drop via UFCS" {
+  assert_eq([1, 2, 3, 4, 5].take(3), [1, 2, 3])
+  assert_eq([1, 2, 3, 4, 5].drop(2), [3, 4, 5])
+}
+
+test "list.sort via UFCS" {
+  assert_eq([3, 1, 2].sort(), [1, 2, 3])
+}
+
+test "list.reverse via UFCS" {
+  assert_eq([1, 2, 3].reverse(), [3, 2, 1])
+}
+
+test "list.unique via UFCS" {
+  assert_eq([1, 2, 2, 3, 3].unique(), [1, 2, 3])
+}
+
+test "list.flatten via UFCS" {
+  assert_eq([[1, 2], [3], [4, 5]].flatten(), [1, 2, 3, 4, 5])
+}
+
+test "list.len via UFCS" {
+  assert_eq([1, 2, 3].len(), 3)
+}
+
+test "list.get via UFCS" {
+  assert_eq([10, 20, 30].get(1), some(20))
+  assert_eq([10, 20, 30].get(5), none)
+}
+
+test "list.contains via UFCS" {
+  assert_eq([1, 2, 3].contains(2), true)
+  assert_eq([1, 2, 3].contains(9), false)
+}
+
+test "list.join via UFCS" {
+  assert_eq(["a", "b", "c"].join(", "), "a, b, c")
+}
+
+test "list.slice via UFCS" {
+  assert_eq([1, 2, 3, 4, 5].slice(1, 4), [2, 3, 4])
+}
+
+test "list.index_of via UFCS" {
+  assert_eq([10, 20, 30].index_of(20), some(1))
+  assert_eq([10, 20, 30].index_of(99), none)
+}
+
+test "list.zip via UFCS" {
+  let pairs = [1, 2, 3].zip(["a", "b", "c"])
+  assert_eq(list.len(pairs), 3)
+}
+
+test "list.enumerate via UFCS" {
+  let pairs = ["a", "b", "c"].enumerate()
+  assert_eq(list.len(pairs), 3)
+}
+
+test "list.sort_by via UFCS" {
+  let sorted = [3, 1, 2].sort_by(fn(x) => 0 - x)
+  assert_eq(sorted, [3, 2, 1])
+}
+
+// ── String UFCS ──
+
+test "string.split via UFCS" {
+  assert_eq("a,b,c".split(","), ["a", "b", "c"])
+}
+
+test "string.to_upper via UFCS" {
+  assert_eq("hello".to_upper(), "HELLO")
+}
+
+test "string.to_lower via UFCS" {
+  assert_eq("HELLO".to_lower(), "hello")
+}
+
+test "string.trim via UFCS" {
+  assert_eq("  hi  ".trim(), "hi")
+}
+
+test "string.len via UFCS" {
+  assert_eq("hello".len(), 5)
+}
+
+test "string.contains via UFCS" {
+  assert_eq("hello world".contains("world"), true)
+  assert_eq("hello world".contains("xyz"), false)
+}
+
+test "string.starts_with via UFCS" {
+  assert_eq("hello".starts_with("hel"), true)
+}
+
+test "string.reverse via UFCS" {
+  assert_eq("abc".reverse(), "cba")
+}

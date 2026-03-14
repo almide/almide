@@ -84,7 +84,7 @@ Surface syntax looks like structural subtyping (simple, familiar). Internal sema
 ```almide
 { name: String }           // closed — exactly these fields, nothing more
 { name: String, .. }       // open — these fields + anything else (anonymous row)
-{ name: String, ..R }      // open with named row — extra fields preserved in type R
+fn f[T: { name: String, .. }](x: T) -> T  // generic structural bound — T preserves concrete type
 ```
 
 ### Critical rule: records are closed by default
@@ -96,7 +96,7 @@ Surface syntax looks like structural subtyping (simple, familiar). Internal sema
 
 Users coming from TypeScript will expect open-by-default. Almide is closed-by-default because:
 - Explicit `..` forces the programmer to declare intent ("I accept extra fields")
-- Row variables (`..R`) only make sense when openness is opt-in
+- Generic structural bounds (`[T: { name, .. }]`) only make sense when openness is opt-in
 - AI-generated code benefits from explicitness: if `..` is missing, the compiler catches unintended width
 - Closed records enable better monomorphization (Rust codegen knows the exact layout)
 
@@ -115,21 +115,21 @@ greet(Cat { name: "Tama", lives: 9 })                  // OK
 greet({ name: "Anonymous" })                            // OK
 ```
 
-**Named rows preserve type information through functions:**
+**Generic structural bounds preserve type information through functions:**
 
 ```almide
-// Without named row — input type info lost in return type
+// Without generic bound — input type info lost in return type
 fn rename(x: { name: String, .. }, new_name: String) -> { name: String, .. } =
-  x { name = new_name }
+  { ...x, name: new_name }
 
-// With named row — full type preserved
-fn rename[R](x: { name: String, ..R }, new_name: String) -> { name: String, ..R } =
-  x { name = new_name }
+// With generic structural bound — full type preserved
+fn rename[T: { name: String, .. }](x: T, new_name: String) -> T =
+  { ...x, name: new_name }
 
 let dog = Dog { name: "Pochi", age: 3, breed: "Shiba" }
 let dog2 = rename(dog, "Jiro")
-dog2.breed  // OK — breed is preserved via ..R
-dog2.age    // OK — age is preserved via ..R
+dog2.breed  // OK — breed is preserved via T = Dog
+dog2.age    // OK — age is preserved via T = Dog
 ```
 
 This is the key difference from TypeScript's structural subtyping: **fields never disappear**.
@@ -160,11 +160,11 @@ type Repo { get_user: fn(String) -> Result[User, String] }
 This is where row polymorphism shines. Each step preserves all fields:
 
 ```almide
-fn rename[R](x: { name: String, ..R }, n: String) -> { name: String, ..R } =
-  x { name = n }
+fn rename[T: { name: String, .. }](x: T, n: String) -> T =
+  { ...x, name: n }
 
-fn set_age[R](x: { age: Int, ..R }, a: Int) -> { age: Int, ..R } =
-  x { age = a }
+fn set_age[T: { age: Int, .. }](x: T, a: Int) -> T =
+  { ...x, age: a }
 
 fn display_name(x: { name: String, .. }) -> String = x.name
 
@@ -253,8 +253,8 @@ find_user({ get_user: |_| ok(mock_user) }, "123")
 Dependency records can also be open. This is important when the repo carries extra fields (logger, metrics, config) that this function doesn't need but shouldn't discard:
 
 ```almide
-fn checkout[R](
-  { get_user, save_user }: { get_user: fn(String) -> Result[User, String], save_user: fn(User) -> Result[Unit, String], ..R },
+fn checkout(
+  { get_user, save_user }: { get_user: fn(String) -> Result[User, String], save_user: fn(User) -> Result[Unit, String], .. },
   order: Order,
 ) -> Result[Receipt, String] =
   do {
@@ -270,7 +270,7 @@ let ctx = {
   log: logger.info,
   metrics: metrics.record,
 }
-checkout(ctx, order)  // OK — get_user and save_user are used, log and metrics are preserved via ..R
+checkout(ctx, order)  // OK — get_user and save_user are used, log and metrics accepted via ..
 ```
 
 > **Dependencies are data, passed as records. Required functions are destructured. Extra dependencies are preserved via open row.**
@@ -330,7 +330,7 @@ let older = user { age = user.age + 1 }   // all other fields preserved
 let renamed = user { name = "Jiro" }       // all other fields preserved
 ```
 
-**Row preservation rule:** `x { field = value }` preserves x's row. If `x: { name: String, ..R }`, then `x { name = "Jiro" }` has type `{ name: String, ..R }`. The update only replaces the specified field's value; all other fields and the row variable remain intact. This is what makes pipe chains type-safe.
+**Row preservation rule:** `{ ...x, field: value }` preserves x's type. If `x: T` where `T: { name: String, .. }`, then `{ ...x, name: "Jiro" }` has type `T`. The update only replaces the specified field's value; all other fields remain intact. This is what makes pipe chains type-safe.
 
 Optional fields use `Option[T]`, not special syntax:
 
@@ -388,8 +388,9 @@ chain_b(x)  →  chain_b(AlmdRec0 { name: x.name.clone() })
 
 #### Phase 2: Named rows + shape aliases
 
-- [ ] Parse `{ field: Type, ..R }` with named row variable
-- [ ] Row unification: input `..R` and output `..R` share the same row
+- [x] Parse generic structural bounds: `[T: { field: Type, .. }]`
+- [x] Checker: structural bound unification — `T` bound to concrete arg type at call site
+- [x] Monomorphization: `fn f[T: ..](x: T) -> T` → `fn f__Dog(x: Dog) -> Dog`
 - [x] `type Name = { field: Type, .. }` as shape alias (structural, not nominal)
 - [ ] Record destructuring in function parameters
 - [x] Nested structural checks: `{ config: { port: Int, .. }, .. }` with recursive field projection

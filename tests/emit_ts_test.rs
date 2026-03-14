@@ -10,7 +10,7 @@ fn parse_and_emit_js(input: &str) -> String {
     let mut checker = almide::check::Checker::new();
     checker.check_program(&mut prog.clone());
     let ir = almide::lower::lower_program(&prog, &checker.expr_types, &checker.env);
-    emit_ts::emit_js_with_modules(&prog, &[], Some(&ir))
+    emit_ts::emit_js_with_modules(&ir)
 }
 
 fn parse_and_emit_ts(input: &str) -> String {
@@ -20,7 +20,7 @@ fn parse_and_emit_ts(input: &str) -> String {
     let mut checker = almide::check::Checker::new();
     checker.check_program(&mut prog.clone());
     let ir = almide::lower::lower_program(&prog, &checker.expr_types, &checker.env);
-    emit_ts::emit_with_modules(&prog, &[], Some(&ir))
+    emit_ts::emit_with_modules(&ir)
 }
 
 /// Strip the runtime preamble, return only user code

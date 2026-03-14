@@ -17,6 +17,7 @@ impl Parser {
                         .unwrap_or_else(|| serde_json::Number::from(0)),
                 ),
                 raw: tok.value.clone(),
+                id: self.next_id(),
                 span,
                 resolved_type: None,
             });
@@ -24,39 +25,39 @@ impl Parser {
         if self.check(TokenType::Float) {
             self.advance();
             let v: f64 = tok.value.parse().unwrap_or(0.0);
-            return Ok(Expr::Float { value: v, span, resolved_type: None });
+            return Ok(Expr::Float { value: v, id: self.next_id(), span, resolved_type: None });
         }
         if self.check(TokenType::String) {
             self.advance();
-            return Ok(Expr::String { value: tok.value.clone(), span, resolved_type: None });
+            return Ok(Expr::String { value: tok.value.clone(), id: self.next_id(), span, resolved_type: None });
         }
         if self.check(TokenType::InterpolatedString) {
             self.advance();
-            return Ok(Expr::InterpolatedString { value: tok.value.clone(), span, resolved_type: None });
+            return Ok(Expr::InterpolatedString { value: tok.value.clone(), id: self.next_id(), span, resolved_type: None });
         }
         if self.check(TokenType::True) {
             self.advance();
-            return Ok(Expr::Bool { value: true, span, resolved_type: None });
+            return Ok(Expr::Bool { value: true, id: self.next_id(), span, resolved_type: None });
         }
         if self.check(TokenType::False) {
             self.advance();
-            return Ok(Expr::Bool { value: false, span, resolved_type: None });
+            return Ok(Expr::Bool { value: false, id: self.next_id(), span, resolved_type: None });
         }
         if self.check(TokenType::Underscore) {
             self.advance();
-            return Ok(Expr::Hole { span, resolved_type: None });
+            return Ok(Expr::Hole { id: self.next_id(), span, resolved_type: None });
         }
         if self.check(TokenType::Break) {
             self.advance();
-            return Ok(Expr::Break { span, resolved_type: None });
+            return Ok(Expr::Break { id: self.next_id(), span, resolved_type: None });
         }
         if self.check(TokenType::Continue) {
             self.advance();
-            return Ok(Expr::Continue { span, resolved_type: None });
+            return Ok(Expr::Continue { id: self.next_id(), span, resolved_type: None });
         }
         if self.check(TokenType::None) {
             self.advance();
-            return Ok(Expr::None { span, resolved_type: None });
+            return Ok(Expr::None { id: self.next_id(), span, resolved_type: None });
         }
         if self.check(TokenType::Some) {
             self.advance();
@@ -64,7 +65,7 @@ impl Parser {
             self.expect(TokenType::LParen)?;
             let expr = self.parse_expr()?;
             self.expect_closing(TokenType::RParen, open.line, open.col, "some()")?;
-            return Ok(Expr::Some { expr: Box::new(expr), span, resolved_type: None });
+            return Ok(Expr::Some { expr: Box::new(expr), id: self.next_id(), span, resolved_type: None });
         }
         if self.check(TokenType::Ok) {
             self.advance();
@@ -72,7 +73,7 @@ impl Parser {
             self.expect(TokenType::LParen)?;
             let expr = self.parse_expr()?;
             self.expect_closing(TokenType::RParen, open.line, open.col, "ok()")?;
-            return Ok(Expr::Ok { expr: Box::new(expr), span, resolved_type: None });
+            return Ok(Expr::Ok { expr: Box::new(expr), id: self.next_id(), span, resolved_type: None });
         }
         if self.check(TokenType::Err) {
             self.advance();
@@ -80,7 +81,7 @@ impl Parser {
             self.expect(TokenType::LParen)?;
             let expr = self.parse_expr()?;
             self.expect_closing(TokenType::RParen, open.line, open.col, "err()")?;
-            return Ok(Expr::Err { expr: Box::new(expr), span, resolved_type: None });
+            return Ok(Expr::Err { expr: Box::new(expr), id: self.next_id(), span, resolved_type: None });
         }
         if self.check(TokenType::Todo) {
             self.advance();
@@ -89,17 +90,17 @@ impl Parser {
             let msg = self.current().value.clone();
             self.expect(TokenType::String)?;
             self.expect_closing(TokenType::RParen, open.line, open.col, "todo()")?;
-            return Ok(Expr::Todo { message: msg, span, resolved_type: None });
+            return Ok(Expr::Todo { message: msg, id: self.next_id(), span, resolved_type: None });
         }
         if self.check(TokenType::Try) {
             self.advance();
             let expr = self.parse_postfix()?;
-            return Ok(Expr::Try { expr: Box::new(expr), span, resolved_type: None });
+            return Ok(Expr::Try { expr: Box::new(expr), id: self.next_id(), span, resolved_type: None });
         }
         if self.check(TokenType::Await) {
             self.advance();
             let expr = self.parse_postfix()?;
-            return Ok(Expr::Await { expr: Box::new(expr), span, resolved_type: None });
+            return Ok(Expr::Await { expr: Box::new(expr), id: self.next_id(), span, resolved_type: None });
         }
         if self.check(TokenType::If) {
             return self.parse_if_expr();
@@ -133,6 +134,7 @@ impl Parser {
             return Ok(Expr::While {
                 cond: Box::new(cond),
                 body: stmts,
+                id: self.next_id(),
                 span,
                 resolved_type: None,
             });
@@ -175,6 +177,7 @@ impl Parser {
                 var_tuple,
                 iterable: Box::new(iterable),
                 body: stmts,
+                id: self.next_id(),
                 span,
                 resolved_type: None,
             });
@@ -190,11 +193,15 @@ impl Parser {
             return self.parse_list_expr();
         }
         if self.check(TokenType::LParen) {
+            // Check for paren-style lambda: () => expr, (x) => expr, (x, y) => expr, (x: T) => expr
+            if self.peek_paren_lambda() {
+                return self.parse_paren_lambda();
+            }
             let open = self.current().clone();
             self.advance();
             if self.check(TokenType::RParen) {
                 self.advance();
-                return Ok(Expr::Unit { span, resolved_type: None });
+                return Ok(Expr::Unit { id: self.next_id(), span, resolved_type: None });
             }
             let first = self.parse_expr()?;
             if self.check(TokenType::Comma) {
@@ -206,10 +213,10 @@ impl Parser {
                     elements.push(self.parse_expr()?);
                 }
                 self.expect_closing(TokenType::RParen, open.line, open.col, "tuple")?;
-                return Ok(Expr::Tuple { elements, span, resolved_type: None });
+                return Ok(Expr::Tuple { elements, id: self.next_id(), span, resolved_type: None });
             }
             self.expect_closing(TokenType::RParen, open.line, open.col, "parenthesized expression")?;
-            return Ok(Expr::Paren { expr: Box::new(first), span, resolved_type: None });
+            return Ok(Expr::Paren { expr: Box::new(first), id: self.next_id(), span, resolved_type: None });
         }
         if self.check(TokenType::TypeName) {
             let name = tok.value.clone();
@@ -222,14 +229,15 @@ impl Parser {
                     let args = self.parse_call_args()?;
                     self.expect_closing(TokenType::RParen, open_call.line, open_call.col, "constructor call")?;
                     return Ok(Expr::Call {
-                        callee: Box::new(Expr::TypeName { name, span, resolved_type: None }),
+                        callee: Box::new(Expr::TypeName { name, id: self.next_id(), span, resolved_type: None }),
                         args,
                         type_args: Some(ta),
+                        id: self.next_id(),
                         span,
                         resolved_type: None,
                     });
                 }
-                return Ok(Expr::TypeName { name, span, resolved_type: None });
+                return Ok(Expr::TypeName { name, id: self.next_id(), span, resolved_type: None });
             }
             if self.check(TokenType::LParen) {
                 let open_call = self.current().clone();
@@ -237,9 +245,10 @@ impl Parser {
                 let args = self.parse_call_args()?;
                 self.expect_closing(TokenType::RParen, open_call.line, open_call.col, "constructor call")?;
                 return Ok(Expr::Call {
-                    callee: Box::new(Expr::TypeName { name, span, resolved_type: None }),
+                    callee: Box::new(Expr::TypeName { name, id: self.next_id(), span, resolved_type: None }),
                     args,
                     type_args: None,
+                    id: self.next_id(),
                     span,
                     resolved_type: None,
                 });
@@ -267,7 +276,7 @@ impl Parser {
                         } else {
                             fields.push(FieldInit {
                                 name: field_name.clone(),
-                                value: Expr::Ident { name: field_name, span: None, resolved_type: None },
+                                value: Expr::Ident { name: field_name, id: self.next_id(), span: None, resolved_type: None },
                             });
                         }
                         self.skip_newlines();
@@ -277,10 +286,10 @@ impl Parser {
                         }
                     }
                     self.expect_closing(TokenType::RBrace, open_rec.line, open_rec.col, "record construction")?;
-                    return Ok(Expr::Record { name: Some(name), fields, span, resolved_type: None });
+                    return Ok(Expr::Record { name: Some(name), fields, id: self.next_id(), span, resolved_type: None });
                 }
             }
-            return Ok(Expr::TypeName { name, span, resolved_type: None });
+            return Ok(Expr::TypeName { name, id: self.next_id(), span, resolved_type: None });
         }
         // Check hint system for rejected operators and keywords from other languages
         if let Some(result) = self.check_hint(None, super::hints::HintScope::Expression) {
@@ -290,7 +299,7 @@ impl Parser {
         if self.check(TokenType::Ident) || self.check(TokenType::IdentQ) {
             let name = tok.value.clone();
             self.advance();
-            return Ok(Expr::Ident { name, span, resolved_type: None });
+            return Ok(Expr::Ident { name, id: self.next_id(), span, resolved_type: None });
         }
 
         Err(format!(

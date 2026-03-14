@@ -4,7 +4,10 @@ use super::Parser;
 
 impl Parser {
     pub(crate) fn parse_expr(&mut self) -> Result<Expr, String> {
-        self.parse_pipe()
+        self.enter_depth()?;
+        let result = self.parse_pipe();
+        self.exit_depth();
+        result
     }
 
     fn parse_pipe(&mut self) -> Result<Expr, String> {
@@ -31,6 +34,7 @@ impl Parser {
                 left = Expr::Match {
                     subject: Box::new(left),
                     arms,
+                    id: self.next_id(),
                     span,
                     resolved_type: None,
                 };
@@ -39,6 +43,7 @@ impl Parser {
                 left = Expr::Pipe {
                     left: Box::new(left),
                     right: Box::new(right),
+                    id: self.next_id(),
                     span,
                     resolved_type: None,
                 };
@@ -62,6 +67,7 @@ impl Parser {
                 op: "or".to_string(),
                 left: Box::new(left),
                 right: Box::new(right),
+                id: self.next_id(),
                 span,
                 resolved_type: None,
             };
@@ -84,6 +90,7 @@ impl Parser {
                 op: "and".to_string(),
                 left: Box::new(left),
                 right: Box::new(right),
+                id: self.next_id(),
                 span,
                 resolved_type: None,
             };
@@ -109,6 +116,7 @@ impl Parser {
                 op,
                 left: Box::new(left),
                 right: Box::new(right),
+                id: self.next_id(),
                 span,
                 resolved_type: None,
             };
@@ -127,6 +135,7 @@ impl Parser {
                 start: Box::new(left),
                 end: Box::new(right),
                 inclusive: false,
+                id: self.next_id(),
                 span,
                 resolved_type: None,
             });
@@ -140,6 +149,7 @@ impl Parser {
                 start: Box::new(left),
                 end: Box::new(right),
                 inclusive: true,
+                id: self.next_id(),
                 span,
                 resolved_type: None,
             });
@@ -159,6 +169,7 @@ impl Parser {
                 op,
                 left: Box::new(left),
                 right: Box::new(right),
+                id: self.next_id(),
                 span,
                 resolved_type: None,
             };
@@ -178,6 +189,7 @@ impl Parser {
                 op,
                 left: Box::new(left),
                 right: Box::new(right),
+                id: self.next_id(),
                 span,
                 resolved_type: None,
             };
@@ -193,6 +205,7 @@ impl Parser {
             return Ok(Expr::Unary {
                 op: "-".to_string(),
                 operand: Box::new(operand),
+                id: self.next_id(),
                 span,
                 resolved_type: None,
             });
@@ -204,6 +217,7 @@ impl Parser {
             return Ok(Expr::Unary {
                 op: "not".to_string(),
                 operand: Box::new(operand),
+                id: self.next_id(),
                 span,
                 resolved_type: None,
             });
@@ -225,6 +239,7 @@ impl Parser {
                     expr = Expr::TupleIndex {
                         object: Box::new(expr),
                         index,
+                        id: self.next_id(),
                         span,
                         resolved_type: None,
                     };
@@ -233,6 +248,7 @@ impl Parser {
                     expr = Expr::Member {
                         object: Box::new(expr),
                         field,
+                        id: self.next_id(),
                         span,
                         resolved_type: None,
                     };
@@ -248,6 +264,7 @@ impl Parser {
                     callee: Box::new(expr),
                     args,
                     type_args: Some(ta),
+                    id: self.next_id(),
                     span,
                     resolved_type: None,
                 };
@@ -260,6 +277,7 @@ impl Parser {
                 expr = Expr::IndexAccess {
                     object: Box::new(expr),
                     index: Box::new(index),
+                    id: self.next_id(),
                     span,
                     resolved_type: None,
                 };
@@ -273,6 +291,7 @@ impl Parser {
                     callee: Box::new(expr),
                     args,
                     type_args: None,
+                    id: self.next_id(),
                     span,
                     resolved_type: None,
                 };
@@ -314,7 +333,7 @@ impl Parser {
         if self.check(TokenType::Underscore) {
             let span = Some(self.current_span());
             self.advance();
-            args.push(Expr::Placeholder { span, resolved_type: None });
+            args.push(Expr::Placeholder { id: self.next_id(), span, resolved_type: None });
             return Ok(());
         }
         if self.check(TokenType::Ident) && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Colon) {

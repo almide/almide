@@ -1,23 +1,23 @@
-use crate::ast::*;
 use crate::emit_ts_runtime;
+use crate::ir::{IrFunction, IrTypeDecl, IrTypeDeclKind, IrVariantKind, IrModule, IrVisibility};
+use crate::types::Ty;
 use super::TsEmitter;
 
 impl TsEmitter {
-    /// Pre-collect variant info from declarations.
-    fn collect_generic_variant_info(&mut self, decls: &[Decl]) {
-        for decl in decls {
-            if let Decl::Type { ty: TypeExpr::Variant { cases }, generics, .. } = decl {
-                let is_generic = matches!(generics, Some(gs) if !gs.is_empty());
+    /// Pre-collect variant info from IR type declarations.
+    fn collect_generic_variant_info_from_ir(&mut self, type_decls: &[IrTypeDecl]) {
+        for td in type_decls {
+            if let IrTypeDeclKind::Variant { cases, is_generic, .. } = &td.kind {
                 for case in cases {
-                    match case {
-                        VariantCase::Unit { name } => {
-                            self.unit_variant_names.insert(name.clone());
-                            if is_generic {
-                                self.generic_variant_unit_ctors.insert(name.clone());
+                    match &case.kind {
+                        IrVariantKind::Unit => {
+                            self.unit_variant_names.insert(case.name.clone());
+                            if *is_generic {
+                                self.generic_variant_unit_ctors.insert(case.name.clone());
                             }
                         }
-                        VariantCase::Record { name, .. } => {
-                            self.variant_constructors.insert(name.clone());
+                        IrVariantKind::Record { .. } => {
+                            self.variant_constructors.insert(case.name.clone());
                         }
                         _ => {}
                     }
@@ -26,25 +26,26 @@ impl TsEmitter {
         }
     }
 
-    pub(crate) fn emit_program(&mut self, prog: &Program, modules: &[(String, Program)]) {
-        self.collect_generic_variant_info(&prog.decls);
-        for (_, mod_prog) in modules {
-            self.collect_generic_variant_info(&mod_prog.decls);
+    pub(crate) fn emit_program(&mut self) {
+        let ir = self.ir_program.as_ref().expect("IR required for codegen").clone();
+
+        self.collect_generic_variant_info_from_ir(&ir.type_decls);
+        for ir_mod in &ir.modules {
+            self.collect_generic_variant_info_from_ir(&ir_mod.type_decls);
         }
         self.out.push_str(&emit_ts_runtime::full_runtime(self.js_mode));
         self.out.push('\n');
 
         // Register and emit imported modules as namespace objects
-        for (mod_name, _) in modules {
-            self.user_modules.push(mod_name.clone());
+        for ir_mod in &ir.modules {
+            self.user_modules.push(ir_mod.name.clone());
         }
         // Pre-declare namespace objects for parent modules that don't have their own module
-        let module_names: std::collections::HashSet<String> = modules.iter().map(|(n, _)| n.clone()).collect();
+        let module_names: std::collections::HashSet<String> = ir.modules.iter().map(|m| m.name.clone()).collect();
         let mut emitted_ns: std::collections::HashSet<String> = std::collections::HashSet::new();
-        for (mod_name, _) in modules {
-            if mod_name.contains('.') {
-                // Walk up the parent chain (e.g. a.b.c -> check a, a.b)
-                let parts: Vec<&str> = mod_name.split('.').collect();
+        for ir_mod in &ir.modules {
+            if ir_mod.name.contains('.') {
+                let parts: Vec<&str> = ir_mod.name.split('.').collect();
                 for i in 1..parts.len() {
                     let ancestor = parts[..i].join(".");
                     if !module_names.contains(&ancestor) && !emitted_ns.contains(&ancestor) {
@@ -58,35 +59,45 @@ impl TsEmitter {
                 }
             }
         }
-        for (mod_name, mod_prog) in modules {
-            self.emit_user_module(mod_name, mod_prog);
+        for ir_mod in &ir.modules {
+            self.emit_ir_user_module(&ir_mod);
         }
 
-        // Emit import aliases and direct sub-module imports
-        for imp in &prog.imports {
-            if let Decl::Import { path, alias, .. } = imp {
-                let full_path = path.join(".");
-                if let Some(alias_name) = alias {
-                    let kw = if self.js_mode { "var" } else { "const" };
-                    self.out.push_str(&format!("{} {} = {};\n", kw, alias_name, full_path));
-                } else if path.len() > 1 {
-                    // Direct sub-module import: `import mylib.parser` makes `parser` available
-                    let short_name = path.last().unwrap();
-                    let kw = if self.js_mode { "var" } else { "const" };
-                    self.out.push_str(&format!("{} {} = {};\n", kw, short_name, full_path));
-                }
-            }
-        }
+        // Emit import aliases from IR imports (stored as the first module entries or from program metadata)
+        // Import aliases are handled by the caller before emit_program
         self.out.push('\n');
 
+        // Emit declarations from IR
         let mut has_main = false;
-        for decl in &prog.decls {
-            if let Decl::Fn { name, .. } = decl {
-                if name == "main" {
-                    has_main = true;
-                }
+
+        // Type declarations
+        for td in &ir.type_decls {
+            self.out.push_str(&self.gen_ir_type_decl(td));
+            self.out.push_str("\n\n");
+        }
+
+        // Top-level lets
+        for tl in &ir.top_lets {
+            let name = ir.var_table.get(tl.var).name.clone();
+            let val_str = self.gen_ir_expr(&tl.value);
+            if self.js_mode {
+                self.out.push_str(&format!("var {} = {};", name, val_str));
+            } else {
+                self.out.push_str(&format!("const {} = {};", name, val_str));
             }
-            self.out.push_str(&self.gen_decl(decl));
+            self.out.push_str("\n\n");
+        }
+
+        // Functions
+        for func in &ir.functions {
+            if func.name == "main" {
+                has_main = true;
+            }
+            if func.is_test {
+                self.out.push_str(&self.gen_ir_test(func));
+            } else {
+                self.out.push_str(&self.gen_ir_fn_decl(func));
+            }
             self.out.push_str("\n\n");
         }
 
@@ -100,219 +111,82 @@ impl TsEmitter {
         }
     }
 
-    fn emit_user_module(&mut self, name: &str, prog: &Program) {
-        self.out.push_str(&format!("// module: {}\n", name));
-        if name.contains('.') {
-            // Sub-module: use property assignment instead of const declaration
-            self.out.push_str(&format!("{} = (() => {{\n", name));
+    fn emit_ir_user_module(&mut self, ir_mod: &IrModule) {
+        self.out.push_str(&format!("// module: {}\n", ir_mod.name));
+        if ir_mod.name.contains('.') {
+            self.out.push_str(&format!("{} = (() => {{\n", ir_mod.name));
         } else {
-            self.out.push_str(&format!("const {} = (() => {{\n", name));
+            self.out.push_str(&format!("const {} = (() => {{\n", ir_mod.name));
         }
 
-        for decl in &prog.decls {
-            match decl {
-                Decl::Fn { .. } => {
-                    self.out.push_str(&self.gen_decl(decl));
-                    self.out.push('\n');
-                }
-                Decl::Type { .. } => {
-                    self.out.push_str(&self.gen_decl(decl));
-                    self.out.push('\n');
-                }
-                _ => {}
-            }
+        for td in &ir_mod.type_decls {
+            self.out.push_str(&self.gen_ir_type_decl(td));
+            self.out.push('\n');
+        }
+
+        for func in &ir_mod.functions {
+            self.out.push_str(&self.gen_ir_fn_decl(func));
+            self.out.push('\n');
         }
 
         // Export non-local functions
-        let fn_names: Vec<String> = prog.decls.iter().filter_map(|d| {
-            if let Decl::Fn { name, visibility, .. } = d {
-                if *visibility != Visibility::Local { Some(Self::sanitize(name)) } else { None }
-            } else { None }
-        }).collect();
+        let fn_names: Vec<String> = ir_mod.functions.iter()
+            .filter(|f| f.visibility != IrVisibility::Private)
+            .map(|f| Self::sanitize(&f.name))
+            .collect();
         self.out.push_str(&format!("  return {{ {} }};\n", fn_names.join(", ")));
         self.out.push_str("})();\n\n");
     }
 
-    pub(crate) fn gen_decl(&self, decl: &Decl) -> String {
-        match decl {
-            Decl::Module { path, .. } => format!("// module: {}", path.join(".")),
-            Decl::Import { path, .. } => format!("// import: {}", path.join(".")),
-            Decl::Type { name, ty, generics, .. } => {
-                if self.js_mode {
-                    // In JS mode, skip pure type decls but still generate variant constructors
-                    if matches!(ty, TypeExpr::Variant { .. }) {
-                        self.gen_type_decl(name, ty, generics.as_ref())
-                    } else {
-                        format!("// type: {}", name)
-                    }
-                } else {
-                    self.gen_type_decl(name, ty, generics.as_ref())
-                }
-            }
-            Decl::Fn { name, params, return_type, body, effect, r#async, extern_attrs, generics, .. } => {
-                let prev = self.in_effect.get();
-                if effect.unwrap_or(false) {
-                    self.in_effect.set(true);
-                }
-                let result = self.gen_fn_decl(name, params, return_type, r#async.unwrap_or(false), extern_attrs, generics.as_ref());
-                self.in_effect.set(prev);
-                result
-            }
-            Decl::Trait { name, .. } => format!("// trait {}", name),
-            Decl::Impl { trait_, for_, methods, .. } => {
-                let mut lines = vec![format!("// impl {} for {}", trait_, for_)];
-                for m in methods {
-                    lines.push(self.gen_decl(m));
-                }
-                lines.join("\n")
-            }
-            Decl::Test { name, .. } => {
-                let prev_test = self.in_test.get();
-                self.in_test.set(true);
-                let ir_fn = self.find_ir_function(name).expect("IR required for codegen").clone();
-                let body_str = self.gen_ir_expr(&ir_fn.body);
-                self.in_test.set(prev_test);
-                if self.js_mode {
-                    let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
-                    format!(
-                        "try {{ (() => {})(); console.log(\"  test {} ... ok\"); }} catch(__e) {{ console.log(\"  test {} ... FAILED\"); console.log(\"    \" + __e.message.split(\"\\n\").join(\"\\n    \")); __node_process.exitCode = 1; }}",
-                        body_str,
-                        escaped,
-                        escaped,
-                    )
-                } else {
-                    format!("Deno.test({}, () => {});", Self::json_string(name), body_str)
-                }
-            }
-            Decl::TopLet { name, .. } => {
-                let ir_tl = self.find_ir_top_let(name).expect("IR required for codegen").clone();
-                let val_str = self.gen_ir_expr(&ir_tl.value);
-                if self.js_mode {
-                    format!("var {} = {};", name, val_str)
-                } else {
-                    format!("const {} = {};", name, val_str)
-                }
-            }
-            Decl::Strict { mode, .. } => format!("// strict {}", mode),
-        }
-    }
-
-    pub(crate) fn gen_type_decl(&self, name: &str, ty: &TypeExpr, generics: Option<&Vec<crate::ast::GenericParam>>) -> String {
-        let generic_str = if self.js_mode {
-            String::new()
-        } else {
-            match generics {
-                Some(gs) if !gs.is_empty() => {
-                    let gparams: Vec<String> = gs.iter().map(|g| g.name.clone()).collect();
-                    format!("<{}>", gparams.join(", "))
-                }
-                _ => String::new(),
-            }
-        };
+    /// Convert an IR Ty to a TypeScript type string.
+    pub(crate) fn ir_ty_to_ts(&self, ty: &Ty) -> String {
         match ty {
-            TypeExpr::Record { fields } | TypeExpr::OpenRecord { fields } => {
-                let fs: Vec<String> = fields.iter()
-                    .map(|f| format!("  {}: {};", f.name, self.gen_type_expr(&f.ty)))
+            Ty::Int | Ty::Float => "number".to_string(),
+            Ty::String => "string".to_string(),
+            Ty::Bool => "boolean".to_string(),
+            Ty::Unit => "void".to_string(),
+            Ty::List(inner) => format!("{}[]", self.ir_ty_to_ts(inner)),
+            Ty::Map(k, v) => format!("Map<{}, {}>", self.ir_ty_to_ts(k), self.ir_ty_to_ts(v)),
+            Ty::Option(inner) => format!("{} | null", self.ir_ty_to_ts(inner)),
+            Ty::Result(ok, _) => self.ir_ty_to_ts(ok),
+            Ty::Tuple(elems) => {
+                let ts: Vec<String> = elems.iter().map(|e| self.ir_ty_to_ts(e)).collect();
+                format!("[{}]", ts.join(", "))
+            }
+            Ty::Fn { params, ret } => {
+                let ps: Vec<String> = params.iter().enumerate()
+                    .map(|(i, p)| format!("_{}: {}", i, self.ir_ty_to_ts(p)))
                     .collect();
-                format!("interface {}{} {{\n{}\n}}", name, generic_str, fs.join("\n"))
+                format!("({}) => {}", ps.join(", "), self.ir_ty_to_ts(ret))
             }
-            TypeExpr::Variant { cases } => {
-                let is_generic = matches!(generics, Some(gs) if !gs.is_empty());
-                let mut lines = vec![format!("// variant type {}", name)];
-                for case in cases {
-                    match case {
-                        VariantCase::Unit { name: cname } => {
-                            if is_generic {
-                                // Generic unit constructors must be functions so they can be called: Nothing()
-                                lines.push(format!("function {}() {{ return {{ tag: {} }}; }}", cname, Self::json_string(cname)));
-                            } else {
-                                lines.push(format!("const {} = {{ tag: {} }};", cname, Self::json_string(cname)));
-                            }
-                        }
-                        VariantCase::Tuple { name: cname, fields } => {
-                            let params: Vec<String> = fields.iter().enumerate()
-                                .map(|(i, _)| format!("_{}", i))
-                                .collect();
-                            let obj_fields: Vec<String> = fields.iter().enumerate()
-                                .map(|(i, _)| format!("_{}: _{}", i, i))
-                                .collect();
-                            lines.push(format!("function {}({}) {{ return {{ tag: {}, {} }}; }}",
-                                cname, params.join(", "), Self::json_string(cname), obj_fields.join(", ")));
-                        }
-                        VariantCase::Record { name: cname, fields } => {
-                            let params: Vec<String> = fields.iter()
-                                .map(|f| f.name.clone())
-                                .collect();
-                            let obj_fields: Vec<String> = fields.iter()
-                                .map(|f| format!("{}: {}", f.name, f.name))
-                                .collect();
-                            lines.push(format!("function {}({}) {{ return {{ tag: {}, {} }}; }}",
-                                cname, params.join(", "), Self::json_string(cname), obj_fields.join(", ")));
-                        }
-                    }
-                }
-                lines.join("\n")
-            }
-            TypeExpr::Newtype { inner } => {
-                format!("type {}{} = {} & {{ readonly __brand: \"{}\" }};", name, generic_str, self.gen_type_expr(inner), name)
-            }
-            _ => format!("type {}{} = {};", name, generic_str, self.gen_type_expr(ty)),
-        }
-    }
-
-    pub(crate) fn gen_type_expr(&self, ty: &TypeExpr) -> String {
-        match ty {
-            TypeExpr::Simple { name } => Self::map_type_name(name).to_string(),
-            TypeExpr::Generic { name, args } => {
-                match name.as_str() {
-                    "List" => format!("{}[]", self.gen_type_expr(&args[0])),
-                    "Map" => format!("Map<{}>", args.iter().map(|a| self.gen_type_expr(a)).collect::<Vec<_>>().join(", ")),
-                    "Set" => format!("Set<{}>", self.gen_type_expr(&args[0])),
-                    "Result" => self.gen_type_expr(&args[0]),
-                    "Option" => format!("{} | null", self.gen_type_expr(&args[0])),
-                    _ => format!("{}<{}>", name, args.iter().map(|a| self.gen_type_expr(a)).collect::<Vec<_>>().join(", ")),
-                }
-            }
-            TypeExpr::Record { fields } | TypeExpr::OpenRecord { fields } => {
+            Ty::Record { fields } | Ty::OpenRecord { fields } => {
                 let fs: Vec<String> = fields.iter()
-                    .map(|f| format!("{}: {}", f.name, self.gen_type_expr(&f.ty)))
+                    .map(|(name, ty)| format!("{}: {}", name, self.ir_ty_to_ts(ty)))
                     .collect();
                 format!("{{ {} }}", fs.join(", "))
             }
-            TypeExpr::Fn { params, ret } => {
-                let ps: Vec<String> = params.iter().enumerate()
-                    .map(|(i, p)| format!("_{}: {}", i, self.gen_type_expr(p)))
-                    .collect();
-                format!("({}) => {}", ps.join(", "), self.gen_type_expr(ret))
+            Ty::Named(name, _) => {
+                match name.as_str() {
+                    "Path" => "string".to_string(),
+                    other => other.to_string(),
+                }
             }
-            TypeExpr::Tuple { elements } => {
-                let ts: Vec<String> = elements.iter().map(|e| self.gen_type_expr(e)).collect();
-                format!("[{}]", ts.join(", "))
+            Ty::TypeVar(name) => name.clone(),
+            Ty::Union(members) => {
+                let ms: Vec<String> = members.iter().map(|m| self.ir_ty_to_ts(m)).collect();
+                ms.join(" | ")
             }
-            TypeExpr::Newtype { inner } => self.gen_type_expr(inner),
-            TypeExpr::Variant { .. } => "any".to_string(),
+            Ty::Variant { name, .. } => name.clone(),
+            Ty::Unknown => "any".to_string(),
         }
     }
 
-    fn map_type_name(name: &str) -> &str {
-        match name {
-            "Int" => "number",
-            "Float" => "number",
-            "String" => "string",
-            "Bool" => "boolean",
-            "Unit" => "void",
-            "Path" => "string",
-            other => other,
-        }
-    }
-
-    fn gen_fn_decl(&self, name: &str, params: &[Param], ret_type: &TypeExpr, is_async: bool, extern_attrs: &[ExternAttr], generics: Option<&Vec<crate::ast::GenericParam>>) -> String {
-        let async_ = if is_async { "async " } else { "" };
-        let sname = Self::sanitize(name);
+    /// Generate a type declaration from IR.
+    fn gen_ir_type_decl(&self, td: &IrTypeDecl) -> String {
         let generic_str = if self.js_mode {
             String::new()
         } else {
-            match generics {
+            match &td.generics {
                 Some(gs) if !gs.is_empty() => {
                     let gparams: Vec<String> = gs.iter().map(|g| g.name.clone()).collect();
                     format!("<{}>", gparams.join(", "))
@@ -320,21 +194,101 @@ impl TsEmitter {
                 _ => String::new(),
             }
         };
-        let params_str: Vec<String> = params.iter()
+
+        match &td.kind {
+            IrTypeDeclKind::Record { fields } => {
+                let fs: Vec<String> = fields.iter()
+                    .map(|f| format!("  {}: {};", f.name, self.ir_ty_to_ts(&f.ty)))
+                    .collect();
+                format!("interface {}{} {{\n{}\n}}", td.name, generic_str, fs.join("\n"))
+            }
+            IrTypeDeclKind::Alias { target } => {
+                if let Ty::OpenRecord { fields } = target {
+                    let fs: Vec<String> = fields.iter()
+                        .map(|(name, ty)| format!("  {}: {};", name, self.ir_ty_to_ts(ty)))
+                        .collect();
+                    format!("interface {}{} {{\n{}\n}}", td.name, generic_str, fs.join("\n"))
+                } else {
+                    format!("type {}{} = {};", td.name, generic_str, self.ir_ty_to_ts(target))
+                }
+            }
+            IrTypeDeclKind::Variant { cases, is_generic, .. } => {
+                if self.js_mode {
+                    // In JS mode, only generate variant constructors
+                    self.gen_ir_variant_constructors(&td.name, cases, *is_generic)
+                } else {
+                    self.gen_ir_variant_constructors(&td.name, cases, *is_generic)
+                }
+            }
+        }
+    }
+
+    fn gen_ir_variant_constructors(&self, _name: &str, cases: &[crate::ir::IrVariantDecl], is_generic: bool) -> String {
+        let mut lines = vec![format!("// variant type {}", _name)];
+        for case in cases {
+            match &case.kind {
+                IrVariantKind::Unit => {
+                    if is_generic {
+                        lines.push(format!("function {}() {{ return {{ tag: {} }}; }}", case.name, Self::json_string(&case.name)));
+                    } else {
+                        lines.push(format!("const {} = {{ tag: {} }};", case.name, Self::json_string(&case.name)));
+                    }
+                }
+                IrVariantKind::Tuple { fields } => {
+                    let params: Vec<String> = fields.iter().enumerate()
+                        .map(|(i, _)| format!("_{}", i))
+                        .collect();
+                    let obj_fields: Vec<String> = fields.iter().enumerate()
+                        .map(|(i, _)| format!("_{}: _{}", i, i))
+                        .collect();
+                    lines.push(format!("function {}({}) {{ return {{ tag: {}, {} }}; }}",
+                        case.name, params.join(", "), Self::json_string(&case.name), obj_fields.join(", ")));
+                }
+                IrVariantKind::Record { fields } => {
+                    let params: Vec<String> = fields.iter()
+                        .map(|f| f.name.clone())
+                        .collect();
+                    let obj_fields: Vec<String> = fields.iter()
+                        .map(|f| format!("{}: {}", f.name, f.name))
+                        .collect();
+                    lines.push(format!("function {}({}) {{ return {{ tag: {}, {} }}; }}",
+                        case.name, params.join(", "), Self::json_string(&case.name), obj_fields.join(", ")));
+                }
+            }
+        }
+        lines.join("\n")
+    }
+
+    /// Generate a function declaration from IR.
+    fn gen_ir_fn_decl(&self, ir_fn: &IrFunction) -> String {
+        let async_ = if ir_fn.is_async { "async " } else { "" };
+        let sname = Self::sanitize(&ir_fn.name);
+        let generic_str = if self.js_mode {
+            String::new()
+        } else {
+            match &ir_fn.generics {
+                Some(gs) if !gs.is_empty() => {
+                    let gparams: Vec<String> = gs.iter().map(|g| g.name.clone()).collect();
+                    format!("<{}>", gparams.join(", "))
+                }
+                _ => String::new(),
+            }
+        };
+        let params_str: Vec<String> = ir_fn.params.iter()
             .filter(|p| p.name != "self")
             .map(|p| {
                 if self.js_mode {
                     Self::sanitize(&p.name)
                 } else {
-                    format!("{}: {}", Self::sanitize(&p.name), self.gen_type_expr(&p.ty))
+                    format!("{}: {}", Self::sanitize(&p.name), self.ir_ty_to_ts(&p.ty))
                 }
             })
             .collect();
-        let ret_str = if self.js_mode { String::new() } else { format!(": {}", self.gen_type_expr(ret_type)) };
+        let ret_str = if self.js_mode { String::new() } else { format!(": {}", self.ir_ty_to_ts(&ir_fn.ret_ty)) };
 
         // Check for @extern(ts, ...)
-        if let Some(ext) = extern_attrs.iter().find(|a| a.target == "ts") {
-            let args: Vec<String> = params.iter()
+        if let Some(ext) = ir_fn.extern_attrs.iter().find(|a| a.target == "ts") {
+            let args: Vec<String> = ir_fn.params.iter()
                 .filter(|p| p.name != "self")
                 .map(|p| Self::sanitize(&p.name))
                 .collect();
@@ -342,59 +296,64 @@ impl TsEmitter {
             return format!("{}function {}{}({}){} {{\n  return {};\n}}", async_, sname, generic_str, params_str.join(", "), ret_str, call);
         }
 
-        if let Some(ir_fn) = self.find_ir_function(name) {
-            let ir_fn = ir_fn.clone();
-            let prev = self.in_effect.get();
-            if ir_fn.is_effect { self.in_effect.set(true); }
-            let body_str = self.gen_ir_expr(&ir_fn.body);
-            self.in_effect.set(prev);
-            match &ir_fn.body.kind {
-                crate::ir::IrExprKind::Block { .. } => {
-                    format!("{}function {}{}({}){} {}", async_, sname, generic_str, params_str.join(", "), ret_str, body_str)
-                }
-                crate::ir::IrExprKind::DoBlock { .. } => {
-                    format!("{}function {}{}({}){} {{\n{}\n}}", async_, sname, generic_str, params_str.join(", "), ret_str, body_str)
-                }
-                _ => {
-                    format!("{}function {}{}({}){} {{\n  return {};\n}}", async_, sname, generic_str, params_str.join(", "), ret_str, body_str)
-                }
+        let prev = self.in_effect.get();
+        if ir_fn.is_effect { self.in_effect.set(true); }
+        let body_str = self.gen_ir_expr(&ir_fn.body);
+        self.in_effect.set(prev);
+        match &ir_fn.body.kind {
+            crate::ir::IrExprKind::Block { .. } => {
+                format!("{}function {}{}({}){} {}", async_, sname, generic_str, params_str.join(", "), ret_str, body_str)
             }
-        } else {
-            unreachable!("IR required for codegen");
+            crate::ir::IrExprKind::DoBlock { .. } => {
+                format!("{}function {}{}({}){} {{\n{}\n}}", async_, sname, generic_str, params_str.join(", "), ret_str, body_str)
+            }
+            _ => {
+                format!("{}function {}{}({}){} {{\n  return {};\n}}", async_, sname, generic_str, params_str.join(", "), ret_str, body_str)
+            }
         }
     }
 
-    /// Find an IR function by name
-    fn find_ir_function(&self, name: &str) -> Option<&crate::ir::IrFunction> {
-        self.ir_program.as_ref()?.functions.iter().find(|f| f.name == name)
-    }
-
-    /// Find an IR top-level let by name
-    fn find_ir_top_let(&self, name: &str) -> Option<&crate::ir::IrTopLet> {
-        let ir = self.ir_program.as_ref()?;
-        ir.top_lets.iter().find(|tl| ir.var_table.get(tl.var).name == name)
+    /// Generate a test from IR.
+    fn gen_ir_test(&self, ir_fn: &IrFunction) -> String {
+        let prev_test = self.in_test.get();
+        self.in_test.set(true);
+        let body_str = self.gen_ir_expr(&ir_fn.body);
+        self.in_test.set(prev_test);
+        if self.js_mode {
+            let escaped = ir_fn.name.replace('\\', "\\\\").replace('"', "\\\"");
+            format!(
+                "try {{ (() => {})(); console.log(\"  test {} ... ok\"); }} catch(__e) {{ console.log(\"  test {} ... FAILED\"); console.log(\"    \" + __e.message.split(\"\\n\").join(\"\\n    \")); __node_process.exitCode = 1; }}",
+                body_str,
+                escaped,
+                escaped,
+            )
+        } else {
+            format!("Deno.test({}, () => {});", Self::json_string(&ir_fn.name), body_str)
+        }
     }
 
     // ── npm package emission ──
 
     /// Emit user code for npm target: no inlined runtime, `export` for public functions,
     /// no entry point, no test blocks.
-    pub(crate) fn emit_npm_program(&mut self, prog: &Program, modules: &[(String, Program)]) {
-        self.collect_generic_variant_info(&prog.decls);
-        for (_, mod_prog) in modules {
-            self.collect_generic_variant_info(&mod_prog.decls);
+    pub(crate) fn emit_npm_program(&mut self) {
+        let ir = self.ir_program.as_ref().expect("IR required for codegen").clone();
+
+        self.collect_generic_variant_info_from_ir(&ir.type_decls);
+        for ir_mod in &ir.modules {
+            self.collect_generic_variant_info_from_ir(&ir_mod.type_decls);
         }
         // Register user modules
-        for (mod_name, _) in modules {
-            self.user_modules.push(mod_name.clone());
+        for ir_mod in &ir.modules {
+            self.user_modules.push(ir_mod.name.clone());
         }
 
         // Pre-declare namespace objects for parent modules
-        let module_names: std::collections::HashSet<String> = modules.iter().map(|(n, _)| n.clone()).collect();
+        let module_names: std::collections::HashSet<String> = ir.modules.iter().map(|m| m.name.clone()).collect();
         let mut emitted_ns: std::collections::HashSet<String> = std::collections::HashSet::new();
-        for (mod_name, _) in modules {
-            if mod_name.contains('.') {
-                let parts: Vec<&str> = mod_name.split('.').collect();
+        for ir_mod in &ir.modules {
+            if ir_mod.name.contains('.') {
+                let parts: Vec<&str> = ir_mod.name.split('.').collect();
                 for i in 1..parts.len() {
                     let ancestor = parts[..i].join(".");
                     if !module_names.contains(&ancestor) && !emitted_ns.contains(&ancestor) {
@@ -410,87 +369,78 @@ impl TsEmitter {
         }
 
         // Emit user modules
-        for (mod_name, mod_prog) in modules {
-            self.emit_user_module(mod_name, mod_prog);
+        for ir_mod in &ir.modules {
+            self.emit_ir_user_module(&ir_mod);
         }
 
-        // Emit import aliases
-        for imp in &prog.imports {
-            if let Decl::Import { path, alias, .. } = imp {
-                let full_path = path.join(".");
-                if let Some(alias_name) = alias {
-                    self.out.push_str(&format!("var {} = {};\n", alias_name, full_path));
-                } else if path.len() > 1 {
-                    let short_name = path.last().unwrap();
-                    self.out.push_str(&format!("var {} = {};\n", short_name, full_path));
-                }
-            }
-        }
         self.out.push('\n');
 
-        // Emit declarations: all functions without export keyword, skip tests
+        // Emit declarations: all functions, skip tests
         // Collect public names for clean export at the end
         let mut public_fns: Vec<(String, String)> = Vec::new(); // (sanitized, original)
         let mut public_variants: Vec<String> = Vec::new(); // variant constructor names
 
-        for decl in &prog.decls {
-            match decl {
-                Decl::Test { .. } => continue,
-                Decl::Fn { name, visibility, .. } => {
-                    self.out.push_str(&self.gen_decl(decl));
-                    self.out.push_str("\n\n");
-                    if *visibility == Visibility::Public {
-                        public_fns.push((Self::sanitize(name), name.clone()));
-                    }
-                }
-                Decl::Type { name, ty, visibility, .. } => {
-                    if *visibility == Visibility::Public {
-                        if let TypeExpr::Variant { cases } = ty {
-                            self.out.push_str(&format!("// variant type {}\n", name));
-                            for case in cases {
-                                match case {
-                                    VariantCase::Unit { name: cname } => {
-                                        self.out.push_str(&format!("const {} = {{ tag: {} }};\n", cname, Self::json_string(cname)));
-                                        public_variants.push(cname.clone());
-                                    }
-                                    VariantCase::Tuple { name: cname, fields } => {
-                                        let params: Vec<String> = fields.iter().enumerate()
-                                            .map(|(i, _)| format!("_{}", i))
-                                            .collect();
-                                        let obj_fields: Vec<String> = fields.iter().enumerate()
-                                            .map(|(i, _)| format!("_{}: _{}", i, i))
-                                            .collect();
-                                        self.out.push_str(&format!("function {}({}) {{ return {{ tag: {}, {} }}; }}\n",
-                                            cname, params.join(", "), Self::json_string(cname), obj_fields.join(", ")));
-                                        public_variants.push(cname.clone());
-                                    }
-                                    VariantCase::Record { name: cname, fields } => {
-                                        let params: Vec<String> = fields.iter()
-                                            .map(|f| f.name.clone())
-                                            .collect();
-                                        let obj_fields: Vec<String> = fields.iter()
-                                            .map(|f| format!("{}: {}", f.name, f.name))
-                                            .collect();
-                                        self.out.push_str(&format!("function {}({}) {{ return {{ tag: {}, {} }}; }}\n",
-                                            cname, params.join(", "), Self::json_string(cname), obj_fields.join(", ")));
-                                        public_variants.push(cname.clone());
-                                    }
-                                }
+        // Type declarations (variant constructors for public types)
+        for td in &ir.type_decls {
+            if td.visibility == IrVisibility::Public {
+                if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
+                    self.out.push_str(&format!("// variant type {}\n", td.name));
+                    for case in cases {
+                        match &case.kind {
+                            IrVariantKind::Unit => {
+                                self.out.push_str(&format!("const {} = {{ tag: {} }};\n", case.name, Self::json_string(&case.name)));
+                                public_variants.push(case.name.clone());
                             }
-                            self.out.push('\n');
-                        } else {
-                            self.out.push_str(&self.gen_decl(decl));
-                            self.out.push_str("\n\n");
+                            IrVariantKind::Tuple { fields } => {
+                                let params: Vec<String> = fields.iter().enumerate()
+                                    .map(|(i, _)| format!("_{}", i))
+                                    .collect();
+                                let obj_fields: Vec<String> = fields.iter().enumerate()
+                                    .map(|(i, _)| format!("_{}: _{}", i, i))
+                                    .collect();
+                                self.out.push_str(&format!("function {}({}) {{ return {{ tag: {}, {} }}; }}\n",
+                                    case.name, params.join(", "), Self::json_string(&case.name), obj_fields.join(", ")));
+                                public_variants.push(case.name.clone());
+                            }
+                            IrVariantKind::Record { fields } => {
+                                let params: Vec<String> = fields.iter()
+                                    .map(|f| f.name.clone())
+                                    .collect();
+                                let obj_fields: Vec<String> = fields.iter()
+                                    .map(|f| format!("{}: {}", f.name, f.name))
+                                    .collect();
+                                self.out.push_str(&format!("function {}({}) {{ return {{ tag: {}, {} }}; }}\n",
+                                    case.name, params.join(", "), Self::json_string(&case.name), obj_fields.join(", ")));
+                                public_variants.push(case.name.clone());
+                            }
                         }
-                    } else {
-                        self.out.push_str(&self.gen_decl(decl));
-                        self.out.push_str("\n\n");
                     }
-                }
-                _ => {
-                    self.out.push_str(&self.gen_decl(decl));
+                    self.out.push('\n');
+                } else {
+                    self.out.push_str(&self.gen_ir_type_decl(td));
                     self.out.push_str("\n\n");
                 }
+            } else {
+                self.out.push_str(&self.gen_ir_type_decl(td));
+                self.out.push_str("\n\n");
+            }
+        }
+
+        // Top-level lets
+        for tl in &ir.top_lets {
+            let name = ir.var_table.get(tl.var).name.clone();
+            let val_str = self.gen_ir_expr(&tl.value);
+            self.out.push_str(&format!("var {} = {};", name, val_str));
+            self.out.push_str("\n\n");
+        }
+
+        // Functions (skip tests)
+        for func in &ir.functions {
+            if func.is_test { continue; }
+            self.out.push_str(&self.gen_ir_fn_decl(func));
+            self.out.push_str("\n\n");
+            if func.visibility == IrVisibility::Public {
+                public_fns.push((Self::sanitize(&func.name), func.name.clone()));
             }
         }
 
@@ -515,78 +465,79 @@ impl TsEmitter {
 
     /// Generate TypeScript declaration file (index.d.ts) for public functions and types.
     /// Uses clean camelCase names matching the export aliases in index.js.
-    pub(crate) fn generate_dts(&self, prog: &Program) -> String {
+    pub(crate) fn generate_dts(&self) -> String {
+        let ir = self.ir_program.as_ref().expect("IR required for codegen");
         let mut dts = String::new();
-        for decl in &prog.decls {
-            match decl {
-                Decl::Fn { name, params, return_type, visibility, r#async, .. } => {
-                    if *visibility != Visibility::Public {
-                        continue;
-                    }
-                    let sname = Self::sanitize(name);
-                    let clean = crate::emit_common::to_clean_export_name(&sname);
-                    let ps: Vec<String> = params.iter()
-                        .filter(|p| p.name != "self")
-                        .map(|p| {
-                            let pname = crate::emit_common::to_clean_export_name(&Self::sanitize(&p.name));
-                            format!("{}: {}", pname, self.gen_type_expr(&p.ty))
-                        })
+
+        for func in &ir.functions {
+            if func.visibility != IrVisibility::Public { continue; }
+            let sname = Self::sanitize(&func.name);
+            let clean = crate::emit_common::to_clean_export_name(&sname);
+            let ps: Vec<String> = func.params.iter()
+                .filter(|p| p.name != "self")
+                .map(|p| {
+                    let pname = crate::emit_common::to_clean_export_name(&Self::sanitize(&p.name));
+                    format!("{}: {}", pname, self.ir_ty_to_ts(&p.ty))
+                })
+                .collect();
+            let ret = self.ir_ty_to_ts(&func.ret_ty);
+            let ret_str = if func.is_async {
+                format!("Promise<{}>", ret)
+            } else {
+                ret
+            };
+            dts.push_str(&format!("export declare function {}({}): {};\n", clean, ps.join(", "), ret_str));
+        }
+
+        for td in &ir.type_decls {
+            if td.visibility != IrVisibility::Public { continue; }
+            match &td.kind {
+                IrTypeDeclKind::Record { fields } => {
+                    let fs: Vec<String> = fields.iter()
+                        .map(|f| format!("  {}: {};", f.name, self.ir_ty_to_ts(&f.ty)))
                         .collect();
-                    let ret = self.gen_type_expr(return_type);
-                    let ret_str = if r#async.unwrap_or(false) {
-                        format!("Promise<{}>", ret)
-                    } else {
-                        ret
-                    };
-                    dts.push_str(&format!("export declare function {}({}): {};\n", clean, ps.join(", "), ret_str));
+                    dts.push_str(&format!("export interface {} {{\n{}\n}}\n", td.name, fs.join("\n")));
                 }
-                Decl::Type { name, ty, visibility, .. } => {
-                    if *visibility != Visibility::Public {
-                        continue;
+                IrTypeDeclKind::Alias { target } => {
+                    if let Ty::OpenRecord { fields } = target {
+                        let fs: Vec<String> = fields.iter()
+                            .map(|(name, ty)| format!("  {}: {};", name, self.ir_ty_to_ts(ty)))
+                            .collect();
+                        dts.push_str(&format!("export interface {} {{\n{}\n}}\n", td.name, fs.join("\n")));
+                    } else {
+                        dts.push_str(&format!("export type {} = {};\n", td.name, self.ir_ty_to_ts(target)));
                     }
-                    match ty {
-                        TypeExpr::Record { fields } | TypeExpr::OpenRecord { fields } => {
-                            let fs: Vec<String> = fields.iter()
-                                .map(|f| format!("  {}: {};", f.name, self.gen_type_expr(&f.ty)))
-                                .collect();
-                            dts.push_str(&format!("export interface {} {{\n{}\n}}\n", name, fs.join("\n")));
-                        }
-                        TypeExpr::Variant { cases } => {
-                            // Export variant constructor type declarations
-                            for case in cases {
-                                match case {
-                                    VariantCase::Unit { name: cname } => {
-                                        dts.push_str(&format!("export declare const {}: {{ tag: \"{}\" }};\n", cname, cname));
-                                    }
-                                    VariantCase::Tuple { name: cname, fields } => {
-                                        let ps: Vec<String> = fields.iter().enumerate()
-                                            .map(|(i, f)| format!("_{}: {}", i, self.gen_type_expr(f)))
-                                            .collect();
-                                        let ret_fields: Vec<String> = std::iter::once(format!("tag: \"{}\"", cname))
-                                            .chain(fields.iter().enumerate().map(|(i, f)| format!("_{}: {}", i, self.gen_type_expr(f))))
-                                            .collect();
-                                        dts.push_str(&format!("export declare function {}({}): {{ {} }};\n", cname, ps.join(", "), ret_fields.join(", ")));
-                                    }
-                                    VariantCase::Record { name: cname, fields } => {
-                                        let ps: Vec<String> = fields.iter()
-                                            .map(|f| format!("{}: {}", f.name, self.gen_type_expr(&f.ty)))
-                                            .collect();
-                                        let ret_fields: Vec<String> = std::iter::once(format!("tag: \"{}\"", cname))
-                                            .chain(fields.iter().map(|f| format!("{}: {}", f.name, self.gen_type_expr(&f.ty))))
-                                            .collect();
-                                        dts.push_str(&format!("export declare function {}({}): {{ {} }};\n", cname, ps.join(", "), ret_fields.join(", ")));
-                                    }
-                                }
+                }
+                IrTypeDeclKind::Variant { cases, .. } => {
+                    for case in cases {
+                        match &case.kind {
+                            IrVariantKind::Unit => {
+                                dts.push_str(&format!("export declare const {}: {{ tag: \"{}\" }};\n", case.name, case.name));
+                            }
+                            IrVariantKind::Tuple { fields } => {
+                                let ps: Vec<String> = fields.iter().enumerate()
+                                    .map(|(i, f)| format!("_{}: {}", i, self.ir_ty_to_ts(f)))
+                                    .collect();
+                                let ret_fields: Vec<String> = std::iter::once(format!("tag: \"{}\"", case.name))
+                                    .chain(fields.iter().enumerate().map(|(i, f)| format!("_{}: {}", i, self.ir_ty_to_ts(f))))
+                                    .collect();
+                                dts.push_str(&format!("export declare function {}({}): {{ {} }};\n", case.name, ps.join(", "), ret_fields.join(", ")));
+                            }
+                            IrVariantKind::Record { fields } => {
+                                let ps: Vec<String> = fields.iter()
+                                    .map(|f| format!("{}: {}", f.name, self.ir_ty_to_ts(&f.ty)))
+                                    .collect();
+                                let ret_fields: Vec<String> = std::iter::once(format!("tag: \"{}\"", case.name))
+                                    .chain(fields.iter().map(|f| format!("{}: {}", f.name, self.ir_ty_to_ts(&f.ty))))
+                                    .collect();
+                                dts.push_str(&format!("export declare function {}({}): {{ {} }};\n", case.name, ps.join(", "), ret_fields.join(", ")));
                             }
                         }
-                        _ => {
-                            dts.push_str(&format!("export type {} = {};\n", name, self.gen_type_expr(ty)));
-                        }
                     }
                 }
-                _ => {}
             }
         }
+
         dts
     }
 }

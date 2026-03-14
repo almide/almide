@@ -233,6 +233,12 @@ fn format_type_expr(out: &mut String, ty: &TypeExpr, _depth: usize) {
         TypeExpr::Newtype { inner } => {
             format_type_expr(out, inner, _depth);
         }
+        TypeExpr::Union { members } => {
+            for (i, m) in members.iter().enumerate() {
+                if i > 0 { out.push_str(" | "); }
+                format_type_expr(out, m, _depth);
+            }
+        }
         TypeExpr::Variant { cases } => {
             for (i, case) in cases.iter().enumerate() {
                 if i > 0 { out.push_str(" | "); } else { out.push_str("| "); }
@@ -280,49 +286,7 @@ fn format_expr(out: &mut String, expr: &Expr, depth: usize) {
             }
         }
         Expr::String { value, .. } => out.push_str(&format!("{:?}", value)),
-        Expr::InterpolatedString { value, .. } => {
-            out.push('"');
-            let mut depth = 0u32;
-            let chars: Vec<char> = value.chars().collect();
-            let mut i = 0;
-            while i < chars.len() {
-                let ch = chars[i];
-                if ch == '$' && i + 1 < chars.len() && chars[i + 1] == '{' {
-                    out.push('$');
-                    out.push('{');
-                    depth += 1;
-                    i += 2;
-                    continue;
-                }
-                if depth > 0 && ch == '{' {
-                    depth += 1;
-                    out.push(ch);
-                    i += 1;
-                    continue;
-                }
-                if depth > 0 && ch == '}' {
-                    depth -= 1;
-                    out.push(ch);
-                    i += 1;
-                    continue;
-                }
-                if depth > 0 {
-                    // Inside interpolation expression — emit verbatim
-                    out.push(ch);
-                } else {
-                    // Outside interpolation — escape special characters
-                    match ch {
-                        '\n' => out.push_str("\\n"),
-                        '\t' => out.push_str("\\t"),
-                        '\\' => out.push_str("\\\\"),
-                        '"' => out.push_str("\\\""),
-                        other => out.push(other),
-                    }
-                }
-                i += 1;
-            }
-            out.push('"');
-        }
+        Expr::InterpolatedString { value, .. } => format_interpolated_string(out, value),
         Expr::Bool { value, .. } => out.push_str(if *value { "true" } else { "false" }),
         Expr::Unit { .. } => out.push_str("()"),
         Expr::None { .. } => out.push_str("none"),
@@ -367,58 +331,13 @@ fn format_expr(out: &mut String, expr: &Expr, depth: usize) {
             out.push(')');
         }
 
-        Expr::List { elements, .. } => {
-            if elements.is_empty() {
-                out.push_str("[]");
-            } else if is_short_list(elements) {
-                out.push('[');
-                for (i, e) in elements.iter().enumerate() {
-                    if i > 0 { out.push_str(", "); }
-                    format_expr(out, e, depth);
-                }
-                out.push(']');
-            } else {
-                out.push_str("[\n");
-                for (i, e) in elements.iter().enumerate() {
-                    out.push_str(&indent(depth + 1));
-                    format_expr(out, e, depth + 1);
-                    if i < elements.len() - 1 { out.push(','); }
-                    out.push('\n');
-                }
-                out.push_str(&indent(depth));
-                out.push(']');
-            }
-        }
+        Expr::List { elements, .. } => format_list_expr(out, elements, depth),
 
         Expr::EmptyMap { .. } => {
             out.push_str("[:]");
         }
 
-        Expr::MapLiteral { entries, .. } => {
-            let short = entries.len() <= 3 && entries.iter().all(|(k, v)| is_short_expr(k) && is_short_expr(v));
-            if short {
-                out.push('[');
-                for (i, (k, v)) in entries.iter().enumerate() {
-                    if i > 0 { out.push_str(", "); }
-                    format_expr(out, k, depth);
-                    out.push_str(": ");
-                    format_expr(out, v, depth);
-                }
-                out.push(']');
-            } else {
-                out.push_str("[\n");
-                for (i, (k, v)) in entries.iter().enumerate() {
-                    out.push_str(&indent(depth + 1));
-                    format_expr(out, k, depth + 1);
-                    out.push_str(": ");
-                    format_expr(out, v, depth + 1);
-                    if i < entries.len() - 1 { out.push(','); }
-                    out.push('\n');
-                }
-                out.push_str(&indent(depth));
-                out.push(']');
-            }
-        }
+        Expr::MapLiteral { entries, .. } => format_map_literal(out, entries, depth),
 
         Expr::Record { name, fields, .. } => {
             if let Some(n) = name {
@@ -526,80 +445,11 @@ fn format_expr(out: &mut String, expr: &Expr, depth: usize) {
             format_expr(out, inner, depth);
         }
 
-        Expr::If { cond, then, else_, .. } => {
-            let inline = is_short_expr(then) && is_short_expr(else_);
-            if inline {
-                out.push_str("if ");
-                format_expr(out, cond, depth);
-                out.push_str(" then ");
-                format_expr(out, then, depth);
-                out.push_str(" else ");
-                format_expr(out, else_, depth);
-            } else {
-                out.push_str("if ");
-                format_expr(out, cond, depth);
-                out.push_str(" then ");
-                format_expr(out, then, depth);
-                // Keep else on same line after closing brace
-                if out.ends_with('}') {
-                    out.push(' ');
-                } else {
-                    out.push('\n');
-                    out.push_str(&indent(depth));
-                }
-                out.push_str("else ");
-                format_expr(out, else_, depth);
-            }
-        }
+        Expr::If { cond, then, else_, .. } => format_if_expr(out, cond, then, else_, depth),
 
-        Expr::Match { subject, arms, .. } => {
-            out.push_str("match ");
-            format_expr(out, subject, depth);
-            out.push_str(" {\n");
-            for arm in arms {
-                for comment in &arm.comments {
-                    out.push_str(&indent(depth + 1));
-                    out.push_str(comment);
-                    out.push('\n');
-                }
-                out.push_str(&indent(depth + 1));
-                format_pattern(out, &arm.pattern);
-                if let Some(ref guard) = arm.guard {
-                    out.push_str(" if ");
-                    format_expr(out, guard, depth + 1);
-                }
-                out.push_str(" => ");
-                format_expr(out, &arm.body, depth + 1);
-                if arms.len() > 1 { out.push(','); }
-                out.push('\n');
-            }
-            out.push_str(&indent(depth));
-            out.push('}');
-        }
+        Expr::Match { subject, arms, .. } => format_match_expr(out, subject, arms, depth),
 
-        Expr::Block { stmts, expr, .. } => {
-            if stmts.is_empty() && expr.is_some() {
-                // Single-expression block: might be inline
-                let inner = expr.as_ref().expect("guarded by is_some()");
-                if is_short_expr(inner) && depth > 0 {
-                    out.push_str("{ ");
-                    format_expr(out, inner, depth);
-                    out.push_str(" }");
-                    return;
-                }
-            }
-            out.push_str("{\n");
-            for s in stmts {
-                format_stmt(out, s, depth + 1);
-            }
-            if let Some(e) = expr {
-                out.push_str(&indent(depth + 1));
-                format_expr(out, e, depth + 1);
-                out.push('\n');
-            }
-            out.push_str(&indent(depth));
-            out.push('}');
-        }
+        Expr::Block { stmts, expr, .. } => format_block_expr(out, stmts, expr, depth),
 
         Expr::DoBlock { stmts, expr, .. } => {
             out.push_str("do {\n");
@@ -655,26 +505,182 @@ fn format_expr(out: &mut String, expr: &Expr, depth: usize) {
             out.push('}');
         }
 
-        Expr::Lambda { params, body, .. } => {
-            out.push_str("fn(");
-            for (i, p) in params.iter().enumerate() {
-                if i > 0 { out.push_str(", "); }
-                if let Some(names) = &p.tuple_names {
-                    out.push('(');
-                    out.push_str(&names.join(", "));
-                    out.push(')');
-                } else {
-                    out.push_str(&p.name);
-                }
-                if let Some(ref ty) = p.ty {
-                    out.push_str(": ");
-                    format_type_expr(out, ty, depth);
-                }
+        Expr::Lambda { params, body, .. } => format_lambda_expr(out, params, body, depth),
+    }
+}
+
+fn format_interpolated_string(out: &mut String, value: &str) {
+    out.push('"');
+    let mut depth = 0u32;
+    let chars: Vec<char> = value.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let ch = chars[i];
+        if ch == '$' && i + 1 < chars.len() && chars[i + 1] == '{' {
+            out.push('$');
+            out.push('{');
+            depth += 1;
+            i += 2;
+            continue;
+        }
+        if depth > 0 && ch == '{' { depth += 1; out.push(ch); i += 1; continue; }
+        if depth > 0 && ch == '}' { depth -= 1; out.push(ch); i += 1; continue; }
+        if depth > 0 {
+            out.push(ch);
+        } else {
+            match ch {
+                '\n' => out.push_str("\\n"),
+                '\t' => out.push_str("\\t"),
+                '\\' => out.push_str("\\\\"),
+                '"' => out.push_str("\\\""),
+                other => out.push(other),
             }
-            out.push_str(") => ");
-            format_expr(out, body, depth);
+        }
+        i += 1;
+    }
+    out.push('"');
+}
+
+fn format_list_expr(out: &mut String, elements: &[Expr], depth: usize) {
+    if elements.is_empty() {
+        out.push_str("[]");
+    } else if is_short_list(elements) {
+        out.push('[');
+        for (i, e) in elements.iter().enumerate() {
+            if i > 0 { out.push_str(", "); }
+            format_expr(out, e, depth);
+        }
+        out.push(']');
+    } else {
+        out.push_str("[\n");
+        for (i, e) in elements.iter().enumerate() {
+            out.push_str(&indent(depth + 1));
+            format_expr(out, e, depth + 1);
+            if i < elements.len() - 1 { out.push(','); }
+            out.push('\n');
+        }
+        out.push_str(&indent(depth));
+        out.push(']');
+    }
+}
+
+fn format_map_literal(out: &mut String, entries: &[(Expr, Expr)], depth: usize) {
+    let short = entries.len() <= 3 && entries.iter().all(|(k, v)| is_short_expr(k) && is_short_expr(v));
+    if short {
+        out.push('[');
+        for (i, (k, v)) in entries.iter().enumerate() {
+            if i > 0 { out.push_str(", "); }
+            format_expr(out, k, depth);
+            out.push_str(": ");
+            format_expr(out, v, depth);
+        }
+        out.push(']');
+    } else {
+        out.push_str("[\n");
+        for (i, (k, v)) in entries.iter().enumerate() {
+            out.push_str(&indent(depth + 1));
+            format_expr(out, k, depth + 1);
+            out.push_str(": ");
+            format_expr(out, v, depth + 1);
+            if i < entries.len() - 1 { out.push(','); }
+            out.push('\n');
+        }
+        out.push_str(&indent(depth));
+        out.push(']');
+    }
+}
+
+fn format_if_expr(out: &mut String, cond: &Expr, then: &Expr, else_: &Expr, depth: usize) {
+    let inline = is_short_expr(then) && is_short_expr(else_);
+    if inline {
+        out.push_str("if ");
+        format_expr(out, cond, depth);
+        out.push_str(" then ");
+        format_expr(out, then, depth);
+        out.push_str(" else ");
+        format_expr(out, else_, depth);
+    } else {
+        out.push_str("if ");
+        format_expr(out, cond, depth);
+        out.push_str(" then ");
+        format_expr(out, then, depth);
+        if out.ends_with('}') {
+            out.push(' ');
+        } else {
+            out.push('\n');
+            out.push_str(&indent(depth));
+        }
+        out.push_str("else ");
+        format_expr(out, else_, depth);
+    }
+}
+
+fn format_match_expr(out: &mut String, subject: &Expr, arms: &[MatchArm], depth: usize) {
+    out.push_str("match ");
+    format_expr(out, subject, depth);
+    out.push_str(" {\n");
+    for arm in arms {
+        for comment in &arm.comments {
+            out.push_str(&indent(depth + 1));
+            out.push_str(comment);
+            out.push('\n');
+        }
+        out.push_str(&indent(depth + 1));
+        format_pattern(out, &arm.pattern);
+        if let Some(ref guard) = arm.guard {
+            out.push_str(" if ");
+            format_expr(out, guard, depth + 1);
+        }
+        out.push_str(" => ");
+        format_expr(out, &arm.body, depth + 1);
+        if arms.len() > 1 { out.push(','); }
+        out.push('\n');
+    }
+    out.push_str(&indent(depth));
+    out.push('}');
+}
+
+fn format_block_expr(out: &mut String, stmts: &[Stmt], expr: &Option<Box<Expr>>, depth: usize) {
+    if stmts.is_empty() && expr.is_some() {
+        let inner = expr.as_ref().expect("guarded by is_some()");
+        if is_short_expr(inner) && depth > 0 {
+            out.push_str("{ ");
+            format_expr(out, inner, depth);
+            out.push_str(" }");
+            return;
         }
     }
+    out.push_str("{\n");
+    for s in stmts {
+        format_stmt(out, s, depth + 1);
+    }
+    if let Some(e) = expr {
+        out.push_str(&indent(depth + 1));
+        format_expr(out, e, depth + 1);
+        out.push('\n');
+    }
+    out.push_str(&indent(depth));
+    out.push('}');
+}
+
+fn format_lambda_expr(out: &mut String, params: &[LambdaParam], body: &Expr, depth: usize) {
+    out.push('(');
+    for (i, p) in params.iter().enumerate() {
+        if i > 0 { out.push_str(", "); }
+        if let Some(names) = &p.tuple_names {
+            out.push('(');
+            out.push_str(&names.join(", "));
+            out.push(')');
+        } else {
+            out.push_str(&p.name);
+        }
+        if let Some(ref ty) = p.ty {
+            out.push_str(": ");
+            format_type_expr(out, ty, depth);
+        }
+    }
+    out.push_str(") => ");
+    format_expr(out, body, depth);
 }
 
 fn format_stmt(out: &mut String, stmt: &Stmt, depth: usize) {
@@ -843,7 +849,10 @@ fn format_generic_params(out: &mut String, params: &[GenericParam]) {
     for (i, gp) in params.iter().enumerate() {
         if i > 0 { out.push_str(", "); }
         out.push_str(&gp.name);
-        if let Some(ref bounds) = gp.bounds {
+        if let Some(ref sb) = gp.structural_bound {
+            out.push_str(": ");
+            format_type_expr(out, sb, 0);
+        } else if let Some(ref bounds) = gp.bounds {
             if !bounds.is_empty() {
                 out.push_str(": ");
                 out.push_str(&bounds.join(" + "));
