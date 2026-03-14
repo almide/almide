@@ -256,8 +256,12 @@ pub enum IrStmtKind {
 #[serde(rename_all = "snake_case")]
 pub enum IrVisibility {
     Public,
+    /// Same project only (pub(crate) in Rust)
+    Mod,
     Private,
 }
+
+fn default_ir_visibility() -> IrVisibility { IrVisibility::Public }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IrFieldDecl {
@@ -363,6 +367,8 @@ pub struct IrFunction {
     pub generics: Option<Vec<crate::ast::GenericParam>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extern_attrs: Vec<crate::ast::ExternAttr>,
+    #[serde(default = "default_ir_visibility")]
+    pub visibility: IrVisibility,
 }
 
 /// Classification of top-level let bindings for codegen.

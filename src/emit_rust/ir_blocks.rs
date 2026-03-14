@@ -436,7 +436,58 @@ impl Emitter {
                 let ps: Vec<String> = params.iter().map(|p| self.ir_ty_to_rust(p)).collect();
                 format!("impl Fn({}) -> {} + Clone", ps.join(", "), self.ir_ty_to_rust(ret))
             }
+            Ty::Variant { name, .. } => name.clone(),
+            Ty::Record { fields } | Ty::OpenRecord { fields } => {
+                let field_names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
+                // Check if this matches a named record type (e.g. Config, Point).
+                // Named records use concrete field types, not generic type params.
+                if let Some(named) = self.named_record_types.get(&field_names) {
+                    return named.clone();
+                }
+                let struct_name = self.anon_record_name(&field_names);
+                let type_args: Vec<String> = fields.iter().map(|(_, t)| self.ir_ty_to_rust(t)).collect();
+                if type_args.is_empty() {
+                    struct_name
+                } else {
+                    format!("{}<{}>", struct_name, type_args.join(", "))
+                }
+            }
             _ => "_".to_string(),
+        }
+    }
+
+    /// Convert IR Ty to Rust type string for function signatures.
+    /// Unlike ir_ty_to_rust, this uses TypeVar names (T, K, V) instead of _,
+    /// which is required for function return types and parameter types.
+    pub(crate) fn ir_ty_to_rust_sig(&self, ty: &almide::types::Ty) -> String {
+        use almide::types::Ty;
+        match ty {
+            Ty::TypeVar(name) => name.clone(),
+            // Delegate to ir_ty_to_rust for simple types
+            Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit => self.ir_ty_to_rust(ty),
+            Ty::Named(name, args) => {
+                if args.is_empty() {
+                    self.ir_ty_to_rust(ty)
+                } else {
+                    let ts: Vec<String> = args.iter().map(|a| self.ir_ty_to_rust_sig(a)).collect();
+                    format!("{}<{}>", name, ts.join(", "))
+                }
+            }
+            // Recursively use sig version for compound types
+            Ty::List(inner) => format!("Vec<{}>", self.ir_ty_to_rust_sig(inner)),
+            Ty::Option(inner) => format!("Option<{}>", self.ir_ty_to_rust_sig(inner)),
+            Ty::Result(ok, err) => format!("Result<{}, {}>", self.ir_ty_to_rust_sig(ok), self.ir_ty_to_rust_sig(err)),
+            Ty::Map(k, v) => format!("HashMap<{}, {}>", self.ir_ty_to_rust_sig(k), self.ir_ty_to_rust_sig(v)),
+            Ty::Tuple(elems) => {
+                let ts: Vec<String> = elems.iter().map(|e| self.ir_ty_to_rust_sig(e)).collect();
+                format!("({})", ts.join(", "))
+            }
+            Ty::Fn { params, ret } => {
+                let ps: Vec<String> = params.iter().map(|p| self.ir_ty_to_rust_sig(p)).collect();
+                format!("impl Fn({}) -> {} + Clone", ps.join(", "), self.ir_ty_to_rust_sig(ret))
+            }
+            Ty::Unknown => "_".to_string(),
+            _ => self.ir_ty_to_rust(ty),
         }
     }
 }
