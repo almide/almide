@@ -471,6 +471,10 @@ const MOD_JSON_TS: &str = r#"const __almd_json = {
   get_float(j: any, key: string): number | null { const v = __almd_json.get(j, key); return typeof v === "number" ? v : null; },
   from_float(n: number): any { return n; },
   stringify_pretty(j: any): string { return JSON.stringify(j, null, 2); },
+  object(entries: [string, any][]): any { const o: any = {}; for (const [k, v] of entries) { o[k] = v; } return o; },
+  as_float(j: any): number | null { return typeof j === "number" ? j : null; },
+  as_bool(j: any): boolean | null { return typeof j === "boolean" ? j : null; },
+  as_array(j: any): any[] | null { return Array.isArray(j) ? j : null; },
 };
 "#;
 
@@ -494,6 +498,10 @@ const MOD_JSON_JS: &str = r#"const __almd_json = {
   get_float(j, key) { const v = __almd_json.get(j, key); return typeof v === "number" ? v : null; },
   from_float(n) { return n; },
   stringify_pretty(j) { return JSON.stringify(j, null, 2); },
+  object(entries) { const o = {}; for (const [k, v] of entries) { o[k] = v; } return o; },
+  as_float(j) { return typeof j === "number" ? j : null; },
+  as_bool(j) { return typeof j === "boolean" ? j : null; },
+  as_array(j) { return Array.isArray(j) ? j : null; },
 };
 "#;
 

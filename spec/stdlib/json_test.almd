@@ -250,3 +250,105 @@ test "json.parse with unwrap_or UFCS" {
   assert_eq(json.get_int(obj, "n").unwrap_or(0), 42)
   assert_eq(json.get_int(obj, "missing").unwrap_or(99), 99)
 }
+
+// ── json.object builder ──
+
+test "json.object builds object from entries" {
+  let j = json.object([("name", json.s("Alice")), ("age", json.i(30))])
+  assert_eq(json.get_string(j, "name"), some("Alice"))
+  assert_eq(json.get_int(j, "age"), some(30))
+}
+
+test "json.object empty" {
+  let j = json.object([])
+  assert_eq(json.stringify(j), "{}")
+}
+
+test "json.object nested" {
+  let addr = json.object([("city", json.s("Tokyo"))])
+  let j = json.object([("name", json.s("Bob")), ("address", addr)])
+  let inner = json.get(j, "address")
+  match inner {
+    some(a) => assert_eq(json.get_string(a, "city"), some("Tokyo")),
+    none => assert(false),
+  }
+}
+
+// ── json.s / json.i / json.f / json.b shortcuts ──
+
+test "json.s creates string" {
+  assert_eq(json.as_string(json.s("hello")), some("hello"))
+}
+
+test "json.i creates int" {
+  assert_eq(json.as_int(json.i(42)), some(42))
+}
+
+test "json.b creates bool" {
+  assert_eq(json.as_bool(json.b(true)), some(true))
+  assert_eq(json.as_bool(json.b(false)), some(false))
+}
+
+// ── json.as_* value extraction ──
+
+test "json.as_string on string" {
+  assert_eq(json.as_string(json.s("test")), some("test"))
+}
+
+test "json.as_string on non-string" {
+  assert_eq(json.as_string(json.i(42)), none)
+}
+
+test "json.as_int on int" {
+  assert_eq(json.as_int(json.i(99)), some(99))
+}
+
+test "json.as_int on non-int" {
+  assert_eq(json.as_int(json.s("hello")), none)
+}
+
+test "json.as_bool on bool" {
+  assert_eq(json.as_bool(json.b(true)), some(true))
+}
+
+test "json.as_bool on non-bool" {
+  assert_eq(json.as_bool(json.i(1)), none)
+}
+
+test "json.as_array on array" {
+  let arr = json.array([json.i(1), json.i(2)])
+  let result = json.as_array(arr)
+  match result {
+    some(items) => assert_eq(list.len(items), 2),
+    none => assert(false),
+  }
+}
+
+test "json.as_array on non-array" {
+  assert_eq(json.as_array(json.s("not array")), none)
+}
+
+// ── json.get + json.as_* composition ──
+
+test "json.get |> json.as_string pipeline" {
+  let j = json.object([("name", json.s("Alice"))])
+  let name = match json.get(j, "name") {
+    some(v) => json.as_string(v),
+    none => none,
+  }
+  assert_eq(name, some("Alice"))
+}
+
+test "json.object full example" {
+  let person = json.object([
+    ("name",    json.s("Alice")),
+    ("age",     json.i(30)),
+    ("active",  json.b(true)),
+    ("tags",    json.array([json.s("dev"), json.s("rust")])),
+    ("notes",   json.null()),
+  ])
+  assert_eq(json.get_string(person, "name"), some("Alice"))
+  assert_eq(json.get_int(person, "age"), some(30))
+  assert_eq(json.get_bool(person, "active"), some(true))
+  assert_eq(json.stringify(json.null()), "null")
+}

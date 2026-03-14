@@ -206,6 +206,22 @@ fn almide_json_from_float(n: f64) -> AlmideJson {
     JInt(n as i64)
 }
 
+fn almide_json_object(entries: Vec<(String, AlmideJson)>) -> AlmideJson {
+    let mut map = HashMap::new();
+    for (k, v) in entries { map.insert(k, v); }
+    JObject(map)
+}
+
+fn almide_json_as_float(j: &AlmideJson) -> Option<f64> {
+    if let JInt(n) = j { Some(*n as f64) } else { None }
+}
+fn almide_json_as_bool(j: &AlmideJson) -> Option<bool> {
+    if let JBool(b) = j { Some(*b) } else { None }
+}
+fn almide_json_as_array(j: &AlmideJson) -> Option<Vec<AlmideJson>> {
+    if let JArray(a) = j { Some(a.clone()) } else { None }
+}
+
 fn almide_json_stringify_pretty(j: &AlmideJson) -> String {
     fn fmt_indent(j: &AlmideJson, indent: usize) -> String {
         let pad = " ".repeat(indent);
