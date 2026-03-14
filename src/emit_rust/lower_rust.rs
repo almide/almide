@@ -38,7 +38,7 @@ pub fn lower(ir: &IrProgram) -> Program {
             IrTypeDeclKind::Record { fields } => structs.push(StructDef {
                 name: td.name.clone(),
                 fields: fields.iter().map(|f| (f.name.clone(), lty(&f.ty))).collect(),
-                generics: vec![], derives: vec!["Debug".into(), "Clone".into(), "PartialEq".into()],
+                generics: vec![], derives: rust_derives(td),
                 is_pub: true,
             }),
             IrTypeDeclKind::Variant { cases, .. } => {
@@ -59,7 +59,7 @@ pub fn lower(ir: &IrProgram) -> Program {
                         IrVariantKind::Record { fields } => VariantKind::Struct(fields.iter().map(|f| (f.name.clone(), lty(&f.ty))).collect()),
                     },
                 }).collect(),
-                generics: vec![], derives: vec!["Debug".into(), "Clone".into(), "PartialEq".into()],
+                generics: vec![], derives: rust_derives(td),
                 is_pub: true,
             })
         } else { None }
@@ -466,4 +466,36 @@ impl<'a> LowerCtx<'a> {
             IrPattern::Err { inner } => Pattern::Ctor { name: "Err".into(), args: vec![self.lower_pat(inner)] },
         }
     }
+}
+
+/// Map Almide derive conventions to Rust #[derive(...)] attributes.
+/// Base derives (Clone) are always included. Convention-specific derives are added
+/// based on the `deriving` field in IrTypeDecl.
+fn rust_derives(td: &IrTypeDecl) -> Vec<String> {
+    let mut derives = vec!["Clone".to_string()];
+    let conventions = td.deriving.as_deref().unwrap_or_default();
+    // Eq → PartialEq + Eq
+    if conventions.iter().any(|d| d == "Eq") {
+        derives.push("PartialEq".into());
+        derives.push("Eq".into());
+    } else {
+        // Default: PartialEq for backward compatibility (== uses almide_eq! macro)
+        derives.push("PartialEq".into());
+    }
+    // Show → Debug
+    if conventions.iter().any(|d| d == "Show") {
+        derives.push("Debug".into());
+    } else {
+        derives.push("Debug".into()); // always derive Debug for now
+    }
+    // Compare → PartialOrd + Ord
+    if conventions.iter().any(|d| d == "Compare") {
+        derives.push("PartialOrd".into());
+        derives.push("Ord".into());
+    }
+    // Hash → Hash
+    if conventions.iter().any(|d| d == "Hash") {
+        derives.push("Hash".into());
+    }
+    derives
 }

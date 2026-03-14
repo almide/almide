@@ -192,11 +192,8 @@ impl Parser {
         self.expect(TokenType::Type)?;
         let name = self.expect_type_name()?;
         let generics = self.try_parse_generic_params()?;
-        self.expect(TokenType::Eq)?;
-        self.skip_newlines();
-        let ty = self.parse_type_expr()?;
-        self.skip_newlines();
-        let deriving = if self.check(TokenType::Deriving) {
+        // Conventions: type Name: Eq, Show = ...
+        let deriving = if self.check(TokenType::Colon) {
             self.advance();
             let mut d = Vec::new();
             d.push(self.expect_type_name()?);
@@ -208,6 +205,9 @@ impl Parser {
         } else {
             None
         };
+        self.expect(TokenType::Eq)?;
+        self.skip_newlines();
+        let ty = self.parse_type_expr()?;
         Ok(Decl::Type { name, ty, deriving, visibility, generics, span: Some(span) })
     }
 

@@ -104,8 +104,8 @@ fn fmt_decl(out: &mut String, decl: &Decl, depth: usize) {
             out.push_str(&i); fmt_vis(out, visibility);
             write!(out, "type {name}").unwrap();
             maybe_generics(out, generics);
+            if let Some(d) = deriving { if !d.is_empty() { write!(out, ": {}", d.join(", ")).unwrap(); } }
             out.push_str(" = "); fmt_type(out, ty, depth);
-            if let Some(d) = deriving { if !d.is_empty() { write!(out, " deriving {}", d.join(", ")).unwrap(); } }
         }
         Decl::TopLet { name, ty, value, visibility, .. } => {
             out.push_str(&i); fmt_vis(out, visibility);

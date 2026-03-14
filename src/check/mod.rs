@@ -217,7 +217,20 @@ impl Checker {
                     if prefix.is_none() && is_effect { self.env.effect_fns.insert(name.clone()); }
                     self.env.functions.insert(key, FnSig { params: ptys, ret, is_effect, generics: gnames, structural_bounds: sb });
                 }
-                ast::Decl::Type { name, ty, generics, .. } => {
+                ast::Decl::Type { name, ty, deriving, generics, .. } => {
+                    // Validate derive convention names
+                    if let Some(derives) = deriving {
+                        let valid = ["Eq", "Show", "Compare", "Hash", "Encode", "Decode"];
+                        for d in derives {
+                            if !valid.contains(&d.as_str()) {
+                                self.diagnostics.push(err(
+                                    format!("unknown derive convention '{}' on type '{}'", d, name),
+                                    format!("Valid conventions: {}", valid.join(", ")),
+                                    format!("type {}", name),
+                                ));
+                            }
+                        }
+                    }
                     let gnames: Vec<String> = generics.as_ref().map(|gs| gs.iter().map(|g| g.name.clone()).collect()).unwrap_or_default();
                     for gn in &gnames { self.env.types.insert(gn.clone(), Ty::TypeVar(gn.clone())); }
                     let mut resolved = self.resolve_type_expr(ty);

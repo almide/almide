@@ -309,6 +309,20 @@ impl Parser {
     }
 
     pub(crate) fn expect_any_fn_name(&mut self) -> Result<String, String> {
+        // Convention method: fn Dog.eq(...) → name = "Dog.eq"
+        if self.check(TokenType::TypeName)
+            && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Dot)
+        {
+            let type_name = self.advance_and_get_value();
+            self.advance(); // skip .
+            let method = if self.check(TokenType::Ident) || self.check(TokenType::IdentQ) {
+                self.advance_and_get_value()
+            } else {
+                let tok = self.current();
+                return Err(format!("Expected method name after '{}.', got {:?} at line {}:{}", type_name, tok.token_type, tok.line, tok.col));
+            };
+            return Ok(format!("{}.{}", type_name, method));
+        }
         if self.check(TokenType::Ident) || self.check(TokenType::IdentQ) {
             return Ok(self.advance_and_get_value());
         }
