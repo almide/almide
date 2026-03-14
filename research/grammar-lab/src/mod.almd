@@ -18,7 +18,20 @@ effect fn println(s: String) -> Unit = io.print(s ++ "\n")
 // ── Entry Point ──
 
 effect fn main() -> Result[Unit, String] = {
-  let args_list = env.args()
+  match run_experiment() {
+    ok(_) => ok(()),
+    err(e) => {
+      println("Error: ${e}")
+      process.exit(1)
+      ok(())
+    },
+  }
+}
+
+effect fn run_experiment() -> Result[Unit, String] = {
+  let raw_args = env.args()
+  // Skip argv[0] (binary path)
+  let args_list = list.drop(raw_args, 1)
   guard list.len(args_list) >= 1 else err("Usage: grammar-lab <experiment-dir> [--model <name>] [--trials <n>]")
 
   let experiment_dir = match list.get(args_list, 0) {
@@ -300,11 +313,38 @@ effect fn evaluate(code: String, test_code: String, task_name: String) -> EvalRe
 
 // ── Summary ──
 
-fn print_summary(results: List[Json]) -> Unit = {
+fn count_passed(results: List[Json], model_name: String, variant_name: String) -> (Int, Int) = {
+  let matching = results
+    |> list.filter(fn(r) =>
+      json.get_string(r, "model").unwrap_or("") == model_name
+      and json.get_string(r, "variant").unwrap_or("") == variant_name
+    )
+  let total = list.len(matching)
+  let passed = matching
+    |> list.filter(fn(r) => json.get_bool(r, "tests_passed").unwrap_or(false))
+    |> list.len()
+  (passed, total)
+}
+
+fn format_cell(passed: Int, total: Int) -> String = {
+  let pct = if total > 0 then int.to_string(passed * 100 / total) else "0"
+  "${pct}% (${int.to_string(passed)}/${int.to_string(total)})"
+}
+
+fn build_row(results: List[Json], model_name: String, variants: List[String]) -> String = {
+  // Build cells first to avoid ownership issues with model_name
+  let cells = list.map(variants, fn(v) => {
+    let (passed, total) = count_passed(results, model_name, v)
+    string.pad_right(format_cell(passed, total), 20, " ")
+  })
+  let row = string.pad_right(model_name, 20, " ")
+  row ++ string.join(cells, "")
+}
+
+effect fn print_summary(results: List[Json]) -> Unit = {
   println("=== Summary ===")
   println("")
 
-  // Group by model + variant
   let models = results
     |> list.map(fn(r) => json.get_string(r, "model").unwrap_or(""))
     |> list.unique()
@@ -321,43 +361,38 @@ fn print_summary(results: List[Json]) -> Unit = {
   println(header)
 
   // Rows
-  for model in models {
-    var row = string.pad_right(model, 20, " ")
-    for variant in variants {
-      let matching = results
-        |> list.filter(fn(r) =>
-          json.get_string(r, "model").unwrap_or("") == model
-          and json.get_string(r, "variant").unwrap_or("") == variant
-        )
-      let total = list.len(matching)
-      let passed = matching
-        |> list.filter(fn(r) => json.get_bool(r, "tests_passed").unwrap_or(false))
-        |> list.len()
-      let pct = if total > 0 then int.to_string(passed * 100 / total) else "0"
-      let cell = "${pct}% (${int.to_string(passed)}/${int.to_string(total)})"
-      row = row ++ string.pad_right(cell, 20, " ")
-    }
-    println(row)
+  let variant_names = variants
+  for model_name in models {
+    println(build_row(results, model_name, variant_names))
   }
   println("")
 }
 
+// ── Result JSON Builder ──
+
+fn make_result_json(experiment: String, variant: String, model: String, task: String, trial: Int, eval: EvalResult) -> Json =
+  json.object([
+    ("experiment", json.s(experiment)),
+    ("variant", json.s(variant)),
+    ("model", json.s(model)),
+    ("task", json.s(task)),
+    ("trial", json.i(trial)),
+    ("compiled", json.b(eval.compiled)),
+    ("tests_passed", json.b(eval.tests_passed)),
+    ("error", json.s(eval.error)),
+  ])
+
 // ── CLI Helpers ──
 
 fn parse_cli_string(args_list: List[String], flag: String, default: String) -> String = {
-  var result = default
-  var found = false
-  for a in args_list {
-    if found then {
-      result = a
-      found = false
-    } else if a == flag then {
-      found = true
-    } else {
-      ()
-    }
+  let idx = list.find_index(args_list, fn(a) => a == flag)
+  match idx {
+    some(i) => match list.get(args_list, i + 1) {
+      some(v) => v,
+      none => default,
+    },
+    none => default,
   }
-  result
 }
 
 fn parse_cli_int(args_list: List[String], flag: String, default: Int) -> Int = {

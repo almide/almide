@@ -173,6 +173,52 @@ fn parse_int(s: String, default: Int) -> Int =
 
 ---
 
+## 9. `env.args()` は argv[0] を含む
+
+`env.args()` は Rust の `std::env::args()` そのままなので、最初の要素はバイナリパス。
+
+```almide
+let raw_args = env.args()         // ["/tmp/mybin", "arg1", "arg2"]
+let args = list.drop(raw_args, 1) // ["arg1", "arg2"]
+```
+
+`almide run` 経由だと argv[0] が一時バイナリのパスになるので、知らずに使うとパスが壊れる。
+
+---
+
+## 10. effect fn main の Err が silent exit(1) になる
+
+`effect fn main() -> Result[Unit, String]` が `err(msg)` を返すと、エラーメッセージが出ずに exit code 1 だけで終了する。
+
+**原因:** codegen が `let _ = e; std::process::exit(1);` を生成している（`src/emit_rust/program.rs:258`）。
+
+**回避策:** main で match して手動で出力。
+
+```almide
+effect fn main() -> Result[Unit, String] = {
+  match run_experiment() {
+    ok(_) => ok(()),
+    err(e) => {
+      println("Error: ${e}")
+      process.exit(1)
+      ok(())
+    },
+  }
+}
+```
+
+**TODO:** コンパイラ側で `eprintln!("{}", e)` を生成すべき。
+
+---
+
+## 11. `string.pad_right` が ownership を取る (codegen)
+
+Rust codegen で `almide_rt_string_pad_right(s: String, ...)` が `s` の ownership を取るため、同じ変数を後で使うとmoveエラー。
+
+**回避策:** 変数を使う順番を工夫するか、先に clone 相当の操作（`list.map` で中間結果を作る等）を行う。
+
+---
+
 ## 全体の教訓
 
 1. **effect fn の auto-unwrap に頼る** — 手動 `match ok/err` は型の不一致を生みやすい
