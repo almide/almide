@@ -2,6 +2,12 @@
 
 **Almide is the language LLMs can write most accurately.** Every design decision serves one metric: modification survival rate.
 
+# Critical Safety Rules
+
+- **NEVER run `git checkout`, `git restore`, or `git stash` on files you did not modify yourself.** Other agents may be working on those files concurrently. Reverting their changes destroys their work and cannot be recovered.
+- **NEVER run destructive git operations without explicit user confirmation.** This includes `git reset`, `git checkout -- <file>`, `git clean`, and `git stash drop`.
+- **If you see unexpected changes in `git status`, ASK the user before touching them.** They may belong to another agent or an in-progress task.
+
 # Project Rules
 
 ## Branch Strategy
