@@ -552,9 +552,20 @@ pub fn cmd_check(file: &str, deny_warnings: bool) {
     }
     let diagnostics = checker.check_program(&mut program);
 
-    let warnings: Vec<_> = diagnostics.iter()
+    // Lower to IR for unused variable analysis (only if no parse errors)
+    let unused_warnings = if parse_errors.is_empty() {
+        let ir = almide::lower::lower_program(&program, &checker.expr_types, &checker.env);
+        almide::ir::collect_unused_var_warnings(&ir, file)
+    } else {
+        Vec::new()
+    };
+
+    let mut warnings: Vec<&diagnostic::Diagnostic> = diagnostics.iter()
         .filter(|d| d.level == diagnostic::Level::Warning)
         .collect();
+    for d in &unused_warnings {
+        warnings.push(d);
+    }
     for d in &warnings {
         eprintln!("{}", d.display_with_source(&source_text));
     }
