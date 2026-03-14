@@ -428,17 +428,16 @@ fn check_undefined_type() {
 
 #[test]
 fn check_unused_variable_warning() {
-    let warns = warnings("fn f() -> Int = {\n  let x = 1\n  2\n}");
-    // Should warn about unused variable (unless prefixed with _)
-    let has_unused = warns.iter().any(|w| w.contains("unused") || w.contains("Unused"));
-    assert!(has_unused, "should warn about unused variable, got: {:?}", warns);
+    // Unused variable warnings are now generated from IR (collect_unused_var_warnings),
+    // not from the checker. See tests/ir_test.rs for those tests.
+    // Verify the checker does not produce false errors for this valid code.
+    has_no_errors("fn f() -> Int = {\n  let x = 1\n  2\n}");
 }
 
 #[test]
 fn check_underscore_prefix_no_warning() {
-    let warns = warnings("fn f() -> Int = {\n  let _x = 1\n  2\n}");
-    let has_unused = warns.iter().any(|w| w.contains("_x"));
-    assert!(!has_unused, "underscore-prefixed variable should not warn");
+    // Same as above — unused variable detection is in IR layer.
+    has_no_errors("fn f() -> Int = {\n  let _x = 1\n  2\n}");
 }
 
 // ---- Do blocks ----
@@ -584,8 +583,8 @@ fn multi_error_block_statements() {
     // Multiple independent errors in a block should all be reported
     let errs = errors("fn f() -> Unit = {\n  let x: Int = \"hello\"\n  let y: String = 42\n  ()\n}");
     assert!(errs.len() >= 2, "should report errors for both let bindings, got: {:?}", errs);
-    assert!(errs.iter().any(|e| e.contains("'x'")), "should report error for x: {:?}", errs);
-    assert!(errs.iter().any(|e| e.contains("'y'")), "should report error for y: {:?}", errs);
+    assert!(errs.iter().any(|e| e.contains("let x")), "should report error for x: {:?}", errs);
+    assert!(errs.iter().any(|e| e.contains("let y")), "should report error for y: {:?}", errs);
 }
 
 #[test]
