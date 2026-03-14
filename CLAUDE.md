@@ -123,28 +123,6 @@ When modifying codegen:
 - Test effect fn: `fs.read_text()` inside effect fn must compile without manual `?`
 - Test that generated Rust compiles without warnings
 
-## Almide Research Laboratory
-
-`research/` ディレクトリは Almide の設計判断を実験データで裏付けるための研究基盤。
-
-### Grammar Lab (`research/grammar-lab/`)
-
-構文バリアントの A/B テストフレームワーク。複数の LLM に対して構文の違いが modification survival rate に与える影響を定量的に測定する。ツール自体が Almide で実装されている（dogfooding）。
-
-- **Runner**: `src/mod.almd` — Claude Code 経由で LLM を呼び出し、`almide check` + `almide test` で自動評価
-- **Transpile**: 未実装構文を現行構文に変換してコンパイル。構文を実装する前に survival rate を測定可能
-- **統計**: Fisher's exact test を Almide で実装。p 値付きで summary を出力
-- **実験結果**: `results/` に JSON で保存。`outputs/` に LLM の生出力を保存
-
-```bash
-cd research/grammar-lab
-export ALMIDE_BIN=/path/to/almide
-almide build src/mod.almd -o /tmp/grammar-lab-bin
-/tmp/grammar-lab-bin experiments/lambda-syntax/ --trials 5 --model claude-haiku-4-5
-```
-
-設計判断は「勘」ではなく「数字」で行う。新しい構文提案は Grammar Lab で実験してから採否を決める。
-
 ## Key Design Decisions
 
 - **Multi-target**: Same AST emits to Rust or TypeScript via `--target rust|ts`
