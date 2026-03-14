@@ -6,8 +6,11 @@
 - [Structured Concurrency](active/structured-concurrency.md) — Layer 2: `async let` / `await` for scoped parallel execution
 - [Grammar Codegen](active/grammar-codegen.md) — Single source of truth for tokens/precedence, auto-generate tree-sitter + TextMate + lexer
 - [Codec Protocol & JSON](active/codec-and-json.md) — `deriving Codec` + JSON as first format, 5-phase roadmap
-- [Template: Typed Document Builder](active/template.md) — `template` keyword, `html {}`/`text {}` builders, `emit`/`embed`, typed document AST
+- [Template: Typed Document Builder](active/template.md) — `template` keyword, `html {}`/`text {}` builders, type-dispatched insertion, typed document AST
 - [Type System Extensions](active/type-system.md) — Row polymorphism, union types, container protocols (LLM-friendly HKT), structural generic bounds
+- [UFCS for External Libraries](active/ufcs-external.md) — Type-directed UFCS resolution for user-defined types, `req.param("id")` style
+- [Syntax Sugar](active/syntax-sugar.md) — Lambda short syntax `(x) => expr`, default arguments, comprehensions
+- [Web Framework](active/web-framework.md) — First-party Hono-equivalent, template/Codec integration, pipe-chain routing
 
 ## On Hold
 
@@ -21,7 +24,7 @@
 - [Self-Hosting](on-hold/self-hosting.md) — rewrite compiler in Almide (after spec stabilization)
 - [Stdlib Architecture: 3-Layer Design](on-hold/stdlib-architecture-3-layer-design.md) — Phase A done, B/C remaining
 - [Supervision & Actors](on-hold/supervision-and-actors.md) — Layer 3: typed actors, channels, supervision trees (stdlib)
-- [Syntax Sugar](on-hold/syntax-sugar.md) — range, exhaustiveness done; comprehensions, raw strings, block comments pending
+- ~~Syntax Sugar~~ — moved to [active](active/syntax-sugar.md)
 - [Tooling](on-hold/tooling.md)
 - [Built-in Protocols](on-hold/trait-impl.md) — Eq, Hash done; Show (`show(x)`) remaining
 
