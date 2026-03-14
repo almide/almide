@@ -995,11 +995,11 @@ impl Emitter {
     }
 
     /// Analyze IR function body to find variables used exactly once
-    pub(crate) fn analyze_ir_single_use(&mut self, body: &IrExpr, param_var_ids: &[(VarId, almide::types::Ty)]) {
+    pub(crate) fn analyze_ir_single_use(&mut self, body: &IrExpr, params: &[IrParam]) {
         let mut counts: std::collections::HashMap<VarId, usize> = std::collections::HashMap::new();
         Self::count_ir_var_uses(body, &mut counts);
         self.single_use_vars.clear();
-        let param_ids: std::collections::HashSet<VarId> = param_var_ids.iter().map(|(id, _)| *id).collect();
+        let param_ids: std::collections::HashSet<VarId> = params.iter().map(|p| p.var).collect();
         let var_table = &self.ir_program.as_ref().expect("IR").var_table;
         for (id, count) in &counts {
             if *count == 1 && !param_ids.contains(id) {

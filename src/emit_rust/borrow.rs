@@ -52,7 +52,7 @@ pub fn analyze_program(
     for f in &ir.functions {
         if f.name == "main" { continue; }
         let params: Vec<(VarId, bool)> = f.params.iter()
-            .map(|(vid, ty)| (*vid, is_heap_type(ty)))
+            .map(|p| (p.var, is_heap_type(&p.ty)))
             .collect();
         fn_decls.push((f.name.clone(), params, &f.body, &ir.var_table));
     }
@@ -61,7 +61,7 @@ pub fn analyze_program(
         for f in &mod_ir.functions {
             let qualified = format!("{}.{}", mod_name, f.name);
             let params: Vec<(VarId, bool)> = f.params.iter()
-                .map(|(vid, ty)| (*vid, is_heap_type(ty)))
+                .map(|p| (p.var, is_heap_type(&p.ty)))
                 .collect();
             fn_decls.push((qualified, params, &f.body, &mod_ir.var_table));
         }
