@@ -5,15 +5,20 @@ import json
 import fs
 import process
 import http
+import env
 
 // ── Config ──
 
 let ALMIDE_BIN = "almide"
 
+// ── Helpers ──
+
+effect fn println(s: String) -> Unit = io.print(s ++ "\n")
+
 // ── Entry Point ──
 
 effect fn main() -> Result[Unit, String] = {
-  let args_list = args.collect()
+  let args_list = env.args()
   guard list.len(args_list) >= 1 else err("Usage: grammar-lab <experiment-dir> [--model <name>] [--trials <n>]")
 
   let experiment_dir = match list.get(args_list, 0) {
@@ -47,10 +52,10 @@ effect fn main() -> Result[Unit, String] = {
   // Load prompt layers
   let layer1 = fs.read_text("prompts/layer1_rules.md")
 
-  io.println("=== Grammar Lab ===")
-  io.println("Experiment: ${experiment_name}")
-  io.println("Trials: ${int.to_string(trials)}")
-  io.println("")
+  println("=== Grammar Lab ===")
+  println("Experiment: ${experiment_name}")
+  println("Trials: ${int.to_string(trials)}")
+  println("")
 
   // Results accumulator
   var all_results: List[Json] = []
@@ -67,7 +72,7 @@ effect fn main() -> Result[Unit, String] = {
       ()
     }
 
-    io.println("Model: ${model_name}")
+    println("Model: ${model_name}")
 
     for variant_json in variants {
       let variant_name = json.get_string(variant_json, "name").unwrap_or("")
@@ -75,13 +80,13 @@ effect fn main() -> Result[Unit, String] = {
 
       // Load layer2 for this variant
       let layer2_path = "prompts/layer2_${variant_name}.md"
-      let layer2 = if fs.exists(layer2_path) then {
+      let layer2 = if fs.exists?(layer2_path) then {
         fs.read_text(layer2_path)
       } else {
         ""
       }
 
-      io.println("  Variant: ${variant_name}")
+      println("  Variant: ${variant_name}")
 
       for task_name_json in task_names {
         let task_name = json.as_string(task_name_json).unwrap_or("")
@@ -100,7 +105,7 @@ effect fn main() -> Result[Unit, String] = {
         let test_code = fs.read_text("${experiment_dir}/tasks/${test_file_name}")
 
         for trial_num in 1..=trials {
-          io.println("    Task: ${task_name} trial ${int.to_string(trial_num)}/${int.to_string(trials)}")
+          println("    Task: ${task_name} trial ${int.to_string(trial_num)}/${int.to_string(trials)}")
 
           // Build prompt
           let system_prompt = build_system_prompt(layer1, layer2, layer3)
@@ -115,38 +120,33 @@ effect fn main() -> Result[Unit, String] = {
           // Evaluate: write to temp file, compile, test
           let eval_result = evaluate(modified_code, test_code, task_name)
 
-          let result = json.object([
-            ("experiment", json.s(experiment_name)),
-            ("variant", json.s(variant_name)),
-            ("model", json.s(model_name)),
-            ("task", json.s(task_name)),
-            ("trial", json.i(trial_num)),
-            ("compiled", json.b(eval_result.compiled)),
-            ("tests_passed", json.b(eval_result.tests_passed)),
-            ("error", json.s(eval_result.error)),
-          ])
+          let result = make_result_json(experiment_name, variant_name, model_name, task_name, trial_num, eval_result)
 
           all_results = all_results ++ [result]
 
           let status = if eval_result.tests_passed then "PASS"
             else if eval_result.compiled then "FAIL (test)"
             else "FAIL (compile)"
-          io.println("      ${status}")
+          println("      ${status}")
         }
       }
     }
   }
 
   // Write results
-  let results_json = json.array(all_results)
-  let timestamp = int.to_string(time.now())
+  let results_text = json.stringify_pretty(json.array(all_results))
+  let timestamp = int.to_string(env.unix_timestamp())
   let results_path = "results/${experiment_name}_${timestamp}.json"
-  fs.write(results_path, json.stringify_pretty(results_json))
-  io.println("")
-  io.println("Results written to ${results_path}")
+  fs.mkdir_p("results")
+  fs.write(results_path, results_text)
+  println("")
+  println("Results written to ${results_path}")
 
-  // Print summary
-  print_summary(all_results)
+  // Re-read results for summary (avoids move issue)
+  let summary_text = fs.read_text(results_path)
+  let summary_results = json.parse(summary_text)
+  let summary_list = json.as_array(summary_results).unwrap_or([])
+  print_summary(summary_list)
 
   ok(())
 }
@@ -161,17 +161,20 @@ fn build_user_prompt(source: String, tests: String, instruction: String) -> Stri
 
 // ── LLM API ──
 
-effect fn call_llm(provider: String, model_id: String, system: String, user: String) -> String = {
-  match provider {
-    "anthropic" => call_anthropic(model_id, system, user),
-    "openai" => call_openai(model_id, system, user),
-    _ => err("Unknown provider: ${provider}"),
+effect fn call_llm(provider: String, model_id: String, system: String, user: String) -> Result[String, String] = {
+  guard provider == "anthropic" or provider == "openai" else err("Unknown provider: ${provider}")
+  if provider == "anthropic" then {
+    ok(call_anthropic(model_id, system, user))
+  } else {
+    ok(call_openai(model_id, system, user))
   }
 }
 
-effect fn call_anthropic(model_id: String, system: String, user: String) -> String = {
-  let api_key = env.get("ANTHROPIC_API_KEY").unwrap_or("")
-  guard api_key != "" else err("ANTHROPIC_API_KEY not set")
+effect fn call_anthropic(model_id: String, system: String, user: String) -> Result[String, String] = {
+  let api_key = match env.get("ANTHROPIC_API_KEY") {
+    some(k) => k,
+    none => err("ANTHROPIC_API_KEY not set"),
+  }
 
   let body = json.object([
     ("model", json.s(model_id)),
@@ -186,24 +189,29 @@ effect fn call_anthropic(model_id: String, system: String, user: String) -> Stri
   ])
 
   let headers = map.set(
-    map.set(map.new(), "Content-Type", "application/json"),
-    "x-api-key", api_key
+    map.set(
+      map.set(map.new(), "Content-Type", "application/json"),
+      "x-api-key", api_key
+    ),
+    "anthropic-version", "2023-06-01"
   )
-  let headers = map.set(headers, "anthropic-version", "2023-06-01")
 
   let response = http.request("POST", "https://api.anthropic.com/v1/messages", json.stringify(body), headers)
 
   let resp_json = json.parse(response)
   let content = json.get_array(resp_json, "content").unwrap_or([])
-  match list.get(content, 0) {
+  let text = match list.get(content, 0) {
     some(block) => json.get_string(block, "text").unwrap_or(""),
     none => "",
   }
+  ok(text)
 }
 
-effect fn call_openai(model_id: String, system: String, user: String) -> String = {
-  let api_key = env.get("OPENAI_API_KEY").unwrap_or("")
-  guard api_key != "" else err("OPENAI_API_KEY not set")
+effect fn call_openai(model_id: String, system: String, user: String) -> Result[String, String] = {
+  let api_key = match env.get("OPENAI_API_KEY") {
+    some(k) => k,
+    none => err("OPENAI_API_KEY not set"),
+  }
 
   let body = json.object([
     ("model", json.s(model_id)),
@@ -224,7 +232,7 @@ effect fn call_openai(model_id: String, system: String, user: String) -> String 
 
   let resp_json = json.parse(response)
   let choices = json.get_array(resp_json, "choices").unwrap_or([])
-  match list.get(choices, 0) {
+  let text = match list.get(choices, 0) {
     some(choice) => {
       match json.get(choice, "message") {
         some(msg) => json.get_string(msg, "content").unwrap_or(""),
@@ -233,6 +241,7 @@ effect fn call_openai(model_id: String, system: String, user: String) -> String 
     },
     none => "",
   }
+  ok(text)
 }
 
 // ── Code Extraction ──
@@ -271,18 +280,18 @@ effect fn evaluate(code: String, test_code: String, task_name: String) -> EvalRe
   let code_path = "${tmp_dir}/${task_name}.almd"
   let combined = "${code}\n\n${test_code}"
 
-  fs.create_dir(tmp_dir)
+  fs.mkdir_p(tmp_dir)
   fs.write(code_path, combined)
 
   // Run almide check
-  let check_result = process.run(ALMIDE_BIN, ["check", code_path])
-  if check_result.exit_code != 0 then {
-    EvalResult { compiled: false, tests_passed: false, error: check_result.stderr }
+  let check_r = process.exec_status(ALMIDE_BIN, ["check", code_path])
+  if check_r.code != 0 then {
+    EvalResult { compiled: false, tests_passed: false, error: check_r.stderr }
   } else {
     // Run almide test
-    let test_result = process.run(ALMIDE_BIN, ["test", code_path])
-    if test_result.exit_code != 0 then {
-      EvalResult { compiled: true, tests_passed: false, error: test_result.stderr }
+    let test_r = process.exec_status(ALMIDE_BIN, ["test", code_path])
+    if test_r.code != 0 then {
+      EvalResult { compiled: true, tests_passed: false, error: test_r.stderr }
     } else {
       EvalResult { compiled: true, tests_passed: true, error: "" }
     }
@@ -292,8 +301,8 @@ effect fn evaluate(code: String, test_code: String, task_name: String) -> EvalRe
 // ── Summary ──
 
 fn print_summary(results: List[Json]) -> Unit = {
-  io.println("=== Summary ===")
-  io.println("")
+  println("=== Summary ===")
+  println("")
 
   // Group by model + variant
   let models = results
@@ -305,11 +314,11 @@ fn print_summary(results: List[Json]) -> Unit = {
     |> list.unique()
 
   // Header
-  var header = "                    "
+  var header = string.pad_right("", 20, " ")
   for v in variants {
     header = header ++ string.pad_right(v, 20, " ")
   }
-  io.println(header)
+  println(header)
 
   // Rows
   for model in models {
@@ -328,9 +337,9 @@ fn print_summary(results: List[Json]) -> Unit = {
       let cell = "${pct}% (${int.to_string(passed)}/${int.to_string(total)})"
       row = row ++ string.pad_right(cell, 20, " ")
     }
-    io.println(row)
+    println(row)
   }
-  io.println("")
+  println("")
 }
 
 // ── CLI Helpers ──
@@ -353,6 +362,12 @@ fn parse_cli_string(args_list: List[String], flag: String, default: String) -> S
 
 fn parse_cli_int(args_list: List[String], flag: String, default: Int) -> Int = {
   let s = parse_cli_string(args_list, flag, "")
-  if s == "" then default
-  else string.to_int(s)
+  if s == "" then {
+    default
+  } else {
+    match string.to_int(s) {
+      ok(n) => n,
+      err(_) => default,
+    }
+  }
 }
