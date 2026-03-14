@@ -148,7 +148,21 @@ impl Checker {
                 if !self.occurs(*id, other) { self.solutions.insert(*id, other.clone()); }
                 true
             }
-            (InferTy::Concrete(a), InferTy::Concrete(b)) => *a == Ty::Unknown || *b == Ty::Unknown || a.compatible(b),
+            (InferTy::Concrete(a), InferTy::Concrete(b)) => {
+                if *a == Ty::Unknown || *b == Ty::Unknown { return true; }
+                // Record structural unification: match fields by name
+                match (a, b) {
+                    (Ty::Record { fields: fa }, Ty::Record { fields: fb }) => {
+                        fa.len() == fb.len() && fa.iter().all(|(n, t)| fb.iter().any(|(n2, t2)| n == n2 && self.unify_infer(&InferTy::from_ty(t), &InferTy::from_ty(t2))))
+                    }
+                    (Ty::OpenRecord { fields: req, .. }, Ty::Record { fields: actual })
+                    | (Ty::OpenRecord { fields: req, .. }, Ty::OpenRecord { fields: actual, .. }) => {
+                        req.iter().all(|(n, t)| actual.iter().any(|(n2, t2)| n == n2 && self.unify_infer(&InferTy::from_ty(t), &InferTy::from_ty(t2))))
+                    }
+                    (Ty::Named(na, _), Ty::Named(nb, _)) if na == nb => true,
+                    _ => a.compatible(b),
+                }
+            }
             (InferTy::List(a), InferTy::List(b)) => self.unify_infer(a, b),
             (InferTy::Option(a), InferTy::Option(b)) => self.unify_infer(a, b),
             (InferTy::Result(ao, ae), InferTy::Result(bo, be)) => self.unify_infer(ao, bo) && self.unify_infer(ae, be),

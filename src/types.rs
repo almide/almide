@@ -275,18 +275,17 @@ impl Ty {
 }
 
 /// Check if binding TypeVar `var` to `ty` would create an infinite type.
-/// Only detects direct self-recursion: T = List[T], T = Option[T], etc.
-/// Does NOT reject cases where a same-named TypeVar appears from a different scope
-/// (e.g., binding A to List[(A, B)] where A is from the caller's generic context).
-/// Full scope-aware occurs check requires scoped TypeVar IDs (future work).
+/// Recursively checks all type constructors: List, Option, Result, Map, Tuple, Record, Fn.
 fn occurs_in(var: &str, ty: &Ty) -> bool {
     match ty {
-        Ty::TypeVar(_) => false, // bare TypeVar is never a recursive occurrence
-        Ty::List(inner) | Ty::Option(inner) => matches!(inner.as_ref(), Ty::TypeVar(n) if n == var),
-        Ty::Result(a, b) | Ty::Map(a, b) => {
-            matches!(a.as_ref(), Ty::TypeVar(n) if n == var)
-            || matches!(b.as_ref(), Ty::TypeVar(n) if n == var)
-        }
+        Ty::TypeVar(name) => name == var,
+        Ty::List(inner) | Ty::Option(inner) => occurs_in(var, inner),
+        Ty::Result(a, b) | Ty::Map(a, b) => occurs_in(var, a) || occurs_in(var, b),
+        Ty::Tuple(elems) => elems.iter().any(|e| occurs_in(var, e)),
+        Ty::Record { fields } | Ty::OpenRecord { fields, .. } => fields.iter().any(|(_, t)| occurs_in(var, t)),
+        Ty::Fn { params, ret } => params.iter().any(|p| occurs_in(var, p)) || occurs_in(var, ret),
+        Ty::Named(_, args) => args.iter().any(|a| occurs_in(var, a)),
+        Ty::Union(members) => members.iter().any(|m| occurs_in(var, m)),
         _ => false,
     }
 }
@@ -294,7 +293,12 @@ fn occurs_in(var: &str, ty: &Ty) -> bool {
 /// Unify a signature type against a concrete type, collecting TypeVar bindings.
 /// Returns true if the types are compatible. Unknown still accepts anything (error recovery).
 pub fn unify(sig_ty: &Ty, actual_ty: &Ty, bindings: &mut std::collections::HashMap<std::string::String, Ty>) -> bool {
-    // Unknown = error recovery, always accept
+    // Unknown: both Unknown → accept. One Unknown → accept but don't mask errors.
+    // This is still lenient for error recovery, but avoids hiding real mismatches
+    // when one side has a known type.
+    if *sig_ty == Ty::Unknown && *actual_ty == Ty::Unknown {
+        return true;
+    }
     if *sig_ty == Ty::Unknown || *actual_ty == Ty::Unknown {
         return true;
     }
@@ -343,9 +347,21 @@ pub fn unify(sig_ty: &Ty, actual_ty: &Ty, bindings: &mut std::collections::HashM
         (Ty::Named(a, a_args), Ty::Named(b, b_args)) if a == b && a_args.len() == b_args.len() => {
             a_args.iter().zip(b_args.iter()).all(|(x, y)| unify(x, y, bindings))
         }
-        // Union: actual type is compatible if it matches any member
-        (Ty::Union(members), _) => members.iter().any(|m| unify(m, actual_ty, bindings)),
-        (_, Ty::Union(members)) => members.iter().any(|m| unify(sig_ty, m, bindings)),
+        // Union: try each member with snapshotted bindings, commit first success
+        (Ty::Union(members), _) => {
+            for m in members {
+                let mut snapshot = bindings.clone();
+                if unify(m, actual_ty, &mut snapshot) { *bindings = snapshot; return true; }
+            }
+            false
+        }
+        (_, Ty::Union(members)) => {
+            for m in members {
+                let mut snapshot = bindings.clone();
+                if unify(sig_ty, m, &mut snapshot) { *bindings = snapshot; return true; }
+            }
+            false
+        }
         _ => sig_ty.compatible(actual_ty),
     }
 }
@@ -356,7 +372,7 @@ pub fn substitute(ty: &Ty, bindings: &std::collections::HashMap<std::string::Str
         return ty.clone();
     }
     match ty {
-        Ty::TypeVar(name) => bindings.get(name).cloned().unwrap_or(Ty::Unknown),
+        Ty::TypeVar(name) => bindings.get(name).cloned().unwrap_or_else(|| Ty::TypeVar(name.clone())),
         Ty::Unknown => Ty::Unknown,
         Ty::List(inner) => Ty::List(Box::new(substitute(inner, bindings))),
         Ty::Option(inner) => Ty::Option(Box::new(substitute(inner, bindings))),

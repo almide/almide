@@ -41,7 +41,7 @@ impl InferTy {
             InferTy::Concrete(ty) => ty.clone(),
             InferTy::Var(id) => {
                 if let Some(solved) = solutions.get(id) { solved.to_ty(solutions) }
-                else { Ty::Unknown }
+                else { Ty::TypeVar(format!("?{}", id.0)) }
             }
             InferTy::List(inner) => Ty::List(Box::new(inner.to_ty(solutions))),
             InferTy::Option(inner) => Ty::Option(Box::new(inner.to_ty(solutions))),

@@ -260,11 +260,11 @@ impl Checker {
                 let prev_do = self.env.in_do_block;
                 self.env.in_do_block = true;
                 for s in stmts.iter_mut() { self.check_stmt(s); }
-                let _ty = expr.as_mut().map(|e| self.check_expr_with(e, expected)).unwrap_or(Ty::Unit);
+                let ty = expr.as_mut().map(|e| self.check_expr_with(e, expected)).unwrap_or(Ty::Unit);
                 self.warn_unused_vars_in_scope("do block");
                 self.env.in_do_block = prev_do;
                 self.env.pop_scope();
-                Ty::Unknown
+                ty
             }
 
             ast::Expr::Range { start, end, .. } => {

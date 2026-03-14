@@ -115,7 +115,14 @@ impl Checker {
                         if let Ty::TypeVar(tv) = pty {
                             if let Some(bound) = sig.structural_bounds.get(tv) {
                                 let resolved = self.env.resolve_named(aty);
-                                if bound.compatible(&resolved) || bound.compatible(aty) { bindings.insert(tv.clone(), aty.clone()); }
+                                if bound.compatible(&resolved) || bound.compatible(aty) {
+                                    bindings.insert(tv.clone(), aty.clone());
+                                } else {
+                                    self.diagnostics.push(super::err(
+                                        format!("argument '{}' does not satisfy bound {}: got {}", pname, bound.display(), aty.display()),
+                                        "The argument must have the required fields".to_string(),
+                                        format!("call to {}()", name)));
+                                }
                             } else { crate::types::unify(pty, aty, &mut bindings); }
                         } else {
                             crate::types::unify(pty, aty, &mut bindings);

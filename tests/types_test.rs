@@ -298,7 +298,7 @@ fn substitute_unbound_typevar() {
     let mut bindings = HashMap::new();
     bindings.insert("X".into(), Ty::Int); // some other binding, not T
     let result = substitute(&Ty::TypeVar("T".into()), &bindings);
-    assert_eq!(result, Ty::Unknown);
+    assert_eq!(result, Ty::TypeVar("T".into()));
 }
 
 #[test]
