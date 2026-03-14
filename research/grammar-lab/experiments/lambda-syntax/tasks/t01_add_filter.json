@@ -1,0 +1,6 @@
+{
+  "name": "add-filter-condition",
+  "instruction": "Change the filter condition from `x > 2` to `x > 2 and x < 8`. Do not change anything else.",
+  "layer3_hint": "Available: `list.filter(xs, fn(x) => bool)` filters elements, `and` is logical AND",
+  "test_file": "t01_add_filter_test.almd"
+}

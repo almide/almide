@@ -1,0 +1,17 @@
+type Item = { name: String, price: Int }
+
+test "sort_by_name alphabetical" {
+  let items = [
+    Item { name: "Cherry", price: 300 },
+    Item { name: "Apple", price: 150 },
+    Item { name: "Banana", price: 80 },
+  ]
+  let sorted = sort_by_name(items)
+  let names = list.map(sorted, fn(i) => i.name)
+  assert_eq(names, ["Apple", "Banana", "Cherry"])
+}
+
+test "item_names unchanged" {
+  let items = [Item { name: "X", price: 1 }, Item { name: "Y", price: 2 }]
+  assert_eq(item_names(items), ["X", "Y"])
+}

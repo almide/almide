@@ -1,0 +1,20 @@
+{
+  "name": "lambda-syntax",
+  "hypothesis": "Short lambda (x) => does not degrade modification survival rate vs fn(x) =>",
+  "variants": [
+    { "name": "fn-lambda", "dir": "variant-fn" },
+    { "name": "paren-lambda", "dir": "variant-paren" }
+  ],
+  "tasks": [
+    "t01_add_filter",
+    "t02_add_map_step",
+    "t03_change_sort_key",
+    "t04_add_fold",
+    "t05_complex_pipe"
+  ],
+  "trials": 5,
+  "models": [
+    { "name": "claude-sonnet-4-6", "provider": "anthropic", "model_id": "claude-sonnet-4-6-20250514" },
+    { "name": "gpt-4o", "provider": "openai", "model_id": "gpt-4o" }
+  ]
+}

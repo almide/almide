@@ -1,0 +1,6 @@
+{
+  "name": "complex-pipe-modification",
+  "instruction": "Modify `summarize` to: 1) filter out items with price <= 0, 2) group remaining items would be too complex so instead just add a step after sort that takes only the first 3 items using `list.take`. Keep everything else the same.",
+  "layer3_hint": "Available: `list.take(xs, n)` returns the first n elements, `list.filter(xs, fn(x) => bool)` filters elements",
+  "test_file": "t05_complex_pipe_test.almd"
+}
