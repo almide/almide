@@ -8,22 +8,32 @@ fn refine_unknown(ty: &Ty, expected: &Ty) -> Ty {
     match (ty, expected) {
         (Ty::Unknown, _) => expected.clone(),
         (Ty::Result(ok, err), Ty::Result(eok, eerr)) => {
-            let ok = if matches!(ok.as_ref(), Ty::Unknown) { eok.clone() } else { ok.clone() };
-            let err = if matches!(err.as_ref(), Ty::Unknown) { eerr.clone() } else { err.clone() };
-            Ty::Result(ok, err)
+            Ty::Result(Box::new(refine_unknown(ok, eok)), Box::new(refine_unknown(err, eerr)))
         }
         (Ty::Option(inner), Ty::Option(einner)) => {
-            let inner = if matches!(inner.as_ref(), Ty::Unknown) { einner.clone() } else { inner.clone() };
-            Ty::Option(inner)
+            Ty::Option(Box::new(refine_unknown(inner, einner)))
         }
         (Ty::List(inner), Ty::List(einner)) => {
-            let inner = if matches!(inner.as_ref(), Ty::Unknown) { einner.clone() } else { inner.clone() };
-            Ty::List(inner)
+            Ty::List(Box::new(refine_unknown(inner, einner)))
         }
         (Ty::Map(k, v), Ty::Map(ek, ev)) => {
-            let k = if matches!(k.as_ref(), Ty::Unknown) { ek.clone() } else { k.clone() };
-            let v = if matches!(v.as_ref(), Ty::Unknown) { ev.clone() } else { v.clone() };
-            Ty::Map(k, v)
+            Ty::Map(Box::new(refine_unknown(k, ek)), Box::new(refine_unknown(v, ev)))
+        }
+        (Ty::Tuple(elems), Ty::Tuple(eelems)) if elems.len() == eelems.len() => {
+            Ty::Tuple(elems.iter().zip(eelems.iter()).map(|(t, e)| refine_unknown(t, e)).collect())
+        }
+        (Ty::Fn { params, ret }, Ty::Fn { params: ep, ret: er }) if params.len() == ep.len() => {
+            Ty::Fn {
+                params: params.iter().zip(ep.iter()).map(|(t, e)| refine_unknown(t, e)).collect(),
+                ret: Box::new(refine_unknown(ret, er)),
+            }
+        }
+        (Ty::Record { fields }, Ty::Record { fields: ef }) => {
+            let refined = fields.iter().map(|(n, t)| {
+                let e = ef.iter().find(|(en, _)| en == n).map(|(_, et)| et);
+                (n.clone(), if let Some(et) = e { refine_unknown(t, et) } else { t.clone() })
+            }).collect();
+            Ty::Record { fields: refined }
         }
         _ => ty.clone(),
     }

@@ -266,13 +266,25 @@ impl Checker {
                 self.env.current_ret = Some(ret_ty.clone());
                 self.env.in_effect = effect.unwrap_or(false);
                 let body_ity = self.infer_expr(body);
-                let body_c = body_ity.to_ty(&self.solutions);
-                let is_result_body = matches!(&body_c, Ty::Result(_, _));
-                if effect.unwrap_or(false) && is_result_body {
-                    self.constrain(InferTy::from_ty(&ret_ty), body_ity, format!("fn '{}'", name));
+                // Signature-driven constraint:
+                // - effect fn with Result[T, E] sig: accept body returning T (auto-wrapped) or Result[T, E] (explicit)
+                // - non-effect: body must match signature exactly
+                if effect.unwrap_or(false) {
+                    if let Ty::Result(ok, _) = &ret_ty {
+                        // Try unwrapped first (body returns T), fall back to full Result match
+                        let unwrapped = InferTy::from_ty(ok);
+                        let full = InferTy::from_ty(&ret_ty);
+                        let body_ty = body_ity.to_ty(&self.solutions);
+                        if matches!(&body_ty, Ty::Result(_, _)) {
+                            self.constrain(full, body_ity, format!("fn '{}'", name));
+                        } else {
+                            self.constrain(unwrapped, body_ity, format!("fn '{}'", name));
+                        }
+                    } else {
+                        self.constrain(InferTy::from_ty(&ret_ty), body_ity, format!("fn '{}'", name));
+                    }
                 } else {
-                    let eff_ret = if effect.unwrap_or(false) { match &ret_ty { Ty::Result(ok, _) => *ok.clone(), _ => ret_ty.clone() } } else { ret_ty.clone() };
-                    self.constrain(InferTy::from_ty(&eff_ret), body_ity, format!("fn '{}'", name));
+                    self.constrain(InferTy::from_ty(&ret_ty), body_ity, format!("fn '{}'", name));
                 }
                 self.env.current_ret = prev.0; self.env.in_effect = prev.1;
                 if let Some(gs) = generics { for g in gs { self.env.types.remove(&g.name); self.env.structural_bounds.remove(&g.name); } }
