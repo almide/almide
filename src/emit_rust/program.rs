@@ -77,6 +77,15 @@ impl Emitter {
         }
     }
 
+    /// Collect open record aliases from AST (not yet modeled in IR).
+    fn collect_open_record_aliases(&mut self, decls: &[Decl]) {
+        for decl in decls {
+            if let Decl::Type { name, ty: TypeExpr::OpenRecord { fields }, .. } = decl {
+                self.open_record_aliases.insert(name.clone(), fields.clone());
+            }
+        }
+    }
+
     /// Check if a TypeExpr references a given type name (for detecting recursive variants).
     fn type_references_name(ty: &TypeExpr, target: &str) -> bool {
         match ty {
@@ -103,6 +112,38 @@ impl Emitter {
         }
     }
 
+    /// Collect named record types and variant metadata from IR type_decls.
+    /// This populates the same fields as `collect_named_records` but from IR instead of AST.
+    fn collect_named_records_from_ir(&mut self, type_decls: &[almide::ir::IrTypeDecl]) {
+        use almide::ir::{IrTypeDeclKind, IrVariantKind};
+        for td in type_decls {
+            match &td.kind {
+                IrTypeDeclKind::Record { fields } => {
+                    let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+                    self.named_record_types.insert(field_names, td.name.clone());
+                }
+                IrTypeDeclKind::Variant { cases, is_generic, boxed_args, boxed_record_fields } => {
+                    // Merge boxed_args and boxed_record_fields
+                    for ba in boxed_args {
+                        self.boxed_variant_args.insert(ba.clone());
+                    }
+                    for brf in boxed_record_fields {
+                        self.boxed_variant_record_fields.insert(brf.clone());
+                    }
+                    for case in cases {
+                        if *is_generic {
+                            self.generic_variant_constructors.insert(case.name.clone(), td.name.clone());
+                            if matches!(&case.kind, IrVariantKind::Unit) {
+                                self.generic_variant_unit_ctors.insert(case.name.clone());
+                            }
+                        }
+                    }
+                }
+                IrTypeDeclKind::Alias { .. } => {}
+            }
+        }
+    }
+
     /// Collect top-level let names. The bool (needs_deref) is set later during emit.
     fn collect_top_lets(&mut self, decls: &[Decl]) {
         for decl in decls {
@@ -114,11 +155,23 @@ impl Emitter {
 
     pub(crate) fn emit_program(&mut self, prog: &Program, modules: &[(String, Program, Option<crate::project::PkgId>, bool)]) {
         self.collect_fn_info(&prog.decls);
-        self.collect_named_records(&prog.decls);
+        // Use IR type_decls when available, fall back to AST
+        if let Some(ref ir) = self.ir_program {
+            self.collect_named_records_from_ir(&ir.type_decls.clone());
+        } else {
+            self.collect_named_records(&prog.decls);
+        }
+        // Always collect from AST for open_record_aliases (not yet in IR)
+        self.collect_open_record_aliases(&prog.decls);
         self.collect_top_lets(&prog.decls);
-        for (_, mod_prog, _, _) in modules {
+        for (mod_name, mod_prog, _, _) in modules {
             self.collect_fn_info(&mod_prog.decls);
-            self.collect_named_records(&mod_prog.decls);
+            if let Some(mod_ir) = self.module_irs.get(mod_name).cloned() {
+                self.collect_named_records_from_ir(&mod_ir.type_decls);
+            } else {
+                self.collect_named_records(&mod_prog.decls);
+            }
+            self.collect_open_record_aliases(&mod_prog.decls);
         }
         // Build module_aliases and user_modules from PkgId info
         for (name, _, pkg_id, _) in modules {

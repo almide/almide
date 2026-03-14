@@ -9,7 +9,7 @@
 ///
 /// Every IR node carries full `Ty` from the checker's `expr_types` map.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use crate::ast;
 use crate::ir::*;
 use crate::types::{Ty, TypeEnv};
@@ -177,6 +177,7 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<(usize, usize), T
     let mut ctx = LowerCtx::new(expr_types, env);
     let mut functions = Vec::new();
     let mut top_lets = Vec::new();
+    let mut type_decls = Vec::new();
 
     for decl in &prog.decls {
         match decl {
@@ -197,6 +198,9 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<(usize, usize), T
                 let var = ctx.define_var(name, ty.clone(), Mutability::Let, *span);
                 top_lets.push(IrTopLet { var, ty, value: ir_value });
             }
+            ast::Decl::Type { name, ty, deriving, visibility, generics, .. } => {
+                type_decls.push(lower_type_decl(&mut ctx, name, ty, deriving, visibility, generics.as_ref()));
+            }
             ast::Decl::Impl { methods, .. } => {
                 for m in methods {
                     if let ast::Decl::Fn { name, params, body: Some(body), effect, r#async, span, .. } = m {
@@ -209,7 +213,7 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<(usize, usize), T
         }
     }
 
-    IrProgram { functions, top_lets, var_table: ctx.var_table }
+    IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table }
 }
 
 fn lower_fn(
@@ -229,6 +233,104 @@ fn lower_fn(
         .unwrap_or_else(|| ir_body.ty.clone());
     ctx.pop_scope();
     IrFunction { name: name.to_string(), params: ir_params, ret_ty, body: ir_body, is_effect, is_async, is_test }
+}
+
+// ── Type declaration lowering ───────────────────────────────────
+
+/// Check if a TypeExpr references a given type name (for detecting recursive variants).
+fn type_references_name(ty: &ast::TypeExpr, target: &str) -> bool {
+    match ty {
+        ast::TypeExpr::Simple { name } => name == target,
+        ast::TypeExpr::Generic { name, args } => {
+            name == target || args.iter().any(|a| type_references_name(a, target))
+        }
+        ast::TypeExpr::Record { fields } => fields.iter().any(|f| type_references_name(&f.ty, target)),
+        ast::TypeExpr::Fn { params, ret } => {
+            params.iter().any(|p| type_references_name(p, target))
+                || type_references_name(ret, target)
+        }
+        ast::TypeExpr::Tuple { elements } => elements.iter().any(|e| type_references_name(e, target)),
+        _ => false,
+    }
+}
+
+fn lower_type_decl(
+    ctx: &mut LowerCtx,
+    name: &str,
+    ty: &ast::TypeExpr,
+    deriving: &Option<Vec<String>>,
+    visibility: &ast::Visibility,
+    generics: Option<&Vec<ast::GenericParam>>,
+) -> IrTypeDecl {
+    let vis = match visibility {
+        ast::Visibility::Public | ast::Visibility::Mod => IrVisibility::Public,
+        ast::Visibility::Local => IrVisibility::Private,
+    };
+
+    let kind = match ty {
+        ast::TypeExpr::Record { fields } => {
+            let ir_fields = fields.iter().map(|f| {
+                IrFieldDecl {
+                    name: f.name.clone(),
+                    ty: resolve_type_expr(&f.ty),
+                    default: f.default.as_ref().map(|e| lower_expr(ctx, e)),
+                }
+            }).collect();
+            IrTypeDeclKind::Record { fields: ir_fields }
+        }
+        ast::TypeExpr::Variant { cases } => {
+            let is_generic = matches!(generics, Some(gs) if !gs.is_empty());
+            let mut boxed_args: HashSet<(String, usize)> = HashSet::new();
+            let mut boxed_record_fields: HashSet<(String, String)> = HashSet::new();
+
+            let ir_cases = cases.iter().map(|case| {
+                match case {
+                    ast::VariantCase::Unit { name: cname } => {
+                        IrVariantDecl { name: cname.clone(), kind: IrVariantKind::Unit }
+                    }
+                    ast::VariantCase::Tuple { name: cname, fields } => {
+                        // Track which args are recursive (need Box wrapping)
+                        for (i, f) in fields.iter().enumerate() {
+                            if type_references_name(f, name) {
+                                boxed_args.insert((cname.clone(), i));
+                            }
+                        }
+                        let tys = fields.iter().map(|f| resolve_type_expr(f)).collect();
+                        IrVariantDecl { name: cname.clone(), kind: IrVariantKind::Tuple { fields: tys } }
+                    }
+                    ast::VariantCase::Record { name: cname, fields } => {
+                        for (i, f) in fields.iter().enumerate() {
+                            if type_references_name(&f.ty, name) {
+                                boxed_args.insert((cname.clone(), i));
+                                boxed_record_fields.insert((cname.clone(), f.name.clone()));
+                            }
+                        }
+                        let ir_fields = fields.iter().map(|f| {
+                            IrFieldDecl {
+                                name: f.name.clone(),
+                                ty: resolve_type_expr(&f.ty),
+                                default: f.default.as_ref().map(|e| lower_expr(ctx, e)),
+                            }
+                        }).collect();
+                        IrVariantDecl { name: cname.clone(), kind: IrVariantKind::Record { fields: ir_fields } }
+                    }
+                }
+            }).collect();
+            IrTypeDeclKind::Variant { cases: ir_cases, is_generic, boxed_args, boxed_record_fields }
+        }
+        // Simple, Generic, Fn, Tuple → type alias
+        _ => {
+            IrTypeDeclKind::Alias { target: resolve_type_expr(ty) }
+        }
+    };
+
+    IrTypeDecl {
+        name: name.to_string(),
+        kind,
+        deriving: deriving.clone(),
+        generics: generics.cloned(),
+        visibility: vis,
+    }
 }
 
 // ── Expression lowering ─────────────────────────────────────────
