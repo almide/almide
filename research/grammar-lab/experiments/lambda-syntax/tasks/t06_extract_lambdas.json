@@ -1,0 +1,6 @@
+{
+  "name": "extract-lambdas-to-named-functions",
+  "instruction": "Refactor `process_entries` by extracting each inline lambda into a named top-level function:\n1. Extract the filter lambda to `fn is_valid(e: Entry) -> Bool`\n2. Extract the sort_by lambda to `fn sort_key(e: Entry) -> Int`\n3. Extract the map lambda to `fn format_entry(e: Entry) -> String`\nThen rewrite `process_entries` to use these named functions instead of inline lambdas. Keep `count_active` and `total_value` unchanged.",
+  "layer3_hint": "Available: `list.filter(xs, fn(x) => bool)` accepts a named function reference too — pass the function name directly like `list.filter(xs, is_valid)`. Same for `list.sort_by(xs, sort_key)` and `list.map(xs, format_entry)`. `string.to_upper(s)` converts to uppercase. `int.to_string(n)` converts Int to String. `++` concatenates strings.",
+  "test_file": "t06_extract_lambdas_test.almd"
+}

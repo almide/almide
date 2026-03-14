@@ -1,0 +1,6 @@
+{
+  "name": "multi-function-type-change",
+  "instruction": "Add a `priority: Int` field to the `Task` type (after `done`). Then update all functions:\n1. `pending` — also filter out tasks with `priority < 1`, and sort results by `priority` descending (sort_by priority, then reverse)\n2. `done_count` — no logic change, but must still compile\n3. `summary` — change format to `\"${title} [${status}] p${priority}\"` where priority is converted to string\n4. `find_task` — no logic change, but must still compile\n5. `mark_done` — when constructing the new Task record, preserve the `priority` field from the original task",
+  "layer3_hint": "Available: Record type fields: `type Task = { title: String, done: Bool, priority: Int }`. Record construction: `Task { title: t.title, done: true, priority: t.priority }`. `list.filter(xs, fn(x) => bool)`, `list.sort_by(xs, fn(x) => key)`, `list.reverse(xs)`. `int.to_string(n)` converts Int to String. `and` for logical AND. `${}` for string interpolation.",
+  "test_file": "t09_type_change_test.almd"
+}

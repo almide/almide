@@ -10,8 +10,25 @@ import env
 
 // ── Config ──
 
+effect fn resolve_bin(env_var: String, name: String, fallback: String) -> String = {
+  // 1. Environment variable
+  match env.get(env_var) {
+    some(p) => p,
+    none => {
+      // 2. Try `which` to find in PATH
+      let r = process.exec_status("which", [name])
+      if r.code == 0 then {
+        string.trim(r.stdout)
+      } else {
+        // 3. Fallback (relative path)
+        fallback
+      }
+    },
+  }
+}
+
 effect fn get_almide_bin() -> String =
-  env.get("ALMIDE_BIN").unwrap_or("/Users/o6lvl4/workspace/github.com/almide/almide/target/release/almide")
+  resolve_bin("ALMIDE_BIN", "almide", "../../target/release/almide")
 
 // ── Helpers ──
 
@@ -192,7 +209,7 @@ effect fn call_llm(provider: String, model_id: String, system: String, user: Str
 }
 
 effect fn call_claude_code(model_id: String, system: String, user: String) -> Result[String, String] = {
-  let claude_bin = env.get("CLAUDE_BIN").unwrap_or("/Users/o6lvl4/.local/bin/claude")
+  let claude_bin = resolve_bin("CLAUDE_BIN", "claude", "claude")
   let r = process.exec_status(
     claude_bin,
     ["-p", "--model", model_id, "--append-system-prompt", system, "--output-format", "text", "--max-turns", "1", user]
@@ -454,6 +471,29 @@ fn build_row(results: List[Json], model_name: String, variants: List[String]) ->
   row ++ string.join(cells, "")
 }
 
+fn count_passed_task(results: List[Json], model_name: String, variant_name: String, task_name: String) -> (Int, Int) = {
+  let matching = results
+    |> list.filter(fn(r) =>
+      json.get_string(r, "model").unwrap_or("") == model_name
+      and json.get_string(r, "variant").unwrap_or("") == variant_name
+      and json.get_string(r, "task").unwrap_or("") == task_name
+    )
+  let total = list.len(matching)
+  let passed = matching
+    |> list.filter(fn(r) => json.get_bool(r, "tests_passed").unwrap_or(false))
+    |> list.len()
+  (passed, total)
+}
+
+fn build_task_row(results: List[Json], model_name: String, task_name: String, variants: List[String]) -> String = {
+  let cells = list.map(variants, fn(v) => {
+    let (passed, total) = count_passed_task(results, model_name, v, task_name)
+    string.pad_right(format_cell(passed, total), 20, " ")
+  })
+  let row = string.pad_right("  " ++ task_name, 24, " ")
+  row ++ string.join(cells, "")
+}
+
 effect fn print_summary(results: List[Json]) -> Unit = {
   println("=== Summary ===")
   println("")
@@ -466,19 +506,37 @@ effect fn print_summary(results: List[Json]) -> Unit = {
     |> list.map(fn(r) => json.get_string(r, "variant").unwrap_or(""))
     |> list.unique()
 
-  // Header
-  var header = string.pad_right("", 20, " ")
-  for v in variants {
-    header = header ++ string.pad_right(v, 20, " ")
-  }
-  println(header)
+  let tasks = results
+    |> list.map(fn(r) => json.get_string(r, "task").unwrap_or(""))
+    |> list.unique()
 
-  // Rows
   let variant_names = variants
+  let task_names = tasks
+
   for model_name in models {
-    println(build_row(results, model_name, variant_names))
+    // Model header
+    println("Model: ${model_name}")
+
+    // Variant header
+    var header = string.pad_right("", 24, " ")
+    for v in variant_names {
+      header = header ++ string.pad_right(v, 20, " ")
+    }
+    println(header)
+
+    // Total row
+    let total_cells = list.map(variant_names, fn(v) => {
+      let (passed, total) = count_passed(results, model_name, v)
+      string.pad_right(format_cell(passed, total), 20, " ")
+    })
+    println(string.pad_right("  TOTAL", 24, " ") ++ string.join(total_cells, ""))
+
+    // Per-task rows
+    for task_name in task_names {
+      println(build_task_row(results, model_name, task_name, variant_names))
+    }
+    println("")
   }
-  println("")
 }
 
 // ── Result JSON Builder ──

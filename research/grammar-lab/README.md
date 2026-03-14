@@ -7,19 +7,29 @@ A/B test framework for measuring how syntax choices affect LLM modification surv
 ```bash
 cd research/grammar-lab
 
-# Set API keys
-export ANTHROPIC_API_KEY="sk-..."
-export OPENAI_API_KEY="sk-..."
+# Set paths (required if not in PATH)
+export ALMIDE_BIN=/path/to/almide          # or add almide to PATH
+export CLAUDE_BIN=/path/to/claude          # optional, auto-detected via `which`
+
+# Build the runner
+almide build src/mod.almd -o /tmp/grammar-lab-bin
 
 # Run experiment (all models, 5 trials)
-almide run src/mod.almd -- experiments/lambda-syntax/
+/tmp/grammar-lab-bin experiments/lambda-syntax/
 
 # Run with specific model
-almide run src/mod.almd -- experiments/lambda-syntax/ --model claude-sonnet-4-6
+/tmp/grammar-lab-bin experiments/lambda-syntax/ --model claude-sonnet-4-6
 
 # Override trial count
-almide run src/mod.almd -- experiments/lambda-syntax/ --trials 3
+/tmp/grammar-lab-bin experiments/lambda-syntax/ --trials 3
 ```
+
+### Path Resolution
+
+Binary paths are resolved in this order:
+1. Environment variable (`ALMIDE_BIN`, `CLAUDE_BIN`)
+2. `which` lookup (if the binary is in PATH)
+3. Fallback (relative path `../../target/release/almide`)
 
 ## Structure
 
