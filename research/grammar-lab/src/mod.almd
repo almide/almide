@@ -9,7 +9,7 @@ import env
 
 // ── Config ──
 
-let ALMIDE_BIN = "almide"
+let ALMIDE_BIN = "/Users/o6lvl4/workspace/github.com/almide/almide/target/release/almide"
 
 // ── Helpers ──
 
@@ -175,11 +175,26 @@ fn build_user_prompt(source: String, tests: String, instruction: String) -> Stri
 // ── LLM API ──
 
 effect fn call_llm(provider: String, model_id: String, system: String, user: String) -> Result[String, String] = {
-  guard provider == "anthropic" or provider == "openai" else err("Unknown provider: ${provider}")
-  if provider == "anthropic" then {
+  guard provider == "anthropic" or provider == "openai" or provider == "claude-code" else err("Unknown provider: ${provider}")
+  if provider == "claude-code" then {
+    ok(call_claude_code(model_id, system, user))
+  } else if provider == "anthropic" then {
     ok(call_anthropic(model_id, system, user))
   } else {
     ok(call_openai(model_id, system, user))
+  }
+}
+
+effect fn call_claude_code(model_id: String, system: String, user: String) -> Result[String, String] = {
+  let claude_bin = env.get("CLAUDE_BIN").unwrap_or("/Users/o6lvl4/.local/bin/claude")
+  let r = process.exec_status(
+    claude_bin,
+    ["-p", "--model", model_id, "--append-system-prompt", system, "--output-format", "text", "--max-turns", "1", user]
+  )
+  if r.code != 0 then {
+    err("claude-code failed: ${r.stderr}")
+  } else {
+    ok(r.stdout)
   }
 }
 
