@@ -13,7 +13,7 @@ fn ty_to_resolved(ty: &Ty) -> ResolvedType {
         Ty::Option(_) => ResolvedType::Option,
         Ty::Result(_, _) => ResolvedType::Result,
         Ty::Map(_, _) => ResolvedType::Map,
-        Ty::Record { .. } => ResolvedType::Record,
+        Ty::Record { .. } | Ty::OpenRecord { .. } => ResolvedType::Record,
         Ty::Variant { .. } => ResolvedType::Variant,
         Ty::Fn { .. } => ResolvedType::Fn,
         Ty::Tuple(_) => ResolvedType::Tuple,
@@ -104,6 +104,11 @@ impl Checker {
                 }
                 if matches!(name.as_str(), "println" | "eprintln") {
                     return Ty::Fn { params: vec![Ty::String], ret: Box::new(Ty::Unit) };
+                }
+                // Module names (user modules or aliases) are valid as identifiers in member/call context
+                if self.env.user_modules.contains(name) || self.env.module_aliases.contains_key(name)
+                    || crate::stdlib::is_stdlib_module(name) {
+                    return Ty::Unknown;
                 }
                 // Don't emit error for names that might be constructors or forward-declared
                 if !self.env.constructors.contains_key(name) && !name.starts_with(char::is_uppercase) {
@@ -211,9 +216,13 @@ impl Checker {
                                 let actual_ty = self.check_expr(&mut f.value);
                                 if let Some((_, expected_ty, _)) = expected_fields.iter().find(|(n, _, _)| n == &f.name) {
                                     if !expected_ty.compatible(&actual_ty) {
+                                        let hint = Self::hint_with_conversion(
+                                            &format!("In variant constructor {}", cname),
+                                            expected_ty, &actual_ty,
+                                        );
                                         self.push_diagnostic(err(
                                             format!("field '{}' expects {} but got {}", f.name, expected_ty.display(), actual_ty.display()),
-                                            &format!("In variant constructor {}", cname), "variant record construction",
+                                            hint, "variant record construction",
                                         ));
                                     }
                                 } else {
@@ -422,7 +431,12 @@ impl Checker {
 
             ast::Expr::Lambda { params, body, .. } => {
                 self.env.push_scope();
-                let pts: Vec<Ty> = params.iter().map(|p| {
+                // Extract expected param/ret types for bidirectional inference
+                let (expected_params, expected_ret) = match expected {
+                    Some(Ty::Fn { params: ep, ret: er }) => (Some(ep.as_slice()), Some(er.as_ref())),
+                    _ => (None, None),
+                };
+                let pts: Vec<Ty> = params.iter().enumerate().map(|(i, p)| {
                     if let Some(names) = &p.tuple_names {
                         let tuple_ty = p.ty.as_ref().map(|te| self.resolve_type_expr(te)).unwrap_or(Ty::Unknown);
                         let tys = self.resolve_tuple_elements(&tuple_ty, names.len(), format!("fn({}) => ...", p.name));
@@ -431,12 +445,24 @@ impl Checker {
                         }
                         Ty::Tuple(tys)
                     } else {
-                        let ty = p.ty.as_ref().map(|te| self.resolve_type_expr(te)).unwrap_or(Ty::Unknown);
+                        let ty = if let Some(te) = &p.ty {
+                            self.resolve_type_expr(te)
+                        } else if let Some(ep) = expected_params {
+                            let inferred = ep.get(i).cloned().unwrap_or(Ty::Unknown);
+                            // Only use inferred type if it's concrete (not TypeVar/Unknown)
+                            if matches!(inferred, Ty::TypeVar(_) | Ty::Unknown) {
+                                Ty::Unknown
+                            } else {
+                                inferred
+                            }
+                        } else {
+                            Ty::Unknown
+                        };
                         self.env.define_var(&p.name, ty.clone());
                         ty
                     }
                 }).collect();
-                let ret = self.check_expr(body);
+                let ret = self.check_expr_with(body, expected_ret);
                 self.env.pop_scope();
                 Ty::Fn { params: pts, ret: Box::new(ret) }
             }
@@ -446,7 +472,8 @@ impl Checker {
             ast::Expr::Member { object, field, .. } => {
                 // Track module usage for unused import detection
                 if let ast::Expr::Ident { name, .. } = object.as_ref() {
-                    if crate::stdlib::is_stdlib_module(name) || self.env.user_modules.contains(name) {
+                    if crate::stdlib::is_stdlib_module(name) || self.env.user_modules.contains(name)
+                        || self.env.module_aliases.contains_key(name) {
                         self.env.used_modules.insert(name.clone());
                     }
                 }

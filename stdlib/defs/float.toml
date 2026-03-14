@@ -75,3 +75,23 @@ params = [{ name = "n", type = "Float" }, { name = "lo", type = "Float" }, { nam
 return = "Float"
 rust = "almide_rt_float_clamp({n}, {lo}, {hi})"
 ts = "__almd_float.clamp({n}, {lo}, {hi})"
+
+[sign]
+params = [{ name = "n", type = "Float" }]
+return = "Float"
+rust = "almide_rt_float_sign({n})"
+ts = "Math.sign({n})"
+
+["is_nan?"]
+params = [{ name = "n", type = "Float" }]
+return = "Bool"
+rust = "({n}).is_nan()"
+ts = "Number.isNaN({n})"
+aliases = ["is_nan_hdlm_qm_"]
+
+["is_infinite?"]
+params = [{ name = "n", type = "Float" }]
+return = "Bool"
+rust = "({n}).is_infinite()"
+ts = "!Number.isFinite({n}) && !Number.isNaN({n})"
+aliases = ["is_infinite_hdlm_qm_"]

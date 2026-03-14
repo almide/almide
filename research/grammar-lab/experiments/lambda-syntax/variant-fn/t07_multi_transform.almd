@@ -1,0 +1,17 @@
+type Order = { customer: String, items: List[String], total: Int, shipped: Bool }
+
+fn revenue(orders: List[Order]) -> Int =
+  orders
+    |> list.filter(fn(o) => o.shipped)
+    |> list.fold(0, fn(acc, o) => acc + o.total)
+
+fn customer_list(orders: List[Order]) -> List[String] =
+  orders
+    |> list.map(fn(o) => o.customer)
+    |> list.unique()
+    |> list.sort()
+
+fn largest_order(orders: List[Order]) -> Option[Order] =
+  orders
+    |> list.sort_by(fn(o) => o.total)
+    |> list.last()

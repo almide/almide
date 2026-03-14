@@ -111,6 +111,7 @@ const MOD_STRING_TS: &str = r#"const __almd_string = {
   contains(s: string, sub: string): boolean { return s.includes(sub); },
   starts_with_hdlm_qm_(s: string, prefix: string): boolean { return s.startsWith(prefix); },
   ends_with_hdlm_qm_(s: string, suffix: string): boolean { return s.endsWith(suffix); },
+  capitalize(s: string): string { return s.length === 0 ? "" : s[0].toUpperCase() + s.slice(1); },
   to_upper(s: string): string { return s.toUpperCase(); },
   to_lower(s: string): string { return s.toLowerCase(); },
   to_int(s: string): number { const n = parseInt(s, 10); if (isNaN(n)) throw new Error("invalid integer: " + s); return n; },
@@ -152,6 +153,7 @@ const MOD_STRING_JS: &str = r#"const __almd_string = {
   contains(s, sub) { return s.includes(sub); },
   starts_with_hdlm_qm_(s, prefix) { return s.startsWith(prefix); },
   ends_with_hdlm_qm_(s, suffix) { return s.endsWith(suffix); },
+  capitalize(s) { return s.length === 0 ? "" : s[0].toUpperCase() + s.slice(1); },
   to_upper(s) { return s.toUpperCase(); },
   to_lower(s) { return s.toLowerCase(); },
   to_int(s) { const n = parseInt(s, 10); if (isNaN(n)) throw new Error("invalid integer: " + s); return n; },
@@ -237,6 +239,8 @@ const MOD_LIST_TS: &str = r#"const __almd_list = {
   windows<T>(xs: T[], n: number): T[][] { if (n <= 0 || n > xs.length) return []; const r: T[][] = []; for (let i = 0; i <= xs.length - n; i++) r.push(xs.slice(i, i + n)); return r; },
   dedup<T>(xs: T[]): T[] { const r: T[] = []; for (const x of xs) { if (r.length === 0 || r[r.length - 1] !== x) r.push(x); } return r; },
   zip_with<A, B, C>(a: A[], b: B[], f: (x: A, y: B) => C): C[] { return a.slice(0, Math.min(a.length, b.length)).map((x, i) => f(x, b[i])); },
+  sum_float(xs: number[]): number { return xs.reduce((a, b) => a + b, 0); },
+  product_float(xs: number[]): number { return xs.reduce((a, b) => a * b, 1); },
 };
 "#;
 
@@ -294,6 +298,8 @@ const MOD_LIST_JS: &str = r#"const __almd_list = {
   windows(xs, n) { if (n <= 0 || n > xs.length) return []; const r = []; for (let i = 0; i <= xs.length - n; i++) r.push(xs.slice(i, i + n)); return r; },
   dedup(xs) { const r = []; for (const x of xs) { if (r.length === 0 || r[r.length - 1] !== x) r.push(x); } return r; },
   zip_with(a, b, f) { return a.slice(0, Math.min(a.length, b.length)).map((x, i) => f(x, b[i])); },
+  sum_float(xs) { return xs.reduce((a, b) => a + b, 0); },
+  product_float(xs) { return xs.reduce((a, b) => a * b, 1); },
 };
 "#;
 
@@ -364,6 +370,7 @@ const MOD_INT_TS: &str = r#"const __almd_int = {
   abs(n: number): number { return Math.abs(n); },
   min(a: number, b: number): number { return Math.min(a, b); },
   max(a: number, b: number): number { return Math.max(a, b); },
+  to_float(n: number): number { return n; },
 };
 "#;
 
@@ -388,6 +395,7 @@ const MOD_INT_JS: &str = r#"const __almd_int = {
   abs(n) { return Math.abs(n); },
   min(a, b) { return Math.min(a, b); },
   max(a, b) { return Math.max(a, b); },
+  to_float(n) { return n; },
 };
 "#;
 
@@ -469,6 +477,20 @@ const MOD_JSON_TS: &str = r#"const __almd_json = {
   get_float(j: any, key: string): number | null { const v = __almd_json.get(j, key); return typeof v === "number" ? v : null; },
   from_float(n: number): any { return n; },
   stringify_pretty(j: any): string { return JSON.stringify(j, null, 2); },
+  object(entries: [string, any][]): any { const o: any = {}; for (const [k, v] of entries) { o[k] = v; } return o; },
+  as_float(j: any): number | null { return typeof j === "number" ? j : null; },
+  as_bool(j: any): boolean | null { return typeof j === "boolean" ? j : null; },
+  as_array(j: any): any[] | null { return Array.isArray(j) ? j : null; },
+  path_root(): any { return { type: "root" }; },
+  path_field(parent: any, name: string): any { return { type: "field", parent, name }; },
+  path_index(parent: any, i: number): any { return { type: "index", parent, i }; },
+  _path_segs(p: any): any[] { const s: any[] = []; let c = p; while (c.type !== "root") { s.push(c); c = c.parent; } s.reverse(); return s; },
+  get_path(j: any, path: any): any | null { const segs = __almd_json._path_segs(path); let cur = j; for (const seg of segs) { if (seg.type === "field") { if (cur == null || typeof cur !== "object" || Array.isArray(cur)) return null; cur = cur[seg.name]; if (cur === undefined) return null; } else { if (!Array.isArray(cur) || seg.i < 0 || seg.i >= cur.length) return null; cur = cur[seg.i]; } } return cur; },
+  set_path(j: any, path: any, value: any): any { const segs = __almd_json._path_segs(path); if (segs.length === 0) return value; return __almd_json._set_at(j, segs, 0, value, false); },
+  upsert_path(j: any, path: any, value: any): any { const segs = __almd_json._path_segs(path); if (segs.length === 0) return value; return __almd_json._set_at(j, segs, 0, value, true); },
+  remove_path(j: any, path: any): any { const segs = __almd_json._path_segs(path); if (segs.length === 0) return null; return __almd_json._remove_at(j, segs, 0); },
+  _set_at(j: any, segs: any[], idx: number, value: any, upsert: boolean): any { if (idx >= segs.length) return value; const seg = segs[idx]; if (seg.type === "field") { let m = (j && typeof j === "object" && !Array.isArray(j)) ? { ...j } : (upsert ? {} : (() => { throw new Error(`path error: expected object at field "${seg.name}"`); })()); if (idx + 1 === segs.length) { if (!upsert && !(seg.name in m)) throw new Error(`path error: field "${seg.name}" does not exist`); m[seg.name] = value; } else { m[seg.name] = __almd_json._set_at(m[seg.name] ?? null, segs, idx + 1, value, upsert); } return m; } else { if (!Array.isArray(j)) throw new Error(`path error: expected array at index ${seg.i}`); if (seg.i < 0 || seg.i >= j.length) throw new Error(`path error: index ${seg.i} out of bounds`); const a = [...j]; if (idx + 1 === segs.length) { a[seg.i] = value; } else { a[seg.i] = __almd_json._set_at(a[seg.i], segs, idx + 1, value, upsert); } return a; } },
+  _remove_at(j: any, segs: any[], idx: number): any { if (idx >= segs.length) return j; const seg = segs[idx]; if (seg.type === "field") { if (!j || typeof j !== "object" || Array.isArray(j)) return j; const m = { ...j }; if (idx + 1 === segs.length) { delete m[seg.name]; } else if (seg.name in m) { m[seg.name] = __almd_json._remove_at(m[seg.name], segs, idx + 1); } return m; } else { if (!Array.isArray(j) || seg.i < 0 || seg.i >= j.length) return j; const a = [...j]; if (idx + 1 === segs.length) { a.splice(seg.i, 1); } else { a[seg.i] = __almd_json._remove_at(a[seg.i], segs, idx + 1); } return a; } },
 };
 "#;
 
@@ -492,6 +514,20 @@ const MOD_JSON_JS: &str = r#"const __almd_json = {
   get_float(j, key) { const v = __almd_json.get(j, key); return typeof v === "number" ? v : null; },
   from_float(n) { return n; },
   stringify_pretty(j) { return JSON.stringify(j, null, 2); },
+  object(entries) { const o = {}; for (const [k, v] of entries) { o[k] = v; } return o; },
+  as_float(j) { return typeof j === "number" ? j : null; },
+  as_bool(j) { return typeof j === "boolean" ? j : null; },
+  as_array(j) { return Array.isArray(j) ? j : null; },
+  path_root() { return { type: "root" }; },
+  path_field(parent, name) { return { type: "field", parent, name }; },
+  path_index(parent, i) { return { type: "index", parent, i }; },
+  _path_segs(p) { const s = []; let c = p; while (c.type !== "root") { s.push(c); c = c.parent; } s.reverse(); return s; },
+  get_path(j, path) { const segs = __almd_json._path_segs(path); let cur = j; for (const seg of segs) { if (seg.type === "field") { if (cur == null || typeof cur !== "object" || Array.isArray(cur)) return null; cur = cur[seg.name]; if (cur === undefined) return null; } else { if (!Array.isArray(cur) || seg.i < 0 || seg.i >= cur.length) return null; cur = cur[seg.i]; } } return cur; },
+  set_path(j, path, value) { const segs = __almd_json._path_segs(path); if (segs.length === 0) return value; return __almd_json._set_at(j, segs, 0, value, false); },
+  upsert_path(j, path, value) { const segs = __almd_json._path_segs(path); if (segs.length === 0) return value; return __almd_json._set_at(j, segs, 0, value, true); },
+  remove_path(j, path) { const segs = __almd_json._path_segs(path); if (segs.length === 0) return null; return __almd_json._remove_at(j, segs, 0); },
+  _set_at(j, segs, idx, value, upsert) { if (idx >= segs.length) return value; const seg = segs[idx]; if (seg.type === "field") { let m = (j && typeof j === "object" && !Array.isArray(j)) ? { ...j } : (upsert ? {} : (() => { throw new Error(`path error: expected object at field "${seg.name}"`); })()); if (idx + 1 === segs.length) { if (!upsert && !(seg.name in m)) throw new Error(`path error: field "${seg.name}" does not exist`); m[seg.name] = value; } else { m[seg.name] = __almd_json._set_at(m[seg.name] ?? null, segs, idx + 1, value, upsert); } return m; } else { if (!Array.isArray(j)) throw new Error(`path error: expected array at index ${seg.i}`); if (seg.i < 0 || seg.i >= j.length) throw new Error(`path error: index ${seg.i} out of bounds`); const a = [...j]; if (idx + 1 === segs.length) { a[seg.i] = value; } else { a[seg.i] = __almd_json._set_at(a[seg.i], segs, idx + 1, value, upsert); } return a; } },
+  _remove_at(j, segs, idx) { if (idx >= segs.length) return j; const seg = segs[idx]; if (seg.type === "field") { if (!j || typeof j !== "object" || Array.isArray(j)) return j; const m = { ...j }; if (idx + 1 === segs.length) { delete m[seg.name]; } else if (seg.name in m) { m[seg.name] = __almd_json._remove_at(m[seg.name], segs, idx + 1); } return m; } else { if (!Array.isArray(j) || seg.i < 0 || seg.i >= j.length) return j; const a = [...j]; if (idx + 1 === segs.length) { a.splice(seg.i, 1); } else { a[seg.i] = __almd_json._remove_at(a[seg.i], segs, idx + 1); } return a; } },
 };
 "#;
 
@@ -560,6 +596,9 @@ const MOD_MATH_TS: &str = r#"const __almd_math = {
   log(x: number): number { return Math.log(x); },
   exp(x: number): number { return Math.exp(x); },
   sqrt(x: number): number { return Math.sqrt(x); },
+  factorial(n: number): number { let r = 1; for (let i = 2; i <= n; i++) r *= i; return r; },
+  choose(n: number, k: number): number { if (k < 0 || k > n) return 0; if (k === 0 || k === n) return 1; k = Math.min(k, n - k); let r = 1; for (let i = 0; i < k; i++) { r = r * (n - i) / (i + 1); } return Math.round(r); },
+  log_gamma(x: number): number { if (x <= 0) return Infinity; if (x < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * x)) - __almd_math.log_gamma(1 - x); x -= 1; const c = [76.18009172947146, -86.50532032941677, 24.01409824083091, -1.231739572450155, 0.1208650973866179e-2, -0.5395239384953e-5]; let sum = 1.000000000190015; let y = x; for (const ci of c) { y += 1; sum += ci / y; } const t = x + 5.5; return -t + (x + 0.5) * Math.log(t) + Math.log(2.5066282746310005 * sum / (x + 1)); },
 };
 "#;
 
@@ -576,6 +615,9 @@ const MOD_MATH_JS: &str = r#"const __almd_math = {
   log(x) { return Math.log(x); },
   exp(x) { return Math.exp(x); },
   sqrt(x) { return Math.sqrt(x); },
+  factorial(n) { let r = 1; for (let i = 2; i <= n; i++) r *= i; return r; },
+  choose(n, k) { if (k < 0 || k > n) return 0; if (k === 0 || k === n) return 1; k = Math.min(k, n - k); let r = 1; for (let i = 0; i < k; i++) { r = r * (n - i) / (i + 1); } return Math.round(r); },
+  log_gamma(x) { if (x <= 0) return Infinity; if (x < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * x)) - __almd_math.log_gamma(1 - x); x -= 1; const c = [76.18009172947146, -86.50532032941677, 24.01409824083091, -1.231739572450155, 0.1208650973866179e-2, -0.5395239384953e-5]; let sum = 1.000000000190015; let y = x; for (const ci of c) { y += 1; sum += ci / y; } const t = x + 5.5; return -t + (x + 0.5) * Math.log(t) + Math.log(2.5066282746310005 * sum / (x + 1)); },
 };
 "#;
 
@@ -821,6 +863,27 @@ function __assert_throws(fn, expectedMsg) {
 }
 "#;
 
+// ──────────────────────────────── result ────────────────────────────────
+
+// Result erasure: ok(x) → x, err(e) → throw. These functions only see ok values
+// at runtime. Functions like unwrap_or/is_ok? are identity/constant in TS because
+// err values are already thrown before reaching these calls.
+const MOD_RESULT_TS: &str = r#"function __almd_result_unwrap_or<A>(v: A, _d: A): A { return v; }
+function __almd_result_unwrap_or_else<A>(v: A, _f: (e: any) => A): A { return v; }
+function __almd_result_is_ok(_v: any): boolean { return true; }
+function __almd_result_is_err(_v: any): boolean { return false; }
+function __almd_result_to_option<A>(v: A): A | null { return v; }
+function __almd_result_to_err_option(_v: any): any { return null; }
+"#;
+
+const MOD_RESULT_JS: &str = r#"function __almd_result_unwrap_or(v, _d) { return v; }
+function __almd_result_unwrap_or_else(v, _f) { return v; }
+function __almd_result_is_ok(_v) { return true; }
+function __almd_result_is_err(_v) { return false; }
+function __almd_result_to_option(v) { return v; }
+function __almd_result_to_err_option(_v) { return null; }
+"#;
+
 // ──────────────────────────────── Registry ────────────────────────────────
 
 /// A runtime module with TS (Deno) and JS (Node.js) source variants.
@@ -848,6 +911,7 @@ pub static ALL_MODULES: &[RuntimeModule] = &[
     RuntimeModule { name: "io",      ts_source: MOD_IO_TS,      js_source: MOD_IO_JS },
     RuntimeModule { name: "time",    ts_source: MOD_TIME_TS,    js_source: MOD_TIME_JS },
     RuntimeModule { name: "http",    ts_source: MOD_HTTP_TS,    js_source: MOD_HTTP_JS },
+    RuntimeModule { name: "result",  ts_source: MOD_RESULT_TS,  js_source: MOD_RESULT_JS },
 ];
 
 /// Compose the full runtime string (backwards compatible with --target ts/js).

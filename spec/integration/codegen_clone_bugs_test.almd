@@ -1,0 +1,68 @@
+// codegen_clone_bugs_test — Ownership bugs: field access + spread, option matched twice
+
+// ── Bug 1: Record field access followed by spread ──
+
+test "record field access then spread" {
+  let r = { name: "Alice", age: 30 }
+  let n = r.name
+  let r2 = { ...r, age: 31 }
+  assert_eq(n, "Alice")
+  assert_eq(r2.name, "Alice")
+  assert_eq(r2.age, 31)
+}
+
+test "record field access multiple fields then spread" {
+  let r = { first: "Bob", last: "Smith", score: 100 }
+  let f = r.first
+  let l = r.last
+  let r2 = { ...r, score: 200 }
+  assert_eq(f, "Bob")
+  assert_eq(l, "Smith")
+  assert_eq(r2.first, "Bob")
+  assert_eq(r2.last, "Smith")
+  assert_eq(r2.score, 200)
+}
+
+// ── Bug 2: Same Option matched twice ──
+
+test "option matched twice some" {
+  let x: Option[String] = some("hello")
+  let a = match x {
+    some(s) => s,
+    none => "none",
+  }
+  let b = match x {
+    some(s) => s,
+    none => "gone",
+  }
+  assert_eq(a, "hello")
+  assert_eq(b, "hello")
+}
+
+test "option matched twice none" {
+  let x: Option[String] = none
+  let a = match x {
+    some(s) => s,
+    none => "first",
+  }
+  let b = match x {
+    some(s) => s,
+    none => "second",
+  }
+  assert_eq(a, "first")
+  assert_eq(b, "second")
+}
+
+test "option of int matched twice" {
+  let x: Option[Int] = some(42)
+  let a = match x {
+    some(n) => n,
+    none => 0,
+  }
+  let b = match x {
+    some(n) => n + 1,
+    none => -1,
+  }
+  assert_eq(a, 42)
+  assert_eq(b, 43)
+}

@@ -1,0 +1,54 @@
+test "pending filters and sorts by priority" {
+  let tasks = [
+    Task { title: "A", done: false, priority: 2 },
+    Task { title: "B", done: true, priority: 3 },
+    Task { title: "C", done: false, priority: 0 },
+    Task { title: "D", done: false, priority: 5 },
+    Task { title: "E", done: false, priority: 1 },
+  ]
+  let result = pending(tasks)
+  let titles = list.map(result, fn(t) => t.title)
+  assert_eq(titles, ["D", "A", "E"])
+}
+
+test "pending empty" {
+  let tasks: List[Task] = []
+  assert_eq(pending(tasks), [])
+}
+
+test "done_count with priority" {
+  let tasks = [
+    Task { title: "A", done: true, priority: 1 },
+    Task { title: "B", done: false, priority: 2 },
+    Task { title: "C", done: true, priority: 3 },
+  ]
+  assert_eq(done_count(tasks), 2)
+}
+
+test "summary includes priority" {
+  let tasks = [
+    Task { title: "Fix bug", done: true, priority: 3 },
+    Task { title: "Add test", done: false, priority: 1 },
+  ]
+  assert_eq(summary(tasks), ["Fix bug [done] p3", "Add test [todo] p1"])
+}
+
+test "find_task with priority" {
+  let tasks = [
+    Task { title: "X", done: false, priority: 5 },
+  ]
+  assert_eq(find_task(tasks, "X"), some(Task { title: "X", done: false, priority: 5 }))
+  assert_eq(find_task(tasks, "Y"), none)
+}
+
+test "mark_done preserves priority" {
+  let tasks = [
+    Task { title: "A", done: false, priority: 3 },
+    Task { title: "B", done: false, priority: 7 },
+  ]
+  let result = mark_done(tasks, "A")
+  assert_eq(result, [
+    Task { title: "A", done: true, priority: 3 },
+    Task { title: "B", done: false, priority: 7 },
+  ])
+}

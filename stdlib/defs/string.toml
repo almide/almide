@@ -63,6 +63,12 @@ return = "List[Int]"
 rust = "almide_rt_string_to_bytes(&*{s})"
 ts = "__almd_string.to_bytes({s})"
 
+[capitalize]
+params = [{ name = "s", type = "String" }]
+return = "String"
+rust = "almide_rt_string_capitalize(&*{s})"
+ts = "__almd_string.capitalize({s})"
+
 [to_upper]
 params = [{ name = "s", type = "String" }]
 return = "String"

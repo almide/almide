@@ -1,0 +1,66 @@
+test "grade_report found" {
+  let students = [
+    Student { name: "Alice", score: 92, grade: "A" },
+    Student { name: "Bob", score: 75, grade: "B" },
+  ]
+  assert_eq(grade_report(students, "Alice"), "Alice: A (92)")
+}
+
+test "grade_report not found" {
+  let students = [
+    Student { name: "Alice", score: 92, grade: "A" },
+  ]
+  assert_eq(grade_report(students, "Zara"), "not found")
+}
+
+test "grade_report empty list" {
+  let students: List[Student] = []
+  assert_eq(grade_report(students, "Anyone"), "not found")
+}
+
+test "top_per_grade finds top" {
+  let students = [
+    Student { name: "Alice", score: 92, grade: "A" },
+    Student { name: "Bob", score: 85, grade: "B" },
+    Student { name: "Carol", score: 98, grade: "A" },
+    Student { name: "Dave", score: 78, grade: "B" },
+  ]
+  assert_eq(top_per_grade(students, "A"), some("Carol"))
+  assert_eq(top_per_grade(students, "B"), some("Bob"))
+}
+
+test "top_per_grade no match" {
+  let students = [
+    Student { name: "Alice", score: 92, grade: "A" },
+  ]
+  assert_eq(top_per_grade(students, "C"), none)
+}
+
+test "top_per_grade empty list" {
+  let students: List[Student] = []
+  assert_eq(top_per_grade(students, "A"), none)
+}
+
+test "top_scorer unchanged" {
+  let students = [
+    Student { name: "Alice", score: 80, grade: "B" },
+    Student { name: "Bob", score: 95, grade: "A" },
+  ]
+  assert_eq(top_scorer(students), "Bob")
+}
+
+test "find_by_name unchanged" {
+  let students = [
+    Student { name: "Alice", score: 80, grade: "B" },
+  ]
+  assert_eq(find_by_name(students, "Alice"), some(Student { name: "Alice", score: 80, grade: "B" }))
+  assert_eq(find_by_name(students, "Bob"), none)
+}
+
+test "passing_names unchanged" {
+  let students = [
+    Student { name: "Alice", score: 80, grade: "B" },
+    Student { name: "Bob", score: 50, grade: "F" },
+  ]
+  assert_eq(passing_names(students), ["Alice"])
+}

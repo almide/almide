@@ -69,3 +69,57 @@ params = [{ name = "x", type = "Float" }]
 return = "Float"
 rust = "almide_rt_math_sqrt({x})"
 ts = "__almd_math.sqrt({x})"
+
+[log10]
+params = [{ name = "x", type = "Float" }]
+return = "Float"
+rust = "almide_rt_math_log10({x})"
+ts = "Math.log10({x})"
+
+[log2]
+params = [{ name = "x", type = "Float" }]
+return = "Float"
+rust = "almide_rt_math_log2({x})"
+ts = "Math.log2({x})"
+
+[sign]
+params = [{ name = "n", type = "Int" }]
+return = "Int"
+rust = "almide_rt_math_sign({n})"
+ts = "Math.sign({n})"
+
+[fmin]
+params = [{ name = "a", type = "Float" }, { name = "b", type = "Float" }]
+return = "Float"
+rust = "almide_rt_math_fmin({a}, {b})"
+ts = "Math.min({a}, {b})"
+
+[fmax]
+params = [{ name = "a", type = "Float" }, { name = "b", type = "Float" }]
+return = "Float"
+rust = "almide_rt_math_fmax({a}, {b})"
+ts = "Math.max({a}, {b})"
+
+[fpow]
+params = [{ name = "base", type = "Float" }, { name = "exp", type = "Float" }]
+return = "Float"
+rust = "almide_rt_math_fpow({base}, {exp})"
+ts = "Math.pow({base}, {exp})"
+
+[factorial]
+params = [{ name = "n", type = "Int" }]
+return = "Int"
+rust = "almide_rt_math_factorial({n})"
+ts = "__almd_math.factorial({n})"
+
+[choose]
+params = [{ name = "n", type = "Int" }, { name = "k", type = "Int" }]
+return = "Int"
+rust = "almide_rt_math_choose({n}, {k})"
+ts = "__almd_math.choose({n}, {k})"
+
+[log_gamma]
+params = [{ name = "x", type = "Float" }]
+return = "Float"
+rust = "almide_rt_math_log_gamma({x})"
+ts = "__almd_math.log_gamma({x})"

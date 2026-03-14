@@ -1,0 +1,6 @@
+{
+  "name": "change-sort-key",
+  "instruction": "Change `sort_by_price` to sort by `name` (alphabetical) instead of `price`. Rename the function to `sort_by_name`.",
+  "layer3_hint": "Available: `list.sort_by(xs, fn(x) => key)` sorts by the key returned by the function",
+  "test_file": "t03_change_sort_key_test.almd"
+}

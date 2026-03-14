@@ -1,0 +1,58 @@
+test "int.to_float" {
+  assert_eq(int.to_float(42), 42.0)
+  assert_eq(int.to_float(-1), -1.0)
+}
+
+test "math.log10" {
+  assert_eq(float.round(math.log10(100.0)), 2.0)
+}
+
+test "math.log2" {
+  assert_eq(float.round(math.log2(8.0)), 3.0)
+}
+
+test "math.sign" {
+  assert_eq(math.sign(5), 1)
+  assert_eq(math.sign(-3), -1)
+  assert_eq(math.sign(0), 0)
+}
+
+test "math.factorial" {
+  assert_eq(math.factorial(0), 1)
+  assert_eq(math.factorial(1), 1)
+  assert_eq(math.factorial(5), 120)
+  assert_eq(math.factorial(10), 3628800)
+}
+
+test "math.choose" {
+  assert_eq(math.choose(5, 2), 10)
+  assert_eq(math.choose(10, 3), 120)
+  assert_eq(math.choose(0, 0), 1)
+  assert_eq(math.choose(5, 0), 1)
+  assert_eq(math.choose(5, 5), 1)
+}
+
+test "list.sum_float" {
+  assert_eq(list.sum_float([1.0, 2.0, 3.0]), 6.0)
+  assert_eq(list.sum_float([]), 0.0)
+}
+
+test "list.product_float" {
+  assert_eq(list.product_float([2.0, 3.0, 4.0]), 24.0)
+  assert_eq(list.product_float([]), 1.0)
+}
+
+test "float.sign" {
+  assert_eq(float.sign(3.14), 1.0)
+  assert_eq(float.sign(-2.0), -1.0)
+  assert_eq(float.sign(0.0), 0.0)
+}
+
+test "math.fpow" {
+  assert_eq(math.fpow(2.0, 10.0), 1024.0)
+}
+
+test "math.fmin fmax" {
+  assert_eq(math.fmin(1.0, 2.0), 1.0)
+  assert_eq(math.fmax(1.0, 2.0), 2.0)
+}

@@ -75,6 +75,15 @@ fn almide_rt_string_to_lower(s: &str) -> String {
 }
 
 #[inline]
+fn almide_rt_string_capitalize(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        None => String::new(),
+        Some(f) => f.to_uppercase().to_string() + c.as_str(),
+    }
+}
+
+#[inline]
 fn almide_rt_string_to_int(s: &str) -> Result<i64, String> {
     s.parse::<i64>().map_err(|e| e.to_string())
 }
@@ -306,6 +315,9 @@ fn almide_rt_int_clamp(n: i64, lo: i64, hi: i64) -> i64 {
     n.max(lo).min(hi)
 }
 
+#[inline(always)]
+fn almide_rt_int_to_float(n: i64) -> f64 { n as f64 }
+
 // ---- float ----
 // Thin arithmetic wrappers — always inline
 
@@ -375,6 +387,9 @@ fn almide_rt_float_to_fixed(n: f64, decimals: i64) -> String {
     format!("{:.prec$}", n, prec = decimals as usize)
 }
 
+#[inline(always)]
+fn almide_rt_float_sign(n: f64) -> f64 { if n > 0.0 { 1.0 } else if n < 0.0 { -1.0 } else { 0.0 } }
+
 // ---- math ----
 // Pure arithmetic — always inline
 
@@ -436,4 +451,62 @@ fn almide_rt_math_exp(x: f64) -> f64 {
 #[inline(always)]
 fn almide_rt_math_sqrt(x: f64) -> f64 {
     x.sqrt()
+}
+
+#[inline(always)]
+fn almide_rt_math_log10(x: f64) -> f64 { x.log10() }
+
+#[inline(always)]
+fn almide_rt_math_log2(x: f64) -> f64 { x.log2() }
+
+#[inline(always)]
+fn almide_rt_math_sign(n: i64) -> i64 { if n > 0 { 1 } else if n < 0 { -1 } else { 0 } }
+
+#[inline(always)]
+fn almide_rt_math_fmin(a: f64, b: f64) -> f64 { a.min(b) }
+
+#[inline(always)]
+fn almide_rt_math_fmax(a: f64, b: f64) -> f64 { a.max(b) }
+
+#[inline(always)]
+fn almide_rt_math_fpow(base: f64, exp: f64) -> f64 { base.powf(exp) }
+
+fn almide_rt_math_factorial(n: i64) -> i64 {
+    if n <= 1 { 1 } else { (2..=n).product() }
+}
+
+fn almide_rt_math_choose(n: i64, k: i64) -> i64 {
+    if k < 0 || k > n { return 0; }
+    if k == 0 || k == n { return 1; }
+    let k = k.min(n - k) as u64;
+    let mut result: i64 = 1;
+    for i in 0..k {
+        result = result * (n - i as i64) / (i as i64 + 1);
+    }
+    result
+}
+
+fn almide_rt_math_log_gamma(x: f64) -> f64 {
+    // Stirling's approximation for log(Gamma(x))
+    if x <= 0.0 { return f64::INFINITY; }
+    if x < 0.5 {
+        return (std::f64::consts::PI / (std::f64::consts::PI * x).sin()).ln() - almide_rt_math_log_gamma(1.0 - x);
+    }
+    let x = x - 1.0;
+    let coefficients = [
+        76.18009172947146,
+        -86.50532032941677,
+        24.01409824083091,
+        -1.231739572450155,
+        0.1208650973866179e-2,
+        -0.5395239384953e-5,
+    ];
+    let mut sum = 1.000000000190015_f64;
+    let mut y = x;
+    for &c in &coefficients {
+        y += 1.0;
+        sum += c / y;
+    }
+    let t = x + 5.5;
+    -t + (x + 0.5) * t.ln() + (2.5066282746310005_f64 * sum / (x + 1.0)).ln()
 }

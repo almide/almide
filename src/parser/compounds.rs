@@ -297,18 +297,25 @@ impl Parser {
         let mut final_expr: Option<Box<Expr>> = None;
 
         loop {
-            if self.check(TokenType::Let) || self.check(TokenType::Var) {
-                let stmt = self.parse_stmt()?;
-                stmts.push(stmt);
+            let stmt = self.parse_stmt()?;
+            self.skip_newlines();
+            if self.check(TokenType::Semicolon) {
+                self.advance();
                 self.skip_newlines();
-                if self.check(TokenType::Semicolon) {
-                    self.advance();
-                    self.skip_newlines();
+            }
+
+            // Check if we've reached the end of the braceless block
+            // (next token is a top-level declaration keyword or EOF)
+            if self.is_at_braceless_block_end() {
+                // Last item — if it's an expression statement, promote to final expr
+                if let Stmt::Expr { expr, .. } = stmt {
+                    final_expr = Some(Box::new(expr));
+                } else {
+                    stmts.push(stmt);
                 }
-            } else {
-                let expr = self.parse_expr()?;
-                final_expr = Some(Box::new(expr));
                 break;
+            } else {
+                stmts.push(stmt);
             }
         }
 
@@ -318,6 +325,18 @@ impl Parser {
             span,
             resolved_type: None,
         })
+    }
+
+    /// Check if the current token indicates the end of a braceless function body.
+    fn is_at_braceless_block_end(&self) -> bool {
+        matches!(self.current().token_type,
+            TokenType::EOF
+            | TokenType::Fn | TokenType::Effect | TokenType::Async
+            | TokenType::Pub | TokenType::Local | TokenType::Mod
+            | TokenType::Type | TokenType::Trait | TokenType::Impl
+            | TokenType::Test | TokenType::Strict | TokenType::At
+            | TokenType::RBrace
+        )
     }
 
     pub(crate) fn parse_list_expr(&mut self) -> Result<Expr, String> {

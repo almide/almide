@@ -340,7 +340,9 @@ impl Parser {
         let body = if self.check(TokenType::Eq) {
             self.advance();
             self.skip_newlines();
-            let mut body = if self.check(TokenType::Let) || self.check(TokenType::Var) {
+            let mut body = if self.check(TokenType::Let) || self.check(TokenType::Var)
+                || self.check(TokenType::Guard)
+            {
                 self.parse_braceless_block()?
             } else {
                 self.parse_expr()?

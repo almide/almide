@@ -1,4 +1,6 @@
-# LLM Developer Experience [ON HOLD]
+# LLM Developer Experience [DONE / MERGED]
+
+> UFCS: done. Remaining items (`almide init` config) merged into [LLM Integration](../active/llm-integration.md).
 
 ### `almide init` CLAUDE.md generation
 

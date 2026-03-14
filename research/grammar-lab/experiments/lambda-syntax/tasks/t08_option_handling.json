@@ -1,0 +1,6 @@
+{
+  "name": "option-handling",
+  "instruction": "Add a new function `grade_report(students: List[Student], target: String) -> String` that:\n1. Uses `find_by_name` to look up the student\n2. If found, returns `\"${name}: ${grade} (${score})\"` where score is converted to string\n3. If not found, returns `\"not found\"`\nAlso add a new function `top_per_grade(students: List[Student], target_grade: String) -> Option[String]` that:\n1. Filters students to those matching `target_grade`\n2. Sorts by score descending (sort_by score, then reverse)\n3. Returns `some(name)` for the first student, or `none` if no students match\nKeep all existing functions unchanged.",
+  "layer3_hint": "Available: `list.find(xs, fn(x) => bool)` returns `Option[A]`. Use `match` on Option: `match opt { some(x) => ..., none => ... }`. `list.filter(xs, fn(x) => bool)` filters. `list.sort_by(xs, fn(x) => key)` sorts ascending. `list.reverse(xs)` reverses. `list.first(xs)` returns `Option[A]`. `list.map(xs, fn(x) => y)` transforms. `int.to_string(n)` converts Int to String. `${}` for string interpolation.",
+  "test_file": "t08_option_handling_test.almd"
+}

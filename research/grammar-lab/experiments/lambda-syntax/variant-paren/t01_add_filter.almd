@@ -1,0 +1,8 @@
+fn big_numbers(xs: List[Int]) -> List[Int] =
+  xs |> list.filter((x) => x > 2)
+
+fn double_all(xs: List[Int]) -> List[Int] =
+  xs |> list.map((x) => x * 2)
+
+fn total(xs: List[Int]) -> Int =
+  xs |> list.fold(0, (acc, x) => acc + x)

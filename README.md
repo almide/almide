@@ -57,7 +57,7 @@ Verify the installation:
 
 ```bash
 almide --version
-# almide 0.5.12
+# almide 0.5.13
 ```
 
 ### Hello World
@@ -187,9 +187,31 @@ Almide compiles to Rust, which then compiles to native machine code. No runtime,
 | Dependencies | 0 (single static binary) |
 | WASM target | `almide build app.almd --target wasm` |
 
-## Editor Support
+## Ecosystem
 
-Install syntax highlighting from [almide/almide-editors](https://github.com/almide/almide-editors):
+### Grammar — [almide-grammar](https://github.com/almide/almide-grammar)
+
+Single source of truth for Almide syntax — keywords, operators, precedence, and TextMate scopes. Written in Almide itself.
+
+All tools that need to know Almide's syntax import this module rather than maintaining their own keyword lists:
+
+```toml
+# almide.toml
+[dependencies]
+almide-grammar = { git = "https://github.com/almide/almide-grammar", tag = "v0.1.0" }
+```
+
+```almide
+import almide_grammar
+almide_grammar.keyword_groups()    // 6 groups, 41 keywords
+almide_grammar.precedence_table()  // 8 levels, pipe → unary
+```
+
+The compiler itself uses `almide-grammar`'s TOML files (`tokens.toml`, `precedence.toml`) at build time to generate its lexer keyword table — ensuring the compiler and all tooling stay in sync.
+
+### Editor Support — [almide-editors](https://github.com/almide/almide-editors)
+
+VS Code extension with syntax highlighting, bracket matching, comment toggling, and code folding for `.almd` files. The TextMate grammar is generated from `almide-grammar`.
 
 - **VS Code** — Download `.vsix` from [Releases](https://github.com/almide/almide-editors/releases), then `code --install-extension almide-lang-*.vsix`
 

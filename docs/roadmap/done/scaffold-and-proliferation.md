@@ -1,4 +1,6 @@
-# almide scaffold & Module Proliferation Pipeline [ON HOLD]
+# almide scaffold & Module Proliferation Pipeline [MERGED]
+
+> Merged into [LLM Integration](../active/llm-integration.md) as `almide forge`.
 
 Infrastructure for mass-producing Almide modules. Enables LLMs to autonomously generate, verify, and publish modules — the core loop of AI proliferation.
 

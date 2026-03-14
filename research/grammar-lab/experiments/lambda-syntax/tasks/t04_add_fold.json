@@ -1,0 +1,6 @@
+{
+  "name": "add-fold-function",
+  "instruction": "Add a new function `longest_name(users: List[User]) -> String` that returns the name of the user with the longest name. Use `list.fold`. If the list is empty, return an empty string.",
+  "layer3_hint": "Available: `list.fold(xs, init, fn(acc, x) => result)` reduces a list, `string.len(s)` returns string length",
+  "test_file": "t04_add_fold_test.almd"
+}

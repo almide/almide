@@ -1,0 +1,28 @@
+type Student = { name: String, score: Int, grade: String }
+
+fn top_scorer(students: List[Student]) -> String =
+  students
+    |> list.sort_by((s) => s.score)
+    |> list.reverse()
+    |> list.first()
+    |> match {
+      some(s) => s.name,
+      none => "",
+    }
+
+fn average_score(students: List[Student]) -> Int = {
+  let n = list.len(students)
+  if n == 0 then 0
+  else {
+    let total = students |> list.fold(0, (acc, s) => acc + s.score)
+    total / n
+  }
+}
+
+fn find_by_name(students: List[Student], target: String) -> Option[Student] =
+  students |> list.find((s) => s.name == target)
+
+fn passing_names(students: List[Student]) -> List[String] =
+  students
+    |> list.filter((s) => s.score >= 60)
+    |> list.map((s) => s.name)

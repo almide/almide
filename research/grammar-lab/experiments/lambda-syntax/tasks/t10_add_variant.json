@@ -1,0 +1,6 @@
+{
+  "name": "add-variant-case",
+  "instruction": "Add two new variants to the `Expr` type:\n1. `Mul(Int, Int)` — multiplication of two integers\n2. `IfPos(Int, Int, Int)` — if the first value is positive (> 0), evaluate to the second value, otherwise evaluate to the third value\nThen update both `eval` and `describe` to handle the new cases:\n- `eval(Mul(a, b))` returns `a * b`\n- `eval(IfPos(cond, then_val, else_val))` returns `then_val` if `cond > 0`, otherwise `else_val`\n- `describe(Mul(a, b))` returns `\"mul(${a}, ${b})\"` with values converted to string\n- `describe(IfPos(c, t, e))` returns `\"ifpos(${c}, ${t}, ${e})\"` with values converted to string\nKeep all other functions (`eval_all`, `describe_all`, `sum_all`, `find_positives`) unchanged.",
+  "layer3_hint": "Available: Variant type syntax: `type Expr = | Num(Int) | Add(Int, Int) | Mul(Int, Int) | IfPos(Int, Int, Int)`. Match syntax: `match e { Num(n) => ..., Mul(a, b) => a * b, IfPos(c, t, e) => if c > 0 then t else e }`. `int.to_string(n)` converts Int to String. `${}` for interpolation. `if cond then expr else expr` for conditionals.",
+  "test_file": "t10_add_variant_test.almd"
+}

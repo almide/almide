@@ -1,0 +1,45 @@
+test "is_valid filters active with positive value" {
+  assert_eq(is_valid(Entry { label: "a", value: 5, active: true }), true)
+  assert_eq(is_valid(Entry { label: "b", value: 0, active: true }), false)
+  assert_eq(is_valid(Entry { label: "c", value: 3, active: false }), false)
+}
+
+test "sort_key returns value" {
+  assert_eq(sort_key(Entry { label: "x", value: 42, active: true }), 42)
+}
+
+test "format_entry formats correctly" {
+  assert_eq(format_entry(Entry { label: "hello", value: 10, active: true }), "HELLO=10")
+}
+
+test "process_entries uses extracted functions" {
+  let entries = [
+    Entry { label: "alpha", value: 30, active: true },
+    Entry { label: "beta", value: 0, active: true },
+    Entry { label: "gamma", value: 10, active: false },
+    Entry { label: "delta", value: 20, active: true },
+  ]
+  assert_eq(process_entries(entries), ["ALPHA=30", "DELTA=20"])
+}
+
+test "process_entries empty" {
+  assert_eq(process_entries([]), [])
+}
+
+test "count_active unchanged" {
+  let entries = [
+    Entry { label: "a", value: 1, active: true },
+    Entry { label: "b", value: 2, active: false },
+    Entry { label: "c", value: 3, active: true },
+  ]
+  assert_eq(count_active(entries), 2)
+}
+
+test "total_value unchanged" {
+  let entries = [
+    Entry { label: "a", value: 10, active: true },
+    Entry { label: "b", value: 20, active: false },
+    Entry { label: "c", value: 30, active: true },
+  ]
+  assert_eq(total_value(entries), 40)
+}

@@ -1,0 +1,132 @@
+// codegen_generics_test — Generic function and type edge cases for codegen
+
+// ── Multiple type parameters with complex interactions ──
+
+fn zip_with_index[A, B](xs: List[A], ys: List[B]) -> List[(Int, A, B)] = {
+  let pairs = list.zip(xs, ys)
+  let indexed = list.enumerate(pairs)
+  list.map(indexed, fn(entry) => {
+    let (i, pair) = entry
+    let (a, b) = pair
+    (i, a, b)
+  })
+}
+
+test "generic fn with multiple type params and tuple construction" {
+  let result = zip_with_index(["a", "b"], [10, 20])
+  assert_eq(list.len(result), 2)
+  assert_eq(list.get(result, 0), some((0, "a", 10)))
+  assert_eq(list.get(result, 1), some((1, "b", 20)))
+}
+
+// ── Generic function returning generic function ──
+
+fn make_mapper[A, B](f: fn(A) -> B) -> fn(List[A]) -> List[B] =
+  fn(xs) => list.map(xs, f)
+
+test "generic fn returning generic fn" {
+  let int_to_str = make_mapper[Int, String](fn(x) => int.to_string(x))
+  assert_eq(int_to_str([1, 2, 3]), ["1", "2", "3"])
+}
+
+// ── Generic type with generic function operating on it ──
+
+type Wrapper[T] = { value: T, label: String }
+
+fn wrap[T](label: String, value: T) -> Wrapper[T] =
+  { value: value, label: label }
+
+fn map_wrapper[A, B](w: Wrapper[A], f: fn(A) -> B) -> Wrapper[B] =
+  { value: f(w.value), label: w.label }
+
+fn unwrap[T](w: Wrapper[T]) -> T = w.value
+
+test "generic record type with map operation" {
+  let w = wrap("num", 42)
+  let w2 = map_wrapper(w, fn(x) => int.to_string(x))
+  assert_eq(w2.value, "42")
+  assert_eq(w2.label, "num")
+}
+
+test "chained generic operations on wrapper" {
+  let w = wrap("val", 5)
+  let result = w
+    |> map_wrapper(fn(x) => x * 10)
+    |> map_wrapper(fn(x) => x + 1)
+    |> unwrap()
+  assert_eq(result, 51)
+}
+
+// ── Generic variant with multiple type params ──
+
+type Result2[A, B] =
+  | First(A)
+  | Second(B)
+  | Neither
+
+fn merge_result2[A, B](r: Result2[A, B], fa: fn(A) -> String, fb: fn(B) -> String) -> String =
+  match r {
+    First(a) => fa(a),
+    Second(b) => fb(b),
+    Neither => "neither",
+  }
+
+test "generic variant with multiple type params" {
+  let r1: Result2[Int, String] = First(42)
+  let r2: Result2[Int, String] = Second("hello")
+  let r3: Result2[Int, String] = Neither
+  assert_eq(merge_result2(r1, fn(x) => int.to_string(x), fn(s) => s), "42")
+  assert_eq(merge_result2(r2, fn(x) => int.to_string(x), fn(s) => s), "hello")
+  assert_eq(merge_result2(r3, fn(x) => int.to_string(x), fn(s) => s), "neither")
+}
+
+// ── Explicit turbofish on nested generic calls ──
+
+test "turbofish on generic calls" {
+  let x = identity[Option[Int]](some(42))
+  assert_eq(x, some(42))
+}
+
+fn identity[T](x: T) -> T = x
+
+// ── Generic function with Option and Result interaction ──
+
+fn option_to_result[T](opt: Option[T], err_msg: String) -> Result[T, String] =
+  match opt {
+    some(v) => ok(v),
+    none => err(err_msg),
+  }
+
+fn result_to_option[T](r: Result[T, String]) -> Option[T] =
+  match r {
+    ok(v) => some(v),
+    err(_) => none,
+  }
+
+test "option to result round trip" {
+  let x = some(42)
+  let r = option_to_result(x, "missing")
+  assert_eq(r, ok(42))
+  let back = result_to_option(r)
+  assert_eq(back, some(42))
+}
+
+test "none to result gives err" {
+  let x: Option[Int] = none
+  let r = option_to_result(x, "was none")
+  assert_eq(r, err("was none"))
+  let back = result_to_option(r)
+  assert_eq(back, none)
+}
+
+// ── Generic function used with list of options ──
+
+fn collect_some[T](xs: List[Option[T]]) -> List[T] =
+  list.filter_map(xs, fn(x) => x)
+
+test "collect_some generic" {
+  let xs: List[Option[Int]] = [some(1), none, some(3), none, some(5)]
+  assert_eq(collect_some(xs), [1, 3, 5])
+  let ys: List[Option[String]] = [some("a"), none, some("c")]
+  assert_eq(collect_some(ys), ["a", "c"])
+}

@@ -206,6 +206,167 @@ fn almide_json_from_float(n: f64) -> AlmideJson {
     JInt(n as i64)
 }
 
+fn almide_json_object(entries: Vec<(String, AlmideJson)>) -> AlmideJson {
+    let mut map = HashMap::new();
+    for (k, v) in entries { map.insert(k, v); }
+    JObject(map)
+}
+
+fn almide_json_as_float(j: &AlmideJson) -> Option<f64> {
+    if let JInt(n) = j { Some(*n as f64) } else { None }
+}
+fn almide_json_as_bool(j: &AlmideJson) -> Option<bool> {
+    if let JBool(b) = j { Some(*b) } else { None }
+}
+fn almide_json_as_array(j: &AlmideJson) -> Option<Vec<AlmideJson>> {
+    if let JArray(a) = j { Some(a.clone()) } else { None }
+}
+
+// ── JsonPath ──────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+enum AlmideJsonPath {
+    JpRoot,
+    JpField(Box<AlmideJsonPath>, String),
+    JpIndex(Box<AlmideJsonPath>, i64),
+}
+
+fn almide_json_path_segments(path: &AlmideJsonPath) -> Vec<AlmideJsonPathSeg> {
+    let mut segs = Vec::new();
+    let mut cur = path;
+    loop {
+        match cur {
+            AlmideJsonPath::JpRoot => break,
+            AlmideJsonPath::JpField(parent, name) => {
+                segs.push(AlmideJsonPathSeg::Field(name.clone()));
+                cur = parent;
+            }
+            AlmideJsonPath::JpIndex(parent, i) => {
+                segs.push(AlmideJsonPathSeg::Index(*i));
+                cur = parent;
+            }
+        }
+    }
+    segs.reverse();
+    segs
+}
+
+#[derive(Debug, Clone)]
+enum AlmideJsonPathSeg {
+    Field(String),
+    Index(i64),
+}
+
+fn almide_json_get_path(j: &AlmideJson, path: &AlmideJsonPath) -> Option<AlmideJson> {
+    let segs = almide_json_path_segments(path);
+    let mut cur = j.clone();
+    for seg in &segs {
+        match seg {
+            AlmideJsonPathSeg::Field(name) => {
+                if let JObject(m) = &cur { cur = m.get(name)?.clone(); } else { return None; }
+            }
+            AlmideJsonPathSeg::Index(i) => {
+                if let JArray(a) = &cur {
+                    let idx = if *i < 0 { return None; } else { *i as usize };
+                    cur = a.get(idx)?.clone();
+                } else { return None; }
+            }
+        }
+    }
+    Some(cur)
+}
+
+fn almide_json_set_path(j: &AlmideJson, path: &AlmideJsonPath, value: AlmideJson) -> Result<AlmideJson, String> {
+    let segs = almide_json_path_segments(path);
+    if segs.is_empty() { return Ok(value); }
+    almide_json_set_at(j, &segs, 0, value, false)
+}
+
+fn almide_json_upsert_path(j: &AlmideJson, path: &AlmideJsonPath, value: AlmideJson) -> AlmideJson {
+    let segs = almide_json_path_segments(path);
+    if segs.is_empty() { return value; }
+    almide_json_set_at(j, &segs, 0, value, true).unwrap_or_else(|_| j.clone())
+}
+
+fn almide_json_remove_path(j: &AlmideJson, path: &AlmideJsonPath) -> AlmideJson {
+    let segs = almide_json_path_segments(path);
+    if segs.is_empty() { return JNull; }
+    almide_json_remove_at(j, &segs, 0)
+}
+
+fn almide_json_set_at(j: &AlmideJson, segs: &[AlmideJsonPathSeg], idx: usize, value: AlmideJson, upsert: bool) -> Result<AlmideJson, String> {
+    if idx >= segs.len() { return Ok(value); }
+    match &segs[idx] {
+        AlmideJsonPathSeg::Field(name) => {
+            let mut m = match j {
+                JObject(m) => m.clone(),
+                _ if upsert => HashMap::new(),
+                _ => return Err(format!("path error: expected object at field \"{}\"", name)),
+            };
+            let child = m.get(name).unwrap_or(&JNull);
+            if idx + 1 == segs.len() {
+                if !upsert && !m.contains_key(name) {
+                    return Err(format!("path error: field \"{}\" does not exist", name));
+                }
+                m.insert(name.clone(), value);
+            } else {
+                let new_child = almide_json_set_at(child, segs, idx + 1, value, upsert)?;
+                m.insert(name.clone(), new_child);
+            }
+            Ok(JObject(m))
+        }
+        AlmideJsonPathSeg::Index(i) => {
+            let mut a = match j {
+                JArray(a) => a.clone(),
+                _ => return Err(format!("path error: expected array at index {}", i)),
+            };
+            let ii = *i as usize;
+            if ii >= a.len() {
+                return Err(format!("path error: index {} out of bounds (len {})", i, a.len()));
+            }
+            if idx + 1 == segs.len() {
+                a[ii] = value;
+            } else {
+                let new_child = almide_json_set_at(&a[ii], segs, idx + 1, value, upsert)?;
+                a[ii] = new_child;
+            }
+            Ok(JArray(a))
+        }
+    }
+}
+
+fn almide_json_remove_at(j: &AlmideJson, segs: &[AlmideJsonPathSeg], idx: usize) -> AlmideJson {
+    if idx >= segs.len() { return j.clone(); }
+    match &segs[idx] {
+        AlmideJsonPathSeg::Field(name) => {
+            if let JObject(m) = j {
+                let mut m = m.clone();
+                if idx + 1 == segs.len() {
+                    m.remove(name);
+                } else if let Some(child) = m.get(name) {
+                    let new_child = almide_json_remove_at(child, segs, idx + 1);
+                    m.insert(name.clone(), new_child);
+                }
+                JObject(m)
+            } else { j.clone() }
+        }
+        AlmideJsonPathSeg::Index(i) => {
+            if let JArray(a) = j {
+                let ii = *i as usize;
+                if ii >= a.len() { return j.clone(); }
+                let mut a = a.clone();
+                if idx + 1 == segs.len() {
+                    a.remove(ii);
+                } else {
+                    let new_child = almide_json_remove_at(&a[ii], segs, idx + 1);
+                    a[ii] = new_child;
+                }
+                JArray(a)
+            } else { j.clone() }
+        }
+    }
+}
+
 fn almide_json_stringify_pretty(j: &AlmideJson) -> String {
     fn fmt_indent(j: &AlmideJson, indent: usize) -> String {
         let pad = " ".repeat(indent);

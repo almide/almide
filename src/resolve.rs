@@ -45,23 +45,53 @@ pub fn resolve_imports_with_deps(
             let is_self_import = path.first().map(|s| s.as_str()) == Some("self");
 
             if is_self_import {
-                // self.xxx → local module within the project
-                if path.len() < 2 {
-                    return Err("invalid self import: expected 'import self.module_name'".to_string());
-                }
-                let mod_path = &path[1..]; // skip "self"
-                let mod_name = alias.as_deref().unwrap_or_else(|| mod_path.last().expect("guarded by path.len() >= 2"));
-                let display_name = mod_path.join(".");
+                if path.len() == 1 {
+                    // import self → load src/mod.almd (package entry point)
+                    let root = project_root.as_ref().ok_or_else(|| {
+                        "cannot resolve 'import self': no almide.toml found in parent directories".to_string()
+                    })?;
+                    let mod_file = root.join("src").join("mod.almd");
+                    if !mod_file.exists() {
+                        return Err(format!(
+                            "cannot resolve 'import self': no src/mod.almd in {}\n  hint: Create src/mod.almd as the package entry point",
+                            root.display()
+                        ));
+                    }
+                    // Determine module name: alias, or package name from almide.toml
+                    let pkg_name = project::parse_toml(&root.join("almide.toml"))
+                        .map(|p| p.package.name)
+                        .unwrap_or_default();
+                    let mod_name_owned: String;
+                    let mod_name: &str = if let Some(a) = alias.as_deref() {
+                        a
+                    } else if !pkg_name.is_empty() {
+                        mod_name_owned = pkg_name;
+                        &mod_name_owned
+                    } else {
+                        "self"
+                    };
+                    if !loaded_names.contains(mod_name) {
+                        let src_dir = root.join("src");
+                        let mod_path = vec!["mod".to_string()];
+                        load_self_module(mod_name, &mod_path, &src_dir, base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading)?;
+                    }
+                } else {
+                    // self.xxx → local module within the project
+                    let mod_path = &path[1..]; // skip "self"
+                    // Always use the canonical name (last path segment) — aliases are handled by import_aliases
+                    let mod_name = mod_path.last().expect("guarded by path.len() >= 2").as_str();
+                    let display_name = mod_path.join(".");
 
-                if loaded_names.contains(mod_name) {
-                    continue;
-                }
+                    if loaded_names.contains(mod_name) {
+                        continue;
+                    }
 
-                let root = project_root.as_ref().ok_or_else(|| {
-                    format!("cannot resolve 'import self.{}': no almide.toml found in parent directories", display_name)
-                })?;
-                let src_dir = root.join("src");
-                load_self_module(mod_name, mod_path, &src_dir, base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading)?;
+                    let root = project_root.as_ref().ok_or_else(|| {
+                        format!("cannot resolve 'import self.{}': no almide.toml found in parent directories", display_name)
+                    })?;
+                    let src_dir = root.join("src");
+                    load_self_module(mod_name, mod_path, &src_dir, base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading)?;
+                }
             } else if path.len() == 1 {
                 let name = &path[0];
                 if stdlib::is_stdlib_module(name) {

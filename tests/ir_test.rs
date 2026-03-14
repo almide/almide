@@ -307,12 +307,18 @@ fn ir_stmt_comment() {
 fn ir_function_construction() {
     let f = IrFunction {
         name: "add".into(),
-        params: vec![(VarId(0), Ty::Int), (VarId(1), Ty::Int)],
+        params: vec![
+            IrParam { var: VarId(0), ty: Ty::Int, name: "a".into(), borrow: ParamBorrow::Own, open_record: None },
+            IrParam { var: VarId(1), ty: Ty::Int, name: "b".into(), borrow: ParamBorrow::Own, open_record: None },
+        ],
         ret_ty: Ty::Int,
         body: IrExpr { kind: IrExprKind::LitInt { value: 0 }, ty: Ty::Int, span: None },
         is_effect: false,
         is_async: false,
         is_test: false,
+        generics: None,
+        extern_attrs: vec![],
+        visibility: IrVisibility::Public,
     };
     assert_eq!(f.name, "add");
     assert_eq!(f.params.len(), 2);
@@ -331,6 +337,9 @@ fn ir_function_effect() {
         is_effect: true,
         is_async: false,
         is_test: false,
+        generics: None,
+        extern_attrs: vec![],
+        visibility: IrVisibility::Public,
     };
     assert!(f.is_effect);
 }
@@ -342,7 +351,9 @@ fn ir_program_construction() {
     let prog = IrProgram {
         functions: vec![],
         top_lets: vec![],
+        type_decls: vec![],
         var_table: VarTable::new(),
+        modules: vec![],
     };
     assert!(prog.functions.is_empty());
     assert!(prog.top_lets.is_empty());

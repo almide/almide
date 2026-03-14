@@ -5,7 +5,7 @@
 use crate::types::{Ty, FnSig};
 
 /// All built-in stdlib module names (hardcoded in the compiler).
-pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "http", "process", "math", "random", "regex", "io"];
+pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "http", "process", "math", "random", "regex", "io", "result"];
 
 /// Check if a module name is a hardcoded stdlib module.
 pub fn is_stdlib_module(name: &str) -> bool {
@@ -55,7 +55,7 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         "trim" | "split" | "pad_left"
         | "starts_with" | "starts_with_hdlm_qm_" | "starts_with?"
         | "ends_with" | "ends_with_hdlm_qm_" | "ends_with?"
-        | "to_bytes" | "to_upper" | "to_lower"
+        | "to_bytes" | "to_upper" | "to_lower" | "capitalize"
         | "to_int" | "replace" | "char_at" | "lines"
         | "chars" | "repeat" | "from_bytes"
         | "is_digit?" | "is_digit_hdlm_qm_"
@@ -64,13 +64,13 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         | "is_whitespace?" | "is_whitespace_hdlm_qm_"
         | "pad_right" | "trim_start" | "trim_end"
         | "strip_prefix" | "strip_suffix"
-        | "replace_first" | "last_index_of" | "to_float" => vec!["string"],
+        | "replace_first" | "last_index_of" => vec!["string"],
 
         // ── list-only ──
         "each" | "fold" | "find" | "any" | "all"
         | "enumerate" | "zip" | "flatten" | "take" | "drop"
         | "sort_by" | "unique"
-        | "last" | "chunk" | "sum" | "product"
+        | "last" | "chunk" | "sum" | "product" | "sum_float" | "product_float"
         | "first" | "flat_map"
         | "filter_map" | "take_while" | "drop_while"
         | "partition" | "reduce" | "group_by"
@@ -86,7 +86,15 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         "to_string" | "to_hex" => vec!["int"],
 
         // ── float-only ──
-        "to_fixed" | "round" | "floor" | "ceil" | "sqrt" => vec!["float"],
+        "to_fixed" | "round" | "floor" | "ceil" | "sqrt"
+        | "is_nan?" | "is_nan_hdlm_qm_"
+        | "is_infinite?" | "is_infinite_hdlm_qm_" => vec!["float"],
+
+        // ── result-only ──
+        "map_err" | "and_then" | "unwrap_or" | "unwrap_or_else"
+        | "is_ok?" | "is_ok_hdlm_qm_"
+        | "is_err?" | "is_err_hdlm_qm_"
+        | "to_err_option" => vec!["result"],
 
         // ── ambiguous: string + list ──
         "reverse" => vec!["string", "list"],
@@ -104,7 +112,14 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         "get" | "get_or" | "set" => vec!["list", "map"],
         "swap" => vec!["list"],
         "sort" => vec!["list"],
-        "map" | "filter" => vec!["list"],
+        "map" | "filter" => vec!["list", "result"],
+        "to_option" => vec!["result"],
+
+        // ── ambiguous: string + int ──
+        "to_float" => vec!["string", "int"],
+
+        // ── ambiguous: math + float ──
+        "sign" => vec!["math", "float"],
 
         _ => vec![],
     }
@@ -126,6 +141,7 @@ pub fn resolve_ufcs_by_type(method: &str, receiver_type: crate::ast::ResolvedTyp
         ResolvedType::Map => "map",
         ResolvedType::Int => "int",
         ResolvedType::Float => "float",
+        ResolvedType::Result => "result",
         _ => return None, // Unknown, Record, etc. — cannot resolve at compile time
     };
     if candidates.contains(&module) {

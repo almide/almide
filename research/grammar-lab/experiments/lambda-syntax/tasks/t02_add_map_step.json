@@ -1,0 +1,6 @@
+{
+  "name": "add-map-step",
+  "instruction": "Add a `list.map` step at the end of the pipe chain in `process` that converts each number to a string using `int.to_string`. The return type should become `List[String]`.",
+  "layer3_hint": "Available: `list.map(xs, fn(x) => y)` transforms elements, `int.to_string(n)` converts Int to String",
+  "test_file": "t02_add_map_step_test.almd"
+}

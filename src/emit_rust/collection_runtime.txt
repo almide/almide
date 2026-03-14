@@ -102,6 +102,10 @@ fn almide_rt_list_product(list: &[i64]) -> i64 {
     list.iter().product::<i64>()
 }
 
+fn almide_rt_list_sum_float(xs: &[f64]) -> f64 { xs.iter().sum() }
+
+fn almide_rt_list_product_float(xs: &[f64]) -> f64 { xs.iter().product() }
+
 fn almide_rt_list_first<T: Clone>(list: &[T]) -> Option<T> {
     list.first().cloned()
 }

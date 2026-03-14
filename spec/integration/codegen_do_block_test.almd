@@ -1,0 +1,136 @@
+// codegen_do_block_test — Do-block and guard edge cases
+
+// ── Do block with multiple guards ──
+
+test "do block with multiple sequential guards" {
+  var x = 0
+  var y = 0
+  do {
+    guard x < 10 else break
+    guard y < 100 else break
+    x = x + 1
+    y = y + x * x
+  }
+  assert_eq(x, 7)
+  assert_eq(y, 140)
+}
+
+// ── Do block simulating while with complex condition ──
+
+test "do block fibonacci until threshold" {
+  var a = 0
+  var b = 1
+  var count = 0
+  do {
+    guard b < 100 else break
+    let next = a + b
+    a = b
+    b = next
+    count = count + 1
+  }
+  assert_eq(count, 11)
+  assert_eq(b, 144)
+}
+
+// ── Effect fn with do block and guard else ok ──
+
+effect fn find_factor(n: Int) -> Result[Int, String] = {
+  guard n > 1 else err("n must be > 1")
+  var i = 2
+  var result = n
+  do {
+    guard i * i <= n else break
+    if n % i == 0 then {
+      result = i
+      break
+    } else {
+      i = i + 1
+    }
+  }
+  ok(result)
+}
+
+test "do block find smallest factor" {
+  assert_eq(find_factor(15), ok(3))
+  assert_eq(find_factor(7), ok(7))
+  assert_eq(find_factor(100), ok(2))
+  assert_eq(find_factor(1), err("n must be > 1"))
+}
+
+// ── For loop with guard continue and break ──
+
+test "for with guard continue filtering" {
+  var odds: List[Int] = []
+  for i in 1..=20 {
+    guard i % 2 != 0 else continue
+    guard i <= 15 else break
+    odds = odds ++ [i]
+  }
+  assert_eq(odds, [1, 3, 5, 7, 9, 11, 13, 15])
+}
+
+// ── Do block with nested for and guard ──
+
+test "do block containing for with guard" {
+  var batch = 0
+  var total = 0
+  do {
+    guard batch < 3 else break
+    var batch_sum = 0
+    for i in 1..=5 {
+      guard i != 3 else continue
+      batch_sum = batch_sum + i
+    }
+    total = total + batch_sum
+    batch = batch + 1
+  }
+  assert_eq(total, 36)
+}
+
+// ── Do block as simple repeat-until ──
+
+test "do block repeat until condition" {
+  var n = 1
+  do {
+    n = n * 2
+    guard n < 1024 else break
+  }
+  assert_eq(n, 1024)
+}
+
+// ── Do block building a string ──
+
+test "do block building string char by char" {
+  var result = ""
+  var i = 0
+  let chars = ["h", "e", "l", "l", "o"]
+  do {
+    guard i < list.len(chars) else break
+    let ch = match list.get(chars, i) {
+      some(c) => c,
+      none => "",
+    }
+    result = result ++ ch
+    i = i + 1
+  }
+  assert_eq(result, "hello")
+}
+
+// ── Effect fn with do block returning computed Result ──
+
+effect fn power_mod(base: Int, exp: Int, modulus: Int) -> Result[Int, String] = {
+  guard modulus > 0 else err("modulus must be positive")
+  guard exp >= 0 else err("exponent must be non-negative")
+  var result = 1
+  for _i in 0..exp {
+    result = (result * base) % modulus
+  }
+  ok(result % modulus)
+}
+
+test "effect fn power_mod" {
+  assert_eq(power_mod(2, 10, 1000), ok(24))
+  assert_eq(power_mod(3, 5, 100), ok(43))
+  assert_eq(power_mod(2, 0, 5), ok(1))
+  assert_eq(power_mod(2, 3, 0), err("modulus must be positive"))
+}

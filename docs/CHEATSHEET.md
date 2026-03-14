@@ -53,17 +53,18 @@ fn parse(text: String) -> Ast = _                     // hole (type-checked stub
 fn optimize(ast: Ast) -> Ast = todo("implement later") // todo with message
 ```
 
-## Trait & Impl
+## Built-in Protocols
+Eq and Hash are automatic (compiler-derived from type structure). No `deriving` needed.
+`deriving From` is the only explicit deriving directive (for error type conversions).
 ```
-trait Iterable[T] {
-  fn map[U](self, f: fn(T) -> U) -> List[U]
-  fn filter(self, f: fn(T) -> Bool) -> List[T]
-}
+// Eq: all value types support == (except Fn)
+let same = color_a == color_b  // just works
 
-impl From[IoError] for ConfigError {
-  fn from(e: IoError) -> ConfigError = Io(e)
-}
+// From: opt-in for error conversions
+type AppError = | Io(IoError) | Parse(ParseError) deriving From
 ```
+<!-- Note: trait/impl syntax exists in the parser but is being superseded by
+     row polymorphism and container protocols. See docs/roadmap/active/type-system.md -->
 
 ## Expressions
 
@@ -167,12 +168,6 @@ do {
 ```
 text |> string.trim |> string.split(",")
 xs |> filter(_, fn(x) => x > 0)      // _ = placeholder for piped value
-```
-
-### Named arguments
-```
-create_user(name: "alice", age: 30)
-create_user("alice", age: 30)          // mixed positional + named
 ```
 
 ### Record & Spread
@@ -346,7 +341,7 @@ The runtime calls `main(args)` where `args` includes the program name at index 0
 `io.read_line()` → `String`, `io.print(s)` (no newline), `io.read_all()` → `String`
 
 ### json (requires `import json`)
-`json.parse(text)` → `Result[Json, String]`, `json.stringify(j)`, `json.get(j, key)` → `Option[Json]`, `json.get_string(j, key)` → `Option[String]`, `json.get_int(j, key)` → `Option[Int]`, `json.get_bool(j, key)` → `Option[Bool]`, `json.get_array(j, key)` → `Option[List[Json]]`, `json.keys(j)` → `List[String]`, `json.to_string(j)` → `Option[String]`, `json.to_int(j)` → `Option[Int]`, `json.from_string(s)`, `json.from_int(n)`, `json.from_bool(b)`, `json.null()`, `json.array(items)`, `json.from_map(m)`
+`json.parse(text)` → `Result[Json, String]`, `json.stringify(j)`, `json.stringify_pretty(j)`, `json.get(j, key)` → `Option[Json]`, `json.get_string(j, key)` → `Option[String]`, `json.get_int(j, key)` → `Option[Int]`, `json.get_float(j, key)` → `Option[Float]`, `json.get_bool(j, key)` → `Option[Bool]`, `json.get_array(j, key)` → `Option[List[Json]]`, `json.keys(j)` → `List[String]`, `json.to_string(j)` → `Option[String]`, `json.to_int(j)` → `Option[Int]`, `json.as_string(j)` → `Option[String]`, `json.as_int(j)` → `Option[Int]`, `json.as_float(j)` → `Option[Float]`, `json.as_bool(j)` → `Option[Bool]`, `json.as_array(j)` → `Option[List[Json]]`, `json.object(entries)` → `Json`, `json.s(v)`, `json.i(v)`, `json.f(v)`, `json.b(v)`, `json.null()`, `json.array(items)`, `json.from_string(s)`, `json.from_int(n)`, `json.from_float(n)`, `json.from_bool(b)`, `json.from_map(m)`
 
 ### math (requires `import math`)
 `math.min(a, b)`, `math.max(a, b)`, `math.abs(n)`, `math.pow(base, exp)`, `math.pi()`, `math.e()`, `math.sin(x)`, `math.cos(x)`, `math.tan(x)`, `math.log(x)`, `math.exp(x)`, `math.sqrt(x)`
@@ -374,7 +369,7 @@ The runtime calls `main(args)` where `args` includes the program name at index 0
 - `?` suffix is for Bool predicates only
 - No exceptions — use `Result[T, E]` everywhere
 - No null — use `Option[T]`
-- No inheritance — use trait + impl
+- No inheritance — use composition
 - No macros, no operator overloading, no implicit conversions
 - Empty list = `[]`, empty map = `[:]` (with type annotation)
 - `_` is ONLY for match wildcard patterns, never as a variable name

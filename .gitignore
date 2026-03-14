@@ -2,3 +2,6 @@ target/
 .test/
 .minigit/
 codopsy-report.json
+main-*/
+test_inc-*/
+.claude/settings.local.json

@@ -1,0 +1,10 @@
+type Product = { name: String, price: Int, qty: Int }
+
+fn summarize(products: List[Product]) -> List[String] =
+  products
+    |> list.sort_by(fn(p) => p.price)
+    |> list.reverse()
+    |> list.map(fn(p) => "${p.name}: ${int.to_string(p.price)}")
+
+fn total_value(products: List[Product]) -> Int =
+  products |> list.fold(0, fn(acc, p) => acc + p.price * p.qty)

@@ -253,6 +253,12 @@ fn almide_rt_io_print(value: &str) -> Result<(), String> {
     std::io::stdout().flush().map_err(|e| e.to_string())
 }
 
+fn almide_rt_io_println(value: &str) -> Result<(), String> {
+    use std::io::Write;
+    println!("{}", value);
+    std::io::stdout().flush().map_err(|e| e.to_string())
+}
+
 fn almide_rt_io_read_all() -> Result<String, String> {
     use std::io::Read;
     let mut buf = String::new();

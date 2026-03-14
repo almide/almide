@@ -1,0 +1,32 @@
+test "summarize filters and takes top 3" {
+  let products = [
+    Product { name: "A", price: 100, qty: 1 },
+    Product { name: "B", price: 0, qty: 5 },
+    Product { name: "C", price: 300, qty: 2 },
+    Product { name: "D", price: -10, qty: 1 },
+    Product { name: "E", price: 200, qty: 3 },
+    Product { name: "F", price: 50, qty: 1 },
+  ]
+  let result = summarize(products)
+  assert_eq(result, ["C: 300", "E: 200", "A: 100"])
+}
+
+test "summarize empty" {
+  assert_eq(summarize([]), [])
+}
+
+test "summarize fewer than 3 valid" {
+  let products = [
+    Product { name: "X", price: 10, qty: 1 },
+    Product { name: "Y", price: -5, qty: 1 },
+  ]
+  assert_eq(summarize(products), ["X: 10"])
+}
+
+test "total_value unchanged" {
+  let products = [
+    Product { name: "A", price: 100, qty: 2 },
+    Product { name: "B", price: 50, qty: 3 },
+  ]
+  assert_eq(total_value(products), 350)
+}

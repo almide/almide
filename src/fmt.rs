@@ -85,14 +85,21 @@ fn format_decl(out: &mut String, decl: &Decl, depth: usize) {
         Decl::Strict { mode, .. } => {
             out.push_str(&format!("{}strict \"{}\"", ind, mode));
         }
-        Decl::Type { name, ty, deriving, visibility, .. } => {
+        Decl::Type { name, ty, deriving, visibility, generics, .. } => {
             out.push_str(&ind);
             match visibility {
                 Visibility::Local => out.push_str("local "),
                 Visibility::Mod => out.push_str("mod "),
                 Visibility::Public => {}
             }
-            out.push_str(&format!("type {} = ", name));
+            out.push_str("type ");
+            out.push_str(name);
+            if let Some(gps) = generics {
+                if !gps.is_empty() {
+                    format_generic_params(out, gps);
+                }
+            }
+            out.push_str(" = ");
             format_type_expr(out, ty, depth);
             if let Some(derives) = deriving {
                 if !derives.is_empty() {
@@ -116,7 +123,7 @@ fn format_decl(out: &mut String, decl: &Decl, depth: usize) {
             out.push_str(" = ");
             format_expr(out, value, depth);
         }
-        Decl::Fn { name, effect, r#async, visibility, params, return_type, body, extern_attrs, .. } => {
+        Decl::Fn { name, effect, r#async, visibility, params, return_type, body, extern_attrs, generics, .. } => {
             // Emit @extern annotations
             for attr in extern_attrs {
                 out.push_str(&ind);
@@ -136,6 +143,11 @@ fn format_decl(out: &mut String, decl: &Decl, depth: usize) {
             }
             out.push_str("fn ");
             out.push_str(name);
+            if let Some(gps) = generics {
+                if !gps.is_empty() {
+                    format_generic_params(out, gps);
+                }
+            }
             out.push('(');
             for (i, p) in params.iter().enumerate() {
                 if i > 0 { out.push_str(", "); }
@@ -190,8 +202,19 @@ fn format_type_expr(out: &mut String, ty: &TypeExpr, _depth: usize) {
             }
             out.push_str(" }");
         }
+        TypeExpr::OpenRecord { fields } => {
+            out.push_str("{ ");
+            for (i, f) in fields.iter().enumerate() {
+                if i > 0 { out.push_str(", "); }
+                out.push_str(&f.name);
+                out.push_str(": ");
+                format_type_expr(out, &f.ty, _depth);
+            }
+            if !fields.is_empty() { out.push_str(", "); }
+            out.push_str(".. }");
+        }
         TypeExpr::Fn { params, ret } => {
-            out.push_str("(");
+            out.push_str("fn(");
             for (i, p) in params.iter().enumerate() {
                 if i > 0 { out.push_str(", "); }
                 format_type_expr(out, p, _depth);
@@ -259,14 +282,44 @@ fn format_expr(out: &mut String, expr: &Expr, depth: usize) {
         Expr::String { value, .. } => out.push_str(&format!("{:?}", value)),
         Expr::InterpolatedString { value, .. } => {
             out.push('"');
-            for ch in value.chars() {
-                match ch {
-                    '\n' => out.push_str("\\n"),
-                    '\t' => out.push_str("\\t"),
-                    '\\' => out.push_str("\\\\"),
-                    '"' => out.push_str("\\\""),
-                    other => out.push(other),
+            let mut depth = 0u32;
+            let chars: Vec<char> = value.chars().collect();
+            let mut i = 0;
+            while i < chars.len() {
+                let ch = chars[i];
+                if ch == '$' && i + 1 < chars.len() && chars[i + 1] == '{' {
+                    out.push('$');
+                    out.push('{');
+                    depth += 1;
+                    i += 2;
+                    continue;
                 }
+                if depth > 0 && ch == '{' {
+                    depth += 1;
+                    out.push(ch);
+                    i += 1;
+                    continue;
+                }
+                if depth > 0 && ch == '}' {
+                    depth -= 1;
+                    out.push(ch);
+                    i += 1;
+                    continue;
+                }
+                if depth > 0 {
+                    // Inside interpolation expression — emit verbatim
+                    out.push(ch);
+                } else {
+                    // Outside interpolation — escape special characters
+                    match ch {
+                        '\n' => out.push_str("\\n"),
+                        '\t' => out.push_str("\\t"),
+                        '\\' => out.push_str("\\\\"),
+                        '"' => out.push_str("\\\""),
+                        other => out.push(other),
+                    }
+                }
+                i += 1;
             }
             out.push('"');
         }
@@ -783,6 +836,21 @@ fn format_pattern(out: &mut String, pat: &Pattern) {
             out.push(')');
         }
     }
+}
+
+fn format_generic_params(out: &mut String, params: &[GenericParam]) {
+    out.push('[');
+    for (i, gp) in params.iter().enumerate() {
+        if i > 0 { out.push_str(", "); }
+        out.push_str(&gp.name);
+        if let Some(ref bounds) = gp.bounds {
+            if !bounds.is_empty() {
+                out.push_str(": ");
+                out.push_str(&bounds.join(" + "));
+            }
+        }
+    }
+    out.push(']');
 }
 
 fn indent(depth: usize) -> String {

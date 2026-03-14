@@ -497,9 +497,13 @@ impl Checker {
                     let resolved_ret = self.env.resolve_named(&effective_ret);
                     let resolved_ret_full = self.env.resolve_named(&ret_ty);
                     if !resolved_body.compatible(&resolved_ret) && !resolved_body.compatible(&resolved_ret_full) && !body_ty.compatible(&effective_ret) && !body_ty.compatible(&ret_ty) {
+                        let hint = Self::hint_with_conversion(
+                            "Change the return type or fix the body expression",
+                            &ret_ty, &body_ty,
+                        );
                         self.push_diagnostic(err(
                             format!("function '{}' declared to return {} but body has type {}", name, ret_ty.display(), body_ty.display()),
-                            "Change the return type or fix the body expression",
+                            hint,
                             format!("fn {}", name),
                         ));
                     }
@@ -579,6 +583,9 @@ impl Checker {
                 }
             }
             ast::TypeExpr::Record { fields } => Ty::Record {
+                fields: fields.iter().map(|f| (f.name.clone(), self.resolve_type_expr(&f.ty))).collect(),
+            },
+            ast::TypeExpr::OpenRecord { fields } => Ty::OpenRecord {
                 fields: fields.iter().map(|f| (f.name.clone(), self.resolve_type_expr(&f.ty))).collect(),
             },
             ast::TypeExpr::Fn { params, ret } => Ty::Fn {
@@ -710,6 +717,30 @@ impl Checker {
     fn register_stdlib(&mut self) {
         for name in stdlib::builtin_effect_fns() {
             self.env.effect_fns.insert(name.to_string());
+        }
+    }
+
+    /// Suggest a type conversion function when a type mismatch occurs.
+    /// Returns a hint string if a known conversion path exists between the types.
+    pub(crate) fn suggest_conversion(expected: &Ty, actual: &Ty) -> Option<String> {
+        match (actual, expected) {
+            (Ty::Int, Ty::String) => Some("use `int.to_string(x)` to convert Int to String".to_string()),
+            (Ty::Float, Ty::String) => Some("use `float.to_string(x)` to convert Float to String".to_string()),
+            (Ty::Bool, Ty::String) => Some("use `to_string(x)` to convert Bool to String".to_string()),
+            (Ty::String, Ty::Int) => Some("use `int.parse(s)` to convert String to Int (returns Result[Int, String])".to_string()),
+            (Ty::String, Ty::Float) => Some("use `float.parse(s)` to convert String to Float (returns Result[Float, String])".to_string()),
+            (Ty::Float, Ty::Int) => Some("use `to_int(x)` to convert Float to Int (truncates)".to_string()),
+            (Ty::Int, Ty::Float) => Some("use `to_float(x)` to convert Int to Float".to_string()),
+            _ => None,
+        }
+    }
+
+    /// Build a hint string, appending a conversion suggestion if available.
+    pub(crate) fn hint_with_conversion(base_hint: &str, expected: &Ty, actual: &Ty) -> String {
+        if let Some(conv) = Self::suggest_conversion(expected, actual) {
+            format!("{}. Or {}", base_hint, conv)
+        } else {
+            base_hint.to_string()
         }
     }
 

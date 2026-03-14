@@ -1,0 +1,55 @@
+test "invoice_summary basic" {
+  let orders = [
+    Order { customer: "Alice", items: ["book", "pen"], total: 50, shipped: true },
+    Order { customer: "Bob", items: ["laptop"], total: 1000, shipped: true },
+    Order { customer: "Carol", items: ["phone", "case", "charger"], total: 800, shipped: false },
+    Order { customer: "Dave", items: ["desk"], total: 300, shipped: true },
+    Order { customer: "Eve", items: [], total: 0, shipped: true },
+  ]
+  assert_eq(invoice_summary(orders), [
+    "Bob: 1000 (1 items)",
+    "Dave: 300 (1 items)",
+    "Alice: 50 (2 items)",
+  ])
+}
+
+test "invoice_summary top 5 limit" {
+  let orders = [
+    Order { customer: "A", items: ["x"], total: 100, shipped: true },
+    Order { customer: "B", items: ["x"], total: 200, shipped: true },
+    Order { customer: "C", items: ["x"], total: 300, shipped: true },
+    Order { customer: "D", items: ["x"], total: 400, shipped: true },
+    Order { customer: "E", items: ["x"], total: 500, shipped: true },
+    Order { customer: "F", items: ["x"], total: 600, shipped: true },
+    Order { customer: "G", items: ["x"], total: 700, shipped: true },
+  ]
+  assert_eq(list.len(invoice_summary(orders)), 5)
+}
+
+test "invoice_summary empty" {
+  assert_eq(invoice_summary([]), [])
+}
+
+test "invoice_summary all unshipped" {
+  let orders = [
+    Order { customer: "X", items: ["a"], total: 100, shipped: false },
+  ]
+  assert_eq(invoice_summary(orders), [])
+}
+
+test "revenue unchanged" {
+  let orders = [
+    Order { customer: "A", items: [], total: 100, shipped: true },
+    Order { customer: "B", items: [], total: 200, shipped: false },
+  ]
+  assert_eq(revenue(orders), 100)
+}
+
+test "customer_list unchanged" {
+  let orders = [
+    Order { customer: "Bob", items: [], total: 1, shipped: true },
+    Order { customer: "Alice", items: [], total: 1, shipped: true },
+    Order { customer: "Bob", items: [], total: 2, shipped: true },
+  ]
+  assert_eq(customer_list(orders), ["Alice", "Bob"])
+}

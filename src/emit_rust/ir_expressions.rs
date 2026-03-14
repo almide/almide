@@ -175,7 +175,11 @@ impl Emitter {
 
             IrExprKind::Member { object, field } => {
                 let obj = self.gen_ir_expr(object);
-                format!("{}.{}", obj, field)
+                if Self::is_copy_ty(&expr.ty) {
+                    format!("{}.{}", obj, field)
+                } else {
+                    format!("{}.{}.clone()", obj, field)
+                }
             }
 
             IrExprKind::TupleIndex { object, index } => {
@@ -479,6 +483,7 @@ impl Emitter {
                 if is_variant_ctor && args.is_empty() {
                     return callee_str;
                 }
+                let open_record_info = self.open_record_params.get(name).cloned();
                 let args_str: Vec<String> = args.iter().enumerate().map(|(i, a)| {
                     let arg_str = self.gen_ir_arg_for(a, name, i);
                     if is_variant_ctor
@@ -486,6 +491,13 @@ impl Emitter {
                         && !self.generic_variant_constructors.contains_key(name)
                     {
                         format!("Box::new({})", arg_str)
+                    } else if let Some(ref open_recs) = open_record_info {
+                        // Check if this arg position needs open record projection
+                        if let Some((_, struct_name, field_infos)) = open_recs.iter().find(|(idx, _, _)| *idx == i) {
+                            Self::gen_open_record_projection(struct_name, field_infos, &arg_str)
+                        } else {
+                            arg_str
+                        }
                     } else {
                         arg_str
                     }
@@ -501,6 +513,11 @@ impl Emitter {
 
             CallTarget::Method { object, method } => {
                 let obj = self.gen_ir_expr(object);
+                // Built-in method calls that map to Rust method syntax
+                if method == "unwrap_or" && args.len() == 1 {
+                    let default = self.gen_ir_expr(&args[0]);
+                    return format!("({}).unwrap_or({})", obj, default);
+                }
                 let rest: Vec<String> = args.iter().map(|a| self.gen_ir_expr(a)).collect();
                 let mut all_args = vec![obj];
                 all_args.extend(rest);
@@ -520,11 +537,19 @@ impl Emitter {
         let resolved_mod = self.module_aliases.get(module)
             .cloned()
             .unwrap_or_else(|| module.to_string());
-        if self.user_modules.contains(&resolved_mod) {
-            let rust_mod = resolved_mod.replace('.', "_");
+        // Check both the resolved name and the original name for user module membership
+        let is_user_mod = self.user_modules.contains(&resolved_mod) || self.user_modules.contains(&module.to_string());
+        if is_user_mod {
+            // Use the name that's actually in user_modules for Rust module path
+            let actual_mod = if self.user_modules.contains(&resolved_mod) {
+                &resolved_mod
+            } else {
+                module
+            };
+            let rust_mod = actual_mod.replace('.', "_");
             let safe_func = crate::emit_common::sanitize(func);
             // Apply borrow inference using qualified name (module.func)
-            let qualified = format!("{}.{}", resolved_mod, func);
+            let qualified = format!("{}.{}", actual_mod, func);
             let borrow_args: Vec<String> = ir_args.iter().enumerate().map(|(i, a)| {
                 self.gen_ir_arg_for(a, &qualified, i)
             }).collect();
@@ -535,7 +560,7 @@ impl Emitter {
             return call;
         }
         // Try auto-generated codegen with lambda inlining from IR args
-        let in_effect = self.in_effect;
+        let in_effect = self.in_effect || self.in_do_block.get();
         let inline_lambda_fn = |idx: usize, arity: usize| -> (Vec<String>, String) {
             self.ir_inline_lambda(&ir_args[idx], arity)
         };
@@ -568,6 +593,19 @@ impl Emitter {
             } else {
                 (vec!["__a".to_string(), "__b".to_string()], format!("({})(__a, __b.clone())", f))
             }
+        }
+    }
+
+    /// Returns true if the Almide type maps to a Copy type in Rust.
+    /// Primitives (i64, f64, bool, ()) are Copy.
+    /// Option<T> and tuples are Copy when their inner types are Copy.
+    pub(crate) fn is_copy_ty(ty: &almide::types::Ty) -> bool {
+        use almide::types::Ty;
+        match ty {
+            Ty::Int | Ty::Float | Ty::Bool | Ty::Unit => true,
+            Ty::Option(inner) => Self::is_copy_ty(inner),
+            Ty::Tuple(elems) => elems.iter().all(|e| Self::is_copy_ty(e)),
+            _ => false,
         }
     }
 
@@ -607,6 +645,21 @@ impl Emitter {
             }
             _ => {}
         }
+    }
+
+    /// Generate open record projection code, recursively handling nested open records.
+    fn gen_open_record_projection(struct_name: &str, field_infos: &[super::OpenFieldInfo], arg: &str) -> String {
+        let fields: Vec<String> = field_infos.iter().map(|fi| {
+            if let Some((nested_struct, nested_infos)) = &fi.nested {
+                // Nested open record: recursively project
+                let inner_arg = format!("{}.{}", arg, fi.name);
+                let nested = Self::gen_open_record_projection(nested_struct, nested_infos, &inner_arg);
+                format!("{}: {}", fi.name, nested)
+            } else {
+                format!("{f}: {arg}.{f}.clone()", f = fi.name, arg = arg)
+            }
+        }).collect();
+        format!("{} {{ {} }}", struct_name, fields.join(", "))
     }
 
     /// Count how many times a VarId is referenced in an IR expression tree
@@ -718,7 +771,7 @@ impl Emitter {
                     return name;
                 }
                 // Single-use: safe to move
-                if self.single_use_vars.contains(&info.name) {
+                if self.single_use_vars.contains(id) {
                     if let Some(borrow_ty) = self.borrowed_params.get(&info.name) {
                         return Self::borrow_to_owned(&name, borrow_ty);
                     }
@@ -942,15 +995,14 @@ impl Emitter {
     }
 
     /// Analyze IR function body to find variables used exactly once
-    pub(crate) fn analyze_ir_single_use(&mut self, body: &IrExpr, param_var_ids: &[(VarId, almide::types::Ty)]) {
+    pub(crate) fn analyze_ir_single_use(&mut self, body: &IrExpr, params: &[IrParam]) {
         let mut counts: std::collections::HashMap<VarId, usize> = std::collections::HashMap::new();
         Self::count_ir_var_uses(body, &mut counts);
         self.single_use_vars.clear();
-        let param_ids: std::collections::HashSet<VarId> = param_var_ids.iter().map(|(id, _)| *id).collect();
-        let var_table = &self.ir_program.as_ref().expect("IR").var_table;
+        let param_ids: std::collections::HashSet<VarId> = params.iter().map(|p| p.var).collect();
         for (id, count) in &counts {
             if *count == 1 && !param_ids.contains(id) {
-                self.single_use_vars.insert(var_table.get(*id).name.clone());
+                self.single_use_vars.insert(*id);
             }
         }
     }
@@ -958,7 +1010,7 @@ impl Emitter {
     fn needs_debug_format(ty: &Ty) -> bool {
         match ty {
             Ty::List(_) | Ty::Option(_) | Ty::Result(_, _) |
-            Ty::Map(_, _) | Ty::Tuple(_) | Ty::Record { .. } |
+            Ty::Map(_, _) | Ty::Tuple(_) | Ty::Record { .. } | Ty::OpenRecord { .. } |
             Ty::Variant { .. } => true,
             Ty::Named(name, _) => {
                 // Built-in type names use Display, user-defined types use Debug

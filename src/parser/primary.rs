@@ -282,13 +282,6 @@ impl Parser {
             }
             return Ok(Expr::TypeName { name, span, resolved_type: None });
         }
-        // |x| closure syntax (needs lookahead — kept inline)
-        if self.check(TokenType::Pipe) && self.peek_at(1).map(|t| matches!(t.token_type, TokenType::Ident | TokenType::IdentQ | TokenType::Underscore)).unwrap_or(false) {
-            return Err(format!(
-                "'|x|' closure syntax is not valid in Almide at line {}:{}\n  Hint: Use 'fn(x) => expr' for lambdas. Example: list.map(xs, fn(x) => x + 1)",
-                tok.line, tok.col
-            ));
-        }
         // Check hint system for rejected operators and keywords from other languages
         if let Some(result) = self.check_hint(None, super::hints::HintScope::Expression) {
             let msg = result.message.unwrap_or_else(|| format!("'{}' is not valid here", tok.value));

@@ -1,0 +1,6 @@
+{
+  "name": "multi-step-transform",
+  "instruction": "Add a new function `invoice_summary(orders: List[Order]) -> List[String]` that:\n1. Filters to only shipped orders with total > 0\n2. Sorts by total descending (sort_by total, then reverse)\n3. Takes the top 5\n4. Maps each order to the string `\"${customer}: ${total} (${item_count} items)\"` where item_count is `list.len(o.items)` converted to string\nKeep all existing functions unchanged.",
+  "layer3_hint": "Available: `list.filter(xs, fn(x) => bool)` filters, `list.sort_by(xs, fn(x) => key)` sorts ascending, `list.reverse(xs)` reverses, `list.take(xs, n)` takes first n, `list.map(xs, fn(x) => y)` transforms, `list.len(xs)` returns length, `int.to_string(n)` converts Int to String, `${}` for string interpolation, `and` for logical AND",
+  "test_file": "t07_multi_transform_test.almd"
+}
