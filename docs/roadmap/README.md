@@ -6,6 +6,7 @@
 - [Structured Concurrency](active/structured-concurrency.md) — Layer 2: `async let` / `await` for scoped parallel execution
 - [Grammar Codegen](active/grammar-codegen.md) — Single source of truth for tokens/precedence, auto-generate tree-sitter + TextMate + lexer
 - [Codec Protocol & JSON](active/codec-and-json.md) — `deriving Codec` + JSON as first format, 5-phase roadmap
+- [Template: Typed Document Builder](active/template.md) — `template` keyword, `html {}`/`text {}` builders, `emit`/`embed`, typed document AST
 - [Type System Extensions](active/type-system.md) — Row polymorphism, union types, container protocols (LLM-friendly HKT), structural generic bounds
 
 ## On Hold
