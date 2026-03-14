@@ -475,6 +475,16 @@ const MOD_JSON_TS: &str = r#"const __almd_json = {
   as_float(j: any): number | null { return typeof j === "number" ? j : null; },
   as_bool(j: any): boolean | null { return typeof j === "boolean" ? j : null; },
   as_array(j: any): any[] | null { return Array.isArray(j) ? j : null; },
+  path_root(): any { return { type: "root" }; },
+  path_field(parent: any, name: string): any { return { type: "field", parent, name }; },
+  path_index(parent: any, i: number): any { return { type: "index", parent, i }; },
+  _path_segs(p: any): any[] { const s: any[] = []; let c = p; while (c.type !== "root") { s.push(c); c = c.parent; } s.reverse(); return s; },
+  get_path(j: any, path: any): any | null { const segs = __almd_json._path_segs(path); let cur = j; for (const seg of segs) { if (seg.type === "field") { if (cur == null || typeof cur !== "object" || Array.isArray(cur)) return null; cur = cur[seg.name]; if (cur === undefined) return null; } else { if (!Array.isArray(cur) || seg.i < 0 || seg.i >= cur.length) return null; cur = cur[seg.i]; } } return cur; },
+  set_path(j: any, path: any, value: any): any { const segs = __almd_json._path_segs(path); if (segs.length === 0) return value; return __almd_json._set_at(j, segs, 0, value, false); },
+  upsert_path(j: any, path: any, value: any): any { const segs = __almd_json._path_segs(path); if (segs.length === 0) return value; return __almd_json._set_at(j, segs, 0, value, true); },
+  remove_path(j: any, path: any): any { const segs = __almd_json._path_segs(path); if (segs.length === 0) return null; return __almd_json._remove_at(j, segs, 0); },
+  _set_at(j: any, segs: any[], idx: number, value: any, upsert: boolean): any { if (idx >= segs.length) return value; const seg = segs[idx]; if (seg.type === "field") { let m = (j && typeof j === "object" && !Array.isArray(j)) ? { ...j } : (upsert ? {} : (() => { throw new Error(`path error: expected object at field "${seg.name}"`); })()); if (idx + 1 === segs.length) { if (!upsert && !(seg.name in m)) throw new Error(`path error: field "${seg.name}" does not exist`); m[seg.name] = value; } else { m[seg.name] = __almd_json._set_at(m[seg.name] ?? null, segs, idx + 1, value, upsert); } return m; } else { if (!Array.isArray(j)) throw new Error(`path error: expected array at index ${seg.i}`); if (seg.i < 0 || seg.i >= j.length) throw new Error(`path error: index ${seg.i} out of bounds`); const a = [...j]; if (idx + 1 === segs.length) { a[seg.i] = value; } else { a[seg.i] = __almd_json._set_at(a[seg.i], segs, idx + 1, value, upsert); } return a; } },
+  _remove_at(j: any, segs: any[], idx: number): any { if (idx >= segs.length) return j; const seg = segs[idx]; if (seg.type === "field") { if (!j || typeof j !== "object" || Array.isArray(j)) return j; const m = { ...j }; if (idx + 1 === segs.length) { delete m[seg.name]; } else if (seg.name in m) { m[seg.name] = __almd_json._remove_at(m[seg.name], segs, idx + 1); } return m; } else { if (!Array.isArray(j) || seg.i < 0 || seg.i >= j.length) return j; const a = [...j]; if (idx + 1 === segs.length) { a.splice(seg.i, 1); } else { a[seg.i] = __almd_json._remove_at(a[seg.i], segs, idx + 1); } return a; } },
 };
 "#;
 
@@ -502,6 +512,16 @@ const MOD_JSON_JS: &str = r#"const __almd_json = {
   as_float(j) { return typeof j === "number" ? j : null; },
   as_bool(j) { return typeof j === "boolean" ? j : null; },
   as_array(j) { return Array.isArray(j) ? j : null; },
+  path_root() { return { type: "root" }; },
+  path_field(parent, name) { return { type: "field", parent, name }; },
+  path_index(parent, i) { return { type: "index", parent, i }; },
+  _path_segs(p) { const s = []; let c = p; while (c.type !== "root") { s.push(c); c = c.parent; } s.reverse(); return s; },
+  get_path(j, path) { const segs = __almd_json._path_segs(path); let cur = j; for (const seg of segs) { if (seg.type === "field") { if (cur == null || typeof cur !== "object" || Array.isArray(cur)) return null; cur = cur[seg.name]; if (cur === undefined) return null; } else { if (!Array.isArray(cur) || seg.i < 0 || seg.i >= cur.length) return null; cur = cur[seg.i]; } } return cur; },
+  set_path(j, path, value) { const segs = __almd_json._path_segs(path); if (segs.length === 0) return value; return __almd_json._set_at(j, segs, 0, value, false); },
+  upsert_path(j, path, value) { const segs = __almd_json._path_segs(path); if (segs.length === 0) return value; return __almd_json._set_at(j, segs, 0, value, true); },
+  remove_path(j, path) { const segs = __almd_json._path_segs(path); if (segs.length === 0) return null; return __almd_json._remove_at(j, segs, 0); },
+  _set_at(j, segs, idx, value, upsert) { if (idx >= segs.length) return value; const seg = segs[idx]; if (seg.type === "field") { let m = (j && typeof j === "object" && !Array.isArray(j)) ? { ...j } : (upsert ? {} : (() => { throw new Error(`path error: expected object at field "${seg.name}"`); })()); if (idx + 1 === segs.length) { if (!upsert && !(seg.name in m)) throw new Error(`path error: field "${seg.name}" does not exist`); m[seg.name] = value; } else { m[seg.name] = __almd_json._set_at(m[seg.name] ?? null, segs, idx + 1, value, upsert); } return m; } else { if (!Array.isArray(j)) throw new Error(`path error: expected array at index ${seg.i}`); if (seg.i < 0 || seg.i >= j.length) throw new Error(`path error: index ${seg.i} out of bounds`); const a = [...j]; if (idx + 1 === segs.length) { a[seg.i] = value; } else { a[seg.i] = __almd_json._set_at(a[seg.i], segs, idx + 1, value, upsert); } return a; } },
+  _remove_at(j, segs, idx) { if (idx >= segs.length) return j; const seg = segs[idx]; if (seg.type === "field") { if (!j || typeof j !== "object" || Array.isArray(j)) return j; const m = { ...j }; if (idx + 1 === segs.length) { delete m[seg.name]; } else if (seg.name in m) { m[seg.name] = __almd_json._remove_at(m[seg.name], segs, idx + 1); } return m; } else { if (!Array.isArray(j) || seg.i < 0 || seg.i >= j.length) return j; const a = [...j]; if (idx + 1 === segs.length) { a.splice(seg.i, 1); } else { a[seg.i] = __almd_json._remove_at(a[seg.i], segs, idx + 1); } return a; } },
 };
 "#;
 

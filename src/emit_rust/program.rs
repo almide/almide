@@ -853,6 +853,7 @@ impl Emitter {
                 "IoError" => "AlmideIoError".to_string(),
                 "Path" => "String".to_string(),
                 "Json" => "AlmideJson".to_string(),
+                "JsonPath" => "AlmideJsonPath".to_string(),
                 "Request" => "AlmideHttpRequest".to_string(),
                 "Response" => "AlmideHttpResponse".to_string(),
                 other => other.to_string(),

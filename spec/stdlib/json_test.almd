@@ -352,3 +352,98 @@ test "json.object full example" {
   assert_eq(json.get_bool(person, "active"), some(true))
   assert_eq(json.stringify(json.null()), "null")
 }
+
+// ── Path API ──
+
+test "json.get_path simple field" {
+  let j = json.object([("name", json.s("Alice"))])
+  let path = json.field(json.root(), "name")
+  assert_eq(json.get_path(j, path), some(json.s("Alice")))
+}
+
+test "json.get_path nested field" {
+  let j = json.object([
+    ("user", json.object([("name", json.s("Bob"))]))
+  ])
+  let path = json.field(json.field(json.root(), "user"), "name")
+  match json.get_path(j, path) {
+    some(v) => assert_eq(json.as_string(v), some("Bob")),
+    none => assert(false),
+  }
+}
+
+test "json.get_path missing returns none" {
+  let j = json.object([("x", json.i(1))])
+  let path = json.field(json.root(), "y")
+  assert_eq(json.get_path(j, path), none)
+}
+
+test "json.get_path array index" {
+  let j = json.object([
+    ("items", json.array([json.s("a"), json.s("b"), json.s("c")]))
+  ])
+  let path = json.index(json.field(json.root(), "items"), 1)
+  match json.get_path(j, path) {
+    some(v) => assert_eq(json.as_string(v), some("b")),
+    none => assert(false),
+  }
+}
+
+effect fn test_set_path() -> Result[Unit, String] =
+  do {
+    let j = json.object([("name", json.s("Alice")), ("age", json.i(30))])
+    let path = json.field(json.root(), "name")
+    let j2 = json.set_path(j, path, json.s("Bob"))
+    assert_eq(json.get_string(j2, "name"), some("Bob"))
+    assert_eq(json.get_int(j2, "age"), some(30))
+    ok(())
+  }
+
+test "json.set_path replaces existing field" {
+  test_set_path()
+}
+
+test "json.upsert_path creates new field" {
+  let j = json.object([("name", json.s("Alice"))])
+  let path = json.field(json.root(), "age")
+  let j2 = json.upsert_path(j, path, json.i(25))
+  assert_eq(json.get_string(j2, "name"), some("Alice"))
+  assert_eq(json.get_int(j2, "age"), some(25))
+}
+
+test "json.upsert_path creates nested" {
+  let j = json.object([("name", json.s("Alice"))])
+  let path = json.field(json.field(json.root(), "address"), "city")
+  let j2 = json.upsert_path(j, path, json.s("Tokyo"))
+  let addr = json.get(j2, "address")
+  match addr {
+    some(a) => assert_eq(json.get_string(a, "city"), some("Tokyo")),
+    none => assert(false),
+  }
+}
+
+test "json.remove_path removes field" {
+  let j = json.object([("name", json.s("Alice")), ("age", json.i(30))])
+  let path = json.field(json.root(), "age")
+  let j2 = json.remove_path(j, path)
+  assert_eq(json.get_string(j2, "name"), some("Alice"))
+  assert_eq(json.get_int(j2, "age"), none)
+}
+
+test "json.remove_path no-op on missing" {
+  let j = json.object([("name", json.s("Alice"))])
+  let path = json.field(json.root(), "missing")
+  let j2 = json.remove_path(j, path)
+  assert_eq(json.get_string(j2, "name"), some("Alice"))
+}
+
+test "json.upsert_path pipe chain" {
+  let config = json.object([("host", json.s("old")), ("port", json.i(8080))])
+  let new_config = json.upsert_path(
+    json.upsert_path(config, json.field(json.root(), "host"), json.s("new")),
+    json.field(json.root(), "port"),
+    json.i(3000)
+  )
+  assert_eq(json.get_string(new_config, "host"), some("new"))
+  assert_eq(json.get_int(new_config, "port"), some(3000))
+}

@@ -419,6 +419,7 @@ impl Emitter {
                 if args.is_empty() {
                     match name.as_str() {
                         "Json" => "AlmideJson".to_string(),
+                        "JsonPath" => "AlmideJsonPath".to_string(),
                         "IoError" => "AlmideIoError".to_string(),
                         "Request" => "AlmideHttpRequest".to_string(),
                         "Response" => "AlmideHttpResponse".to_string(),
