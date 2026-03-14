@@ -456,18 +456,8 @@ fn format_expr(out: &mut String, expr: &Expr, depth: usize) {
 
         Expr::DoBlock { stmts, expr, .. } => {
             out.push_str("do {\n");
-            let tail_last = expr.is_none() && stmts.last().map_or(false, |s| matches!(s, Stmt::Expr { .. }));
-            let last_idx = stmts.len().saturating_sub(1);
-            for (i, s) in stmts.iter().enumerate() {
-                if tail_last && i == last_idx {
-                    if let Stmt::Expr { expr: e, .. } = s {
-                        out.push_str(&indent(depth + 1));
-                        format_expr(out, e, depth + 1);
-                        out.push('\n');
-                    }
-                } else {
-                    format_stmt(out, s, depth + 1);
-                }
+            for s in stmts {
+                format_stmt(out, s, depth + 1);
             }
             if let Some(e) = expr {
                 out.push_str(&indent(depth + 1));
@@ -664,21 +654,8 @@ fn format_block_expr(out: &mut String, stmts: &[Stmt], expr: &Option<Box<Expr>>,
         }
     }
     out.push_str("{\n");
-    // If there's no tail expression and the last stmt is Stmt::Expr,
-    // format it as a tail expression (no semicolon) for idempotency.
-    let tail_last = expr.is_none() && stmts.last().map_or(false, |s| matches!(s, Stmt::Expr { .. }));
-    let last_idx = stmts.len().saturating_sub(1);
-    for (i, s) in stmts.iter().enumerate() {
-        if tail_last && i == last_idx {
-            // Format as tail expression (no semicolon)
-            if let Stmt::Expr { expr: e, .. } = s {
-                out.push_str(&indent(depth + 1));
-                format_expr(out, e, depth + 1);
-                out.push('\n');
-            }
-        } else {
-            format_stmt(out, s, depth + 1);
-        }
+    for s in stmts {
+        format_stmt(out, s, depth + 1);
     }
     if let Some(e) = expr {
         out.push_str(&indent(depth + 1));
