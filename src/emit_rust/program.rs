@@ -27,6 +27,21 @@ impl Emitter {
         }
     }
 
+    /// Scan IR functions to classify effect/result functions (no AST needed).
+    fn collect_fn_info_from_ir(&mut self, functions: &[almide::ir::IrFunction]) {
+        for func in functions {
+            if func.is_test { continue; }
+            let ret_str = self.ir_ty_to_rust_sig(&func.ret_ty);
+            let returns_result = ret_str.starts_with("Result<");
+            if func.is_effect {
+                self.effect_fns.push(func.name.clone());
+            }
+            if returns_result || func.is_effect {
+                self.result_fns.push(func.name.clone());
+            }
+        }
+    }
+
     /// Pre-collect named record types so anonymous record literals can use the correct struct name.
     fn collect_named_records(&mut self, decls: &[Decl]) {
         for decl in decls {
@@ -168,30 +183,36 @@ impl Emitter {
     }
 
     pub(crate) fn emit_program(&mut self, prog: &Program, modules: &[(String, Program, Option<crate::project::PkgId>, bool)]) {
-        self.collect_fn_info(&prog.decls);
-        // Use IR type_decls when available, fall back to AST
-        if let Some(ref ir) = self.ir_program {
-            self.collect_named_records_from_ir(&ir.type_decls.clone());
-        } else {
-            self.collect_named_records(&prog.decls);
-        }
-        // Always collect from AST for open_record_aliases (not yet in IR)
-        self.collect_open_record_aliases(&prog.decls);
-        self.collect_top_lets(&prog.decls);
+        let use_ir = self.ir_program.is_some();
 
-        // Use IR modules when available for module metadata collection
+        // ── Phase 1: Collect metadata ──
+        if use_ir {
+            let ir_fns = self.ir_program.as_ref().unwrap().functions.clone();
+            let ir_tds = self.ir_program.as_ref().unwrap().type_decls.clone();
+            self.collect_fn_info_from_ir(&ir_fns);
+            self.collect_named_records_from_ir(&ir_tds);
+            self.collect_top_lets(&prog.decls);
+        } else {
+            self.collect_fn_info(&prog.decls);
+            self.collect_named_records(&prog.decls);
+            self.collect_top_lets(&prog.decls);
+        }
+
+        // Always collect from AST for open_record_aliases (not yet modeled in IR type system)
+        self.collect_open_record_aliases(&prog.decls);
+
+        // Module metadata
         let has_ir_modules = self.ir_program.as_ref().map_or(false, |ir| !ir.modules.is_empty());
         if has_ir_modules {
             let ir_modules = self.ir_program.as_ref().unwrap().modules.clone();
             for ir_mod in &ir_modules {
-                // Collect fn info from AST (still needed for effect/result classification)
+                self.collect_fn_info_from_ir(&ir_mod.functions);
+                self.collect_named_records_from_ir(&ir_mod.type_decls);
+                // Still need AST for open_record_aliases
                 if let Some((_, mod_prog, _, _)) = modules.iter().find(|(n, _, _, _)| n == &ir_mod.name) {
-                    self.collect_fn_info(&mod_prog.decls);
                     self.collect_open_record_aliases(&mod_prog.decls);
                 }
-                self.collect_named_records_from_ir(&ir_mod.type_decls);
             }
-            // Build module_aliases and user_modules from IR modules
             for ir_mod in &ir_modules {
                 if let Some(ref versioned) = ir_mod.versioned_name {
                     self.module_aliases.insert(ir_mod.name.clone(), versioned.clone());
@@ -202,15 +223,20 @@ impl Emitter {
             }
         } else {
             for (mod_name, mod_prog, _, _) in modules {
-                self.collect_fn_info(&mod_prog.decls);
-                if let Some(mod_ir) = self.module_irs.get(mod_name).cloned() {
-                    self.collect_named_records_from_ir(&mod_ir.type_decls);
+                if use_ir {
+                    if let Some(mod_ir) = self.module_irs.get(mod_name).cloned() {
+                        self.collect_fn_info_from_ir(&mod_ir.functions);
+                        self.collect_named_records_from_ir(&mod_ir.type_decls);
+                    } else {
+                        self.collect_fn_info(&mod_prog.decls);
+                        self.collect_named_records(&mod_prog.decls);
+                    }
                 } else {
+                    self.collect_fn_info(&mod_prog.decls);
                     self.collect_named_records(&mod_prog.decls);
                 }
                 self.collect_open_record_aliases(&mod_prog.decls);
             }
-            // Build module_aliases and user_modules from PkgId info
             for (name, _, pkg_id, _) in modules {
                 if let Some(pid) = pkg_id {
                     let versioned = pid.mod_name();
@@ -222,22 +248,21 @@ impl Emitter {
             }
         }
 
+        // ── Phase 2: Emit runtime and preamble ──
         self.emitln("#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use)]");
         self.emitln("");
         self.emit_runtime();
         self.emitln("");
 
-        // Placeholder for anonymous record structs — filled after codegen
         let anon_record_placeholder = "/* __ALMD_ANON_RECORDS__ */";
         self.emitln(anon_record_placeholder);
         self.emitln("");
 
-        // Collect variant and record type names per module for cross-module imports
+        // ── Phase 3: Collect cross-module type info ──
         let mut module_variant_types: Vec<(String, Vec<String>)> = Vec::new();
         let mut module_record_types: Vec<(String, Vec<String>)> = Vec::new();
 
         if has_ir_modules {
-            // Derive cross-module type info from IR modules
             let ir_modules = self.ir_program.as_ref().unwrap().modules.clone();
             for ir_mod in &ir_modules {
                 let rust_mod = ir_mod.versioned_name.as_ref()
@@ -247,12 +272,8 @@ impl Emitter {
                 let mut record_names = Vec::new();
                 for td in &ir_mod.type_decls {
                     match &td.kind {
-                        almide::ir::IrTypeDeclKind::Variant { .. } => {
-                            variant_names.push(td.name.clone());
-                        }
-                        almide::ir::IrTypeDeclKind::Record { .. } => {
-                            record_names.push(td.name.clone());
-                        }
+                        almide::ir::IrTypeDeclKind::Variant { .. } => variant_names.push(td.name.clone()),
+                        almide::ir::IrTypeDeclKind::Record { .. } => record_names.push(td.name.clone()),
                         _ => {}
                     }
                 }
@@ -270,12 +291,8 @@ impl Emitter {
                 let mut record_names = Vec::new();
                 for decl in &mod_prog.decls {
                     match decl {
-                        Decl::Type { name, ty: TypeExpr::Variant { .. }, .. } => {
-                            variant_names.push(name.clone());
-                        }
-                        Decl::Type { name, ty: TypeExpr::Record { .. }, .. } => {
-                            record_names.push(name.clone());
-                        }
+                        Decl::Type { name, ty: TypeExpr::Variant { .. }, .. } => variant_names.push(name.clone()),
+                        Decl::Type { name, ty: TypeExpr::Record { .. }, .. } => record_names.push(name.clone()),
                         _ => {}
                     }
                 }
@@ -284,20 +301,27 @@ impl Emitter {
             }
         }
 
-        // Emit imported modules as `mod name { ... }`
-        for (mod_name, mod_prog, pkg_id, _) in modules {
-            self.emit_user_module(mod_name, mod_prog, pkg_id.as_ref(), &module_variant_types, &module_record_types);
-            self.emitln("");
+        // ── Phase 4: Emit modules ──
+        if has_ir_modules {
+            let ir_modules = self.ir_program.as_ref().unwrap().modules.clone();
+            for ir_mod in &ir_modules {
+                self.emit_ir_user_module(&ir_mod, &module_variant_types, &module_record_types);
+                self.emitln("");
+            }
+        } else {
+            for (mod_name, mod_prog, pkg_id, _) in modules {
+                self.emit_user_module(mod_name, mod_prog, pkg_id.as_ref(), &module_variant_types, &module_record_types);
+                self.emitln("");
+            }
         }
 
-        // Import variant types from modules into top-level scope
+        // Import variant/record types from modules into top-level scope
         for (rust_mod, variant_names) in &module_variant_types {
             for vname in variant_names {
                 self.emitln(&format!("use {}::{};", rust_mod, vname));
                 self.emitln(&format!("use {}::{}::*;", rust_mod, vname));
             }
         }
-        // Import record types from modules into top-level scope
         for (rust_mod, record_names) in &module_record_types {
             for rname in record_names {
                 self.emitln(&format!("use {}::{};", rust_mod, rname));
@@ -308,34 +332,130 @@ impl Emitter {
             self.emitln("");
         }
 
-        for decl in &prog.decls {
-            self.emit_decl(decl);
-            self.emitln("");
-        }
+        // ── Phase 5: Emit declarations ──
+        // When IR is available, emit from IR structures. Fall back to AST
+        // for functions whose return type couldn't be fully resolved by lowering
+        // (e.g., Result<T, Unknown> where the error type was inferred).
+        if use_ir {
+            let ir = self.ir_program.as_ref().unwrap().clone();
 
-        let main_decl = prog.decls.iter().find(|d| matches!(d, Decl::Fn { name, .. } if name == "main"));
-        if let Some(Decl::Fn { params, effect, return_type, .. }) = main_decl {
-            let has_args = !params.is_empty();
-            let is_effect = effect.unwrap_or(false);
-            let ret_str = self.gen_type(return_type);
-            let returns_result = ret_str.starts_with("Result<") || is_effect;
+            // Build a lookup from AST decls for fallback when IR has Unknown types
+            // (indexed by name for quick lookup)
+            let ast_decl_map: std::collections::HashMap<&str, &Decl> = prog.decls.iter()
+                .filter_map(|d| match d {
+                    Decl::Fn { name, .. } => Some((name.as_str(), d)),
+                    Decl::Type { name, .. } => Some((name.as_str(), d)),
+                    Decl::TopLet { name, .. } => Some((name.as_str(), d)),
+                    Decl::Test { name, .. } => Some((name.as_str(), d)),
+                    _ => None,
+                })
+                .collect();
 
-            self.emitln("fn main() {");
-            self.indent += 1;
-
-            if self.no_thread_wrap {
-                self.emit_main_body(has_args, returns_result);
-            } else {
-                self.emitln("let t = std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {");
-                self.indent += 1;
-                self.emit_main_body(has_args, returns_result);
-                self.indent -= 1;
-                self.emitln("}).expect(\"failed to spawn main thread\");");
-                self.emitln("t.join().expect(\"main thread panicked\");");
+            // Emit type declarations from IR
+            for td in &ir.type_decls {
+                self.emit_ir_type_decl(td);
+                self.emitln("");
             }
 
-            self.indent -= 1;
-            self.emitln("}");
+            // Emit top-level lets from IR
+            for tl in &ir.top_lets {
+                self.emit_ir_top_let(tl);
+                self.emitln("");
+            }
+
+            // Emit functions from IR, with AST fallback for Unknown ret types
+            for func in &ir.functions {
+                let has_unknown_ret = Self::ty_contains_unknown(&func.ret_ty);
+
+                if func.is_test {
+                    self.emit_ir_test(func);
+                } else if has_unknown_ret {
+                    // IR lowering doesn't resolve all return types yet.
+                    // Fall back to AST emit_decl for these functions.
+                    if let Some(decl) = ast_decl_map.get(func.name.as_str()) {
+                        self.emit_decl(decl);
+                    } else {
+                        self.emit_ir_fn_decl(func);
+                    }
+                } else {
+                    self.emit_ir_fn_decl(func);
+                }
+                self.emitln("");
+            }
+
+            // Emit Impl blocks from AST (methods already in IR, just emit comment)
+            for decl in &prog.decls {
+                match decl {
+                    Decl::Module { path, .. } => {
+                        self.emitln(&format!("// module: {}", path.join(".")));
+                        self.emitln("");
+                    }
+                    Decl::Import { path, .. } => {
+                        self.emitln(&format!("// import: {}", path.join(".")));
+                        self.emitln("");
+                    }
+                    Decl::Impl { trait_, for_, .. } => {
+                        self.emitln(&format!("// impl {} for {}", trait_, for_));
+                        self.emitln("");
+                    }
+                    _ => {}
+                }
+            }
+
+            // Emit main() wrapper from IR
+            if let Some(main_fn) = ir.functions.iter().find(|f| f.name == "main") {
+                let has_args = !main_fn.params.is_empty();
+                let ret_str = self.ir_ty_to_rust_sig(&main_fn.ret_ty);
+                let returns_result = ret_str.starts_with("Result<") || main_fn.is_effect;
+
+                self.emitln("fn main() {");
+                self.indent += 1;
+
+                if self.no_thread_wrap {
+                    self.emit_main_body(has_args, returns_result);
+                } else {
+                    self.emitln("let t = std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {");
+                    self.indent += 1;
+                    self.emit_main_body(has_args, returns_result);
+                    self.indent -= 1;
+                    self.emitln("}).expect(\"failed to spawn main thread\");");
+                    self.emitln("t.join().expect(\"main thread panicked\");");
+                }
+
+                self.indent -= 1;
+                self.emitln("}");
+            }
+        } else {
+            // Legacy AST-based path
+            for decl in &prog.decls {
+                self.emit_decl(decl);
+                self.emitln("");
+            }
+
+            let main_decl = prog.decls.iter().find(|d| matches!(d, Decl::Fn { name, .. } if name == "main"));
+            if let Some(Decl::Fn { params, effect, return_type, .. }) = main_decl {
+                let has_args = !params.is_empty();
+                let is_effect = effect.unwrap_or(false);
+                let ret_str = self.gen_type(return_type);
+                let returns_result = ret_str.starts_with("Result<") || is_effect;
+
+                self.emitln("fn main() {");
+                self.indent += 1;
+
+                if self.no_thread_wrap {
+                    self.emit_main_body(has_args, returns_result);
+                } else {
+                    self.emitln("let t = std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {");
+                    self.indent += 1;
+                    self.emit_main_body(has_args, returns_result);
+                    self.indent -= 1;
+                    self.emitln("}).expect(\"failed to spawn main thread\");");
+                    self.emitln("t.join().expect(\"main thread panicked\");");
+                }
+
+                self.indent -= 1;
+                self.emitln("}");
+            }
         }
 
         // Replace placeholder with collected anonymous record struct definitions
@@ -1137,6 +1257,508 @@ impl Emitter {
         } else {
             format!("{}.clone()", expr)
         }
+    }
+
+    // ── Phase 5: IR-only codegen methods ─────────────────────────────
+
+    fn ir_vis_prefix(vis: almide::ir::IrVisibility) -> &'static str {
+        match vis {
+            almide::ir::IrVisibility::Public => "pub ",
+            almide::ir::IrVisibility::Mod => "pub(crate) ",
+            almide::ir::IrVisibility::Private => "",
+        }
+    }
+
+    fn ir_generic_str(generics: Option<&Vec<crate::ast::GenericParam>>) -> String {
+        match generics {
+            Some(gs) if !gs.is_empty() => {
+                let gparams: Vec<String> = gs.iter().map(|g| {
+                    format!("{}: Clone + std::fmt::Debug + PartialEq + PartialOrd", g.name)
+                }).collect();
+                format!("<{}>", gparams.join(", "))
+            }
+            _ => String::new(),
+        }
+    }
+
+    fn ir_generic_names(generics: Option<&Vec<crate::ast::GenericParam>>) -> String {
+        match generics {
+            Some(gs) if !gs.is_empty() => {
+                let names: Vec<String> = gs.iter().map(|g| g.name.clone()).collect();
+                format!("<{}>", names.join(", "))
+            }
+            _ => String::new(),
+        }
+    }
+
+    /// Check if a Ty references a given type name (for detecting recursive variants in IR).
+    fn ty_references_name(ty: &almide::types::Ty, target: &str) -> bool {
+        use almide::types::Ty;
+        match ty {
+            Ty::Named(name, args) => name == target || args.iter().any(|a| Self::ty_references_name(a, target)),
+            Ty::List(inner) | Ty::Option(inner) => Self::ty_references_name(inner, target),
+            Ty::Result(a, b) | Ty::Map(a, b) => Self::ty_references_name(a, target) || Self::ty_references_name(b, target),
+            Ty::Tuple(elems) => elems.iter().any(|e| Self::ty_references_name(e, target)),
+            Ty::Fn { params, ret } => params.iter().any(|p| Self::ty_references_name(p, target)) || Self::ty_references_name(ret, target),
+            Ty::Record { fields } => fields.iter().any(|(_, fty)| Self::ty_references_name(fty, target)),
+            _ => false,
+        }
+    }
+
+    /// Check if a Ty contains Ty::Unknown anywhere in its structure.
+    fn ty_contains_unknown(ty: &almide::types::Ty) -> bool {
+        use almide::types::Ty;
+        match ty {
+            Ty::Unknown => true,
+            Ty::List(inner) | Ty::Option(inner) => Self::ty_contains_unknown(inner),
+            Ty::Result(a, b) | Ty::Map(a, b) => Self::ty_contains_unknown(a) || Self::ty_contains_unknown(b),
+            Ty::Tuple(elems) => elems.iter().any(|e| Self::ty_contains_unknown(e)),
+            Ty::Named(_, args) => args.iter().any(|a| Self::ty_contains_unknown(a)),
+            Ty::Fn { params, ret } => params.iter().any(|p| Self::ty_contains_unknown(p)) || Self::ty_contains_unknown(ret),
+            Ty::Record { fields } => fields.iter().any(|(_, fty)| Self::ty_contains_unknown(fty)),
+            _ => false,
+        }
+    }
+
+    /// Generate a Rust type string from Ty, wrapping with Box if it references the given recursive type name.
+    fn ir_ty_to_rust_boxed(&self, ty: &almide::types::Ty, recursive_name: &str) -> String {
+        if Self::ty_references_name(ty, recursive_name) {
+            format!("Box<{}>", self.ir_ty_to_rust_sig(ty))
+        } else {
+            self.ir_ty_to_rust_sig(ty)
+        }
+    }
+
+    /// Emit a type declaration from IrTypeDecl (no AST needed).
+    fn emit_ir_type_decl(&mut self, td: &almide::ir::IrTypeDecl) {
+        self.emit_ir_type_decl_vis(td, Self::ir_vis_prefix(td.visibility));
+    }
+
+    fn emit_ir_type_decl_vis(&mut self, td: &almide::ir::IrTypeDecl, vis: &str) {
+        use almide::ir::{IrTypeDeclKind, IrVariantKind};
+        let generic_str = Self::ir_generic_str(td.generics.as_ref());
+        let generic_names = Self::ir_generic_names(td.generics.as_ref());
+
+        match &td.kind {
+            IrTypeDeclKind::Record { fields } => {
+                self.emitln("#[derive(Debug, Clone, PartialEq)]");
+                self.emitln(&format!("{}struct {}{} {{", vis, td.name, generic_str));
+                self.indent += 1;
+                let field_vis = if vis.is_empty() { "" } else { "pub " };
+                for f in fields {
+                    let ty_str = self.ir_ty_to_rust_sig(&f.ty);
+                    self.emitln(&format!("{}{}: {},", field_vis, f.name, ty_str));
+                }
+                self.indent -= 1;
+                self.emitln("}");
+            }
+            IrTypeDeclKind::Alias { target } => {
+                // Check if alias target is an open record (field-based struct)
+                if let almide::types::Ty::OpenRecord { fields } = target {
+                    let field_names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
+                    let struct_name = self.fresh_anon_record_name(&field_names);
+                    let type_args: Vec<String> = fields.iter().map(|(_, t)| self.ir_ty_to_rust(t)).collect();
+                    if type_args.is_empty() {
+                        self.emitln(&format!("{}type {}{} = {};", vis, td.name, generic_str, struct_name));
+                    } else {
+                        self.emitln(&format!("{}type {}{} = {}<{}>;", vis, td.name, generic_str, struct_name, type_args.join(", ")));
+                    }
+                } else {
+                    let ty_str = self.ir_ty_to_rust(target);
+                    self.emitln(&format!("{}type {}{} = {};", vis, td.name, generic_str, ty_str));
+                }
+            }
+            IrTypeDeclKind::Variant { cases, is_generic, boxed_args, boxed_record_fields: _ } => {
+                let is_recursive = cases.iter().any(|c| match &c.kind {
+                    IrVariantKind::Tuple { fields } => fields.iter().any(|f| Self::ty_references_name(f, &td.name)),
+                    IrVariantKind::Record { fields } => fields.iter().any(|f| Self::ty_references_name(&f.ty, &td.name)),
+                    _ => false,
+                });
+
+                self.emitln("#[derive(Debug, Clone, PartialEq)]");
+                self.emitln(&format!("{}enum {}{} {{", vis, td.name, generic_str));
+                self.indent += 1;
+                for case in cases {
+                    match &case.kind {
+                        IrVariantKind::Unit => {
+                            self.emitln(&format!("{},", case.name));
+                        }
+                        IrVariantKind::Tuple { fields } => {
+                            let fs: Vec<String> = fields.iter().map(|f| {
+                                if is_recursive { self.ir_ty_to_rust_boxed(f, &td.name) } else { self.ir_ty_to_rust_sig(f) }
+                            }).collect();
+                            self.emitln(&format!("{}({}),", case.name, fs.join(", ")));
+                        }
+                        IrVariantKind::Record { fields } => {
+                            let fs: Vec<String> = fields.iter().map(|f| {
+                                let ty_str = if is_recursive { self.ir_ty_to_rust_boxed(&f.ty, &td.name) } else { self.ir_ty_to_rust_sig(&f.ty) };
+                                format!("{}: {}", f.name, ty_str)
+                            }).collect();
+                            self.emitln(&format!("{} {{ {} }},", case.name, fs.join(", ")));
+                        }
+                    }
+                }
+                self.indent -= 1;
+                self.emitln("}");
+
+                // impl Display
+                self.emitln(&format!("impl{} std::fmt::Display for {}{} {{", generic_str, td.name, generic_names));
+                self.emitln(&format!("    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {{ write!(f, \"{{:?}}\", self) }}"));
+                self.emitln("}");
+
+                if generic_str.is_empty() {
+                    self.emitln(&format!("use {}::*;", td.name));
+                } else {
+                    // Generic enum constructor wrappers
+                    for case in cases {
+                        match &case.kind {
+                            IrVariantKind::Unit => {
+                                self.emitln("#[allow(non_snake_case)]");
+                                self.emitln(&format!("fn {}{}() -> {}{} {{ {}::{} }}", case.name, generic_str, td.name, generic_names, td.name, case.name));
+                            }
+                            IrVariantKind::Tuple { fields } => {
+                                let params: Vec<String> = fields.iter().enumerate()
+                                    .map(|(i, f)| format!("_{}: {}", i, self.ir_ty_to_rust_sig(f)))
+                                    .collect();
+                                let args: Vec<String> = fields.iter().enumerate().map(|(i, f)| {
+                                    if is_recursive && Self::ty_references_name(f, &td.name) {
+                                        format!("Box::new(_{})", i)
+                                    } else {
+                                        format!("_{}", i)
+                                    }
+                                }).collect();
+                                self.emitln("#[allow(non_snake_case)]");
+                                self.emitln(&format!("fn {}{}({}) -> {}{} {{ {}::{}({}) }}", case.name, generic_str, params.join(", "), td.name, generic_names, td.name, case.name, args.join(", ")));
+                            }
+                            IrVariantKind::Record { fields } => {
+                                let params: Vec<String> = fields.iter()
+                                    .map(|f| format!("{}: {}", f.name, self.ir_ty_to_rust_sig(&f.ty)))
+                                    .collect();
+                                let args: Vec<String> = fields.iter()
+                                    .map(|f| {
+                                        if is_recursive && Self::ty_references_name(&f.ty, &td.name) {
+                                            format!("{}: Box::new({})", f.name, f.name)
+                                        } else {
+                                            f.name.clone()
+                                        }
+                                    })
+                                    .collect();
+                                self.emitln("#[allow(non_snake_case)]");
+                                self.emitln(&format!("fn {}{}({}) -> {}{} {{ {}::{} {{ {} }} }}", case.name, generic_str, params.join(", "), td.name, generic_names, td.name, case.name, args.join(", ")));
+                            }
+                        }
+                    }
+                }
+                // deriving From
+                if td.deriving.as_ref().map_or(false, |d| d.iter().any(|s| s == "From")) {
+                    for case in cases {
+                        if let IrVariantKind::Tuple { fields } = &case.kind {
+                            if fields.len() == 1 {
+                                let inner_ty = self.ir_ty_to_rust_sig(&fields[0]);
+                                self.emitln(&format!("impl From<{}> for {} {{", inner_ty, td.name));
+                                self.emitln(&format!("    fn from(e: {}) -> Self {{ {}::{}(e) }}", inner_ty, td.name, case.name));
+                                self.emitln("}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Emit a function declaration from IrFunction (no AST needed).
+    fn emit_ir_fn_decl(&mut self, ir_fn: &almide::ir::IrFunction) {
+        let fn_name = if ir_fn.name == "main" { "almide_main".to_string() } else { crate::emit_common::sanitize(&ir_fn.name) };
+        // Use ret_ty, falling back to body's type when ret_ty is Unknown
+        let effective_ret_ty = if matches!(&ir_fn.ret_ty, almide::types::Ty::Unknown) {
+            &ir_fn.body.ty
+        } else {
+            &ir_fn.ret_ty
+        };
+        let ret_str = self.ir_ty_to_rust_sig(effective_ret_ty);
+        let is_unit_ret = ret_str == "()";
+
+        let actual_ret = if ir_fn.is_effect {
+            if ret_str.starts_with("Result<") {
+                ret_str.clone()
+            } else if is_unit_ret {
+                "Result<(), String>".to_string()
+            } else {
+                format!("Result<{}, String>", ret_str)
+            }
+        } else {
+            ret_str.clone()
+        };
+
+        self.borrowed_params.clear();
+        // Track open record params for call-site projection
+        let mut fn_open_records: Vec<(usize, String, Vec<super::OpenFieldInfo>)> = Vec::new();
+        let params_str: Vec<String> = ir_fn.params.iter().enumerate()
+            .filter(|(_, p)| p.name != "self")
+            .map(|(i, p)| {
+                // Open record params via IR Ty
+                if let almide::types::Ty::OpenRecord { fields } = &p.ty {
+                    let field_infos = self.build_open_field_infos_from_ty(fields);
+                    let field_names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
+                    let struct_name = self.fresh_anon_record_name(&field_names);
+                    let type_args: Vec<String> = fields.iter().map(|(_, t)| self.ir_ty_to_rust(t)).collect();
+                    fn_open_records.push((i, struct_name.clone(), field_infos));
+                    let ty = if type_args.is_empty() {
+                        struct_name
+                    } else {
+                        format!("{}<{}>", struct_name, type_args.join(", "))
+                    };
+                    return format!("{}: {}", p.name, ty);
+                }
+                // Check open_record_aliases for shape alias types
+                if let almide::types::Ty::Named(alias_name, _) = &p.ty {
+                    if let Some(fields) = self.open_record_aliases.get(alias_name).cloned() {
+                        let field_infos = self.build_open_field_infos(&fields);
+                        let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+                        let struct_name = self.fresh_anon_record_name(&field_names);
+                        let type_args: Vec<String> = fields.iter().map(|f| self.gen_type(&f.ty)).collect();
+                        fn_open_records.push((i, struct_name.clone(), field_infos));
+                        let ty = if type_args.is_empty() {
+                            struct_name
+                        } else {
+                            format!("{}<{}>", struct_name, type_args.join(", "))
+                        };
+                        return format!("{}: {}", p.name, ty);
+                    }
+                }
+                let ty = self.ir_ty_to_rust_sig(&p.ty);
+                let ownership = self.borrow_info.param_ownership(&ir_fn.name, i);
+                let ty = if ownership == super::borrow::ParamOwnership::Borrow {
+                    let borrowed = Self::to_borrow_type(&ty);
+                    self.borrowed_params.insert(p.name.clone(), borrowed.clone());
+                    borrowed
+                } else {
+                    ty
+                };
+                format!("{}: {}", p.name, ty)
+            })
+            .collect();
+        if !fn_open_records.is_empty() {
+            self.open_record_params.insert(ir_fn.name.clone(), fn_open_records);
+        }
+
+        let generic_str = Self::ir_generic_str(ir_fn.generics.as_ref());
+        let async_prefix = if ir_fn.is_async { "async " } else { "" };
+        self.emitln(&format!("{}fn {}{}({}) -> {} {{", async_prefix, fn_name, generic_str, params_str.join(", "), actual_ret));
+        self.indent += 1;
+
+        // Check for @extern(rs, ...)
+        let rs_extern = ir_fn.extern_attrs.iter().find(|a| a.target == "rs");
+        if let Some(ext) = rs_extern {
+            let args: Vec<String> = ir_fn.params.iter()
+                .filter(|p| p.name != "self")
+                .map(|p| format!("{}.clone()", p.name))
+                .collect();
+            let call = format!("{}::{}({})", ext.module.replace('.', "::"), ext.function, args.join(", "));
+            if ir_fn.is_effect {
+                self.emitln(&format!("{}?", call));
+            } else {
+                self.emitln(&call);
+            }
+        } else {
+            self.analyze_ir_single_use(&ir_fn.body, &ir_fn.params);
+            let prev_effect = self.in_effect;
+            self.in_effect = ir_fn.is_effect || ret_str.starts_with("Result<");
+            self.emit_ir_fn_body(&ir_fn.body, ir_fn.is_effect, &ret_str, is_unit_ret);
+            self.in_effect = prev_effect;
+        }
+
+        self.indent -= 1;
+        self.emitln("}");
+    }
+
+    /// Emit a function declaration from IrFunction with visibility (for modules).
+    fn emit_ir_fn_decl_vis(&mut self, ir_fn: &almide::ir::IrFunction, module_name: &str) {
+        let fn_name = crate::emit_common::sanitize(&ir_fn.name);
+        // Use ret_ty, falling back to body's type when ret_ty is Unknown
+        let effective_ret_ty = if matches!(&ir_fn.ret_ty, almide::types::Ty::Unknown) {
+            &ir_fn.body.ty
+        } else {
+            &ir_fn.ret_ty
+        };
+        let ret_str = self.ir_ty_to_rust_sig(effective_ret_ty);
+        let is_unit_ret = ret_str == "()" || ret_str == "Result<(), String>";
+
+        let actual_ret = if ir_fn.is_effect && !ret_str.starts_with("Result<") {
+            if ret_str == "()" {
+                "Result<(), String>".to_string()
+            } else {
+                format!("Result<{}, String>", ret_str)
+            }
+        } else {
+            ret_str.clone()
+        };
+
+        let qualified = format!("{}.{}", module_name, ir_fn.name);
+        self.borrowed_params.clear();
+        let params_str: Vec<String> = ir_fn.params.iter().enumerate()
+            .map(|(i, p)| {
+                let ty = self.ir_ty_to_rust_sig(&p.ty);
+                let ownership = self.borrow_info.param_ownership(&qualified, i);
+                let ty = if ownership == super::borrow::ParamOwnership::Borrow {
+                    let borrowed = Self::to_borrow_type(&ty);
+                    self.borrowed_params.insert(p.name.clone(), borrowed.clone());
+                    borrowed
+                } else {
+                    ty
+                };
+                format!("{}: {}", p.name, ty)
+            })
+            .collect();
+
+        let vis = Self::ir_vis_prefix(ir_fn.visibility);
+        let generic_str = Self::ir_generic_str(ir_fn.generics.as_ref());
+        let async_prefix = if ir_fn.is_async { &format!("{}async ", vis) } else { vis };
+        self.emitln(&format!("{}fn {}{}({}) -> {} {{", async_prefix, fn_name, generic_str, params_str.join(", "), actual_ret));
+        self.indent += 1;
+
+        let rs_extern = ir_fn.extern_attrs.iter().find(|a| a.target == "rs");
+        if let Some(ext) = rs_extern {
+            let args: Vec<String> = ir_fn.params.iter().map(|p| format!("{}.clone()", p.name)).collect();
+            let call = format!("{}::{}({})", ext.module.replace('.', "::"), ext.function, args.join(", "));
+            if ir_fn.is_effect {
+                self.emitln(&format!("{}?", call));
+            } else {
+                self.emitln(&call);
+            }
+        } else {
+            // Temporarily swap ir_program to module's IR (for VarTable access)
+            let saved_ir = self.ir_program.take();
+            let module_ir_prog = saved_ir.as_ref()
+                .and_then(|ir| ir.modules.iter().find(|m| m.name == module_name))
+                .map(|m| almide::ir::IrProgram {
+                    functions: m.functions.clone(),
+                    top_lets: m.top_lets.clone(),
+                    type_decls: m.type_decls.clone(),
+                    var_table: m.var_table.clone(),
+                    modules: Vec::new(),
+                })
+                .or_else(|| self.module_irs.get(module_name).cloned());
+            self.ir_program = module_ir_prog;
+            self.analyze_ir_single_use(&ir_fn.body, &ir_fn.params);
+            let prev_effect = self.in_effect;
+            self.in_effect = ir_fn.is_effect || ret_str.starts_with("Result<");
+            self.emit_ir_fn_body(&ir_fn.body, ir_fn.is_effect, &ret_str, is_unit_ret);
+            self.in_effect = prev_effect;
+            self.ir_program = saved_ir;
+        }
+
+        self.indent -= 1;
+        self.emitln("}");
+        self.emitln("");
+    }
+
+    /// Emit a top-level let from IrTopLet (no AST needed).
+    fn emit_ir_top_let(&mut self, ir_tl: &almide::ir::IrTopLet) {
+        let name = self.ir_var_table().get(ir_tl.var).name.clone();
+        let ty_str = {
+            let inferred = self.ir_ty_to_rust_sig(&ir_tl.ty);
+            if inferred == "i64" && self.ir_expr_contains_float(&ir_tl.value) {
+                "f64".to_string()
+            } else {
+                inferred
+            }
+        };
+        let val_str = self.gen_ir_expr(&ir_tl.value);
+        let use_lazy = ty_str == "String" || ir_tl.kind == almide::ir::TopLetKind::Lazy;
+        if use_lazy {
+            self.top_let_names.insert(name.clone(), true);
+            self.emitln(&format!("static {}: std::sync::LazyLock<{}> = std::sync::LazyLock::new(|| {});", name, ty_str, val_str));
+        } else {
+            self.emitln(&format!("const {}: {} = {};", name, ty_str, val_str));
+        }
+    }
+
+    /// Emit a test from IrFunction (no AST needed).
+    fn emit_ir_test(&mut self, ir_fn: &almide::ir::IrFunction) {
+        self.emitln("#[test]");
+        let safe_name = ir_fn.name.chars().map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' }).collect::<String>();
+        let ir_fn = ir_fn.clone();
+        self.analyze_ir_single_use(&ir_fn.body, &ir_fn.params);
+        self.borrowed_params.clear();
+        let prev_effect = self.in_effect;
+        let prev_test = self.in_test;
+        self.in_effect = true;
+        self.in_test = true;
+        let expr = self.gen_ir_expr(&ir_fn.body);
+        let has_question = expr.contains("?");
+        if has_question {
+            self.emitln(&format!("fn test_{}() -> Result<(), String> {{", safe_name));
+            self.indent += 1;
+            self.emitln(&format!("{};", expr));
+            self.emitln("Ok(())");
+        } else {
+            self.emitln(&format!("fn test_{}() {{", safe_name));
+            self.indent += 1;
+            self.emitln(&format!("{};", expr));
+        }
+        self.in_effect = prev_effect;
+        self.in_test = prev_test;
+        self.indent -= 1;
+        self.emitln("}");
+    }
+
+    /// Emit a user module from IrModule (no AST Program needed).
+    fn emit_ir_user_module(&mut self, ir_mod: &almide::ir::IrModule, module_variant_types: &[(String, Vec<String>)], module_record_types: &[(String, Vec<String>)]) {
+        let mod_name = ir_mod.versioned_name.as_ref().unwrap_or(&ir_mod.name);
+        let prev_module = self.current_module.take();
+        self.current_module = Some(ir_mod.name.clone());
+        let rust_mod_name = mod_name.replace('.', "_");
+        self.emitln(&format!("mod {} {{", rust_mod_name));
+        self.indent += 1;
+        self.emitln("use super::*;");
+        // Import variant types from other user modules
+        for (other_mod, variant_names) in module_variant_types {
+            if other_mod == &rust_mod_name { continue; }
+            for vname in variant_names {
+                self.emitln(&format!("use super::{}::{};", other_mod, vname));
+                self.emitln(&format!("use super::{}::{}::*;", other_mod, vname));
+            }
+        }
+        // Import record types from other user modules
+        for (other_mod, record_names) in module_record_types {
+            if other_mod == &rust_mod_name { continue; }
+            for rname in record_names {
+                self.emitln(&format!("use super::{}::{};", other_mod, rname));
+            }
+        }
+        self.emitln("");
+
+        // Emit functions
+        for func in &ir_mod.functions {
+            self.emit_ir_fn_decl_vis(func, &ir_mod.name);
+        }
+
+        // Emit type declarations
+        for td in &ir_mod.type_decls {
+            let vis = Self::ir_vis_prefix(td.visibility);
+            self.emit_ir_type_decl_vis(td, vis);
+            self.emitln("");
+        }
+
+        self.indent -= 1;
+        self.emitln("}");
+        self.current_module = prev_module;
+    }
+
+    /// Build OpenFieldInfo from IR Ty fields (for open record params).
+    fn build_open_field_infos_from_ty(&self, fields: &[(String, almide::types::Ty)]) -> Vec<super::OpenFieldInfo> {
+        fields.iter().map(|(name, ty)| {
+            let nested = if let almide::types::Ty::OpenRecord { fields: inner } = ty {
+                let inner_infos = self.build_open_field_infos_from_ty(inner);
+                let inner_names: Vec<String> = inner.iter().map(|(n, _)| n.clone()).collect();
+                let struct_name = self.fresh_anon_record_name(&inner_names);
+                Some((struct_name, inner_infos))
+            } else {
+                None
+            };
+            super::OpenFieldInfo { name: name.clone(), nested }
+        }).collect()
     }
 
 }

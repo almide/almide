@@ -174,20 +174,37 @@ impl<'a> LowerCtx<'a> {
 // ── Program lowering ────────────────────────────────────────────
 
 pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<(usize, usize), Ty>, env: &TypeEnv) -> IrProgram {
+    lower_program_with_prefix(prog, expr_types, env, None)
+}
+
+fn lower_program_with_prefix(prog: &ast::Program, expr_types: &HashMap<(usize, usize), Ty>, env: &TypeEnv, external_prefix: Option<&str>) -> IrProgram {
     let mut ctx = LowerCtx::new(expr_types, env);
     let mut functions = Vec::new();
     let mut top_lets = Vec::new();
     let mut type_decls = Vec::new();
 
+    // Detect module prefix for qualified env lookups (e.g. "path" -> "path.stem").
+    // Use external_prefix (from lower_module) or detect from module declaration.
+    let module_prefix: Option<String> = external_prefix.map(|s| s.to_string()).or_else(|| {
+        prog.module.as_ref().and_then(|m| {
+            if let ast::Decl::Module { path, .. } = m {
+                Some(path.join("."))
+            } else {
+                None
+            }
+        })
+    });
+
     for decl in &prog.decls {
         match decl {
-            ast::Decl::Fn { name, params, body: Some(body), effect, r#async, span, generics, extern_attrs, .. } => {
+            ast::Decl::Fn { name, params, body: Some(body), effect, r#async, span, generics, extern_attrs, visibility, .. } => {
+                let vis = lower_visibility(visibility);
                 functions.push(lower_fn(&mut ctx, name, params, body,
                     effect.unwrap_or(false), r#async.unwrap_or(false), false, *span,
-                    generics.clone(), extern_attrs.clone()));
+                    generics.clone(), extern_attrs.clone(), vis, module_prefix.as_deref()));
             }
             ast::Decl::Test { name, body, span, .. } => {
-                functions.push(lower_fn(&mut ctx, name, &[], body, false, false, true, *span, None, vec![]));
+                functions.push(lower_fn(&mut ctx, name, &[], body, false, false, true, *span, None, vec![], IrVisibility::Private, None));
             }
             ast::Decl::TopLet { name, value, span, .. } => {
                 let ir_value = lower_expr(&mut ctx, value);
@@ -205,10 +222,11 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<(usize, usize), T
             }
             ast::Decl::Impl { methods, .. } => {
                 for m in methods {
-                    if let ast::Decl::Fn { name, params, body: Some(body), effect, r#async, span, generics, extern_attrs, .. } = m {
+                    if let ast::Decl::Fn { name, params, body: Some(body), effect, r#async, span, generics, extern_attrs, visibility, .. } = m {
+                        let vis = lower_visibility(visibility);
                         functions.push(lower_fn(&mut ctx, name, params, body,
                             effect.unwrap_or(false), r#async.unwrap_or(false), false, *span,
-                            generics.clone(), extern_attrs.clone()));
+                            generics.clone(), extern_attrs.clone(), vis, module_prefix.as_deref()));
                     }
                 }
             }
@@ -230,7 +248,7 @@ pub fn lower_module(
     env: &TypeEnv,
     versioned_name: Option<String>,
 ) -> crate::ir::IrModule {
-    let ir_prog = lower_program(prog, expr_types, env);
+    let ir_prog = lower_program_with_prefix(prog, expr_types, env, Some(name));
     crate::ir::IrModule {
         name: name.to_string(),
         versioned_name,
@@ -245,6 +263,7 @@ fn lower_fn(
     ctx: &mut LowerCtx, name: &str, params: &[ast::Param], body: &ast::Expr,
     is_effect: bool, is_async: bool, is_test: bool, _span: Option<ast::Span>,
     generics: Option<Vec<ast::GenericParam>>, extern_attrs: Vec<ast::ExternAttr>,
+    visibility: IrVisibility, module_prefix: Option<&str>,
 ) -> IrFunction {
     ctx.push_scope();
     let ir_params: Vec<IrParam> = params.iter().map(|p| {
@@ -259,12 +278,30 @@ fn lower_fn(
         }
     }).collect();
     let ir_body = lower_expr(ctx, body);
-    // Use declared return type from env if available, else body type
-    let ret_ty = ctx.env.functions.get(name)
-        .map(|sig| sig.ret.clone())
-        .unwrap_or_else(|| ir_body.ty.clone());
+    // Use declared return type from env if available, else body type.
+    // For module functions, try qualified name (e.g. "path.stem") first.
+    let ret_ty = {
+        let direct = ctx.env.functions.get(name);
+        let qualified = module_prefix.and_then(|pfx| {
+            let qname = format!("{}.{}", pfx, name);
+            ctx.env.functions.get(&qname)
+        });
+        qualified.or(direct)
+            .map(|sig| sig.ret.clone())
+            .unwrap_or_else(|| ir_body.ty.clone())
+    };
     ctx.pop_scope();
-    IrFunction { name: name.to_string(), params: ir_params, ret_ty, body: ir_body, is_effect, is_async, is_test, generics, extern_attrs }
+    IrFunction { name: name.to_string(), params: ir_params, ret_ty, body: ir_body, is_effect, is_async, is_test, generics, extern_attrs, visibility }
+}
+
+// ── Visibility lowering ─────────────────────────────────────────
+
+fn lower_visibility(vis: &ast::Visibility) -> IrVisibility {
+    match vis {
+        ast::Visibility::Public => IrVisibility::Public,
+        ast::Visibility::Mod => IrVisibility::Mod,
+        ast::Visibility::Local => IrVisibility::Private,
+    }
 }
 
 // ── Type declaration lowering ───────────────────────────────────
@@ -294,10 +331,7 @@ fn lower_type_decl(
     visibility: &ast::Visibility,
     generics: Option<&Vec<ast::GenericParam>>,
 ) -> IrTypeDecl {
-    let vis = match visibility {
-        ast::Visibility::Public | ast::Visibility::Mod => IrVisibility::Public,
-        ast::Visibility::Local => IrVisibility::Private,
-    };
+    let vis = lower_visibility(visibility);
 
     let kind = match ty {
         ast::TypeExpr::Record { fields } => {

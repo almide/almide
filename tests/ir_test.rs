@@ -318,6 +318,7 @@ fn ir_function_construction() {
         is_test: false,
         generics: None,
         extern_attrs: vec![],
+        visibility: IrVisibility::Public,
     };
     assert_eq!(f.name, "add");
     assert_eq!(f.params.len(), 2);
@@ -338,6 +339,7 @@ fn ir_function_effect() {
         is_test: false,
         generics: None,
         extern_attrs: vec![],
+        visibility: IrVisibility::Public,
     };
     assert!(f.is_effect);
 }
