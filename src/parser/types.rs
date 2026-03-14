@@ -16,18 +16,10 @@ impl Parser {
             let inner = self.parse_type_expr()?;
             return Ok(TypeExpr::Newtype { inner: Box::new(inner) });
         }
-        if self.check(TokenType::Pipe) {
-            return self.parse_variant_type();
-        }
-        if self.check(TokenType::LBrace) {
-            return self.parse_record_type();
-        }
-        if self.check(TokenType::Fn) {
-            return self.parse_fn_type();
-        }
-        if self.check(TokenType::LParen) {
-            return self.parse_tuple_type();
-        }
+        if self.check(TokenType::Pipe) { return self.parse_variant_type(); }
+        if self.check(TokenType::LBrace) { return self.parse_record_type(); }
+        if self.check(TokenType::Fn) { return self.parse_fn_type(); }
+        if self.check(TokenType::LParen) { return self.parse_tuple_type(); }
 
         let name = self.expect_type_name()?;
         if self.check(TokenType::LBracket) {
@@ -67,11 +59,9 @@ impl Parser {
         }
         let first = self.parse_type_expr()?;
         if self.check(TokenType::RParen) {
-            // (Type) — parenthesized, not a tuple
             self.advance();
             return Ok(first);
         }
-        // (Type, Type, ...) — tuple
         let mut elements = vec![first];
         while self.check(TokenType::Comma) {
             self.advance();
@@ -150,7 +140,6 @@ impl Parser {
             }
             self.skip_newlines();
         }
-        // If all cases are simple names without payloads, produce Union instead of Variant
         if all_simple {
             let members = simple_names.into_iter()
                 .map(|n| TypeExpr::Simple { name: n })
@@ -168,7 +157,6 @@ impl Parser {
         let mut open = false;
         while !self.check(TokenType::RBrace) {
             self.skip_newlines();
-            // Check for `..` to mark as open record type
             if self.check(TokenType::DotDot) {
                 self.advance();
                 open = true;
@@ -186,17 +174,11 @@ impl Parser {
             };
             fields.push(FieldType { name: field_name, ty: field_type, default });
             self.skip_newlines();
-            if self.check(TokenType::Comma) {
-                self.advance();
-                self.skip_newlines();
-            }
+            if self.check(TokenType::Comma) { self.advance(); self.skip_newlines(); }
         }
         self.expect(TokenType::RBrace)?;
-        if open {
-            Ok(TypeExpr::OpenRecord { fields })
-        } else {
-            Ok(TypeExpr::Record { fields })
-        }
+        if open { Ok(TypeExpr::OpenRecord { fields }) }
+        else { Ok(TypeExpr::Record { fields }) }
     }
 
     pub(crate) fn parse_field_type_list(&mut self) -> Result<Vec<FieldType>, String> {
@@ -214,10 +196,7 @@ impl Parser {
             };
             fields.push(FieldType { name: field_name, ty: field_type, default });
             self.skip_newlines();
-            if self.check(TokenType::Comma) {
-                self.advance();
-                self.skip_newlines();
-            }
+            if self.check(TokenType::Comma) { self.advance(); self.skip_newlines(); }
         }
         Ok(fields)
     }
@@ -254,9 +233,7 @@ impl Parser {
     }
 
     pub(crate) fn try_parse_generic_params(&mut self) -> Result<Option<Vec<GenericParam>>, String> {
-        if !self.check(TokenType::LBracket) {
-            return Ok(None);
-        }
+        if !self.check(TokenType::LBracket) { return Ok(None); }
         self.advance();
         let mut params = Vec::new();
         if !self.check(TokenType::RBracket) {
@@ -276,7 +253,6 @@ impl Parser {
         let mut structural_bound = None;
         if self.check(TokenType::Colon) {
             self.advance();
-            // Check for structural bound: `T: { name: String, .. }`
             if self.check(TokenType::LBrace) {
                 structural_bound = Some(self.parse_record_type()?);
             } else {

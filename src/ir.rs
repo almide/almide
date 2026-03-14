@@ -1,4 +1,7 @@
-/// Typed IR — intermediate representation between checker and emitters.
+/// Typed IR data types.
+///
+/// Owns:     IR node definitions, use-count computation
+/// Does NOT: construction (lower.rs), consumption (codegen)
 ///
 /// Design goals:
 /// - Every node carries full `Ty` (no runtime type queries during codegen)

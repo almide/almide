@@ -17,9 +17,7 @@ impl Parser {
                         .unwrap_or_else(|| serde_json::Number::from(0)),
                 ),
                 raw: tok.value.clone(),
-                id: self.next_id(),
-                span,
-                resolved_type: None,
+                id: self.next_id(), span, resolved_type: None,
             });
         }
         if self.check(TokenType::Float) {
@@ -108,79 +106,16 @@ impl Parser {
         if self.check(TokenType::Match) {
             return self.parse_match_expr();
         }
-        if self.check(TokenType::Fn) && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::LParen) {
+        if self.check(TokenType::Fn)
+            && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::LParen)
+        {
             return self.parse_lambda();
         }
         if self.check(TokenType::While) {
-            let span = Some(self.current_span());
-            self.advance(); // skip 'while'
-            self.skip_newlines();
-            let cond = self.parse_expr()?;
-            self.skip_newlines();
-            let open = self.current().clone();
-            self.expect(TokenType::LBrace)?;
-            let mut stmts = Vec::new();
-            self.skip_newlines_into_stmts(&mut stmts);
-            while !self.check(TokenType::RBrace) {
-                let stmt = self.parse_stmt()?;
-                stmts.push(stmt);
-                self.skip_newlines_into_stmts(&mut stmts);
-                if self.check(TokenType::Semicolon) {
-                    self.advance();
-                    self.skip_newlines_into_stmts(&mut stmts);
-                }
-            }
-            self.expect_closing(TokenType::RBrace, open.line, open.col, "while body")?;
-            return Ok(Expr::While {
-                cond: Box::new(cond),
-                body: stmts,
-                id: self.next_id(),
-                span,
-                resolved_type: None,
-            });
+            return self.parse_while_expr();
         }
         if self.check(TokenType::For) {
-            self.advance();
-            // Support `for (a, b) in ...` tuple destructuring
-            let (var_name, var_tuple) = if self.check(TokenType::LParen) {
-                self.advance();
-                let mut names = vec![self.expect_ident()?];
-                while self.check(TokenType::Comma) {
-                    self.advance();
-                    names.push(self.expect_ident()?);
-                }
-                self.expect(TokenType::RParen)?;
-                (names[0].clone(), Some(names))
-            } else if self.check(TokenType::Underscore) {
-                self.advance();
-                ("_".to_string(), None)
-            } else {
-                (self.expect_ident()?, None)
-            };
-            self.expect(TokenType::In)?;
-            let iterable = self.parse_expr()?;
-            let open_for = self.current().clone();
-            self.expect(TokenType::LBrace)?;
-            let mut stmts = Vec::new();
-            self.skip_newlines_into_stmts(&mut stmts);
-            while !self.check(TokenType::RBrace) {
-                stmts.push(self.parse_stmt()?);
-                self.skip_newlines_into_stmts(&mut stmts);
-                if self.check(TokenType::Semicolon) {
-                    self.advance();
-                    self.skip_newlines_into_stmts(&mut stmts);
-                }
-            }
-            self.expect_closing(TokenType::RBrace, open_for.line, open_for.col, "for body")?;
-            return Ok(Expr::ForIn {
-                var: var_name,
-                var_tuple,
-                iterable: Box::new(iterable),
-                body: stmts,
-                id: self.next_id(),
-                span,
-                resolved_type: None,
-            });
+            return self.parse_for_expr();
         }
         if self.check(TokenType::Do) {
             self.advance();
@@ -193,105 +128,12 @@ impl Parser {
             return self.parse_list_expr();
         }
         if self.check(TokenType::LParen) {
-            // Check for paren-style lambda: () => expr, (x) => expr, (x, y) => expr, (x: T) => expr
-            if self.peek_paren_lambda() {
-                return self.parse_paren_lambda();
-            }
-            let open = self.current().clone();
-            self.advance();
-            if self.check(TokenType::RParen) {
-                self.advance();
-                return Ok(Expr::Unit { id: self.next_id(), span, resolved_type: None });
-            }
-            let first = self.parse_expr()?;
-            if self.check(TokenType::Comma) {
-                // Tuple: (a, b, ...)
-                let mut elements = vec![first];
-                while self.check(TokenType::Comma) {
-                    self.advance();
-                    if self.check(TokenType::RParen) { break; } // trailing comma
-                    elements.push(self.parse_expr()?);
-                }
-                self.expect_closing(TokenType::RParen, open.line, open.col, "tuple")?;
-                return Ok(Expr::Tuple { elements, id: self.next_id(), span, resolved_type: None });
-            }
-            self.expect_closing(TokenType::RParen, open.line, open.col, "parenthesized expression")?;
-            return Ok(Expr::Paren { expr: Box::new(first), id: self.next_id(), span, resolved_type: None });
+            return self.parse_paren_expr();
         }
         if self.check(TokenType::TypeName) {
-            let name = tok.value.clone();
-            self.advance();
-            if self.check(TokenType::LBracket) {
-                let ta = self.parse_type_args()?;
-                if self.check(TokenType::LParen) {
-                    let open_call = self.current().clone();
-                    self.advance();
-                    let args = self.parse_call_args()?;
-                    self.expect_closing(TokenType::RParen, open_call.line, open_call.col, "constructor call")?;
-                    return Ok(Expr::Call {
-                        callee: Box::new(Expr::TypeName { name, id: self.next_id(), span, resolved_type: None }),
-                        args,
-                        type_args: Some(ta),
-                        id: self.next_id(),
-                        span,
-                        resolved_type: None,
-                    });
-                }
-                return Ok(Expr::TypeName { name, id: self.next_id(), span, resolved_type: None });
-            }
-            if self.check(TokenType::LParen) {
-                let open_call = self.current().clone();
-                self.advance();
-                let args = self.parse_call_args()?;
-                self.expect_closing(TokenType::RParen, open_call.line, open_call.col, "constructor call")?;
-                return Ok(Expr::Call {
-                    callee: Box::new(Expr::TypeName { name, id: self.next_id(), span, resolved_type: None }),
-                    args,
-                    type_args: None,
-                    id: self.next_id(),
-                    span,
-                    resolved_type: None,
-                });
-            }
-            // Named record construction: Foo {x: 1, y: 2}
-            if self.check(TokenType::LBrace) {
-                // Peek to distinguish from block: must be `Ident :` pattern
-                if self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Ident)
-                    && self.peek_at(2).map(|t| &t.token_type) == Some(&TokenType::Colon)
-                {
-                    let open_rec = self.current().clone();
-                    self.advance(); // consume {
-                    let mut fields = Vec::new();
-                    while !self.check(TokenType::RBrace) {
-                        self.skip_newlines();
-                        let field_name = self.expect_any_name()?;
-                        if self.check(TokenType::Colon) {
-                            self.advance();
-                            self.skip_newlines();
-                            let field_value = self.parse_expr()?;
-                            fields.push(FieldInit {
-                                name: field_name,
-                                value: field_value,
-                            });
-                        } else {
-                            fields.push(FieldInit {
-                                name: field_name.clone(),
-                                value: Expr::Ident { name: field_name, id: self.next_id(), span: None, resolved_type: None },
-                            });
-                        }
-                        self.skip_newlines();
-                        if self.check(TokenType::Comma) {
-                            self.advance();
-                            self.skip_newlines();
-                        }
-                    }
-                    self.expect_closing(TokenType::RBrace, open_rec.line, open_rec.col, "record construction")?;
-                    return Ok(Expr::Record { name: Some(name), fields, id: self.next_id(), span, resolved_type: None });
-                }
-            }
-            return Ok(Expr::TypeName { name, id: self.next_id(), span, resolved_type: None });
+            return self.parse_type_name_expr();
         }
-        // Check hint system for rejected operators and keywords from other languages
+        // Check hint system for rejected operators/keywords
         if let Some(result) = self.check_hint(None, super::hints::HintScope::Expression) {
             let msg = result.message.unwrap_or_else(|| format!("'{}' is not valid here", tok.value));
             return Err(format!("{} at line {}:{}\n  Hint: {}", msg, tok.line, tok.col, result.hint));
@@ -306,5 +148,158 @@ impl Parser {
             "Expected expression at line {}:{} (got {:?} '{}')",
             tok.line, tok.col, tok.token_type, tok.value
         ))
+    }
+
+    fn parse_paren_expr(&mut self) -> Result<Expr, String> {
+        let span = Some(self.current_span());
+        if self.peek_paren_lambda() {
+            return self.parse_paren_lambda();
+        }
+        let open = self.current().clone();
+        self.advance();
+        if self.check(TokenType::RParen) {
+            self.advance();
+            return Ok(Expr::Unit { id: self.next_id(), span, resolved_type: None });
+        }
+        let first = self.parse_expr()?;
+        if self.check(TokenType::Comma) {
+            let mut elements = vec![first];
+            while self.check(TokenType::Comma) {
+                self.advance();
+                if self.check(TokenType::RParen) { break; }
+                elements.push(self.parse_expr()?);
+            }
+            self.expect_closing(TokenType::RParen, open.line, open.col, "tuple")?;
+            return Ok(Expr::Tuple { elements, id: self.next_id(), span, resolved_type: None });
+        }
+        self.expect_closing(TokenType::RParen, open.line, open.col, "parenthesized expression")?;
+        Ok(Expr::Paren { expr: Box::new(first), id: self.next_id(), span, resolved_type: None })
+    }
+
+    fn parse_type_name_expr(&mut self) -> Result<Expr, String> {
+        let tok = self.current().clone();
+        let span = Some(Span { line: tok.line, col: tok.col });
+        let name = tok.value.clone();
+        self.advance();
+
+        if self.check(TokenType::LBracket) {
+            let ta = self.parse_type_args()?;
+            if self.check(TokenType::LParen) {
+                let open_call = self.current().clone();
+                self.advance();
+                let args = self.parse_call_args()?;
+                self.expect_closing(TokenType::RParen, open_call.line, open_call.col, "constructor call")?;
+                return Ok(Expr::Call {
+                    callee: Box::new(Expr::TypeName { name, id: self.next_id(), span, resolved_type: None }),
+                    args, type_args: Some(ta),
+                    id: self.next_id(), span, resolved_type: None,
+                });
+            }
+            return Ok(Expr::TypeName { name, id: self.next_id(), span, resolved_type: None });
+        }
+        if self.check(TokenType::LParen) {
+            let open_call = self.current().clone();
+            self.advance();
+            let args = self.parse_call_args()?;
+            self.expect_closing(TokenType::RParen, open_call.line, open_call.col, "constructor call")?;
+            return Ok(Expr::Call {
+                callee: Box::new(Expr::TypeName { name, id: self.next_id(), span, resolved_type: None }),
+                args, type_args: None,
+                id: self.next_id(), span, resolved_type: None,
+            });
+        }
+        // Named record: Foo {x: 1, y: 2}
+        if self.check(TokenType::LBrace)
+            && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Ident)
+            && self.peek_at(2).map(|t| &t.token_type) == Some(&TokenType::Colon)
+        {
+            let open_rec = self.current().clone();
+            self.advance();
+            let mut fields = Vec::new();
+            while !self.check(TokenType::RBrace) {
+                self.skip_newlines();
+                let field_name = self.expect_any_name()?;
+                if self.check(TokenType::Colon) {
+                    self.advance();
+                    self.skip_newlines();
+                    let field_value = self.parse_expr()?;
+                    fields.push(FieldInit { name: field_name, value: field_value });
+                } else {
+                    fields.push(FieldInit {
+                        name: field_name.clone(),
+                        value: Expr::Ident { name: field_name, id: self.next_id(), span: None, resolved_type: None },
+                    });
+                }
+                self.skip_newlines();
+                if self.check(TokenType::Comma) { self.advance(); self.skip_newlines(); }
+            }
+            self.expect_closing(TokenType::RBrace, open_rec.line, open_rec.col, "record construction")?;
+            return Ok(Expr::Record { name: Some(name), fields, id: self.next_id(), span, resolved_type: None });
+        }
+        Ok(Expr::TypeName { name, id: self.next_id(), span, resolved_type: None })
+    }
+
+    fn parse_while_expr(&mut self) -> Result<Expr, String> {
+        let span = Some(self.current_span());
+        self.advance(); // skip 'while'
+        self.skip_newlines();
+        let cond = self.parse_expr()?;
+        self.skip_newlines();
+        let open = self.current().clone();
+        self.expect(TokenType::LBrace)?;
+        let mut stmts = Vec::new();
+        self.skip_newlines_into_stmts(&mut stmts);
+        while !self.check(TokenType::RBrace) {
+            stmts.push(self.parse_stmt()?);
+            self.skip_newlines_into_stmts(&mut stmts);
+            if self.check(TokenType::Semicolon) {
+                self.advance();
+                self.skip_newlines_into_stmts(&mut stmts);
+            }
+        }
+        self.expect_closing(TokenType::RBrace, open.line, open.col, "while body")?;
+        Ok(Expr::While {
+            cond: Box::new(cond), body: stmts,
+            id: self.next_id(), span, resolved_type: None,
+        })
+    }
+
+    fn parse_for_expr(&mut self) -> Result<Expr, String> {
+        let span = Some(self.current_span());
+        self.advance(); // skip 'for'
+        let (var_name, var_tuple) = if self.check(TokenType::LParen) {
+            self.advance();
+            let mut names = vec![self.expect_ident()?];
+            while self.check(TokenType::Comma) {
+                self.advance();
+                names.push(self.expect_ident()?);
+            }
+            self.expect(TokenType::RParen)?;
+            (names[0].clone(), Some(names))
+        } else if self.check(TokenType::Underscore) {
+            self.advance();
+            ("_".to_string(), None)
+        } else {
+            (self.expect_ident()?, None)
+        };
+        self.expect(TokenType::In)?;
+        let iterable = self.parse_expr()?;
+        let open_for = self.current().clone();
+        self.expect(TokenType::LBrace)?;
+        let mut stmts = Vec::new();
+        self.skip_newlines_into_stmts(&mut stmts);
+        while !self.check(TokenType::RBrace) {
+            stmts.push(self.parse_stmt()?);
+            self.skip_newlines_into_stmts(&mut stmts);
+            if self.check(TokenType::Semicolon) {
+                self.advance();
+                self.skip_newlines_into_stmts(&mut stmts);
+            }
+        }
+        self.expect_closing(TokenType::RBrace, open_for.line, open_for.col, "for body")?;
+        Ok(Expr::ForIn {
+            var: var_name, var_tuple, iterable: Box::new(iterable), body: stmts,
+            id: self.next_id(), span, resolved_type: None,
+        })
     }
 }

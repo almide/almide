@@ -6,3 +6,6 @@ main-*/
 test_inc-*/
 .claude/settings.local.json
 codopsy-report.json
+_tmp_*
+.almide/cache/
+spec_*-*/

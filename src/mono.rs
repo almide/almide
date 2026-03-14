@@ -1,4 +1,9 @@
-/// Monomorphization pass: IR → IR transform.
+/// IR → IR monomorphization pass.
+///
+/// Input:    &mut IrProgram
+/// Output:   IrProgram with specialized functions
+/// Owns:     structural bound instantiation, function cloning, call rewriting
+/// Does NOT: other optimizations, codegen
 ///
 /// Specializes generic functions with structural bounds (e.g., `T: { name: String, .. }`)
 /// into concrete versions for each call-site type. This enables Rust codegen

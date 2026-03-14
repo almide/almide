@@ -45,7 +45,6 @@ impl Parser {
                 self.expect(TokenType::RParen)?;
                 return Ok(Pattern::Tuple { elements });
             }
-            // Single parenthesized pattern
             self.expect(TokenType::RParen)?;
             return Ok(first);
         }
@@ -68,57 +67,7 @@ impl Parser {
             });
         }
         if self.check(TokenType::TypeName) {
-            let name = self.current().value.clone();
-            self.advance();
-            if self.check(TokenType::LParen) {
-                self.advance();
-                let mut args = Vec::new();
-                if !self.check(TokenType::RParen) {
-                    args.push(self.parse_pattern()?);
-                    while self.check(TokenType::Comma) {
-                        self.advance();
-                        args.push(self.parse_pattern()?);
-                    }
-                }
-                self.expect(TokenType::RParen)?;
-                return Ok(Pattern::Constructor { name, args });
-            }
-            if self.check(TokenType::LBrace) {
-                self.advance();
-                self.skip_newlines();
-                let mut fields = Vec::new();
-                let mut rest = false;
-                while !self.check(TokenType::RBrace) {
-                    if self.check(TokenType::DotDot) {
-                        self.advance();
-                        rest = true;
-                        if self.check(TokenType::Comma) { self.advance(); }
-                        self.skip_newlines();
-                        break;
-                    }
-                    let field_name = self.expect_ident()?;
-                    if self.check(TokenType::Colon) {
-                        self.advance();
-                        let pattern = self.parse_pattern()?;
-                        fields.push(FieldPattern {
-                            name: field_name,
-                            pattern: Some(pattern),
-                        });
-                    } else {
-                        fields.push(FieldPattern {
-                            name: field_name,
-                            pattern: None,
-                        });
-                    }
-                    if self.check(TokenType::Comma) {
-                        self.advance();
-                        self.skip_newlines();
-                    }
-                }
-                self.expect(TokenType::RBrace)?;
-                return Ok(Pattern::RecordPattern { name, fields, rest });
-            }
-            return Ok(Pattern::Constructor { name, args: Vec::new() });
+            return self.parse_constructor_pattern();
         }
         if self.check(TokenType::Ident) {
             let name = self.current().value.clone();
@@ -135,5 +84,50 @@ impl Parser {
             "Expected pattern at line {}:{} (got {:?} '{}'){}",
             tok.line, tok.col, tok.token_type, tok.value, hint
         ))
+    }
+
+    fn parse_constructor_pattern(&mut self) -> Result<Pattern, String> {
+        let name = self.current().value.clone();
+        self.advance();
+        if self.check(TokenType::LParen) {
+            self.advance();
+            let mut args = Vec::new();
+            if !self.check(TokenType::RParen) {
+                args.push(self.parse_pattern()?);
+                while self.check(TokenType::Comma) {
+                    self.advance();
+                    args.push(self.parse_pattern()?);
+                }
+            }
+            self.expect(TokenType::RParen)?;
+            return Ok(Pattern::Constructor { name, args });
+        }
+        if self.check(TokenType::LBrace) {
+            self.advance();
+            self.skip_newlines();
+            let mut fields = Vec::new();
+            let mut rest = false;
+            while !self.check(TokenType::RBrace) {
+                if self.check(TokenType::DotDot) {
+                    self.advance();
+                    rest = true;
+                    if self.check(TokenType::Comma) { self.advance(); }
+                    self.skip_newlines();
+                    break;
+                }
+                let field_name = self.expect_ident()?;
+                if self.check(TokenType::Colon) {
+                    self.advance();
+                    let pattern = self.parse_pattern()?;
+                    fields.push(FieldPattern { name: field_name, pattern: Some(pattern) });
+                } else {
+                    fields.push(FieldPattern { name: field_name, pattern: None });
+                }
+                if self.check(TokenType::Comma) { self.advance(); self.skip_newlines(); }
+            }
+            self.expect(TokenType::RBrace)?;
+            return Ok(Pattern::RecordPattern { name, fields, rest });
+        }
+        Ok(Pattern::Constructor { name, args: Vec::new() })
     }
 }

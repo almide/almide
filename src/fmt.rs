@@ -1,4 +1,7 @@
-/// Almide code formatter: AST → formatted source code.
+/// Almide code formatter: AST → formatted Almide source code.
+///
+/// Owns:     indentation, spacing, line breaks, comment preservation
+/// Does NOT: parsing, type checking
 ///
 /// Top-level comments (before module, imports, and declarations) are preserved
 /// via the `comment_map` field on `Program`. Inline comments within function

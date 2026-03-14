@@ -1,662 +1,81 @@
+/// Call type checking — resolves function calls, builtins, variant constructors.
+
+use std::collections::HashMap;
 use crate::ast;
-use crate::types::{Ty, VariantPayload, unify, substitute};
-use crate::stdlib;
-use super::{Checker, err};
+use crate::types::Ty;
+use super::types::InferTy;
+use super::Checker;
 
 impl Checker {
-    /// Flatten nested Member expressions into (segments, func).
-    /// e.g. pkg.sub.func() → (["pkg", "sub"], "func")
-    fn flatten_member_chain<'a>(expr: &'a ast::Expr) -> Option<(Vec<&'a str>, &'a str)> {
-        if let ast::Expr::Member { object, field, .. } = expr {
-            let mut segments = Vec::new();
-            let mut current = object.as_ref();
-            loop {
-                match current {
-                    ast::Expr::Ident { name, .. } => {
-                        segments.push(name.as_str());
-                        break;
-                    }
-                    ast::Expr::Member { object, field: seg, .. } => {
-                        segments.push(seg.as_str());
-                        current = object.as_ref();
-                    }
-                    _ => return None,
-                }
+    pub(crate) fn check_call(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr]) -> InferTy {
+        let arg_tys: Vec<InferTy> = args.iter_mut().map(|a| self.infer_expr(a)).collect();
+        match callee {
+            ast::Expr::Ident { name, .. } => self.check_named_call(name, &arg_tys),
+            ast::Expr::TypeName { name, .. } => {
+                if let Some((type_name, _)) = self.env.constructors.get(name).cloned() {
+                    InferTy::Concrete(Ty::Named(type_name, vec![]))
+                } else { InferTy::Concrete(Ty::Named(name.clone(), vec![])) }
             }
-            segments.reverse();
-            Some((segments, field.as_str()))
-        } else {
-            None
+            _ => {
+                let ct = self.infer_expr(callee);
+                let ret = self.fresh_var();
+                self.constrain(ct, InferTy::Fn { params: arg_tys, ret: Box::new(ret.clone()) }, "function call");
+                ret
+            }
         }
     }
 
-    pub(crate) fn check_call(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr]) -> Ty {
-        let has_lambda = args.iter().any(|a| matches!(a, ast::Expr::Lambda { .. }));
-
-        // Module System v2: handle nested member access (any depth)
-        if let Some((segments, func)) = Self::flatten_member_chain(callee) {
-            // Resolve alias on the first segment (e.g. "m" → "mylib")
-            let first = self.env.module_aliases.get(segments[0])
-                .map(|s| s.as_str())
-                .unwrap_or(segments[0]);
-
-            // Try progressively longer module paths: pkg.sub.subsub, pkg.sub, pkg
-            for i in (1..=segments.len()).rev() {
-                let dotted = if i == 1 {
-                    first.to_string()
-                } else {
-                    let rest: Vec<&str> = segments[1..i].to_vec();
-                    format!("{}.{}", first, rest.join("."))
-                };
-                if self.env.user_modules.contains(&dotted) || stdlib::is_stdlib_module(&dotted) {
-                    // Track alias usage for unused import detection
-                    if first != segments[0] {
-                        self.env.used_modules.insert(segments[0].to_string());
-                    }
-                    let arg_tys = self.check_args_with_inference(args, has_lambda, Some((&dotted, func)), None, 0);
-                    return self.check_module_call(&dotted, func, &arg_tys);
-                }
-            }
-
-            // Single segment — only call as module if it's actually a known module
-            if segments.len() == 1 {
-                let resolved_first = self.env.module_aliases.get(segments[0])
-                    .cloned()
-                    .unwrap_or_else(|| segments[0].to_string());
-                if self.env.user_modules.contains(&resolved_first) || stdlib::is_stdlib_module(segments[0]) {
-                    let arg_tys = self.check_args_with_inference(args, has_lambda, Some((segments[0], func)), None, 0);
-                    return self.check_module_call(segments[0], func, &arg_tys);
-                }
-                // Not a module — fall through to type-check the callee (UFCS will resolve via resolved_type)
-            }
-        }
-
-        // Direct call — check args with inference from user function signature
-        if let ast::Expr::Ident { name, .. } = callee {
-            // assert_eq/assert_ne: use first arg's type as expected for second arg (bidirectional)
-            if (name == "assert_eq" || name == "assert_ne") && args.len() == 2 {
-                let first_ty = self.check_expr(&mut args[0]);
-                let second_ty = self.check_expr_with(&mut args[1], Some(&first_ty));
-                return self.check_direct_call(name, &[first_ty, second_ty]);
-            }
-            let user_sig = if has_lambda { self.env.functions.get(name).cloned() } else { None };
-            let arg_tys = if let Some(ref sig) = user_sig {
-                self.check_args_with_fn_params(args, &sig.params, 0)
-            } else {
-                args.iter_mut().map(|a| self.check_expr(a)).collect()
-            };
-            return self.check_direct_call(name, &arg_tys);
-        }
-
-        if let ast::Expr::TypeName { name, .. } = callee {
-            let arg_tys: Vec<Ty> = args.iter_mut().map(|a| self.check_expr(a)).collect();
-            return self.check_constructor_call(name, &arg_tys);
-        }
-
-        // UFCS: receiver.method(args) — resolve module from receiver type
-        if let ast::Expr::Member { object, field, .. } = callee {
-            let receiver_ty = self.check_expr(object);
-            let module = match &receiver_ty {
-                Ty::String => Some("string"),
-                Ty::List(_) => Some("list"),
-                Ty::Map(_, _) => Some("map"),
-                Ty::Int => Some("int"),
-                Ty::Float => Some("float"),
-                _ => None,
-            };
-            if let Some(module) = module {
-                let candidates = stdlib::resolve_ufcs_candidates(field);
-                if candidates.contains(&module) {
-                    // Check args with bidirectional inference, receiver is sig.params[0]
-                    let arg_tys = self.check_args_with_inference(args, has_lambda, Some((module, field)), Some(&receiver_ty), 1);
-                    let mut full_arg_tys = vec![receiver_ty];
-                    full_arg_tys.extend(arg_tys);
-                    return self.check_module_call(module, field, &full_arg_tys);
-                }
-            }
-            // Not a UFCS call — check remaining args and return Unknown
-            for a in args.iter_mut() { self.check_expr(a); }
-            return Ty::Unknown;
-        }
-
-        let arg_tys: Vec<Ty> = args.iter_mut().map(|a| self.check_expr(a)).collect();
-        let ct = self.check_expr(callee);
-        match &ct {
-            Ty::Fn { ret, .. } => *ret.clone(),
-            _ => { let _ = arg_tys; Ty::Unknown },
-        }
-    }
-
-    /// Check arguments with bidirectional type inference for lambda parameters.
-    /// For module/stdlib calls: looks up the function signature, checks non-lambda args first
-    /// to bind TypeVars, then checks lambda args with expected types from the signature.
-    /// `sig_offset`: 0 for module calls (args align with sig.params), 1 for UFCS (receiver is sig.params[0]).
-    fn check_args_with_inference(
-        &mut self,
-        args: &mut [ast::Expr],
-        has_lambda: bool,
-        call: Option<(&str, &str)>,
-        receiver_ty: Option<&Ty>,
-        sig_offset: usize,
-    ) -> Vec<Ty> {
-        // Look up stdlib signature
-        let sig = call.and_then(|(module, func)| stdlib::lookup_sig(module, func));
-
-        if !has_lambda && sig.is_none() {
-            return args.iter_mut().map(|a| self.check_expr(a)).collect();
-        }
-
-        if let Some(sig) = sig {
-            // Seed bindings from receiver type (for UFCS)
-            let mut bindings = std::collections::HashMap::new();
-            if let Some(recv) = receiver_ty {
-                if !sig.params.is_empty() {
-                    unify(&sig.params[0].1, recv, &mut bindings);
-                }
-            }
-            return self.two_pass_check(args, &sig.params, sig_offset, bindings);
-        }
-
-        // Try user-defined module function
-        if let Some((module, func)) = call {
-            let key = format!("{}.{}", module, func);
-            if let Some(user_sig) = self.env.functions.get(&key).cloned() {
-                let mut bindings = std::collections::HashMap::new();
-                if let Some(recv) = receiver_ty {
-                    if !user_sig.params.is_empty() {
-                        unify(&user_sig.params[0].1, recv, &mut bindings);
-                    }
-                }
-                return self.two_pass_check(args, &user_sig.params, sig_offset, bindings);
-            }
-        }
-
-        args.iter_mut().map(|a| self.check_expr(a)).collect()
-    }
-
-    /// Check arguments with bidirectional inference using user function params (no TypeVars).
-    fn check_args_with_fn_params(
-        &mut self,
-        args: &mut [ast::Expr],
-        params: &[(String, Ty)],
-        sig_offset: usize,
-    ) -> Vec<Ty> {
-        self.two_pass_check(args, params, sig_offset, std::collections::HashMap::new())
-    }
-
-    /// Two-pass argument checking: non-lambda args first (to collect TypeVar bindings),
-    /// then lambda args with expected types derived from the signature.
-    fn two_pass_check(
-        &mut self,
-        args: &mut [ast::Expr],
-        sig_params: &[(String, Ty)],
-        sig_offset: usize,
-        mut bindings: std::collections::HashMap<String, Ty>,
-    ) -> Vec<Ty> {
-        let mut arg_tys = vec![None; args.len()];
-
-        // Pass 1: check non-lambda args, collect TypeVar bindings
-        for (i, arg) in args.iter_mut().enumerate() {
-            if !matches!(arg, ast::Expr::Lambda { .. }) {
-                let sig_idx = i + sig_offset;
-                let expected = if sig_idx < sig_params.len() {
-                    let sub = substitute(&sig_params[sig_idx].1, &bindings);
-                    if matches!(sub, Ty::TypeVar(_) | Ty::Unknown) { None } else { Some(sub) }
-                } else {
-                    None
-                };
-                let ty = self.check_expr_with(arg, expected.as_ref());
-                if sig_idx < sig_params.len() {
-                    unify(&sig_params[sig_idx].1, &ty, &mut bindings);
-                }
-                arg_tys[i] = Some(ty);
-            }
-        }
-
-        // Pass 2: check lambda args with substituted expected types
-        for (i, arg) in args.iter_mut().enumerate() {
-            if matches!(arg, ast::Expr::Lambda { .. }) {
-                let sig_idx = i + sig_offset;
-                let expected = if sig_idx < sig_params.len() {
-                    let sub = substitute(&sig_params[sig_idx].1, &bindings);
-                    if matches!(sub, Ty::TypeVar(_) | Ty::Unknown) { None } else { Some(sub) }
-                } else {
-                    None
-                };
-                let ty = self.check_expr_with(arg, expected.as_ref());
-                arg_tys[i] = Some(ty);
-            }
-        }
-
-        arg_tys.into_iter().map(|t| t.unwrap_or(Ty::Unknown)).collect()
-    }
-
-    fn check_direct_call(&mut self, name: &str, arg_tys: &[Ty]) -> Ty {
+    fn check_named_call(&mut self, name: &str, arg_tys: &[InferTy]) -> InferTy {
         match name {
-            "println" | "eprintln" => {
-                if arg_tys.len() != 1 {
-                    self.push_diagnostic(err(
-                        format!("{}() takes exactly 1 argument but got {}", name, arg_tys.len()),
-                        format!("Use {}(\"message\")", name),
-                        format!("{}()", name),
-                    ));
-                } else if !arg_tys[0].compatible(&Ty::String) {
-                    let hint = Self::hint_with_conversion(
-                        &format!("{}() requires a String argument", name),
-                        &Ty::String, &arg_tys[0],
-                    );
-                    self.push_diagnostic(err(
-                        format!("{}() requires String but got {}", name, arg_tys[0].display()),
-                        hint,
-                        format!("{}()", name),
-                    ));
-                }
-                return Ty::Unit;
-            }
-            "assert" => {
-                if arg_tys.len() == 1 && !arg_tys[0].compatible(&Ty::Bool) {
-                    self.push_diagnostic(err(
-                        format!("assert() requires Bool but got {}", arg_tys[0].display()),
-                        "Pass a boolean condition to assert()", "assert()",
-                    ));
-                }
-                return Ty::Unit;
-            }
-            "assert_eq" | "assert_ne" => return Ty::Unit,
+            "println" | "eprintln" | "assert" | "assert_eq" | "assert_ne" => InferTy::Concrete(Ty::Unit),
             "ok" => {
-                let ok_ty = arg_tys.first().cloned().unwrap_or(Ty::Unit);
-                // Infer error type from enclosing function's return type
+                let ok_ty = arg_tys.first().cloned().unwrap_or(InferTy::Concrete(Ty::Unit));
                 let err_ty = match &self.env.current_ret {
-                    Some(Ty::Result(_, e)) => *e.clone(),
-                    _ => Ty::Unknown,
+                    Some(Ty::Result(_, e)) => InferTy::from_ty(e),
+                    _ => InferTy::Concrete(Ty::String),
                 };
-                return Ty::Result(Box::new(ok_ty), Box::new(err_ty));
+                InferTy::Result(Box::new(ok_ty), Box::new(err_ty))
             }
             "err" => {
-                let err_ty = arg_tys.first().cloned().unwrap_or(Ty::Unknown);
-                // Infer ok type from enclosing function's return type
+                let err_ty = arg_tys.first().cloned().unwrap_or(InferTy::Concrete(Ty::String));
                 let ok_ty = match &self.env.current_ret {
-                    Some(Ty::Result(o, _)) => *o.clone(),
-                    _ => Ty::Unknown,
+                    Some(Ty::Result(o, _)) => InferTy::from_ty(o),
+                    _ => InferTy::Concrete(Ty::Unit),
                 };
-                return Ty::Result(Box::new(ok_ty), Box::new(err_ty));
+                InferTy::Result(Box::new(ok_ty), Box::new(err_ty))
             }
-            "some" => return Ty::Option(Box::new(arg_tys.first().cloned().unwrap_or(Ty::Unknown))),
-            "unwrap_or" => {
-                if arg_tys.len() != 2 {
-                    self.push_diagnostic(err(
-                        format!("unwrap_or() takes exactly 2 arguments but got {}", arg_tys.len()),
-                        "Use unwrap_or(option_value, default)",
-                        "unwrap_or()",
-                    ));
-                    return Ty::Unknown;
-                }
-                // Extract inner type from Option[T] or Result[T, _]
-                match &arg_tys[0] {
-                    Ty::Option(inner) => return *inner.clone(),
-                    Ty::Result(ok_ty, _) => return *ok_ty.clone(),
-                    _ => return arg_tys[1].clone(),
+            "some" => InferTy::Option(Box::new(arg_tys.first().cloned().unwrap_or(self.fresh_var()))),
+            "unwrap_or" if arg_tys.len() >= 2 => {
+                let concrete = arg_tys[0].to_ty(&self.solutions);
+                match &concrete {
+                    Ty::Option(inner) => InferTy::from_ty(inner),
+                    Ty::Result(ok, _) => InferTy::from_ty(ok),
+                    _ => arg_tys[1].clone(),
                 }
             }
-            _ => {}
-        }
-
-        if let Some(sig) = self.env.functions.get(name).cloned() {
-            if sig.is_effect && !self.env.in_effect {
-                self.push_diagnostic(err(
-                    format!("cannot call effect function '{}' from a pure function", name),
-                    "Mark the calling function as 'effect fn' to allow side effects",
-                    format!("call to {}()", name),
-                ));
-            }
-            if arg_tys.len() != sig.params.len() {
-                let expected = sig.format_params();
-                self.push_diagnostic(err(
-                    format!("function '{}' expects {} argument(s) but got {}", name, sig.params.len(), arg_tys.len()),
-                    format!("Expected: {}({})", name, expected),
-                    format!("call to {}()", name),
-                ));
-            } else {
-                for (i, ((pname, pty), aty)) in sig.params.iter().zip(arg_tys.iter()).enumerate() {
-                    if !self.is_compatible(pty, aty) {
-                        let hint = if let Some(missing) = self.open_record_missing_fields(pty, aty) {
-                            format!("Type {} is missing field(s): {}", aty.display(), missing.join(", "))
-                        } else {
-                            Self::hint_with_conversion(
-                                &format!("Pass a value of type {}", pty.display()),
-                                pty, aty,
-                            )
-                        };
-                        self.push_diagnostic(err(
-                            format!("argument '{}' (position {}) expects {} but got {}", pname, i + 1, pty.display(), aty.display()),
-                            hint,
-                            format!("call to {}()", name),
-                        ));
+            _ => {
+                if let Some(sig) = self.env.functions.get(name).cloned() {
+                    let mut bindings = HashMap::new();
+                    let concrete_args: Vec<Ty> = arg_tys.iter().map(|a| a.to_ty(&self.solutions)).collect();
+                    for ((_, pty), aty) in sig.params.iter().zip(concrete_args.iter()) {
+                        if let Ty::TypeVar(tv) = pty {
+                            if let Some(bound) = sig.structural_bounds.get(tv) {
+                                let resolved = self.env.resolve_named(aty);
+                                if bound.compatible(&resolved) || bound.compatible(aty) { bindings.insert(tv.clone(), aty.clone()); }
+                            } else { crate::types::unify(pty, aty, &mut bindings); }
+                        } else { crate::types::unify(pty, aty, &mut bindings); }
                     }
-                }
-            }
-            // Unify parameters against args to bind TypeVars
-            let mut bindings = std::collections::HashMap::new();
-            for ((_, pty), aty) in sig.params.iter().zip(arg_tys.iter()) {
-                // For TypeVars with structural bounds, check the arg satisfies
-                // the constraint and bind the TypeVar to the concrete arg type
-                if let Ty::TypeVar(tv_name) = pty {
-                    if let Some(bound) = sig.structural_bounds.get(tv_name) {
-                        let resolved_aty = self.env.resolve_named(aty);
-                        if bound.compatible(&resolved_aty) || bound.compatible(aty) {
-                            bindings.insert(tv_name.clone(), aty.clone());
-                        } else {
-                            self.push_diagnostic(err(
-                                format!("type {} does not satisfy bound {} for type parameter {}", aty.display(), bound.display(), tv_name),
-                                format!("The value must have fields matching {}", bound.display()),
-                                format!("call to {}()", name),
-                            ));
-                        }
-                    } else {
-                        unify(pty, aty, &mut bindings);
-                    }
+                    let ret = if bindings.is_empty() { sig.ret.clone() } else { crate::types::substitute(&sig.ret, &bindings) };
+                    InferTy::from_ty(&ret)
+                } else if let Some((type_name, _)) = self.env.constructors.get(name).cloned() {
+                    InferTy::Concrete(Ty::Named(type_name, vec![]))
+                } else if let Some(ty) = self.env.lookup_var(name).cloned() {
+                    match &ty { Ty::Fn { ret, .. } => InferTy::from_ty(ret), _ => InferTy::from_ty(&ty) }
                 } else {
-                    unify(pty, aty, &mut bindings);
+                    self.diagnostics.push(super::err(format!("undefined function '{}'", name), "Check the function name", format!("call to {}()", name)));
+                    InferTy::Concrete(Ty::Unknown)
                 }
             }
-            let ret = if bindings.is_empty() {
-                sig.ret.clone()
-            } else {
-                substitute(&sig.ret, &bindings)
-            };
-            // Note: unresolved TypeVars in return type are allowed — they may be
-            // resolved by downstream usage (e.g., `let s = stack_new(); stack_push(s, 10)`).
-            // The codegen handles this via Rust's own type inference.
-            if self.should_auto_unwrap_user() {
-                if let Ty::Result(ok_ty, _) = &ret {
-                    return *ok_ty.clone();
-                }
-            }
-            return ret;
-        }
-
-        if self.env.constructors.contains_key(name) {
-            return self.check_constructor_call(name, arg_tys);
-        }
-
-        // Check if name is a local variable with function type (e.g. fn parameter)
-        if let Some(ty) = self.env.lookup_var(name).cloned() {
-            self.env.used_vars.insert(name.to_string());
-            if let Ty::Fn { ret, .. } = &ty {
-                return *ret.clone();
-            }
-            return ty;
-        }
-
-        // Emit "did you mean?" for undefined functions
-        let hint = if let Some(suggestion) = self.suggest_similar(name, "function") {
-            format!("Did you mean '{}'?", suggestion)
-        } else {
-            "Check the function name and make sure it is defined before this call".to_string()
-        };
-        self.push_diagnostic(err(
-            format!("undefined function '{}'", name),
-            hint,
-            format!("call to {}()", name),
-        ));
-        Ty::Unknown
-    }
-
-    fn check_constructor_call(&mut self, name: &str, arg_tys: &[Ty]) -> Ty {
-        if let Some((type_name, case)) = self.env.constructors.get(name).cloned() {
-            match &case.payload {
-                VariantPayload::Unit => {
-                    if !arg_tys.is_empty() {
-                        self.push_diagnostic(err(
-                            format!("constructor '{}' takes no arguments but got {}", name, arg_tys.len()),
-                            format!("Use {} without parentheses", name),
-                            format!("constructor {}", name),
-                        ));
-                    }
-                }
-                VariantPayload::Tuple(expected) => {
-                    if arg_tys.len() != expected.len() {
-                        let exp = expected.iter().map(|t| t.display()).collect::<Vec<_>>().join(", ");
-                        self.push_diagnostic(err(
-                            format!("constructor '{}' expects {} argument(s) but got {}", name, expected.len(), arg_tys.len()),
-                            format!("{}({})", name, exp),
-                            format!("constructor {}", name),
-                        ));
-                    } else {
-                        for (i, (ety, aty)) in expected.iter().zip(arg_tys.iter()).enumerate() {
-                            if !ety.compatible(aty) {
-                                let hint = Self::hint_with_conversion(
-                                    &format!("Pass a value of type {}", ety.display()),
-                                    ety, aty,
-                                );
-                                self.push_diagnostic(err(
-                                    format!("constructor '{}' argument {} expects {} but got {}", name, i + 1, ety.display(), aty.display()),
-                                    hint,
-                                    format!("constructor {}", name),
-                                ));
-                            }
-                        }
-                    }
-                }
-                VariantPayload::Record(_) => {}
-            }
-            return Ty::Named(type_name, vec![]);
-        }
-        Ty::Unknown
-    }
-
-    fn check_module_call(&mut self, module: &str, func: &str, arg_tys: &[Ty]) -> Ty {
-        // Resolve module name through aliases (e.g. "json" -> "json_v2")
-        let resolved_module = self.env.module_aliases.get(module)
-            .cloned()
-            .unwrap_or_else(|| module.to_string());
-
-        // Track module usage for unused import detection (use original name)
-        if stdlib::is_stdlib_module(module) || self.env.user_modules.contains(&resolved_module) {
-            self.env.used_modules.insert(module.to_string());
-        }
-        if let Some(sig) = stdlib::lookup_sig(module, func) {
-            let min_params = stdlib::min_params(module, func).unwrap_or(sig.params.len());
-            if arg_tys.len() < min_params || arg_tys.len() > sig.params.len() {
-                let usage = sig.format_params();
-                self.push_diagnostic(err(
-                    format!("{}.{}() expects {} argument(s) but got {}", module, func, sig.params.len(), arg_tys.len()),
-                    format!("Usage: {}.{}({})", module, func, usage),
-                    format!("{}.{}()", module, func),
-                ));
-            } else {
-                // Use unification to bind type variables from arguments
-                let mut bindings = std::collections::HashMap::new();
-                for (i, ((pname, pty), aty)) in sig.params.iter().zip(arg_tys.iter()).enumerate() {
-                    if !unify(pty, aty, &mut bindings) {
-                        // Substitute known bindings into param type for better error messages
-                        let display_ty = substitute(pty, &bindings);
-                        let hint = Self::hint_with_conversion(
-                            &format!("Pass a value of type {}", display_ty.display()),
-                            &display_ty, aty,
-                        );
-                        self.push_diagnostic(err(
-                            format!("{}.{}() argument '{}' (position {}) expects {} but got {}", module, func, pname, i + 1, display_ty.display(), aty.display()),
-                            hint,
-                            format!("{}.{}()", module, func),
-                        ));
-                    }
-                }
-                // Substitute bindings into return type to propagate concrete types
-                let ret = substitute(&sig.ret, &bindings);
-                if sig.is_effect && !self.env.in_effect {
-                    self.push_diagnostic(err(
-                        format!("{}.{}() is an effect function and cannot be called from a pure function", module, func),
-                        "Mark the calling function as 'effect fn'",
-                        format!("{}.{}()", module, func),
-                    ));
-                }
-                if self.should_auto_unwrap_stdlib() {
-                    if let Ty::Result(ok_ty, _) = &ret {
-                        return *ok_ty.clone();
-                    }
-                }
-                return ret;
-            }
-            // Arg count mismatch — still check effect and return raw sig type
-            if sig.is_effect && !self.env.in_effect {
-                self.push_diagnostic(err(
-                    format!("{}.{}() is an effect function and cannot be called from a pure function", module, func),
-                    "Mark the calling function as 'effect fn'",
-                    format!("{}.{}()", module, func),
-                ));
-            }
-            let ret = sig.ret.clone();
-            if self.should_auto_unwrap_stdlib() {
-                if let Ty::Result(ok_ty, _) = &ret {
-                    return *ok_ty.clone();
-                }
-            }
-            return ret;
-        }
-
-        // Check user-defined modules
-        if self.env.user_modules.contains(&resolved_module) {
-            let key = format!("{}.{}", resolved_module, func);
-            // Check if the function is hidden by visibility (local or mod)
-            if self.env.local_symbols.contains(&key) {
-                self.push_diagnostic(err(
-                    format!("function '{}' is not accessible from module '{}'", func, module),
-                    format!("'{}' has restricted visibility and cannot be accessed from here", func),
-                    format!("{}.{}()", module, func),
-                ));
-                return Ty::Unknown;
-            }
-            if let Some(sig) = self.env.functions.get(&key).cloned() {
-                if arg_tys.len() != sig.params.len() {
-                    let usage = sig.format_params();
-                    self.push_diagnostic(err(
-                        format!("{}.{}() expects {} argument(s) but got {}", module, func, sig.params.len(), arg_tys.len()),
-                        format!("Usage: {}.{}({})", module, func, usage),
-                        format!("{}.{}()", module, func),
-                    ));
-                } else {
-                    for (i, ((pname, pty), aty)) in sig.params.iter().zip(arg_tys.iter()).enumerate() {
-                        if !self.is_compatible(pty, aty) {
-                            let hint = if let Some(missing) = self.open_record_missing_fields(pty, aty) {
-                                format!("Type {} is missing field(s): {}", aty.display(), missing.join(", "))
-                            } else {
-                                Self::hint_with_conversion(
-                                    &format!("Pass a value of type {}", pty.display()),
-                                    pty, aty,
-                                )
-                            };
-                            self.push_diagnostic(err(
-                                format!("{}.{}() argument '{}' (position {}) expects {} but got {}", module, func, pname, i + 1, pty.display(), aty.display()),
-                                hint,
-                                format!("{}.{}()", module, func),
-                            ));
-                        }
-                    }
-                }
-                if sig.is_effect && !self.env.in_effect {
-                    self.push_diagnostic(err(
-                        format!("{}.{}() is an effect function and cannot be called from a pure function", module, func),
-                        "Mark the calling function as 'effect fn'",
-                        format!("{}.{}()", module, func),
-                    ));
-                }
-                let ret = sig.ret.clone();
-                if self.should_auto_unwrap_stdlib() {
-                    if let Ty::Result(ok_ty, _) = &ret {
-                        return *ok_ty.clone();
-                    }
-                }
-                return ret;
-            }
-        }
-
-        // Emit "did you mean?" for undefined module functions
-        if stdlib::is_stdlib_module(module) || self.env.user_modules.contains(&resolved_module) {
-            let hint = if let Some(suggestion) = self.suggest_module_fn(module, func) {
-                format!("Did you mean '{}.{}'?", module, suggestion)
-            } else {
-                format!("Module '{}' has no function named '{}'", module, func)
-            };
-            self.push_diagnostic(err(
-                format!("undefined function '{}.{}'", module, func),
-                hint,
-                format!("{}.{}()", module, func),
-            ));
-        }
-
-        Ty::Unknown
-    }
-
-    /// Whether the current context should auto-unwrap Result types from user function calls.
-    /// In effect context, not in test, and not suppressed by skip_auto_unwrap (for match arms).
-    fn should_auto_unwrap_user(&self) -> bool {
-        self.env.in_effect && !self.env.in_test && !self.env.skip_auto_unwrap
-    }
-
-    /// Whether the current context should auto-unwrap Result types from stdlib/module calls.
-    /// Always unwraps in effect context unless suppressed by skip_auto_unwrap (for match arms).
-    /// Note: tests ARE effect contexts and DO auto-unwrap stdlib calls (codegen always adds `?`).
-    fn should_auto_unwrap_stdlib(&self) -> bool {
-        self.env.in_effect && !self.env.skip_auto_unwrap
-    }
-
-    /// Check type compatibility, resolving Named types when comparing against open records.
-    pub(crate) fn is_compatible(&self, param_ty: &Ty, arg_ty: &Ty) -> bool {
-        if param_ty.compatible(arg_ty) {
-            return true;
-        }
-        // If param is an open record and arg is Named, resolve the Named type
-        if let Ty::OpenRecord { .. } = param_ty {
-            let resolved = self.env.resolve_named(arg_ty);
-            if !std::ptr::eq(&resolved as &Ty, arg_ty) {
-                return param_ty.compatible(&resolved);
-            }
-        }
-        false
-    }
-
-    /// Get missing fields when an argument doesn't satisfy an open record parameter.
-    fn open_record_missing_fields(&self, param_ty: &Ty, arg_ty: &Ty) -> Option<Vec<String>> {
-        if let Ty::OpenRecord { fields: required, .. } = param_ty {
-            let resolved = self.env.resolve_named(arg_ty);
-            if let Ty::Record { fields: actual } | Ty::OpenRecord { fields: actual, .. } = &resolved {
-                let missing: Vec<String> = required.iter()
-                    .filter(|(n, t)| !actual.iter().any(|(an, at)| an == n && t.compatible(at)))
-                    .map(|(n, t)| format!("{}: {}", n, t.display()))
-                    .collect();
-                if !missing.is_empty() {
-                    return Some(missing);
-                }
-            }
-        }
-        None
-    }
-
-    pub(crate) fn check_member_access(&mut self, obj_ty: &Ty, field: &str) -> Ty {
-        // Handle TypeVar with structural bound: T: { name: String, .. }
-        if let Ty::TypeVar(tv_name) = obj_ty {
-            if let Some(bound) = self.env.structural_bounds.get(tv_name).cloned() {
-                return self.check_member_access(&bound, field);
-            }
-        }
-        let resolved = self.env.resolve_named(obj_ty);
-        match &resolved {
-            Ty::Record { fields } | Ty::OpenRecord { fields } => {
-                for (name, ty) in fields {
-                    if name == field { return ty.clone(); }
-                }
-                let avail = fields.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ");
-                self.push_diagnostic(err(
-                    format!("record has no field '{}'", field),
-                    format!("Available fields: {}", avail),
-                    format!("field access .{}", field),
-                ));
-                Ty::Unknown
-            }
-            Ty::Unknown => Ty::Unknown,
-            _ => Ty::Unknown,
         }
     }
 }
-

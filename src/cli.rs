@@ -509,7 +509,7 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
             }
             "rust-ir" => {
                 let ir = ir_program.as_ref().expect("IR required for RustIR codegen");
-                emit_rust::emit_via_rust_ir(ir)
+                emit_rust::emit_with_options(ir, &emit_rust::EmitOptions::default(), &import_aliases, &module_irs)
             }
             "ts" | "typescript" => {
                 let ir = ir_program.as_ref().expect("IR required for TS codegen");

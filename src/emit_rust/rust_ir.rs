@@ -1,242 +1,188 @@
-/// RustIR — intermediate representation between Almide IR and Rust source code.
+/// RustIR — typed intermediate representation for Rust code generation.
 ///
-/// All codegen decisions (auto-?, clone, Ok-wrap, mut, type annotations) are made
-/// during IR → RustIR lowering. The Render pass is a pure, stateless string emitter.
+/// Principles:
+/// 1. **All decisions here** — clone, borrow, ?, Ok-wrap, mut, type annotations
+///    are encoded in the data structure, not in the renderer.
+/// 2. **Renderer is trivial** — pure pattern match → string, no conditionals.
+/// 3. **IR types carry full information** — no looking up external state during render.
 
 // ── Expressions ──────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub enum RustExpr {
+pub enum Expr {
     // Literals
-    IntLit(i64),
-    FloatLit(f64),
-    StringLit(String),
-    BoolLit(bool),
+    Int(i64),
+    Float(f64),
+    Str(String),
+    Bool(bool),
     Unit,
 
     // Variables
     Var(String),
 
     // Operators
-    BinOp { op: RustBinOp, left: Box<RustExpr>, right: Box<RustExpr> },
-    UnOp { op: RustUnOp, operand: Box<RustExpr> },
+    BinOp { op: &'static str, left: Box<Expr>, right: Box<Expr> },
+    UnOp { op: &'static str, operand: Box<Expr> },
 
     // Calls
-    Call { func: String, args: Vec<RustExpr> },
-    MethodCall { receiver: Box<RustExpr>, method: String, args: Vec<RustExpr> },
-    MacroCall { name: String, args: Vec<RustExpr> },
+    Call { func: String, args: Vec<Expr> },
+    MethodCall { recv: Box<Expr>, method: String, args: Vec<Expr> },
+    Macro { name: String, args: Vec<Expr> },
 
     // Control flow
-    If { cond: Box<RustExpr>, then: Box<RustExpr>, else_: Option<Box<RustExpr>> },
-    Match { subject: Box<RustExpr>, arms: Vec<RustMatchArm> },
-    Block { stmts: Vec<RustStmt>, expr: Option<Box<RustExpr>> },
-    For { var: String, iter: Box<RustExpr>, body: Vec<RustStmt> },
-    While { cond: Box<RustExpr>, body: Vec<RustStmt> },
-    Loop { label: Option<String>, body: Vec<RustStmt> },
+    If { cond: Box<Expr>, then: Box<Expr>, else_: Option<Box<Expr>> },
+    Match { subject: Box<Expr>, arms: Vec<MatchArm> },
+    Block { stmts: Vec<Stmt>, tail: Option<Box<Expr>> },
+    For { var: String, iter: Box<Expr>, body: Vec<Stmt> },
+    While { cond: Box<Expr>, body: Vec<Stmt> },
+    Loop { label: Option<String>, body: Vec<Stmt> },
     Break,
     Continue { label: Option<String> },
-    Return(Option<Box<RustExpr>>),
+    Return(Option<Box<Expr>>),
 
-    // Ownership / error handling
-    Clone(Box<RustExpr>),
-    ToOwned(Box<RustExpr>),
-    Borrow(Box<RustExpr>),
-    Deref(Box<RustExpr>),
-    TryOp(Box<RustExpr>),
-    ResultOk(Box<RustExpr>),
-    ResultErr(Box<RustExpr>),
-    OptionSome(Box<RustExpr>),
-    OptionNone,
+    // Ownership
+    Clone(Box<Expr>),
+    Borrow(Box<Expr>),
+    Try(Box<Expr>),           // expr?
+    Ok(Box<Expr>),            // Ok(expr)
+    Err(Box<Expr>),           // Err(expr)
+    Some(Box<Expr>),          // Some(expr)
+    None,
 
     // Collections
-    Vec(Vec<RustExpr>),
-    HashMap(Vec<(RustExpr, RustExpr)>),
-    Tuple(Vec<RustExpr>),
-    Range { start: Box<RustExpr>, end: Box<RustExpr>, inclusive: bool, elem_ty: RustType },
+    Vec(Vec<Expr>),
+    HashMap(Vec<(Expr, Expr)>),
+    Tuple(Vec<Expr>),
+    Range { start: Box<Expr>, end: Box<Expr>, inclusive: bool, elem_ty: Type },
 
     // Access
-    Field(Box<RustExpr>, String),
-    Index(Box<RustExpr>, Box<RustExpr>),
-    TupleIndex(Box<RustExpr>, usize),
+    Field(Box<Expr>, String),
+    Index(Box<Expr>, Box<Expr>),
+    TupleIdx(Box<Expr>, usize),
 
     // Structs
-    StructInit { name: String, fields: Vec<(String, RustExpr)> },
-    StructUpdate { base: Box<RustExpr>, fields: Vec<(String, RustExpr)> },
+    Struct { name: String, fields: Vec<(String, Expr)> },
+    StructUpdate { base: Box<Expr>, fields: Vec<(String, Expr)> },
 
     // Lambda
-    Closure { params: Vec<RustParam>, body: Box<RustExpr> },
+    Closure { params: Vec<String>, body: Box<Expr> },
 
     // Strings
-    Format { template: String, args: Vec<RustExpr> },
+    Format { template: String, args: Vec<Expr> },
 
-    // Type cast
-    Cast { expr: Box<RustExpr>, ty: RustType },
-
-    // Unsafe
-    Unsafe(Box<RustExpr>),
-
-    // Raw Rust code (escape hatch for runtime calls, macros, etc.)
+    // Raw (escape hatch for generated runtime calls)
     Raw(String),
-}
-
-// ── Operators ────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Copy)]
-pub enum RustBinOp {
-    Add, Sub, Mul, Div, Mod,
-    Eq, Neq, Lt, Gt, Lte, Gte,
-    And, Or,
-    BitXor,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum RustUnOp {
-    Neg, Not,
 }
 
 // ── Statements ───────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
-pub enum RustStmt {
-    Let { name: String, ty: Option<RustType>, mutable: bool, value: RustExpr },
-    LetPattern { pattern: RustPattern, value: RustExpr },
-    Assign { target: String, value: RustExpr },
-    FieldAssign { target: String, field: String, value: RustExpr },
-    IndexAssign { target: String, index: RustExpr, value: RustExpr },
-    Expr(RustExpr),
-    Comment(String),
+pub enum Stmt {
+    Let { name: String, ty: Option<Type>, mutable: bool, value: Expr },
+    LetPattern { pattern: Pattern, value: Expr },
+    Assign { target: String, value: Expr },
+    FieldAssign { target: String, field: String, value: Expr },
+    IndexAssign { target: String, index: Expr, value: Expr },
+    Expr(Expr),
 }
 
 // ── Patterns ─────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub enum RustPattern {
-    Wildcard,
+pub enum Pattern {
+    Wild,
     Var(String),
-    Literal(RustExpr),
-    Constructor { name: String, args: Vec<RustPattern> },
-    Struct { name: String, fields: Vec<(String, Option<RustPattern>)>, rest: bool },
-    Tuple(Vec<RustPattern>),
-    Box(Box<RustPattern>),
-    Ref(Box<RustPattern>),
-    Or(Vec<RustPattern>),
+    Lit(Expr),
+    Ctor { name: String, args: Vec<Pattern> },
+    Struct { name: String, fields: Vec<(String, Option<Pattern>)>, rest: bool },
+    Tuple(Vec<Pattern>),
 }
 
 #[derive(Debug, Clone)]
-pub struct RustMatchArm {
-    pub pattern: RustPattern,
-    pub guard: Option<RustExpr>,
-    pub body: RustExpr,
+pub struct MatchArm {
+    pub pat: Pattern,
+    pub guard: Option<Expr>,
+    pub body: Expr,
 }
 
 // ── Types ────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub enum RustType {
-    I64, F64, Bool, String, Unit,
-    Vec(Box<RustType>),
-    HashMap(Box<RustType>, Box<RustType>),
-    Option(Box<RustType>),
-    Result(Box<RustType>, Box<RustType>),
-    Tuple(Vec<RustType>),
-    Named(std::string::String),
-    Generic(std::string::String, Vec<RustType>),
-    Ref(Box<RustType>),
+pub enum Type {
+    I64, F64, Bool, Str, Unit,
+    Vec(Box<Type>),
+    HashMap(Box<Type>, Box<Type>),
+    Option(Box<Type>),
+    Result(Box<Type>, Box<Type>),
+    Tuple(Vec<Type>),
+    Named(String),
+    Generic(String, Vec<Type>),
+    Ref(Box<Type>),
     RefStr,
-    Slice(Box<RustType>),
-    Fn(Vec<RustType>, Box<RustType>),
+    Slice(Box<Type>),
+    Fn(Vec<Type>, Box<Type>),
     Infer,
 }
 
-// ── Top-level items ──────────────────────────────────────────────
+// ── Top-level ────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
-pub struct RustParam {
+pub struct Function {
     pub name: String,
-    pub ty: RustType,
+    pub generics: Vec<String>,
+    pub params: Vec<Param>,
+    pub ret: Type,
+    pub body: Vec<Stmt>,
+    pub tail: Option<Expr>,
+    pub attrs: Vec<String>,
+    pub is_pub: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct Param {
+    pub name: String,
+    pub ty: Type,
     pub mutable: bool,
 }
 
 #[derive(Debug, Clone)]
-pub struct RustFunction {
+pub struct StructDef {
     pub name: String,
-    pub generics: Vec<String>,
-    pub params: Vec<RustParam>,
-    pub ret_ty: RustType,
-    pub body: Vec<RustStmt>,
-    pub tail_expr: Option<RustExpr>,
-    pub attrs: Vec<String>,
-    pub is_pub: bool,
-    pub is_async: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct RustStruct {
-    pub name: String,
-    pub fields: Vec<(String, RustType)>,
+    pub fields: Vec<(String, Type)>,
     pub generics: Vec<String>,
     pub derives: Vec<String>,
     pub is_pub: bool,
 }
 
 #[derive(Debug, Clone)]
-pub struct RustEnum {
+pub struct EnumDef {
     pub name: String,
-    pub variants: Vec<RustVariant>,
+    pub variants: Vec<Variant>,
     pub generics: Vec<String>,
     pub derives: Vec<String>,
     pub is_pub: bool,
 }
 
 #[derive(Debug, Clone)]
-pub struct RustVariant {
+pub struct Variant {
     pub name: String,
-    pub kind: RustVariantKind,
+    pub kind: VariantKind,
 }
 
 #[derive(Debug, Clone)]
-pub enum RustVariantKind {
+pub enum VariantKind {
     Unit,
-    Tuple(Vec<RustType>),
-    Struct(Vec<(String, RustType)>),
+    Tuple(Vec<Type>),
+    Struct(Vec<(String, Type)>),
 }
 
 #[derive(Debug, Clone)]
-pub struct RustTypeAlias {
-    pub name: String,
-    pub ty: RustType,
-    pub is_pub: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct RustConst {
-    pub name: String,
-    pub ty: RustType,
-    pub value: RustExpr,
-    pub is_pub: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct RustImpl {
-    pub type_name: String,
-    pub trait_name: Option<String>,
-    pub methods: Vec<RustFunction>,
-}
-
-#[derive(Debug, Clone)]
-pub struct RustProgram {
+pub struct Program {
     pub prelude: Vec<String>,
-    pub macros: Vec<String>,
-    pub structs: Vec<RustStruct>,
-    pub enums: Vec<RustEnum>,
-    pub type_aliases: Vec<RustTypeAlias>,
-    pub consts: Vec<RustConst>,
-    pub impls: Vec<RustImpl>,
-    pub functions: Vec<RustFunction>,
-    pub test_functions: Vec<RustFunction>,
-    pub main_wrapper: Option<RustFunction>,
+    pub structs: Vec<StructDef>,
+    pub enums: Vec<EnumDef>,
+    pub functions: Vec<Function>,
+    pub tests: Vec<Function>,
+    pub main: Option<Function>,
     pub runtime: String,
 }

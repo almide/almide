@@ -21,28 +21,24 @@ impl Parser {
             Expr::Unit { id: self.next_id(), span: span.clone(), resolved_type: None }
         };
         Ok(Expr::If {
-            cond: Box::new(cond),
-            then: Box::new(then),
-            else_: Box::new(else_),
-            id: self.next_id(),
-            span,
-            resolved_type: None,
+            cond: Box::new(cond), then: Box::new(then), else_: Box::new(else_),
+            id: self.next_id(), span, resolved_type: None,
         })
     }
 
     fn parse_if_branch(&mut self) -> Result<Expr, String> {
-        if self.check(TokenType::Ident) && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Eq) {
+        if self.check(TokenType::Ident)
+            && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Eq)
+        {
             let span = Some(self.current_span());
             let name = self.advance_and_get_value();
-            self.advance();
+            self.advance(); // skip =
             self.skip_newlines();
             let value = self.parse_expr()?;
             return Ok(Expr::Block {
                 stmts: vec![Stmt::Assign { name, value, span: None }],
                 expr: None,
-                id: self.next_id(),
-                span,
-                resolved_type: None,
+                id: self.next_id(), span, resolved_type: None,
             });
         }
         self.parse_expr()
@@ -71,28 +67,25 @@ impl Parser {
         }
         self.expect_closing(TokenType::RBrace, open.line, open.col, "match block")?;
         Ok(Expr::Match {
-            subject: Box::new(subject),
-            arms,
-            id: self.next_id(),
-            span,
-            resolved_type: None,
+            subject: Box::new(subject), arms,
+            id: self.next_id(), span, resolved_type: None,
         })
     }
 
     pub(crate) fn parse_match_arm(&mut self) -> Result<MatchArm, String> {
         let pattern = self.parse_pattern()?;
-        let mut guard: Option<Expr> = None;
-        if self.check(TokenType::If) {
+        let guard = if self.check(TokenType::If) {
             self.advance();
-            guard = Some(self.parse_expr()?);
-        }
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
         self.expect(TokenType::FatArrow)?;
         self.skip_newlines();
         let body = self.parse_expr()?;
         Ok(MatchArm { pattern, guard, body, comments: Vec::new() })
     }
 
-    /// Parse paren-style lambda: `(params) => expr`
     pub(crate) fn parse_paren_lambda(&mut self) -> Result<Expr, String> {
         let span = Some(self.current_span());
         let open = self.current().clone();
@@ -110,15 +103,11 @@ impl Parser {
         self.skip_newlines();
         let body = self.parse_expr()?;
         Ok(Expr::Lambda {
-            params,
-            body: Box::new(body),
-            id: self.next_id(),
-            span,
-            resolved_type: None,
+            params, body: Box::new(body),
+            id: self.next_id(), span, resolved_type: None,
         })
     }
 
-    /// Parse fn-style lambda (legacy): `fn(params) => expr`
     pub(crate) fn parse_lambda(&mut self) -> Result<Expr, String> {
         let span = Some(self.current_span());
         self.expect(TokenType::Fn)?;
@@ -137,11 +126,8 @@ impl Parser {
         self.skip_newlines();
         let body = self.parse_expr()?;
         Ok(Expr::Lambda {
-            params,
-            body: Box::new(body),
-            id: self.next_id(),
-            span,
-            resolved_type: None,
+            params, body: Box::new(body),
+            id: self.next_id(), span, resolved_type: None,
         })
     }
 
@@ -151,20 +137,19 @@ impl Parser {
             let mut names = Vec::new();
             while !self.check(TokenType::RParen) {
                 names.push(self.expect_ident()?);
-                if self.check(TokenType::Comma) {
-                    self.advance();
-                }
+                if self.check(TokenType::Comma) { self.advance(); }
             }
             self.expect(TokenType::RParen)?;
             let first = names.first().cloned().unwrap_or_default();
             return Ok(LambdaParam { name: first, tuple_names: Some(names), ty: None });
         }
         let name = self.expect_ident()?;
-        let mut ty: Option<TypeExpr> = None;
-        if self.check(TokenType::Colon) {
+        let ty = if self.check(TokenType::Colon) {
             self.advance();
-            ty = Some(self.parse_type_expr()?);
-        }
+            Some(self.parse_type_expr()?)
+        } else {
+            None
+        };
         Ok(LambdaParam { name, tuple_names: None, ty })
     }
 
@@ -197,11 +182,8 @@ impl Parser {
         }
         self.expect_closing(TokenType::RBrace, open.line, open.col, "do block")?;
         Ok(Expr::DoBlock {
-            stmts,
-            expr: final_expr,
-            id: self.next_id(),
-            span,
-            resolved_type: None,
+            stmts, expr: final_expr,
+            id: self.next_id(), span, resolved_type: None,
         })
     }
 
@@ -213,75 +195,71 @@ impl Parser {
         self.skip_newlines_into_stmts(&mut initial_comments);
         if self.check(TokenType::RBrace) {
             self.advance();
-            // Empty braces `{}` are an empty block (Unit), not an empty record.
             return Ok(Expr::Block {
-                stmts: Vec::new(),
-                expr: None,
-                id: self.next_id(),
-                span,
-                resolved_type: None,
+                stmts: Vec::new(), expr: None,
+                id: self.next_id(), span, resolved_type: None,
             });
         }
+        // Spread record: { ...base, field: value }
         if self.check(TokenType::DotDotDot) {
-            self.advance();
-            let base = self.parse_expr()?;
-            let mut fields = Vec::new();
-            while self.check(TokenType::Comma) {
-                self.advance();
-                self.skip_newlines();
-                if self.check(TokenType::RBrace) {
-                    break;
-                }
-                let field_name = self.expect_ident()?;
-                self.expect(TokenType::Colon)?;
-                self.skip_newlines();
-                let field_value = self.parse_expr()?;
-                fields.push(FieldInit {
-                    name: field_name,
-                    value: field_value,
-                });
-            }
-            self.skip_newlines();
-            self.expect_closing(TokenType::RBrace, open.line, open.col, "spread record")?;
-            return Ok(Expr::SpreadRecord {
-                base: Box::new(base),
-                fields,
-                id: self.next_id(),
-                span,
-                resolved_type: None,
-            });
+            return self.parse_spread_record(span, open);
         }
+        // Record literal: { field: value, ... }
         if (self.check(TokenType::Ident) || self.check(TokenType::IdentQ))
             && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Colon)
         {
-            let mut fields = Vec::new();
-            while !self.check(TokenType::RBrace) {
-                self.skip_newlines();
-                let field_name = self.expect_any_name()?;
-                if self.check(TokenType::Colon) {
-                    self.advance();
-                    self.skip_newlines();
-                    let field_value = self.parse_expr()?;
-                    fields.push(FieldInit {
-                        name: field_name.clone(),
-                        value: field_value,
-                    });
-                } else {
-                    fields.push(FieldInit {
-                        name: field_name.clone(),
-                        value: Expr::Ident { name: field_name, id: self.next_id(), span: None, resolved_type: None },
-                    });
-                }
-                self.skip_newlines();
-                if self.check(TokenType::Comma) {
-                    self.advance();
-                    self.skip_newlines();
-                }
-            }
-            self.expect_closing(TokenType::RBrace, open.line, open.col, "record literal")?;
-            return Ok(Expr::Record { name: None, fields, id: self.next_id(), span, resolved_type: None });
+            return self.parse_record_literal(span, open);
         }
+        // Block expression
+        self.parse_block_body(initial_comments, span, open)
+    }
 
+    fn parse_spread_record(&mut self, span: Option<Span>, open: crate::lexer::Token) -> Result<Expr, String> {
+        self.advance(); // skip ...
+        let base = self.parse_expr()?;
+        let mut fields = Vec::new();
+        while self.check(TokenType::Comma) {
+            self.advance();
+            self.skip_newlines();
+            if self.check(TokenType::RBrace) { break; }
+            let field_name = self.expect_ident()?;
+            self.expect(TokenType::Colon)?;
+            self.skip_newlines();
+            let field_value = self.parse_expr()?;
+            fields.push(FieldInit { name: field_name, value: field_value });
+        }
+        self.skip_newlines();
+        self.expect_closing(TokenType::RBrace, open.line, open.col, "spread record")?;
+        Ok(Expr::SpreadRecord {
+            base: Box::new(base), fields,
+            id: self.next_id(), span, resolved_type: None,
+        })
+    }
+
+    fn parse_record_literal(&mut self, span: Option<Span>, open: crate::lexer::Token) -> Result<Expr, String> {
+        let mut fields = Vec::new();
+        while !self.check(TokenType::RBrace) {
+            self.skip_newlines();
+            let field_name = self.expect_any_name()?;
+            if self.check(TokenType::Colon) {
+                self.advance();
+                self.skip_newlines();
+                let field_value = self.parse_expr()?;
+                fields.push(FieldInit { name: field_name, value: field_value });
+            } else {
+                fields.push(FieldInit {
+                    name: field_name.clone(),
+                    value: Expr::Ident { name: field_name, id: self.next_id(), span: None, resolved_type: None },
+                });
+            }
+            self.skip_newlines();
+            if self.check(TokenType::Comma) { self.advance(); self.skip_newlines(); }
+        }
+        self.expect_closing(TokenType::RBrace, open.line, open.col, "record literal")?;
+        Ok(Expr::Record { name: None, fields, id: self.next_id(), span, resolved_type: None })
+    }
+
+    fn parse_block_body(&mut self, initial_comments: Vec<Stmt>, span: Option<Span>, open: crate::lexer::Token) -> Result<Expr, String> {
         let mut stmts = initial_comments;
         let mut final_expr: Option<Box<Expr>> = None;
         while !self.check(TokenType::RBrace) && !self.check(TokenType::EOF) {
@@ -306,7 +284,6 @@ impl Parser {
                     }
                 }
                 Err(msg) => {
-                    // Collect the error, insert Error node, skip to next statement boundary
                     let err_span = Some(self.current_span());
                     self.errors.push(self.string_to_diagnostic(&msg));
                     self.skip_to_next_stmt();
@@ -316,16 +293,11 @@ impl Parser {
         }
         self.expect_closing(TokenType::RBrace, open.line, open.col, "block")?;
         Ok(Expr::Block {
-            stmts,
-            expr: final_expr,
-            id: self.next_id(),
-            span,
-            resolved_type: None,
+            stmts, expr: final_expr,
+            id: self.next_id(), span, resolved_type: None,
         })
     }
 
-    /// Parse a braceless block: a sequence of let/var statements ending in an expression.
-    /// Used for `fn foo() = let x = 1; let y = 2; x + y` without braces.
     pub(crate) fn parse_braceless_block(&mut self) -> Result<Expr, String> {
         let span = Some(self.current_span());
         let mut stmts = Vec::new();
@@ -338,11 +310,7 @@ impl Parser {
                 self.advance();
                 self.skip_newlines();
             }
-
-            // Check if we've reached the end of the braceless block
-            // (next token is a top-level declaration keyword or EOF)
             if self.is_at_braceless_block_end() {
-                // Last item — if it's an expression statement, promote to final expr
                 if let Stmt::Expr { expr, .. } = stmt {
                     final_expr = Some(Box::new(expr));
                 } else {
@@ -355,15 +323,11 @@ impl Parser {
         }
 
         Ok(Expr::Block {
-            stmts,
-            expr: final_expr,
-            id: self.next_id(),
-            span,
-            resolved_type: None,
+            stmts, expr: final_expr,
+            id: self.next_id(), span, resolved_type: None,
         })
     }
 
-    /// Check if the current token indicates the end of a braceless function body.
     fn is_at_braceless_block_end(&self) -> bool {
         matches!(self.current().token_type,
             TokenType::EOF
@@ -381,55 +345,24 @@ impl Parser {
         self.expect(TokenType::LBracket)?;
         self.skip_newlines();
 
-        // [] → empty List
         if self.check(TokenType::RBracket) {
             self.advance();
             return Ok(Expr::List { elements: vec![], id: self.next_id(), span, resolved_type: None });
         }
-
-        // [:] → empty Map
         if self.check(TokenType::Colon) {
             self.advance();
             self.expect_closing(TokenType::RBracket, open.line, open.col, "empty map")?;
             return Ok(Expr::EmptyMap { id: self.next_id(), span, resolved_type: None });
         }
 
-        // Parse first expression, then decide List vs Map
         let first = self.parse_expr()?;
         self.skip_newlines();
 
         if self.check(TokenType::Colon) {
-            // Map literal: [key: value, ...]
-            self.advance();
-            self.skip_newlines();
-            let first_value = self.parse_expr()?;
-            self.skip_newlines();
-            let mut entries = vec![(first, first_value)];
-            while self.check(TokenType::Comma) {
-                self.advance();
-                self.skip_newlines();
-                if self.check(TokenType::RBracket) { break; } // trailing comma
-                let key = self.parse_expr()?;
-                self.skip_newlines();
-                self.expect(TokenType::Colon)?;
-                self.skip_newlines();
-                let value = self.parse_expr()?;
-                self.skip_newlines();
-                entries.push((key, value));
-            }
-            // Detect missing comma in map literal
-            if !self.check(TokenType::RBracket) && !self.check(TokenType::EOF) {
-                if let Some(result) = self.check_hint(None, super::hints::HintScope::MapLiteral) {
-                    let tok = self.current();
-                    let msg = result.message.as_deref().unwrap_or("Unexpected token in map");
-                    return Err(format!("{} at line {}:{}\n  Hint: {}", msg, tok.line, tok.col, result.hint));
-                }
-            }
-            self.expect_closing(TokenType::RBracket, open.line, open.col, "map literal")?;
-            return Ok(Expr::MapLiteral { entries, id: self.next_id(), span, resolved_type: None });
+            return self.parse_map_literal(first, span, open);
         }
 
-        // List literal: [expr, ...]
+        // List literal
         let mut elements = vec![first];
         while self.check(TokenType::Comma) {
             self.advance();
@@ -438,7 +371,6 @@ impl Parser {
             elements.push(self.parse_expr()?);
             self.skip_newlines();
         }
-        // Detect missing comma: next token is an expression start but not ']'
         if !self.check(TokenType::RBracket) && !self.check(TokenType::EOF) {
             if let Some(result) = self.check_hint(None, super::hints::HintScope::ListLiteral) {
                 let tok = self.current();
@@ -448,5 +380,34 @@ impl Parser {
         }
         self.expect_closing(TokenType::RBracket, open.line, open.col, "list literal")?;
         Ok(Expr::List { elements, id: self.next_id(), span, resolved_type: None })
+    }
+
+    fn parse_map_literal(&mut self, first_key: Expr, span: Option<Span>, open: crate::lexer::Token) -> Result<Expr, String> {
+        self.advance(); // skip :
+        self.skip_newlines();
+        let first_value = self.parse_expr()?;
+        self.skip_newlines();
+        let mut entries = vec![(first_key, first_value)];
+        while self.check(TokenType::Comma) {
+            self.advance();
+            self.skip_newlines();
+            if self.check(TokenType::RBracket) { break; }
+            let key = self.parse_expr()?;
+            self.skip_newlines();
+            self.expect(TokenType::Colon)?;
+            self.skip_newlines();
+            let value = self.parse_expr()?;
+            self.skip_newlines();
+            entries.push((key, value));
+        }
+        if !self.check(TokenType::RBracket) && !self.check(TokenType::EOF) {
+            if let Some(result) = self.check_hint(None, super::hints::HintScope::MapLiteral) {
+                let tok = self.current();
+                let msg = result.message.as_deref().unwrap_or("Unexpected token in map");
+                return Err(format!("{} at line {}:{}\n  Hint: {}", msg, tok.line, tok.col, result.hint));
+            }
+        }
+        self.expect_closing(TokenType::RBracket, open.line, open.col, "map literal")?;
+        Ok(Expr::MapLiteral { entries, id: self.next_id(), span, resolved_type: None })
     }
 }
