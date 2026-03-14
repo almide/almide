@@ -52,15 +52,14 @@ effect = true
 rust = "almide_rt_fs_mkdir_p(&*{path})?"
 ts = "__almd_fs.mkdir_p({path})"
 
-["exists?"]
+[exists]
 description = "Check if a file or directory exists"
-example = 'if fs.exists?("config.toml") then ...'
+example = 'if fs.exists("config.toml") then ...'
 params = [{ name = "path", type = "String" }]
 return = "Bool"
 effect = true
 rust = "almide_rt_fs_exists(&*{path})"
-ts = "__almd_fs.exists_hdlm_qm_({path})"
-aliases = ["exists_hdlm_qm_"]
+ts = "__almd_fs.exists({path})"
 
 [read_lines]
 description = "Read a file as a list of lines"
@@ -89,25 +88,23 @@ effect = true
 rust = "almide_rt_fs_list_dir(&*{path})?"
 ts = "__almd_fs.list_dir({path})"
 
-["is_dir?"]
+[is_dir]
 description = "Check if a path is a directory"
-example = 'if fs.is_dir?("src") then ...'
+example = 'if fs.is_dir("src") then ...'
 params = [{ name = "path", type = "String" }]
 return = "Bool"
 effect = true
 rust = "almide_rt_fs_is_dir(&*{path})"
-ts = "__almd_fs.is_dir_hdlm_qm_({path})"
-aliases = ["is_dir_hdlm_qm_"]
+ts = "__almd_fs.is_dir({path})"
 
-["is_file?"]
+[is_file]
 description = "Check if a path is a regular file"
-example = 'if fs.is_file?("readme.md") then ...'
+example = 'if fs.is_file("readme.md") then ...'
 params = [{ name = "path", type = "String" }]
 return = "Bool"
 effect = true
 rust = "almide_rt_fs_is_file(&*{path})"
-ts = "__almd_fs.is_file_hdlm_qm_({path})"
-aliases = ["is_file_hdlm_qm_"]
+ts = "__almd_fs.is_file({path})"
 
 [copy]
 description = "Copy a file from src to dst"
@@ -198,15 +195,14 @@ effect = true
 rust = "almide_rt_fs_create_temp_dir(&*{prefix})?"
 ts = "__almd_fs.create_temp_dir({prefix})"
 
-["is_symlink?"]
+[is_symlink]
 description = "Check if a path is a symbolic link"
-example = 'if fs.is_symlink?("link") then ...'
+example = 'if fs.is_symlink("link") then ...'
 params = [{ name = "path", type = "String" }]
 return = "Bool"
 effect = true
 rust = "almide_rt_fs_is_symlink(&*{path})"
-ts = "__almd_fs.is_symlink_hdlm_qm_({path})"
-aliases = ["is_symlink_hdlm_qm_"]
+ts = "__almd_fs.is_symlink({path})"
 
 [modified_at]
 description = "Get file modification time as Unix timestamp (seconds)"

@@ -1,20 +1,18 @@
-["match?"]
+[is_match]
 description = "Check if a pattern matches anywhere in a string."
-example = 'regex.match?("[0-9]+", "abc123") // => true'
+example = 'regex.is_match("[0-9]+", "abc123") // => true'
 params = [{ name = "pat", type = "String" }, { name = "s", type = "String" }]
 return = "Bool"
 rust = "almide_regex_is_match(&{pat}, &{s})"
-ts = "__almd_regex.match_hdlm_qm_({pat}, {s})"
-aliases = ["match_hdlm_qm_"]
+ts = "__almd_regex.is_match({pat}, {s})"
 
-["full_match?"]
+[full_match]
 description = "Check if a pattern matches the entire string."
-example = 'regex.full_match?("[0-9]+", "123") // => true'
+example = 'regex.full_match("[0-9]+", "123") // => true'
 params = [{ name = "pat", type = "String" }, { name = "s", type = "String" }]
 return = "Bool"
 rust = "almide_regex_full_match(&{pat}, &{s})"
-ts = "__almd_regex.full_match_hdlm_qm_({pat}, {s})"
-aliases = ["full_match_hdlm_qm_"]
+ts = "__almd_regex.full_match({pat}, {s})"
 
 [find]
 description = "Find the first match of a pattern in a string."

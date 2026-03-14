@@ -229,12 +229,12 @@ test "list.first of two" {
   assert_eq(list.first([99, 1]), some(99))
 }
 
-// ── is_empty? ──
+// ── is_empty ──
 
-test "list.is_empty? via UFCS" {
+test "list.is_empty via UFCS" {
   let xs: List[Int] = []
-  assert(xs.is_empty?())
-  assert(not [1].is_empty?())
+  assert(xs.is_empty())
+  assert(not [1].is_empty())
 }
 
 // ── min / max ──

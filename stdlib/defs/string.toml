@@ -30,32 +30,29 @@ return = "Int"
 rust = "almide_rt_string_len(&*{s})"
 ts = "__almd_string.len({s})"
 
-["contains?"]
+[contains]
 description = "Check if a string contains a substring."
-example = 'string.contains?("hello world", "world") // => true'
+example = 'string.contains("hello world", "world") // => true'
 params = [{ name = "s", type = "String" }, { name = "sub", type = "String" }]
 return = "Bool"
 rust = "almide_rt_string_contains(&*{s}, &*{sub})"
-ts = "__almd_string.contains_hdlm_qm_({s}, {sub})"
-aliases = ["contains_hdlm_qm_", "contains"]
+ts = "__almd_string.contains({s}, {sub})"
 
-["starts_with?"]
+[starts_with]
 description = "Check if a string starts with a prefix."
-example = 'string.starts_with?("hello", "hel") // => true'
+example = 'string.starts_with("hello", "hel") // => true'
 params = [{ name = "s", type = "String" }, { name = "prefix", type = "String" }]
 return = "Bool"
 rust = "almide_rt_string_starts_with(&*{s}, &*{prefix})"
-ts = "__almd_string.starts_with_hdlm_qm_({s}, {prefix})"
-aliases = ["starts_with_hdlm_qm_", "starts_with"]
+ts = "__almd_string.starts_with({s}, {prefix})"
 
-["ends_with?"]
+[ends_with]
 description = "Check if a string ends with a suffix."
-example = 'string.ends_with?("hello", "llo") // => true'
+example = 'string.ends_with("hello", "llo") // => true'
 params = [{ name = "s", type = "String" }, { name = "suffix", type = "String" }]
 return = "Bool"
 rust = "almide_rt_string_ends_with(&*{s}, &*{suffix})"
-ts = "__almd_string.ends_with_hdlm_qm_({s}, {suffix})"
-aliases = ["ends_with_hdlm_qm_", "ends_with"]
+ts = "__almd_string.ends_with({s}, {suffix})"
 
 [slice]
 description = "Extract a substring by start and optional end index."
@@ -171,59 +168,53 @@ return = "String"
 rust = "almide_rt_string_from_bytes(&{ let __bytes: Vec<i64> = {bytes}; __bytes })"
 ts = "__almd_string.from_bytes({bytes})"
 
-["is_digit?"]
+[is_digit]
 description = "Check if all characters are ASCII digits."
-example = 'string.is_digit?("123") // => true'
+example = 'string.is_digit("123") // => true'
 params = [{ name = "s", type = "String" }]
 return = "Bool"
 rust = "almide_rt_string_is_digit(&*{s})"
-ts = "__almd_string.is_digit_hdlm_qm_({s})"
-aliases = ["is_digit_hdlm_qm_"]
+ts = "__almd_string.is_digit({s})"
 
-["is_alpha?"]
+[is_alpha]
 description = "Check if all characters are alphabetic."
-example = 'string.is_alpha?("abc") // => true'
+example = 'string.is_alpha("abc") // => true'
 params = [{ name = "s", type = "String" }]
 return = "Bool"
 rust = "almide_rt_string_is_alpha(&*{s})"
-ts = "__almd_string.is_alpha_hdlm_qm_({s})"
-aliases = ["is_alpha_hdlm_qm_"]
+ts = "__almd_string.is_alpha({s})"
 
-["is_alphanumeric?"]
+[is_alphanumeric]
 description = "Check if all characters are alphanumeric."
-example = 'string.is_alphanumeric?("abc123") // => true'
+example = 'string.is_alphanumeric("abc123") // => true'
 params = [{ name = "s", type = "String" }]
 return = "Bool"
 rust = "almide_rt_string_is_alphanumeric(&*{s})"
-ts = "__almd_string.is_alphanumeric_hdlm_qm_({s})"
-aliases = ["is_alphanumeric_hdlm_qm_"]
+ts = "__almd_string.is_alphanumeric({s})"
 
-["is_whitespace?"]
+[is_whitespace]
 description = "Check if all characters are whitespace."
-example = 'string.is_whitespace?("  ") // => true'
+example = 'string.is_whitespace("  ") // => true'
 params = [{ name = "s", type = "String" }]
 return = "Bool"
 rust = "almide_rt_string_is_whitespace(&*{s})"
-ts = "__almd_string.is_whitespace_hdlm_qm_({s})"
-aliases = ["is_whitespace_hdlm_qm_"]
+ts = "__almd_string.is_whitespace({s})"
 
-["is_upper?"]
+[is_upper]
 description = "Check if all characters in the string are uppercase."
-example = 'string.is_upper?("ABC") // => true'
+example = 'string.is_upper("ABC") // => true'
 params = [{ name = "s", type = "String" }]
 return = "Bool"
 rust = "almide_rt_string_is_upper(&*{s})"
-ts = "__almd_string.is_upper_hdlm_qm_({s})"
-aliases = ["is_upper_hdlm_qm_"]
+ts = "__almd_string.is_upper({s})"
 
-["is_lower?"]
+[is_lower]
 description = "Check if all characters in the string are lowercase."
-example = 'string.is_lower?("abc") // => true'
+example = 'string.is_lower("abc") // => true'
 params = [{ name = "s", type = "String" }]
 return = "Bool"
 rust = "almide_rt_string_is_lower(&*{s})"
-ts = "__almd_string.is_lower_hdlm_qm_({s})"
-aliases = ["is_lower_hdlm_qm_"]
+ts = "__almd_string.is_lower({s})"
 
 [codepoint]
 description = "Return the Unicode codepoint of the first character, or none for empty string."
@@ -281,14 +272,13 @@ return = "Int"
 rust = "almide_rt_string_count(&*{s}, &*{sub})"
 ts = "__almd_string.count({s}, {sub})"
 
-["is_empty?"]
+[is_empty]
 description = "Check if a string is empty."
-example = 'string.is_empty?("") // => true'
+example = 'string.is_empty("") // => true'
 params = [{ name = "s", type = "String" }]
 return = "Bool"
 rust = "almide_rt_string_is_empty(&*{s})"
-ts = "__almd_string.is_empty_hdlm_qm_({s})"
-aliases = ["is_empty_hdlm_qm_"]
+ts = "__almd_string.is_empty({s})"
 
 [reverse]
 description = "Reverse the characters in a string."

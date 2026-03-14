@@ -12,7 +12,7 @@ test "empty list in typed context" {
 test "empty map operations" {
   let m: Map[String, Int] = [:]
   assert_eq(m.len(), 0)
-  assert_eq(m.is_empty?(), true)
+  assert_eq(m.is_empty(), true)
   let m2 = m.set("x", 42)
   assert_eq(m2.len(), 1)
   assert_eq(m2["x"], some(42))

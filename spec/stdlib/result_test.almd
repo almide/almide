@@ -36,14 +36,14 @@ test "result.unwrap_or returns default on err" {
   assert_eq(v, 0)
 }
 
-test "result.is_ok? true for ok" {
+test "result.is_ok true for ok" {
   let r: Result[Int, String] = ok(1)
-  assert(result.is_ok?(r))
+  assert(result.is_ok(r))
 }
 
-test "result.is_err? true for err" {
+test "result.is_err true for err" {
   let r: Result[Int, String] = err("oops")
-  assert(result.is_err?(r))
+  assert(result.is_err(r))
 }
 
 test "result.to_option converts ok" {

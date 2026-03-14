@@ -55,25 +55,23 @@ return = "A"
 rust = "({r}).unwrap_or_else(|{f.args}| {{ {f.body} }})"
 ts = "__almd_result_unwrap_or_else({r}, ({f.args}) => {f.body})"
 
-["is_ok?"]
+[is_ok]
 description = "Check if the Result is ok."
-example = 'result.is_ok?(ok(42))'
+example = 'result.is_ok(ok(42))'
 type_params = ["A", "E"]
 params = [{ name = "r", type = "Result[A, E]" }]
 return = "Bool"
 rust = "({r}).is_ok()"
 ts = "__almd_result_is_ok({r})"
-aliases = ["is_ok_hdlm_qm_"]
 
-["is_err?"]
+[is_err]
 description = "Check if the Result is err."
-example = 'result.is_err?(err("fail"))'
+example = 'result.is_err(err("fail"))'
 type_params = ["A", "E"]
 params = [{ name = "r", type = "Result[A, E]" }]
 return = "Bool"
 rust = "({r}).is_err()"
 ts = "__almd_result_is_err({r})"
-aliases = ["is_err_hdlm_qm_"]
 
 [to_option]
 description = "Convert ok to some, err to none. Discards the error value."

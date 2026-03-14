@@ -172,20 +172,18 @@ return = "Int"
 rust = "{a} - {b}"
 ts = "{a} - {b}"
 
-["is_before?"]
+[is_before]
 description = "Check if timestamp a is before timestamp b."
-example = 'datetime.is_before?(earlier, later) // => true'
+example = 'datetime.is_before(earlier, later) // => true'
 params = [{ name = "a", type = "Int" }, { name = "b", type = "Int" }]
 return = "Bool"
 rust = "{a} < {b}"
 ts = "{a} < {b}"
-aliases = ["is_before_hdlm_qm_"]
 
-["is_after?"]
+[is_after]
 description = "Check if timestamp a is after timestamp b."
-example = 'datetime.is_after?(later, earlier) // => true'
+example = 'datetime.is_after(later, earlier) // => true'
 params = [{ name = "a", type = "Int" }, { name = "b", type = "Int" }]
 return = "Bool"
 rust = "{a} > {b}"
 ts = "{a} > {b}"
-aliases = ["is_after_hdlm_qm_"]

@@ -151,7 +151,7 @@ fn parse_host_port(s: String) -> (String, Option[Int]) = {
     some(i) => {
       let host_part = string.slice(s, 0, i)
       let port_str = string.slice(s, i + 1)
-      if string.len(port_str) > 0 and string.is_digit?(port_str) then {
+      if string.len(port_str) > 0 and string.is_digit(port_str) then {
         match string.to_int(port_str) {
           ok(p) => (host_part, some(p))
           err(_) => (s, none)
@@ -182,7 +182,7 @@ fn parse_query_string(q: String) -> Map[String, String] = {
 }
 
 fn is_unreserved(ch: String) -> Bool = {
-  string.is_alphanumeric?(ch) or ch == "-" or ch == "_" or ch == "." or ch == "~"
+  string.is_alphanumeric(ch) or ch == "-" or ch == "_" or ch == "." or ch == "~"
 }
 
 fn percent_encode_char(ch: String) -> String = {

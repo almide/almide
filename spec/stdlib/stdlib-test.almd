@@ -35,8 +35,8 @@ test "string.split and join roundtrip" {
 test "string.contains and starts/ends_with" {
   assert(string.contains("hello world", "world"))
   assert(not string.contains("hello", "xyz"))
-  assert(string.starts_with?("hello", "hel"))
-  assert(string.ends_with?("hello", "llo"))
+  assert(string.starts_with("hello", "hel"))
+  assert(string.ends_with("hello", "llo"))
 }
 
 test "string.slice" {
@@ -388,67 +388,67 @@ test "string.from_bytes empty" {
 }
 
 // ============================================================
-// string.is_digit?
+// string.is_digit
 // ============================================================
 
-test "string.is_digit? true" {
-  assert(string.is_digit?("0"))
-  assert(string.is_digit?("9"))
-  assert(string.is_digit?("42"))
+test "string.is_digit true" {
+  assert(string.is_digit("0"))
+  assert(string.is_digit("9"))
+  assert(string.is_digit("42"))
 }
 
-test "string.is_digit? false" {
-  assert(not string.is_digit?("a"))
-  assert(not string.is_digit?(""))
-  assert(not string.is_digit?("1a"))
-}
-
-// ============================================================
-// string.is_alpha?
-// ============================================================
-
-test "string.is_alpha? true" {
-  assert(string.is_alpha?("a"))
-  assert(string.is_alpha?("Z"))
-  assert(string.is_alpha?("hello"))
-}
-
-test "string.is_alpha? false" {
-  assert(not string.is_alpha?("1"))
-  assert(not string.is_alpha?(""))
-  assert(not string.is_alpha?("a1"))
+test "string.is_digit false" {
+  assert(not string.is_digit("a"))
+  assert(not string.is_digit(""))
+  assert(not string.is_digit("1a"))
 }
 
 // ============================================================
-// string.is_alphanumeric?
+// string.is_alpha
 // ============================================================
 
-test "string.is_alphanumeric? true" {
-  assert(string.is_alphanumeric?("a1"))
-  assert(string.is_alphanumeric?("abc"))
-  assert(string.is_alphanumeric?("123"))
+test "string.is_alpha true" {
+  assert(string.is_alpha("a"))
+  assert(string.is_alpha("Z"))
+  assert(string.is_alpha("hello"))
 }
 
-test "string.is_alphanumeric? false" {
-  assert(not string.is_alphanumeric?(""))
-  assert(not string.is_alphanumeric?("a-b"))
-  assert(not string.is_alphanumeric?(" "))
+test "string.is_alpha false" {
+  assert(not string.is_alpha("1"))
+  assert(not string.is_alpha(""))
+  assert(not string.is_alpha("a1"))
 }
 
 // ============================================================
-// string.is_whitespace?
+// string.is_alphanumeric
 // ============================================================
 
-test "string.is_whitespace? true" {
-  assert(string.is_whitespace?(" "))
-  assert(string.is_whitespace?("\t"))
-  assert(string.is_whitespace?("  \t\n"))
+test "string.is_alphanumeric true" {
+  assert(string.is_alphanumeric("a1"))
+  assert(string.is_alphanumeric("abc"))
+  assert(string.is_alphanumeric("123"))
 }
 
-test "string.is_whitespace? false" {
-  assert(not string.is_whitespace?(""))
-  assert(not string.is_whitespace?("a"))
-  assert(not string.is_whitespace?(" a "))
+test "string.is_alphanumeric false" {
+  assert(not string.is_alphanumeric(""))
+  assert(not string.is_alphanumeric("a-b"))
+  assert(not string.is_alphanumeric(" "))
+}
+
+// ============================================================
+// string.is_whitespace
+// ============================================================
+
+test "string.is_whitespace true" {
+  assert(string.is_whitespace(" "))
+  assert(string.is_whitespace("\t"))
+  assert(string.is_whitespace("  \t\n"))
+}
+
+test "string.is_whitespace false" {
+  assert(not string.is_whitespace(""))
+  assert(not string.is_whitespace("a"))
+  assert(not string.is_whitespace(" a "))
 }
 
 // ============================================================
@@ -459,9 +459,9 @@ test "string UFCS chars" {
   assert_eq("abc".chars(), ["a", "b", "c"])
 }
 
-test "string UFCS is_digit?" {
-  assert("5".is_digit?())
-  assert(not "x".is_digit?())
+test "string UFCS is_digit" {
+  assert("5".is_digit())
+  assert(not "x".is_digit())
 }
 
 // ============================================================

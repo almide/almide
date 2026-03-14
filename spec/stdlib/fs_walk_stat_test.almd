@@ -8,8 +8,8 @@ effect fn main() -> Result[Unit, String] = {
   // Test fs.walk
   let files = fs.walk(dir)
   assert(list.len(files) >= 3, "walk returns at least 3 entries")
-  let has_a = list.any(files, (f) => string.ends_with?(f, "a.txt"))
-  let has_b = list.any(files, (f) => string.ends_with?(f, "b.txt"))
+  let has_a = list.any(files, (f) => string.ends_with(f, "a.txt"))
+  let has_b = list.any(files, (f) => string.ends_with(f, "b.txt"))
   assert(has_a, "walk finds a.txt")
   assert(has_b, "walk finds sub/b.txt")
 

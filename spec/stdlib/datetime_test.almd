@@ -135,18 +135,18 @@ test "datetime.diff_seconds" {
   assert_eq(datetime.diff_seconds(ts2, ts), 7200)
 }
 
-test "datetime.is_before?" {
+test "datetime.is_before" {
   let ts = datetime.from_parts(2024, 1, 15, 10, 30, 45)
   let ts2 = datetime.add_days(ts, 1)
-  assert(datetime.is_before?(ts, ts2))
-  assert(not datetime.is_before?(ts2, ts))
+  assert(datetime.is_before(ts, ts2))
+  assert(not datetime.is_before(ts2, ts))
 }
 
-test "datetime.is_after?" {
+test "datetime.is_after" {
   let ts = datetime.from_parts(2024, 1, 15, 10, 30, 45)
   let ts2 = datetime.add_days(ts, 1)
-  assert(datetime.is_after?(ts2, ts))
-  assert(not datetime.is_after?(ts, ts2))
+  assert(datetime.is_after(ts2, ts))
+  assert(not datetime.is_after(ts, ts2))
 }
 
 // ── Edge cases ──

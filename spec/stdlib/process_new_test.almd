@@ -2,7 +2,7 @@ import string
 
 test "process.exec_in" {
   let out = process.exec_in("/tmp", "pwd", [])
-  assert(string.contains?(string.trim(out), "tmp"))
+  assert(string.contains(string.trim(out), "tmp"))
 }
 
 test "process.exec_with_stdin" {

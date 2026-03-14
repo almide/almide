@@ -176,15 +176,14 @@ return = "Option[A]"
 rust = "almide_rt_list_first(&{xs})"
 ts = "__almd_list.first({xs})"
 
-["is_empty?"]
+[is_empty]
 description = "Check if a list is empty."
-example = 'list.is_empty?([]) // => true'
+example = 'list.is_empty([]) // => true'
 type_params = ["A"]
 params = [{ name = "xs", type = "List[A]" }]
 return = "Bool"
 rust = "almide_rt_list_is_empty(&{xs})"
-ts = "__almd_list.is_empty_hdlm_qm_({xs})"
-aliases = ["is_empty_hdlm_qm_"]
+ts = "__almd_list.is_empty({xs})"
 
 [min]
 description = "Find the minimum element, or none if empty."

@@ -28,7 +28,7 @@ fn parse_config(content: String) -> Result[List[List[String]], String] = {
           let line = match list.get(entry, 1) { some(v) => v, none => "" };
           let trimmed = string.trim(line);
           if trimmed == "" then ok(pairs)
-          else if string.starts_with?(trimmed, "#") then ok(pairs)
+          else if string.starts_with(trimmed, "#") then ok(pairs)
           else if string.contains(trimmed, "=") then {
             let parts = string.split(trimmed, "=");
             let key = match list.get(parts, 0) { some(v) => v, none => "" };
@@ -140,7 +140,7 @@ fn lookup(pairs: List[List[String]], key: String) -> Option[String] = {
 fn filter_by_prefix(pairs: List[List[String]], prefix: String) -> List[List[String]] = {
   list.filter(pairs, fn(pair) => {
     let key = match list.get(pair, 0) { some(v) => v, none => "" };
-    string.starts_with?(key, prefix)
+    string.starts_with(key, prefix)
   })
 }
 
@@ -312,5 +312,5 @@ test "merge and save error propagation" {
     [f1, td ++ "/almide_test_nonexistent_file.conf"],
     out
   ) { err(_e) => true, _ => false })
-  assert_eq(fs.exists?(out), false)
+  assert_eq(fs.exists(out), false)
 }

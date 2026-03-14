@@ -3,13 +3,13 @@ import list
 
 test "fs create_temp_dir" {
   let dir = fs.create_temp_dir("almide_test_")
-  assert_eq(fs.is_dir?(dir), true)
+  assert_eq(fs.is_dir(dir), true)
   fs.remove_all(dir)
 }
 
 test "fs create_temp_file" {
   let path = fs.create_temp_file("almide_test_")
-  assert_eq(fs.exists?(path), true)
+  assert_eq(fs.exists(path), true)
   fs.remove(path)
 }
 
@@ -26,7 +26,7 @@ test "fs is_symlink false for file" {
   let dir = fs.create_temp_dir("almide_sym_")
   let f = dir ++ "/regular.txt"
   fs.write(f, "hello")
-  assert_eq(fs.is_symlink?(f), false)
+  assert_eq(fs.is_symlink(f), false)
   fs.remove_all(dir)
 }
 

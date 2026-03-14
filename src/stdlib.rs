@@ -57,17 +57,12 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
     match method {
         // ── string-only ──
         "trim" | "split" | "pad_left"
-        | "starts_with" | "starts_with_hdlm_qm_" | "starts_with?"
-        | "ends_with" | "ends_with_hdlm_qm_" | "ends_with?"
+        | "starts_with" | "ends_with"
         | "to_bytes" | "to_upper" | "to_lower" | "capitalize"
         | "to_int" | "replace" | "char_at" | "lines"
         | "chars" | "repeat" | "from_bytes"
-        | "is_digit?" | "is_digit_hdlm_qm_"
-        | "is_alpha?" | "is_alpha_hdlm_qm_"
-        | "is_alphanumeric?" | "is_alphanumeric_hdlm_qm_"
-        | "is_whitespace?" | "is_whitespace_hdlm_qm_"
-        | "is_upper?" | "is_upper_hdlm_qm_"
-        | "is_lower?" | "is_lower_hdlm_qm_"
+        | "is_digit" | "is_alpha" | "is_alphanumeric"
+        | "is_whitespace" | "is_upper" | "is_lower"
         | "codepoint" | "from_codepoint" | "char_count"
         | "pad_right" | "trim_start" | "trim_end"
         | "strip_prefix" | "strip_suffix"
@@ -94,21 +89,18 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
 
         // ── float-only ──
         "to_fixed" | "round" | "floor" | "ceil" | "sqrt"
-        | "is_nan?" | "is_nan_hdlm_qm_"
-        | "is_infinite?" | "is_infinite_hdlm_qm_" => vec!["float"],
+        | "is_nan" | "is_infinite" => vec!["float"],
 
         // ── result-only ──
         "map_err" | "and_then" | "unwrap_or" | "unwrap_or_else"
-        | "is_ok?" | "is_ok_hdlm_qm_"
-        | "is_err?" | "is_err_hdlm_qm_"
+        | "is_ok" | "is_err"
         | "to_err_option" => vec!["result"],
 
         // ── error-only ──
         "context" => vec!["error"],
 
         // ── datetime-only ──
-        "is_before?" | "is_before_hdlm_qm_"
-        | "is_after?" | "is_after_hdlm_qm_" => vec!["datetime"],
+        "is_before" | "is_after" => vec!["datetime"],
 
         // ── ambiguous: string + list ──
         "reverse" => vec!["string", "list"],
@@ -119,8 +111,8 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
 
         // ── ambiguous: string + list + map ──
         "len" => vec!["string", "list", "map"],
-        "contains" | "contains?" | "contains_hdlm_qm_" => vec!["string", "list", "map"],
-        "is_empty?" | "is_empty_hdlm_qm_" => vec!["list", "map"],
+        "contains" => vec!["string", "list", "map"],
+        "is_empty" => vec!["string", "list", "map"],
 
         // ── ambiguous: list + map ──
         "get" | "get_or" | "set" => vec!["list", "map"],

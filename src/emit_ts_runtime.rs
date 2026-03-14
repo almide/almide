@@ -26,7 +26,6 @@ const MOD_FS_TS: &str = r#"const __almd_fs = {
   write_bytes(p: string, b: Uint8Array | number[]): void { Deno.writeFileSync(p, b instanceof Uint8Array ? b : new Uint8Array(b)); },
   append(p: string, s: string): void { Deno.writeTextFileSync(p, Deno.readTextFileSync(p) + s); },
   mkdir_p(p: string): void { Deno.mkdirSync(p, { recursive: true }); },
-  exists_hdlm_qm_(p: string): boolean { try { Deno.statSync(p); return true; } catch { return false; } },
   read_lines(p: string): string[] { return Deno.readTextFileSync(p).split("\n").filter(l => l.length > 0).map(l => l.replace(/\r$/, "")); },
   remove(p: string): void { Deno.removeSync(p, { recursive: true }); },
   list_dir(p: string): string[] { return [...Deno.readDirSync(p)].map(e => e.name).sort(); },
@@ -46,8 +45,8 @@ const MOD_FS_TS: &str = r#"const __almd_fs = {
     const s = Deno.statSync(path);
     return { size: s.size, is_dir: s.isDirectory, is_file: s.isFile, modified: Math.floor((s.mtime?.getTime() ?? 0) / 1000) };
   },
-  is_dir_hdlm_qm_(p: string): boolean { try { return Deno.statSync(p).isDirectory; } catch { return false; } },
-  is_file_hdlm_qm_(p: string): boolean { try { return Deno.statSync(p).isFile; } catch { return false; } },
+  is_dir(p: string): boolean { try { return Deno.statSync(p).isDirectory; } catch { return false; } },
+  is_file(p: string): boolean { try { return Deno.statSync(p).isFile; } catch { return false; } },
   copy(src: string, dst: string): void { Deno.copyFileSync(src, dst); },
   rename(src: string, dst: string): void { Deno.renameSync(src, dst); },
   remove_all(p: string): void { try { Deno.removeSync(p, { recursive: true }); } catch {} },
@@ -107,7 +106,7 @@ const MOD_FS_TS: &str = r#"const __almd_fs = {
     const p = Deno.makeTempDirSync({ prefix });
     return p.replace(/\\/g, "/");
   },
-  is_symlink_hdlm_qm_(p: string): boolean { try { return Deno.lstatSync(p).isSymlink; } catch { return false; } },
+  is_symlink(p: string): boolean { try { return Deno.lstatSync(p).isSymlink; } catch { return false; } },
   modified_at(p: string): number { const s = Deno.statSync(p); return Math.floor((s.mtime?.getTime() ?? 0) / 1000); },
 };
 "#;
@@ -120,7 +119,6 @@ const MOD_FS_JS: &str = r#"const __almd_fs = {
   write_bytes(p, b) { require("fs").writeFileSync(p, Buffer.from(b)); },
   append(p, s) { require("fs").appendFileSync(p, s); },
   mkdir_p(p) { require("fs").mkdirSync(p, { recursive: true }); },
-  exists_hdlm_qm_(p) { const fs = require("fs"); try { fs.statSync(p); return true; } catch { return false; } },
   read_lines(p) { return require("fs").readFileSync(p, "utf-8").split("\n").filter(l => l.length > 0).map(l => l.replace(/\r$/, "")); },
   remove(p) { const fs = require("fs"); try { const s = fs.statSync(p); if (s.isDirectory()) fs.rmSync(p, { recursive: true }); else fs.unlinkSync(p); } catch(e) { throw e; } },
   list_dir(p) { return require("fs").readdirSync(p).sort(); },
@@ -143,8 +141,8 @@ const MOD_FS_JS: &str = r#"const __almd_fs = {
     const s = fs.statSync(path);
     return { size: s.size, is_dir: s.isDirectory(), is_file: s.isFile(), modified: Math.floor(s.mtimeMs / 1000) };
   },
-  is_dir_hdlm_qm_(p) { try { return require("fs").statSync(p).isDirectory(); } catch { return false; } },
-  is_file_hdlm_qm_(p) { try { return require("fs").statSync(p).isFile(); } catch { return false; } },
+  is_dir(p) { try { return require("fs").statSync(p).isDirectory(); } catch { return false; } },
+  is_file(p) { try { return require("fs").statSync(p).isFile(); } catch { return false; } },
   copy(src, dst) { require("fs").copyFileSync(src, dst); },
   rename(src, dst) { require("fs").renameSync(src, dst); },
   remove_all(p) { require("fs").rmSync(p, { recursive: true, force: true }); },
@@ -208,7 +206,7 @@ const MOD_FS_JS: &str = r#"const __almd_fs = {
     fs.mkdirSync(p, { recursive: true });
     return p.replace(/\\/g, "/");
   },
-  is_symlink_hdlm_qm_(p) { try { return require("fs").lstatSync(p).isSymbolicLink(); } catch { return false; } },
+  is_symlink(p) { try { return require("fs").lstatSync(p).isSymbolicLink(); } catch { return false; } },
   modified_at(p) { return Math.floor(require("fs").statSync(p).mtimeMs / 1000); },
 };
 "#;
@@ -225,8 +223,6 @@ const MOD_STRING_TS: &str = r#"const __almd_string = {
   slice(s: string, start: number, end?: number): string { return end !== undefined ? s.slice(start, end) : s.slice(start); },
   to_bytes(s: string): number[] { return Array.from(new TextEncoder().encode(s)); },
   contains(s: string, sub: string): boolean { return s.includes(sub); },
-  starts_with_hdlm_qm_(s: string, prefix: string): boolean { return s.startsWith(prefix); },
-  ends_with_hdlm_qm_(s: string, suffix: string): boolean { return s.endsWith(suffix); },
   capitalize(s: string): string { return s.length === 0 ? "" : s[0].toUpperCase() + s.slice(1); },
   to_upper(s: string): string { return s.toUpperCase(); },
   to_lower(s: string): string { return s.toLowerCase(); },
@@ -238,10 +234,10 @@ const MOD_STRING_TS: &str = r#"const __almd_string = {
   index_of(s: string, needle: string): number | null { const i = s.indexOf(needle); return i >= 0 ? i : null; },
   repeat(s: string, n: number): string { return s.repeat(n); },
   from_bytes(bytes: number[]): string { return new TextDecoder().decode(new Uint8Array(bytes)); },
-  is_digit_hdlm_qm_(s: string): boolean { return s.length > 0 && /^[0-9]+$/.test(s); },
-  is_alpha_hdlm_qm_(s: string): boolean { return s.length > 0 && /^[a-zA-Z]+$/.test(s); },
-  is_alphanumeric_hdlm_qm_(s: string): boolean { return s.length > 0 && /^[a-zA-Z0-9]+$/.test(s); },
-  is_whitespace_hdlm_qm_(s: string): boolean { return s.length > 0 && /^\s+$/.test(s); },
+  is_digit(s: string): boolean { return s.length > 0 && /^[0-9]+$/.test(s); },
+  is_alpha(s: string): boolean { return s.length > 0 && /^[a-zA-Z]+$/.test(s); },
+  is_alphanumeric(s: string): boolean { return s.length > 0 && /^[a-zA-Z0-9]+$/.test(s); },
+  is_whitespace(s: string): boolean { return s.length > 0 && /^\s+$/.test(s); },
   replace_first(s: string, from: string, to: string): string { const i = s.indexOf(from); return i < 0 ? s : s.slice(0, i) + to + s.slice(i + from.length); },
   last_index_of(s: string, needle: string): number | null { const i = s.lastIndexOf(needle); return i >= 0 ? i : null; },
   to_float(s: string): number { const n = parseFloat(s); if (isNaN(n)) throw new Error("invalid float number: " + s); return n; },
@@ -249,11 +245,13 @@ const MOD_STRING_TS: &str = r#"const __almd_string = {
   trim_start(s: string): string { return s.trimStart(); },
   trim_end(s: string): string { return s.trimEnd(); },
   count(s: string, sub: string): number { if (!sub) return 0; let c = 0, i = 0; while ((i = s.indexOf(sub, i)) >= 0) { c++; i += sub.length; } return c; },
-  is_empty_hdlm_qm_(s: string): boolean { return s.length === 0; },
+  is_empty(s: string): boolean { return s.length === 0; },
   reverse(s: string): string { return [...s].reverse().join(""); },
   strip_prefix(s: string, prefix: string): string | null { return s.startsWith(prefix) ? s.slice(prefix.length) : null; },
   strip_suffix(s: string, suffix: string): string | null { return s.endsWith(suffix) ? s.slice(0, -suffix.length) : null; },
   ends_with(s: string, suffix: string): boolean { return s.endsWith(suffix); },
+  is_upper(s: string): boolean { return s.length > 0 && s === s.toUpperCase() && s !== s.toLowerCase(); },
+  is_lower(s: string): boolean { return s.length > 0 && s === s.toLowerCase() && s !== s.toUpperCase(); },
 };
 "#;
 
@@ -267,8 +265,6 @@ const MOD_STRING_JS: &str = r#"const __almd_string = {
   slice(s, start, end) { return end !== undefined ? s.slice(start, end) : s.slice(start); },
   to_bytes(s) { return Array.from(new TextEncoder().encode(s)); },
   contains(s, sub) { return s.includes(sub); },
-  starts_with_hdlm_qm_(s, prefix) { return s.startsWith(prefix); },
-  ends_with_hdlm_qm_(s, suffix) { return s.endsWith(suffix); },
   capitalize(s) { return s.length === 0 ? "" : s[0].toUpperCase() + s.slice(1); },
   to_upper(s) { return s.toUpperCase(); },
   to_lower(s) { return s.toLowerCase(); },
@@ -280,10 +276,10 @@ const MOD_STRING_JS: &str = r#"const __almd_string = {
   index_of(s, needle) { const i = s.indexOf(needle); return i >= 0 ? i : null; },
   repeat(s, n) { return s.repeat(n); },
   from_bytes(bytes) { return new TextDecoder().decode(new Uint8Array(bytes)); },
-  is_digit_hdlm_qm_(s) { return s.length > 0 && /^[0-9]+$/.test(s); },
-  is_alpha_hdlm_qm_(s) { return s.length > 0 && /^[a-zA-Z]+$/.test(s); },
-  is_alphanumeric_hdlm_qm_(s) { return s.length > 0 && /^[a-zA-Z0-9]+$/.test(s); },
-  is_whitespace_hdlm_qm_(s) { return s.length > 0 && /^\s+$/.test(s); },
+  is_digit(s) { return s.length > 0 && /^[0-9]+$/.test(s); },
+  is_alpha(s) { return s.length > 0 && /^[a-zA-Z]+$/.test(s); },
+  is_alphanumeric(s) { return s.length > 0 && /^[a-zA-Z0-9]+$/.test(s); },
+  is_whitespace(s) { return s.length > 0 && /^\s+$/.test(s); },
   replace_first(s, from, to) { const i = s.indexOf(from); return i < 0 ? s : s.slice(0, i) + to + s.slice(i + from.length); },
   last_index_of(s, needle) { const i = s.lastIndexOf(needle); return i >= 0 ? i : null; },
   to_float(s) { const n = parseFloat(s); if (isNaN(n)) throw new Error("invalid float number: " + s); return n; },
@@ -291,11 +287,13 @@ const MOD_STRING_JS: &str = r#"const __almd_string = {
   trim_start(s) { return s.trimStart(); },
   trim_end(s) { return s.trimEnd(); },
   count(s, sub) { if (!sub) return 0; let c = 0, i = 0; while ((i = s.indexOf(sub, i)) >= 0) { c++; i += sub.length; } return c; },
-  is_empty_hdlm_qm_(s) { return s.length === 0; },
+  is_empty(s) { return s.length === 0; },
   reverse(s) { return [...s].reverse().join(""); },
   strip_prefix(s, prefix) { return s.startsWith(prefix) ? s.slice(prefix.length) : null; },
   strip_suffix(s, suffix) { return s.endsWith(suffix) ? s.slice(0, -suffix.length) : null; },
   ends_with(s, suffix) { return s.endsWith(suffix); },
+  is_upper(s) { return s.length > 0 && s === s.toUpperCase() && s !== s.toLowerCase(); },
+  is_lower(s) { return s.length > 0 && s === s.toLowerCase() && s !== s.toUpperCase(); },
 };
 "#;
 
@@ -338,7 +336,6 @@ const MOD_LIST_TS: &str = r#"const __almd_list = {
   sum(xs: number[]): number { return xs.reduce((a, b) => a + b, 0); },
   product(xs: number[]): number { return xs.reduce((a, b) => a * b, 1); },
   is_empty<T>(xs: T[]): boolean { return xs.length === 0; },
-  is_empty_hdlm_qm_<T>(xs: T[]): boolean { return xs.length === 0; },
   flat_map<T, U>(xs: T[], f: (x: T) => U[]): U[] { return xs.flatMap(f); },
   min<T>(xs: T[]): T | null { return xs.length === 0 ? null : xs.reduce((a, b) => a < b ? a : b); },
   max<T>(xs: T[]): T | null { return xs.length === 0 ? null : xs.reduce((a, b) => a > b ? a : b); },
@@ -397,7 +394,6 @@ const MOD_LIST_JS: &str = r#"const __almd_list = {
   sum(xs) { return xs.reduce((a, b) => a + b, 0); },
   product(xs) { return xs.reduce((a, b) => a * b, 1); },
   is_empty(xs) { return xs.length === 0; },
-  is_empty_hdlm_qm_(xs) { return xs.length === 0; },
   flat_map(xs, f) { return xs.flatMap(f); },
   min(xs) { return xs.length === 0 ? null : xs.reduce((a, b) => a < b ? a : b); },
   max(xs) { return xs.length === 0 ? null : xs.reduce((a, b) => a > b ? a : b); },
@@ -438,7 +434,6 @@ const MOD_MAP_TS: &str = r#"const __almd_map = {
   from_entries<K, V>(entries: [K, V][]): Map<K, V> { const r = new Map<K, V>(); for (const [k, v] of entries) r.set(k, v); return r; },
   merge<K, V>(a: Map<K, V>, b: Map<K, V>): Map<K, V> { const r = new Map(a); b.forEach((v, k) => r.set(k, v)); return r; },
   is_empty<K, V>(m: Map<K, V>): boolean { return m.size === 0; },
-  is_empty_hdlm_qm_<K, V>(m: Map<K, V>): boolean { return m.size === 0; },
 };
 "#;
 
@@ -459,7 +454,6 @@ const MOD_MAP_JS: &str = r#"const __almd_map = {
   from_entries(entries) { const r = new Map(); for (const [k, v] of entries) r.set(k, v); return r; },
   merge(a, b) { const r = new Map(a); b.forEach((v, k) => r.set(k, v)); return r; },
   is_empty(m) { return m.size === 0; },
-  is_empty_hdlm_qm_(m) { return m.size === 0; },
 };
 "#;
 
@@ -558,7 +552,7 @@ const MOD_PATH_TS: &str = r#"const __almd_path = {
   dirname(p: string): string { const i = p.lastIndexOf("/"); return i >= 0 ? p.substring(0, i) : "."; },
   basename(p: string): string { const i = p.lastIndexOf("/"); return i >= 0 ? p.substring(i + 1) : p; },
   extension(p: string): string | null { const b = __almd_path.basename(p); const i = b.lastIndexOf("."); return i > 0 ? b.substring(i + 1) : null; },
-  is_absolute_hdlm_qm_(p: string): boolean { return p.startsWith("/"); },
+  is_absolute(p: string): boolean { return p.startsWith("/"); },
 };
 "#;
 
@@ -567,7 +561,7 @@ const MOD_PATH_JS: &str = r#"const __almd_path = {
   dirname(p) { const i = p.lastIndexOf("/"); return i >= 0 ? p.substring(0, i) : "."; },
   basename(p) { const i = p.lastIndexOf("/"); return i >= 0 ? p.substring(i + 1) : p; },
   extension(p) { const b = __almd_path.basename(p); const i = b.lastIndexOf("."); return i > 0 ? b.substring(i + 1) : null; },
-  is_absolute_hdlm_qm_(p) { return p.startsWith("/"); },
+  is_absolute(p) { return p.startsWith("/"); },
 };
 "#;
 
@@ -758,8 +752,8 @@ const MOD_RANDOM_JS: &str = r#"const __almd_random = {
 // ──────────────────────────────── regex ────────────────────────────────
 
 const MOD_REGEX_TS: &str = r#"const __almd_regex = {
-  match_hdlm_qm_(pat: string, s: string): boolean { return new RegExp(pat).test(s); },
-  full_match_hdlm_qm_(pat: string, s: string): boolean { return new RegExp(`^(?:${pat})$`).test(s); },
+  is_match(pat: string, s: string): boolean { return new RegExp(pat).test(s); },
+  full_match(pat: string, s: string): boolean { return new RegExp(`^(?:${pat})$`).test(s); },
   find(pat: string, s: string): string | null { const m = s.match(new RegExp(pat)); return m ? m[0] : null; },
   find_all(pat: string, s: string): string[] { const m = s.match(new RegExp(pat, 'g')); return m ? [...m] : []; },
   replace(pat: string, s: string, rep: string): string { return s.replace(new RegExp(pat, 'g'), rep); },
@@ -770,8 +764,8 @@ const MOD_REGEX_TS: &str = r#"const __almd_regex = {
 "#;
 
 const MOD_REGEX_JS: &str = r#"const __almd_regex = {
-  match_hdlm_qm_(pat, s) { return new RegExp(pat).test(s); },
-  full_match_hdlm_qm_(pat, s) { return new RegExp(`^(?:${pat})$`).test(s); },
+  is_match(pat, s) { return new RegExp(pat).test(s); },
+  full_match(pat, s) { return new RegExp(`^(?:${pat})$`).test(s); },
   find(pat, s) { const m = s.match(new RegExp(pat)); return m ? m[0] : null; },
   find_all(pat, s) { const m = s.match(new RegExp(pat, 'g')); return m ? [...m] : []; },
   replace(pat, s, rep) { return s.replace(new RegExp(pat, 'g'), rep); },

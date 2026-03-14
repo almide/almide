@@ -16,7 +16,7 @@ test "toml.parse float value" {
   let result = toml.parse("pi = 3.14")
   // json.from_float has a known precision issue in stringify, so check via get
   let s = json.stringify(result)
-  assert(string.contains?(s, "pi"))
+  assert(string.contains(s, "pi"))
 }
 
 test "toml.parse boolean values" {
@@ -74,14 +74,14 @@ test "toml.parse ignores comments" {
 test "toml.stringify simple" {
   let obj = json.object([("name", json.from_string("Alice")), ("age", json.from_int(30))])
   let text = toml.stringify(obj)
-  assert(string.contains?(text, "name = \"Alice\""))
-  assert(string.contains?(text, "age = 30"))
+  assert(string.contains(text, "name = \"Alice\""))
+  assert(string.contains(text, "age = 30"))
 }
 
 test "toml.stringify boolean" {
   let obj = json.object([("debug", json.from_bool(true))])
   let text = toml.stringify(obj)
-  assert(string.contains?(text, "debug = true"))
+  assert(string.contains(text, "debug = true"))
 }
 
 // ── roundtrip ──

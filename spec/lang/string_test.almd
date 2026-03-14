@@ -248,13 +248,13 @@ test "escape sequences mixed" {
 }
 
 test "string is_empty" {
-  assert_eq(string.is_empty?(""), true)
-  assert_eq(string.is_empty?("hello"), false)
+  assert_eq(string.is_empty(""), true)
+  assert_eq(string.is_empty("hello"), false)
 }
 
 test "string is_whitespace" {
-  assert_eq(string.is_whitespace?("   "), true)
-  assert_eq(string.is_whitespace?("hello"), false)
+  assert_eq(string.is_whitespace("   "), true)
+  assert_eq(string.is_whitespace("hello"), false)
 }
 
 test "string to_upper to_lower idempotent" {

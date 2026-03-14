@@ -3,7 +3,7 @@
 test "empty map with type annotation" {
   let m: Map[String, Int] = [:]
   assert_eq(m.len(), 0)
-  assert(m.is_empty?())
+  assert(m.is_empty())
 }
 
 test "map literal with entries" {

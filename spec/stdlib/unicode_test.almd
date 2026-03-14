@@ -1,27 +1,27 @@
 // Unicode string function tests
 
-test "is_upper? all uppercase" {
-  assert_eq(string.is_upper?("ABC"), true)
+test "is_upper all uppercase" {
+  assert_eq(string.is_upper("ABC"), true)
 }
 
-test "is_upper? mixed case" {
-  assert_eq(string.is_upper?("AbC"), false)
+test "is_upper mixed case" {
+  assert_eq(string.is_upper("AbC"), false)
 }
 
-test "is_upper? with numbers" {
-  assert_eq(string.is_upper?("ABC123"), true)
+test "is_upper with numbers" {
+  assert_eq(string.is_upper("ABC123"), true)
 }
 
-test "is_lower? all lowercase" {
-  assert_eq(string.is_lower?("abc"), true)
+test "is_lower all lowercase" {
+  assert_eq(string.is_lower("abc"), true)
 }
 
-test "is_lower? mixed case" {
-  assert_eq(string.is_lower?("aBc"), false)
+test "is_lower mixed case" {
+  assert_eq(string.is_lower("aBc"), false)
 }
 
-test "is_lower? with numbers" {
-  assert_eq(string.is_lower?("abc123"), true)
+test "is_lower with numbers" {
+  assert_eq(string.is_lower("abc123"), true)
 }
 
 test "codepoint ASCII" {
@@ -44,14 +44,14 @@ test "char_count ASCII" {
   assert_eq(string.char_count(""), 0)
 }
 
-test "is_upper? via UFCS" {
-  assert_eq("HELLO".is_upper?(), true)
-  assert_eq("Hello".is_upper?(), false)
+test "is_upper via UFCS" {
+  assert_eq("HELLO".is_upper(), true)
+  assert_eq("Hello".is_upper(), false)
 }
 
-test "is_lower? via UFCS" {
-  assert_eq("hello".is_lower?(), true)
-  assert_eq("Hello".is_lower?(), false)
+test "is_lower via UFCS" {
+  assert_eq("hello".is_lower(), true)
+  assert_eq("Hello".is_lower(), false)
 }
 
 test "codepoint via UFCS" {

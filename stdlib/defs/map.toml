@@ -97,15 +97,14 @@ return = "Map[K, V]"
 rust = "almide_rt_map_merge(&{a}, &{b})"
 ts = "__almd_map.merge({a}, {b})"
 
-["is_empty?"]
+[is_empty]
 description = "Check if the map has no entries."
-example = 'map.is_empty?(m)'
+example = 'map.is_empty(m)'
 type_params = ["K", "V"]
 params = [{ name = "m", type = "Map[K, V]" }]
 return = "Bool"
 rust = "almide_rt_map_is_empty(&{m})"
-ts = "__almd_map.is_empty_hdlm_qm_({m})"
-aliases = ["is_empty_hdlm_qm_"]
+ts = "__almd_map.is_empty({m})"
 
 [from_entries]
 description = "Create a map from a list of (key, value) tuples."

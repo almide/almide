@@ -72,7 +72,7 @@ ts = "__almd_list.filter({xs}, {f.args} => {f.body})"
 | `rust_effect` | no       | Alternative Rust template for effect context with `?` |
 | `rust_min`    | no       | Rust template when optional params are omitted     |
 | `ts_min`      | no       | TS template when optional params are omitted       |
-| `aliases`     | no       | Sanitized name aliases (e.g. `"is_empty_hdlm_qm_"`) |
+| `aliases`     | no       | Sanitized name aliases for special characters       |
 
 ### Param fields
 

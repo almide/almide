@@ -22,10 +22,10 @@ fn parse_lines(lines: List[String], i: Int, len: Int, current_table: String, roo
   else {
     let line = string.trim(match list.get(lines, i) { some(l) => l, none => "" })
     // Skip empty lines and comments
-    if string.len(line) == 0 or string.starts_with?(line, "#") then
+    if string.len(line) == 0 or string.starts_with(line, "#") then
       parse_lines(lines, i + 1, len, current_table, root)
     // Table header [name]
-    else if string.starts_with?(line, "[") and not string.starts_with?(line, "[[") then {
+    else if string.starts_with(line, "[") and not string.starts_with(line, "[[") then {
       let table_name = string.trim(string.slice(line, 1, string.len(line) - 1))
       parse_lines(lines, i + 1, len, table_name, root)
     }
@@ -50,12 +50,12 @@ fn parse_value(s: String) -> Json = {
   let len = string.len(trimmed)
   if len == 0 then json.null()
   // Quoted string
-  else if string.starts_with?(trimmed, "\"") then {
+  else if string.starts_with(trimmed, "\"") then {
     let inner = string.slice(trimmed, 1, len - 1)
     json.from_string(unescape_string(inner))
   }
   // Single-quoted string (literal)
-  else if string.starts_with?(trimmed, "'") then {
+  else if string.starts_with(trimmed, "'") then {
     let inner = string.slice(trimmed, 1, len - 1)
     json.from_string(inner)
   }
@@ -63,7 +63,7 @@ fn parse_value(s: String) -> Json = {
   else if trimmed == "true" then json.from_bool(true)
   else if trimmed == "false" then json.from_bool(false)
   // Array
-  else if string.starts_with?(trimmed, "[") then {
+  else if string.starts_with(trimmed, "[") then {
     let inner = string.trim(string.slice(trimmed, 1, len - 1))
     if string.len(inner) == 0 then json.array([])
     else {
@@ -73,7 +73,7 @@ fn parse_value(s: String) -> Json = {
     }
   }
   // Inline table
-  else if string.starts_with?(trimmed, "{") then {
+  else if string.starts_with(trimmed, "{") then {
     let inner = string.trim(string.slice(trimmed, 1, len - 1))
     if string.len(inner) == 0 then json.object([])
     else {
@@ -93,7 +93,7 @@ fn parse_value(s: String) -> Json = {
     }
   }
   // Float (contains .)
-  else if string.contains?(trimmed, ".") then {
+  else if string.contains(trimmed, ".") then {
     match string.to_float(trimmed) {
       ok(f) => json.from_float(f)
       err(_) => json.from_string(trimmed)

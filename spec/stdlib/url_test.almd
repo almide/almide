@@ -81,8 +81,8 @@ test "url.encode preserves unreserved" {
 
 test "url.encode special chars" {
   let encoded = url.encode("a=b&c=d")
-  assert(string.contains?(encoded, "%3D"))
-  assert(string.contains?(encoded, "%26"))
+  assert(string.contains(encoded, "%3D"))
+  assert(string.contains(encoded, "%26"))
 }
 
 test "url.decode basic" {

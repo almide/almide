@@ -69,7 +69,7 @@ fn flip_bool(s: String) -> Result[String, String] = {
 }
 
 // Helper: check if key ends with a suffix
-fn ends_with?(s: String, suffix: String) -> Bool = {
+fn ends_with(s: String, suffix: String) -> Bool = {
   let slen = string.len(s)
   let sufflen = string.len(suffix)
   if slen < sufflen then false
@@ -127,12 +127,12 @@ fn validate_values(pairs: List[List[String]]) -> Result[List[List[String]], Stri
       ok(valid) => {
         let key = match list.get(pair, 0) { some(v) => v, _ => "" }
         let value = match list.get(pair, 1) { some(v) => v, _ => "" }
-        if ends_with?(key, "_n") then {
+        if ends_with(key, "_n") then {
           match parse_int(value) {
             ok(n) => ok(valid ++ [pair]),
             err(e) => err("key ${key}: expected integer")
           }
-        } else if ends_with?(key, "_b") then {
+        } else if ends_with(key, "_b") then {
           if value == "true" or value == "false" then ok(valid ++ [pair])
           else err("key ${key}: expected boolean")
         } else ok(valid ++ [pair])
@@ -146,10 +146,10 @@ fn transform(pairs: List[List[String]]) -> Result[List[List[String]], String] = 
   ok(list.map(pairs, fn(pair) => {
     let key = match list.get(pair, 0) { some(v) => v, _ => "" }
     let value = match list.get(pair, 1) { some(v) => v, _ => "" }
-    if ends_with?(key, "_n") then {
+    if ends_with(key, "_n") then {
       let doubled = match double_int(value) { ok(v) => v, _ => value }
       [key, doubled]
-    } else if ends_with?(key, "_b") then {
+    } else if ends_with(key, "_b") then {
       let flipped = match flip_bool(value) { ok(v) => v, _ => value }
       [key, flipped]
     } else [key, to_upper(value)]

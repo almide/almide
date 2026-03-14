@@ -93,7 +93,7 @@ fn zip_to_map(keys: List[String], values: List[String]) -> Map[String, String] =
 }
 
 fn needs_quoting(field: String) -> Bool =
-  string.contains?(field, ",") or string.contains?(field, "\n") or string.contains?(field, "\"") or string.contains?(field, "\r")
+  string.contains(field, ",") or string.contains(field, "\n") or string.contains(field, "\"") or string.contains(field, "\r")
 
 fn quote_field(field: String) -> String = {
   if needs_quoting(field) then {

@@ -110,20 +110,18 @@ return = "Float"
 rust = "almide_rt_float_sign({n})"
 ts = "Math.sign({n})"
 
-["is_nan?"]
+[is_nan]
 description = "Check if a float is NaN (not a number)."
-example = "float.is_nan?(0.0 / 0.0) // => true"
+example = "float.is_nan(0.0 / 0.0) // => true"
 params = [{ name = "n", type = "Float" }]
 return = "Bool"
 rust = "({n}).is_nan()"
 ts = "Number.isNaN({n})"
-aliases = ["is_nan_hdlm_qm_"]
 
-["is_infinite?"]
+[is_infinite]
 description = "Check if a float is positive or negative infinity."
-example = "float.is_infinite?(1.0 / 0.0) // => true"
+example = "float.is_infinite(1.0 / 0.0) // => true"
 params = [{ name = "n", type = "Float" }]
 return = "Bool"
 rust = "({n}).is_infinite()"
 ts = "!Number.isFinite({n}) && !Number.isNaN({n})"
-aliases = ["is_infinite_hdlm_qm_"]
