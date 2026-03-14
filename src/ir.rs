@@ -8,6 +8,7 @@
 /// - Patterns compiled with VarId bindings
 /// - Call targets resolved (module calls, constructors, free functions)
 
+use std::collections::HashSet;
 use serde::{Serialize, Deserialize};
 use crate::ast::Span;
 use crate::types::Ty;
@@ -235,6 +236,63 @@ pub enum IrStmtKind {
     Comment { text: String },
 }
 
+// ── Type declarations ────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IrVisibility {
+    Public,
+    Private,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IrFieldDecl {
+    pub name: String,
+    pub ty: Ty,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default: Option<IrExpr>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum IrVariantKind {
+    Unit,
+    Tuple { fields: Vec<Ty> },
+    Record { fields: Vec<IrFieldDecl> },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IrVariantDecl {
+    pub name: String,
+    pub kind: IrVariantKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum IrTypeDeclKind {
+    Record { fields: Vec<IrFieldDecl> },
+    Variant {
+        cases: Vec<IrVariantDecl>,
+        is_generic: bool,
+        /// Constructor args that need Box wrapping (recursive variants): (ctor_name, arg_index)
+        boxed_args: HashSet<(String, usize)>,
+        /// Record variant fields that need Box wrapping: (ctor_name, field_name)
+        boxed_record_fields: HashSet<(String, String)>,
+    },
+    Alias { target: Ty },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IrTypeDecl {
+    pub name: String,
+    pub kind: IrTypeDeclKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deriving: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generics: Option<Vec<crate::ast::GenericParam>>,
+    pub visibility: IrVisibility,
+}
+
 // ── Top-level structures ────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -259,5 +317,6 @@ pub struct IrTopLet {
 pub struct IrProgram {
     pub functions: Vec<IrFunction>,
     pub top_lets: Vec<IrTopLet>,
+    pub type_decls: Vec<IrTypeDecl>,
     pub var_table: VarTable,
 }

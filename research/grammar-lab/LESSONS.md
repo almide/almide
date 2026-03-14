@@ -219,6 +219,41 @@ Rust codegen で `almide_rt_string_pad_right(s: String, ...)` が `s` の owners
 
 ---
 
+## 12. テストファイルの型二重定義
+
+runner が `"${code}\n\n${test_code}"` で結合するため、テストファイルにソースと同じ `type` 定義があると Rust codegen で `Item is defined multiple times` エラーになる。
+
+**解決:** テストファイルには型定義を書かない。型はソースコード側で定義される。
+
+---
+
+## 13. Transpile で未実装構文を実装前にテスト
+
+LLM に未実装構文（`(x) => expr`）で書かせて、compile 前に現行構文（`fn(x) => expr`）にトランスパイルする。これにより compiler 変更なしで構文実験ができる。
+
+```
+LLM output: (x) => x * 2
+  ↓ transpile
+fn(x) => x * 2
+  ↓ almide check + almide test
+PASS/FAIL
+```
+
+**注意:** `regex.replace` はキャプチャグループの back reference (`$1`) をサポートしない。文字列の `string.replace` で既知パターンを列挙する方が確実。
+
+---
+
+## 14. LLM が `if ... { } else { }` と書く（他言語の癖）
+
+Almide は `if ... then ... else ...` だが、LLM は JS/Rust の癖で `if ... { } else { }` と書く。
+
+Layer 1 に `if` の構文を明示的に入れることで回避:
+```
+- `if` uses `then`: `if x > 0 then "yes" else "no"` (not `if (x > 0) { }`)
+```
+
+---
+
 ## 全体の教訓
 
 1. **effect fn の auto-unwrap に頼る** — 手動 `match ok/err` は型の不一致を生みやすい

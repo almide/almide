@@ -6,11 +6,12 @@ import fs
 import process
 import http
 import env
-import regex
+
 
 // ── Config ──
 
-let ALMIDE_BIN = "/Users/o6lvl4/workspace/github.com/almide/almide/target/release/almide"
+effect fn get_almide_bin() -> String =
+  env.get("ALMIDE_BIN").unwrap_or("/Users/o6lvl4/workspace/github.com/almide/almide/target/release/almide")
 
 // ── Helpers ──
 
@@ -377,12 +378,12 @@ effect fn evaluate(code: String, test_code: String, task_name: String) -> EvalRe
   fs.write(code_path, combined)
 
   // Run almide check
-  let check_r = process.exec_status(ALMIDE_BIN, ["check", code_path])
+  let check_r = process.exec_status(get_almide_bin(), ["check", code_path])
   if check_r.code != 0 then {
     EvalResult { compiled: false, tests_passed: false, error: check_r.stderr }
   } else {
     // Run almide test
-    let test_r = process.exec_status(ALMIDE_BIN, ["test", code_path])
+    let test_r = process.exec_status(get_almide_bin(), ["test", code_path])
     if test_r.code != 0 then {
       EvalResult { compiled: true, tests_passed: false, error: test_r.stderr }
     } else {
