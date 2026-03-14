@@ -14,62 +14,58 @@ Detects at compile time when a match on a variant type does not cover all cases.
 
 ---
 
-## Lambda Short Syntax [HIGH PRIORITY]
+## Lambda Syntax: `fn` を廃止、パレンスタイルに統一 [HIGH PRIORITY]
 
 ### Problem
 
-現在の lambda 構文は `fn(params) => expr` で固定。web framework のような callback-heavy な API で冗長。
+現在の lambda 構文 `fn(params) => expr` は冗長。`fn` は関数宣言のキーワードであり、lambda に使うのは役割が混在する。
+
+### Decision
+
+Grammar Lab の実験結果により、`fn(x) => expr` と `(x) => expr` の modification survival rate に差がないことが確認された (fn 86% = paren 86%, p=1.0, Haiku N=30)。
+
+**`fn(params) => expr` を廃止し、`(params) => expr` に統一する。**
+
+### After
 
 ```almide
-// 今
-|> web.get("/", fn(req) => web.text("Hello"))
-|> list.map(fn(x) => x * 2)
-|> list.filter(fn(x) => x > 0)
-```
-
-### Proposed: パレンスタイル
-
-```almide
-// 短縮形
-|> web.get("/", (req) => web.text("Hello"))
 |> list.map((x) => x * 2)
 |> list.filter((x) => x > 0)
-
-// 単一引数はパレン省略可
-|> list.map(x => x * 2)
-|> list.filter(x => x > 0)
-
-// 複数引数
 |> list.fold(0, (acc, x) => acc + x)
 
-// 型注釈付き（既存の fn 形式）
-fn(x: Int) => x * 2
+// 型注釈付き
+(x: Int) => x * 2
+
+// 引数なし
+() => 42
 ```
 
-### ルール
+`fn` keyword は関数宣言 (`fn name(...) -> Type = ...`) 専用になる。
 
-- `(params) => expr` は `fn(params) => expr` の短縮形
-- 単一引数 + 型注釈なしのとき `x => expr` も可
-- 型注釈が必要なときは `fn(x: Type) => expr` を使う（推論が効かない場面）
-- `fn(params) => expr` は引き続き使える（breaking change なし）
+### Breaking Change
+
+全 `.almd` ファイルの `fn(params) => expr` を `(params) => expr` に書き換える必要がある。
+
+影響範囲:
+- `spec/` 以下の全テスト
+- `stdlib/` の例示コード
+- `research/grammar-lab/` のタスクファイル
+- `CLAUDE.md`, `docs/` のドキュメント
+- Grammar Lab の Layer 2 prompt テンプレート
 
 ### Parser 変更
 
-`(` の後に `)` `=>` が続くか、`Ident` `)` `=>` / `Ident` `=>` が続くかで lambda と判定。既存の tuple/paren 式との曖昧性は `=>` の有無で解消。
+- `fn` + `(` の組み合わせを lambda として parse するパスを削除
+- `(` の後に `)` `=>` パターンが来たら lambda として parse
+- tuple/paren 式との曖昧性は `=>` の有無で解消
+- 型注釈: `(x: Int) => expr` — `(` の中に `:` があれば型付き lambda
 
-### 影響
+### Implementation Order
 
-Web framework の書き味に直結:
-
-```almide
-// before
-|> web.get("/users/:id", fn(req) => { ... })
-|> web.use(fn(next) => fn(req) => { ... })
-
-// after
-|> web.get("/users/:id", (req) => { ... })
-|> web.use((next) => (req) => { ... })
-```
+1. Parser に `(params) => expr` を追加（新構文）
+2. 全 `.almd` ファイルを一括置換（`fn(` → `(`、lambda 文脈のみ）
+3. `fn(params) => expr` を parse error にする（旧構文を削除）
+4. ドキュメント更新
 
 ---
 
