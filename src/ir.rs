@@ -386,12 +386,33 @@ pub struct IrTopLet {
 
 fn default_top_let_kind() -> TopLetKind { TopLetKind::Lazy }
 
+/// An imported module lowered to IR.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IrModule {
+    /// Module name (e.g., "mylib" or "mylib.parser")
+    pub name: String,
+    /// Versioned name for diamond dependency aliases (PkgId.mod_name()), if any
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub versioned_name: Option<String>,
+    /// Type declarations in this module
+    pub type_decls: Vec<IrTypeDecl>,
+    /// Functions in this module
+    pub functions: Vec<IrFunction>,
+    /// Top-level let bindings in this module
+    pub top_lets: Vec<IrTopLet>,
+    /// Variable table for this module
+    pub var_table: VarTable,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IrProgram {
     pub functions: Vec<IrFunction>,
     pub top_lets: Vec<IrTopLet>,
     pub type_decls: Vec<IrTypeDecl>,
     pub var_table: VarTable,
+    /// Imported user modules, lowered to IR
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub modules: Vec<IrModule>,
 }
 
 // ── Use-count computation (post-pass) ───────────────────────────

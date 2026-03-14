@@ -351,6 +351,7 @@ fn ir_program_construction() {
         top_lets: vec![],
         type_decls: vec![],
         var_table: VarTable::new(),
+        modules: vec![],
     };
     assert!(prog.functions.is_empty());
     assert!(prog.top_lets.is_empty());

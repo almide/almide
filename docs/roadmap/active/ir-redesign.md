@@ -232,13 +232,17 @@ pub struct IrModule {
 
 ### Phase 4: IrModule
 
-- [ ] `ir.rs`: `IrModule` struct 追加
-- [ ] `ir.rs`: `IrProgram` に `modules: Vec<IrModule>` 追加
-- [ ] `lower.rs`: imported module の Program → IrModule 変換
-- [ ] `emit_rust/program.rs`: `emit_user_module` を `IrModule` ベースに書き換え
-- [ ] `emit_with_options` のシグネチャ変更: `&IrProgram` のみ受け取る
-- [ ] Emitter から `module_irs`, `user_modules` 削除
-- [ ] テスト: 全パス
+- [x] `ir.rs`: `IrModule` struct 追加
+- [x] `ir.rs`: `IrProgram` に `modules: Vec<IrModule>` 追加
+- [x] `lower.rs`: imported module の Program → IrModule 変換 (`lower_module`)
+- [x] `emit_rust/program.rs`: `emit_program` が IR modules から cross-module type info を構築
+- [x] `emit_rust/program.rs`: `find_module_ir_function` が IR modules を優先検索
+- [x] `emit_rust/program.rs`: `emit_user_module` が IR module の VarTable を使用
+- [x] `emit_rust/borrow.rs`: `analyze_program` が IR modules を優先使用
+- [x] `main.rs`, `cli.rs`: `compile_with_options`/`cmd_emit` が IrProgram.modules を populated
+- [ ] `emit_with_options` のシグネチャ変更: `&IrProgram` のみ受け取る (Phase 5 で完了予定)
+- [ ] Emitter から `module_irs`, `user_modules` 削除 (Phase 5 で完了予定)
+- [x] テスト: 全パス
 
 ### Phase 5: AST removal from codegen
 

@@ -216,9 +216,29 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<(usize, usize), T
         }
     }
 
-    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table };
+    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, modules: Vec::new() };
     crate::ir::compute_use_counts(&mut program);
     program
+}
+
+/// Lower an imported module's Program into an IrModule.
+/// The `versioned_name` is the PkgId.mod_name() for diamond dependency aliases.
+pub fn lower_module(
+    name: &str,
+    prog: &ast::Program,
+    expr_types: &HashMap<(usize, usize), Ty>,
+    env: &TypeEnv,
+    versioned_name: Option<String>,
+) -> crate::ir::IrModule {
+    let ir_prog = lower_program(prog, expr_types, env);
+    crate::ir::IrModule {
+        name: name.to_string(),
+        versioned_name,
+        type_decls: ir_prog.type_decls,
+        functions: ir_prog.functions,
+        top_lets: ir_prog.top_lets,
+        var_table: ir_prog.var_table,
+    }
 }
 
 fn lower_fn(
