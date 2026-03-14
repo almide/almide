@@ -134,7 +134,7 @@ impl<'a> LowerCtx<'a> {
     /// Resolve the type of a field access on a known object type.
     fn resolve_field_ty(&self, obj_ty: &Ty, field: &str) -> Ty {
         match obj_ty {
-            Ty::Record { fields, .. } => {
+            Ty::Record { fields } | Ty::OpenRecord { fields } => {
                 for (fname, fty) in fields {
                     if fname == field { return fty.clone(); }
                 }
@@ -1076,6 +1076,9 @@ fn resolve_type_expr(te: &ast::TypeExpr) -> Ty {
             ret: Box::new(resolve_type_expr(ret)),
         },
         ast::TypeExpr::Record { fields } => Ty::Record {
+            fields: fields.iter().map(|f| (f.name.clone(), resolve_type_expr(&f.ty))).collect(),
+        },
+        ast::TypeExpr::OpenRecord { fields } => Ty::OpenRecord {
             fields: fields.iter().map(|f| (f.name.clone(), resolve_type_expr(&f.ty))).collect(),
         },
         _ => Ty::Unknown,

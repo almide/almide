@@ -202,6 +202,17 @@ fn format_type_expr(out: &mut String, ty: &TypeExpr, _depth: usize) {
             }
             out.push_str(" }");
         }
+        TypeExpr::OpenRecord { fields } => {
+            out.push_str("{ ");
+            for (i, f) in fields.iter().enumerate() {
+                if i > 0 { out.push_str(", "); }
+                out.push_str(&f.name);
+                out.push_str(": ");
+                format_type_expr(out, &f.ty, _depth);
+            }
+            if !fields.is_empty() { out.push_str(", "); }
+            out.push_str(".. }");
+        }
         TypeExpr::Fn { params, ret } => {
             out.push_str("fn(");
             for (i, p) in params.iter().enumerate() {

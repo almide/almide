@@ -378,7 +378,7 @@ fn parse_record_type() {
     let prog = parse("type Point = { x: Int, y: Int }");
     if let Decl::Type { name, ty, .. } = &prog.decls[0] {
         assert_eq!(name, "Point");
-        assert!(matches!(ty, TypeExpr::Record { fields } if fields.len() == 2));
+        assert!(matches!(ty, TypeExpr::Record { fields, .. } if fields.len() == 2));
     } else {
         panic!("expected type decl");
     }

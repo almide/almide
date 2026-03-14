@@ -585,6 +585,9 @@ impl Checker {
             ast::TypeExpr::Record { fields } => Ty::Record {
                 fields: fields.iter().map(|f| (f.name.clone(), self.resolve_type_expr(&f.ty))).collect(),
             },
+            ast::TypeExpr::OpenRecord { fields } => Ty::OpenRecord {
+                fields: fields.iter().map(|f| (f.name.clone(), self.resolve_type_expr(&f.ty))).collect(),
+            },
             ast::TypeExpr::Fn { params, ret } => Ty::Fn {
                 params: params.iter().map(|p| self.resolve_type_expr(p)).collect(),
                 ret: Box::new(self.resolve_type_expr(ret)),

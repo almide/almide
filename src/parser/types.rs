@@ -144,10 +144,39 @@ impl Parser {
     fn parse_record_type(&mut self) -> Result<TypeExpr, String> {
         self.expect(TokenType::LBrace)?;
         self.skip_newlines();
-        let fields = self.parse_field_type_list()?;
-        self.skip_newlines();
+        let mut fields = Vec::new();
+        let mut open = false;
+        while !self.check(TokenType::RBrace) {
+            self.skip_newlines();
+            // Check for `..` to mark as open record type
+            if self.check(TokenType::DotDot) {
+                self.advance();
+                open = true;
+                self.skip_newlines();
+                break;
+            }
+            let field_name = self.expect_ident()?;
+            self.expect(TokenType::Colon)?;
+            let field_type = self.parse_type_expr()?;
+            let default = if self.check(TokenType::Eq) {
+                self.advance();
+                Some(self.parse_expr()?)
+            } else {
+                None
+            };
+            fields.push(FieldType { name: field_name, ty: field_type, default });
+            self.skip_newlines();
+            if self.check(TokenType::Comma) {
+                self.advance();
+                self.skip_newlines();
+            }
+        }
         self.expect(TokenType::RBrace)?;
-        Ok(TypeExpr::Record { fields })
+        if open {
+            Ok(TypeExpr::OpenRecord { fields })
+        } else {
+            Ok(TypeExpr::Record { fields })
+        }
     }
 
     pub(crate) fn parse_field_type_list(&mut self) -> Result<Vec<FieldType>, String> {

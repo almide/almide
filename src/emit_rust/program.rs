@@ -31,7 +31,7 @@ impl Emitter {
     fn collect_named_records(&mut self, decls: &[Decl]) {
         for decl in decls {
             match decl {
-                Decl::Type { name, ty: TypeExpr::Record { fields }, .. } => {
+                Decl::Type { name, ty: TypeExpr::Record { fields, .. }, .. } => {
                     let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
                     self.named_record_types.insert(field_names, name.clone());
                 }
@@ -81,7 +81,7 @@ impl Emitter {
             TypeExpr::Generic { name, args } => {
                 name == target || args.iter().any(|a| Self::type_references_name(a, target))
             }
-            TypeExpr::Record { fields } => fields.iter().any(|f| Self::type_references_name(&f.ty, target)),
+            TypeExpr::Record { fields } | TypeExpr::OpenRecord { fields } => fields.iter().any(|f| Self::type_references_name(&f.ty, target)),
             TypeExpr::Fn { params, ret } => {
                 params.iter().any(|p| Self::type_references_name(p, target))
                     || Self::type_references_name(ret, target)
@@ -541,7 +541,7 @@ impl Emitter {
             _ => String::new(),
         };
         match ty {
-            TypeExpr::Record { fields } => {
+            TypeExpr::Record { fields, .. } => {
                 self.emitln("#[derive(Debug, Clone, PartialEq)]");
                 self.emitln(&format!("{}struct {}{} {{", vis, name, generic_str));
                 self.indent += 1;
@@ -681,9 +681,24 @@ impl Emitter {
 
         // Clear borrowed_params for this function
         self.borrowed_params.clear();
+        // Track open record params for call-site projection
+        let mut fn_open_records: Vec<(usize, String, Vec<String>)> = Vec::new();
         let params_str: Vec<String> = params.iter().enumerate()
             .filter(|(_, p)| p.name != "self")
             .map(|(i, p)| {
+                // Open record params: emit as a generated struct type and track for call-site projection
+                if let TypeExpr::OpenRecord { fields } = &p.ty {
+                    let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+                    let struct_name = self.fresh_anon_record_name(&field_names);
+                    let type_args: Vec<String> = fields.iter().map(|f| self.gen_type(&f.ty)).collect();
+                    fn_open_records.push((i, struct_name.clone(), field_names));
+                    let ty = if type_args.is_empty() {
+                        struct_name
+                    } else {
+                        format!("{}<{}>", struct_name, type_args.join(", "))
+                    };
+                    return format!("{}: {}", p.name, ty);
+                }
                 let ty = self.gen_type(&p.ty);
                 let ownership = self.borrow_info.param_ownership(name, i);
                 let ty = if ownership == super::borrow::ParamOwnership::Borrow {
@@ -696,6 +711,9 @@ impl Emitter {
                 format!("{}: {}", p.name, ty)
             })
             .collect();
+        if !fn_open_records.is_empty() {
+            self.open_record_params.insert(name.to_string(), fn_open_records);
+        }
 
         // Generate generic type parameter list
         let generic_str = match generics {
@@ -867,8 +885,24 @@ impl Emitter {
                 other => format!("{}<{}>", other, args.iter().map(|a| self.gen_type(a)).collect::<Vec<_>>().join(", ")),
             },
             TypeExpr::Record { fields } => {
-                let fs: Vec<String> = fields.iter().map(|f| format!("{}: {}", f.name, self.gen_type(&f.ty))).collect();
-                format!("{{ {} }}", fs.join(", "))
+                let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+                let struct_name = self.anon_record_name(&field_names);
+                let type_args: Vec<String> = fields.iter().map(|f| self.gen_type(&f.ty)).collect();
+                if type_args.is_empty() {
+                    struct_name
+                } else {
+                    format!("{}<{}>", struct_name, type_args.join(", "))
+                }
+            }
+            TypeExpr::OpenRecord { fields } => {
+                let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+                let struct_name = self.fresh_anon_record_name(&field_names);
+                let type_args: Vec<String> = fields.iter().map(|f| self.gen_type(&f.ty)).collect();
+                if type_args.is_empty() {
+                    struct_name
+                } else {
+                    format!("{}<{}>", struct_name, type_args.join(", "))
+                }
             }
             TypeExpr::Fn { params, ret } => {
                 let ps: Vec<String> = params.iter().map(|p| self.gen_type(p)).collect();

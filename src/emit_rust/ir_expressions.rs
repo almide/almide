@@ -483,6 +483,7 @@ impl Emitter {
                 if is_variant_ctor && args.is_empty() {
                     return callee_str;
                 }
+                let open_record_info = self.open_record_params.get(name).cloned();
                 let args_str: Vec<String> = args.iter().enumerate().map(|(i, a)| {
                     let arg_str = self.gen_ir_arg_for(a, name, i);
                     if is_variant_ctor
@@ -490,6 +491,16 @@ impl Emitter {
                         && !self.generic_variant_constructors.contains_key(name)
                     {
                         format!("Box::new({})", arg_str)
+                    } else if let Some(ref open_recs) = open_record_info {
+                        // Check if this arg position needs open record projection
+                        if let Some((_, struct_name, field_names)) = open_recs.iter().find(|(idx, _, _)| *idx == i) {
+                            let fields: Vec<String> = field_names.iter()
+                                .map(|f| format!("{f}: {arg}.{f}.clone()", f = f, arg = arg_str))
+                                .collect();
+                            format!("{} {{ {} }}", struct_name, fields.join(", "))
+                        } else {
+                            arg_str
+                        }
                     } else {
                         arg_str
                     }
@@ -988,7 +999,7 @@ impl Emitter {
     fn needs_debug_format(ty: &Ty) -> bool {
         match ty {
             Ty::List(_) | Ty::Option(_) | Ty::Result(_, _) |
-            Ty::Map(_, _) | Ty::Tuple(_) | Ty::Record { .. } |
+            Ty::Map(_, _) | Ty::Tuple(_) | Ty::Record { .. } | Ty::OpenRecord { .. } |
             Ty::Variant { .. } => true,
             Ty::Named(name, _) => {
                 // Built-in type names use Display, user-defined types use Debug

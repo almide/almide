@@ -289,11 +289,15 @@ impl Checker {
                 ));
             } else {
                 for (i, ((pname, pty), aty)) in sig.params.iter().zip(arg_tys.iter()).enumerate() {
-                    if !pty.compatible(aty) {
-                        let hint = Self::hint_with_conversion(
-                            &format!("Pass a value of type {}", pty.display()),
-                            pty, aty,
-                        );
+                    if !self.is_compatible(pty, aty) {
+                        let hint = if let Some(missing) = self.open_record_missing_fields(pty, aty) {
+                            format!("Type {} is missing field(s): {}", aty.display(), missing.join(", "))
+                        } else {
+                            Self::hint_with_conversion(
+                                &format!("Pass a value of type {}", pty.display()),
+                                pty, aty,
+                            )
+                        };
                         self.push_diagnostic(err(
                             format!("argument '{}' (position {}) expects {} but got {}", pname, i + 1, pty.display(), aty.display()),
                             hint,
@@ -474,11 +478,15 @@ impl Checker {
                     ));
                 } else {
                     for (i, ((pname, pty), aty)) in sig.params.iter().zip(arg_tys.iter()).enumerate() {
-                        if !pty.compatible(aty) {
-                            let hint = Self::hint_with_conversion(
-                                &format!("Pass a value of type {}", pty.display()),
-                                pty, aty,
-                            );
+                        if !self.is_compatible(pty, aty) {
+                            let hint = if let Some(missing) = self.open_record_missing_fields(pty, aty) {
+                                format!("Type {} is missing field(s): {}", aty.display(), missing.join(", "))
+                            } else {
+                                Self::hint_with_conversion(
+                                    &format!("Pass a value of type {}", pty.display()),
+                                    pty, aty,
+                                )
+                            };
                             self.push_diagnostic(err(
                                 format!("{}.{}() argument '{}' (position {}) expects {} but got {}", module, func, pname, i + 1, pty.display(), aty.display()),
                                 hint,
@@ -522,10 +530,42 @@ impl Checker {
         Ty::Unknown
     }
 
+    /// Check type compatibility, resolving Named types when comparing against open records.
+    pub(crate) fn is_compatible(&self, param_ty: &Ty, arg_ty: &Ty) -> bool {
+        if param_ty.compatible(arg_ty) {
+            return true;
+        }
+        // If param is an open record and arg is Named, resolve the Named type
+        if let Ty::OpenRecord { .. } = param_ty {
+            let resolved = self.env.resolve_named(arg_ty);
+            if !std::ptr::eq(&resolved as &Ty, arg_ty) {
+                return param_ty.compatible(&resolved);
+            }
+        }
+        false
+    }
+
+    /// Get missing fields when an argument doesn't satisfy an open record parameter.
+    fn open_record_missing_fields(&self, param_ty: &Ty, arg_ty: &Ty) -> Option<Vec<String>> {
+        if let Ty::OpenRecord { fields: required } = param_ty {
+            let resolved = self.env.resolve_named(arg_ty);
+            if let Ty::Record { fields: actual } | Ty::OpenRecord { fields: actual } = &resolved {
+                let missing: Vec<String> = required.iter()
+                    .filter(|(n, t)| !actual.iter().any(|(an, at)| an == n && t.compatible(at)))
+                    .map(|(n, t)| format!("{}: {}", n, t.display()))
+                    .collect();
+                if !missing.is_empty() {
+                    return Some(missing);
+                }
+            }
+        }
+        None
+    }
+
     pub(crate) fn check_member_access(&mut self, obj_ty: &Ty, field: &str) -> Ty {
         let resolved = self.env.resolve_named(obj_ty);
         match &resolved {
-            Ty::Record { fields } => {
+            Ty::Record { fields } | Ty::OpenRecord { fields } => {
                 for (name, ty) in fields {
                     if name == field { return ty.clone(); }
                 }

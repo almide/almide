@@ -13,7 +13,7 @@ fn ty_to_resolved(ty: &Ty) -> ResolvedType {
         Ty::Option(_) => ResolvedType::Option,
         Ty::Result(_, _) => ResolvedType::Result,
         Ty::Map(_, _) => ResolvedType::Map,
-        Ty::Record { .. } => ResolvedType::Record,
+        Ty::Record { .. } | Ty::OpenRecord { .. } => ResolvedType::Record,
         Ty::Variant { .. } => ResolvedType::Variant,
         Ty::Fn { .. } => ResolvedType::Fn,
         Ty::Tuple(_) => ResolvedType::Tuple,

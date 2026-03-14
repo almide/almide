@@ -216,7 +216,7 @@ impl Checker {
                             rec_fields.into_iter().map(|(n, t, _)| (n, t)).collect()
                         } else { vec![] }
                     } else { vec![] }
-                } else if let Ty::Record { fields: rec_fields } = subject_ty {
+                } else if let Ty::Record { fields: rec_fields } | Ty::OpenRecord { fields: rec_fields } = subject_ty {
                     rec_fields.clone()
                 } else { vec![] };
                 for field in fields {
