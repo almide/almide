@@ -440,16 +440,21 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
     }
 
     // Lower to IR if checker ran
-    let ir_program = checker_opt.as_ref().map(|checker| {
+    let mut ir_program = checker_opt.as_ref().map(|checker| {
         almide::lower::lower_program(&program, &checker.expr_types, &checker.env)
     });
     let mut module_irs = std::collections::HashMap::new();
     if let Some(checker) = &mut checker_opt {
-        for (name, mod_prog, _, _) in &mut resolved.modules {
+        for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
             if almide::stdlib::is_stdlib_module(name) { continue; }
             let mod_types = checker.check_module_bodies(mod_prog);
+            let versioned = pkg_id.as_ref().map(|pid| pid.mod_name());
+            let mod_ir_module = almide::lower::lower_module(name, mod_prog, &mod_types, &checker.env, versioned);
             let mod_ir = almide::lower::lower_program(mod_prog, &mod_types, &checker.env);
             module_irs.insert(name.clone(), mod_ir);
+            if let Some(ref mut ir) = ir_program {
+                ir.modules.push(mod_ir_module);
+            }
         }
     }
 

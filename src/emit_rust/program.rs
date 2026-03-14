@@ -178,23 +178,47 @@ impl Emitter {
         // Always collect from AST for open_record_aliases (not yet in IR)
         self.collect_open_record_aliases(&prog.decls);
         self.collect_top_lets(&prog.decls);
-        for (mod_name, mod_prog, _, _) in modules {
-            self.collect_fn_info(&mod_prog.decls);
-            if let Some(mod_ir) = self.module_irs.get(mod_name).cloned() {
-                self.collect_named_records_from_ir(&mod_ir.type_decls);
-            } else {
-                self.collect_named_records(&mod_prog.decls);
+
+        // Use IR modules when available for module metadata collection
+        let has_ir_modules = self.ir_program.as_ref().map_or(false, |ir| !ir.modules.is_empty());
+        if has_ir_modules {
+            let ir_modules = self.ir_program.as_ref().unwrap().modules.clone();
+            for ir_mod in &ir_modules {
+                // Collect fn info from AST (still needed for effect/result classification)
+                if let Some((_, mod_prog, _, _)) = modules.iter().find(|(n, _, _, _)| n == &ir_mod.name) {
+                    self.collect_fn_info(&mod_prog.decls);
+                    self.collect_open_record_aliases(&mod_prog.decls);
+                }
+                self.collect_named_records_from_ir(&ir_mod.type_decls);
             }
-            self.collect_open_record_aliases(&mod_prog.decls);
-        }
-        // Build module_aliases and user_modules from PkgId info
-        for (name, _, pkg_id, _) in modules {
-            if let Some(pid) = pkg_id {
-                let versioned = pid.mod_name();
-                self.module_aliases.insert(name.clone(), versioned.clone());
-                self.user_modules.push(versioned);
-            } else {
-                self.user_modules.push(name.clone());
+            // Build module_aliases and user_modules from IR modules
+            for ir_mod in &ir_modules {
+                if let Some(ref versioned) = ir_mod.versioned_name {
+                    self.module_aliases.insert(ir_mod.name.clone(), versioned.clone());
+                    self.user_modules.push(versioned.clone());
+                } else {
+                    self.user_modules.push(ir_mod.name.clone());
+                }
+            }
+        } else {
+            for (mod_name, mod_prog, _, _) in modules {
+                self.collect_fn_info(&mod_prog.decls);
+                if let Some(mod_ir) = self.module_irs.get(mod_name).cloned() {
+                    self.collect_named_records_from_ir(&mod_ir.type_decls);
+                } else {
+                    self.collect_named_records(&mod_prog.decls);
+                }
+                self.collect_open_record_aliases(&mod_prog.decls);
+            }
+            // Build module_aliases and user_modules from PkgId info
+            for (name, _, pkg_id, _) in modules {
+                if let Some(pid) = pkg_id {
+                    let versioned = pid.mod_name();
+                    self.module_aliases.insert(name.clone(), versioned.clone());
+                    self.user_modules.push(versioned);
+                } else {
+                    self.user_modules.push(name.clone());
+                }
             }
         }
 
@@ -211,27 +235,53 @@ impl Emitter {
         // Collect variant and record type names per module for cross-module imports
         let mut module_variant_types: Vec<(String, Vec<String>)> = Vec::new();
         let mut module_record_types: Vec<(String, Vec<String>)> = Vec::new();
-        for (mod_name, mod_prog, pkg_id, _) in modules {
-            let rust_mod = if let Some(pid) = pkg_id {
-                pid.mod_name().replace('.', "_")
-            } else {
-                mod_name.replace('.', "_")
-            };
-            let mut variant_names = Vec::new();
-            let mut record_names = Vec::new();
-            for decl in &mod_prog.decls {
-                match decl {
-                    Decl::Type { name, ty: TypeExpr::Variant { .. }, .. } => {
-                        variant_names.push(name.clone());
+
+        if has_ir_modules {
+            // Derive cross-module type info from IR modules
+            let ir_modules = self.ir_program.as_ref().unwrap().modules.clone();
+            for ir_mod in &ir_modules {
+                let rust_mod = ir_mod.versioned_name.as_ref()
+                    .unwrap_or(&ir_mod.name)
+                    .replace('.', "_");
+                let mut variant_names = Vec::new();
+                let mut record_names = Vec::new();
+                for td in &ir_mod.type_decls {
+                    match &td.kind {
+                        almide::ir::IrTypeDeclKind::Variant { .. } => {
+                            variant_names.push(td.name.clone());
+                        }
+                        almide::ir::IrTypeDeclKind::Record { .. } => {
+                            record_names.push(td.name.clone());
+                        }
+                        _ => {}
                     }
-                    Decl::Type { name, ty: TypeExpr::Record { .. }, .. } => {
-                        record_names.push(name.clone());
-                    }
-                    _ => {}
                 }
+                module_variant_types.push((rust_mod.clone(), variant_names));
+                module_record_types.push((rust_mod, record_names));
             }
-            module_variant_types.push((rust_mod.clone(), variant_names));
-            module_record_types.push((rust_mod, record_names));
+        } else {
+            for (mod_name, mod_prog, pkg_id, _) in modules {
+                let rust_mod = if let Some(pid) = pkg_id {
+                    pid.mod_name().replace('.', "_")
+                } else {
+                    mod_name.replace('.', "_")
+                };
+                let mut variant_names = Vec::new();
+                let mut record_names = Vec::new();
+                for decl in &mod_prog.decls {
+                    match decl {
+                        Decl::Type { name, ty: TypeExpr::Variant { .. }, .. } => {
+                            variant_names.push(name.clone());
+                        }
+                        Decl::Type { name, ty: TypeExpr::Record { .. }, .. } => {
+                            record_names.push(name.clone());
+                        }
+                        _ => {}
+                    }
+                }
+                module_variant_types.push((rust_mod.clone(), variant_names));
+                module_record_types.push((rust_mod, record_names));
+            }
         }
 
         // Emit imported modules as `mod name { ... }`
@@ -426,7 +476,18 @@ impl Emitter {
                         let ir_fn = ir_fn.clone();
                         // Temporarily swap ir_program to module's IR (for VarTable access)
                         let saved_ir = self.ir_program.take();
-                        self.ir_program = self.module_irs.get(name).cloned();
+                        // Try IrModule first, fall back to module_irs
+                        let module_ir_prog = saved_ir.as_ref()
+                            .and_then(|ir| ir.modules.iter().find(|m| m.name == name))
+                            .map(|m| almide::ir::IrProgram {
+                                functions: m.functions.clone(),
+                                top_lets: m.top_lets.clone(),
+                                type_decls: m.type_decls.clone(),
+                                var_table: m.var_table.clone(),
+                                modules: Vec::new(),
+                            })
+                            .or_else(|| self.module_irs.get(name).cloned());
+                        self.ir_program = module_ir_prog;
                         self.analyze_ir_single_use(&ir_fn.body, &ir_fn.params);
                         let prev_effect = self.in_effect;
                         self.in_effect = is_effect || ret_str.starts_with("Result<");
@@ -459,6 +520,15 @@ impl Emitter {
     }
 
     fn find_module_ir_function(&self, module_name: &str, fn_name: &str) -> Option<&almide::ir::IrFunction> {
+        // Try IrProgram::modules first (Phase 4 path)
+        if let Some(ref ir) = self.ir_program {
+            for ir_mod in &ir.modules {
+                if ir_mod.name == module_name {
+                    return ir_mod.functions.iter().find(|f| f.name == fn_name);
+                }
+            }
+        }
+        // Fall back to separate module_irs HashMap
         let ir = self.module_irs.get(module_name)?;
         ir.functions.iter().find(|f| f.name == fn_name)
     }

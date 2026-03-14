@@ -57,13 +57,26 @@ pub fn analyze_program(
         fn_decls.push((f.name.clone(), params, &f.body, &ir.var_table));
     }
 
-    for (mod_name, mod_ir) in module_irs {
-        for f in &mod_ir.functions {
-            let qualified = format!("{}.{}", mod_name, f.name);
-            let params: Vec<(VarId, bool)> = f.params.iter()
-                .map(|p| (p.var, is_heap_type(&p.ty)))
-                .collect();
-            fn_decls.push((qualified, params, &f.body, &mod_ir.var_table));
+    // Use IR modules from IrProgram when available, fall back to separate module_irs
+    if !ir.modules.is_empty() {
+        for ir_mod in &ir.modules {
+            for f in &ir_mod.functions {
+                let qualified = format!("{}.{}", ir_mod.name, f.name);
+                let params: Vec<(VarId, bool)> = f.params.iter()
+                    .map(|p| (p.var, is_heap_type(&p.ty)))
+                    .collect();
+                fn_decls.push((qualified, params, &f.body, &ir_mod.var_table));
+            }
+        }
+    } else {
+        for (mod_name, mod_ir) in module_irs {
+            for f in &mod_ir.functions {
+                let qualified = format!("{}.{}", mod_name, f.name);
+                let params: Vec<(VarId, bool)> = f.params.iter()
+                    .map(|p| (p.var, is_heap_type(&p.ty)))
+                    .collect();
+                fn_decls.push((qualified, params, &f.body, &mod_ir.var_table));
+            }
         }
     }
 

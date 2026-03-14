@@ -246,11 +246,17 @@ fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::Em
             ir_program = Some(almide::lower::lower_program(&program, &checker.expr_types, &checker.env));
         }
         // Lower user modules to IR (skip TOML-defined stdlib — they use generated codegen)
-        for (name, mod_prog, _, _) in &mut resolved.modules {
+        for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
             if almide::stdlib::is_stdlib_module(name) { continue; }
             let mod_types = checker.check_module_bodies(mod_prog);
-            let mod_ir = almide::lower::lower_program(mod_prog, &mod_types, &checker.env);
-            module_irs.insert(name.clone(), mod_ir);
+            let versioned = pkg_id.as_ref().map(|pid| pid.mod_name());
+            let mod_ir_module = almide::lower::lower_module(name, mod_prog, &mod_types, &checker.env, versioned);
+            // Also keep in module_irs for backward compat (borrow analysis, etc.)
+            let mod_ir_program = almide::lower::lower_program(mod_prog, &mod_types, &checker.env);
+            module_irs.insert(name.clone(), mod_ir_program);
+            if let Some(ref mut ir) = ir_program {
+                ir.modules.push(mod_ir_module);
+            }
         }
     }
 
