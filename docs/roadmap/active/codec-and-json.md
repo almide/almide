@@ -24,44 +24,47 @@ let bob = json.decode_from_string[Person](text)?   // String -> Person
 1. **typed record → encode が主経路** — LLM は型付き record を書く。JSON 文字列は書かない
 2. **derive が主経路** — 日常は `deriving Codec` で完結。manual は例外用
 3. **field annotation なし** — 型レベル設定 + manual 実装で対応。annotation DSL の爆発を避ける。field annotation は初期段階では入れない。必要なら将来、最小限の field-level codec override を検討
-4. **JsonValue を第一級に** — syntax (parse/stringify) と semantic (encode/decode) を分離
+4. **Json を第一級に** — syntax (parse/stringify) と semantic (encode/decode) を分離
 5. **missing/null/default を明確に** — Option + field default で自然に解決
 6. **エラーは構造化 + 修復可能** — path + kind + suggested fix
 7. **局所操作 > 全体再生成** — LLM は path ベースの surgical edit の方が安定する
 
 ## Architecture
 
-Codec protocol はフォーマット非依存の抽象であり、JsonValue / parse / stringify / JsonOptions は JSON backend の仕様である。
+Codec protocol はフォーマット非依存の抽象であり、Json / parse / stringify / JsonOptions は JSON backend の仕様である。
 
 - **Codec core**: derive, encode/decode の概念, defaults, naming, ADT repr
-- **JSON backend**: JsonValue, parse/stringify, JsonOptions, path API, repair rules
+- **JSON backend**: Json, parse/stringify, JsonOptions, path API, repair rules
 
 ```
-Text ──parse──▶ JsonValue ──decode[T]──▶ T
-T ──encode[T]──▶ JsonValue ──stringify──▶ Text
+Text ──parse──▶ Json ──decode[T]──▶ T
+T ──encode[T]──▶ Json ──stringify──▶ Text
 
 局所操作:
-JsonValue ──set/remove/update(path)──▶ JsonValue
+Json ──set/remove/update(path)──▶ Json
 
 修復:
-JsonValue ──repair[T]──▶ RepairResult[T]
+Json ──repair[T]──▶ RepairResult[T]
 
 便利API:
 T ──encode_to_string──▶ Text
 Text ──decode_from_string[T]──▶ T
 ```
 
-### Codec Protocol (内部的に分離)
+### Codec 抽象 (内部的に分離)
+
+ここで言う「Codec」は言語レベルの trait/protocol ではなく、**codegen 規約 (naming convention + deriving directive)** である。
+type-system.md の container protocols (Mappable 等) とは異なる概念。
 
 ```almide
-// 概念上の定義 (言語にtraitが入ったら明示化)
-// Encodable: T -> JsonValue (または汎用 Encoder)
-// Decodable: JsonValue (または汎用 Decoder) -> T
+// 概念上の定義 (codegen が生成する関数群)
+// Encodable: T -> Json (または汎用 Encoder)
+// Decodable: Json (または汎用 Decoder) -> T
 // Codec = Encodable + Decodable
 ```
 
 encode だけ / decode だけが必要なケースに対応するため、内部的には分離。
-ユーザー表面は `deriving Codec` を推奨。
+ユーザー表面は `deriving Codec` を推奨。将来 type-system に trait 相当の機構が入った場合、codegen 規約からそちらに移行する可能性がある。
 
 ---
 
@@ -92,7 +95,7 @@ encode だけ / decode だけが必要なケースに対応するため、内部
 let p = Person { name: "Alice", age: 30 }
 let j = json.encode(p)
 
-// 2. フォールバック: JsonValue builder (dynamic JSON 用)
+// 2. フォールバック: Json builder (dynamic JSON 用)
 let j = json.object([("name", json.s("Alice")), ("age", json.i(30))])
 
 // 3. 局所操作: path API (既存 JSON の mutation 用)
@@ -103,7 +106,7 @@ let j2 = json.set_path(j, Field(Field(Root, "user"), "name"), json.s("Bob"))
 
 ## Phase 1: JSON Builder + Path API (stdlib 追加のみ)
 
-### 手動 JsonValue 構築
+### 手動 Json 構築
 
 ```almide
 let person = json.object([

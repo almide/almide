@@ -53,17 +53,18 @@ fn parse(text: String) -> Ast = _                     // hole (type-checked stub
 fn optimize(ast: Ast) -> Ast = todo("implement later") // todo with message
 ```
 
-## Trait & Impl
+## Built-in Protocols
+Eq and Hash are automatic (compiler-derived from type structure). No `deriving` needed.
+`deriving From` is the only explicit deriving directive (for error type conversions).
 ```
-trait Iterable[T] {
-  fn map[U](self, f: fn(T) -> U) -> List[U]
-  fn filter(self, f: fn(T) -> Bool) -> List[T]
-}
+// Eq: all value types support == (except Fn)
+let same = color_a == color_b  // just works
 
-impl From[IoError] for ConfigError {
-  fn from(e: IoError) -> ConfigError = Io(e)
-}
+// From: opt-in for error conversions
+type AppError = | Io(IoError) | Parse(ParseError) deriving From
 ```
+<!-- Note: trait/impl syntax exists in the parser but is being superseded by
+     row polymorphism and container protocols. See docs/roadmap/active/type-system.md -->
 
 ## Expressions
 
@@ -167,12 +168,6 @@ do {
 ```
 text |> string.trim |> string.split(",")
 xs |> filter(_, fn(x) => x > 0)      // _ = placeholder for piped value
-```
-
-### Named arguments
-```
-create_user(name: "alice", age: 30)
-create_user("alice", age: 30)          // mixed positional + named
 ```
 
 ### Record & Spread
@@ -374,7 +369,7 @@ The runtime calls `main(args)` where `args` includes the program name at index 0
 - `?` suffix is for Bool predicates only
 - No exceptions — use `Result[T, E]` everywhere
 - No null — use `Option[T]`
-- No inheritance — use trait + impl
+- No inheritance — use composition
 - No macros, no operator overloading, no implicit conversions
 - Empty list = `[]`, empty map = `[:]` (with type annotation)
 - `_` is ONLY for match wildcard patterns, never as a variable name

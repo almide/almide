@@ -124,7 +124,7 @@ These are intentional trade-offs — things we gave up to make LLM generation re
 | Raw expressiveness | Each concept has one idiomatic way to write it. Almide provides the right abstraction (e.g., `map`, `for...in`) but not multiple ways to achieve the same thing. |
 | Operator overloading | Operators have fixed built-in meanings only. No user-defined overloading, no implicit coercion. |
 | Metaprogramming | No macros, no reflection, no code generation. The language surface is fixed. |
-| Ad-hoc polymorphism | No traits, no typeclasses, and no ad-hoc polymorphism. Parametric generics exist, but constraints are structural (`T: { field: Type, .. }`), not resolved through global instances. |
+| Ad-hoc polymorphism | No user-defined traits, no typeclasses, no ad-hoc polymorphism. Built-in protocols (Eq, Hash) are automatic. Parametric generics exist, but constraints are structural (`T: { field: Type, .. }`), not resolved through global instances. Future direction: row polymorphism and container protocols — see [Type System Extensions](roadmap/active/type-system.md). |
 | Named/default arguments | All arguments are positional. No optionality, no reordering. |
 | Multiple return styles | No `return` keyword. The last expression is always the value. No exceptions. |
 | Syntax sugar variety | One way to write each construct. No shorthand forms, no alternative spellings. |

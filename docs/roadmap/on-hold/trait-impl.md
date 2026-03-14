@@ -1,4 +1,6 @@
-# Built-in Protocols
+# Built-in Protocols [ON HOLD]
+
+> **Note**: Eq, Hash は実装済み。Show は残件。型システム全体の設計は [Type System Extensions](../active/type-system.md) に移行しており、container protocols (Mappable, Chainable 等) や `deriving` による conformance はそちらを参照のこと。本文書は Eq/Hash/Show の built-in protocol に限定した初期設計を記録したものである。
 
 ## Design Principle
 

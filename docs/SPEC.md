@@ -1,4 +1,4 @@
-# Almide Language Specification v0.6
+# Almide Language Specification v0.5
 
 **"Not a language for writing freely, but a language for converging correctly."**
 
@@ -347,6 +347,8 @@ Map[String, List[Int]]
 ---
 
 ## 6. Traits (Minimal Abstraction Mechanism)
+
+> **Status**: この trait/impl 構文は初期設計であり、将来的に row polymorphism と container protocols による代替が検討されている。詳細は [Type System Extensions](roadmap/active/type-system.md) を参照。現在実装済みの built-in protocols (Eq, Hash) は自動導出であり、trait 構文を使わない。
 
 ```
 TraitDecl ::= "trait" TypeName GenericParams? "{" TraitMethodList "}"
@@ -1035,6 +1037,8 @@ I/O, clock, env, net, and randomness are all `effect fn`.
 
 ## 15. Async/Await
 
+> **Status**: 基本設計 (`async fn`, `await`) は確定済み。構造化並行性の構文は `async let` / `await` ベースに移行中。`Async[T]` はユーザーに露出しない（内部型として存在）。最新設計は [Structured Concurrency](roadmap/active/structured-concurrency.md) および [DESIGN.md](DESIGN.md) の Async セクションを参照。
+
 ### 15.1 async fn
 
 `async fn` declares an asynchronous function. **`async` implicitly includes `effect`** (since all async operations involve I/O).
@@ -1044,7 +1048,7 @@ async fn fetch(url: String) -> Result[String, HttpError] = _
 async fn fetch_json[T](url: String) -> Result[T, HttpError] = _
 ```
 
-The return type of `async fn` is written as the inner type. The actual runtime return value is `Async[Result[String, HttpError]]`, but the type annotation is written as `Result[String, HttpError]`.
+The return type of `async fn` is written as the inner type. The runtime wraps this internally, but `Async[T]` is not exposed in user-facing type annotations.
 
 ### 15.2 await
 
@@ -1052,13 +1056,12 @@ The return type of `async fn` is written as the inner type. The actual runtime r
 AwaitExpr ::= "await" Expr
 ```
 
-`await` unwraps `Async[T]` to extract `T`. It is a prefix operator similar to `try`, usable only within `async fn`.
+`await` resolves an async computation to extract `T`. It is a prefix operator similar to `try`, usable only within `async fn`.
 
 ```
 async fn load(url: String) -> Result[Config, AppError] = {
-  let text = await fetch(url)      // fetch: Async[Result[String, HttpError]]
-                                    // await: Result[String, HttpError]
-  let config = try parse(text)     // try: Config
+  let text = await fetch(url)
+  let config = try parse(text)
   ok(config)
 }
 ```
@@ -1070,7 +1073,7 @@ Combine `await` and implicit `try` inside a `do` block:
 ```
 async fn load(url: String) -> Result[Config, AppError] =
   do {
-    let text = await fetch(url)     // await unwraps Async, do auto-tries Result
+    let text = await fetch(url)     // await resolves async, do auto-tries Result
     let config = parse(text)        // do auto-tries Result
     config
   }
@@ -1082,15 +1085,19 @@ async fn load(url: String) -> Result[Config, AppError] =
 
 ### 15.4 Structured Concurrency
 
-Unstructured `spawn` / `join` are **prohibited**. Concurrent execution uses only built-in combinators:
+Unstructured `spawn` / `join` are **prohibited**. Concurrent execution uses `async let` for scoped parallel tasks:
 
 ```
-// Execute all tasks in parallel and await all results
-async fn parallel[T](tasks: List[Async[T]]) -> List[T]
+// Start a concurrent task (scoped to the enclosing block)
+async let result = fetch(url)
 
-// Return the result of the first task to complete
-async fn race[T](tasks: List[Async[T]]) -> T
+// Await the result (consumes the handle — second await is a compile error)
+let value = await result
+```
 
+Stdlib combinators for common patterns:
+
+```
 // Execute with a timeout
 async fn timeout[T](ms: Int, task: Async[T]) -> Result[T, TimeoutError]
 
@@ -1098,23 +1105,7 @@ async fn timeout[T](ms: Int, task: Async[T]) -> Result[T, TimeoutError]
 async fn sleep(ms: Int) -> Unit
 ```
 
-Examples:
-```
-async fn load_all(urls: List[String]) -> Result[List[String], HttpError] =
-  do {
-    await parallel(urls.map(fn(url) => fetch(url)))
-  }
-
-async fn fetch_fastest(urls: List[String]) -> Result[String, HttpError] =
-  do {
-    await race(urls.map(fn(url) => fetch(url)))
-  }
-
-async fn fetch_with_timeout(url: String) -> Result[String, AppError] =
-  do {
-    await timeout(5000, fetch(url))
-  }
-```
+Inside `do` blocks, any task failure cancels all siblings, then propagates the error — the same fail-fast semantics as sequential `do`.
 
 ### 15.5 Typing Rules
 

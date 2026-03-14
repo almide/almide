@@ -1,13 +1,10 @@
 # Almide Roadmap
 
-- [2026 Ergonomics Roadmap](2026-ergonomics.md) — ✅ All 3 items complete: `do` pure fn, `unwrap_or` UFCS, `json.parse` auto-`?`
-
 ## Active
 
 - [LLM Integration](active/llm-integration.md) — `almide forge` (library generation), `almide fix` (self-repair), `almide explain`
 - [Structured Concurrency](active/structured-concurrency.md) — Layer 2: `async let` / `await` for scoped parallel execution
 - [Grammar Codegen](active/grammar-codegen.md) — Single source of truth for tokens/precedence, auto-generate tree-sitter + TextMate + lexer
-- [Lambda Type Inference](active/lambda-type-inference.md) — Bidirectional inference for lambda params (`xs.map(fn(x) => x.len())` without annotation)
 - [Codec Protocol & JSON](active/codec-and-json.md) — `deriving Codec` + JSON as first format, 5-phase roadmap
 - [Type System Extensions](active/type-system.md) — Row polymorphism, union types, container protocols (LLM-friendly HKT), structural generic bounds
 
@@ -67,6 +64,8 @@
 - [Map Literal](done/map-literal.md) — `[:]` / `["key": value]` syntax, index access, direct iteration
 - [Eq Protocol](done/eq-protocol.md) — automatic `==` for all value types, `Fn` types rejected
 - [Error Recovery](done/error-recovery.md) — Multi-error reporting, statement/expression-level recovery, error AST nodes, common typo detection
+- [Lambda Type Inference](done/lambda-type-inference.md) — Bidirectional inference for lambda params (implemented commit 002180d)
+- [JSON Builder API](done/json-builder-api.md) — Superseded by [Codec Protocol & JSON](active/codec-and-json.md)
 - [While Loop](done/while-loop.md) — `while condition { }`, universal loop syntax
 - [Hint System](done/hint-system.md) — Pluggable hint registry, 5 modules, 61 tests, catalog
 - [`import self`](done/import-self-entry.md) — `main.almd` can access `mod.almd` pub definitions via `import self`

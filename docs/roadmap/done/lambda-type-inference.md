@@ -1,6 +1,6 @@
-# Bidirectional Type Inference for Lambda Parameters [ACTIVE]
+# Bidirectional Type Inference for Lambda Parameters [DONE]
 
-**Status**: 部分実装済み。チェッカーに expected type からの推論フィルタリングが追加されているが、lowerer への伝播が未完了。行番号は一部ズレあり（本文中で更新済み）。
+**Status**: 実装完了 (commit 002180d, 2026-03-14)。checker の two-pass 推論 + lowerer への型伝搬を実装。
 
 ## Problem
 

@@ -45,6 +45,8 @@ src/
 ├── resolve.rs           Import resolution
 ├── check/               Type checker (5 files)
 ├── types.rs             Internal type system (Ty, TypeEnv, FnSig)
+├── ir.rs                Typed IR (intermediate representation)
+├── lower.rs             AST → IR lowering
 ├── diagnostic.rs        Error reporting with file/line and hints
 ├── stdlib.rs            UFCS resolution, module registry
 ├── generated/           Auto-generated from stdlib/defs/*.toml (DO NOT EDIT)

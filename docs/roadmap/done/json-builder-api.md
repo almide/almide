@@ -1,4 +1,6 @@
-# JSON Builder API [ACTIVE]
+# JSON Builder API [SUPERSEDED]
+
+> **Note**: This roadmap has been superseded by [Codec Protocol & JSON](../active/codec-and-json.md) (Phase 1 に統合).
 
 ## Problem
 

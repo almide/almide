@@ -1,4 +1,4 @@
-# Syntax Sugar [IN PROGRESS]
+# Syntax Sugar [ON HOLD]
 
 ## Range Literals ✅
 ```almide
