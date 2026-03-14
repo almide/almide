@@ -108,11 +108,36 @@ impl Checker {
                 let exp = c.expected.to_ty(&self.solutions);
                 let act = c.actual.to_ty(&self.solutions);
                 if exp != Ty::Unknown && act != Ty::Unknown {
+                    let hint = Self::hint_with_conversion(
+                        "Fix the expression type or change the expected type",
+                        &exp, &act,
+                    );
                     self.diagnostics.push(err(
                         format!("type mismatch in {}: expected {} but got {}", c.context, exp.display(), act.display()),
-                        "Fix the expression type or change the expected type", c.context));
+                        hint, c.context));
                 }
             }
+        }
+    }
+
+    pub(crate) fn suggest_conversion(expected: &Ty, actual: &Ty) -> Option<String> {
+        match (actual, expected) {
+            (Ty::Int, Ty::String) => Some("use `int.to_string(x)` to convert Int to String".to_string()),
+            (Ty::Float, Ty::String) => Some("use `float.to_string(x)` to convert Float to String".to_string()),
+            (Ty::Bool, Ty::String) => Some("use `to_string(x)` to convert Bool to String".to_string()),
+            (Ty::String, Ty::Int) => Some("use `int.parse(s)` to convert String to Int (returns Result[Int, String])".to_string()),
+            (Ty::String, Ty::Float) => Some("use `float.parse(s)` to convert String to Float (returns Result[Float, String])".to_string()),
+            (Ty::Float, Ty::Int) => Some("use `to_int(x)` to convert Float to Int (truncates)".to_string()),
+            (Ty::Int, Ty::Float) => Some("use `to_float(x)` to convert Int to Float".to_string()),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn hint_with_conversion(base_hint: &str, expected: &Ty, actual: &Ty) -> String {
+        if let Some(conv) = Self::suggest_conversion(expected, actual) {
+            format!("{}. Or {}", base_hint, conv)
+        } else {
+            base_hint.to_string()
         }
     }
 
@@ -217,7 +242,11 @@ impl Checker {
                         }
                     }
                 }
-                for p in params { let ty = self.resolve_type_expr(&p.ty); self.env.define_var(&p.name, ty); }
+                for p in params {
+                    let ty = self.resolve_type_expr(&p.ty);
+                    self.env.define_var(&p.name, ty);
+                    self.env.param_vars.insert(p.name.clone());
+                }
                 let ret_ty = self.resolve_type_expr(return_type);
                 let prev = (self.env.current_ret.take(), self.env.in_effect);
                 self.env.current_ret = Some(ret_ty.clone());

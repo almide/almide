@@ -3,7 +3,7 @@
 
 use crate::ast;
 use crate::types::{Ty, VariantPayload};
-use super::types::{InferTy, TyVarId};
+use super::types::InferTy;
 use super::Checker;
 
 impl Checker {
@@ -111,8 +111,33 @@ impl Checker {
                         }
                         if lc == Ty::Float || rc == Ty::Float { InferTy::Concrete(Ty::Float) } else { lt }
                     }
-                    "++" => lt,
-                    "==" | "!=" | "<" | ">" | "<=" | ">=" | "and" | "or" => InferTy::Concrete(Ty::Bool),
+                    "++" => {
+                        let lc = lt.to_ty(&self.solutions);
+                        let is_concatable = |t: &Ty| matches!(t, Ty::String | Ty::List(_) | Ty::Unknown | Ty::TypeVar(_));
+                        if !is_concatable(&lc) {
+                            self.diagnostics.push(super::err(
+                                format!("operator '++' requires String or List but got {}", lc.display()),
+                                "Use ++ with String or List types", "operator ++"));
+                        }
+                        lt
+                    }
+                    "==" | "!=" | "<" | ">" | "<=" | ">=" => InferTy::Concrete(Ty::Bool),
+                    "and" | "or" => {
+                        let lc = lt.to_ty(&self.solutions);
+                        let rc = rt.to_ty(&self.solutions);
+                        let is_bool = |t: &Ty| matches!(t, Ty::Bool | Ty::Unknown | Ty::TypeVar(_));
+                        if !is_bool(&lc) {
+                            self.diagnostics.push(super::err(
+                                format!("operator '{}' requires Bool but got {}", op, lc.display()),
+                                "Use Bool values with logical operators", format!("operator {}", op)));
+                        }
+                        if !is_bool(&rc) {
+                            self.diagnostics.push(super::err(
+                                format!("operator '{}' requires Bool but got {}", op, rc.display()),
+                                "Use Bool values with logical operators", format!("operator {}", op)));
+                        }
+                        InferTy::Concrete(Ty::Bool)
+                    }
                     "^" => InferTy::Concrete(Ty::Int),
                     _ => lt,
                 }
@@ -159,9 +184,39 @@ impl Checker {
             ast::Expr::Call { callee, args, .. } => self.check_call(callee, args),
 
             ast::Expr::Pipe { left, right, .. } => {
-                self.infer_expr(left);
+                let left_ty = self.infer_expr(left);
                 match right.as_mut() {
-                    ast::Expr::Call { callee, args, .. } => self.check_call(callee, args),
+                    ast::Expr::Call { callee, args, .. } => {
+                        // Pipe inserts left as the first argument
+                        let mut all_arg_tys: Vec<super::types::InferTy> = vec![left_ty];
+                        all_arg_tys.extend(args.iter_mut().map(|a| self.infer_expr(a)));
+                        // Resolve module calls for pipe (e.g. xs |> list.filter(f))
+                        match callee.as_mut() {
+                            ast::Expr::Ident { name, .. } => self.check_named_call(name, &all_arg_tys),
+                            ast::Expr::Member { object, field, .. } => {
+                                if let ast::Expr::Ident { name: module, .. } = object.as_ref() {
+                                    if crate::stdlib::is_stdlib_module(module) || self.env.user_modules.contains(module.as_str()) {
+                                        let key = format!("{}.{}", module, field);
+                                        return self.check_named_call(&key, &all_arg_tys);
+                                    }
+                                    if let Some(target) = self.env.module_aliases.get(module.as_str()).cloned() {
+                                        let key = format!("{}.{}", target, field);
+                                        return self.check_named_call(&key, &all_arg_tys);
+                                    }
+                                }
+                                let ct = self.infer_expr(callee);
+                                let ret = self.fresh_var();
+                                self.constrain(ct, super::types::InferTy::Fn { params: all_arg_tys, ret: Box::new(ret.clone()) }, "pipe call");
+                                ret
+                            }
+                            _ => {
+                                let ct = self.infer_expr(callee);
+                                let ret = self.fresh_var();
+                                self.constrain(ct, super::types::InferTy::Fn { params: all_arg_tys, ret: Box::new(ret.clone()) }, "pipe call");
+                                ret
+                            }
+                        }
+                    }
                     _ => self.infer_expr(right),
                 }
             }
@@ -252,21 +307,54 @@ impl Checker {
 
     pub(crate) fn check_stmt(&mut self, stmt: &mut ast::Stmt) {
         match stmt {
-            ast::Stmt::Let { name, ty, value, .. } | ast::Stmt::Var { name, ty, value, .. } => {
+            ast::Stmt::Let { name, ty, value, .. } => {
                 let val_ity = self.infer_expr(value);
                 let final_ty = if let Some(te) = ty {
                     let declared = self.resolve_type_expr(te);
                     self.constrain(InferTy::from_ty(&declared), val_ity, format!("let {}", name));
                     declared
-                } else { val_ity.to_ty(&self.solutions) };
+                } else {
+                    let t = val_ity.to_ty(&self.solutions);
+                    // Auto-unwrap Result in do blocks
+                    if self.env.in_effect {
+                        match t { Ty::Result(ok, _) => *ok, other => other }
+                    } else { t }
+                };
                 self.env.define_var(name, final_ty);
+            }
+            ast::Stmt::Var { name, ty, value, .. } => {
+                let val_ity = self.infer_expr(value);
+                let final_ty = if let Some(te) = ty {
+                    let declared = self.resolve_type_expr(te);
+                    self.constrain(InferTy::from_ty(&declared), val_ity, format!("let {}", name));
+                    declared
+                } else {
+                    let t = val_ity.to_ty(&self.solutions);
+                    if self.env.in_effect {
+                        match t { Ty::Result(ok, _) => *ok, other => other }
+                    } else { t }
+                };
+                self.env.define_var(name, final_ty);
+                self.env.mutable_vars.insert(name.clone());
             }
             ast::Stmt::LetDestructure { pattern, value, .. } => {
                 let val_ity = self.infer_expr(value);
                 let val_ty = val_ity.to_ty(&self.solutions);
                 self.bind_pattern(pattern, &val_ty);
             }
-            ast::Stmt::Assign { value, .. } => { self.infer_expr(value); }
+            ast::Stmt::Assign { name, value, .. } => {
+                self.infer_expr(value);
+                if self.env.lookup_var(name).is_some() && !self.env.mutable_vars.contains(name.as_str()) {
+                    let hint = if self.env.param_vars.contains(name.as_str()) {
+                        format!("'{}' is a function parameter (immutable). Use a local copy: var {0}_ = {0}", name)
+                    } else {
+                        format!("Use 'var {0} = ...' instead of 'let {0} = ...' to declare a mutable variable", name)
+                    };
+                    self.diagnostics.push(super::err(
+                        format!("cannot reassign immutable binding '{}'", name),
+                        hint, format!("{} = ...", name)));
+                }
+            }
             ast::Stmt::IndexAssign { index, value, .. } => { self.infer_expr(index); self.infer_expr(value); }
             ast::Stmt::FieldAssign { value, .. } => { self.infer_expr(value); }
             ast::Stmt::Guard { cond, else_, .. } => { self.infer_expr(cond); self.infer_expr(else_); }

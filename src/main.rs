@@ -246,7 +246,13 @@ fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::Em
         }
         // Lower to IR only if no parse errors (partial AST can't produce valid IR)
         if !has_parse_errors {
-            ir_program = Some(almide::lower::lower_program(&program, &checker.expr_types, &checker.env));
+            let ir = almide::lower::lower_program(&program, &checker.expr_types, &checker.env);
+            // Emit unused variable warnings
+            let unused_warnings = almide::ir::collect_unused_var_warnings(&ir, file);
+            for d in &unused_warnings {
+                eprintln!("{}", d.display_with_source(&source_text));
+            }
+            ir_program = Some(ir);
         }
         // Lower user modules to IR (skip TOML-defined stdlib — they use generated codegen)
         for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
