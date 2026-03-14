@@ -2,8 +2,8 @@
   "name": "lambda-syntax",
   "hypothesis": "Short lambda (x) => does not degrade modification survival rate vs fn(x) =>",
   "variants": [
-    { "name": "fn-lambda", "dir": "variant-fn" },
-    { "name": "paren-lambda", "dir": "variant-paren" }
+    { "name": "fn-lambda", "dir": "variant-fn", "transpile_regex": "" },
+    { "name": "paren-lambda", "dir": "variant-paren", "transpile_regex": "paren-to-fn-lambda" }
   ],
   "tasks": [
     "t01_add_filter",

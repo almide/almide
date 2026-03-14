@@ -6,6 +6,7 @@ import fs
 import process
 import http
 import env
+import regex
 
 // ── Config ──
 
@@ -90,6 +91,7 @@ effect fn run_experiment() -> Result[Unit, String] = {
     for variant_json in variants {
       let variant_name = json.get_string(variant_json, "name").unwrap_or("")
       let variant_dir = json.get_string(variant_json, "dir").unwrap_or("")
+      let transpile_mode = json.get_string(variant_json, "transpile_regex").unwrap_or("")
 
       // Load layer2 for this variant
       let layer2_path = "prompts/layer2_${variant_name}.md"
@@ -130,8 +132,11 @@ effect fn run_experiment() -> Result[Unit, String] = {
           // Extract code from response
           let modified_code = extract_code(llm_response)
 
+          // Transpile if needed (convert experimental syntax to current syntax for compilation)
+          let compilable_code = transpile(modified_code, transpile_mode)
+
           // Evaluate: write to temp file, compile, test
-          let eval_result = evaluate(modified_code, test_code, task_name)
+          let eval_result = evaluate(compilable_code, test_code, task_name)
 
           let result = make_result_json(experiment_name, variant_name, model_name, task_name, trial_num, eval_result)
 
@@ -270,6 +275,66 @@ effect fn call_openai(model_id: String, system: String, user: String) -> Result[
     none => "",
   }
   ok(text)
+}
+
+// ── Transpile ──
+
+fn transpile(code: String, mode: String) -> String =
+  if mode == "" then {
+    code
+  } else if mode == "paren-to-fn-lambda" then {
+    // Transform (params) => to fn(params) =>
+    // Strategy: find ") =>" and look backwards for matching "("
+    // If not preceded by "fn", insert "fn"
+    let lines = string.split(code, "\n")
+    let converted = list.map(lines, fn(line) => transpile_line_paren_to_fn(line))
+    string.join(converted, "\n")
+  } else {
+    code
+  }
+
+fn transpile_line_paren_to_fn(line: String) -> String = {
+  // Find all occurrences of ") =>" and check if preceded by "fn("
+  // Simple approach: replace known patterns
+  // "(x) =>" -> "fn(x) =>" but "fn(x) =>" stays
+  var result = line
+
+  // Replace ") => " pattern where not preceded by fn
+  // We do this by first marking fn( cases, then adding fn to bare ( cases
+  // Simpler: just add fn before every "(" that's followed by idents and ") =>"
+  // and then fix double fn
+
+  // Step 1: Find ") =>" positions and work backwards
+  // For simplicity, use string.replace for common patterns
+  // The LLM will use consistent param names from the examples
+
+  // Single char params
+  let singles = ["a", "b", "c", "e", "f", "i", "k", "n", "p", "r", "s", "u", "v", "x", "y"]
+  for s in singles {
+    result = string.replace(result, "(${s}) =>", "fn(${s}) =>")
+  }
+
+  // Common multi-char params
+  let words = ["acc", "item", "user", "val", "key", "elem", "prev", "curr", "name", "row", "col"]
+  for w in words {
+    result = string.replace(result, "(${w}) =>", "fn(${w}) =>")
+  }
+
+  // Two params: common combos
+  let pairs = [
+    "(acc, x)", "(acc, u)", "(acc, p)", "(acc, i)", "(acc, s)",
+    "(acc, item)", "(acc, val)", "(acc, n)", "(acc, e)",
+    "(a, b)", "(x, y)", "(k, v)", "(key, val)",
+  ]
+  for pair in pairs {
+    result = string.replace(result, "${pair} =>", "fn${pair} =>")
+  }
+
+  // Fix double fn
+  result = string.replace(result, "fn(fn(", "fn(")
+  result = string.replace(result, "fnfn(", "fn(")
+
+  result
 }
 
 // ── Code Extraction ──
