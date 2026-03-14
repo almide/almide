@@ -535,8 +535,74 @@ effect fn print_summary(results: List[Json]) -> Unit = {
     for task_name in task_names {
       println(build_task_row(results, model_name, task_name, variant_names))
     }
+
+    // Fisher's exact test (if exactly 2 variants)
+    if list.len(variant_names) == 2 then {
+      let v1 = match list.get(variant_names, 0) { some(v) => v, none => "" }
+      let v2 = match list.get(variant_names, 1) { some(v) => v, none => "" }
+      let (p1, t1) = count_passed(results, model_name, v1)
+      let (p2, t2) = count_passed(results, model_name, v2)
+      let a = p1       // variant 1 pass
+      let b = t1 - p1  // variant 1 fail
+      let c = p2       // variant 2 pass
+      let d = t2 - p2  // variant 2 fail
+      let p = fishers_exact_p(a, b, c, d)
+      let p_str = float.to_fixed(p, 4)
+      let sig = if p < 0.05 then " *" else if p < 0.10 then " ." else ""
+      println("  Fisher's exact test: p = ${p_str}${sig}")
+    } else {
+      ()
+    }
     println("")
   }
+}
+
+// ── Fisher's Exact Test ──
+
+fn log_choose(n: Int, k: Int) -> Float = {
+  // log(C(n, k)) = log_gamma(n+1) - log_gamma(k+1) - log_gamma(n-k+1)
+  math.log_gamma(int.to_float(n + 1))
+    - math.log_gamma(int.to_float(k + 1))
+    - math.log_gamma(int.to_float(n - k + 1))
+}
+
+fn hypergeometric_log_pmf(a: Int, b: Int, c: Int, d: Int) -> Float = {
+  // P(X=a) for 2x2 table [[a,b],[c,d]]
+  let n = a + b + c + d
+  log_choose(a + b, a) + log_choose(c + d, c) - log_choose(n, a + c)
+}
+
+fn fishers_exact_p(a: Int, b: Int, c: Int, d: Int) -> Float = {
+  // Two-tailed Fisher's exact test
+  // Sum probabilities of all tables as or more extreme than observed
+  let n = a + b + c + d
+  let r1 = a + b   // row 1 total
+  let c1 = a + c   // col 1 total
+  let observed_log_p = hypergeometric_log_pmf(a, b, c, d)
+  let observed_p = math.exp(observed_log_p)
+
+  // Enumerate all possible values of a (0..min(r1, c1))
+  let max_a = math.min(r1, c1)
+  var p_value = 0.0
+  for i in 0..=max_a {
+    let bi = r1 - i
+    let ci = c1 - i
+    let di = n - r1 - ci
+    if bi >= 0 and ci >= 0 and di >= 0 then {
+      let log_pi = hypergeometric_log_pmf(i, bi, ci, di)
+      let pi = math.exp(log_pi)
+      // Include if probability <= observed (two-tailed)
+      if pi <= observed_p + 0.0000001 then {
+        p_value = p_value + pi
+      } else {
+        ()
+      }
+    } else {
+      ()
+    }
+  }
+  // Clamp to [0, 1]
+  math.fmin(1.0, p_value)
 }
 
 // ── Result JSON Builder ──
