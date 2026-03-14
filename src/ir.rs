@@ -293,17 +293,62 @@ pub struct IrTypeDecl {
     pub visibility: IrVisibility,
 }
 
+// ── Function parameter metadata ─────────────────────────────────
+
+/// Borrow classification for a function parameter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ParamBorrow {
+    /// Parameter is owned (String, Vec<T>)
+    Own,
+    /// Parameter can be borrowed as &T
+    Ref,
+    /// Parameter can be borrowed as &str (for String params)
+    RefStr,
+    /// Parameter can be borrowed as &[T] (for Vec<T> params)
+    RefSlice,
+}
+
+/// Info about an open record field (destructured from a record param).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenFieldInfo {
+    pub name: String,
+    pub ty: Ty,
+}
+
+/// Info about an open record parameter (destructured struct fields as params).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenRecordInfo {
+    pub struct_name: String,
+    pub fields: Vec<OpenFieldInfo>,
+}
+
+/// A fully-resolved function parameter in the IR.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IrParam {
+    pub var: VarId,
+    pub ty: Ty,
+    pub name: String,
+    pub borrow: ParamBorrow,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub open_record: Option<OpenRecordInfo>,
+}
+
 // ── Top-level structures ────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IrFunction {
     pub name: String,
-    pub params: Vec<(VarId, Ty)>,
+    pub params: Vec<IrParam>,
     pub ret_ty: Ty,
     pub body: IrExpr,
     pub is_effect: bool,
     pub is_async: bool,
     pub is_test: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generics: Option<Vec<crate::ast::GenericParam>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extern_attrs: Vec<crate::ast::ExternAttr>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -181,12 +181,13 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<(usize, usize), T
 
     for decl in &prog.decls {
         match decl {
-            ast::Decl::Fn { name, params, body: Some(body), effect, r#async, span, .. } => {
+            ast::Decl::Fn { name, params, body: Some(body), effect, r#async, span, generics, extern_attrs, .. } => {
                 functions.push(lower_fn(&mut ctx, name, params, body,
-                    effect.unwrap_or(false), r#async.unwrap_or(false), false, *span));
+                    effect.unwrap_or(false), r#async.unwrap_or(false), false, *span,
+                    generics.clone(), extern_attrs.clone()));
             }
             ast::Decl::Test { name, body, span, .. } => {
-                functions.push(lower_fn(&mut ctx, name, &[], body, false, false, true, *span));
+                functions.push(lower_fn(&mut ctx, name, &[], body, false, false, true, *span, None, vec![]));
             }
             ast::Decl::TopLet { name, value, span, .. } => {
                 let ir_value = lower_expr(&mut ctx, value);
@@ -203,9 +204,10 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<(usize, usize), T
             }
             ast::Decl::Impl { methods, .. } => {
                 for m in methods {
-                    if let ast::Decl::Fn { name, params, body: Some(body), effect, r#async, span, .. } = m {
+                    if let ast::Decl::Fn { name, params, body: Some(body), effect, r#async, span, generics, extern_attrs, .. } = m {
                         functions.push(lower_fn(&mut ctx, name, params, body,
-                            effect.unwrap_or(false), r#async.unwrap_or(false), false, *span));
+                            effect.unwrap_or(false), r#async.unwrap_or(false), false, *span,
+                            generics.clone(), extern_attrs.clone()));
                     }
                 }
             }
@@ -219,12 +221,19 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<(usize, usize), T
 fn lower_fn(
     ctx: &mut LowerCtx, name: &str, params: &[ast::Param], body: &ast::Expr,
     is_effect: bool, is_async: bool, is_test: bool, _span: Option<ast::Span>,
+    generics: Option<Vec<ast::GenericParam>>, extern_attrs: Vec<ast::ExternAttr>,
 ) -> IrFunction {
     ctx.push_scope();
-    let ir_params: Vec<(VarId, Ty)> = params.iter().map(|p| {
+    let ir_params: Vec<IrParam> = params.iter().map(|p| {
         let ty = resolve_type_expr(&p.ty);
         let var = ctx.define_var(&p.name, ty.clone(), Mutability::Let, None);
-        (var, ty)
+        IrParam {
+            var,
+            ty,
+            name: p.name.clone(),
+            borrow: ParamBorrow::Own,
+            open_record: None,
+        }
     }).collect();
     let ir_body = lower_expr(ctx, body);
     // Use declared return type from env if available, else body type
@@ -232,7 +241,7 @@ fn lower_fn(
         .map(|sig| sig.ret.clone())
         .unwrap_or_else(|| ir_body.ty.clone());
     ctx.pop_scope();
-    IrFunction { name: name.to_string(), params: ir_params, ret_ty, body: ir_body, is_effect, is_async, is_test }
+    IrFunction { name: name.to_string(), params: ir_params, ret_ty, body: ir_body, is_effect, is_async, is_test, generics, extern_attrs }
 }
 
 // ── Type declaration lowering ───────────────────────────────────
