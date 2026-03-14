@@ -313,7 +313,13 @@ impl Checker {
                     let declared = self.resolve_type_expr(te);
                     self.constrain(InferTy::from_ty(&declared), val_ity, format!("let {}", name));
                     declared
-                } else { val_ity.to_ty(&self.solutions) };
+                } else {
+                    let t = val_ity.to_ty(&self.solutions);
+                    // Auto-unwrap Result in do blocks
+                    if self.env.in_effect {
+                        match t { Ty::Result(ok, _) => *ok, other => other }
+                    } else { t }
+                };
                 self.env.define_var(name, final_ty);
             }
             ast::Stmt::Var { name, ty, value, .. } => {
@@ -322,7 +328,12 @@ impl Checker {
                     let declared = self.resolve_type_expr(te);
                     self.constrain(InferTy::from_ty(&declared), val_ity, format!("let {}", name));
                     declared
-                } else { val_ity.to_ty(&self.solutions) };
+                } else {
+                    let t = val_ity.to_ty(&self.solutions);
+                    if self.env.in_effect {
+                        match t { Ty::Result(ok, _) => *ok, other => other }
+                    } else { t }
+                };
                 self.env.define_var(name, final_ty);
                 self.env.mutable_vars.insert(name.clone());
             }
