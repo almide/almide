@@ -17,7 +17,7 @@ Rewrite the Almide compiler in Almide itself, replacing the current Rust impleme
 
 ## Prerequisites Before Starting
 
-- [ ] trait/impl system complete
+- [ ] type system extensions complete (row polymorphism, container protocols — see [Type System Extensions](../active/type-system.md))
 - [ ] Type system extensions done
 - [ ] Generics fully stable (recursive variants, trait bounds)
 - [ ] Benchmark results competitive with Python/Go across multiple tasks

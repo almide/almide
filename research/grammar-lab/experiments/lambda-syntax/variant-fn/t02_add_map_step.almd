@@ -1,0 +1,5 @@
+fn process(xs: List[Int]) -> List[Int] =
+  xs
+    |> list.filter(fn(x) => x > 0)
+    |> list.map(fn(x) => x * 10)
+    |> list.sort()

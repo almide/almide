@@ -1,0 +1,90 @@
+
+// do block in pure functions — no effect fn, no Result required
+// ── guard else break in pure fn ──
+fn sum_until(n: Int) -> Int = {
+  var total = 0;
+  var i = 1;
+  do {
+    guard i <= n else break;
+    total = total + i;
+    i = i + 1;
+  };
+  total
+}
+
+test "do guard break in pure fn" {
+  assert_eq(sum_until(5), 15);
+  assert_eq(sum_until(0), 0);
+  assert_eq(sum_until(1), 1);
+  assert_eq(sum_until(10), 55)
+}
+
+// ── guard else continue ──
+fn sum_evens(n: Int) -> Int = {
+  var total = 0;
+  var i = 0;
+  do {
+    guard i < n else break;
+    i = i + 1;
+    guard i % 2 == 0 else continue;
+    total = total + i;
+  };
+  total
+}
+
+test "do guard continue in pure fn" {
+  assert_eq(sum_evens(6), 12);
+  assert_eq(sum_evens(1), 0);
+  assert_eq(sum_evens(2), 2)
+}
+
+// ── do block as statement in multi-statement body ──
+fn count_up_to(limit: Int) -> Int = {
+  var count = 0;
+  do {
+    guard count < limit else break;
+    count = count + 1;
+  };
+  count
+}
+
+test "do block count up" {
+  assert_eq(count_up_to(0), 0);
+  assert_eq(count_up_to(3), 3);
+  assert_eq(count_up_to(100), 100)
+}
+
+// ── guard in braceless body (no do block) ──
+fn clamp_positive(x: Int) -> Int = {
+  guard x > 0 else 0;
+  x
+}
+
+test "guard in braceless body" {
+  assert_eq(clamp_positive(5), 5);
+  assert_eq(clamp_positive(0), 0);
+  assert_eq(clamp_positive(0 - 3), 0)
+}
+
+// ── multiple do blocks in sequence ──
+fn zigzag(n: Int) -> Int = {
+  var total = 0;
+  var i = 0;
+  do {
+    guard i < n else break;
+    total = total + i;
+    i = i + 1;
+  };
+  var j = n;
+  do {
+    guard j > 0 else break;
+    total = total + j;
+    j = j - 1;
+  };
+  total
+}
+
+test "multiple do blocks in pure fn" {
+  assert_eq(zigzag(0), 0);
+  assert_eq(zigzag(3), 9)
+}

@@ -315,3 +315,126 @@ fn fmt_for_in_comments() {
     let out = roundtrip("module app\neffect fn main(_a: List[String]) -> Result[Unit, String] = {\n  for x in xs {\n    // process item\n    println(x)\n  }\n  ok(())\n}");
     assert!(out.contains("// process item"));
 }
+
+// ---- Roundtrip & Idempotency over all spec/ files ----
+
+#[test]
+fn fmt_roundtrip_idempotency_all_spec_files() {
+    let spec_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("spec");
+    let mut tested = 0u32;
+    let mut skipped = Vec::new();
+    let mut failures = Vec::new();
+
+    for entry in walkdir(spec_dir.as_path()) {
+        let path = entry;
+        let source = match std::fs::read_to_string(&path) {
+            Ok(s) => s,
+            Err(_) => {
+                skipped.push(format!("{}: read error", path.display()));
+                continue;
+            }
+        };
+
+        // First parse
+        let tokens1 = Lexer::tokenize(&source);
+        let mut parser1 = Parser::new(tokens1);
+        let prog1 = match parser1.parse() {
+            Ok(p) => p,
+            Err(_) => {
+                skipped.push(format!("{}: parse error", path.display()));
+                continue;
+            }
+        };
+
+        // Format once
+        let formatted1 = fmt::format_program(&prog1);
+
+        // Reparse the formatted output
+        let tokens2 = Lexer::tokenize(&formatted1);
+        let mut parser2 = Parser::new(tokens2);
+        let prog2 = match parser2.parse() {
+            Ok(p) => p,
+            Err(e) => {
+                failures.push(format!(
+                    "{}: formatted output failed to parse: {}\n--- formatted output ---\n{}",
+                    path.display(),
+                    e,
+                    formatted1
+                ));
+                continue;
+            }
+        };
+
+        // Format again
+        let formatted2 = fmt::format_program(&prog2);
+
+        // Idempotency check: format(format(x)) == format(x)
+        if formatted1 != formatted2 {
+            // Compute a concise diff: find first diverging line
+            let lines1: Vec<&str> = formatted1.lines().collect();
+            let lines2: Vec<&str> = formatted2.lines().collect();
+            let mut diff_info = String::new();
+            for (i, (l1, l2)) in lines1.iter().zip(lines2.iter()).enumerate() {
+                if l1 != l2 {
+                    diff_info.push_str(&format!(
+                        "  first diff at line {}: fmt1={:?} fmt2={:?}\n",
+                        i + 1, l1, l2
+                    ));
+                    break;
+                }
+            }
+            if lines1.len() != lines2.len() {
+                diff_info.push_str(&format!(
+                    "  line count: fmt1={} fmt2={}\n",
+                    lines1.len(), lines2.len()
+                ));
+            }
+            failures.push(format!(
+                "{}: formatter is not idempotent\n{}",
+                path.display(),
+                diff_info,
+            ));
+            continue;
+        }
+
+        tested += 1;
+    }
+
+    eprintln!(
+        "fmt roundtrip/idempotency: {} files tested, {} skipped",
+        tested,
+        skipped.len()
+    );
+    for s in &skipped {
+        eprintln!("  SKIP: {}", s);
+    }
+
+    if !failures.is_empty() {
+        for f in &failures {
+            eprintln!("  FAIL: {}", f);
+        }
+        panic!(
+            "{} file(s) failed roundtrip/idempotency check",
+            failures.len()
+        );
+    }
+
+    assert!(tested > 0, "no spec files were tested");
+}
+
+/// Recursively collect all .almd files under a directory.
+fn walkdir(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut results = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                results.extend(walkdir(&path));
+            } else if path.extension().and_then(|e| e.to_str()) == Some("almd") {
+                results.push(path);
+            }
+        }
+    }
+    results.sort();
+    results
+}

@@ -1,0 +1,11 @@
+test "big_numbers filters range" {
+  assert_eq(big_numbers([1, 2, 3, 5, 7, 9, 10]), [3, 5, 7])
+}
+
+test "double_all unchanged" {
+  assert_eq(double_all([1, 2, 3]), [2, 4, 6])
+}
+
+test "total unchanged" {
+  assert_eq(total([1, 2, 3]), 6)
+}

@@ -75,6 +75,15 @@ fn almide_rt_string_to_lower(s: &str) -> String {
 }
 
 #[inline]
+fn almide_rt_string_capitalize(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        None => String::new(),
+        Some(f) => f.to_uppercase().to_string() + c.as_str(),
+    }
+}
+
+#[inline]
 fn almide_rt_string_to_int(s: &str) -> Result<i64, String> {
     s.parse::<i64>().map_err(|e| e.to_string())
 }

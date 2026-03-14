@@ -111,10 +111,16 @@ impl Emitter {
             false
         };
 
+        // Clone variable subjects to avoid use-after-move when matched multiple times
+        let subj_is_var = matches!(&subject.kind, IrExprKind::Var { .. });
+        let subj_needs_clone = subj_is_var && !Self::is_copy_ty(&subject.ty);
+
         let subj_expr = if has_string_in_option {
             format!("{}.as_deref()", subj)
         } else if has_bare_string && !subj_is_borrowed {
             format!("{}.as_str()", subj)
+        } else if subj_needs_clone {
+            format!("{}.clone()", subj)
         } else {
             subj
         };
@@ -411,7 +417,15 @@ impl Emitter {
             }
             Ty::Named(name, args) => {
                 if args.is_empty() {
-                    name.clone()
+                    match name.as_str() {
+                        "Json" => "AlmideJson".to_string(),
+                        "JsonPath" => "AlmideJsonPath".to_string(),
+                        "IoError" => "AlmideIoError".to_string(),
+                        "Request" => "AlmideHttpRequest".to_string(),
+                        "Response" => "AlmideHttpResponse".to_string(),
+                        "Path" => "String".to_string(),
+                        _ => name.clone(),
+                    }
                 } else {
                     let ts: Vec<String> = args.iter().map(|a| self.ir_ty_to_rust(a)).collect();
                     format!("{}<{}>", name, ts.join(", "))

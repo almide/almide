@@ -35,6 +35,7 @@ pub enum TypeExpr {
     Simple { name: String },
     Generic { name: String, args: Vec<TypeExpr> },
     Record { fields: Vec<FieldType> },
+    OpenRecord { fields: Vec<FieldType> },
     Fn { params: Vec<TypeExpr>, ret: Box<TypeExpr> },
     Tuple { elements: Vec<TypeExpr> },
     Newtype { inner: Box<TypeExpr> },

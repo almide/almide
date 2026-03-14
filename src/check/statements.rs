@@ -38,9 +38,13 @@ impl Checker {
                     // so structural comparison works with anonymous record literals
                     let t_resolved = self.env.resolve_named(&t);
                     if !t_resolved.compatible(&vt) {
+                        let hint = Self::hint_with_conversion(
+                            "Change the type annotation or the value",
+                            &t, &vt,
+                        );
                         self.push_diagnostic(err(
                             format!("cannot assign {} to variable '{}' of type {}", vt.display(), name, t.display()),
-                            "Change the type annotation or the value",
+                            hint,
                             format!("let {} = ...", name),
                         ));
                     }
@@ -59,9 +63,13 @@ impl Checker {
                     let t = expected_ty.clone().unwrap_or_else(|| self.resolve_type_expr(te));
                     let t_resolved = self.env.resolve_named(&t);
                     if !t_resolved.compatible(&vt) {
+                        let hint = Self::hint_with_conversion(
+                            "Change the type annotation or the value",
+                            &t, &vt,
+                        );
                         self.push_diagnostic(err(
                             format!("cannot assign {} to variable '{}' of type {}", vt.display(), name, t.display()),
-                            "Change the type annotation or the value",
+                            hint,
                             format!("var {} = ...", name),
                         ));
                     }
@@ -103,9 +111,13 @@ impl Checker {
                         }
                         self.push_diagnostic(diag);
                     } else if !var_ty.compatible(&vt) {
+                        let hint = Self::hint_with_conversion(
+                            "Assignment must match the variable's declared type",
+                            &var_ty, &vt,
+                        );
                         let mut diag = err(
                             format!("cannot assign {} to variable '{}' of type {}", vt.display(), name, var_ty.display()),
-                            "Assignment must match the variable's declared type",
+                            hint,
                             format!("{} = ...", name),
                         );
                         if let Some((decl_line, decl_col)) = self.env.var_decl_loc(name) {
@@ -204,7 +216,7 @@ impl Checker {
                             rec_fields.into_iter().map(|(n, t, _)| (n, t)).collect()
                         } else { vec![] }
                     } else { vec![] }
-                } else if let Ty::Record { fields: rec_fields } = subject_ty {
+                } else if let Ty::Record { fields: rec_fields } | Ty::OpenRecord { fields: rec_fields } = subject_ty {
                     rec_fields.clone()
                 } else { vec![] };
                 for field in fields {

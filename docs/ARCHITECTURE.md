@@ -116,7 +116,7 @@ Almide supports generics for type declarations (`type Pair[A, B] = { first: A, s
 
 ### Why directory modules?
 
-The compiler was originally single-file-per-module. As it grew, `check.rs` (860 lines), `parser/expressions.rs` (653 lines), and `emit_rust.rs` became hard to navigate. The current structure keeps every file under 600 lines while preserving `impl` block cohesion via `pub(crate)` visibility.
+The compiler was originally single-file-per-module. As it grew, `check.rs` (860 lines), `parser/expressions.rs` (653 lines), and the emitters became hard to navigate. These were split into directory modules: `check/` (5 files), `parser/` (7 files), `emit_rust/` (5 files), `emit_ts/` (4 files). The current structure keeps every file under 600 lines while preserving `impl` block cohesion via `pub(crate)` visibility.
 
 ### Effect system
 

@@ -9,7 +9,7 @@
 ///
 /// Every IR node carries full `Ty` from the checker's `expr_types` map.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use crate::ast;
 use crate::ir::*;
 use crate::types::{Ty, TypeEnv};
@@ -21,6 +21,9 @@ pub struct LowerCtx<'a> {
     scopes: Vec<HashMap<String, VarId>>,
     expr_types: &'a HashMap<(usize, usize), Ty>,
     env: &'a TypeEnv,
+    /// When true, skip span-based type lookups (used for re-parsed string interpolation
+    /// expressions whose bogus spans would match wrong entries in expr_types).
+    skip_span_lookup: bool,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -29,6 +32,7 @@ impl<'a> LowerCtx<'a> {
             var_table: VarTable::new(),
             scopes: vec![HashMap::new()],
             expr_types,
+            skip_span_lookup: false,
             env,
         }
     }
@@ -54,9 +58,106 @@ impl<'a> LowerCtx<'a> {
     }
 
     fn expr_ty(&self, expr: &ast::Expr) -> Ty {
-        expr.span()
-            .and_then(|s| self.expr_types.get(&(s.line, s.col)).cloned())
-            .unwrap_or(Ty::Unknown)
+        // First try the checker's span-based type lookup (skip for re-parsed interpolation exprs)
+        if !self.skip_span_lookup {
+            let ty = expr.span()
+                .and_then(|s| self.expr_types.get(&(s.line, s.col)).cloned())
+                .unwrap_or(Ty::Unknown);
+            if !matches!(ty, Ty::Unknown) {
+                return ty;
+            }
+        }
+        // Fallback: infer type from the expression structure
+        self.infer_expr_ty(expr)
+    }
+
+    /// Structural type inference when the checker's span-based lookup fails.
+    /// This handles cases where the span doesn't match (e.g., cross-module expressions).
+    fn infer_expr_ty(&self, expr: &ast::Expr) -> Ty {
+        match expr {
+            ast::Expr::Ident { name, .. } => {
+                if let Some(var_id) = self.lookup_var(name) {
+                    return self.var_table.get(var_id).ty.clone();
+                }
+                Ty::Unknown
+            }
+            ast::Expr::Member { object, field, .. } => {
+                let obj_ty = self.expr_ty(object);
+                self.resolve_field_ty(&obj_ty, field)
+            }
+            ast::Expr::Call { callee, .. } => {
+                if let ast::Expr::Member { object, field, .. } = callee.as_ref() {
+                    // Try direct module call (e.g., grammar.keyword_groups())
+                    if let Some((mod_path, func)) = flatten_module_call(self, object, field) {
+                        let key = format!("{}.{}", mod_path, func);
+                        if let Some(sig) = self.env.functions.get(&key) {
+                            return sig.ret.clone();
+                        }
+                        // Try stdlib signature
+                        if let Some(sig) = crate::stdlib::lookup_sig(&mod_path, &func) {
+                            let mut bindings = std::collections::HashMap::new();
+                            // No receiver unification for direct module calls
+                            return crate::types::substitute(&sig.ret, &bindings);
+                        }
+                    }
+                    // Try UFCS: infer object type, determine module, look up signature
+                    let obj_ty = self.expr_ty(object);
+                    let module = match &obj_ty {
+                        Ty::String => Some("string"),
+                        Ty::List(_) => Some("list"),
+                        Ty::Map(_, _) => Some("map"),
+                        Ty::Int => Some("int"),
+                        Ty::Float => Some("float"),
+                        _ => None,
+                    };
+                    if let Some(module) = module {
+                        if let Some(sig) = crate::stdlib::lookup_sig(module, field) {
+                            let mut bindings = std::collections::HashMap::new();
+                            if !sig.params.is_empty() {
+                                crate::types::unify(&sig.params[0].1, &obj_ty, &mut bindings);
+                            }
+                            return crate::types::substitute(&sig.ret, &bindings);
+                        }
+                    }
+                }
+                Ty::Unknown
+            }
+            ast::Expr::String { .. } | ast::Expr::InterpolatedString { .. } => Ty::String,
+            ast::Expr::Int { .. } => Ty::Int,
+            ast::Expr::Float { .. } => Ty::Float,
+            ast::Expr::Bool { .. } => Ty::Bool,
+            ast::Expr::List { .. } => Ty::List(Box::new(Ty::Unknown)),
+            _ => Ty::Unknown,
+        }
+    }
+
+    /// Resolve the type of a field access on a known object type.
+    fn resolve_field_ty(&self, obj_ty: &Ty, field: &str) -> Ty {
+        match obj_ty {
+            Ty::Record { fields } | Ty::OpenRecord { fields } => {
+                for (fname, fty) in fields {
+                    if fname == field { return fty.clone(); }
+                }
+                Ty::Unknown
+            }
+            Ty::Named(name, _) => {
+                // Look up type definition from the checker's environment.
+                // Try direct name first, then module-qualified name (e.g., "grammar.TypeName")
+                // since cross-module types are stored with module prefix.
+                if let Some(def) = self.env.types.get(name) {
+                    return self.resolve_field_ty(def, field);
+                }
+                // Try module-qualified lookup: scan for "*.TypeName"
+                let suffix = format!(".{}", name);
+                for (key, def) in &self.env.types {
+                    if key.ends_with(&suffix) {
+                        return self.resolve_field_ty(def, field);
+                    }
+                }
+                Ty::Unknown
+            }
+            _ => Ty::Unknown,
+        }
     }
 
     fn mk(&self, kind: IrExprKind, ty: Ty, span: Option<ast::Span>) -> IrExpr {
@@ -76,6 +177,7 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<(usize, usize), T
     let mut ctx = LowerCtx::new(expr_types, env);
     let mut functions = Vec::new();
     let mut top_lets = Vec::new();
+    let mut type_decls = Vec::new();
 
     for decl in &prog.decls {
         match decl {
@@ -96,6 +198,9 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<(usize, usize), T
                 let var = ctx.define_var(name, ty.clone(), Mutability::Let, *span);
                 top_lets.push(IrTopLet { var, ty, value: ir_value });
             }
+            ast::Decl::Type { name, ty, deriving, visibility, generics, .. } => {
+                type_decls.push(lower_type_decl(&mut ctx, name, ty, deriving, visibility, generics.as_ref()));
+            }
             ast::Decl::Impl { methods, .. } => {
                 for m in methods {
                     if let ast::Decl::Fn { name, params, body: Some(body), effect, r#async, span, .. } = m {
@@ -108,7 +213,7 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<(usize, usize), T
         }
     }
 
-    IrProgram { functions, top_lets, var_table: ctx.var_table }
+    IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table }
 }
 
 fn lower_fn(
@@ -128,6 +233,104 @@ fn lower_fn(
         .unwrap_or_else(|| ir_body.ty.clone());
     ctx.pop_scope();
     IrFunction { name: name.to_string(), params: ir_params, ret_ty, body: ir_body, is_effect, is_async, is_test }
+}
+
+// ── Type declaration lowering ───────────────────────────────────
+
+/// Check if a TypeExpr references a given type name (for detecting recursive variants).
+fn type_references_name(ty: &ast::TypeExpr, target: &str) -> bool {
+    match ty {
+        ast::TypeExpr::Simple { name } => name == target,
+        ast::TypeExpr::Generic { name, args } => {
+            name == target || args.iter().any(|a| type_references_name(a, target))
+        }
+        ast::TypeExpr::Record { fields } => fields.iter().any(|f| type_references_name(&f.ty, target)),
+        ast::TypeExpr::Fn { params, ret } => {
+            params.iter().any(|p| type_references_name(p, target))
+                || type_references_name(ret, target)
+        }
+        ast::TypeExpr::Tuple { elements } => elements.iter().any(|e| type_references_name(e, target)),
+        _ => false,
+    }
+}
+
+fn lower_type_decl(
+    ctx: &mut LowerCtx,
+    name: &str,
+    ty: &ast::TypeExpr,
+    deriving: &Option<Vec<String>>,
+    visibility: &ast::Visibility,
+    generics: Option<&Vec<ast::GenericParam>>,
+) -> IrTypeDecl {
+    let vis = match visibility {
+        ast::Visibility::Public | ast::Visibility::Mod => IrVisibility::Public,
+        ast::Visibility::Local => IrVisibility::Private,
+    };
+
+    let kind = match ty {
+        ast::TypeExpr::Record { fields } => {
+            let ir_fields = fields.iter().map(|f| {
+                IrFieldDecl {
+                    name: f.name.clone(),
+                    ty: resolve_type_expr(&f.ty),
+                    default: f.default.as_ref().map(|e| lower_expr(ctx, e)),
+                }
+            }).collect();
+            IrTypeDeclKind::Record { fields: ir_fields }
+        }
+        ast::TypeExpr::Variant { cases } => {
+            let is_generic = matches!(generics, Some(gs) if !gs.is_empty());
+            let mut boxed_args: HashSet<(String, usize)> = HashSet::new();
+            let mut boxed_record_fields: HashSet<(String, String)> = HashSet::new();
+
+            let ir_cases = cases.iter().map(|case| {
+                match case {
+                    ast::VariantCase::Unit { name: cname } => {
+                        IrVariantDecl { name: cname.clone(), kind: IrVariantKind::Unit }
+                    }
+                    ast::VariantCase::Tuple { name: cname, fields } => {
+                        // Track which args are recursive (need Box wrapping)
+                        for (i, f) in fields.iter().enumerate() {
+                            if type_references_name(f, name) {
+                                boxed_args.insert((cname.clone(), i));
+                            }
+                        }
+                        let tys = fields.iter().map(|f| resolve_type_expr(f)).collect();
+                        IrVariantDecl { name: cname.clone(), kind: IrVariantKind::Tuple { fields: tys } }
+                    }
+                    ast::VariantCase::Record { name: cname, fields } => {
+                        for (i, f) in fields.iter().enumerate() {
+                            if type_references_name(&f.ty, name) {
+                                boxed_args.insert((cname.clone(), i));
+                                boxed_record_fields.insert((cname.clone(), f.name.clone()));
+                            }
+                        }
+                        let ir_fields = fields.iter().map(|f| {
+                            IrFieldDecl {
+                                name: f.name.clone(),
+                                ty: resolve_type_expr(&f.ty),
+                                default: f.default.as_ref().map(|e| lower_expr(ctx, e)),
+                            }
+                        }).collect();
+                        IrVariantDecl { name: cname.clone(), kind: IrVariantKind::Record { fields: ir_fields } }
+                    }
+                }
+            }).collect();
+            IrTypeDeclKind::Variant { cases: ir_cases, is_generic, boxed_args, boxed_record_fields }
+        }
+        // Simple, Generic, Fn, Tuple → type alias
+        _ => {
+            IrTypeDeclKind::Alias { target: resolve_type_expr(ty) }
+        }
+    };
+
+    IrTypeDecl {
+        name: name.to_string(),
+        kind,
+        deriving: deriving.clone(),
+        generics: generics.cloned(),
+        visibility: vis,
+    }
 }
 
 // ── Expression lowering ─────────────────────────────────────────
@@ -388,8 +591,19 @@ fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         // ── Lambda ──
         ast::Expr::Lambda { params, body, .. } => {
             ctx.push_scope();
-            let ir_params: Vec<(VarId, Ty)> = params.iter().map(|p| {
-                let pty = p.ty.as_ref().map(|t| resolve_type_expr(t)).unwrap_or(Ty::Unknown);
+            // Extract inferred param types from checker's lambda type (bidirectional inference)
+            let inferred_param_tys = match &ty {
+                Ty::Fn { params: fn_params, .. } => Some(fn_params.as_slice()),
+                _ => None,
+            };
+            let ir_params: Vec<(VarId, Ty)> = params.iter().enumerate().map(|(i, p)| {
+                let pty = if let Some(te) = &p.ty {
+                    resolve_type_expr(te)
+                } else if let Some(fn_params) = inferred_param_tys {
+                    fn_params.get(i).cloned().unwrap_or(Ty::Unknown)
+                } else {
+                    Ty::Unknown
+                };
                 let var = ctx.define_var(&p.name, pty.clone(), Mutability::Let, None);
                 (var, pty)
             }).collect();
@@ -573,6 +787,12 @@ fn flatten_module_call(ctx: &LowerCtx, object: &ast::Expr, func: &str) -> Option
         }
     }
     segments.reverse();
+
+    // If the first segment is a local variable, it's not a module call.
+    // Local variables shadow module names (e.g., `let args = env.args(); args.len()`)
+    if ctx.lookup_var(segments[0]).is_some() {
+        return None;
+    }
 
     // Resolve the first segment through module aliases (e.g., "m" → "mylib")
     let resolved_first = ctx.env.module_aliases.get(segments[0])
@@ -842,14 +1062,16 @@ fn lower_string_interp(ctx: &mut LowerCtx, raw: &str) -> Vec<IrStringPart> {
                 if ch == '}' { depth -= 1; if depth == 0 { break; } }
                 expr_str.push(ch);
             }
-            // Re-parse the expression and lower it
+            // Re-parse the expression and lower it.
+            // Skip span-based type lookups — re-parsed expressions have bogus spans (1,1)
+            // that would match wrong entries in the checker's expr_types map.
             let tokens = crate::lexer::Lexer::tokenize(&expr_str);
             let mut parser = crate::parser::Parser::new(tokens);
             if let Ok(parsed) = parser.parse_single_expr() {
+                ctx.skip_span_lookup = true;
                 let mut ir_expr = lower_expr(ctx, &parsed);
-                // Fix type: re-parsed expressions have bogus spans (1,1) which
-                // cause expr_types lookup to return wrong types. For Var nodes,
-                // use the authoritative type from VarTable instead.
+                ctx.skip_span_lookup = false;
+                // Fix type: for simple Var nodes, use the authoritative type from VarTable.
                 if let IrExprKind::Var { id } = &ir_expr.kind {
                     ir_expr.ty = ctx.var_table.get(*id).ty.clone();
                 }
@@ -956,6 +1178,9 @@ fn resolve_type_expr(te: &ast::TypeExpr) -> Ty {
             ret: Box::new(resolve_type_expr(ret)),
         },
         ast::TypeExpr::Record { fields } => Ty::Record {
+            fields: fields.iter().map(|f| (f.name.clone(), resolve_type_expr(&f.ty))).collect(),
+        },
+        ast::TypeExpr::OpenRecord { fields } => Ty::OpenRecord {
             fields: fields.iter().map(|f| (f.name.clone(), resolve_type_expr(&f.ty))).collect(),
         },
         _ => Ty::Unknown,

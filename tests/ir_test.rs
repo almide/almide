@@ -342,6 +342,7 @@ fn ir_program_construction() {
     let prog = IrProgram {
         functions: vec![],
         top_lets: vec![],
+        type_decls: vec![],
         var_table: VarTable::new(),
     };
     assert!(prog.functions.is_empty());

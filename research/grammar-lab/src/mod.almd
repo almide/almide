@@ -1,0 +1,489 @@
+// Grammar Lab — A/B test runner for Almide syntax variants
+// Usage: almide run src/mod.almd -- <experiment-dir> [--model <name>] [--trials <n>]
+
+import json
+import fs
+import process
+import http
+import env
+
+
+// ── Config ──
+
+effect fn get_almide_bin() -> String =
+  env.get("ALMIDE_BIN").unwrap_or("/Users/o6lvl4/workspace/github.com/almide/almide/target/release/almide")
+
+// ── Helpers ──
+
+effect fn println(s: String) -> Unit = io.print(s ++ "\n")
+
+// ── Entry Point ──
+
+effect fn main() -> Result[Unit, String] = {
+  match run_experiment() {
+    ok(_) => ok(()),
+    err(e) => {
+      println("Error: ${e}")
+      process.exit(1)
+      ok(())
+    },
+  }
+}
+
+effect fn run_experiment() -> Result[Unit, String] = {
+  let raw_args = env.args()
+  // Skip argv[0] (binary path)
+  let args_list = list.drop(raw_args, 1)
+  guard list.len(args_list) >= 1 else err("Usage: grammar-lab <experiment-dir> [--model <name>] [--trials <n>]")
+
+  let experiment_dir = match list.get(args_list, 0) {
+    some(d) => d,
+    none => "",
+  }
+
+  // Load experiment config
+  let config_path = "${experiment_dir}/experiment.json"
+  let config_text = fs.read_text(config_path)
+  let config = json.parse(config_text)
+
+  let experiment_name = json.get_string(config, "name").unwrap_or("unknown")
+  let trials = json.get_int(config, "trials").unwrap_or(5)
+
+  // Override trials from CLI
+  let trials = parse_cli_int(args_list, "--trials", trials)
+
+  // Load models
+  let models = json.get_array(config, "models").unwrap_or([])
+
+  // Filter model from CLI
+  let model_filter = parse_cli_string(args_list, "--model", "")
+
+  // Load task names
+  let task_names = json.get_array(config, "tasks").unwrap_or([])
+
+  // Load variants
+  let variants = json.get_array(config, "variants").unwrap_or([])
+
+  // Load prompt layers
+  let layer1 = fs.read_text("prompts/layer1_rules.md")
+
+  println("=== Grammar Lab ===")
+  println("Experiment: ${experiment_name}")
+  println("Trials: ${int.to_string(trials)}")
+  println("")
+
+  // Results accumulator
+  var all_results: List[Json] = []
+
+  for model_json in models {
+    let model_name = json.get_string(model_json, "name").unwrap_or("")
+    let provider = json.get_string(model_json, "provider").unwrap_or("")
+    let model_id = json.get_string(model_json, "model_id").unwrap_or("")
+
+    // Skip if model filter is set and doesn't match
+    if model_filter != "" and model_filter != model_name then {
+      continue
+    } else {
+      ()
+    }
+
+    println("Model: ${model_name}")
+
+    for variant_json in variants {
+      let variant_name = json.get_string(variant_json, "name").unwrap_or("")
+      let variant_dir = json.get_string(variant_json, "dir").unwrap_or("")
+      let transpile_mode = json.get_string(variant_json, "transpile_regex").unwrap_or("")
+
+      // Load layer2 for this variant
+      let layer2_path = "prompts/layer2_${variant_name}.md"
+      let layer2 = if fs.exists?(layer2_path) then {
+        fs.read_text(layer2_path)
+      } else {
+        ""
+      }
+
+      println("  Variant: ${variant_name}")
+
+      for task_name_json in task_names {
+        let task_name = json.as_string(task_name_json).unwrap_or("")
+
+        // Load task config
+        let task_config_text = fs.read_text("${experiment_dir}/tasks/${task_name}.json")
+        let task_config = json.parse(task_config_text)
+        let instruction = json.get_string(task_config, "instruction").unwrap_or("")
+        let layer3 = json.get_string(task_config, "layer3_hint").unwrap_or("")
+        let test_file_name = json.get_string(task_config, "test_file").unwrap_or("")
+
+        // Load source code for this variant
+        let source_code = fs.read_text("${experiment_dir}/${variant_dir}/${task_name}.almd")
+
+        // Load test code
+        let test_code = fs.read_text("${experiment_dir}/tasks/${test_file_name}")
+
+        for trial_num in 1..=trials {
+          println("    Task: ${task_name} trial ${int.to_string(trial_num)}/${int.to_string(trials)}")
+
+          // Build prompt
+          let system_prompt = build_system_prompt(layer1, layer2, layer3)
+          let user_prompt = build_user_prompt(source_code, test_code, instruction)
+
+          // Call LLM
+          let llm_response = call_llm(provider, model_id, system_prompt, user_prompt)
+
+          // Extract code from response
+          let modified_code = extract_code(llm_response)
+
+          // Transpile if needed (convert experimental syntax to current syntax for compilation)
+          let compilable_code = transpile(modified_code, transpile_mode)
+
+          // Evaluate: write to temp file, compile, test
+          let eval_result = evaluate(compilable_code, test_code, task_name)
+
+          let result = make_result_json(experiment_name, variant_name, model_name, task_name, trial_num, eval_result)
+
+          all_results = all_results ++ [result]
+
+          let status = if eval_result.tests_passed then "PASS"
+            else if eval_result.compiled then "FAIL (test)"
+            else "FAIL (compile)"
+          println("      ${status}")
+        }
+      }
+    }
+  }
+
+  // Write results
+  let results_text = json.stringify_pretty(json.array(all_results))
+  let timestamp = int.to_string(env.unix_timestamp())
+  let results_path = "results/${experiment_name}_${timestamp}.json"
+  fs.mkdir_p("results")
+  fs.write(results_path, results_text)
+  println("")
+  println("Results written to ${results_path}")
+
+  // Re-read results for summary (avoids move issue)
+  let summary_text = fs.read_text(results_path)
+  let summary_results = json.parse(summary_text)
+  let summary_list = json.as_array(summary_results).unwrap_or([])
+  print_summary(summary_list)
+
+  ok(())
+}
+
+// ── Prompt Building ──
+
+fn build_system_prompt(layer1: String, layer2: String, layer3: String) -> String =
+  "You are modifying code written in Almide (.almd files). Return ONLY the modified code, no explanation.\n\n${layer1}\n\n${layer2}\n\n${layer3}"
+
+fn build_user_prompt(source: String, tests: String, instruction: String) -> String =
+  "## Current Code\n\n```almide\n${source}\n```\n\n## Tests (must pass after modification)\n\n```almide\n${tests}\n```\n\n## Task\n\n${instruction}\n\nReturn the complete modified file. Output ONLY the code, wrapped in ```almide ... ```."
+
+// ── LLM API ──
+
+effect fn call_llm(provider: String, model_id: String, system: String, user: String) -> Result[String, String] = {
+  guard provider == "anthropic" or provider == "openai" or provider == "claude-code" else err("Unknown provider: ${provider}")
+  if provider == "claude-code" then {
+    ok(call_claude_code(model_id, system, user))
+  } else if provider == "anthropic" then {
+    ok(call_anthropic(model_id, system, user))
+  } else {
+    ok(call_openai(model_id, system, user))
+  }
+}
+
+effect fn call_claude_code(model_id: String, system: String, user: String) -> Result[String, String] = {
+  let claude_bin = env.get("CLAUDE_BIN").unwrap_or("/Users/o6lvl4/.local/bin/claude")
+  let r = process.exec_status(
+    claude_bin,
+    ["-p", "--model", model_id, "--append-system-prompt", system, "--output-format", "text", "--max-turns", "1", user]
+  )
+  if r.code != 0 then {
+    err("claude-code failed: ${r.stderr}")
+  } else {
+    ok(r.stdout)
+  }
+}
+
+effect fn call_anthropic(model_id: String, system: String, user: String) -> Result[String, String] = {
+  let api_key = match env.get("ANTHROPIC_API_KEY") {
+    some(k) => k,
+    none => err("ANTHROPIC_API_KEY not set"),
+  }
+
+  let body = json.object([
+    ("model", json.s(model_id)),
+    ("max_tokens", json.i(4096)),
+    ("system", json.s(system)),
+    ("messages", json.array([
+      json.object([
+        ("role", json.s("user")),
+        ("content", json.s(user)),
+      ]),
+    ])),
+  ])
+
+  let headers = map.set(
+    map.set(
+      map.set(map.new(), "Content-Type", "application/json"),
+      "x-api-key", api_key
+    ),
+    "anthropic-version", "2023-06-01"
+  )
+
+  let response = http.request("POST", "https://api.anthropic.com/v1/messages", json.stringify(body), headers)
+
+  let resp_json = json.parse(response)
+  let content = json.get_array(resp_json, "content").unwrap_or([])
+  let text = match list.get(content, 0) {
+    some(block) => json.get_string(block, "text").unwrap_or(""),
+    none => "",
+  }
+  ok(text)
+}
+
+effect fn call_openai(model_id: String, system: String, user: String) -> Result[String, String] = {
+  let api_key = match env.get("OPENAI_API_KEY") {
+    some(k) => k,
+    none => err("OPENAI_API_KEY not set"),
+  }
+
+  let body = json.object([
+    ("model", json.s(model_id)),
+    ("max_tokens", json.i(4096)),
+    ("temperature", json.i(0)),
+    ("messages", json.array([
+      json.object([("role", json.s("system")), ("content", json.s(system))]),
+      json.object([("role", json.s("user")), ("content", json.s(user))]),
+    ])),
+  ])
+
+  let headers = map.set(
+    map.set(map.new(), "Content-Type", "application/json"),
+    "Authorization", "Bearer ${api_key}"
+  )
+
+  let response = http.request("POST", "https://api.openai.com/v1/chat/completions", json.stringify(body), headers)
+
+  let resp_json = json.parse(response)
+  let choices = json.get_array(resp_json, "choices").unwrap_or([])
+  let text = match list.get(choices, 0) {
+    some(choice) => {
+      match json.get(choice, "message") {
+        some(msg) => json.get_string(msg, "content").unwrap_or(""),
+        none => "",
+      }
+    },
+    none => "",
+  }
+  ok(text)
+}
+
+// ── Transpile ──
+
+fn transpile(code: String, mode: String) -> String =
+  if mode == "" then {
+    code
+  } else if mode == "paren-to-fn-lambda" then {
+    // Transform (params) => to fn(params) =>
+    // Strategy: find ") =>" and look backwards for matching "("
+    // If not preceded by "fn", insert "fn"
+    let lines = string.split(code, "\n")
+    let converted = list.map(lines, fn(line) => transpile_line_paren_to_fn(line))
+    string.join(converted, "\n")
+  } else {
+    code
+  }
+
+fn transpile_line_paren_to_fn(line: String) -> String = {
+  // Find all occurrences of ") =>" and check if preceded by "fn("
+  // Simple approach: replace known patterns
+  // "(x) =>" -> "fn(x) =>" but "fn(x) =>" stays
+  var result = line
+
+  // Replace ") => " pattern where not preceded by fn
+  // We do this by first marking fn( cases, then adding fn to bare ( cases
+  // Simpler: just add fn before every "(" that's followed by idents and ") =>"
+  // and then fix double fn
+
+  // Step 1: Find ") =>" positions and work backwards
+  // For simplicity, use string.replace for common patterns
+  // The LLM will use consistent param names from the examples
+
+  // Single char params
+  let singles = ["a", "b", "c", "e", "f", "i", "k", "n", "p", "r", "s", "u", "v", "x", "y"]
+  for s in singles {
+    result = string.replace(result, "(${s}) =>", "fn(${s}) =>")
+  }
+
+  // Common multi-char params
+  let words = ["acc", "item", "user", "val", "key", "elem", "prev", "curr", "name", "row", "col"]
+  for w in words {
+    result = string.replace(result, "(${w}) =>", "fn(${w}) =>")
+  }
+
+  // Two params: common combos
+  let pairs = [
+    "(acc, x)", "(acc, u)", "(acc, p)", "(acc, i)", "(acc, s)",
+    "(acc, item)", "(acc, val)", "(acc, n)", "(acc, e)",
+    "(a, b)", "(x, y)", "(k, v)", "(key, val)",
+  ]
+  for pair in pairs {
+    result = string.replace(result, "${pair} =>", "fn${pair} =>")
+  }
+
+  // Fix double fn
+  result = string.replace(result, "fn(fn(", "fn(")
+  result = string.replace(result, "fnfn(", "fn(")
+
+  result
+}
+
+// ── Code Extraction ──
+
+fn extract_code(response: String) -> String = {
+  // Find ```almide ... ``` block
+  let lines = string.split(response, "\n")
+  var in_block = false
+  var code_lines: List[String] = []
+  for line in lines {
+    if string.starts_with(line, "```almide") then {
+      in_block = true
+    } else if in_block and string.starts_with(line, "```") then {
+      in_block = false
+    } else if in_block then {
+      code_lines = code_lines ++ [line]
+    } else {
+      ()
+    }
+  }
+  // If no code block found, assume entire response is code
+  if list.len(code_lines) == 0 then {
+    response
+  } else {
+    string.join(code_lines, "\n")
+  }
+}
+
+// ── Evaluation ──
+
+type EvalResult = { compiled: Bool, tests_passed: Bool, error: String }
+
+effect fn evaluate(code: String, test_code: String, task_name: String) -> EvalResult = {
+  // Write modified code to temp file
+  let tmp_dir = "/tmp/grammar-lab"
+  let code_path = "${tmp_dir}/${task_name}.almd"
+  let combined = "${code}\n\n${test_code}"
+
+  fs.mkdir_p(tmp_dir)
+  fs.write(code_path, combined)
+
+  // Run almide check
+  let check_r = process.exec_status(get_almide_bin(), ["check", code_path])
+  if check_r.code != 0 then {
+    EvalResult { compiled: false, tests_passed: false, error: check_r.stderr }
+  } else {
+    // Run almide test
+    let test_r = process.exec_status(get_almide_bin(), ["test", code_path])
+    if test_r.code != 0 then {
+      EvalResult { compiled: true, tests_passed: false, error: test_r.stderr }
+    } else {
+      EvalResult { compiled: true, tests_passed: true, error: "" }
+    }
+  }
+}
+
+// ── Summary ──
+
+fn count_passed(results: List[Json], model_name: String, variant_name: String) -> (Int, Int) = {
+  let matching = results
+    |> list.filter(fn(r) =>
+      json.get_string(r, "model").unwrap_or("") == model_name
+      and json.get_string(r, "variant").unwrap_or("") == variant_name
+    )
+  let total = list.len(matching)
+  let passed = matching
+    |> list.filter(fn(r) => json.get_bool(r, "tests_passed").unwrap_or(false))
+    |> list.len()
+  (passed, total)
+}
+
+fn format_cell(passed: Int, total: Int) -> String = {
+  let pct = if total > 0 then int.to_string(passed * 100 / total) else "0"
+  "${pct}% (${int.to_string(passed)}/${int.to_string(total)})"
+}
+
+fn build_row(results: List[Json], model_name: String, variants: List[String]) -> String = {
+  // Build cells first to avoid ownership issues with model_name
+  let cells = list.map(variants, fn(v) => {
+    let (passed, total) = count_passed(results, model_name, v)
+    string.pad_right(format_cell(passed, total), 20, " ")
+  })
+  let row = string.pad_right(model_name, 20, " ")
+  row ++ string.join(cells, "")
+}
+
+effect fn print_summary(results: List[Json]) -> Unit = {
+  println("=== Summary ===")
+  println("")
+
+  let models = results
+    |> list.map(fn(r) => json.get_string(r, "model").unwrap_or(""))
+    |> list.unique()
+
+  let variants = results
+    |> list.map(fn(r) => json.get_string(r, "variant").unwrap_or(""))
+    |> list.unique()
+
+  // Header
+  var header = string.pad_right("", 20, " ")
+  for v in variants {
+    header = header ++ string.pad_right(v, 20, " ")
+  }
+  println(header)
+
+  // Rows
+  let variant_names = variants
+  for model_name in models {
+    println(build_row(results, model_name, variant_names))
+  }
+  println("")
+}
+
+// ── Result JSON Builder ──
+
+fn make_result_json(experiment: String, variant: String, model: String, task: String, trial: Int, eval: EvalResult) -> Json =
+  json.object([
+    ("experiment", json.s(experiment)),
+    ("variant", json.s(variant)),
+    ("model", json.s(model)),
+    ("task", json.s(task)),
+    ("trial", json.i(trial)),
+    ("compiled", json.b(eval.compiled)),
+    ("tests_passed", json.b(eval.tests_passed)),
+    ("error", json.s(eval.error)),
+  ])
+
+// ── CLI Helpers ──
+
+fn parse_cli_string(args_list: List[String], flag: String, default: String) -> String = {
+  let idx = list.find_index(args_list, fn(a) => a == flag)
+  match idx {
+    some(i) => match list.get(args_list, i + 1) {
+      some(v) => v,
+      none => default,
+    },
+    none => default,
+  }
+}
+
+fn parse_cli_int(args_list: List[String], flag: String, default: Int) -> Int = {
+  let s = parse_cli_string(args_list, flag, "")
+  if s == "" then {
+    default
+  } else {
+    match string.to_int(s) {
+      ok(n) => n,
+      err(_) => default,
+    }
+  }
+}

@@ -2,30 +2,33 @@
 
 ## Active
 
-- [Hint System Architecture](active/hint-system.md) — Pluggable hint registry, separate hint modules from parser core
 - [LLM Integration](active/llm-integration.md) — `almide forge` (library generation), `almide fix` (self-repair), `almide explain`
+- [Structured Concurrency](active/structured-concurrency.md) — Layer 2: `async let` / `await` for scoped parallel execution
+- [Grammar Codegen](active/grammar-codegen.md) — Single source of truth for tokens/precedence, auto-generate tree-sitter + TextMate + lexer
+- [Codec Protocol & JSON](active/codec-and-json.md) — `deriving Codec` + JSON as first format, 5-phase roadmap
+- [Template: Typed Document Builder](active/template.md) — `template` keyword, `html {}`/`text {}` builders, type-dispatched insertion, typed document AST
+- [Type System Extensions](active/type-system.md) — Row polymorphism, union types, container protocols (LLM-friendly HKT), structural generic bounds
+- [Monomorphization](active/monomorphization.md) — Generic function instantiation for named rows (`..R`) and container protocols Rust codegen
+- [UFCS for External Libraries](active/ufcs-external.md) — Type-directed UFCS resolution for user-defined types, `req.param("id")` style
+- [Syntax Sugar](active/syntax-sugar.md) — Lambda short syntax `(x) => expr`, default arguments, comprehensions
+- [Web Framework](active/web-framework.md) — First-party Hono-equivalent, template/Codec integration, pipe-chain routing
+- [Grammar Research Infrastructure](active/grammar-research.md) — A/B test syntax variants across LLMs, measure modification survival rate, built in Almide
 
 ## On Hold
 
 - [Benchmark Report](on-hold/benchmark-report.md)
-- [Cross-Target AOT Compilation](on-hold/cross-target-aot.md) — Compile to native binary via Rust, TS via Deno/Bun, WASM via wasm-pack
 - [Direct WASM Emission](on-hold/emit-wasm-direct.md) — `.almd → WASM bytecode` without rustc
 - [Editor & GitHub Integration](on-hold/editor-github-integration.md)
-- [Function Reference Passing](on-hold/function-reference-passing.md) — low priority, verbose form is always correct
 - [Rainbow FFI](on-hold/rainbow-ffi.md) — Rust, JS, C, Python, Swift, Kotlin, Erlang FFI
-- [LLM Developer Experience](on-hold/llm-developer-experience.md)
 - [LLM Immutable Sugar](on-hold/llm-immutable-sugar.md) — var indexing, `with` expression
 - [Package Registry](on-hold/package-registry.md)
 - [Research: Modification Survival Rate Paper](on-hold/research-modification-survival-rate-paper.md)
-- [Scaffold & Proliferation Pipeline](on-hold/scaffold-and-proliferation.md)
 - [Self-Hosting](on-hold/self-hosting.md) — rewrite compiler in Almide (after spec stabilization)
 - [Stdlib Architecture: 3-Layer Design](on-hold/stdlib-architecture-3-layer-design.md) — Phase A done, B/C remaining
-- [Structured Concurrency](on-hold/structured-concurrency.md)
-- [Syntax Sugar](on-hold/syntax-sugar.md) — range, raw strings, exhaustiveness done; comprehensions pending
+- [Supervision & Actors](on-hold/supervision-and-actors.md) — Layer 3: typed actors, channels, supervision trees (stdlib)
+- ~~Syntax Sugar~~ — moved to [active](active/syntax-sugar.md)
 - [Tooling](on-hold/tooling.md)
-- [Trailing Lambda / Builder DSL](on-hold/trailing-lambda-builder.md) — won't do, solve with stdlib instead
-- [Built-in Protocols](on-hold/trait-impl.md) — Show (`show(x)`), Hash (Map key constraint) remaining; all automatic
-- [Type System Extensions](on-hold/type-system.md)
+- [Built-in Protocols](on-hold/trait-impl.md) — Eq, Hash done; Show (`show(x)`) remaining
 
 ## Done
 
@@ -65,6 +68,16 @@
 - [Typed IR](done/typed-ir.md) — IR-based codegen, AST-direct codegen removed
 - [Variant Record Fields](done/variant-record-fields.md) — named fields on enum variants, `..` rest pattern
 - [Map Literal](done/map-literal.md) — `[:]` / `["key": value]` syntax, index access, direct iteration
-- [Eq Protocol](on-hold/trait-impl.md) — automatic `==` for all value types, `Fn` types rejected
+- [Eq Protocol](done/eq-protocol.md) — automatic `==` for all value types, `Fn` types rejected
 - [Error Recovery](done/error-recovery.md) — Multi-error reporting, statement/expression-level recovery, error AST nodes, common typo detection
+- [Lambda Type Inference](done/lambda-type-inference.md) — Bidirectional inference for lambda params (implemented commit 002180d)
+- [JSON Builder API](done/json-builder-api.md) — Superseded by [Codec Protocol & JSON](active/codec-and-json.md)
 - [While Loop](done/while-loop.md) — `while condition { }`, universal loop syntax
+- [Hint System](done/hint-system.md) — Pluggable hint registry, 5 modules, 61 tests, catalog
+- [`import self`](done/import-self-entry.md) — `main.almd` can access `mod.almd` pub definitions via `import self`
+- [UFCS Type Resolution](done/ufcs-type-resolution.md) — Recursive type inference in lowerer for member access UFCS (`g.words.len()`)
+- [LLM Developer Experience](done/llm-developer-experience.md) — UFCS done; remaining merged into LLM Integration
+- [Scaffold & Proliferation](done/scaffold-and-proliferation.md) — Merged into LLM Integration as `almide forge`
+- [Trailing Lambda / Builder DSL](done/trailing-lambda-builder.md) — Won't do; stdlib approach preferred
+- [Function Reference Passing](done/function-reference-passing.md) — Won't do; verbose form is always correct
+- [2026 Ergonomics](2026-ergonomics.md) — `do` block pure fn support, `guard else break/continue`, `unwrap_or` UFCS fix, `json.parse` auto-`?` fix

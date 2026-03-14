@@ -153,5 +153,9 @@ parser.parse(...)            // OK
 - [x] CLI: `almide build --release` (opt-level=2)
 - [x] Deprecation warning for `module` declarations
 - [x] Deprecation warning for `lib.almd` as package entry (suggest rename to `mod.almd`)
+- [x] `import self` — load own package entry point (`mod.almd`) from `main.almd`
+- [x] `import self as alias` — with alias support
+- [x] Self-import alias codegen — correct Rust module path for aliased self-imports
+- [x] Checker: recognize module aliases in Ident expressions (no false "undefined variable" error)
 
 ---

@@ -14,6 +14,7 @@ pub enum Ty {
     Result(Box<Ty>, Box<Ty>),
     Map(Box<Ty>, Box<Ty>),
     Record { fields: Vec<(std::string::String, Ty)> },
+    OpenRecord { fields: Vec<(std::string::String, Ty)> },
     Variant { name: std::string::String, cases: Vec<VariantCase> },
     Fn { params: Vec<Ty>, ret: Box<Ty> },
     Tuple(Vec<Ty>),
@@ -134,6 +135,10 @@ impl Ty {
                 let fs: Vec<_> = fields.iter().map(|(n, t)| format!("{}: {}", n, t.display())).collect();
                 format!("{{ {} }}", fs.join(", "))
             }
+            Ty::OpenRecord { fields } => {
+                let fs: Vec<_> = fields.iter().map(|(n, t)| format!("{}: {}", n, t.display())).collect();
+                format!("{{ {}, .. }}", fs.join(", "))
+            }
             Ty::Variant { name, .. } => name.clone(),
             Ty::Fn { params, ret } => {
                 let ps: Vec<_> = params.iter().map(|t| t.display()).collect();
@@ -185,8 +190,18 @@ impl Ty {
                     && r1.compatible(r2)
             }
             (Ty::Record { fields: f1 }, Ty::Record { fields: f2 }) => {
+                // Both closed: exact match
                 f1.len() == f2.len()
                     && f1.iter().zip(f2.iter()).all(|((n1, t1), (n2, t2))| n1 == n2 && t1.compatible(t2))
+            }
+            (Ty::OpenRecord { fields: required }, Ty::Record { fields: actual })
+            | (Ty::OpenRecord { fields: required }, Ty::OpenRecord { fields: actual }) => {
+                // Open parameter: all required fields must exist in the argument (by name, order-independent)
+                required.iter().all(|(n1, t1)| actual.iter().any(|(n2, t2)| n1 == n2 && t1.compatible(t2)))
+            }
+            (Ty::Record { .. }, Ty::OpenRecord { .. }) => {
+                // Closed parameter × open argument: not allowed
+                false
             }
             (Ty::Tuple(a), Ty::Tuple(b)) => {
                 a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.compatible(y))
@@ -261,6 +276,9 @@ pub fn substitute(ty: &Ty, bindings: &std::collections::HashMap<std::string::Str
         Ty::Record { fields } => Ty::Record {
             fields: fields.iter().map(|(n, t)| (n.clone(), substitute(t, bindings))).collect(),
         },
+        Ty::OpenRecord { fields } => Ty::OpenRecord {
+            fields: fields.iter().map(|(n, t)| (n.clone(), substitute(t, bindings))).collect(),
+        },
         Ty::Named(name, args) if !args.is_empty() => {
             Ty::Named(name.clone(), args.iter().map(|a| substitute(a, bindings)).collect())
         }
@@ -311,7 +329,7 @@ impl TypeEnv {
             Ty::Result(ok, err) => self.is_eq_inner(ok, seen) && self.is_eq_inner(err, seen),
             Ty::Map(k, v) => self.is_eq_inner(k, seen) && self.is_eq_inner(v, seen),
             Ty::Tuple(tys) => tys.iter().all(|t| self.is_eq_inner(t, seen)),
-            Ty::Record { fields } => fields.iter().all(|(_, t)| self.is_eq_inner(t, seen)),
+            Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().all(|(_, t)| self.is_eq_inner(t, seen)),
             Ty::Variant { name, cases, .. } => {
                 if !seen.insert(name.clone()) {
                     return true; // Recursive type — assume Eq to break cycle
@@ -353,7 +371,7 @@ impl TypeEnv {
             Ty::Result(ok, err) => self.is_hash_inner(ok, seen) && self.is_hash_inner(err, seen),
             Ty::Map(_, _) => false, // Maps themselves are not hashable
             Ty::Tuple(tys) => tys.iter().all(|t| self.is_hash_inner(t, seen)),
-            Ty::Record { fields } => fields.iter().all(|(_, t)| self.is_hash_inner(t, seen)),
+            Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().all(|(_, t)| self.is_hash_inner(t, seen)),
             Ty::Variant { name, cases, .. } => {
                 if !seen.insert(name.clone()) {
                     return true;
@@ -456,7 +474,7 @@ impl TypeEnv {
                 Self::collect_typevars(a, out);
                 Self::collect_typevars(b, out);
             }
-            Ty::Record { fields } => {
+            Ty::Record { fields } | Ty::OpenRecord { fields } => {
                 for (_, t) in fields {
                     Self::collect_typevars(t, out);
                 }

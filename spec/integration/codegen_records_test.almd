@@ -1,0 +1,149 @@
+// codegen_records_test — Record operations, spread, named types edge cases
+
+// ── Record spread with multiple overrides ──
+
+test "record spread override all fields" {
+  let base = { a: 1, b: 2, c: 3 }
+  let updated = { ...base, a: 10, b: 20, c: 30 }
+  assert_eq(updated.a, 10)
+  assert_eq(updated.b, 20)
+  assert_eq(updated.c, 30)
+}
+
+// ── Record spread chained ──
+
+test "record spread chained updates" {
+  let v1 = { x: 0, y: 0, z: 0 }
+  let v2 = { ...v1, x: 1 }
+  let v3 = { ...v2, y: 2 }
+  let v4 = { ...v3, z: 3 }
+  assert_eq(v4.x, 1)
+  assert_eq(v4.y, 2)
+  assert_eq(v4.z, 3)
+}
+
+// ── Named record construction ──
+
+type Config = { host: String, port: Int, debug: Bool }
+
+fn default_config() -> Config =
+  { host: "localhost", port: 8080, debug: false }
+
+fn with_debug(c: Config) -> Config =
+  { ...c, debug: true }
+
+fn with_port(c: Config, p: Int) -> Config =
+  { ...c, port: p }
+
+test "named record construction and spread" {
+  let c = default_config()
+  assert_eq(c.host, "localhost")
+  assert_eq(c.port, 8080)
+  assert_eq(c.debug, false)
+
+  let c2 = with_debug(with_port(c, 9090))
+  assert_eq(c2.host, "localhost")
+  assert_eq(c2.port, 9090)
+  assert_eq(c2.debug, true)
+}
+
+// ── Pipe chaining on named records ──
+
+test "pipe chain on named record functions" {
+  let result = default_config()
+    |> with_port(3000)
+    |> with_debug()
+  assert_eq(result.port, 3000)
+  assert_eq(result.debug, true)
+}
+
+// ── Record with list field operations ──
+
+type TodoList = { name: String, items: List[String] }
+
+fn add_item(t: TodoList, item: String) -> TodoList =
+  { ...t, items: t.items ++ [item] }
+
+fn item_count(t: TodoList) -> Int = list.len(t.items)
+
+test "record with list field mutation via spread" {
+  let t = { name: "chores", items: [] }
+  let t = add_item(t, "clean")
+  let t = add_item(t, "cook")
+  let t = add_item(t, "shop")
+  assert_eq(t.items, ["clean", "cook", "shop"])
+  assert_eq(item_count(t), 3)
+}
+
+// ── Nested records with spread ──
+
+test "nested record spread" {
+  let inner = { value: 10, label: "orig" }
+  let updated_inner = { ...inner, value: 20 }
+  let outer = { data: inner, count: 1 }
+  let updated_outer = { ...outer, data: updated_inner, count: 2 }
+  assert_eq(updated_outer.data.value, 20)
+  assert_eq(updated_outer.data.label, "orig")
+  assert_eq(updated_outer.count, 2)
+}
+
+// ── Record with option field ──
+
+type User = { name: String, email: Option[String] }
+
+fn user_display(u: User) -> String =
+  match u.email {
+    some(e) => "${u.name} <${e}>",
+    none => u.name,
+  }
+
+test "record with option field some" {
+  let u: User = { name: "alice", email: some("alice@example.com") }
+  assert_eq(user_display(u), "alice <alice@example.com>")
+}
+
+test "record with option field none" {
+  let u: User = { name: "bob", email: none }
+  assert_eq(user_display(u), "bob")
+}
+
+// ── List of named records ──
+
+test "list of named records with operations" {
+  let users: List[User] = [
+    { name: "alice", email: some("a@b.com") },
+    { name: "bob", email: none },
+    { name: "carol", email: some("c@d.com") },
+  ]
+  let with_email = list.filter(users, fn(u) => match u.email {
+    some(_) => true,
+    none => false,
+  })
+  assert_eq(list.len(with_email), 2)
+  let names = list.map(users, fn(u) => u.name)
+  assert_eq(names, ["alice", "bob", "carol"])
+}
+
+// ── Record equality ──
+
+test "record deep equality" {
+  let a = { x: 1, y: [2, 3], z: "hello" }
+  let b = { x: 1, y: [2, 3], z: "hello" }
+  assert_eq(a == b, true)
+  let c = { x: 1, y: [2, 4], z: "hello" }
+  assert_eq(a != c, true)
+}
+
+// ── Record passed to higher-order function ──
+
+test "record in higher-order function" {
+  let items = [
+    { name: "apple", price: 150 },
+    { name: "banana", price: 80 },
+    { name: "cherry", price: 300 },
+  ]
+  let total = list.fold(items, 0, fn(acc, item) => acc + item.price)
+  assert_eq(total, 530)
+  let expensive = list.filter(items, fn(item) => item.price > 100)
+  assert_eq(list.len(expensive), 2)
+}

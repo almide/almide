@@ -1,0 +1,9 @@
+type User = { name: String, age: Int }
+
+fn adult_names(users: List[User]) -> List[String] =
+  users
+    |> list.filter(fn(u) => u.age >= 18)
+    |> list.map(fn(u) => u.name)
+
+fn total_age(users: List[User]) -> Int =
+  users |> list.fold(0, fn(acc, u) => acc + u.age)

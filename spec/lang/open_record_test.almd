@@ -1,0 +1,81 @@
+
+// Open Record (Row Polymorphism) tests
+type Dog = { name: String, breed: String }
+
+type Person = { name: String, age: Int, email: String }
+
+fn greet(who: { name: String, .. }) -> String = "Hello, ${who.name}!"
+
+fn name_and_age(who: { name: String, age: Int, .. }) -> String = "${who.name} is ${who.age}"
+
+fn closed_fn(r: { name: String }) -> String = r.name
+
+test "open record accepts record with extra fields" {
+  let result = greet({ name: "Alice", age: 30 });
+  assert_eq(result, "Hello, Alice!")
+}
+
+test "open record accepts named type" {
+  let dog = Dog { name: "Rex", breed: "Labrador" };
+  let result = greet(dog);
+  assert_eq(result, "Hello, Rex!")
+}
+
+test "open record accepts named type with multiple extra fields" {
+  let person = Person { name: "Bob", age: 25, email: "bob@example.com" };
+  let result = greet(person);
+  assert_eq(result, "Hello, Bob!")
+}
+
+test "open record with multiple required fields" {
+  let person = Person { name: "Carol", age: 42, email: "carol@example.com" };
+  let result = name_and_age(person);
+  assert_eq(result, "Carol is 42")
+}
+
+test "open record accepts exact match" {
+  let result = greet({ name: "Dave" });
+  assert_eq(result, "Hello, Dave!")
+}
+
+test "closed record is strict" {
+  let result = closed_fn({ name: "Eve" });
+  assert_eq(result, "Eve")
+}
+
+test "member access on open record parameter" {
+  let dog = Dog { name: "Spot", breed: "Dalmatian" };
+  assert_eq(greet(dog), "Hello, Spot!")
+}
+
+fn chain_b(x: { name: String, .. }) -> String = x.name
+fn chain_a(x: { name: String, breed: String, .. }) -> String = chain_b(x)
+
+test "open record chain calling" {
+  let dog = Dog { name: "Rex", breed: "Lab" };
+  assert_eq(chain_a(dog), "Rex")
+}
+
+// Shape alias
+type Named = { name: String, .. }
+
+fn greet_named(who: Named) -> String = "Hi, ${who.name}!"
+
+test "shape alias accepts named type" {
+  let dog = Dog { name: "Max", breed: "Poodle" };
+  assert_eq(greet_named(dog), "Hi, Max!")
+}
+
+test "shape alias accepts anonymous record" {
+  assert_eq(greet_named({ name: "Alice", age: 30 }), "Hi, Alice!")
+}
+
+// Nested open records
+type App = { config: { port: Int, host: String }, db: { url: String } }
+
+fn get_port(app: { config: { port: Int, .. }, .. }) -> Int = app.config.port
+
+test "nested open record" {
+  let app = App { config: { port: 8080, host: "localhost" }, db: { url: "pg://localhost" } };
+  assert_eq(get_port(app), 8080)
+}

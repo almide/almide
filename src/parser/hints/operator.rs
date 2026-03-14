@@ -56,11 +56,23 @@ fn check_standalone(ctx: &HintContext) -> Option<HintResult> {
             message: Some("'!' is not valid in Almide".into()),
             hint: "Use 'not x' for boolean negation, not '!x'.".into(),
         }),
-        // `|x|` closure syntax
+        // `|x|` closure syntax — detected via lookahead
         (TokenType::Pipe, _) => {
-            // Only if next looks like an identifier (closure pattern)
-            None // handled more specifically in primary.rs with peek
+            if let Some(next) = ctx.next {
+                if matches!(next.token_type, TokenType::Ident | TokenType::IdentQ | TokenType::Underscore) {
+                    return Some(HintResult {
+                        message: Some("'|x|' closure syntax is not valid in Almide".into()),
+                        hint: "Use 'fn(x) => expr' for lambdas. Example: list.map(xs, fn(x) => x + 1)".into(),
+                    });
+                }
+            }
+            None
         }
+        // `;` — semicolons are not needed
+        (TokenType::Semicolon, _) => Some(HintResult {
+            message: Some("Semicolons are not used in Almide".into()),
+            hint: "Remove the ';'. Almide uses newlines to separate statements.".into(),
+        }),
         _ => None,
     }
 }

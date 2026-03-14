@@ -1,0 +1,31 @@
+test "longest_name basic" {
+  let users = [
+    User { name: "Al", age: 20 },
+    User { name: "Bob", age: 25 },
+    User { name: "Christina", age: 30 },
+  ]
+  assert_eq(longest_name(users), "Christina")
+}
+
+test "longest_name empty" {
+  let users: List[User] = []
+  assert_eq(longest_name(users), "")
+}
+
+test "longest_name tie picks first" {
+  let users = [
+    User { name: "Amy", age: 20 },
+    User { name: "Bob", age: 25 },
+  ]
+  assert_eq(longest_name(users), "Amy")
+}
+
+test "adult_names unchanged" {
+  let users = [User { name: "Kid", age: 10 }, User { name: "Adult", age: 20 }]
+  assert_eq(adult_names(users), ["Adult"])
+}
+
+test "total_age unchanged" {
+  let users = [User { name: "A", age: 10 }, User { name: "B", age: 20 }]
+  assert_eq(total_age(users), 30)
+}

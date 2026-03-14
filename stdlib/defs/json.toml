@@ -111,3 +111,111 @@ params = [{ name = "j", type = "Json" }]
 return = "String"
 rust = "almide_json_stringify_pretty(&{j})"
 ts = "__almd_json.stringify_pretty({j})"
+
+# ── Builder shortcuts ──────────────────────────────────────────────
+
+[object]
+params = [{ name = "entries", type = "List[(String, Json)]" }]
+return = "Json"
+rust = "almide_json_object({entries})"
+ts = "__almd_json.object({entries})"
+
+[s]
+params = [{ name = "v", type = "String" }]
+return = "Json"
+rust = "JStr({v})"
+ts = "__almd_json.from_string({v})"
+
+[i]
+params = [{ name = "v", type = "Int" }]
+return = "Json"
+rust = "JInt({v})"
+ts = "__almd_json.from_int({v})"
+
+[f]
+params = [{ name = "v", type = "Float" }]
+return = "Json"
+rust = "almide_json_from_float({v})"
+ts = "__almd_json.from_float({v})"
+
+[b]
+params = [{ name = "v", type = "Bool" }]
+return = "Json"
+rust = "JBool({v})"
+ts = "__almd_json.from_bool({v})"
+
+# ── Value extraction (keyless, on Json value itself) ───────────────
+
+[as_string]
+params = [{ name = "j", type = "Json" }]
+return = "Option[String]"
+rust = "almide_json_to_string(&{j})"
+ts = "__almd_json.to_string({j})"
+
+[as_int]
+params = [{ name = "j", type = "Json" }]
+return = "Option[Int]"
+rust = "almide_json_to_int(&{j})"
+ts = "__almd_json.to_int({j})"
+
+[as_float]
+params = [{ name = "j", type = "Json" }]
+return = "Option[Float]"
+rust = "almide_json_as_float(&{j})"
+ts = "__almd_json.as_float({j})"
+
+[as_bool]
+params = [{ name = "j", type = "Json" }]
+return = "Option[Bool]"
+rust = "almide_json_as_bool(&{j})"
+ts = "__almd_json.as_bool({j})"
+
+[as_array]
+params = [{ name = "j", type = "Json" }]
+return = "Option[List[Json]]"
+rust = "almide_json_as_array(&{j})"
+ts = "__almd_json.as_array({j})"
+
+# ── Path API ───────────────────────────────────────────────────────
+
+[root]
+params = []
+return = "JsonPath"
+rust = "AlmideJsonPath::JpRoot"
+ts = "__almd_json.path_root()"
+
+[field]
+params = [{ name = "path", type = "JsonPath" }, { name = "name", type = "String" }]
+return = "JsonPath"
+rust = "AlmideJsonPath::JpField(Box::new({path}), {name})"
+ts = "__almd_json.path_field({path}, {name})"
+
+[index]
+params = [{ name = "path", type = "JsonPath" }, { name = "i", type = "Int" }]
+return = "JsonPath"
+rust = "AlmideJsonPath::JpIndex(Box::new({path}), {i})"
+ts = "__almd_json.path_index({path}, {i})"
+
+[get_path]
+params = [{ name = "j", type = "Json" }, { name = "path", type = "JsonPath" }]
+return = "Option[Json]"
+rust = "almide_json_get_path(&{j}, &{path})"
+ts = "__almd_json.get_path({j}, {path})"
+
+[set_path]
+params = [{ name = "j", type = "Json" }, { name = "path", type = "JsonPath" }, { name = "value", type = "Json" }]
+return = "Result[Json, String]"
+rust = "almide_json_set_path(&{j}, &{path}, {value})?"
+ts = "__almd_json.set_path({j}, {path}, {value})"
+
+[upsert_path]
+params = [{ name = "j", type = "Json" }, { name = "path", type = "JsonPath" }, { name = "value", type = "Json" }]
+return = "Json"
+rust = "almide_json_upsert_path(&{j}, &{path}, {value})"
+ts = "__almd_json.upsert_path({j}, {path}, {value})"
+
+[remove_path]
+params = [{ name = "j", type = "Json" }, { name = "path", type = "JsonPath" }]
+return = "Json"
+rust = "almide_json_remove_path(&{j}, &{path})"
+ts = "__almd_json.remove_path({j}, {path})"

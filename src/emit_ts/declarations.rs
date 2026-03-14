@@ -210,7 +210,7 @@ impl TsEmitter {
             }
         };
         match ty {
-            TypeExpr::Record { fields } => {
+            TypeExpr::Record { fields } | TypeExpr::OpenRecord { fields } => {
                 let fs: Vec<String> = fields.iter()
                     .map(|f| format!("  {}: {};", f.name, self.gen_type_expr(&f.ty)))
                     .collect();
@@ -273,7 +273,7 @@ impl TsEmitter {
                     _ => format!("{}<{}>", name, args.iter().map(|a| self.gen_type_expr(a)).collect::<Vec<_>>().join(", ")),
                 }
             }
-            TypeExpr::Record { fields } => {
+            TypeExpr::Record { fields } | TypeExpr::OpenRecord { fields } => {
                 let fs: Vec<String> = fields.iter()
                     .map(|f| format!("{}: {}", f.name, self.gen_type_expr(&f.ty)))
                     .collect();
@@ -545,7 +545,7 @@ impl TsEmitter {
                         continue;
                     }
                     match ty {
-                        TypeExpr::Record { fields } => {
+                        TypeExpr::Record { fields } | TypeExpr::OpenRecord { fields } => {
                             let fs: Vec<String> = fields.iter()
                                 .map(|f| format!("  {}: {};", f.name, self.gen_type_expr(&f.ty)))
                                 .collect();

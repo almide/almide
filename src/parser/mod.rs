@@ -32,10 +32,12 @@ impl Parser {
     /// Check all hint modules for a matching hint at the current position.
     pub(crate) fn check_hint(&self, expected: Option<crate::lexer::TokenType>, scope: hints::HintScope) -> Option<hints::HintResult> {
         let prev = if self.pos > 0 { Some(&self.tokens[self.pos - 1]) } else { None };
+        let next = if self.pos + 1 < self.tokens.len() { Some(&self.tokens[self.pos + 1]) } else { None };
         let ctx = hints::HintContext {
             expected,
             got: self.current(),
             prev,
+            next,
             scope,
         };
         hints::check_hint(&ctx)

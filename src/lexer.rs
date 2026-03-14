@@ -112,54 +112,9 @@ pub struct Token {
     pub col: usize,
 }
 
+/// Build keyword map — delegates to generated code from grammar/tokens.toml
 fn build_keyword_map() -> HashMap<&'static str, TokenType> {
-    let mut m = HashMap::new();
-    m.insert("module", TokenType::Module);
-    m.insert("import", TokenType::Import);
-    m.insert("type", TokenType::Type);
-    m.insert("trait", TokenType::Trait);
-    m.insert("impl", TokenType::Impl);
-    m.insert("for", TokenType::For);
-    m.insert("in", TokenType::In);
-    m.insert("fn", TokenType::Fn);
-    m.insert("let", TokenType::Let);
-    m.insert("var", TokenType::Var);
-    m.insert("if", TokenType::If);
-    m.insert("then", TokenType::Then);
-    m.insert("else", TokenType::Else);
-    m.insert("match", TokenType::Match);
-    m.insert("ok", TokenType::Ok);
-    m.insert("Ok", TokenType::Ok);
-    m.insert("err", TokenType::Err);
-    m.insert("Err", TokenType::Err);
-    m.insert("some", TokenType::Some);
-    m.insert("Some", TokenType::Some);
-    m.insert("none", TokenType::None);
-    m.insert("None", TokenType::None);
-    m.insert("try", TokenType::Try);
-    m.insert("do", TokenType::Do);
-    m.insert("todo", TokenType::Todo);
-    m.insert("unsafe", TokenType::Unsafe);
-    m.insert("true", TokenType::True);
-    m.insert("false", TokenType::False);
-    m.insert("not", TokenType::Not);
-    m.insert("and", TokenType::And);
-    m.insert("or", TokenType::Or);
-    m.insert("strict", TokenType::Strict);
-    m.insert("pub", TokenType::Pub);
-    m.insert("effect", TokenType::Effect);
-    m.insert("deriving", TokenType::Deriving);
-    m.insert("test", TokenType::Test);
-    m.insert("async", TokenType::Async);
-    m.insert("await", TokenType::Await);
-    m.insert("guard", TokenType::Guard);
-    m.insert("break", TokenType::Break);
-    m.insert("continue", TokenType::Continue);
-    m.insert("while", TokenType::While);
-    m.insert("local", TokenType::Local);
-    m.insert("mod", TokenType::Mod);
-    m.insert("newtype", TokenType::Newtype);
-    m
+    crate::generated::token_table::build_keyword_map_generated()
 }
 
 fn is_continuation_token(tt: &TokenType) -> bool {
