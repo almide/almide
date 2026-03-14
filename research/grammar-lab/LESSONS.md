@@ -254,6 +254,20 @@ Layer 1 に `if` の構文を明示的に入れることで回避:
 
 ---
 
+## 15. transpile のパターン列挙は脆い
+
+パターン列挙式の transpile（`(x) =>` → `fn(x) =>` を変数名ごとに string.replace）は、LLM が使う変数名を網羅できない。`(o) =>`, `(t) =>` が漏れて paren-lambda が 26% に落ちた。
+
+**解決:** `") =>"` を見つけて逆方向に `(` を探す汎用アルゴリズムに変更。パラメータ名に依存しない。
+
+---
+
+## 16. LLM の生出力を保存すべき
+
+transpile バグと LLM エラーの切り分けには、transpile 前の生出力が必要。`outputs/` ディレクトリに `_raw.almd`（生出力）と `_compiled.almd`（transpile 後）を保存する仕組みを追加した。
+
+---
+
 ## 全体の教訓
 
 1. **effect fn の auto-unwrap に頼る** — 手動 `match ok/err` は型の不一致を生みやすい
