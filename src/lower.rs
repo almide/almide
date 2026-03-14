@@ -196,8 +196,9 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<(usize, usize), T
                     let checked = ctx.expr_ty(value);
                     if matches!(checked, Ty::Unknown) { ir_value.ty.clone() } else { checked }
                 };
+                let kind = crate::ir::classify_top_let_kind(&ir_value);
                 let var = ctx.define_var(name, ty.clone(), Mutability::Let, *span);
-                top_lets.push(IrTopLet { var, ty, value: ir_value });
+                top_lets.push(IrTopLet { var, ty, value: ir_value, kind });
             }
             ast::Decl::Type { name, ty, deriving, visibility, generics, .. } => {
                 type_decls.push(lower_type_decl(&mut ctx, name, ty, deriving, visibility, generics.as_ref()));
@@ -215,7 +216,9 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<(usize, usize), T
         }
     }
 
-    IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table }
+    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table };
+    crate::ir::compute_use_counts(&mut program);
+    program
 }
 
 fn lower_fn(

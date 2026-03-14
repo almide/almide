@@ -56,6 +56,10 @@ pub struct VarInfo {
     pub mutability: Mutability,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub span: Option<Span>,
+    /// Number of times this variable is referenced in the IR.
+    /// Computed as a post-pass after lowering.
+    #[serde(default)]
+    pub use_count: u32,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -68,13 +72,23 @@ impl VarTable {
 
     pub fn alloc(&mut self, name: String, ty: Ty, mutability: Mutability, span: Option<Span>) -> VarId {
         let id = VarId(self.entries.len() as u32);
-        self.entries.push(VarInfo { name, ty, mutability, span });
+        self.entries.push(VarInfo { name, ty, mutability, span, use_count: 0 });
         id
     }
 
     pub fn get(&self, id: VarId) -> &VarInfo { &self.entries[id.0 as usize] }
 
     pub fn len(&self) -> usize { self.entries.len() }
+
+    /// Increment the use count for a variable.
+    pub fn increment_use(&mut self, id: VarId) {
+        self.entries[id.0 as usize].use_count += 1;
+    }
+
+    /// Get the use count for a variable.
+    pub fn use_count(&self, id: VarId) -> u32 {
+        self.entries[id.0 as usize].use_count
+    }
 }
 
 // ── String interpolation ────────────────────────────────────────
@@ -351,12 +365,26 @@ pub struct IrFunction {
     pub extern_attrs: Vec<crate::ast::ExternAttr>,
 }
 
+/// Classification of top-level let bindings for codegen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TopLetKind {
+    /// Simple literal value (int, float, bool) — emits as `const` in Rust.
+    Const,
+    /// Non-literal expression — emits as `LazyLock` in Rust.
+    Lazy,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IrTopLet {
     pub var: VarId,
     pub ty: Ty,
     pub value: IrExpr,
+    #[serde(default = "default_top_let_kind")]
+    pub kind: TopLetKind,
 }
+
+fn default_top_let_kind() -> TopLetKind { TopLetKind::Lazy }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IrProgram {
@@ -364,4 +392,152 @@ pub struct IrProgram {
     pub top_lets: Vec<IrTopLet>,
     pub type_decls: Vec<IrTypeDecl>,
     pub var_table: VarTable,
+}
+
+// ── Use-count computation (post-pass) ───────────────────────────
+
+/// Walk the entire IR program and count variable uses, storing results in VarTable.
+pub fn compute_use_counts(program: &mut IrProgram) {
+    // Reset all counts
+    for i in 0..program.var_table.len() {
+        program.var_table.entries[i].use_count = 0;
+    }
+
+    // Count uses in all function bodies
+    for func in &program.functions {
+        count_uses_in_expr(&func.body, &mut program.var_table);
+    }
+
+    // Count uses in top-level let values
+    for tl in &program.top_lets {
+        count_uses_in_expr(&tl.value, &mut program.var_table);
+    }
+}
+
+fn count_uses_in_expr(expr: &IrExpr, table: &mut VarTable) {
+    match &expr.kind {
+        IrExprKind::Var { id } => {
+            table.increment_use(*id);
+        }
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
+        | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::OptionNone
+        | IrExprKind::Hole | IrExprKind::Todo { .. }
+        | IrExprKind::Break | IrExprKind::Continue
+        | IrExprKind::EmptyMap => {}
+
+        IrExprKind::BinOp { left, right, .. } => {
+            count_uses_in_expr(left, table);
+            count_uses_in_expr(right, table);
+        }
+        IrExprKind::UnOp { operand, .. } => {
+            count_uses_in_expr(operand, table);
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            count_uses_in_expr(cond, table);
+            count_uses_in_expr(then, table);
+            count_uses_in_expr(else_, table);
+        }
+        IrExprKind::Match { subject, arms } => {
+            count_uses_in_expr(subject, table);
+            for arm in arms {
+                if let Some(g) = &arm.guard { count_uses_in_expr(g, table); }
+                count_uses_in_expr(&arm.body, table);
+            }
+        }
+        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+            for s in stmts { count_uses_in_stmt(s, table); }
+            if let Some(e) = expr { count_uses_in_expr(e, table); }
+        }
+        IrExprKind::Call { target, args, .. } => {
+            match target {
+                CallTarget::Method { object, .. } => count_uses_in_expr(object, table),
+                CallTarget::Computed { callee } => count_uses_in_expr(callee, table),
+                _ => {}
+            }
+            for a in args { count_uses_in_expr(a, table); }
+        }
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
+            for e in elements { count_uses_in_expr(e, table); }
+        }
+        IrExprKind::Record { fields, .. } => {
+            for (_, e) in fields { count_uses_in_expr(e, table); }
+        }
+        IrExprKind::SpreadRecord { base, fields } => {
+            count_uses_in_expr(base, table);
+            for (_, e) in fields { count_uses_in_expr(e, table); }
+        }
+        IrExprKind::MapLiteral { entries } => {
+            for (k, v) in entries {
+                count_uses_in_expr(k, table);
+                count_uses_in_expr(v, table);
+            }
+        }
+        IrExprKind::Range { start, end, .. } => {
+            count_uses_in_expr(start, table);
+            count_uses_in_expr(end, table);
+        }
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
+            count_uses_in_expr(object, table);
+        }
+        IrExprKind::IndexAccess { object, index } => {
+            count_uses_in_expr(object, table);
+            count_uses_in_expr(index, table);
+        }
+        IrExprKind::ForIn { iterable, body, .. } => {
+            count_uses_in_expr(iterable, table);
+            for s in body { count_uses_in_stmt(s, table); }
+        }
+        IrExprKind::While { cond, body } => {
+            count_uses_in_expr(cond, table);
+            for s in body { count_uses_in_stmt(s, table); }
+        }
+        IrExprKind::Lambda { body, .. } => {
+            count_uses_in_expr(body, table);
+        }
+        IrExprKind::StringInterp { parts } => {
+            for part in parts {
+                if let IrStringPart::Expr { expr } = part {
+                    count_uses_in_expr(expr, table);
+                }
+            }
+        }
+        IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
+        | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
+        | IrExprKind::Await { expr } => {
+            count_uses_in_expr(expr, table);
+        }
+    }
+}
+
+fn count_uses_in_stmt(stmt: &IrStmt, table: &mut VarTable) {
+    match &stmt.kind {
+        IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
+        | IrStmtKind::Assign { value, .. } => {
+            count_uses_in_expr(value, table);
+        }
+        IrStmtKind::IndexAssign { index, value, .. } => {
+            count_uses_in_expr(index, table);
+            count_uses_in_expr(value, table);
+        }
+        IrStmtKind::FieldAssign { value, .. } => {
+            count_uses_in_expr(value, table);
+        }
+        IrStmtKind::Expr { expr } => {
+            count_uses_in_expr(expr, table);
+        }
+        IrStmtKind::Guard { cond, else_ } => {
+            count_uses_in_expr(cond, table);
+            count_uses_in_expr(else_, table);
+        }
+        IrStmtKind::Comment { .. } => {}
+    }
+}
+
+/// Classify a top-level let value: simple literals are `Const`, everything else is `Lazy`.
+pub fn classify_top_let_kind(expr: &IrExpr) -> TopLetKind {
+    match &expr.kind {
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitBool { .. } | IrExprKind::Unit => TopLetKind::Const,
+        _ => TopLetKind::Lazy,
+    }
 }

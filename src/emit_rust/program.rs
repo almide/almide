@@ -144,11 +144,25 @@ impl Emitter {
         }
     }
 
-    /// Collect top-level let names. The bool (needs_deref) is set later during emit.
+    /// Collect top-level let names. When IR is available, pre-classify using TopLetKind;
+    /// otherwise the bool (needs_deref) is set later during emit.
     fn collect_top_lets(&mut self, decls: &[Decl]) {
-        for decl in decls {
-            if let Decl::TopLet { name, .. } = decl {
-                self.top_let_names.insert(name.clone(), false);
+        if let Some(ref ir) = self.ir_program {
+            for tl in &ir.top_lets {
+                let info = ir.var_table.get(tl.var);
+                let needs_deref = match tl.kind {
+                    almide::ir::TopLetKind::Lazy => true,
+                    almide::ir::TopLetKind::Const => false,
+                };
+                // String top-lets always need LazyLock
+                let needs_deref = needs_deref || matches!(tl.ty, almide::types::Ty::String);
+                self.top_let_names.insert(info.name.clone(), needs_deref);
+            }
+        } else {
+            for decl in decls {
+                if let Decl::TopLet { name, .. } = decl {
+                    self.top_let_names.insert(name.clone(), false);
+                }
             }
         }
     }
@@ -522,7 +536,7 @@ impl Emitter {
                         }
                     };
                     let val_str = self.gen_ir_expr(&ir_tl.value);
-                    let use_lazy = ty_str == "String" || !self.ir_expr_is_const(&ir_tl.value);
+                    let use_lazy = ty_str == "String" || ir_tl.kind == almide::ir::TopLetKind::Lazy;
                     if use_lazy {
                         self.top_let_names.insert(name.clone(), true);
                         self.emitln(&format!("static {}: std::sync::LazyLock<{}> = std::sync::LazyLock::new(|| {});", name, ty_str, val_str));
