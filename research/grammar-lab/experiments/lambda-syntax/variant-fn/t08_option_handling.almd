@@ -10,9 +10,14 @@ fn top_scorer(students: List[Student]) -> String =
       none => "",
     }
 
-fn average_score(students: List[Student]) -> Int =
-  if list.len(students) == 0 then 0
-  else students |> list.fold(0, fn(acc, s) => acc + s.score) / list.len(students)
+fn average_score(students: List[Student]) -> Int = {
+  let n = list.len(students)
+  if n == 0 then 0
+  else {
+    let total = students |> list.fold(0, fn(acc, s) => acc + s.score)
+    total / n
+  }
+}
 
 fn find_by_name(students: List[Student], target: String) -> Option[Student] =
   students |> list.find(fn(s) => s.name == target)

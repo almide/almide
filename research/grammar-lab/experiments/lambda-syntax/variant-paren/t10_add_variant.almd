@@ -1,0 +1,28 @@
+type Expr =
+  | Num(Int)
+  | Add(Int, Int)
+  | Neg(Int)
+
+fn eval(e: Expr) -> Int = match e {
+  Num(n) => n,
+  Add(a, b) => a + b,
+  Neg(n) => 0 - n,
+}
+
+fn describe(e: Expr) -> String = match e {
+  Num(n) => "num(${int.to_string(n)})",
+  Add(a, b) => "add(${int.to_string(a)}, ${int.to_string(b)})",
+  Neg(n) => "neg(${int.to_string(n)})",
+}
+
+fn eval_all(exprs: List[Expr]) -> List[Int] =
+  exprs |> list.map((e) => eval(e))
+
+fn describe_all(exprs: List[Expr]) -> List[String] =
+  exprs |> list.map((e) => describe(e))
+
+fn sum_all(exprs: List[Expr]) -> Int =
+  exprs |> list.fold(0, (acc, e) => acc + eval(e))
+
+fn find_positives(exprs: List[Expr]) -> List[Expr] =
+  exprs |> list.filter((e) => eval(e) > 0)

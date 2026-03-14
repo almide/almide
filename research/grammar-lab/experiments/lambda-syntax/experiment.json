@@ -10,7 +10,12 @@
     "t02_add_map_step",
     "t03_change_sort_key",
     "t04_add_fold",
-    "t05_complex_pipe"
+    "t05_complex_pipe",
+    "t06_extract_lambdas",
+    "t07_multi_transform",
+    "t08_option_handling",
+    "t09_type_change",
+    "t10_add_variant"
   ],
   "trials": 5,
   "models": [

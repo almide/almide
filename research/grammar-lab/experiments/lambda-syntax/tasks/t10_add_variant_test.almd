@@ -1,0 +1,66 @@
+test "eval Mul" {
+  assert_eq(eval(Mul(3, 4)), 12)
+  assert_eq(eval(Mul(0, 100)), 0)
+  assert_eq(eval(Mul(7, 1)), 7)
+}
+
+test "eval IfPos positive" {
+  assert_eq(eval(IfPos(1, 10, 20)), 10)
+  assert_eq(eval(IfPos(99, 42, 0)), 42)
+}
+
+test "eval IfPos zero or negative" {
+  assert_eq(eval(IfPos(0, 10, 20)), 20)
+  assert_eq(eval(IfPos(0 - 5, 10, 20)), 20)
+}
+
+test "describe Mul" {
+  assert_eq(describe(Mul(3, 4)), "mul(3, 4)")
+}
+
+test "describe IfPos" {
+  assert_eq(describe(IfPos(1, 10, 20)), "ifpos(1, 10, 20)")
+}
+
+test "eval_all with new variants" {
+  let exprs = [Num(1), Mul(2, 3), IfPos(1, 10, 20), Add(5, 5)]
+  assert_eq(eval_all(exprs), [1, 6, 10, 10])
+}
+
+test "describe_all with new variants" {
+  let exprs = [Mul(2, 3), IfPos(0, 1, 2)]
+  assert_eq(describe_all(exprs), ["mul(2, 3)", "ifpos(0, 1, 2)"])
+}
+
+test "sum_all with new variants" {
+  let exprs = [Num(1), Mul(2, 5), IfPos(0 - 1, 100, 3)]
+  assert_eq(sum_all(exprs), 14)
+}
+
+test "find_positives with new variants" {
+  let exprs = [
+    Num(0),
+    Mul(3, 2),
+    Neg(5),
+    IfPos(0 - 1, 100, 0),
+    IfPos(1, 7, 0),
+  ]
+  let result = find_positives(exprs)
+  assert_eq(eval_all(result), [6, 7])
+}
+
+test "eval Num unchanged" {
+  assert_eq(eval(Num(42)), 42)
+}
+
+test "eval Add unchanged" {
+  assert_eq(eval(Add(3, 4)), 7)
+}
+
+test "eval Neg unchanged" {
+  assert_eq(eval(Neg(5)), -5)
+}
+
+test "describe Num unchanged" {
+  assert_eq(describe(Num(42)), "num(42)")
+}
