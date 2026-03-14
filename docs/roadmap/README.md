@@ -8,6 +8,7 @@
 - [Codec Protocol & JSON](active/codec-and-json.md) — `deriving Codec` + JSON as first format, 5-phase roadmap
 - [Template: Typed Document Builder](active/template.md) — `template` keyword, `html {}`/`text {}` builders, type-dispatched insertion, typed document AST
 - [Type System Extensions](active/type-system.md) — Row polymorphism, union types, container protocols (LLM-friendly HKT), structural generic bounds
+- [Codegen IR Redesign](active/ir-redesign.md) — Self-contained typed IR, side-channel elimination, AST-free codegen
 - [Monomorphization](active/monomorphization.md) — Generic function instantiation for named rows (`..R`) and container protocols Rust codegen
 - [UFCS for External Libraries](active/ufcs-external.md) — Type-directed UFCS resolution for user-defined types, `req.param("id")` style
 - [Syntax Sugar](active/syntax-sugar.md) — Lambda short syntax `(x) => expr`, default arguments, comprehensions
