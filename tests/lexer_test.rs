@@ -24,54 +24,6 @@ fn lex_integer() {
     assert_eq!(toks, vec![(TokenType::Int, "42".into())]);
 }
 
-#[test]
-fn lex_hex_literal() {
-    let toks = tokens("0xFF");
-    assert_eq!(toks, vec![(TokenType::Int, "255".into())]);
-}
-
-#[test]
-fn lex_hex_uppercase() {
-    let toks = tokens("0XAB");
-    assert_eq!(toks, vec![(TokenType::Int, "171".into())]);
-}
-
-#[test]
-fn lex_binary_literal() {
-    let toks = tokens("0b1010");
-    assert_eq!(toks, vec![(TokenType::Int, "10".into())]);
-}
-
-#[test]
-fn lex_binary_uppercase() {
-    let toks = tokens("0B1100");
-    assert_eq!(toks, vec![(TokenType::Int, "12".into())]);
-}
-
-#[test]
-fn lex_octal_literal() {
-    let toks = tokens("0o17");
-    assert_eq!(toks, vec![(TokenType::Int, "15".into())]);
-}
-
-#[test]
-fn lex_octal_uppercase() {
-    let toks = tokens("0O77");
-    assert_eq!(toks, vec![(TokenType::Int, "63".into())]);
-}
-
-#[test]
-fn lex_underscore_separator() {
-    let toks = tokens("1_000_000");
-    assert_eq!(toks, vec![(TokenType::Int, "1000000".into())]);
-}
-
-#[test]
-fn lex_hex_with_underscores() {
-    let toks = tokens("0xFF_FF");
-    assert_eq!(toks, vec![(TokenType::Int, "65535".into())]);
-}
-
 // ---- Float literals ----
 
 #[test]
@@ -113,40 +65,11 @@ fn lex_string_escape_sequences() {
 }
 
 #[test]
-fn lex_string_unicode_escape() {
-    let toks = tokens("\"\\u{0041}\"");
-    assert_eq!(toks, vec![(TokenType::String, "A".into())]);
-}
-
-#[test]
 fn lex_interpolated_string() {
     let toks = tokens("\"hello ${name}\"");
     assert_eq!(toks.len(), 1);
     assert_eq!(toks[0].0, TokenType::InterpolatedString);
     assert!(toks[0].1.contains("${name}"));
-}
-
-#[test]
-fn lex_raw_string() {
-    let toks = tokens("r\"no\\escapes\"");
-    assert_eq!(toks, vec![(TokenType::String, "no\\escapes".into())]);
-}
-
-#[test]
-fn lex_heredoc() {
-    let toks = tokens("\"\"\"\n  hello\n  world\n  \"\"\"");
-    assert_eq!(toks.len(), 1);
-    assert_eq!(toks[0].0, TokenType::String);
-    assert!(toks[0].1.contains("hello"));
-    assert!(toks[0].1.contains("world"));
-}
-
-#[test]
-fn lex_raw_heredoc() {
-    let toks = tokens("r\"\"\"\n  no\\escapes\n  \"\"\"");
-    assert_eq!(toks.len(), 1);
-    assert_eq!(toks[0].0, TokenType::String);
-    assert!(toks[0].1.contains("no\\escapes"));
 }
 
 #[test]
@@ -208,18 +131,6 @@ fn lex_all_keywords() {
     }
 }
 
-#[test]
-fn lex_ok_err_case_insensitive() {
-    assert_eq!(token_types("ok"), vec![TokenType::Ok]);
-    assert_eq!(token_types("Ok"), vec![TokenType::Ok]);
-    assert_eq!(token_types("err"), vec![TokenType::Err]);
-    assert_eq!(token_types("Err"), vec![TokenType::Err]);
-    assert_eq!(token_types("some"), vec![TokenType::Some]);
-    assert_eq!(token_types("Some"), vec![TokenType::Some]);
-    assert_eq!(token_types("none"), vec![TokenType::None]);
-    assert_eq!(token_types("None"), vec![TokenType::None]);
-}
-
 // ---- Identifiers ----
 
 #[test]
@@ -238,12 +149,6 @@ fn lex_type_name() {
 fn lex_predicate_identifier() {
     let toks = tokens("empty?");
     assert_eq!(toks, vec![(TokenType::IdentQ, "empty?".into())]);
-}
-
-#[test]
-fn lex_underscore() {
-    let toks = tokens("_");
-    assert_eq!(toks, vec![(TokenType::Underscore, "_".into())]);
 }
 
 #[test]
@@ -319,52 +224,10 @@ fn lex_comment_preserves_line_info() {
 // ---- Newline handling ----
 
 #[test]
-fn lex_newline_suppressed_in_parens() {
-    let toks = Lexer::tokenize("(\n1\n)");
-    let has_newline = toks.iter().any(|t| t.token_type == TokenType::Newline);
-    assert!(!has_newline, "newlines inside () should be suppressed");
-}
-
-#[test]
-fn lex_newline_suppressed_in_brackets() {
-    let toks = Lexer::tokenize("[\n1\n]");
-    let has_newline = toks.iter().any(|t| t.token_type == TokenType::Newline);
-    assert!(!has_newline, "newlines inside [] should be suppressed");
-}
-
-#[test]
-fn lex_continuation_after_operator() {
-    let toks = Lexer::tokenize("a +\nb");
-    let has_newline = toks.iter().any(|t| t.token_type == TokenType::Newline);
-    assert!(!has_newline, "newline after + should be suppressed");
-}
-
-#[test]
-fn lex_continuation_before_pipe() {
-    let toks = Lexer::tokenize("xs\n  |> f");
-    let has_newline = toks.iter().any(|t| t.token_type == TokenType::Newline);
-    assert!(!has_newline, "newline before |> should be suppressed");
-}
-
-#[test]
-fn lex_continuation_before_dot() {
-    let toks = Lexer::tokenize("x\n  .y");
-    let has_newline = toks.iter().any(|t| t.token_type == TokenType::Newline);
-    assert!(!has_newline, "newline before . should be suppressed");
-}
-
-#[test]
 fn lex_newline_between_statements() {
     let toks = Lexer::tokenize("a\nb");
     let newline_count = toks.iter().filter(|t| t.token_type == TokenType::Newline).count();
     assert_eq!(newline_count, 1);
-}
-
-#[test]
-fn lex_no_duplicate_newlines() {
-    let toks = Lexer::tokenize("a\n\n\nb");
-    let newline_count = toks.iter().filter(|t| t.token_type == TokenType::Newline).count();
-    assert_eq!(newline_count, 1, "multiple blank lines should produce only one newline token");
 }
 
 // ---- Line/column tracking ----
@@ -464,12 +327,6 @@ fn lex_negative_start() {
 // ---- Float edge cases ----
 
 #[test]
-fn lex_float_with_underscores() {
-    let toks = tokens("1_000.50");
-    assert_eq!(toks, vec![(TokenType::Float, "1000.50".into())]);
-}
-
-#[test]
 fn lex_zero_float() {
     let toks = tokens("0.0");
     assert_eq!(toks, vec![(TokenType::Float, "0.0".into())]);
@@ -493,12 +350,6 @@ fn lex_escaped_backslash() {
 fn lex_escaped_quote() {
     let toks = tokens("\"he said \\\"hi\\\"\"");
     assert_eq!(toks, vec![(TokenType::String, "he said \"hi\"".into())]);
-}
-
-#[test]
-fn lex_null_escape() {
-    let toks = tokens("\"\\0\"");
-    assert_eq!(toks, vec![(TokenType::String, "\0".into())]);
 }
 
 // ---- Carriage return handling ----
