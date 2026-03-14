@@ -11,6 +11,7 @@
 - [UFCS for External Libraries](active/ufcs-external.md) — Type-directed UFCS resolution for user-defined types, `req.param("id")` style
 - [Syntax Sugar](active/syntax-sugar.md) — Lambda short syntax `(x) => expr`, default arguments, comprehensions
 - [Web Framework](active/web-framework.md) — First-party Hono-equivalent, template/Codec integration, pipe-chain routing
+- [Grammar Research Infrastructure](active/grammar-research.md) — A/B test syntax variants across LLMs, measure modification survival rate, built in Almide
 
 ## On Hold
 
