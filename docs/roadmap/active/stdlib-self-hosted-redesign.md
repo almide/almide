@@ -43,18 +43,38 @@ Go が GOOS/GOARCH だけ知っていて、Docker に包むのは Dockerfile の
 
 この境界を崩さないことで、コンパイラの複雑さが増えず、長期的に設計が持つ。
 
-### Rule 7: glue runtime は明示的に存在する
+### Rule 7: glue runtime は明示的で薄い翻訳層
 
-ターゲット間の値変換（Result 表現、Option 表現等）を行う glue layer は、隠れた魔法ではなく、リポジトリ上で普通に見えるファイルとして配置する。glue の責務は「翻訳者」に限定し、ロジック本体を glue に書かない。
+ターゲット間の値変換を行う glue layer は、隠れた魔法ではなく、リポジトリ上で普通に見えるファイルとして配置する。glue はモジュールごとではなく**ターゲット単位で集約**する。Result の表現、List の受け渡し、String のエンコーディング規則は fs でも list でも http でも同じだから。
 
 ```
-stdlib/
-  _glue/
-    result.ts          Result<A,E> の TS 値表現 + 変換ヘルパー
-    result.rs          Rust は Result がネイティブなので薄い
-    types.ts           Option, Unit 等の共通型定義
-    types.rs
+runtime/
+  ts/
+    core.ts           Result, Option, 基本型の表現
+    core.node.ts      Node 固有の差分（あれば）
+    core.browser.ts   Browser 固有の差分（あれば）
+    core_test.ts      glue 自体のテスト
+  rust/
+    core.rs           Result, Option, 基本型の表現
+    core.wasm.rs      WASM 固有の差分（あれば）
+    core_test.rs      glue 自体のテスト
 ```
+
+**glue が吸収する責務（これだけ）:**
+1. **値表現の変換** — ネストした型の変換規則
+2. **Result/Option の正規化** — ホスト API の throw/null を Almide の値表現に変換
+3. **String の境界処理** — UTF-8 (Almide) ↔ UTF-16 (TS) の変換規則
+4. **Panic/例外の捕捉** — ホスト API の throw を catch して Result に変換。外に throw を漏らさない
+
+**glue に入れないもの:**
+- stdlib のロジック本体
+- モジュール固有のディスパッチ
+- 複雑な条件分岐やプラットフォーム判定
+- 最適化
+
+**設計指標:** core.ts が ~50行、core.rs が ~20行で済む。それ以上膨らんだら設計が間違っている兆候。
+
+Go の `wasm_exec.js` は glue をテスト不能な隠しファイルにしたのが苦しみの原因。Almide は glue 自体を unit test 可能にし、将来ユーザーが `@extern` パッケージを書くときも `import { ok, err, catchToResult } from "almide/runtime"` で同じ glue を使う形にする
 
 ---
 
@@ -97,28 +117,39 @@ stdlib/
 ### Architecture
 
 ```
-stdlib/
+runtime/                    ← ターゲット共通の翻訳層（glue）
+  ts/
+    core.ts                 Result, Option, 基本型の TS 表現
+    core.node.ts            Node 固有の差分（あれば）
+    core.browser.ts         Browser 固有の差分（あれば）
+    core_test.ts            glue 自体のテスト
+  rust/
+    core.rs                 Result, Option, 基本型の Rust 表現
+    core.wasm.rs            WASM 固有の差分（あれば）
+    core_test.rs            glue 自体のテスト
+
+stdlib/                     ← モジュール別の定義 + ネイティブ実装
   list/
-    mod.almd              型シグネチャ + 純粋 Almide 実装
-    extern.rs             Rust ネイティブ実装（本物の Rust コード）
-    extern_test.rs        cargo test で直接テスト可能
-    extern.ts             TS ネイティブ実装（本物の TS コード）
-    extern_test.ts        deno test で直接テスト可能
+    mod.almd                型シグネチャ + 純粋 Almide 実装
+    extern.rs               Rust ネイティブ実装（本物の Rust コード）
+    extern_test.rs          cargo test で直接テスト可能
+    extern.ts               TS ネイティブ実装（本物の TS コード）
+    extern_test.ts          deno test で直接テスト可能
   fs/
-    mod.almd              型シグネチャ（全関数が @extern）
-    extern.rs             Rust: std::fs（sync, native）
-    extern.wasm.rs        Rust: WASM 環境（制限付き or stub）
-    extern.ts             TS: Deno（デフォルト）
-    extern.node.ts        TS: Node fs
-    extern.node.22.ts     TS: Node 22+（fs.glob 対応）
-    extern.browser.ts     TS: File System Access API
+    mod.almd                型シグネチャ（全関数が @extern）
+    extern.rs               Rust: std::fs（sync, native）
+    extern.wasm.rs          Rust: WASM 環境（制限付き or stub）
+    extern.ts               TS: Deno（デフォルト）
+    extern.node.ts          TS: Node fs
+    extern.node.22.ts       TS: Node 22+（fs.glob 対応）
+    extern.browser.ts       TS: File System Access API
     extern_test.rs
     extern_test.ts
     extern_test.node.ts
   hash/
-    mod.almd              全て純粋 Almide（extern ファイル不要）
+    mod.almd                全て純粋 Almide（extern ファイル不要）
   csv/
-    mod.almd              全て純粋 Almide（extern ファイル不要）
+    mod.almd                全て純粋 Almide（extern ファイル不要）
 ```
 
 ### `@extern` 構文
@@ -177,21 +208,99 @@ Unit              ()                         void
 
 #### エラー表現（Rule 4）
 
-**Result は全ターゲットで値として表現する。**
+**Result は全ターゲットで値として表現する。** glue layer（`runtime/ts/core.ts`）が型定義とヘルパーを提供し、全 extern がこれを import して使う。
 
 ```typescript
-// TS での Result 表現 — throw ではなく値オブジェクト
-type Result<A, E> =
-  | { ok: true; value: A }
+// runtime/ts/core.ts — glue layer（~50行で済む）
+
+export type AlmResult<T, E> =
+  | { ok: true; value: T }
   | { ok: false; error: E };
 
-// extern 関数は Result を返す
-export function almide_rt_fs_read_text(path: string): Result<string, string> {
+export function ok<T, E>(value: T): AlmResult<T, E> {
+  return { ok: true, value };
+}
+
+export function err<T, E>(error: E): AlmResult<T, E> {
+  return { ok: false, error };
+}
+
+// ホスト API の throw を Result に変換するラッパー
+export function catchToResult<T>(f: () => T): AlmResult<T, string> {
   try {
-    return { ok: true, value: Deno.readTextFileSync(path) };
+    return ok(f());
   } catch (e) {
-    return { ok: false, error: String(e) };
+    return err(e instanceof Error ? e.message : String(e));
   }
+}
+
+export type AlmOption<T> =
+  | { some: true; value: T }
+  | { some: false };
+
+export function some<T>(value: T): AlmOption<T> {
+  return { some: true, value };
+}
+
+export const none: AlmOption<never> = { some: false };
+
+export function fromNullable<T>(value: T | null | undefined): AlmOption<T> {
+  return value != null ? some(value) : none;
+}
+```
+
+```rust
+// runtime/rust/core.rs — Rust は Result/Option がネイティブなので薄い（~20行）
+
+pub type AlmResult<T> = Result<T, String>;
+pub type AlmOption<T> = Option<T>;
+
+/// ホスト API が panic する可能性がある場合のラッパー
+pub fn catch_to_result<T, F: FnOnce() -> T>(f: F) -> AlmResult<T> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
+        .map_err(|e| {
+            if let Some(s) = e.downcast_ref::<&str>() {
+                s.to_string()
+            } else if let Some(s) = e.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "unknown panic".to_string()
+            }
+        })
+}
+```
+
+**extern が glue を使う例:**
+
+```typescript
+// stdlib/fs/extern.ts — glue を import して使う
+import { catchToResult, type AlmResult } from "../../runtime/ts/core.ts";
+
+export function almide_rt_fs_read_text(path: string): AlmResult<string, string> {
+  return catchToResult(() => Deno.readTextFileSync(path));
+}
+```
+
+```typescript
+// stdlib/fs/extern.node.ts — Node バリアントも同じ glue を使う
+import { ok, err, type AlmResult } from "../../runtime/ts/core.ts";
+import * as fs from "node:fs";
+
+export function almide_rt_fs_read_text(path: string): AlmResult<string, string> {
+  try {
+    return ok(fs.readFileSync(path, "utf-8"));
+  } catch (e) {
+    return err(e instanceof Error ? e.message : String(e));
+  }
+}
+```
+
+```rust
+// stdlib/fs/extern.rs — Rust 側は自然に Result を返すだけ
+use crate::runtime::core::AlmResult;
+
+pub fn almide_rt_fs_read_text(path: String) -> AlmResult<String> {
+    std::fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 ```
 
@@ -638,6 +747,13 @@ regex:   new, is_match, find, find_all, replace, split, captures
 
 ## Files
 ```
+runtime/ts/core.ts (Result, Option, 基本型の TS 表現 — ~50行)
+runtime/ts/core.node.ts (Node 固有差分 — あれば)
+runtime/ts/core.browser.ts (Browser 固有差分 — あれば)
+runtime/ts/core_test.ts (glue 自体のテスト)
+runtime/rust/core.rs (Result, Option, 基本型の Rust 表現 — ~20行)
+runtime/rust/core.wasm.rs (WASM 固有差分 — あれば)
+runtime/rust/core_test.rs (glue 自体のテスト)
 src/parser/mod.rs (add @extern parsing)
 src/check/ (handle @extern fn signatures)
 src/lower.rs (emit Extern IR nodes)
@@ -645,15 +761,11 @@ src/emit_rust/ (include extern.rs, dispatch @extern calls)
 src/emit_ts/ (include extern.ts, dispatch @extern calls)
 src/resolve.rs (variant resolution logic)
 src/cli.rs (add scaffold subcommand, --runtime/--runtime-version flags)
-stdlib/_glue/result.rs (Result glue for Rust — thin)
-stdlib/_glue/result.ts (Result glue for TS — value representation)
-stdlib/_glue/types.rs (Option, Unit etc. for Rust)
-stdlib/_glue/types.ts (Option, Unit etc. for TS)
 stdlib/*/mod.almd (type signatures + pure Almide)
-stdlib/*/extern.rs (Rust native implementations)
+stdlib/*/extern.rs (Rust native implementations — import runtime/rust/core)
 stdlib/*/extern.{variant}.rs (Rust variant implementations)
 stdlib/*/extern_test.rs (Rust tests)
-stdlib/*/extern.ts (TS native implementations)
+stdlib/*/extern.ts (TS native implementations — import runtime/ts/core)
 stdlib/*/extern.{variant}.ts (TS variant implementations)
 stdlib/*/extern_test.ts (TS tests)
 stdlib/Cargo.toml (workspace for Rust extern tests)
