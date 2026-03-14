@@ -130,8 +130,8 @@ effect fn run_experiment() -> Result[Unit, String] = {
           // Call LLM
           let llm_response = call_llm(provider, model_id, system_prompt, user_prompt)
 
-          // Extract code from response
-          let modified_code = extract_code(llm_response)
+          // Extract code from response, strip any test blocks LLM may have included
+          let modified_code = strip_test_blocks(extract_code(llm_response))
 
           // Transpile if needed (convert experimental syntax to current syntax for compilation)
           let compilable_code = transpile(modified_code, transpile_mode)
@@ -176,7 +176,7 @@ fn build_system_prompt(layer1: String, layer2: String, layer3: String) -> String
   "You are modifying code written in Almide (.almd files). Return ONLY the modified code, no explanation.\n\n${layer1}\n\n${layer2}\n\n${layer3}"
 
 fn build_user_prompt(source: String, tests: String, instruction: String) -> String =
-  "## Current Code\n\n```almide\n${source}\n```\n\n## Tests (must pass after modification)\n\n```almide\n${tests}\n```\n\n## Task\n\n${instruction}\n\nReturn the complete modified file. Output ONLY the code, wrapped in ```almide ... ```."
+  "## Current Code\n\n```almide\n${source}\n```\n\n## Tests (must pass after modification)\n\n```almide\n${tests}\n```\n\n## Task\n\n${instruction}\n\nReturn ONLY the modified source code (the Current Code section above, with your changes applied). Do NOT include the test blocks — tests will be appended automatically. Wrap your code in ```almide ... ```."
 
 // ── LLM API ──
 
@@ -276,6 +276,38 @@ effect fn call_openai(model_id: String, system: String, user: String) -> Result[
     none => "",
   }
   ok(text)
+}
+
+// ── Strip Test Blocks ──
+
+fn strip_test_blocks(code: String) -> String = {
+  // Remove test "..." { ... } blocks from LLM output
+  // Tests are appended by the runner, so duplicates cause compile errors
+  let lines = string.split(code, "\n")
+  var result: List[String] = []
+  var in_test = false
+  var brace_depth = 0
+  for line in lines {
+    if not in_test and string.starts_with(string.trim(line), "test ") then {
+      in_test = true
+      brace_depth = 0
+      // Count opening braces on this line
+      for c in string.chars(line) {
+        if c == "{" then { brace_depth = brace_depth + 1 } else { () }
+        if c == "}" then { brace_depth = brace_depth - 1 } else { () }
+      }
+      if brace_depth <= 0 then { in_test = false } else { () }
+    } else if in_test then {
+      for c in string.chars(line) {
+        if c == "{" then { brace_depth = brace_depth + 1 } else { () }
+        if c == "}" then { brace_depth = brace_depth - 1 } else { () }
+      }
+      if brace_depth <= 0 then { in_test = false } else { () }
+    } else {
+      result = result ++ [line]
+    }
+  }
+  string.join(result, "\n")
 }
 
 // ── Transpile ──
