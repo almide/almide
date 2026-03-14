@@ -64,13 +64,13 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         | "is_whitespace?" | "is_whitespace_hdlm_qm_"
         | "pad_right" | "trim_start" | "trim_end"
         | "strip_prefix" | "strip_suffix"
-        | "replace_first" | "last_index_of" | "to_float" => vec!["string"],
+        | "replace_first" | "last_index_of" => vec!["string"],
 
         // ── list-only ──
         "each" | "fold" | "find" | "any" | "all"
         | "enumerate" | "zip" | "flatten" | "take" | "drop"
         | "sort_by" | "unique"
-        | "last" | "chunk" | "sum" | "product"
+        | "last" | "chunk" | "sum" | "product" | "sum_float" | "product_float"
         | "first" | "flat_map"
         | "filter_map" | "take_while" | "drop_while"
         | "partition" | "reduce" | "group_by"
@@ -86,7 +86,9 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         "to_string" | "to_hex" => vec!["int"],
 
         // ── float-only ──
-        "to_fixed" | "round" | "floor" | "ceil" | "sqrt" => vec!["float"],
+        "to_fixed" | "round" | "floor" | "ceil" | "sqrt"
+        | "is_nan?" | "is_nan_hdlm_qm_"
+        | "is_infinite?" | "is_infinite_hdlm_qm_" => vec!["float"],
 
         // ── result-only ──
         "map_err" | "and_then" | "unwrap_or" | "unwrap_or_else"
@@ -112,6 +114,12 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         "sort" => vec!["list"],
         "map" | "filter" => vec!["list", "result"],
         "to_option" => vec!["result"],
+
+        // ── ambiguous: string + int ──
+        "to_float" => vec!["string", "int"],
+
+        // ── ambiguous: math + float ──
+        "sign" => vec!["math", "float"],
 
         _ => vec![],
     }

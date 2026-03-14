@@ -415,6 +415,18 @@ return = "List[C]"
 rust = "almide_rt_list_zip_with(({xs}).to_vec(), ({ys}).to_vec(), |{f.args}| {{ {f.clone_bindings}{f.body} }})"
 ts = "__almd_list.zip_with({xs}, {ys}, ({f.args}) => {f.body})"
 
+[sum_float]
+params = [{ name = "xs", type = "List[Float]" }]
+return = "Float"
+rust = "almide_rt_list_sum_float(&{xs})"
+ts = "__almd_list.sum_float({xs})"
+
+[product_float]
+params = [{ name = "xs", type = "List[Float]" }]
+return = "Float"
+rust = "almide_rt_list_product_float(&{xs})"
+ts = "__almd_list.product_float({xs})"
+
 [fold]
 type_params = ["A", "B"]
 params = [

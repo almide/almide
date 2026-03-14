@@ -239,6 +239,8 @@ const MOD_LIST_TS: &str = r#"const __almd_list = {
   windows<T>(xs: T[], n: number): T[][] { if (n <= 0 || n > xs.length) return []; const r: T[][] = []; for (let i = 0; i <= xs.length - n; i++) r.push(xs.slice(i, i + n)); return r; },
   dedup<T>(xs: T[]): T[] { const r: T[] = []; for (const x of xs) { if (r.length === 0 || r[r.length - 1] !== x) r.push(x); } return r; },
   zip_with<A, B, C>(a: A[], b: B[], f: (x: A, y: B) => C): C[] { return a.slice(0, Math.min(a.length, b.length)).map((x, i) => f(x, b[i])); },
+  sum_float(xs: number[]): number { return xs.reduce((a, b) => a + b, 0); },
+  product_float(xs: number[]): number { return xs.reduce((a, b) => a * b, 1); },
 };
 "#;
 
@@ -296,6 +298,8 @@ const MOD_LIST_JS: &str = r#"const __almd_list = {
   windows(xs, n) { if (n <= 0 || n > xs.length) return []; const r = []; for (let i = 0; i <= xs.length - n; i++) r.push(xs.slice(i, i + n)); return r; },
   dedup(xs) { const r = []; for (const x of xs) { if (r.length === 0 || r[r.length - 1] !== x) r.push(x); } return r; },
   zip_with(a, b, f) { return a.slice(0, Math.min(a.length, b.length)).map((x, i) => f(x, b[i])); },
+  sum_float(xs) { return xs.reduce((a, b) => a + b, 0); },
+  product_float(xs) { return xs.reduce((a, b) => a * b, 1); },
 };
 "#;
 
@@ -366,6 +370,7 @@ const MOD_INT_TS: &str = r#"const __almd_int = {
   abs(n: number): number { return Math.abs(n); },
   min(a: number, b: number): number { return Math.min(a, b); },
   max(a: number, b: number): number { return Math.max(a, b); },
+  to_float(n: number): number { return n; },
 };
 "#;
 
@@ -390,6 +395,7 @@ const MOD_INT_JS: &str = r#"const __almd_int = {
   abs(n) { return Math.abs(n); },
   min(a, b) { return Math.min(a, b); },
   max(a, b) { return Math.max(a, b); },
+  to_float(n) { return n; },
 };
 "#;
 
@@ -590,6 +596,9 @@ const MOD_MATH_TS: &str = r#"const __almd_math = {
   log(x: number): number { return Math.log(x); },
   exp(x: number): number { return Math.exp(x); },
   sqrt(x: number): number { return Math.sqrt(x); },
+  factorial(n: number): number { let r = 1; for (let i = 2; i <= n; i++) r *= i; return r; },
+  choose(n: number, k: number): number { if (k < 0 || k > n) return 0; if (k === 0 || k === n) return 1; k = Math.min(k, n - k); let r = 1; for (let i = 0; i < k; i++) { r = r * (n - i) / (i + 1); } return Math.round(r); },
+  log_gamma(x: number): number { if (x <= 0) return Infinity; if (x < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * x)) - __almd_math.log_gamma(1 - x); x -= 1; const c = [76.18009172947146, -86.50532032941677, 24.01409824083091, -1.231739572450155, 0.1208650973866179e-2, -0.5395239384953e-5]; let sum = 1.000000000190015; let y = x; for (const ci of c) { y += 1; sum += ci / y; } const t = x + 5.5; return -t + (x + 0.5) * Math.log(t) + Math.log(2.5066282746310005 * sum / (x + 1)); },
 };
 "#;
 
@@ -606,6 +615,9 @@ const MOD_MATH_JS: &str = r#"const __almd_math = {
   log(x) { return Math.log(x); },
   exp(x) { return Math.exp(x); },
   sqrt(x) { return Math.sqrt(x); },
+  factorial(n) { let r = 1; for (let i = 2; i <= n; i++) r *= i; return r; },
+  choose(n, k) { if (k < 0 || k > n) return 0; if (k === 0 || k === n) return 1; k = Math.min(k, n - k); let r = 1; for (let i = 0; i < k; i++) { r = r * (n - i) / (i + 1); } return Math.round(r); },
+  log_gamma(x) { if (x <= 0) return Infinity; if (x < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * x)) - __almd_math.log_gamma(1 - x); x -= 1; const c = [76.18009172947146, -86.50532032941677, 24.01409824083091, -1.231739572450155, 0.1208650973866179e-2, -0.5395239384953e-5]; let sum = 1.000000000190015; let y = x; for (const ci of c) { y += 1; sum += ci / y; } const t = x + 5.5; return -t + (x + 0.5) * Math.log(t) + Math.log(2.5066282746310005 * sum / (x + 1)); },
 };
 "#;
 

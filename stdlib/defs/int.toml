@@ -117,3 +117,10 @@ params = [{ name = "n", type = "Int" }, { name = "lo", type = "Int" }, { name = 
 return = "Int"
 rust = "almide_rt_int_clamp({n}, {lo}, {hi})"
 ts = "__almd_int.clamp({n}, {lo}, {hi})"
+
+[to_float]
+params = [{ name = "n", type = "Int" }]
+return = "Float"
+rust = "almide_rt_int_to_float({n})"
+ts = "__almd_int.to_float({n})"
+ufcs = true
