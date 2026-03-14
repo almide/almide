@@ -771,7 +771,7 @@ impl Emitter {
                     return name;
                 }
                 // Single-use: safe to move
-                if self.single_use_vars.contains(&info.name) {
+                if self.single_use_vars.contains(id) {
                     if let Some(borrow_ty) = self.borrowed_params.get(&info.name) {
                         return Self::borrow_to_owned(&name, borrow_ty);
                     }
@@ -1000,10 +1000,9 @@ impl Emitter {
         Self::count_ir_var_uses(body, &mut counts);
         self.single_use_vars.clear();
         let param_ids: std::collections::HashSet<VarId> = params.iter().map(|p| p.var).collect();
-        let var_table = &self.ir_program.as_ref().expect("IR").var_table;
         for (id, count) in &counts {
             if *count == 1 && !param_ids.contains(id) {
-                self.single_use_vars.insert(var_table.get(*id).name.clone());
+                self.single_use_vars.insert(*id);
             }
         }
     }

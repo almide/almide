@@ -71,7 +71,7 @@ pub(crate) struct Emitter {
     /// Record variant fields that need Box wrapping: (ctor_name, field_name)
     pub(crate) boxed_variant_record_fields: std::collections::HashSet<(String, String)>,
     /// Variables used only once in the current function body — safe to move instead of clone
-    pub(crate) single_use_vars: std::collections::HashSet<String>,
+    pub(crate) single_use_vars: std::collections::HashSet<almide::ir::VarId>,
     /// Borrow inference results: which params can be passed by reference
     pub(crate) borrow_info: borrow::BorrowInfo,
     /// Parameters that are currently borrowed (&str, &[T]) — need .to_owned()/.to_vec() instead of .clone()
