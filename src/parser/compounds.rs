@@ -160,24 +160,33 @@ impl Parser {
         let mut stmts = Vec::new();
         self.skip_newlines_into_stmts(&mut stmts);
         let mut final_expr: Option<Box<Expr>> = None;
-        while !self.check(TokenType::RBrace) {
-            let stmt = self.parse_stmt()?;
-            let mut trailing = Vec::new();
-            self.skip_newlines_into_stmts(&mut trailing);
-            if self.check(TokenType::Semicolon) {
-                self.advance();
-                self.skip_newlines_into_stmts(&mut trailing);
-            }
-            if self.check(TokenType::RBrace) {
-                if let Stmt::Expr { expr, .. } = stmt {
-                    final_expr = Some(Box::new(expr));
-                } else {
-                    stmts.push(stmt);
+        while !self.check(TokenType::RBrace) && !self.check(TokenType::EOF) {
+            match self.parse_stmt() {
+                Ok(stmt) => {
+                    let mut trailing = Vec::new();
+                    self.skip_newlines_into_stmts(&mut trailing);
+                    if self.check(TokenType::Semicolon) {
+                        self.advance();
+                        self.skip_newlines_into_stmts(&mut trailing);
+                    }
+                    if self.check(TokenType::RBrace) {
+                        if let Stmt::Expr { expr, .. } = stmt {
+                            final_expr = Some(Box::new(expr));
+                        } else {
+                            stmts.push(stmt);
+                        }
+                        stmts.extend(trailing);
+                    } else {
+                        stmts.push(stmt);
+                        stmts.extend(trailing);
+                    }
                 }
-                stmts.extend(trailing);
-            } else {
-                stmts.push(stmt);
-                stmts.extend(trailing);
+                Err(msg) => {
+                    let err_span = Some(self.current_span());
+                    self.errors.push(self.string_to_diagnostic(&msg));
+                    self.recover_to_sync_point(true);
+                    stmts.push(Stmt::Error { span: err_span });
+                }
             }
         }
         self.expect_closing(TokenType::RBrace, open.line, open.col, "do block")?;
@@ -286,7 +295,7 @@ impl Parser {
                 Err(msg) => {
                     let err_span = Some(self.current_span());
                     self.errors.push(self.string_to_diagnostic(&msg));
-                    self.skip_to_next_stmt();
+                    self.recover_to_sync_point(true);
                     stmts.push(Stmt::Error { span: err_span });
                 }
             }
@@ -304,21 +313,33 @@ impl Parser {
         let mut final_expr: Option<Box<Expr>> = None;
 
         loop {
-            let stmt = self.parse_stmt()?;
-            self.skip_newlines();
-            if self.check(TokenType::Semicolon) {
-                self.advance();
-                self.skip_newlines();
-            }
-            if self.is_at_braceless_block_end() {
-                if let Stmt::Expr { expr, .. } = stmt {
-                    final_expr = Some(Box::new(expr));
-                } else {
-                    stmts.push(stmt);
+            match self.parse_stmt() {
+                Ok(stmt) => {
+                    self.skip_newlines();
+                    if self.check(TokenType::Semicolon) {
+                        self.advance();
+                        self.skip_newlines();
+                    }
+                    if self.is_at_braceless_block_end() {
+                        if let Stmt::Expr { expr, .. } = stmt {
+                            final_expr = Some(Box::new(expr));
+                        } else {
+                            stmts.push(stmt);
+                        }
+                        break;
+                    } else {
+                        stmts.push(stmt);
+                    }
                 }
-                break;
-            } else {
-                stmts.push(stmt);
+                Err(msg) => {
+                    let err_span = Some(self.current_span());
+                    self.errors.push(self.string_to_diagnostic(&msg));
+                    self.recover_to_sync_point(false);
+                    stmts.push(Stmt::Error { span: err_span });
+                    if self.is_at_braceless_block_end() {
+                        break;
+                    }
+                }
             }
         }
 

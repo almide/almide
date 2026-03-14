@@ -812,33 +812,75 @@ fn error_keyword_typo_class() {
 
 #[test]
 fn error_multi_errors_in_block() {
-    // Two parse errors in one block — statement recovery collects both
-    let errors = parse_errors("fn f() -> Int = {\n  let x = 1 +\n  let y = 2 +\n  x\n}");
-    assert!(!errors.is_empty(), "should report at least 1 error, got: {:?}", errors);
-    // The first `1 +` error is caught, recovery skips to `let y`, which also fails with `2 +`
-    // Both errors should be reported via statement-level recovery
-    assert!(errors.len() >= 1, "should report errors: {:?}", errors);
+    // Two parse errors in one block — missing identifiers after `let`
+    let errors = parse_errors("fn f() -> Int = {\n  let = 1\n  let = 2\n  42\n}");
+    assert!(errors.len() >= 2, "should report at least 2 errors via statement recovery, got: {:?}", errors);
 }
 
 #[test]
 fn error_recovery_across_decls() {
-    // Error in first fn, second fn should still parse
-    let input = "fn f() -> Int = {\n  let x = 1 +\n  x\n}\nfn g() -> Int = 42";
+    // Error in first fn (missing `=` before body), second fn should still parse
+    let input = "fn bad() -> Int { 1 }\nfn good() -> Int = 42";
     let tokens = Lexer::tokenize(input);
     let mut parser = Parser::new(tokens).with_file("test.almd");
-    let result = parser.parse();
-    // Parser collects errors and returns partial AST
-    // Even with errors, if decls are partially parsed, it returns Ok
-    match result {
-        Ok(prog) => {
-            assert!(prog.decls.len() >= 1, "should parse at least one declaration");
-            // Errors may be in parser.errors or returned as Err
-            // The key thing is that parsing didn't crash
+    let prog = parser.parse().expect("should return Ok with partial AST");
+    assert!(!parser.errors.is_empty(), "should have collected parse errors");
+    // The good declaration fn good() should be parsed
+    let has_good = prog.decls.iter().any(|d| matches!(d, Decl::Fn { name, .. } if name == "good"));
+    assert!(has_good, "should have parsed fn good(): {:?}", prog.decls.iter().map(|d| match d { Decl::Fn { name, .. } => name.as_str(), _ => "?" }).collect::<Vec<_>>());
+}
+
+#[test]
+fn error_recovery_multiple_bad_decls() {
+    // Two broken declarations followed by a good one
+    let input = "fn a() -> = 1\nfn b( -> Int = 2\nfn c() -> Int = 3";
+    let tokens = Lexer::tokenize(input);
+    let mut parser = Parser::new(tokens).with_file("test.almd");
+    let prog = parser.parse().expect("should return Ok with partial AST");
+    assert!(!parser.errors.is_empty(), "should have errors");
+    // The good declaration fn c() should be parsed
+    let has_c = prog.decls.iter().any(|d| matches!(d, Decl::Fn { name, .. } if name == "c"));
+    assert!(has_c, "should have parsed fn c(): {:?}", prog.decls.iter().map(|d| match d { Decl::Fn { name, .. } => name.as_str(), _ => "?" }).collect::<Vec<_>>());
+}
+
+#[test]
+fn error_recovery_do_block() {
+    // Error inside do block — missing identifier after `let`
+    let input = "effect fn f() -> Result[Int, String] = do {\n  let = 1\n  let y = 2\n  ok(y)\n}";
+    let tokens = Lexer::tokenize(input);
+    let mut parser = Parser::new(tokens).with_file("test.almd");
+    let prog = parser.parse().expect("should return Ok with partial AST");
+    assert_eq!(prog.decls.len(), 1, "should parse the fn declaration");
+    assert!(!parser.errors.is_empty(), "should have parse errors from do block");
+}
+
+#[test]
+fn error_recovery_import_then_decls() {
+    // Bad import followed by valid declarations
+    let input = "import { bad }\nfn f() -> Int = 1";
+    let tokens = Lexer::tokenize(input);
+    let mut parser = Parser::new(tokens).with_file("test.almd");
+    let prog = parser.parse().expect("should return Ok with partial AST");
+    assert!(!parser.errors.is_empty(), "should have import error");
+    assert!(!prog.decls.is_empty(), "should still parse fn declaration after bad import");
+}
+
+#[test]
+fn error_recovery_stmt_error_nodes() {
+    // Verify Stmt::Error nodes are inserted at failure points
+    let input = "fn f() -> Int = {\n  let = 1\n  let y = 2\n  y\n}";
+    let tokens = Lexer::tokenize(input);
+    let mut parser = Parser::new(tokens).with_file("test.almd");
+    let prog = parser.parse().expect("should parse");
+    if let Decl::Fn { body: Some(body), .. } = &prog.decls[0] {
+        if let Expr::Block { stmts, .. } = body {
+            let has_error = stmts.iter().any(|s| matches!(s, Stmt::Error { .. }));
+            assert!(has_error, "block should contain Stmt::Error node, got: {:?}", stmts.iter().map(|s| std::mem::discriminant(s)).collect::<Vec<_>>());
+        } else {
+            panic!("expected block body");
         }
-        Err(_) => {
-            // Parser errors were returned directly — still valid behavior
-            assert!(!parser.errors.is_empty() || true, "errors collected or returned");
-        }
+    } else {
+        panic!("expected fn with body");
     }
 }
 

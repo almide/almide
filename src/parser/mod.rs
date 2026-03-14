@@ -414,10 +414,16 @@ impl Parser {
             pending = self.skip_newlines_collect_comments();
         }
 
-        // Import declarations
+        // Import declarations (with recovery)
         while self.check(TokenType::Import) {
             program.comment_map.push(std::mem::take(&mut pending));
-            program.imports.push(self.parse_import_decl()?);
+            match self.parse_import_decl() {
+                Ok(import) => program.imports.push(import),
+                Err(msg) => {
+                    self.errors.push(self.string_to_diagnostic(&msg));
+                    self.skip_to_next_decl();
+                }
+            }
             pending = self.skip_newlines_collect_comments();
         }
 
@@ -442,7 +448,7 @@ impl Parser {
             program.comment_map.push(pending);
         }
 
-        if !self.errors.is_empty() && program.decls.is_empty() && program.module.is_none() {
+        if !self.errors.is_empty() && program.decls.is_empty() && program.imports.is_empty() && program.module.is_none() {
             let messages: Vec<String> = self.errors.iter().map(|d| d.display()).collect();
             return Err(messages.join("\n"));
         }
@@ -451,6 +457,39 @@ impl Parser {
     }
 
     // ── Error recovery ────────────────────────────────────────────
+
+    /// Unified sync-point recovery: skip tokens until a statement or declaration boundary.
+    /// Used by block parsers to continue after a syntax error.
+    /// `in_block`: true when inside `{ }`, stops at `}`. false for braceless/top-level contexts.
+    pub(crate) fn recover_to_sync_point(&mut self, in_block: bool) {
+        loop {
+            let tt = &self.current().token_type;
+            match tt {
+                TokenType::EOF => break,
+                TokenType::RBrace if in_block => break,
+                TokenType::Newline => {
+                    self.advance();
+                    if matches!(self.current().token_type,
+                        // Statement-level sync points
+                        TokenType::Let | TokenType::Var | TokenType::Guard
+                        | TokenType::If | TokenType::Match | TokenType::For
+                        | TokenType::While | TokenType::Do
+                        | TokenType::Ident | TokenType::TypeName
+                        | TokenType::RBrace | TokenType::EOF
+                        // Declaration-level sync points
+                        | TokenType::Fn | TokenType::Effect | TokenType::Async
+                        | TokenType::Type | TokenType::Test | TokenType::Pub
+                        | TokenType::Trait | TokenType::Impl
+                        | TokenType::Local | TokenType::Mod
+                        | TokenType::Strict | TokenType::At
+                    ) {
+                        break;
+                    }
+                }
+                _ => { self.advance(); }
+            }
+        }
+    }
 
     pub(crate) fn skip_to_next_stmt(&mut self) {
         loop {
