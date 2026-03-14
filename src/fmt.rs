@@ -193,7 +193,7 @@ fn fmt_type(out: &mut String, ty: &TypeExpr, depth: usize) {
 fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
     match expr {
         Expr::Int { raw, .. } => out.push_str(raw),
-        Expr::Float { value, .. } => { let s = format!("{value}"); out.push_str(if s.contains('.') { &s } else { &format!("{s}.0") }); }
+        Expr::Float { value, .. } => { let s = format!("{value}"); if s.contains('.') { out.push_str(&s); } else { out.push_str(&s); out.push_str(".0"); } }
         Expr::String { value, .. } => write!(out, "{value:?}").unwrap(),
         Expr::InterpolatedString { value, .. } => fmt_istring(out, value),
         Expr::Bool { value, .. } => out.push_str(if *value { "true" } else { "false" }),
