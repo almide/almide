@@ -1,5 +1,3 @@
-type Item = { name: String, price: Int }
-
 test "sort_by_name alphabetical" {
   let items = [
     Item { name: "Cherry", price: 300 },
