@@ -3,9 +3,7 @@
 ## Active
 
 ### Codec & Serialization
-- [Codec Implementation](active/codec-implementation.md) — Phase 0-2 ✅ (Value, auto-derive, JSON roundtrip). Next: Variant, json.decode[T], repair
-- [Codec Test Spec](active/codec-test-spec.md) — P0 14/14 ✅. P1/P2 remaining
-- [Codec Protocol & JSON](active/codec-and-json.md) — 設計仕様 (Phase 3-5 remaining)
+- [Codec Remaining](active/codec-remaining.md) — Variant encode/decode, json.decode[T], naming strategy, repair
 
 ### Stdlib v2
 - [Stdlib Runtime Architecture](active/stdlib-self-hosted-redesign.md) — Runtime crate `almide_rt` 基盤完成。@extern 移行中
@@ -66,6 +64,9 @@
 - [Borrow Inference](done/borrow-inference-design.md)
 - [CLI Tool Authoring](done/cli-tool-authoring.md)
 - [Clone Reduction Phase 4](done/clone-reduction.md)
+- [Codec Implementation](done/codec-implementation.md) — Value, auto-derive, JSON roundtrip, runtime crate
+- [Codec Protocol & JSON](done/codec-and-json.md) — 設計仕様完成
+- [Codec Test Spec](done/codec-test-spec.md) — P0 14/14 ✅
 - [Codegen Correctness](done/codegen-correctness.md)
 - [Codegen IR Redesign](done/ir-redesign.md)
 - [Codegen Optimization](done/codegen-optimization.md)
