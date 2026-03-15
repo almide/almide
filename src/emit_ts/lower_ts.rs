@@ -319,7 +319,15 @@ impl<'a> LowerCtx<'a> {
                     return Expr::Call { func: Box::new(Expr::Var("unwrap_or".into())), args: vec![obj, a.into_iter().next().unwrap()] };
                 }
                 let mut all = vec![obj]; all.extend(a);
-                Expr::Call { func: Box::new(Expr::Var(sanitize(method))), args: all }
+                // Module-qualified UFCS: "list.len" → same path as Module call
+                if let Some((module, func)) = method.split_once('.') {
+                    Expr::Call {
+                        func: Box::new(Expr::Field(Box::new(Expr::Var(self.map_module(module))), sanitize(func))),
+                        args: all,
+                    }
+                } else {
+                    Expr::Call { func: Box::new(Expr::Var(sanitize(method))), args: all }
+                }
             }
             CallTarget::Computed { callee } => Expr::Call { func: Box::new(self.lower_expr(callee, ie, it)), args: a },
         }

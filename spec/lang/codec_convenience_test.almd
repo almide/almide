@@ -1,0 +1,19 @@
+module convenience_test
+
+type Person: Codec = { name: String, age: Int }
+
+fn decode_person(v: Value) -> Person =
+  match Person.decode(v) { ok(p) => p, err(_) => Person { name: "", age: 0 } }
+
+test "json.encode convenience" {
+  let p = Person { name: "Alice", age: 30 }
+  let text = json.encode(p)
+  println(text)
+  match json.parse(text) {
+    ok(v) => {
+      let p2 = decode_person(v)
+      assert_eq(p2.name, "Alice")
+    }
+    err(_) => assert(false)
+  }
+}

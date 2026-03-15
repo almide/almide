@@ -556,6 +556,44 @@ fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
 // ── Call lowering ───────────────────────────────────────────────
 
 fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Expr], named_args: &[(String, ast::Expr)], type_args: Option<&Vec<ast::TypeExpr>>, ty: Ty, span: Option<ast::Span>) -> IrExpr {
+    // Convenience: json.encode(expr) → json.stringify(T.encode(expr)) when expr is Codec type
+    if let ast::Expr::Member { object, field, .. } = callee {
+        if let ast::Expr::Ident { name: module, .. } = object.as_ref() {
+            if field == "encode" && args.len() == 1 {
+                let arg_ty = ctx.expr_ty(&args[0]);
+                if let Some(encode_fn) = ctx.find_convention_fn(&arg_ty, "encode") {
+                    let ir_arg = lower_expr(ctx, &args[0]);
+                    let encoded = ctx.mk(IrExprKind::Call {
+                        target: CallTarget::Named { name: encode_fn },
+                        args: vec![ir_arg], type_args: vec![],
+                    }, Ty::Named("Value".into(), vec![]), span);
+                    return ctx.mk(IrExprKind::Call {
+                        target: CallTarget::Module { module: module.clone(), func: "stringify".into() },
+                        args: vec![encoded], type_args: vec![],
+                    }, Ty::String, span);
+                }
+            }
+            if field == "decode" && args.len() == 1 {
+                if let Some(type_args) = type_args {
+                    if let Some(ast::TypeExpr::Simple { name: type_name }) = type_args.first() {
+                        let ir_arg = lower_expr(ctx, &args[0]);
+                        // json.decode[T](text) → T.decode(json.parse(text)?)
+                        let parsed = ctx.mk(IrExprKind::Try { expr: Box::new(ctx.mk(IrExprKind::Call {
+                            target: CallTarget::Module { module: module.clone(), func: "parse".into() },
+                            args: vec![ir_arg], type_args: vec![],
+                        }, Ty::Result(Box::new(Ty::Named("Value".into(), vec![])), Box::new(Ty::String)), span)) },
+                        Ty::Named("Value".into(), vec![]), span);
+                        let decode_fn = format!("{}.decode", type_name);
+                        return ctx.mk(IrExprKind::Call {
+                            target: CallTarget::Named { name: decode_fn },
+                            args: vec![parsed], type_args: vec![],
+                        }, ty, span);
+                    }
+                }
+            }
+        }
+    }
+
     let mut ir_args: Vec<IrExpr> = args.iter().map(|a| lower_expr(ctx, a)).collect();
     let ta = type_args.map(|tas| tas.iter().map(|t| resolve_type_expr(t)).collect()).unwrap_or_default();
     let target = lower_call_target(ctx, callee);
@@ -628,8 +666,28 @@ fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallTarget {
                     return CallTarget::Named { name: key };
                 }
             }
-            // Check for convention method: dog.repr() → Dog.repr(dog)
+            // Built-in generic types: xs.len() → list.len(xs) for List, Map, etc.
             let obj_ty = ctx.expr_ty(object);
+            let builtin_module = match &obj_ty {
+                Ty::List(_) => Some("list"),
+                Ty::Map(_, _) => Some("map"),
+                Ty::String => Some("string"),
+                Ty::Int => Some("int"),
+                Ty::Float => Some("float"),
+                Ty::Result(_, _) => Some("result"),
+                Ty::Option(_) => Some("option"),
+                _ => None,
+            };
+            if let Some(module) = builtin_module {
+                let key = format!("{}.{}", module, field);
+                if ctx.env.functions.contains_key(&key)
+                    || crate::stdlib::resolve_ufcs_candidates(field).contains(&module)
+                {
+                    let ir_obj = lower_expr(ctx, object);
+                    return CallTarget::Method { object: Box::new(ir_obj), method: key };
+                }
+            }
+            // Check for convention method: dog.repr() → Dog.repr(dog)
             let type_name_opt = match &obj_ty {
                 Ty::Named(name, _) => Some(name.clone()),
                 Ty::Record { .. } | Ty::Variant { .. } => {

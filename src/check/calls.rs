@@ -21,6 +21,22 @@ impl Checker {
             // Module call: string.trim(s), list.map(xs, f), etc.
             ast::Expr::Member { object, field, .. } => {
                 if let ast::Expr::Ident { name: module, .. } = object.as_ref() {
+                    // Codec convenience: module.encode(t) → String when t has T.encode
+                    if field == "encode" && arg_tys.len() == 1 {
+                        let arg_concrete = arg_tys[0].to_ty(&self.solutions);
+                        let has_codec = match &arg_concrete {
+                            Ty::Named(name, _) => self.env.functions.contains_key(&format!("{}.encode", name)),
+                            Ty::Record { .. } | Ty::Variant { .. } => {
+                                self.env.types.iter().any(|(name, ty)| {
+                                    ty == &arg_concrete && self.env.functions.contains_key(&format!("{}.encode", name))
+                                })
+                            }
+                            _ => false,
+                        };
+                        if has_codec {
+                            return InferTy::Concrete(Ty::String);
+                        }
+                    }
                     if crate::stdlib::is_stdlib_module(module) || self.env.user_modules.contains(module.as_str()) {
                         let key = format!("{}.{}", module, field);
                         return self.check_named_call(&key, &arg_tys);
@@ -39,10 +55,31 @@ impl Checker {
                         return self.check_named_call(&key, &arg_tys);
                     }
                 }
-                // Convention method: dog.repr() → Dog.repr(dog)
+                // UFCS method: obj.method(args) → module.method(obj, args)
                 let obj_ty = self.infer_expr(object);
                 let obj_concrete = obj_ty.to_ty(&self.solutions);
-                // Find the Named type for convention lookup
+                // Built-in generic types → stdlib module UFCS
+                let builtin_module = match &obj_concrete {
+                    Ty::List(_) => Some("list"),
+                    Ty::Map(_, _) => Some("map"),
+                    Ty::String => Some("string"),
+                    Ty::Int => Some("int"),
+                    Ty::Float => Some("float"),
+                    Ty::Result(_, _) => Some("result"),
+                    Ty::Option(_) => Some("option"),
+                    _ => None,
+                };
+                if let Some(module) = builtin_module {
+                    let key = format!("{}.{}", module, field);
+                    if self.env.functions.contains_key(&key)
+                        || crate::stdlib::resolve_ufcs_candidates(field).contains(&module)
+                    {
+                        let mut all_args = vec![obj_ty];
+                        all_args.extend(arg_tys.iter().cloned());
+                        return self.check_named_call(&key, &all_args);
+                    }
+                }
+                // Convention method: dog.repr() → Dog.repr(dog)
                 let type_name_opt = match &obj_concrete {
                     Ty::Named(name, _) => Some(name.clone()),
                     Ty::Record { .. } | Ty::Variant { .. } => {

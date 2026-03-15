@@ -337,7 +337,20 @@ impl<'a> LowerCtx<'a> {
                     CallTarget::Method { object, method } => {
                         let obj = self.lower_expr(object);
                         let mut all = vec![obj]; all.extend(ir_args);
-                        Expr::Call { func: crate::emit_common::sanitize(method), args: all }
+                        // Module-qualified UFCS: "list.len" → same path as Module call
+                        if let Some((module, func)) = method.split_once('.') {
+                            let key = method.to_string();
+                            let expr = Expr::Call {
+                                func: format!("{}_{}", module.replace('.', "_"), crate::emit_common::sanitize(func)),
+                                args: all,
+                            };
+                            if self.auto_try && self.result_fns.contains(&key) {
+                                return Expr::Try(Box::new(expr));
+                            }
+                            expr
+                        } else {
+                            Expr::Call { func: crate::emit_common::sanitize(method), args: all }
+                        }
                     }
                     CallTarget::Computed { callee } => {
                         let c = self.lower_expr(callee);
