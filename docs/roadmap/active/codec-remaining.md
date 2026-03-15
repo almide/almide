@@ -2,23 +2,17 @@
 
 Phase 0-2 完了。残りの機能。
 
-## Now
+## Done
 
-### Variant encode/decode (Tagged)
-```almide
-type Shape: Codec = Circle(radius: Float) | Rect(w: Float, h: Float)
-// Circle(3.0) → {"Circle": {"radius": 3.0}}
-```
-- auto-derive で Variant の match → encode/decode 生成
-- Tagged 形式 (externally tagged) がデフォルト
+### Variant encode (Tagged) ✅
+Unit/Tuple/Record variant → `{"CaseName": payload}` 形式で encode
+Variant decode は stub (err を返す) — full decode は Future
 
-### json.decode[T](text) convenience
+### json decode パターン ✅
 ```almide
-let p = json.decode[Person](text)?
-// → json.parse(text)? |> Person.decode
+match json.parse(text) { ok(v) => Person.decode(v), err(e) => err(e) }
 ```
-- checker: 型引数から戻り値型を推論
-- lowerer: 展開 (既に lowerer 側の実装はある、checker 型引数解決が残り)
+`json.decode[T](text)` convenience は checker 型引数解決が必要 → Future
 
 ## Next
 
