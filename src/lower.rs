@@ -30,6 +30,8 @@ pub struct LowerCtx<'a> {
     env: &'a TypeEnv,
     /// Default argument expressions for functions: fn_name → vec of defaults (index-aligned with params, None for required)
     fn_defaults: HashMap<String, Vec<Option<ast::Expr>>>,
+    /// Type names that derive each convention: convention_name → set of type names
+    type_conventions: HashMap<String, std::collections::HashSet<String>>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -40,7 +42,21 @@ impl<'a> LowerCtx<'a> {
             expr_types,
             env,
             fn_defaults: HashMap::new(),
+            type_conventions: HashMap::new(),
         }
+    }
+
+    /// Find a convention function (e.g., "Dog.eq") for a given type and convention name.
+    /// Returns the fully qualified function name if the type derives the convention
+    /// AND the function is registered in the environment.
+    fn find_convention_fn(&self, ty: &Ty, convention: &str) -> Option<String> {
+        if let Ty::Named(type_name, _) = ty {
+            let fn_name = format!("{}.{}", type_name, convention);
+            if self.env.functions.contains_key(&fn_name) {
+                return Some(fn_name);
+            }
+        }
+        None
     }
 
     fn push_scope(&mut self) { self.scopes.push(HashMap::new()); }
@@ -108,6 +124,15 @@ impl<'a> LowerCtx<'a> {
 
 pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprId, Ty>, env: &TypeEnv) -> IrProgram {
     let mut ctx = LowerCtx::new(expr_types, env);
+
+    // Collect type conventions (deriving Eq, Repr, etc.)
+    for decl in &prog.decls {
+        if let ast::Decl::Type { name, deriving: Some(derives), .. } = decl {
+            for conv in derives {
+                ctx.type_conventions.entry(conv.clone()).or_default().insert(name.clone());
+            }
+        }
+    }
 
     // Collect function default arguments for call-site expansion
     for decl in &prog.decls {
@@ -307,6 +332,19 @@ fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             let l = lower_expr(ctx, left);
             let r = lower_expr(ctx, right);
             let left_ty = &l.ty;
+            // Operator protocol: dispatch == / != to convention methods if available
+            if (op == "==" || op == "!=") {
+                if let Some(eq_fn) = ctx.find_convention_fn(left_ty, "eq") {
+                    let call = ctx.mk(IrExprKind::Call {
+                        target: CallTarget::Named { name: eq_fn },
+                        args: vec![l, r], type_args: vec![],
+                    }, Ty::Bool, span);
+                    if op == "!=" {
+                        return ctx.mk(IrExprKind::UnOp { op: UnOp::Not, operand: Box::new(call) }, Ty::Bool, span);
+                    }
+                    return call;
+                }
+            }
             let bin_op = match (op.as_str(), left_ty) {
                 ("+", Ty::Float) => BinOp::AddFloat, ("+", _) => BinOp::AddInt,
                 ("-", Ty::Float) => BinOp::SubFloat, ("-", _) => BinOp::SubInt,
@@ -787,6 +825,13 @@ fn lower_interpolation(ctx: &mut LowerCtx, template: &str) -> Vec<IrStringPart> 
                 // Fix type for simple vars
                 if let IrExprKind::Var { id } = &ir_expr.kind {
                     ir_expr.ty = ctx.var_table.get(*id).ty.clone();
+                }
+                // Operator protocol: dispatch to Repr convention if available
+                if let Some(repr_fn) = ctx.find_convention_fn(&ir_expr.ty, "repr") {
+                    ir_expr = ctx.mk(IrExprKind::Call {
+                        target: CallTarget::Named { name: repr_fn },
+                        args: vec![ir_expr], type_args: vec![],
+                    }, Ty::String, None);
                 }
                 parts.push(IrStringPart::Expr { expr: ir_expr });
             } else {
