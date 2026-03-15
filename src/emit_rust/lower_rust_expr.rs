@@ -79,12 +79,16 @@ impl<'a> LowerCtx<'a> {
             IrExprKind::DoBlock { stmts, expr } => {
                 let has_guard = stmts.iter().any(|s| matches!(&s.kind, IrStmtKind::Guard { .. }));
                 if has_guard {
-                    // Wrap in loop { ... break; } so guard's break/continue work correctly
+                    // Wrap in loop { ... } so guard's break/continue work correctly
                     let mut body_stmts: Vec<Stmt> = stmts.iter().map(|s| self.lower_stmt(s)).collect();
                     if let Some(tail) = expr.as_ref() {
                         body_stmts.push(Stmt::Expr(self.lower_expr(tail)));
                     }
-                    body_stmts.push(Stmt::Expr(Expr::Break));
+                    // In effect context: add trailing break (loop runs once, exits via ok/err/?)
+                    // In pure context: no trailing break (loop continues until guard triggers break)
+                    if self.auto_try {
+                        body_stmts.push(Stmt::Expr(Expr::Break));
+                    }
                     Expr::Block {
                         stmts: vec![Stmt::Expr(Expr::Loop { label: None, body: body_stmts })],
                         tail: None,
