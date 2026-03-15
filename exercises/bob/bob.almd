@@ -10,13 +10,13 @@ import list
 
 fn has_letters?(s: String) -> Bool = {
   let bytes = string.to_bytes(s);
-  list.find(bytes, fn(b) => (b >= 65 and b <= 90) or (b >= 97 and b <= 122)) != none
+  list.find(bytes, (b) => (b >= 65 and b <= 90) or (b >= 97 and b <= 122)) != none
 }
 
 fn is_yelling?(s: String) -> Bool = {
   let bytes = string.to_bytes(s);
-  let letters = list.filter(bytes, fn(b) => (b >= 65 and b <= 90) or (b >= 97 and b <= 122));
-  let uppers = list.filter(letters, fn(b) => b >= 65 and b <= 90);
+  let letters = list.filter(bytes, (b) => (b >= 65 and b <= 90) or (b >= 97 and b <= 122));
+  let uppers = list.filter(letters, (b) => b >= 65 and b <= 90);
   list.len(letters) > 0 and list.len(uppers) == list.len(letters)
 }
 

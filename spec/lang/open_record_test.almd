@@ -8,7 +8,7 @@ fn greet(who: { name: String, .. }) -> String = "Hello, ${who.name}!"
 
 fn name_and_age(who: { name: String, age: Int, .. }) -> String = "${who.name} is ${who.age}"
 
-fn closed_fn(r: { name: String }) -> String = r.name
+fn closed_(r: { name: String }) -> String = r.name
 
 test "open record accepts record with extra fields" {
   let result = greet({ name: "Alice", age: 30 });
@@ -39,7 +39,7 @@ test "open record accepts exact match" {
 }
 
 test "closed record is strict" {
-  let result = closed_fn({ name: "Eve" });
+  let result = closed_({ name: "Eve" });
   assert_eq(result, "Eve")
 }
 

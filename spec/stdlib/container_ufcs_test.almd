@@ -3,39 +3,39 @@
 // ── List UFCS: Mappable ──
 
 test "list.map via UFCS" {
-  assert_eq([1, 2, 3].map(fn(x) => x * 2), [2, 4, 6])
+  assert_eq([1, 2, 3].map((x) => x * 2), [2, 4, 6])
 }
 
 test "list.flat_map via UFCS" {
-  assert_eq([1, 2].flat_map(fn(x) => [x, x * 10]), [1, 10, 2, 20])
+  assert_eq([1, 2].flat_map((x) => [x, x * 10]), [1, 10, 2, 20])
 }
 
 // ── List UFCS: Filterable ──
 
 test "list.filter via UFCS" {
-  assert_eq([1, 2, 3, 4, 5].filter(fn(x) => x > 3), [4, 5])
+  assert_eq([1, 2, 3, 4, 5].filter((x) => x > 3), [4, 5])
 }
 
 // ── List UFCS: Foldable ──
 
 test "list.fold via UFCS" {
-  assert_eq([1, 2, 3, 4].fold(0, fn(acc, x) => acc + x), 10)
+  assert_eq([1, 2, 3, 4].fold(0, (acc, x) => acc + x), 10)
 }
 
 // ── List UFCS: Iterable ──
 
 test "list.find via UFCS" {
-  assert_eq([1, 2, 3].find(fn(x) => x > 1), some(2))
+  assert_eq([1, 2, 3].find((x) => x > 1), some(2))
 }
 
 test "list.any via UFCS" {
-  assert_eq([1, 2, 3].any(fn(x) => x > 2), true)
-  assert_eq([1, 2, 3].any(fn(x) => x > 5), false)
+  assert_eq([1, 2, 3].any((x) => x > 2), true)
+  assert_eq([1, 2, 3].any((x) => x > 5), false)
 }
 
 test "list.all via UFCS" {
-  assert_eq([2, 4, 6].all(fn(x) => x % 2 == 0), true)
-  assert_eq([2, 3, 6].all(fn(x) => x % 2 == 0), false)
+  assert_eq([2, 4, 6].all((x) => x % 2 == 0), true)
+  assert_eq([2, 3, 6].all((x) => x % 2 == 0), false)
 }
 
 // ── List UFCS: Chainable ──
@@ -43,16 +43,16 @@ test "list.all via UFCS" {
 test "list method chaining" {
   let result = [5, 3, 1, 4, 2]
     .sort()
-    .filter(fn(x) => x > 1)
-    .map(fn(x) => x * 100)
+    .filter((x) => x > 1)
+    .map((x) => x * 100)
     .take(3)
   assert_eq(result, [200, 300, 400])
 }
 
 test "list filter-map chain" {
   let result = [1, 2, 3, 4, 5]
-    .filter(fn(x) => x % 2 != 0)
-    .map(fn(x) => x * 10)
+    .filter((x) => x % 2 != 0)
+    .map((x) => x * 10)
   assert_eq(result, [10, 30, 50])
 }
 
@@ -117,7 +117,7 @@ test "list.enumerate via UFCS" {
 }
 
 test "list.sort_by via UFCS" {
-  let sorted = [3, 1, 2].sort_by(fn(x) => 0 - x)
+  let sorted = [3, 1, 2].sort_by((x) => 0 - x)
   assert_eq(sorted, [3, 2, 1])
 }
 

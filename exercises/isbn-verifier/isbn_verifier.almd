@@ -7,10 +7,10 @@ import list
 // Validation: (d1*10 + d2*9 + d3*8 + ... + d10*1) mod 11 == 0
 fn valid?(isbn: String) -> Bool = {
   let chars = string.split(isbn, "")
-    |> list.filter(fn(c) => c != "-");
+    |> list.filter((c) => c != "-");
   if list.len(chars) != 10 then false
   else {
-    let result = list.fold(chars, ok([0, 0]), fn(acc, c) => {
+    let result = list.fold(chars, ok([0, 0]), (acc, c) => {
       match acc {
         err(e) => err(e),
         ok(state) => {

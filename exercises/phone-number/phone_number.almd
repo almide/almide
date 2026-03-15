@@ -9,13 +9,13 @@ fn clean(phone: String) -> Result[String, String] = {
   let bytes = string.to_bytes(phone);
 
   // Check for letters
-  let has_letters = list.find(bytes, fn(b) => {
+  let has_letters = list.find(bytes, (b) => {
     (b >= 65 and b <= 90) or (b >= 97 and b <= 122)
   });
   guard match has_letters { none => true, _ => false, } else err("letters not permitted");
 
   // Check for invalid punctuation (anything that's not digit, space, +, -, ., (, ))
-  let has_bad_punct = list.find(bytes, fn(b) => {
+  let has_bad_punct = list.find(bytes, (b) => {
     let is_digit = b >= 48 and b <= 57;
     let is_space = b == 32;
     let is_plus = b == 43;
@@ -28,8 +28,8 @@ fn clean(phone: String) -> Result[String, String] = {
   guard match has_bad_punct { none => true, _ => false, } else err("punctuations not permitted");
 
   // Extract only digits and convert to string
-  let digit_bytes = list.filter(bytes, fn(b) => b >= 48 and b <= 57);
-  let digit_str = list.fold(digit_bytes, "", fn(acc, b) => {
+  let digit_bytes = list.filter(bytes, (b) => b >= 48 and b <= 57);
+  let digit_str = list.fold(digit_bytes, "", (acc, b) => {
     let ch = match b - 48 {
       0 => "0",
       1 => "1",

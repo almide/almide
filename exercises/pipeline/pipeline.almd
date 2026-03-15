@@ -15,7 +15,7 @@ import int
 fn to_upper(s: String) -> String = {
   let upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
   let bytes = string.to_bytes(s)
-  list.fold(bytes, "", fn(result, byte) => {
+  list.fold(bytes, "", (result, byte) => {
     let i = string.len(result)
     let ch = string.slice(s, i, i + 1)
     if byte >= 97 and byte <= 122 then result ++ string.slice(upper, byte - 97, byte - 96) else result ++ ch
@@ -26,7 +26,7 @@ fn to_upper(s: String) -> String = {
 fn all_lower_alpha?(s: String) -> Bool = {
   let bytes = string.to_bytes(s)
   if list.len(bytes) == 0 then false
-  else list.fold(bytes, true, fn(acc, byte) => {
+  else list.fold(bytes, true, (acc, byte) => {
     if acc then (byte >= 97 and byte <= 122) or byte == 95
     else false
   })
@@ -42,11 +42,11 @@ fn parse_int(s: String) -> Result[Int, String] = {
     let start_bytes = if is_neg then string.to_bytes(string.slice(s, 1)) else bytes
     if list.len(start_bytes) == 0 then err("not an integer")
     else {
-      let valid = list.fold(start_bytes, true, fn(acc, b) => {
+      let valid = list.fold(start_bytes, true, (acc, b) => {
         if acc then b >= 48 and b <= 57 else false
       })
       if valid then {
-        let num = list.fold(start_bytes, 0, fn(acc, b) => acc * 10 + (b - 48))
+        let num = list.fold(start_bytes, 0, (acc, b) => acc * 10 + (b - 48))
         if is_neg then ok(0 - num) else ok(num)
       } else err("not an integer")
     }
@@ -82,7 +82,7 @@ fn parse_pairs(input: String) -> Result[List[List[String]], String] = {
   if string.len(input) == 0 then err("empty input")
   else {
     let lines = string.split(input, "\n")
-    list.fold(lines, ok([]), fn(acc, line) => {
+    list.fold(lines, ok([]), (acc, line) => {
       match acc {
         err(e) => err(e),
         ok(pairs) => {
@@ -103,14 +103,14 @@ fn parse_pairs(input: String) -> Result[List[List[String]], String] = {
 
 // Stage 2: Validate keys (must be lowercase alpha only, no duplicates)
 fn validate_keys(pairs: List[List[String]]) -> Result[List[List[String]], String] = {
-  list.fold(pairs, ok([]), fn(acc, pair) => {
+  list.fold(pairs, ok([]), (acc, pair) => {
     match acc {
       err(e) => err(e),
       ok(seen) => {
         let key = match list.get(pair, 0) { some(v) => v, _ => "" }
         if not all_lower_alpha?(key) then err("invalid key: ${key}")
         else {
-          let keys_seen = list.map(seen, fn(p) => match list.get(p, 0) { some(v) => v, _ => "" })
+          let keys_seen = list.map(seen, (p) => match list.get(p, 0) { some(v) => v, _ => "" })
           if list.contains(keys_seen, key) then err("duplicate key: ${key}")
           else ok(seen ++ [pair])
         }
@@ -121,7 +121,7 @@ fn validate_keys(pairs: List[List[String]]) -> Result[List[List[String]], String
 
 // Stage 3: Type-check values based on key suffix convention
 fn validate_values(pairs: List[List[String]]) -> Result[List[List[String]], String] = {
-  list.fold(pairs, ok([]), fn(acc, pair) => {
+  list.fold(pairs, ok([]), (acc, pair) => {
     match acc {
       err(e) => err(e),
       ok(valid) => {
@@ -143,7 +143,7 @@ fn validate_values(pairs: List[List[String]]) -> Result[List[List[String]], Stri
 
 // Stage 4: Transform values
 fn transform(pairs: List[List[String]]) -> Result[List[List[String]], String] = {
-  ok(list.map(pairs, fn(pair) => {
+  ok(list.map(pairs, (pair) => {
     let key = match list.get(pair, 0) { some(v) => v, _ => "" }
     let value = match list.get(pair, 1) { some(v) => v, _ => "" }
     if ends_with(key, "_n") then {
@@ -158,7 +158,7 @@ fn transform(pairs: List[List[String]]) -> Result[List[List[String]], String] = 
 
 // Stage 5: Format output as "KEY=VALUE" lines joined by newline
 fn format_output(pairs: List[List[String]]) -> Result[String, String] = {
-  let lines = list.map(pairs, fn(pair) => {
+  let lines = list.map(pairs, (pair) => {
     let key = match list.get(pair, 0) { some(v) => v, _ => "" }
     let value = match list.get(pair, 1) { some(v) => v, _ => "" }
     key ++ "=" ++ value

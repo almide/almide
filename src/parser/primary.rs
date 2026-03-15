@@ -106,11 +106,7 @@ impl Parser {
         if self.check(TokenType::Match) {
             return self.parse_match_expr();
         }
-        if self.check(TokenType::Fn)
-            && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::LParen)
-        {
-            return self.parse_lambda();
-        }
+
         if self.check(TokenType::While) {
             return self.parse_while_expr();
         }

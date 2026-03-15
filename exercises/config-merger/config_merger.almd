@@ -16,11 +16,11 @@ fn parse_config(content: String) -> Result[List[List[String]], String] = {
   if string.len(content) == 0 then ok([])
   else {
     let lines = string.split(content, "\n");
-    let indexed = list.fold(lines, [], fn(acc, line) => {
+    let indexed = list.fold(lines, [], (acc, line) => {
       let idx = list.len(acc) + 1;
       acc ++ [[int.to_string(idx), line]]
     });
-    list.fold(indexed, ok([]), fn(acc, entry) => {
+    list.fold(indexed, ok([]), (acc, entry) => {
       match acc {
         err(e) => err(e),
         ok(pairs) => {
@@ -34,13 +34,13 @@ fn parse_config(content: String) -> Result[List[List[String]], String] = {
             let key = match list.get(parts, 0) { some(v) => v, none => "" };
             if key == "" then err("line ${line_num}: empty key")
             else {
-              let indexed_parts = list.fold(parts, [], fn(a, p) => a ++ [[int.to_string(list.len(a)), p]]);
-              let rest = list.filter(indexed_parts, fn(ip) => {
+              let indexed_parts = list.fold(parts, [], (a, p) => a ++ [[int.to_string(list.len(a)), p]]);
+              let rest = list.filter(indexed_parts, (ip) => {
                 match list.get(ip, 0) { some(v) => v != "0", none => false }
               });
-              let rest_vals = list.map(rest, fn(ip) => match list.get(ip, 1) { some(v) => v, none => "" });
+              let rest_vals = list.map(rest, (ip) => match list.get(ip, 1) { some(v) => v, none => "" });
               let value = string.join(rest_vals, "=");
-              let existing_keys = list.map(pairs, fn(p) => match list.get(p, 0) { some(v) => v, none => "" });
+              let existing_keys = list.map(pairs, (p) => match list.get(p, 0) { some(v) => v, none => "" });
               if list.contains(existing_keys, key) then err("line ${line_num}: duplicate key: ${key}")
               else ok(pairs ++ [[key, value]])
             }
@@ -55,18 +55,18 @@ fn parse_config(content: String) -> Result[List[List[String]], String] = {
 // Merge two parsed configs: entries in `overlay` override `base` for matching keys
 // Non-matching keys from both are preserved. Order: base keys first, then new overlay keys
 fn merge_configs(base: List[List[String]], overlay: List[List[String]]) -> List[List[String]] = {
-  let overlay_keys = list.map(overlay, fn(p) => match list.get(p, 0) { some(v) => v, none => "" });
-  let merged_base = list.map(base, fn(pair) => {
+  let overlay_keys = list.map(overlay, (p) => match list.get(p, 0) { some(v) => v, none => "" });
+  let merged_base = list.map(base, (pair) => {
     let key = match list.get(pair, 0) { some(v) => v, none => "" };
     if list.contains(overlay_keys, key) then {
-      match list.find(overlay, fn(op) => match list.get(op, 0) { some(v) => v == key, none => false }) {
+      match list.find(overlay, (op) => match list.get(op, 0) { some(v) => v == key, none => false }) {
         some(found) => found,
         none => pair
       }
     } else pair
   });
-  let base_keys = list.map(base, fn(p) => match list.get(p, 0) { some(v) => v, none => "" });
-  let new_overlay = list.filter(overlay, fn(p) => {
+  let base_keys = list.map(base, (p) => match list.get(p, 0) { some(v) => v, none => "" });
+  let new_overlay = list.filter(overlay, (p) => {
     let key = match list.get(p, 0) { some(v) => v, none => "" };
     not list.contains(base_keys, key)
   });
@@ -75,7 +75,7 @@ fn merge_configs(base: List[List[String]], overlay: List[List[String]]) -> List[
 
 // Serialize config pairs back to string format (key=value lines)
 fn serialize_config(pairs: List[List[String]]) -> String = {
-  let lines = list.map(pairs, fn(pair) => {
+  let lines = list.map(pairs, (pair) => {
     let key = match list.get(pair, 0) { some(v) => v, none => "" };
     let value = match list.get(pair, 1) { some(v) => v, none => "" };
     key ++ "=" ++ value
@@ -130,7 +130,7 @@ effect fn merge_and_save(paths: List[String], output: String) -> Result[Int, Str
 
 // Lookup a key in config pairs, returns Option
 fn lookup(pairs: List[List[String]], key: String) -> Option[String] = {
-  match list.find(pairs, fn(pair) => match list.get(pair, 0) { some(v) => v == key, none => false }) {
+  match list.find(pairs, (pair) => match list.get(pair, 0) { some(v) => v == key, none => false }) {
     some(pair) => match list.get(pair, 1) { some(v) => some(v), none => none },
     none => none
   }
@@ -138,7 +138,7 @@ fn lookup(pairs: List[List[String]], key: String) -> Option[String] = {
 
 // Filter config pairs by key prefix (e.g. "db_" returns all db_* keys)
 fn filter_by_prefix(pairs: List[List[String]], prefix: String) -> List[List[String]] = {
-  list.filter(pairs, fn(pair) => {
+  list.filter(pairs, (pair) => {
     let key = match list.get(pair, 0) { some(v) => v, none => "" };
     string.starts_with(key, prefix)
   })

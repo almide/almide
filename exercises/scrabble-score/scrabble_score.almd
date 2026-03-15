@@ -48,7 +48,7 @@ fn letter_score(c: Int) -> Int = {
 // Q,Z = 10
 fn score(word: String) -> Int = {
   let bytes = string.to_bytes(word);
-  list.fold(bytes, 0, fn(acc, b) => acc + letter_score(b))
+  list.fold(bytes, 0, (acc, b) => acc + letter_score(b))
 }
 
 test "lowercase letter" {

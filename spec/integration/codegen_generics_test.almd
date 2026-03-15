@@ -21,7 +21,7 @@ test "generic fn with multiple type params and tuple construction" {
 
 // ── Generic function returning generic function ──
 
-fn make_mapper[A, B](f: fn(A) -> B) -> fn(List[A]) -> List[B] =
+fn make_mapper[A, B](f: (A) -> B) -> (List[A]) -> List[B] =
   (xs) => list.map(xs, f)
 
 test "generic fn returning generic fn" {
@@ -36,7 +36,7 @@ type Wrapper[T] = { value: T, label: String }
 fn wrap[T](label: String, value: T) -> Wrapper[T] =
   { value: value, label: label }
 
-fn map_wrapper[A, B](w: Wrapper[A], f: fn(A) -> B) -> Wrapper[B] =
+fn map_wrapper[A, B](w: Wrapper[A], f: (A) -> B) -> Wrapper[B] =
   { value: f(w.value), label: w.label }
 
 fn unwrap[T](w: Wrapper[T]) -> T = w.value
@@ -64,7 +64,7 @@ type Result2[A, B] =
   | Second(B)
   | Neither
 
-fn merge_result2[A, B](r: Result2[A, B], fa: fn(A) -> String, fb: fn(B) -> String) -> String =
+fn merge_result2[A, B](r: Result2[A, B], fa: (A) -> String, fb: (B) -> String) -> String =
   match r {
     First(a) => fa(a),
     Second(b) => fb(b),

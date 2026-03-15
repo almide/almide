@@ -98,7 +98,7 @@ fn check_tuple() {
 
 #[test]
 fn check_lambda() {
-    has_no_errors("fn f() -> fn(Int) -> Int = fn(x) => x + 1");
+    has_no_errors("fn f() -> fn(Int) -> Int = (x) => x + 1");
 }
 
 #[test]
@@ -145,7 +145,7 @@ fn check_for_in_loop() {
 
 #[test]
 fn check_pipe_operator() {
-    has_no_errors("fn f(xs: List[Int]) -> List[Int] = xs |> list.filter(fn(x) => x > 0)");
+    has_no_errors("fn f(xs: List[Int]) -> List[Int] = xs |> list.filter((x) => x > 0)");
 }
 
 #[test]
@@ -261,7 +261,7 @@ fn check_map_type() {
 
 #[test]
 fn check_lambda_as_arg() {
-    has_no_errors("fn apply(f: fn(Int) -> Int, x: Int) -> Int = f(x)\nfn g() -> Int = apply(fn(x) => x + 1, 5)");
+    has_no_errors("fn apply(f: fn(Int) -> Int, x: Int) -> Int = f(x)\nfn g() -> Int = apply((x) => x + 1, 5)");
 }
 
 #[test]
@@ -301,7 +301,7 @@ fn check_for_in_range() {
 
 #[test]
 fn check_chained_pipe() {
-    has_no_errors("fn f(xs: List[Int]) -> List[Int] = xs |> list.filter(fn(x) => x > 0) |> list.map(fn(x) => x * 2)");
+    has_no_errors("fn f(xs: List[Int]) -> List[Int] = xs |> list.filter((x) => x > 0) |> list.map((x) => x * 2)");
 }
 
 // ---- Type error messages ----
@@ -366,12 +366,12 @@ fn check_stdlib_string_split() {
 
 #[test]
 fn check_stdlib_list_fold() {
-    has_no_errors("fn f(xs: List[Int]) -> Int = list.fold(xs, 0, fn(acc, x) => acc + x)");
+    has_no_errors("fn f(xs: List[Int]) -> Int = list.fold(xs, 0, (acc, x) => acc + x)");
 }
 
 #[test]
 fn check_stdlib_list_reduce() {
-    has_no_errors("fn f(xs: List[Int]) -> Option[Int] = list.reduce(xs, fn(a, b) => a + b)");
+    has_no_errors("fn f(xs: List[Int]) -> Option[Int] = list.reduce(xs, (a, b) => a + b)");
 }
 
 #[test]
@@ -474,12 +474,12 @@ fn check_stdlib_string_len() {
 
 #[test]
 fn check_stdlib_list_map() {
-    has_no_errors("fn f(xs: List[Int]) -> List[Int] = list.map(xs, fn(x) => x + 1)");
+    has_no_errors("fn f(xs: List[Int]) -> List[Int] = list.map(xs, (x) => x + 1)");
 }
 
 #[test]
 fn check_stdlib_list_filter() {
-    has_no_errors("fn f(xs: List[Int]) -> List[Int] = list.filter(xs, fn(x) => x > 0)");
+    has_no_errors("fn f(xs: List[Int]) -> List[Int] = list.filter(xs, (x) => x > 0)");
 }
 
 #[test]

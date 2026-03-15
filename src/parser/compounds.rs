@@ -108,28 +108,6 @@ impl Parser {
         })
     }
 
-    pub(crate) fn parse_lambda(&mut self) -> Result<Expr, String> {
-        let span = Some(self.current_span());
-        self.expect(TokenType::Fn)?;
-        let open = self.current().clone();
-        self.expect(TokenType::LParen)?;
-        let mut params = Vec::new();
-        if !self.check(TokenType::RParen) {
-            params.push(self.parse_lambda_param()?);
-            while self.check(TokenType::Comma) {
-                self.advance();
-                params.push(self.parse_lambda_param()?);
-            }
-        }
-        self.expect_closing(TokenType::RParen, open.line, open.col, "lambda parameters")?;
-        self.expect(TokenType::FatArrow)?;
-        self.skip_newlines();
-        let body = self.parse_expr()?;
-        Ok(Expr::Lambda {
-            params, body: Box::new(body),
-            id: self.next_id(), span, resolved_type: None,
-        })
-    }
 
     fn parse_lambda_param(&mut self) -> Result<LambdaParam, String> {
         if self.check(TokenType::LParen) {

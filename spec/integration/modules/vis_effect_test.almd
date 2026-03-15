@@ -13,7 +13,7 @@ effect fn main(_args: List[String]) -> Result[Unit, String] = {
   assert_eq(config, "config_value")
 
   // pure fn also callable
-  assert_eq(effectlib.pure_fn(), "pure")
+  assert_eq(effectlib.pure_(), "pure")
 
   println("vis_effect: 2 assertions passed")
   ok(())

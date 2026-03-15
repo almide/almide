@@ -171,7 +171,7 @@ fn parse_match_expr() {
 
 #[test]
 fn parse_lambda() {
-    let expr = parse_expr("fn(x) => x + 1");
+    let expr = parse_expr("(x) => x + 1");
     if let Expr::Lambda { params, .. } = &expr {
         assert_eq!(params.len(), 1);
         assert_eq!(params[0].name, "x");
@@ -182,7 +182,7 @@ fn parse_lambda() {
 
 #[test]
 fn parse_pipe() {
-    let expr = parse_expr("xs |> list.map(fn(x) => x + 1)");
+    let expr = parse_expr("xs |> list.map((x) => x + 1)");
     assert!(matches!(expr, Expr::Pipe { .. }));
 }
 
@@ -596,7 +596,7 @@ fn parse_nested_calls() {
 
 #[test]
 fn parse_typed_lambda() {
-    let expr = parse_expr("fn(x: Int) => x + 1");
+    let expr = parse_expr("(x: Int) => x + 1");
     if let Expr::Lambda { params, .. } = &expr {
         assert_eq!(params.len(), 1);
         assert_eq!(params[0].name, "x");
@@ -779,11 +779,12 @@ fn error_unclosed_match_brace() {
 
 #[test]
 fn error_unclosed_lambda_params() {
-    let errors = parse_errors("fn f() -> Int = {\n  let g = fn(x => x\n  g(1)\n}");
+    let errors = parse_errors("fn f() -> Int = {\n  let g = (x => x\n  g(1)\n}");
     assert!(!errors.is_empty());
     let msg = &errors[0];
     assert!(msg.contains("Expected ')'"), "should mention missing ')': {}", msg);
-    assert!(msg.contains("lambda parameters"), "should mention lambda context: {}", msg);
+    // Lambda context may show as "lambda parameters" or "parenthesized expression"
+    assert!(msg.contains("lambda") || msg.contains("parenthesized"), "should mention context: {}", msg);
 }
 
 #[test]

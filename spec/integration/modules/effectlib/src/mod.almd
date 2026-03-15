@@ -2,4 +2,4 @@ effect fn read_config() -> Result[String, String] = {
   ok("config_value")
 }
 
-fn pure_fn() -> String = "pure"
+fn pure_() -> String = "pure"

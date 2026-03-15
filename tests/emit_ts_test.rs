@@ -101,7 +101,7 @@ fn emit_list_concat() {
 
 #[test]
 fn emit_pipe() {
-    let out = parse_and_emit_js("module app\nfn foo(xs: List[Int]) -> List[Int] = xs |> list.filter(fn(x) => x > 0)");
+    let out = parse_and_emit_js("module app\nfn foo(xs: List[Int]) -> List[Int] = xs |> list.filter((x) => x > 0)");
     let code = user_code(&out);
     assert!(code.contains("__almd_list.filter"));
 }
@@ -420,7 +420,7 @@ fn emit_empty_list_js() {
 
 #[test]
 fn emit_lambda_js() {
-    let out = parse_and_emit_js("module app\nfn f() -> fn(Int) -> Int = fn(x) => x + 1");
+    let out = parse_and_emit_js("module app\nfn f() -> fn(Int) -> Int = (x) => x + 1");
     let code = user_code(&out);
     assert!(code.contains("=>") || code.contains("function"), "should emit lambda/arrow function");
 }

@@ -6,7 +6,7 @@ fn add(a: Int, b: Int) -> Int = a + b
 
 fn greet(name: String) -> String = "hello ${name}"
 
-fn unit_fn() -> Unit = ()
+fn unit_() -> Unit = ()
 
 fn constant() -> Int = 42
 
@@ -63,9 +63,9 @@ test "mutual recursion" {
 
 // ── Higher-order functions ──
 
-fn apply(f: fn(Int) -> Int, x: Int) -> Int = f(x)
+fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)
 
-fn twice(f: fn(Int) -> Int, x: Int) -> Int = f(f(x))
+fn twice(f: (Int) -> Int, x: Int) -> Int = f(f(x))
 
 test "higher-order function" {
   let double = (x) => x * 2
@@ -75,7 +75,7 @@ test "higher-order function" {
 
 // ── Function returning function ──
 
-fn adder(n: Int) -> fn(Int) -> Int = (x) => x + n
+fn adder(n: Int) -> (Int) -> Int = (x) => x + n
 
 test "function returning function" {
   let add5 = adder(5)
@@ -176,7 +176,7 @@ test "nested function calls" {
   assert_eq(double(double(double(1))), 8)
 }
 
-fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int =
+fn compose(f: (Int) -> Int, g: (Int) -> Int) -> (Int) -> Int =
   (x) => f(g(x))
 
 test "function composition" {
@@ -249,7 +249,7 @@ test "generic function with various types" {
   assert_eq(identity_val([1, 2]), [1, 2])
 }
 
-fn map_option[A, B](opt: Option[A], f: fn(A) -> B) -> Option[B] =
+fn map_option[A, B](opt: Option[A], f: (A) -> B) -> Option[B] =
   match opt {
     some(v) => some(f(v)),
     none => none,
@@ -286,7 +286,7 @@ test "function call in if condition" {
   assert_eq(result, "yes")
 }
 
-fn repeat_fn(f: fn(Int) -> Int, n: Int, x: Int) -> Int = {
+fn repeat_(f: (Int) -> Int, n: Int, x: Int) -> Int = {
   var result = x
   for _i in 0..n {
     result = f(result)
@@ -295,11 +295,11 @@ fn repeat_fn(f: fn(Int) -> Int, n: Int, x: Int) -> Int = {
 }
 
 test "function applied n times" {
-  assert_eq(repeat_fn((x) => x + 1, 5, 0), 5)
-  assert_eq(repeat_fn((x) => x * 2, 4, 1), 16)
+  assert_eq(repeat_((x) => x + 1, 5, 0), 5)
+  assert_eq(repeat_((x) => x * 2, 4, 1), 16)
 }
 
-fn flip(f: fn(Int, Int) -> Int) -> fn(Int, Int) -> Int =
+fn flip(f: (Int, Int) -> Int) -> (Int, Int) -> Int =
   (a, b) => f(b, a)
 
 test "flip arguments" {

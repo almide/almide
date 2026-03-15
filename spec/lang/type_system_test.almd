@@ -99,7 +99,7 @@ type Maybe[T] =
   | Just(T)
   | Nothing
 
-fn maybe_map[A, B](m: Maybe[A], f: fn(A) -> B) -> Maybe[B] =
+fn maybe_map[A, B](m: Maybe[A], f: (A) -> B) -> Maybe[B] =
   match m {
     Just(v) => Just(f(v)),
     Nothing => Nothing,
@@ -168,14 +168,14 @@ test "Result type" {
 
 // ── Function types ──
 
-fn apply(f: fn(Int) -> Int, x: Int) -> Int = f(x)
+fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)
 
 test "function type as parameter" {
   let result = apply((x) => x * 3, 10)
   assert_eq(result, 30)
 }
 
-fn make_adder(n: Int) -> fn(Int) -> Int = (x) => x + n
+fn make_adder(n: Int) -> (Int) -> Int = (x) => x + n
 
 test "function type as return" {
   let add5 = make_adder(5)
@@ -212,7 +212,7 @@ test "generic wrap and unwrap" {
   assert_eq(unwrap_or[Int](none, 99), 99)
 }
 
-fn map_result[A, B](r: Result[A, String], f: fn(A) -> B) -> Result[B, String] =
+fn map_result[A, B](r: Result[A, String], f: (A) -> B) -> Result[B, String] =
   match r {
     ok(v) => ok(f(v)),
     err(e) => err(e),
@@ -243,7 +243,7 @@ test "generic variant type" {
   assert_eq(tree_value(t2), "root")
 }
 
-fn option_chain[A, B](opt: Option[A], f: fn(A) -> Option[B]) -> Option[B] =
+fn option_chain[A, B](opt: Option[A], f: (A) -> Option[B]) -> Option[B] =
   match opt {
     some(v) => f(v),
     none => none,
@@ -281,7 +281,7 @@ type Either[A, B] =
   | Left(A)
   | Right(B)
 
-fn either_map_right[A, B, C](e: Either[A, B], f: fn(B) -> C) -> Either[A, C] =
+fn either_map_right[A, B, C](e: Either[A, B], f: (B) -> C) -> Either[A, C] =
   match e {
     Left(a) => Left(a),
     Right(b) => Right(f(b)),
@@ -325,9 +325,9 @@ test "generic function with list param" {
 fn const_fn[A, B](a: A, _b: B) -> A = a
 
 test "generic function ignoring param" {
-  assert_eq(const_fn(42, "ignored"), 42)
-  assert_eq(const_fn("kept", 999), "kept")
-  assert_eq(const_fn(true, [1, 2, 3]), true)
+  assert_eq(const_(42, "ignored"), 42)
+  assert_eq(const_("kept", 999), "kept")
+  assert_eq(const_(true, [1, 2, 3]), true)
 }
 
 test "stack push and peek multiple" {

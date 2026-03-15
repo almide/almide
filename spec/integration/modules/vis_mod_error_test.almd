@@ -8,5 +8,5 @@
 
 import extlib
 fn main(_args: List[String]) -> Unit = {
-  println(extlib.mod_fn())
+  println(extlib.mod_())
 }

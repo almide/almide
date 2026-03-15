@@ -62,7 +62,7 @@ fn check_standalone(ctx: &HintContext) -> Option<HintResult> {
                 if matches!(next.token_type, TokenType::Ident | TokenType::IdentQ | TokenType::Underscore) {
                     return Some(HintResult {
                         message: Some("'|x|' closure syntax is not valid in Almide".into()),
-                        hint: "Use 'fn(x) => expr' for lambdas. Example: list.map(xs, fn(x) => x + 1)".into(),
+                        hint: "Use '(x) => expr' for lambdas. Example: list.map(xs, (x) => x + 1)".into(),
                     });
                 }
             }

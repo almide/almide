@@ -8,7 +8,7 @@ test "crypto.random_bytes returns correct length" {
 
 test "crypto.random_bytes values in 0-255" {
   let bytes = crypto.random_bytes(32)
-  let all_valid = list.all(bytes, fn(b) => b >= 0 and b <= 255)
+  let all_valid = list.all(bytes, (b) => b >= 0 and b <= 255)
   assert(all_valid)
 }
 

@@ -12,7 +12,7 @@ fn from_option[T](opt: Option[T]) -> Maybe[T] =
     none => Nothing
   }
 
-fn maybe_map[A, B](m: Maybe[A], f: fn(A) -> B) -> Maybe[B] =
+fn maybe_map[A, B](m: Maybe[A], f: (A) -> B) -> Maybe[B] =
   match m {
     Just(v) => Just(f(v))
     Nothing => Nothing

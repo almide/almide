@@ -81,7 +81,7 @@ test "match binding does not leak" {
 
 // ── Closure captures ──
 
-fn make_counter(start: Int) -> fn(Int) -> Int = {
+fn make_counter(start: Int) -> (Int) -> Int = {
   (step) => start + step
 }
 

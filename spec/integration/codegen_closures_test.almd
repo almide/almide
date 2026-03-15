@@ -16,10 +16,10 @@ test "closure captures mixed types" {
 
 // ── Closure returned from function capturing its argument ──
 
-fn make_prefixer(prefix: String) -> fn(String) -> String =
+fn make_prefixer(prefix: String) -> (String) -> String =
   (s) => prefix ++ s
 
-fn make_suffixer(suffix: String) -> fn(String) -> String =
+fn make_suffixer(suffix: String) -> (String) -> String =
   (s) => s ++ suffix
 
 test "composed closures from functions" {
@@ -32,7 +32,7 @@ test "composed closures from functions" {
 // ── Closure as value in list ──
 
 test "list of closures" {
-  let fns: List[fn(Int) -> Int] = [
+  let fns: List[(Int) -> Int] = [
     (x) => x + 1,
     (x) => x * 2,
     (x) => x * x,
@@ -115,7 +115,7 @@ test "closure captures original value before shadowing" {
 
 // ── Higher-order function returning closure that captures argument ──
 
-fn make_range_checker(lo: Int, hi: Int) -> fn(Int) -> Bool =
+fn make_range_checker(lo: Int, hi: Int) -> (Int) -> Bool =
   (x) => x >= lo and x <= hi
 
 test "closure captures multiple function args" {

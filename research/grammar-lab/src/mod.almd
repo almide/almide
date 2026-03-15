@@ -343,13 +343,13 @@ fn transpile(code: String, mode: String) -> String =
     // Strategy: find ") =>" and look backwards for matching "("
     // If not preceded by "fn", insert "fn"
     let lines = string.split(code, "\n")
-    let converted = list.map(lines, (line) => transpile_line_paren_to_fn(line))
+    let converted = list.map(lines, (line) => transpile_line_paren_to_(line))
     string.join(converted, "\n")
   } else {
     code
   }
 
-fn transpile_line_paren_to_fn(line: String) -> String = {
+fn transpile_line_paren_to_(line: String) -> String = {
   // Generic approach: find ") =>" and look backwards for matching "("
   // If "(" is not preceded by "fn" or a keyword, insert "fn"
   // Handles any parameter names without enumeration

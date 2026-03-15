@@ -10,8 +10,8 @@ fn to_lower_byte(b: Int) -> Int =
 fn isogram?(word: String) -> Bool = {
   let bytes = string.to_bytes(word);
   let letters = list.filter(
-    list.map(bytes, fn(b) => to_lower_byte(b)),
-    fn(b) => b != 45 and b != 32
+    list.map(bytes, (b) => to_lower_byte(b)),
+    (b) => b != 45 and b != 32
   );
   let len = list.len(letters);
   var i = 0;

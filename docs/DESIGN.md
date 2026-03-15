@@ -11,7 +11,7 @@ Almide optimizes for **minimal thinking tokens**: the less an LLM has to branch 
 | Generics | `<T>` (ambiguous with `<` `>`) | `[T]` | No parser ambiguity with comparisons |
 | Loops | `while`, `for`, `loop`, `forEach`, recursion | `for x in xs { }` for collection iteration, `do { guard ... }` for condition-driven repetition | Each form has one purpose |
 | Early exit | `return`, `break`, `continue`, `throw` | Last expression only; `guard ... else` is the canonical structured escape hatch | No early-return confusion |
-| Lambdas | `=>`, `->`, `lambda`, `fn`, `\x ->`, blocks | `fn(x) => expr` only | One syntax, zero alternatives |
+| Lambdas | `=>`, `->`, `lambda`, `fn`, `\x ->`, blocks | `(x) => expr` only | One syntax, zero alternatives |
 | Statement termination | `;`, optional `;`, ASI rules | Newline-separated | No insertion ambiguity |
 | Conditionals | `if` with optional `else`, ternary `?:` | `if/then/else` (else mandatory) | No dangling-else |
 | Side effects | Implicit anywhere | `effect fn` annotation required | Restricts callable set at each point |

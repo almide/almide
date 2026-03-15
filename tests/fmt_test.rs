@@ -160,7 +160,7 @@ fn fmt_list_literal() {
 
 #[test]
 fn fmt_pipe() {
-    let out = roundtrip("fn f(xs: List[Int]) -> List[Int] = xs |> list.filter(fn(x) => x > 0)");
+    let out = roundtrip("fn f(xs: List[Int]) -> List[Int] = xs |> list.filter((x) => x > 0)");
     assert!(out.contains("|>"));
 }
 

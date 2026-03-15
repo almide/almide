@@ -16,7 +16,7 @@ fn tree_size[T](t: Tree[T]) -> Int =
     Node(left, right) => tree_size(left) + tree_size(right)
   }
 
-fn tree_map[A, B](t: Tree[A], f: fn(A) -> B) -> Tree[B] =
+fn tree_map[A, B](t: Tree[A], f: (A) -> B) -> Tree[B] =
   match t {
     Leaf(v) => Leaf(f(v))
     Node(left, right) => Node(tree_map(left, f), tree_map(right, f))

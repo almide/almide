@@ -182,7 +182,7 @@ test "sub-import: utils imports extlib package" {
 // ------------------------------------------------------------
 
 test "visibility: public fn is accessible from external" {
-  assert_eq(extlib.pub_fn(), "public")
+  assert_eq(extlib.pub_(), "public")
 }
 
 // ------------------------------------------------------------

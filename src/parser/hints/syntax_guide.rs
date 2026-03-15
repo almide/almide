@@ -86,7 +86,7 @@ fn check_rejected_ident(name: &str) -> Option<HintResult> {
         }),
         "lambda" => Some(HintResult {
             message: Some("'lambda' is not valid in Almide".into()),
-            hint: "Use 'fn(x) => expr' for lambdas. Example: list.map(xs, fn(x) => x + 1)".into(),
+            hint: "Use '(x) => expr' for lambdas. Example: list.map(xs, (x) => x + 1)".into(),
         }),
         _ => None,
     }

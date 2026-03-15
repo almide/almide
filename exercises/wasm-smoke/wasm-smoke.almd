@@ -18,7 +18,7 @@ effect fn main(args: List[String]) -> Result[Unit, String] = {
   guard fb15 == "FizzBuzz" else err("fizzbuzz(15) should be FizzBuzz")
 
   let names = ["Alice", "Bob", "Charlie"]
-  let upper = list.map(names, fn(s) => string.to_upper(s))
+  let upper = list.map(names, (s) => string.to_upper(s))
   guard list.len(upper) == 3 else err("list length mismatch")
 
   println("All WASM smoke tests passed.")
