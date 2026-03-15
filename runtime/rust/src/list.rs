@@ -21,29 +21,29 @@ pub fn almide_rt_list_find<A: Clone>(xs: Vec<A>, f: impl Fn(A) -> bool) -> Optio
     xs.into_iter().find(|x| f(x.clone()))
 }
 
-pub fn almide_rt_list_any<A: Clone>(xs: &Vec<A>, f: impl Fn(A) -> bool) -> bool {
+pub fn almide_rt_list_any<A: Clone>(xs: Vec<A>, f: impl Fn(A) -> bool) -> bool {
     xs.iter().any(|x| f(x.clone()))
 }
 
-pub fn almide_rt_list_all<A: Clone>(xs: &Vec<A>, f: impl Fn(A) -> bool) -> bool {
+pub fn almide_rt_list_all<A: Clone>(xs: Vec<A>, f: impl Fn(A) -> bool) -> bool {
     xs.iter().all(|x| f(x.clone()))
 }
 
-pub fn almide_rt_list_reverse<A: Clone>(xs: &Vec<A>) -> Vec<A> {
-    xs.iter().rev().cloned().collect()
+pub fn almide_rt_list_reverse<A: Clone>(xs: Vec<A>) -> Vec<A> {
+    xs.into_iter().rev().collect()
 }
 
-pub fn almide_rt_list_sort<A: Ord + Clone>(xs: &Vec<A>) -> Vec<A> {
-    let mut v = xs.clone();
+pub fn almide_rt_list_sort<A: Ord + Clone>(xs: Vec<A>) -> Vec<A> {
+    let mut v = xs;
     v.sort();
     v
 }
 
-pub fn almide_rt_list_first<A: Clone>(xs: &Vec<A>) -> Option<A> {
+pub fn almide_rt_list_first<A: Clone>(xs: Vec<A>) -> Option<A> {
     xs.first().cloned()
 }
 
-pub fn almide_rt_list_last<A: Clone>(xs: &Vec<A>) -> Option<A> {
+pub fn almide_rt_list_last<A: Clone>(xs: Vec<A>) -> Option<A> {
     xs.last().cloned()
 }
 
@@ -59,28 +59,28 @@ pub fn almide_rt_list_zip_with<A: Clone, B: Clone, C>(a: Vec<A>, b: Vec<B>, f: i
     a.into_iter().zip(b.into_iter()).map(|(x, y)| f(x, y)).collect()
 }
 
-pub fn almide_rt_list_contains<T: PartialEq>(xs: &Vec<T>, x: &T) -> bool {
-    xs.contains(x)
+pub fn almide_rt_list_contains<T: PartialEq>(xs: Vec<T>, x: T) -> bool {
+    xs.contains(&x)
 }
 
-pub fn almide_rt_list_is_empty<T>(xs: &Vec<T>) -> bool {
+pub fn almide_rt_list_is_empty<T>(xs: Vec<T>) -> bool {
     xs.is_empty()
 }
 
-pub fn almide_rt_list_get<T: Clone>(xs: &Vec<T>, i: i64) -> Option<T> {
+pub fn almide_rt_list_get<T: Clone>(xs: Vec<T>, i: i64) -> Option<T> {
     xs.get(i as usize).cloned()
 }
 
-pub fn almide_rt_list_get_or<T: Clone>(xs: &Vec<T>, i: i64, default: T) -> T {
+pub fn almide_rt_list_get_or<T: Clone>(xs: Vec<T>, i: i64, default: T) -> T {
     xs.get(i as usize).cloned().unwrap_or(default)
 }
 
-pub fn almide_rt_list_index_of<T: PartialEq>(xs: &Vec<T>, x: &T) -> Option<i64> {
-    xs.iter().position(|v| v == x).map(|i| i as i64)
+pub fn almide_rt_list_index_of<T: PartialEq>(xs: Vec<T>, x: T) -> Option<i64> {
+    xs.iter().position(|v| *v == x).map(|i| i as i64)
 }
 
-pub fn almide_rt_list_join(xs: &Vec<String>, sep: &str) -> String {
-    xs.join(sep)
+pub fn almide_rt_list_join(xs: Vec<String>, sep: impl AsRef<str>) -> String {
+    xs.join(sep.as_ref())
 }
 
 pub fn almide_rt_list_flatten<T: Clone>(xs: Vec<Vec<T>>) -> Vec<T> {
@@ -105,11 +105,11 @@ pub fn almide_rt_list_find_index<A: Clone>(xs: Vec<A>, f: impl Fn(A) -> bool) ->
     xs.into_iter().position(|x| f(x)).map(|i| i as i64)
 }
 
-pub fn almide_rt_list_each<A: Clone>(xs: &Vec<A>, f: impl Fn(A)) {
+pub fn almide_rt_list_each<A: Clone>(xs: Vec<A>, f: impl Fn(A)) {
     for x in xs { f(x.clone()); }
 }
 
-pub fn almide_rt_list_count<A: Clone>(xs: &Vec<A>, f: impl Fn(A) -> bool) -> i64 {
+pub fn almide_rt_list_count<A: Clone>(xs: Vec<A>, f: impl Fn(A) -> bool) -> i64 {
     xs.iter().filter(|x| f((*x).clone())).count() as i64
 }
 
@@ -129,24 +129,24 @@ pub fn almide_rt_list_drop_while<A: Clone>(xs: Vec<A>, f: impl Fn(A) -> bool) ->
     xs.into_iter().skip_while(|x| f(x.clone())).collect()
 }
 
-pub fn almide_rt_list_chunk<T: Clone>(xs: &Vec<T>, n: i64) -> Vec<Vec<T>> {
+pub fn almide_rt_list_chunk<T: Clone>(xs: Vec<T>, n: i64) -> Vec<Vec<T>> {
     xs.chunks(n as usize).map(|c| c.to_vec()).collect()
 }
 
-pub fn almide_rt_list_windows<T: Clone>(xs: &Vec<T>, n: i64) -> Vec<Vec<T>> {
+pub fn almide_rt_list_windows<T: Clone>(xs: Vec<T>, n: i64) -> Vec<Vec<T>> {
     if (n as usize) > xs.len() { return vec![]; }
     xs.windows(n as usize).map(|w| w.to_vec()).collect()
 }
 
-pub fn almide_rt_list_dedup<T: Clone + PartialEq>(xs: &Vec<T>) -> Vec<T> {
+pub fn almide_rt_list_dedup<T: Clone + PartialEq>(xs: Vec<T>) -> Vec<T> {
     let mut result = Vec::new();
-    for x in xs { if result.last() != Some(x) { result.push(x.clone()); } }
+    for x in &xs { if result.last() != Some(x) { result.push(x.clone()); } }
     result
 }
 
-pub fn almide_rt_list_unique<T: Clone + PartialEq>(xs: &Vec<T>) -> Vec<T> {
+pub fn almide_rt_list_unique<T: Clone + PartialEq>(xs: Vec<T>) -> Vec<T> {
     let mut result = Vec::new();
-    for x in xs { if !result.contains(x) { result.push(x.clone()); } }
+    for x in &xs { if !result.contains(x) { result.push(x.clone()); } }
     result
 }
 
@@ -182,17 +182,15 @@ pub fn almide_rt_list_remove_at<T>(mut xs: Vec<T>, i: i64) -> Vec<T> {
     xs
 }
 
-pub fn almide_rt_list_set<T: Clone>(xs: &Vec<T>, i: i64, x: T) -> Vec<T> {
-    let mut result = xs.clone();
-    if let Some(slot) = result.get_mut(i as usize) { *slot = x; }
-    result
+pub fn almide_rt_list_set<T: Clone>(mut xs: Vec<T>, i: i64, x: T) -> Vec<T> {
+    if let Some(slot) = xs.get_mut(i as usize) { *slot = x; }
+    xs
 }
 
-pub fn almide_rt_list_swap<T: Clone>(xs: &Vec<T>, i: i64, j: i64) -> Vec<T> {
-    let mut result = xs.clone();
+pub fn almide_rt_list_swap<T: Clone>(mut xs: Vec<T>, i: i64, j: i64) -> Vec<T> {
     let (a, b) = (i as usize, j as usize);
-    if a < result.len() && b < result.len() { result.swap(a, b); }
-    result
+    if a < xs.len() && b < xs.len() { xs.swap(a, b); }
+    xs
 }
 
 pub fn almide_rt_list_update<A: Clone>(mut xs: Vec<A>, i: i64, f: impl Fn(A) -> A) -> Vec<A> {
@@ -217,13 +215,13 @@ pub fn almide_rt_list_range(start: i64, end: i64) -> Vec<i64> {
     (start..end).collect()
 }
 
-pub fn almide_rt_list_sum(xs: &Vec<i64>) -> i64 { xs.iter().sum() }
-pub fn almide_rt_list_sum_float(xs: &Vec<f64>) -> f64 { xs.iter().sum() }
-pub fn almide_rt_list_product(xs: &Vec<i64>) -> i64 { xs.iter().product() }
-pub fn almide_rt_list_product_float(xs: &Vec<f64>) -> f64 { xs.iter().product() }
+pub fn almide_rt_list_sum(xs: Vec<i64>) -> i64 { xs.iter().sum() }
+pub fn almide_rt_list_sum_float(xs: Vec<f64>) -> f64 { xs.iter().sum() }
+pub fn almide_rt_list_product(xs: Vec<i64>) -> i64 { xs.iter().product() }
+pub fn almide_rt_list_product_float(xs: Vec<f64>) -> f64 { xs.iter().product() }
 
-pub fn almide_rt_list_min<T: Ord + Clone>(xs: &Vec<T>) -> Option<T> { xs.iter().min().cloned() }
-pub fn almide_rt_list_max<T: Ord + Clone>(xs: &Vec<T>) -> Option<T> { xs.iter().max().cloned() }
+pub fn almide_rt_list_min<T: Ord + Clone>(xs: Vec<T>) -> Option<T> { xs.iter().min().cloned() }
+pub fn almide_rt_list_max<T: Ord + Clone>(xs: Vec<T>) -> Option<T> { xs.iter().max().cloned() }
 
 pub fn almide_rt_list_reduce<A: Clone>(xs: Vec<A>, f: impl Fn(A, A) -> A) -> Option<A> {
     xs.into_iter().reduce(f)
