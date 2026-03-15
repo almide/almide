@@ -36,6 +36,7 @@ pub(super) struct LowerCtx<'a> {
     generic_unit_ctors: HashSet<String>,
     pub(super) variant_ctors: HashSet<String>,
     pub(super) user_modules: Vec<String>,
+    tmp_counter: std::cell::Cell<u32>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -50,7 +51,8 @@ impl<'a> LowerCtx<'a> {
         }
         let user_modules = ir.modules.iter().map(|m| m.name.clone()).collect();
         LowerCtx { ir, js_mode: opts.js_mode, npm_mode: opts.npm_mode,
-            unit_variants, generic_unit_ctors, variant_ctors, user_modules }
+            unit_variants, generic_unit_ctors, variant_ctors, user_modules,
+            tmp_counter: std::cell::Cell::new(0) }
     }
 
     fn collect_variant_info(td: &IrTypeDecl, unit: &mut HashSet<String>, generic_unit: &mut HashSet<String>, record: &mut HashSet<String>) {
@@ -65,6 +67,7 @@ impl<'a> LowerCtx<'a> {
         }
     }
 
+    fn next_tmp(&self) -> u32 { let n = self.tmp_counter.get(); self.tmp_counter.set(n + 1); n }
     pub(super) fn vt(&self) -> &VarTable { &self.ir.var_table }
     pub(super) fn var_name(&self, id: VarId) -> String { sanitize(&self.vt().get(id).name) }
 
@@ -226,11 +229,18 @@ impl<'a> LowerCtx<'a> {
                 IrStringPart::Expr { expr } => TemplatePart::Expr(self.lower_expr(expr, ie, it)),
             }).collect() },
 
-            IrExprKind::ResultOk { expr } => self.lower_expr(expr, ie, it),
-            IrExprKind::ResultErr { expr } => self.lower_err(expr, ie, it),
+            IrExprKind::ResultOk { expr } => Expr::ResultOk(Box::new(self.lower_expr(expr, ie, it))),
+            IrExprKind::ResultErr { expr } => Expr::ResultErr(Box::new(self.lower_expr(expr, ie, it))),
             IrExprKind::OptionSome { expr } => self.lower_expr(expr, ie, it),
             IrExprKind::OptionNone => Expr::Null,
-            IrExprKind::Try { expr } => self.lower_expr(expr, ie, it),
+            IrExprKind::Try { expr } => {
+                // auto-try: Result を unwrap。IIFE で早期 return パターン
+                let inner = self.lower_expr(expr, ie, it);
+                Expr::Call {
+                    func: Box::new(Expr::Var("__unwrap".into())),
+                    args: vec![inner],
+                }
+            }
             IrExprKind::Await { expr } => Expr::Await(Box::new(self.lower_expr(expr, ie, it))),
 
             IrExprKind::Hole => if self.js_mode { Expr::Null } else { Expr::Raw("null as any".into()) },

@@ -80,6 +80,8 @@ pub fn expr(o: &mut String, e: &Expr, d: usize) {
         Expr::Return(v) => { o.push_str("return"); if let Some(e) = v { o.push(' '); expr(o, e, d); } }
         Expr::Throw(e) => { o.push_str("throw "); expr(o, e, d); }
 
+        Expr::ResultOk(v) => { o.push_str("{ ok: true, value: "); expr(o, v, d); o.push_str(" }"); }
+        Expr::ResultErr(e) => { o.push_str("{ ok: false, error: "); expr(o, e, d); o.push_str(" }"); }
         Expr::ThrowError(msg) => { o.push_str("__throw("); expr(o, msg, d); o.push(')'); }
         Expr::ThrowStructuredError { msg, value } => {
             o.push_str("(() => { const __e = new Error("); expr(o, msg, d);
@@ -158,6 +160,10 @@ pub fn stmt(o: &mut String, s: &Stmt, d: usize) {
         }
         Stmt::Expr(e) => { expr(o, e, d); o.push_str(";\n"); }
         Stmt::Comment(text) => { o.push_str(text); o.push('\n'); }
+        Stmt::ResultUnwrapBind { name, value } => {
+            w!(o, "const __r_{0} = ", name); expr(o, value, d);
+            w!(o, "; if (!__r_{0}.ok) return __r_{0}; const {0} = __r_{0}.value;\n", name);
+        }
         Stmt::TryCatchBind { name, value } => {
             w!(o, "var {}; try {{ {} = ", name, name); expr(o, value, d);
             w!(o, "; }} catch (__e) {{ {} = new __Err(__e instanceof Error ? __e.message : String(__e), __e.__almd_value); }}\n", name);

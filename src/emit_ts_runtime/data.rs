@@ -175,6 +175,8 @@ function assert(c: boolean, msg?: string): void { if (!c) throw new Error(msg ? 
 function unwrap_or<T>(x: T | null, d: T): T { return x !== null ? x : d; }
 function __concat(a: any, b: any): any { return typeof a === "string" ? a + b : [...a, ...b]; }
 function __throw(msg: string): never { throw new Error(msg); }
+type Result<T, E> = { ok: true, value: T } | { ok: false, error: E };
+function __unwrap<T, E>(r: Result<T, E>): T { if (r.ok) return r.value; throw new Error(String(r.error)); }
 function __assert_throws(fn: () => any, expectedMsg: string): void {
   try { fn(); throw new Error("Expected error but succeeded with: " + fn); }
   catch (e) { if (e instanceof Error && e.message === expectedMsg) return; throw e; }
@@ -241,6 +243,7 @@ function assert(c, msg) { if (!c) throw new Error(msg ? msg : "assertion failed"
 function unwrap_or(x, d) { return x !== null ? x : d; }
 function __concat(a, b) { return typeof a === "string" ? a + b : [...a, ...b]; }
 function __throw(msg) { throw new Error(msg); }
+function __unwrap(r) { if (r.ok) return r.value; throw new Error(String(r.error)); }
 function __assert_throws(fn, expectedMsg) {
   try { fn(); throw new Error("Expected error but succeeded with: " + fn); }
   catch (e) { if (e instanceof Error && e.message === expectedMsg) return; throw e; }

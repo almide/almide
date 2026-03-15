@@ -47,7 +47,11 @@ pub enum Expr {
     Return(Option<Box<Expr>>),
     Throw(Box<Expr>),
 
-    // Result erasure: err → throw
+    // Result objects
+    ResultOk(Box<Expr>),
+    ResultErr(Box<Expr>),
+
+    // Legacy Result erasure (kept for backward compat during migration)
     ThrowError(Box<Expr>),
     ThrowStructuredError { msg: Box<Expr>, value: Box<Expr> },
 
@@ -99,11 +103,10 @@ pub enum Stmt {
     If { cond: Expr, body: Vec<Stmt> },
     Expr(Expr),
     Comment(String),
-    /// Test-mode try-catch for effect fn calls:
-    /// `var name; try { name = value; } catch (e) { name = new __Err(...); }`
+    /// Result unwrap bind: `const name = value; if (!name.ok) return name;`
+    ResultUnwrapBind { name: String, value: Expr },
+    /// Legacy try-catch (kept during migration)
     TryCatchBind { name: String, value: Expr },
-    /// Do-block err propagation:
-    /// `if (name instanceof __Err) { throw ... }`
     ErrPropagate { name: String },
 }
 
