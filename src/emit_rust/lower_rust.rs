@@ -235,14 +235,22 @@ impl<'a> LowerCtx<'a> {
                 then: Box::new(self.lower_expr(then)),
                 else_: Some(Box::new(self.lower_expr(else_))),
             },
-            IrExprKind::Match { subject, arms } => Expr::Match {
-                subject: Box::new(self.lower_expr(subject)),
-                arms: arms.iter().map(|a| MatchArm {
-                    pat: self.lower_pat(&a.pattern),
-                    guard: a.guard.as_ref().map(|g| self.lower_expr(g)),
-                    body: self.lower_expr(&a.body),
-                }).collect(),
-            },
+            IrExprKind::Match { subject, arms } => {
+                let subj = self.lower_expr(subject);
+                // String subjects need .as_str() to match against string literal patterns
+                let has_str_pat = arms.iter().any(|a| matches!(&a.pattern, IrPattern::Literal { expr } if matches!(&expr.kind, IrExprKind::LitStr { .. })));
+                let subj = if has_str_pat && matches!(&subject.ty, Ty::String) {
+                    Expr::MethodCall { recv: Box::new(subj), method: "as_str".into(), args: vec![] }
+                } else { subj };
+                Expr::Match {
+                    subject: Box::new(subj),
+                    arms: arms.iter().map(|a| MatchArm {
+                        pat: self.lower_pat(&a.pattern),
+                        guard: a.guard.as_ref().map(|g| self.lower_expr(g)),
+                        body: self.lower_expr(&a.body),
+                    }).collect(),
+                }
+            }
             IrExprKind::Block { stmts, expr } => Expr::Block {
                 stmts: stmts.iter().map(|s| self.lower_stmt(s)).collect(),
                 tail: expr.as_ref().map(|e| Box::new(self.lower_expr(e))),
