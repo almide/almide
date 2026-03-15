@@ -1,5 +1,7 @@
+/// Token helpers: position tracking, lookahead, expect, advance, newline/comment skipping.
+
 use crate::lexer::{Token, TokenType};
-use crate::ast::Span;
+use crate::ast::{Span, Stmt};
 use super::Parser;
 
 impl Parser {
@@ -14,7 +16,6 @@ impl Parser {
         } else if let Some(last) = self.tokens.last() {
             last
         } else {
-            // Static EOF token as fallback — lexer always adds EOF, so this is unreachable
             static EOF_TOKEN: Token = Token {
                 token_type: TokenType::EOF,
                 value: String::new(),
@@ -29,22 +30,13 @@ impl Parser {
         self.tokens.get(self.pos + offset)
     }
 
-    /// Returns true if the current token is on a different line than the previous token.
     pub(crate) fn newline_before_current(&self) -> bool {
-        if self.pos == 0 {
-            return false;
-        }
-        let prev = &self.tokens[self.pos - 1];
-        let curr = self.current();
-        curr.line > prev.line
+        if self.pos == 0 { return false; }
+        self.tokens[self.pos - 1].line < self.current().line
     }
 
-    /// Look ahead to check if `[...]` is followed by `(` — indicating type args before a call.
     pub(crate) fn peek_type_args_call(&self) -> bool {
-        // Current token should be `[`
-        if self.current().token_type != TokenType::LBracket {
-            return false;
-        }
+        if self.current().token_type != TokenType::LBracket { return false; }
         let mut depth = 0;
         let mut i = 0;
         loop {
@@ -57,7 +49,6 @@ impl Parser {
                 TokenType::RBracket => {
                     depth -= 1;
                     if depth == 0 {
-                        // Check if next token after `]` is `(`
                         return self.peek_at(i + 1).map(|t| t.token_type == TokenType::LParen).unwrap_or(false);
                     }
                 }
@@ -68,33 +59,23 @@ impl Parser {
         }
     }
 
-    /// Look ahead past optional newlines to check if `{ Ident :` follows — indicating a named record.
-    /// Handles: `Foo { x: 1 }` and `Foo {\n  x: 1, ...}`
+    /// Peek past optional newlines for `{ Ident :` pattern — named record.
     pub(crate) fn peek_named_record(&self) -> bool {
         let mut i = 0;
-        // Skip newlines
         while self.peek_at(i).map(|t| &t.token_type) == Some(&TokenType::Newline) { i += 1; }
-        // Check { Ident :
         self.peek_at(i).map(|t| &t.token_type) == Some(&TokenType::LBrace)
             && {
                 let mut j = i + 1;
                 while self.peek_at(j).map(|t| &t.token_type) == Some(&TokenType::Newline) { j += 1; }
                 self.peek_at(j).map(|t| &t.token_type) == Some(&TokenType::Ident)
-                    && {
-                        let k = j + 1;
-                        self.peek_at(k).map(|t| &t.token_type) == Some(&TokenType::Colon)
-                    }
+                    && self.peek_at(j + 1).map(|t| &t.token_type) == Some(&TokenType::Colon)
             }
     }
 
-    /// Look ahead to check if `(...)` is followed by `=>` — indicating a paren-style lambda.
-    /// Handles: `() =>`, `(x) =>`, `(x, y) =>`, `(x: T) =>`, `((a, b)) =>`
     pub(crate) fn peek_paren_lambda(&self) -> bool {
-        if self.current().token_type != TokenType::LParen {
-            return false;
-        }
+        if self.current().token_type != TokenType::LParen { return false; }
         let mut depth = 1;
-        let mut i = 1; // skip the opening `(`
+        let mut i = 1;
         loop {
             let tok = match self.peek_at(i) {
                 Some(t) => t,
@@ -105,7 +86,6 @@ impl Parser {
                 TokenType::RParen => {
                     depth -= 1;
                     if depth == 0 {
-                        // Check if next token after `)` is `=>`
                         return self.peek_at(i + 1)
                             .map(|t| t.token_type == TokenType::FatArrow)
                             .unwrap_or(false);
@@ -197,13 +177,7 @@ impl Parser {
     }
 
     pub(crate) fn expect_any_name(&mut self) -> Result<String, String> {
-        if self.check(TokenType::Ident) {
-            return Ok(self.advance_and_get_value());
-        }
-        if self.check(TokenType::IdentQ) {
-            return Ok(self.advance_and_get_value());
-        }
-        if self.check(TokenType::TypeName) {
+        if self.check(TokenType::Ident) || self.check(TokenType::IdentQ) || self.check(TokenType::TypeName) {
             return Ok(self.advance_and_get_value());
         }
         let tok = self.current();
@@ -223,10 +197,21 @@ impl Parser {
     }
 
     pub(crate) fn expect_any_fn_name(&mut self) -> Result<String, String> {
-        if self.check(TokenType::Ident) {
-            return Ok(self.advance_and_get_value());
+        // Convention method: fn Dog.eq(...) → name = "Dog.eq"
+        if self.check(TokenType::TypeName)
+            && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Dot)
+        {
+            let type_name = self.advance_and_get_value();
+            self.advance(); // skip .
+            let method = if self.check(TokenType::Ident) || self.check(TokenType::IdentQ) {
+                self.advance_and_get_value()
+            } else {
+                let tok = self.current();
+                return Err(format!("Expected method name after '{}.', got {:?} at line {}:{}", type_name, tok.token_type, tok.line, tok.col));
+            };
+            return Ok(format!("{}.{}", type_name, method));
         }
-        if self.check(TokenType::IdentQ) {
+        if self.check(TokenType::Ident) || self.check(TokenType::IdentQ) {
             return Ok(self.advance_and_get_value());
         }
         let tok = self.current();
@@ -242,10 +227,7 @@ impl Parser {
     }
 
     pub(crate) fn expect_any_param_name(&mut self) -> Result<String, String> {
-        if self.check(TokenType::Ident) {
-            return Ok(self.advance_and_get_value());
-        }
-        if self.check(TokenType::Var) {
+        if self.check(TokenType::Ident) || self.check(TokenType::Var) {
             return Ok(self.advance_and_get_value());
         }
         let tok = self.current();
@@ -262,48 +244,27 @@ impl Parser {
         ))
     }
 
-    /// Expect a closing delimiter, providing the opening delimiter's position for better error messages.
-    /// On failure, produces a Diagnostic with a secondary span pointing to where the delimiter was opened.
     pub(crate) fn expect_closing(&mut self, close: TokenType, open_line: usize, open_col: usize, context: &str) -> Result<&Token, String> {
-        if self.check(close.clone()) {
-            return Ok(self.advance());
-        }
-        let tok_line = self.current().line;
-        let tok_col = self.current().col;
-        let close_name = match close {
-            TokenType::RParen => "')'",
-            TokenType::RBracket => "']'",
-            TokenType::RBrace => "'}'",
-            _ => "closing delimiter",
+        if self.check(close.clone()) { return Ok(self.advance()); }
+        let (tok_line, tok_col) = (self.current().line, self.current().col);
+        let (close_name, open_name) = match close {
+            TokenType::RParen => ("')'", "'('"),
+            TokenType::RBracket => ("']'", "'['"),
+            TokenType::RBrace => ("'}'", "'{'"),
+            _ => ("closing delimiter", "opening delimiter"),
         };
-        let open_name = match close {
-            TokenType::RParen => "'('",
-            TokenType::RBracket => "'['",
-            TokenType::RBrace => "'{'",
-            _ => "opening delimiter",
-        };
-        let msg = format!(
-            "Expected {} to close {} opened at line {}:{}",
-            close_name, context, open_line, open_col
-        );
-        let hint = format!(
-            "Add {} or check for a missing delimiter inside the {}",
-            close_name, context
-        );
+        let msg = format!("Expected {} to close {} opened at line {}:{}", close_name, context, open_line, open_col);
+        let hint = format!("Add {} or check for a missing delimiter inside the {}", close_name, context);
         let mut diag = self.diag_error(&msg, &hint, "");
         diag.secondary.push(crate::diagnostic::SecondarySpan {
-            line: open_line,
-            col: Some(open_col),
+            line: open_line, col: Some(open_col),
             label: format!("{} opened here", open_name),
         });
-        // Return as Err(String) for compatibility with existing error propagation,
-        // but also push the rich diagnostic so it can be displayed with source context.
         self.errors.push(diag);
-        Err(format!(
-            "{} at line {}:{}",
-            msg, tok_line, tok_col
-        ))
+        Err(format!("{} at line {}:{}", msg, tok_line, tok_col))
     }
+
+    // ── Newline / comment skipping ────────────────────────────────
 
     pub(crate) fn skip_newlines(&mut self) {
         while self.check(TokenType::Newline) || self.check(TokenType::Comment) {
@@ -311,17 +272,15 @@ impl Parser {
         }
     }
 
-    /// Skip newlines, collecting Comment tokens as Stmt::Comment into a Vec.
-    pub(crate) fn skip_newlines_into_stmts(&mut self, stmts: &mut Vec<crate::ast::Stmt>) {
+    pub(crate) fn skip_newlines_into_stmts(&mut self, stmts: &mut Vec<Stmt>) {
         while self.check(TokenType::Newline) || self.check(TokenType::Comment) {
             if self.check(TokenType::Comment) {
-                stmts.push(crate::ast::Stmt::Comment { text: self.current().value.clone() });
+                stmts.push(Stmt::Comment { text: self.current().value.clone() });
             }
             self.advance();
         }
     }
 
-    /// Skip newlines and collect any Comment tokens encountered.
     pub(crate) fn skip_newlines_collect_comments(&mut self) -> Vec<String> {
         let mut comments = Vec::new();
         while self.check(TokenType::Newline) || self.check(TokenType::Comment) {

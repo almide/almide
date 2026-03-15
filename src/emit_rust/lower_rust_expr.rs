@@ -1,0 +1,317 @@
+/// Expression + TCO lowering (split from lower_rust.rs).
+
+use almide::ir::*;
+use almide::types::Ty;
+use super::rust_ir::*;
+use super::lower_types::is_copy;
+use super::lower_rust::LowerCtx;
+
+impl<'a> LowerCtx<'a> {
+    // ── Expression ──
+
+    pub(super) fn lower_expr(&self, e: &IrExpr) -> Expr {
+        match &e.kind {
+            IrExprKind::LitInt { value } => Expr::Int(*value),
+            IrExprKind::LitFloat { value } => Expr::Float(*value),
+            IrExprKind::LitStr { value } => Expr::Str(value.clone()),
+            IrExprKind::LitBool { value } => Expr::Bool(*value),
+            IrExprKind::Unit => Expr::Unit,
+            IrExprKind::Var { id } => {
+                let info = self.vt.get(*id);
+                let var = Expr::Var(crate::emit_common::sanitize(&info.name));
+                if info.use_count > 1 && !is_copy(&info.ty) { Expr::Clone(Box::new(var)) } else { var }
+            }
+
+            IrExprKind::BinOp { op, left, right } => {
+                let l = self.lower_expr(left);
+                let r = self.lower_expr(right);
+                match op {
+                    BinOp::PowFloat => Expr::MethodCall { recv: Box::new(l), method: "powf".into(), args: vec![r] },
+                    BinOp::ConcatStr | BinOp::ConcatList => Expr::Call { func: "AlmideConcat::concat".into(), args: vec![l, r] },
+                    _ => {
+                        let op_str = match op {
+                            BinOp::AddInt | BinOp::AddFloat => "+", BinOp::SubInt | BinOp::SubFloat => "-",
+                            BinOp::MulInt | BinOp::MulFloat => "*", BinOp::DivInt | BinOp::DivFloat => "/",
+                            BinOp::ModInt | BinOp::ModFloat => "%", BinOp::XorInt => "^",
+                            BinOp::Eq => "==", BinOp::Neq => "!=",
+                            BinOp::Lt => "<", BinOp::Gt => ">", BinOp::Lte => "<=", BinOp::Gte => ">=",
+                            BinOp::And => "&&", BinOp::Or => "||",
+                            _ => "+",
+                        };
+                        Expr::BinOp { op: op_str, left: Box::new(l), right: Box::new(r) }
+                    }
+                }
+            }
+            IrExprKind::UnOp { op, operand } => {
+                let o = self.lower_expr(operand);
+                Expr::UnOp { op: match op { UnOp::Not => "!", _ => "-" }, operand: Box::new(o) }
+            }
+
+            IrExprKind::If { cond, then, else_ } => Expr::If {
+                cond: Box::new(self.lower_expr(cond)),
+                then: Box::new(self.lower_expr(then)),
+                else_: Some(Box::new(self.lower_expr(else_))),
+            },
+            IrExprKind::Match { subject, arms } => {
+                let subj = self.lower_expr(subject);
+                // String subjects need .as_str() to match against string literal patterns
+                let has_str_pat = arms.iter().any(|a| matches!(&a.pattern, IrPattern::Literal { expr } if matches!(&expr.kind, IrExprKind::LitStr { .. })));
+                let subj = if has_str_pat && matches!(&subject.ty, Ty::String) {
+                    Expr::MethodCall { recv: Box::new(subj), method: "as_str".into(), args: vec![] }
+                } else { subj };
+                Expr::Match {
+                    subject: Box::new(subj),
+                    arms: arms.iter().map(|a| MatchArm {
+                        pat: self.lower_pat(&a.pattern),
+                        guard: a.guard.as_ref().map(|g| self.lower_expr(g)),
+                        body: self.lower_expr(&a.body),
+                    }).collect(),
+                }
+            }
+            IrExprKind::Block { stmts, expr } => Expr::Block {
+                stmts: stmts.iter().map(|s| self.lower_stmt(s)).collect(),
+                tail: expr.as_ref().map(|e| Box::new(self.lower_expr(e))),
+            },
+            IrExprKind::DoBlock { stmts, expr } => {
+                let has_guard = stmts.iter().any(|s| matches!(&s.kind, IrStmtKind::Guard { .. }));
+                if has_guard {
+                    // Wrap in loop { ... break; } so guard's break/continue work correctly
+                    let mut body_stmts: Vec<Stmt> = stmts.iter().map(|s| self.lower_stmt(s)).collect();
+                    if let Some(tail) = expr.as_ref() {
+                        body_stmts.push(Stmt::Expr(self.lower_expr(tail)));
+                    }
+                    body_stmts.push(Stmt::Expr(Expr::Break));
+                    Expr::Block {
+                        stmts: vec![Stmt::Expr(Expr::Loop { label: None, body: body_stmts })],
+                        tail: None,
+                    }
+                } else {
+                    Expr::Block {
+                        stmts: stmts.iter().map(|s| self.lower_stmt(s)).collect(),
+                        tail: expr.as_ref().map(|e| Box::new(self.lower_expr(e))),
+                    }
+                }
+            }
+            IrExprKind::ForIn { var, iterable, body, .. } => {
+                let iter_expr = self.lower_expr(iterable);
+                // Skip clone for: ranges (Copy), literals (fresh), single-use vars (can move)
+                let needs_clone = !matches!(&iterable.kind, IrExprKind::Range { .. })
+                    && !matches!(&iterable.kind, IrExprKind::List { .. })
+                    && !self.is_single_use_var(iterable);
+                let iter_val = if needs_clone { Expr::Clone(Box::new(iter_expr)) } else { iter_expr };
+                Expr::For {
+                    var: self.vt.get(*var).name.clone(),
+                    iter: Box::new(iter_val),
+                    body: body.iter().map(|s| self.lower_stmt(s)).collect(),
+                }
+            }
+            IrExprKind::While { cond, body } => Expr::While {
+                cond: Box::new(self.lower_expr(cond)),
+                body: body.iter().map(|s| self.lower_stmt(s)).collect(),
+            },
+            IrExprKind::Break => Expr::Break,
+            IrExprKind::Continue => Expr::Continue { label: None },
+            IrExprKind::Range { start, end, inclusive } => Expr::Range {
+                start: Box::new(self.lower_expr(start)), end: Box::new(self.lower_expr(end)),
+                inclusive: *inclusive, elem_ty: match &e.ty { Ty::List(inner) => self.lty(inner), _ => Type::I64 },
+            },
+
+            IrExprKind::Call { target, args, .. } => {
+                let ir_args: Vec<Expr> = args.iter().map(|a| self.lower_expr(a)).collect();
+                let call = match target {
+                    CallTarget::Named { name } => return self.lower_named_call(name, ir_args),
+                    CallTarget::Module { module, func } => {
+                        let key = format!("{}.{}", module, func);
+                        let expr = Expr::Call {
+                            func: format!("almide_rt_{}_{}", module.replace('.', "_"), crate::emit_common::sanitize(func)),
+                            args: ir_args,
+                        };
+                        // Auto-? for module calls to result-returning functions in effect context
+                        if self.auto_try && self.result_fns.contains(&key) {
+                            return Expr::Try(Box::new(expr));
+                        }
+                        expr
+                    }
+                    CallTarget::Method { object, method } => {
+                        let obj = self.lower_expr(object);
+                        let mut all = vec![obj]; all.extend(ir_args);
+                        // Module-qualified UFCS: "list.len" → almide_rt_list_len
+                        if let Some((module, func)) = method.split_once('.') {
+                            let key = method.to_string();
+                            // Only stdlib modules get almide_rt_ prefix; user types (Person.encode) don't
+                            let is_stdlib = crate::stdlib::is_stdlib_module(module) || crate::stdlib::is_any_stdlib(module);
+                            let prefix = if is_stdlib { "almide_rt_" } else { "" };
+                            let expr = Expr::Call {
+                                func: format!("{}{}_{}", prefix, module.replace('.', "_"), crate::emit_common::sanitize(func)),
+                                args: all,
+                            };
+                            if self.auto_try && self.result_fns.contains(&key) {
+                                return Expr::Try(Box::new(expr));
+                            }
+                            expr
+                        } else {
+                            Expr::Call { func: crate::emit_common::sanitize(method), args: all }
+                        }
+                    }
+                    CallTarget::Computed { callee } => {
+                        let c = self.lower_expr(callee);
+                        Expr::Raw(format!("({})({})", super::render::expr_str(&c),
+                            ir_args.iter().map(|a| super::render::expr_str(a)).collect::<Vec<_>>().join(", ")))
+                    }
+                };
+                // Auto-? for any call returning Result in effect context
+                if self.auto_try && matches!(&e.ty, Ty::Result(_, _)) {
+                    Expr::Try(Box::new(call))
+                } else {
+                    call
+                }
+            }
+
+            IrExprKind::List { elements } => Expr::Vec(elements.iter().map(|e| self.lower_expr(e)).collect()),
+            IrExprKind::MapLiteral { entries } => Expr::HashMap(entries.iter().map(|(k, v)| (self.lower_expr(k), self.lower_expr(v))).collect()),
+            IrExprKind::EmptyMap => Expr::Raw("HashMap::new()".into()),
+            IrExprKind::Tuple { elements } => Expr::Tuple(elements.iter().map(|e| self.lower_expr(e)).collect()),
+            IrExprKind::Record { name, fields } => {
+                let sname = name.as_ref().map(|n| self.ctors.get(n).map(|e| format!("{}::{}", e, n)).unwrap_or(n.clone())).unwrap_or_else(|| {
+                    let mut fnames: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
+                    fnames.sort();
+                    self.anon.get(&fnames).cloned().unwrap_or("AnonRecord".into())
+                });
+                Expr::Struct { name: sname, fields: fields.iter().map(|(n, v)| (n.clone(), self.lower_expr(v))).collect() }
+            }
+            IrExprKind::SpreadRecord { base, fields } => {
+                let base_expr = self.lower_expr(base);
+                let base_val = if self.is_single_use_var(base) { base_expr } else { Expr::Clone(Box::new(base_expr)) };
+                Expr::StructUpdate {
+                    base: Box::new(base_val),
+                    fields: fields.iter().map(|(n, v)| (n.clone(), self.lower_expr(v))).collect(),
+                }
+            }
+            IrExprKind::Member { object, field } => {
+                let obj = self.lower_expr(object);
+                let field_expr = Expr::Field(Box::new(obj), field.clone());
+                if is_copy(&e.ty) || self.is_single_use_var(object) { field_expr }
+                else { Expr::Clone(Box::new(field_expr)) }
+            }
+            IrExprKind::TupleIndex { object, index } => Expr::TupleIdx(Box::new(self.lower_expr(object)), *index),
+            IrExprKind::IndexAccess { object, index } => Expr::Index(Box::new(self.lower_expr(object)), Box::new(self.lower_expr(index))),
+            IrExprKind::Lambda { params, body } => Expr::Closure {
+                params: params.iter().map(|(var, _)| self.vt.get(*var).name.clone()).collect(),
+                body: Box::new(self.lower_expr(body)),
+            },
+            IrExprKind::StringInterp { parts } => {
+                let mut template = String::new();
+                let mut args = Vec::new();
+                for part in parts {
+                    match part {
+                        IrStringPart::Lit { value } => {
+                            for c in value.chars() { match c { '{' => template.push_str("{{"), '}' => template.push_str("}}"), '"' => template.push_str("\\\""), '\\' => template.push_str("\\\\"), _ => template.push(c) } }
+                        }
+                        IrStringPart::Expr { expr } => {
+                            let debug = matches!(&expr.ty, Ty::List(_) | Ty::Option(_) | Ty::Result(_, _) | Ty::Map(_, _) | Ty::Tuple(_) | Ty::Record { .. } | Ty::Variant { .. });
+                            template.push_str(if debug { "{:?}" } else { "{}" });
+                            args.push(self.lower_expr(expr));
+                        }
+                    }
+                }
+                if args.is_empty() { Expr::Str(template) } else { Expr::Format { template: format!("\"{}\"", template), args } }
+            }
+            IrExprKind::ResultOk { expr } => Expr::Ok(Box::new(self.lower_expr(expr))),
+            IrExprKind::ResultErr { expr } => Expr::Err(Box::new(self.lower_expr(expr))),
+            IrExprKind::OptionSome { expr } => Expr::Some(Box::new(self.lower_expr(expr))),
+            IrExprKind::OptionNone => Expr::None,
+            IrExprKind::Try { expr } => Expr::Try(Box::new(self.lower_expr(expr))),
+            IrExprKind::Await { expr } => self.lower_expr(expr),
+            IrExprKind::Hole | IrExprKind::Todo { .. } => Expr::Raw("todo!()".into()),
+        }
+    }
+
+    fn lower_named_call(&self, name: &str, args: Vec<Expr>) -> Expr {
+        match name {
+            "println" => Expr::Macro { name: "println".into(), args: vec![Expr::Raw("\"{}\"".into()), args.into_iter().next().unwrap_or(Expr::Unit)] },
+            "eprintln" => Expr::Macro { name: "eprintln".into(), args: vec![Expr::Raw("\"{}\"".into()), args.into_iter().next().unwrap_or(Expr::Unit)] },
+            "assert_eq" => Expr::Macro { name: "assert_eq".into(), args },
+            "assert_ne" => Expr::Macro { name: "assert_ne".into(), args },
+            "assert" => Expr::Macro { name: "assert".into(), args },
+            _ if name.starts_with("__encode_list_") || name.starts_with("__decode_list_") => {
+                let is_encode = name.starts_with("__encode_list_");
+                let type_suffix = if is_encode { &name["__encode_list_".len()..] } else { &name["__decode_list_".len()..] };
+                // Primitives have direct runtime helpers
+                match type_suffix {
+                    "string" | "int" | "float" | "bool" => {
+                        Expr::Call { func: format!("almide_rt_{}", crate::emit_common::sanitize(name)), args }
+                    }
+                    // Named types: pass Type_encode/decode as function argument
+                    _ => {
+                        let func_ref = if is_encode {
+                            format!("{}_encode", crate::emit_common::sanitize(type_suffix))
+                        } else {
+                            format!("{}_decode", crate::emit_common::sanitize(type_suffix))
+                        };
+                        let rt_func = if is_encode { "almide_rt_value_encode_list" } else { "almide_rt_value_decode_list" };
+                        let mut all_args = args;
+                        all_args.push(Expr::Var(func_ref));
+                        Expr::Call { func: rt_func.into(), args: all_args }
+                    }
+                }
+            }
+            _ => {
+                let call = if let Some(enum_name) = self.ctors.get(name) {
+                    if args.is_empty() { return Expr::Var(format!("{}::{}", enum_name, name)); }
+                    Expr::Call { func: format!("{}::{}", enum_name, name), args }
+                } else {
+                    let func_name = crate::emit_common::sanitize(name);
+                    // Runtime helper functions get almide_rt_ prefix
+                    let func_name = if func_name.starts_with("__") {
+                        format!("almide_rt_{}", func_name)
+                    } else {
+                        func_name
+                    };
+                    Expr::Call { func: func_name, args }
+                };
+                // Auto-? for calls to result-returning functions in effect context
+                if self.auto_try && self.result_fns.contains(name) {
+                    Expr::Try(Box::new(call))
+                } else {
+                    call
+                }
+            }
+        }
+    }
+
+    // ── TCO ──
+
+    pub(super) fn lower_tco(&self, e: &IrExpr, fn_name: &str, params: &[String]) -> Expr {
+        match &e.kind {
+            IrExprKind::Call { target: CallTarget::Named { name }, args, .. } if name == fn_name => {
+                let mut stmts = Vec::new();
+                for (i, arg) in args.iter().enumerate() {
+                    stmts.push(Stmt::Let { name: format!("_tco_tmp_{}", i), ty: None, mutable: false, value: self.lower_expr(arg) });
+                }
+                for (i, param) in params.iter().enumerate() {
+                    stmts.push(Stmt::Assign { target: param.clone(), value: Expr::Var(format!("_tco_tmp_{}", i)) });
+                }
+                stmts.push(Stmt::Expr(Expr::Continue { label: Some("_tco".into()) }));
+                Expr::Block { stmts, tail: None }
+            }
+            IrExprKind::If { cond, then, else_ } => Expr::If {
+                cond: Box::new(self.lower_expr(cond)),
+                then: Box::new(self.lower_tco(then, fn_name, params)),
+                else_: Some(Box::new(self.lower_tco(else_, fn_name, params))),
+            },
+            IrExprKind::Match { subject, arms } => Expr::Match {
+                subject: Box::new(self.lower_expr(subject)),
+                arms: arms.iter().map(|a| MatchArm {
+                    pat: self.lower_pat(&a.pattern),
+                    guard: a.guard.as_ref().map(|g| self.lower_expr(g)),
+                    body: self.lower_tco(&a.body, fn_name, params),
+                }).collect(),
+            },
+            IrExprKind::Block { stmts, expr: Some(tail) } => Expr::Block {
+                stmts: stmts.iter().map(|s| self.lower_stmt(s)).collect(),
+                tail: Some(Box::new(self.lower_tco(tail, fn_name, params))),
+            },
+            _ => Expr::Return(Some(Box::new(self.lower_expr(e)))),
+        }
+    }
+}
