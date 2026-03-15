@@ -121,7 +121,10 @@ fn fmt_decl(out: &mut String, decl: &Decl, depth: usize) {
             write!(out, "fn {name}").unwrap();
             maybe_generics(out, generics);
             out.push('(');
-            comma_sep(out, params, |out, p| { write!(out, "{}: ", p.name).unwrap(); fmt_type(out, &p.ty, depth); });
+            comma_sep(out, params, |out, p| {
+                if p.name == "self" { out.push_str("self"); }
+                else { write!(out, "{}: ", p.name).unwrap(); fmt_type(out, &p.ty, depth); }
+            });
             out.push_str(") -> "); fmt_type(out, return_type, depth);
             if let Some(b) = body { out.push_str(" = "); fmt_expr(out, b, depth); }
         }

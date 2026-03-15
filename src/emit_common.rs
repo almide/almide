@@ -4,7 +4,7 @@
 /// Replaces `?` with `_hdlm_qm_` (e.g., `exists?` → `exists_hdlm_qm_`).
 /// The `_hdlm_` prefix prevents collisions with user-defined identifiers.
 pub fn sanitize(name: &str) -> String {
-    name.replace('?', "_hdlm_qm_")
+    name.replace('?', "_hdlm_qm_").replace('.', "_")
 }
 
 /// Convert a sanitized or snake_case name to a clean camelCase export name
