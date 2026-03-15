@@ -273,6 +273,8 @@ pub struct IrFieldDecl {
     pub ty: Ty,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default: Option<IrExpr>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alias: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

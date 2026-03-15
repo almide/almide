@@ -74,6 +74,9 @@ pub struct FieldType {
     pub ty: TypeExpr,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<Expr>,
+    /// Serialization alias: `name as "external_key": Type`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alias: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

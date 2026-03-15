@@ -795,7 +795,7 @@ fn lower_type_decl(ctx: &mut LowerCtx, name: &str, ty: &ast::TypeExpr, deriving:
         ast::TypeExpr::Record { fields } => {
             let fs = fields.iter().map(|f| {
                 let default = f.default.as_ref().map(|d| lower_expr(ctx, d));
-                IrFieldDecl { name: f.name.clone(), ty: resolve_type_expr(&f.ty), default }
+                IrFieldDecl { name: f.name.clone(), ty: resolve_type_expr(&f.ty), default, alias: f.alias.clone() }
             }).collect();
             IrTypeDeclKind::Record { fields: fs }
         }
@@ -828,7 +828,7 @@ fn lower_variant_case(ctx: &mut LowerCtx, case: &ast::VariantCase, _parent: &str
         ast::VariantCase::Record { name, fields } => {
             let fs = fields.iter().map(|f| {
                 let default = f.default.as_ref().map(|d| lower_expr(ctx, d));
-                IrFieldDecl { name: f.name.clone(), ty: resolve_type_expr(&f.ty), default }
+                IrFieldDecl { name: f.name.clone(), ty: resolve_type_expr(&f.ty), default, alias: f.alias.clone() }
             }).collect();
             IrVariantDecl { name: name.clone(), kind: IrVariantKind::Record { fields: fs } }
         }
@@ -977,6 +977,18 @@ fn generate_auto_derives(ctx: &mut LowerCtx, type_decls: &[IrTypeDecl], existing
                         auto.push(auto_derive_eq(&mut ctx.var_table, &td.name, &type_ty, fields));
                     }
                 }
+                "Codec" => {
+                    if let Some(ref fields) = fields {
+                        let encode_name = format!("{}.encode", td.name);
+                        let decode_name = format!("{}.decode", td.name);
+                        if !fn_names.contains(encode_name.as_str()) {
+                            auto.push(auto_derive_encode(&mut ctx.var_table, &td.name, &type_ty, fields));
+                        }
+                        if !fn_names.contains(decode_name.as_str()) {
+                            auto.push(auto_derive_decode(&mut ctx.var_table, &td.name, &type_ty, fields));
+                        }
+                    }
+                }
                 _ => {} // Ord, Hash — Rust #[derive] handles these for now
             }
         }
@@ -1048,5 +1060,197 @@ fn auto_derive_eq(vt: &mut VarTable, type_name: &str, type_ty: &Ty, fields: &[Ir
         body: body.unwrap_or(IrExpr { kind: IrExprKind::LitBool { value: true }, ty: Ty::Bool, span: None }),
         is_effect: false, is_async: false, is_test: false,
         generics: None, extern_attrs: vec![], visibility: IrVisibility::Public,
+    }
+}
+
+/// Auto-derive Codec encode: `fn T.encode(t: T) -> Value`
+/// Generates: `value.object([("field1", value.str(t.field1)), ("field2", value.int(t.field2)), ...])`
+fn auto_derive_encode(vt: &mut VarTable, type_name: &str, type_ty: &Ty, fields: &[IrFieldDecl]) -> IrFunction {
+    let var = vt.alloc("_v".to_string(), type_ty.clone(), Mutability::Let, None);
+    let value_ty = Ty::Named("Value".to_string(), vec![]);
+
+    // Build list of (String, Value) tuples for value.object(...)
+    let pairs: Vec<IrExpr> = fields.iter().map(|f| {
+        let field_access = IrExpr {
+            kind: IrExprKind::Member {
+                object: Box::new(IrExpr { kind: IrExprKind::Var { id: var }, ty: type_ty.clone(), span: None }),
+                field: f.name.clone(),
+            },
+            ty: f.ty.clone(), span: None,
+        };
+        // Choose value constructor based on field type
+        let value_call = encode_field_value(&field_access, &f.ty, &value_ty);
+        IrExpr {
+            kind: IrExprKind::Tuple { elements: vec![
+                IrExpr { kind: IrExprKind::LitStr { value: f.alias.clone().unwrap_or_else(|| f.name.clone()) }, ty: Ty::String, span: None },
+                value_call,
+            ]},
+            ty: Ty::Tuple(vec![Ty::String, value_ty.clone()]), span: None,
+        }
+    }).collect();
+
+    let pairs_list = IrExpr {
+        kind: IrExprKind::List { elements: pairs },
+        ty: Ty::List(Box::new(Ty::Tuple(vec![Ty::String, value_ty.clone()]))), span: None,
+    };
+
+    let body = IrExpr {
+        kind: IrExprKind::Call {
+            target: CallTarget::Module { module: "value".to_string(), func: "object".to_string() },
+            args: vec![pairs_list],
+            type_args: vec![],
+        },
+        ty: value_ty.clone(), span: None,
+    };
+
+    IrFunction {
+        name: format!("{}.encode", type_name),
+        params: vec![IrParam { var, ty: type_ty.clone(), name: "_v".to_string(), borrow: ParamBorrow::Own, open_record: None, default: None }],
+        ret_ty: value_ty,
+        body,
+        is_effect: false, is_async: false, is_test: false,
+        generics: None, extern_attrs: vec![], visibility: IrVisibility::Public,
+    }
+}
+
+/// Choose the right value constructor for a field type.
+fn encode_field_value(field_expr: &IrExpr, field_ty: &Ty, value_ty: &Ty) -> IrExpr {
+    let (module, func) = match field_ty {
+        Ty::String => ("value", "str"),
+        Ty::Int => ("value", "int"),
+        Ty::Float => ("value", "float"),
+        Ty::Bool => ("value", "bool"),
+        _ => {
+            // Named type (nested Codec) → call Type.encode(field)
+            if let Ty::Named(name, _) = field_ty {
+                return IrExpr {
+                    kind: IrExprKind::Call {
+                        target: CallTarget::Named { name: format!("{}.encode", name) },
+                        args: vec![field_expr.clone()],
+                        type_args: vec![],
+                    },
+                    ty: value_ty.clone(), span: None,
+                };
+            }
+            // Fallback: value.str(to_string(field))
+            ("value", "str")
+        }
+    };
+    IrExpr {
+        kind: IrExprKind::Call {
+            target: CallTarget::Module { module: module.to_string(), func: func.to_string() },
+            args: vec![field_expr.clone()],
+            type_args: vec![],
+        },
+        ty: value_ty.clone(), span: None,
+    }
+}
+
+/// Auto-derive Codec decode: `fn T.decode(v: Value) -> Result[T, String]`
+fn auto_derive_decode(vt: &mut VarTable, type_name: &str, type_ty: &Ty, fields: &[IrFieldDecl]) -> IrFunction {
+    let value_ty = Ty::Named("Value".to_string(), vec![]);
+    let result_ty = Ty::Result(Box::new(type_ty.clone()), Box::new(Ty::String));
+    let var_v = vt.alloc("_v".to_string(), value_ty.clone(), Mutability::Let, None);
+
+    let mut stmts = Vec::new();
+    let mut field_vars = Vec::new();
+
+    for f in fields {
+        let field_var = vt.alloc(format!("_{}", f.name), f.ty.clone(), Mutability::Let, None);
+
+        // value.field(_v, "field_name")?
+        let get_field = IrExpr {
+            kind: IrExprKind::Try { expr: Box::new(IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Module { module: "value".to_string(), func: "field".to_string() },
+                    args: vec![
+                        IrExpr { kind: IrExprKind::Var { id: var_v }, ty: value_ty.clone(), span: None },
+                        IrExpr { kind: IrExprKind::LitStr { value: f.alias.clone().unwrap_or_else(|| f.name.clone()) }, ty: Ty::String, span: None },
+                    ],
+                    type_args: vec![],
+                },
+                ty: Ty::Result(Box::new(value_ty.clone()), Box::new(Ty::String)), span: None,
+            })},
+            ty: value_ty.clone(), span: None,
+        };
+
+        // |> value.as_string? (or as_int, as_float, as_bool, or Type.decode?)
+        let decode_call = decode_field_value(get_field, &f.ty, &value_ty);
+
+        stmts.push(IrStmt {
+            kind: IrStmtKind::Bind { var: field_var, mutability: Mutability::Let, ty: f.ty.clone(), value: decode_call },
+            span: None,
+        });
+        field_vars.push((f.name.clone(), field_var));
+    }
+
+    // ok(TypeName { field1: _field1, field2: _field2, ... })
+    let record = IrExpr {
+        kind: IrExprKind::Record {
+            name: Some(type_name.to_string()),
+            fields: field_vars.iter().map(|(name, var)| {
+                (name.clone(), IrExpr { kind: IrExprKind::Var { id: *var }, ty: Ty::Unknown, span: None })
+            }).collect(),
+        },
+        ty: type_ty.clone(), span: None,
+    };
+
+    let body = IrExpr {
+        kind: IrExprKind::Block {
+            stmts,
+            expr: Some(Box::new(IrExpr {
+                kind: IrExprKind::ResultOk { expr: Box::new(record) },
+                ty: result_ty.clone(), span: None,
+            })),
+        },
+        ty: result_ty.clone(), span: None,
+    };
+
+    IrFunction {
+        name: format!("{}.decode", type_name),
+        params: vec![IrParam { var: var_v, ty: value_ty, name: "_v".to_string(), borrow: ParamBorrow::Own, open_record: None, default: None }],
+        ret_ty: result_ty,
+        body,
+        is_effect: true, is_async: false, is_test: false,
+        generics: None, extern_attrs: vec![], visibility: IrVisibility::Public,
+    }
+}
+
+/// Generate decode expression for a field based on its type.
+fn decode_field_value(get_field_expr: IrExpr, field_ty: &Ty, value_ty: &Ty) -> IrExpr {
+    let (module, func) = match field_ty {
+        Ty::String => ("value", "as_string"),
+        Ty::Int => ("value", "as_int"),
+        Ty::Float => ("value", "as_float"),
+        Ty::Bool => ("value", "as_bool"),
+        _ => {
+            // Named type → Type.decode(value)?
+            if let Ty::Named(name, _) = field_ty {
+                return IrExpr {
+                    kind: IrExprKind::Try { expr: Box::new(IrExpr {
+                        kind: IrExprKind::Call {
+                            target: CallTarget::Named { name: format!("{}.decode", name) },
+                            args: vec![get_field_expr],
+                            type_args: vec![],
+                        },
+                        ty: Ty::Result(Box::new(field_ty.clone()), Box::new(Ty::String)), span: None,
+                    })},
+                    ty: field_ty.clone(), span: None,
+                };
+            }
+            ("value", "as_string") // fallback
+        }
+    };
+    // value.as_TYPE(field_value)?
+    IrExpr {
+        kind: IrExprKind::Try { expr: Box::new(IrExpr {
+            kind: IrExprKind::Call {
+                target: CallTarget::Module { module: module.to_string(), func: func.to_string() },
+                args: vec![get_field_expr],
+                type_args: vec![],
+            },
+            ty: Ty::Result(Box::new(field_ty.clone()), Box::new(Ty::String)), span: None,
+        })},
+        ty: field_ty.clone(), span: None,
     }
 }

@@ -260,7 +260,7 @@ impl Checker {
                 ast::Decl::Type { name, ty, deriving, generics, .. } => {
                     // Validate derive convention names
                     if let Some(derives) = deriving {
-                        let valid = ["Eq", "Repr", "Ord", "Hash", "Encode", "Decode"];
+                        let valid = ["Eq", "Repr", "Ord", "Hash", "Codec", "Encode", "Decode"];
                         for d in derives {
                             if !valid.contains(&d.as_str()) {
                                 self.diagnostics.push(err(

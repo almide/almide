@@ -164,6 +164,7 @@ impl Parser {
                 break;
             }
             let field_name = self.expect_ident()?;
+            let alias = self.parse_field_alias()?;
             self.expect(TokenType::Colon)?;
             let field_type = self.parse_type_expr()?;
             let default = if self.check(TokenType::Eq) {
@@ -172,7 +173,7 @@ impl Parser {
             } else {
                 None
             };
-            fields.push(FieldType { name: field_name, ty: field_type, default });
+            fields.push(FieldType { name: field_name, ty: field_type, default, alias });
             self.skip_newlines();
             if self.check(TokenType::Comma) { self.advance(); self.skip_newlines(); }
         }
@@ -186,6 +187,7 @@ impl Parser {
         while !self.check(TokenType::RBrace) {
             self.skip_newlines();
             let field_name = self.expect_ident()?;
+            let alias = self.parse_field_alias()?;
             self.expect(TokenType::Colon)?;
             let field_type = self.parse_type_expr()?;
             let default = if self.check(TokenType::Eq) {
@@ -194,11 +196,27 @@ impl Parser {
             } else {
                 None
             };
-            fields.push(FieldType { name: field_name, ty: field_type, default });
+            fields.push(FieldType { name: field_name, ty: field_type, default, alias });
             self.skip_newlines();
             if self.check(TokenType::Comma) { self.advance(); self.skip_newlines(); }
         }
         Ok(fields)
+    }
+
+    /// Parse optional `as "alias"` after field name.
+    fn parse_field_alias(&mut self) -> Result<Option<String>, String> {
+        if self.check_ident("as") {
+            self.advance();
+            if self.check(TokenType::String) {
+                let alias = self.advance_and_get_value();
+                Ok(Some(alias))
+            } else {
+                let tok = self.current();
+                Err(format!("expected string literal after 'as' at line {}:{}", tok.line, tok.col))
+            }
+        } else {
+            Ok(None)
+        }
     }
 
     fn parse_fn_type(&mut self) -> Result<TypeExpr, String> {
