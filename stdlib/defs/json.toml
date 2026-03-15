@@ -1,18 +1,18 @@
 [parse]
-description = "Parse a JSON string into a Json value."
-example = 'let j = json.parse("{\"name\": \"Alice\"}")'
+description = "Parse a JSON string into a Value."
+example = 'let v = json.parse("{\"name\": \"Alice\"}")'
 params = [{ name = "text", type = "String" }]
-return = "Result[Json, String]"
-rust = "almide_json_parse(&{text})?"
+return = "Result[Value, String]"
+rust = "json_parse({text})"
 ts = "__almd_json.parse({text})"
 
 [stringify]
-description = "Convert a Json value to a compact JSON string."
-example = 'json.stringify(json.object([("a", json.i(1))]))'
-params = [{ name = "j", type = "Json" }]
+description = "Convert a Value to a JSON string."
+example = 'json.stringify(person.encode())'
+params = [{ name = "v", type = "Value" }]
 return = "String"
-rust = "almide_json_stringify(&{j})"
-ts = "__almd_json.stringify({j})"
+rust = "json_stringify({v})"
+ts = "__almd_json.stringify({v})"
 
 [get]
 description = "Get a nested value by key. Returns none if key doesn't exist."

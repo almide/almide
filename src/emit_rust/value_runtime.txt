@@ -45,6 +45,17 @@ fn value_as_array(v: Value) -> Result<Vec<Value>, String> {
     match v { Value::Array(a) => Ok(a), _ => Err("expected Array".to_string()) }
 }
 
+fn value_encode_list<T, F: Fn(T) -> Value>(items: Vec<T>, f: F) -> Value {
+    Value::Array(items.into_iter().map(f).collect())
+}
+
+fn value_decode_list<T, F: Fn(Value) -> Result<T, String>>(v: Value, f: F) -> Result<Vec<T>, String> {
+    match v {
+        Value::Array(items) => items.into_iter().map(f).collect(),
+        _ => Err("expected Array".to_string()),
+    }
+}
+
 fn value_stringify(v: &Value) -> String {
     match v {
         Value::Null => "null".to_string(),
@@ -61,4 +72,102 @@ fn value_stringify(v: &Value) -> String {
             format!("{{{}}}", inner.join(","))
         }
     }
+}
+
+// json.stringify: Value → JSON string
+fn json_stringify(v: Value) -> String { value_stringify(&v) }
+
+// json.parse: JSON string → Value (minimal recursive descent parser)
+fn json_parse(text: String) -> Result<Value, String> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut pos = 0;
+    fn skip_ws(chars: &[char], pos: &mut usize) {
+        while *pos < chars.len() && chars[*pos].is_whitespace() { *pos += 1; }
+    }
+    fn parse_value(chars: &[char], pos: &mut usize) -> Result<Value, String> {
+        skip_ws(chars, pos);
+        if *pos >= chars.len() { return Err("unexpected end of input".into()); }
+        match chars[*pos] {
+            '"' => parse_string(chars, pos).map(Value::Str),
+            '{' => parse_object(chars, pos),
+            '[' => parse_array(chars, pos),
+            't' | 'f' => parse_bool(chars, pos),
+            'n' => parse_null(chars, pos),
+            c if c == '-' || c.is_ascii_digit() => parse_number(chars, pos),
+            c => Err(format!("unexpected char '{}' at pos {}", c, pos)),
+        }
+    }
+    fn parse_string(chars: &[char], pos: &mut usize) -> Result<String, String> {
+        *pos += 1; // skip "
+        let mut s = String::new();
+        while *pos < chars.len() && chars[*pos] != '"' {
+            if chars[*pos] == '\\' {
+                *pos += 1;
+                match chars.get(*pos) {
+                    Some('n') => s.push('\n'), Some('t') => s.push('\t'),
+                    Some('"') => s.push('"'), Some('\\') => s.push('\\'),
+                    Some('/') => s.push('/'),
+                    Some('u') => { s.push('?'); *pos += 4; } // simplified
+                    _ => {}
+                }
+            } else { s.push(chars[*pos]); }
+            *pos += 1;
+        }
+        if *pos < chars.len() { *pos += 1; } // skip "
+        Ok(s)
+    }
+    fn parse_number(chars: &[char], pos: &mut usize) -> Result<Value, String> {
+        let start = *pos;
+        if chars[*pos] == '-' { *pos += 1; }
+        while *pos < chars.len() && chars[*pos].is_ascii_digit() { *pos += 1; }
+        let mut is_float = false;
+        if *pos < chars.len() && chars[*pos] == '.' { is_float = true; *pos += 1; while *pos < chars.len() && chars[*pos].is_ascii_digit() { *pos += 1; } }
+        if *pos < chars.len() && (chars[*pos] == 'e' || chars[*pos] == 'E') { is_float = true; *pos += 1; if *pos < chars.len() && (chars[*pos] == '+' || chars[*pos] == '-') { *pos += 1; } while *pos < chars.len() && chars[*pos].is_ascii_digit() { *pos += 1; } }
+        let s: String = chars[start..*pos].iter().collect();
+        if is_float { s.parse::<f64>().map(Value::Float).map_err(|e| e.to_string()) }
+        else { s.parse::<i64>().map(Value::Int).map_err(|e| e.to_string()) }
+    }
+    fn parse_bool(chars: &[char], pos: &mut usize) -> Result<Value, String> {
+        if chars[*pos..].starts_with(&['t','r','u','e']) { *pos += 4; Ok(Value::Bool(true)) }
+        else if chars[*pos..].starts_with(&['f','a','l','s','e']) { *pos += 5; Ok(Value::Bool(false)) }
+        else { Err("expected bool".into()) }
+    }
+    fn parse_null(chars: &[char], pos: &mut usize) -> Result<Value, String> {
+        if chars[*pos..].starts_with(&['n','u','l','l']) { *pos += 4; Ok(Value::Null) }
+        else { Err("expected null".into()) }
+    }
+    fn parse_array(chars: &[char], pos: &mut usize) -> Result<Value, String> {
+        *pos += 1; skip_ws(chars, pos);
+        let mut items = Vec::new();
+        if *pos < chars.len() && chars[*pos] == ']' { *pos += 1; return Ok(Value::Array(items)); }
+        loop {
+            items.push(parse_value(chars, pos)?);
+            skip_ws(chars, pos);
+            if *pos < chars.len() && chars[*pos] == ',' { *pos += 1; skip_ws(chars, pos); }
+            else { break; }
+        }
+        skip_ws(chars, pos);
+        if *pos < chars.len() && chars[*pos] == ']' { *pos += 1; }
+        Ok(Value::Array(items))
+    }
+    fn parse_object(chars: &[char], pos: &mut usize) -> Result<Value, String> {
+        *pos += 1; skip_ws(chars, pos);
+        let mut pairs = Vec::new();
+        if *pos < chars.len() && chars[*pos] == '}' { *pos += 1; return Ok(Value::Object(pairs)); }
+        loop {
+            skip_ws(chars, pos);
+            let key = parse_string(chars, pos)?;
+            skip_ws(chars, pos);
+            if *pos < chars.len() && chars[*pos] == ':' { *pos += 1; }
+            let val = parse_value(chars, pos)?;
+            pairs.push((key, val));
+            skip_ws(chars, pos);
+            if *pos < chars.len() && chars[*pos] == ',' { *pos += 1; }
+            else { break; }
+        }
+        skip_ws(chars, pos);
+        if *pos < chars.len() && chars[*pos] == '}' { *pos += 1; }
+        Ok(Value::Object(pairs))
+    }
+    parse_value(&chars, &mut pos)
 }

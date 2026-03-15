@@ -1141,6 +1141,23 @@ fn encode_field_value(field_expr: &IrExpr, field_ty: &Ty, value_ty: &Ty) -> IrEx
         Ty::Int => ("value", "int"),
         Ty::Float => ("value", "float"),
         Ty::Bool => ("value", "bool"),
+        Ty::List(inner) => {
+            // List[T] → value.array(list.map(field, (x) => encode_element(x)))
+            let elem_encode = encode_field_value(
+                &IrExpr { kind: IrExprKind::Var { id: VarId(u32::MAX) }, ty: *inner.clone(), span: None },
+                inner, value_ty,
+            );
+            // For now, generate value.array(field) and let runtime handle element encoding
+            // TODO: proper list.map with lambda for nested types
+            return IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Module { module: "value".to_string(), func: "array".to_string() },
+                    args: vec![field_expr.clone()],
+                    type_args: vec![],
+                },
+                ty: value_ty.clone(), span: None,
+            };
+        }
         _ => {
             // Named type (nested Codec) → call Type.encode(field)
             if let Ty::Named(name, _) = field_ty {
