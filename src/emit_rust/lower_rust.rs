@@ -38,7 +38,10 @@ pub fn lower(ir: &IrProgram) -> Program {
             IrTypeDeclKind::Record { fields } => structs.push(StructDef {
                 name: td.name.clone(),
                 fields: fields.iter().map(|f| (f.name.clone(), lty(&f.ty))).collect(),
-                generics: vec![], derives: rust_derives(td),
+                generics: td.generics.as_ref().map(|gs| gs.iter()
+                    .map(|g| format!("{}: Clone + std::fmt::Debug + PartialEq", g.name))
+                    .collect()).unwrap_or_default(),
+                derives: rust_derives(td),
                 is_pub: true,
             }),
             IrTypeDeclKind::Variant { cases, .. } => {
@@ -59,7 +62,10 @@ pub fn lower(ir: &IrProgram) -> Program {
                         IrVariantKind::Record { fields } => VariantKind::Struct(fields.iter().map(|f| (f.name.clone(), lty(&f.ty))).collect()),
                     },
                 }).collect(),
-                generics: vec![], derives: rust_derives(td),
+                generics: td.generics.as_ref().map(|gs| gs.iter()
+                    .map(|g| format!("{}: Clone + std::fmt::Debug + PartialEq", g.name))
+                    .collect()).unwrap_or_default(),
+                derives: rust_derives(td),
                 is_pub: true,
             })
         } else { None }
