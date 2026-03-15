@@ -15,6 +15,9 @@
 - [Structured Concurrency](active/structured-concurrency.md) — Conservative async
 - [Platform Async](active/platform-async.md) — `effect fn` = async on all targets
 
+### Testing
+- [Exercise Suite v0.6.0](active/exercises-v060.md) — 23 exercises / 330+ tests, 6 tiers, cross-target
+
 ### Ecosystem
 - [Almide Shell](active/almide-shell.md) — AI-native shell replacing Bash/Zsh
 - [Web Framework](active/web-framework.md) — First-party Hono-equivalent
