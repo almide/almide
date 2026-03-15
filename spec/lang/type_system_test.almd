@@ -142,7 +142,7 @@ test "comparison on type variable" {
 type Point = { x: Float, y: Float }
 
 fn distance(a: Point, b: Point) -> Float =
-  float.sqrt(math.fpow(b.x - a.x, 2.0) + math.fpow(b.y - a.y, 2.0))
+  float.sqrt(math.pow(b.x - a.x, 2.0) + math.pow(b.y - a.y, 2.0))
 
 test "named record type" {
   let p: Point = { x: 0.0, y: 0.0 }

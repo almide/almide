@@ -349,7 +349,17 @@ impl<'a> LowerCtx<'a> {
                 let guard_body = match &else_.kind {
                     IrExprKind::Break => Expr::Break,
                     IrExprKind::Continue => Expr::Continue { label: None },
-                    IrExprKind::ResultErr { .. } => Expr::Return(Some(Box::new(self.lower_expr(else_)))),
+                    _ if self.auto_try => Expr::Return(Some(Box::new(self.lower_expr(else_)))),
+                    // In non-auto-try context (tests, pure fn): don't wrap in Ok/Err
+                    IrExprKind::ResultOk { expr } if !self.auto_try => {
+                        let inner = self.lower_expr(expr);
+                        Expr::Return(Some(Box::new(inner)))
+                    }
+                    IrExprKind::ResultErr { expr } if !self.auto_try => {
+                        // In test/pure context, err becomes panic
+                        let inner = self.lower_expr(expr);
+                        Expr::Raw(format!("panic!(\"{{:?}}\", {})", super::render::expr_str(&inner)))
+                    }
                     _ => Expr::Return(Some(Box::new(self.lower_expr(else_)))),
                 };
                 Stmt::Expr(Expr::If {

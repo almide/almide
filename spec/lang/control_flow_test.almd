@@ -222,8 +222,10 @@ effect fn find_first_negative(xs: List[Int]) -> Result[Int, String] = {
 }
 
 test "do guard else ok with int value" {
-  let result = find_first_negative([1, 2, -3, 4])
-  assert_eq(result, -3)
+  match find_first_negative([1, 2, -3, 4]) {
+    ok(v) => assert_eq(v, -3),
+    err(_) => assert(false, "expected ok"),
+  }
 }
 
 test "do guard else err when not found" {
