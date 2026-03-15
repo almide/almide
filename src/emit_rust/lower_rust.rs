@@ -247,10 +247,26 @@ impl<'a> LowerCtx<'a> {
                 stmts: stmts.iter().map(|s| self.lower_stmt(s)).collect(),
                 tail: expr.as_ref().map(|e| Box::new(self.lower_expr(e))),
             },
-            IrExprKind::DoBlock { stmts, expr } => Expr::Block {
-                stmts: stmts.iter().map(|s| self.lower_stmt(s)).collect(),
-                tail: expr.as_ref().map(|e| Box::new(self.lower_expr(e))),
-            },
+            IrExprKind::DoBlock { stmts, expr } => {
+                let has_guard = stmts.iter().any(|s| matches!(&s.kind, IrStmtKind::Guard { .. }));
+                if has_guard {
+                    // Wrap in loop { ... break; } so guard's break/continue work correctly
+                    let mut body_stmts: Vec<Stmt> = stmts.iter().map(|s| self.lower_stmt(s)).collect();
+                    if let Some(tail) = expr.as_ref() {
+                        body_stmts.push(Stmt::Expr(self.lower_expr(tail)));
+                    }
+                    body_stmts.push(Stmt::Expr(Expr::Break));
+                    Expr::Block {
+                        stmts: vec![Stmt::Expr(Expr::Loop { label: None, body: body_stmts })],
+                        tail: None,
+                    }
+                } else {
+                    Expr::Block {
+                        stmts: stmts.iter().map(|s| self.lower_stmt(s)).collect(),
+                        tail: expr.as_ref().map(|e| Box::new(self.lower_expr(e))),
+                    }
+                }
+            }
             IrExprKind::ForIn { var, iterable, body, .. } => Expr::For {
                 var: self.vt.get(*var).name.clone(),
                 iter: Box::new(Expr::Clone(Box::new(self.lower_expr(iterable)))),
@@ -430,11 +446,19 @@ impl<'a> LowerCtx<'a> {
                 target: crate::emit_common::sanitize(&self.vt.get(*target).name),
                 field: field.clone(), value: self.lower_expr(value),
             },
-            IrStmtKind::Guard { cond, else_ } => Stmt::Expr(Expr::If {
-                cond: Box::new(Expr::UnOp { op: "!", operand: Box::new(self.lower_expr(cond)) }),
-                then: Box::new(Expr::Return(Some(Box::new(self.lower_expr(else_))))),
-                else_: None,
-            }),
+            IrStmtKind::Guard { cond, else_ } => {
+                let guard_body = match &else_.kind {
+                    IrExprKind::Break => Expr::Break,
+                    IrExprKind::Continue => Expr::Continue { label: None },
+                    IrExprKind::ResultErr { .. } => Expr::Return(Some(Box::new(self.lower_expr(else_)))),
+                    _ => Expr::Return(Some(Box::new(self.lower_expr(else_)))),
+                };
+                Stmt::Expr(Expr::If {
+                    cond: Box::new(Expr::UnOp { op: "!", operand: Box::new(self.lower_expr(cond)) }),
+                    then: Box::new(guard_body),
+                    else_: None,
+                })
+            }
             IrStmtKind::Expr { expr } => Stmt::Expr(self.lower_expr(expr)),
             IrStmtKind::Comment { text } => Stmt::Expr(Expr::Raw(format!("// {}", text))),
         }
