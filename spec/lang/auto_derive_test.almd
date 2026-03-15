@@ -1,0 +1,20 @@
+module auto_derive_test
+
+type Point: Eq, Repr = { x: Int, y: Int }
+
+// No custom Point.eq or Point.repr defined — auto-derived
+
+test "auto-derive eq" {
+  let a = Point { x: 1, y: 2 }
+  let b = Point { x: 1, y: 2 }
+  assert(a == b)
+
+  let c = Point { x: 3, y: 4 }
+  let d = Point { x: 3, y: 4 }
+  assert(c != d == false)
+}
+
+test "auto-derive repr in string interpolation" {
+  let p = Point { x: 10, y: 20 }
+  assert_eq("${p}", "Point { x: 10, y: 20 }")
+}
