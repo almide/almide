@@ -357,10 +357,15 @@ pub fn lookup_generated_sig(module: &str, func: &str) -> Option<FnSig> {
         ("value", "field") => FnSig { generics: vec![], params: vec![(s("v"), Ty::Named(s("Value"), vec![])), (s("key"), Ty::String)], ret: Ty::Result(Box::new(Ty::Named(s("Value"), vec![])), Box::new(Ty::String)), is_effect: false, structural_bounds: std::collections::HashMap::new() },
         ("value", "float") => FnSig { generics: vec![], params: vec![(s("f"), Ty::Float)], ret: Ty::Named(s("Value"), vec![]), is_effect: false, structural_bounds: std::collections::HashMap::new() },
         ("value", "int") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Int)], ret: Ty::Named(s("Value"), vec![]), is_effect: false, structural_bounds: std::collections::HashMap::new() },
+        ("value", "merge") => FnSig { generics: vec![], params: vec![(s("a"), Ty::Named(s("Value"), vec![])), (s("b"), Ty::Named(s("Value"), vec![]))], ret: Ty::Named(s("Value"), vec![]), is_effect: false, structural_bounds: std::collections::HashMap::new() },
         ("value", "null") => FnSig { generics: vec![], params: vec![], ret: Ty::Named(s("Value"), vec![]), is_effect: false, structural_bounds: std::collections::HashMap::new() },
         ("value", "object") => FnSig { generics: vec![], params: vec![(s("pairs"), Ty::List(Box::new(Ty::Tuple(vec![Ty::String, Ty::Named(s("Value"), vec![])]))))], ret: Ty::Named(s("Value"), vec![]), is_effect: false, structural_bounds: std::collections::HashMap::new() },
+        ("value", "omit") => FnSig { generics: vec![], params: vec![(s("v"), Ty::Named(s("Value"), vec![])), (s("keys"), Ty::List(Box::new(Ty::String)))], ret: Ty::Named(s("Value"), vec![]), is_effect: false, structural_bounds: std::collections::HashMap::new() },
+        ("value", "pick") => FnSig { generics: vec![], params: vec![(s("v"), Ty::Named(s("Value"), vec![])), (s("keys"), Ty::List(Box::new(Ty::String)))], ret: Ty::Named(s("Value"), vec![]), is_effect: false, structural_bounds: std::collections::HashMap::new() },
         ("value", "str") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::Named(s("Value"), vec![]), is_effect: false, structural_bounds: std::collections::HashMap::new() },
         ("value", "stringify") => FnSig { generics: vec![], params: vec![(s("v"), Ty::Named(s("Value"), vec![]))], ret: Ty::String, is_effect: false, structural_bounds: std::collections::HashMap::new() },
+        ("value", "to_camel_case") => FnSig { generics: vec![], params: vec![(s("v"), Ty::Named(s("Value"), vec![]))], ret: Ty::Named(s("Value"), vec![]), is_effect: false, structural_bounds: std::collections::HashMap::new() },
+        ("value", "to_snake_case") => FnSig { generics: vec![], params: vec![(s("v"), Ty::Named(s("Value"), vec![]))], ret: Ty::Named(s("Value"), vec![]), is_effect: false, structural_bounds: std::collections::HashMap::new() },
         _ => return None,
     };
     Some(sig)
@@ -389,7 +394,7 @@ pub fn generated_module_functions(module: &str) -> Vec<&'static str> {
         "string" => vec!["capitalize", "char_at", "char_count", "chars", "codepoint", "contains", "count", "ends_with", "from_bytes", "from_codepoint", "index_of", "is_alpha", "is_alphanumeric", "is_digit", "is_empty", "is_lower", "is_upper", "is_whitespace", "join", "last_index_of", "len", "lines", "pad_left", "pad_right", "repeat", "replace", "replace_first", "reverse", "slice", "split", "starts_with", "strip_prefix", "strip_suffix", "to_bytes", "to_float", "to_int", "to_lower", "to_upper", "trim", "trim_end", "trim_start"],
         "testing" => vec!["assert_approx", "assert_contains", "assert_gt", "assert_lt", "assert_ok", "assert_some", "assert_throws"],
         "uuid" => vec!["is_valid", "nil", "parse", "v4", "v5", "version"],
-        "value" => vec!["array", "as_array", "as_bool", "as_float", "as_int", "as_string", "bool", "field", "float", "int", "null", "object", "str", "stringify"],
+        "value" => vec!["array", "as_array", "as_bool", "as_float", "as_int", "as_string", "bool", "field", "float", "int", "merge", "null", "object", "omit", "pick", "str", "stringify", "to_camel_case", "to_snake_case"],
         _ => vec![],
     }
 }

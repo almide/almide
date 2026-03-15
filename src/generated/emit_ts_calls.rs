@@ -324,10 +324,15 @@ pub fn gen_generated_call(module: &str, func: &str, args_str: &[String]) -> Opti
             ("value", "field") => format!("__almd_value.field({}, {})", args_str[0], args_str[1]),
             ("value", "float") => format!("__almd_value.float({})", args_str[0]),
             ("value", "int") => format!("__almd_value.int({})", args_str[0]),
+            ("value", "merge") => format!("__almd_value.merge({}, {})", args_str[0], args_str[1]),
             ("value", "null") => "null".to_string(),
             ("value", "object") => format!("__almd_value.object({})", args_str[0]),
+            ("value", "omit") => format!("__almd_value.omit({}, {})", args_str[0], args_str[1]),
+            ("value", "pick") => format!("__almd_value.pick({}, {})", args_str[0], args_str[1]),
             ("value", "str") => format!("__almd_value.str({})", args_str[0]),
             ("value", "stringify") => format!("JSON.stringify({})", args_str[0]),
+            ("value", "to_camel_case") => format!("__almd_value.to_camel_case({})", args_str[0]),
+            ("value", "to_snake_case") => format!("__almd_value.to_snake_case({})", args_str[0]),
         _ => return None,
     };
     Some(expr)

@@ -89,6 +89,41 @@ return = "Value"
 rust = "value_null()"
 ts = "null"
 
+[pick]
+description = "Pick specific keys from an Object, discarding the rest."
+params = [{ name = "v", type = "Value" }, { name = "keys", type = "List[String]" }]
+return = "Value"
+rust = "almide_rt_value_pick({v}, {keys})"
+ts = "__almd_value.pick({v}, {keys})"
+
+[omit]
+description = "Remove specific keys from an Object."
+params = [{ name = "v", type = "Value" }, { name = "keys", type = "List[String]" }]
+return = "Value"
+rust = "almide_rt_value_omit({v}, {keys})"
+ts = "__almd_value.omit({v}, {keys})"
+
+[merge]
+description = "Merge two Objects. Keys from b override keys from a."
+params = [{ name = "a", type = "Value" }, { name = "b", type = "Value" }]
+return = "Value"
+rust = "almide_rt_value_merge({a}, {b})"
+ts = "__almd_value.merge({a}, {b})"
+
+[to_camel_case]
+description = "Convert Object keys from snake_case to camelCase."
+params = [{ name = "v", type = "Value" }]
+return = "Value"
+rust = "almide_rt_value_to_camel_case({v})"
+ts = "__almd_value.to_camel_case({v})"
+
+[to_snake_case]
+description = "Convert Object keys from camelCase to snake_case."
+params = [{ name = "v", type = "Value" }]
+return = "Value"
+rust = "almide_rt_value_to_snake_case({v})"
+ts = "__almd_value.to_snake_case({v})"
+
 [stringify]
 description = "Convert a Value to a JSON-like string representation."
 params = [{ name = "v", type = "Value" }]

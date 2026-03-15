@@ -109,6 +109,81 @@ pub fn almide_rt___decode_default_int(v: Value, key: String, default: i64) -> Re
 pub fn almide_rt___decode_default_float(v: Value, key: String, default: f64) -> Result<f64, String> { almide_rt_value_decode_with_default(&v, &key, default, almide_rt_value_as_float) }
 pub fn almide_rt___decode_default_bool(v: Value, key: String, default: bool) -> Result<bool, String> { almide_rt_value_decode_with_default(&v, &key, default, almide_rt_value_as_bool) }
 
+// ── Value utilities ──
+
+/// Pick specific keys from an Object, discarding the rest.
+pub fn almide_rt_value_pick(v: Value, keys: Vec<String>) -> Value {
+    match v {
+        Value::Object(pairs) => {
+            Value::Object(pairs.into_iter().filter(|(k, _)| keys.contains(k)).collect())
+        }
+        other => other,
+    }
+}
+
+/// Rename keys in an Object using a transform function.
+pub fn almide_rt_value_rename_keys(v: Value, f: impl Fn(String) -> String) -> Value {
+    match v {
+        Value::Object(pairs) => {
+            Value::Object(pairs.into_iter().map(|(k, v)| (f(k), v)).collect())
+        }
+        other => other,
+    }
+}
+
+/// Merge two Objects. Keys from `b` override keys from `a`.
+pub fn almide_rt_value_merge(a: Value, b: Value) -> Value {
+    match (a, b) {
+        (Value::Object(mut pa), Value::Object(pb)) => {
+            for (k, v) in pb {
+                if let Some(pos) = pa.iter().position(|(ek, _)| ek == &k) {
+                    pa[pos] = (k, v);
+                } else {
+                    pa.push((k, v));
+                }
+            }
+            Value::Object(pa)
+        }
+        (_, b) => b,
+    }
+}
+
+/// Remove specific keys from an Object.
+pub fn almide_rt_value_omit(v: Value, keys: Vec<String>) -> Value {
+    match v {
+        Value::Object(pairs) => {
+            Value::Object(pairs.into_iter().filter(|(k, _)| !keys.contains(k)).collect())
+        }
+        other => other,
+    }
+}
+
+/// Convert snake_case key to camelCase.
+pub fn almide_rt_value_to_camel_case(v: Value) -> Value {
+    almide_rt_value_rename_keys(v, |k| {
+        let mut result = String::new();
+        let mut capitalize_next = false;
+        for c in k.chars() {
+            if c == '_' { capitalize_next = true; }
+            else if capitalize_next { result.push(c.to_ascii_uppercase()); capitalize_next = false; }
+            else { result.push(c); }
+        }
+        result
+    })
+}
+
+/// Convert camelCase key to snake_case.
+pub fn almide_rt_value_to_snake_case(v: Value) -> Value {
+    almide_rt_value_rename_keys(v, |k| {
+        let mut result = String::new();
+        for (i, c) in k.chars().enumerate() {
+            if c.is_ascii_uppercase() && i > 0 { result.push('_'); }
+            result.push(c.to_ascii_lowercase());
+        }
+        result
+    })
+}
+
 // ── Stringify ──
 
 pub fn almide_rt_value_stringify(v: &Value) -> String {

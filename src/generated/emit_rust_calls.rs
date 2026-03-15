@@ -445,10 +445,15 @@ pub fn gen_generated_call(
             ("value", "field") => format!("value_field({}, {})", args_str[0], args_str[1]),
             ("value", "float") => format!("value_float({})", args_str[0]),
             ("value", "int") => format!("value_int({})", args_str[0]),
+            ("value", "merge") => format!("almide_rt_value_merge({}, {})", args_str[0], args_str[1]),
             ("value", "null") => "value_null()".to_string(),
             ("value", "object") => format!("value_object({})", args_str[0]),
+            ("value", "omit") => format!("almide_rt_value_omit({}, {})", args_str[0], args_str[1]),
+            ("value", "pick") => format!("almide_rt_value_pick({}, {})", args_str[0], args_str[1]),
             ("value", "str") => format!("value_str({})", args_str[0]),
             ("value", "stringify") => format!("value_stringify(&{})", args_str[0]),
+            ("value", "to_camel_case") => format!("almide_rt_value_to_camel_case({})", args_str[0]),
+            ("value", "to_snake_case") => format!("almide_rt_value_to_snake_case({})", args_str[0]),
         _ => return None,
     };
     Some(expr)
