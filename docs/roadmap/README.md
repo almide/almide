@@ -7,10 +7,7 @@
 
 ### Phase A: Generated Code Quality
 - [Clone Reduction Phase 4](active/clone-reduction.md) — for-in/list/member/match/spread clone elimination, field-level borrow analysis
-- [IR Optimization Passes](active/ir-optimization-passes.md) — Tier 1 (constant folding, DCE) ✅。Tier 2: inlining, CSE, LICM
-- [RustIR: Codegen 中間表現](active/rust-ir.md) — IR → RustIR → String の 2 段パイプライン
-- [Tail Call Optimization](active/tail-call-optimization.md) — Self-recursive tail calls → labeled loop
-- [--emit-ir: IR JSON Export](active/emit-ir.md) — `--emit-ir` flag to output typed IR as JSON
+- [IR Optimization Passes](active/ir-optimization-passes.md) — Tier 1 ✅。Tier 2: inlining, CSE, LICM
 
 ### Phase B: Type System & Safety
 - [Type System Extensions](active/type-system.md) — Row polymorphism, union types, container protocols, structural generic bounds
@@ -69,6 +66,9 @@
 
 - [2026 Ergonomics](2026-ergonomics.md) — `do` block pure fn, `guard else break/continue`, `unwrap_or`, `json.parse` auto-`?`
 - [Architecture Hardening](done/architecture-hardening.md) — RustIR pipeline migration eliminated Emitter clones and state flags
+- [--emit-ir](done/emit-ir.md) — `--emit-ir` flag for typed IR JSON export
+- [RustIR Pipeline](done/rust-ir.md) — IR → RustIR → String 2-stage codegen (985 lines, 3 files)
+- [Tail Call Optimization](done/tail-call-optimization.md) — Self-recursive tail calls → labeled loop
 - [Borrow Inference](done/borrow-inference-design.md) — Lobster-style move/clone analysis
 - [CLI Tool Authoring](done/cli-tool-authoring.md) — err() exit, almide run args
 - [Codegen Correctness](done/codegen-correctness.md) — P1 7項 + P2 1項, auto-?, guard, do-block, string pattern
