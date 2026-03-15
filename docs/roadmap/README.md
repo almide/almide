@@ -3,7 +3,7 @@
 ## Active
 
 ### Language
-- [Syntax Sugar](active/syntax-sugar.md) — 6/7 ✅, remaining: named arguments (Swift-style, optional)
+  
 - [Codec Protocol & JSON](active/codec-and-json.md) — `deriving Codec` + JSON, Encode/Decode convention
 - [Template](active/template.md) — Typed document builder: `html {}`/`text {}` builders
 - [UFCS External](active/ufcs-external.md) — Type-directed UFCS for user-defined/external functions
