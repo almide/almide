@@ -1,0 +1,9 @@
+[package]
+name = "almide_rt"
+version = "0.1.0"
+edition = "2021"
+description = "Almide runtime library — native implementations for stdlib @extern functions"
+
+[lib]
+name = "almide_rt"
+path = "src/lib.rs"
