@@ -154,33 +154,24 @@ impl<'a> LowerCtx<'a> {
                 let call = match target {
                     CallTarget::Named { name } => return self.lower_named_call(name, ir_args),
                     CallTarget::Module { module, func } => {
-                        let key = format!("{}.{}", module, func);
-                        let expr = Expr::Call {
-                            func: format!("almide_rt_{}_{}", module.replace('.', "_"), crate::emit_common::sanitize(func)),
-                            args: ir_args,
-                        };
-                        if self.auto_try && self.result_fns.contains(&key) {
-                            return Expr::Try(Box::new(expr));
-                        }
-                        expr
+                        self.lower_stdlib_call(module, func, ir_args, args, e)
                     }
+
                     CallTarget::Method { object, method } => {
                         let obj = self.lower_expr(object);
-                        let mut all = vec![obj]; all.extend(ir_args);
+                        let mut all_exprs = vec![obj]; all_exprs.extend(ir_args);
                         if let Some((module, func)) = method.split_once('.') {
-                            let key = method.to_string();
                             let is_stdlib = crate::stdlib::is_stdlib_module(module) || crate::stdlib::is_any_stdlib(module);
-                            let prefix = if is_stdlib { "almide_rt_" } else { "" };
-                            let expr = Expr::Call {
-                                func: format!("{}{}_{}", prefix, module.replace('.', "_"), crate::emit_common::sanitize(func)),
-                                args: all,
-                            };
-                            if self.auto_try && self.result_fns.contains(&key) {
-                                return Expr::Try(Box::new(expr));
+                            if is_stdlib {
+                                // Reconstruct IR args with object prepended
+                                let mut all_ir: Vec<&IrExpr> = vec![object];
+                                all_ir.extend(args.iter());
+                                self.lower_stdlib_call(module, func, all_exprs, &all_ir.iter().map(|x| (*x).clone()).collect::<Vec<_>>(), e)
+                            } else {
+                                Expr::Call { func: format!("{}_{}", module.replace('.', "_"), crate::emit_common::sanitize(func)), args: all_exprs }
                             }
-                            expr
                         } else {
-                            Expr::Call { func: crate::emit_common::sanitize(method), args: all }
+                            Expr::Call { func: crate::emit_common::sanitize(method), args: all_exprs }
                         }
                     }
                     CallTarget::Computed { callee } => {
@@ -356,28 +347,33 @@ impl<'a> LowerCtx<'a> {
 
     /// Lower a stdlib module call using the generated dispatch templates.
     /// Falls back to direct call if no template exists.
-    fn lower_stdlib_call(&self, module: &str, func: &str, args: Vec<Expr>, e: &IrExpr) -> Expr {
+    fn lower_stdlib_call(&self, module: &str, func: &str, rust_args: Vec<Expr>, ir_args: &[IrExpr], e: &IrExpr) -> Expr {
         let key = format!("{}.{}", module, func);
-        // Render args to strings for the generated template
-        let args_str: Vec<String> = args.iter().map(|a| super::render::expr_str(a)).collect();
-        let inline_lambda = |param_idx: usize, body_idx: usize| -> (Vec<String>, String) {
-            // For lambda args: extract closure param names and body
-            if let Some(Expr::Closure { params, body }) = args.get(param_idx) {
-                (params.clone(), super::render::expr_str(body))
+        // Use generated TOML templates for core stdlib modules
+        let use_template = matches!(module, "list" | "string" | "map" | "int" | "float" | "math" | "result" | "option");
+        let expr = if use_template {
+            let args_str: Vec<String> = rust_args.iter().map(|a| super::render::expr_str(a)).collect();
+            let inline_lambda = |param_idx: usize, _body_idx: usize| -> (Vec<String>, String) {
+                if let Some(Expr::Closure { params, body }) = rust_args.get(param_idx) {
+                    (params.clone(), super::render::expr_str(body))
+                } else {
+                    (vec!["__x".into()], args_str.get(param_idx).cloned().unwrap_or_default())
+                }
+            };
+            if let Some(code) = almide::generated::emit_rust_calls::gen_generated_call(
+                module, func, &args_str, self.in_effect, &inline_lambda,
+            ) {
+                Expr::Raw(code)
             } else {
-                (vec!["__x".into()], args_str.get(body_idx).cloned().unwrap_or_default())
+                Expr::Call {
+                    func: format!("almide_rt_{}_{}", module.replace('.', "_"), crate::emit_common::sanitize(func)),
+                    args: rust_args,
+                }
             }
-        };
-        let result = almide::generated::emit_rust_calls::gen_generated_call(
-            module, func, &args_str, self.in_effect, &inline_lambda,
-        );
-        let expr = if let Some(code) = result {
-            Expr::Raw(code)
         } else {
-            // Fallback: direct call
             Expr::Call {
                 func: format!("almide_rt_{}_{}", module.replace('.', "_"), crate::emit_common::sanitize(func)),
-                args,
+                args: rust_args,
             }
         };
         if self.auto_try && self.result_fns.contains(&key) {

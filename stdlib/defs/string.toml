@@ -245,7 +245,7 @@ description = "Pad a string on the right to reach a target length."
 example = 'string.pad_right("hi", 5, ".") // => "hi..."'
 params = [{ name = "s", type = "String" }, { name = "n", type = "Int" }, { name = "ch", type = "String" }]
 return = "String"
-rust = "almide_rt_string_pad_right({s}, {n}, &*{ch})"
+rust = "almide_rt_string_pad_right(&*{s}, {n}, &*{ch})"
 ts = "__almd_string.pad_right({s}, {n}, {ch})"
 
 [trim_start]
