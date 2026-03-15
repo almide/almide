@@ -2,22 +2,27 @@
 
 ## Active
 
+### Codec & Serialization
+- [Codec Implementation](active/codec-implementation.md) — Phase 0-2 ✅ (Value, auto-derive, JSON roundtrip). Next: Variant, json.decode[T], repair
+- [Codec Test Spec](active/codec-test-spec.md) — P0 14/14 ✅. P1/P2 remaining
+- [Codec Protocol & JSON](active/codec-and-json.md) — 設計仕様 (Phase 3-5 remaining)
+
+### Stdlib v2
+- [Stdlib Runtime Architecture](active/stdlib-self-hosted-redesign.md) — Runtime crate `almide_rt` 基盤完成。@extern 移行中
+- [Stdlib API Reform](active/stdlib-verb-system.md) — Verb 標準化 (from_string, to_upper, len 等)
+- [Stdlib Strategy](active/stdlib-strategy.md) — 282→700+ 関数
+
 ### Language
-- [Codec Implementation](active/codec-implementation.md) — deriving Codec 実装パス。auto-derive → encode/decode → repair
-- [Codec Protocol & JSON](active/codec-and-json.md) — 設計仕様 (5 Phase)
-- [Template](active/template.md) — Typed document builder: `html {}`/`text {}` builders
-- [UFCS External](active/ufcs-external.md) — Type-directed UFCS for user-defined/external functions
+- [Template](active/template.md) — Typed document builder
+- [UFCS External](active/ufcs-external.md) — User-defined UFCS
 
 ### Runtime & Async
-- [Structured Concurrency](active/structured-concurrency.md) — Conservative async: explicit fork/join, fail-fast
-- [Platform Async](active/platform-async.md) — `effect fn` = async on all targets, `parallel` block
+- [Structured Concurrency](active/structured-concurrency.md) — Conservative async
+- [Platform Async](active/platform-async.md) — `effect fn` = async on all targets
 
-### Stdlib & Ecosystem
-- [Stdlib Runtime Architecture](active/stdlib-self-hosted-redesign.md) — `.almd` 中心, `@extern` でホスト依存
-- [Stdlib API Reform](active/stdlib-verb-system.md) — Verb 標準化
-- [Stdlib Strategy](active/stdlib-strategy.md) — 282→700+ 関数
+### Ecosystem
 - [Web Framework](active/web-framework.md) — First-party Hono-equivalent
-- [CLI-First](active/cli-first.md) — `almide run` for dev, `almide build` for native binary
+- [CLI-First](active/cli-first.md) — `almide run` + `almide build`
 
 ### Multi-Target
 - [Multi-Target Strategy](active/multi-target-strategy.md) — Python, Go, Kotlin, Swift, C
@@ -25,9 +30,9 @@
 
 ### Tooling
 - [Incremental Compilation](active/incremental-compilation.md) — Skip rustc when unchanged
-- [IR Interpreter](active/ir-interpreter.md) — Direct IR execution for REPL, playground
-- [Error-Fix Database](active/error-fix-db.md) — Error → fix suggestion mapping
-- [Grammar Codegen](active/grammar-codegen.md) — Single source of truth for tokens/precedence
+- [IR Interpreter](active/ir-interpreter.md) — Direct IR execution
+- [Error-Fix Database](active/error-fix-db.md) — Error → fix mapping
+- [Grammar Codegen](active/grammar-codegen.md) — Single source of truth
 
 ### LLM
 - [LLM Integration](active/llm-integration.md) — `almide forge`, `almide fix`
@@ -38,7 +43,7 @@
 - [Benchmark Report](on-hold/benchmark-report.md)
 - [Built-in Protocols](on-hold/trait-impl.md) — Eq, Hash done; Repr remaining
 - [Cross-Target AOT](on-hold/cross-target-aot.md)
-- [Cross-Target Semantics](on-hold/cross-target-semantics.md) — TS 本格化時。実装大半完了
+- [Cross-Target Semantics](on-hold/cross-target-semantics.md) — TS 本格化時
 - [Direct WASM Emission](on-hold/emit-wasm-direct.md)
 - [Editor & GitHub Integration](on-hold/editor-github-integration.md)
 - [LSP Server](on-hold/lsp.md)
@@ -54,7 +59,7 @@
 
 ## Done
 
-~~Phase 0~~ ✅ | ~~Phase A~~ ✅
+~~Phase 0~~ ✅ | ~~Phase A~~ ✅ | ~~Phase B~~ ✅
 
 - [2026 Ergonomics](2026-ergonomics.md)
 - [Architecture Hardening](done/architecture-hardening.md)
@@ -71,8 +76,7 @@
 - [Control Flow Extensions](done/control-flow.md)
 - [Cross-Platform Support](done/cross-platform.md)
 - [Default Field Values](done/default-field-values.md)
-- [Derive Conventions](done/derive-conventions.md) — Eq/Repr/Ord/Hash, convention declaration + method resolution
-- [Operator Protocol](done/operator-protocol.md) — `==` → Type.eq, `"${d}"` → Type.repr, auto-derive Eq/Repr
+- [Derive Conventions](done/derive-conventions.md) — Eq/Repr/Ord/Hash
 - [--emit-ir](done/emit-ir.md)
 - [Eq Protocol](done/eq-protocol.md)
 - [Error Diagnostics](done/error-diagnostics.md)
@@ -82,7 +86,7 @@
 - [Formatter Rewrite](done/formatter-rewrite.md)
 - [Function Reference Passing](done/function-reference-passing.md)
 - [Generics](done/generics.md)
-- [Grammar Research](done/grammar-research.md) — A/B test framework, lambda syntax experiment
+- [Grammar Research](done/grammar-research.md)
 - [Hint System](done/hint-system.md)
 - [HTTP Module](done/http.md)
 - [`import self`](done/import-self-entry.md)
@@ -98,8 +102,9 @@
 - [LLM Immutable Patterns](done/llm-immutable-patterns.md)
 - [Map Literal](done/map-literal.md)
 - [Module System v2](done/module-system-v2.md)
-- [Monomorphization](done/monomorphization.md) — Structural bounds, transitive, 16 tests
+- [Monomorphization](done/monomorphization.md)
 - [npm Package Target](done/npm-package-target-target-npm.md)
+- [Operator Protocol](done/operator-protocol.md) — `==` dispatch, auto-derive
 - [Parser Error Recovery](done/parser-error-recovery.md)
 - [Playground Repair](done/playground-repair.md)
 - [Proliferation Blockers](done/proliferation-blockers.md)
@@ -114,6 +119,7 @@
 - [Stdlib Self-Hosting](done/stdlib-self-hosting.md)
 - [String Handling](done/string-handling.md)
 - [Structured Concurrency (Phase 1)](done/structured-concurrency.md)
+- [Syntax Sugar](done/syntax-sugar.md) — Lambda, default/named args, block comments, raw strings
 - [Tail Call Optimization](done/tail-call-optimization.md)
 - [Test Coverage](done/test-coverage.md)
 - [Test Directory Structure](done/test-directory-structure.md)
@@ -122,7 +128,7 @@
 - [TS/JS Codegen Rewrite](done/ts-codegen-rewrite.md)
 - [Tuple & Record](done/tuple-record.md)
 - [Typed IR](done/typed-ir.md)
-- [Type System Extensions](done/type-system.md) — OpenRecord, structural bounds, union parsing
+- [Type System Extensions](done/type-system.md)
 - [Type System Soundness](done/type-system-soundness.md)
 - [UFCS Type Resolution](done/ufcs-type-resolution.md)
 - [Unused Variable Warnings](done/unused-variable-warnings.md)
