@@ -3,7 +3,6 @@
 ## Active
 
 ### Phase 0: Compiler Integrity (健全性・正確性・構造)
-- [Type System Soundness](active/type-system-soundness.md) — C/H/M 10項目修正完了 (B+ → A+)。残 P1: Unknown 伝播の根本修正
 - [Codegen Correctness Fixes](active/codegen-correctness.md) — auto-? 統一 ✅, Range 型 ✅, Box パターン ✅, 残: guard 二重ラップ, do-block auto-?
 - [Architecture Hardening](active/architecture-hardening.md) — IrProgram clone 除去, Emitter リファクタ
 - [Cross-Target Semantics](active/cross-target-semantics.md) — Rust/TS 意味論統一: Map 比較, entries 順序, 整数オーバーフロー, Float 精度
@@ -126,6 +125,7 @@
 - [Tuple & Record](done/tuple-record.md)
 - [Typed IR](done/typed-ir.md) — IR-based codegen, AST-direct codegen removed
 - [UFCS Type Resolution](done/ufcs-type-resolution.md) — Recursive type inference in lowerer
+- [Type System Soundness](done/type-system-soundness.md) — B+ → A+: 14 fixes (C3+H4+M3+P4), lambda inference, ok/err bidirectional, Unknown elimination
 - [Unused Variable Warnings](done/unused-variable-warnings.md) — Use-count based detection, `_` prefix suppression
 - [Variant Record Fields](done/variant-record-fields.md) — named fields on enum variants, `..` rest
 - [While Loop](done/while-loop.md) — `while condition { }`, universal loop syntax
