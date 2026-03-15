@@ -1,4 +1,4 @@
-# Derive Conventions [ACTIVE]
+# Derive Conventions [DONE]
 
 ## Summary
 trait/typeclass を導入せず、固定 convention + コロン構文で polymorphism を実現する。

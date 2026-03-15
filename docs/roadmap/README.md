@@ -2,12 +2,10 @@
 
 ## Active
 
-### Now: Derive Conventions Phase 3-4
-- [Derive Conventions](active/derive-conventions.md) — **Eq/Repr/Ord/Hash**. Phase 1-2 ✅. Next: operator dispatch (`==` → `Dog.eq`), auto-derive
-
 ### Language
+- [Operator Protocol](active/operator-protocol.md) — `==` → `Dog.eq`, `"${d}"` → `Dog.repr`, auto-derive (Encode/Decode は Codec に統合)
 - [Syntax Sugar](active/syntax-sugar.md) — Lambda ✅, default args ✅. Remaining: comprehensions, named args, raw strings, block comments
-- [Codec Protocol & JSON](active/codec-and-json.md) — `deriving Codec` + JSON as first format
+- [Codec Protocol & JSON](active/codec-and-json.md) — `deriving Codec` + JSON, Encode/Decode convention
 - [Template](active/template.md) — Typed document builder: `html {}`/`text {}` builders
 - [UFCS External](active/ufcs-external.md) — Type-directed UFCS for user-defined/external functions
 
@@ -74,6 +72,7 @@
 - [Control Flow Extensions](done/control-flow.md)
 - [Cross-Platform Support](done/cross-platform.md)
 - [Default Field Values](done/default-field-values.md)
+- [Derive Conventions](done/derive-conventions.md) — Eq/Repr/Ord/Hash, convention declaration + method resolution
 - [--emit-ir](done/emit-ir.md)
 - [Eq Protocol](done/eq-protocol.md)
 - [Error Diagnostics](done/error-diagnostics.md)
