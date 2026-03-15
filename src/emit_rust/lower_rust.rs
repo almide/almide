@@ -444,7 +444,7 @@ fn contains_typevar(ty: &Ty) -> bool {
 /// if/match/block where all branches are Result-producing.
 fn is_result_expr(e: &Expr) -> bool {
     match e {
-        Expr::Ok(_) | Expr::Err(_) | Expr::Try(_) => true,
+        Expr::Ok(_) | Expr::Err(_) => true,
         Expr::Return(Some(inner)) => is_result_expr(inner),
         Expr::If { then, else_: Some(else_), .. } => is_result_expr(then) && is_result_expr(else_),
         Expr::Match { arms, .. } => !arms.is_empty() && arms.iter().all(|a| is_result_expr(&a.body)),

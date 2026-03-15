@@ -13,28 +13,24 @@ let DATA_DIR = "tools/stdlib-crawler/data/python"
 
 // ── Entry ──────────────────────────────────────────
 
-effect fn main() -> Unit = {
+effect fn main() -> Unit = do {
   let args = env.args()
-  let n = list.len(args)
-  if n < 2 then {
-    println("Usage: stdlib-crawler <language> <command>")
-    process.exit(1)
-  } else {
-    let language = args[0]
-    let command = args[1]
-    let flags = list.drop(args, 2)
-    if language != "python" then {
-      println("Unsupported language: ${language}")
-      process.exit(1)
-    } else {
-      let force = list.contains(flags, "--force")
-      let save = list.contains(flags, "--save")
-      if command == "--list" then python_list_modules()
-      else if command == "--all" then python_crawl_all(force)
-      else if command == "--summary" then python_print_summary()
-      else if command == "--verbs" then python_verb_analysis()
-      else python_crawl_module(command, save)
-    }
+  guard list.len(args) >= 2 else err("Usage: stdlib-crawler <language> <command>")
+
+  let language = args[0]
+  let command = args[1]
+  let flags = list.drop(args, 2)
+
+  guard language == "python" else err("Unsupported language: ${language}")
+
+  let force = list.contains(flags, "--force")
+  let save = list.contains(flags, "--save")
+  match command {
+    "--list" => python_list_modules()
+    "--all" => python_crawl_all(force)
+    "--summary" => python_print_summary()
+    "--verbs" => python_verb_analysis()
+    _ => python_crawl_module(command, save)
   }
 }
 
