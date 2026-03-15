@@ -14,15 +14,13 @@
 
 **修正済み.** 非 Bind パターン（Wildcard, nested Constructor）に対して適切な `box` キーワードまたはスキップを追加。
 
-## P1: Do-block guard の二重 Result ラップ
+## P1: Do-block guard の break/continue ハンドリング ✅
 
-**問題:** guard の else ブランチが既に Result を返す式の場合、`return Err(...)` で二重ラップされる可能性。
+**修正済み.** guard の else ブランチの IR ノード種別 (Break/Continue/ResultErr) を検査し、適切な Rust コードを生成。
 
-文字列の `contains("return ")` による判定は脆弱だが、IR ベースの判定に切り替えると `ResultOk` in effect context のケースが壊れる。
+## P1: do ブロック + guard で unreachable になる ✅
 
-**修正:**
-- [ ] ResultErr/ResultOk の codegen と guard の codegen の実行順序を整理
-- [ ] guard 内の else 式を codegen する際に do-block コンテキストフラグを活用
+**修正済み.** guard を含む do ブロックを `loop { ... break; }` で囲むことで、guard の `break`/`return` 後のコードが正常に到達可能に。TS codegen の `DoLoop` パターンと同じアプローチ。
 
 ## P1: do ブロック内の auto-`?` が `let` バインドで効かないケースがある
 
@@ -31,17 +29,10 @@
 **修正:**
 - [ ] do ブロック内の `let` バインドで右辺が Result を返す場合に auto-`?` を挿入
 
-## P1: do ブロック + guard で main 関数が unreachable になる
-
-**問題:** guard が `loop` 変換され、loop 内の `return Err(...)` 後のコードが unreachable 扱いになる。
-
-**修正:**
-- [ ] guard ありの do ブロックで `loop` の後に `break` を挿入して正常終了パスを作る
-
 ## P1: effect fn 内の for ループで Result ラップが壊れる
 
 **修正:**
-- [ ] `emit_rust/ir_blocks.rs`: `do` ブロック内の `for` ループの codegen を修正
+- [ ] `emit_rust/lower_rust.rs`: for ループ body 内のステートメントに in_effect コンテキストを伝播
 
 ## P2: 文字列パターンの borrowed subject 不整合
 

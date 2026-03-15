@@ -14,58 +14,13 @@ Detects at compile time when a match on a variant type does not cover all cases.
 
 ---
 
-## Lambda Syntax: `fn` を廃止、パレンスタイルに統一 [HIGH PRIORITY]
+## Lambda Syntax: `fn` を廃止、パレンスタイルに統一 ✅
 
-### Problem
-
-現在の lambda 構文 `fn(params) => expr` は冗長。`fn` は関数宣言のキーワードであり、lambda に使うのは役割が混在する。
-
-### Decision
-
-Grammar Lab の実験結果により、`fn(x) => expr` と `(x) => expr` の modification survival rate に差がないことが確認された (fn 86% = paren 86%, p=1.0, Haiku N=30)。
-
-**`fn(params) => expr` を廃止し、`(params) => expr` に統一する。**
-
-### After
-
-```almide
-|> list.map((x) => x * 2)
-|> list.filter((x) => x > 0)
-|> list.fold(0, (acc, x) => acc + x)
-
-// 型注釈付き
-(x: Int) => x * 2
-
-// 引数なし
-() => 42
-```
-
-`fn` keyword は関数宣言 (`fn name(...) -> Type = ...`) 専用になる。
-
-### Breaking Change
-
-全 `.almd` ファイルの `fn(params) => expr` を `(params) => expr` に書き換える必要がある。
-
-影響範囲:
-- `spec/` 以下の全テスト
-- `stdlib/` の例示コード
-- `research/grammar-lab/` のタスクファイル
-- `CLAUDE.md`, `docs/` のドキュメント
-- Grammar Lab の Layer 2 prompt テンプレート
-
-### Parser 変更
-
-- `fn` + `(` の組み合わせを lambda として parse するパスを削除
-- `(` の後に `)` `=>` パターンが来たら lambda として parse
-- tuple/paren 式との曖昧性は `=>` の有無で解消
-- 型注釈: `(x: Int) => expr` — `(` の中に `:` があれば型付き lambda
-
-### Implementation Order
-
-1. Parser に `(params) => expr` を追加（新構文）
-2. 全 `.almd` ファイルを一括置換（`fn(` → `(`、lambda 文脈のみ）
-3. `fn(params) => expr` を parse error にする（旧構文を削除）
-4. ドキュメント更新
+`fn(params) => expr` を廃止し、`(params) => expr` に統一完了。
+- パーサーから `fn(` lambda パスを削除
+- 全 `.almd` ファイル (44ファイル) を一括置換
+- Rust テスト、ドキュメント、ヒントメッセージを更新
+- `fn` keyword は関数宣言 (`fn name(...) -> Type = ...`) 専用に
 
 ---
 
