@@ -1,0 +1,209 @@
+module codec_p0_test
+
+// --- Test Models ---
+
+type Basic: Codec = { id: Int, name: String }
+
+type WithOptional: Codec = { id: Int, nickname: Option[String] }
+
+type WithDefault: Codec = {
+  id: Int,
+  name: String = "anonymous",
+  active: Bool = true
+}
+
+type Inner: Codec = { x: Int, y: Int }
+type Outer: Codec = { label: String, inner: Inner }
+
+type Item: Codec = { id: Int, value: String }
+
+type WithAlias: Codec = {
+  type_ as "type": String,
+  ref_ as "$ref": String,
+  name: String
+}
+
+// --- P0-001: required field missing ---
+test "P0-001: required field missing" {
+  let v = json.parse("{\"name\": \"Alice\"}")
+  let result = Basic.decode(v)
+  match result {
+    err(e) => assert(string.contains(e, "missing field"))
+    ok(_) => assert(false)
+  }
+}
+
+// --- P0-002: required field null ---
+test "P0-002: required field null" {
+  let v = json.parse("{\"id\": null, \"name\": \"Alice\"}")
+  let result = Basic.decode(v)
+  match result {
+    err(e) => assert(string.contains(e, "expected Int"))
+    ok(_) => assert(false)
+  }
+}
+
+// --- P0-003: optional field missing ---
+test "P0-003: optional field missing" {
+  let v = json.parse("{\"id\": 1}")
+  let result = WithOptional.decode(v)
+  match result {
+    ok(w) => {
+      assert_eq(w.id, 1)
+      assert_eq(w.nickname, none)
+    }
+    err(_) => assert(false)
+  }
+}
+
+// --- P0-004: optional field null ---
+test "P0-004: optional field null" {
+  let v = json.parse("{\"id\": 1, \"nickname\": null}")
+  let result = WithOptional.decode(v)
+  match result {
+    ok(w) => assert_eq(w.nickname, none)
+    err(_) => assert(false)
+  }
+}
+
+// --- P0-005: optional field present ---
+test "P0-005: optional field present" {
+  let v = json.parse("{\"id\": 1, \"nickname\": \"neo\"}")
+  let result = WithOptional.decode(v)
+  match result {
+    ok(w) => assert_eq(w.nickname, some("neo"))
+    err(_) => assert(false)
+  }
+}
+
+// --- P0-006: default field missing ---
+test "P0-006: default field missing" {
+  let v = json.parse("{\"id\": 1}")
+  let result = WithDefault.decode(v)
+  match result {
+    ok(w) => {
+      assert_eq(w.id, 1)
+      assert_eq(w.name, "anonymous")
+      assert_eq(w.active, true)
+    }
+    err(_) => assert(false)
+  }
+}
+
+// --- P0-007: default field null ---
+test "P0-007: default field null" {
+  let v = json.parse("{\"id\": 1, \"name\": null}")
+  let result = WithDefault.decode(v)
+  match result {
+    ok(w) => assert_eq(w.name, "anonymous")
+    err(_) => assert(false)
+  }
+}
+
+// --- P0-008: default field present ---
+test "P0-008: default field present" {
+  let v = json.parse("{\"id\": 1, \"name\": \"Bob\", \"active\": false}")
+  let result = WithDefault.decode(v)
+  match result {
+    ok(w) => {
+      assert_eq(w.name, "Bob")
+      assert_eq(w.active, false)
+    }
+    err(_) => assert(false)
+  }
+}
+
+// --- P0-009: type mismatch ---
+test "P0-009: type mismatch no coercion" {
+  let v = json.parse("{\"id\": \"1\", \"name\": \"Alice\"}")
+  let result = Basic.decode(v)
+  match result {
+    err(e) => assert(string.contains(e, "expected Int"))
+    ok(_) => assert(false)
+  }
+}
+
+// --- P0-010: nested required missing ---
+test "P0-010: nested required missing" {
+  let v = json.parse("{\"label\": \"A\", \"inner\": {\"x\": 1}}")
+  let result = Outer.decode(v)
+  match result {
+    err(e) => assert(string.contains(e, "missing field"))
+    ok(_) => assert(false)
+  }
+}
+
+// --- P0-012: all fields present roundtrip ---
+test "P0-012: all fields present roundtrip" {
+  let b = Basic { id: 42, name: "Alice" }
+  let v = b.encode()
+  let b2 = Basic.decode(v)
+  assert_eq(b2.id, 42)
+  assert_eq(b2.name, "Alice")
+}
+
+// --- P0-013: unknown field ignored ---
+test "P0-013: unknown field ignored" {
+  let v = json.parse("{\"id\": 1, \"name\": \"Alice\", \"extra\": true}")
+  let result = Basic.decode(v)
+  match result {
+    ok(b) => {
+      assert_eq(b.id, 1)
+      assert_eq(b.name, "Alice")
+    }
+    err(_) => assert(false)
+  }
+}
+
+// --- P0-014: alias decode ---
+test "P0-014: alias decode" {
+  let v = json.parse("{\"type\": \"Person\", \"$ref\": \"#/defs/P\", \"name\": \"Alice\"}")
+  let result = WithAlias.decode(v)
+  match result {
+    ok(w) => {
+      assert_eq(w.type_, "Person")
+      assert_eq(w.ref_, "#/defs/P")
+      assert_eq(w.name, "Alice")
+    }
+    err(_) => assert(false)
+  }
+}
+
+// --- P0-015: alias encode ---
+test "P0-015: alias encode" {
+  let w = WithAlias { type_: "Person", ref_: "#/defs/P", name: "Alice" }
+  let text = json.stringify(w.encode())
+  assert(string.contains(text, "\"type\""))
+  assert(string.contains(text, "\"$ref\""))
+}
+
+// --- P0-017: flat record roundtrip ---
+test "P0-017: flat record roundtrip via JSON" {
+  let b = Basic { id: 99, name: "Bob" }
+  let text = json.stringify(b.encode())
+  let v2 = json.parse(text)
+  let b2 = Basic.decode(v2)
+  assert_eq(b2.id, 99)
+  assert_eq(b2.name, "Bob")
+}
+
+// --- P0-018: nested record roundtrip ---
+test "P0-018: nested record roundtrip via JSON" {
+  let o = Outer { label: "test", inner: Inner { x: 10, y: 20 } }
+  let text = json.stringify(o.encode())
+  let v2 = json.parse(text)
+  let o2 = Outer.decode(v2)
+  assert_eq(o2.label, "test")
+  assert_eq(o2.inner.x, 10)
+  assert_eq(o2.inner.y, 20)
+}
+
+// --- P0-020: full stringify-parse roundtrip ---
+test "P0-020: full stringify-parse roundtrip" {
+  let original = WithDefault { id: 7, name: "Carol", active: false }
+  let json_text = json.stringify(original.encode())
+  let restored = json.parse(json_text) |> WithDefault.decode
+  assert_eq(restored.id, 7)
+  assert_eq(restored.name, "Carol")
+  assert_eq(restored.active, false)
+}
