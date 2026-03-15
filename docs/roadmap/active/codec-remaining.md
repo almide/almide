@@ -14,20 +14,20 @@ match json.parse(text) { ok(v) => Person.decode(v), err(e) => err(e) }
 ```
 `json.decode[T](text)` convenience は checker 型引数解決が必要 → Future
 
-## Next
-
-### value ユーティリティ
-- `value.pick(v, ["name", "age"])` — フィールド抽出
-- `value.rename_keys(v, fn)` — キー名変換
+### value ユーティリティ ✅
+- `value.pick(v, keys)` / `value.omit(v, keys)` — フィールド選択/除外
 - `value.merge(a, b)` — Object 結合
+- `value.to_camel_case(v)` / `value.to_snake_case(v)` — キー名変換
+- `value.rename_keys(v, fn)` — 汎用キー変換 (runtime 内部)
 
-### Codec(naming_strategy)
+### Naming strategy ✅
 ```almide
-type ApiRes: Codec(snake_case) = { userId: String }
-// encode → {"user_id": "..."}
+let camel = value.to_camel_case(person.encode())
+let text = json.stringify(camel)  // → {"userName": "Alice"}
 ```
-- type 宣言の Codec 引数パース
-- encode 時に naming strategy 適用
+関数合成で実現。`Codec(snake_case)` 構文は Future の sugar。
+
+## Next
 
 ### 旧 TOML → runtime crate 移行
 - `stdlib/defs/*.toml` の関数を `runtime/rust/src/*.rs` に段階的に移動
