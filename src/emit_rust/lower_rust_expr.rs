@@ -306,7 +306,17 @@ impl<'a> LowerCtx<'a> {
             IrExprKind::ResultOk { expr } => Expr::Ok(Box::new(self.lower_expr(expr))),
             IrExprKind::ResultErr { expr } => Expr::Err(Box::new(self.lower_expr(expr))),
             IrExprKind::OptionSome { expr } => Expr::Some(Box::new(self.lower_expr(expr))),
-            IrExprKind::OptionNone => Expr::None,
+            IrExprKind::OptionNone => {
+                // Option[T] の T が判明していれば None::<T> を生成（Rust の型推論を助ける）
+                if let Ty::Option(inner) = &e.ty {
+                    if !inner.contains_unknown() && !matches!(inner.as_ref(), Ty::TypeVar(_)) {
+                        let mut ty_str = String::new();
+                        super::render::render_type(&mut ty_str, &self.lty(inner));
+                        return Expr::Raw(format!("None::<{}>", ty_str));
+                    }
+                }
+                Expr::None
+            }
             IrExprKind::Try { expr } => Expr::Try(Box::new(self.lower_expr(expr))),
             IrExprKind::Await { expr } => self.lower_expr(expr),
             IrExprKind::Hole | IrExprKind::Todo { .. } => Expr::Raw("todo!()".into()),

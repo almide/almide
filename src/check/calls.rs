@@ -101,6 +101,12 @@ impl Checker {
                         return self.check_named_call(&convention_key, &all_args);
                     }
                 }
+                // UFCS: user-defined function obj.func(args) → func(obj, args)
+                if self.env.functions.contains_key(field) {
+                    let mut all_args = vec![obj_ty];
+                    all_args.extend(arg_tys.iter().cloned());
+                    return self.check_named_call(field, &all_args);
+                }
                 let ret = self.fresh_var();
                 self.constrain(obj_ty, InferTy::Fn { params: arg_tys.to_vec(), ret: Box::new(ret.clone()) }, "method call");
                 ret
