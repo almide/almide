@@ -17,7 +17,15 @@ impl Checker {
         match expr {
             ast::Expr::Int { .. } => InferTy::Concrete(Ty::Int),
             ast::Expr::Float { .. } => InferTy::Concrete(Ty::Float),
-            ast::Expr::String { .. } | ast::Expr::InterpolatedString { .. } => InferTy::Concrete(Ty::String),
+            ast::Expr::String { .. } => InferTy::Concrete(Ty::String),
+            ast::Expr::InterpolatedString { parts, .. } => {
+                for part in parts.iter_mut() {
+                    if let ast::StringPart::Expr { expr } = part {
+                        self.infer_expr(expr);
+                    }
+                }
+                InferTy::Concrete(Ty::String)
+            }
             ast::Expr::Bool { .. } => InferTy::Concrete(Ty::Bool),
             ast::Expr::Unit { .. } => InferTy::Concrete(Ty::Unit),
 
@@ -247,15 +255,28 @@ impl Checker {
                 InferTy::Fn { params: param_tys, ret: Box::new(ret_ty) }
             }
 
-            ast::Expr::ForIn { var, iterable, body, .. } => {
+            ast::Expr::ForIn { var, var_tuple, iterable, body, .. } => {
                 let iter_ty = self.infer_expr(iterable);
                 self.env.push_scope();
                 let elem_ty = match &iter_ty {
                     InferTy::List(inner) => inner.to_ty(&self.solutions),
                     InferTy::Concrete(Ty::List(inner)) => *inner.clone(),
+                    InferTy::Map(k, v) => Ty::Tuple(vec![k.to_ty(&self.solutions), v.to_ty(&self.solutions)]),
+                    InferTy::Concrete(Ty::Map(k, v)) => Ty::Tuple(vec![*k.clone(), *v.clone()]),
                     _ => Ty::Unknown,
                 };
-                self.env.define_var(var, elem_ty);
+                if let Some(names) = var_tuple {
+                    // Destructure tuple: for (a, b) in xs
+                    if let Ty::Tuple(tys) = &elem_ty {
+                        for (i, n) in names.iter().enumerate() {
+                            self.env.define_var(n, tys.get(i).cloned().unwrap_or(Ty::Unknown));
+                        }
+                    } else {
+                        for n in names { self.env.define_var(n, Ty::Unknown); }
+                    }
+                } else {
+                    self.env.define_var(var, elem_ty);
+                }
                 for stmt in body.iter_mut() { self.check_stmt(stmt); }
                 self.env.pop_scope();
                 InferTy::Concrete(Ty::Unit)

@@ -195,7 +195,7 @@ fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
         Expr::Int { raw, .. } => out.push_str(raw),
         Expr::Float { value, .. } => { let s = format!("{value}"); if s.contains('.') { out.push_str(&s); } else { out.push_str(&s); out.push_str(".0"); } }
         Expr::String { value, .. } => write!(out, "{value:?}").unwrap(),
-        Expr::InterpolatedString { value, .. } => fmt_istring(out, value),
+        Expr::InterpolatedString { parts, .. } => fmt_istring_parts(out, parts, depth),
         Expr::Bool { value, .. } => out.push_str(if *value { "true" } else { "false" }),
         Expr::Unit { .. } => out.push_str("()"),
         Expr::None { .. } => out.push_str("none"),
@@ -320,21 +320,21 @@ fn fmt_map(out: &mut String, entries: &[(Expr, Expr)], depth: usize) {
     out.push_str(close);
 }
 
-fn fmt_istring(out: &mut String, value: &str) {
+fn fmt_istring_parts(out: &mut String, parts: &[StringPart], depth: usize) {
     out.push('"');
-    let mut bd = 0u32;
-    let chars: Vec<char> = value.chars().collect();
-    let mut i = 0;
-    while i < chars.len() {
-        let ch = chars[i];
-        if ch == '$' && i + 1 < chars.len() && chars[i + 1] == '{' { out.push_str("${"); bd += 1; i += 2; continue; }
-        if bd > 0 {
-            if ch == '{' { bd += 1; } if ch == '}' { bd -= 1; }
-            out.push(ch);
-        } else {
-            match ch { '\n' => out.push_str("\\n"), '\t' => out.push_str("\\t"), '\\' => out.push_str("\\\\"), '"' => out.push_str("\\\""), o => out.push(o) }
+    for part in parts {
+        match part {
+            StringPart::Lit { value } => {
+                for ch in value.chars() {
+                    match ch { '\n' => out.push_str("\\n"), '\t' => out.push_str("\\t"), '\\' => out.push_str("\\\\"), '"' => out.push_str("\\\""), o => out.push(o) }
+                }
+            }
+            StringPart::Expr { expr } => {
+                out.push_str("${");
+                fmt_expr(out, expr, depth);
+                out.push('}');
+            }
         }
-        i += 1;
     }
     out.push('"');
 }

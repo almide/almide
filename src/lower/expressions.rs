@@ -8,7 +8,6 @@ use super::calls::{lower_call, lower_call_target};
 use super::statements::lower_stmt;
 use super::statements::lower_pattern;
 use super::types::resolve_type_expr;
-use super::interpolation::lower_interpolation;
 
 pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
     let ty = ctx.expr_ty(expr);
@@ -162,9 +161,16 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                 Ty::Map(k, v) => Ty::Tuple(vec![*k.clone(), *v.clone()]),
                 _ => Ty::Unknown,
             };
-            let var_id = ctx.define_var(var, elem_ty, Mutability::Let, span.clone());
+            let var_id = ctx.define_var(var, elem_ty.clone(), Mutability::Let, span.clone());
             let tuple_vars = var_tuple.as_ref().map(|names| {
-                names.iter().map(|n| ctx.define_var(n, Ty::Unknown, Mutability::Let, None)).collect()
+                let tys = match &elem_ty {
+                    Ty::Tuple(tys) => tys.clone(),
+                    _ => vec![],
+                };
+                names.iter().enumerate().map(|(i, n)| {
+                    let ty = tys.get(i).cloned().unwrap_or(Ty::Unknown);
+                    ctx.define_var(n, ty, Mutability::Let, None)
+                }).collect()
             });
             let ir_body: Vec<IrStmt> = body.iter().map(|s| lower_stmt(ctx, s)).collect();
             ctx.pop_scope();
@@ -248,9 +254,22 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         }
 
         // ── String interpolation ──
-        ast::Expr::InterpolatedString { value, .. } => {
-            let parts = lower_interpolation(ctx, value);
-            ctx.mk(IrExprKind::StringInterp { parts }, Ty::String, span)
+        ast::Expr::InterpolatedString { parts, .. } => {
+            let ir_parts = parts.iter().map(|part| match part {
+                ast::StringPart::Lit { value } => IrStringPart::Lit { value: value.clone() },
+                ast::StringPart::Expr { expr } => {
+                    let mut ir_expr = lower_expr(ctx, expr);
+                    // Operator protocol: dispatch to Repr convention if available
+                    if let Some(repr_fn) = ctx.find_convention_fn(&ir_expr.ty, "repr") {
+                        ir_expr = ctx.mk(IrExprKind::Call {
+                            target: CallTarget::Named { name: repr_fn },
+                            args: vec![ir_expr], type_args: vec![],
+                        }, Ty::String, None);
+                    }
+                    IrStringPart::Expr { expr: ir_expr }
+                }
+            }).collect();
+            ctx.mk(IrExprKind::StringInterp { parts: ir_parts }, Ty::String, span)
         }
 
         // ── Result / Option ──

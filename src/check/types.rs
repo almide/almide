@@ -33,6 +33,9 @@ impl InferTy {
                 params: params.iter().map(InferTy::from_ty).collect(),
                 ret: Box::new(InferTy::from_ty(ret)),
             },
+            Ty::TypeVar(name) if name.starts_with('?') => {
+                InferTy::Var(TyVarId(name[1..].parse::<u32>().unwrap_or(0)))
+            }
             other => InferTy::Concrete(other.clone()),
         }
     }

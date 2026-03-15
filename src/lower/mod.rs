@@ -25,7 +25,6 @@ mod expressions;
 mod calls;
 mod statements;
 mod types;
-mod interpolation;
 mod derive;
 mod derive_codec;
 

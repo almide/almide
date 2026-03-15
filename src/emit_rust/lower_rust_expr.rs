@@ -92,15 +92,20 @@ impl<'a> LowerCtx<'a> {
                     }
                 }
             }
-            IrExprKind::ForIn { var, iterable, body, .. } => {
+            IrExprKind::ForIn { var, var_tuple, iterable, body } => {
                 let iter_expr = self.lower_expr(iterable);
                 // Skip clone for: ranges (Copy), literals (fresh), single-use vars (can move)
                 let needs_clone = !matches!(&iterable.kind, IrExprKind::Range { .. })
                     && !matches!(&iterable.kind, IrExprKind::List { .. })
                     && !self.is_single_use_var(iterable);
                 let iter_val = if needs_clone { Expr::Clone(Box::new(iter_expr)) } else { iter_expr };
+                let binding = if let Some(tvars) = var_tuple {
+                    format!("({})", tvars.iter().map(|v| self.vt.get(*v).name.clone()).collect::<Vec<_>>().join(", "))
+                } else {
+                    self.vt.get(*var).name.clone()
+                };
                 Expr::For {
-                    var: self.vt.get(*var).name.clone(),
+                    var: binding,
                     iter: Box::new(iter_val),
                     body: body.iter().map(|s| self.lower_stmt(s)).collect(),
                 }

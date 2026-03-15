@@ -31,7 +31,8 @@ impl Parser {
         }
         if self.check(TokenType::InterpolatedString) {
             self.advance();
-            return Ok(Expr::InterpolatedString { value: tok.value.clone(), id: self.next_id(), span, resolved_type: None });
+            let parts = self.parse_interpolation_parts(&tok.value, tok.line, tok.col)?;
+            return Ok(Expr::InterpolatedString { parts, id: self.next_id(), span, resolved_type: None });
         }
         if self.check(TokenType::True) {
             self.advance();
@@ -296,5 +297,75 @@ impl Parser {
             var: var_name, var_tuple, iterable: Box::new(iterable), body: stmts,
             id: self.next_id(), span, resolved_type: None,
         })
+    }
+
+    fn parse_interpolation_parts(&mut self, template: &str, str_line: usize, str_col: usize) -> Result<Vec<StringPart>, String> {
+        let mut parts = Vec::new();
+        let mut lit = String::new();
+        let chars: Vec<char> = template.chars().collect();
+        let mut i = 0;
+        // Track column offset: opening " is at str_col, content starts at str_col+1
+        let mut col_offset = 0usize;
+
+        while i < chars.len() {
+            if chars[i] == '$' && i + 1 < chars.len() && chars[i + 1] == '{' {
+                if !lit.is_empty() {
+                    parts.push(StringPart::Lit { value: std::mem::take(&mut lit) });
+                }
+                let expr_col_start = col_offset + 2; // past ${
+                i += 2; // skip ${
+                col_offset += 2;
+                let mut depth = 1;
+                let mut expr_str = String::new();
+                while i < chars.len() && depth > 0 {
+                    if chars[i] == '{' { depth += 1; }
+                    if chars[i] == '}' { depth -= 1; if depth == 0 { break; } }
+                    expr_str.push(chars[i]);
+                    i += 1;
+                    col_offset += 1;
+                }
+                i += 1; // skip }
+                col_offset += 1;
+                // Sub-parse the expression with current id counter
+                let mut tokens = crate::lexer::Lexer::tokenize(&expr_str);
+                // Adjust spans: sub-lexer produces line=1,col=1-based; remap to parent source
+                for t in &mut tokens {
+                    t.line = str_line;
+                    // col: sub-lexer 1-based → 0-based offset + parent string position
+                    // str_col is the opening quote col, +1 for quote char, + template offset
+                    t.col = str_col + 1 + expr_col_start + (t.col - 1);
+                }
+                let id_offset = self.expr_id_counter();
+                let mut sub_parser = super::Parser::new_with_id_offset(tokens, id_offset);
+                match sub_parser.parse_single_expr() {
+                    Ok(parsed) => {
+                        // Advance our id counter past sub-parser's allocations
+                        self.next_expr_id = sub_parser.expr_id_counter();
+                        parts.push(StringPart::Expr { expr: Box::new(parsed) });
+                    }
+                    Err(e) => {
+                        // Error recovery: keep as literal, report diagnostic
+                        let mut diag = crate::diagnostic::Diagnostic::error(
+                            format!("invalid expression in interpolation: {}", e),
+                            "Check the expression syntax inside ${...}",
+                            format!("${{{}}}", expr_str),
+                        );
+                        diag.file = self.file.clone();
+                        diag.line = Some(str_line);
+                        diag.col = Some(str_col + 1 + expr_col_start);
+                        self.errors.push(diag);
+                        parts.push(StringPart::Lit { value: format!("${{{}}}", expr_str) });
+                    }
+                }
+            } else {
+                col_offset += 1;
+                lit.push(chars[i]);
+                i += 1;
+            }
+        }
+        if !lit.is_empty() {
+            parts.push(StringPart::Lit { value: lit });
+        }
+        Ok(parts)
     }
 }
