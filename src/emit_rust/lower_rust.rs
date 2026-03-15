@@ -550,14 +550,14 @@ fn rust_derives(td: &IrTypeDecl) -> Vec<String> {
         // Default: PartialEq for backward compatibility (== uses almide_eq! macro)
         derives.push("PartialEq".into());
     }
-    // Show → Debug
-    if conventions.iter().any(|d| d == "Show") {
+    // Repr → Debug
+    if conventions.iter().any(|d| d == "Repr") {
         derives.push("Debug".into());
     } else {
         derives.push("Debug".into()); // always derive Debug for now
     }
-    // Compare → PartialOrd + Ord
-    if conventions.iter().any(|d| d == "Compare") {
+    // Ord → PartialOrd + Ord
+    if conventions.iter().any(|d| d == "Ord") {
         derives.push("PartialOrd".into());
         derives.push("Ord".into());
     }

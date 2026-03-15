@@ -1,6 +1,6 @@
 # Built-in Protocols [ON HOLD]
 
-> **Note**: Eq, Hash は実装済み。Show は残件。型システム全体の設計は [Type System Extensions](../active/type-system.md) に移行しており、container protocols (Mappable, Chainable 等) や `deriving` による conformance はそちらを参照のこと。本文書は Eq/Hash/Show の built-in protocol に限定した初期設計を記録したものである。
+> **Note**: Eq, Hash は実装済み。Repr は残件。型システム全体の設計は [Type System Extensions](../active/type-system.md) に移行しており、container protocols (Mappable, Chainable 等) や `deriving` による conformance はそちらを参照のこと。本文書は Eq/Hash/Repr の built-in protocol に限定した初期設計を記録したものである。
 
 ## Design Principle
 
@@ -13,7 +13,7 @@
 | Protocol | Behavior | Status |
 |----------|----------|--------|
 | `Eq` | `==` / `!=` on all value types. `Fn` rejected | **Done** |
-| `Show` | `show(x)` → String for all value types. `Fn` rejected | Planned |
+| `Repr` | `show(x)` → String for all value types. `Fn` rejected | Planned |
 | `Hash` | Map key constraint. `Fn` and `Float` rejected | **Done** |
 | `From` | Error type conversions via `deriving From` | **Done** |
 
@@ -32,7 +32,7 @@ fn same_color?(a: Color, b: Color) -> Bool = a == b  // just works
 - Recursive types — handled (cycle detection)
 - `Fn` types — compile error
 
-## Show Protocol (Planned)
+## Repr Protocol (Planned)
 
 **Automatic.** All value types can be converted to String. Replaces per-module `int.to_string()`, `float.to_string()`, etc.
 
@@ -46,7 +46,7 @@ show(some(42))        // "some(42)"
 show({ x: 1, y: 2 }) // "{ x: 1, y: 2 }"
 ```
 
-What is Show:
+What is Repr:
 - Primitives: Int → digits, Float → digits, String → itself, Bool → "true"/"false", Unit → "()"
 - Containers: List → "[elem, ...]", Option → "some(x)" / "none", Result → "ok(x)" / "err(e)"
 - Records: "{ field: value, ... }"
@@ -56,8 +56,8 @@ What is Show:
 
 ### Implementation
 
-- Add built-in `show` function: `fn show[T: Show](x: T) -> String`
-- Checker: all types except `Fn` are Show (same pattern as `is_eq`)
+- Add built-in `show` function: `fn show[T: Repr](x: T) -> String`
+- Checker: all types except `Fn` are Repr (same pattern as `is_eq`)
 - Rust codegen: generate `Display` impl for user-defined types, use `format!("{:?}", x)` or custom formatting
 - TS codegen: generate `toString()` or use JSON.stringify-based approach
 - Existing `int.to_string()` etc. remain for backward compatibility but `show()` becomes the recommended way
@@ -98,5 +98,5 @@ What is Hash:
 - No user-defined traits
 - No `impl` blocks
 - No associated types, default methods, orphan rules, trait objects
-- No `deriving Eq` / `deriving Show` / `deriving Hash` — all automatic from type structure
+- No `deriving Eq` / `deriving Repr` / `deriving Hash` — all automatic from type structure
 - Only exception: `deriving From` (genuinely opt-in for error type conversions)

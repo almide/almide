@@ -53,7 +53,7 @@
 - [Stdlib Architecture: 3-Layer Design](on-hold/stdlib-architecture-3-layer-design.md)
 - [Supervision & Actors](on-hold/supervision-and-actors.md) — Typed actors, channels, supervision trees
 - [Tooling (remaining)](on-hold/tooling.md) — doc comments, benchmarking, fmt comment preservation
-- [Built-in Protocols](on-hold/trait-impl.md) — Eq, Hash done; Show remaining
+- [Built-in Protocols](on-hold/trait-impl.md) — Eq, Hash done; Repr remaining
 
 ## Done
 
