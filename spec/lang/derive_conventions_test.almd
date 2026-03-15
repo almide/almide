@@ -1,0 +1,18 @@
+type Dog: Eq, Repr = { name: String, breed: String }
+
+fn Dog.eq(self, other: Dog) -> Bool =
+  self.name == other.name
+
+fn Dog.repr(self) -> String =
+  "${self.name} (${self.breed})"
+
+test "convention method resolution" {
+  let d = Dog { name: "Max", breed: "Husky" }
+  
+  // Convention method call: dog.repr() → Dog.repr(dog)
+  assert_eq(d.repr(), "Max (Husky)")
+  
+  // Convention eq
+  let d2 = Dog { name: "Max", breed: "Poodle" }
+  assert(d.eq(d2))
+}

@@ -31,9 +31,19 @@ impl Checker {
                         return self.check_named_call(&key, &arg_tys);
                     }
                 }
-                let ct = self.infer_expr(callee);
+                // Convention method: dog.repr() → Dog.repr(dog)
+                let obj_ty = self.infer_expr(object);
+                let obj_concrete = obj_ty.to_ty(&self.solutions);
+                if let Ty::Named(type_name, _) = &obj_concrete {
+                    let convention_key = format!("{}.{}", type_name, field);
+                    if self.env.functions.contains_key(&convention_key) {
+                        let mut all_args = vec![obj_ty];
+                        all_args.extend(arg_tys.iter().cloned());
+                        return self.check_named_call(&convention_key, &all_args);
+                    }
+                }
                 let ret = self.fresh_var();
-                self.constrain(ct, InferTy::Fn { params: arg_tys, ret: Box::new(ret.clone()) }, "function call");
+                self.constrain(obj_ty, InferTy::Fn { params: arg_tys, ret: Box::new(ret.clone()) }, "method call");
                 ret
             }
             _ => {
@@ -128,7 +138,9 @@ impl Checker {
                             crate::types::unify(pty, aty, &mut bindings);
                             // Generate constraint for argument type checking
                             let expected_ty = if bindings.is_empty() { pty.clone() } else { crate::types::substitute(pty, &bindings) };
-                            if expected_ty != Ty::Unknown && *aty != Ty::Unknown && !expected_ty.compatible(aty) {
+                            let expected_resolved = self.env.resolve_named(&expected_ty);
+                            let aty_resolved = self.env.resolve_named(aty);
+                            if expected_ty != Ty::Unknown && *aty != Ty::Unknown && !expected_resolved.compatible(&aty_resolved) && !expected_ty.compatible(aty) {
                                 let hint = Self::hint_with_conversion(
                                     "Fix the argument type",
                                     &expected_ty, aty,

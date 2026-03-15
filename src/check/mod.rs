@@ -185,6 +185,17 @@ impl Checker {
                         req.iter().all(|(n, t)| actual.iter().any(|(n2, t2)| n == n2 && self.unify_infer(&InferTy::from_ty(t), &InferTy::from_ty(t2))))
                     }
                     (Ty::Named(na, _), Ty::Named(nb, _)) if na == nb => true,
+                    // Resolve Named types for structural comparison
+                    (Ty::Named(_, _), _) => {
+                        let resolved = self.env.resolve_named(a);
+                        if resolved != *a { self.unify_infer(&InferTy::from_ty(&resolved), &InferTy::from_ty(b)) }
+                        else { a.compatible(b) }
+                    }
+                    (_, Ty::Named(_, _)) => {
+                        let resolved = self.env.resolve_named(b);
+                        if resolved != *b { self.unify_infer(&InferTy::from_ty(a), &InferTy::from_ty(&resolved)) }
+                        else { a.compatible(b) }
+                    }
                     _ => a.compatible(b),
                 }
             }
@@ -234,8 +245,18 @@ impl Checker {
                         }
                     }
                     for gn in &gnames { self.env.types.insert(gn.clone(), Ty::TypeVar(gn.clone())); }
+                    // For convention methods (Dog.repr), resolve Self to the type name
+                    let self_type_name = if name.contains('.') {
+                        name.split('.').next().map(|s| s.to_string())
+                    } else { None };
+                    if let Some(ref stn) = self_type_name {
+                        self.env.types.insert("Self".to_string(), Ty::Named(stn.clone(), vec![]));
+                    }
                     let ptys: Vec<(String, Ty)> = params.iter().map(|p| (p.name.clone(), self.resolve_type_expr(&p.ty))).collect();
                     let ret = self.resolve_type_expr(return_type);
+                    if self_type_name.is_some() {
+                        self.env.types.remove("Self");
+                    }
                     for gn in &gnames { self.env.types.remove(gn); }
                     let is_effect = effect.unwrap_or(false) || r#async.unwrap_or(false);
                     let key = prefix.map(|p| format!("{}.{}", p, name)).unwrap_or(name.clone());
@@ -289,6 +310,12 @@ impl Checker {
         match decl {
             ast::Decl::Fn { name, params, return_type, body: Some(body), effect, generics, .. } => {
                 self.env.push_scope();
+                // For convention methods (Dog.repr), resolve Self to the type name
+                if let Some(type_name) = name.split('.').next() {
+                    if name.contains('.') {
+                        self.env.types.insert("Self".to_string(), Ty::Named(type_name.to_string(), vec![]));
+                    }
+                }
                 if let Some(gs) = generics {
                     for g in gs {
                         self.env.types.insert(g.name.clone(), Ty::TypeVar(g.name.clone()));

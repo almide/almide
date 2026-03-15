@@ -540,7 +540,17 @@ fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallTarget {
                     return CallTarget::Module { module: resolved, func: field.clone() };
                 }
             }
-            // Method call: obj.method(args) → UFCS
+            // Check for convention method: dog.repr() → Dog.repr(dog)
+            let obj_ty = ctx.expr_ty(object);
+            if let Ty::Named(type_name, _) = &obj_ty {
+                let convention_key = format!("{}.{}", type_name, field);
+                if ctx.env.functions.contains_key(&convention_key) {
+                    // Rewrite to named call — caller will prepend object as first arg
+                    let ir_obj = lower_expr(ctx, object);
+                    return CallTarget::Method { object: Box::new(ir_obj), method: convention_key };
+                }
+            }
+            // Generic method call: obj.method(args) → UFCS
             let ir_obj = lower_expr(ctx, object);
             CallTarget::Method { object: Box::new(ir_obj), method: field.clone() }
         }
