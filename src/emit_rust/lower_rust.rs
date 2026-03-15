@@ -294,7 +294,8 @@ impl<'a> LowerCtx<'a> {
                     if module == "map" && func == "new" && args.is_empty());
                 // Check if this is a unit variant constructor of a generic enum
                 let is_generic_variant = matches!(&value.kind, IrExprKind::Call { args, .. } if args.is_empty())
-                    && matches!(&value.ty, Ty::Named(_, args) if !args.is_empty());
+                    && (matches!(&value.ty, Ty::Named(_, args) if !args.is_empty())
+                        || matches!(var_ty, Ty::Named(_, args) if !args.is_empty()));
                 let needs_ty = matches!(&value.kind, IrExprKind::List { elements } if elements.is_empty())
                     || matches!(&value.kind, IrExprKind::EmptyMap | IrExprKind::OptionNone)
                     || is_map_new || is_generic_variant

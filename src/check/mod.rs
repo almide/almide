@@ -187,7 +187,13 @@ impl Checker {
                     | (Ty::OpenRecord { fields: req, .. }, Ty::OpenRecord { fields: actual, .. }) => {
                         req.iter().all(|(n, t)| actual.iter().any(|(n2, t2)| n == n2 && self.unify_infer(&InferTy::from_ty(t), &InferTy::from_ty(t2))))
                     }
-                    (Ty::Named(na, _), Ty::Named(nb, _)) if na == nb => true,
+                    (Ty::Named(na, args_a), Ty::Named(nb, args_b)) if na == nb => {
+                        // HM: structurally unify type constructor arguments
+                        args_a.len() == args_b.len()
+                            && args_a.iter().zip(args_b.iter()).all(|(ta, tb)|
+                                self.unify_infer(&InferTy::from_ty(ta), &InferTy::from_ty(tb)))
+                            || (args_a.is_empty() || args_b.is_empty()) // backward compat: empty args = no constraint
+                    }
                     // Resolve Named types for structural comparison
                     (Ty::Named(_, _), _) => {
                         let resolved = self.env.resolve_named(a);

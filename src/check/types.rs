@@ -108,6 +108,9 @@ impl InferTy {
                 params: params.iter().map(|p| Self::resolve_inner(p, solutions, seen)).collect(),
                 ret: Box::new(Self::resolve_inner(ret, solutions, seen)),
             },
+            Ty::Named(name, args) if !args.is_empty() => {
+                Ty::Named(name.clone(), args.iter().map(|a| Self::resolve_inner(a, solutions, seen)).collect())
+            }
             _ => ty.clone(),
         }
     }
