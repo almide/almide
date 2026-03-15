@@ -78,7 +78,7 @@ pub fn lower(ir: &IrProgram) -> Program {
     let mut functions = Vec::new();
     let mut tests = Vec::new();
     for f in &ir.functions {
-        let ctx = LowerCtx { vt: &ir.var_table, ctors: &ctors, anon: &anon, named: &named, result_fns: &result_fns, in_effect: f.is_effect };
+        let ctx = LowerCtx { vt: &ir.var_table, ctors: &ctors, anon: &anon, named: &named, result_fns: &result_fns, in_effect: f.is_effect, auto_try: f.is_effect && !f.is_test };
         let rf = ctx.lower_fn(f);
         if f.is_test { tests.push(rf); } else { functions.push(rf); }
     }
@@ -127,8 +127,12 @@ struct LowerCtx<'a> {
     named: &'a HashMap<Vec<String>, String>,
     /// Names of functions that return Result (effect fns + explicit Result returns)
     result_fns: &'a std::collections::HashSet<String>,
-    /// Whether we're currently inside an effect function
+    /// Whether we're currently inside an effect function (can call effect fns)
     in_effect: bool,
+    /// Whether auto-? (Result unwrapping) is enabled in this context
+    /// true for: effect fn bodies, do blocks
+    /// false for: test blocks, regular fn
+    auto_try: bool,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -148,7 +152,7 @@ impl<'a> LowerCtx<'a> {
             else if f.is_test { format!("test_{}", f.name.replace(|c: char| !c.is_alphanumeric() && c != '_', "_")) }
             else { crate::emit_common::sanitize(&f.name) };
 
-        let ret = if f.is_test { Type::Result(Box::new(Type::Unit), Box::new(Type::Str)) }
+        let ret = if f.is_test { Type::Unit }
             else if f.is_effect {
                 match &f.ret_ty {
                     Ty::Result(_, _) => self.lty(&f.ret_ty),
@@ -172,14 +176,8 @@ impl<'a> LowerCtx<'a> {
         // Wrap body for test/effect
         let (body, tail) = if f.is_test {
             match body_expr {
-                Expr::Block { stmts, tail } => {
-                    let wrapped = tail.map(|t| match *t {
-                        Expr::Ok(_) | Expr::Err(_) => *t,
-                        other => Expr::Ok(Box::new(other)),
-                    }).unwrap_or(Expr::Ok(Box::new(Expr::Unit)));
-                    (stmts, Some(wrapped))
-                }
-                other => (vec![], Some(Expr::Ok(Box::new(other)))),
+                Expr::Block { stmts, tail } => (stmts, tail.map(|t| *t)),
+                other => (vec![], Some(other)),
             }
         } else if f.is_effect {
             match body_expr {
@@ -331,7 +329,7 @@ impl<'a> LowerCtx<'a> {
                             args: ir_args,
                         };
                         // Auto-? for module calls to result-returning functions in effect context
-                        if self.in_effect && self.result_fns.contains(&key) {
+                        if self.auto_try && self.result_fns.contains(&key) {
                             return Expr::Try(Box::new(expr));
                         }
                         expr
@@ -348,7 +346,7 @@ impl<'a> LowerCtx<'a> {
                     }
                 };
                 // Auto-? for any call returning Result in effect context
-                if self.in_effect && matches!(&e.ty, Ty::Result(_, _)) {
+                if self.auto_try && matches!(&e.ty, Ty::Result(_, _)) {
                     Expr::Try(Box::new(call))
                 } else {
                     call
@@ -429,7 +427,7 @@ impl<'a> LowerCtx<'a> {
                     Expr::Call { func: crate::emit_common::sanitize(name), args }
                 };
                 // Auto-? for calls to result-returning functions in effect context
-                if self.in_effect && self.result_fns.contains(name) {
+                if self.auto_try && self.result_fns.contains(name) {
                     Expr::Try(Box::new(call))
                 } else {
                     call

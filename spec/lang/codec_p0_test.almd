@@ -1,38 +1,77 @@
-module codec_p0
+module codec_p0_test
 
 type Basic: Codec = { id: Int, name: String }
 type Inner: Codec = { x: Int, y: Int }
 type Outer: Codec = { label: String, inner: Inner }
 
+fn is_basic_err(json_text: String) -> Bool =
+  match json.parse(json_text) {
+    ok(v) => match Basic.decode(v) { err(_) => true, ok(_) => false }
+    err(_) => true
+  }
+
+fn decode_basic(v: Value) -> Basic =
+  match Basic.decode(v) { ok(b) => b, err(_) => Basic { id: 0, name: "" } }
+
+fn decode_outer(v: Value) -> Outer =
+  match Outer.decode(v) { ok(o) => o, err(_) => Outer { label: "", inner: Inner { x: 0, y: 0 } } }
+
+test "P0-001: required missing" {
+  assert(is_basic_err("{\"name\": \"Alice\"}"))
+}
+
+test "P0-002: required null" {
+  assert(is_basic_err("{\"id\": null, \"name\": \"Alice\"}"))
+}
+
+test "P0-009: type mismatch" {
+  assert(is_basic_err("{\"id\": \"not_int\", \"name\": \"Alice\"}"))
+}
+
+test "P0-010: nested missing" {
+  match json.parse("{\"label\": \"A\", \"inner\": {\"x\": 1}}") {
+    ok(v) => match Outer.decode(v) { err(_) => assert(true), ok(_) => assert(false) }
+    err(_) => assert(false)
+  }
+}
+
 test "P0-012: roundtrip" {
   let b = Basic { id: 42, name: "Alice" }
-  let b2 = Basic.decode(b.encode())
+  let b2 = decode_basic(b.encode())
   assert_eq(b2.id, 42)
   assert_eq(b2.name, "Alice")
 }
 
 test "P0-013: unknown ignored" {
-  let v = json.parse("{\"id\": 1, \"name\": \"A\", \"extra\": true}")
-  let b = Basic.decode(v)
-  assert_eq(b.id, 1)
-  assert_eq(b.name, "A")
+  match json.parse("{\"id\": 1, \"name\": \"A\", \"extra\": true}") {
+    ok(v) => assert_eq(decode_basic(v).id, 1)
+    err(_) => assert(false)
+  }
 }
 
 test "P0-017: flat JSON roundtrip" {
   let b = Basic { id: 99, name: "Bob" }
   let text = json.stringify(b.encode())
-  let v = json.parse(text)
-  let b2 = Basic.decode(v)
-  assert_eq(b2.id, 99)
-  assert_eq(b2.name, "Bob")
+  match json.parse(text) {
+    ok(v) => {
+      let b2 = decode_basic(v)
+      assert_eq(b2.id, 99)
+      assert_eq(b2.name, "Bob")
+    }
+    err(_) => assert(false)
+  }
 }
 
 test "P0-018: nested roundtrip" {
   let o = Outer { label: "test", inner: Inner { x: 10, y: 20 } }
   let text = json.stringify(o.encode())
-  let v = json.parse(text)
-  let o2 = Outer.decode(v)
-  assert_eq(o2.label, "test")
-  assert_eq(o2.inner.x, 10)
-  assert_eq(o2.inner.y, 20)
+  match json.parse(text) {
+    ok(v) => {
+      let o2 = decode_outer(v)
+      assert_eq(o2.label, "test")
+      assert_eq(o2.inner.x, 10)
+      assert_eq(o2.inner.y, 20)
+    }
+    err(_) => assert(false)
+  }
 }

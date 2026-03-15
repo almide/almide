@@ -2,8 +2,10 @@ module weather_test
 
 type Coord: Codec = { lon: Float, lat: Float }
 type Wind: Codec = { speed: Float, deg: Int }
-
 type WeatherInfo: Codec = { coord: Coord, wind: Wind, name: String, visibility: Int }
+
+fn unwrap_weather(v: Value) -> WeatherInfo =
+  match WeatherInfo.decode(v) { ok(w) => w, err(_) => WeatherInfo { coord: Coord { lon: 0.0, lat: 0.0 }, wind: Wind { speed: 0.0, deg: 0 }, name: "", visibility: 0 } }
 
 test "nested codec roundtrip" {
   let c = Coord { lon: 139.69, lat: 35.69 }
@@ -11,9 +13,12 @@ test "nested codec roundtrip" {
   let w = WeatherInfo { coord: c, wind: wi, name: "Tokyo", visibility: 10000 }
   let v = w.encode()
   let text = json.stringify(v)
-  println(text)
-  let v2 = json.parse(text)
-  let w2 = WeatherInfo.decode(v2)
-  assert_eq(w2.name, "Tokyo")
-  assert_eq(w2.visibility, 10000)
+  match json.parse(text) {
+    ok(v2) => {
+      let w2 = unwrap_weather(v2)
+      assert_eq(w2.name, "Tokyo")
+      assert_eq(w2.visibility, 10000)
+    }
+    err(_) => assert(false)
+  }
 }
