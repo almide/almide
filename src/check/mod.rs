@@ -85,7 +85,10 @@ impl Checker {
         self.register_decls(&program.decls, None);
         for decl in program.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
-        for (id, ity) in &self.infer_types { self.expr_types.insert(*id, ity.to_ty(&self.solutions)); }
+        for (id, ity) in &self.infer_types {
+            let ty = ity.to_ty(&self.solutions);
+            self.expr_types.insert(*id, InferTy::resolve_inference_vars(&ty, &self.solutions));
+        }
         std::mem::take(&mut self.diagnostics)
     }
 
@@ -94,7 +97,10 @@ impl Checker {
             std::mem::take(&mut self.constraints), std::mem::take(&mut self.solutions));
         for decl in prog.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
-        for (id, ity) in &self.infer_types { self.expr_types.insert(*id, ity.to_ty(&self.solutions)); }
+        for (id, ity) in &self.infer_types {
+            let ty = ity.to_ty(&self.solutions);
+            self.expr_types.insert(*id, InferTy::resolve_inference_vars(&ty, &self.solutions));
+        }
         let module_types = std::mem::take(&mut self.expr_types);
         self.expr_types = saved.0; self.infer_types = saved.1; self.constraints = saved.2; self.solutions = saved.3;
         module_types

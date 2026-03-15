@@ -139,6 +139,13 @@ impl Checker {
                             }
                         }
                     }
+                    // Propagate resolved types back to inference variables (fixes lambda param inference)
+                    for ((_, pty), aty) in sig.params.iter().zip(arg_tys.iter()) {
+                        let expected = if bindings.is_empty() { pty.clone() } else { crate::types::substitute(pty, &bindings) };
+                        if expected != Ty::Unknown {
+                            self.constrain(InferTy::from_ty(&expected), aty.clone(), format!("call to {}()", name));
+                        }
+                    }
                     let ret = if bindings.is_empty() { sig.ret.clone() } else { crate::types::substitute(&sig.ret, &bindings) };
                     InferTy::from_ty(&ret)
                 } else if let Some((type_name, case)) = self.env.constructors.get(name).cloned() {

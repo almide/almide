@@ -413,8 +413,15 @@ fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         // ── Lambda ──
         ast::Expr::Lambda { params, body, .. } => {
             ctx.push_scope();
-            let ir_params: Vec<(VarId, Ty)> = params.iter().map(|p| {
-                let param_ty = p.ty.as_ref().map(|te| resolve_type_expr(te)).unwrap_or(Ty::Unknown);
+            // Get lambda type from checker to resolve inferred param types
+            let lambda_param_tys: Vec<Ty> = match &ty {
+                Ty::Fn { params: ptys, .. } => ptys.clone(),
+                _ => vec![],
+            };
+            let ir_params: Vec<(VarId, Ty)> = params.iter().enumerate().map(|(i, p)| {
+                let param_ty = p.ty.as_ref().map(|te| resolve_type_expr(te))
+                    .or_else(|| lambda_param_tys.get(i).cloned())
+                    .unwrap_or(Ty::Unknown);
                 let var = ctx.define_var(&p.name, param_ty.clone(), Mutability::Let, None);
                 (var, param_ty)
             }).collect();

@@ -1,6 +1,7 @@
 /// Inference types, type variables, and constraints for the constraint-based checker.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use crate::types::Ty;
 
 /// A fresh type variable for constraint-based inference.
@@ -52,6 +53,59 @@ impl InferTy {
                 params: params.iter().map(|p| p.to_ty(solutions)).collect(),
                 ret: Box::new(ret.to_ty(solutions)),
             },
+        }
+    }
+
+    /// Post-solve pass: resolve any remaining Ty::TypeVar("?N") in a fully-resolved Ty.
+    /// Called AFTER to_ty() and constraint solving, so solutions are final.
+    /// Uses a `seen` set to break cycles (e.g. ?0 → ?1 → Concrete(TypeVar("?0"))).
+    pub fn resolve_inference_vars(ty: &Ty, solutions: &HashMap<TyVarId, InferTy>) -> Ty {
+        Self::resolve_inner(ty, solutions, &mut HashSet::new())
+    }
+
+    fn resolve_inner(ty: &Ty, solutions: &HashMap<TyVarId, InferTy>, seen: &mut HashSet<u32>) -> Ty {
+        match ty {
+            Ty::TypeVar(name) if name.starts_with('?') => {
+                if let Ok(id) = name[1..].parse::<u32>() {
+                    if !seen.insert(id) { return ty.clone(); }
+                    // Follow Var chain
+                    let mut current = TyVarId(id);
+                    let mut chain = HashSet::new();
+                    let terminal = loop {
+                        if !chain.insert(current.0) { break None; }
+                        match solutions.get(&current) {
+                            Some(InferTy::Var(next)) => current = *next,
+                            Some(other) => break Some(other.clone()),
+                            None => break None,
+                        }
+                    };
+                    let result = if let Some(solved) = terminal {
+                        let concrete = solved.to_ty(solutions);
+                        Self::resolve_inner(&concrete, solutions, seen)
+                    } else {
+                        ty.clone()
+                    };
+                    seen.remove(&id);
+                    return result;
+                }
+                ty.clone()
+            }
+            Ty::List(inner) => Ty::List(Box::new(Self::resolve_inner(inner, solutions, seen))),
+            Ty::Option(inner) => Ty::Option(Box::new(Self::resolve_inner(inner, solutions, seen))),
+            Ty::Result(ok, err) => Ty::Result(
+                Box::new(Self::resolve_inner(ok, solutions, seen)),
+                Box::new(Self::resolve_inner(err, solutions, seen)),
+            ),
+            Ty::Map(k, v) => Ty::Map(
+                Box::new(Self::resolve_inner(k, solutions, seen)),
+                Box::new(Self::resolve_inner(v, solutions, seen)),
+            ),
+            Ty::Tuple(elems) => Ty::Tuple(elems.iter().map(|e| Self::resolve_inner(e, solutions, seen)).collect()),
+            Ty::Fn { params, ret } => Ty::Fn {
+                params: params.iter().map(|p| Self::resolve_inner(p, solutions, seen)).collect(),
+                ret: Box::new(Self::resolve_inner(ret, solutions, seen)),
+            },
+            _ => ty.clone(),
         }
     }
 }
