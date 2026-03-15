@@ -5,12 +5,12 @@
 use crate::types::FnSig;
 
 /// All built-in stdlib module names (hardcoded in the compiler).
-pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "http", "process", "math", "random", "regex", "io", "result", "error", "datetime", "testing", "crypto", "uuid", "log"];
+pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "http", "process", "math", "random", "regex", "io", "result", "error", "datetime", "testing", "crypto", "uuid", "log", "value"];
 
 /// Prelude modules: automatically available without explicit `import`.
 /// These are core modules that virtually every program needs.
 pub const PRELUDE_MODULES: &[&str] = &[
-    "string", "list", "int", "float", "math", "map", "result", "option",
+    "string", "list", "int", "float", "math", "map", "result", "option", "value",
 ];
 
 /// Check if a module name is a prelude module (auto-imported).
