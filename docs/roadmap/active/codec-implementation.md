@@ -65,7 +65,7 @@ fn Person.encode(p: Person) -> Value =
 fn Person.decode(v: Value) -> Result[Person, String] = ...
 ```
 
-### Nested types
+### Nested types — encode
 
 ```almide
 type Address: Codec = { city: String, zip: String }
@@ -75,6 +75,51 @@ type Person: Codec = { name: String, address: Address }
 fn Person.encode(p: Person) -> Value =
   Obj([("name", Str(p.name)), ("address", Address.encode(p.address))])
 ```
+
+### Nested types — decode (型ディスパッチ)
+
+auto-derive はフィールドの型を見て適切な decode 関数を選ぶ:
+
+```
+フィールド型       → 生成する decode コード
+──────────────    ──────────────────────
+String            value.as_string(v)?
+Int               value.as_int(v)?
+Float             value.as_float(v)?
+Bool              value.as_bool(v)?
+Named("Address")  Address.decode(v)?       ← Codec 保証チェック
+List[T]           value.as_arr(v)? |> list.map((x) => T.decode(x)?)
+Option[T]         field missing → none, Null → none, other → some(T.decode(v)?)
+```
+
+```almide
+type Team: Codec = { name: String, leader: Person, members: List[Person] }
+
+// auto-generated:
+fn Team.decode(v: Value) -> Result[Team, String] = match v {
+  Obj(fields) => {
+    let name = fields |> find("name") |> value.as_string?
+    let leader = fields |> find("leader") |> Person.decode?
+    let members = fields |> find("members") |> value.as_arr? |> list.map(Person.decode)?
+    ok(Team { name: name, leader: leader, members: members })
+  }
+  _ => err("expected object")
+}
+```
+
+### Codec 制約の検証
+
+`Team: Codec` を auto-derive するとき、フィールド型が Named(Person) なら `Person` も Codec を持つ必要がある。
+
+**検証タイミング**: `generate_auto_derives` (lowerer) で `type_conventions` を参照。
+
+```
+error: field 'leader' has type Person which does not derive Codec
+  --> app.almd:3
+  hint: Add `: Codec` to the type declaration: type Person: Codec = ...
+```
+
+trait も protocol も不要。auto-derive 生成時の静的チェックで保証。
 
 ### Variant types
 
