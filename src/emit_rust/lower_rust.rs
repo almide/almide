@@ -290,22 +290,23 @@ impl<'a> LowerCtx<'a> {
                 let name = crate::emit_common::sanitize(&self.vt.get(*var).name);
                 let var_ty = &self.vt.get(*var).ty;
                 let val = self.lower_expr(value);
+                // 型注釈が必要なケース: Rust の型推論が足りない場合
                 let is_map_new = matches!(&value.kind, IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. }
                     if module == "map" && func == "new" && args.is_empty());
-                // Check if this is a unit variant constructor of a generic enum
                 let is_generic_variant = matches!(&value.kind, IrExprKind::Call { args, .. } if args.is_empty())
                     && (matches!(&value.ty, Ty::Named(_, args) if !args.is_empty())
                         || matches!(var_ty, Ty::Named(_, args) if !args.is_empty()));
                 let needs_ty = matches!(&value.kind, IrExprKind::List { elements } if elements.is_empty())
-                    || matches!(&value.kind, IrExprKind::EmptyMap | IrExprKind::OptionNone)
+                    || matches!(&value.kind, IrExprKind::EmptyMap | IrExprKind::OptionNone | IrExprKind::OptionSome { .. })
                     || is_map_new || is_generic_variant
-                    || matches!(&value.kind, IrExprKind::OptionSome { .. })
                     || (matches!(&value.kind, IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. })
-                        && matches!(&value.ty, Ty::Result(_, _)));
-                // Use var's type (from annotation/inference) for let bindings, not the value's generic type
+                        && matches!(&value.ty, Ty::Result(_, _)))
+                    // Named 型の値で型引数がある場合（generic enum/struct）
+                    || matches!(var_ty, Ty::Named(_, args) if !args.is_empty());
                 let bind_ty = if var_ty.contains_unknown() { &value.ty } else { var_ty };
                 let has_unresolved = bind_ty.contains_unknown() || contains_typevar(bind_ty);
-                let ty_ann = if needs_ty && !has_unresolved { Some(self.lty(bind_ty)) } else { None };
+                let is_fn_ty = matches!(bind_ty, Ty::Fn { .. });
+                let ty_ann = if needs_ty && !has_unresolved && !is_fn_ty { Some(self.lty(bind_ty)) } else { None };
                 Stmt::Let { name, ty: ty_ann, mutable: matches!(mutability, Mutability::Var), value: val }
             }
             IrStmtKind::BindDestructure { pattern, value } => {
