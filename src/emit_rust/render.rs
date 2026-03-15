@@ -220,6 +220,8 @@ fn pat(o: &mut String, p: &Pattern) {
     }
 }
 
+pub fn render_type(o: &mut String, t: &Type) { ty(o, t); }
+
 fn ty(o: &mut String, t: &Type) {
     match t {
         Type::I64 => o.push_str("i64"),

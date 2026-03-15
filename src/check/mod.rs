@@ -64,7 +64,10 @@ impl Checker {
     }
 
     pub(crate) fn constrain(&mut self, expected: InferTy, actual: InferTy, context: impl Into<String>) {
-        self.constraints.push(Constraint { expected, actual, context: context.into() });
+        let ctx = context.into();
+        // Eagerly unify to propagate type info into lambda bodies
+        self.unify_infer(&expected, &actual);
+        self.constraints.push(Constraint { expected, actual, context: ctx });
     }
 
     pub fn set_source(&mut self, file: &str, text: &str) { self.source_file = Some(file.into()); self.source_text = Some(text.into()); }

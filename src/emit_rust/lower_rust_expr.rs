@@ -19,7 +19,11 @@ impl<'a> LowerCtx<'a> {
             IrExprKind::Var { id } => {
                 let info = self.vt.get(*id);
                 let var = Expr::Var(crate::emit_common::sanitize(&info.name));
-                if info.use_count > 1 && !is_copy(&info.ty) { Expr::Clone(Box::new(var)) } else { var }
+                // Skip clone if: single-use, Copy type, or borrow analysis says this param is borrowed
+                let is_borrowed_param = self.is_borrowed_param(*id);
+                if info.use_count > 1 && !is_copy(&info.ty) && !is_borrowed_param {
+                    Expr::Clone(Box::new(var))
+                } else { var }
             }
 
             IrExprKind::BinOp { op, left, right } => {
@@ -172,7 +176,27 @@ impl<'a> LowerCtx<'a> {
                 }
             }
 
-            IrExprKind::List { elements } => Expr::Vec(elements.iter().map(|e| self.lower_expr(e)).collect()),
+            IrExprKind::List { elements } => {
+                if elements.is_empty() {
+                    // Emit typed empty vec to avoid Rust type inference failure
+                    let inner_ty = match &e.ty {
+                        Ty::List(inner) if !matches!(inner.as_ref(), Ty::Unknown | Ty::TypeVar(_)) => {
+                            let rt = super::lower_types::lower_ty(inner);
+                            let mut s = String::new();
+                            super::render::render_type(&mut s, &rt);
+                            Some(s)
+                        }
+                        _ => None,
+                    };
+                    if let Some(ty_str) = inner_ty {
+                        Expr::Raw(format!("Vec::<{}>::new()", ty_str))
+                    } else {
+                        Expr::Vec(vec![]) // fallback: let Rust infer
+                    }
+                } else {
+                    Expr::Vec(elements.iter().map(|e| self.lower_expr(e)).collect())
+                }
+            }
             IrExprKind::MapLiteral { entries } => Expr::HashMap(entries.iter().map(|(k, v)| (self.lower_expr(k), self.lower_expr(v))).collect()),
             IrExprKind::EmptyMap => Expr::Raw("HashMap::new()".into()),
             IrExprKind::Tuple { elements } => Expr::Tuple(elements.iter().map(|e| self.lower_expr(e)).collect()),

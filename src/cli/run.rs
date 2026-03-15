@@ -1,9 +1,12 @@
 use std::process::Command;
-use crate::{compile, find_rustc};
+use crate::{compile, try_compile, find_rustc};
 use super::{hash64, incremental_cache_dir};
 
 pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool) -> i32 {
-    let rs_code = compile(file, no_check);
+    let rs_code = match try_compile(file, no_check) {
+        Ok(code) => code,
+        Err(_) => return 1,
+    };
 
     let tmp_dir = std::env::temp_dir().join("almide-run");
     if let Err(e) = std::fs::create_dir_all(&tmp_dir) {

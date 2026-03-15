@@ -123,7 +123,13 @@ impl Checker {
                 }
                 return InferTy::Concrete(Ty::Unit);
             }
-            "assert" | "assert_eq" | "assert_ne" => return InferTy::Concrete(Ty::Unit),
+            "assert" => return InferTy::Concrete(Ty::Unit),
+            "assert_eq" | "assert_ne" => {
+                if arg_tys.len() >= 2 {
+                    self.constrain(arg_tys[0].clone(), arg_tys[1].clone(), format!("call to {}()", name));
+                }
+                return InferTy::Concrete(Ty::Unit);
+            }
             _ => {}
         }
         match name {

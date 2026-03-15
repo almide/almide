@@ -78,7 +78,8 @@ pub fn lower(ir: &IrProgram) -> Program {
     let mut functions = Vec::new();
     let mut tests = Vec::new();
     for f in &ir.functions {
-        let ctx = LowerCtx { vt: &ir.var_table, ctors: &ctors, anon: &anon, named: &named, result_fns: &result_fns, in_effect: f.is_effect, auto_try: f.is_effect && !f.is_test };
+        let param_vars: Vec<VarId> = f.params.iter().map(|p| p.var).collect();
+        let ctx = LowerCtx { vt: &ir.var_table, ctors: &ctors, anon: &anon, named: &named, borrow_info: &borrow_info, current_fn: f.name.clone(), param_vars, result_fns: &result_fns, in_effect: f.is_effect, auto_try: f.is_effect && !f.is_test };
         let rf = ctx.lower_fn(f);
         if f.is_test { tests.push(rf); } else { functions.push(rf); }
     }
@@ -151,6 +152,9 @@ pub(super) struct LowerCtx<'a> {
     pub(super) ctors: &'a HashMap<String, String>,
     pub(super) anon: &'a HashMap<Vec<String>, String>,
     pub(super) named: &'a HashMap<Vec<String>, String>,
+    pub(super) borrow_info: &'a super::borrow::BorrowInfo,
+    pub(super) current_fn: String,
+    pub(super) param_vars: Vec<VarId>,
     /// Names of functions that return Result (effect fns + explicit Result returns)
     pub(super) result_fns: &'a std::collections::HashSet<String>,
     /// Whether we're currently inside an effect function (can call effect fns)
@@ -163,6 +167,15 @@ pub(super) struct LowerCtx<'a> {
 
 impl<'a> LowerCtx<'a> {
     pub(super) fn lty(&self, ty: &Ty) -> Type { lower_ty_with(self.anon, self.named, ty) }
+
+    /// Check if a VarId is a function parameter that borrow analysis marked as Borrow.
+    pub(super) fn is_borrowed_param(&self, var: VarId) -> bool {
+        if let Some(idx) = self.param_vars.iter().position(|v| *v == var) {
+            self.borrow_info.ownership(&self.current_fn, idx) == super::borrow::ParamOwnership::Borrow
+        } else {
+            false
+        }
+    }
 
     /// Check if an IR expression is a variable used only once (safe to move instead of clone).
     pub(super) fn is_single_use_var(&self, e: &IrExpr) -> bool {

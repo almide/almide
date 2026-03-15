@@ -163,17 +163,21 @@ fn parse_file(file: &str) -> (ast::Program, String, Vec<diagnostic::Diagnostic>)
 }
 
 fn compile(file: &str, no_check: bool) -> String {
-    compile_with_options(file, no_check, &emit_rust::EmitOptions::default(), None).0
+    try_compile(file, no_check).unwrap_or_else(|_| std::process::exit(1))
 }
 
-fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::EmitOptions, build_target: Option<&str>) -> (String, Option<almide::ir::IrProgram>) {
+fn try_compile(file: &str, no_check: bool) -> Result<String, String> {
+    try_compile_with_options(file, no_check, &emit_rust::EmitOptions::default(), None).map(|(code, _)| code)
+}
+
+fn try_compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::EmitOptions, build_target: Option<&str>) -> Result<(String, Option<almide::ir::IrProgram>), String> {
     let (mut program, source_text, parse_errors) = parse_file(file);
     let has_parse_errors = !parse_errors.is_empty();
 
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
             project::fetch_all_deps(&proj)
-                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); })
+                .map_err(|e| { eprintln!("{}", e); e.to_string() })?
                 .into_iter()
                 .map(|fd| (fd.pkg_id, fd.source_dir))
                 .collect()
@@ -185,7 +189,7 @@ fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::Em
     };
 
     let mut resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
-        .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+        .map_err(|e| { eprintln!("{}", e); e.clone() })?;
 
     let import_aliases: Vec<(String, String)> = program.imports.iter().filter_map(|imp| {
         if let ast::Decl::Import { path, alias, .. } = imp {
@@ -239,7 +243,7 @@ fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::Em
                 eprintln!("{}", d.display_with_source(&source_text));
             }
             eprintln!("\n{} error(s) found", all_errors.len());
-            std::process::exit(1);
+            return Err(format!("{} error(s) found", all_errors.len()));
         }
         for d in diagnostics.iter().filter(|d| d.level == diagnostic::Level::Warning) {
             eprintln!("{}", d.display_with_source(&source_text));
@@ -281,7 +285,12 @@ fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::Em
 
     let ir = ir_program.as_ref().expect("IR required for codegen");
     let code = emit_rust::emit_with_options(ir, emit_options, &import_aliases, &module_irs);
-    (code, ir_program)
+    Ok((code, ir_program))
+}
+
+fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::EmitOptions, build_target: Option<&str>) -> (String, Option<almide::ir::IrProgram>) {
+    try_compile_with_options(file, no_check, emit_options, build_target)
+        .unwrap_or_else(|_| std::process::exit(1))
 }
 
 fn collect_almd_files(dir: &std::path::Path, out: &mut Vec<String>) {
