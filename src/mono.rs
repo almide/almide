@@ -63,8 +63,9 @@ pub fn monomorphize(program: &mut IrProgram) {
     }
 
     // 元の generic/open-record 関数を削除（specialized 版が代わりに使われる）
-    let mono_fn_names: std::collections::HashSet<&str> = bound_fns.keys().map(|s| s.as_str()).collect();
-    program.functions.retain(|f| !mono_fn_names.contains(f.name.as_str()));
+    // instance が見つかった関数のみ削除
+    let mono_fn_names: std::collections::HashSet<String> = all_instances.keys().map(|(name, _)| name.clone()).collect();
+    program.functions.retain(|f| !mono_fn_names.contains(&f.name));
 }
 
 /// Info about a structurally-bounded type parameter in a function.
