@@ -151,6 +151,10 @@ pub fn lower(ir: &IrProgram) -> Program {
     rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/string.rs")));
     rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/list.rs")));
     rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/map.rs")));
+    rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/result.rs")));
+    rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/option.rs")));
+    rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/error.rs")));
+    rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/testing.rs")));
     rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/value.rs")));
     rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/env.rs")));
     rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/process.rs")));

@@ -249,7 +249,16 @@ impl<'a> LowerCtx<'a> {
                 else { Expr::Clone(Box::new(field_expr)) }
             }
             IrExprKind::TupleIndex { object, index } => Expr::TupleIdx(Box::new(self.lower_expr(object)), *index),
-            IrExprKind::IndexAccess { object, index } => Expr::Index(Box::new(self.lower_expr(object)), Box::new(self.lower_expr(index))),
+            IrExprKind::IndexAccess { object, index } => {
+                if matches!(&object.ty, Ty::Map(_, _)) {
+                    // Map index: m[k] → m.get(&k).cloned()
+                    let obj = self.lower_expr(object);
+                    let idx = self.lower_expr(index);
+                    Expr::Raw(format!("{}.get(&{}).cloned()", super::render::expr_str(&obj), super::render::expr_str(&idx)))
+                } else {
+                    Expr::Index(Box::new(self.lower_expr(object)), Box::new(self.lower_expr(index)))
+                }
+            }
             IrExprKind::Lambda { params, body } => Expr::Closure {
                 params: params.iter().map(|(var, _)| self.vt.get(*var).name.clone()).collect(),
                 body: Box::new(self.lower_expr(body)),
