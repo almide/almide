@@ -16,8 +16,8 @@ pub fn almide_rt_int_clamp(n: i64, lo: i64, hi: i64) -> i64 { n.clamp(lo, hi) }
 pub fn almide_rt_int_to_float(n: i64) -> f64 { n as f64 }
 pub fn almide_rt_int_to_hex(n: i64) -> String { format!("{:x}", n) }
 pub fn almide_rt_int_to_u(n: i64) -> i64 { n.unsigned_abs() as i64 }
-pub fn almide_rt_int_parse(s: String) -> Result<i64, String> { s.trim().parse::<i64>().map_err(|e| e.to_string()) }
-pub fn almide_rt_int_parse_hex(s: String) -> Result<i64, String> { i64::from_str_radix(s.trim().trim_start_matches("0x"), 16).map_err(|e| e.to_string()) }
+pub fn almide_rt_int_parse(s: &str) -> Result<i64, String> { s.trim().parse::<i64>().map_err(|e| e.to_string()) }
+pub fn almide_rt_int_parse_hex(s: &str) -> Result<i64, String> { i64::from_str_radix(s.trim().trim_start_matches("0x"), 16).map_err(|e| e.to_string()) }
 pub fn almide_rt_int_band(a: i64, b: i64) -> i64 { a & b }
 pub fn almide_rt_int_bor(a: i64, b: i64) -> i64 { a | b }
 pub fn almide_rt_int_bxor(a: i64, b: i64) -> i64 { a ^ b }

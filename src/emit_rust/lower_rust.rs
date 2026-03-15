@@ -319,10 +319,22 @@ impl<'a> LowerCtx<'a> {
             IrStmtKind::Assign { var, value } => Stmt::Assign {
                 target: crate::emit_common::sanitize(&self.vt.get(*var).name), value: self.lower_expr(value),
             },
-            IrStmtKind::IndexAssign { target, index, value } => Stmt::IndexAssign {
-                target: crate::emit_common::sanitize(&self.vt.get(*target).name),
-                index: self.lower_expr(index), value: self.lower_expr(value),
-            },
+            IrStmtKind::IndexAssign { target, index, value } => {
+                let target_name = crate::emit_common::sanitize(&self.vt.get(*target).name);
+                let target_ty = &self.vt.get(*target).ty;
+                if matches!(target_ty, Ty::Map(_, _)) {
+                    // Map index assign: m[k] = v → m.insert(k, v)
+                    let idx = self.lower_expr(index);
+                    let val = self.lower_expr(value);
+                    Stmt::Expr(Expr::Raw(format!("{}.insert({}, {});",
+                        target_name, super::render::expr_str(&idx), super::render::expr_str(&val))))
+                } else {
+                    Stmt::IndexAssign {
+                        target: target_name,
+                        index: self.lower_expr(index), value: self.lower_expr(value),
+                    }
+                }
+            }
             IrStmtKind::FieldAssign { target, field, value } => Stmt::FieldAssign {
                 target: crate::emit_common::sanitize(&self.vt.get(*target).name),
                 field: field.clone(), value: self.lower_expr(value),

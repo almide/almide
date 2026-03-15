@@ -22,8 +22,8 @@ pub fn almide_rt_float_to_int(n: f64) -> i64 { n as i64 }
 pub fn almide_rt_float_from_int(n: i64) -> f64 { n as f64 }
 pub fn almide_rt_float_to_fixed(n: f64, decimals: i64) -> String { format!("{:.1$}", n, decimals as usize) }
 
-// math module functions (delegated to float operations)
-pub fn almide_rt_math_abs(x: f64) -> f64 { x.abs() }
+// math module functions
+pub fn almide_rt_math_abs(x: i64) -> i64 { x.abs() }
 pub fn almide_rt_math_ceil(x: f64) -> f64 { x.ceil() }
 pub fn almide_rt_math_floor(x: f64) -> f64 { x.floor() }
 pub fn almide_rt_math_round(x: f64) -> f64 { x.round() }
