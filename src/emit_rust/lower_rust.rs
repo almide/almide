@@ -419,6 +419,28 @@ impl<'a> LowerCtx<'a> {
             "assert_eq" => Expr::Macro { name: "assert_eq".into(), args },
             "assert_ne" => Expr::Macro { name: "assert_ne".into(), args },
             "assert" => Expr::Macro { name: "assert".into(), args },
+            _ if name.starts_with("__encode_list_") || name.starts_with("__decode_list_") => {
+                let is_encode = name.starts_with("__encode_list_");
+                let type_suffix = if is_encode { &name["__encode_list_".len()..] } else { &name["__decode_list_".len()..] };
+                // Primitives have direct runtime helpers
+                match type_suffix {
+                    "string" | "int" | "float" | "bool" => {
+                        Expr::Call { func: crate::emit_common::sanitize(name), args }
+                    }
+                    // Named types: pass Type_encode/decode as function argument
+                    _ => {
+                        let func_ref = if is_encode {
+                            format!("{}_encode", crate::emit_common::sanitize(type_suffix))
+                        } else {
+                            format!("{}_decode", crate::emit_common::sanitize(type_suffix))
+                        };
+                        let rt_func = if is_encode { "value_encode_list" } else { "value_decode_list" };
+                        let mut all_args = args;
+                        all_args.push(Expr::Var(func_ref));
+                        Expr::Call { func: rt_func.into(), args: all_args }
+                    }
+                }
+            }
             _ => {
                 let call = if let Some(enum_name) = self.ctors.get(name) {
                     if args.is_empty() { return Expr::Var(format!("{}::{}", enum_name, name)); }

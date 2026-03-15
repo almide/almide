@@ -78,6 +78,23 @@ fn value_decode_with_default<T: Clone, F: Fn(Value) -> Result<T, String>>(v: &Va
     }
 }
 
+// Concrete encode_list helpers
+fn __encode_list_string(items: Vec<String>) -> Value { value_encode_list(items, value_str) }
+fn __encode_list_int(items: Vec<i64>) -> Value { value_encode_list(items, value_int) }
+fn __encode_list_float(items: Vec<f64>) -> Value { value_encode_list(items, value_float) }
+fn __encode_list_bool(items: Vec<bool>) -> Value { value_encode_list(items, value_bool) }
+
+// Concrete decode_list helpers
+fn __decode_list_string(v: Value) -> Result<Vec<String>, String> { value_decode_list(v, value_as_string) }
+fn __decode_list_int(v: Value) -> Result<Vec<i64>, String> { value_decode_list(v, value_as_int) }
+fn __decode_list_float(v: Value) -> Result<Vec<f64>, String> { value_decode_list(v, value_as_float) }
+fn __decode_list_bool(v: Value) -> Result<Vec<bool>, String> { value_decode_list(v, value_as_bool) }
+
+// Generic Named-type list encode/decode (generated per type by codegen via naming convention)
+// __encode_list_Weather(items) calls Weather_encode on each element
+// __decode_list_Weather(v) calls Weather_decode on each element
+// These are generated dynamically by codegen when needed
+
 // Concrete encode_option helpers
 fn __encode_option_string(v: Option<String>) -> Value { value_option_encode(v, value_str) }
 fn __encode_option_int(v: Option<i64>) -> Value { value_option_encode(v, value_int) }
