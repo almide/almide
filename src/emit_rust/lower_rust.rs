@@ -52,14 +52,23 @@ pub fn lower(ir: &IrProgram) -> Program {
     }
     let enums: Vec<EnumDef> = ir.type_decls.iter().filter_map(|td| {
         if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
+            let enum_name = &td.name;
+            // 自己参照フィールドを Box で包む関数
+            let box_if_recursive = |ty: &Ty| -> Type {
+                if ty_contains_name(ty, enum_name) {
+                    Type::Generic("Box".into(), vec![lty(ty)])
+                } else {
+                    lty(ty)
+                }
+            };
             Some(EnumDef {
                 name: td.name.clone(),
                 variants: cases.iter().map(|c| Variant {
                     name: c.name.clone(),
                     kind: match &c.kind {
                         IrVariantKind::Unit => VariantKind::Unit,
-                        IrVariantKind::Tuple { fields } => VariantKind::Tuple(fields.iter().map(&lty).collect()),
-                        IrVariantKind::Record { fields } => VariantKind::Struct(fields.iter().map(|f| (f.name.clone(), lty(&f.ty))).collect()),
+                        IrVariantKind::Tuple { fields } => VariantKind::Tuple(fields.iter().map(|f| box_if_recursive(f)).collect()),
+                        IrVariantKind::Record { fields } => VariantKind::Struct(fields.iter().map(|f| (f.name.clone(), box_if_recursive(&f.ty))).collect()),
                     },
                 }).collect(),
                 generics: td.generics.as_ref().map(|gs| gs.iter()
@@ -403,6 +412,17 @@ impl<'a> LowerCtx<'a> {
             IrPattern::Ok { inner } => Pattern::Ctor { name: "Ok".into(), args: vec![self.lower_pat(inner)] },
             IrPattern::Err { inner } => Pattern::Ctor { name: "Err".into(), args: vec![self.lower_pat(inner)] },
         }
+    }
+}
+
+/// 型が特定の名前の Named 型を**直接**含むか（再帰型検出用）
+/// List/Option/Map の中は間接参照なので Box 不要 → 無視
+pub(super) fn ty_contains_name(ty: &Ty, name: &str) -> bool {
+    match ty {
+        Ty::Named(n, args) => n == name || args.iter().any(|a| ty_contains_name(a, name)),
+        Ty::Tuple(ts) => ts.iter().any(|t| ty_contains_name(t, name)),
+        // List, Option, Map, Result は既に heap 上の indirection なので再帰とみなさない
+        _ => false,
     }
 }
 

@@ -366,7 +366,9 @@ impl<'a> LowerCtx<'a> {
             _ => {
                 let call = if let Some(enum_name) = self.ctors.get(name) {
                     if args.is_empty() { return Expr::Var(format!("{}::{}", enum_name, name)); }
-                    Expr::Call { func: format!("{}::{}", enum_name, name), args }
+                    // 再帰型コンストラクタ: 自己参照する引数を Box::new() で包む
+                    let boxed_args = self.box_recursive_args(enum_name, name, args);
+                    Expr::Call { func: format!("{}::{}", enum_name, name), args: boxed_args }
                 } else {
                     let func_name = crate::emit_common::sanitize(name);
                     // Runtime helper functions get almide_rt_ prefix
@@ -385,6 +387,28 @@ impl<'a> LowerCtx<'a> {
                 }
             }
         }
+    }
+
+    /// 再帰型コンストラクタの引数を Box::new() で包む
+    fn box_recursive_args(&self, enum_name: &str, ctor_name: &str, args: Vec<Expr>) -> Vec<Expr> {
+        // IR の型定義からコンストラクタのフィールド型を取得
+        if let Some(td) = self.type_decls.iter().find(|td| td.name == enum_name) {
+            if let almide::ir::IrTypeDeclKind::Variant { cases, .. } = &td.kind {
+                if let Some(case) = cases.iter().find(|c| c.name == ctor_name) {
+                    if let almide::ir::IrVariantKind::Tuple { fields } = &case.kind {
+                        return args.into_iter().enumerate().map(|(i, arg)| {
+                            if let Some(field_ty) = fields.get(i) {
+                                if super::lower_rust::ty_contains_name(field_ty, enum_name) {
+                                    return Expr::Call { func: "Box::new".into(), args: vec![arg] };
+                                }
+                            }
+                            arg
+                        }).collect();
+                    }
+                }
+            }
+        }
+        args
     }
 
     /// Lower a stdlib module call using the generated dispatch templates.
