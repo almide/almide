@@ -276,12 +276,19 @@ impl<'a> LowerCtx<'a> {
         match &s.kind {
             IrStmtKind::Bind { var, mutability, value, .. } => {
                 let name = crate::emit_common::sanitize(&self.vt.get(*var).name);
+                let var_ty = &self.vt.get(*var).ty;
                 let val = self.lower_expr(value);
+                let is_map_new = matches!(&value.kind, IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. }
+                    if module == "map" && func == "new" && args.is_empty());
                 let needs_ty = matches!(&value.kind, IrExprKind::List { elements } if elements.is_empty())
                     || matches!(&value.kind, IrExprKind::EmptyMap | IrExprKind::OptionNone)
+                    || is_map_new
                     || (matches!(&value.kind, IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. })
                         && matches!(&value.ty, Ty::Result(_, _)) && !value.ty.contains_unknown());
-                let ty_ann = if needs_ty { Some(self.lty(&value.ty)) } else { None };
+                // Use var's type (from annotation/inference) for let bindings, not the value's generic type
+                let bind_ty = if var_ty.contains_unknown() { &value.ty } else { var_ty };
+                let has_unresolved = bind_ty.contains_unknown() || contains_typevar(bind_ty);
+                let ty_ann = if needs_ty && !has_unresolved { Some(self.lty(bind_ty)) } else { None };
                 Stmt::Let { name, ty: ty_ann, mutable: matches!(mutability, Mutability::Var), value: val }
             }
             IrStmtKind::BindDestructure { pattern, value } => Stmt::LetPattern {
@@ -341,6 +348,17 @@ impl<'a> LowerCtx<'a> {
             IrPattern::Ok { inner } => Pattern::Ctor { name: "Ok".into(), args: vec![self.lower_pat(inner)] },
             IrPattern::Err { inner } => Pattern::Ctor { name: "Err".into(), args: vec![self.lower_pat(inner)] },
         }
+    }
+}
+
+fn contains_typevar(ty: &Ty) -> bool {
+    match ty {
+        Ty::TypeVar(_) => true,
+        Ty::List(inner) | Ty::Option(inner) => contains_typevar(inner),
+        Ty::Result(a, b) | Ty::Map(a, b) => contains_typevar(a) || contains_typevar(b),
+        Ty::Tuple(ts) => ts.iter().any(contains_typevar),
+        Ty::Fn { params, ret } => params.iter().any(contains_typevar) || contains_typevar(ret),
+        _ => false,
     }
 }
 

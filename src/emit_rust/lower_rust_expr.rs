@@ -219,7 +219,21 @@ impl<'a> LowerCtx<'a> {
                 }
             }
             IrExprKind::MapLiteral { entries } => Expr::HashMap(entries.iter().map(|(k, v)| (self.lower_expr(k), self.lower_expr(v))).collect()),
-            IrExprKind::EmptyMap => Expr::Raw("HashMap::new()".into()),
+            IrExprKind::EmptyMap => {
+                if let Ty::Map(k, v) = &e.ty {
+                    if !matches!(k.as_ref(), Ty::Unknown | Ty::TypeVar(_)) {
+                        let mut ks = String::new();
+                        let mut vs = String::new();
+                        super::render::render_type(&mut ks, &self.lty(k));
+                        super::render::render_type(&mut vs, &self.lty(v));
+                        Expr::Raw(format!("HashMap::<{}, {}>::new()", ks, vs))
+                    } else {
+                        Expr::Raw("HashMap::new()".into())
+                    }
+                } else {
+                    Expr::Raw("HashMap::new()".into())
+                }
+            }
             IrExprKind::Tuple { elements } => Expr::Tuple(elements.iter().map(|e| self.lower_expr(e)).collect()),
             IrExprKind::Record { name, fields } => {
                 let sname = name.as_ref().map(|n| self.ctors.get(n).map(|e| format!("{}::{}", e, n)).unwrap_or(n.clone())).unwrap_or_else(|| {
@@ -282,7 +296,18 @@ impl<'a> LowerCtx<'a> {
             "eprintln" => Expr::Macro { name: "eprintln".into(), args: vec![Expr::Raw("\"{}\"".into()), args.into_iter().next().unwrap_or(Expr::Unit)] },
             "assert_eq" => Expr::Macro { name: "assert_eq".into(), args },
             "assert_ne" => Expr::Macro { name: "assert_ne".into(), args },
-            "assert" => Expr::Macro { name: "assert".into(), args },
+            "assert" => {
+                if args.len() >= 2 {
+                    // assert(cond, msg) → assert!(cond, "{}", msg)
+                    let mut a = args;
+                    let msg = a.remove(1);
+                    a.insert(1, Expr::Raw("\"{}\"".into()));
+                    a.insert(2, msg);
+                    Expr::Macro { name: "assert".into(), args: a }
+                } else {
+                    Expr::Macro { name: "assert".into(), args }
+                }
+            }
             _ if name.starts_with("__encode_list_") || name.starts_with("__decode_list_") => {
                 let is_encode = name.starts_with("__encode_list_");
                 let type_suffix = if is_encode { &name["__encode_list_".len()..] } else { &name["__decode_list_".len()..] };
