@@ -2,7 +2,10 @@
 // No import statements in this file — all module calls use prelude.
 
 test "int.parse works without import" {
-  assert_eq(int.parse("42"), ok(42))
+  match int.parse("42") {
+    ok(v) => assert_eq(v, 42),
+    err(_) => assert(false, "expected ok"),
+  }
 }
 
 test "string.trim works without import" {
@@ -29,5 +32,8 @@ test "float.round works without import" {
 test "result.map works without import" {
   let r: Result[Int, String] = ok(42)
   let mapped = result.map(r, (x) => x * 2)
-  assert_eq(mapped, ok(84))
+  match mapped {
+    ok(v) => assert_eq(v, 84),
+    err(_) => assert(false, "expected ok"),
+  }
 }

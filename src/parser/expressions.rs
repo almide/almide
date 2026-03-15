@@ -170,7 +170,7 @@ impl Parser {
     }
 
     fn parse_mul_div(&mut self) -> Result<Expr, String> {
-        let mut left = self.parse_unary()?;
+        let mut left = self.parse_power()?;
         while self.check(TokenType::Star) || self.check(TokenType::Slash)
             || self.check(TokenType::Percent) || self.check(TokenType::Caret)
         {
@@ -178,9 +178,25 @@ impl Parser {
             let op = self.current().value.clone();
             self.advance();
             self.skip_newlines();
-            let right = self.parse_unary()?;
+            let right = self.parse_power()?;
             left = Expr::Binary {
                 op, left: Box::new(left), right: Box::new(right),
+                id: self.next_id(), span, resolved_type: None,
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_power(&mut self) -> Result<Expr, String> {
+        let mut left = self.parse_unary()?;
+        // ** is right-associative
+        if self.check(TokenType::StarStar) {
+            let span = Some(self.current_span());
+            self.advance();
+            self.skip_newlines();
+            let right = self.parse_power()?;
+            left = Expr::Binary {
+                op: "**".to_string(), left: Box::new(left), right: Box::new(right),
                 id: self.next_id(), span, resolved_type: None,
             };
         }

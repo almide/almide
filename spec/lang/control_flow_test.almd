@@ -223,12 +223,14 @@ effect fn find_first_negative(xs: List[Int]) -> Result[Int, String] = {
 
 test "do guard else ok with int value" {
   let result = find_first_negative([1, 2, -3, 4])
-  assert_eq(result, ok(-3))
+  assert_eq(result, -3)
 }
 
 test "do guard else err when not found" {
-  let result = find_first_negative([1, 2, 3])
-  assert_eq(result, err("no negative found"))
+  match find_first_negative([1, 2, 3]) {
+    ok(_) => assert(false, "expected err"),
+    err(e) => assert_eq(e, "no negative found"),
+  }
 }
 
 effect fn count_until(limit: Int) -> Result[Int, String] = {

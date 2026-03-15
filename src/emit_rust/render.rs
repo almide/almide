@@ -18,10 +18,24 @@ pub fn program(p: &Program) -> String {
     if !p.runtime.is_empty() { o.push_str(&p.runtime); o.push('\n'); }
     for s in &p.structs { struct_def(&mut o, s, 0); o.push('\n'); }
     for e in &p.enums { enum_def(&mut o, e, 0); o.push('\n'); }
+    for tl in &p.top_lets { top_let(&mut o, tl); o.push('\n'); }
     for f in &p.functions { function(&mut o, f, 0); o.push('\n'); }
     for f in &p.tests { function(&mut o, f, 0); o.push('\n'); }
     if let Some(m) = &p.main { function(&mut o, m, 0); o.push('\n'); }
     o
+}
+
+fn top_let(o: &mut String, tl: &TopLet) {
+    if tl.is_const {
+        // Simple literal: emit as const
+        o.push_str("const "); o.push_str(&tl.name); o.push_str(": "); ty(o, &tl.ty);
+        o.push_str(" = "); expr(o, &tl.value, 0); o.push_str(";\n");
+    } else {
+        // Computed value: emit as LazyLock static
+        o.push_str("static "); o.push_str(&tl.name);
+        o.push_str(": std::sync::LazyLock<"); ty(o, &tl.ty); o.push_str(">");
+        o.push_str(" = std::sync::LazyLock::new(|| "); expr(o, &tl.value, 0); o.push_str(");\n");
+    }
 }
 
 fn function(o: &mut String, f: &Function, d: usize) {

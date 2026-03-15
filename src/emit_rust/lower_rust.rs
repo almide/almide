@@ -74,6 +74,16 @@ pub fn lower(ir: &IrProgram) -> Program {
         .map(|f| f.name.clone())
         .collect();
 
+    // Top-level lets
+    let top_lets_ctx = LowerCtx { vt: &ir.var_table, ctors: &ctors, anon: &anon, named: &named, borrow_info: &borrow_info, current_fn: String::new(), param_vars: vec![], result_fns: &result_fns, in_effect: false, auto_try: false };
+    let top_lets: Vec<TopLet> = ir.top_lets.iter().map(|tl| {
+        let name = ir.var_table.get(tl.var).name.clone();
+        let ty = lower_ty_with(&anon, &named, &tl.ty);
+        let value = top_lets_ctx.lower_expr(&tl.value);
+        let is_const = matches!(tl.kind, almide::ir::TopLetKind::Const);
+        TopLet { name, ty, value, is_const }
+    }).collect();
+
     // Functions
     let mut functions = Vec::new();
     let mut tests = Vec::new();
@@ -141,7 +151,7 @@ pub fn lower(ir: &IrProgram) -> Program {
 
     Program {
         prelude: vec!["#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use)]".into()],
-        structs, enums, functions, tests, main, runtime: rt,
+        structs, enums, top_lets, functions, tests, main, runtime: rt,
     }
 }
 

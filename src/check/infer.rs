@@ -35,6 +35,12 @@ impl Checker {
                 self.env.used_vars.insert(name.clone());
                 if let Some(ty) = self.env.lookup_var(name).cloned() { InferTy::from_ty(&ty) }
                 else if let Some(ty) = self.env.top_lets.get(name).cloned() { InferTy::from_ty(&ty) }
+                else if let Some(sig) = self.env.functions.get(name).cloned() {
+                    InferTy::Fn {
+                        params: sig.params.iter().map(|(_, t)| InferTy::from_ty(t)).collect(),
+                        ret: Box::new(InferTy::from_ty(&sig.ret)),
+                    }
+                }
                 else {
                     self.diagnostics.push(super::err(format!("undefined variable '{}'", name), "Check the variable name", format!("variable {}", name)));
                     InferTy::Concrete(Ty::Unknown)
@@ -238,7 +244,35 @@ impl Checker {
                             }
                         }
                     }
-                    _ => self.infer_expr(right),
+                    // Pipe RHS is a bare function name (e.g. `5 |> double`)
+                    ast::Expr::Ident { name, .. } => {
+                        let all_arg_tys = vec![left_ty];
+                        self.check_named_call(name, &all_arg_tys)
+                    }
+                    // Pipe RHS is a module-qualified function (e.g. `5 |> int.abs`)
+                    ast::Expr::Member { object, field, .. } => {
+                        let all_arg_tys = vec![left_ty];
+                        if let ast::Expr::Ident { name: module, .. } = object.as_ref() {
+                            if crate::stdlib::is_stdlib_module(module) || self.env.user_modules.contains(module.as_str()) {
+                                let key = format!("{}.{}", module, field);
+                                return self.check_named_call(&key, &all_arg_tys);
+                            }
+                            if let Some(target) = self.env.module_aliases.get(module.as_str()).cloned() {
+                                let key = format!("{}.{}", target, field);
+                                return self.check_named_call(&key, &all_arg_tys);
+                            }
+                        }
+                        let ct = self.infer_expr(right);
+                        let ret = self.fresh_var();
+                        self.constrain(ct, super::types::InferTy::Fn { params: all_arg_tys, ret: Box::new(ret.clone()) }, "pipe call");
+                        ret
+                    }
+                    _ => {
+                        let rt = self.infer_expr(right);
+                        let ret = self.fresh_var();
+                        self.constrain(rt, super::types::InferTy::Fn { params: vec![left_ty], ret: Box::new(ret.clone()) }, "pipe call");
+                        ret
+                    }
                 }
             }
 

@@ -37,7 +37,7 @@ pub enum TokenType {
     BangEq,    // !=
     LtEq,      // <=
     GtEq,      // >=
-    Plus, Minus, Star, Slash, Percent,
+    Plus, Minus, Star, StarStar, Slash, Percent,
     PlusPlus,  // ++
     Pipe,      // |
     PipeArrow, // |>
@@ -430,6 +430,7 @@ fn lex_operator(chars: &[char], pos: usize, line: usize, col: usize) -> (Token, 
         ('>', _, _) => (TokenType::RAngle, ">", 1),
         ('+', _, _) => (TokenType::Plus, "+", 1),
         ('-', _, _) => (TokenType::Minus, "-", 1),
+        ('*', Some('*'), _) => (TokenType::StarStar, "**", 2),
         ('*', _, _) => (TokenType::Star, "*", 1),
         ('/', _, _) => (TokenType::Slash, "/", 1),
         ('%', _, _) => (TokenType::Percent, "%", 1),

@@ -142,7 +142,7 @@ test "comparison on type variable" {
 type Point = { x: Float, y: Float }
 
 fn distance(a: Point, b: Point) -> Float =
-  float.sqrt((b.x - a.x) ^ 2.0 + (b.y - a.y) ^ 2.0)
+  float.sqrt(math.fpow(b.x - a.x, 2.0) + math.fpow(b.y - a.y, 2.0))
 
 test "named record type" {
   let p: Point = { x: 0.0, y: 0.0 }
@@ -221,10 +221,16 @@ fn map_result[A, B](r: Result[A, String], f: (A) -> B) -> Result[B, String] =
 test "generic result mapping" {
   let r: Result[Int, String] = ok(5)
   let mapped = map_result(r, (x) => x * 2)
-  assert_eq(mapped, ok(10))
+  match mapped {
+    ok(v) => assert_eq(v, 10),
+    err(_) => assert(false, "expected ok"),
+  }
   let e: Result[Int, String] = err("fail")
   let mapped2 = map_result(e, (x) => x * 2)
-  assert_eq(mapped2, err("fail"))
+  match mapped2 {
+    ok(_) => assert(false, "expected err"),
+    err(msg) => assert_eq(msg, "fail"),
+  }
 }
 
 type Tree[T] =
@@ -325,9 +331,9 @@ test "generic function with list param" {
 fn const_fn[A, B](a: A, _b: B) -> A = a
 
 test "generic function ignoring param" {
-  assert_eq(const_(42, "ignored"), 42)
-  assert_eq(const_("kept", 999), "kept")
-  assert_eq(const_(true, [1, 2, 3]), true)
+  assert_eq(const_fn(42, "ignored"), 42)
+  assert_eq(const_fn("kept", 999), "kept")
+  assert_eq(const_fn(true, [1, 2, 3]), true)
 }
 
 test "stack push and peek multiple" {
