@@ -1,69 +1,117 @@
-# Open Record / Structural Typing
+# Open Record / Row Polymorphism — 実装ガイド
 
-**Test:** `spec/lang/open_record_test.almd`
-**Status:** 16 rustc errors, 0 checker errors
+**テスト:** `spec/lang/open_record_test.almd`
+**ステータス:** 16 rustc エラー, 0 checker エラー
+**理論:** Rémy 1989 Row Polymorphism
 
-## Current State
+## 現状のアーキテクチャ
 
+```
+チェッカー (src/check/)     → OpenRecord は compatible チェックで通る ✅
+monomorphizer (src/mono.rs) → generic + structural bound のみ対応 ⚠️
+codegen (src/emit_rust/)    → OpenRecord / TypeVar("Named") が Rust 型に変換できない ❌
+```
+
+## テストが要求する2パターン
+
+### パターン A: 直接 OpenRecord パラメータ
 ```almide
-fn greet(who: { name: String, .. }) -> String = "hello ${who.name}"
+fn greet(who: { name: String, .. }) -> String = "Hello, ${who.name}!"
+greet(Dog { name: "Rex", breed: "Lab" })  // Dog は name を持つ
 ```
+**monomorphizer が認識しない** — generic がないから。
 
-Generates:
+### パターン B: Generic + Structural Bound
+```almide
+fn describe[T: { name: String, .. }](x: T) -> String = "name: ${x.name}"
+describe(Dog { name: "Rex", breed: "Lab" })
+```
+**monomorphizer が対応済み** — `src/mono.rs` で specialization される。
+
+## 修正するファイル
+
+### 1. `src/mono.rs` — find_structurally_bounded_fns を拡張
 
 ```rust
-pub fn greet_named(who: Named) -> String {  // error: cannot find type Named
-```
+// 現状: generic + structural bound のみ検出
+fn find_structurally_bounded_fns(functions: &[IrFunction]) -> HashMap<String, Vec<BoundedParam>> {
+    for func in functions {
+        if let Some(ref generics) = func.generics {
+            // structural_bound がある generic param を検出
+        }
+    }
+}
 
-## What's Broken
-
-Open records (`{ name: String, .. }`) use structural subtyping — any record with at least the specified fields is accepted. The codegen emits `Named` as the Rust type, which doesn't exist. Rust has no structural typing.
-
-## Why It Happens
-
-- The IR function param type is `Ty::TypeVar("Named")` (from generic structural bound) or `Ty::OpenRecord { fields: [...] }`
-- `lower_ty` converts `TypeVar("Named")` → `Type::Named("Named")` which doesn't exist as a Rust struct
-- Open record structural typing has no direct Rust equivalent
-- The monomorphizer (`src/mono.rs`) already handles row-polymorphic functions but doesn't fully specialize open record params
-
-## Expected Result
-
-Two possible approaches:
-
-### A. Monomorphization (simpler)
-
-For each call to a function with open record params, create a specialized version:
-
-```rust
-// greet({ name: "Alice", age: 30 }) → specialized version
-pub fn greet_AlmdRec0(who: AlmdRec0) -> String {
-    format!("hello {}", who.name)
+// 修正: 直接 OpenRecord パラメータも検出
+fn find_open_record_fns(functions: &[IrFunction]) -> HashMap<String, Vec<OpenRecordParam>> {
+    for func in functions {
+        for (i, param) in func.params.iter().enumerate() {
+            if matches!(&param.ty, Ty::OpenRecord { .. }) {
+                // この関数は monomorphization 対象
+            }
+        }
+    }
 }
 ```
 
-### B. Trait-based (idiomatic Rust)
+### 2. `src/mono.rs` — discover_instances を拡張
+
+Call site で渡される具体型を収集:
 
 ```rust
-trait HasName { fn name(&self) -> String; }
-impl HasName for Person { fn name(&self) -> String { self.name.clone() } }
-pub fn greet(who: &impl HasName) -> String {
-    format!("hello {}", who.name())
-}
+// greet(Dog { name: "Rex", breed: "Lab" })
+// → call target: "greet", args[0].ty = Named("Dog", [])
+// → instance: ("greet", "Dog") → { param_0 → Dog }
 ```
 
-## Proposed Fix
+IR の Call ノードを走査し、target が open record fn で args の型が Named なら instance を登録。
 
-**Approach A** — fix the existing monomorphizer:
+### 3. `src/mono.rs` — specialize_function を拡張
 
-The monomorphizer (`src/mono.rs`) already exists and handles row-polymorphic functions. The issue is that:
-1. It doesn't generate specialized function copies for all call sites with open record args
-2. The call sites aren't rewritten to call the specialized versions
-3. Structural bounds from generics (`T: { name: String, .. }`) aren't resolved to concrete types
+Open record パラメータの型を具体型に置換:
 
-Steps:
-1. In `mono.rs`, when a function has `OpenRecord` or structural-bound params, collect all call sites
-2. For each unique concrete record type passed, generate a specialized function copy
-3. Rewrite call sites to use the specialized version
-4. Remove the original generic function
+```rust
+// greet(who: { name: String, .. }) → greet__Dog(who: Dog)
+// 関数 body 内の who.name は Dog::name に解決される
+```
 
-**Effort:** ~100 lines to fix the monomorphizer, or ~200 lines for the trait approach
+### 4. `src/mono.rs` — rewrite_calls を拡張
+
+Call site を specialized 版にリダイレクト:
+
+```rust
+// greet(dog) → greet__Dog(dog)
+```
+
+## アルゴリズムの核心 (Row Unification)
+
+```
+unify({ name: String, .. }, Dog)
+  ↓
+Dog を resolve → { name: String, breed: String }
+  ↓
+{ name: String | ρ } vs { name: String, breed: String | RowEmpty }
+  ↓
+共通: name: String ✓
+余り: breed: String → ρ に入る
+  ↓
+ρ = { breed: String }
+```
+
+これはチェッカーでは **既に動いてる** (compatible チェック)。codegen 側の monomorphization が足りないだけ。
+
+## 実装順序
+
+1. `find_open_record_fns()` — OpenRecord パラメータを持つ関数を検出
+2. `discover_instances()` — 各 call site の具体型を収集
+3. `specialize_function()` — OpenRecord → 具体型 に置換した関数コピーを生成
+4. `rewrite_calls()` — call site を specialized 版にリダイレクト
+5. codegen の `TypeVar("Named")` → resolved named type のフォールバック
+
+## テストの期待結果
+
+```
+spec/lang/open_record_test.almd: 16 tests pass
+```
+
+全 16 テストが Rust compilation を通過し、runtime assertion を満たすこと。
