@@ -9,3 +9,4 @@ codopsy-report.json
 _tmp_*
 .almide/cache/
 spec_*-*/
+tools/stdlib-crawler/data/

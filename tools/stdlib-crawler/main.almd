@@ -1,82 +1,335 @@
-// stdlib-crawler: Collect stdlib function encyclopedia from other languages.
+// stdlib-crawler: Collect and analyze stdlib APIs from other languages.
 //
 // Usage:
 //   almide run tools/stdlib-crawler/main.almd -- python --list
 //   almide run tools/stdlib-crawler/main.almd -- python datetime
+//   almide run tools/stdlib-crawler/main.almd -- python datetime --save
+//   almide run tools/stdlib-crawler/main.almd -- python --all
+//   almide run tools/stdlib-crawler/main.almd -- python --all --force
+//   almide run tools/stdlib-crawler/main.almd -- python --summary
+//   almide run tools/stdlib-crawler/main.almd -- python --verbs
 
-effect fn main() -> Unit = do {
+let DATA_DIR = "tools/stdlib-crawler/data/python"
+
+// ── Entry ──────────────────────────────────────────
+
+effect fn main() -> Unit = {
   let args = env.args()
-  guard list.len(args) >= 2 else err("Usage: stdlib-crawler <language> <module|--list>")
-
-  let language = args[0]
-  let command = args[1]
-
-  match language {
-    "python" =>
-      if command == "--list" then
-        python_list_modules()
-      else
-        python_collect_module(command)
-    _ => {
-      eprintln("Unsupported language: {language}")
+  let n = list.len(args)
+  if n < 2 then {
+    println("Usage: stdlib-crawler <language> <command>")
+    process.exit(1)
+  } else {
+    let language = args[0]
+    let command = args[1]
+    let flags = list.drop(args, 2)
+    if language != "python" then {
+      println("Unsupported language: ${language}")
       process.exit(1)
+    } else {
+      let force = list.contains(flags, "--force")
+      let save = list.contains(flags, "--save")
+      if command == "--list" then python_list_modules()
+      else if command == "--all" then python_crawl_all(force)
+      else if command == "--summary" then python_print_summary()
+      else if command == "--verbs" then python_verb_analysis()
+      else python_crawl_module(command, save)
     }
   }
 }
 
-// ── Python: list all stdlib modules ─────────────────
+// ── List all stdlib modules ────────────────────────
 
-effect fn python_list_modules() -> Unit = do {
-  let script = string.join([
-    "import sys, json",
-    "names = sorted(sys.stdlib_module_names - {'__main__', '__phello__', '_thread'})",
-    "names = [n for n in names if not n.startswith('_')]",
-    "for n in names: print(n)"
-  ], "\n")
+effect fn python_list_modules() -> Unit = {
+  let script = """
+    import sys
+    names = sorted(sys.stdlib_module_names - {'__main__', '__phello__', '_thread'})
+    names = [n for n in names if not n.startswith('_')]
+    print(len(names))
+    for n in names:
+        print(n)
+  """
   let output = process.exec("python3", ["-c", script])
-  let lines = string.split(output, "\n")
-  let count = list.len(list.filter(lines, (l) => string.len(l) > 0))
-  println("Python stdlib: ${int.to_string(count)} modules")
-  println(output)
+  println(string.trim(output))
 }
 
-// ── Python: collect a single module ─────────────────
+// ── Crawl single module ────────────────────────────
 
-effect fn python_collect_module(mod_name: String) -> Unit = do {
-  let script = string.join([
-    "import sys,json,inspect,importlib",
-    "mod_name=sys.argv[1]",
-    "try:",
-    "    mod=importlib.import_module(mod_name)",
-    "except ImportError as e:",
-    "    print(json.dumps({'language':'python','module':mod_name,'error':str(e)}))",
-    "    sys.exit(0)",
-    "functions=[]",
-    "classes=[]",
-    "for name,obj in inspect.getmembers(mod):",
-    "    if name.startswith('_'): continue",
-    "    if inspect.isfunction(obj) or inspect.isbuiltin(obj):",
-    "        try: sig=str(inspect.signature(obj))",
-    "        except: sig=''",
-    "        doc=(obj.__doc__ or '').strip().split(chr(10))[0][:200]",
-    "        functions.append({'name':name,'signature':sig,'description':doc})",
-    "    elif inspect.isclass(obj) and getattr(obj,'__module__','')==mod_name:",
-    "        methods=[]",
-    "        for mname,mobj in inspect.getmembers(obj):",
-    "            if mname.startswith('_') and mname!='__init__': continue",
-    "            if not callable(mobj): continue",
-    "            try: sig=str(inspect.signature(mobj))",
-    "            except: sig=''",
-    "            doc=(mobj.__doc__ or '').strip().split(chr(10))[0][:200]",
-    "            methods.append({'name':mname,'signature':sig,'description':doc})",
-    "        cdoc=(obj.__doc__ or '').strip().split(chr(10))[0][:200]",
-    "        classes.append({'name':name,'description':cdoc,'methods':methods})",
-    "mod_doc=(mod.__doc__ or '').strip().split(chr(10))[0][:200]",
-    "total=len(functions)+sum(len(c['methods']) for c in classes)",
-    "result={'language':'python','version':sys.version.split()[0],'module':mod_name,'description':mod_doc,'function_count':total,'functions':functions,'classes':classes}",
-    "print(json.dumps(result,ensure_ascii=False))"
-  ], "\n")
-  let output = process.exec("python3", ["-c", script, mod_name])
-  let parsed = json.parse(output)
-  println(json.stringify(parsed))
+effect fn python_crawl_module(mod_name: String, save: Bool) -> Unit = {
+  let script = python_introspect_script()
+  if save then {
+    let save_script = """
+      import subprocess, sys, os, json
+      mod_name = sys.argv[1]
+      data_dir = sys.argv[2]
+      os.makedirs(data_dir, exist_ok=True)
+      result = subprocess.run(
+          [sys.executable, "-c", sys.argv[3], mod_name],
+          capture_output=True, text=True
+      )
+      output = result.stdout.strip()
+      path = os.path.join(data_dir, f"{mod_name}.json")
+      with open(path, "w") as f:
+          f.write(output)
+      print(f"Saved: {path}")
+    """
+    let output = process.exec("python3", ["-c", save_script, mod_name, DATA_DIR, script])
+    println(string.trim(output))
+  } else {
+    let output = process.exec("python3", ["-c", script, mod_name])
+    println(string.trim(output))
+  }
+}
+
+fn python_introspect_script() -> String = """
+  import sys, json, inspect, importlib
+
+  mod_name = sys.argv[1]
+  try:
+      mod = importlib.import_module(mod_name)
+  except ImportError as e:
+      print(json.dumps({"error": str(e)}, indent=2))
+      sys.exit(0)
+
+  def get_sig(obj):
+      try:
+          return str(inspect.signature(obj))
+      except (ValueError, TypeError):
+          return ""
+
+  def get_doc(obj):
+      return (obj.__doc__ or "").strip().split("\\n")[0][:200]
+
+  def classify_params(sig_str):
+      if not sig_str:
+          return {"required": 0, "optional": 0, "variadic": False}
+      required = optional = 0
+      variadic = False
+      for part in sig_str.strip("()").split(","):
+          part = part.strip()
+          if not part or part == "/":
+              continue
+          if part.startswith("*") or part.startswith("**"):
+              variadic = True
+          elif "=" in part:
+              optional += 1
+          else:
+              required += 1
+      return {"required": required, "optional": optional, "variadic": variadic}
+
+  functions = []
+  classes = []
+  constants = []
+
+  for name, obj in sorted(inspect.getmembers(mod)):
+      if name.startswith("_"):
+          continue
+      if inspect.isfunction(obj) or inspect.isbuiltin(obj):
+          sig = get_sig(obj)
+          functions.append({
+              "name": name,
+              "signature": sig,
+              "params": classify_params(sig),
+              "description": get_doc(obj),
+          })
+      elif inspect.isclass(obj):
+          if getattr(obj, "__module__", "") != mod_name:
+              continue
+          methods = []
+          for mname, mobj in sorted(inspect.getmembers(obj)):
+              if mname.startswith("_") and mname != "__init__":
+                  continue
+              if not callable(mobj):
+                  continue
+              sig = get_sig(mobj)
+              methods.append({
+                  "name": mname,
+                  "signature": sig,
+                  "params": classify_params(sig),
+                  "description": get_doc(mobj),
+              })
+          classes.append({
+              "name": name,
+              "description": get_doc(obj),
+              "method_count": len(methods),
+              "methods": methods,
+          })
+      elif not callable(obj) and isinstance(obj, (int, float, str)):
+          constants.append({"name": name, "type": type(obj).__name__, "value": str(obj)[:100]})
+
+  total_fns = len(functions) + sum(c["method_count"] for c in classes)
+  result = {
+      "language": "python",
+      "version": sys.version.split()[0],
+      "module": mod_name,
+      "description": get_doc(mod),
+      "function_count": total_fns,
+      "class_count": len(classes),
+      "constant_count": len(constants),
+      "functions": functions,
+      "classes": classes,
+      "constants": constants,
+  }
+  print(json.dumps(result, indent=2, ensure_ascii=False))
+"""
+
+// ── Crawl all modules ──────────────────────────────
+
+effect fn python_crawl_all(force: Bool) -> Unit = {
+  let force_flag = if force then "1" else "0"
+  let script = """
+    import sys, os, json, inspect, importlib, subprocess
+
+    data_dir = sys.argv[1]
+    force = sys.argv[2] == "1"
+    introspect_script = sys.argv[3]
+
+    names = sorted(sys.stdlib_module_names - {'__main__', '__phello__', '_thread'})
+    names = [n for n in names if not n.startswith('_')]
+
+    os.makedirs(data_dir, exist_ok=True)
+    crawled = skipped = errors = 0
+
+    for mod_name in names:
+        path = os.path.join(data_dir, f"{mod_name}.json")
+        if os.path.exists(path) and not force:
+            skipped += 1
+            continue
+
+        result = subprocess.run(
+            [sys.executable, "-c", introspect_script, mod_name],
+            capture_output=True, text=True, timeout=30
+        )
+        output = result.stdout.strip()
+        if not output or '"error"' in output:
+            errors += 1
+            print(f"  SKIP: {mod_name}", file=sys.stderr)
+        else:
+            with open(path, "w") as f:
+                f.write(output)
+            crawled += 1
+            # Count functions from the output
+            try:
+                data = json.loads(output)
+                fn_count = data.get("function_count", 0)
+                cls_count = data.get("class_count", 0)
+                print(f"  OK: {mod_name} ({fn_count} fns, {cls_count} classes)")
+            except json.JSONDecodeError:
+                print(f"  OK: {mod_name}")
+
+    print()
+    print(f"Done: {crawled} crawled, {skipped} cached, {errors} errors")
+  """
+  let introspect = python_introspect_script()
+  let output = process.exec("python3", ["-c", script, DATA_DIR, force_flag, introspect])
+  println(string.trim(output))
+}
+
+// ── Summary from cached data ───────────────────────
+
+effect fn python_print_summary() -> Unit = {
+  let script = """
+    import os, json, sys
+
+    data_dir = sys.argv[1]
+    if not os.path.exists(data_dir):
+        print("No data. Run: stdlib-crawler python --all")
+        sys.exit(0)
+
+    modules = []
+    for fname in sorted(os.listdir(data_dir)):
+        if not fname.endswith(".json"):
+            continue
+        with open(os.path.join(data_dir, fname)) as f:
+            data = json.load(f)
+        fn_count = len(data.get("functions", []))
+        method_count = sum(len(c.get("methods", [])) for c in data.get("classes", []))
+        modules.append((
+            data.get("module", fname[:-5]),
+            fn_count,
+            len(data.get("classes", [])),
+            method_count,
+            len(data.get("constants", [])),
+            fn_count + method_count,
+        ))
+
+    modules.sort(key=lambda m: m[5], reverse=True)
+    total = sum(m[5] for m in modules)
+
+    print("Python Stdlib Summary")
+    print("=====================")
+    print(f"{len(modules)} modules, {total} total functions/methods")
+    print()
+    print(f"  {'Module':<25} {'Fns':>5} {'Classes':>8} {'Methods':>8} {'Consts':>8}")
+    print(f"  {'─'*25} {'─'*5} {'─'*8} {'─'*8} {'─'*8}")
+    for name, fns, cls, methods, consts, _ in modules:
+        print(f"  {name:<25} {fns:>5} {cls:>8} {methods:>8} {consts:>8}")
+    print(f"  {'─'*25} {'─'*5} {'─'*8} {'─'*8} {'─'*8}")
+    print(f"  {'TOTAL':<25} {sum(m[1] for m in modules):>5} {sum(m[2] for m in modules):>8} {sum(m[3] for m in modules):>8} {sum(m[4] for m in modules):>8}")
+  """
+  let output = process.exec("python3", ["-c", script, DATA_DIR])
+  println(string.trim(output))
+}
+
+// ── Verb analysis ──────────────────────────────────
+
+effect fn python_verb_analysis() -> Unit = {
+  let script = """
+    import os, json, sys
+    from collections import Counter
+
+    data_dir = sys.argv[1]
+    if not os.path.exists(data_dir):
+        print("No data. Run: stdlib-crawler python --all")
+        sys.exit(0)
+
+    verb_counter = Counter()
+    verb_examples = {}
+    total_fns = 0
+
+    for fname in sorted(os.listdir(data_dir)):
+        if not fname.endswith(".json"):
+            continue
+        mod_name = fname[:-5]
+        with open(os.path.join(data_dir, fname)) as f:
+            data = json.load(f)
+
+        for fn in data.get("functions", []):
+            name = fn["name"]
+            total_fns += 1
+            parts = name.split("_")
+            verb = parts[0] if parts else name
+            if len(verb) > 2:
+                verb_counter[verb] += 1
+                verb_examples.setdefault(verb, [])
+                if len(verb_examples[verb]) < 3:
+                    verb_examples[verb].append(f"{mod_name}.{name}")
+
+        for cls in data.get("classes", []):
+            for method in cls.get("methods", []):
+                name = method["name"]
+                if name == "__init__":
+                    continue
+                total_fns += 1
+                parts = name.split("_")
+                verb = parts[0] if parts else name
+                if len(verb) > 2:
+                    verb_counter[verb] += 1
+                    verb_examples.setdefault(verb, [])
+                    if len(verb_examples[verb]) < 3:
+                        verb_examples[verb].append(f"{mod_name}.{cls['name']}.{name}")
+
+    print("Python Verb Analysis")
+    print("====================")
+    print(f"Total functions analyzed: {total_fns}")
+    print(f"Unique verb prefixes: {len(verb_counter)}")
+    print()
+    print("Top 50 verbs:")
+    print("─" * 60)
+    for verb, count in verb_counter.most_common(50):
+        examples = ", ".join(verb_examples.get(verb, []))
+        print(f"  {count:>4}x  {verb:<15}  {examples}")
+  """
+  let output = process.exec("python3", ["-c", script, DATA_DIR])
+  println(string.trim(output))
 }
