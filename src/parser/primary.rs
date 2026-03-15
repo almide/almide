@@ -204,11 +204,10 @@ impl Parser {
                 id: self.next_id(), span, resolved_type: None,
             });
         }
-        // Named record: Foo {x: 1, y: 2}
-        if self.check(TokenType::LBrace)
-            && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Ident)
-            && self.peek_at(2).map(|t| &t.token_type) == Some(&TokenType::Colon)
-        {
+        // Named record: Foo {x: 1, y: 2} or Foo {\n  x: 1, ...}
+        // Peek past optional newlines to check for { Ident : pattern
+        if self.peek_named_record() {
+            self.skip_newlines();
             let open_rec = self.current().clone();
             self.advance();
             let mut fields = Vec::new();

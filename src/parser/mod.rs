@@ -184,6 +184,19 @@ impl Parser {
         }
     }
 
+    /// Peek past optional newlines for `{ Ident :` pattern — named record.
+    pub(crate) fn peek_named_record(&self) -> bool {
+        let mut i = 0;
+        while self.peek_at(i).map(|t| &t.token_type) == Some(&TokenType::Newline) { i += 1; }
+        self.peek_at(i).map(|t| &t.token_type) == Some(&TokenType::LBrace)
+            && {
+                let mut j = i + 1;
+                while self.peek_at(j).map(|t| &t.token_type) == Some(&TokenType::Newline) { j += 1; }
+                self.peek_at(j).map(|t| &t.token_type) == Some(&TokenType::Ident)
+                    && self.peek_at(j + 1).map(|t| &t.token_type) == Some(&TokenType::Colon)
+            }
+    }
+
     pub(crate) fn peek_paren_lambda(&self) -> bool {
         if self.current().token_type != TokenType::LParen { return false; }
         let mut depth = 1;

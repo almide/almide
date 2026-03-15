@@ -68,6 +68,25 @@ impl Parser {
         }
     }
 
+    /// Look ahead past optional newlines to check if `{ Ident :` follows — indicating a named record.
+    /// Handles: `Foo { x: 1 }` and `Foo {\n  x: 1, ...}`
+    pub(crate) fn peek_named_record(&self) -> bool {
+        let mut i = 0;
+        // Skip newlines
+        while self.peek_at(i).map(|t| &t.token_type) == Some(&TokenType::Newline) { i += 1; }
+        // Check { Ident :
+        self.peek_at(i).map(|t| &t.token_type) == Some(&TokenType::LBrace)
+            && {
+                let mut j = i + 1;
+                while self.peek_at(j).map(|t| &t.token_type) == Some(&TokenType::Newline) { j += 1; }
+                self.peek_at(j).map(|t| &t.token_type) == Some(&TokenType::Ident)
+                    && {
+                        let k = j + 1;
+                        self.peek_at(k).map(|t| &t.token_type) == Some(&TokenType::Colon)
+                    }
+            }
+    }
+
     /// Look ahead to check if `(...)` is followed by `=>` — indicating a paren-style lambda.
     /// Handles: `() =>`, `(x) =>`, `(x, y) =>`, `(x: T) =>`, `((a, b)) =>`
     pub(crate) fn peek_paren_lambda(&self) -> bool {
