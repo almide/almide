@@ -55,20 +55,18 @@ let pairs = [(x, y) for x in xs for y in ys]
 http.response(status: 200, body: "OK")
 ```
 
-## Raw String Literals
+## Raw String Literals ✅
 
 ```almide
 let regex_pattern = r"^\d{3}-\d{4}$"
 let path = r"C:\Users\test"
 ```
 
-## Block Comments
+## Block Comments ✅
 
 ```almide
-/*
-  multi-line comment
-  currently only // is supported
-*/
+/* inline comment */
+/* nestable /* nested */ comment */
 ```
 
 ---

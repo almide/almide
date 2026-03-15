@@ -89,13 +89,46 @@ impl Lexer {
                 continue;
             }
 
-            // Comment
+            // Line comment
             if ch == '/' && peek(&chars, pos + 1) == Some('/') {
                 let start = pos;
                 while pos < chars.len() && chars[pos] != '\n' { pos += 1; }
                 let text: String = chars[start..pos].iter().collect();
                 tokens.push(Token { token_type: TokenType::Comment, value: text, line, col });
                 col += pos - start;
+                continue;
+            }
+
+            // Block comment /* ... */ — nestable, fully skipped (not a token)
+            if ch == '/' && peek(&chars, pos + 1) == Some('*') {
+                pos += 2; col += 2;
+                let mut depth = 1;
+                while pos < chars.len() && depth > 0 {
+                    if chars[pos] == '/' && peek(&chars, pos + 1) == Some('*') {
+                        depth += 1; pos += 2; col += 2;
+                    } else if chars[pos] == '*' && peek(&chars, pos + 1) == Some('/') {
+                        depth -= 1; pos += 2; col += 2;
+                    } else if chars[pos] == '\n' {
+                        line += 1; col = 1; pos += 1;
+                    } else {
+                        col += 1; pos += 1;
+                    }
+                }
+                continue;
+            }
+
+            // Raw string literal r"..."
+            if ch == 'r' && peek(&chars, pos + 1) == Some('"') {
+                pos += 1; col += 1; // skip 'r'
+                let start = pos + 1; // after opening "
+                pos += 1; col += 1; // skip opening "
+                while pos < chars.len() && chars[pos] != '"' {
+                    if chars[pos] == '\n' { line += 1; col = 1; } else { col += 1; }
+                    pos += 1;
+                }
+                let value: String = chars[start..pos].iter().collect();
+                if pos < chars.len() { pos += 1; col += 1; } // skip closing "
+                tokens.push(Token { token_type: TokenType::String, value, line, col });
                 continue;
             }
 
