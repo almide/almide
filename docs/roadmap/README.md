@@ -3,7 +3,7 @@
 ## Active
 
 ### Codec & Serialization
-- [Codec Remaining](active/codec-remaining.md) — Variant encode/decode, json.decode[T], naming strategy, repair
+- [Codec Remaining](active/codec-remaining.md) — Variant encode ✅. Remaining: naming strategy, value utils, DecodeError, repair
 
 ### Stdlib v2
 - [Stdlib Runtime Architecture](active/stdlib-self-hosted-redesign.md) — Runtime crate `almide_rt` 基盤完成。@extern 移行中
