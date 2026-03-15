@@ -1,0 +1,42 @@
+// list — list operations
+// Core module (auto-import, platform-independent)
+
+@extern
+fn len[A](xs: List[A]) -> Int
+
+@extern
+fn map[A, B](xs: List[A], f: Fn(A) -> B) -> List[B]
+
+@extern
+fn filter[A](xs: List[A], f: Fn(A) -> Bool) -> List[A]
+
+@extern
+fn fold[A, B](xs: List[A], init: B, f: Fn(B, A) -> B) -> B
+
+@extern
+fn find[A](xs: List[A], f: Fn(A) -> Bool) -> Option[A]
+
+@extern
+fn any[A](xs: List[A], f: Fn(A) -> Bool) -> Bool
+
+@extern
+fn all[A](xs: List[A], f: Fn(A) -> Bool) -> Bool
+
+@extern
+fn reverse[A](xs: List[A]) -> List[A]
+
+@extern
+fn sort[A](xs: List[A]) -> List[A]
+
+@extern
+fn first[A](xs: List[A]) -> Option[A]
+
+@extern
+fn last[A](xs: List[A]) -> Option[A]
+
+fn is_empty[A](xs: List[A]) -> Bool = list.len(xs) == 0
+
+fn contains[A](xs: List[A], value: A) -> Bool =
+  list.any(xs, (x) => x == value)
+
+fn sum(xs: List[Int]) -> Int = list.fold(xs, 0, (acc, x) => acc + x)
