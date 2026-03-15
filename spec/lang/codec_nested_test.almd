@@ -1,0 +1,19 @@
+module weather_test
+
+type Coord: Codec = { lon: Float, lat: Float }
+type Wind: Codec = { speed: Float, deg: Int }
+
+type WeatherInfo: Codec = { coord: Coord, wind: Wind, name: String, visibility: Int }
+
+test "nested codec roundtrip" {
+  let c = Coord { lon: 139.69, lat: 35.69 }
+  let wi = Wind { speed: 3.6, deg: 350 }
+  let w = WeatherInfo { coord: c, wind: wi, name: "Tokyo", visibility: 10000 }
+  let v = w.encode()
+  let text = json.stringify(v)
+  println(text)
+  let v2 = json.parse(text)
+  let w2 = WeatherInfo.decode(v2)
+  assert_eq(w2.name, "Tokyo")
+  assert_eq(w2.visibility, 10000)
+}
