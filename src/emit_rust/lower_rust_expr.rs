@@ -135,7 +135,6 @@ impl<'a> LowerCtx<'a> {
                             func: format!("almide_rt_{}_{}", module.replace('.', "_"), crate::emit_common::sanitize(func)),
                             args: ir_args,
                         };
-                        // Auto-? for module calls to result-returning functions in effect context
                         if self.auto_try && self.result_fns.contains(&key) {
                             return Expr::Try(Box::new(expr));
                         }
@@ -144,10 +143,8 @@ impl<'a> LowerCtx<'a> {
                     CallTarget::Method { object, method } => {
                         let obj = self.lower_expr(object);
                         let mut all = vec![obj]; all.extend(ir_args);
-                        // Module-qualified UFCS: "list.len" → almide_rt_list_len
                         if let Some((module, func)) = method.split_once('.') {
                             let key = method.to_string();
-                            // Only stdlib modules get almide_rt_ prefix; user types (Person.encode) don't
                             let is_stdlib = crate::stdlib::is_stdlib_module(module) || crate::stdlib::is_any_stdlib(module);
                             let prefix = if is_stdlib { "almide_rt_" } else { "" };
                             let expr = Expr::Call {
@@ -305,6 +302,41 @@ impl<'a> LowerCtx<'a> {
                     call
                 }
             }
+        }
+    }
+
+    /// Lower a stdlib module call using the generated dispatch templates.
+    /// Falls back to direct call if no template exists.
+    fn lower_stdlib_call(&self, module: &str, func: &str, args: Vec<Expr>, e: &IrExpr) -> Expr {
+        let key = format!("{}.{}", module, func);
+        // Render args to strings for the generated template
+        let args_str: Vec<String> = args.iter().map(|a| super::render::expr_str(a)).collect();
+        let inline_lambda = |param_idx: usize, body_idx: usize| -> (Vec<String>, String) {
+            // For lambda args: extract closure param names and body
+            if let Some(Expr::Closure { params, body }) = args.get(param_idx) {
+                (params.clone(), super::render::expr_str(body))
+            } else {
+                (vec!["__x".into()], args_str.get(body_idx).cloned().unwrap_or_default())
+            }
+        };
+        let result = almide::generated::emit_rust_calls::gen_generated_call(
+            module, func, &args_str, self.in_effect, &inline_lambda,
+        );
+        let expr = if let Some(code) = result {
+            Expr::Raw(code)
+        } else {
+            // Fallback: direct call
+            Expr::Call {
+                func: format!("almide_rt_{}_{}", module.replace('.', "_"), crate::emit_common::sanitize(func)),
+                args,
+            }
+        };
+        if self.auto_try && self.result_fns.contains(&key) {
+            Expr::Try(Box::new(expr))
+        } else if self.auto_try && matches!(&e.ty, Ty::Result(_, _)) {
+            Expr::Try(Box::new(expr))
+        } else {
+            expr
         }
     }
 

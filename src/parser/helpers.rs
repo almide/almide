@@ -272,6 +272,18 @@ impl Parser {
         }
     }
 
+    /// Skip newlines only if the next non-newline token matches `tt`.
+    /// This allows multiline continuation for operators like `|>`.
+    pub(crate) fn skip_newlines_if_followed_by(&mut self, tt: TokenType) {
+        let saved = self.pos;
+        while self.check(TokenType::Newline) || self.check(TokenType::Comment) {
+            self.advance();
+        }
+        if !self.check(tt) {
+            self.pos = saved; // restore — the newlines are significant
+        }
+    }
+
     pub(crate) fn skip_newlines_into_stmts(&mut self, stmts: &mut Vec<Stmt>) {
         while self.check(TokenType::Newline) || self.check(TokenType::Comment) {
             if self.check(TokenType::Comment) {

@@ -358,11 +358,14 @@ impl Checker {
                 // - effect fn with Result[T, E] sig: accept body returning T (auto-wrapped) or Result[T, E] (explicit)
                 // - non-effect: body must match signature exactly
                 if effect.unwrap_or(false) {
-                    if let Ty::Result(ok, _) = &ret_ty {
+                    let body_ty = body_ity.to_ty(&self.solutions);
+                    // Effect fn: accept Unit body (returns happen via guard/break/ok/err in loops)
+                    if body_ty == Ty::Unit {
+                        // ok — do blocks, while loops, guard patterns return via control flow
+                    } else if let Ty::Result(ok, _) = &ret_ty {
                         // Try unwrapped first (body returns T), fall back to full Result match
                         let unwrapped = InferTy::from_ty(ok);
                         let full = InferTy::from_ty(&ret_ty);
-                        let body_ty = body_ity.to_ty(&self.solutions);
                         if matches!(&body_ty, Ty::Result(_, _)) {
                             self.constrain(full, body_ity, format!("fn '{}'", name));
                         } else {

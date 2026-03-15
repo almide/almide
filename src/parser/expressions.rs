@@ -12,7 +12,7 @@ impl Parser {
 
     fn parse_pipe(&mut self) -> Result<Expr, String> {
         let mut left = self.parse_or()?;
-        while self.check(TokenType::PipeArrow) {
+        while { self.skip_newlines_if_followed_by(TokenType::PipeArrow); self.check(TokenType::PipeArrow) } {
             let span = Some(self.current_span());
             self.advance();
             self.skip_newlines();

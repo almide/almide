@@ -1,6 +1,7 @@
 // list extern — Rust native implementations
 
-pub fn almide_rt_list_len<T>(xs: Vec<T>) -> i64 {
+pub fn almide_rt_list_len<T>(xs: impl AsRef<Vec<T>>) -> i64 {
+    let xs = xs.as_ref();
     xs.len() as i64
 }
 
@@ -20,29 +21,29 @@ pub fn almide_rt_list_find<A: Clone>(xs: Vec<A>, f: impl Fn(A) -> bool) -> Optio
     xs.into_iter().find(|x| f(x.clone()))
 }
 
-pub fn almide_rt_list_any<A: Clone>(xs: Vec<A>, f: impl Fn(A) -> bool) -> bool {
+pub fn almide_rt_list_any<A: Clone>(xs: &Vec<A>, f: impl Fn(A) -> bool) -> bool {
     xs.iter().any(|x| f(x.clone()))
 }
 
-pub fn almide_rt_list_all<A: Clone>(xs: Vec<A>, f: impl Fn(A) -> bool) -> bool {
+pub fn almide_rt_list_all<A: Clone>(xs: &Vec<A>, f: impl Fn(A) -> bool) -> bool {
     xs.iter().all(|x| f(x.clone()))
 }
 
-pub fn almide_rt_list_reverse<A>(xs: Vec<A>) -> Vec<A> {
-    xs.into_iter().rev().collect()
+pub fn almide_rt_list_reverse<A: Clone>(xs: &Vec<A>) -> Vec<A> {
+    xs.iter().rev().cloned().collect()
 }
 
-pub fn almide_rt_list_sort<A: Ord + Clone>(xs: Vec<A>) -> Vec<A> {
-    let mut v = xs;
+pub fn almide_rt_list_sort<A: Ord + Clone>(xs: &Vec<A>) -> Vec<A> {
+    let mut v = xs.clone();
     v.sort();
     v
 }
 
-pub fn almide_rt_list_first<A: Clone>(xs: Vec<A>) -> Option<A> {
+pub fn almide_rt_list_first<A: Clone>(xs: &Vec<A>) -> Option<A> {
     xs.first().cloned()
 }
 
-pub fn almide_rt_list_last<A: Clone>(xs: Vec<A>) -> Option<A> {
+pub fn almide_rt_list_last<A: Clone>(xs: &Vec<A>) -> Option<A> {
     xs.last().cloned()
 }
 
@@ -256,8 +257,8 @@ mod tests {
 
     #[test]
     fn test_len() {
-        assert_eq!(almide_rt_list_len(vec![1, 2, 3]), 3);
-        assert_eq!(almide_rt_list_len::<i64>(vec![]), 0);
+        assert_eq!(almide_rt_list_len(&vec![1, 2, 3]), 3);
+        assert_eq!(almide_rt_list_len::<i64>(&vec![]), 0);
     }
 
     #[test]
