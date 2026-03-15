@@ -8,9 +8,13 @@ use super::Checker;
 
 impl Checker {
     pub(crate) fn check_call(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr]) -> InferTy {
+        self.check_call_with_type_args(callee, args, None)
+    }
+
+    pub(crate) fn check_call_with_type_args(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr], type_args: Option<&[Ty]>) -> InferTy {
         let arg_tys: Vec<InferTy> = args.iter_mut().map(|a| self.infer_expr(a)).collect();
         match callee {
-            ast::Expr::Ident { name, .. } => self.check_named_call(name, &arg_tys),
+            ast::Expr::Ident { name, .. } => self.check_named_call_with_type_args(name, &arg_tys, type_args),
             ast::Expr::TypeName { name, .. } => {
                 if let Some((type_name, case)) = self.env.constructors.get(name).cloned() {
                     self.check_constructor_args(name, &case, &arg_tys);
@@ -121,6 +125,10 @@ impl Checker {
     }
 
     pub(crate) fn check_named_call(&mut self, name: &str, arg_tys: &[InferTy]) -> InferTy {
+        self.check_named_call_with_type_args(name, arg_tys, None)
+    }
+
+    pub(crate) fn check_named_call_with_type_args(&mut self, name: &str, arg_tys: &[InferTy], type_args: Option<&[Ty]>) -> InferTy {
         // Builtins that accept any types
         match name {
             "println" | "eprintln" => {
@@ -191,6 +199,12 @@ impl Checker {
                     }
                     // Validate argument types and infer generics
                     let mut bindings = HashMap::new();
+                    // 明示的な型引数があれば事前に bind (HM の instantiation)
+                    if let Some(ta) = type_args {
+                        for (gname, gty) in sig.generics.iter().zip(ta.iter()) {
+                            bindings.insert(gname.clone(), gty.clone());
+                        }
+                    }
                     let concrete_args: Vec<Ty> = arg_tys.iter().map(|a| a.to_ty(&self.solutions)).collect();
                     for ((pname, pty), aty) in sig.params.iter().zip(concrete_args.iter()) {
                         if let Ty::TypeVar(tv) = pty {

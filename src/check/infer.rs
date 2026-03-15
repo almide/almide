@@ -201,13 +201,16 @@ impl Checker {
                 ty
             }
 
-            ast::Expr::Call { callee, args, named_args, .. } => {
+            ast::Expr::Call { callee, args, named_args, type_args, .. } => {
                 // Combine positional + named args for type checking
                 let mut all_args: Vec<&mut ast::Expr> = args.iter_mut().collect();
                 let mut named_exprs: Vec<ast::Expr> = named_args.iter().map(|(_, e)| e.clone()).collect();
                 let mut all_flat: Vec<ast::Expr> = args.to_vec();
                 all_flat.extend(named_exprs);
-                self.check_call(callee, &mut all_flat)
+                // 型引数を解決して渡す
+                let resolved_type_args: Option<Vec<crate::types::Ty>> = type_args.as_ref().map(|tas|
+                    tas.iter().map(|te| self.resolve_type_expr(te)).collect());
+                self.check_call_with_type_args(callee, &mut all_flat, resolved_type_args.as_deref())
             }
 
             ast::Expr::Pipe { left, right, .. } => {
