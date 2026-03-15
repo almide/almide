@@ -3,7 +3,8 @@
 ## Active
 
 ### Phase B: Type System & Safety
-- [Derive Conventions](active/derive-conventions.md) — Phase 1 ✅ (parser+checker), Phase 2: method resolution `dog.show()` → UFCS
+- [Derive Conventions](active/derive-conventions.md) — Eq/Repr/Ord/Hash。Phase 1-2 ✅, remaining: operator dispatch, auto-derive
+- [Monomorphization](active/monomorphization.md) — Structural bounds ✅, transitive ✅, container protocols → on-hold
 - [Type System Extensions](active/type-system.md) — OpenRecord ✅, structural bounds ✅, remaining: container protocols
 
 ### Phase C: Language Extensions
