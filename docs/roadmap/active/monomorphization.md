@@ -34,9 +34,9 @@ Generic structural bounds (`T: { name: String, .. }`) の Rust codegen に必要
 
 ### Remaining
 
-- [ ] Container protocols integration (`F: Mappable`)
-- [ ] Transitive monomorphization: A → B → C のチェーン呼び出し
-- [ ] Multiple structural bounds per function (`[A: { .. }, B: { .. }]`)
+- [x] Transitive monomorphization: fixed-point loop で A → B → C チェーンを解決
+- [x] Multiple structural bounds per function: 既に動作（bindings が全 TypeVar を追跡）
+- [ ] Container protocols integration (`F: Mappable`) — 設計は下記
 - [ ] TS target: 構造的制約を型注釈として出力（mono 不要、structural typing）
 
 ## Codegen model
@@ -84,3 +84,66 @@ transform[T=List[Int]]          → set_name__List_Int
 
 - **Code size explosion**: N types × M functions = N×M Rust functions。実際は small N (< 10) が多いので許容範囲
 - **Compile time**: Instantiation discovery は O(calls × types)。プログラムが大きくなった時の性能は要監視
+
+## Container Protocols Design
+
+### Problem
+`list.map`, `option.map`, `result.map` は同じ「中の値に関数を適用」という意味だが、別々の stdlib 関数。
+ユーザーが generic に書くには:
+
+```almide
+// これは書けない — list.map は List 専用
+fn double_all[F: Mappable](container: F[Int]) -> F[Int] =
+  container.map((x) => x * 2)
+```
+
+### Almide のアプローチ: Trait なし、Convention ベース
+
+Almide は trait/typeclass を持たない。代わりに **固定 convention** で protocol を表現:
+
+```almide
+// Protocol = 構造的制約 + 固定メソッド名
+// Mappable は「.map(f) を持つコンテナ」
+
+fn transform[C: Mappable[Int, Int]](c: C, f: fn(Int) -> Int) -> C =
+  c.map(f)
+```
+
+### 実装方針: Structural bounds の型パラメータ版
+
+```
+Mappable[A, B] = { map: fn(fn(A) -> B) -> Self[B] }
+```
+
+これは HKT (Higher-Kinded Types) に近いが、Almide では以下で代替:
+
+1. **Protocol = 固定名の関数セット** — `Mappable` は `map` メソッドを持つことを意味
+2. **Mono pass で解決** — `C = List[Int]` のとき、`c.map(f)` → `list.map(c, f)` に書き換え
+3. **Protocol 対応型は固定** — List, Option, Result の3つ。ユーザー定義不可（Canonicity）
+
+### Codegen model
+
+```almide
+fn transform[C: Mappable](xs: C[Int], f: fn(Int) -> Int) -> C[Int] =
+  xs.map(f)
+
+// C = List[Int] の場合:
+// fn transform__List_Int(xs: Vec<i64>, f: impl Fn(i64) -> i64) -> Vec<i64> {
+//     list_map(xs, f)
+// }
+
+// C = Option[Int] の場合:
+// fn transform__Option_Int(xs: Option<i64>, f: impl Fn(i64) -> i64) -> Option<i64> {
+//     xs.map(f)
+// }
+```
+
+### Priority
+
+Container protocols は表現力は高いが:
+- 使用頻度は低い（大半のコードは具体型で書く）
+- HKT に近い複雑さがあり、LLM の modification survival rate に影響する可能性
+- 実装コストが高い（型パラメータの kind 判定、protocol 解決、mono 拡張）
+
+**判定: on-hold**。structural bounds + derive conventions で当面の需要は満たせる。
+Container protocols は「必要になってから」実装する。

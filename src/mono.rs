@@ -30,26 +30,37 @@ pub fn monomorphize(program: &mut IrProgram) {
         return;
     }
 
-    // Step 2: Discover instantiations by scanning all call sites
-    let instances = discover_instances(program, &bound_fns);
-    if instances.is_empty() {
-        return;
-    }
+    // Fixed-point loop: transitive monomorphization (A → B → C chains)
+    let mut all_instances: HashMap<MonoKey, HashMap<String, Ty>> = HashMap::new();
+    let max_iterations = 10;
+    for _ in 0..max_iterations {
+        // Discover new instantiations (includes scanning previously generated specialized functions)
+        let instances = discover_instances(program, &bound_fns);
 
-    // Step 3: Clone and specialize functions
-    let mut new_functions = Vec::new();
-    for ((fn_name, suffix), bindings) in &instances {
-        if let Some(orig) = program.functions.iter().find(|f| f.name == *fn_name) {
-            let specialized = specialize_function(orig, suffix, bindings);
-            new_functions.push(specialized);
+        // Filter to only new instances
+        let new: HashMap<MonoKey, HashMap<String, Ty>> = instances.into_iter()
+            .filter(|(k, _)| !all_instances.contains_key(k))
+            .collect();
+        if new.is_empty() {
+            break;
         }
+
+        // Clone and specialize new functions
+        let mut new_functions = Vec::new();
+        for ((fn_name, suffix), bindings) in &new {
+            if let Some(orig) = program.functions.iter().find(|f| f.name == *fn_name) {
+                let specialized = specialize_function(orig, suffix, bindings);
+                new_functions.push(specialized);
+            }
+        }
+
+        // Rewrite call sites (all instances, including previous rounds)
+        all_instances.extend(new);
+        rewrite_calls(program, &bound_fns, &all_instances);
+
+        // Add specialized functions so next round can discover transitive calls in them
+        program.functions.extend(new_functions);
     }
-
-    // Step 4: Rewrite call sites
-    rewrite_calls(program, &bound_fns, &instances);
-
-    // Step 5: Add specialized functions to the program
-    program.functions.extend(new_functions);
 }
 
 /// Info about a structurally-bounded type parameter in a function.
