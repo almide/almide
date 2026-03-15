@@ -61,6 +61,10 @@ pub fn monomorphize(program: &mut IrProgram) {
         // Add specialized functions so next round can discover transitive calls in them
         program.functions.extend(new_functions);
     }
+
+    // 元の generic/open-record 関数を削除（specialized 版が代わりに使われる）
+    let mono_fn_names: std::collections::HashSet<&str> = bound_fns.keys().map(|s| s.as_str()).collect();
+    program.functions.retain(|f| !mono_fn_names.contains(f.name.as_str()));
 }
 
 /// Info about a structurally-bounded type parameter in a function.
@@ -71,17 +75,17 @@ struct BoundedParam {
     type_var: String,
 }
 
-/// Find functions that have structural bounds on generic type parameters.
+/// Find functions that have structural bounds on generic type parameters,
+/// OR direct OpenRecord parameters.
 /// Returns function_name → list of bounded params.
 fn find_structurally_bounded_fns(functions: &[IrFunction]) -> HashMap<String, Vec<BoundedParam>> {
     let mut result = HashMap::new();
     for func in functions {
         let mut bounded = Vec::new();
+        // パターン A: generic + structural bound (fn f[T: { name: String, .. }](x: T))
         if let Some(ref generics) = func.generics {
             for g in generics {
                 if g.structural_bound.is_some() {
-                    // Find which params use this type variable
-                    // In IR, TypeVar("T") may appear as Named("T", []) depending on lowering
                     for (i, param) in func.params.iter().enumerate() {
                         let is_match = matches!(&param.ty, Ty::TypeVar(n) if n == &g.name)
                             || matches!(&param.ty, Ty::Named(n, args) if n == &g.name && args.is_empty());
@@ -93,6 +97,17 @@ fn find_structurally_bounded_fns(functions: &[IrFunction]) -> HashMap<String, Ve
                         }
                     }
                 }
+            }
+        }
+        // パターン B: 直接 OpenRecord パラメータ (fn greet(who: { name: String, .. }))
+        for (i, param) in func.params.iter().enumerate() {
+            if matches!(&param.ty, Ty::OpenRecord { .. }) {
+                // OpenRecord パラメータ用の仮の type_var 名を生成
+                let tv_name = format!("__open_{}", i);
+                bounded.push(BoundedParam {
+                    param_idx: i,
+                    type_var: tv_name,
+                });
             }
         }
         if !bounded.is_empty() {
@@ -285,7 +300,15 @@ fn specialize_function(
 
     // Substitute type variables in parameter types
     for param in &mut func.params {
-        param.ty = substitute_ty(&param.ty, bindings);
+        // OpenRecord パラメータ → 具体型に直接置換
+        if matches!(&param.ty, Ty::OpenRecord { .. }) {
+            let key = format!("__open_{}", orig.params.iter().position(|p| p.var == param.var).unwrap_or(0));
+            if let Some(concrete) = bindings.get(&key) {
+                param.ty = concrete.clone();
+            }
+        } else {
+            param.ty = substitute_ty(&param.ty, bindings);
+        }
     }
     func.ret_ty = substitute_ty(&func.ret_ty, bindings);
     substitute_expr_types(&mut func.body, bindings);
