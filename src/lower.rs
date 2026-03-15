@@ -66,7 +66,14 @@ impl<'a> LowerCtx<'a> {
     /// Get the type of an expression from the checker's expr_types.
     /// This is the ONLY way to get types — no fallback inference.
     fn expr_ty(&self, expr: &ast::Expr) -> Ty {
-        self.expr_types.get(&expr.id()).cloned().unwrap_or(Ty::Unknown)
+        match self.expr_types.get(&expr.id()).cloned() {
+            Some(ty) => ty,
+            None => {
+                // ICE: checker should have assigned a type to every expression
+                eprintln!("[ICE] lower: missing type for expr id={}", expr.id().0);
+                Ty::Unknown
+            }
+        }
     }
 
     /// Resolve a field type on a known object type.
@@ -758,8 +765,14 @@ fn resolve_type_expr(te: &ast::TypeExpr) -> Ty {
         ast::TypeExpr::Generic { name, args } => {
             let ra: Vec<Ty> = args.iter().map(resolve_type_expr).collect();
             match name.as_str() {
-                "List" => Ty::List(Box::new(ra.first().cloned().unwrap_or(Ty::Unknown))),
-                "Option" => Ty::Option(Box::new(ra.first().cloned().unwrap_or(Ty::Unknown))),
+                "List" => Ty::List(Box::new(ra.first().cloned().unwrap_or_else(|| {
+                    eprintln!("[ICE] lower: List[] without type argument");
+                    Ty::Unknown
+                }))),
+                "Option" => Ty::Option(Box::new(ra.first().cloned().unwrap_or_else(|| {
+                    eprintln!("[ICE] lower: Option[] without type argument");
+                    Ty::Unknown
+                }))),
                 "Result" if ra.len() >= 2 => Ty::Result(Box::new(ra[0].clone()), Box::new(ra[1].clone())),
                 "Map" if ra.len() >= 2 => Ty::Map(Box::new(ra[0].clone()), Box::new(ra[1].clone())),
                 _ => Ty::Named(name.clone(), ra),

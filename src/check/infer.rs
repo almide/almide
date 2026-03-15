@@ -263,7 +263,7 @@ impl Checker {
                 let ok_ty = self.infer_expr(expr);
                 let err_ty = match &self.env.current_ret {
                     Some(Ty::Result(_, e)) => InferTy::from_ty(e),
-                    _ => InferTy::Concrete(Ty::String),
+                    _ => self.fresh_var(),
                 };
                 InferTy::Result(Box::new(ok_ty), Box::new(err_ty))
             }
@@ -271,7 +271,7 @@ impl Checker {
                 let err_ty = self.infer_expr(expr);
                 let ok_ty = match &self.env.current_ret {
                     Some(Ty::Result(o, _)) => InferTy::from_ty(o),
-                    _ => InferTy::Concrete(Ty::Unit),
+                    _ => self.fresh_var(),
                 };
                 InferTy::Result(Box::new(ok_ty), Box::new(err_ty))
             }

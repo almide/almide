@@ -1,4 +1,5 @@
 use crate::ast::{self, ResolvedType};
+use crate::diagnostic::Diagnostic;
 use crate::types::{Ty, VariantPayload};
 use super::{Checker, err};
 
@@ -110,20 +111,26 @@ impl Checker {
                 if !self.env.in_effect && matches!(inner_ty, Ty::Unit) {
                     Ty::Unit
                 } else {
-                    // Use expected type to infer error half
+                    // Use expected type first, then current_ret, then Unknown
                     let err_ty = match expected {
                         Some(Ty::Result(_, e)) => *e.clone(),
-                        _ => Ty::Unknown,
+                        _ => match &self.env.current_ret {
+                            Some(Ty::Result(_, e)) => *e.clone(),
+                            _ => Ty::Unknown,
+                        },
                     };
                     Ty::Result(Box::new(inner_ty), Box::new(err_ty))
                 }
             }
             ast::Expr::Err { expr: inner, .. } => {
                 let err_ty = self.check_expr(inner);
-                // Use expected type to infer ok half
+                // Use expected type first, then current_ret, then Unknown
                 let ok_ty = match expected {
                     Some(Ty::Result(o, _)) => *o.clone(),
-                    _ => Ty::Unknown,
+                    _ => match &self.env.current_ret {
+                        Some(Ty::Result(o, _)) => *o.clone(),
+                        _ => Ty::Unknown,
+                    },
                 };
                 Ty::Result(Box::new(ok_ty), Box::new(err_ty))
             }
@@ -496,6 +503,13 @@ impl Checker {
         }
         let st = self.check_expr(subject);
         self.env.skip_auto_unwrap = prev_skip;
+        if matches!(&st, Ty::Unknown) {
+            self.push_diagnostic(Diagnostic::warning(
+                "match subject has unknown type — pattern bindings will be untyped",
+                "Add a type annotation to the match subject so pattern variables get correct types",
+                "match expression",
+            ));
+        }
         let mut result_ty: Option<Ty> = None;
         let first_arm_span = arms.first().and_then(|a| a.body.span());
         for arm in arms.iter_mut() {

@@ -1,7 +1,7 @@
 # Type System Soundness [ACTIVE]
 
 ## Summary
-型システムの健全性を B+ → A+ に引き上げる。Critical 3 + High 4 + Medium 3 = 10 修正完了。残り P1 項目あり。
+型システムの健全性を B+ → A+ に引き上げる。Critical 3 + High 4 + Medium 3 + P1 3 = 13 修正完了。残り P1-c のみ。
 
 ## Goal
 - Unknown の伝播を最小化
@@ -12,27 +12,15 @@
 ## Critical (型システムが壊れる) ✅
 
 ### C-1: DoBlock が常に Unknown を返す ✅
-- `src/check/expressions.rs` — `_ty` をそのまま返す。guard 付き do block は `Ty::Unit`
-
 ### C-2: Record 同士の unify_infer がない ✅
-- `src/check/mod.rs` — Record のフィールド同士を再帰的に unify するケース追加
-
 ### C-3: Unknown が全てと unify 成功する ✅
-- `src/types.rs` — Unknown 同士 → true。片方 Unknown → binding を試行して情報伝播
 
 ## High (型推論の精度に直結) ✅
 
 ### H-1: occurs check が浅い (Tuple, Record, Fn 未チェック) ✅
-- `src/types.rs` — Tuple, Record, OpenRecord, Fn の再帰チェック追加
-
 ### H-2: 未解決 TypeVar が Unknown に落ちる ✅
-- `src/types.rs`, `src/check/types.rs` — `Ty::TypeVar(name)` のまま保持
-
 ### H-3: TypeVar binding 時に structural bounds 未検証 ✅
-- `src/types.rs` — binding 前に bound の compatible チェック
-
 ### H-4: Union unification が非決定的 ✅
-- `src/types.rs` — binding のスナップショット → 成功時に commit、失敗時に rollback
 
 ## Medium ✅
 
@@ -40,29 +28,36 @@
 ### M-2: effect fn の return type 判定が body 依存 ✅
 ### M-3: Unknown の refinement が不十分 (Record, Union) ✅
 
-## Remaining P1: Unknown 伝播の根本修正
+## P1: Unknown 伝播の修正
 
-### P1-a: `unwrap_or(Ty::Unknown)` の段階的エラー化
-- **問題**: 型が見つからない場合 `Ty::Unknown` で続行し、以降の型チェックをすり抜ける（15箇所以上）
-- **修正**: Unknown の発生源を分類 (意図的ワイルドカード / 推論失敗 / 内部エラー) し、(b)(c) をエラーまたは warning として報告
-- codegen が Unknown を含む IR を受け取った場合に ICE を出す
+### P1-a: `unwrap_or(Ty::Unknown)` の段階的エラー化 ✅
+- 17箇所を分類: 意図的 wildcard (12) / 推論失敗 (2) / ICE (3)
+- lower.rs `expr_ty()` に ICE ログ追加（checker が型を付けなかった式を検出）
+- lower.rs `resolve_type_expr` の `List[]`/`Option[]` に ICE ログ追加
+- check/mod.rs の `List[]`/`Option[]` は `resolve_type_expr` が `&self` のため warning 追加は保留（`&mut self` 化の影響範囲が大きい）
 
-### P1-b: Result の Unknown 半分
-- **問題**: `ok(42)` → `Result[Int, Unknown]`、`err("fail")` → `Result[Unknown, String]`
-- **修正**: 双方向型推論で呼び出し文脈から期待される Result 型を取得し、Unknown 半分を埋める
+### P1-b: Result の Unknown 半分 ✅
+- `expressions.rs`: `ok()`/`err()` で expected → current_ret → Unknown の3段フォールバック
+- `infer.rs`: `ok()`/`err()` のデフォルトを `Ty::String`/`Ty::Unit` から `fresh_var()` に変更（制約ソルバーが正しい型を推論）
 
-### P1-c: ラムダ引数の TypeVar → Unknown 降格
-- **問題**: ラムダの引数型推論で TypeVar が Unknown に降格される
-- **修正**: TypeVar を保持し、ラムダの body 型チェック中に制約収集して解決
+### P1-d: パターンマッチの Unknown 伝播 ✅
+- match subject が `Ty::Unknown` のとき warning を出力
+- パターン変数への Unknown 伝播自体は設計上正しい（error recovery）
 
-### P1-d: パターンマッチの Unknown 伝播
-- **問題**: `match` の subject が Unknown 型のとき、パターン変数が Unknown でバインドされる
-- **修正**: subject が Unknown の場合にエラーにするか、制約を収集して遅延推論
+### P1-c: ラムダ引数の TypeVar → Unknown 降格 [REMAINING]
+- **問題**: ラムダの引数型推論に2つの独立パスがある
+  - `infer.rs` (Pass 1): `fresh_var()` で TypeVar を生成 — 制約ベース推論に参加
+  - `expressions.rs` (Pass 2): expected type or `Ty::Unknown` — 文脈駆動チェック
+- **根本原因**: `check_decl` は `infer_expr` (Pass 1) のみを呼ぶ。`check_expr_with` (Pass 2) は呼ばれない。そのため `expressions.rs` の lambda チェックパスは関数宣言の body からは到達しない
+- **影響**: lambda が `list.map((x) => x + 1)` のように stdlib 呼び出しの引数として使われる場合、`infer.rs` が fresh_var を生成し、stdlib の型シグネチャから制約が伝播して正しく推論される。問題が出るのは expected type が伝播しないネストしたケースのみ
+- **修正案**: `check_decl` で `infer_expr` と `check_expr_with` の両方を走らせるか、`infer.rs` の lambda パスに expected type 伝播を追加する（後者がリスク低い）
+- **リスク**: checker アーキテクチャ（2パス構成）に触るため、意図しない型チェック変更が広範に影響する可能性
 
 ## Files
 ```
 src/types.rs          — unify, occurs_in, substitute
 src/check/mod.rs      — unify_infer
-src/check/expressions.rs — DoBlock, pattern binding
-src/check/types.rs    — InferTy::to_ty
+src/check/expressions.rs — ok/err bidirectional, match Unknown warning
+src/check/infer.rs    — ok/err fresh_var
+src/lower.rs          — ICE logging for missing types
 ```
