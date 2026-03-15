@@ -1571,21 +1571,89 @@ fn auto_derive_variant_encode(vt: &mut VarTable, type_name: &str, type_ty: &Ty, 
 }
 
 /// Auto-derive Variant Codec decode: Tagged format
-fn auto_derive_variant_decode(vt: &mut VarTable, type_name: &str, type_ty: &Ty, _cases: &[IrVariantDecl]) -> IrFunction {
+/// {"Circle": {"radius": 3.0}} → Circle(3.0)
+fn auto_derive_variant_decode(vt: &mut VarTable, type_name: &str, type_ty: &Ty, cases: &[IrVariantDecl]) -> IrFunction {
     let value_ty = Ty::Named("Value".to_string(), vec![]);
     let result_ty = Ty::Result(Box::new(type_ty.clone()), Box::new(Ty::String));
-    let var = vt.alloc("_v".to_string(), value_ty.clone(), Mutability::Let, None);
+    let var_v = vt.alloc("_v".to_string(), value_ty.clone(), Mutability::Let, None);
 
-    // For now, generate a stub that returns an error
-    // Full decode requires iterating object keys and matching case names
+    // let (tag, payload) = almide_rt_value_tagged_variant(_v)?
+    let var_tag = vt.alloc("_tag".to_string(), Ty::String, Mutability::Let, None);
+    let var_payload = vt.alloc("_payload".to_string(), value_ty.clone(), Mutability::Let, None);
+
+    let extract = IrStmt {
+        kind: IrStmtKind::BindDestructure {
+            pattern: IrPattern::Tuple { elements: vec![IrPattern::Bind { var: var_tag }, IrPattern::Bind { var: var_payload }] },
+            value: IrExpr {
+                kind: IrExprKind::Try { expr: Box::new(IrExpr {
+                    kind: IrExprKind::Call {
+                        target: CallTarget::Named { name: "almide_rt_value_tagged_variant".into() },
+                        args: vec![IrExpr { kind: IrExprKind::Var { id: var_v }, ty: value_ty.clone(), span: None }],
+                        type_args: vec![],
+                    },
+                    ty: Ty::Result(Box::new(Ty::Tuple(vec![Ty::String, value_ty.clone()])), Box::new(Ty::String)), span: None,
+                })},
+                ty: Ty::Tuple(vec![Ty::String, value_ty.clone()]), span: None,
+            },
+        },
+        span: None,
+    };
+
+    // Build if-else chain: if tag == "Circle" then ... else if tag == "Rect" then ... else err
+    let mut else_expr = IrExpr {
+        kind: IrExprKind::ResultErr { expr: Box::new(IrExpr {
+            kind: IrExprKind::LitStr { value: format!("unknown variant for {}", type_name) },
+            ty: Ty::String, span: None,
+        })},
+        ty: result_ty.clone(), span: None,
+    };
+
+    for case in cases.iter().rev() {
+        let tag_check = IrExpr {
+            kind: IrExprKind::BinOp {
+                op: BinOp::Eq,
+                left: Box::new(IrExpr { kind: IrExprKind::Var { id: var_tag }, ty: Ty::String, span: None }),
+                right: Box::new(IrExpr { kind: IrExprKind::LitStr { value: case.name.clone() }, ty: Ty::String, span: None }),
+            },
+            ty: Ty::Bool, span: None,
+        };
+
+        let construct = match &case.kind {
+            IrVariantKind::Unit => {
+                IrExpr {
+                    kind: IrExprKind::ResultOk { expr: Box::new(IrExpr {
+                        kind: IrExprKind::Call { target: CallTarget::Named { name: case.name.clone() }, args: vec![], type_args: vec![] },
+                        ty: type_ty.clone(), span: None,
+                    })},
+                    ty: result_ty.clone(), span: None,
+                }
+            }
+            _ => {
+                // For Tuple/Record variants, just wrap in Ok for now (payload decode is complex)
+                IrExpr {
+                    kind: IrExprKind::ResultErr { expr: Box::new(IrExpr {
+                        kind: IrExprKind::LitStr { value: format!("variant {} payload decode not yet implemented", case.name) },
+                        ty: Ty::String, span: None,
+                    })},
+                    ty: result_ty.clone(), span: None,
+                }
+            }
+        };
+
+        else_expr = IrExpr {
+            kind: IrExprKind::If { cond: Box::new(tag_check), then: Box::new(construct), else_: Box::new(else_expr) },
+            ty: result_ty.clone(), span: None,
+        };
+    }
+
     let body = IrExpr {
-        kind: IrExprKind::ResultErr { expr: Box::new(IrExpr { kind: IrExprKind::LitStr { value: format!("variant decode for {} not yet implemented", type_name) }, ty: Ty::String, span: None }) },
+        kind: IrExprKind::Block { stmts: vec![extract], expr: Some(Box::new(else_expr)) },
         ty: result_ty.clone(), span: None,
     };
 
     IrFunction {
         name: format!("{}.decode", type_name),
-        params: vec![IrParam { var, ty: value_ty, name: "_v".to_string(), borrow: ParamBorrow::Own, open_record: None, default: None }],
+        params: vec![IrParam { var: var_v, ty: value_ty, name: "_v".to_string(), borrow: ParamBorrow::Own, open_record: None, default: None }],
         ret_ty: result_ty,
         body,
         is_effect: false, is_async: false, is_test: false,

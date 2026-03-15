@@ -184,6 +184,23 @@ pub fn almide_rt_value_to_snake_case(v: Value) -> Value {
     })
 }
 
+// ── Variant decode helper ──
+
+/// Extract the tag and payload from a tagged variant object {"Tag": payload}
+pub fn almide_rt_value_tagged_variant(v: Value) -> Result<(String, Value), String> {
+    match v {
+        Value::Object(pairs) => {
+            if pairs.len() == 1 {
+                let (tag, payload) = pairs.into_iter().next().unwrap();
+                Ok((tag, payload))
+            } else {
+                Err(format!("expected object with exactly 1 key for variant, got {} keys", pairs.len()))
+            }
+        }
+        _ => Err("expected Object for variant decode".to_string()),
+    }
+}
+
 // ── Stringify ──
 
 pub fn almide_rt_value_stringify(v: &Value) -> String {
