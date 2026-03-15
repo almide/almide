@@ -1,6 +1,6 @@
 // string extern — Rust native implementations
 
-pub fn almide_rt_string_len(s: &str) -> i64 {
+pub fn almide_rt_string_len(s: String) -> i64 {
     s.chars().count() as i64
 }
 
@@ -16,27 +16,27 @@ pub fn almide_rt_string_trim(s: String) -> String {
     s.trim().to_string()
 }
 
-pub fn almide_rt_string_contains(s: &str, sub: &str) -> bool {
-    s.contains(sub)
+pub fn almide_rt_string_contains(s: String, sub: String) -> bool {
+    s.contains(&sub)
 }
 
-pub fn almide_rt_string_starts_with(s: &str, prefix: &str) -> bool {
-    s.starts_with(prefix)
+pub fn almide_rt_string_starts_with(s: String, prefix: String) -> bool {
+    s.starts_with(&prefix)
 }
 
-pub fn almide_rt_string_ends_with(s: &str, suffix: &str) -> bool {
-    s.ends_with(suffix)
+pub fn almide_rt_string_ends_with(s: String, suffix: String) -> bool {
+    s.ends_with(&suffix)
 }
 
-pub fn almide_rt_string_split(s: &str, sep: &str) -> Vec<String> {
-    s.split(sep).map(|x| x.to_string()).collect()
+pub fn almide_rt_string_split(s: String, sep: String) -> Vec<String> {
+    s.split(&sep).map(|x| x.to_string()).collect()
 }
 
-pub fn almide_rt_string_replace(s: String, from: &str, to: &str) -> String {
-    s.replace(from, to)
+pub fn almide_rt_string_replace(s: String, from: String, to: String) -> String {
+    s.replace(&from, &to)
 }
 
-pub fn almide_rt_string_slice(s: &str, start: i64, end: i64) -> String {
+pub fn almide_rt_string_slice(s: String, start: i64, end: i64) -> String {
     let chars: Vec<char> = s.chars().collect();
     let start = start.max(0) as usize;
     let end = end.min(chars.len() as i64) as usize;
@@ -55,13 +55,13 @@ mod tests {
 
     #[test]
     fn test_len() {
-        assert_eq!(almide_rt_string_len("hello"), 5);
-        assert_eq!(almide_rt_string_len(""), 0);
+        assert_eq!(almide_rt_string_len("hello".into()), 5);
+        assert_eq!(almide_rt_string_len("".into()), 0);
     }
 
     #[test]
     fn test_contains() {
-        assert!(almide_rt_string_contains("hello world", "world"));
-        assert!(!almide_rt_string_contains("hello", "xyz"));
+        assert!(almide_rt_string_contains("hello world".into(), "world".into()));
+        assert!(!almide_rt_string_contains("hello".into(), "xyz".into()));
     }
 }

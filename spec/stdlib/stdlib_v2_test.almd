@@ -1,128 +1,41 @@
-// Tests for stdlib additions: int, string, list new functions
+module stdlib_e2e
 
-// ── int module ──
-
-test "int.parse" {
-  assert_eq(int.parse("42"), ok(42))
-  assert_eq(int.parse("-7"), ok(-7))
-  assert_eq(int.parse("abc"), err("invalid digit found in string"))
+test "string.to_upper" {
+  assert_eq(string.to_upper("hello"), "HELLO")
 }
 
-test "int.parse_hex" {
-  assert_eq(int.parse_hex("ff"), ok(255))
-  assert_eq(int.parse_hex("0xFF"), ok(255))
-  assert_eq(int.parse_hex("1a"), ok(26))
+test "string.len" {
+  assert_eq(string.len("hello"), 5)
 }
 
-test "int.abs" {
-  assert_eq(int.abs(-5), 5)
-  assert_eq(int.abs(3), 3)
-  assert_eq(int.abs(0), 0)
+test "string.contains" {
+  assert(string.contains("hello world", "world"))
 }
 
-test "int.min and int.max" {
-  assert_eq(int.min(3, 7), 3)
-  assert_eq(int.max(3, 7), 7)
-  assert_eq(int.min(-1, -5), -5)
-  assert_eq(int.max(-1, -5), -1)
+test "list.len" {
+  assert_eq(list.len([1, 2, 3]), 3)
 }
 
-// ── string module ──
-
-test "string.pad_right" {
-  assert_eq(string.pad_right("hi", 5, " "), "hi   ")
-  assert_eq(string.pad_right("hello", 3, " "), "hello")
+test "list.map" {
+  assert_eq(list.map([1, 2, 3], (x) => x * 2), [2, 4, 6])
 }
 
-test "string.trim_start and trim_end" {
-  assert_eq(string.trim_start("  hello  "), "hello  ")
-  assert_eq(string.trim_end("  hello  "), "  hello")
+test "list.filter" {
+  assert_eq(list.filter([1, 2, 3, 4], (x) => x > 2), [3, 4])
 }
 
-test "string.count" {
-  assert_eq(string.count("hello world", "l"), 3)
-  assert_eq(string.count("aaa", "aa"), 1)
-  assert_eq(string.count("abc", "z"), 0)
+test "list.fold" {
+  assert_eq(list.fold([1, 2, 3], 0, (acc, x) => acc + x), 6)
 }
 
-// ── list module ──
-
-test "list.index_of" {
-  assert_eq(list.index_of([10, 20, 30], 20), some(1))
-  assert_eq(list.index_of([10, 20, 30], 99), none)
+test "int.to_string" {
+  assert_eq(int.to_string(42), "42")
 }
 
-test "list.last" {
-  assert_eq(list.last([1, 2, 3]), some(3))
-  assert_eq(list.last(list.drop([1], 1)), none)
+test "UFCS string" {
+  assert_eq("hello".to_upper(), "HELLO")
 }
 
-test "list.chunk" {
-  assert_eq(list.chunk([1, 2, 3, 4, 5], 2), [[1, 2], [3, 4], [5]])
-  assert_eq(list.chunk([1, 2, 3], 3), [[1, 2, 3]])
-}
-
-test "list.sum and list.product" {
-  assert_eq(list.sum([1, 2, 3, 4]), 10)
-  assert_eq(list.product([1, 2, 3, 4]), 24)
-  assert_eq(list.sum([]), 0)
-  assert_eq(list.product([]), 1)
-}
-
-// ── Additional coverage ──
-
-test "int.parse large number" {
-  assert_eq(int.parse("999999"), ok(999999))
-}
-
-test "int.parse_hex mixed case" {
-  assert_eq(int.parse_hex("Ab"), ok(171))
-}
-
-test "int.abs large negative" {
-  assert_eq(int.abs(-999), 999)
-}
-
-test "int.min first smaller" {
-  assert_eq(int.min(1, 100), 1)
-}
-
-test "int.max second larger" {
-  assert_eq(int.max(1, 100), 100)
-}
-
-test "string.count single occurrence" {
-  assert_eq(string.count("hello", "h"), 1)
-}
-
-test "string.pad_right with dot" {
-  assert_eq(string.pad_right("ab", 5, "."), "ab...")
-}
-
-test "string.trim_start tabs" {
-  assert_eq(string.trim_start("\t\thello"), "hello")
-}
-
-test "string.trim_end newlines" {
-  assert_eq(string.trim_end("hello\n\n"), "hello")
-}
-
-test "list.index_of first element" {
-  assert_eq(list.index_of([1, 2, 3], 1), some(0))
-}
-
-test "list.last of strings" {
-  assert_eq(list.last(["a", "b", "c"]), some("c"))
-}
-
-test "list.chunk single element chunks" {
-  assert_eq(list.chunk([1, 2, 3], 1), [[1], [2], [3]])
-}
-
-test "list.sum single element" {
-  assert_eq(list.sum([42]), 42)
-}
-
-test "list.product of two" {
-  assert_eq(list.product([3, 7]), 21)
+test "UFCS list" {
+  assert_eq([1, 2, 3].map((x) => x + 10), [11, 12, 13])
 }

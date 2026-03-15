@@ -42,6 +42,26 @@ pub fn get_bundled_source(name: &str) -> Option<&'static str> {
     }
 }
 
+/// Get the extern.rs source for a core stdlib module (compiled into the binary).
+pub fn get_core_extern_rs(name: &str) -> Option<&'static str> {
+    match name {
+        "int" => Some(include_str!("../stdlib/core/int/extern.rs")),
+        "string" => Some(include_str!("../stdlib/core/string/extern.rs")),
+        "list" => Some(include_str!("../stdlib/core/list/extern.rs")),
+        _ => None,
+    }
+}
+
+/// Get the .almd source for a core v2 stdlib module.
+pub fn get_core_source(name: &str) -> Option<&'static str> {
+    match name {
+        "int" => Some(include_str!("../stdlib/core/int/mod.almd")),
+        "string" => Some(include_str!("../stdlib/core/string/mod.almd")),
+        "list" => Some(include_str!("../stdlib/core/list/mod.almd")),
+        _ => None,
+    }
+}
+
 /// Check if a module name is any kind of stdlib (hardcoded or bundled).
 pub fn is_any_stdlib(name: &str) -> bool {
     is_stdlib_module(name) || get_bundled_source(name).is_some()

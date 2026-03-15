@@ -109,8 +109,30 @@ pub fn lower(ir: &IrProgram) -> Program {
     rt.push_str("impl<T: Clone> AlmideConcat<Vec<T>> for Vec<T> { type Output = Vec<T>; #[inline(always)] fn concat(self, rhs: Vec<T>) -> Vec<T> { let mut r = self; r.extend(rhs); r } }\n");
     rt.push_str("macro_rules! almide_eq { ($a:expr, $b:expr) => { ($a) == ($b) }; }\n");
     rt.push_str("macro_rules! almide_ne { ($a:expr, $b:expr) => { ($a) != ($b) }; }\n");
-    rt.push_str(include_str!("value_runtime.txt"));
-    rt.push('\n');
+    // Runtime: include almide_rt crate sources inline (for almide run single-file mode)
+    // Strip #[cfg(test)] blocks and doc comments for inline embedding
+    fn strip_test_blocks(src: &str) -> String {
+        let mut out = String::new();
+        let mut skip = false;
+        let mut brace_depth = 0;
+        for line in src.lines() {
+            if line.trim().starts_with("#[cfg(test)]") { skip = true; continue; }
+            if line.trim().starts_with("//!") { continue; } // doc comments
+            if skip {
+                brace_depth += line.chars().filter(|c| *c == '{').count();
+                brace_depth = brace_depth.saturating_sub(line.chars().filter(|c| *c == '}').count());
+                if brace_depth == 0 { skip = false; }
+                continue;
+            }
+            out.push_str(line);
+            out.push('\n');
+        }
+        out
+    }
+    rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/int.rs")));
+    rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/string.rs")));
+    rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/list.rs")));
+    rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/value.rs")));
 
     Program {
         prelude: vec!["#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use)]".into()],
@@ -325,7 +347,7 @@ impl<'a> LowerCtx<'a> {
                     CallTarget::Module { module, func } => {
                         let key = format!("{}.{}", module, func);
                         let expr = Expr::Call {
-                            func: format!("{}_{}", module.replace('.', "_"), crate::emit_common::sanitize(func)),
+                            func: format!("almide_rt_{}_{}", module.replace('.', "_"), crate::emit_common::sanitize(func)),
                             args: ir_args,
                         };
                         // Auto-? for module calls to result-returning functions in effect context
@@ -337,11 +359,14 @@ impl<'a> LowerCtx<'a> {
                     CallTarget::Method { object, method } => {
                         let obj = self.lower_expr(object);
                         let mut all = vec![obj]; all.extend(ir_args);
-                        // Module-qualified UFCS: "list.len" → same path as Module call
+                        // Module-qualified UFCS: "list.len" → almide_rt_list_len
                         if let Some((module, func)) = method.split_once('.') {
                             let key = method.to_string();
+                            // Only stdlib modules get almide_rt_ prefix; user types (Person.encode) don't
+                            let is_stdlib = crate::stdlib::is_stdlib_module(module) || crate::stdlib::is_any_stdlib(module);
+                            let prefix = if is_stdlib { "almide_rt_" } else { "" };
                             let expr = Expr::Call {
-                                func: format!("{}_{}", module.replace('.', "_"), crate::emit_common::sanitize(func)),
+                                func: format!("{}{}_{}", prefix, module.replace('.', "_"), crate::emit_common::sanitize(func)),
                                 args: all,
                             };
                             if self.auto_try && self.result_fns.contains(&key) {
@@ -438,7 +463,7 @@ impl<'a> LowerCtx<'a> {
                 // Primitives have direct runtime helpers
                 match type_suffix {
                     "string" | "int" | "float" | "bool" => {
-                        Expr::Call { func: crate::emit_common::sanitize(name), args }
+                        Expr::Call { func: format!("almide_rt_{}", crate::emit_common::sanitize(name)), args }
                     }
                     // Named types: pass Type_encode/decode as function argument
                     _ => {
@@ -447,7 +472,7 @@ impl<'a> LowerCtx<'a> {
                         } else {
                             format!("{}_decode", crate::emit_common::sanitize(type_suffix))
                         };
-                        let rt_func = if is_encode { "value_encode_list" } else { "value_decode_list" };
+                        let rt_func = if is_encode { "almide_rt_value_encode_list" } else { "almide_rt_value_decode_list" };
                         let mut all_args = args;
                         all_args.push(Expr::Var(func_ref));
                         Expr::Call { func: rt_func.into(), args: all_args }
@@ -459,7 +484,14 @@ impl<'a> LowerCtx<'a> {
                     if args.is_empty() { return Expr::Var(format!("{}::{}", enum_name, name)); }
                     Expr::Call { func: format!("{}::{}", enum_name, name), args }
                 } else {
-                    Expr::Call { func: crate::emit_common::sanitize(name), args }
+                    let func_name = crate::emit_common::sanitize(name);
+                    // Runtime helper functions get almide_rt_ prefix
+                    let func_name = if func_name.starts_with("__") {
+                        format!("almide_rt_{}", func_name)
+                    } else {
+                        func_name
+                    };
+                    Expr::Call { func: func_name, args }
                 };
                 // Auto-? for calls to result-returning functions in effect context
                 if self.auto_try && self.result_fns.contains(name) {
