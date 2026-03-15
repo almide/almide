@@ -27,14 +27,9 @@ let text = json.stringify(camel)  // → {"userName": "Alice"}
 ```
 関数合成で実現。`Codec(snake_case)` 構文は Future の sugar。
 
-## Next
-
-### 旧 TOML → runtime crate 移行
-- `stdlib/defs/*.toml` の関数を `runtime/rust/src/*.rs` に段階的に移動
-- 移動完了した TOML を削除
-- 最終的に build.rs の stdlib 生成ロジックを削除
-
 ## Future
+
+旧 TOML → runtime crate 移行は [Stdlib Runtime Architecture](stdlib-self-hosted-redesign.md) のスコープ。Codec 側は TOML で動作中。
 
 ### DecodeError 構造化
 - `DecodeError { path: List[String], kind: DecodeErrorKind }`
