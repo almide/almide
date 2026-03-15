@@ -19,11 +19,21 @@ impl<'a> LowerCtx<'a> {
             IrExprKind::Var { id } => {
                 let info = self.vt.get(*id);
                 let var = Expr::Var(crate::emit_common::sanitize(&info.name));
-                // Skip clone if: single-use, Copy type, or borrow analysis says this param is borrowed
-                let is_borrowed_param = self.is_borrowed_param(*id);
-                if info.use_count > 1 && !is_copy(&info.ty) && !is_borrowed_param {
-                    Expr::Clone(Box::new(var))
-                } else { var }
+                // Lazy top-level lets are LazyLock statics: deref with * to get inner value
+                if self.lazy_top_lets.contains(id) {
+                    let deref = Expr::Raw(format!("(*{})", crate::emit_common::sanitize(&info.name)));
+                    if info.use_count > 1 && !is_copy(&info.ty) {
+                        Expr::Clone(Box::new(deref))
+                    } else {
+                        deref
+                    }
+                } else {
+                    // Skip clone if: single-use, Copy type, or borrow analysis says this param is borrowed
+                    let is_borrowed_param = self.is_borrowed_param(*id);
+                    if info.use_count > 1 && !is_copy(&info.ty) && !is_borrowed_param {
+                        Expr::Clone(Box::new(var))
+                    } else { var }
+                }
             }
 
             IrExprKind::BinOp { op, left, right } => {
@@ -57,7 +67,18 @@ impl<'a> LowerCtx<'a> {
                 else_: Some(Box::new(self.lower_expr(else_))),
             },
             IrExprKind::Match { subject, arms } => {
-                let subj = self.lower_expr(subject);
+                let has_result_arms = arms.iter().any(|a| matches!(&a.pattern,
+                    IrPattern::Ok { .. } | IrPattern::Err { .. }
+                    | IrPattern::Some { .. } | IrPattern::None));
+                let subj = if has_result_arms {
+                    // Match on Result — don't auto-try the subject
+                    match self.lower_expr(subject) {
+                        Expr::Try(inner) => *inner, // strip auto-?
+                        other => other,
+                    }
+                } else {
+                    self.lower_expr(subject)
+                };
                 // String subjects need .as_str() to match against string literal patterns
                 let has_str_pat = arms.iter().any(|a| matches!(&a.pattern, IrPattern::Literal { expr } if matches!(&expr.kind, IrExprKind::LitStr { .. })));
                 let subj = if has_str_pat && matches!(&subject.ty, Ty::String) {

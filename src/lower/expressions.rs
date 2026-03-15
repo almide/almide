@@ -16,7 +16,15 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
     match expr {
         // ── Literals ──
         ast::Expr::Int { raw, .. } => {
-            let value = raw.parse::<i64>().unwrap_or(0);
+            let value = if raw.starts_with("0x") || raw.starts_with("0X") {
+                i64::from_str_radix(&raw[2..].replace('_', ""), 16).unwrap_or(0)
+            } else if raw.starts_with("0b") || raw.starts_with("0B") {
+                i64::from_str_radix(&raw[2..].replace('_', ""), 2).unwrap_or(0)
+            } else if raw.starts_with("0o") || raw.starts_with("0O") {
+                i64::from_str_radix(&raw[2..].replace('_', ""), 8).unwrap_or(0)
+            } else {
+                raw.replace('_', "").parse::<i64>().unwrap_or(0)
+            };
             ctx.mk(IrExprKind::LitInt { value }, ty, span)
         }
         ast::Expr::Float { value, .. } => ctx.mk(IrExprKind::LitFloat { value: *value }, ty, span),
@@ -207,6 +215,11 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                     let target = lower_call_target(ctx, callee);
                     let ta = type_args.as_ref().map(|tas| tas.iter().map(|t| resolve_type_expr(t)).collect()).unwrap_or_default();
                     ctx.mk(IrExprKind::Call { target, args: all_args, type_args: ta }, ty, span)
+                }
+                // Bare function name: `a |> f` → `f(a)`
+                ast::Expr::Ident { .. } | ast::Expr::Member { .. } => {
+                    let target = lower_call_target(ctx, right);
+                    ctx.mk(IrExprKind::Call { target, args: vec![ir_left], type_args: vec![] }, ty, span)
                 }
                 _ => {
                     let ir_right = lower_expr(ctx, right);
