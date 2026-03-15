@@ -117,18 +117,32 @@ impl Lexer {
                 continue;
             }
 
-            // Raw string literal r"..."
+            // Raw string literal: r"..." or r"""...""" (triple-quote allows embedded ")
             if ch == 'r' && peek(&chars, pos + 1) == Some('"') {
                 pos += 1; col += 1; // skip 'r'
-                let start = pos + 1; // after opening "
-                pos += 1; col += 1; // skip opening "
-                while pos < chars.len() && chars[pos] != '"' {
-                    if chars[pos] == '\n' { line += 1; col = 1; } else { col += 1; }
-                    pos += 1;
+                // Check for triple-quote r"""..."""
+                if peek(&chars, pos + 1) == Some('"') && peek(&chars, pos + 2) == Some('"') {
+                    pos += 3; col += 3; // skip """
+                    let start = pos;
+                    while pos + 2 < chars.len() && !(chars[pos] == '"' && chars[pos + 1] == '"' && chars[pos + 2] == '"') {
+                        if chars[pos] == '\n' { line += 1; col = 1; } else { col += 1; }
+                        pos += 1;
+                    }
+                    let value: String = chars[start..pos].iter().collect();
+                    if pos + 2 < chars.len() { pos += 3; col += 3; } // skip closing """
+                    tokens.push(Token { token_type: TokenType::String, value, line, col });
+                } else {
+                    // Single-quote r"..."
+                    let start = pos + 1;
+                    pos += 1; col += 1; // skip opening "
+                    while pos < chars.len() && chars[pos] != '"' {
+                        if chars[pos] == '\n' { line += 1; col = 1; } else { col += 1; }
+                        pos += 1;
+                    }
+                    let value: String = chars[start..pos].iter().collect();
+                    if pos < chars.len() { pos += 1; col += 1; } // skip closing "
+                    tokens.push(Token { token_type: TokenType::String, value, line, col });
                 }
-                let value: String = chars[start..pos].iter().collect();
-                if pos < chars.len() { pos += 1; col += 1; } // skip closing "
-                tokens.push(Token { token_type: TokenType::String, value, line, col });
                 continue;
             }
 

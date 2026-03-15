@@ -19,19 +19,19 @@ fn decode_outer(v: Value) -> Outer =
   match Outer.decode(v) { ok(o) => o, err(_) => Outer { label: "", inner: Inner { x: 0, y: 0 } } }
 
 test "P0-001: required missing" {
-  assert(is_basic_err("{\"name\": \"Alice\"}"))
+  assert(is_basic_err(r"""{"name": "Alice"}"""))
 }
 
 test "P0-002: required null" {
-  assert(is_basic_err("{\"id\": null, \"name\": \"Alice\"}"))
+  assert(is_basic_err(r"""{"id": null, "name": "Alice"}"""))
 }
 
 test "P0-009: type mismatch" {
-  assert(is_basic_err("{\"id\": \"not_int\", \"name\": \"Alice\"}"))
+  assert(is_basic_err(r"""{"id": "not_int", "name": "Alice"}"""))
 }
 
 test "P0-010: nested missing" {
-  match json.parse("{\"label\": \"A\", \"inner\": {\"x\": 1}}") {
+  match json.parse(r"""{"label": "A", "inner": {"x": 1}}""") {
     ok(v) => match Outer.decode(v) { err(_) => assert(true), ok(_) => assert(false) }
     err(_) => assert(false)
   }
@@ -45,7 +45,7 @@ test "P0-012: roundtrip" {
 }
 
 test "P0-013: unknown ignored" {
-  match json.parse("{\"id\": 1, \"name\": \"A\", \"extra\": true}") {
+  match json.parse(r"""{"id": 1, "name": "A", "extra": true}""") {
     ok(v) => assert_eq(decode_basic(v).id, 1)
     err(_) => assert(false)
   }
@@ -84,7 +84,7 @@ fn decode_opt(v: Value) -> WithOpt =
   match WithOpt.decode(v) { ok(w) => w, err(_) => WithOpt { id: 0, nickname: none } }
 
 test "P0-003: optional field missing" {
-  match json.parse("{\"id\": 1}") {
+  match json.parse(r"""{"id": 1}""") {
     ok(v) => {
       let w = decode_opt(v)
       assert_eq(w.id, 1)
@@ -95,14 +95,14 @@ test "P0-003: optional field missing" {
 }
 
 test "P0-004: optional field null" {
-  match json.parse("{\"id\": 1, \"nickname\": null}") {
+  match json.parse(r"""{"id": 1, "nickname": null}""") {
     ok(v) => assert_eq(decode_opt(v).nickname, none)
     err(_) => assert(false)
   }
 }
 
 test "P0-005: optional field present" {
-  match json.parse("{\"id\": 1, \"nickname\": \"neo\"}") {
+  match json.parse(r"""{"id": 1, "nickname": "neo"}""") {
     ok(v) => assert_eq(decode_opt(v).nickname, some("neo"))
     err(_) => assert(false)
   }
@@ -114,7 +114,7 @@ fn decode_def(v: Value) -> WithDef =
   match WithDef.decode(v) { ok(w) => w, err(_) => WithDef { id: 0, name: "FAIL", active: false } }
 
 test "P0-006: default field missing" {
-  match json.parse("{\"id\": 1}") {
+  match json.parse(r"""{"id": 1}""") {
     ok(v) => {
       let w = decode_def(v)
       assert_eq(w.id, 1)
@@ -126,14 +126,14 @@ test "P0-006: default field missing" {
 }
 
 test "P0-007: default field null" {
-  match json.parse("{\"id\": 1, \"name\": null}") {
+  match json.parse(r"""{"id": 1, "name": null}""") {
     ok(v) => assert_eq(decode_def(v).name, "anonymous")
     err(_) => assert(false)
   }
 }
 
 test "P0-008: default field present" {
-  match json.parse("{\"id\": 1, \"name\": \"Bob\", \"active\": false}") {
+  match json.parse(r"""{"id": 1, "name": "Bob", "active": false}""") {
     ok(v) => {
       let w = decode_def(v)
       assert_eq(w.name, "Bob")
