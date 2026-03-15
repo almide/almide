@@ -132,6 +132,15 @@ struct LowerCtx<'a> {
 impl<'a> LowerCtx<'a> {
     fn lty(&self, ty: &Ty) -> Type { lower_ty_with(self.anon, self.named, ty) }
 
+    /// Check if an IR expression is a variable used only once (safe to move instead of clone).
+    fn is_single_use_var(&self, e: &IrExpr) -> bool {
+        if let IrExprKind::Var { id } = &e.kind {
+            self.vt.get(*id).use_count <= 1
+        } else {
+            false
+        }
+    }
+
     fn lower_fn(&self, f: &IrFunction) -> Function {
         let fn_name = if f.name == "main" { "almide_main".into() }
             else if f.is_test { format!("test_{}", f.name.replace(|c: char| !c.is_alphanumeric() && c != '_', "_")) }
@@ -275,11 +284,19 @@ impl<'a> LowerCtx<'a> {
                     }
                 }
             }
-            IrExprKind::ForIn { var, iterable, body, .. } => Expr::For {
-                var: self.vt.get(*var).name.clone(),
-                iter: Box::new(Expr::Clone(Box::new(self.lower_expr(iterable)))),
-                body: body.iter().map(|s| self.lower_stmt(s)).collect(),
-            },
+            IrExprKind::ForIn { var, iterable, body, .. } => {
+                let iter_expr = self.lower_expr(iterable);
+                // Skip clone for: ranges (Copy), literals (fresh), single-use vars (can move)
+                let needs_clone = !matches!(&iterable.kind, IrExprKind::Range { .. })
+                    && !matches!(&iterable.kind, IrExprKind::List { .. })
+                    && !self.is_single_use_var(iterable);
+                let iter_val = if needs_clone { Expr::Clone(Box::new(iter_expr)) } else { iter_expr };
+                Expr::For {
+                    var: self.vt.get(*var).name.clone(),
+                    iter: Box::new(iter_val),
+                    body: body.iter().map(|s| self.lower_stmt(s)).collect(),
+                }
+            }
             IrExprKind::While { cond, body } => Expr::While {
                 cond: Box::new(self.lower_expr(cond)),
                 body: body.iter().map(|s| self.lower_stmt(s)).collect(),
@@ -338,14 +355,19 @@ impl<'a> LowerCtx<'a> {
                 });
                 Expr::Struct { name: sname, fields: fields.iter().map(|(n, v)| (n.clone(), self.lower_expr(v))).collect() }
             }
-            IrExprKind::SpreadRecord { base, fields } => Expr::StructUpdate {
-                base: Box::new(Expr::Clone(Box::new(self.lower_expr(base)))),
-                fields: fields.iter().map(|(n, v)| (n.clone(), self.lower_expr(v))).collect(),
-            },
+            IrExprKind::SpreadRecord { base, fields } => {
+                let base_expr = self.lower_expr(base);
+                let base_val = if self.is_single_use_var(base) { base_expr } else { Expr::Clone(Box::new(base_expr)) };
+                Expr::StructUpdate {
+                    base: Box::new(base_val),
+                    fields: fields.iter().map(|(n, v)| (n.clone(), self.lower_expr(v))).collect(),
+                }
+            }
             IrExprKind::Member { object, field } => {
                 let obj = self.lower_expr(object);
-                if is_copy(&e.ty) { Expr::Field(Box::new(obj), field.clone()) }
-                else { Expr::Clone(Box::new(Expr::Field(Box::new(obj), field.clone()))) }
+                let field_expr = Expr::Field(Box::new(obj), field.clone());
+                if is_copy(&e.ty) || self.is_single_use_var(object) { field_expr }
+                else { Expr::Clone(Box::new(field_expr)) }
             }
             IrExprKind::TupleIndex { object, index } => Expr::TupleIdx(Box::new(self.lower_expr(object)), *index),
             IrExprKind::IndexAccess { object, index } => Expr::Index(Box::new(self.lower_expr(object)), Box::new(self.lower_expr(index))),
