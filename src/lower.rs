@@ -1141,6 +1141,19 @@ fn encode_field_value(field_expr: &IrExpr, field_ty: &Ty, value_ty: &Ty) -> IrEx
         Ty::Int => ("value", "int"),
         Ty::Float => ("value", "float"),
         Ty::Bool => ("value", "bool"),
+        Ty::Option(inner) => {
+            // Option[T] → encode inner if Some, Null if None
+            // Use runtime helper: value_option_encode(field, |v| encode_inner(v))
+            // Simplified: generate a Call to value_option_encode with the appropriate encoder
+            return IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Named { name: format!("__encode_option_{}", decode_func_suffix(inner)) },
+                    args: vec![field_expr.clone()],
+                    type_args: vec![],
+                },
+                ty: value_ty.clone(), span: None,
+            };
+        }
         Ty::List(inner) => {
             // List[T] → value.array(list.map(field, (x) => encode_element(x)))
             let elem_encode = encode_field_value(
@@ -1214,36 +1227,39 @@ fn auto_derive_decode(vt: &mut VarTable, type_name: &str, type_ty: &Ty, fields: 
         };
 
         let decode_expr = if is_option {
-            // Option[T]: missing/null → none, present → some(decode(v))
-            // match value.field(_v, "key") { ok(v) => match v { Null => none, _ => some(as_T(v)?) }, err(_) => none }
-            let inner_decode = decode_field_value(
-                IrExpr { kind: IrExprKind::Var { id: VarId(u32::MAX - 1) }, ty: value_ty.clone(), span: None },
-                &inner_ty, &value_ty,
-            );
-            // For now, generate a simplified version: try field, wrap in some, fallback to none
-            // This uses the runtime helper
+            // Option[T]: use runtime helper value_decode_option(_v, "key", as_T)
+            // Returns Result[Option[T], String]
             IrExpr {
-                kind: IrExprKind::OptionNone,
+                kind: IrExprKind::Try { expr: Box::new(IrExpr {
+                    kind: IrExprKind::Call {
+                        target: CallTarget::Named { name: format!("__decode_option_{}", decode_func_suffix(&inner_ty)) },
+                        args: vec![
+                            IrExpr { kind: IrExprKind::Var { id: var_v }, ty: value_ty.clone(), span: None },
+                            IrExpr { kind: IrExprKind::LitStr { value: key_name(f) }, ty: Ty::String, span: None },
+                        ],
+                        type_args: vec![],
+                    },
+                    ty: Ty::Result(Box::new(f.ty.clone()), Box::new(Ty::String)), span: None,
+                })},
                 ty: f.ty.clone(), span: None,
             }
-            // TODO: proper Option decode with match
         } else if has_default {
-            // Default: try decode, fallback to default value
-            // match value.field(_v, "key") { ok(v) => as_T(v)?, err(_) => default }
-            let get_and_decode = IrExpr {
-                kind: IrExprKind::Try { expr: Box::new(get_field_call.clone()) },
-                ty: value_ty.clone(), span: None,
-            };
-            let decoded = decode_field_value(get_and_decode, &f.ty, &value_ty);
-            // For now, just use Try which will fail on missing — need match for fallback
-            // Use the default value directly since Try will propagate error
-            if let Some(ref default_expr) = f.default {
-                // Generate: match value.field(_v, "key") { ok(fv) => as_T(fv)?, err(_) => default }
-                // Simplified: just try, and if it fails the whole decode fails
-                // TODO: proper default fallback
-                decoded
-            } else {
-                decoded
+            // Default: use runtime helper value_decode_with_default(_v, "key", default, as_T)
+            let default_expr = f.default.clone().unwrap_or(IrExpr { kind: IrExprKind::Unit, ty: f.ty.clone(), span: None });
+            IrExpr {
+                kind: IrExprKind::Try { expr: Box::new(IrExpr {
+                    kind: IrExprKind::Call {
+                        target: CallTarget::Named { name: format!("__decode_default_{}", decode_func_suffix(&f.ty)) },
+                        args: vec![
+                            IrExpr { kind: IrExprKind::Var { id: var_v }, ty: value_ty.clone(), span: None },
+                            IrExpr { kind: IrExprKind::LitStr { value: key_name(f) }, ty: Ty::String, span: None },
+                            default_expr,
+                        ],
+                        type_args: vec![],
+                    },
+                    ty: Ty::Result(Box::new(f.ty.clone()), Box::new(Ty::String)), span: None,
+                })},
+                ty: f.ty.clone(), span: None,
             }
         } else {
             // Required: value.field(_v, "key")? |> as_T?
@@ -1290,6 +1306,16 @@ fn auto_derive_decode(vt: &mut VarTable, type_name: &str, type_ty: &Ty, fields: 
         body,
         is_effect: false, is_async: false, is_test: false,
         generics: None, extern_attrs: vec![], visibility: IrVisibility::Public,
+    }
+}
+
+fn decode_func_suffix(ty: &Ty) -> &'static str {
+    match ty {
+        Ty::String => "string",
+        Ty::Int => "int",
+        Ty::Float => "float",
+        Ty::Bool => "bool",
+        _ => "value",
     }
 }
 

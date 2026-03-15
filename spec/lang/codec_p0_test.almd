@@ -1,6 +1,8 @@
 module codec_p0_test
 
 type Basic: Codec = { id: Int, name: String }
+type WithOpt: Codec = { id: Int, nickname: Option[String] }
+type WithDef: Codec = { id: Int, name: String = "anonymous", active: Bool = true }
 type Inner: Codec = { x: Int, y: Int }
 type Outer: Codec = { label: String, inner: Inner }
 
@@ -71,6 +73,71 @@ test "P0-018: nested roundtrip" {
       assert_eq(o2.label, "test")
       assert_eq(o2.inner.x, 10)
       assert_eq(o2.inner.y, 20)
+    }
+    err(_) => assert(false)
+  }
+}
+
+// --- Option field tests ---
+
+fn decode_opt(v: Value) -> WithOpt =
+  match WithOpt.decode(v) { ok(w) => w, err(_) => WithOpt { id: 0, nickname: none } }
+
+test "P0-003: optional field missing" {
+  match json.parse("{\"id\": 1}") {
+    ok(v) => {
+      let w = decode_opt(v)
+      assert_eq(w.id, 1)
+      assert_eq(w.nickname, none)
+    }
+    err(_) => assert(false)
+  }
+}
+
+test "P0-004: optional field null" {
+  match json.parse("{\"id\": 1, \"nickname\": null}") {
+    ok(v) => assert_eq(decode_opt(v).nickname, none)
+    err(_) => assert(false)
+  }
+}
+
+test "P0-005: optional field present" {
+  match json.parse("{\"id\": 1, \"nickname\": \"neo\"}") {
+    ok(v) => assert_eq(decode_opt(v).nickname, some("neo"))
+    err(_) => assert(false)
+  }
+}
+
+// --- Default field tests ---
+
+fn decode_def(v: Value) -> WithDef =
+  match WithDef.decode(v) { ok(w) => w, err(_) => WithDef { id: 0, name: "FAIL", active: false } }
+
+test "P0-006: default field missing" {
+  match json.parse("{\"id\": 1}") {
+    ok(v) => {
+      let w = decode_def(v)
+      assert_eq(w.id, 1)
+      assert_eq(w.name, "anonymous")
+      assert_eq(w.active, true)
+    }
+    err(_) => assert(false)
+  }
+}
+
+test "P0-007: default field null" {
+  match json.parse("{\"id\": 1, \"name\": null}") {
+    ok(v) => assert_eq(decode_def(v).name, "anonymous")
+    err(_) => assert(false)
+  }
+}
+
+test "P0-008: default field present" {
+  match json.parse("{\"id\": 1, \"name\": \"Bob\", \"active\": false}") {
+    ok(v) => {
+      let w = decode_def(v)
+      assert_eq(w.name, "Bob")
+      assert_eq(w.active, false)
     }
     err(_) => assert(false)
   }

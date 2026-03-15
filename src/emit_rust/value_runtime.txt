@@ -60,6 +60,58 @@ fn value_option_encode<T, F: Fn(T) -> Value>(opt: Option<T>, f: F) -> Value {
     match opt { Some(v) => f(v), None => Value::Null }
 }
 
+/// Decode an optional field: missing/null → None, present → Some(decode(v))
+fn value_decode_option<T, F: Fn(Value) -> Result<T, String>>(v: &Value, key: &str, f: F) -> Result<Option<T>, String> {
+    match value_field(v.clone(), key.to_string()) {
+        Ok(Value::Null) => Ok(None),
+        Ok(val) => f(val).map(Some),
+        Err(_) => Ok(None),  // missing field → None
+    }
+}
+
+/// Decode a field with default: missing/null → default, present → decode(v)
+fn value_decode_with_default<T: Clone, F: Fn(Value) -> Result<T, String>>(v: &Value, key: &str, default: T, f: F) -> Result<T, String> {
+    match value_field(v.clone(), key.to_string()) {
+        Ok(Value::Null) => Ok(default),
+        Ok(val) => f(val),
+        Err(_) => Ok(default),  // missing field → default
+    }
+}
+
+// Concrete encode_option helpers
+fn __encode_option_string(v: Option<String>) -> Value { value_option_encode(v, value_str) }
+fn __encode_option_int(v: Option<i64>) -> Value { value_option_encode(v, value_int) }
+fn __encode_option_float(v: Option<f64>) -> Value { value_option_encode(v, value_float) }
+fn __encode_option_bool(v: Option<bool>) -> Value { value_option_encode(v, value_bool) }
+
+// Concrete decode_option helpers (called from auto-derive IR)
+fn __decode_option_string(v: Value, key: String) -> Result<Option<String>, String> {
+    value_decode_option(&v, &key, |v| value_as_string(v))
+}
+fn __decode_option_int(v: Value, key: String) -> Result<Option<i64>, String> {
+    value_decode_option(&v, &key, |v| value_as_int(v))
+}
+fn __decode_option_float(v: Value, key: String) -> Result<Option<f64>, String> {
+    value_decode_option(&v, &key, |v| value_as_float(v))
+}
+fn __decode_option_bool(v: Value, key: String) -> Result<Option<bool>, String> {
+    value_decode_option(&v, &key, |v| value_as_bool(v))
+}
+
+// Concrete decode_default helpers
+fn __decode_default_string(v: Value, key: String, default: String) -> Result<String, String> {
+    value_decode_with_default(&v, &key, default, |v| value_as_string(v))
+}
+fn __decode_default_int(v: Value, key: String, default: i64) -> Result<i64, String> {
+    value_decode_with_default(&v, &key, default, |v| value_as_int(v))
+}
+fn __decode_default_float(v: Value, key: String, default: f64) -> Result<f64, String> {
+    value_decode_with_default(&v, &key, default, |v| value_as_float(v))
+}
+fn __decode_default_bool(v: Value, key: String, default: bool) -> Result<bool, String> {
+    value_decode_with_default(&v, &key, default, |v| value_as_bool(v))
+}
+
 fn value_stringify(v: &Value) -> String {
     match v {
         Value::Null => "null".to_string(),
