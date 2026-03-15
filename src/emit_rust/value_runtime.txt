@@ -56,6 +56,10 @@ fn value_decode_list<T, F: Fn(Value) -> Result<T, String>>(v: Value, f: F) -> Re
     }
 }
 
+fn value_option_encode<T, F: Fn(T) -> Value>(opt: Option<T>, f: F) -> Value {
+    match opt { Some(v) => f(v), None => Value::Null }
+}
+
 fn value_stringify(v: &Value) -> String {
     match v {
         Value::Null => "null".to_string(),
