@@ -2,110 +2,110 @@
 
 ## Active
 
-### Phase B: Type System & Safety
-- [Derive Conventions](active/derive-conventions.md) — Eq/Repr/Ord/Hash。Phase 1-2 ✅, remaining: operator dispatch, auto-derive
-- [Monomorphization](active/monomorphization.md) — Structural bounds ✅, transitive ✅, container protocols → on-hold
-- [Type System Extensions](active/type-system.md) — OpenRecord ✅, structural bounds ✅, remaining: container protocols
+### Now: Derive Conventions Phase 3-4
+- [Derive Conventions](active/derive-conventions.md) — **Eq/Repr/Ord/Hash**. Phase 1-2 ✅. Next: operator dispatch (`==` → `Dog.eq`), auto-derive
 
-### Phase C: Language Extensions
-- [Syntax Sugar](active/syntax-sugar.md) — Lambda ✅, default args ✅, remaining: comprehensions, named args, raw strings, block comments
+### Language
+- [Syntax Sugar](active/syntax-sugar.md) — Lambda ✅, default args ✅. Remaining: comprehensions, named args, raw strings, block comments
 - [Codec Protocol & JSON](active/codec-and-json.md) — `deriving Codec` + JSON as first format
-- [Template: Typed Document Builder](active/template.md) — `template` keyword, `html {}`/`text {}` builders
-- [UFCS for External Libraries](active/ufcs-external.md) — Type-directed UFCS for user-defined types
-- [Structured Concurrency](active/structured-concurrency.md) — Conservative async: explicit fork/join, fail-fast semantics
+- [Template](active/template.md) — Typed document builder: `html {}`/`text {}` builders
+- [UFCS External](active/ufcs-external.md) — Type-directed UFCS for user-defined/external functions
+
+### Runtime & Async
+- [Structured Concurrency](active/structured-concurrency.md) — Conservative async: explicit fork/join, fail-fast
 - [Platform Async](active/platform-async.md) — `effect fn` = async on all targets, `parallel` block
 
-### Phase D: Stdlib & Ecosystem
-- [Stdlib Runtime Architecture](active/stdlib-self-hosted-redesign.md) — `.almd` 中心の stdlib, `@extern` でホスト依存
-- [Stdlib API Surface Reform](active/stdlib-verb-system.md) — Verb 標準化: 1 verb を全コンテナ型に適用
-- [Stdlib Strategy](active/stdlib-strategy.md) — 282→700+ 関数, Tier 1-3 モジュール拡充
-- [Web Framework](active/web-framework.md) — First-party Hono-equivalent, template/Codec integration
-- [CLI-First](active/cli-first.md) — CLI tool authoring: `almide run` for dev, `almide build` for native binary
+### Stdlib & Ecosystem
+- [Stdlib Runtime Architecture](active/stdlib-self-hosted-redesign.md) — `.almd` 中心, `@extern` でホスト依存
+- [Stdlib API Reform](active/stdlib-verb-system.md) — Verb 標準化
+- [Stdlib Strategy](active/stdlib-strategy.md) — 282→700+ 関数
+- [Web Framework](active/web-framework.md) — First-party Hono-equivalent
+- [CLI-First](active/cli-first.md) — `almide run` for dev, `almide build` for native binary
 
-### Phase E: Multi-Target Expansion
-- [Multi-Target Strategy](active/multi-target-strategy.md) — Python, Go, Kotlin, Swift, C expansion plan
-- [New Codegen Targets](active/new-codegen-targets.md) — Go, Python 優先。IR redesign により低コスト追加
+### Multi-Target
+- [Multi-Target Strategy](active/multi-target-strategy.md) — Python, Go, Kotlin, Swift, C
+- [New Codegen Targets](active/new-codegen-targets.md) — Go, Python 優先
 
-### Phase F: Tooling & Infrastructure
-- [Incremental Compilation](active/incremental-compilation.md) — Skip rustc when generated code unchanged, module-level IR caching
-- [IR Interpreter](active/ir-interpreter.md) — Direct IR execution for REPL, playground, fast test runs
-- [Error-Fix Database](active/error-fix-db.md) — Compiler error → fix suggestion mapping with before/after examples
-
-### Ongoing: LLM & Grammar Research
-- [LLM Integration](active/llm-integration.md) — `almide forge` (library generation), `almide fix` (self-repair)
-- [LLM → IR Direct Generation](active/llm-ir-generation.md) — LLM が型付き IR (JSON) を直接生成
+### Tooling
+- [Incremental Compilation](active/incremental-compilation.md) — Skip rustc when unchanged
+- [IR Interpreter](active/ir-interpreter.md) — Direct IR execution for REPL, playground
+- [Error-Fix Database](active/error-fix-db.md) — Error → fix suggestion mapping
 - [Grammar Codegen](active/grammar-codegen.md) — Single source of truth for tokens/precedence
-- [Grammar Research Infrastructure](active/grammar-research.md) — A/B test syntax variants across LLMs
+
+### LLM
+- [LLM Integration](active/llm-integration.md) — `almide forge`, `almide fix`
+- [LLM → IR Generation](active/llm-ir-generation.md) — LLM generates typed IR directly
 
 ## On Hold
 
 - [Benchmark Report](on-hold/benchmark-report.md)
-- [Cross-Target AOT](on-hold/cross-target-aot.md)
-- [Cross-Target Semantics](on-hold/cross-target-semantics.md) — TS ターゲット本格化時に対応。実装は大半完了、残りはテスト
-- [Direct WASM Emission](on-hold/emit-wasm-direct.md) — `.almd → WASM bytecode` without rustc
-- [Editor & GitHub Integration](on-hold/editor-github-integration.md)
-- [LSP Server](on-hold/lsp.md) — Editor integration: diagnostics, hover, go-to-def, completion
-- [LLM Immutable Sugar](on-hold/llm-immutable-sugar.md) — var indexing, `with` expression
-- [Package Registry](on-hold/package-registry.md) — Lock file, semver resolution, central registry
-- [Rainbow FFI](on-hold/rainbow-ffi.md) — Rust, JS, C, Python, Swift, Kotlin, Erlang FFI
-- [REPL](on-hold/repl.md) — Interactive evaluation, state accumulation, history
-- [Research: Modification Survival Rate Paper](on-hold/research-modification-survival-rate-paper.md)
-- [Self-Hosting](on-hold/self-hosting.md) — Rewrite compiler in Almide
-- [Stdlib Architecture: 3-Layer Design](on-hold/stdlib-architecture-3-layer-design.md)
-- [Supervision & Actors](on-hold/supervision-and-actors.md) — Typed actors, channels, supervision trees
-- [Tooling (remaining)](on-hold/tooling.md) — doc comments, benchmarking, fmt comment preservation
 - [Built-in Protocols](on-hold/trait-impl.md) — Eq, Hash done; Repr remaining
+- [Cross-Target AOT](on-hold/cross-target-aot.md)
+- [Cross-Target Semantics](on-hold/cross-target-semantics.md) — TS 本格化時。実装大半完了
+- [Direct WASM Emission](on-hold/emit-wasm-direct.md)
+- [Editor & GitHub Integration](on-hold/editor-github-integration.md)
+- [LSP Server](on-hold/lsp.md)
+- [LLM Immutable Sugar](on-hold/llm-immutable-sugar.md)
+- [Package Registry](on-hold/package-registry.md)
+- [Rainbow FFI](on-hold/rainbow-ffi.md)
+- [REPL](on-hold/repl.md)
+- [Research: MSR Paper](on-hold/research-modification-survival-rate-paper.md)
+- [Self-Hosting](on-hold/self-hosting.md)
+- [Stdlib 3-Layer Design](on-hold/stdlib-architecture-3-layer-design.md)
+- [Supervision & Actors](on-hold/supervision-and-actors.md)
+- [Tooling (remaining)](on-hold/tooling.md)
 
 ## Done
 
-~~Phase 0: Compiler Integrity~~ ✅ | ~~Phase A: Generated Code Quality~~ ✅
+~~Phase 0~~ ✅ | ~~Phase A~~ ✅
 
-- [2026 Ergonomics](2026-ergonomics.md) — `do` block pure fn, `guard else break/continue`, `unwrap_or`, `json.parse` auto-`?`
-- [Architecture Hardening](done/architecture-hardening.md) — RustIR pipeline eliminated Emitter clones
-- [Borrow Inference](done/borrow-inference-design.md) — Lobster-style move/clone analysis
-- [CLI Tool Authoring](done/cli-tool-authoring.md) — err() exit, almide run args
-- [Clone Reduction Phase 4](done/clone-reduction.md) — Single-use var move, range/literal skip
-- [Codegen Correctness](done/codegen-correctness.md) — P1 7項 + P2 1項, auto-?, guard, do-block
-- [Codegen IR Redesign](done/ir-redesign.md) — Self-contained typed IR, Phase 1-5
-- [Codegen Optimization](done/codegen-optimization.md) — move analysis, borrow inference (Phase 0-3)
-- [Codegen Refinement](done/codegen-refinement.md) — let mut→let demotion via IR post-pass
-- [Compiler Bug Fixes](done/compiler-bugs-from-tests.md) — 7 bugs found by test expansion
+- [2026 Ergonomics](2026-ergonomics.md)
+- [Architecture Hardening](done/architecture-hardening.md)
+- [Borrow Inference](done/borrow-inference-design.md)
+- [CLI Tool Authoring](done/cli-tool-authoring.md)
+- [Clone Reduction Phase 4](done/clone-reduction.md)
+- [Codegen Correctness](done/codegen-correctness.md)
+- [Codegen IR Redesign](done/ir-redesign.md)
+- [Codegen Optimization](done/codegen-optimization.md)
+- [Codegen Refinement](done/codegen-refinement.md)
+- [Compiler Bug Fixes](done/compiler-bugs-from-tests.md)
 - [Compiler Hardening](done/compiler-hardening.md)
-- [Compiler Warnings](done/compiler-warnings.md) — Unused variables, unused imports
+- [Compiler Warnings](done/compiler-warnings.md)
 - [Control Flow Extensions](done/control-flow.md)
 - [Cross-Platform Support](done/cross-platform.md)
-- [Default Field Values](done/default-field-values.md) — `field: Type = expr`
-- [--emit-ir](done/emit-ir.md) — `--emit-ir` flag for typed IR JSON export
-- [Eq Protocol](done/eq-protocol.md) — automatic `==` for all value types
-- [Error Diagnostics](done/error-diagnostics.md) — lost mutation, "did you mean?", immutability hints
-- [Error Diagnostics — Visual](done/error-diagnostics-visual.md) — color, carets, multi-span
-- [Error Recovery](done/error-recovery.md) — Multi-error reporting, recovery
-- [Exhaustiveness Check](done/exhaustiveness-check.md) — Non-exhaustive match → compile error
-- [Formatter Rewrite](done/formatter-rewrite.md) — 890 → 397 lines
-- [Function Reference Passing](done/function-reference-passing.md) — Won't do
+- [Default Field Values](done/default-field-values.md)
+- [--emit-ir](done/emit-ir.md)
+- [Eq Protocol](done/eq-protocol.md)
+- [Error Diagnostics](done/error-diagnostics.md)
+- [Error Diagnostics — Visual](done/error-diagnostics-visual.md)
+- [Error Recovery](done/error-recovery.md)
+- [Exhaustiveness Check](done/exhaustiveness-check.md)
+- [Formatter Rewrite](done/formatter-rewrite.md)
+- [Function Reference Passing](done/function-reference-passing.md)
 - [Generics](done/generics.md)
-- [Hint System](done/hint-system.md) — Pluggable hint registry, 61 tests
-- [HTTP Module](done/http.md) — server, client, multi-target
+- [Grammar Research](done/grammar-research.md) — A/B test framework, lambda syntax experiment
+- [Hint System](done/hint-system.md)
+- [HTTP Module](done/http.md)
 - [`import self`](done/import-self-entry.md)
-- [IR Optimization Passes](done/ir-optimization-passes.md) — Constant folding, DCE, constant propagation
-- [IR Optimization (Tier 1)](done/ir-optimization.md) — Constant folding, DCE
-- [JSON Builder API](done/json-builder-api.md) — Superseded by Codec Protocol
-- [Lambda Type Inference](done/lambda-type-inference.md) — Bidirectional inference
+- [IR Optimization Passes](done/ir-optimization-passes.md)
+- [IR Optimization (Tier 1)](done/ir-optimization.md)
+- [JSON Builder API](done/json-builder-api.md)
+- [Lambda Type Inference](done/lambda-type-inference.md)
 - [Language Test Suite](done/language-test-suite.md)
-- [List Index Read](done/list-index-read.md) — `xs[i]`
-- [List Stdlib Gaps](done/list-stdlib-gaps.md) — 52 functions
+- [List Index Read](done/list-index-read.md)
+- [List Stdlib Gaps](done/list-stdlib-gaps.md)
 - [Literal Syntax Gaps](done/literal-syntax-gaps.md)
 - [LLM Developer Experience](done/llm-developer-experience.md)
-- [LLM Immutable Patterns](done/llm-immutable-patterns.md) — Tier 1-2
-- [Map Literal](done/map-literal.md) — `[:]` / `["key": value]`
+- [LLM Immutable Patterns](done/llm-immutable-patterns.md)
+- [Map Literal](done/map-literal.md)
 - [Module System v2](done/module-system-v2.md)
-- [Monomorphization](done/monomorphization.md) — Generic structural bounds, mono.rs, 16 tests
+- [Monomorphization](done/monomorphization.md) — Structural bounds, transitive, 16 tests
 - [npm Package Target](done/npm-package-target-target-npm.md)
 - [Parser Error Recovery](done/parser-error-recovery.md)
 - [Playground Repair](done/playground-repair.md)
 - [Proliferation Blockers](done/proliferation-blockers.md)
-- [Rust Test Coverage](done/rust-test-coverage.md) — 567 cargo tests
-- [RustIR Pipeline](done/rust-ir.md) — IR → RustIR → String 2-stage codegen
+- [Rust Test Coverage](done/rust-test-coverage.md)
+- [RustIR Pipeline](done/rust-ir.md)
 - [Scaffold & Proliferation](done/scaffold-and-proliferation.md)
 - [Self-Tooling](done/self-tooling.md)
 - [stdin / Interactive I/O](done/stdin-io.md)
@@ -115,15 +115,16 @@
 - [Stdlib Self-Hosting](done/stdlib-self-hosting.md)
 - [String Handling](done/string-handling.md)
 - [Structured Concurrency (Phase 1)](done/structured-concurrency.md)
-- [Tail Call Optimization](done/tail-call-optimization.md) — Self-recursive → labeled loop
-- [Test Coverage](done/test-coverage.md) — 1,700+ almd tests
+- [Tail Call Optimization](done/tail-call-optimization.md)
+- [Test Coverage](done/test-coverage.md)
 - [Test Directory Structure](done/test-directory-structure.md)
-- [Top-Level Let](done/top-level-let.md) — `let PI = 3.14`
-- [Trailing Lambda / Builder DSL](done/trailing-lambda-builder.md) — Won't do
-- [TS/JS Codegen Rewrite](done/ts-codegen-rewrite.md) — 2-stage pipeline
+- [Top-Level Let](done/top-level-let.md)
+- [Trailing Lambda / Builder DSL](done/trailing-lambda-builder.md)
+- [TS/JS Codegen Rewrite](done/ts-codegen-rewrite.md)
 - [Tuple & Record](done/tuple-record.md)
 - [Typed IR](done/typed-ir.md)
-- [Type System Soundness](done/type-system-soundness.md) — B+ → A+: 14 fixes
+- [Type System Extensions](done/type-system.md) — OpenRecord, structural bounds, union parsing
+- [Type System Soundness](done/type-system-soundness.md)
 - [UFCS Type Resolution](done/ufcs-type-resolution.md)
 - [Unused Variable Warnings](done/unused-variable-warnings.md)
 - [Variant Record Fields](done/variant-record-fields.md)
