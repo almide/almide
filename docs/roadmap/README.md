@@ -3,7 +3,6 @@
 ## Active
 
 ### Language
-- [Operator Protocol](active/operator-protocol.md) — `==` → `Dog.eq`, `"${d}"` → `Dog.repr`, auto-derive (Encode/Decode は Codec に統合)
 - [Syntax Sugar](active/syntax-sugar.md) — Lambda ✅, default args ✅. Remaining: comprehensions, named args, raw strings, block comments
 - [Codec Protocol & JSON](active/codec-and-json.md) — `deriving Codec` + JSON, Encode/Decode convention
 - [Template](active/template.md) — Typed document builder: `html {}`/`text {}` builders
@@ -73,6 +72,7 @@
 - [Cross-Platform Support](done/cross-platform.md)
 - [Default Field Values](done/default-field-values.md)
 - [Derive Conventions](done/derive-conventions.md) — Eq/Repr/Ord/Hash, convention declaration + method resolution
+- [Operator Protocol](done/operator-protocol.md) — `==` → Type.eq, `"${d}"` → Type.repr, auto-derive Eq/Repr
 - [--emit-ir](done/emit-ir.md)
 - [Eq Protocol](done/eq-protocol.md)
 - [Error Diagnostics](done/error-diagnostics.md)
