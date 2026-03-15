@@ -121,7 +121,7 @@ pub enum Expr {
     EmptyMap { #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Record { name: Option<String>, fields: Vec<FieldInit>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     SpreadRecord { base: Box<Expr>, fields: Vec<FieldInit>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Call { callee: Box<Expr>, args: Vec<Expr>, #[serde(default)] type_args: Option<Vec<TypeExpr>>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Call { callee: Box<Expr>, args: Vec<Expr>, #[serde(default, skip_serializing_if = "Vec::is_empty")] named_args: Vec<(String, Expr)>, #[serde(default)] type_args: Option<Vec<TypeExpr>>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Member { object: Box<Expr>, field: String, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     TupleIndex { object: Box<Expr>, index: usize, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     IndexAccess { object: Box<Expr>, index: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },

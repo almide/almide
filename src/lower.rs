@@ -454,8 +454,8 @@ fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         }
 
         // ── Calls ──
-        ast::Expr::Call { callee, args, type_args, .. } => {
-            lower_call(ctx, callee, args, type_args.as_ref(), ty, span)
+        ast::Expr::Call { callee, args, named_args, type_args, .. } => {
+            lower_call(ctx, callee, args, named_args, type_args.as_ref(), ty, span)
         }
 
         // ── Pipe: desugar `a |> f(b)` → `f(a, b)` ──
@@ -555,19 +555,46 @@ fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
 
 // ── Call lowering ───────────────────────────────────────────────
 
-fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Expr], type_args: Option<&Vec<ast::TypeExpr>>, ty: Ty, span: Option<ast::Span>) -> IrExpr {
+fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Expr], named_args: &[(String, ast::Expr)], type_args: Option<&Vec<ast::TypeExpr>>, ty: Ty, span: Option<ast::Span>) -> IrExpr {
     let mut ir_args: Vec<IrExpr> = args.iter().map(|a| lower_expr(ctx, a)).collect();
     let ta = type_args.map(|tas| tas.iter().map(|t| resolve_type_expr(t)).collect()).unwrap_or_default();
     let target = lower_call_target(ctx, callee);
 
-    // Call-site expansion: fill in default arguments for missing params
-    if let CallTarget::Named { ref name } = target {
-        if let Some(defaults) = ctx.fn_defaults.get(name).cloned() {
-            let expected = defaults.len();
-            if ir_args.len() < expected {
-                for i in ir_args.len()..expected {
-                    if let Some(Some(default_expr)) = defaults.get(i) {
-                        ir_args.push(lower_expr(ctx, &default_expr));
+    // Named args: resolve to positional order using function signature
+    if !named_args.is_empty() {
+        let fn_name = match &target {
+            CallTarget::Named { name } => Some(name.clone()),
+            _ => None,
+        };
+        if let Some(ref name) = fn_name {
+            let param_names: Vec<String> = ctx.env.functions.get(name)
+                .map(|sig| sig.params.iter().map(|(n, _)| n.clone()).collect())
+                .unwrap_or_default();
+            let defaults = ctx.fn_defaults.get(name).cloned();
+            let positional_count = ir_args.len();
+            for i in positional_count..param_names.len() {
+                let param_name = &param_names[i];
+                if let Some((_, expr)) = named_args.iter().find(|(n, _)| n == param_name) {
+                    ir_args.push(lower_expr(ctx, expr));
+                } else if let Some(ref defs) = defaults {
+                    if let Some(Some(default_expr)) = defs.get(i) {
+                        ir_args.push(lower_expr(ctx, default_expr));
+                    }
+                }
+            }
+        }
+    }
+
+    // Default args: fill in remaining defaults (for calls without named args)
+    if named_args.is_empty() {
+        if let CallTarget::Named { ref name } = target {
+            if let Some(defaults) = ctx.fn_defaults.get(name).cloned() {
+                let expected = defaults.len();
+                if ir_args.len() < expected {
+                    for i in ir_args.len()..expected {
+                        if let Some(Some(default_expr)) = defaults.get(i) {
+                            ir_args.push(lower_expr(ctx, &default_expr));
+                        }
                     }
                 }
             }

@@ -181,7 +181,14 @@ impl Checker {
                 ty
             }
 
-            ast::Expr::Call { callee, args, .. } => self.check_call(callee, args),
+            ast::Expr::Call { callee, args, named_args, .. } => {
+                // Combine positional + named args for type checking
+                let mut all_args: Vec<&mut ast::Expr> = args.iter_mut().collect();
+                let mut named_exprs: Vec<ast::Expr> = named_args.iter().map(|(_, e)| e.clone()).collect();
+                let mut all_flat: Vec<ast::Expr> = args.to_vec();
+                all_flat.extend(named_exprs);
+                self.check_call(callee, &mut all_flat)
+            }
 
             ast::Expr::Pipe { left, right, .. } => {
                 let left_ty = self.infer_expr(left);

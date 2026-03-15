@@ -236,10 +236,10 @@ impl Parser {
                 let span = Some(self.current_span());
                 let ta = self.parse_type_args()?;
                 self.expect(TokenType::LParen)?;
-                let args = self.parse_call_args()?;
+                let (args, named_args) = self.parse_call_args()?;
                 self.expect(TokenType::RParen)?;
                 expr = Expr::Call {
-                    callee: Box::new(expr), args, type_args: Some(ta),
+                    callee: Box::new(expr), args, named_args, type_args: Some(ta),
                     id: self.next_id(), span, resolved_type: None,
                 };
             } else if self.check(TokenType::LBracket) && !self.newline_before_current() {
@@ -256,10 +256,10 @@ impl Parser {
                 let span = Some(self.current_span());
                 let open = self.current().clone();
                 self.advance();
-                let args = self.parse_call_args()?;
+                let (args, named_args) = self.parse_call_args()?;
                 self.expect_closing(TokenType::RParen, open.line, open.col, "function call")?;
                 expr = Expr::Call {
-                    callee: Box::new(expr), args, type_args: None,
+                    callee: Box::new(expr), args, named_args, type_args: None,
                     id: self.next_id(), span, resolved_type: None,
                 };
             } else {
@@ -269,16 +269,17 @@ impl Parser {
         Ok(expr)
     }
 
-    pub(crate) fn parse_call_args(&mut self) -> Result<Vec<Expr>, String> {
+    pub(crate) fn parse_call_args(&mut self) -> Result<(Vec<Expr>, Vec<(String, Expr)>), String> {
         let mut args = Vec::new();
+        let mut named_args = Vec::new();
         self.skip_newlines();
-        if self.check(TokenType::RParen) { return Ok(args); }
-        self.parse_one_call_arg(&mut args)?;
+        if self.check(TokenType::RParen) { return Ok((args, named_args)); }
+        self.parse_one_call_arg(&mut args, &mut named_args)?;
         while self.check(TokenType::Comma) {
             self.advance();
             self.skip_newlines();
             if self.check(TokenType::RParen) { break; }
-            self.parse_one_call_arg(&mut args)?;
+            self.parse_one_call_arg(&mut args, &mut named_args)?;
         }
         self.skip_newlines();
         if !self.check(TokenType::RParen) && !self.check(TokenType::EOF) {
@@ -288,25 +289,37 @@ impl Parser {
                 return Err(format!("{} at line {}:{}\n  Hint: {}", msg, tok.line, tok.col, result.hint));
             }
         }
-        Ok(args)
+        Ok((args, named_args))
     }
 
-    fn parse_one_call_arg(&mut self, args: &mut Vec<Expr>) -> Result<(), String> {
+    fn parse_one_call_arg(&mut self, args: &mut Vec<Expr>, named_args: &mut Vec<(String, Expr)>) -> Result<(), String> {
         if self.check(TokenType::Underscore) {
             let span = Some(self.current_span());
             self.advance();
             args.push(Expr::Placeholder { id: self.next_id(), span, resolved_type: None });
             return Ok(());
         }
+        // Named argument: `name: expr`
         if self.check(TokenType::Ident)
             && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Colon)
+            && self.peek_at(2).map(|t| &t.token_type) != Some(&TokenType::Colon) // not ::
         {
-            self.advance(); // skip label name
+            let name = self.advance_and_get_value();
             self.advance(); // skip :
             self.skip_newlines();
             let value = self.parse_expr()?;
-            args.push(value);
+            if !named_args.is_empty() || true {
+                // Once named starts, check no positional after
+                if named_args.is_empty() && !args.is_empty() {
+                    // First named arg after positional — OK
+                }
+                named_args.push((name, value));
+            }
         } else {
+            if !named_args.is_empty() {
+                let tok = self.current();
+                return Err(format!("positional argument after named argument at line {}:{}", tok.line, tok.col));
+            }
             args.push(self.parse_expr()?);
         }
         Ok(())

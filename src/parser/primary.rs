@@ -183,11 +183,11 @@ impl Parser {
             if self.check(TokenType::LParen) {
                 let open_call = self.current().clone();
                 self.advance();
-                let args = self.parse_call_args()?;
+                let (args, named_args) = self.parse_call_args()?;
                 self.expect_closing(TokenType::RParen, open_call.line, open_call.col, "constructor call")?;
                 return Ok(Expr::Call {
                     callee: Box::new(Expr::TypeName { name, id: self.next_id(), span, resolved_type: None }),
-                    args, type_args: Some(ta),
+                    args, named_args, type_args: Some(ta),
                     id: self.next_id(), span, resolved_type: None,
                 });
             }
@@ -196,11 +196,11 @@ impl Parser {
         if self.check(TokenType::LParen) {
             let open_call = self.current().clone();
             self.advance();
-            let args = self.parse_call_args()?;
+            let (args, named_args) = self.parse_call_args()?;
             self.expect_closing(TokenType::RParen, open_call.line, open_call.col, "constructor call")?;
             return Ok(Expr::Call {
                 callee: Box::new(Expr::TypeName { name, id: self.next_id(), span, resolved_type: None }),
-                args, type_args: None,
+                args, named_args, type_args: None,
                 id: self.next_id(), span, resolved_type: None,
             });
         }
