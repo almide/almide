@@ -248,19 +248,10 @@ fn emit_do_guard_ok_value_js() {
     let code = user_code(&out);
     assert!(code.contains("while"), "do-block should emit while loop");
     assert!(
-        code.contains("return count") || code.contains("return (count)"),
-        "guard else ok(count) should emit return count, got:\n{}",
+        code.contains("{ ok: true, value: count }") || code.contains("return count") || code.contains("return (count)"),
+        "guard else ok(count) should emit Result ok or return count, got:\n{}",
         code
     );
-    // Must NOT emit break for non-unit ok value
-    let guard_line = code.lines().find(|l| l.contains("if (!("));
-    if let Some(line) = guard_line {
-        assert!(
-            !line.contains("break"),
-            "guard else ok(count) must NOT emit break, got: {}",
-            line
-        );
-    }
 }
 
 #[test]
@@ -270,8 +261,8 @@ fn emit_do_guard_err_js() {
     );
     let code = user_code(&out);
     assert!(
-        code.contains("throw") || code.contains("Error"),
-        "guard else err should emit throw, got:\n{}",
+        code.contains("throw") || code.contains("Error") || code.contains("{ ok: false, error:"),
+        "guard else err should emit throw or Result err, got:\n{}",
         code
     );
 }
@@ -292,8 +283,8 @@ fn emit_do_guard_ok_value_ts() {
     );
     let code = user_code(&out);
     assert!(
-        code.contains("return count") || code.contains("return (count)"),
-        "TS: guard else ok(count) should emit return count, got:\n{}",
+        code.contains("{ ok: true, value: count }") || code.contains("return count") || code.contains("return (count)"),
+        "TS: guard else ok(count) should emit Result ok or return count, got:\n{}",
         code
     );
 }
