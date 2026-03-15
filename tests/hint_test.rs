@@ -385,10 +385,9 @@ fn syntax_guide_not_triggered_wrong_scope() {
 
 #[test]
 fn syntax_guide_self() {
-    // `self` is valid in convention methods (fn Dog.repr(self) -> String)
     let got = tok(TokenType::Ident, "self");
     let ctx = HintContext { expected: None, got: &got, prev: None, next: None, scope: HintScope::Expression };
-    assert!(almide::parser::hints::check_hint(&ctx).is_none(), "self should not trigger a hint");
+    assert_hint_match(&ctx, "first parameter");
 }
 
 #[test]

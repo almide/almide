@@ -20,8 +20,8 @@ LLM の生成精度を最大化する設計判断。
 // 1. 組み込み convention
 type Dog: Eq, Repr = { name: String, breed: String }
 
-fn Dog.eq(self, other: Dog) -> Bool = self.name == other.name
-fn Dog.repr(self) -> String = "${self.name} (${self.breed})"
+fn Dog.eq(a: Dog, b: Dog) -> Bool = d.name == other.name
+fn Dog.repr(d: Dog) -> String = "${d.name} (${d.breed})"
 
 // 2. structural bound (convention 定義不要、メソッド + bound)
 fn print_all[T: { display: () -> String }](items: List[T]) =

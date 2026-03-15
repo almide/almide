@@ -191,35 +191,13 @@ fn lower_fn(
     visibility: &ast::Visibility, _module_prefix: Option<&str>,
 ) -> IrFunction {
     ctx.push_scope();
-    // For convention methods (Dog.repr), resolve Self type and rename self param
-    let self_type = if name.contains('.') {
-        name.split('.').next().map(|s| Ty::Named(s.to_string(), vec![]))
-    } else { None };
     let mut ir_params = Vec::new();
     for p in params {
-        let ty = if p.name == "self" {
-            self_type.clone().unwrap_or_else(|| resolve_type_expr(&p.ty))
-        } else {
-            let t = resolve_type_expr(&p.ty);
-            // Resolve Self → concrete type in parameter types
-            if let Some(ref st) = self_type {
-                if matches!(&t, Ty::Named(n, args) if n == "Self" && args.is_empty()) {
-                    st.clone()
-                } else { t }
-            } else { t }
-        };
-        // Rename self → _self to avoid Rust keyword conflict
-        let param_name = if p.name == "self" { "_self".to_string() } else { p.name.clone() };
-        let var = ctx.define_var(&param_name, ty.clone(), Mutability::Let, span.clone());
-        // Alias "self" → same VarId so body references resolve to _self
-        if p.name == "self" {
-            if let Some(scope) = ctx.scopes.last_mut() {
-                scope.insert("self".to_string(), var);
-            }
-        }
+        let ty = resolve_type_expr(&p.ty);
+        let var = ctx.define_var(&p.name, ty.clone(), Mutability::Let, span.clone());
         let default = p.default.as_ref().map(|d| Box::new(lower_expr(ctx, d)));
         ir_params.push(IrParam {
-            var, ty: ty.clone(), name: param_name,
+            var, ty: ty.clone(), name: p.name.clone(),
             borrow: ParamBorrow::Own, open_record: None, default,
         });
     }

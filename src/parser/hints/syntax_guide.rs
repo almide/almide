@@ -56,9 +56,9 @@ fn check_rejected_ident(name: &str) -> Option<HintResult> {
             message: Some(format!("'{}' is not valid in Almide", name)),
             hint: "Almide has no try/catch. Use 'match' on Result values instead.".into(),
         }),
-        "this" => Some(HintResult {
-            message: Some("'this' is not valid in Almide".into()),
-            hint: "Use 'self' in convention methods (fn Type.method(self) -> ...) or pass the value as the first parameter".into(),
+        "self" | "this" => Some(HintResult {
+            message: Some(format!("'{}' is not valid in Almide", name)),
+            hint: "Pass the value as an explicit first parameter. Example: fn Dog.repr(d: Dog) -> String".into(),
         }),
         "new" => Some(HintResult {
             message: Some("'new' is not needed in Almide".into()),
