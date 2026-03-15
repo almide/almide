@@ -42,18 +42,22 @@ greet("Alice", "Hi")        // → greet("Alice", "Hi")
 
 ---
 
-## List Comprehensions
+## List Comprehensions — Won't Do
 
-```almide
-let evens = [x for x in 0..100 if x % 2 == 0]
-let pairs = [(x, y) for x in xs for y in ys]
-```
+Canonicity 違反。`xs |> list.filter(...) |> list.map(...)` で同じことが書ける。
 
 ## Named Arguments
 
 ```almide
+// Optional, positional args の後ろでのみ使用可能
+create_user("Alice", admin: true)
 http.response(status: 200, body: "OK")
+
+// 位置引数のみも OK
+create_user("Alice", 30, false)
 ```
+
+Swift 参考だが external/internal name 分離なし。Almide は Vocabulary Economy 重視。
 
 ## Raw String Literals ✅
 
@@ -73,6 +77,4 @@ let path = r"C:\Users\test"
 
 ## Priority
 
-~~Range literals~~ ✅ > ~~exhaustiveness checking~~ ✅ > **lambda short syntax** > **default arguments** > block comments > list comprehensions > named arguments > raw strings
-
-Lambda short syntax と default arguments は web framework DX の前提条件として優先度を上げた。
+Range ✅ > Exhaustiveness ✅ > Lambda ✅ > Default args ✅ > Block comments ✅ > Raw strings ✅ > ~~List comprehensions~~ (Won't do) > **Named arguments**
