@@ -2,9 +2,6 @@
 
 ## Active
 
-### Codec & Serialization
-- [Codec Advanced](active/codec-advanced.md) — DecodeError, repair, validate, JSON Schema, Variant decode
-
 ### Stdlib v2
 - [Stdlib Runtime Architecture](active/stdlib-self-hosted-redesign.md) — Runtime crate `almide_rt` 基盤完成。@extern 移行中
 - [Stdlib API Reform](active/stdlib-verb-system.md) — Verb 標準化 (from_string, to_upper, len 等)
@@ -66,6 +63,7 @@
 - [Clone Reduction Phase 4](done/clone-reduction.md)
 - [Codec Implementation](done/codec-implementation.md) — Value, auto-derive, JSON roundtrip, runtime crate
 - [Codec Protocol & JSON](done/codec-and-json.md) — 設計仕様完成
+- [Codec Advanced](done/codec-advanced.md) — Variant decode, DecodeError, value utils
 - [Codec Remaining](done/codec-remaining.md) — Variant encode, value utils, naming strategy
 - [Codec Test Spec](done/codec-test-spec.md) — P0 14/14 ✅
 - [Codegen Correctness](done/codegen-correctness.md)
