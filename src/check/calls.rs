@@ -31,10 +31,31 @@ impl Checker {
                         return self.check_named_call(&key, &arg_tys);
                     }
                 }
+                // TypeName.method(args) → direct convention call (not UFCS)
+                // e.g., Person.decode(v) → Person.decode(v), NOT Person.decode(Person, v)
+                if let ast::Expr::TypeName { name: type_name, .. } = object.as_ref() {
+                    let key = format!("{}.{}", type_name, field);
+                    if self.env.functions.contains_key(&key) {
+                        return self.check_named_call(&key, &arg_tys);
+                    }
+                }
                 // Convention method: dog.repr() → Dog.repr(dog)
                 let obj_ty = self.infer_expr(object);
                 let obj_concrete = obj_ty.to_ty(&self.solutions);
-                if let Ty::Named(type_name, _) = &obj_concrete {
+                // Find the Named type for convention lookup
+                let type_name_opt = match &obj_concrete {
+                    Ty::Named(name, _) => Some(name.clone()),
+                    Ty::Record { .. } | Ty::Variant { .. } => {
+                        // Reverse lookup: find type name whose definition matches this structure
+                        self.env.types.iter().find_map(|(name, ty)| {
+                            if ty == &obj_concrete && name.chars().next().map_or(false, |c| c.is_uppercase()) {
+                                Some(name.clone())
+                            } else { None }
+                        })
+                    }
+                    _ => None,
+                };
+                if let Some(type_name) = type_name_opt {
                     let convention_key = format!("{}.{}", type_name, field);
                     if self.env.functions.contains_key(&convention_key) {
                         let mut all_args = vec![obj_ty];

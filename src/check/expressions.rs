@@ -490,6 +490,13 @@ impl Checker {
                 }
             }
         }
+        // Named record (Person { ... }) → Named type if the name resolves to a type
+        if let Some(cname) = name.as_ref() {
+            if self.env.types.contains_key(cname) {
+                for f in fields.iter_mut() { self.check_expr(&mut f.value); }
+                return Ty::Named(cname.clone(), vec![]);
+            }
+        }
         Ty::Record {
             fields: fields.iter_mut().map(|f| (f.name.clone(), self.check_expr(&mut f.value))).collect(),
         }

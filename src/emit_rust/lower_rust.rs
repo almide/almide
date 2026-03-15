@@ -148,7 +148,7 @@ impl<'a> LowerCtx<'a> {
             else if f.is_test { format!("test_{}", f.name.replace(|c: char| !c.is_alphanumeric() && c != '_', "_")) }
             else { crate::emit_common::sanitize(&f.name) };
 
-        let ret = if f.is_test { Type::Unit }
+        let ret = if f.is_test { Type::Result(Box::new(Type::Unit), Box::new(Type::Str)) }
             else if f.is_effect {
                 match &f.ret_ty {
                     Ty::Result(_, _) => self.lty(&f.ret_ty),
@@ -172,8 +172,14 @@ impl<'a> LowerCtx<'a> {
         // Wrap body for test/effect
         let (body, tail) = if f.is_test {
             match body_expr {
-                Expr::Block { stmts, tail } => (stmts, tail.map(|t| *t)),
-                other => (vec![], Some(other)),
+                Expr::Block { stmts, tail } => {
+                    let wrapped = tail.map(|t| match *t {
+                        Expr::Ok(_) | Expr::Err(_) => *t,
+                        other => Expr::Ok(Box::new(other)),
+                    }).unwrap_or(Expr::Ok(Box::new(Expr::Unit)));
+                    (stmts, Some(wrapped))
+                }
+                other => (vec![], Some(Expr::Ok(Box::new(other)))),
             }
         } else if f.is_effect {
             match body_expr {
@@ -214,7 +220,11 @@ impl<'a> LowerCtx<'a> {
             IrExprKind::LitStr { value } => Expr::Str(value.clone()),
             IrExprKind::LitBool { value } => Expr::Bool(*value),
             IrExprKind::Unit => Expr::Unit,
-            IrExprKind::Var { id } => Expr::Var(crate::emit_common::sanitize(&self.vt.get(*id).name)),
+            IrExprKind::Var { id } => {
+                let info = self.vt.get(*id);
+                let var = Expr::Var(crate::emit_common::sanitize(&info.name));
+                if info.use_count > 1 && !is_copy(&info.ty) { Expr::Clone(Box::new(var)) } else { var }
+            }
 
             IrExprKind::BinOp { op, left, right } => {
                 let l = self.lower_expr(left);

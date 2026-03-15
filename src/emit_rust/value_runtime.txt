@@ -19,14 +19,13 @@ fn value_object(pairs: Vec<(String, Value)>) -> Value { Value::Object(pairs) }
 fn value_null() -> Value { Value::Null }
 
 fn value_field(v: Value, key: String) -> Result<Value, String> {
-    match v {
-        Value::Object(pairs) => {
-            for (k, val) in pairs {
-                if k == key { return Ok(val); }
-            }
-            Err(format!("missing field '{}'", key))
+    if let Value::Object(pairs) = v {
+        for (k, val) in pairs {
+            if k == key { return Ok(val); }
         }
-        _ => Err(format!("expected Object")),
+        Err(format!("missing field '{}'", key))
+    } else {
+        Err("expected Object".to_string())
     }
 }
 

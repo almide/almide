@@ -308,7 +308,7 @@ impl Checker {
                                     }
                                     let decode_key = format!("{}.decode", name);
                                     if !self.env.functions.contains_key(&decode_key) {
-                                        self.env.functions.insert(decode_key, FnSig { params: vec![("v".into(), value_ty.clone())], ret: Ty::Result(Box::new(type_ty.clone()), Box::new(Ty::String)), is_effect: true, generics: vec![], structural_bounds: std::collections::HashMap::new() });
+                                        self.env.functions.insert(decode_key, FnSig { params: vec![("v".into(), value_ty.clone())], ret: Ty::Result(Box::new(type_ty.clone()), Box::new(Ty::String)), is_effect: false, generics: vec![], structural_bounds: std::collections::HashMap::new() });
                                     }
                                 }
                                 _ => {}

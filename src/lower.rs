@@ -197,7 +197,7 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprI
     functions.extend(auto_derived);
 
     let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, modules: Vec::new() };
-    compute_use_counts(&mut program);
+    compute_use_counts(&mut program); // After auto-derive so derived functions get correct use_counts
     demote_unused_mut(&mut program);
     program
 }
@@ -619,12 +619,33 @@ fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallTarget {
                     return CallTarget::Module { module: resolved, func: field.clone() };
                 }
             }
+            // TypeName.method(args) → direct named call (not UFCS, no object prepend)
+            if let ast::Expr::TypeName { name: type_name, .. } = object.as_ref() {
+                let key = format!("{}.{}", type_name, field);
+                if ctx.env.functions.contains_key(&key)
+                    || ctx.find_convention_fn(&Ty::Named(type_name.clone(), vec![]), field).is_some()
+                {
+                    return CallTarget::Named { name: key };
+                }
+            }
             // Check for convention method: dog.repr() → Dog.repr(dog)
             let obj_ty = ctx.expr_ty(object);
-            if let Ty::Named(type_name, _) = &obj_ty {
+            let type_name_opt = match &obj_ty {
+                Ty::Named(name, _) => Some(name.clone()),
+                Ty::Record { .. } | Ty::Variant { .. } => {
+                    ctx.env.types.iter().find_map(|(name, ty)| {
+                        if ty == &obj_ty && name.chars().next().map_or(false, |c| c.is_uppercase()) {
+                            Some(name.clone())
+                        } else { None }
+                    })
+                }
+                _ => None,
+            };
+            if let Some(type_name) = type_name_opt {
                 let convention_key = format!("{}.{}", type_name, field);
-                if ctx.env.functions.contains_key(&convention_key) {
-                    // Rewrite to named call — caller will prepend object as first arg
+                if ctx.env.functions.contains_key(&convention_key)
+                    || ctx.find_convention_fn(&Ty::Named(type_name.clone(), vec![]), field).is_some()
+                {
                     let ir_obj = lower_expr(ctx, object);
                     return CallTarget::Method { object: Box::new(ir_obj), method: convention_key };
                 }
