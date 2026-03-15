@@ -38,7 +38,10 @@ pub fn lower_ty_with(
             names.sort();
             if let Some(n) = named.get(&names) { return Type::Named(n.clone()); }
             if let Some(n) = anon.get(&names) {
-                let args: Vec<Type> = fields.iter().map(|(_, t)| lower_ty_with(anon, named, t)).collect();
+                // generics をフィールドのソート順で生成（struct 定義と一致させる）
+                let mut sorted_fields: Vec<(&String, &Ty)> = fields.iter().map(|(n, t)| (n, t)).collect();
+                sorted_fields.sort_by_key(|(n, _)| n.clone());
+                let args: Vec<Type> = sorted_fields.iter().map(|(_, t)| lower_ty_with(anon, named, t)).collect();
                 return if args.is_empty() { Type::Named(n.clone()) } else { Type::Generic(n.clone(), args) };
             }
             Type::Named("AnonRecord".into())

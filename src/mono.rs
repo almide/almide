@@ -25,7 +25,7 @@ type MonoKey = (String, String);
 /// Only affects functions with structurally-bounded type parameters.
 pub fn monomorphize(program: &mut IrProgram) {
     // Step 1: Identify functions with structural bounds on generics
-    let bound_fns = find_structurally_bounded_fns(&program.functions);
+    let bound_fns = find_structurally_bounded_fns(&program.functions, &program.type_decls);
     if bound_fns.is_empty() {
         return;
     }
@@ -79,7 +79,7 @@ struct BoundedParam {
 /// Find functions that have structural bounds on generic type parameters,
 /// OR direct OpenRecord parameters.
 /// Returns function_name → list of bounded params.
-fn find_structurally_bounded_fns(functions: &[IrFunction]) -> HashMap<String, Vec<BoundedParam>> {
+fn find_structurally_bounded_fns(functions: &[IrFunction], type_decls: &[IrTypeDecl]) -> HashMap<String, Vec<BoundedParam>> {
     let mut result = HashMap::new();
     for func in functions {
         let mut bounded = Vec::new();
@@ -100,9 +100,13 @@ fn find_structurally_bounded_fns(functions: &[IrFunction]) -> HashMap<String, Ve
                 }
             }
         }
-        // パターン B: 直接 OpenRecord パラメータ (fn greet(who: { name: String, .. }))
+        // パターン B: 直接 OpenRecord パラメータ、または OpenRecord エイリアス
         for (i, param) in func.params.iter().enumerate() {
-            if matches!(&param.ty, Ty::OpenRecord { .. }) {
+            let is_open = matches!(&param.ty, Ty::OpenRecord { .. })
+                || matches!(&param.ty, Ty::Named(name, args) if args.is_empty()
+                    && type_decls.iter().any(|td| td.name == *name
+                        && matches!(&td.kind, IrTypeDeclKind::Alias { target } if matches!(target, Ty::OpenRecord { .. }))));
+            if is_open {
                 // OpenRecord パラメータ用の仮の type_var 名を生成
                 let tv_name = format!("__open_{}", i);
                 bounded.push(BoundedParam {
@@ -301,10 +305,11 @@ fn specialize_function(
 
     // Substitute type variables in parameter types
     for param in &mut func.params {
-        // OpenRecord パラメータ → 具体型に直接置換
-        if matches!(&param.ty, Ty::OpenRecord { .. }) {
-            let key = format!("__open_{}", orig.params.iter().position(|p| p.var == param.var).unwrap_or(0));
-            if let Some(concrete) = bindings.get(&key) {
+        // OpenRecord パラメータ (直接 or エイリアス) → 具体型に直接置換
+        let param_pos = orig.params.iter().position(|p| p.var == param.var).unwrap_or(0);
+        let open_key = format!("__open_{}", param_pos);
+        if bindings.contains_key(&open_key) {
+            if let Some(concrete) = bindings.get(&open_key) {
                 param.ty = concrete.clone();
             }
         } else {
