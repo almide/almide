@@ -156,6 +156,72 @@ fn csv.stringify(v: Value) -> String = ...
 fn csv.parse(text: String) -> Result[Value, String] = ...
 ```
 
+## Format 提供者の実装ガイド
+
+フォーマットを追加するには `Value ↔ 外部表現` の2関数を書くだけ。型の知識は不要。
+
+### 最小実装: stringify
+
+```almide
+// my_format/mod.almd
+fn stringify(v: Value) -> String =
+  match v {
+    Null       => "null"
+    Bool(b)    => if b then "true" else "false"
+    Int(n)     => int.to_string(n)
+    Float(f)   => float.to_string(f)
+    Str(s)     => "\"" ++ escape(s) ++ "\""
+    Arr(items) => "[" ++ items |> list.map(stringify) |> string.join(", ") ++ "]"
+    Obj(pairs) => "{" ++ pairs |> list.map((k, v) => "\"" ++ k ++ "\": " ++ stringify(v)) |> string.join(", ") ++ "}"
+  }
+```
+
+これだけで `person.encode() |> my_format.stringify` が動く。Person の型定義を知る必要はない。
+
+### 最小実装: parse
+
+```almide
+fn parse(text: String) -> Result[Value, String] = {
+  // テキストをトークン化 → Value を再帰的に構築
+  // 各フォーマット固有のパーサーロジック
+  // 出力は常に Value 型
+}
+```
+
+### フォーマット固有オプション
+
+```almide
+type MyFormatOptions = { pretty: Bool = false, indent: Int = 2 }
+
+fn stringify_with(v: Value, opts: MyFormatOptions) -> String = ...
+
+// 使う側:
+person.encode() |> my_format.stringify_with(MyFormatOptions { pretty: true })
+```
+
+オプションはフォーマット側の引数。Codec 側には影響しない。
+
+### binary フォーマット
+
+```almide
+// Value ↔ Bytes (String の代わり)
+fn msgpack.to_bytes(v: Value) -> List[Int] = ...
+fn msgpack.from_bytes(b: List[Int]) -> Result[Value, String] = ...
+
+// 使う側:
+let bytes = person.encode() |> msgpack.to_bytes
+let p2 = msgpack.from_bytes(bytes)? |> Person.decode
+```
+
+### フォーマット提供者が知るべきこと
+
+1. **入力は常に Value** — 7 variant のパターンマッチで全ケースを処理
+2. **出力も常に Value** — parse は必ず Value を返す
+3. **型の知識は不要** — Person か Config かは関係ない
+4. **エラーは Result** — parse 失敗は `err("message")` で返す
+5. **ネストは再帰** — Arr と Obj の中身を再帰的に処理するだけ
+6. **テスト**: `json.parse(text)? |> my_format.stringify |> my_format.parse` が roundtrip すれば正しい
+
 ## 利用側ユースケース
 
 ### JSON encode/decode
