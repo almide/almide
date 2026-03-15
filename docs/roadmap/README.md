@@ -3,7 +3,7 @@
 ## Active
 
 ### Phase 0: Compiler Integrity (健全性・正確性・構造)
-- [Codegen Correctness Fixes](active/codegen-correctness.md) — 5/7 P1 完了。残: do-block let auto-?, effect for-loop
+- [Codegen Correctness Fixes](active/codegen-correctness.md) — P1 全7項完了。残 P2: borrowed pattern, pattern clone
 - [Architecture Hardening](active/architecture-hardening.md) — IrProgram clone 除去, Emitter リファクタ
 - [Cross-Target Semantics](active/cross-target-semantics.md) — Rust/TS 意味論統一: Map 比較, entries 順序, 整数オーバーフロー, Float 精度
 

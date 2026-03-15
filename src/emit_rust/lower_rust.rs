@@ -285,12 +285,20 @@ impl<'a> LowerCtx<'a> {
 
             IrExprKind::Call { target, args, .. } => {
                 let ir_args: Vec<Expr> = args.iter().map(|a| self.lower_expr(a)).collect();
-                match target {
-                    CallTarget::Named { name } => self.lower_named_call(name, ir_args),
-                    CallTarget::Module { module, func } => Expr::Call {
-                        func: format!("{}_{}", module.replace('.', "_"), crate::emit_common::sanitize(func)),
-                        args: ir_args,
-                    },
+                let call = match target {
+                    CallTarget::Named { name } => return self.lower_named_call(name, ir_args),
+                    CallTarget::Module { module, func } => {
+                        let key = format!("{}.{}", module, func);
+                        let expr = Expr::Call {
+                            func: format!("{}_{}", module.replace('.', "_"), crate::emit_common::sanitize(func)),
+                            args: ir_args,
+                        };
+                        // Auto-? for module calls to result-returning functions in effect context
+                        if self.in_effect && self.result_fns.contains(&key) {
+                            return Expr::Try(Box::new(expr));
+                        }
+                        expr
+                    }
                     CallTarget::Method { object, method } => {
                         let obj = self.lower_expr(object);
                         let mut all = vec![obj]; all.extend(ir_args);
@@ -301,6 +309,12 @@ impl<'a> LowerCtx<'a> {
                         Expr::Raw(format!("({})({})", super::render::expr_str(&c),
                             ir_args.iter().map(|a| super::render::expr_str(a)).collect::<Vec<_>>().join(", ")))
                     }
+                };
+                // Auto-? for any call returning Result in effect context
+                if self.in_effect && matches!(&e.ty, Ty::Result(_, _)) {
+                    Expr::Try(Box::new(call))
+                } else {
+                    call
                 }
             }
 
