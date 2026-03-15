@@ -791,7 +791,22 @@ fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> IrPattern {
             IrPattern::Bind { var }
         }
         ast::Pattern::Literal { value } => {
-            let ir_expr = lower_expr(ctx, value);
+            // Pattern literals may not have expr_types entries (they're patterns,
+            // not expressions), so construct IR directly without calling lower_expr.
+            let (kind, ty) = match value.as_ref() {
+                ast::Expr::Int { raw, .. } => {
+                    let v = raw.parse::<i64>().unwrap_or(0);
+                    (IrExprKind::LitInt { value: v }, Ty::Int)
+                }
+                ast::Expr::Float { value: v, .. } => (IrExprKind::LitFloat { value: *v }, Ty::Float),
+                ast::Expr::String { value: v, .. } => (IrExprKind::LitStr { value: v.clone() }, Ty::String),
+                ast::Expr::Bool { value: v, .. } => (IrExprKind::LitBool { value: *v }, Ty::Bool),
+                _ => {
+                    let ir_expr = lower_expr(ctx, value);
+                    return IrPattern::Literal { expr: ir_expr };
+                }
+            };
+            let ir_expr = ctx.mk(kind, ty, value.span());
             IrPattern::Literal { expr: ir_expr }
         }
         ast::Pattern::Constructor { name, args } => {
@@ -941,7 +956,7 @@ fn lower_interpolation(ctx: &mut LowerCtx, template: &str) -> Vec<IrStringPart> 
             let tokens = crate::lexer::Lexer::tokenize(&expr_str);
             let mut parser = crate::parser::Parser::new_with_id_offset(tokens, u32::MAX / 2);
             if let Ok(parsed) = parser.parse_single_expr() {
-                let mut ir_expr = lower_expr(ctx, &parsed);
+                let mut ir_expr = lower_interpolation_expr(ctx, &parsed);
                 // Fix type for simple vars
                 if let IrExprKind::Var { id } = &ir_expr.kind {
                     ir_expr.ty = ctx.var_table.get(*id).ty.clone();
@@ -966,6 +981,53 @@ fn lower_interpolation(ctx: &mut LowerCtx, template: &str) -> Vec<IrStringPart> 
         parts.push(IrStringPart::Lit { value: lit });
     }
     parts
+}
+
+// ── String interpolation expression lowering ────────────────────
+// Interpolation expressions are re-parsed at lower time and have no
+// expr_types entries. We lower them without consulting the type checker.
+
+fn lower_interpolation_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
+    let span = expr.span();
+    match expr {
+        ast::Expr::Int { raw, .. } => {
+            let value = raw.parse::<i64>().unwrap_or(0);
+            ctx.mk(IrExprKind::LitInt { value }, Ty::Int, span)
+        }
+        ast::Expr::Float { value, .. } => ctx.mk(IrExprKind::LitFloat { value: *value }, Ty::Float, span),
+        ast::Expr::String { value, .. } => ctx.mk(IrExprKind::LitStr { value: value.clone() }, Ty::String, span),
+        ast::Expr::Bool { value, .. } => ctx.mk(IrExprKind::LitBool { value: *value }, Ty::Bool, span),
+        ast::Expr::Ident { name, .. } => {
+            if let Some(var_id) = ctx.lookup_var(name) {
+                let ty = ctx.var_table.get(var_id).ty.clone();
+                ctx.mk(IrExprKind::Var { id: var_id }, ty, span)
+            } else {
+                ctx.mk(IrExprKind::LitStr { value: name.clone() }, Ty::String, span)
+            }
+        }
+        // Module call: int.to_string(x), string.len(s), etc.
+        ast::Expr::Call { callee, args, .. } => {
+            let lowered_args: Vec<IrExpr> = args.iter().map(|a| lower_interpolation_expr(ctx, a)).collect();
+            if let ast::Expr::Member { object, field, .. } = callee.as_ref() {
+                if let ast::Expr::Ident { name: module, .. } = object.as_ref() {
+                    let target = CallTarget::Module { module: module.clone(), func: field.clone() };
+                    let ret_ty = crate::stdlib::lookup_sig(module, field)
+                        .map(|sig| sig.ret.clone())
+                        .unwrap_or(Ty::String);
+                    return ctx.mk(IrExprKind::Call { target, args: lowered_args, type_args: vec![] }, ret_ty, span);
+                }
+            }
+            // Named call: foo(x)
+            if let ast::Expr::Ident { name, .. } = callee.as_ref() {
+                let target = CallTarget::Named { name: name.clone() };
+                ctx.mk(IrExprKind::Call { target, args: lowered_args, type_args: vec![] }, Ty::String, span)
+            } else {
+                lower_expr(ctx, expr)
+            }
+        }
+        // Anything else: fall back to lower_expr
+        _ => lower_expr(ctx, expr),
+    }
 }
 
 // ── Type expression resolution (standalone, no checker needed) ──

@@ -152,7 +152,7 @@ fn expr(o: &mut String, e: &Expr, d: usize) {
         }
 
         Expr::Field(e, f) => { expr(o, e, d); o.push('.'); o.push_str(f); }
-        Expr::Index(e, i) => { expr(o, e, d); o.push('['); expr(o, i, d); o.push(']'); }
+        Expr::Index(e, i) => { expr(o, e, d); o.push_str("[("); expr(o, i, d); o.push_str(") as usize].clone()"); }
         Expr::TupleIdx(e, i) => { expr(o, e, d); o.push('.'); o.push_str(&i.to_string()); }
 
         Expr::Struct { name, fields } => {
@@ -202,7 +202,10 @@ fn pat(o: &mut String, p: &Pattern) {
     match p {
         Pattern::Wild => o.push('_'),
         Pattern::Var(n) => o.push_str(n),
-        Pattern::Lit(e) => expr(o, e, 0),
+        Pattern::Lit(e) => match e {
+            Expr::Str(s) => o.push_str(&format!("{:?}", s)),
+            _ => expr(o, e, 0),
+        },
         Pattern::Ctor { name, args } => {
             o.push_str(name);
             if !args.is_empty() { o.push('('); for (i, a) in args.iter().enumerate() { if i > 0 { o.push_str(", "); } pat(o, a); } o.push(')'); }

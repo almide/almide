@@ -35,8 +35,8 @@ effect fn python_list_modules() -> Unit = do {
   ], "\n")
   let output = process.exec("python3", ["-c", script])
   let lines = string.split(output, "\n")
-  let count = list.len(list.filter(lines, fn(l) => string.len(l) > 0))
-  println("Python stdlib: {int.to_string(count)} modules")
+  let count = list.len(list.filter(lines, (l) => string.len(l) > 0))
+  println("Python stdlib: ${int.to_string(count)} modules")
   println(output)
 }
 
@@ -78,6 +78,5 @@ effect fn python_collect_module(mod_name: String) -> Unit = do {
   ], "\n")
   let output = process.exec("python3", ["-c", script, mod_name])
   let parsed = json.parse(output)
-  let pretty = json.stringify_pretty(parsed)
-  println(pretty)
+  println(json.stringify(parsed))
 }

@@ -36,6 +36,10 @@ pub fn almide_rt_string_replace(s: String, from: String, to: String) -> String {
     s.replace(&from, &to)
 }
 
+pub fn almide_rt_string_join(parts: Vec<String>, sep: String) -> String {
+    parts.join(&sep)
+}
+
 pub fn almide_rt_string_slice(s: String, start: i64, end: i64) -> String {
     let chars: Vec<char> = s.chars().collect();
     let start = start.max(0) as usize;

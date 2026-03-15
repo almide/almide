@@ -101,13 +101,13 @@ impl Checker {
                     }
                 }
                 let ret = self.fresh_var();
-                self.constrain(obj_ty, InferTy::Fn { params: arg_tys, ret: Box::new(ret.clone()) }, "method call");
+                self.constrain(obj_ty, InferTy::Fn { params: arg_tys.to_vec(), ret: Box::new(ret.clone()) }, "method call");
                 ret
             }
             _ => {
                 let ct = self.infer_expr(callee);
                 let ret = self.fresh_var();
-                self.constrain(ct, InferTy::Fn { params: arg_tys, ret: Box::new(ret.clone()) }, "function call");
+                self.constrain(ct, InferTy::Fn { params: arg_tys.to_vec(), ret: Box::new(ret.clone()) }, "function call");
                 ret
             }
         }

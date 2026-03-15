@@ -133,6 +133,8 @@ pub fn lower(ir: &IrProgram) -> Program {
     rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/string.rs")));
     rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/list.rs")));
     rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/value.rs")));
+    rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/env.rs")));
+    rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/process.rs")));
 
     Program {
         prelude: vec!["#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use)]".into()],
