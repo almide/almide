@@ -8,13 +8,13 @@ IR redesign (Phase 1-5) により codegen は `&IrProgram` のみを入力とす
 
 ## Passes
 
-### Tier 1: Low-hanging fruit
+### Tier 1: Low-hanging fruit ✅
 
-| Pass | Effect |
-|------|--------|
-| **Constant folding** | `1 + 2` → `LitInt(3)`, `"a" ++ "b"` → `LitStr("ab")` |
-| **Dead code elimination** | 到達不能ブランチ、使用されない let 束縛の除去 |
-| **Constant propagation** | `let x = 5; x + 1` → `5 + 1` → `6` |
+| Pass | Effect | Status |
+|------|--------|--------|
+| **Constant folding** | `1 + 2` → `LitInt(3)`, `"a" ++ "b"` → `LitStr("ab")` | ✅ |
+| **Dead code elimination** | 到達不能ブランチ、使用されない let 束縛の除去 | ✅ |
+| **Constant propagation** | `let x = 5; x + 1` → `5 + 1` → `6` | future |
 
 ### Tier 2: Medium complexity
 
