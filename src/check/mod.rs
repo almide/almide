@@ -63,6 +63,46 @@ impl Checker {
         InferTy::Var(id)
     }
 
+    /// Let-polymorphism: instantiate で TypeVar("?N") を fresh var に置換
+    /// 同じ let binding を2回参照する時、各参照で独立した型変数を使う
+    pub(crate) fn instantiate_ty(&mut self, ty: &Ty) -> InferTy {
+        let mut mapping: std::collections::HashMap<u32, TyVarId> = std::collections::HashMap::new();
+        self.instantiate_inner(ty, &mut mapping)
+    }
+
+    fn instantiate_inner(&mut self, ty: &Ty, mapping: &mut std::collections::HashMap<u32, TyVarId>) -> InferTy {
+        match ty {
+            Ty::TypeVar(name) if name.starts_with('?') => {
+                if let Ok(id) = name[1..].parse::<u32>() {
+                    let fresh_id = mapping.entry(id).or_insert_with(|| {
+                        let fv = TyVarId(self.next_tyvar);
+                        self.next_tyvar += 1;
+                        fv
+                    });
+                    InferTy::Var(*fresh_id)
+                } else {
+                    InferTy::from_ty(ty)
+                }
+            }
+            Ty::List(inner) => InferTy::List(Box::new(self.instantiate_inner(inner, mapping))),
+            Ty::Option(inner) => InferTy::Option(Box::new(self.instantiate_inner(inner, mapping))),
+            Ty::Result(ok, err) => InferTy::Result(
+                Box::new(self.instantiate_inner(ok, mapping)),
+                Box::new(self.instantiate_inner(err, mapping)),
+            ),
+            Ty::Map(k, v) => InferTy::Map(
+                Box::new(self.instantiate_inner(k, mapping)),
+                Box::new(self.instantiate_inner(v, mapping)),
+            ),
+            Ty::Tuple(elems) => InferTy::Tuple(elems.iter().map(|e| self.instantiate_inner(e, mapping)).collect()),
+            Ty::Fn { params, ret } => InferTy::Fn {
+                params: params.iter().map(|p| self.instantiate_inner(p, mapping)).collect(),
+                ret: Box::new(self.instantiate_inner(ret, mapping)),
+            },
+            other => InferTy::from_ty(other),
+        }
+    }
+
     pub(crate) fn constrain(&mut self, expected: InferTy, actual: InferTy, context: impl Into<String>) {
         let ctx = context.into();
         // Eagerly unify to propagate type info into lambda bodies

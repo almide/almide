@@ -33,8 +33,8 @@ impl Checker {
 
             ast::Expr::Ident { name, .. } => {
                 self.env.used_vars.insert(name.clone());
-                if let Some(ty) = self.env.lookup_var(name).cloned() { InferTy::from_ty(&ty) }
-                else if let Some(ty) = self.env.top_lets.get(name).cloned() { InferTy::from_ty(&ty) }
+                if let Some(ty) = self.env.lookup_var(name).cloned() { self.instantiate_ty(&ty) }
+                else if let Some(ty) = self.env.top_lets.get(name).cloned() { self.instantiate_ty(&ty) }
                 else if let Some(sig) = self.env.functions.get(name).cloned() {
                     InferTy::Fn {
                         params: sig.params.iter().map(|(_, t)| InferTy::from_ty(t)).collect(),
