@@ -37,6 +37,7 @@ pub fn get_bundled_source(name: &str) -> Option<&'static str> {
         "toml" => Some(include_str!("../stdlib/toml.almd")),
         "csv" => Some(include_str!("../stdlib/csv.almd")),
         "compress" => Some(include_str!("../stdlib/compress.almd")),
+        "value" => Some(include_str!("../stdlib/value.almd")),
         _ => None,
     }
 }

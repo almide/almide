@@ -282,7 +282,39 @@ impl Checker {
                         }
                     }
                     let key = prefix.map(|p| format!("{}.{}", p, name)).unwrap_or(name.clone());
-                    self.env.types.insert(key, resolved);
+                    self.env.types.insert(key.clone(), resolved);
+                    // Pre-register auto-derive function signatures for conventions
+                    if let Some(derives) = deriving {
+                        let type_ty = Ty::Named(name.clone(), vec![]);
+                        let value_ty = Ty::Named("Value".to_string(), vec![]);
+                        for d in derives {
+                            match d.as_str() {
+                                "Eq" => {
+                                    let fn_key = format!("{}.eq", name);
+                                    if !self.env.functions.contains_key(&fn_key) {
+                                        self.env.functions.insert(fn_key, FnSig { params: vec![("a".into(), type_ty.clone()), ("b".into(), type_ty.clone())], ret: Ty::Bool, is_effect: false, generics: vec![], structural_bounds: std::collections::HashMap::new() });
+                                    }
+                                }
+                                "Repr" => {
+                                    let fn_key = format!("{}.repr", name);
+                                    if !self.env.functions.contains_key(&fn_key) {
+                                        self.env.functions.insert(fn_key, FnSig { params: vec![("v".into(), type_ty.clone())], ret: Ty::String, is_effect: false, generics: vec![], structural_bounds: std::collections::HashMap::new() });
+                                    }
+                                }
+                                "Codec" => {
+                                    let encode_key = format!("{}.encode", name);
+                                    if !self.env.functions.contains_key(&encode_key) {
+                                        self.env.functions.insert(encode_key, FnSig { params: vec![("v".into(), type_ty.clone())], ret: value_ty.clone(), is_effect: false, generics: vec![], structural_bounds: std::collections::HashMap::new() });
+                                    }
+                                    let decode_key = format!("{}.decode", name);
+                                    if !self.env.functions.contains_key(&decode_key) {
+                                        self.env.functions.insert(decode_key, FnSig { params: vec![("v".into(), value_ty.clone())], ret: Ty::Result(Box::new(type_ty.clone()), Box::new(Ty::String)), is_effect: true, generics: vec![], structural_bounds: std::collections::HashMap::new() });
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
                 }
                 ast::Decl::TopLet { name, ty, value, .. } => {
                     let rt = ty.as_ref().map(|te| self.resolve_type_expr(te)).unwrap_or_else(|| self.infer_literal_type(value));

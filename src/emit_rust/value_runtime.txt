@@ -1,0 +1,65 @@
+// Value: universal data model for Codec protocol
+#[derive(Clone, Debug, PartialEq)]
+enum Value {
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    Str(String),
+    Array(Vec<Value>),
+    Object(Vec<(String, Value)>),
+}
+
+fn value_str(s: String) -> Value { Value::Str(s) }
+fn value_int(n: i64) -> Value { Value::Int(n) }
+fn value_float(f: f64) -> Value { Value::Float(f) }
+fn value_bool(b: bool) -> Value { Value::Bool(b) }
+fn value_array(items: Vec<Value>) -> Value { Value::Array(items) }
+fn value_object(pairs: Vec<(String, Value)>) -> Value { Value::Object(pairs) }
+fn value_null() -> Value { Value::Null }
+
+fn value_field(v: Value, key: String) -> Result<Value, String> {
+    match v {
+        Value::Object(pairs) => {
+            for (k, val) in pairs {
+                if k == key { return Ok(val); }
+            }
+            Err(format!("missing field '{}'", key))
+        }
+        _ => Err(format!("expected Object")),
+    }
+}
+
+fn value_as_string(v: Value) -> Result<String, String> {
+    match v { Value::Str(s) => Ok(s), _ => Err("expected Str".to_string()) }
+}
+fn value_as_int(v: Value) -> Result<i64, String> {
+    match v { Value::Int(n) => Ok(n), _ => Err("expected Int".to_string()) }
+}
+fn value_as_float(v: Value) -> Result<f64, String> {
+    match v { Value::Float(f) => Ok(f), _ => Err("expected Float".to_string()) }
+}
+fn value_as_bool(v: Value) -> Result<bool, String> {
+    match v { Value::Bool(b) => Ok(b), _ => Err("expected Bool".to_string()) }
+}
+fn value_as_array(v: Value) -> Result<Vec<Value>, String> {
+    match v { Value::Array(a) => Ok(a), _ => Err("expected Array".to_string()) }
+}
+
+fn value_stringify(v: &Value) -> String {
+    match v {
+        Value::Null => "null".to_string(),
+        Value::Bool(b) => if *b { "true".to_string() } else { "false".to_string() },
+        Value::Int(n) => n.to_string(),
+        Value::Float(f) => format!("{}", f),
+        Value::Str(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
+        Value::Array(items) => {
+            let inner: Vec<String> = items.iter().map(value_stringify).collect();
+            format!("[{}]", inner.join(","))
+        }
+        Value::Object(pairs) => {
+            let inner: Vec<String> = pairs.iter().map(|(k, v)| format!("\"{}\":{}", k, value_stringify(v))).collect();
+            format!("{{{}}}", inner.join(","))
+        }
+    }
+}

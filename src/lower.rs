@@ -1211,7 +1211,7 @@ fn auto_derive_decode(vt: &mut VarTable, type_name: &str, type_ty: &Ty, fields: 
         params: vec![IrParam { var: var_v, ty: value_ty, name: "_v".to_string(), borrow: ParamBorrow::Own, open_record: None, default: None }],
         ret_ty: result_ty,
         body,
-        is_effect: true, is_async: false, is_test: false,
+        is_effect: false, is_async: false, is_test: false,
         generics: None, extern_attrs: vec![], visibility: IrVisibility::Public,
     }
 }
