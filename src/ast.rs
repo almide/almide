@@ -302,6 +302,8 @@ pub struct Param {
     pub name: String,
     #[serde(rename = "type")]
     pub ty: TypeExpr,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<Box<Expr>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

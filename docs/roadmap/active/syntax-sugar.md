@@ -24,49 +24,21 @@ Detects at compile time when a match on a variant type does not cover all cases.
 
 ---
 
-## Default Arguments [HIGH PRIORITY]
+## Default Arguments ✅
 
-### Problem
-
-```almide
-// 今: status code を毎回指定
-web.json(200, data)
-web.text_status(200, "Hello")
-
-// 欲しい: common case はデフォルト
-web.json(data)             // status = 200
-web.json(data, 201)        // explicit
-```
-
-### Proposed
+Call-site expansion 方式で実装。Lowering 時に不足引数にデフォルト値を IR に挿入。codegen 変更不要。
 
 ```almide
 fn greet(name: String, greeting: String = "Hello") -> String =
   "${greeting}, ${name}!"
 
-greet("Alice")              // "Hello, Alice!"
-greet("Alice", "Hi")        // "Hi, Alice!"
+greet("Alice")              // → greet("Alice", "Hello") at IR level
+greet("Alice", "Hi")        // → greet("Alice", "Hi")
 ```
 
-### ルール
-
-- デフォルト引数は末尾に寄せる
-- field default values と同じ仕組み（既に AST に default expr の概念がある）
-- codegen: Rust は複数の関数を生成（`rust_min` パターンの一般化）
-- TS はそのまま default params にマッピング
-
-### 影響
-
-Web framework:
-
-```almide
-fn json(body: Json, status: Int = 200) -> Response = ...
-fn text(body: String, status: Int = 200) -> Response = ...
-
-// 使う側
-web.json(data)        // 200
-web.json(data, 201)   // 201
-```
+- Parser: `name: Type = expr` を Param.default に格納
+- Checker: fn_min_params で引数数を許容
+- Lowerer: call-site で defaults を展開（ターゲット非依存）
 
 ---
 

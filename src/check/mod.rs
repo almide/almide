@@ -221,7 +221,11 @@ impl Checker {
                     let is_effect = effect.unwrap_or(false) || r#async.unwrap_or(false);
                     let key = prefix.map(|p| format!("{}.{}", p, name)).unwrap_or(name.clone());
                     if prefix.is_none() && is_effect { self.env.effect_fns.insert(name.clone()); }
-                    self.env.functions.insert(key, FnSig { params: ptys, ret, is_effect, generics: gnames, structural_bounds: sb });
+                    let min_p = params.iter().take_while(|p| p.default.is_none()).count();
+                    self.env.functions.insert(key.clone(), FnSig { params: ptys, ret, is_effect, generics: gnames, structural_bounds: sb });
+                    if min_p < params.len() {
+                        self.env.fn_min_params.insert(key, min_p);
+                    }
                 }
                 ast::Decl::Type { name, ty, deriving, generics, .. } => {
                     // Validate derive convention names

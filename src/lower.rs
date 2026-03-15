@@ -28,6 +28,8 @@ pub struct LowerCtx<'a> {
     scopes: Vec<HashMap<String, VarId>>,
     expr_types: &'a HashMap<crate::ast::ExprId, Ty>,
     env: &'a TypeEnv,
+    /// Default argument expressions for functions: fn_name → vec of defaults (index-aligned with params, None for required)
+    fn_defaults: HashMap<String, Vec<Option<ast::Expr>>>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -37,6 +39,7 @@ impl<'a> LowerCtx<'a> {
             scopes: vec![HashMap::new()],
             expr_types,
             env,
+            fn_defaults: HashMap::new(),
         }
     }
 
@@ -105,6 +108,19 @@ impl<'a> LowerCtx<'a> {
 
 pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprId, Ty>, env: &TypeEnv) -> IrProgram {
     let mut ctx = LowerCtx::new(expr_types, env);
+
+    // Collect function default arguments for call-site expansion
+    for decl in &prog.decls {
+        if let ast::Decl::Fn { name, params, .. } = decl {
+            if params.iter().any(|p| p.default.is_some()) {
+                let defaults: Vec<Option<ast::Expr>> = params.iter()
+                    .map(|p| p.default.as_ref().map(|d| *d.clone()))
+                    .collect();
+                ctx.fn_defaults.insert(name.clone(), defaults);
+            }
+        }
+    }
+
     let mut functions = Vec::new();
     let mut top_lets = Vec::new();
     let mut type_decls = Vec::new();
@@ -178,9 +194,10 @@ fn lower_fn(
     for p in params {
         let ty = resolve_type_expr(&p.ty);
         let var = ctx.define_var(&p.name, ty.clone(), Mutability::Let, span.clone());
+        let default = p.default.as_ref().map(|d| Box::new(lower_expr(ctx, d)));
         ir_params.push(IrParam {
             var, ty: ty.clone(), name: p.name.clone(),
-            borrow: ParamBorrow::Own, open_record: None,
+            borrow: ParamBorrow::Own, open_record: None, default,
         });
     }
 
@@ -486,9 +503,24 @@ fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
 // ── Call lowering ───────────────────────────────────────────────
 
 fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Expr], type_args: Option<&Vec<ast::TypeExpr>>, ty: Ty, span: Option<ast::Span>) -> IrExpr {
-    let ir_args: Vec<IrExpr> = args.iter().map(|a| lower_expr(ctx, a)).collect();
+    let mut ir_args: Vec<IrExpr> = args.iter().map(|a| lower_expr(ctx, a)).collect();
     let ta = type_args.map(|tas| tas.iter().map(|t| resolve_type_expr(t)).collect()).unwrap_or_default();
     let target = lower_call_target(ctx, callee);
+
+    // Call-site expansion: fill in default arguments for missing params
+    if let CallTarget::Named { ref name } = target {
+        if let Some(defaults) = ctx.fn_defaults.get(name).cloned() {
+            let expected = defaults.len();
+            if ir_args.len() < expected {
+                for i in ir_args.len()..expected {
+                    if let Some(Some(default_expr)) = defaults.get(i) {
+                        ir_args.push(lower_expr(ctx, &default_expr));
+                    }
+                }
+            }
+        }
+    }
+
     ctx.mk(IrExprKind::Call { target, args: ir_args, type_args: ta }, ty, span)
 }
 

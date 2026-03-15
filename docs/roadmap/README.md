@@ -22,7 +22,7 @@
 - [Compiler Warnings](active/compiler-warnings.md) — Warning infrastructure, unused imports, dead code
 
 ### Phase C: Language Extensions
-- [Syntax Sugar](active/syntax-sugar.md) — Lambda `(x) => expr` ✅, default arguments, comprehensions
+- [Syntax Sugar](active/syntax-sugar.md) — Lambda ✅, default args ✅, remaining: comprehensions, named args, raw strings, block comments
 - [Codec Protocol & JSON](active/codec-and-json.md) — `deriving Codec` + JSON as first format（value-type.md 吸収済み）
 - [Template: Typed Document Builder](active/template.md) — `template` keyword, `html {}`/`text {}` builders
 - [UFCS for External Libraries](active/ufcs-external.md) — Type-directed UFCS for user-defined types

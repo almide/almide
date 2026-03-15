@@ -354,6 +354,8 @@ pub struct IrParam {
     pub borrow: ParamBorrow,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub open_record: Option<OpenRecordInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default: Option<Box<IrExpr>>,
 }
 
 // ── Top-level structures ────────────────────────────────────────

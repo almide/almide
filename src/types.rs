@@ -123,6 +123,8 @@ pub struct TypeEnv {
     pub eq_types: std::collections::HashSet<std::string::String>,
     /// Structural bounds for generic type parameters: TypeVar name → OpenRecord constraint
     pub structural_bounds: std::collections::HashMap<std::string::String, Ty>,
+    /// Minimum required arguments for functions with default params: fn key -> min count
+    pub fn_min_params: std::collections::HashMap<std::string::String, usize>,
 }
 
 impl Ty {
@@ -426,6 +428,7 @@ impl TypeEnv {
             top_lets: std::collections::HashMap::new(),
             eq_types: std::collections::HashSet::new(),
             structural_bounds: std::collections::HashMap::new(),
+            fn_min_params: std::collections::HashMap::new(),
         }
     }
 

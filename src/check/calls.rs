@@ -101,7 +101,7 @@ impl Checker {
                         let parts: Vec<&str> = name.splitn(2, '.').collect();
                         crate::stdlib::min_params(parts[0], parts[1]).unwrap_or(sig.params.len())
                     } else {
-                        sig.params.len()
+                        self.env.fn_min_params.get(name).copied().unwrap_or(sig.params.len())
                     };
                     if arg_tys.len() < min_params || arg_tys.len() > sig.params.len() {
                         self.diagnostics.push(super::err(

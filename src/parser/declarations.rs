@@ -420,16 +420,28 @@ impl Parser {
             params.push(Param {
                 name: "self".to_string(),
                 ty: TypeExpr::Simple { name: "Self".to_string() },
+                default: None,
             });
             self.advance();
             if self.check(TokenType::Comma) { self.advance(); }
         }
 
+        let mut has_default = false;
         while !self.check(TokenType::RParen) {
             let param_name = self.expect_any_param_name()?;
             self.expect(TokenType::Colon)?;
             let param_type = self.parse_type_expr()?;
-            params.push(Param { name: param_name, ty: param_type });
+            let default = if self.check(TokenType::Eq) {
+                self.advance();
+                has_default = true;
+                Some(Box::new(self.parse_expr()?))
+            } else {
+                if has_default {
+                    return Err(format!("parameter '{}' must have a default value (all parameters after the first default must also have defaults)", param_name));
+                }
+                None
+            };
+            params.push(Param { name: param_name, ty: param_type, default });
             if self.check(TokenType::Comma) { self.advance(); } else { break; }
         }
         Ok(params)
