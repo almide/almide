@@ -228,9 +228,15 @@ impl<'a> LowerCtx<'a> {
             IrExprKind::Tuple { elements } => Expr::Tuple(elements.iter().map(|e| self.lower_expr(e)).collect()),
             IrExprKind::Record { name, fields } => {
                 let sname = name.as_ref().map(|n| self.ctors.get(n).map(|e| format!("{}::{}", e, n)).unwrap_or(n.clone())).unwrap_or_else(|| {
+                    // Check if the expression type is a Named type (e.g., Pair, Stack)
+                    if let Ty::Named(type_name, _) = &e.ty {
+                        return type_name.clone();
+                    }
                     let mut fnames: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
                     fnames.sort();
-                    self.anon.get(&fnames).cloned().unwrap_or("AnonRecord".into())
+                    self.anon.get(&fnames).cloned()
+                        .or_else(|| self.named.get(&fnames).cloned())
+                        .unwrap_or("AnonRecord".into())
                 });
                 let mut lowered_fields: Vec<(String, Expr)> = fields.iter().map(|(n, v)| (n.clone(), self.lower_expr(v))).collect();
                 // Fill in default field values for any missing fields in named records

@@ -107,7 +107,7 @@ fn maybe_map[A, B](m: Maybe[A], f: (A) -> B) -> Maybe[B] =
 
 test "generic variant Just and Nothing" {
   let x = Just(42)
-  let y = Nothing[Int]()
+  let y: Maybe[Int] = Nothing()
   match x {
     Just(v) => assert_eq(v, 42),
     Nothing => assert(false, "expected Just"),

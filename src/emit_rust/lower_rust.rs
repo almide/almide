@@ -292,9 +292,12 @@ impl<'a> LowerCtx<'a> {
                 let val = self.lower_expr(value);
                 let is_map_new = matches!(&value.kind, IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. }
                     if module == "map" && func == "new" && args.is_empty());
+                // Check if this is a unit variant constructor of a generic enum
+                let is_generic_variant = matches!(&value.kind, IrExprKind::Call { args, .. } if args.is_empty())
+                    && matches!(&value.ty, Ty::Named(_, args) if !args.is_empty());
                 let needs_ty = matches!(&value.kind, IrExprKind::List { elements } if elements.is_empty())
                     || matches!(&value.kind, IrExprKind::EmptyMap | IrExprKind::OptionNone)
-                    || is_map_new
+                    || is_map_new || is_generic_variant
                     || matches!(&value.kind, IrExprKind::OptionSome { .. })
                     || (matches!(&value.kind, IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. })
                         && matches!(&value.ty, Ty::Result(_, _)));
@@ -407,6 +410,7 @@ fn contains_typevar(ty: &Ty) -> bool {
         Ty::List(inner) | Ty::Option(inner) => contains_typevar(inner),
         Ty::Result(a, b) | Ty::Map(a, b) => contains_typevar(a) || contains_typevar(b),
         Ty::Tuple(ts) => ts.iter().any(contains_typevar),
+        Ty::Named(_, args) => args.iter().any(contains_typevar),
         Ty::Fn { params, ret } => params.iter().any(contains_typevar) || contains_typevar(ret),
         _ => false,
     }
