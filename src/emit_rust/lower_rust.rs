@@ -239,11 +239,15 @@ impl<'a> LowerCtx<'a> {
         } else if f.is_effect {
             match body_expr {
                 Expr::Block { stmts, tail } => {
-                    let wrapped = tail.map(|t| match *t {
-                        ref e if is_result_expr(e) => *t,
-                        other => Expr::Ok(Box::new(other)),
-                    }).unwrap_or(Expr::Ok(Box::new(Expr::Unit)));
-                    (stmts, Some(wrapped))
+                    if let Some(t) = tail {
+                        let wrapped = if is_result_expr(&t) { *t } else { Expr::Ok(Box::new(*t)) };
+                        (stmts, Some(wrapped))
+                    } else if stmts.iter().any(|s| stmt_has_result_return(s)) {
+                        // Body has return Ok/Err in loops — don't wrap
+                        (stmts, None)
+                    } else {
+                        (stmts, Some(Expr::Ok(Box::new(Expr::Unit))))
+                    }
                 }
                 other => {
                     let w = if is_result_expr(&other) { other } else { Expr::Ok(Box::new(other)) };
@@ -345,9 +349,34 @@ impl<'a> LowerCtx<'a> {
 fn is_result_expr(e: &Expr) -> bool {
     match e {
         Expr::Ok(_) | Expr::Err(_) | Expr::Try(_) => true,
+        Expr::Return(Some(inner)) => is_result_expr(inner),
         Expr::If { then, else_: Some(else_), .. } => is_result_expr(then) && is_result_expr(else_),
         Expr::Match { arms, .. } => !arms.is_empty() && arms.iter().all(|a| is_result_expr(&a.body)),
         Expr::Block { tail: Some(t), .. } => is_result_expr(t),
+        // Block with no tail but containing a loop with return Ok/Err (do-block pattern)
+        Expr::Block { stmts, tail: None } => stmts.iter().any(|s| stmt_has_result_return(s)),
+        _ => false,
+    }
+}
+
+fn stmt_has_result_return(s: &Stmt) -> bool {
+    match s {
+        Stmt::Expr(e) => expr_has_result_return(e),
+        _ => false,
+    }
+}
+
+fn expr_has_result_return(e: &Expr) -> bool {
+    match e {
+        Expr::Return(Some(inner)) => is_result_expr(inner),
+        Expr::Block { stmts, tail } => {
+            stmts.iter().any(|s| stmt_has_result_return(s))
+                || tail.as_ref().map_or(false, |t| expr_has_result_return(t))
+        }
+        Expr::Loop { body, .. } => body.iter().any(|s| stmt_has_result_return(s)),
+        Expr::If { then, else_, .. } => {
+            expr_has_result_return(then) || else_.as_ref().map_or(false, |e| expr_has_result_return(e))
+        }
         _ => false,
     }
 }

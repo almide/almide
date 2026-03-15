@@ -105,11 +105,10 @@ impl<'a> LowerCtx<'a> {
                     if let Some(tail) = expr.as_ref() {
                         body_stmts.push(Stmt::Expr(self.lower_expr(tail)));
                     }
-                    // In effect context: add trailing break (loop runs once, exits via ok/err/?)
-                    // In pure context: no trailing break (loop continues until guard triggers break)
-                    if self.auto_try {
-                        body_stmts.push(Stmt::Expr(Expr::Break));
-                    }
+                    // Guards generate `return Ok/Err` (effect) or `break`/`continue` (pure).
+                    // In both cases, the loop exits via control flow — no trailing break needed.
+                    // (Previously added trailing break for effect context, but this was wrong:
+                    //  it caused one-shot behavior when the loop should iterate until a guard returns.)
                     Expr::Block {
                         stmts: vec![Stmt::Expr(Expr::Loop { label: None, body: body_stmts })],
                         tail: None,
