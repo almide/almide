@@ -2,15 +2,15 @@
 
 test "pipe: map then filter" {
   let result = [1, 2, 3, 4, 5]
-    |> list.map(fn(x) => x * 2)
-    |> list.filter(fn(x) => x > 4)
+    |> list.map((x) => x * 2)
+    |> list.filter((x) => x > 4)
   assert_eq(result, [6, 8, 10])
 }
 
 test "pipe: filter then map then sum" {
   let result = [1, 2, 3, 4, 5, 6]
-    |> list.filter(fn(x) => x % 2 == 0)
-    |> list.map(fn(x) => x * x)
+    |> list.filter((x) => x % 2 == 0)
+    |> list.map((x) => x * x)
     |> list.sum()
   assert_eq(result, 56)
 }
@@ -18,7 +18,7 @@ test "pipe: filter then map then sum" {
 test "pipe: string split then map then join" {
   let result = "hello world foo"
     |> string.split(" ")
-    |> list.map(fn(s) => string.to_upper(s))
+    |> list.map((s) => string.to_upper(s))
     |> string.join(" ")
   assert_eq(result, "HELLO WORLD FOO")
 }
@@ -40,7 +40,7 @@ test "pipe: list to unique then sort" {
 
 test "pipe: filter_map then take" {
   let result = [1, 2, 3, 4, 5, 6, 7, 8]
-    |> list.filter_map(fn(x) => if x % 2 == 0 then some(x * 10) else none)
+    |> list.filter_map((x) => if x % 2 == 0 then some(x * 10) else none)
     |> list.take(3)
   assert_eq(result, [20, 40, 60])
 }
@@ -56,7 +56,7 @@ test "pipe: enumerate then collect evens" {
 
 test "pipe: sort_by then take" {
   let result = ["banana", "fig", "apple", "cherry"]
-    |> list.sort_by(fn(s) => string.len(s))
+    |> list.sort_by((s) => string.len(s))
     |> list.take(2)
   assert_eq(result, ["fig", "apple"])
 }
@@ -70,8 +70,8 @@ test "pipe: flat_map then unique" {
 
 test "pipe: map then fold" {
   let result = [1, 2, 3, 4]
-    |> list.map(fn(x) => x * x)
-    |> list.fold(0, fn(acc, x) => acc + x)
+    |> list.map((x) => x * x)
+    |> list.fold(0, (acc, x) => acc + x)
   assert_eq(result, 30)
 }
 
@@ -86,7 +86,7 @@ test "pipe: string processing chain" {
 
 test "pipe: take_while then len" {
   let result = [1, 2, 3, 10, 20, 30]
-    |> list.take_while(fn(x) => x < 10)
+    |> list.take_while((x) => x < 10)
     |> list.len()
   assert_eq(result, 3)
 }
@@ -103,14 +103,14 @@ test "pipe: map keys to values" {
 test "pipe: chunk then map" {
   let result = [1, 2, 3, 4, 5, 6]
     |> list.chunk(2)
-    |> list.map(fn(chunk) => list.sum(chunk))
+    |> list.map((chunk) => list.sum(chunk))
   assert_eq(result, [3, 7, 11])
 }
 
 test "pipe: zip_with then sum" {
   let xs = [1, 2, 3]
   let ys = [10, 20, 30]
-  let result = list.zip_with(xs, ys, fn(a, b) => a + b)
+  let result = list.zip_with(xs, ys, (a, b) => a + b)
     |> list.sum()
   assert_eq(result, 66)
 }
@@ -125,7 +125,7 @@ test "pipe: intersperse then join" {
 test "pipe: windows then map to sums" {
   let result = [1, 2, 3, 4, 5]
     |> list.windows(3)
-    |> list.map(fn(w) => list.sum(w))
+    |> list.map((w) => list.sum(w))
   assert_eq(result, [6, 9, 12])
 }
 
@@ -138,14 +138,14 @@ test "pipe: drop then take slice" {
 
 test "pipe: partition then count" {
   let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-  let result = list.partition(data, fn(x) => x % 2 == 0)
+  let result = list.partition(data, (x) => x % 2 == 0)
   assert_eq(list.len(result.0), 5)
   assert_eq(list.len(result.1), 5)
 }
 
 test "pipe: scan then last" {
   let result = [1, 2, 3, 4, 5]
-    |> list.scan(0, fn(acc, x) => acc + x)
+    |> list.scan(0, (acc, x) => acc + x)
     |> list.last()
   assert_eq(result, some(15))
 }

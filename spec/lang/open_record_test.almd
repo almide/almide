@@ -8,7 +8,7 @@ fn greet(who: { name: String, .. }) -> String = "Hello, ${who.name}!"
 
 fn name_and_age(who: { name: String, age: Int, .. }) -> String = "${who.name} is ${who.age}"
 
-fn closed_fn(r: { name: String }) -> String = r.name
+fn closed_(r: { name: String }) -> String = r.name
 
 test "open record accepts record with extra fields" {
   let result = greet({ name: "Alice", age: 30 });
@@ -39,7 +39,7 @@ test "open record accepts exact match" {
 }
 
 test "closed record is strict" {
-  let result = closed_fn({ name: "Eve" });
+  let result = closed_({ name: "Eve" });
   assert_eq(result, "Eve")
 }
 
@@ -68,6 +68,41 @@ test "shape alias accepts named type" {
 
 test "shape alias accepts anonymous record" {
   assert_eq(greet_named({ name: "Alice", age: 30 }), "Hi, Alice!")
+}
+
+// Generic structural bound: T: { name: String, .. }
+fn describe[T: { name: String, .. }](x: T) -> String = "name: ${x.name}"
+
+test "structural bound accepts Dog" {
+  let dog = Dog { name: "Rex", breed: "Lab" };
+  assert_eq(describe(dog), "name: Rex")
+}
+
+test "structural bound accepts Person" {
+  let person = Person { name: "Alice", age: 30, email: "alice@test.com" };
+  assert_eq(describe(person), "name: Alice")
+}
+
+test "structural bound accepts anonymous record" {
+  assert_eq(describe({ name: "X", extra: true }), "name: X")
+}
+
+// Monomorphization: return type preserves concrete type via T
+fn set_name[T: { name: String, .. }](x: T, n: String) -> T =
+  { ...x, name: n }
+
+test "monomorphize: rename Dog preserves breed" {
+  let d = Dog { name: "Rex", breed: "Lab" };
+  let d2 = set_name(d, "Max");
+  assert_eq(d2.name, "Max");
+  assert_eq(d2.breed, "Lab")
+}
+
+test "monomorphize: rename Person preserves age" {
+  let p = Person { name: "Alice", age: 30, email: "a@b.com" };
+  let p2 = set_name(p, "Bob");
+  assert_eq(p2.name, "Bob");
+  assert_eq(p2.age, 30)
 }
 
 // Nested open records

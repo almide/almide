@@ -58,7 +58,7 @@ fn check_rejected_ident(name: &str) -> Option<HintResult> {
         }),
         "self" | "this" => Some(HintResult {
             message: Some(format!("'{}' is not valid in Almide", name)),
-            hint: "Almide has no 'self' or 'this'. Pass the value as the first parameter. Example: fn greet(user: User) -> String".into(),
+            hint: "Pass the value as an explicit first parameter. Example: fn Dog.repr(d: Dog) -> String".into(),
         }),
         "new" => Some(HintResult {
             message: Some("'new' is not needed in Almide".into()),
@@ -86,7 +86,7 @@ fn check_rejected_ident(name: &str) -> Option<HintResult> {
         }),
         "lambda" => Some(HintResult {
             message: Some("'lambda' is not valid in Almide".into()),
-            hint: "Use 'fn(x) => expr' for lambdas. Example: list.map(xs, fn(x) => x + 1)".into(),
+            hint: "Use '(x) => expr' for lambdas. Example: list.map(xs, (x) => x + 1)".into(),
         }),
         _ => None,
     }

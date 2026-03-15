@@ -298,7 +298,7 @@ fn substitute_unbound_typevar() {
     let mut bindings = HashMap::new();
     bindings.insert("X".into(), Ty::Int); // some other binding, not T
     let result = substitute(&Ty::TypeVar("T".into()), &bindings);
-    assert_eq!(result, Ty::Unknown);
+    assert_eq!(result, Ty::TypeVar("T".into()));
 }
 
 #[test]
@@ -472,6 +472,7 @@ fn fn_sig_format_params() {
         ret: Ty::Bool,
         is_effect: false,
         generics: vec![],
+        structural_bounds: std::collections::HashMap::new(),
     };
     assert_eq!(sig.format_params(), "a: Int, b: String");
 }
@@ -483,6 +484,7 @@ fn fn_sig_format_params_empty() {
         ret: Ty::Unit,
         is_effect: false,
         generics: vec![],
+        structural_bounds: std::collections::HashMap::new(),
     };
     assert_eq!(sig.format_params(), "");
 }

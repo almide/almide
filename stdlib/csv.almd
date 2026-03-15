@@ -77,13 +77,13 @@ fn parse_with_header(input: String) -> List[Map[String, String]] = {
   }
   let data_rows = list.drop(rows, 1)
 
-  list.map(data_rows, fn(row) => {
+  list.map(data_rows, (row) => {
     zip_to_map(headers, row)
   })
 }
 
 fn zip_to_map(keys: List[String], values: List[String]) -> Map[String, String] = {
-  list.fold(keys, { idx: 0, result: map.new() }, fn(acc, key) => {
+  list.fold(keys, { idx: 0, result: map.new() }, (acc, key) => {
     let value = match list.get(values, acc.idx) {
       some(v) => v,
       none => "",
@@ -93,7 +93,7 @@ fn zip_to_map(keys: List[String], values: List[String]) -> Map[String, String] =
 }
 
 fn needs_quoting(field: String) -> Bool =
-  string.contains?(field, ",") or string.contains?(field, "\n") or string.contains?(field, "\"") or string.contains?(field, "\r")
+  string.contains(field, ",") or string.contains(field, "\n") or string.contains(field, "\"") or string.contains(field, "\r")
 
 fn quote_field(field: String) -> String = {
   if needs_quoting(field) then {
@@ -105,8 +105,8 @@ fn quote_field(field: String) -> String = {
 fn stringify(rows: List[List[String]]) -> String = {
   guard list.len(rows) > 0 else ""
 
-  list.fold(rows, "", fn(acc, row) => {
-    let fields = list.map(row, fn(f) => quote_field(f))
+  list.fold(rows, "", (acc, row) => {
+    let fields = list.map(row, (f) => quote_field(f))
     let line = string.join(fields, ",")
     acc ++ line ++ "\n"
   })

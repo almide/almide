@@ -1,0 +1,132 @@
+[field]
+description = "Get a field from a Value object by key. Returns err if missing."
+params = [{ name = "v", type = "Value" }, { name = "key", type = "String" }]
+return = "Result[Value, String]"
+rust = "value_field({v}, {key})"
+ts = "__almd_value.field({v}, {key})"
+
+[as_string]
+description = "Extract a String from a Value. Returns err if not a Str."
+params = [{ name = "v", type = "Value" }]
+return = "Result[String, String]"
+rust = "value_as_string({v})"
+ts = "__almd_value.as_string({v})"
+
+[as_int]
+description = "Extract an Int from a Value. Returns err if not an Int."
+params = [{ name = "v", type = "Value" }]
+return = "Result[Int, String]"
+rust = "value_as_int({v})"
+ts = "__almd_value.as_int({v})"
+
+[as_float]
+description = "Extract a Float from a Value. Returns err if not a Float."
+params = [{ name = "v", type = "Value" }]
+return = "Result[Float, String]"
+rust = "value_as_float({v})"
+ts = "__almd_value.as_float({v})"
+
+[as_bool]
+description = "Extract a Bool from a Value. Returns err if not a Bool."
+params = [{ name = "v", type = "Value" }]
+return = "Result[Bool, String]"
+rust = "value_as_bool({v})"
+ts = "__almd_value.as_bool({v})"
+
+[as_array]
+description = "Extract a List[Value] from a Value. Returns err if not an Array."
+params = [{ name = "v", type = "Value" }]
+return = "Result[List[Value], String]"
+rust = "value_as_array({v})"
+ts = "__almd_value.as_array({v})"
+
+[str]
+description = "Create a Value from a String."
+params = [{ name = "s", type = "String" }]
+return = "Value"
+rust = "value_str({s})"
+ts = "__almd_value.str({s})"
+
+[int]
+description = "Create a Value from an Int."
+params = [{ name = "n", type = "Int" }]
+return = "Value"
+rust = "value_int({n})"
+ts = "__almd_value.int({n})"
+
+[float]
+description = "Create a Value from a Float."
+params = [{ name = "f", type = "Float" }]
+return = "Value"
+rust = "value_float({f})"
+ts = "__almd_value.float({f})"
+
+[bool]
+description = "Create a Value from a Bool."
+params = [{ name = "b", type = "Bool" }]
+return = "Value"
+rust = "value_bool({b})"
+ts = "__almd_value.bool({b})"
+
+[object]
+description = "Create a Value object from a list of key-value pairs."
+params = [{ name = "pairs", type = "List[(String, Value)]" }]
+return = "Value"
+rust = "value_object({pairs})"
+ts = "__almd_value.object({pairs})"
+
+[array]
+description = "Create a Value array from a list of Values."
+params = [{ name = "items", type = "List[Value]" }]
+return = "Value"
+rust = "value_array({items})"
+ts = "__almd_value.array({items})"
+
+[null]
+description = "Create a null Value."
+params = []
+return = "Value"
+rust = "value_null()"
+ts = "null"
+
+[pick]
+description = "Pick specific keys from an Object, discarding the rest."
+params = [{ name = "v", type = "Value" }, { name = "keys", type = "List[String]" }]
+return = "Value"
+rust = "almide_rt_value_pick({v}, {keys})"
+ts = "__almd_value.pick({v}, {keys})"
+
+[omit]
+description = "Remove specific keys from an Object."
+params = [{ name = "v", type = "Value" }, { name = "keys", type = "List[String]" }]
+return = "Value"
+rust = "almide_rt_value_omit({v}, {keys})"
+ts = "__almd_value.omit({v}, {keys})"
+
+[merge]
+description = "Merge two Objects. Keys from b override keys from a."
+params = [{ name = "a", type = "Value" }, { name = "b", type = "Value" }]
+return = "Value"
+rust = "almide_rt_value_merge({a}, {b})"
+ts = "__almd_value.merge({a}, {b})"
+
+[to_camel_case]
+description = "Convert Object keys from snake_case to camelCase."
+params = [{ name = "v", type = "Value" }]
+return = "Value"
+rust = "almide_rt_value_to_camel_case({v})"
+ts = "__almd_value.to_camel_case({v})"
+
+[to_snake_case]
+description = "Convert Object keys from camelCase to snake_case."
+params = [{ name = "v", type = "Value" }]
+return = "Value"
+rust = "almide_rt_value_to_snake_case({v})"
+ts = "__almd_value.to_snake_case({v})"
+
+[stringify]
+description = "Convert a Value to a JSON-like string representation."
+params = [{ name = "v", type = "Value" }]
+return = "String"
+rust = "value_stringify(&{v})"
+ts = "JSON.stringify({v})"

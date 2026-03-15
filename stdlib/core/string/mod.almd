@@ -1,0 +1,40 @@
+// string — string operations
+// Core module (auto-import, platform-independent)
+
+@extern
+fn len(s: String) -> Int
+
+@extern
+fn to_upper(s: String) -> String
+
+@extern
+fn to_lower(s: String) -> String
+
+@extern
+fn trim(s: String) -> String
+
+@extern
+fn contains(s: String, sub: String) -> Bool
+
+@extern
+fn starts_with(s: String, prefix: String) -> Bool
+
+@extern
+fn ends_with(s: String, suffix: String) -> Bool
+
+@extern
+fn split(s: String, sep: String) -> List[String]
+
+@extern
+fn replace(s: String, from: String, to: String) -> String
+
+@extern
+fn slice(s: String, start: Int, end: Int) -> String
+
+fn is_empty(s: String) -> Bool = string.len(s) == 0
+
+fn join(items: List[String], sep: String) -> String =
+  list.fold(items, "", (acc, item) =>
+    if string.is_empty(acc) then item
+    else acc ++ sep ++ item
+  )

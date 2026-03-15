@@ -44,25 +44,28 @@ See [ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the full compiler pipeline and
 ```
 src/
 ├── main.rs              CLI dispatch, compile pipeline
+├── lib.rs               Library crate root (re-exports for tests)
 ├── cli.rs               Commands: run, build, test, check, fmt, clean, init
 ├── ast.rs               AST types (Program, Decl, Expr, Stmt, TypeExpr)
 ├── lexer.rs             Tokenizer
-├── parser/              Recursive descent parser (7 files)
+├── parser/              Recursive descent parser (8 files + hints/)
+│   └── hints/           Context-aware error recovery hints (7 files)
 ├── resolve.rs           Import resolution
 ├── check/               Type checker (5 files)
 ├── types.rs             Internal type system (Ty, TypeEnv, FnSig)
-├── ir.rs                Typed IR (intermediate representation)
-├── lower.rs             AST → IR lowering
+├── ir.rs                Typed IR (IrProgram, IrModule, IrFunction, IrTypeDecl)
+├── lower.rs             AST → IR lowering with use-count analysis
 ├── diagnostic.rs        Error reporting with file/line and hints
 ├── stdlib.rs            UFCS resolution, module registry
-├── generated/           Auto-generated from stdlib/defs/*.toml (DO NOT EDIT)
+├── generated/           Auto-generated from stdlib/defs/*.toml + grammar/*.toml (DO NOT EDIT)
 ├── emit_common.rs       Shared codegen utilities
-├── emit_rust/           Rust code generation (5 files)
+├── emit_rust/           Rust code generation (5 .rs files + 7 runtime .txt files)
+│   └── borrow.rs        Borrow analysis, clone insertion, single-use optimization
 ├── emit_ts/             TypeScript code generation (4 files)
 ├── emit_ts_runtime.rs   Embedded JS/TS runtime
 ├── fmt.rs               Code formatter (AST → source)
 └── project.rs           almide.toml, dependency management
-stdlib/defs/             TOML stdlib definitions (14 modules, 203 functions)
+stdlib/defs/             TOML stdlib definitions (15 modules, 282 functions)
 ```
 
 `build.rs` reads `stdlib/defs/*.toml` at compile time and generates type signatures + codegen dispatch into `src/generated/`. See [stdlib/README.md](./stdlib/README.md) for the full spec.

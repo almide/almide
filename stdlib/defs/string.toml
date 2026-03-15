@@ -1,49 +1,62 @@
 [trim]
+description = "Remove leading and trailing whitespace."
+example = 'string.trim("  hello  ") // => "hello"'
 params = [{ name = "s", type = "String" }]
 return = "String"
 rust = "almide_rt_string_trim(&*{s})"
 ts = "__almd_string.trim({s})"
 
 [split]
+description = "Split a string by separator into a list of substrings."
+example = 'string.split("a,b,c", ",") // => ["a", "b", "c"]'
 params = [{ name = "s", type = "String" }, { name = "sep", type = "String" }]
 return = "List[String]"
 rust = "almide_rt_string_split(&*{s}, &*{sep})"
 ts = "__almd_string.split({s}, {sep})"
 
 [join]
+description = "Join a list of strings with a separator."
+example = 'string.join(["a", "b", "c"], "-") // => "a-b-c"'
 params = [{ name = "list", type = "List[String]" }, { name = "sep", type = "String" }]
 return = "String"
 rust = "almide_rt_string_join(&{list}, &*{sep})"
 ts = "__almd_string.join({list}, {sep})"
 
 [len]
+description = "Return the number of characters in a string."
+example = 'string.len("hello") // => 5'
 params = [{ name = "s", type = "String" }]
 return = "Int"
 rust = "almide_rt_string_len(&*{s})"
 ts = "__almd_string.len({s})"
 
-["contains?"]
+[contains]
+description = "Check if a string contains a substring."
+example = 'string.contains("hello world", "world") // => true'
 params = [{ name = "s", type = "String" }, { name = "sub", type = "String" }]
 return = "Bool"
 rust = "almide_rt_string_contains(&*{s}, &*{sub})"
-ts = "__almd_string.contains_hdlm_qm_({s}, {sub})"
-aliases = ["contains_hdlm_qm_", "contains"]
+ts = "__almd_string.contains({s}, {sub})"
 
-["starts_with?"]
+[starts_with]
+description = "Check if a string starts with a prefix."
+example = 'string.starts_with("hello", "hel") // => true'
 params = [{ name = "s", type = "String" }, { name = "prefix", type = "String" }]
 return = "Bool"
 rust = "almide_rt_string_starts_with(&*{s}, &*{prefix})"
-ts = "__almd_string.starts_with_hdlm_qm_({s}, {prefix})"
-aliases = ["starts_with_hdlm_qm_", "starts_with"]
+ts = "__almd_string.starts_with({s}, {prefix})"
 
-["ends_with?"]
+[ends_with]
+description = "Check if a string ends with a suffix."
+example = 'string.ends_with("hello", "llo") // => true'
 params = [{ name = "s", type = "String" }, { name = "suffix", type = "String" }]
 return = "Bool"
 rust = "almide_rt_string_ends_with(&*{s}, &*{suffix})"
-ts = "__almd_string.ends_with_hdlm_qm_({s}, {suffix})"
-aliases = ["ends_with_hdlm_qm_", "ends_with"]
+ts = "__almd_string.ends_with({s}, {suffix})"
 
 [slice]
+description = "Extract a substring by start and optional end index."
+example = 'string.slice("hello", 1, 4) // => "ell"'
 params = [{ name = "s", type = "String" }, { name = "start", type = "Int" }, { name = "end", type = "Int", optional = true }]
 return = "String"
 rust = "almide_rt_string_slice(&*{s}, {start}, Some({end}))"
@@ -52,173 +65,264 @@ ts = "__almd_string.slice({s}, {start}, {end})"
 ts_min = "__almd_string.slice({s}, {start})"
 
 [pad_left]
+description = "Pad a string on the left to reach a target length."
+example = 'string.pad_left("42", 5, "0") // => "00042"'
 params = [{ name = "s", type = "String" }, { name = "n", type = "Int" }, { name = "ch", type = "String" }]
 return = "String"
 rust = "almide_rt_string_pad_left(&*{s}, {n}, &*{ch})"
 ts = "__almd_string.pad_left({s}, {n}, {ch})"
 
 [to_bytes]
+description = "Convert a string to a list of UTF-8 byte values."
+example = 'string.to_bytes("Hi") // => [72, 105]'
 params = [{ name = "s", type = "String" }]
 return = "List[Int]"
 rust = "almide_rt_string_to_bytes(&*{s})"
 ts = "__almd_string.to_bytes({s})"
 
 [capitalize]
+description = "Capitalize the first character of a string."
+example = 'string.capitalize("hello") // => "Hello"'
 params = [{ name = "s", type = "String" }]
 return = "String"
 rust = "almide_rt_string_capitalize(&*{s})"
 ts = "__almd_string.capitalize({s})"
 
 [to_upper]
+description = "Convert all characters to uppercase."
+example = 'string.to_upper("hello") // => "HELLO"'
 params = [{ name = "s", type = "String" }]
 return = "String"
 rust = "almide_rt_string_to_upper(&*{s})"
 ts = "__almd_string.to_upper({s})"
 
 [to_lower]
+description = "Convert all characters to lowercase."
+example = 'string.to_lower("HELLO") // => "hello"'
 params = [{ name = "s", type = "String" }]
 return = "String"
 rust = "almide_rt_string_to_lower(&*{s})"
 ts = "__almd_string.to_lower({s})"
 
 [to_int]
+description = "Parse a string as an integer. Returns err if invalid."
+example = 'string.to_int("42") // => ok(42)'
 params = [{ name = "s", type = "String" }]
 return = "Result[Int, String]"
 rust = "almide_rt_string_to_int(&*{s})?"
 ts = "__almd_string.to_int({s})"
 
 [replace]
+description = "Replace all occurrences of a substring."
+example = 'string.replace("aabbcc", "bb", "XX") // => "aaXXcc"'
 params = [{ name = "s", type = "String" }, { name = "from", type = "String" }, { name = "to", type = "String" }]
 return = "String"
 rust = "almide_rt_string_replace(&*{s}, &*{from}, &*{to})"
 ts = "__almd_string.replace({s}, {from}, {to})"
 
 [char_at]
+description = "Get the character at a given index, or none if out of bounds."
+example = 'string.char_at("hello", 1) // => some("e")'
 params = [{ name = "s", type = "String" }, { name = "i", type = "Int" }]
 return = "Option[String]"
 rust = "almide_rt_string_char_at(&*{s}, {i})"
 ts = "__almd_string.char_at({s}, {i})"
 
 [lines]
+description = "Split a string into lines."
+example = 'string.lines("a\nb\nc") // => ["a", "b", "c"]'
 params = [{ name = "s", type = "String" }]
 return = "List[String]"
 rust = "almide_rt_string_lines(&*{s})"
 ts = "__almd_string.lines({s})"
 
 [chars]
+description = "Split a string into individual characters."
+example = 'string.chars("abc") // => ["a", "b", "c"]'
 params = [{ name = "s", type = "String" }]
 return = "List[String]"
 rust = "almide_rt_string_chars(&*{s})"
 ts = "__almd_string.chars({s})"
 
 [index_of]
+description = "Find the first index of a substring, or none if not found."
+example = 'string.index_of("hello", "ll") // => some(2)'
 params = [{ name = "s", type = "String" }, { name = "needle", type = "String" }]
 return = "Option[Int]"
 rust = "almide_rt_string_index_of(&*{s}, &*{needle})"
 ts = "__almd_string.index_of({s}, {needle})"
 
 [repeat]
+description = "Repeat a string n times."
+example = 'string.repeat("ab", 3) // => "ababab"'
 params = [{ name = "s", type = "String" }, { name = "n", type = "Int" }]
 return = "String"
 rust = "almide_rt_string_repeat(&*{s}, {n})"
 ts = "__almd_string.repeat({s}, {n})"
 
 [from_bytes]
+description = "Create a string from a list of UTF-8 byte values."
+example = 'string.from_bytes([72, 105]) // => "Hi"'
 params = [{ name = "bytes", type = "List[Int]" }]
 return = "String"
 rust = "almide_rt_string_from_bytes(&{ let __bytes: Vec<i64> = {bytes}; __bytes })"
 ts = "__almd_string.from_bytes({bytes})"
 
-["is_digit?"]
+[is_digit]
+description = "Check if all characters are ASCII digits."
+example = 'string.is_digit("123") // => true'
 params = [{ name = "s", type = "String" }]
 return = "Bool"
 rust = "almide_rt_string_is_digit(&*{s})"
-ts = "__almd_string.is_digit_hdlm_qm_({s})"
-aliases = ["is_digit_hdlm_qm_"]
+ts = "__almd_string.is_digit({s})"
 
-["is_alpha?"]
+[is_alpha]
+description = "Check if all characters are alphabetic."
+example = 'string.is_alpha("abc") // => true'
 params = [{ name = "s", type = "String" }]
 return = "Bool"
 rust = "almide_rt_string_is_alpha(&*{s})"
-ts = "__almd_string.is_alpha_hdlm_qm_({s})"
-aliases = ["is_alpha_hdlm_qm_"]
+ts = "__almd_string.is_alpha({s})"
 
-["is_alphanumeric?"]
+[is_alphanumeric]
+description = "Check if all characters are alphanumeric."
+example = 'string.is_alphanumeric("abc123") // => true'
 params = [{ name = "s", type = "String" }]
 return = "Bool"
 rust = "almide_rt_string_is_alphanumeric(&*{s})"
-ts = "__almd_string.is_alphanumeric_hdlm_qm_({s})"
-aliases = ["is_alphanumeric_hdlm_qm_"]
+ts = "__almd_string.is_alphanumeric({s})"
 
-["is_whitespace?"]
+[is_whitespace]
+description = "Check if all characters are whitespace."
+example = 'string.is_whitespace("  ") // => true'
 params = [{ name = "s", type = "String" }]
 return = "Bool"
 rust = "almide_rt_string_is_whitespace(&*{s})"
-ts = "__almd_string.is_whitespace_hdlm_qm_({s})"
-aliases = ["is_whitespace_hdlm_qm_"]
+ts = "__almd_string.is_whitespace({s})"
+
+[is_upper]
+description = "Check if all characters in the string are uppercase."
+example = 'string.is_upper("ABC") // => true'
+params = [{ name = "s", type = "String" }]
+return = "Bool"
+rust = "almide_rt_string_is_upper(&*{s})"
+ts = "__almd_string.is_upper({s})"
+
+[is_lower]
+description = "Check if all characters in the string are lowercase."
+example = 'string.is_lower("abc") // => true'
+params = [{ name = "s", type = "String" }]
+return = "Bool"
+rust = "almide_rt_string_is_lower(&*{s})"
+ts = "__almd_string.is_lower({s})"
+
+[codepoint]
+description = "Return the Unicode codepoint of the first character, or none for empty string."
+example = 'string.codepoint("A") // => some(65)'
+params = [{ name = "s", type = "String" }]
+return = "Option[Int]"
+rust = "almide_rt_string_codepoint(&*{s})"
+ts = "__almd_string.codepoint({s})"
+
+[from_codepoint]
+description = "Create a single-character string from a Unicode codepoint."
+example = 'string.from_codepoint(65) // => "A"'
+params = [{ name = "n", type = "Int" }]
+return = "String"
+rust = "almide_rt_string_from_codepoint({n})"
+ts = "String.fromCodePoint({n})"
+
+[char_count]
+description = "Return the number of Unicode characters (not bytes) in a string."
+example = 'string.char_count("hello") // => 5'
+params = [{ name = "s", type = "String" }]
+return = "Int"
+rust = "almide_rt_string_char_count(&*{s})"
+ts = "__almd_string.char_count({s})"
 
 [pad_right]
+description = "Pad a string on the right to reach a target length."
+example = 'string.pad_right("hi", 5, ".") // => "hi..."'
 params = [{ name = "s", type = "String" }, { name = "n", type = "Int" }, { name = "ch", type = "String" }]
 return = "String"
-rust = "almide_rt_string_pad_right({s}, {n}, &*{ch})"
+rust = "almide_rt_string_pad_right(&*{s}, {n}, &*{ch})"
 ts = "__almd_string.pad_right({s}, {n}, {ch})"
 
 [trim_start]
+description = "Remove leading whitespace."
+example = 'string.trim_start("  hello") // => "hello"'
 params = [{ name = "s", type = "String" }]
 return = "String"
 rust = "almide_rt_string_trim_start(&*{s})"
 ts = "__almd_string.trim_start({s})"
 
 [trim_end]
+description = "Remove trailing whitespace."
+example = 'string.trim_end("hello  ") // => "hello"'
 params = [{ name = "s", type = "String" }]
 return = "String"
 rust = "almide_rt_string_trim_end(&*{s})"
 ts = "__almd_string.trim_end({s})"
 
 [count]
+description = "Count occurrences of a substring."
+example = 'string.count("banana", "an") // => 2'
 params = [{ name = "s", type = "String" }, { name = "sub", type = "String" }]
 return = "Int"
 rust = "almide_rt_string_count(&*{s}, &*{sub})"
 ts = "__almd_string.count({s}, {sub})"
 
-["is_empty?"]
+[is_empty]
+description = "Check if a string is empty."
+example = 'string.is_empty("") // => true'
 params = [{ name = "s", type = "String" }]
 return = "Bool"
 rust = "almide_rt_string_is_empty(&*{s})"
-ts = "__almd_string.is_empty_hdlm_qm_({s})"
-aliases = ["is_empty_hdlm_qm_"]
+ts = "__almd_string.is_empty({s})"
 
 [reverse]
+description = "Reverse the characters in a string."
+example = 'string.reverse("hello") // => "olleh"'
 params = [{ name = "s", type = "String" }]
 return = "String"
 rust = "almide_rt_string_reverse(&*{s})"
 ts = "__almd_string.reverse({s})"
 
 [strip_prefix]
+description = "Remove a prefix if present, returning none if not found."
+example = 'string.strip_prefix("hello", "hel") // => some("lo")'
 params = [{ name = "s", type = "String" }, { name = "prefix", type = "String" }]
 return = "Option[String]"
 rust = "almide_rt_string_strip_prefix(&*{s}, &*{prefix})"
 ts = "__almd_string.strip_prefix({s}, {prefix})"
 
 [strip_suffix]
+description = "Remove a suffix if present, returning none if not found."
+example = 'string.strip_suffix("hello", "llo") // => some("he")'
 params = [{ name = "s", type = "String" }, { name = "suffix", type = "String" }]
 return = "Option[String]"
 rust = "almide_rt_string_strip_suffix(&*{s}, &*{suffix})"
 ts = "__almd_string.strip_suffix({s}, {suffix})"
 
 [replace_first]
+description = "Replace the first occurrence of a substring."
+example = 'string.replace_first("aabaa", "a", "X") // => "Xabaa"'
 params = [{ name = "s", type = "String" }, { name = "from", type = "String" }, { name = "to", type = "String" }]
 return = "String"
 rust = "almide_rt_string_replace_first(&*{s}, &*{from}, &*{to})"
 ts = "__almd_string.replace_first({s}, {from}, {to})"
 
 [last_index_of]
+description = "Find the last index of a substring, or none if not found."
+example = 'string.last_index_of("abcabc", "bc") // => some(4)'
 params = [{ name = "s", type = "String" }, { name = "needle", type = "String" }]
 return = "Option[Int]"
 rust = "almide_rt_string_last_index_of(&*{s}, &*{needle})"
 ts = "__almd_string.last_index_of({s}, {needle})"
 
 [to_float]
+description = "Parse a string as a float. Returns err if invalid."
+example = 'string.to_float("3.14") // => ok(3.14)'
 params = [{ name = "s", type = "String" }]
 return = "Result[Float, String]"
 rust = "almide_rt_string_to_float(&*{s})?"

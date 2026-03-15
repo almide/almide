@@ -12,7 +12,7 @@ test "empty list in typed context" {
 test "empty map operations" {
   let m: Map[String, Int] = [:]
   assert_eq(m.len(), 0)
-  assert_eq(m.is_empty?(), true)
+  assert_eq(m.is_empty(), true)
   let m2 = m.set("x", 42)
   assert_eq(m2.len(), 1)
   assert_eq(m2["x"], some(42))
@@ -24,7 +24,7 @@ test "list of lists with map and flatten" {
   let matrix = [[1, 2], [3, 4], [5, 6]]
   let flat = list.flatten(matrix)
   assert_eq(flat, [1, 2, 3, 4, 5, 6])
-  let doubled_rows = list.map(matrix, fn(row) => list.map(row, fn(x) => x * 2))
+  let doubled_rows = list.map(matrix, (row) => list.map(row, (x) => x * 2))
   assert_eq(doubled_rows, [[2, 4], [6, 8], [10, 12]])
 }
 
@@ -33,8 +33,8 @@ test "list of lists with map and flatten" {
 test "chain: filter, map, sort, reverse, take" {
   let data = [15, 3, 8, 22, 1, 19, 7, 11, 25, 4]
   let result = data
-    |> list.filter(fn(x) => x > 5)
-    |> list.map(fn(x) => x * 2)
+    |> list.filter((x) => x > 5)
+    |> list.map((x) => x * 2)
     |> list.sort()
     |> list.reverse()
     |> list.take(3)
@@ -47,7 +47,7 @@ test "map from computed entries" {
   let names = ["alice", "bob", "carol"]
   let entries = list.map(
     list.enumerate(names),
-    fn(pair) => {
+    (pair) => {
       let (i, name) = pair
       (name, i)
     }
@@ -62,7 +62,7 @@ test "map from computed entries" {
 
 test "list chunk then map to sums" {
   let result = list.chunk([1, 2, 3, 4, 5, 6, 7, 8, 9], 3)
-    |> list.map(fn(chunk) => list.sum(chunk))
+    |> list.map((chunk) => list.sum(chunk))
   assert_eq(result, [6, 15, 24])
 }
 
@@ -77,7 +77,7 @@ test "zip then process pairs" {
   let keys = ["a", "b", "c"]
   let values = [1, 2, 3]
   let entries = list.zip(keys, values)
-  let descriptions = list.map(entries, fn(pair) => {
+  let descriptions = list.map(entries, (pair) => {
     let (k, v) = pair
     "${k}=${int.to_string(v)}"
   })
@@ -134,8 +134,8 @@ test "group list elements by predicate using map" {
 
 test "list of tuples with operations" {
   let pairs = [(1, "one"), (2, "two"), (3, "three")]
-  let nums = list.map(pairs, fn(p) => p.0)
-  let strs = list.map(pairs, fn(p) => p.1)
+  let nums = list.map(pairs, (p) => p.0)
+  let strs = list.map(pairs, (p) => p.1)
   assert_eq(nums, [1, 2, 3])
   assert_eq(strs, ["one", "two", "three"])
 }
@@ -143,7 +143,7 @@ test "list of tuples with operations" {
 // ── List reduce ──
 
 test "list reduce to find max" {
-  let result = list.reduce([3, 7, 2, 9, 1], fn(a, b) => if a > b then a else b)
+  let result = list.reduce([3, 7, 2, 9, 1], (a, b) => if a > b then a else b)
   assert_eq(result, some(9))
 }
 

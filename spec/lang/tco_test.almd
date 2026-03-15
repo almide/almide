@@ -1,0 +1,44 @@
+// Tail Call Optimization tests
+
+fn factorial(n: Int, acc: Int) -> Int =
+  if n <= 1 then acc
+  else factorial(n - 1, acc * n)
+
+test "tco factorial" {
+  assert_eq(factorial(10, 1), 3628800);
+  assert_eq(factorial(1, 1), 1);
+  assert_eq(factorial(0, 1), 1)
+}
+
+fn sum_to(n: Int, acc: Int) -> Int =
+  if n <= 0 then acc
+  else sum_to(n - 1, acc + n)
+
+test "tco sum" {
+  assert_eq(sum_to(100, 0), 5050);
+  assert_eq(sum_to(0, 0), 0)
+}
+
+fn count_down(n: Int, acc: Int) -> Int =
+  if n <= 0 then acc
+  else count_down(n - 1, acc + 1)
+
+test "tco count down" {
+  assert_eq(count_down(100, 0), 100);
+  assert_eq(count_down(0, 0), 0)
+}
+
+// Deep recursion — would stack overflow without TCO
+test "tco deep recursion" {
+  assert_eq(sum_to(100000, 0), 5000050000)
+}
+
+fn fib_tail(n: Int, a: Int, b: Int) -> Int =
+  if n <= 0 then a
+  else fib_tail(n - 1, b, a + b)
+
+test "tco fibonacci" {
+  assert_eq(fib_tail(10, 0, 1), 55);
+  assert_eq(fib_tail(0, 0, 1), 0);
+  assert_eq(fib_tail(1, 0, 1), 1)
+}

@@ -29,9 +29,9 @@ test "list.remove_at" {
 
 test "list.find_index" {
   let xs = [10, 20, 30, 40]
-  assert_eq(list.find_index(xs, fn(x) => x == 30), some(2))
-  assert_eq(list.find_index(xs, fn(x) => x > 25), some(2))
-  assert_eq(list.find_index(xs, fn(x) => x > 100), none)
+  assert_eq(list.find_index(xs, (x) => x == 30), some(2))
+  assert_eq(list.find_index(xs, (x) => x > 25), some(2))
+  assert_eq(list.find_index(xs, (x) => x > 100), none)
 }
 
 test "UFCS forms" {
@@ -39,5 +39,5 @@ test "UFCS forms" {
   assert_eq(xs.slice(1, 3), [2, 3])
   assert_eq(xs.insert(0, 0), [0, 1, 2, 3, 4, 5])
   assert_eq(xs.remove_at(2), [1, 2, 4, 5])
-  assert_eq(xs.find_index(fn(x) => x == 4), some(3))
+  assert_eq(xs.find_index((x) => x == 4), some(3))
 }

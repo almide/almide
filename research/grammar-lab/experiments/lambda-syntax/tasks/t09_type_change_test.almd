@@ -7,7 +7,7 @@ test "pending filters and sorts by priority" {
     Task { title: "E", done: false, priority: 1 },
   ]
   let result = pending(tasks)
-  let titles = list.map(result, fn(t) => t.title)
+  let titles = list.map(result, (t) => t.title)
   assert_eq(titles, ["D", "A", "E"])
 }
 

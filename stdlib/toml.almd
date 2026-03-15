@@ -1,0 +1,285 @@
+// toml — TOML parser and generator
+// Bundled stdlib module (written in Almide, auto multi-target)
+// Outputs to Json type for interop with json module.
+// Supports: key=value, [tables], strings, ints, floats, bools, arrays, inline tables.
+
+fn parse(text: String) -> Result[Json, String] = {
+  let lines = string.split(text, "\n")
+  let result = parse_lines(lines, 0, list.len(lines), "", json.object([]))
+  ok(result.0)
+}
+
+fn stringify(value: Json) -> String = {
+  stringify_table(value, "")
+}
+
+// ── Parser internals ──
+
+type ParseState = (Json, Int)
+
+fn parse_lines(lines: List[String], i: Int, len: Int, current_table: String, root: Json) -> ParseState = {
+  if i >= len then (root, i)
+  else {
+    let line = string.trim(match list.get(lines, i) { some(l) => l, none => "" })
+    // Skip empty lines and comments
+    if string.len(line) == 0 or string.starts_with(line, "#") then
+      parse_lines(lines, i + 1, len, current_table, root)
+    // Table header [name]
+    else if string.starts_with(line, "[") and not string.starts_with(line, "[[") then {
+      let table_name = string.trim(string.slice(line, 1, string.len(line) - 1))
+      parse_lines(lines, i + 1, len, table_name, root)
+    }
+    // Key = Value
+    else {
+      match string.index_of(line, "=") {
+        some(eq_pos) => {
+          let key = string.trim(string.slice(line, 0, eq_pos))
+          let val_str = string.trim(string.slice(line, eq_pos + 1))
+          let val = parse_value(val_str)
+          let root = set_nested(root, current_table, key, val)
+          parse_lines(lines, i + 1, len, current_table, root)
+        }
+        none => parse_lines(lines, i + 1, len, current_table, root)
+      }
+    }
+  }
+}
+
+fn parse_value(s: String) -> Json = {
+  let trimmed = string.trim(s)
+  let len = string.len(trimmed)
+  if len == 0 then json.null()
+  // Quoted string
+  else if string.starts_with(trimmed, "\"") then {
+    let inner = string.slice(trimmed, 1, len - 1)
+    json.from_string(unescape_string(inner))
+  }
+  // Single-quoted string (literal)
+  else if string.starts_with(trimmed, "'") then {
+    let inner = string.slice(trimmed, 1, len - 1)
+    json.from_string(inner)
+  }
+  // Boolean
+  else if trimmed == "true" then json.from_bool(true)
+  else if trimmed == "false" then json.from_bool(false)
+  // Array
+  else if string.starts_with(trimmed, "[") then {
+    let inner = string.trim(string.slice(trimmed, 1, len - 1))
+    if string.len(inner) == 0 then json.array([])
+    else {
+      let items = split_array_items(inner)
+      let parsed = list.map(items, (item) => parse_value(string.trim(item)))
+      json.array(parsed)
+    }
+  }
+  // Inline table
+  else if string.starts_with(trimmed, "{") then {
+    let inner = string.trim(string.slice(trimmed, 1, len - 1))
+    if string.len(inner) == 0 then json.object([])
+    else {
+      let pairs = split_array_items(inner)
+      let entries = list.map(pairs, (pair) => {
+        let p = string.trim(pair)
+        match string.index_of(p, "=") {
+          some(eq) => {
+            let k = string.trim(string.slice(p, 0, eq))
+            let v = parse_value(string.trim(string.slice(p, eq + 1)))
+            (k, v)
+          }
+          none => (p, json.null())
+        }
+      })
+      json.object(entries)
+    }
+  }
+  // Float (contains .)
+  else if string.contains(trimmed, ".") then {
+    match string.to_float(trimmed) {
+      ok(f) => json.from_float(f)
+      err(_) => json.from_string(trimmed)
+    }
+  }
+  // Integer
+  else {
+    match string.to_int(trimmed) {
+      ok(n) => json.from_int(n)
+      err(_) => json.from_string(trimmed)
+    }
+  }
+}
+
+// Split comma-separated items, respecting brackets and quotes
+fn split_array_items(s: String) -> List[String] = {
+  let chars = string.chars(s)
+  let len = list.len(chars)
+  split_items_loop(chars, 0, len, 0, 0, "", [])
+}
+
+fn split_items_loop(chars: List[String], i: Int, len: Int, bracket_depth: Int, in_quote: Int, current: String, acc: List[String]) -> List[String] = {
+  if i >= len then {
+    let trimmed = string.trim(current)
+    if string.len(trimmed) > 0 then acc ++ [trimmed]
+    else acc
+  }
+  else {
+    let ch = match list.get(chars, i) { some(c) => c, none => "" }
+    if in_quote > 0 then {
+      if ch == "\"" then split_items_loop(chars, i + 1, len, bracket_depth, 0, current ++ ch, acc)
+      else split_items_loop(chars, i + 1, len, bracket_depth, in_quote, current ++ ch, acc)
+    }
+    else if ch == "\"" then split_items_loop(chars, i + 1, len, bracket_depth, 1, current ++ ch, acc)
+    else if ch == "[" or ch == "{" then split_items_loop(chars, i + 1, len, bracket_depth + 1, in_quote, current ++ ch, acc)
+    else if ch == "]" or ch == "}" then split_items_loop(chars, i + 1, len, bracket_depth - 1, in_quote, current ++ ch, acc)
+    else if ch == "," and bracket_depth == 0 then {
+      let trimmed = string.trim(current)
+      split_items_loop(chars, i + 1, len, 0, 0, "", acc ++ [trimmed])
+    }
+    else split_items_loop(chars, i + 1, len, bracket_depth, in_quote, current ++ ch, acc)
+  }
+}
+
+fn set_nested(root: Json, table: String, key: String, val: Json) -> Json = {
+  if string.len(table) == 0 then {
+    // Top-level key
+    json_set_key(root, key, val)
+  }
+  else {
+    // Nested: get or create table, set key, put back
+    let existing = match json.get(root, table) {
+      some(t) => t
+      none => json.object([])
+    }
+    let updated = json_set_key(existing, key, val)
+    json_set_key(root, table, updated)
+  }
+}
+
+fn json_set_key(obj: Json, key: String, val: Json) -> Json = {
+  let keys = json.keys(obj)
+  let entries = json_set_key_loop(obj, keys, 0, list.len(keys), key, val, [])
+  json.object(entries)
+}
+
+fn json_set_key_loop(obj: Json, keys: List[String], i: Int, len: Int, target_key: String, target_val: Json, acc: List[(String, Json)]) -> List[(String, Json)] = {
+  if i >= len then {
+    // If target key wasn't in existing keys, append it
+    let found = list.any(keys, (k) => k == target_key)
+    if found then acc
+    else acc ++ [(target_key, target_val)]
+  }
+  else {
+    let k = match list.get(keys, i) { some(v) => v, none => "" }
+    let k2 = k ++ ""
+    if k == target_key then {
+      json_set_key_loop(obj, keys, i + 1, len, target_key, json.null(), acc ++ [(k2, target_val)])
+    }
+    else {
+      let v = match json.get(obj, k) { some(v) => v, none => json.null() }
+      json_set_key_loop(obj, keys, i + 1, len, target_key, target_val, acc ++ [(k2, v)])
+    }
+  }
+}
+
+fn unescape_string(s: String) -> String = {
+  let result = string.replace(s, "\\n", "\n")
+  let result = string.replace(result, "\\t", "\t")
+  let result = string.replace(result, "\\\"", "\"")
+  let result = string.replace(result, "\\\\", "\\")
+  result
+}
+
+// ── Stringify internals ──
+
+fn stringify_table(value: Json, prefix: String) -> String = {
+  let keys = json.keys(value)
+  let simple_entries = list.filter(keys, (k) => {
+    match json.get(value, k) {
+      some(v) => not is_table(v)
+      none => true
+    }
+  })
+  let table_entries = list.filter(keys, (k) => {
+    match json.get(value, k) {
+      some(v) => is_table(v)
+      none => false
+    }
+  })
+  // Simple key=value pairs
+  let simple_lines = list.map(simple_entries, (k) => {
+    let v = match json.get(value, k) { some(x) => x, none => json.null() }
+    k ++ " = " ++ stringify_value(v)
+  })
+  let result = string.join(simple_lines, "\n")
+  // Nested tables
+  let table_lines = list.map(table_entries, (k) => {
+    let v = match json.get(value, k) { some(x) => x, none => json.null() }
+    let section = if string.len(prefix) > 0 then prefix ++ "." ++ k else k
+    "\n[" ++ section ++ "]\n" ++ stringify_table(v, section)
+  })
+  if list.len(table_lines) > 0 then {
+    if string.len(result) > 0 then result ++ "\n" ++ string.join(table_lines, "\n")
+    else string.join(table_lines, "\n")
+  }
+  else result
+}
+
+fn stringify_value(v: Json) -> String = {
+  match json.as_string(v) {
+    some(s) => "\"" ++ escape_string(s) ++ "\""
+    none => match json.as_int(v) {
+      some(n) => int.to_string(n)
+      none => match json.as_float(v) {
+        some(f) => float.to_string(f)
+        none => match json.as_bool(v) {
+          some(b) => if b then "true" else "false"
+          none => match json.as_array(v) {
+            some(arr) => {
+              let items = list.map(arr, (item) => stringify_value(item))
+              "[" ++ string.join(items, ", ") ++ "]"
+            }
+            none => {
+              // Inline table or null
+              let keys = json.keys(v)
+              if list.len(keys) > 0 then {
+                let pairs = list.map(keys, (k) => {
+                  let val = match json.get(v, k) { some(x) => x, none => json.null() }
+                  k ++ " = " ++ stringify_value(val)
+                })
+                "{ " ++ string.join(pairs, ", ") ++ " }"
+              }
+              else json.stringify(v)
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+fn is_table(v: Json) -> Bool = {
+  // A "table" is a JSON object (has keys) that's not an array
+  match json.as_array(v) {
+    some(_) => false
+    none => match json.as_string(v) {
+      some(_) => false
+      none => match json.as_int(v) {
+        some(_) => false
+        none => match json.as_float(v) {
+          some(_) => false
+          none => match json.as_bool(v) {
+            some(_) => false
+            none => list.len(json.keys(v)) > 0
+          }
+        }
+      }
+    }
+  }
+}
+
+fn escape_string(s: String) -> String = {
+  let result = string.replace(s, "\\", "\\\\")
+  let result = string.replace(result, "\"", "\\\"")
+  let result = string.replace(result, "\n", "\\n")
+  let result = string.replace(result, "\t", "\\t")
+  result
+}

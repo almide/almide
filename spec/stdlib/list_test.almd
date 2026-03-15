@@ -229,12 +229,12 @@ test "list.first of two" {
   assert_eq(list.first([99, 1]), some(99))
 }
 
-// ── is_empty? ──
+// ── is_empty ──
 
-test "list.is_empty? via UFCS" {
+test "list.is_empty via UFCS" {
   let xs: List[Int] = []
-  assert(xs.is_empty?())
-  assert(not [1].is_empty?())
+  assert(xs.is_empty())
+  assert(not [1].is_empty())
 }
 
 // ── min / max ──
@@ -268,63 +268,63 @@ test "list.join single" {
 // ── map ──
 
 test "list.map to strings" {
-  assert_eq(list.map([1, 2, 3], fn(x) => int.to_string(x)), ["1", "2", "3"])
+  assert_eq(list.map([1, 2, 3], (x) => int.to_string(x)), ["1", "2", "3"])
 }
 
 test "list.map empty" {
   let xs: List[Int] = []
-  assert_eq(list.map(xs, fn(x) => x * 2), [])
+  assert_eq(list.map(xs, (x) => x * 2), [])
 }
 
 // ── filter ──
 
 test "list.filter none pass" {
-  assert_eq(list.filter([1, 2, 3], fn(x) => x > 10), [])
+  assert_eq(list.filter([1, 2, 3], (x) => x > 10), [])
 }
 
 test "list.filter all pass" {
-  assert_eq(list.filter([1, 2, 3], fn(x) => x > 0), [1, 2, 3])
+  assert_eq(list.filter([1, 2, 3], (x) => x > 0), [1, 2, 3])
 }
 
 // ── find ──
 
 test "list.find first match" {
-  assert_eq(list.find([1, 2, 3, 4], fn(x) => x > 2), some(3))
+  assert_eq(list.find([1, 2, 3, 4], (x) => x > 2), some(3))
 }
 
 test "list.find no match" {
-  assert_eq(list.find([1, 2, 3], fn(x) => x > 10), none)
+  assert_eq(list.find([1, 2, 3], (x) => x > 10), none)
 }
 
 // ── any / all ──
 
 test "list.any empty" {
   let xs: List[Int] = []
-  assert(not list.any(xs, fn(x) => x > 0))
+  assert(not list.any(xs, (x) => x > 0))
 }
 
 test "list.all empty" {
   let xs: List[Int] = []
-  assert(list.all(xs, fn(x) => x > 0))
+  assert(list.all(xs, (x) => x > 0))
 }
 
 test "list.any single true" {
-  assert(list.any([1], fn(x) => x == 1))
+  assert(list.any([1], (x) => x == 1))
 }
 
 test "list.all single false" {
-  assert(not list.all([1], fn(x) => x == 2))
+  assert(not list.all([1], (x) => x == 2))
 }
 
 // ── sort_by ──
 
 test "list.sort_by numeric key" {
-  let result = list.sort_by([3, 1, 2], fn(x) => x)
+  let result = list.sort_by([3, 1, 2], (x) => x)
   assert_eq(result, [1, 2, 3])
 }
 
 test "list.sort_by reverse by negation" {
-  let result = list.sort_by([1, 2, 3], fn(x) => 0 - x)
+  let result = list.sort_by([1, 2, 3], (x) => 0 - x)
   assert_eq(result, [3, 2, 1])
 }
 
@@ -332,66 +332,66 @@ test "list.sort_by reverse by negation" {
 
 test "list.flat_map empty result" {
   let xs: List[Int] = []
-  let result = list.flat_map(xs, fn(x) => [x, x])
+  let result = list.flat_map(xs, (x) => [x, x])
   assert_eq(result, [])
 }
 
 test "list.flat_map tripling" {
-  assert_eq(list.flat_map([1, 2], fn(x) => [x, x, x]), [1, 1, 1, 2, 2, 2])
+  assert_eq(list.flat_map([1, 2], (x) => [x, x, x]), [1, 1, 1, 2, 2, 2])
 }
 
 // ── filter_map ──
 
 test "list.filter_map all none" {
   let xs = [1, 2, 3]
-  let result = list.filter_map(xs, fn(x) => if x > 10 then some(x) else none)
+  let result = list.filter_map(xs, (x) => if x > 10 then some(x) else none)
   assert_eq(result, [])
 }
 
 test "list.filter_map all some" {
   let xs = [1, 2, 3]
-  let result = list.filter_map(xs, fn(x) => some(x * 10))
+  let result = list.filter_map(xs, (x) => some(x * 10))
   assert_eq(result, [10, 20, 30])
 }
 
 // ── take_while / drop_while ──
 
 test "list.take_while all" {
-  assert_eq(list.take_while([1, 2, 3], fn(x) => x < 10), [1, 2, 3])
+  assert_eq(list.take_while([1, 2, 3], (x) => x < 10), [1, 2, 3])
 }
 
 test "list.take_while none" {
-  assert_eq(list.take_while([1, 2, 3], fn(x) => x < 0), [])
+  assert_eq(list.take_while([1, 2, 3], (x) => x < 0), [])
 }
 
 test "list.drop_while all" {
-  assert_eq(list.drop_while([1, 2, 3], fn(x) => x < 10), [])
+  assert_eq(list.drop_while([1, 2, 3], (x) => x < 10), [])
 }
 
 test "list.drop_while none" {
-  assert_eq(list.drop_while([1, 2, 3], fn(x) => x < 0), [1, 2, 3])
+  assert_eq(list.drop_while([1, 2, 3], (x) => x < 0), [1, 2, 3])
 }
 
 // ── count ──
 
 test "list.count none match" {
-  assert_eq(list.count([1, 2, 3], fn(x) => x > 10), 0)
+  assert_eq(list.count([1, 2, 3], (x) => x > 10), 0)
 }
 
 test "list.count all match" {
-  assert_eq(list.count([1, 2, 3], fn(x) => x > 0), 3)
+  assert_eq(list.count([1, 2, 3], (x) => x > 0), 3)
 }
 
 // ── partition ──
 
 test "list.partition all left" {
-  let result = list.partition([2, 4, 6], fn(x) => x % 2 == 0)
+  let result = list.partition([2, 4, 6], (x) => x % 2 == 0)
   assert_eq(result.0, [2, 4, 6])
   assert_eq(result.1, [])
 }
 
 test "list.partition all right" {
-  let result = list.partition([1, 3, 5], fn(x) => x % 2 == 0)
+  let result = list.partition([1, 3, 5], (x) => x % 2 == 0)
   assert_eq(result.0, [])
   assert_eq(result.1, [1, 3, 5])
 }
@@ -400,21 +400,21 @@ test "list.partition all right" {
 
 test "list.reduce empty" {
   let xs: List[Int] = []
-  assert_eq(list.reduce(xs, fn(a, b) => a + b), none)
+  assert_eq(list.reduce(xs, (a, b) => a + b), none)
 }
 
 test "list.reduce single" {
-  assert_eq(list.reduce([42], fn(a, b) => a + b), some(42))
+  assert_eq(list.reduce([42], (a, b) => a + b), some(42))
 }
 
 test "list.reduce multiply" {
-  assert_eq(list.reduce([1, 2, 3, 4], fn(a, b) => a * b), some(24))
+  assert_eq(list.reduce([1, 2, 3, 4], (a, b) => a * b), some(24))
 }
 
 // ── group_by ──
 
 test "list.group_by string length" {
-  let groups = list.group_by(["a", "bb", "c", "dd", "e"], fn(s) => string.len(s))
+  let groups = list.group_by(["a", "bb", "c", "dd", "e"], (s) => string.len(s))
   let ones = map.get_or(groups, 1, [])
   let twos = map.get_or(groups, 2, [])
   assert_eq(ones, ["a", "c", "e"])
@@ -454,17 +454,17 @@ test "list.remove_at last" {
 // ── find_index ──
 
 test "list.find_index found" {
-  assert_eq(list.find_index([10, 20, 30], fn(x) => x == 20), some(1))
+  assert_eq(list.find_index([10, 20, 30], (x) => x == 20), some(1))
 }
 
 test "list.find_index not found" {
-  assert_eq(list.find_index([10, 20, 30], fn(x) => x == 99), none)
+  assert_eq(list.find_index([10, 20, 30], (x) => x == 99), none)
 }
 
 // ── update ──
 
 test "list.update transform" {
-  assert_eq(list.update([1, 2, 3], 1, fn(x) => x * 10), [1, 20, 3])
+  assert_eq(list.update([1, 2, 3], 1, (x) => x * 10), [1, 20, 3])
 }
 
 // ── repeat ──
@@ -480,12 +480,12 @@ test "list.repeat zero" {
 // ── scan ──
 
 test "list.scan running product" {
-  assert_eq(list.scan([1, 2, 3, 4], 1, fn(acc, x) => acc * x), [1, 2, 6, 24])
+  assert_eq(list.scan([1, 2, 3, 4], 1, (acc, x) => acc * x), [1, 2, 6, 24])
 }
 
 test "list.scan empty" {
   let xs: List[Int] = []
-  assert_eq(list.scan(xs, 0, fn(acc, x) => acc + x), [])
+  assert_eq(list.scan(xs, 0, (acc, x) => acc + x), [])
 }
 
 // ── intersperse ──
@@ -521,33 +521,33 @@ test "list.dedup alternating" {
 // ── zip_with ──
 
 test "list.zip_with multiply" {
-  assert_eq(list.zip_with([1, 2, 3], [4, 5, 6], fn(a, b) => a * b), [4, 10, 18])
+  assert_eq(list.zip_with([1, 2, 3], [4, 5, 6], (a, b) => a * b), [4, 10, 18])
 }
 
 test "list.zip_with concat strings" {
-  assert_eq(list.zip_with(["a", "b"], ["1", "2"], fn(a, b) => a ++ b), ["a1", "b2"])
+  assert_eq(list.zip_with(["a", "b"], ["1", "2"], (a, b) => a ++ b), ["a1", "b2"])
 }
 
 // ── fold ──
 
 test "list.fold build string" {
-  let result = list.fold([1, 2, 3], "", fn(acc, x) => acc ++ int.to_string(x))
+  let result = list.fold([1, 2, 3], "", (acc, x) => acc ++ int.to_string(x))
   assert_eq(result, "123")
 }
 
 test "list.fold empty" {
   let xs: List[Int] = []
-  assert_eq(list.fold(xs, 0, fn(acc, x) => acc + x), 0)
+  assert_eq(list.fold(xs, 0, (acc, x) => acc + x), 0)
 }
 
 // ── UFCS ──
 
 test "list UFCS map" {
-  assert_eq([1, 2, 3].map(fn(x) => x + 1), [2, 3, 4])
+  assert_eq([1, 2, 3].map((x) => x + 1), [2, 3, 4])
 }
 
 test "list UFCS filter" {
-  assert_eq([1, 2, 3, 4].filter(fn(x) => x > 2), [3, 4])
+  assert_eq([1, 2, 3, 4].filter((x) => x > 2), [3, 4])
 }
 
 test "list UFCS sort" {

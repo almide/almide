@@ -1,0 +1,82 @@
+name: Cross-Target CI
+
+# Runs spec/ and exercises/ on both Rust and TS targets, reports mismatches.
+# Triggered on develop push (alongside main CI) to catch cross-target regressions early.
+
+on:
+  push:
+    branches: [develop]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - 'LICENSE'
+      - '.tasks/**'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.89.0"
+
+jobs:
+  cross-target:
+    name: Cross-Target (Rust vs TS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cross-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cross-cargo-${{ env.RUST_TOOLCHAIN }}-
+
+      - name: Build
+        run: cargo build --release
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      # Exercises skipped until stdlib is rebuilt
+      - name: Cross-target spec tests
+        run: |
+          ALMIDE=./target/release/almide
+          passed=0; ts_skip=0; mismatch=0; both_fail=0
+          for f in $(find spec/ -name '*.almd' -type f | sort); do
+            case "$f" in *_error_test.almd) continue;; esac
+
+            # Rust
+            rust_ok=true
+            $ALMIDE test "$f" > /dev/null 2>&1 || rust_ok=false
+
+            # TS (emit + deno test)
+            ts_ok=true
+            if $ALMIDE "$f" --target ts > /tmp/cross_ts.ts 2>/dev/null; then
+              deno test --allow-all --no-check /tmp/cross_ts.ts > /dev/null 2>&1 || ts_ok=false
+            else
+              ts_skip=$((ts_skip + 1))
+              continue
+            fi
+
+            if [ "$rust_ok" = "$ts_ok" ]; then
+              if [ "$rust_ok" = "true" ]; then
+                passed=$((passed + 1))
+              else
+                both_fail=$((both_fail + 1))
+              fi
+            else
+              mismatch=$((mismatch + 1))
+              echo "MISMATCH: $f (Rust=$rust_ok, TS=$ts_ok)"
+            fi
+          done
+          echo "::notice::Spec tests: $passed consistent, $mismatch mismatches, $both_fail both-fail, $ts_skip TS-skipped"
+          # Report mismatches but don't fail CI yet (known differences exist)
+          if [ $mismatch -gt 0 ]; then
+            echo "::warning::$mismatch cross-target mismatches found"
+          fi

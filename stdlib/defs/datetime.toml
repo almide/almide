@@ -1,0 +1,189 @@
+# datetime module — date/time operations via native runtime
+# DateTime is represented as Int (Unix timestamp in seconds, UTC)
+
+# ── Generation ──
+
+[now]
+description = "Get the current time as a Unix timestamp (seconds, UTC)."
+example = 'let ts = datetime.now()'
+params = []
+return = "Int"
+effect = true
+rust = "almide_rt_datetime_now()?"
+ts = "__almd_datetime.now()"
+
+[from_parts]
+description = "Create a timestamp from year, month, day, hour, minute, second (UTC)."
+example = 'datetime.from_parts(2024, 1, 15, 12, 0, 0)'
+params = [
+    { name = "y", type = "Int" },
+    { name = "m", type = "Int" },
+    { name = "d", type = "Int" },
+    { name = "h", type = "Int" },
+    { name = "min", type = "Int" },
+    { name = "s", type = "Int" },
+]
+return = "Int"
+rust = "almide_rt_datetime_from_parts({y}, {m}, {d}, {h}, {min}, {s})"
+ts = "__almd_datetime.from_parts({y}, {m}, {d}, {h}, {min}, {s})"
+
+[parse_iso]
+description = "Parse an ISO 8601 date string into a timestamp."
+example = 'datetime.parse_iso("2024-01-15T12:00:00Z") // => ok(1705320000)'
+params = [{ name = "s", type = "String" }]
+return = "Result[Int, String]"
+rust = "almide_rt_datetime_parse_iso(&*{s})?"
+ts = "__almd_datetime.parse_iso({s})"
+
+[from_unix]
+description = "Convert a Unix timestamp (identity function for documentation clarity)."
+example = 'datetime.from_unix(1705320000)'
+params = [{ name = "seconds", type = "Int" }]
+return = "Int"
+rust = "{seconds}"
+ts = "{seconds}"
+
+# ── Format ──
+
+[format]
+description = "Format a timestamp using a pattern string."
+example = 'datetime.format(ts, "%Y-%m-%d") // => "2024-01-15"'
+params = [
+    { name = "ts", type = "Int" },
+    { name = "pattern", type = "String" },
+]
+return = "String"
+rust = "almide_rt_datetime_format({ts}, &*{pattern})"
+ts = "__almd_datetime.format({ts}, {pattern})"
+
+[to_iso]
+description = "Format a timestamp as ISO 8601 string."
+example = 'datetime.to_iso(1705320000) // => "2024-01-15T12:00:00Z"'
+params = [{ name = "ts", type = "Int" }]
+return = "String"
+rust = "almide_rt_datetime_to_iso({ts})"
+ts = "__almd_datetime.to_iso({ts})"
+
+[to_unix]
+description = "Get the Unix timestamp value (identity function)."
+example = 'datetime.to_unix(ts) // => 1705320000'
+params = [{ name = "ts", type = "Int" }]
+return = "Int"
+rust = "{ts}"
+ts = "{ts}"
+
+# ── Part access ──
+
+[year]
+description = "Extract the year from a timestamp."
+example = 'datetime.year(ts) // => 2024'
+params = [{ name = "ts", type = "Int" }]
+return = "Int"
+rust = "almide_rt_datetime_year({ts})"
+ts = "__almd_datetime.year({ts})"
+
+[month]
+description = "Extract the month (1-12) from a timestamp."
+example = 'datetime.month(ts) // => 1'
+params = [{ name = "ts", type = "Int" }]
+return = "Int"
+rust = "almide_rt_datetime_month({ts})"
+ts = "__almd_datetime.month({ts})"
+
+[day]
+description = "Extract the day of month (1-31) from a timestamp."
+example = 'datetime.day(ts) // => 15'
+params = [{ name = "ts", type = "Int" }]
+return = "Int"
+rust = "almide_rt_datetime_day({ts})"
+ts = "__almd_datetime.day({ts})"
+
+[hour]
+description = "Extract the hour (0-23) from a timestamp."
+example = 'datetime.hour(ts) // => 12'
+params = [{ name = "ts", type = "Int" }]
+return = "Int"
+rust = "almide_rt_datetime_hour({ts})"
+ts = "__almd_datetime.hour({ts})"
+
+[minute]
+description = "Extract the minute (0-59) from a timestamp."
+example = 'datetime.minute(ts) // => 30'
+params = [{ name = "ts", type = "Int" }]
+return = "Int"
+rust = "almide_rt_datetime_minute({ts})"
+ts = "__almd_datetime.minute({ts})"
+
+[second]
+description = "Extract the second (0-59) from a timestamp."
+example = 'datetime.second(ts) // => 45'
+params = [{ name = "ts", type = "Int" }]
+return = "Int"
+rust = "almide_rt_datetime_second({ts})"
+ts = "__almd_datetime.second({ts})"
+
+[weekday]
+description = "Get the day of week as a string (Monday-Sunday)."
+example = 'datetime.weekday(ts) // => "Monday"'
+params = [{ name = "ts", type = "Int" }]
+return = "String"
+rust = "almide_rt_datetime_weekday({ts})"
+ts = "__almd_datetime.weekday({ts})"
+
+# ── Arithmetic (P1) ──
+
+[add_days]
+description = "Add n days to a timestamp."
+example = 'datetime.add_days(ts, 7) // one week later'
+params = [{ name = "ts", type = "Int" }, { name = "n", type = "Int" }]
+return = "Int"
+rust = "{ts} + {n} * 86400"
+ts = "{ts} + {n} * 86400"
+
+[add_hours]
+description = "Add n hours to a timestamp."
+example = 'datetime.add_hours(ts, 3)'
+params = [{ name = "ts", type = "Int" }, { name = "n", type = "Int" }]
+return = "Int"
+rust = "{ts} + {n} * 3600"
+ts = "{ts} + {n} * 3600"
+
+[add_minutes]
+description = "Add n minutes to a timestamp."
+example = 'datetime.add_minutes(ts, 30)'
+params = [{ name = "ts", type = "Int" }, { name = "n", type = "Int" }]
+return = "Int"
+rust = "{ts} + {n} * 60"
+ts = "{ts} + {n} * 60"
+
+[add_seconds]
+description = "Add n seconds to a timestamp."
+example = 'datetime.add_seconds(ts, 90)'
+params = [{ name = "ts", type = "Int" }, { name = "n", type = "Int" }]
+return = "Int"
+rust = "{ts} + {n}"
+ts = "{ts} + {n}"
+
+[diff_seconds]
+description = "Compute the difference in seconds between two timestamps."
+example = 'datetime.diff_seconds(later, earlier) // => 3600'
+params = [{ name = "a", type = "Int" }, { name = "b", type = "Int" }]
+return = "Int"
+rust = "{a} - {b}"
+ts = "{a} - {b}"
+
+[is_before]
+description = "Check if timestamp a is before timestamp b."
+example = 'datetime.is_before(earlier, later) // => true'
+params = [{ name = "a", type = "Int" }, { name = "b", type = "Int" }]
+return = "Bool"
+rust = "{a} < {b}"
+ts = "{a} < {b}"
+
+[is_after]
+description = "Check if timestamp a is after timestamp b."
+example = 'datetime.is_after(later, earlier) // => true'
+params = [{ name = "a", type = "Int" }, { name = "b", type = "Int" }]
+return = "Bool"
+rust = "{a} > {b}"
+ts = "{a} > {b}"

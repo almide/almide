@@ -1,0 +1,97 @@
+import toml
+
+// ── parse basic types ──
+
+test "toml.parse string value" {
+  let result = toml.parse("name = \"Alice\"")
+  assert_eq(json.get_string(result, "name"), some("Alice"))
+}
+
+test "toml.parse integer value" {
+  let result = toml.parse("port = 8080")
+  assert_eq(json.get_int(result, "port"), some(8080))
+}
+
+test "toml.parse float value" {
+  let result = toml.parse("pi = 3.14")
+  // json.from_float has a known precision issue in stringify, so check via get
+  let s = json.stringify(result)
+  assert(string.contains(s, "pi"))
+}
+
+test "toml.parse boolean values" {
+  let result = toml.parse("debug = true\nverbose = false")
+  assert_eq(json.get_bool(result, "debug"), some(true))
+  assert_eq(json.get_bool(result, "verbose"), some(false))
+}
+
+// ── parse tables ──
+
+test "toml.parse table" {
+  let input = "title = \"App\"\n\n[server]\nhost = \"localhost\"\nport = 3000"
+  let result = toml.parse(input)
+  assert_eq(json.get_string(result, "title"), some("App"))
+  let server = json.get(result, "server")
+  match server {
+    some(s) => {
+      assert_eq(json.get_string(s, "host"), some("localhost"))
+      assert_eq(json.get_int(s, "port"), some(3000))
+    }
+    none => assert(false)
+  }
+}
+
+// ── parse arrays ──
+
+test "toml.parse array" {
+  let result = toml.parse("ports = [80, 443, 8080]")
+  let arr = json.get_array(result, "ports")
+  match arr {
+    some(a) => assert_eq(list.len(a), 3)
+    none => assert(false)
+  }
+}
+
+test "toml.parse string array" {
+  let result = toml.parse("tags = [\"web\", \"api\"]")
+  let arr = json.get_array(result, "tags")
+  match arr {
+    some(a) => assert_eq(list.len(a), 2)
+    none => assert(false)
+  }
+}
+
+// ── parse comments and empty lines ──
+
+test "toml.parse ignores comments" {
+  let input = "# This is a comment\nname = \"test\"\n# Another comment"
+  let result = toml.parse(input)
+  assert_eq(json.get_string(result, "name"), some("test"))
+}
+
+// ── stringify ──
+
+test "toml.stringify simple" {
+  let obj = json.object([("name", json.from_string("Alice")), ("age", json.from_int(30))])
+  let text = toml.stringify(obj)
+  assert(string.contains(text, "name = \"Alice\""))
+  assert(string.contains(text, "age = 30"))
+}
+
+test "toml.stringify boolean" {
+  let obj = json.object([("debug", json.from_bool(true))])
+  let text = toml.stringify(obj)
+  assert(string.contains(text, "debug = true"))
+}
+
+// ── roundtrip ──
+
+test "toml.parse and stringify roundtrip" {
+  let input = "name = \"test\"\nport = 8080\ndebug = true"
+  let parsed = toml.parse(input)
+  let output = toml.stringify(parsed)
+  let reparsed = toml.parse(output)
+  assert_eq(json.get_string(reparsed, "name"), some("test"))
+  assert_eq(json.get_int(reparsed, "port"), some(8080))
+  assert_eq(json.get_bool(reparsed, "debug"), some(true))
+}

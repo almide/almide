@@ -91,7 +91,7 @@ pub fn all_hints() -> Vec<HintEntry> {
             module: "operator",
             trigger: "'|' followed by identifier (closure syntax)",
             message: "'|x|' closure syntax is not valid in Almide",
-            hint: "Use 'fn(x) => expr' for lambdas. Example: list.map(xs, fn(x) => x + 1)",
+            hint: "Use '(x) => expr' for lambdas. Example: list.map(xs, (x) => x + 1)",
         },
         HintEntry {
             module: "operator",
@@ -259,7 +259,7 @@ pub fn all_hints() -> Vec<HintEntry> {
             module: "syntax_guide",
             trigger: "'lambda' in expression",
             message: "'lambda' is not valid in Almide",
-            hint: "Use 'fn(x) => expr' for lambdas.",
+            hint: "Use '(x) => expr' for lambdas.",
         },
     ]
 }

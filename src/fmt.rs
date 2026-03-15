@@ -1,237 +1,170 @@
-/// Almide code formatter: AST → formatted source code.
+/// Almide code formatter: AST → formatted Almide source code.
 ///
-/// Top-level comments (before module, imports, and declarations) are preserved
-/// via the `comment_map` field on `Program`. Inline comments within function
-/// bodies are not yet preserved.
+/// Owns:     indentation, spacing, line breaks, comment preservation
+/// Does NOT: parsing, type checking
 
+use std::fmt::Write;
 use crate::ast::*;
 
 const INDENT: &str = "  ";
 
+fn ind(depth: usize) -> String { INDENT.repeat(depth) }
+
+fn is_short(expr: &Expr) -> bool {
+    match expr {
+        Expr::Int { .. } | Expr::Float { .. } | Expr::Bool { .. }
+        | Expr::Unit { .. } | Expr::None { .. } | Expr::Hole { .. } | Expr::Placeholder { .. }
+        | Expr::Ident { .. } | Expr::TypeName { .. } => true,
+        Expr::String { value, .. } => value.len() < 40,
+        Expr::Some { expr, .. } | Expr::Ok { expr, .. } | Expr::Err { expr, .. }
+        | Expr::Paren { expr, .. } => is_short(expr),
+        Expr::Tuple { elements, .. } => elements.len() <= 4 && elements.iter().all(is_short),
+        Expr::Call { args, .. } => args.len() <= 2 && args.iter().all(is_short),
+        Expr::IndexAccess { object, index, .. } => is_short(object) && is_short(index),
+        Expr::Binary { left, right, .. } => is_short(left) && is_short(right),
+        Expr::Unary { operand, .. } => is_short(operand),
+        _ => false,
+    }
+}
+
+fn comma_sep<T>(out: &mut String, items: &[T], f: impl Fn(&mut String, &T)) {
+    for (i, item) in items.iter().enumerate() {
+        if i > 0 { out.push_str(", "); }
+        f(out, item);
+    }
+}
+
 pub fn format_program(program: &Program) -> String {
     let mut out = String::new();
     let cm = &program.comment_map;
-    let mut cm_idx = 0;
-
-    // Helper: emit comments at current index
-    let emit_comments = |out: &mut String, idx: &mut usize| {
+    let mut ci = 0;
+    let mut emit_comments = |out: &mut String, idx: &mut usize| {
         if let Some(comments) = cm.get(*idx) {
-            for c in comments {
-                out.push_str(c);
-                out.push('\n');
-            }
+            for c in comments { writeln!(out, "{c}").unwrap(); }
         }
         *idx += 1;
     };
-
-    // Imports
-    if !program.imports.is_empty() {
-        if !out.is_empty() {
-            out.push('\n');
-        }
-        for imp in &program.imports {
-            emit_comments(&mut out, &mut cm_idx);
-            if let Decl::Import { path, names, alias, .. } = imp {
-                out.push_str("import ");
-                out.push_str(&path.join("."));
-                if let Some(names) = names {
-                    out.push_str(&format!(" ({})", names.join(", ")));
-                }
-                if let Some(a) = alias {
-                    out.push_str(&format!(" as {}", a));
-                }
-                out.push('\n');
-            }
-        }
+    for imp in &program.imports {
+        if !out.is_empty() && ci == 0 { out.push('\n'); }
+        emit_comments(&mut out, &mut ci);
+        fmt_decl(&mut out, imp, 0);
+        out.push('\n');
     }
-
-    // Declarations
     for decl in &program.decls {
         out.push('\n');
-        emit_comments(&mut out, &mut cm_idx);
-        format_decl(&mut out, decl, 0);
+        emit_comments(&mut out, &mut ci);
+        fmt_decl(&mut out, decl, 0);
         out.push('\n');
     }
-
-    // Trailing comments
-    if let Some(comments) = cm.get(cm_idx) {
+    if let Some(comments) = cm.get(ci) {
         if !comments.is_empty() {
             out.push('\n');
-            for c in comments {
-                out.push_str(c);
-                out.push('\n');
-            }
+            for c in comments { writeln!(out, "{c}").unwrap(); }
         }
     }
-
     out
 }
 
-fn format_decl(out: &mut String, decl: &Decl, depth: usize) {
-    let ind = indent(depth);
+fn fmt_vis(out: &mut String, vis: &Visibility) {
+    match vis {
+        Visibility::Local => out.push_str("local "),
+        Visibility::Mod => out.push_str("mod "),
+        Visibility::Public => {}
+    }
+}
+
+fn fmt_generics(out: &mut String, params: &[GenericParam]) {
+    out.push('[');
+    comma_sep(out, params, |out, gp| {
+        out.push_str(&gp.name);
+        if let Some(ref sb) = gp.structural_bound {
+            out.push_str(": "); fmt_type(out, sb, 0);
+        } else if let Some(ref bounds) = gp.bounds {
+            if !bounds.is_empty() { write!(out, ": {}", bounds.join(" + ")).unwrap(); }
+        }
+    });
+    out.push(']');
+}
+
+fn maybe_generics(out: &mut String, generics: &Option<Vec<GenericParam>>) {
+    if let Some(gps) = generics { if !gps.is_empty() { fmt_generics(out, gps); } }
+}
+
+fn fmt_decl(out: &mut String, decl: &Decl, depth: usize) {
+    let i = ind(depth);
     match decl {
-        Decl::Module { path, .. } => {
-            out.push_str(&format!("{}module {}", ind, path.join(".")));
-        }
+        Decl::Module { path, .. } => write!(out, "{i}module {}", path.join(".")).unwrap(),
         Decl::Import { path, names, alias, .. } => {
-            out.push_str(&format!("{}import {}", ind, path.join(".")));
-            if let Some(names) = names {
-                out.push_str(&format!(" ({})", names.join(", ")));
-            }
-            if let Some(a) = alias {
-                out.push_str(&format!(" as {}", a));
-            }
+            write!(out, "{i}import {}", path.join(".")).unwrap();
+            if let Some(n) = names { write!(out, " ({})", n.join(", ")).unwrap(); }
+            if let Some(a) = alias { write!(out, " as {a}").unwrap(); }
         }
-        Decl::Strict { mode, .. } => {
-            out.push_str(&format!("{}strict \"{}\"", ind, mode));
-        }
+        Decl::Strict { mode, .. } => write!(out, "{i}strict \"{mode}\"").unwrap(),
         Decl::Type { name, ty, deriving, visibility, generics, .. } => {
-            out.push_str(&ind);
-            match visibility {
-                Visibility::Local => out.push_str("local "),
-                Visibility::Mod => out.push_str("mod "),
-                Visibility::Public => {}
-            }
-            out.push_str("type ");
-            out.push_str(name);
-            if let Some(gps) = generics {
-                if !gps.is_empty() {
-                    format_generic_params(out, gps);
-                }
-            }
-            out.push_str(" = ");
-            format_type_expr(out, ty, depth);
-            if let Some(derives) = deriving {
-                if !derives.is_empty() {
-                    out.push_str(&format!(" deriving {}", derives.join(", ")));
-                }
-            }
+            out.push_str(&i); fmt_vis(out, visibility);
+            write!(out, "type {name}").unwrap();
+            maybe_generics(out, generics);
+            if let Some(d) = deriving { if !d.is_empty() { write!(out, ": {}", d.join(", ")).unwrap(); } }
+            out.push_str(" = "); fmt_type(out, ty, depth);
         }
         Decl::TopLet { name, ty, value, visibility, .. } => {
-            out.push_str(&ind);
-            match visibility {
-                Visibility::Local => out.push_str("local "),
-                Visibility::Mod => out.push_str("mod "),
-                Visibility::Public => {}
-            }
-            out.push_str("let ");
-            out.push_str(name);
-            if let Some(te) = ty {
-                out.push_str(": ");
-                format_type_expr(out, te, depth);
-            }
-            out.push_str(" = ");
-            format_expr(out, value, depth);
+            out.push_str(&i); fmt_vis(out, visibility);
+            write!(out, "let {name}").unwrap();
+            if let Some(te) = ty { out.push_str(": "); fmt_type(out, te, depth); }
+            out.push_str(" = "); fmt_expr(out, value, depth);
         }
         Decl::Fn { name, effect, r#async, visibility, params, return_type, body, extern_attrs, generics, .. } => {
-            // Emit @extern annotations
-            for attr in extern_attrs {
-                out.push_str(&ind);
-                out.push_str(&format!("@extern({}, \"{}\", \"{}\")\n", attr.target, attr.module, attr.function));
-            }
-            out.push_str(&ind);
-            match visibility {
-                Visibility::Local => out.push_str("local "),
-                Visibility::Mod => out.push_str("mod "),
-                Visibility::Public => {}
-            }
-            if matches!(effect, Some(true)) {
-                out.push_str("effect ");
-            }
-            if matches!(r#async, Some(true)) {
-                out.push_str("async ");
-            }
-            out.push_str("fn ");
-            out.push_str(name);
-            if let Some(gps) = generics {
-                if !gps.is_empty() {
-                    format_generic_params(out, gps);
-                }
-            }
+            for a in extern_attrs { writeln!(out, "{i}@extern({}, \"{}\", \"{}\")", a.target, a.module, a.function).unwrap(); }
+            out.push_str(&i); fmt_vis(out, visibility);
+            if matches!(effect, Some(true)) { out.push_str("effect "); }
+            if matches!(r#async, Some(true)) { out.push_str("async "); }
+            write!(out, "fn {name}").unwrap();
+            maybe_generics(out, generics);
             out.push('(');
-            for (i, p) in params.iter().enumerate() {
-                if i > 0 { out.push_str(", "); }
-                out.push_str(&p.name);
-                out.push_str(": ");
-                format_type_expr(out, &p.ty, depth);
-            }
-            out.push_str(") -> ");
-            format_type_expr(out, return_type, depth);
-            if let Some(body) = body {
-                out.push_str(" = ");
-                format_expr(out, body, depth);
-            }
+            comma_sep(out, params, |out, p| { write!(out, "{}: ", p.name).unwrap(); fmt_type(out, &p.ty, depth); });
+            out.push_str(") -> "); fmt_type(out, return_type, depth);
+            if let Some(b) = body { out.push_str(" = "); fmt_expr(out, b, depth); }
         }
-        Decl::Test { name, body, .. } => {
-            out.push_str(&format!("{}test \"{}\" ", ind, name));
-            format_expr(out, body, depth);
-        }
-        Decl::Trait { name, .. } => {
-            out.push_str(&format!("{}trait {}", ind, name));
-        }
+        Decl::Test { name, body, .. } => { write!(out, "{i}test \"{name}\" ").unwrap(); fmt_expr(out, body, depth); }
+        Decl::Trait { name, .. } => write!(out, "{i}trait {name}").unwrap(),
         Decl::Impl { trait_, for_, methods, .. } => {
-            out.push_str(&format!("{}impl {} for {} {{\n", ind, trait_, for_));
-            for m in methods {
-                format_decl(out, m, depth + 1);
-                out.push('\n');
-            }
-            out.push_str(&format!("{}}}", ind));
+            writeln!(out, "{i}impl {trait_} for {for_} {{").unwrap();
+            for m in methods { fmt_decl(out, m, depth + 1); out.push('\n'); }
+            write!(out, "{i}}}").unwrap();
         }
     }
 }
 
-fn format_type_expr(out: &mut String, ty: &TypeExpr, _depth: usize) {
+fn fmt_type(out: &mut String, ty: &TypeExpr, depth: usize) {
     match ty {
         TypeExpr::Simple { name } => out.push_str(name),
         TypeExpr::Generic { name, args } => {
-            out.push_str(name);
-            out.push('[');
-            for (i, a) in args.iter().enumerate() {
-                if i > 0 { out.push_str(", "); }
-                format_type_expr(out, a, _depth);
-            }
+            out.push_str(name); out.push('[');
+            comma_sep(out, args, |out, a| fmt_type(out, a, depth));
             out.push(']');
         }
-        TypeExpr::Record { fields } => {
+        TypeExpr::Record { fields } | TypeExpr::OpenRecord { fields } => {
+            let open = matches!(ty, TypeExpr::OpenRecord { .. });
             out.push_str("{ ");
-            for (i, f) in fields.iter().enumerate() {
-                if i > 0 { out.push_str(", "); }
-                out.push_str(&f.name);
-                out.push_str(": ");
-                format_type_expr(out, &f.ty, _depth);
-            }
-            out.push_str(" }");
-        }
-        TypeExpr::OpenRecord { fields } => {
-            out.push_str("{ ");
-            for (i, f) in fields.iter().enumerate() {
-                if i > 0 { out.push_str(", "); }
-                out.push_str(&f.name);
-                out.push_str(": ");
-                format_type_expr(out, &f.ty, _depth);
-            }
-            if !fields.is_empty() { out.push_str(", "); }
-            out.push_str(".. }");
+            comma_sep(out, fields, |out, f| { write!(out, "{}: ", f.name).unwrap(); fmt_type(out, &f.ty, depth); });
+            if open { if !fields.is_empty() { out.push_str(", "); } out.push_str(".. "); }
+            else { out.push(' '); }
+            out.push('}');
         }
         TypeExpr::Fn { params, ret } => {
             out.push_str("fn(");
-            for (i, p) in params.iter().enumerate() {
-                if i > 0 { out.push_str(", "); }
-                format_type_expr(out, p, _depth);
-            }
-            out.push_str(") -> ");
-            format_type_expr(out, ret, _depth);
+            comma_sep(out, params, |out, p| fmt_type(out, p, depth));
+            out.push_str(") -> "); fmt_type(out, ret, depth);
         }
         TypeExpr::Tuple { elements } => {
-            out.push('(');
-            for (i, e) in elements.iter().enumerate() {
-                if i > 0 { out.push_str(", "); }
-                format_type_expr(out, e, _depth);
-            }
-            out.push(')');
+            out.push('('); comma_sep(out, elements, |out, e| fmt_type(out, e, depth)); out.push(')');
         }
-        TypeExpr::Newtype { inner } => {
-            format_type_expr(out, inner, _depth);
+        TypeExpr::Newtype { inner } => fmt_type(out, inner, depth),
+        TypeExpr::Union { members } => {
+            for (i, m) in members.iter().enumerate() {
+                if i > 0 { out.push_str(" | "); }
+                fmt_type(out, m, depth);
+            }
         }
         TypeExpr::Variant { cases } => {
             for (i, case) in cases.iter().enumerate() {
@@ -239,27 +172,16 @@ fn format_type_expr(out: &mut String, ty: &TypeExpr, _depth: usize) {
                 match case {
                     VariantCase::Unit { name } => out.push_str(name),
                     VariantCase::Tuple { name, fields } => {
-                        out.push_str(name);
-                        out.push('(');
-                        for (j, f) in fields.iter().enumerate() {
-                            if j > 0 { out.push_str(", "); }
-                            format_type_expr(out, f, _depth);
-                        }
+                        out.push_str(name); out.push('(');
+                        comma_sep(out, fields, |out, f| fmt_type(out, f, depth));
                         out.push(')');
                     }
                     VariantCase::Record { name, fields } => {
-                        out.push_str(name);
-                        out.push_str(" { ");
-                        for (j, f) in fields.iter().enumerate() {
-                            if j > 0 { out.push_str(", "); }
-                            out.push_str(&f.name);
-                            out.push_str(": ");
-                            format_type_expr(out, &f.ty, _depth);
-                            if let Some(ref default) = f.default {
-                                out.push_str(" = ");
-                                format_expr(out, default, _depth);
-                            }
-                        }
+                        write!(out, "{name} {{ ").unwrap();
+                        comma_sep(out, fields, |out, f| {
+                            write!(out, "{}: ", f.name).unwrap(); fmt_type(out, &f.ty, depth);
+                            if let Some(ref d) = f.default { out.push_str(" = "); fmt_expr(out, d, depth); }
+                        });
                         out.push_str(" }");
                     }
                 }
@@ -268,614 +190,208 @@ fn format_type_expr(out: &mut String, ty: &TypeExpr, _depth: usize) {
     }
 }
 
-fn format_expr(out: &mut String, expr: &Expr, depth: usize) {
+fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
     match expr {
         Expr::Int { raw, .. } => out.push_str(raw),
-        Expr::Float { value, .. } => {
-            let s = format!("{}", value);
-            if s.contains('.') {
-                out.push_str(&s);
-            } else {
-                out.push_str(&format!("{}.0", s));
-            }
-        }
-        Expr::String { value, .. } => out.push_str(&format!("{:?}", value)),
-        Expr::InterpolatedString { value, .. } => {
-            out.push('"');
-            let mut depth = 0u32;
-            let chars: Vec<char> = value.chars().collect();
-            let mut i = 0;
-            while i < chars.len() {
-                let ch = chars[i];
-                if ch == '$' && i + 1 < chars.len() && chars[i + 1] == '{' {
-                    out.push('$');
-                    out.push('{');
-                    depth += 1;
-                    i += 2;
-                    continue;
-                }
-                if depth > 0 && ch == '{' {
-                    depth += 1;
-                    out.push(ch);
-                    i += 1;
-                    continue;
-                }
-                if depth > 0 && ch == '}' {
-                    depth -= 1;
-                    out.push(ch);
-                    i += 1;
-                    continue;
-                }
-                if depth > 0 {
-                    // Inside interpolation expression — emit verbatim
-                    out.push(ch);
-                } else {
-                    // Outside interpolation — escape special characters
-                    match ch {
-                        '\n' => out.push_str("\\n"),
-                        '\t' => out.push_str("\\t"),
-                        '\\' => out.push_str("\\\\"),
-                        '"' => out.push_str("\\\""),
-                        other => out.push(other),
-                    }
-                }
-                i += 1;
-            }
-            out.push('"');
-        }
+        Expr::Float { value, .. } => { let s = format!("{value}"); if s.contains('.') { out.push_str(&s); } else { out.push_str(&s); out.push_str(".0"); } }
+        Expr::String { value, .. } => write!(out, "{value:?}").unwrap(),
+        Expr::InterpolatedString { parts, .. } => fmt_istring_parts(out, parts, depth),
         Expr::Bool { value, .. } => out.push_str(if *value { "true" } else { "false" }),
         Expr::Unit { .. } => out.push_str("()"),
         Expr::None { .. } => out.push_str("none"),
-        Expr::Hole { .. } => out.push_str("_"),
-        Expr::Placeholder { .. } => out.push_str("_"),
+        Expr::Hole { .. } | Expr::Placeholder { .. } => out.push('_'),
         Expr::Error { .. } => out.push_str("/* error */"),
-        Expr::Todo { message, .. } => {
-            if message.is_empty() {
-                out.push_str("todo");
-            } else {
-                out.push_str(&format!("todo(\"{}\")", message));
-            }
-        }
-        Expr::Some { expr: inner, .. } => {
-            out.push_str("some(");
-            format_expr(out, inner, depth);
-            out.push(')');
-        }
-        Expr::Ok { expr: inner, .. } => {
-            out.push_str("ok(");
-            format_expr(out, inner, depth);
-            out.push(')');
-        }
-        Expr::Err { expr: inner, .. } => {
-            out.push_str("err(");
-            format_expr(out, inner, depth);
-            out.push(')');
-        }
-        Expr::Ident { name, .. } => out.push_str(name),
-        Expr::TypeName { name, .. } => out.push_str(name),
-        Expr::Paren { expr: inner, .. } => {
-            out.push('(');
-            format_expr(out, inner, depth);
-            out.push(')');
-        }
-        Expr::Tuple { elements, .. } => {
-            out.push('(');
-            for (i, e) in elements.iter().enumerate() {
-                if i > 0 { out.push_str(", "); }
-                format_expr(out, e, depth);
-            }
-            out.push(')');
-        }
-
-        Expr::List { elements, .. } => {
-            if elements.is_empty() {
-                out.push_str("[]");
-            } else if is_short_list(elements) {
-                out.push('[');
-                for (i, e) in elements.iter().enumerate() {
-                    if i > 0 { out.push_str(", "); }
-                    format_expr(out, e, depth);
-                }
-                out.push(']');
-            } else {
-                out.push_str("[\n");
-                for (i, e) in elements.iter().enumerate() {
-                    out.push_str(&indent(depth + 1));
-                    format_expr(out, e, depth + 1);
-                    if i < elements.len() - 1 { out.push(','); }
-                    out.push('\n');
-                }
-                out.push_str(&indent(depth));
-                out.push(']');
-            }
-        }
-
-        Expr::EmptyMap { .. } => {
-            out.push_str("[:]");
-        }
-
-        Expr::MapLiteral { entries, .. } => {
-            let short = entries.len() <= 3 && entries.iter().all(|(k, v)| is_short_expr(k) && is_short_expr(v));
-            if short {
-                out.push('[');
-                for (i, (k, v)) in entries.iter().enumerate() {
-                    if i > 0 { out.push_str(", "); }
-                    format_expr(out, k, depth);
-                    out.push_str(": ");
-                    format_expr(out, v, depth);
-                }
-                out.push(']');
-            } else {
-                out.push_str("[\n");
-                for (i, (k, v)) in entries.iter().enumerate() {
-                    out.push_str(&indent(depth + 1));
-                    format_expr(out, k, depth + 1);
-                    out.push_str(": ");
-                    format_expr(out, v, depth + 1);
-                    if i < entries.len() - 1 { out.push(','); }
-                    out.push('\n');
-                }
-                out.push_str(&indent(depth));
-                out.push(']');
-            }
-        }
-
+        Expr::Todo { message, .. } => if message.is_empty() { out.push_str("todo"); } else { write!(out, "todo(\"{message}\")").unwrap(); },
+        Expr::Some { expr: e, .. } => { out.push_str("some("); fmt_expr(out, e, depth); out.push(')'); }
+        Expr::Ok { expr: e, .. } => { out.push_str("ok("); fmt_expr(out, e, depth); out.push(')'); }
+        Expr::Err { expr: e, .. } => { out.push_str("err("); fmt_expr(out, e, depth); out.push(')'); }
+        Expr::Ident { name, .. } | Expr::TypeName { name, .. } => out.push_str(name),
+        Expr::Paren { expr: e, .. } => { out.push('('); fmt_expr(out, e, depth); out.push(')'); }
+        Expr::Tuple { elements, .. } => { out.push('('); comma_sep(out, elements, |out, e| fmt_expr(out, e, depth)); out.push(')'); }
+        Expr::List { elements, .. } => fmt_list(out, elements, depth),
+        Expr::EmptyMap { .. } => out.push_str("[:]"),
+        Expr::MapLiteral { entries, .. } => fmt_map(out, entries, depth),
         Expr::Record { name, fields, .. } => {
-            if let Some(n) = name {
-                out.push_str(n);
-                out.push(' ');
-            }
-            if fields.is_empty() {
-                out.push_str("{}");
-            } else {
-                out.push_str("{ ");
-                for (i, f) in fields.iter().enumerate() {
-                    if i > 0 { out.push_str(", "); }
-                    out.push_str(&f.name);
-                    out.push_str(": ");
-                    format_expr(out, &f.value, depth);
-                }
-                out.push_str(" }");
-            }
+            if let Some(n) = name { write!(out, "{n} ").unwrap(); }
+            if fields.is_empty() { out.push_str("{}"); }
+            else { out.push_str("{ "); comma_sep(out, fields, |out, f| { write!(out, "{}: ", f.name).unwrap(); fmt_expr(out, &f.value, depth); }); out.push_str(" }"); }
         }
-
         Expr::SpreadRecord { base, fields, .. } => {
-            out.push_str("{ ...");
-            format_expr(out, base, depth);
-            for f in fields {
-                out.push_str(", ");
-                out.push_str(&f.name);
-                out.push_str(": ");
-                format_expr(out, &f.value, depth);
-            }
+            out.push_str("{ ..."); fmt_expr(out, base, depth);
+            for f in fields { write!(out, ", {}: ", f.name).unwrap(); fmt_expr(out, &f.value, depth); }
             out.push_str(" }");
         }
-
         Expr::Call { callee, args, type_args, .. } => {
-            format_expr(out, callee, depth);
-            if let Some(ta) = type_args {
-                out.push('[');
-                for (i, t) in ta.iter().enumerate() {
-                    if i > 0 { out.push_str(", "); }
-                    format_type_expr(out, t, depth);
-                }
-                out.push(']');
-            }
-            out.push('(');
-            for (i, a) in args.iter().enumerate() {
-                if i > 0 { out.push_str(", "); }
-                format_expr(out, a, depth);
-            }
-            out.push(')');
+            fmt_expr(out, callee, depth);
+            if let Some(ta) = type_args { out.push('['); comma_sep(out, ta, |out, t| fmt_type(out, t, depth)); out.push(']'); }
+            out.push('('); comma_sep(out, args, |out, a| fmt_expr(out, a, depth)); out.push(')');
         }
-
-        Expr::Member { object, field, .. } => {
-            format_expr(out, object, depth);
-            out.push('.');
-            out.push_str(field);
-        }
-
-        Expr::TupleIndex { object, index, .. } => {
-            format_expr(out, object, depth);
-            out.push('.');
-            out.push_str(&index.to_string());
-        }
-
-        Expr::IndexAccess { object, index, .. } => {
-            format_expr(out, object, depth);
-            out.push('[');
-            format_expr(out, index, depth);
-            out.push(']');
-        }
-
-        Expr::Pipe { left, right, .. } => {
-            format_expr(out, left, depth);
-            out.push_str(" |> ");
-            format_expr(out, right, depth);
-        }
-
-        Expr::Binary { op, left, right, .. } => {
-            format_expr(out, left, depth);
-            out.push(' ');
-            out.push_str(op);
-            out.push(' ');
-            format_expr(out, right, depth);
-        }
-
-        Expr::Unary { op, operand, .. } => {
-            out.push_str(op);
-            if op == "not" { out.push(' '); }
-            format_expr(out, operand, depth);
-        }
-
-        Expr::Break { .. } => {
-            out.push_str("break");
-        }
-
-        Expr::Continue { .. } => {
-            out.push_str("continue");
-        }
-
-        Expr::Try { expr: inner, .. } => {
-            out.push_str("try ");
-            format_expr(out, inner, depth);
-        }
-
-        Expr::Await { expr: inner, .. } => {
-            out.push_str("await ");
-            format_expr(out, inner, depth);
-        }
-
+        Expr::Member { object, field, .. } => { fmt_expr(out, object, depth); write!(out, ".{field}").unwrap(); }
+        Expr::TupleIndex { object, index, .. } => { fmt_expr(out, object, depth); write!(out, ".{index}").unwrap(); }
+        Expr::IndexAccess { object, index, .. } => { fmt_expr(out, object, depth); out.push('['); fmt_expr(out, index, depth); out.push(']'); }
+        Expr::Pipe { left, right, .. } => { fmt_expr(out, left, depth); out.push_str(" |> "); fmt_expr(out, right, depth); }
+        Expr::Binary { op, left, right, .. } => { fmt_expr(out, left, depth); write!(out, " {op} ").unwrap(); fmt_expr(out, right, depth); }
+        Expr::Unary { op, operand, .. } => { out.push_str(op); if op == "not" { out.push(' '); } fmt_expr(out, operand, depth); }
+        Expr::Break { .. } => out.push_str("break"),
+        Expr::Continue { .. } => out.push_str("continue"),
+        Expr::Try { expr: e, .. } => { out.push_str("try "); fmt_expr(out, e, depth); }
+        Expr::Await { expr: e, .. } => { out.push_str("await "); fmt_expr(out, e, depth); }
         Expr::If { cond, then, else_, .. } => {
-            let inline = is_short_expr(then) && is_short_expr(else_);
-            if inline {
-                out.push_str("if ");
-                format_expr(out, cond, depth);
-                out.push_str(" then ");
-                format_expr(out, then, depth);
-                out.push_str(" else ");
-                format_expr(out, else_, depth);
-            } else {
-                out.push_str("if ");
-                format_expr(out, cond, depth);
-                out.push_str(" then ");
-                format_expr(out, then, depth);
-                // Keep else on same line after closing brace
-                if out.ends_with('}') {
-                    out.push(' ');
-                } else {
-                    out.push('\n');
-                    out.push_str(&indent(depth));
-                }
-                out.push_str("else ");
-                format_expr(out, else_, depth);
-            }
+            out.push_str("if "); fmt_expr(out, cond, depth); out.push_str(" then "); fmt_expr(out, then, depth);
+            if is_short(then) && is_short(else_) { out.push(' '); }
+            else if out.ends_with('}') { out.push(' '); }
+            else { out.push('\n'); out.push_str(&ind(depth)); }
+            out.push_str("else "); fmt_expr(out, else_, depth);
         }
-
         Expr::Match { subject, arms, .. } => {
-            out.push_str("match ");
-            format_expr(out, subject, depth);
-            out.push_str(" {\n");
+            out.push_str("match "); fmt_expr(out, subject, depth); out.push_str(" {\n");
+            let ai = ind(depth + 1);
             for arm in arms {
-                for comment in &arm.comments {
-                    out.push_str(&indent(depth + 1));
-                    out.push_str(comment);
-                    out.push('\n');
-                }
-                out.push_str(&indent(depth + 1));
-                format_pattern(out, &arm.pattern);
-                if let Some(ref guard) = arm.guard {
-                    out.push_str(" if ");
-                    format_expr(out, guard, depth + 1);
-                }
-                out.push_str(" => ");
-                format_expr(out, &arm.body, depth + 1);
+                for c in &arm.comments { writeln!(out, "{ai}{c}").unwrap(); }
+                out.push_str(&ai); fmt_pattern(out, &arm.pattern);
+                if let Some(ref g) = arm.guard { out.push_str(" if "); fmt_expr(out, g, depth + 1); }
+                out.push_str(" => "); fmt_expr(out, &arm.body, depth + 1);
                 if arms.len() > 1 { out.push(','); }
                 out.push('\n');
             }
-            out.push_str(&indent(depth));
-            out.push('}');
+            write!(out, "{}}}", ind(depth)).unwrap();
         }
-
         Expr::Block { stmts, expr, .. } => {
-            if stmts.is_empty() && expr.is_some() {
-                // Single-expression block: might be inline
-                let inner = expr.as_ref().expect("guarded by is_some()");
-                if is_short_expr(inner) && depth > 0 {
-                    out.push_str("{ ");
-                    format_expr(out, inner, depth);
-                    out.push_str(" }");
-                    return;
-                }
-            }
-            out.push_str("{\n");
-            for s in stmts {
-                format_stmt(out, s, depth + 1);
-            }
-            if let Some(e) = expr {
-                out.push_str(&indent(depth + 1));
-                format_expr(out, e, depth + 1);
-                out.push('\n');
-            }
-            out.push_str(&indent(depth));
-            out.push('}');
+            if stmts.is_empty() { if let Some(e) = expr { if is_short(e) && depth > 0 { out.push_str("{ "); fmt_expr(out, e, depth); out.push_str(" }"); return; } } }
+            fmt_block(out, stmts, expr, depth);
         }
-
-        Expr::DoBlock { stmts, expr, .. } => {
-            out.push_str("do {\n");
-            for s in stmts {
-                format_stmt(out, s, depth + 1);
-            }
-            if let Some(e) = expr {
-                out.push_str(&indent(depth + 1));
-                format_expr(out, e, depth + 1);
-                out.push('\n');
-            }
-            out.push_str(&indent(depth));
-            out.push('}');
-        }
-
-        Expr::Range { start, end, inclusive, .. } => {
-            format_expr(out, start, depth);
-            if *inclusive {
-                out.push_str("..=");
-            } else {
-                out.push_str("..");
-            }
-            format_expr(out, end, depth);
-        }
-
+        Expr::DoBlock { stmts, expr, .. } => { out.push_str("do "); fmt_block(out, stmts, expr, depth); }
+        Expr::Range { start, end, inclusive, .. } => { fmt_expr(out, start, depth); out.push_str(if *inclusive { "..=" } else { ".." }); fmt_expr(out, end, depth); }
         Expr::ForIn { var, var_tuple, iterable, body, .. } => {
             out.push_str("for ");
-            if let Some(names) = var_tuple {
-                out.push('(');
-                out.push_str(&names.join(", "));
-                out.push(')');
-            } else {
-                out.push_str(var);
-            }
-            out.push_str(" in ");
-            format_expr(out, iterable, depth);
-            out.push_str(" {\n");
-            for s in body {
-                format_stmt(out, s, depth + 1);
-            }
-            out.push_str(&indent(depth));
-            out.push('}');
+            if let Some(n) = var_tuple { write!(out, "({})", n.join(", ")).unwrap(); } else { out.push_str(var); }
+            out.push_str(" in "); fmt_expr(out, iterable, depth); out.push_str(" {\n");
+            for s in body { fmt_stmt(out, s, depth + 1); }
+            write!(out, "{}}}", ind(depth)).unwrap();
         }
-
         Expr::While { cond, body, .. } => {
-            out.push_str("while ");
-            format_expr(out, cond, depth);
-            out.push_str(" {\n");
-            for s in body {
-                format_stmt(out, s, depth + 1);
-            }
-            out.push_str(&indent(depth));
-            out.push('}');
+            out.push_str("while "); fmt_expr(out, cond, depth); out.push_str(" {\n");
+            for s in body { fmt_stmt(out, s, depth + 1); }
+            write!(out, "{}}}", ind(depth)).unwrap();
         }
-
         Expr::Lambda { params, body, .. } => {
-            out.push_str("fn(");
-            for (i, p) in params.iter().enumerate() {
-                if i > 0 { out.push_str(", "); }
-                if let Some(names) = &p.tuple_names {
-                    out.push('(');
-                    out.push_str(&names.join(", "));
-                    out.push(')');
-                } else {
-                    out.push_str(&p.name);
-                }
-                if let Some(ref ty) = p.ty {
-                    out.push_str(": ");
-                    format_type_expr(out, ty, depth);
-                }
-            }
-            out.push_str(") => ");
-            format_expr(out, body, depth);
+            out.push('(');
+            comma_sep(out, params, |out, p| {
+                if let Some(n) = &p.tuple_names { write!(out, "({})", n.join(", ")).unwrap(); } else { out.push_str(&p.name); }
+                if let Some(ref ty) = p.ty { out.push_str(": "); fmt_type(out, ty, depth); }
+            });
+            out.push_str(") => "); fmt_expr(out, body, depth);
         }
     }
 }
 
-fn format_stmt(out: &mut String, stmt: &Stmt, depth: usize) {
-    let ind = indent(depth);
+fn fmt_block(out: &mut String, stmts: &[Stmt], expr: &Option<Box<Expr>>, depth: usize) {
+    out.push_str("{\n");
+    for s in stmts { fmt_stmt(out, s, depth + 1); }
+    if let Some(e) = expr { out.push_str(&ind(depth + 1)); fmt_expr(out, e, depth + 1); out.push('\n'); }
+    write!(out, "{}}}", ind(depth)).unwrap();
+}
+
+fn fmt_list(out: &mut String, elements: &[Expr], depth: usize) {
+    if elements.is_empty() { out.push_str("[]"); return; }
+    if elements.len() <= 5 && elements.iter().all(is_short) {
+        out.push('['); comma_sep(out, elements, |out, e| fmt_expr(out, e, depth)); out.push(']');
+    } else {
+        out.push_str("[\n");
+        for (i, e) in elements.iter().enumerate() {
+            out.push_str(&ind(depth + 1)); fmt_expr(out, e, depth + 1);
+            if i < elements.len() - 1 { out.push(','); } out.push('\n');
+        }
+        write!(out, "{}]", ind(depth)).unwrap();
+    }
+}
+
+fn fmt_map(out: &mut String, entries: &[(Expr, Expr)], depth: usize) {
+    let short = entries.len() <= 3 && entries.iter().all(|(k, v)| is_short(k) && is_short(v));
+    let (open, close, d) = if short { ("[", "]", depth) } else { ("[\n", "]", depth + 1) };
+    out.push_str(open);
+    for (i, (k, v)) in entries.iter().enumerate() {
+        if short { if i > 0 { out.push_str(", "); } }
+        else { out.push_str(&ind(d)); }
+        fmt_expr(out, k, d); out.push_str(": "); fmt_expr(out, v, d);
+        if !short { if i < entries.len() - 1 { out.push(','); } out.push('\n'); }
+    }
+    if !short { out.push_str(&ind(depth)); }
+    out.push_str(close);
+}
+
+fn fmt_istring_parts(out: &mut String, parts: &[StringPart], depth: usize) {
+    out.push('"');
+    for part in parts {
+        match part {
+            StringPart::Lit { value } => {
+                for ch in value.chars() {
+                    match ch { '\n' => out.push_str("\\n"), '\t' => out.push_str("\\t"), '\\' => out.push_str("\\\\"), '"' => out.push_str("\\\""), o => out.push(o) }
+                }
+            }
+            StringPart::Expr { expr } => {
+                out.push_str("${");
+                fmt_expr(out, expr, depth);
+                out.push('}');
+            }
+        }
+    }
+    out.push('"');
+}
+
+fn fmt_stmt(out: &mut String, stmt: &Stmt, depth: usize) {
+    let i = ind(depth);
     match stmt {
         Stmt::Let { name, ty, value, .. } => {
-            out.push_str(&ind);
-            out.push_str("let ");
-            out.push_str(name);
-            if let Some(ty) = ty {
-                out.push_str(": ");
-                format_type_expr(out, ty, depth);
-            }
-            out.push_str(" = ");
-            format_expr(out, value, depth);
+            write!(out, "{i}let {name}").unwrap();
+            if let Some(t) = ty { out.push_str(": "); fmt_type(out, t, depth); }
+            out.push_str(" = "); fmt_expr(out, value, depth);
         }
-        Stmt::LetDestructure { pattern, value, .. } => {
-            out.push_str(&ind);
-            out.push_str("let ");
-            format_destructure_pattern(out, pattern);
-            out.push_str(" = ");
-            format_expr(out, value, depth);
-        }
+        Stmt::LetDestructure { pattern, value, .. } => { out.push_str(&i); out.push_str("let "); fmt_dpat(out, pattern); out.push_str(" = "); fmt_expr(out, value, depth); }
         Stmt::Var { name, ty, value, .. } => {
-            out.push_str(&ind);
-            out.push_str("var ");
-            out.push_str(name);
-            if let Some(ty) = ty {
-                out.push_str(": ");
-                format_type_expr(out, ty, depth);
-            }
-            out.push_str(" = ");
-            format_expr(out, value, depth);
+            write!(out, "{i}var {name}").unwrap();
+            if let Some(t) = ty { out.push_str(": "); fmt_type(out, t, depth); }
+            out.push_str(" = "); fmt_expr(out, value, depth);
         }
-        Stmt::Assign { name, value, .. } => {
-            out.push_str(&ind);
-            out.push_str(name);
-            out.push_str(" = ");
-            format_expr(out, value, depth);
-        }
-        Stmt::IndexAssign { target, index, value, .. } => {
-            out.push_str(&ind);
-            out.push_str(target);
-            out.push('[');
-            format_expr(out, index, depth);
-            out.push_str("] = ");
-            format_expr(out, value, depth);
-        }
-        Stmt::FieldAssign { target, field, value, .. } => {
-            out.push_str(&ind);
-            out.push_str(target);
-            out.push('.');
-            out.push_str(field);
-            out.push_str(" = ");
-            format_expr(out, value, depth);
-        }
-        Stmt::Guard { cond, else_, .. } => {
-            out.push_str(&ind);
-            out.push_str("guard ");
-            format_expr(out, cond, depth);
-            out.push_str(" else ");
-            format_expr(out, else_, depth);
-        }
-        Stmt::Expr { expr, .. } => {
-            out.push_str(&ind);
-            format_expr(out, expr, depth);
-        }
-        Stmt::Comment { text } => {
-            out.push_str(&ind);
-            out.push_str(text);
-            out.push('\n');
-            return;
-        }
-        Stmt::Error { .. } => { return; }
+        Stmt::Assign { name, value, .. } => { write!(out, "{i}{name} = ").unwrap(); fmt_expr(out, value, depth); }
+        Stmt::IndexAssign { target, index, value, .. } => { write!(out, "{i}{target}[").unwrap(); fmt_expr(out, index, depth); out.push_str("] = "); fmt_expr(out, value, depth); }
+        Stmt::FieldAssign { target, field, value, .. } => { write!(out, "{i}{target}.{field} = ").unwrap(); fmt_expr(out, value, depth); }
+        Stmt::Guard { cond, else_, .. } => { out.push_str(&i); out.push_str("guard "); fmt_expr(out, cond, depth); out.push_str(" else "); fmt_expr(out, else_, depth); }
+        Stmt::Expr { expr, .. } => { out.push_str(&i); fmt_expr(out, expr, depth); }
+        Stmt::Comment { text } => { writeln!(out, "{i}{text}").unwrap(); return; }
+        Stmt::Error { .. } => return,
     }
     out.push_str(";\n");
 }
 
-/// Format a destructure pattern for `let` statements.
-/// Differs from `format_pattern` in that record patterns omit the constructor name.
-fn format_destructure_pattern(out: &mut String, pat: &Pattern) {
-    match pat {
-        Pattern::Tuple { elements } => {
-            out.push('(');
-            for (i, e) in elements.iter().enumerate() {
-                if i > 0 { out.push_str(", "); }
-                format_destructure_pattern(out, e);
-            }
-            out.push(')');
-        }
-        Pattern::RecordPattern { fields, .. } => {
-            out.push_str("{ ");
-            for (i, f) in fields.iter().enumerate() {
-                if i > 0 { out.push_str(", "); }
-                out.push_str(&f.name);
-            }
-            out.push_str(" }");
-        }
-        Pattern::Ident { name } => out.push_str(name),
-        _ => format_pattern(out, pat),
-    }
-}
-
-fn format_pattern(out: &mut String, pat: &Pattern) {
+fn fmt_pattern(out: &mut String, pat: &Pattern) {
     match pat {
         Pattern::Wildcard => out.push('_'),
         Pattern::Ident { name } => out.push_str(name),
-        Pattern::Literal { value } => format_expr(out, value, 0),
+        Pattern::Literal { value } => fmt_expr(out, value, 0),
         Pattern::Constructor { name, args } => {
             out.push_str(name);
-            if !args.is_empty() {
-                out.push('(');
-                for (i, a) in args.iter().enumerate() {
-                    if i > 0 { out.push_str(", "); }
-                    format_pattern(out, a);
-                }
-                out.push(')');
-            }
+            if !args.is_empty() { out.push('('); comma_sep(out, args, |out, a| fmt_pattern(out, a)); out.push(')'); }
         }
         Pattern::RecordPattern { name, fields, rest } => {
-            out.push_str(name);
-            out.push_str(" { ");
-            for (i, f) in fields.iter().enumerate() {
-                if i > 0 { out.push_str(", "); }
-                out.push_str(&f.name);
-                if let Some(ref p) = f.pattern {
-                    out.push_str(": ");
-                    format_pattern(out, p);
-                }
-            }
-            if *rest {
-                if !fields.is_empty() { out.push_str(", "); }
-                out.push_str("..");
-            }
+            write!(out, "{name} {{ ").unwrap();
+            comma_sep(out, fields, |out, f| { out.push_str(&f.name); if let Some(ref p) = f.pattern { out.push_str(": "); fmt_pattern(out, p); } });
+            if *rest { if !fields.is_empty() { out.push_str(", "); } out.push_str(".."); }
             out.push_str(" }");
         }
-        Pattern::Tuple { elements } => {
-            out.push('(');
-            for (i, e) in elements.iter().enumerate() {
-                if i > 0 { out.push_str(", "); }
-                format_pattern(out, e);
-            }
-            out.push(')');
-        }
-        Pattern::Some { inner } => {
-            out.push_str("some(");
-            format_pattern(out, inner);
-            out.push(')');
-        }
+        Pattern::Tuple { elements } => { out.push('('); comma_sep(out, elements, |out, e| fmt_pattern(out, e)); out.push(')'); }
+        Pattern::Some { inner } => { out.push_str("some("); fmt_pattern(out, inner); out.push(')'); }
         Pattern::None => out.push_str("none"),
-        Pattern::Ok { inner } => {
-            out.push_str("ok(");
-            format_pattern(out, inner);
-            out.push(')');
-        }
-        Pattern::Err { inner } => {
-            out.push_str("err(");
-            format_pattern(out, inner);
-            out.push(')');
-        }
+        Pattern::Ok { inner } => { out.push_str("ok("); fmt_pattern(out, inner); out.push(')'); }
+        Pattern::Err { inner } => { out.push_str("err("); fmt_pattern(out, inner); out.push(')'); }
     }
 }
 
-fn format_generic_params(out: &mut String, params: &[GenericParam]) {
-    out.push('[');
-    for (i, gp) in params.iter().enumerate() {
-        if i > 0 { out.push_str(", "); }
-        out.push_str(&gp.name);
-        if let Some(ref bounds) = gp.bounds {
-            if !bounds.is_empty() {
-                out.push_str(": ");
-                out.push_str(&bounds.join(" + "));
-            }
-        }
+fn fmt_dpat(out: &mut String, pat: &Pattern) {
+    match pat {
+        Pattern::Tuple { elements } => { out.push('('); comma_sep(out, elements, |out, e| fmt_dpat(out, e)); out.push(')'); }
+        Pattern::RecordPattern { fields, .. } => { out.push_str("{ "); comma_sep(out, fields, |out, f| out.push_str(&f.name)); out.push_str(" }"); }
+        Pattern::Ident { name } => out.push_str(name),
+        _ => fmt_pattern(out, pat),
     }
-    out.push(']');
-}
-
-fn indent(depth: usize) -> String {
-    INDENT.repeat(depth)
-}
-
-/// Heuristic: is this expression short enough for inline formatting?
-fn is_short_expr(expr: &Expr) -> bool {
-    match expr {
-        Expr::Int { .. } | Expr::Float { .. } | Expr::Bool { .. }
-        | Expr::Unit { .. } | Expr::None { .. } | Expr::Hole { .. } | Expr::Placeholder { .. }
-        | Expr::Ident { .. } | Expr::TypeName { .. } => true,
-        Expr::String { value, .. } => value.len() < 40,
-        Expr::Some { expr, .. } | Expr::Ok { expr, .. } | Expr::Err { expr, .. }
-        | Expr::Paren { expr, .. } => is_short_expr(expr),
-        Expr::Tuple { elements, .. } => elements.len() <= 4 && elements.iter().all(is_short_expr),
-        Expr::Call { args, .. } => args.len() <= 2 && args.iter().all(is_short_expr),
-        Expr::IndexAccess { object, index, .. } => is_short_expr(object) && is_short_expr(index),
-        Expr::Binary { left, right, .. } => is_short_expr(left) && is_short_expr(right),
-        Expr::Unary { operand, .. } => is_short_expr(operand),
-        _ => false,
-    }
-}
-
-/// Heuristic: is a list short enough to be on one line?
-fn is_short_list(elements: &[Expr]) -> bool {
-    elements.len() <= 5 && elements.iter().all(is_short_expr)
 }

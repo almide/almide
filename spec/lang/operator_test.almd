@@ -17,14 +17,14 @@ test "pipe chain" {
 
 test "pipe into function call with args" {
   let xs = [3, 1, 2]
-  let result = xs |> list.map(fn(x) => x * 10)
+  let result = xs |> list.map((x) => x * 10)
   assert_eq(result, [30, 10, 20])
 }
 
 test "pipe chain list operations" {
   let result = [1, 2, 3, 4, 5]
-    |> list.filter(fn(x) => x % 2 == 0)
-    |> list.map(fn(x) => x * 10)
+    |> list.filter((x) => x % 2 == 0)
+    |> list.map((x) => x * 10)
   assert_eq(result, [20, 40])
 }
 
@@ -72,12 +72,12 @@ test "equality on Option" {
   assert_eq(x == none, true)
 }
 
-// ── Power / XOR (^) ──
+// ── Power (**) / XOR (^) ──
 
 test "float power" {
-  assert_eq(2.0 ^ 3.0, 8.0)
-  assert_eq(3.0 ^ 2.0, 9.0)
-  assert_eq(4.0 ^ 0.5, 2.0)
+  assert_eq(2.0 ** 3.0, 8.0)
+  assert_eq(3.0 ** 2.0, 9.0)
+  assert_eq(4.0 ** 0.5, 2.0)
 }
 
 test "int xor" {
@@ -163,10 +163,10 @@ test "int xor properties" {
 }
 
 test "float power edge cases" {
-  assert_eq(0.0 ^ 1.0, 0.0)
-  assert_eq(1.0 ^ 0.0, 1.0)
-  assert_eq(2.0 ^ 1.0, 2.0)
-  assert_eq(100.0 ^ 0.5, 10.0)
+  assert_eq(0.0 ** 1.0, 0.0)
+  assert_eq(1.0 ** 0.0, 1.0)
+  assert_eq(2.0 ** 1.0, 2.0)
+  assert_eq(100.0 ** 0.5, 10.0)
 }
 
 test "concat with empty string" {

@@ -12,7 +12,7 @@ fn from_option[T](opt: Option[T]) -> Maybe[T] =
     none => Nothing
   }
 
-fn maybe_map[A, B](m: Maybe[A], f: fn(A) -> B) -> Maybe[B] =
+fn maybe_map[A, B](m: Maybe[A], f: (A) -> B) -> Maybe[B] =
   match m {
     Just(v) => Just(f(v))
     Nothing => Nothing
@@ -58,7 +58,7 @@ test "from_option converts none" {
 
 test "maybe_map applies function" {
   let m = Just(5)
-  let doubled = maybe_map(m, fn(x: Int) => x * 2)
+  let doubled = maybe_map(m, (x: Int) => x * 2)
   match doubled {
     Just(v) => assert_eq(v, 10)
     Nothing => assert(false)

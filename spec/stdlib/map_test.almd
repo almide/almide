@@ -49,7 +49,7 @@ test "map.remove last key" {
   let m = map.set(map.new(), "a", 1)
   let m2 = map.remove(m, "a")
   assert_eq(map.len(m2), 0)
-  assert(map.is_empty?(m2))
+  assert(map.is_empty(m2))
 }
 
 // ── keys / values ──
@@ -117,13 +117,13 @@ test "map.merge empty" {
   assert_eq(map.len(merged), 1)
 }
 
-// ── is_empty? ──
+// ── is_empty ──
 
-test "map.is_empty? after adding and removing" {
+test "map.is_empty after adding and removing" {
   let m = map.set(map.new(), "k", 1)
-  assert(not map.is_empty?(m))
+  assert(not map.is_empty(m))
   let m2 = map.remove(m, "k")
-  assert(map.is_empty?(m2))
+  assert(map.is_empty(m2))
 }
 
 // ── from_entries ──
@@ -140,41 +140,41 @@ test "map.from_entries multiple" {
 test "map.from_entries empty" {
   let entries: List[(String, Int)] = []
   let m = map.from_entries(entries)
-  assert(map.is_empty?(m))
+  assert(map.is_empty(m))
 }
 
 // ── map_values ──
 
 test "map.map_values to string" {
   let m = map.set(map.set(map.new(), "a", 1), "b", 2)
-  let result = map.map_values(m, fn(v) => v + 100)
+  let result = map.map_values(m, (v) => v + 100)
   assert_eq(map.get_or(result, "a", 0), 101)
   assert_eq(map.get_or(result, "b", 0), 102)
 }
 
 test "map.map_values empty" {
   let m: Map[String, Int] = map.new()
-  let result = map.map_values(m, fn(v) => v * 2)
-  assert(map.is_empty?(result))
+  let result = map.map_values(m, (v) => v * 2)
+  assert(map.is_empty(result))
 }
 
 // ── filter ──
 
 test "map.filter all pass" {
   let m = map.set(map.set(map.new(), "a", 10), "b", 20)
-  let result = map.filter(m, fn(k, v) => v > 0)
+  let result = map.filter(m, (k, v) => v > 0)
   assert_eq(map.len(result), 2)
 }
 
 test "map.filter none pass" {
   let m = map.set(map.set(map.new(), "a", 1), "b", 2)
-  let result = map.filter(m, fn(k, v) => v > 10)
+  let result = map.filter(m, (k, v) => v > 10)
   assert_eq(map.len(result), 0)
 }
 
 test "map.filter by key" {
   let m = map.set(map.set(map.set(map.new(), "apple", 1), "banana", 2), "avocado", 3)
-  let result = map.filter(m, fn(k, v) => string.starts_with?(k, "a"))
+  let result = map.filter(m, (k, v) => string.starts_with(k, "a"))
   assert_eq(map.len(result), 2)
   assert(map.contains(result, "apple"))
   assert(map.contains(result, "avocado"))

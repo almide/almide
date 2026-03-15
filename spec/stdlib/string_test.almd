@@ -56,48 +56,48 @@ test "string.len spaces" {
   assert_eq(string.len("  "), 2)
 }
 
-// ── contains? ──
+// ── contains ──
 
-test "string.contains? substring at start" {
+test "string.contains substring at start" {
   assert(string.contains("hello world", "hello"))
 }
 
-test "string.contains? substring at end" {
+test "string.contains substring at end" {
   assert(string.contains("hello world", "world"))
 }
 
-test "string.contains? empty substring" {
+test "string.contains empty substring" {
   assert(string.contains("hello", ""))
 }
 
-test "string.contains? self" {
+test "string.contains self" {
   assert(string.contains("abc", "abc"))
 }
 
-// ── starts_with? / ends_with? ──
+// ── starts_with / ends_with ──
 
-test "string.starts_with? empty prefix" {
-  assert(string.starts_with?("hello", ""))
+test "string.starts_with empty prefix" {
+  assert(string.starts_with("hello", ""))
 }
 
-test "string.starts_with? full string" {
-  assert(string.starts_with?("hello", "hello"))
+test "string.starts_with full string" {
+  assert(string.starts_with("hello", "hello"))
 }
 
-test "string.starts_with? false" {
-  assert(not string.starts_with?("hello", "world"))
+test "string.starts_with false" {
+  assert(not string.starts_with("hello", "world"))
 }
 
-test "string.ends_with? empty suffix" {
-  assert(string.ends_with?("hello", ""))
+test "string.ends_with empty suffix" {
+  assert(string.ends_with("hello", ""))
 }
 
-test "string.ends_with? full string" {
-  assert(string.ends_with?("hello", "hello"))
+test "string.ends_with full string" {
+  assert(string.ends_with("hello", "hello"))
 }
 
-test "string.ends_with? false" {
-  assert(not string.ends_with?("hello", "world"))
+test "string.ends_with false" {
+  assert(not string.ends_with("hello", "world"))
 }
 
 // ── slice ──
@@ -235,48 +235,48 @@ test "string.from_bytes single byte" {
   assert_eq(string.from_bytes([72]), "H")
 }
 
-// ── is_digit? ──
+// ── is_digit ──
 
-test "string.is_digit? all digits" {
-  assert(string.is_digit?("12345"))
+test "string.is_digit all digits" {
+  assert(string.is_digit("12345"))
 }
 
-test "string.is_digit? mixed" {
-  assert(not string.is_digit?("12a45"))
+test "string.is_digit mixed" {
+  assert(not string.is_digit("12a45"))
 }
 
-// ── is_alpha? ──
+// ── is_alpha ──
 
-test "string.is_alpha? lower" {
-  assert(string.is_alpha?("abc"))
+test "string.is_alpha lower" {
+  assert(string.is_alpha("abc"))
 }
 
-test "string.is_alpha? upper" {
-  assert(string.is_alpha?("XYZ"))
+test "string.is_alpha upper" {
+  assert(string.is_alpha("XYZ"))
 }
 
-test "string.is_alpha? with space" {
-  assert(not string.is_alpha?("a b"))
+test "string.is_alpha with space" {
+  assert(not string.is_alpha("a b"))
 }
 
-// ── is_alphanumeric? ──
+// ── is_alphanumeric ──
 
-test "string.is_alphanumeric? mixed" {
-  assert(string.is_alphanumeric?("abc123"))
+test "string.is_alphanumeric mixed" {
+  assert(string.is_alphanumeric("abc123"))
 }
 
-test "string.is_alphanumeric? with underscore" {
-  assert(not string.is_alphanumeric?("abc_123"))
+test "string.is_alphanumeric with underscore" {
+  assert(not string.is_alphanumeric("abc_123"))
 }
 
-// ── is_whitespace? ──
+// ── is_whitespace ──
 
-test "string.is_whitespace? newline" {
-  assert(string.is_whitespace?("\n"))
+test "string.is_whitespace newline" {
+  assert(string.is_whitespace("\n"))
 }
 
-test "string.is_whitespace? mixed ws" {
-  assert(string.is_whitespace?(" \t\n "))
+test "string.is_whitespace mixed ws" {
+  assert(string.is_whitespace(" \t\n "))
 }
 
 // ── trim_start / trim_end ──
@@ -313,10 +313,10 @@ test "string.count empty substring" {
   assert(c >= 0)
 }
 
-// ── is_empty? ──
+// ── is_empty ──
 
-test "string.is_empty? on whitespace" {
-  assert(not string.is_empty?(" "))
+test "string.is_empty on whitespace" {
+  assert(not string.is_empty(" "))
 }
 
 // ── reverse ──
@@ -409,7 +409,7 @@ test "string UFCS repeat" {
   assert_eq("ab".repeat(3), "ababab")
 }
 
-test "string.is_empty? via module" {
-  assert(string.is_empty?(""))
-  assert(not string.is_empty?("x"))
+test "string.is_empty via module" {
+  assert(string.is_empty(""))
+  assert(not string.is_empty("x"))
 }

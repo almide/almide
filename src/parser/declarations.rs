@@ -3,7 +3,7 @@ use crate::ast::*;
 use super::Parser;
 
 impl Parser {
-    // ---- Module & Import ----
+    // ── Module & Import ───────────────────────────────────────────
 
     pub(crate) fn parse_module_decl(&mut self) -> Result<Decl, String> {
         let span = self.current_span();
@@ -16,7 +16,6 @@ impl Parser {
         let span = self.current_span();
         self.expect(TokenType::Import)?;
 
-        // Detect JS-style `import { name }` — Almide uses `import name`
         if self.check(TokenType::LBrace) {
             let tok = self.current();
             return Err(format!(
@@ -27,7 +26,10 @@ impl Parser {
 
         let path = self.parse_module_path()?;
 
-        if self.check(TokenType::Dot) && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::LBrace) {
+        // Selective import: import mod.{ A, B }
+        if self.check(TokenType::Dot)
+            && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::LBrace)
+        {
             self.advance();
             let open = self.current().clone();
             self.expect(TokenType::LBrace)?;
@@ -35,16 +37,13 @@ impl Parser {
             names.push(self.expect_any_name()?);
             while self.check(TokenType::Comma) {
                 self.advance();
-                if self.check(TokenType::RBrace) {
-                    break;
-                }
+                if self.check(TokenType::RBrace) { break; }
                 names.push(self.expect_any_name()?);
             }
             self.expect_closing(TokenType::RBrace, open.line, open.col, "selective import")?;
             return Ok(Decl::Import { path, names: Some(names), alias: None, span: Some(span) });
         }
 
-        // `as` alias: import self.http.client as c
         let alias = if self.check_ident("as") {
             self.advance();
             Some(self.expect_ident()?)
@@ -58,17 +57,18 @@ impl Parser {
     fn parse_module_path(&mut self) -> Result<Vec<String>, String> {
         let mut parts = Vec::new();
         parts.push(self.expect_ident()?);
-        while self.check(TokenType::Dot) && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Ident) {
+        while self.check(TokenType::Dot)
+            && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Ident)
+        {
             self.advance();
             parts.push(self.expect_ident()?);
         }
         Ok(parts)
     }
 
-    // ---- Top-level Declarations ----
+    // ── Top-level Declarations ────────────────────────────────────
 
     pub(crate) fn parse_top_decl(&mut self) -> Result<Decl, String> {
-        // Collect @extern annotations
         if self.check(TokenType::At) {
             let extern_attrs = self.collect_extern_attrs()?;
             return self.parse_fn_decl_with_attrs(extern_attrs);
@@ -82,17 +82,19 @@ impl Parser {
         if self.check(TokenType::Impl) {
             return self.parse_impl_decl();
         }
-        // Top-level `let` (module-scope constant): `let NAME = expr` or `pub let NAME: Type = expr`
         if self.check(TokenType::Let) {
             return self.parse_top_let(Visibility::Public);
         }
-        if self.check(TokenType::Fn) || self.check(TokenType::Pub) || self.check(TokenType::Effect) || self.check(TokenType::Async) || self.check(TokenType::Local) || self.check(TokenType::Mod) {
-            // `pub let` — public top-level constant
-            if self.check(TokenType::Pub) && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Let) {
-                self.advance(); // consume `pub`
+        if self.check(TokenType::Fn) || self.check(TokenType::Pub)
+            || self.check(TokenType::Effect) || self.check(TokenType::Async)
+            || self.check(TokenType::Local) || self.check(TokenType::Mod)
+        {
+            if self.check(TokenType::Pub)
+                && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Let)
+            {
+                self.advance();
                 return self.parse_top_let(Visibility::Public);
             }
-            // local/mod can precede let, fn, and type
             if self.check(TokenType::Local) || self.check(TokenType::Mod) {
                 if self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Type) {
                     return self.parse_type_decl();
@@ -125,7 +127,6 @@ impl Parser {
         let span = self.current_span();
         self.expect(TokenType::Let)?;
         let name = self.expect_any_name()?;
-        // Optional type annotation: `let NAME: Type = expr`
         let ty = if self.check(TokenType::Colon) {
             self.advance();
             Some(self.parse_type_expr()?)
@@ -141,12 +142,12 @@ impl Parser {
     fn collect_extern_attrs(&mut self) -> Result<Vec<ExternAttr>, String> {
         let mut attrs = Vec::new();
         while self.check(TokenType::At) {
-            self.advance(); // skip @
+            self.advance();
             if !self.check_ident("extern") {
                 let tok = self.current();
                 return Err(format!("Expected 'extern' after '@' at line {}:{}", tok.line, tok.col));
             }
-            self.advance(); // skip "extern"
+            self.advance();
             let open_ext = self.current().clone();
             self.expect(TokenType::LParen)?;
             let target = self.expect_ident()?;
@@ -191,12 +192,8 @@ impl Parser {
         self.expect(TokenType::Type)?;
         let name = self.expect_type_name()?;
         let generics = self.try_parse_generic_params()?;
-        self.expect(TokenType::Eq)?;
-        self.skip_newlines();
-        let ty = self.parse_type_expr()?;
-        self.skip_newlines();
-        let mut deriving: Option<Vec<String>> = None;
-        if self.check(TokenType::Deriving) {
+        // Conventions: type Name: Eq, Show = ...
+        let deriving = if self.check(TokenType::Colon) {
             self.advance();
             let mut d = Vec::new();
             d.push(self.expect_type_name()?);
@@ -204,8 +201,25 @@ impl Parser {
                 self.advance();
                 d.push(self.expect_type_name()?);
             }
-            deriving = Some(d);
-        }
+            Some(d)
+        } else {
+            None
+        };
+        self.expect(TokenType::Eq)?;
+        self.skip_newlines();
+        let ty = self.parse_type_expr()?;
+        // In type declarations, Union of all-uppercase Simple names is a Variant (enum)
+        // e.g., `type Color = Red | Green | Blue` → Variant, not Union
+        let ty = match ty {
+            TypeExpr::Union { ref members } if members.iter().all(|m| matches!(m, TypeExpr::Simple { name } if name.starts_with(char::is_uppercase))) => {
+                TypeExpr::Variant {
+                    cases: members.iter().map(|m| {
+                        if let TypeExpr::Simple { name } = m { VariantCase::Unit { name: name.clone() } } else { unreachable!() }
+                    }).collect(),
+                }
+            }
+            other => other,
+        };
         Ok(Decl::Type { name, ty, deriving, visibility, generics, span: Some(span) })
     }
 
@@ -228,15 +242,9 @@ impl Parser {
 
     fn parse_trait_method(&mut self) -> Result<serde_json::Value, String> {
         let mut async_ = false;
-        if self.check(TokenType::Async) {
-            self.advance();
-            async_ = true;
-        }
+        if self.check(TokenType::Async) { self.advance(); async_ = true; }
         let mut effect = false;
-        if self.check(TokenType::Effect) {
-            self.advance();
-            effect = true;
-        }
+        if self.check(TokenType::Effect) { self.advance(); effect = true; }
         self.expect(TokenType::Fn)?;
         let name = self.expect_any_fn_name()?;
         let _generics = self.try_parse_generic_params()?;
@@ -249,25 +257,18 @@ impl Parser {
 
         let mut map = serde_json::Map::new();
         map.insert("name".to_string(), serde_json::Value::String(name));
-        if async_ {
-            map.insert("async".to_string(), serde_json::Value::Bool(true));
-        }
-        if effect {
-            map.insert("effect".to_string(), serde_json::Value::Bool(true));
-        }
-        let params_json: Vec<serde_json::Value> = params
-            .iter()
-            .map(|p| {
-                let mut pm = serde_json::Map::new();
-                pm.insert("name".to_string(), serde_json::Value::String(p.name.clone()));
-                if let Ok(ty_json) = serde_json::to_value(&p.ty) {
-                    pm.insert("type".to_string(), ty_json);
-                }
-                serde_json::Value::Object(pm)
-            })
-            .collect();
+        if async_ { map.insert("async".to_string(), serde_json::Value::Bool(true)); }
+        if effect { map.insert("effect".to_string(), serde_json::Value::Bool(true)); }
+        let params_json: Vec<serde_json::Value> = params.iter().map(|p| {
+            let mut pm = serde_json::Map::new();
+            pm.insert("name".to_string(), serde_json::Value::String(p.name.clone()));
+            if let std::result::Result::Ok(ty_json) = serde_json::to_value(&p.ty) {
+                pm.insert("type".to_string(), ty_json);
+            }
+            serde_json::Value::Object(pm)
+        }).collect();
         map.insert("params".to_string(), serde_json::Value::Array(params_json));
-        if let Ok(rt_json) = serde_json::to_value(&return_type) {
+        if let std::result::Result::Ok(rt_json) = serde_json::to_value(&return_type) {
             map.insert("returnType".to_string(), rt_json);
         }
         Ok(serde_json::Value::Object(map))
@@ -280,9 +281,7 @@ impl Parser {
         let generics = self.try_parse_generic_params()?;
         self.expect(TokenType::For)?;
         let for_name = self.expect_type_name()?;
-        if self.check(TokenType::LBracket) {
-            self.parse_type_args()?;
-        }
+        if self.check(TokenType::LBracket) { self.parse_type_args()?; }
         let open_impl = self.current().clone();
         self.expect(TokenType::LBrace)?;
         self.skip_newlines();
@@ -293,30 +292,19 @@ impl Parser {
         }
         self.expect_closing(TokenType::RBrace, open_impl.line, open_impl.col, "impl body")?;
         Ok(Decl::Impl {
-            trait_: trait_name,
-            for_: for_name,
-            generics,
-            methods,
+            trait_: trait_name, for_: for_name, generics, methods,
             span: Some(span),
         })
     }
 
     pub(crate) fn parse_fn_decl(&mut self) -> Result<Decl, String> {
         let span = self.current_span();
-        if self.check(TokenType::Pub) {
-            self.advance(); // pub is default, just consume it
-        }
+        if self.check(TokenType::Pub) { self.advance(); }
         let visibility = self.parse_visibility();
         let mut async_ = false;
-        if self.check(TokenType::Async) {
-            self.advance();
-            async_ = true;
-        }
+        if self.check(TokenType::Async) { self.advance(); async_ = true; }
         let mut effect = false;
-        if self.check(TokenType::Effect) {
-            self.advance();
-            effect = true;
-        }
+        if self.check(TokenType::Effect) { self.advance(); effect = true; }
         self.expect(TokenType::Fn)?;
         let name = self.expect_any_fn_name()?;
         let generics = self.try_parse_generic_params()?;
@@ -327,7 +315,6 @@ impl Parser {
         self.expect(TokenType::Arrow)?;
         let return_type = self.parse_type_expr()?;
 
-        // Detect missing `=` before body: `fn name() -> T { ... }` instead of `fn name() -> T = { ... }`
         if self.check(TokenType::LBrace) {
             let tok = self.current();
             return Err(format!(
@@ -336,7 +323,6 @@ impl Parser {
             ));
         }
 
-        // Body is optional — @extern-only functions have no `= expr`
         let body = if self.check(TokenType::Eq) {
             self.advance();
             self.skip_newlines();
@@ -352,46 +338,7 @@ impl Parser {
                 TypeExpr::Generic { name, .. } if name == "Result"
             );
             if effect && returns_result {
-                if let Expr::Block { ref stmts, ref expr, .. } = body {
-                    let (effective_stmts, effective_expr) = if expr.is_none() && !stmts.is_empty() {
-                        // Find last non-comment stmt
-                        let last_non_comment = stmts.iter().rposition(|s| !matches!(s, Stmt::Comment { .. }));
-                        if let Some(idx) = last_non_comment {
-                            if let Stmt::Expr { expr: last_expr, .. } = &stmts[idx] {
-                                let mut remaining = stmts[..idx].to_vec();
-                                remaining.extend_from_slice(&stmts[idx+1..]);
-                                (remaining, Some(Box::new(last_expr.clone())))
-                            } else {
-                                (stmts.clone(), None)
-                            }
-                        } else {
-                            (stmts.clone(), None)
-                        }
-                    } else {
-                        (stmts.clone(), expr.clone())
-                    };
-                    let needs_ok = match &effective_expr {
-                        None => true,
-                        Some(e) => matches!(e.as_ref(), Expr::Unit { .. }),
-                    };
-                    if needs_ok {
-                        let mut new_stmts = effective_stmts;
-                        if let Some(trailing) = effective_expr {
-                            new_stmts.push(Stmt::Expr { expr: *trailing, span: None });
-                        }
-                        body = Expr::Block {
-                            stmts: new_stmts,
-                            expr: Some(Box::new(Expr::Ok { expr: Box::new(Expr::Unit { span: None, resolved_type: None }), span: None, resolved_type: None })),
-                            span: None, resolved_type: None,
-                        };
-                    } else if expr.is_none() {
-                        body = Expr::Block {
-                            stmts: effective_stmts,
-                            expr: effective_expr,
-                            span: None, resolved_type: None,
-                        };
-                    }
-                }
+                body = self.wrap_effect_result_body(body);
             }
 
             Some(body)
@@ -405,12 +352,54 @@ impl Parser {
             effect: if effect { Some(true) } else { None },
             visibility,
             extern_attrs: Vec::new(),
-            generics,
-            params,
-            return_type,
-            body,
+            generics, params, return_type, body,
             span: Some(span),
         })
+    }
+
+    fn wrap_effect_result_body(&mut self, body: Expr) -> Expr {
+        if let Expr::Block { ref stmts, ref expr, .. } = body {
+            let (effective_stmts, effective_expr) = if expr.is_none() && !stmts.is_empty() {
+                let last_non_comment = stmts.iter().rposition(|s| !matches!(s, Stmt::Comment { .. }));
+                if let Some(idx) = last_non_comment {
+                    if let Stmt::Expr { expr: last_expr, .. } = &stmts[idx] {
+                        let mut remaining = stmts[..idx].to_vec();
+                        remaining.extend_from_slice(&stmts[idx+1..]);
+                        (remaining, Some(Box::new(last_expr.clone())))
+                    } else {
+                        (stmts.clone(), None)
+                    }
+                } else {
+                    (stmts.clone(), None)
+                }
+            } else {
+                (stmts.clone(), expr.clone())
+            };
+            let needs_ok = match &effective_expr {
+                None => true,
+                Some(e) => matches!(e.as_ref(), Expr::Unit { .. }),
+            };
+            if needs_ok {
+                let mut new_stmts = effective_stmts;
+                if let Some(trailing) = effective_expr {
+                    new_stmts.push(Stmt::Expr { expr: *trailing, span: None });
+                }
+                return Expr::Block {
+                    stmts: new_stmts,
+                    expr: Some(Box::new(Expr::Ok {
+                        expr: Box::new(Expr::Unit { id: self.next_id(), span: None, resolved_type: None }),
+                        id: self.next_id(), span: None, resolved_type: None,
+                    })),
+                    id: self.next_id(), span: None, resolved_type: None,
+                };
+            } else if expr.is_none() {
+                return Expr::Block {
+                    stmts: effective_stmts, expr: effective_expr,
+                    id: self.next_id(), span: None, resolved_type: None,
+                };
+            }
+        }
+        body
     }
 
     fn parse_strict_decl(&mut self) -> Result<Decl, String> {
@@ -430,47 +419,42 @@ impl Parser {
     }
 
     fn parse_visibility(&mut self) -> Visibility {
-        if self.check(TokenType::Local) {
-            self.advance();
-            Visibility::Local
-        } else if self.check(TokenType::Mod) {
-            self.advance();
-            Visibility::Mod
-        } else {
-            Visibility::Public
-        }
+        if self.check(TokenType::Local) { self.advance(); Visibility::Local }
+        else if self.check(TokenType::Mod) { self.advance(); Visibility::Mod }
+        else { Visibility::Public }
     }
 
     pub(crate) fn parse_param_list(&mut self) -> Result<Vec<Param>, String> {
         let mut params = Vec::new();
-        if self.check(TokenType::RParen) {
-            return Ok(params);
-        }
+        if self.check(TokenType::RParen) { return Ok(params); }
 
         if self.check_ident("self") {
             params.push(Param {
                 name: "self".to_string(),
                 ty: TypeExpr::Simple { name: "Self".to_string() },
+                default: None,
             });
             self.advance();
-            if self.check(TokenType::Comma) {
-                self.advance();
-            }
+            if self.check(TokenType::Comma) { self.advance(); }
         }
 
+        let mut has_default = false;
         while !self.check(TokenType::RParen) {
             let param_name = self.expect_any_param_name()?;
             self.expect(TokenType::Colon)?;
             let param_type = self.parse_type_expr()?;
-            params.push(Param {
-                name: param_name,
-                ty: param_type,
-            });
-            if self.check(TokenType::Comma) {
+            let default = if self.check(TokenType::Eq) {
                 self.advance();
+                has_default = true;
+                Some(Box::new(self.parse_expr()?))
             } else {
-                break;
-            }
+                if has_default {
+                    return Err(format!("parameter '{}' must have a default value (all parameters after the first default must also have defaults)", param_name));
+                }
+                None
+            };
+            params.push(Param { name: param_name, ty: param_type, default });
+            if self.check(TokenType::Comma) { self.advance(); } else { break; }
         }
         Ok(params)
     }

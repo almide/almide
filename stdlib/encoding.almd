@@ -6,7 +6,7 @@
 
 fn hex_encode(bytes: List[Int]) -> String = {
   let hex_chars = "0123456789abcdef"
-  list.fold(bytes, "", fn(acc, b) => {
+  list.fold(bytes, "", (acc, b) => {
     let hi = int.bshr(int.band(b, 240), 4)
     let lo = int.band(b, 15)
     let h = match string.char_at(hex_chars, hi) {
@@ -24,7 +24,7 @@ fn hex_encode(bytes: List[Int]) -> String = {
 fn hex_decode(s: String) -> List[Int] = {
   let chars = string.chars(s)
   let pairs = list.chunk(chars, 2)
-  list.map(pairs, fn(pair) => {
+  list.map(pairs, (pair) => {
     let hi = hex_char_val(list.get_or(pair, 0, "0"))
     let lo = hex_char_val(list.get_or(pair, 1, "0"))
     int.bor(int.bshl(hi, 4), lo)
@@ -54,13 +54,13 @@ fn base64_encode(bytes: List[Int]) -> String = {
   let full_chunks = len / 3
   let remainder = len % 3
 
-  let b64_char = fn(idx) => match string.char_at(table, idx) {
+  let b64_char = (idx) => match string.char_at(table, idx) {
     some(c) => c
     none => "A"
   }
 
   // Process full 3-byte chunks
-  let result = list.fold(list.take(list.chunk(bytes, 3), full_chunks), "", fn(acc, chunk) => {
+  let result = list.fold(list.take(list.chunk(bytes, 3), full_chunks), "", (acc, chunk) => {
     let b0 = list.get_or(chunk, 0, 0)
     let b1 = list.get_or(chunk, 1, 0)
     let b2 = list.get_or(chunk, 2, 0)
@@ -92,14 +92,14 @@ fn base64_encode(bytes: List[Int]) -> String = {
 
 fn base64_decode(s: String) -> List[Int] = {
   // Strip padding and whitespace
-  let clean = list.filter(string.chars(s), fn(c) => c != "=" and c != " " and c != "\n")
+  let clean = list.filter(string.chars(s), (c) => c != "=" and c != " " and c != "\n")
   let len = list.len(clean)
   let full_chunks = len / 4
   let remainder = len % 4
 
   let chunks = list.chunk(clean, 4)
 
-  let result = list.fold(list.take(chunks, full_chunks), [], fn(acc, chunk) => {
+  let result = list.fold(list.take(chunks, full_chunks), [], (acc, chunk) => {
     let n0 = b64_char_val(list.get_or(chunk, 0, "A"))
     let n1 = b64_char_val(list.get_or(chunk, 1, "A"))
     let n2 = b64_char_val(list.get_or(chunk, 2, "A"))

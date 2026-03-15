@@ -1,110 +1,59 @@
-use std::collections::HashMap;
+/// Almide lexer: Source text → Token stream.
+///
+/// Input:    &str (source code)
+/// Output:   Vec<Token> (with line/col positions)
+/// Owns:     character classification, string interpolation detection, keyword resolution
+/// Does NOT: error recovery, syntax structure, semantic meaning
+///
+/// Principles:
+/// 1. Single pass, no backtracking
+/// 2. String interpolation handled inline
+/// 3. Keywords resolved after identifier scan
 
-#[derive(Debug, Clone, PartialEq)]
+// ── Token types ─────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenType {
     // Literals
-    Int,
-    Float,
-    String,
-    InterpolatedString,
-
-    // Identifiers & Names
-    Ident,
-    TypeName,
-    IdentQ,
-
+    Int, Float, String, InterpolatedString,
+    // Identifiers
+    Ident, TypeName, IdentQ,
     // Keywords
-    Module,
-    Import,
-    Type,
-    Trait,
-    Impl,
-    For,
-    In,
-    Fn,
-    Let,
-    Var,
-    If,
-    Then,
-    Else,
-    Match,
-    Ok,
-    Err,
-    Some,
-    None,
-    Try,
-    Do,
-    Todo,
-    Unsafe,
-    True,
-    False,
-    Not,
-    And,
-    Or,
-    Strict,
-    Pub,
-    Effect,
-    Deriving,
-    Test,
-    Async,
-    Await,
-    Guard,
-    Break,
-    Continue,
-    While,
-    Local,
-    Mod,
-    Newtype,
-
-    // Symbols
-    LParen,
-    RParen,
-    LBrace,
-    RBrace,
-    LBracket,
-    RBracket,
-    LAngle,
-    RAngle,
-    Comma,
-    Dot,
-    Colon,
-    Semicolon,
-    Arrow,
-    FatArrow,
-    Eq,
-    EqEq,
-    Bang,
-    BangEq,
-    LtEq,
-    GtEq,
-    Plus,
-    Minus,
-    Star,
-    Slash,
-    Percent,
-    PlusPlus,
-    Pipe,
-    PipeArrow,
-    Caret,
-
-    // Error-recovery tokens: common mistakes from other languages
-    AmpAmp,   // && (should be `and`)
-    PipePipe, // || (should be `or`)
+    Module, Import, Type, Trait, Impl, For, In, Fn, Let, Var,
+    If, Then, Else, Match, Ok, Err, Some, None, Try, Do, Todo, Unsafe,
+    True, False, Not, And, Or,
+    Strict, Pub, Effect, Deriving, Test, Async, Await,
+    Guard, Break, Continue, While, Local, Mod, Newtype,
+    // Delimiters
+    LParen, RParen, LBrace, RBrace, LBracket, RBracket,
+    LAngle, RAngle,
+    Comma, Dot, Colon, Semicolon,
+    // Operators
+    Arrow,     // ->
+    FatArrow,  // =>
+    Eq,        // =
+    EqEq,      // ==
+    Bang,      // !
+    BangEq,    // !=
+    LtEq,      // <=
+    GtEq,      // >=
+    Plus, Minus, Star, StarStar, Slash, Percent,
+    PlusPlus,  // ++
+    Pipe,      // |
+    PipeArrow, // |>
+    Caret,     // ^
+    AmpAmp,    // &&
+    PipePipe,  // ||
     Underscore,
-    DotDot,
-    DotDotEq,
-    DotDotDot,
-
-    // Annotations
-    At,
-
-    // Special
-    Comment,
-    Newline,
-    EOF,
+    DotDot,    // ..
+    DotDotEq,  // ..=
+    DotDotDot, // ...
+    At,        // @
+    // Whitespace / structure
+    Comment, Newline, EOF,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Token {
     pub token_type: TokenType,
     pub value: std::string::String,
@@ -112,818 +61,389 @@ pub struct Token {
     pub col: usize,
 }
 
-/// Build keyword map — delegates to generated code from grammar/tokens.toml
-fn build_keyword_map() -> HashMap<&'static str, TokenType> {
-    crate::generated::token_table::build_keyword_map_generated()
-}
+// ── Lexer ───────────────────────────────────────────────────────
 
-fn is_continuation_token(tt: &TokenType) -> bool {
-    matches!(
-        tt,
-        TokenType::Dot
-            | TokenType::Comma
-            | TokenType::LParen
-            | TokenType::LBrace
-            | TokenType::LBracket
-            | TokenType::Plus
-            | TokenType::Minus
-            | TokenType::Star
-            | TokenType::Slash
-            | TokenType::Percent
-            | TokenType::PlusPlus
-            | TokenType::Pipe
-            | TokenType::PipeArrow
-            | TokenType::Arrow
-            | TokenType::FatArrow
-            | TokenType::Eq
-            | TokenType::EqEq
-            | TokenType::Bang
-            | TokenType::BangEq
-            | TokenType::LtEq
-            | TokenType::GtEq
-            | TokenType::LAngle
-            | TokenType::RAngle
-            | TokenType::And
-            | TokenType::Or
-            | TokenType::Not
-            | TokenType::Colon
-            | TokenType::If
-            | TokenType::Then
-            | TokenType::Else
-            | TokenType::Match
-            | TokenType::Try
-            | TokenType::Await
-            | TokenType::Do
-            | TokenType::Guard
-            | TokenType::DotDot
-            | TokenType::DotDotEq
-    )
-}
-
-pub struct Lexer {
-    chars: Vec<char>,
-    pos: usize,
-    line: usize,
-    col: usize,
-    tokens: Vec<Token>,
-    keywords: HashMap<&'static str, TokenType>,
-    paren_depth: usize, // depth of () and [] — newlines suppressed when > 0
-}
-
-fn strip_indent(s: &str) -> String {
-    // Remove trailing whitespace-only content (the indent before closing """)
-    let s = s.trim_end();
-    // Also remove the trailing newline before that indent
-    let s = s.strip_suffix('\n').unwrap_or(s);
-
-    if s.is_empty() {
-        return String::new();
-    }
-
-    let lines: Vec<&str> = s.split('\n').collect();
-    let min_indent = lines
-        .iter()
-        .filter(|line| !line.trim().is_empty())
-        .map(|line| line.len() - line.trim_start().len())
-        .min()
-        .unwrap_or(0);
-    lines
-        .iter()
-        .map(|line| {
-            if line.len() >= min_indent {
-                &line[min_indent..]
-            } else {
-                line.trim()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
+pub struct Lexer;
 
 impl Lexer {
     pub fn tokenize(src: &str) -> Vec<Token> {
-        let mut lexer = Lexer {
-            chars: src.replace('\r', "").chars().collect(),
-            pos: 0,
-            line: 1,
-            col: 1,
-            tokens: Vec::new(),
-            keywords: build_keyword_map(),
-            paren_depth: 0,
-        };
-        lexer.run();
-        lexer.tokens
-    }
+        let mut tokens = Vec::new();
+        let chars: Vec<char> = src.chars().collect();
+        let mut pos = 0;
+        let mut line = 1;
+        let mut col = 1;
 
-    fn run(&mut self) {
-        while self.pos < self.chars.len() {
-            self.skip_spaces_and_comments();
-            if self.pos >= self.chars.len() {
-                break;
+        while pos < chars.len() {
+            let ch = chars[pos];
+
+            // Skip whitespace (except newlines)
+            if ch == ' ' || ch == '\t' || ch == '\r' {
+                pos += 1; col += 1;
+                continue;
             }
 
-            let ch = self.chars[self.pos];
-
-            // Newline — suppressed inside () and []
+            // Newline
             if ch == '\n' {
-                if self.paren_depth == 0 {
-                    self.add_newline();
-                } else {
-                    self.line += 1;
-                    self.col = 1;
+                tokens.push(Token { token_type: TokenType::Newline, value: String::new(), line, col });
+                pos += 1; line += 1; col = 1;
+                continue;
+            }
+
+            // Line comment
+            if ch == '/' && peek(&chars, pos + 1) == Some('/') {
+                let start = pos;
+                while pos < chars.len() && chars[pos] != '\n' { pos += 1; }
+                let text: String = chars[start..pos].iter().collect();
+                tokens.push(Token { token_type: TokenType::Comment, value: text, line, col });
+                col += pos - start;
+                continue;
+            }
+
+            // Block comment /* ... */ — nestable, fully skipped (not a token)
+            if ch == '/' && peek(&chars, pos + 1) == Some('*') {
+                pos += 2; col += 2;
+                let mut depth = 1;
+                while pos < chars.len() && depth > 0 {
+                    if chars[pos] == '/' && peek(&chars, pos + 1) == Some('*') {
+                        depth += 1; pos += 2; col += 2;
+                    } else if chars[pos] == '*' && peek(&chars, pos + 1) == Some('/') {
+                        depth -= 1; pos += 2; col += 2;
+                    } else if chars[pos] == '\n' {
+                        line += 1; col = 1; pos += 1;
+                    } else {
+                        col += 1; pos += 1;
+                    }
                 }
-                self.pos += 1;
+                continue;
+            }
+
+            // Raw string literal: r"..." or r"""...""" (triple-quote allows embedded ")
+            if ch == 'r' && peek(&chars, pos + 1) == Some('"') {
+                pos += 1; col += 1; // skip 'r'
+                // Check for triple-quote r"""..."""
+                if peek(&chars, pos + 1) == Some('"') && peek(&chars, pos + 2) == Some('"') {
+                    pos += 3; col += 3; // skip """
+                    let start = pos;
+                    while pos + 2 < chars.len() && !(chars[pos] == '"' && chars[pos + 1] == '"' && chars[pos + 2] == '"') {
+                        if chars[pos] == '\n' { line += 1; col = 1; } else { col += 1; }
+                        pos += 1;
+                    }
+                    let value: String = chars[start..pos].iter().collect();
+                    if pos + 2 < chars.len() { pos += 3; col += 3; } // skip closing """
+                    tokens.push(Token { token_type: TokenType::String, value, line, col });
+                } else {
+                    // Single-quote r"..."
+                    let start = pos + 1;
+                    pos += 1; col += 1; // skip opening "
+                    while pos < chars.len() && chars[pos] != '"' {
+                        if chars[pos] == '\n' { line += 1; col = 1; } else { col += 1; }
+                        pos += 1;
+                    }
+                    let value: String = chars[start..pos].iter().collect();
+                    if pos < chars.len() { pos += 1; col += 1; } // skip closing "
+                    tokens.push(Token { token_type: TokenType::String, value, line, col });
+                }
                 continue;
             }
 
             // String literal
             if ch == '"' {
-                if self.peek(1) == '"' && self.peek(2) == '"' {
-                    self.read_heredoc(false);
-                } else {
-                    self.read_string();
-                }
+                let (tok, new_pos) = lex_string(&chars, pos, line, col);
+                let len = new_pos - pos;
+                tokens.push(tok);
+                pos = new_pos; col += len;
                 continue;
             }
 
             // Number
             if ch.is_ascii_digit() {
-                self.read_number();
+                let (tok, new_pos) = lex_number(&chars, pos, line, col);
+                let len = new_pos - pos;
+                tokens.push(tok);
+                pos = new_pos; col += len;
                 continue;
             }
 
-            // Raw string literal r"..." or r"""..."""
-            if ch == 'r' && self.peek(1) == '"' {
-                if self.peek(2) == '"' && self.peek(3) == '"' {
-                    self.read_heredoc(true);
-                } else {
-                    self.read_raw_string();
-                }
+            // Identifier or keyword
+            if ch.is_ascii_alphabetic() || ch == '_' {
+                let (tok, new_pos) = lex_ident(&chars, pos, line, col);
+                let len = new_pos - pos;
+                tokens.push(tok);
+                pos = new_pos; col += len;
                 continue;
             }
 
-            // Identifier or keyword (lowercase or _)
-            if ch.is_ascii_lowercase() || ch == '_' {
-                // special case: _ alone is Underscore
-                if ch == '_' && !self.is_alpha_num(self.peek(1)) {
-                    self.add_token(TokenType::Underscore, "_".to_string());
-                    self.advance();
-                    continue;
-                }
-                self.read_identifier();
-                continue;
-            }
-
-            // Type name (uppercase)
-            if ch.is_ascii_uppercase() {
-                self.read_type_name();
-                continue;
-            }
-
-            // Symbols
-            if self.read_symbol() {
-                continue;
-            }
-
-            // Unknown character - skip
-            self.advance();
+            // Operators and delimiters
+            let (tok, len) = lex_operator(&chars, pos, line, col);
+            tokens.push(tok);
+            pos += len; col += len;
         }
 
-        self.add_token(TokenType::EOF, String::new());
+        tokens.push(Token { token_type: TokenType::EOF, value: String::new(), line, col });
+        tokens
+    }
+}
+
+// ── String lexing ───────────────────────────────────────────────
+
+fn lex_string(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize) {
+    // Check for triple-quote heredoc: """..."""
+    if start + 2 < chars.len() && chars[start + 1] == '"' && chars[start + 2] == '"' {
+        return lex_heredoc(chars, start, line, col);
     }
 
-    fn skip_spaces_and_comments(&mut self) {
-        while self.pos < self.chars.len() {
-            let ch = self.chars[self.pos];
-            if ch == ' ' || ch == '\t' || ch == '\r' {
-                self.advance();
-            } else if ch == '/' && self.peek(1) == '/' {
-                // Line comment — emit as Comment token
-                let start_line = self.line;
-                let start_col = self.col;
-                let mut text = String::new();
-                while self.pos < self.chars.len() && self.chars[self.pos] != '\n' {
-                    text.push(self.chars[self.pos]);
-                    self.advance();
-                }
-                self.tokens.push(Token {
-                    token_type: TokenType::Comment,
-                    value: text,
-                    line: start_line,
-                    col: start_col,
-                });
-            } else {
-                break;
-            }
-        }
-    }
+    let mut pos = start + 1; // skip opening "
+    let mut value = String::new();
+    let mut has_interpolation = false;
 
-    fn add_newline(&mut self) {
-        // Skip newline if previous token is a continuation token
-        if let Some(last) = self.tokens.last() {
-            if is_continuation_token(&last.token_type) {
-                self.line += 1;
-                self.col = 1;
-                return;
+    while pos < chars.len() && chars[pos] != '"' {
+        if chars[pos] == '\\' && pos + 1 < chars.len() {
+            match chars[pos + 1] {
+                'n' => { value.push('\n'); pos += 2; }
+                't' => { value.push('\t'); pos += 2; }
+                'r' => { value.push('\r'); pos += 2; }
+                '\\' => { value.push('\\'); pos += 2; }
+                '"' => { value.push('"'); pos += 2; }
+                '$' => { value.push('$'); pos += 2; }
+                _ => { value.push('\\'); value.push(chars[pos + 1]); pos += 2; }
             }
-            // Skip duplicate newlines
-            if last.token_type == TokenType::Newline {
-                self.line += 1;
-                self.col = 1;
-                return;
+        } else if chars[pos] == '$' && pos + 1 < chars.len() && chars[pos + 1] == '{' {
+            has_interpolation = true;
+            value.push('$');
+            value.push('{');
+            pos += 2;
+            let mut depth = 1;
+            while pos < chars.len() && depth > 0 {
+                if chars[pos] == '{' { depth += 1; }
+                if chars[pos] == '}' { depth -= 1; }
+                if depth > 0 { value.push(chars[pos]); }
+                pos += 1;
             }
+            value.push('}');
         } else {
-            // Skip newline at start (no tokens yet)
-            self.line += 1;
-            self.col = 1;
-            return;
+            value.push(chars[pos]);
+            pos += 1;
         }
-
-        // Skip newline if next non-whitespace starts a continuation (. or |>)
-        if self.peek_next_non_whitespace() {
-            self.line += 1;
-            self.col = 1;
-            return;
-        }
-
-        self.add_token(TokenType::Newline, "\\n".to_string());
-        self.line += 1;
-        self.col = 1;
     }
+    if pos < chars.len() { pos += 1; } // skip closing "
 
-    fn peek_next_non_whitespace(&self) -> bool {
-        let mut i = self.pos + 1; // skip past current \n
-        while i < self.chars.len()
-            && (self.chars[i] == ' '
-                || self.chars[i] == '\t'
-                || self.chars[i] == '\r'
-                || self.chars[i] == '\n')
-        {
-            i += 1;
-        }
-        if i >= self.chars.len() {
-            return false;
-        }
-        // Leading dot (method chain)
-        if self.chars[i] == '.' {
-            return true;
-        }
-        // Leading |> (pipe)
-        if self.chars[i] == '|' && i + 1 < self.chars.len() && self.chars[i + 1] == '>' {
-            return true;
-        }
-        // Leading binary operator (continuation of expression)
-        if matches!(self.chars[i], '+' | '-' | '*' | '/' | '%' | '&') {
-            return true;
-        }
-        // Leading == != <= >= && ||
-        if (self.chars[i] == '=' || self.chars[i] == '!' || self.chars[i] == '<' || self.chars[i] == '>')
-            && i + 1 < self.chars.len() && self.chars[i + 1] == '='
-        {
-            return true;
-        }
-        false
-    }
+    let tt = if has_interpolation { TokenType::InterpolatedString } else { TokenType::String };
+    (Token { token_type: tt, value, line, col }, pos)
+}
 
-    fn read_string(&mut self) {
-        let start_line = self.line;
-        let start_col = self.col;
-        self.advance(); // skip opening "
-        let mut value = String::new();
-        let mut has_interpolation = false;
+fn lex_heredoc(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize) {
+    let mut pos = start + 3; // skip opening """
+    let mut raw = String::new();
+    let mut has_interpolation = false;
 
-        while self.pos < self.chars.len() && self.chars[self.pos] != '"' {
-            if self.chars[self.pos] == '$' && self.peek(1) == '{' {
-                has_interpolation = true;
-                // Skip interpolation block, tracking brace depth and nested strings
-                value.push('$');
-                self.advance();
-                value.push('{');
-                self.advance();
-                let mut depth = 1;
-                while self.pos < self.chars.len() && depth > 0 {
-                    let ch = self.chars[self.pos];
-                    if ch == '{' {
-                        depth += 1;
-                        value.push(ch);
-                        self.advance();
-                    } else if ch == '}' {
-                        depth -= 1;
-                        if depth > 0 {
-                            value.push(ch);
-                        } else {
-                            value.push('}');
-                        }
-                        self.advance();
-                    } else if ch == '"' {
-                        // Nested string literal inside interpolation
-                        value.push('"');
-                        self.advance();
-                        while self.pos < self.chars.len() && self.chars[self.pos] != '"' {
-                            if self.chars[self.pos] == '\\' {
-                                value.push('\\');
-                                self.advance();
-                                if self.pos < self.chars.len() {
-                                    value.push(self.chars[self.pos]);
-                                    self.advance();
-                                }
-                            } else {
-                                value.push(self.chars[self.pos]);
-                                self.advance();
-                            }
-                        }
-                        if self.pos < self.chars.len() {
-                            value.push('"');
-                            self.advance(); // skip closing "
-                        }
-                    } else {
-                        value.push(ch);
-                        self.advance();
-                    }
-                }
-                continue;
+    // Consume until closing """
+    while pos + 2 < chars.len() && !(chars[pos] == '"' && chars[pos + 1] == '"' && chars[pos + 2] == '"') {
+        if chars[pos] == '\\' && pos + 1 < chars.len() {
+            match chars[pos + 1] {
+                'n' => { raw.push('\n'); pos += 2; }
+                't' => { raw.push('\t'); pos += 2; }
+                'r' => { raw.push('\r'); pos += 2; }
+                '\\' => { raw.push('\\'); pos += 2; }
+                '"' => { raw.push('"'); pos += 2; }
+                '$' => { raw.push('$'); pos += 2; }
+                _ => { raw.push('\\'); raw.push(chars[pos + 1]); pos += 2; }
             }
-            if self.chars[self.pos] == '\\' {
-                self.advance();
-                if self.pos < self.chars.len() {
-                    let esc = self.chars[self.pos];
-                    match esc {
-                        'n' => value.push('\n'),
-                        't' => value.push('\t'),
-                        'r' => value.push('\r'),
-                        '0' => value.push('\0'),
-                        '\\' => value.push('\\'),
-                        '"' => value.push('"'),
-                        '$' => value.push('$'),
-                        'u' => {
-                            // Unicode escape: \u{XXXX} or \u{XXXXXX}
-                            self.advance(); // skip 'u', now pos is at '{'
-                            if self.pos < self.chars.len() && self.chars[self.pos] == '{' {
-                                self.advance(); // skip '{'
-                                let mut hex = String::new();
-                                while self.pos < self.chars.len() && self.chars[self.pos] != '}' {
-                                    hex.push(self.chars[self.pos]);
-                                    self.advance();
-                                }
-                                if self.pos < self.chars.len() {
-                                    self.advance(); // skip '}'
-                                }
-                                if let Ok(code) = u32::from_str_radix(&hex, 16) {
-                                    if let Some(ch) = char::from_u32(code) {
-                                        value.push(ch);
-                                    }
-                                }
-                            } else {
-                                value.push('u');
-                            }
-                            continue; // skip the normal advance below
-                        }
-                        other => value.push(other),
-                    }
-                    self.advance();
-                }
-            } else {
-                value.push(self.chars[self.pos]);
-                self.advance();
+        } else if chars[pos] == '$' && pos + 1 < chars.len() && chars[pos + 1] == '{' {
+            has_interpolation = true;
+            raw.push('$');
+            raw.push('{');
+            pos += 2;
+            let mut depth = 1;
+            while pos < chars.len() && depth > 0 {
+                if chars[pos] == '{' { depth += 1; }
+                if chars[pos] == '}' { depth -= 1; }
+                if depth > 0 { raw.push(chars[pos]); }
+                pos += 1;
             }
-        }
-        if self.pos < self.chars.len() {
-            self.advance(); // skip closing "
-        }
-
-        let token_type = if has_interpolation {
-            TokenType::InterpolatedString
+            raw.push('}');
         } else {
-            TokenType::String
-        };
-        self.tokens.push(Token {
-            token_type,
-            value,
-            line: start_line,
-            col: start_col,
-        });
-    }
-
-    fn read_heredoc(&mut self, is_raw: bool) {
-        let start_line = self.line;
-        let start_col = self.col;
-
-        // Skip r prefix if raw
-        if is_raw {
-            self.advance();
-        }
-
-        // Skip opening """
-        self.advance();
-        self.advance();
-        self.advance();
-
-        // Skip the first newline immediately after """
-        if self.pos < self.chars.len() && self.chars[self.pos] == '\n' {
-            self.pos += 1;
-            self.line += 1;
-            self.col = 1;
-        }
-
-        let mut raw_content = String::new();
-        let mut has_interpolation = false;
-
-        while self.pos < self.chars.len() {
-            if self.chars[self.pos] == '"' && self.peek(1) == '"' && self.peek(2) == '"' {
-                break;
-            }
-
-            if !is_raw && self.chars[self.pos] == '$' && self.peek(1) == '{' {
-                has_interpolation = true;
-                // Skip interpolation block, tracking brace depth and nested strings
-                raw_content.push('$');
-                self.advance();
-                raw_content.push('{');
-                self.advance();
-                let mut depth = 1;
-                while self.pos < self.chars.len() && depth > 0 {
-                    let ch = self.chars[self.pos];
-                    if ch == '{' {
-                        depth += 1;
-                        raw_content.push(ch);
-                        self.advance();
-                    } else if ch == '}' {
-                        depth -= 1;
-                        raw_content.push('}');
-                        self.advance();
-                    } else if ch == '"' {
-                        // Nested string literal inside interpolation
-                        raw_content.push('"');
-                        self.advance();
-                        while self.pos < self.chars.len() && self.chars[self.pos] != '"' {
-                            if self.chars[self.pos] == '\\' {
-                                raw_content.push('\\');
-                                self.advance();
-                                if self.pos < self.chars.len() {
-                                    raw_content.push(self.chars[self.pos]);
-                                    self.advance();
-                                }
-                            } else {
-                                raw_content.push(self.chars[self.pos]);
-                                self.advance();
-                            }
-                        }
-                        if self.pos < self.chars.len() {
-                            raw_content.push('"');
-                            self.advance(); // skip closing "
-                        }
-                    } else if ch == '\n' {
-                        raw_content.push('\n');
-                        self.pos += 1;
-                        self.line += 1;
-                        self.col = 1;
-                    } else {
-                        raw_content.push(ch);
-                        self.advance();
-                    }
-                }
-                continue;
-            }
-
-            if self.chars[self.pos] == '\n' {
-                raw_content.push('\n');
-                self.pos += 1;
-                self.line += 1;
-                self.col = 1;
-            } else if !is_raw && self.chars[self.pos] == '\\' {
-                self.advance();
-                if self.pos < self.chars.len() {
-                    match self.chars[self.pos] {
-                        'n' => raw_content.push('\n'),
-                        't' => raw_content.push('\t'),
-                        '\\' => raw_content.push('\\'),
-                        '"' => raw_content.push('"'),
-                        '$' => raw_content.push('$'),
-                        other => raw_content.push(other),
-                    }
-                    self.advance();
-                }
-            } else {
-                raw_content.push(self.chars[self.pos]);
-                self.advance();
-            }
-        }
-
-        // Skip closing """
-        if self.pos < self.chars.len() {
-            self.advance();
-            self.advance();
-            self.advance();
-        }
-
-        let value = strip_indent(&raw_content);
-
-        let token_type = if has_interpolation {
-            TokenType::InterpolatedString
-        } else {
-            TokenType::String
-        };
-        self.tokens.push(Token {
-            token_type,
-            value,
-            line: start_line,
-            col: start_col,
-        });
-    }
-
-    fn read_raw_string(&mut self) {
-        let start_line = self.line;
-        let start_col = self.col;
-        self.advance(); // skip 'r'
-        self.advance(); // skip '"'
-        let mut value = String::new();
-        while self.pos < self.chars.len() && self.chars[self.pos] != '"' {
-            value.push(self.chars[self.pos]);
-            self.advance();
-        }
-        if self.pos < self.chars.len() {
-            self.advance(); // skip closing "
-        }
-        self.tokens.push(Token {
-            token_type: TokenType::String,
-            value,
-            line: start_line,
-            col: start_col,
-        });
-    }
-
-    fn read_number(&mut self) {
-        let start_line = self.line;
-        let start_col = self.col;
-        let mut is_float = false;
-
-        // Helper: read digits with underscore separators, return digits only
-        fn read_digits_with_sep(lexer: &mut Lexer, validator: fn(char) -> bool) -> String {
-            let mut s = String::new();
-            while lexer.pos < lexer.chars.len() && (validator(lexer.chars[lexer.pos]) || lexer.chars[lexer.pos] == '_') {
-                if lexer.chars[lexer.pos] != '_' {
-                    s.push(lexer.chars[lexer.pos]);
-                }
-                lexer.advance();
-            }
-            s
-        }
-
-        // Hex: 0x / 0X
-        if self.chars[self.pos] == '0' && self.pos + 1 < self.chars.len()
-            && (self.chars[self.pos + 1] == 'x' || self.chars[self.pos + 1] == 'X')
-        {
-            self.advance(); self.advance();
-            let hex = read_digits_with_sep(self, |c| c.is_ascii_hexdigit());
-            let dec = i64::from_str_radix(&hex, 16).unwrap_or(0);
-            self.tokens.push(Token { token_type: TokenType::Int, value: dec.to_string(), line: start_line, col: start_col });
-            return;
-        }
-
-        // Binary: 0b / 0B
-        if self.chars[self.pos] == '0' && self.pos + 1 < self.chars.len()
-            && (self.chars[self.pos + 1] == 'b' || self.chars[self.pos + 1] == 'B')
-        {
-            self.advance(); self.advance();
-            let bin = read_digits_with_sep(self, |c| c == '0' || c == '1');
-            let dec = i64::from_str_radix(&bin, 2).unwrap_or(0);
-            self.tokens.push(Token { token_type: TokenType::Int, value: dec.to_string(), line: start_line, col: start_col });
-            return;
-        }
-
-        // Octal: 0o / 0O
-        if self.chars[self.pos] == '0' && self.pos + 1 < self.chars.len()
-            && (self.chars[self.pos + 1] == 'o' || self.chars[self.pos + 1] == 'O')
-        {
-            self.advance(); self.advance();
-            let oct = read_digits_with_sep(self, |c| c >= '0' && c <= '7');
-            let dec = i64::from_str_radix(&oct, 8).unwrap_or(0);
-            self.tokens.push(Token { token_type: TokenType::Int, value: dec.to_string(), line: start_line, col: start_col });
-            return;
-        }
-
-        // Decimal integer part (with underscore separators)
-        let mut value = read_digits_with_sep(self, |c| c.is_ascii_digit());
-
-        // Fractional part
-        if self.pos < self.chars.len()
-            && self.chars[self.pos] == '.'
-            && self.peek(1).is_ascii_digit()
-        {
-            is_float = true;
-            value.push('.');
-            self.advance();
-            let frac = read_digits_with_sep(self, |c| c.is_ascii_digit());
-            value.push_str(&frac);
-        }
-
-        // Scientific notation: e.g. 1.989e30, 6.674e-11, 3E+8
-        if self.pos < self.chars.len()
-            && (self.chars[self.pos] == 'e' || self.chars[self.pos] == 'E')
-        {
-            let next = self.peek(1);
-            if next.is_ascii_digit() || next == '+' || next == '-' {
-                is_float = true;
-                value.push(self.chars[self.pos]);
-                self.advance();
-                if self.pos < self.chars.len() && (self.chars[self.pos] == '+' || self.chars[self.pos] == '-') {
-                    value.push(self.chars[self.pos]);
-                    self.advance();
-                }
-                let exp = read_digits_with_sep(self, |c| c.is_ascii_digit());
-                value.push_str(&exp);
-            }
-        }
-
-        let token_type = if is_float { TokenType::Float } else { TokenType::Int };
-        self.tokens.push(Token { token_type, value, line: start_line, col: start_col });
-    }
-
-    fn read_identifier(&mut self) {
-        let start_line = self.line;
-        let start_col = self.col;
-        let mut value = String::new();
-
-        while self.pos < self.chars.len() && self.is_alpha_num(self.chars[self.pos]) {
-            value.push(self.chars[self.pos]);
-            self.advance();
-        }
-
-        // Check for ? suffix (Bool predicates)
-        if self.pos < self.chars.len() && self.chars[self.pos] == '?' {
-            value.push('?');
-            self.advance();
-            self.tokens.push(Token {
-                token_type: TokenType::IdentQ,
-                value,
-                line: start_line,
-                col: start_col,
-            });
-            return;
-        }
-
-        // Check keywords
-        let token_type = if let Some(kw) = self.keywords.get(value.as_str()) {
-            kw.clone()
-        } else {
-            TokenType::Ident
-        };
-        self.tokens.push(Token {
-            token_type,
-            value,
-            line: start_line,
-            col: start_col,
-        });
-    }
-
-    fn read_type_name(&mut self) {
-        let start_line = self.line;
-        let start_col = self.col;
-        let mut value = String::new();
-
-        while self.pos < self.chars.len() && self.is_alpha_num(self.chars[self.pos]) {
-            value.push(self.chars[self.pos]);
-            self.advance();
-        }
-
-        let token_type = self.keywords.get(value.as_str()).cloned().unwrap_or(TokenType::TypeName);
-
-        self.tokens.push(Token {
-            token_type,
-            value,
-            line: start_line,
-            col: start_col,
-        });
-    }
-
-    fn read_symbol(&mut self) -> bool {
-        let start_line = self.line;
-        let start_col = self.col;
-
-        let c = self.chars[self.pos];
-        let c2 = self.peek(1);
-        let c3 = self.peek(2);
-
-        // Three-char: ... and ..=
-        if c == '.' && c2 == '.' && c3 == '.' {
-            self.add_token(TokenType::DotDotDot, "...".to_string());
-            self.advance();
-            self.advance();
-            self.advance();
-            return true;
-        }
-        if c == '.' && c2 == '.' && c3 == '=' {
-            self.add_token(TokenType::DotDotEq, "..=".to_string());
-            self.advance();
-            self.advance();
-            self.advance();
-            return true;
-        }
-        // Two-char: ..
-        if c == '.' && c2 == '.' {
-            self.add_token(TokenType::DotDot, "..".to_string());
-            self.advance();
-            self.advance();
-            return true;
-        }
-
-        // Two-char tokens
-        let two: String = [c, c2].iter().collect();
-        let two_char_type = match two.as_str() {
-            "->" => Some(TokenType::Arrow),
-            "=>" => Some(TokenType::FatArrow),
-            "==" => Some(TokenType::EqEq),
-            "!=" => Some(TokenType::BangEq),
-            "<=" => Some(TokenType::LtEq),
-            ">=" => Some(TokenType::GtEq),
-            "++" => Some(TokenType::PlusPlus),
-            "|>" => Some(TokenType::PipeArrow),
-            "&&" => Some(TokenType::AmpAmp),
-            "||" => Some(TokenType::PipePipe),
-            _ => Option::None,
-        };
-        if let Some(tt) = two_char_type {
-            self.tokens.push(Token {
-                token_type: tt,
-                value: two,
-                line: start_line,
-                col: start_col,
-            });
-            self.advance();
-            self.advance();
-            return true;
-        }
-
-        // Single-char tokens
-        let one_char_type = match c {
-            '(' => Some(TokenType::LParen),
-            ')' => Some(TokenType::RParen),
-            '{' => Some(TokenType::LBrace),
-            '}' => Some(TokenType::RBrace),
-            '[' => Some(TokenType::LBracket),
-            ']' => Some(TokenType::RBracket),
-            '<' => Some(TokenType::LAngle),
-            '>' => Some(TokenType::RAngle),
-            ',' => Some(TokenType::Comma),
-            '.' => Some(TokenType::Dot),
-            ':' => Some(TokenType::Colon),
-            ';' => Some(TokenType::Semicolon),
-            '=' => Some(TokenType::Eq),
-            '+' => Some(TokenType::Plus),
-            '-' => Some(TokenType::Minus),
-            '*' => Some(TokenType::Star),
-            '/' => Some(TokenType::Slash),
-            '%' => Some(TokenType::Percent),
-            '|' => Some(TokenType::Pipe),
-            '^' => Some(TokenType::Caret),
-            '!' => Some(TokenType::Bang),
-            '@' => Some(TokenType::At),
-            '_' => Some(TokenType::Underscore),
-            _ => Option::None,
-        };
-        if let Some(tt) = one_char_type {
-            match tt {
-                TokenType::LParen | TokenType::LBracket => self.paren_depth += 1,
-                TokenType::RParen | TokenType::RBracket => { if self.paren_depth > 0 { self.paren_depth -= 1; } },
-                _ => {}
-            }
-            self.tokens.push(Token {
-                token_type: tt,
-                value: c.to_string(),
-                line: start_line,
-                col: start_col,
-            });
-            self.advance();
-            return true;
-        }
-
-        false
-    }
-
-    fn add_token(&mut self, token_type: TokenType, value: String) {
-        self.tokens.push(Token {
-            token_type,
-            value,
-            line: self.line,
-            col: self.col,
-        });
-    }
-
-    fn advance(&mut self) {
-        self.pos += 1;
-        self.col += 1;
-    }
-
-    fn peek(&self, offset: usize) -> char {
-        let idx = self.pos + offset;
-        if idx < self.chars.len() {
-            self.chars[idx]
-        } else {
-            '\0'
+            raw.push(chars[pos]);
+            pos += 1;
         }
     }
+    if pos + 2 < chars.len() { pos += 3; } // skip closing """
 
-    fn is_alpha_num(&self, ch: char) -> bool {
-        ch.is_ascii_lowercase() || ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '_'
+    let value = strip_heredoc_indent(&raw);
+    let tt = if has_interpolation { TokenType::InterpolatedString } else { TokenType::String };
+    (Token { token_type: tt, value, line, col }, pos)
+}
+
+/// Strip common leading indentation from heredoc content.
+/// - First line (after opening """) is skipped if blank
+/// - Last line (before closing """) is dropped if whitespace-only
+/// - Minimum indent of non-empty content lines is stripped from all lines
+fn strip_heredoc_indent(raw: &str) -> String {
+    let lines: Vec<&str> = raw.split('\n').collect();
+    if lines.is_empty() { return String::new(); }
+
+    // If first line is blank (content starts on next line after """), skip it
+    let start = if lines[0].trim().is_empty() { 1 } else { 0 };
+    // If last line is whitespace-only, drop it
+    let end = if lines.len() > 1 && lines[lines.len() - 1].trim().is_empty() {
+        lines.len() - 1
+    } else {
+        lines.len()
+    };
+
+    if start >= end { return String::new(); }
+
+    let content = &lines[start..end];
+    let indent = content.iter()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.len() - l.trim_start().len())
+        .min()
+        .unwrap_or(0);
+
+    content.iter()
+        .map(|l| if l.len() >= indent { &l[indent..] } else { "" })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+// ── Number lexing ───────────────────────────────────────────────
+
+fn lex_number(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize) {
+    let mut pos = start;
+    let mut is_float = false;
+
+    // Hex: 0x...
+    if chars[pos] == '0' && pos + 1 < chars.len() && (chars[pos + 1] == 'x' || chars[pos + 1] == 'X') {
+        pos += 2;
+        while pos < chars.len() && (chars[pos].is_ascii_hexdigit() || chars[pos] == '_') { pos += 1; }
+        let raw: String = chars[start..pos].iter().collect();
+        return (Token { token_type: TokenType::Int, value: raw, line, col }, pos);
     }
+
+    while pos < chars.len() && (chars[pos].is_ascii_digit() || chars[pos] == '_') { pos += 1; }
+
+    if pos < chars.len() && chars[pos] == '.' && pos + 1 < chars.len() && chars[pos + 1].is_ascii_digit() {
+        is_float = true;
+        pos += 1;
+        while pos < chars.len() && (chars[pos].is_ascii_digit() || chars[pos] == '_') { pos += 1; }
+    }
+
+    // Scientific notation
+    if pos < chars.len() && (chars[pos] == 'e' || chars[pos] == 'E') {
+        is_float = true;
+        pos += 1;
+        if pos < chars.len() && (chars[pos] == '+' || chars[pos] == '-') { pos += 1; }
+        while pos < chars.len() && chars[pos].is_ascii_digit() { pos += 1; }
+    }
+
+    let raw: String = chars[start..pos].iter().collect();
+    let tt = if is_float { TokenType::Float } else { TokenType::Int };
+    (Token { token_type: tt, value: raw, line, col }, pos)
+}
+
+// ── Identifier / keyword lexing ─────────────────────────────────
+
+fn lex_ident(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize) {
+    let mut pos = start;
+    while pos < chars.len() && (chars[pos].is_ascii_alphanumeric() || chars[pos] == '_') { pos += 1; }
+
+    // Trailing ? for query methods (e.g., is_empty?)
+    if pos < chars.len() && chars[pos] == '?' {
+        pos += 1;
+    }
+
+    let value: String = chars[start..pos].iter().collect();
+
+    // Check if it's a keyword
+    let token_type = keyword(&value).unwrap_or_else(|| {
+        if value.ends_with('?') { TokenType::IdentQ }
+        else if value.chars().next().map_or(false, |c| c.is_uppercase()) { TokenType::TypeName }
+        else { TokenType::Ident }
+    });
+
+    (Token { token_type, value, line, col }, pos)
+}
+
+fn keyword(s: &str) -> Option<TokenType> {
+    match s {
+        "module" => Some(TokenType::Module), "import" => Some(TokenType::Import),
+        "type" => Some(TokenType::Type), "trait" => Some(TokenType::Trait),
+        "impl" => Some(TokenType::Impl), "for" => Some(TokenType::For),
+        "in" => Some(TokenType::In), "fn" => Some(TokenType::Fn),
+        "let" => Some(TokenType::Let), "var" => Some(TokenType::Var),
+        "if" => Some(TokenType::If), "then" => Some(TokenType::Then),
+        "else" => Some(TokenType::Else), "match" => Some(TokenType::Match),
+        "ok" => Some(TokenType::Ok), "err" => Some(TokenType::Err),
+        "some" => Some(TokenType::Some), "none" => Some(TokenType::None),
+        "try" => Some(TokenType::Try), "do" => Some(TokenType::Do),
+        "todo" => Some(TokenType::Todo), "unsafe" => Some(TokenType::Unsafe),
+        "true" => Some(TokenType::True), "false" => Some(TokenType::False),
+        "not" => Some(TokenType::Not), "and" => Some(TokenType::And),
+        "or" => Some(TokenType::Or), "strict" => Some(TokenType::Strict),
+        "pub" => Some(TokenType::Pub), "effect" => Some(TokenType::Effect),
+        "deriving" => Some(TokenType::Deriving), "test" => Some(TokenType::Test),
+        "async" => Some(TokenType::Async), "await" => Some(TokenType::Await),
+        "guard" => Some(TokenType::Guard), "break" => Some(TokenType::Break),
+        "continue" => Some(TokenType::Continue), "while" => Some(TokenType::While),
+        "local" => Some(TokenType::Local), "mod" => Some(TokenType::Mod),
+        "newtype" => Some(TokenType::Newtype),
+        _ => None,
+    }
+}
+
+// ── Operator / delimiter lexing ─────────────────────────────────
+
+fn lex_operator(chars: &[char], pos: usize, line: usize, col: usize) -> (Token, usize) {
+    let ch = chars[pos];
+    let next = peek(chars, pos + 1);
+    let next2 = peek(chars, pos + 2);
+
+    let (tt, val, len) = match (ch, next, next2) {
+        // Three-char
+        ('.', Some('.'), Some('=')) => (TokenType::DotDotEq, "..=", 3),
+        ('.', Some('.'), Some('.')) => (TokenType::DotDotDot, "...", 3),
+        // Two-char
+        ('-', Some('>'), _) => (TokenType::Arrow, "->", 2),
+        ('=', Some('>'), _) => (TokenType::FatArrow, "=>", 2),
+        ('=', Some('='), _) => (TokenType::EqEq, "==", 2),
+        ('!', Some('='), _) => (TokenType::BangEq, "!=", 2),
+        ('<', Some('='), _) => (TokenType::LtEq, "<=", 2),
+        ('>', Some('='), _) => (TokenType::GtEq, ">=", 2),
+        ('+', Some('+'), _) => (TokenType::PlusPlus, "++", 2),
+        ('|', Some('>'), _) => (TokenType::PipeArrow, "|>", 2),
+        ('&', Some('&'), _) => (TokenType::AmpAmp, "&&", 2),
+        ('|', Some('|'), _) => (TokenType::PipePipe, "||", 2),
+        ('.', Some('.'), _) => (TokenType::DotDot, "..", 2),
+        // Single-char
+        ('(', _, _) => (TokenType::LParen, "(", 1),
+        (')', _, _) => (TokenType::RParen, ")", 1),
+        ('{', _, _) => (TokenType::LBrace, "{", 1),
+        ('}', _, _) => (TokenType::RBrace, "}", 1),
+        ('[', _, _) => (TokenType::LBracket, "[", 1),
+        (']', _, _) => (TokenType::RBracket, "]", 1),
+        (',', _, _) => (TokenType::Comma, ",", 1),
+        ('.', _, _) => (TokenType::Dot, ".", 1),
+        (':', _, _) => (TokenType::Colon, ":", 1),
+        (';', _, _) => (TokenType::Semicolon, ";", 1),
+        ('=', _, _) => (TokenType::Eq, "=", 1),
+        ('!', _, _) => (TokenType::Bang, "!", 1),
+        ('<', _, _) => (TokenType::LAngle, "<", 1),
+        ('>', _, _) => (TokenType::RAngle, ">", 1),
+        ('+', _, _) => (TokenType::Plus, "+", 1),
+        ('-', _, _) => (TokenType::Minus, "-", 1),
+        ('*', Some('*'), _) => (TokenType::StarStar, "**", 2),
+        ('*', _, _) => (TokenType::Star, "*", 1),
+        ('/', _, _) => (TokenType::Slash, "/", 1),
+        ('%', _, _) => (TokenType::Percent, "%", 1),
+        ('|', _, _) => (TokenType::Pipe, "|", 1),
+        ('^', _, _) => (TokenType::Caret, "^", 1),
+        ('_', _, _) => (TokenType::Underscore, "_", 1),
+        ('@', _, _) => (TokenType::At, "@", 1),
+        _ => (TokenType::EOF, "", 1), // skip unknown char
+    };
+
+    (Token { token_type: tt, value: val.to_string(), line, col }, len)
+}
+
+fn peek(chars: &[char], pos: usize) -> Option<char> {
+    chars.get(pos).copied()
 }

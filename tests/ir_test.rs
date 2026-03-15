@@ -308,8 +308,8 @@ fn ir_function_construction() {
     let f = IrFunction {
         name: "add".into(),
         params: vec![
-            IrParam { var: VarId(0), ty: Ty::Int, name: "a".into(), borrow: ParamBorrow::Own, open_record: None },
-            IrParam { var: VarId(1), ty: Ty::Int, name: "b".into(), borrow: ParamBorrow::Own, open_record: None },
+            IrParam { var: VarId(0), ty: Ty::Int, name: "a".into(), borrow: ParamBorrow::Own, open_record: None, default: None },
+            IrParam { var: VarId(1), ty: Ty::Int, name: "b".into(), borrow: ParamBorrow::Own, open_record: None, default: None },
         ],
         ret_ty: Ty::Int,
         body: IrExpr { kind: IrExprKind::LitInt { value: 0 }, ty: Ty::Int, span: None },
@@ -463,4 +463,175 @@ fn ir_expr_hole() {
         span: None,
     };
     assert!(matches!(expr.kind, IrExprKind::Hole));
+}
+
+// ---- collect_unused_var_warnings ----
+
+fn make_program_with_vars(vars: Vec<(&str, Option<Span>, bool)>) -> IrProgram {
+    let mut var_table = VarTable::new();
+    let mut stmts = Vec::new();
+    let mut param_vars = Vec::new();
+
+    for (name, span, is_param) in &vars {
+        let id = var_table.alloc(name.to_string(), Ty::Int, Mutability::Let, *span);
+        if *is_param {
+            param_vars.push(id);
+        } else {
+            stmts.push(IrStmt {
+                kind: IrStmtKind::Bind {
+                    var: id,
+                    mutability: Mutability::Let,
+                    ty: Ty::Int,
+                    value: IrExpr { kind: IrExprKind::LitInt { value: 0 }, ty: Ty::Int, span: None },
+                },
+                span: *span,
+            });
+        }
+    }
+
+    let params: Vec<IrParam> = param_vars.iter().map(|&id| {
+        let info = var_table.get(id);
+        IrParam {
+            var: id,
+            ty: Ty::Int,
+            name: info.name.clone(),
+            borrow: ParamBorrow::Own,
+            open_record: None,
+            default: None,
+        }
+    }).collect();
+
+    let body = IrExpr {
+        kind: IrExprKind::Block { stmts, expr: Some(Box::new(IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None })) },
+        ty: Ty::Unit,
+        span: None,
+    };
+
+    IrProgram {
+        functions: vec![IrFunction {
+            name: "test_fn".into(),
+            params,
+            ret_ty: Ty::Unit,
+            body,
+            is_effect: false,
+            is_async: false,
+            is_test: false,
+            generics: None,
+            extern_attrs: vec![],
+            visibility: IrVisibility::Public,
+        }],
+        top_lets: vec![],
+        type_decls: vec![],
+        var_table,
+        modules: vec![],
+    }
+}
+
+#[test]
+fn unused_var_warning_basic() {
+    let mut prog = make_program_with_vars(vec![
+        ("x", Some(Span { line: 3, col: 7 }), false),
+    ]);
+    compute_use_counts(&mut prog);
+    let warnings = collect_unused_var_warnings(&prog, "test.almd");
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].message.contains("unused variable 'x'"));
+    assert!(warnings[0].hint.contains("_x"));
+}
+
+#[test]
+fn unused_var_warning_underscore_suppressed() {
+    let mut prog = make_program_with_vars(vec![
+        ("_x", Some(Span { line: 3, col: 7 }), false),
+    ]);
+    compute_use_counts(&mut prog);
+    let warnings = collect_unused_var_warnings(&prog, "test.almd");
+    assert_eq!(warnings.len(), 0);
+}
+
+#[test]
+fn unused_var_warning_used_var_no_warning() {
+    let mut var_table = VarTable::new();
+    let x_id = var_table.alloc("x".into(), Ty::Int, Mutability::Let, Some(Span { line: 2, col: 7 }));
+
+    let bind_stmt = IrStmt {
+        kind: IrStmtKind::Bind {
+            var: x_id,
+            mutability: Mutability::Let,
+            ty: Ty::Int,
+            value: IrExpr { kind: IrExprKind::LitInt { value: 42 }, ty: Ty::Int, span: None },
+        },
+        span: Some(Span { line: 2, col: 7 }),
+    };
+    let use_expr = IrExpr {
+        kind: IrExprKind::Var { id: x_id },
+        ty: Ty::Int,
+        span: None,
+    };
+    let body = IrExpr {
+        kind: IrExprKind::Block {
+            stmts: vec![bind_stmt],
+            expr: Some(Box::new(use_expr)),
+        },
+        ty: Ty::Int,
+        span: None,
+    };
+
+    let mut prog = IrProgram {
+        functions: vec![IrFunction {
+            name: "test_fn".into(),
+            params: vec![],
+            ret_ty: Ty::Int,
+            body,
+            is_effect: false,
+            is_async: false,
+            is_test: false,
+            generics: None,
+            extern_attrs: vec![],
+            visibility: IrVisibility::Public,
+        }],
+        top_lets: vec![],
+        type_decls: vec![],
+        var_table,
+        modules: vec![],
+    };
+    compute_use_counts(&mut prog);
+    let warnings = collect_unused_var_warnings(&prog, "test.almd");
+    assert_eq!(warnings.len(), 0);
+}
+
+#[test]
+fn unused_var_warning_param_excluded() {
+    let mut prog = make_program_with_vars(vec![
+        ("arg", Some(Span { line: 1, col: 10 }), true),
+    ]);
+    compute_use_counts(&mut prog);
+    let warnings = collect_unused_var_warnings(&prog, "test.almd");
+    assert_eq!(warnings.len(), 0);
+}
+
+#[test]
+fn unused_var_warning_no_span_excluded() {
+    let mut prog = make_program_with_vars(vec![
+        ("x", None, false),
+    ]);
+    compute_use_counts(&mut prog);
+    let warnings = collect_unused_var_warnings(&prog, "test.almd");
+    assert_eq!(warnings.len(), 0);
+}
+
+#[test]
+fn unused_var_warning_multiple() {
+    let mut prog = make_program_with_vars(vec![
+        ("a", Some(Span { line: 2, col: 7 }), false),
+        ("_b", Some(Span { line: 3, col: 7 }), false),
+        ("c", Some(Span { line: 4, col: 7 }), false),
+        ("param", Some(Span { line: 1, col: 10 }), true),
+    ]);
+    compute_use_counts(&mut prog);
+    let warnings = collect_unused_var_warnings(&prog, "test.almd");
+    assert_eq!(warnings.len(), 2);
+    let names: Vec<&str> = warnings.iter().map(|w| w.message.as_str()).collect();
+    assert!(names.iter().any(|m| m.contains("'a'")));
+    assert!(names.iter().any(|m| m.contains("'c'")));
 }

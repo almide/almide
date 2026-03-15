@@ -2,12 +2,12 @@
 
 // ── string ──
 
-test "string.is_empty? on empty" {
-  assert_eq(string.is_empty?(""), true)
+test "string.is_empty on empty" {
+  assert_eq(string.is_empty(""), true)
 }
 
-test "string.is_empty? on non-empty" {
-  assert_eq(string.is_empty?("hi"), false)
+test "string.is_empty on non-empty" {
+  assert_eq(string.is_empty("hi"), false)
 }
 
 test "string.reverse basic" {
@@ -49,24 +49,24 @@ test "list.first via UFCS" {
   assert_eq([1, 2, 3].first(), some(1))
 }
 
-test "list.is_empty? true" {
+test "list.is_empty true" {
   let xs: List[Int] = []
-  assert_eq(list.is_empty?(xs), true)
+  assert_eq(list.is_empty(xs), true)
 }
 
-test "list.is_empty? false" {
-  assert_eq(list.is_empty?([1]), false)
+test "list.is_empty false" {
+  assert_eq(list.is_empty([1]), false)
 }
 
 test "list.flat_map basic" {
   let xs = [1, 2, 3]
-  let result = list.flat_map(xs, fn(x) => [x, x * 10])
+  let result = list.flat_map(xs, (x) => [x, x * 10])
   assert_eq(result, [1, 10, 2, 20, 3, 30])
 }
 
 test "list.flat_map with strings" {
   let xs = ["ab", "cd"]
-  let result = list.flat_map(xs, fn(s) => string.chars(s))
+  let result = list.flat_map(xs, (s) => string.chars(s))
   assert_eq(result, ["a", "b", "c", "d"])
 }
 
@@ -115,12 +115,12 @@ test "map.merge via UFCS" {
   assert_eq(map.len(merged), 2)
 }
 
-test "map.is_empty? true" {
+test "map.is_empty true" {
   let m: Map[String, Int] = map.new()
-  assert_eq(map.is_empty?(m), true)
+  assert_eq(map.is_empty(m), true)
 }
 
-test "map.is_empty? false" {
+test "map.is_empty false" {
   let m = map.set(map.new(), "k", 1)
-  assert_eq(map.is_empty?(m), false)
+  assert_eq(map.is_empty(m), false)
 }

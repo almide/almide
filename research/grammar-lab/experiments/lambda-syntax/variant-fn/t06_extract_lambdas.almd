@@ -2,13 +2,13 @@ type Entry = { label: String, value: Int, active: Bool }
 
 fn process_entries(entries: List[Entry]) -> List[String] =
   entries
-    |> list.filter(fn(e) => e.active and e.value > 0)
-    |> list.sort_by(fn(e) => e.value)
+    |> list.filter((e) => e.active and e.value > 0)
+    |> list.sort_by((e) => e.value)
     |> list.reverse()
-    |> list.map(fn(e) => string.to_upper(e.label) ++ "=" ++ int.to_string(e.value))
+    |> list.map((e) => string.to_upper(e.label) ++ "=" ++ int.to_string(e.value))
 
 fn count_active(entries: List[Entry]) -> Int =
-  entries |> list.count(fn(e) => e.active)
+  entries |> list.count((e) => e.active)
 
 fn total_value(entries: List[Entry]) -> Int =
-  entries |> list.fold(0, fn(acc, e) => if e.active then acc + e.value else acc)
+  entries |> list.fold(0, (acc, e) => if e.active then acc + e.value else acc)

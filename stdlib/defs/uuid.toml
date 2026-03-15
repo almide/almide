@@ -1,0 +1,53 @@
+[v4]
+description = "Generate a random UUID v4."
+example = 'uuid.v4() // => ok("550e8400-e29b-41d4-a716-446655440000")'
+params = []
+return = "Result[String, String]"
+effect = true
+rust = "almide_rt_uuid_v4()?"
+ts = "__almd_uuid.v4()"
+
+[v5]
+description = "Generate a deterministic UUID v5 from namespace and name."
+example = 'uuid.v5("dns", "example.com")'
+params = [{ name = "namespace", type = "String" }, { name = "name", type = "String" }]
+return = "Result[String, String]"
+effect = true
+rust = "almide_rt_uuid_v5(&*{namespace}, &*{name})?"
+ts = "__almd_uuid.v5({namespace}, {name})"
+
+[parse]
+description = "Parse and validate a UUID string."
+example = 'uuid.parse("550e8400-e29b-41d4-a716-446655440000") // => ok("...")'
+params = [{ name = "s", type = "String" }]
+return = "Result[String, String]"
+effect = false
+rust = "almide_rt_uuid_parse(&*{s})?"
+ts = "__almd_uuid.parse({s})"
+
+[is_valid]
+description = "Check if a string is a valid UUID."
+example = 'uuid.is_valid("550e8400-e29b-41d4-a716-446655440000") // => true'
+params = [{ name = "s", type = "String" }]
+return = "Bool"
+effect = false
+rust = "almide_rt_uuid_is_valid(&*{s})"
+ts = "__almd_uuid.is_valid({s})"
+
+[nil]
+description = "Return the nil UUID (all zeros)."
+example = 'uuid.nil() // => "00000000-0000-0000-0000-000000000000"'
+params = []
+return = "String"
+effect = false
+rust = "almide_rt_uuid_nil()"
+ts = "__almd_uuid.nil()"
+
+[version]
+description = "Extract the version number from a UUID string."
+example = 'uuid.version("550e8400-e29b-41d4-a716-446655440000") // => ok(4)'
+params = [{ name = "s", type = "String" }]
+return = "Result[Int, String]"
+effect = false
+rust = "almide_rt_uuid_version(&*{s})?"
+ts = "__almd_uuid.version({s})"

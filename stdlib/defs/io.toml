@@ -1,16 +1,22 @@
 [read_line]
+description = "Read a single line from standard input"
+example = 'let name = io.read_line()'
 params = []
 return = "String"
 effect = true
 rust = "almide_rt_io_read_line()?"
 
 [print]
+description = "Print a string to stdout without a trailing newline"
+example = 'io.print("Enter name: ")'
 params = [{ name = "s", type = "String" }]
 return = "Unit"
 effect = true
 rust = "almide_rt_io_print(&*{s})?"
 
 [read_all]
+description = "Read all of standard input as a single string"
+example = 'let input = io.read_all()'
 params = []
 return = "String"
 effect = true

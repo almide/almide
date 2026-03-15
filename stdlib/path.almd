@@ -3,9 +3,9 @@
 
 fn join(base: String, child: String) -> String = {
   // If child is absolute, it replaces base (matches Rust Path::join behavior)
-  if string.starts_with?(child, "/") then child
+  if string.starts_with(child, "/") then child
   else {
-    let b = if string.ends_with?(base, "/") then string.slice(base, 0, string.len(base) - 1) else base
+    let b = if string.ends_with(base, "/") then string.slice(base, 0, string.len(base) - 1) else base
     if string.len(b) == 0 then child
     else b ++ "/" ++ child
   }
@@ -19,14 +19,14 @@ fn dirname(p: String) -> String = {
     let parent_parts = list.take(parts, n - 1)
     let joined = string.join(parent_parts, "/")
     // Preserve root "/" for absolute paths
-    if string.len(joined) == 0 and string.starts_with?(p, "/") then "/"
+    if string.len(joined) == 0 and string.starts_with(p, "/") then "/"
     else joined
   }
 }
 
 fn basename(p: String) -> String = {
   let parts = string.split(p, "/")
-  let filtered = list.filter(parts, fn(s) => string.len(s) > 0)
+  let filtered = list.filter(parts, (s) => string.len(s) > 0)
   match list.last(filtered) {
     some(name) => name
     none => ""
@@ -40,7 +40,7 @@ fn extension(p: String) -> Option[String] = {
   else list.last(parts)
 }
 
-fn is_absolute?(p: String) -> Bool = string.starts_with?(p, "/")
+fn is_absolute?(p: String) -> Bool = string.starts_with(p, "/")
 
 fn stem(p: String) -> String = {
   let name = basename(p)
@@ -48,7 +48,7 @@ fn stem(p: String) -> String = {
   let n = list.len(parts)
   // No dot, or only a leading dot (e.g. ".hidden") → return as-is
   if n <= 1 then name
-  else if string.starts_with?(name, ".") and n == 2 then name
+  else if string.starts_with(name, ".") and n == 2 then name
   else {
     // Drop the last segment and rejoin
     let prefix_parts = list.take(parts, n - 1)
@@ -57,12 +57,12 @@ fn stem(p: String) -> String = {
 }
 
 fn normalize(p: String) -> String = {
-  let absolute = string.starts_with?(p, "/")
+  let absolute = string.starts_with(p, "/")
   let segments = string.split(p, "/")
   // Filter out empty segments (from //) and "." segments
-  let cleaned = list.filter(segments, fn(s) => string.len(s) > 0 and s != ".")
+  let cleaned = list.filter(segments, (s) => string.len(s) > 0 and s != ".")
   // Fold left, building a reversed list of resolved segments
-  let resolved = list.fold(cleaned, [], fn(acc, seg) => {
+  let resolved = list.fold(cleaned, [], (acc, seg) => {
     if seg == ".." then {
       let acc_len = list.len(acc)
       if acc_len == 0 then {

@@ -1,0 +1,27 @@
+module named_args_test
+
+fn greet(name: String, greeting: String = "Hello") -> String =
+  "${greeting}, ${name}!"
+
+fn add3(a: Int, b: Int, c: Int = 0) -> Int = a + b + c
+
+test "all positional" {
+  assert_eq(greet("Alice", "Hi"), "Hi, Alice!")
+}
+
+test "positional + named" {
+  assert_eq(greet("Bob", greeting: "Hey"), "Hey, Bob!")
+}
+
+test "all named" {
+  assert_eq(greet(name: "Carol", greeting: "Yo"), "Yo, Carol!")
+}
+
+test "named with default" {
+  assert_eq(greet(name: "Dave"), "Hello, Dave!")
+}
+
+test "mixed positional and named with default" {
+  assert_eq(add3(1, 2, c: 10), 13)
+  assert_eq(add3(1, b: 2), 3)
+}

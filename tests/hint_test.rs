@@ -457,7 +457,7 @@ fn syntax_guide_implements() {
 fn syntax_guide_lambda() {
     let got = tok(TokenType::Ident, "lambda");
     let ctx = HintContext { expected: None, got: &got, prev: None, next: None, scope: HintScope::Expression };
-    assert_hint_match(&ctx, "fn(x) => expr");
+    assert_hint_match(&ctx, "(x) => expr");
 }
 
 // ============================================================
@@ -469,7 +469,7 @@ fn operator_pipe_closure_with_next() {
     let got = tok(TokenType::Pipe, "|");
     let next = tok(TokenType::Ident, "x");
     let ctx = HintContext { expected: None, got: &got, prev: None, next: Some(&next), scope: HintScope::Expression };
-    assert_hint_match(&ctx, "fn(x) => expr");
+    assert_hint_match(&ctx, "(x) => expr");
 }
 
 #[test]
@@ -477,7 +477,7 @@ fn operator_pipe_closure_with_underscore() {
     let got = tok(TokenType::Pipe, "|");
     let next = tok(TokenType::Underscore, "_");
     let ctx = HintContext { expected: None, got: &got, prev: None, next: Some(&next), scope: HintScope::Expression };
-    assert_hint_match(&ctx, "fn(x) => expr");
+    assert_hint_match(&ctx, "(x) => expr");
 }
 
 #[test]

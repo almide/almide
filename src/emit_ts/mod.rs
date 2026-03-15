@@ -1,111 +1,50 @@
-mod declarations;
-mod ir_expressions;
-mod ir_blocks;
+/// TypeScript/JavaScript code generation — pipeline orchestration.
+///
+/// Input:    &IrProgram
+/// Output:   String (TS/JS source), or NpmOutput (npm package)
+/// Owns:     pipeline orchestration (lower → render), npm packaging, .d.ts generation
+/// Does NOT: codegen decisions (lower_ts.rs), rendering (render_*.rs)
+///
+/// Architecture: 2-stage pipeline with per-target renderers:
+///   IR → TsIR (lower_ts.rs) → render_ts  → TypeScript (Deno)
+///                             → render_js  → JavaScript (Node.js)
+///                             → render_npm → npm package (ESM)
+///                             → render_rb  → Ruby (将来)
+///
+/// Adding a new target: create render_<target>.rs, add entry point here.
 
-use std::cell::{Cell, RefCell};
-use std::collections::HashSet;
-use crate::ast::*;
+pub mod ts_ir;
+pub mod lower_decls;
+pub mod lower_ts;
+pub mod render_common;
+pub mod render_ts;
+pub mod render_js;
+pub mod render_npm;
 
-pub(crate) struct TsEmitter {
-    pub(crate) out: String,
-    pub(crate) js_mode: bool,
-    pub(crate) npm_mode: bool,
-    pub(crate) user_modules: Vec<String>,
-    /// Tracks which stdlib modules (`__almd_*`) are referenced during codegen.
-    pub(crate) used_stdlib: RefCell<HashSet<String>>,
-    /// Generic variant unit constructors — need `()` when used as standalone expressions
-    pub(crate) generic_variant_unit_ctors: HashSet<String>,
-    /// All unit variant names (no payload) — emitted as bare identifiers, not function calls
-    pub(crate) unit_variant_names: HashSet<String>,
-    /// Variant record constructor names — need `tag` field in TS output
-    pub(crate) variant_constructors: HashSet<String>,
-    /// True when inside an effect fn body (err() should throw for auto-? propagation)
-    pub(crate) in_effect: Cell<bool>,
-    /// True when inside a test block (effect fn calls should be caught and wrapped as __Err)
-    pub(crate) in_test: Cell<bool>,
-    /// Typed IR program (available when type checking succeeded)
-    pub(crate) ir_program: Option<crate::ir::IrProgram>,
+use crate::ir::{IrProgram, IrVisibility, IrTypeDeclKind, IrVariantKind};
+use crate::types::Ty;
+
+// ── Public API ───────────────────────────────────────────────────
+
+/// Emit TypeScript source (Deno target).
+pub fn emit_with_modules(ir: &IrProgram) -> String {
+    let opts = lower_ts::LowerOpts { js_mode: false, npm_mode: false };
+    let prog = lower_ts::lower(ir, &opts);
+    render_ts::render(&prog)
 }
 
-impl TsEmitter {
-    fn new() -> Self {
-        Self {
-            out: String::new(),
-            js_mode: false,
-            npm_mode: false,
-            user_modules: Vec::new(),
-            used_stdlib: RefCell::new(HashSet::new()),
-            generic_variant_unit_ctors: HashSet::new(),
-            unit_variant_names: HashSet::new(),
-            variant_constructors: HashSet::new(),
-            in_effect: Cell::new(false),
-            in_test: Cell::new(false),
-            ir_program: None,
-        }
-    }
-
-    // Helpers
-
-    pub(crate) fn sanitize(name: &str) -> String {
-        crate::emit_common::sanitize(name)
-    }
-
-    pub(crate) fn map_module(&self, name: &str) -> String {
-        // User modules take priority over stdlib
-        if self.user_modules.contains(&name.to_string()) {
-            name.to_string()
-        } else if crate::stdlib::is_stdlib_module(name) {
-            self.used_stdlib.borrow_mut().insert(name.to_string());
-            format!("__almd_{}", name)
-        } else {
-            name.to_string()
-        }
-    }
-
-    pub(crate) fn json_string(s: &str) -> String {
-        serde_json::to_string(s).unwrap_or_else(|_| format!("\"{}\"", s))
-    }
-
-    pub(crate) fn pascal_to_message(name: &str) -> String {
-        let mut result = String::new();
-        for (i, c) in name.chars().enumerate() {
-            if i > 0 && c.is_uppercase() {
-                result.push(' ');
-                result.push(c.to_lowercase().next().unwrap_or(c));
-            } else if i == 0 {
-                result.push(c.to_uppercase().next().unwrap_or(c));
-            } else {
-                result.push(c);
-            }
-        }
-        result
-    }
-}
-
-pub fn emit_with_modules(program: &Program, modules: &[(String, Program)], ir: Option<&crate::ir::IrProgram>) -> String {
-    let mut emitter = TsEmitter::new();
-    emitter.ir_program = ir.cloned();
-    emitter.emit_program(program, modules);
-    emitter.out
-}
-
-pub fn emit_js_with_modules(program: &Program, modules: &[(String, Program)], ir: Option<&crate::ir::IrProgram>) -> String {
-    let mut emitter = TsEmitter::new();
-    emitter.js_mode = true;
-    emitter.ir_program = ir.cloned();
-    emitter.emit_program(program, modules);
-    emitter.out
+/// Emit JavaScript source (Node.js target).
+pub fn emit_js_with_modules(ir: &IrProgram) -> String {
+    let opts = lower_ts::LowerOpts { js_mode: true, npm_mode: false };
+    let prog = lower_ts::lower(ir, &opts);
+    render_js::render(&prog)
 }
 
 /// Output from the npm package emitter.
 pub struct NpmOutput {
-    /// `index.js` — ESM user code with runtime imports and exports.
     pub index_js: String,
-    /// `index.d.ts` — TypeScript type declarations for public functions.
     pub index_dts: String,
-    /// Runtime files: `(relative_path, content)` pairs (e.g. `("_runtime/list.js", "...")`)
     pub runtime_files: Vec<(String, String)>,
-    /// `package.json` content.
     pub package_json: String,
 }
 
@@ -116,64 +55,52 @@ pub struct NpmConfig {
 }
 
 /// Emit an npm-publishable package from an Almide program.
-pub fn emit_npm_package(program: &Program, modules: &[(String, Program)], config: &NpmConfig) -> NpmOutput {
+pub fn emit_npm_package(ir: &IrProgram, config: &NpmConfig) -> NpmOutput {
     use crate::emit_ts_runtime;
 
-    let mut emitter = TsEmitter::new();
-    emitter.js_mode = true;
-    emitter.npm_mode = true;
-    emitter.emit_npm_program(program, modules);
-    let user_code = std::mem::take(&mut emitter.out);
+    let opts = lower_ts::LowerOpts { js_mode: true, npm_mode: true };
+    let prog = lower_ts::lower(ir, &opts);
+    let rendered = render_npm::render(&prog);
 
-    let used = emitter.used_stdlib.borrow();
-
-    // Post-process: rename __almd_X → __X in user code for cleaner output.
-    // Safe because __almd_ prefix is compiler-generated and never appears in user identifiers.
-    let mut clean_code = user_code;
-    for mod_name in used.iter() {
-        clean_code = clean_code.replace(
-            &format!("__almd_{}", mod_name),
-            &format!("__{}", mod_name),
-        );
+    // Post-process: rename __almd_X → __X for cleaner output
+    let mut clean_code = rendered.code;
+    let used_modules = detect_used_stdlib(&clean_code);
+    for mod_name in &used_modules {
+        clean_code = clean_code.replace(&format!("__almd_{}", mod_name), &format!("__{}", mod_name));
     }
 
-    // Build import preamble with aliased imports: __almd_X as __X
+    // Build import preamble
     let mut imports = String::new();
     imports.push_str("import { __bigop, __div, __deep_eq, __concat, __throw, println, eprintln, assert_eq, assert_ne, assert, unwrap_or, __assert_throws } from \"./_runtime/helpers.js\";\n");
-    let mut sorted_modules: Vec<&String> = used.iter().collect();
-    sorted_modules.sort();
-    for mod_name in &sorted_modules {
-        imports.push_str(&format!(
-            "import {{ __almd_{name} as __{name} }} from \"./_runtime/{name}.js\";\n",
-            name = mod_name
-        ));
+    for mod_name in &used_modules {
+        imports.push_str(&format!("import {{ __almd_{name} as __{name} }} from \"./_runtime/{name}.js\";\n", name = mod_name));
     }
     imports.push('\n');
 
-    let index_js = format!("{}{}", imports, clean_code);
+    // Exports
+    let mut exports = Vec::new();
+    for name in &rendered.public_fns {
+        let clean = crate::emit_common::to_clean_export_name(name);
+        if clean == *name { exports.push(name.clone()); }
+        else { exports.push(format!("{} as {}", name, clean)); }
+    }
+    for name in &rendered.public_variants { exports.push(name.clone()); }
+    let export_line = if exports.is_empty() { String::new() }
+        else { format!("export {{ {} }};\n", exports.join(", ")) };
 
-    // Generate index.d.ts
-    let index_dts = emitter.generate_dts(program);
+    let index_js = format!("{}{}{}", imports, clean_code, export_line);
+    let index_dts = generate_dts(ir);
 
-    // Generate runtime files
+    // Runtime files
     let mut runtime_files = Vec::new();
-
-    // helpers.js
-    let helpers_src = emit_ts_runtime::get_helpers_source(true);
-    let helpers_esm = convert_helpers_to_esm(helpers_src);
-    runtime_files.push(("_runtime/helpers.js".to_string(), helpers_esm));
-
-    // Individual stdlib modules
-    for mod_name in &sorted_modules {
+    runtime_files.push(("_runtime/helpers.js".into(), convert_helpers_to_esm(emit_ts_runtime::get_helpers_source(true))));
+    for mod_name in &used_modules {
         if let Some(src) = emit_ts_runtime::get_module_source(mod_name, true) {
-            let esm_src = convert_module_to_esm(mod_name, src);
-            runtime_files.push((format!("_runtime/{}.js", mod_name), esm_src));
+            runtime_files.push((format!("_runtime/{}.js", mod_name), convert_module_to_esm(mod_name, src)));
         }
     }
 
-    // package.json
-    let package_json = format!(
-        r#"{{
+    let package_json = format!(r#"{{
   "name": "{}",
   "version": "{}",
   "type": "module",
@@ -189,40 +116,105 @@ pub fn emit_npm_package(program: &Program, modules: &[(String, Program)], config
     "node": ">=22"
   }}
 }}
-"#,
-        config.name, config.version
-    );
+"#, config.name, config.version);
 
-    NpmOutput {
-        index_js,
-        index_dts,
-        runtime_files,
-        package_json,
+    NpmOutput { index_js, index_dts, runtime_files, package_json }
+}
+
+// ── .d.ts generation ─────────────────────────────────────────────
+
+fn generate_dts(ir: &IrProgram) -> String {
+    let mut dts = String::new();
+    for func in &ir.functions {
+        if func.visibility != IrVisibility::Public { continue; }
+        let sname = crate::emit_common::sanitize(&func.name);
+        let clean = crate::emit_common::to_clean_export_name(&sname);
+        let ps: Vec<String> = func.params.iter()
+            .filter(|p| p.name != "self")
+            .map(|p| format!("{}: {}", crate::emit_common::to_clean_export_name(&crate::emit_common::sanitize(&p.name)), ty_to_ts(&p.ty)))
+            .collect();
+        let ret = ty_to_ts(&func.ret_ty);
+        let ret_str = if func.is_async { format!("Promise<{}>", ret) } else { ret };
+        dts.push_str(&format!("export declare function {}({}): {};\n", clean, ps.join(", "), ret_str));
+    }
+    for td in &ir.type_decls {
+        if td.visibility != IrVisibility::Public { continue; }
+        match &td.kind {
+            IrTypeDeclKind::Record { fields } => {
+                let fs: Vec<String> = fields.iter().map(|f| format!("  {}: {};", f.name, ty_to_ts(&f.ty))).collect();
+                dts.push_str(&format!("export interface {} {{\n{}\n}}\n", td.name, fs.join("\n")));
+            }
+            IrTypeDeclKind::Alias { target } => {
+                if let Ty::OpenRecord { fields, .. } = target {
+                    let fs: Vec<String> = fields.iter().map(|(n, t)| format!("  {}: {};", n, ty_to_ts(t))).collect();
+                    dts.push_str(&format!("export interface {} {{\n{}\n}}\n", td.name, fs.join("\n")));
+                } else { dts.push_str(&format!("export type {} = {};\n", td.name, ty_to_ts(target))); }
+            }
+            IrTypeDeclKind::Variant { cases, .. } => {
+                for case in cases {
+                    let tag = format!("tag: \"{}\"", case.name);
+                    match &case.kind {
+                        IrVariantKind::Unit => dts.push_str(&format!("export declare const {}: {{ {} }};\n", case.name, tag)),
+                        IrVariantKind::Tuple { fields } => {
+                            let ps: Vec<String> = fields.iter().enumerate().map(|(i, f)| format!("_{}: {}", i, ty_to_ts(f))).collect();
+                            let rf: Vec<String> = std::iter::once(tag.clone()).chain(fields.iter().enumerate().map(|(i, f)| format!("_{}: {}", i, ty_to_ts(f)))).collect();
+                            dts.push_str(&format!("export declare function {}({}): {{ {} }};\n", case.name, ps.join(", "), rf.join(", ")));
+                        }
+                        IrVariantKind::Record { fields } => {
+                            let ps: Vec<String> = fields.iter().map(|f| format!("{}: {}", f.name, ty_to_ts(&f.ty))).collect();
+                            let rf: Vec<String> = std::iter::once(tag.clone()).chain(fields.iter().map(|f| format!("{}: {}", f.name, ty_to_ts(&f.ty)))).collect();
+                            dts.push_str(&format!("export declare function {}({}): {{ {} }};\n", case.name, ps.join(", "), rf.join(", ")));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    dts
+}
+
+fn ty_to_ts(ty: &Ty) -> String {
+    match ty {
+        Ty::Int | Ty::Float => "number".into(), Ty::String => "string".into(),
+        Ty::Bool => "boolean".into(), Ty::Unit => "void".into(),
+        Ty::List(inner) => format!("{}[]", ty_to_ts(inner)),
+        Ty::Map(k, v) => format!("Map<{}, {}>", ty_to_ts(k), ty_to_ts(v)),
+        Ty::Option(inner) => format!("{} | null", ty_to_ts(inner)),
+        Ty::Result(ok, _) => ty_to_ts(ok),
+        Ty::Tuple(es) => format!("[{}]", es.iter().map(|e| ty_to_ts(e)).collect::<Vec<_>>().join(", ")),
+        Ty::Fn { params, ret } => format!("({}) => {}", params.iter().enumerate().map(|(i, p)| format!("_{}: {}", i, ty_to_ts(p))).collect::<Vec<_>>().join(", "), ty_to_ts(ret)),
+        Ty::Record { fields } | Ty::OpenRecord { fields, .. } => format!("{{ {} }}", fields.iter().map(|(n, t)| format!("{}: {}", n, ty_to_ts(t))).collect::<Vec<_>>().join(", ")),
+        Ty::Named(name, _) => match name.as_str() { "Path" => "string".into(), o => o.into() },
+        Ty::TypeVar(name) => name.clone(), Ty::Unknown => "any".into(),
+        Ty::Union(ms) => ms.iter().map(|m| ty_to_ts(m)).collect::<Vec<_>>().join(" | "),
+        Ty::Variant { name, .. } => name.clone(),
     }
 }
 
-/// Convert a `const __almd_X = { ... };` block to an ESM export.
+// ── Utilities ────────────────────────────────────────────────────
+
+fn detect_used_stdlib(code: &str) -> Vec<String> {
+    let mut used = std::collections::HashSet::new();
+    let prefix = "__almd_";
+    let mut start = 0;
+    while let Some(pos) = code[start..].find(prefix) {
+        let abs = start + pos + prefix.len();
+        let end = code[abs..].find(|c: char| !c.is_alphanumeric() && c != '_').map(|e| abs + e).unwrap_or(code.len());
+        let name = &code[abs..end];
+        if !name.is_empty() { used.insert(name.to_string()); }
+        start = end;
+    }
+    let mut sorted: Vec<String> = used.into_iter().collect();
+    sorted.sort(); sorted
+}
+
 fn convert_module_to_esm(name: &str, src: &str) -> String {
-    // The source starts with `const __almd_X = {` — replace `const` with `export const`
     let prefix = format!("const __almd_{}", name);
-    if let Some(rest) = src.strip_prefix(&prefix) {
-        format!("export const __almd_{}{}", name, rest)
-    } else {
-        format!("export {}", src)
-    }
+    src.strip_prefix(&prefix).map(|rest| format!("export const __almd_{}{}", name, rest)).unwrap_or_else(|| format!("export {}", src))
 }
 
-/// Convert helper functions to ESM exports.
 fn convert_helpers_to_esm(src: &str) -> String {
     let mut out = String::with_capacity(src.len() + 200);
-    for line in src.lines() {
-        if line.starts_with("function ") {
-            out.push_str("export ");
-            out.push_str(line);
-        } else {
-            out.push_str(line);
-        }
-        out.push('\n');
-    }
+    for line in src.lines() { if line.starts_with("function ") { out.push_str("export "); } out.push_str(line); out.push('\n'); }
     out
 }

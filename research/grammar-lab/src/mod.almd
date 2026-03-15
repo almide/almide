@@ -339,17 +339,17 @@ fn transpile(code: String, mode: String) -> String =
   if mode == "" then {
     code
   } else if mode == "paren-to-fn-lambda" then {
-    // Transform (params) => to fn(params) =>
+    // Transform (params) => to (params) =>
     // Strategy: find ") =>" and look backwards for matching "("
     // If not preceded by "fn", insert "fn"
     let lines = string.split(code, "\n")
-    let converted = list.map(lines, fn(line) => transpile_line_paren_to_fn(line))
+    let converted = list.map(lines, (line) => transpile_line_paren_to_(line))
     string.join(converted, "\n")
   } else {
     code
   }
 
-fn transpile_line_paren_to_fn(line: String) -> String = {
+fn transpile_line_paren_to_(line: String) -> String = {
   // Generic approach: find ") =>" and look backwards for matching "("
   // If "(" is not preceded by "fn" or a keyword, insert "fn"
   // Handles any parameter names without enumeration
@@ -478,13 +478,13 @@ effect fn evaluate(code: String, test_code: String, task_name: String) -> EvalRe
 
 fn count_passed(results: List[Json], model_name: String, variant_name: String) -> (Int, Int) = {
   let matching = results
-    |> list.filter(fn(r) =>
+    |> list.filter((r) =>
       json.get_string(r, "model").unwrap_or("") == model_name
       and json.get_string(r, "variant").unwrap_or("") == variant_name
     )
   let total = list.len(matching)
   let passed = matching
-    |> list.filter(fn(r) => json.get_bool(r, "tests_passed").unwrap_or(false))
+    |> list.filter((r) => json.get_bool(r, "tests_passed").unwrap_or(false))
     |> list.len()
   (passed, total)
 }
@@ -496,7 +496,7 @@ fn format_cell(passed: Int, total: Int) -> String = {
 
 fn build_row(results: List[Json], model_name: String, variants: List[String]) -> String = {
   // Build cells first to avoid ownership issues with model_name
-  let cells = list.map(variants, fn(v) => {
+  let cells = list.map(variants, (v) => {
     let (passed, total) = count_passed(results, model_name, v)
     string.pad_right(format_cell(passed, total), 20, " ")
   })
@@ -506,20 +506,20 @@ fn build_row(results: List[Json], model_name: String, variants: List[String]) ->
 
 fn count_passed_task(results: List[Json], model_name: String, variant_name: String, task_name: String) -> (Int, Int) = {
   let matching = results
-    |> list.filter(fn(r) =>
+    |> list.filter((r) =>
       json.get_string(r, "model").unwrap_or("") == model_name
       and json.get_string(r, "variant").unwrap_or("") == variant_name
       and json.get_string(r, "task").unwrap_or("") == task_name
     )
   let total = list.len(matching)
   let passed = matching
-    |> list.filter(fn(r) => json.get_bool(r, "tests_passed").unwrap_or(false))
+    |> list.filter((r) => json.get_bool(r, "tests_passed").unwrap_or(false))
     |> list.len()
   (passed, total)
 }
 
 fn build_task_row(results: List[Json], model_name: String, task_name: String, variants: List[String]) -> String = {
-  let cells = list.map(variants, fn(v) => {
+  let cells = list.map(variants, (v) => {
     let (passed, total) = count_passed_task(results, model_name, v, task_name)
     string.pad_right(format_cell(passed, total), 20, " ")
   })
@@ -532,15 +532,15 @@ effect fn print_summary(results: List[Json]) -> Unit = {
   println("")
 
   let models = results
-    |> list.map(fn(r) => json.get_string(r, "model").unwrap_or(""))
+    |> list.map((r) => json.get_string(r, "model").unwrap_or(""))
     |> list.unique()
 
   let variants = results
-    |> list.map(fn(r) => json.get_string(r, "variant").unwrap_or(""))
+    |> list.map((r) => json.get_string(r, "variant").unwrap_or(""))
     |> list.unique()
 
   let tasks = results
-    |> list.map(fn(r) => json.get_string(r, "task").unwrap_or(""))
+    |> list.map((r) => json.get_string(r, "task").unwrap_or(""))
     |> list.unique()
 
   let variant_names = variants
@@ -558,7 +558,7 @@ effect fn print_summary(results: List[Json]) -> Unit = {
     println(header)
 
     // Total row
-    let total_cells = list.map(variant_names, fn(v) => {
+    let total_cells = list.map(variant_names, (v) => {
       let (passed, total) = count_passed(results, model_name, v)
       string.pad_right(format_cell(passed, total), 20, " ")
     })
@@ -655,7 +655,7 @@ fn make_result_json(experiment: String, variant: String, model: String, task: St
 // ── CLI Helpers ──
 
 fn parse_cli_string(args_list: List[String], flag: String, default: String) -> String = {
-  let idx = list.find_index(args_list, fn(a) => a == flag)
+  let idx = list.find_index(args_list, (a) => a == flag)
   match idx {
     some(i) => match list.get(args_list, i + 1) {
       some(v) => v,

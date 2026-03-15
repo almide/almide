@@ -5,7 +5,7 @@
 fn zip_with_index[A, B](xs: List[A], ys: List[B]) -> List[(Int, A, B)] = {
   let pairs = list.zip(xs, ys)
   let indexed = list.enumerate(pairs)
-  list.map(indexed, fn(entry) => {
+  list.map(indexed, (entry) => {
     let (i, pair) = entry
     let (a, b) = pair
     (i, a, b)
@@ -21,11 +21,11 @@ test "generic fn with multiple type params and tuple construction" {
 
 // ── Generic function returning generic function ──
 
-fn make_mapper[A, B](f: fn(A) -> B) -> fn(List[A]) -> List[B] =
-  fn(xs) => list.map(xs, f)
+fn make_mapper[A, B](f: (A) -> B) -> (List[A]) -> List[B] =
+  (xs) => list.map(xs, f)
 
 test "generic fn returning generic fn" {
-  let int_to_str = make_mapper[Int, String](fn(x) => int.to_string(x))
+  let int_to_str = make_mapper[Int, String]((x) => int.to_string(x))
   assert_eq(int_to_str([1, 2, 3]), ["1", "2", "3"])
 }
 
@@ -36,14 +36,14 @@ type Wrapper[T] = { value: T, label: String }
 fn wrap[T](label: String, value: T) -> Wrapper[T] =
   { value: value, label: label }
 
-fn map_wrapper[A, B](w: Wrapper[A], f: fn(A) -> B) -> Wrapper[B] =
+fn map_wrapper[A, B](w: Wrapper[A], f: (A) -> B) -> Wrapper[B] =
   { value: f(w.value), label: w.label }
 
 fn unwrap[T](w: Wrapper[T]) -> T = w.value
 
 test "generic record type with map operation" {
   let w = wrap("num", 42)
-  let w2 = map_wrapper(w, fn(x) => int.to_string(x))
+  let w2 = map_wrapper(w, (x) => int.to_string(x))
   assert_eq(w2.value, "42")
   assert_eq(w2.label, "num")
 }
@@ -51,8 +51,8 @@ test "generic record type with map operation" {
 test "chained generic operations on wrapper" {
   let w = wrap("val", 5)
   let result = w
-    |> map_wrapper(fn(x) => x * 10)
-    |> map_wrapper(fn(x) => x + 1)
+    |> map_wrapper((x) => x * 10)
+    |> map_wrapper((x) => x + 1)
     |> unwrap()
   assert_eq(result, 51)
 }
@@ -64,7 +64,7 @@ type Result2[A, B] =
   | Second(B)
   | Neither
 
-fn merge_result2[A, B](r: Result2[A, B], fa: fn(A) -> String, fb: fn(B) -> String) -> String =
+fn merge_result2[A, B](r: Result2[A, B], fa: (A) -> String, fb: (B) -> String) -> String =
   match r {
     First(a) => fa(a),
     Second(b) => fb(b),
@@ -75,9 +75,9 @@ test "generic variant with multiple type params" {
   let r1: Result2[Int, String] = First(42)
   let r2: Result2[Int, String] = Second("hello")
   let r3: Result2[Int, String] = Neither
-  assert_eq(merge_result2(r1, fn(x) => int.to_string(x), fn(s) => s), "42")
-  assert_eq(merge_result2(r2, fn(x) => int.to_string(x), fn(s) => s), "hello")
-  assert_eq(merge_result2(r3, fn(x) => int.to_string(x), fn(s) => s), "neither")
+  assert_eq(merge_result2(r1, (x) => int.to_string(x), (s) => s), "42")
+  assert_eq(merge_result2(r2, (x) => int.to_string(x), (s) => s), "hello")
+  assert_eq(merge_result2(r3, (x) => int.to_string(x), (s) => s), "neither")
 }
 
 // ── Explicit turbofish on nested generic calls ──
@@ -122,7 +122,7 @@ test "none to result gives err" {
 // ── Generic function used with list of options ──
 
 fn collect_some[T](xs: List[Option[T]]) -> List[T] =
-  list.filter_map(xs, fn(x) => x)
+  list.filter_map(xs, (x) => x)
 
 test "collect_some generic" {
   let xs: List[Option[Int]] = [some(1), none, some(3), none, some(5)]

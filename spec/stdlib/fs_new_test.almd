@@ -16,5 +16,5 @@ test "fs.remove_all" {
   fs.mkdir_p(dir ++ "/sub")
   fs.write(dir ++ "/sub/f.txt", "x")
   fs.remove_all(dir)
-  assert_eq(fs.exists?(dir), false)
+  assert_eq(fs.exists(dir), false)
 }

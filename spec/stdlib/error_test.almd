@@ -1,0 +1,41 @@
+// error module tests
+import error
+
+// ── chain ──
+
+test "error.chain combines messages" {
+  let msg = error.chain("reading config", "file not found")
+  assert_eq(msg, "reading config: file not found")
+}
+
+test "error.chain nested" {
+  let inner = error.chain("parse failed", "invalid JSON")
+  let outer = error.chain("loading settings", inner)
+  assert_eq(outer, "loading settings: parse failed: invalid JSON")
+}
+
+// ── context ──
+
+test "error.context on ok passes through" {
+  let r = ok(42)
+  let r2 = error.context(r, "should not appear")
+  assert_eq(r2, ok(42))
+}
+
+test "error.context on err adds context" {
+  let r: Result[Int, String] = err("not found")
+  let r2 = error.context(r, "reading config")
+  assert_eq(r2, err("reading config: not found"))
+}
+
+// ── message ──
+
+test "error.message on err returns message" {
+  let r: Result[Int, String] = err("something broke")
+  assert_eq(error.message(r), "something broke")
+}
+
+test "error.message on ok returns empty" {
+  let r: Result[Int, String] = ok(42)
+  assert_eq(error.message(r), "")
+}

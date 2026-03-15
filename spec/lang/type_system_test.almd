@@ -99,7 +99,7 @@ type Maybe[T] =
   | Just(T)
   | Nothing
 
-fn maybe_map[A, B](m: Maybe[A], f: fn(A) -> B) -> Maybe[B] =
+fn maybe_map[A, B](m: Maybe[A], f: (A) -> B) -> Maybe[B] =
   match m {
     Just(v) => Just(f(v)),
     Nothing => Nothing,
@@ -107,7 +107,7 @@ fn maybe_map[A, B](m: Maybe[A], f: fn(A) -> B) -> Maybe[B] =
 
 test "generic variant Just and Nothing" {
   let x = Just(42)
-  let y = Nothing[Int]()
+  let y: Maybe[Int] = Nothing()
   match x {
     Just(v) => assert_eq(v, 42),
     Nothing => assert(false, "expected Just"),
@@ -120,7 +120,7 @@ test "generic variant Just and Nothing" {
 
 test "generic variant map" {
   let m = Just(5)
-  let doubled = maybe_map(m, fn(x: Int) => x * 2)
+  let doubled = maybe_map(m, (x: Int) => x * 2)
   match doubled {
     Just(v) => assert_eq(v, 10),
     Nothing => assert(false, "expected Just"),
@@ -142,7 +142,7 @@ test "comparison on type variable" {
 type Point = { x: Float, y: Float }
 
 fn distance(a: Point, b: Point) -> Float =
-  float.sqrt((b.x - a.x) ^ 2.0 + (b.y - a.y) ^ 2.0)
+  float.sqrt((b.x - a.x) ** 2.0 + (b.y - a.y) ** 2.0)
 
 test "named record type" {
   let p: Point = { x: 0.0, y: 0.0 }
@@ -168,14 +168,14 @@ test "Result type" {
 
 // ── Function types ──
 
-fn apply(f: fn(Int) -> Int, x: Int) -> Int = f(x)
+fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)
 
 test "function type as parameter" {
-  let result = apply(fn(x) => x * 3, 10)
+  let result = apply((x) => x * 3, 10)
   assert_eq(result, 30)
 }
 
-fn make_adder(n: Int) -> fn(Int) -> Int = fn(x) => x + n
+fn make_adder(n: Int) -> (Int) -> Int = (x) => x + n
 
 test "function type as return" {
   let add5 = make_adder(5)
@@ -212,7 +212,7 @@ test "generic wrap and unwrap" {
   assert_eq(unwrap_or[Int](none, 99), 99)
 }
 
-fn map_result[A, B](r: Result[A, String], f: fn(A) -> B) -> Result[B, String] =
+fn map_result[A, B](r: Result[A, String], f: (A) -> B) -> Result[B, String] =
   match r {
     ok(v) => ok(f(v)),
     err(e) => err(e),
@@ -220,11 +220,17 @@ fn map_result[A, B](r: Result[A, String], f: fn(A) -> B) -> Result[B, String] =
 
 test "generic result mapping" {
   let r: Result[Int, String] = ok(5)
-  let mapped = map_result(r, fn(x) => x * 2)
-  assert_eq(mapped, ok(10))
+  let mapped = map_result(r, (x) => x * 2)
+  match mapped {
+    ok(v) => assert_eq(v, 10),
+    err(_) => assert(false, "expected ok"),
+  }
   let e: Result[Int, String] = err("fail")
-  let mapped2 = map_result(e, fn(x) => x * 2)
-  assert_eq(mapped2, err("fail"))
+  let mapped2 = map_result(e, (x) => x * 2)
+  match mapped2 {
+    ok(_) => assert(false, "expected err"),
+    err(msg) => assert_eq(msg, "fail"),
+  }
 }
 
 type Tree[T] =
@@ -243,7 +249,7 @@ test "generic variant type" {
   assert_eq(tree_value(t2), "root")
 }
 
-fn option_chain[A, B](opt: Option[A], f: fn(A) -> Option[B]) -> Option[B] =
+fn option_chain[A, B](opt: Option[A], f: (A) -> Option[B]) -> Option[B] =
   match opt {
     some(v) => f(v),
     none => none,
@@ -251,12 +257,12 @@ fn option_chain[A, B](opt: Option[A], f: fn(A) -> Option[B]) -> Option[B] =
 
 test "option chaining" {
   let x = some(10)
-  let result = option_chain(x, fn(n) => if n > 5 then some(n * 2) else none)
+  let result = option_chain(x, (n) => if n > 5 then some(n * 2) else none)
   assert_eq(result, some(20))
-  let result2 = option_chain(x, fn(n) => if n > 20 then some(n * 2) else none)
+  let result2 = option_chain(x, (n) => if n > 20 then some(n * 2) else none)
   assert_eq(result2, none)
   let empty: Option[Int] = none
-  let result3 = option_chain(empty, fn(n) => some(n * 2))
+  let result3 = option_chain(empty, (n) => some(n * 2))
   assert_eq(result3, none)
 }
 
@@ -281,7 +287,7 @@ type Either[A, B] =
   | Left(A)
   | Right(B)
 
-fn either_map_right[A, B, C](e: Either[A, B], f: fn(B) -> C) -> Either[A, C] =
+fn either_map_right[A, B, C](e: Either[A, B], f: (B) -> C) -> Either[A, C] =
   match e {
     Left(a) => Left(a),
     Right(b) => Right(f(b)),
@@ -292,7 +298,7 @@ fn make_left(s: String) -> Either[String, Int] = Left(s)
 
 test "generic variant with map right" {
   let e1 = make_right(5)
-  let mapped = either_map_right(e1, fn(x) => x * 10)
+  let mapped = either_map_right(e1, (x) => x * 10)
   let r1 = match mapped {
     Right(v) => v,
     Left(_) => -1,
@@ -302,7 +308,7 @@ test "generic variant with map right" {
 
 test "generic variant with map left" {
   let e2 = make_left("error")
-  let mapped2 = either_map_right(e2, fn(x) => x * 10)
+  let mapped2 = either_map_right(e2, (x) => x * 10)
   let r2 = match mapped2 {
     Left(s) => s,
     Right(_) => "unexpected",
@@ -341,7 +347,7 @@ test "stack push and peek multiple" {
 
 test "maybe map chain" {
   let m = Just(3)
-  let result = maybe_map(maybe_map(m, fn(x: Int) => x + 1), fn(x: Int) => x * 10)
+  let result = maybe_map(maybe_map(m, (x: Int) => x + 1), (x: Int) => x * 10)
   match result {
     Just(v) => assert_eq(v, 40),
     Nothing => assert(false, "expected Just"),

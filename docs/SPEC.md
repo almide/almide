@@ -123,9 +123,9 @@ In the following cases, a newline is ignored and the statement continues on the 
 
 ```
 let result = items
-  .filter(fn(x) => x > 0)
-  .map(fn(x) => x * 2)
-  .fold(0, fn(acc, x) => acc + x)
+  .filter((x) => x > 0)
+  .map((x) => x * 2)
+  .fold(0, (acc, x) => acc + x)
 
 text
   |> string.trim
@@ -460,7 +460,7 @@ When the `effect` keyword precedes a function declaration, it indicates that the
 
 ```
 fn tracked?(index: Index, path: Path) -> Bool =
-  index.entries.any(fn(entry) => entry.path == path)
+  index.entries.any((entry) => entry.path == path)
 
 effect fn add(index: Index, file: Path) -> Result[Index, IoError] =
   if tracked?(index, file) then ok(index)
@@ -658,9 +658,9 @@ LambdaExpr ::= "fn" "(" LambdaParamList? ")" "=>" Expr
 **Only one form. Shorthand notations are prohibited.**
 
 ```
-fn(x) => x + 1
-fn(x: Int, y: Int) => x + y
-items.map(fn(x) => x * 2)
+(x) => x + 1
+(x: Int, y: Int) => x + y
+items.map((x) => x * 2)
 ```
 
 ### 10.5 Named Arguments
@@ -765,7 +765,7 @@ Examples:
 text
   |> string.trim
   |> string.split(",")
-  |> list.map(fn(s) => string.trim(s))
+  |> list.map((s) => string.trim(s))
 ```
 
 Canonicalizes the problem of mixing method chaining and function calls using pipes. `x |> f` is equivalent to `f(x)`.
@@ -776,7 +776,7 @@ When using multi-argument functions on the right side of a pipe, `_` specifies w
 
 ```
 text |> split(_, ",")           // split(text, ",")
-xs |> filter(_, fn(x) => x > 0)  // filter(xs, fn(x) => x > 0)
+xs |> filter(_, (x) => x > 0)  // filter(xs, (x) => x > 0)
 ```
 
 - `_` functions as a placeholder only within call arguments

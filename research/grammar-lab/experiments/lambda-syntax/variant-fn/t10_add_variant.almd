@@ -16,13 +16,13 @@ fn describe(e: Expr) -> String = match e {
 }
 
 fn eval_all(exprs: List[Expr]) -> List[Int] =
-  exprs |> list.map(fn(e) => eval(e))
+  exprs |> list.map((e) => eval(e))
 
 fn describe_all(exprs: List[Expr]) -> List[String] =
-  exprs |> list.map(fn(e) => describe(e))
+  exprs |> list.map((e) => describe(e))
 
 fn sum_all(exprs: List[Expr]) -> Int =
-  exprs |> list.fold(0, fn(acc, e) => acc + eval(e))
+  exprs |> list.fold(0, (acc, e) => acc + eval(e))
 
 fn find_positives(exprs: List[Expr]) -> List[Expr] =
-  exprs |> list.filter(fn(e) => eval(e) > 0)
+  exprs |> list.filter((e) => eval(e) > 0)

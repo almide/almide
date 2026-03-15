@@ -1,0 +1,26 @@
+module syntax_test
+
+/* Block comment */
+
+/*
+  Multi-line
+  block comment
+*/
+
+fn main() -> Unit = {
+  /* inline */ let x = 42
+  let path = r"C:\Users\test\file.txt"
+  let regex = r"^\d{3}-\d{4}$"
+  println(path)
+  println(regex)
+}
+
+test "raw strings" {
+  let s = r"hello\nworld"
+  assert_eq(s, "hello\\nworld")
+}
+
+test "block comments" {
+  let x = 1 /* + 2 */ + 3
+  assert_eq(x, 4)
+}

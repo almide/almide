@@ -41,8 +41,10 @@ effect fn add_parsed(a: String, b: String) -> Result[Int, String] = {
 }
 
 test "effect fn auto unwrap ok" {
-  let result = add_parsed("10", "20")
-  assert_eq(result, ok(30))
+  match add_parsed("10", "20") {
+    ok(v) => assert_eq(v, 30),
+    err(_) => assert(false, "expected ok"),
+  }
 }
 
 test "effect fn propagates err" {
@@ -79,8 +81,10 @@ test "effect fn chain err from first" {
 }
 
 test "effect fn chain err from second" {
-  let result = double_positive("-3")
-  assert_eq(result, err("must be positive"))
+  match double_positive("-3") {
+    ok(_) => assert(false, "expected err"),
+    err(e) => assert_eq(e, "must be positive"),
+  }
 }
 
 // ── do block with guard ──

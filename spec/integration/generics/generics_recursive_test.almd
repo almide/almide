@@ -16,7 +16,7 @@ fn tree_size[T](t: Tree[T]) -> Int =
     Node(left, right) => tree_size(left) + tree_size(right)
   }
 
-fn tree_map[A, B](t: Tree[A], f: fn(A) -> B) -> Tree[B] =
+fn tree_map[A, B](t: Tree[A], f: (A) -> B) -> Tree[B] =
   match t {
     Leaf(v) => Leaf(f(v))
     Node(left, right) => Node(tree_map(left, f), tree_map(right, f))
@@ -39,6 +39,6 @@ fn main() -> Unit = {
   println("test 4: " ++ int.to_string(tree_size(t3)))
 
   // Test 5: tree_map
-  let t4 = tree_map(t2, fn(x: Int) => x * 10)
+  let t4 = tree_map(t2, (x: Int) => x * 10)
   println("test 5: " ++ int.to_string(tree_sum(t4)))
 }

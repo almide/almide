@@ -37,7 +37,7 @@ test "multi-line list literal" {
     5
   ]
   assert_eq(list.len(xs), 5)
-  assert_eq(list.fold(xs, 0, fn(acc, x) => acc + x), 15)
+  assert_eq(list.fold(xs, 0, (acc, x) => acc + x), 15)
 }
 
 // --- Nested multi-line ---
@@ -63,7 +63,7 @@ test "nested multi-line parens and brackets" {
       6
     )
   ]
-  assert_eq(list.fold(xs, 0, fn(acc, x) => acc + x), 21)
+  assert_eq(list.fold(xs, 0, (acc, x) => acc + x), 21)
 }
 
 // --- Leading binary operator continuation ---

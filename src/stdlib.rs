@@ -2,10 +2,21 @@
 /// Both the type checker (check.rs) and code generator (emit_rust.rs) reference this module
 /// to avoid duplicating function signatures, module lists, and UFCS mappings.
 
-use crate::types::{Ty, FnSig};
+use crate::types::FnSig;
 
 /// All built-in stdlib module names (hardcoded in the compiler).
-pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "http", "process", "math", "random", "regex", "io", "result"];
+pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "http", "process", "math", "random", "regex", "io", "result", "error", "datetime", "testing", "crypto", "uuid", "log", "value"];
+
+/// Prelude modules: automatically available without explicit `import`.
+/// These are core modules that virtually every program needs.
+pub const PRELUDE_MODULES: &[&str] = &[
+    "string", "list", "int", "float", "math", "map", "result", "option", "value",
+];
+
+/// Check if a module name is a prelude module (auto-imported).
+pub fn is_prelude_module(name: &str) -> bool {
+    PRELUDE_MODULES.contains(&name)
+}
 
 /// Check if a module name is a hardcoded stdlib module.
 pub fn is_stdlib_module(name: &str) -> bool {
@@ -22,6 +33,31 @@ pub fn get_bundled_source(name: &str) -> Option<&'static str> {
         "encoding" => Some(include_str!("../stdlib/encoding.almd")),
         "hash" => Some(include_str!("../stdlib/hash.almd")),
         "term" => Some(include_str!("../stdlib/term.almd")),
+        "url" => Some(include_str!("../stdlib/url.almd")),
+        "toml" => Some(include_str!("../stdlib/toml.almd")),
+        "csv" => Some(include_str!("../stdlib/csv.almd")),
+        "compress" => Some(include_str!("../stdlib/compress.almd")),
+        "value" => Some(include_str!("../stdlib/value.almd")),
+        _ => None,
+    }
+}
+
+/// Get the extern.rs source for a core stdlib module (compiled into the binary).
+pub fn get_core_extern_rs(name: &str) -> Option<&'static str> {
+    match name {
+        "int" => Some(include_str!("../stdlib/core/int/extern.rs")),
+        "string" => Some(include_str!("../stdlib/core/string/extern.rs")),
+        "list" => Some(include_str!("../stdlib/core/list/extern.rs")),
+        _ => None,
+    }
+}
+
+/// Get the .almd source for a core v2 stdlib module.
+pub fn get_core_source(name: &str) -> Option<&'static str> {
+    match name {
+        "int" => Some(include_str!("../stdlib/core/int/mod.almd")),
+        "string" => Some(include_str!("../stdlib/core/string/mod.almd")),
+        "list" => Some(include_str!("../stdlib/core/list/mod.almd")),
         _ => None,
     }
 }
@@ -53,15 +89,13 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
     match method {
         // ── string-only ──
         "trim" | "split" | "pad_left"
-        | "starts_with" | "starts_with_hdlm_qm_" | "starts_with?"
-        | "ends_with" | "ends_with_hdlm_qm_" | "ends_with?"
+        | "starts_with" | "ends_with"
         | "to_bytes" | "to_upper" | "to_lower" | "capitalize"
         | "to_int" | "replace" | "char_at" | "lines"
         | "chars" | "repeat" | "from_bytes"
-        | "is_digit?" | "is_digit_hdlm_qm_"
-        | "is_alpha?" | "is_alpha_hdlm_qm_"
-        | "is_alphanumeric?" | "is_alphanumeric_hdlm_qm_"
-        | "is_whitespace?" | "is_whitespace_hdlm_qm_"
+        | "is_digit" | "is_alpha" | "is_alphanumeric"
+        | "is_whitespace" | "is_upper" | "is_lower"
+        | "codepoint" | "from_codepoint" | "char_count"
         | "pad_right" | "trim_start" | "trim_end"
         | "strip_prefix" | "strip_suffix"
         | "replace_first" | "last_index_of" => vec!["string"],
@@ -87,14 +121,18 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
 
         // ── float-only ──
         "to_fixed" | "round" | "floor" | "ceil" | "sqrt"
-        | "is_nan?" | "is_nan_hdlm_qm_"
-        | "is_infinite?" | "is_infinite_hdlm_qm_" => vec!["float"],
+        | "is_nan" | "is_infinite" => vec!["float"],
 
         // ── result-only ──
         "map_err" | "and_then" | "unwrap_or" | "unwrap_or_else"
-        | "is_ok?" | "is_ok_hdlm_qm_"
-        | "is_err?" | "is_err_hdlm_qm_"
+        | "is_ok" | "is_err"
         | "to_err_option" => vec!["result"],
+
+        // ── error-only ──
+        "context" => vec!["error"],
+
+        // ── datetime-only ──
+        "is_before" | "is_after" => vec!["datetime"],
 
         // ── ambiguous: string + list ──
         "reverse" => vec!["string", "list"],
@@ -105,8 +143,8 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
 
         // ── ambiguous: string + list + map ──
         "len" => vec!["string", "list", "map"],
-        "contains" | "contains?" | "contains_hdlm_qm_" => vec!["string", "list", "map"],
-        "is_empty?" | "is_empty_hdlm_qm_" => vec!["list", "map"],
+        "contains" => vec!["string", "list", "map"],
+        "is_empty" => vec!["string", "list", "map"],
 
         // ── ambiguous: list + map ──
         "get" | "get_or" | "set" => vec!["list", "map"],

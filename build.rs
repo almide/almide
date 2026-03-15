@@ -11,6 +11,7 @@ struct FnDef {
     #[serde(default)]
     effect: bool,
     #[serde(default)]
+    #[allow(dead_code)]
     ufcs: bool,
     /// Type parameters for generics (e.g. ["A", "B"] or ["K", "V"])
     #[serde(default)]
@@ -29,6 +30,12 @@ struct FnDef {
     /// Sanitized aliases for function names with special chars (e.g. "match?" -> "match_hdlm_qm_")
     #[serde(default)]
     aliases: Vec<String>,
+    /// Human-readable description (English)
+    #[serde(default)]
+    description: Option<String>,
+    /// Usage example in Almide syntax
+    #[serde(default)]
+    example: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -42,25 +49,42 @@ struct Param {
 }
 
 /// Extract closure arity from type string. Fn[A, B] -> C → Some(2), non-Fn → None
+/// Handles nested brackets: Fn[List[Int], Map[String, Int]] -> Bool → Some(2)
 fn closure_arity_from_type(ty: &str) -> Option<usize> {
     if ty.starts_with("Fn[") {
-        if let Some(bracket_end) = ty.find("] -> ") {
-            let params_str = &ty[3..bracket_end];
-            if params_str.is_empty() {
-                return Some(0);
-            }
-            // Count top-level commas (respecting nested brackets)
-            let mut count = 1;
-            let mut depth = 0;
-            for ch in params_str.chars() {
-                match ch {
-                    '[' | '{' => depth += 1,
-                    ']' | '}' => depth -= 1,
-                    ',' if depth == 0 => count += 1,
-                    _ => {}
+        // Find the matching ] for Fn[ respecting nested brackets
+        let mut depth = 0;
+        let mut bracket_end = None;
+        for (i, ch) in ty[3..].char_indices() {
+            match ch {
+                '[' | '{' => depth += 1,
+                ']' if depth > 0 => depth -= 1,
+                ']' if depth == 0 => {
+                    bracket_end = Some(i + 3);
+                    break;
                 }
+                _ => {}
             }
-            return Some(count);
+        }
+        if let Some(end) = bracket_end {
+            if ty[end..].starts_with("] -> ") {
+                let params_str = &ty[3..end];
+                if params_str.is_empty() {
+                    return Some(0);
+                }
+                // Count top-level commas (respecting nested brackets)
+                let mut count = 1;
+                let mut d = 0;
+                for ch in params_str.chars() {
+                    match ch {
+                        '[' | '{' => d += 1,
+                        ']' | '}' => d -= 1,
+                        ',' if d == 0 => count += 1,
+                        _ => {}
+                    }
+                }
+                return Some(count);
+            }
         }
     }
     None
@@ -273,7 +297,24 @@ fn render_template_full(template: &str, params: &[Param], _use_effect: bool) -> 
                     continue;
                 }
             }
-            // Not a known placeholder — emit the { literally
+            // Not a known placeholder — check if it looks like an intended placeholder
+            if let Some(close_offset) = template[pos+1..].find('}') {
+                let candidate = &template[pos+1..pos+1+close_offset];
+                // If candidate looks like an identifier (no spaces, no operators), warn
+                if !candidate.is_empty()
+                    && !candidate.contains(' ')
+                    && !candidate.contains('+')
+                    && !candidate.contains('-')
+                    && candidate.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.' || c == '[' || c == ']')
+                {
+                    panic!(
+                        "build.rs: unknown placeholder {{{}}} in template. Known: {:?}",
+                        candidate,
+                        known.iter().collect::<Vec<_>>()
+                    );
+                }
+            }
+            // Literal brace
             fmt_str.push('{');
             pos += 1;
         } else {
@@ -348,7 +389,7 @@ fn main() {
 
             // Generate type signature
             let tp = &def.type_params;
-            let params_str: Vec<String> = def
+            let _params_str: Vec<String> = def
                 .params
                 .iter()
                 .filter(|p| !p.optional) // Required params only for sig
@@ -369,7 +410,7 @@ fn main() {
                 format!("vec![{}]", gs.join(", "))
             };
             sig_arms.push_str(&format!(
-                "        (\"{module}\", \"{func}\") => FnSig {{ generics: {generics}, params: vec![{params}], ret: {ret}, is_effect: {effect} }},\n",
+                "        (\"{module}\", \"{func}\") => FnSig {{ generics: {generics}, params: vec![{params}], ret: {ret}, is_effect: {effect}, structural_bounds: std::collections::HashMap::new() }},\n",
                 module = module_name,
                 func = fn_name,
                 generics = generics_str,
@@ -455,9 +496,8 @@ fn main() {
                     expr = expr,
                     expr_e = expr_e,
                 ));
-            } else if !def.effect && def.rust.ends_with('?') {
-                // Pure-but-fallible: template has ? but function is not effect.
-                // Generate conditional: in_effect uses ?, otherwise omit ? (returns raw Result).
+            } else if def.rust.ends_with('?') {
+                // Fallible function: template has ?. In effect context add ?, otherwise return raw Result.
                 let (binds, expr_with_q) = render_template_full(&def.rust, &def.params, false);
                 let rust_no_q = def.rust.trim_end_matches('?');
                 let (_, expr_no_q) = render_template_full(rust_no_q, &def.params, false);
@@ -490,7 +530,7 @@ fn main() {
             // Generate alias arms
             for alias in &def.aliases {
                 sig_arms.push_str(&format!(
-                    "        (\"{module}\", \"{alias}\") => FnSig {{ generics: {generics}, params: vec![{params}], ret: {ret}, is_effect: {effect} }},\n",
+                    "        (\"{module}\", \"{alias}\") => FnSig {{ generics: {generics}, params: vec![{params}], ret: {ret}, is_effect: {effect}, structural_bounds: std::collections::HashMap::new() }},\n",
                     module = module_name,
                     generics = generics_str,
                     params = all_params_str.join(", "),
@@ -498,7 +538,7 @@ fn main() {
                     effect = def.effect,
                 ));
                 // For aliases, just duplicate the Rust arm (copy the last generated arm with alias)
-                let last_arm = rust_arms.lines().rev()
+                let _last_arm = rust_arms.lines().rev()
                     .take_while(|l| !l.is_empty())
                     .collect::<Vec<_>>()
                     .into_iter()
@@ -663,8 +703,10 @@ struct TokensDef {
     #[serde(default)]
     keyword_aliases: BTreeMap<String, String>,
     operators: BTreeMap<String, Vec<String>>,
+    #[allow(dead_code)]
     delimiters: BTreeMap<String, Vec<String>>,
     #[serde(default)]
+    #[allow(dead_code)]
     special: BTreeMap<String, Vec<String>>,
 }
 

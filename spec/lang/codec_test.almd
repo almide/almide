@@ -1,0 +1,15 @@
+module codec_test
+
+type Person: Codec = { name: String, age: Int }
+
+test "codec encode-decode roundtrip" {
+  let p = Person { name: "Alice", age: 30 }
+  let v = p.encode()
+  match Person.decode(v) {
+    ok(p2) => {
+      assert_eq(p2.name, "Alice")
+      assert_eq(p2.age, 30)
+    }
+    err(_) => assert(false)
+  }
+}

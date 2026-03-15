@@ -1,43 +1,43 @@
 import regex
 
 // ============================================================
-// regex.match? — partial match
+// regex.is_match — partial match
 // ============================================================
 
-test "regex.match? finds digits" {
-  assert(regex.match?(r"\d+", "abc123"))
-  assert(regex.match?(r"\d+", "42"))
-  assert(not regex.match?(r"\d+", "hello"))
+test "regex.is_match finds digits" {
+  assert(regex.is_match(r"\d+", "abc123"))
+  assert(regex.is_match(r"\d+", "42"))
+  assert(not regex.is_match(r"\d+", "hello"))
 }
 
-test "regex.match? with character classes" {
-  assert(regex.match?("[a-z]+", "hello"))
-  assert(not regex.match?("[a-z]+", "123"))
-  assert(regex.match?("[^0-9]+", "abc"))
+test "regex.is_match with character classes" {
+  assert(regex.is_match("[a-z]+", "hello"))
+  assert(not regex.is_match("[a-z]+", "123"))
+  assert(regex.is_match("[^0-9]+", "abc"))
 }
 
-test "regex.match? with dot and quantifiers" {
-  assert(regex.match?("a.c", "abc"))
-  assert(regex.match?("a.*c", "aXXXc"))
-  assert(regex.match?("ab?c", "ac"))
-  assert(regex.match?("ab?c", "abc"))
+test "regex.is_match with dot and quantifiers" {
+  assert(regex.is_match("a.c", "abc"))
+  assert(regex.is_match("a.*c", "aXXXc"))
+  assert(regex.is_match("ab?c", "ac"))
+  assert(regex.is_match("ab?c", "abc"))
 }
 
 // ============================================================
-// regex.full_match? — entire string match
+// regex.full_match — entire string match
 // ============================================================
 
-test "regex.full_match? requires full string" {
-  assert(regex.full_match?(r"\d+", "123"))
-  assert(not regex.full_match?(r"\d+", "abc123"))
-  assert(regex.full_match?("[a-zA-Z_][a-zA-Z0-9_]*", "my_var_1"))
-  assert(not regex.full_match?("[a-zA-Z_][a-zA-Z0-9_]*", "1bad"))
+test "regex.full_match requires full string" {
+  assert(regex.full_match(r"\d+", "123"))
+  assert(not regex.full_match(r"\d+", "abc123"))
+  assert(regex.full_match("[a-zA-Z_][a-zA-Z0-9_]*", "my_var_1"))
+  assert(not regex.full_match("[a-zA-Z_][a-zA-Z0-9_]*", "1bad"))
 }
 
-test "regex.full_match? integer validation" {
-  assert(regex.full_match?(r"-?\d+", "42"))
-  assert(regex.full_match?(r"-?\d+", "-7"))
-  assert(not regex.full_match?(r"-?\d+", "abc"))
+test "regex.full_match integer validation" {
+  assert(regex.full_match(r"-?\d+", "42"))
+  assert(regex.full_match(r"-?\d+", "-7"))
+  assert(not regex.full_match(r"-?\d+", "abc"))
 }
 
 // ============================================================
@@ -100,21 +100,21 @@ test "regex.captures extracts groups" {
 // regex with alternation
 // ============================================================
 
-test "regex.match? with alternation" {
-  assert(regex.match?("cat|dog", "I have a cat"))
-  assert(regex.match?("cat|dog", "I have a dog"))
-  assert(not regex.match?("cat|dog", "I have a fish"))
+test "regex.is_match with alternation" {
+  assert(regex.is_match("cat|dog", "I have a cat"))
+  assert(regex.is_match("cat|dog", "I have a dog"))
+  assert(not regex.is_match("cat|dog", "I have a fish"))
 }
 
 // ============================================================
-// regex.match? with shorthand classes
+// regex.is_match with shorthand classes
 // ============================================================
 
 test "regex shorthand classes" {
-  assert(regex.match?(r"\w+", "hello"))
-  assert(regex.match?(r"\s", " "))
-  assert(not regex.match?(r"\S", " "))
-  assert(regex.match?(r"\D+", "abc"))
+  assert(regex.is_match(r"\w+", "hello"))
+  assert(regex.is_match(r"\s", " "))
+  assert(not regex.is_match(r"\S", " "))
+  assert(regex.is_match(r"\D+", "abc"))
 }
 
 // ============================================================
@@ -132,47 +132,47 @@ test "raw strings preserve backslashes" {
 // ============================================================
 
 test "regex validates section headers" {
-  assert(regex.full_match?(r"\[([a-zA-Z_][a-zA-Z0-9_]*)\]", "[server]"))
-  assert(regex.full_match?(r"\[([a-zA-Z_][a-zA-Z0-9_]*)\]", "[my_section_2]"))
-  assert(not regex.full_match?(r"\[([a-zA-Z_][a-zA-Z0-9_]*)\]", "[2bad]"))
-  assert(not regex.full_match?(r"\[([a-zA-Z_][a-zA-Z0-9_]*)\]", "server"))
+  assert(regex.full_match(r"\[([a-zA-Z_][a-zA-Z0-9_]*)\]", "[server]"))
+  assert(regex.full_match(r"\[([a-zA-Z_][a-zA-Z0-9_]*)\]", "[my_section_2]"))
+  assert(not regex.full_match(r"\[([a-zA-Z_][a-zA-Z0-9_]*)\]", "[2bad]"))
+  assert(not regex.full_match(r"\[([a-zA-Z_][a-zA-Z0-9_]*)\]", "server"))
 }
 
 // ============================================================
-// regex.match? — additional edge cases
+// regex.is_match — additional edge cases
 // ============================================================
 
-test "regex.match? empty string" {
-  assert(not regex.match?(r"\d+", ""))
+test "regex.is_match empty string" {
+  assert(not regex.is_match(r"\d+", ""))
 }
 
-test "regex.match? anchored start" {
-  assert(regex.match?("^hello", "hello world"))
-  assert(not regex.match?("^hello", "say hello"))
+test "regex.is_match anchored start" {
+  assert(regex.is_match("^hello", "hello world"))
+  assert(not regex.is_match("^hello", "say hello"))
 }
 
-test "regex.match? anchored end" {
-  assert(regex.match?("world$", "hello world"))
-  assert(not regex.match?("world$", "world hello"))
+test "regex.is_match anchored end" {
+  assert(regex.is_match("world$", "hello world"))
+  assert(not regex.is_match("world$", "world hello"))
 }
 
-test "regex.match? with plus quantifier" {
-  assert(regex.match?("a+", "aaa"))
-  assert(not regex.match?("a+", "bbb"))
+test "regex.is_match with plus quantifier" {
+  assert(regex.is_match("a+", "aaa"))
+  assert(not regex.is_match("a+", "bbb"))
 }
 
 // ============================================================
-// regex.full_match? — additional patterns
+// regex.full_match — additional patterns
 // ============================================================
 
-test "regex.full_match? email-like pattern" {
-  assert(regex.full_match?(r"[a-zA-Z0-9.]+@[a-zA-Z0-9]+\.[a-zA-Z]+", "test@example.com"))
-  assert(not regex.full_match?(r"[a-zA-Z0-9.]+@[a-zA-Z0-9]+\.[a-zA-Z]+", "not-an-email"))
+test "regex.full_match email-like pattern" {
+  assert(regex.full_match(r"[a-zA-Z0-9.]+@[a-zA-Z0-9]+\.[a-zA-Z]+", "test@example.com"))
+  assert(not regex.full_match(r"[a-zA-Z0-9.]+@[a-zA-Z0-9]+\.[a-zA-Z]+", "not-an-email"))
 }
 
-test "regex.full_match? ip-like pattern" {
-  assert(regex.full_match?(r"\d+\.\d+\.\d+\.\d+", "192.168.1.1"))
-  assert(not regex.full_match?(r"\d+\.\d+\.\d+\.\d+", "192.168.1"))
+test "regex.full_match ip-like pattern" {
+  assert(regex.full_match(r"\d+\.\d+\.\d+\.\d+", "192.168.1.1"))
+  assert(not regex.full_match(r"\d+\.\d+\.\d+\.\d+", "192.168.1"))
 }
 
 // ============================================================

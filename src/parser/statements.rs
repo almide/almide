@@ -4,16 +4,11 @@ use super::Parser;
 
 impl Parser {
     pub(crate) fn parse_stmt(&mut self) -> Result<Stmt, String> {
-        if self.check(TokenType::Let) {
-            return self.parse_let_stmt();
-        }
-        if self.check(TokenType::Var) {
-            return self.parse_var_stmt();
-        }
-        if self.check(TokenType::Guard) {
-            return self.parse_guard_stmt();
-        }
+        if self.check(TokenType::Let) { return self.parse_let_stmt(); }
+        if self.check(TokenType::Var) { return self.parse_var_stmt(); }
+        if self.check(TokenType::Guard) { return self.parse_guard_stmt(); }
 
+        // name = value (simple assignment)
         if self.check(TokenType::Ident)
             && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Eq)
             && self.peek_at(2).map(|t| &t.token_type) != Some(&TokenType::Eq)
@@ -49,15 +44,13 @@ impl Parser {
         let span = self.current_span();
         self.expect(TokenType::Let)?;
 
+        // Record destructuring: let { a, b } = expr
         if self.check(TokenType::LBrace) {
             self.advance();
             let mut names = Vec::new();
             while !self.check(TokenType::RBrace) {
                 names.push(self.expect_ident()?);
-                if self.check(TokenType::Comma) {
-                    self.advance();
-                    self.skip_newlines();
-                }
+                if self.check(TokenType::Comma) { self.advance(); self.skip_newlines(); }
             }
             self.expect(TokenType::RBrace)?;
             self.expect(TokenType::Eq)?;
@@ -72,6 +65,7 @@ impl Parser {
             });
         }
 
+        // Tuple destructuring: let (a, b) = expr
         if self.check(TokenType::LParen) {
             let pattern = self.parse_destructure_tuple()?;
             self.expect(TokenType::Eq)?;
@@ -80,24 +74,27 @@ impl Parser {
             return Ok(Stmt::LetDestructure { pattern, value, span: Some(span) });
         }
 
-        // Detect `let mut` (Rust style) — hint to use `var` instead
+        // Detect `let mut` (Rust style)
         if self.check(TokenType::Ident) && self.current().value == "mut" {
-            return Err(self.check_hint_or_err(Some(TokenType::Ident), super::hints::HintScope::Block,
-                "'let mut' is not valid in Almide"));
+            return Err(self.check_hint_or_err(
+                Some(TokenType::Ident), super::hints::HintScope::Block,
+                "'let mut' is not valid in Almide",
+            ));
         }
 
-        // Allow `let _ = expr` to discard values
+        // Allow `let _ = expr`
         let name = if self.check(TokenType::Underscore) {
             self.advance();
             "_".to_string()
         } else {
             self.expect_ident()?
         };
-        let mut ty: Option<TypeExpr> = None;
-        if self.check(TokenType::Colon) {
+        let ty = if self.check(TokenType::Colon) {
             self.advance();
-            ty = Some(self.parse_type_expr()?);
-        }
+            Some(self.parse_type_expr()?)
+        } else {
+            None
+        };
         self.expect(TokenType::Eq)?;
         self.skip_newlines();
         let value = self.parse_expr()?;
@@ -108,11 +105,12 @@ impl Parser {
         let span = self.current_span();
         self.expect(TokenType::Var)?;
         let name = self.expect_ident()?;
-        let mut ty: Option<TypeExpr> = None;
-        if self.check(TokenType::Colon) {
+        let ty = if self.check(TokenType::Colon) {
             self.advance();
-            ty = Some(self.parse_type_expr()?);
-        }
+            Some(self.parse_type_expr()?)
+        } else {
+            None
+        };
         self.expect(TokenType::Eq)?;
         self.skip_newlines();
         let value = self.parse_expr()?;
@@ -139,23 +137,22 @@ impl Parser {
         Ok(Stmt::Assign { name, value, span: Some(span) })
     }
 
-    /// Try to parse `xs[i] = value`. Returns None if not an assignment (e.g. just `xs[i]`).
     fn try_parse_index_assign(&mut self) -> Result<Option<Stmt>, String> {
         let saved = self.pos;
         let span = self.current_span();
         let target = self.current().value.clone();
-        self.advance(); // skip ident
+        self.advance();
         self.expect(TokenType::LBracket)?;
         let index = self.parse_expr()?;
         self.expect(TokenType::RBracket)?;
-        // Check if followed by `=` (but not `==`)
-        if self.check(TokenType::Eq) && self.peek_at(1).map(|t| &t.token_type) != Some(&TokenType::Eq) {
-            self.advance(); // skip =
+        if self.check(TokenType::Eq)
+            && self.peek_at(1).map(|t| &t.token_type) != Some(&TokenType::Eq)
+        {
+            self.advance();
             self.skip_newlines();
             let value = self.parse_expr()?;
             Ok(Some(Stmt::IndexAssign { target, index: Box::new(index), value, span: Some(span) }))
         } else {
-            // Not an assignment — rewind and let parse_expr handle it
             self.pos = saved;
             Ok(None)
         }
@@ -164,8 +161,8 @@ impl Parser {
     fn parse_field_assign_stmt(&mut self) -> Result<Stmt, String> {
         let span = self.current_span();
         let target = self.current().value.clone();
-        self.advance(); // skip ident
-        self.advance(); // skip .
+        self.advance(); // ident
+        self.advance(); // .
         let field = self.expect_ident()?;
         self.expect(TokenType::Eq)?;
         self.skip_newlines();
@@ -173,22 +170,17 @@ impl Parser {
         Ok(Stmt::FieldAssign { target, field, value, span: Some(span) })
     }
 
-    /// Parse a destructure pattern for tuples: `(a, b)` or `((a, b), c)`
     fn parse_destructure_tuple(&mut self) -> Result<Pattern, String> {
         self.expect(TokenType::LParen)?;
         let mut elements = Vec::new();
         while !self.check(TokenType::RParen) {
             if self.check(TokenType::LParen) {
-                // Nested tuple
                 elements.push(self.parse_destructure_tuple()?);
             } else {
                 let name = self.expect_ident()?;
                 elements.push(Pattern::Ident { name });
             }
-            if self.check(TokenType::Comma) {
-                self.advance();
-                self.skip_newlines();
-            }
+            if self.check(TokenType::Comma) { self.advance(); self.skip_newlines(); }
         }
         self.expect(TokenType::RParen)?;
         Ok(Pattern::Tuple { elements })

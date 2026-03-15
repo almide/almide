@@ -166,13 +166,122 @@ pub fn cache_dir() -> PathBuf {
     PathBuf::from(home).join(".almide").join("cache")
 }
 
-/// Fetch a dependency (clone or use cached)
+/// A locked dependency entry for almide.lock
+#[derive(Debug, Clone)]
+pub struct LockedDep {
+    pub name: String,
+    pub git: String,
+    pub ref_name: String,
+    pub commit: String,
+}
+
+/// Parse almide.lock (simple line-based: name = { git = "...", ref = "...", commit = "..." })
+pub fn parse_lock_file(path: &Path) -> Result<Vec<LockedDep>, String> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+    let mut locked = Vec::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') { continue; }
+        if let Some(dep) = parse_lock_line(line) {
+            locked.push(dep);
+        }
+    }
+    Ok(locked)
+}
+
+fn parse_lock_line(line: &str) -> Option<LockedDep> {
+    let mut parts = line.splitn(2, '=');
+    let name = parts.next()?.trim().to_string();
+    let rest = parts.next()?.trim();
+    if !rest.starts_with('{') { return None; }
+    let inner = rest.trim_start_matches('{').trim_end_matches('}').trim();
+    let mut git = String::new();
+    let mut ref_name = String::new();
+    let mut commit = String::new();
+    for item in inner.split(',') {
+        if let Some((k, v)) = parse_kv(item) {
+            match k {
+                "git" => git = v,
+                "ref" => ref_name = v,
+                "commit" => commit = v,
+                _ => {}
+            }
+        }
+    }
+    if git.is_empty() || commit.is_empty() { return None; }
+    Some(LockedDep { name, git, ref_name, commit })
+}
+
+/// Write almide.lock
+fn write_lock_file(path: &Path, locked: &[LockedDep]) -> Result<(), String> {
+    let mut content = String::from("# almide.lock — auto-generated, do not edit\n\n");
+    for dep in locked {
+        content.push_str(&format!(
+            "{} = {{ git = \"{}\", ref = \"{}\", commit = \"{}\" }}\n",
+            dep.name, dep.git, dep.ref_name, dep.commit
+        ));
+    }
+    std::fs::write(path, content)
+        .map_err(|e| format!("Failed to write {}: {}", path.display(), e))
+}
+
+/// Get the current HEAD commit hash in a git repo
+fn git_head_hash(repo_dir: &Path) -> Result<String, String> {
+    let output = Command::new("git")
+        .arg("-C").arg(repo_dir)
+        .arg("rev-parse").arg("HEAD")
+        .output()
+        .map_err(|e| format!("Failed to run git rev-parse: {}", e))?;
+    if !output.status.success() {
+        return Err("Failed to get git HEAD hash".into());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Fetch a dependency (clone or use cached). Returns (path, commit_hash).
 pub fn fetch_dep(dep: &Dependency) -> Result<PathBuf, String> {
+    fetch_dep_with_lock(dep, None)
+}
+
+/// Fetch a dependency, optionally pinned to a locked commit hash.
+pub fn fetch_dep_with_lock(dep: &Dependency, locked_commit: Option<&str>) -> Result<PathBuf, String> {
     let cache = cache_dir();
     let ref_name = dep.tag.as_deref()
         .or(dep.branch.as_deref())
         .unwrap_or("main");
-    let dep_dir = cache.join(&dep.name).join(ref_name);
+
+    // If locked to a specific commit, use commit-based cache dir
+    let dep_dir = if let Some(commit) = locked_commit {
+        let dir = cache.join(&dep.name).join(&commit[..12.min(commit.len())]);
+        if dir.exists() {
+            return Ok(dir);
+        }
+        // Clone and checkout exact commit
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| format!("Failed to create cache dir: {}", e))?;
+        eprintln!("Fetching {} from {} (locked: {})", dep.name, dep.git, &commit[..8.min(commit.len())]);
+        let output = Command::new("git")
+            .arg("clone").arg(&dep.git).arg(&dir)
+            .output()
+            .map_err(|e| format!("Failed to run git: {}", e))?;
+        if !output.status.success() {
+            let _ = std::fs::remove_dir_all(&dir);
+            return Err(format!("Failed to fetch {}: {}", dep.name, String::from_utf8_lossy(&output.stderr)));
+        }
+        let checkout = Command::new("git")
+            .arg("-C").arg(&dir)
+            .arg("checkout").arg(commit)
+            .output()
+            .map_err(|e| format!("Failed to checkout commit: {}", e))?;
+        if !checkout.status.success() {
+            let _ = std::fs::remove_dir_all(&dir);
+            return Err(format!("Failed to checkout {} at {}: {}", dep.name, commit, String::from_utf8_lossy(&checkout.stderr)));
+        }
+        return Ok(dir);
+    } else {
+        cache.join(&dep.name).join(ref_name)
+    };
 
     if dep_dir.exists() {
         return Ok(dep_dir);
@@ -207,6 +316,32 @@ pub fn fetch_dep(dep: &Dependency) -> Result<PathBuf, String> {
     Ok(dep_dir)
 }
 
+/// Update almide.lock after fetching all dependencies.
+pub fn update_lock_file(deps: &[Dependency], fetched: &[FetchedDep]) -> Result<(), String> {
+    let lock_path = Path::new("almide.lock");
+    let mut locked = Vec::new();
+    for (dep, fd) in deps.iter().zip(fetched.iter()) {
+        let ref_name = dep.tag.as_deref()
+            .or(dep.branch.as_deref())
+            .unwrap_or("main");
+        let commit = git_head_hash(&fd.source_dir)
+            .or_else(|_| git_head_hash(fd.source_dir.parent().unwrap_or(&fd.source_dir)))
+            .unwrap_or_default();
+        if !commit.is_empty() {
+            locked.push(LockedDep {
+                name: dep.name.clone(),
+                git: dep.git.clone(),
+                ref_name: ref_name.to_string(),
+                commit,
+            });
+        }
+    }
+    if !locked.is_empty() {
+        write_lock_file(lock_path, &locked)?;
+    }
+    Ok(())
+}
+
 fn resolve_dep_version(dep: &Dependency) -> String {
     if let Some(ref ver) = dep.version {
         let cleaned = ver.trim_start_matches(|c: char| !c.is_ascii_digit());
@@ -231,15 +366,30 @@ fn resolve_dep_version(dep: &Dependency) -> String {
 
 /// Fetch all dependencies recursively and return FetchedDep list.
 /// Same-name deps with same major version are unified; different majors coexist.
+/// If almide.lock exists, uses locked commit hashes for reproducibility.
 pub fn fetch_all_deps(project: &Project) -> Result<Vec<FetchedDep>, String> {
+    let lock_path = Path::new("almide.lock");
+    let locked = if lock_path.exists() {
+        parse_lock_file(lock_path).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
     let mut fetched: Vec<FetchedDep> = Vec::new();
     let mut visited = std::collections::HashSet::new();
-    fetch_deps_recursive(&project.dependencies, &mut fetched, &mut visited)?;
+    fetch_deps_recursive(&project.dependencies, &locked, &mut fetched, &mut visited)?;
+
+    // Update lock file if it doesn't exist or deps changed
+    if !project.dependencies.is_empty() {
+        let _ = update_lock_file(&project.dependencies, &fetched);
+    }
+
     Ok(fetched)
 }
 
 fn fetch_deps_recursive(
     deps: &[Dependency],
+    locked: &[LockedDep],
     fetched: &mut Vec<FetchedDep>,
     visited: &mut std::collections::HashSet<String>,
 ) -> Result<(), String> {
@@ -257,7 +407,11 @@ fn fetch_deps_recursive(
         }
         visited.insert(visit_key);
 
-        let path = fetch_dep(dep)?;
+        // Use locked commit if available
+        let locked_commit = locked.iter()
+            .find(|l| l.name == dep.name)
+            .map(|l| l.commit.as_str());
+        let path = fetch_dep_with_lock(dep, locked_commit)?;
 
         let dep_toml = path.join("almide.toml");
         let (module_name, source_dir, transitive_deps) = if dep_toml.exists() {
@@ -281,7 +435,7 @@ fn fetch_deps_recursive(
         });
 
         if !transitive_deps.is_empty() {
-            fetch_deps_recursive(&transitive_deps, fetched, visited)?;
+            fetch_deps_recursive(&transitive_deps, locked, fetched, visited)?;
         }
     }
     Ok(())

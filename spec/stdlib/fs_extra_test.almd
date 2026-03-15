@@ -1,0 +1,38 @@
+import fs
+
+test "fs.read_lines reads file into list" {
+  let tmp = fs.create_temp_file("readlines")
+  fs.write(tmp, "line1\nline2\nline3")
+  let lines = fs.read_lines(tmp)
+  assert_eq(list.len(lines), 3)
+  assert_eq(list.get(lines, 0), some("line1"))
+  assert_eq(list.get(lines, 2), some("line3"))
+  fs.remove(tmp)
+}
+
+test "fs.append appends to file" {
+  let tmp = fs.create_temp_file("append")
+  fs.write(tmp, "hello")
+  fs.append(tmp, " world")
+  let content = fs.read_text(tmp)
+  assert_eq(content, "hello world")
+  fs.remove(tmp)
+}
+
+test "fs.list_dir lists directory contents" {
+  let dir = fs.create_temp_dir("listdir")
+  fs.write(dir ++ "/a.txt", "a")
+  fs.write(dir ++ "/b.txt", "b")
+  let entries = fs.list_dir(dir)
+  assert_eq(list.len(entries), 2)
+  fs.remove_all(dir)
+}
+
+test "fs.write_bytes and fs.read_bytes roundtrip" {
+  let tmp = fs.create_temp_file("bytes")
+  let data = [72, 101, 108, 108, 111]
+  fs.write_bytes(tmp, data)
+  let read = fs.read_bytes(tmp)
+  assert_eq(read, data)
+  fs.remove(tmp)
+}

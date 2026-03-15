@@ -1,0 +1,21 @@
+import compress
+
+test "compress.gzip and gunzip roundtrip" {
+  let original = string.to_bytes("Hello, Almide! This is a test of gzip compression.")
+  let compressed = compress.gzip(original)
+  let decompressed = compress.gunzip(compressed)
+  assert_eq(decompressed, original)
+}
+
+test "compress.gzip produces smaller output for repetitive data" {
+  let repeated = string.to_bytes(string.repeat("abcdefgh", 100))
+  let compressed = compress.gzip(repeated)
+  assert(list.len(compressed) < list.len(repeated))
+}
+
+test "compress.gzip_string and gunzip_string roundtrip" {
+  let original = "The quick brown fox jumps over the lazy dog."
+  let compressed = compress.gzip_string(original)
+  let result = compress.gunzip_string(compressed)
+  assert_eq(result, original)
+}

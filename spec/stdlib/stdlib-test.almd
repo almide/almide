@@ -35,8 +35,8 @@ test "string.split and join roundtrip" {
 test "string.contains and starts/ends_with" {
   assert(string.contains("hello world", "world"))
   assert(not string.contains("hello", "xyz"))
-  assert(string.starts_with?("hello", "hel"))
-  assert(string.ends_with?("hello", "llo"))
+  assert(string.starts_with("hello", "hel"))
+  assert(string.ends_with("hello", "llo"))
 }
 
 test "string.slice" {
@@ -104,24 +104,24 @@ test "list.contains" {
 
 test "list.map" {
   let xs = [1, 2, 3]
-  let doubled = list.map(xs, fn(x) => x * 2)
+  let doubled = list.map(xs, (x) => x * 2)
   assert_eq(doubled, [2, 4, 6])
 }
 
 test "list.filter" {
   let xs = [1, 2, 3, 4, 5]
-  let evens = list.filter(xs, fn(x) => x % 2 == 0)
+  let evens = list.filter(xs, (x) => x % 2 == 0)
   assert_eq(evens, [2, 4])
 }
 
 test "list.find" {
   let xs = ["a", "bb", "ccc"]
-  assert_eq(list.find(xs, fn(x) => string.len(x) > 1), some("bb"))
-  assert_eq(list.find(xs, fn(x) => string.len(x) > 10), none)
+  assert_eq(list.find(xs, (x) => string.len(x) > 1), some("bb"))
+  assert_eq(list.find(xs, (x) => string.len(x) > 10), none)
 }
 
 test "list.fold" {
-  let sum = list.fold([1, 2, 3, 4], 0, fn(acc, x) => acc + x)
+  let sum = list.fold([1, 2, 3, 4], 0, (acc, x) => acc + x)
   assert_eq(sum, 10)
 }
 
@@ -287,13 +287,13 @@ test "list.reverse" {
 }
 
 test "list.any" {
-  assert(list.any([1, 2, 3], fn(x) => x == 2))
-  assert(not list.any([1, 2, 3], fn(x) => x == 5))
+  assert(list.any([1, 2, 3], (x) => x == 2))
+  assert(not list.any([1, 2, 3], (x) => x == 5))
 }
 
 test "list.all" {
-  assert(list.all([2, 4, 6], fn(x) => x % 2 == 0))
-  assert(not list.all([2, 3, 6], fn(x) => x % 2 == 0))
+  assert(list.all([2, 4, 6], (x) => x % 2 == 0))
+  assert(not list.all([2, 3, 6], (x) => x % 2 == 0))
 }
 
 // ============================================================
@@ -312,13 +312,13 @@ test "map.get_or" {
 
 test "simple hash fold" {
   let data = string.to_bytes("test")
-  let h = list.fold(data, 5381, fn(h, b) => h * 33 + b)
+  let h = list.fold(data, 5381, (h, b) => h * 33 + b)
   assert(h > 0, "hash should be positive")
 }
 
 test "hash deterministic" {
-  let h1 = list.fold(string.to_bytes("hello"), 5381, fn(h, b) => h * 33 + b)
-  let h2 = list.fold(string.to_bytes("hello"), 5381, fn(h, b) => h * 33 + b)
+  let h1 = list.fold(string.to_bytes("hello"), 5381, (h, b) => h * 33 + b)
+  let h2 = list.fold(string.to_bytes("hello"), 5381, (h, b) => h * 33 + b)
   assert_eq(h1, h2)
 }
 
@@ -388,67 +388,67 @@ test "string.from_bytes empty" {
 }
 
 // ============================================================
-// string.is_digit?
+// string.is_digit
 // ============================================================
 
-test "string.is_digit? true" {
-  assert(string.is_digit?("0"))
-  assert(string.is_digit?("9"))
-  assert(string.is_digit?("42"))
+test "string.is_digit true" {
+  assert(string.is_digit("0"))
+  assert(string.is_digit("9"))
+  assert(string.is_digit("42"))
 }
 
-test "string.is_digit? false" {
-  assert(not string.is_digit?("a"))
-  assert(not string.is_digit?(""))
-  assert(not string.is_digit?("1a"))
-}
-
-// ============================================================
-// string.is_alpha?
-// ============================================================
-
-test "string.is_alpha? true" {
-  assert(string.is_alpha?("a"))
-  assert(string.is_alpha?("Z"))
-  assert(string.is_alpha?("hello"))
-}
-
-test "string.is_alpha? false" {
-  assert(not string.is_alpha?("1"))
-  assert(not string.is_alpha?(""))
-  assert(not string.is_alpha?("a1"))
+test "string.is_digit false" {
+  assert(not string.is_digit("a"))
+  assert(not string.is_digit(""))
+  assert(not string.is_digit("1a"))
 }
 
 // ============================================================
-// string.is_alphanumeric?
+// string.is_alpha
 // ============================================================
 
-test "string.is_alphanumeric? true" {
-  assert(string.is_alphanumeric?("a1"))
-  assert(string.is_alphanumeric?("abc"))
-  assert(string.is_alphanumeric?("123"))
+test "string.is_alpha true" {
+  assert(string.is_alpha("a"))
+  assert(string.is_alpha("Z"))
+  assert(string.is_alpha("hello"))
 }
 
-test "string.is_alphanumeric? false" {
-  assert(not string.is_alphanumeric?(""))
-  assert(not string.is_alphanumeric?("a-b"))
-  assert(not string.is_alphanumeric?(" "))
+test "string.is_alpha false" {
+  assert(not string.is_alpha("1"))
+  assert(not string.is_alpha(""))
+  assert(not string.is_alpha("a1"))
 }
 
 // ============================================================
-// string.is_whitespace?
+// string.is_alphanumeric
 // ============================================================
 
-test "string.is_whitespace? true" {
-  assert(string.is_whitespace?(" "))
-  assert(string.is_whitespace?("\t"))
-  assert(string.is_whitespace?("  \t\n"))
+test "string.is_alphanumeric true" {
+  assert(string.is_alphanumeric("a1"))
+  assert(string.is_alphanumeric("abc"))
+  assert(string.is_alphanumeric("123"))
 }
 
-test "string.is_whitespace? false" {
-  assert(not string.is_whitespace?(""))
-  assert(not string.is_whitespace?("a"))
-  assert(not string.is_whitespace?(" a "))
+test "string.is_alphanumeric false" {
+  assert(not string.is_alphanumeric(""))
+  assert(not string.is_alphanumeric("a-b"))
+  assert(not string.is_alphanumeric(" "))
+}
+
+// ============================================================
+// string.is_whitespace
+// ============================================================
+
+test "string.is_whitespace true" {
+  assert(string.is_whitespace(" "))
+  assert(string.is_whitespace("\t"))
+  assert(string.is_whitespace("  \t\n"))
+}
+
+test "string.is_whitespace false" {
+  assert(not string.is_whitespace(""))
+  assert(not string.is_whitespace("a"))
+  assert(not string.is_whitespace(" a "))
 }
 
 // ============================================================
@@ -459,9 +459,9 @@ test "string UFCS chars" {
   assert_eq("abc".chars(), ["a", "b", "c"])
 }
 
-test "string UFCS is_digit?" {
-  assert("5".is_digit?())
-  assert(not "x".is_digit?())
+test "string UFCS is_digit" {
+  assert("5".is_digit())
+  assert(not "x".is_digit())
 }
 
 // ============================================================
@@ -529,7 +529,7 @@ test "list.drop all" {
 // ============================================================
 
 test "list.sort_by string length" {
-  let result = list.sort_by(["bb", "a", "ccc"], fn(s) => string.len(s))
+  let result = list.sort_by(["bb", "a", "ccc"], (s) => string.len(s))
   assert_eq(result, ["a", "bb", "ccc"])
 }
 

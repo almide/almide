@@ -1,4 +1,6 @@
 [map]
+description = "Transform the ok value using a function. If err, passes through unchanged."
+example = 'result.map(ok(2), fn(x) => x * 10)'
 type_params = ["A", "B", "E"]
 params = [
     { name = "r", type = "Result[A, E]" },
@@ -9,6 +11,8 @@ rust = "({r}).map(|{f.args}| {{ {f.body} }})"
 ts = "(({f.args}) => {f.body})({r})"
 
 [map_err]
+description = "Transform the err value using a function. If ok, passes through unchanged."
+example = 'result.map_err(err("fail"), fn(e) => "wrapped: " ++ e)'
 type_params = ["A", "E", "F"]
 params = [
     { name = "r", type = "Result[A, E]" },
@@ -19,6 +23,8 @@ rust = "({r}).map_err(|{f.args}| {{ {f.body} }})"
 ts = "{r}"
 
 [and_then]
+description = "Chain a Result-returning function on the ok value. Flattens nested Results."
+example = 'result.and_then(ok(5), fn(x) => if x > 0 then ok(x) else err("negative"))'
 type_params = ["A", "B", "E"]
 params = [
     { name = "r", type = "Result[A, E]" },
@@ -29,6 +35,8 @@ rust = "({r}).and_then(|{f.args}| {{ {f.body} }})"
 ts = "(({f.args}) => {f.body})({r})"
 
 [unwrap_or]
+description = "Get the ok value, or return a default if err."
+example = 'result.unwrap_or(err("fail"), 0)'
 type_params = ["A", "E"]
 params = [{ name = "r", type = "Result[A, E]" }, { name = "default", type = "A" }]
 return = "A"
@@ -36,6 +44,8 @@ rust = "({r}).unwrap_or({default})"
 ts = "__almd_result_unwrap_or({r}, {default})"
 
 [unwrap_or_else]
+description = "Get the ok value, or compute a default from the error using a function."
+example = 'result.unwrap_or_else(err("fail"), fn(e) => string.len(e))'
 type_params = ["A", "E"]
 params = [
     { name = "r", type = "Result[A, E]" },
@@ -45,23 +55,27 @@ return = "A"
 rust = "({r}).unwrap_or_else(|{f.args}| {{ {f.body} }})"
 ts = "__almd_result_unwrap_or_else({r}, ({f.args}) => {f.body})"
 
-["is_ok?"]
+[is_ok]
+description = "Check if the Result is ok."
+example = 'result.is_ok(ok(42))'
 type_params = ["A", "E"]
 params = [{ name = "r", type = "Result[A, E]" }]
 return = "Bool"
 rust = "({r}).is_ok()"
 ts = "__almd_result_is_ok({r})"
-aliases = ["is_ok_hdlm_qm_"]
 
-["is_err?"]
+[is_err]
+description = "Check if the Result is err."
+example = 'result.is_err(err("fail"))'
 type_params = ["A", "E"]
 params = [{ name = "r", type = "Result[A, E]" }]
 return = "Bool"
 rust = "({r}).is_err()"
 ts = "__almd_result_is_err({r})"
-aliases = ["is_err_hdlm_qm_"]
 
 [to_option]
+description = "Convert ok to some, err to none. Discards the error value."
+example = 'result.to_option(ok(42))'
 type_params = ["A", "E"]
 params = [{ name = "r", type = "Result[A, E]" }]
 return = "Option[A]"
@@ -69,6 +83,8 @@ rust = "({r}).ok()"
 ts = "__almd_result_to_option({r})"
 
 [to_err_option]
+description = "Convert err to some, ok to none. Discards the ok value."
+example = 'result.to_err_option(err("fail"))'
 type_params = ["A", "E"]
 params = [{ name = "r", type = "Result[A, E]" }]
 return = "Option[E]"

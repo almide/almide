@@ -65,7 +65,7 @@ fn byte_to_string(b: Int) -> String = {
 fn encode(plain_text: String, a: Int, b: Int) -> Result[String, String] = {
   guard gcd(a, 26) == 1 else err("a and m must be coprime.")
   let bytes = string.to_bytes(plain_text)
-  let encoded = list.fold(bytes, [], fn(acc, byte) => {
+  let encoded = list.fold(bytes, [], (acc, byte) => {
     if is_lower(byte) then {
       let x = byte - 97
       let e = mod26(a * x + b)
@@ -102,7 +102,7 @@ fn decode(cipher_text: String, a: Int, b: Int) -> Result[String, String] = {
   let a_inv = find_mmi(a)
   let no_spaces = string.join(string.split(cipher_text, " "), "")
   let bytes = string.to_bytes(no_spaces)
-  let decoded = list.fold(bytes, [], fn(acc, byte) => {
+  let decoded = list.fold(bytes, [], (acc, byte) => {
     if is_lower(byte) then {
       let y = byte - 97
       let d = mod26(a_inv * (y - b))

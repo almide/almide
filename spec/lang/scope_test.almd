@@ -81,8 +81,8 @@ test "match binding does not leak" {
 
 // ── Closure captures ──
 
-fn make_counter(start: Int) -> fn(Int) -> Int = {
-  fn(step) => start + step
+fn make_counter(start: Int) -> (Int) -> Int = {
+  (step) => start + step
 }
 
 test "closure captures value at definition" {
@@ -94,14 +94,14 @@ test "closure captures value at definition" {
 test "closure captures multiple values" {
   let a = 10
   let b = 20
-  let f = fn(x: Int) => a + b + x
+  let f = (x: Int) => a + b + x
   assert_eq(f(3), 33)
 }
 
 test "nested closure" {
   let base = 5
-  let outer = fn(x: Int) => {
-    let inner = fn(y: Int) => base + x + y
+  let outer = (x: Int) => {
+    let inner = (y: Int) => base + x + y
     inner(1)
   }
   assert_eq(outer(10), 16)
@@ -141,7 +141,7 @@ test "closure in for loop" {
   let multiplier = 10
   var results: List[Int] = []
   for x in [1, 2, 3] {
-    let f = fn(v: Int) => v * multiplier
+    let f = (v: Int) => v * multiplier
     results = results ++ [f(x)]
   }
   assert_eq(results, [10, 20, 30])
@@ -152,7 +152,7 @@ test "closure in match arm" {
   let x = some(3)
   let result = match x {
     some(n) => {
-      let f = fn(v: Int) => v * factor
+      let f = (v: Int) => v * factor
       f(n)
     },
     none => 0,
@@ -194,7 +194,7 @@ test "for loop body scope isolation" {
 
 test "closure captures let not var snapshot" {
   let base = 42
-  let f = fn(x: Int) => base + x
+  let f = (x: Int) => base + x
   assert_eq(f(1), 43)
   assert_eq(f(10), 52)
 }
@@ -231,11 +231,11 @@ test "block expression as argument" {
 
 test "deeply nested closure capture" {
   let a = 1
-  let f = fn(x: Int) => {
+  let f = (x: Int) => {
     let b = 2
-    let g = fn(y: Int) => {
+    let g = (y: Int) => {
       let c = 3
-      let h = fn(z: Int) => a + b + c + x + y + z
+      let h = (z: Int) => a + b + c + x + y + z
       h(6)
     }
     g(5)
@@ -271,12 +271,12 @@ test "let in nested if" {
 test "closure in list.filter" {
   let threshold = 3
   let xs = [1, 2, 3, 4, 5]
-  let result = list.filter(xs, fn(x) => x > threshold)
+  let result = list.filter(xs, (x) => x > threshold)
   assert_eq(result, [4, 5])
 }
 
 test "closure in list.fold" {
   let factor = 10
-  let result = list.fold([1, 2, 3], 0, fn(acc, x) => acc + x * factor)
+  let result = list.fold([1, 2, 3], 0, (acc, x) => acc + x * factor)
   assert_eq(result, 60)
 }
