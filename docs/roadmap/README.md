@@ -3,7 +3,6 @@
 ## Active
 
 ### Phase 0: Compiler Integrity (健全性・正確性・構造)
-- [Architecture Hardening](active/architecture-hardening.md) — IrProgram clone 除去, Emitter リファクタ
 - [Cross-Target Semantics](active/cross-target-semantics.md) — Rust/TS 意味論統一: Map 比較, entries 順序, 整数オーバーフロー, Float 精度
 
 ### Phase A: Generated Code Quality
@@ -69,6 +68,7 @@
 ## Done
 
 - [2026 Ergonomics](2026-ergonomics.md) — `do` block pure fn, `guard else break/continue`, `unwrap_or`, `json.parse` auto-`?`
+- [Architecture Hardening](done/architecture-hardening.md) — RustIR pipeline migration eliminated Emitter clones and state flags
 - [Borrow Inference](done/borrow-inference-design.md) — Lobster-style move/clone analysis
 - [CLI Tool Authoring](done/cli-tool-authoring.md) — err() exit, almide run args
 - [Codegen Correctness](done/codegen-correctness.md) — P1 7項 + P2 1項, auto-?, guard, do-block, string pattern
