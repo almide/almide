@@ -193,7 +193,7 @@ fn stmt(o: &mut String, s: &Stmt, d: usize) {
         }
         Stmt::Assign { target, value } => { o.push_str(target); o.push_str(" = "); expr(o, value, d); o.push_str(";\n"); }
         Stmt::FieldAssign { target, field, value } => { o.push_str(target); o.push('.'); o.push_str(field); o.push_str(" = "); expr(o, value, d); o.push_str(";\n"); }
-        Stmt::IndexAssign { target, index, value } => { o.push_str(target); o.push('['); expr(o, index, d); o.push_str("] = "); expr(o, value, d); o.push_str(";\n"); }
+        Stmt::IndexAssign { target, index, value } => { o.push_str(target); o.push_str("[("); expr(o, index, d); o.push_str(") as usize] = "); expr(o, value, d); o.push_str(";\n"); }
         Stmt::Expr(e) => { expr(o, e, d); o.push_str(";\n"); }
     }
 }

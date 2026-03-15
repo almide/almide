@@ -55,11 +55,23 @@ impl Parser {
         self.expect(TokenType::LParen)?;
         if self.check(TokenType::RParen) {
             self.advance();
+            // () -> T is a function type with no params
+            if self.check(TokenType::Arrow) {
+                self.advance();
+                let ret = self.parse_type_expr()?;
+                return Ok(TypeExpr::Fn { params: vec![], ret: Box::new(ret) });
+            }
             return Ok(TypeExpr::Simple { name: "Unit".to_string() });
         }
         let first = self.parse_type_expr()?;
         if self.check(TokenType::RParen) {
             self.advance();
+            // (T) -> U is a function type with one param
+            if self.check(TokenType::Arrow) {
+                self.advance();
+                let ret = self.parse_type_expr()?;
+                return Ok(TypeExpr::Fn { params: vec![first], ret: Box::new(ret) });
+            }
             return Ok(first);
         }
         let mut elements = vec![first];
@@ -68,6 +80,12 @@ impl Parser {
             elements.push(self.parse_type_expr()?);
         }
         self.expect(TokenType::RParen)?;
+        // (T, U) -> V is a function type with multiple params
+        if self.check(TokenType::Arrow) {
+            self.advance();
+            let ret = self.parse_type_expr()?;
+            return Ok(TypeExpr::Fn { params: elements, ret: Box::new(ret) });
+        }
         Ok(TypeExpr::Tuple { elements })
     }
 
