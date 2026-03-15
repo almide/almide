@@ -3,8 +3,8 @@
 ## Active
 
 ### Language
-  
-- [Codec Protocol & JSON](active/codec-and-json.md) — `deriving Codec` + JSON, Encode/Decode convention
+- [Codec Implementation](active/codec-implementation.md) — deriving Codec 実装パス。auto-derive → encode/decode → repair
+- [Codec Protocol & JSON](active/codec-and-json.md) — 設計仕様 (5 Phase)
 - [Template](active/template.md) — Typed document builder: `html {}`/`text {}` builders
 - [UFCS External](active/ufcs-external.md) — Type-directed UFCS for user-defined/external functions
 
