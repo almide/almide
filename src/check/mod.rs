@@ -388,6 +388,14 @@ impl Checker {
                 self.env.in_effect = prev;
                 self.env.pop_scope();
             }
+            ast::Decl::TopLet { name, value, .. } => {
+                let ity = self.infer_expr(value);
+                let resolved = ity.to_ty(&self.solutions);
+                // Update env.top_lets with the fully inferred type
+                if matches!(self.env.top_lets.get(name.as_str()), Some(Ty::Unknown) | None) {
+                    self.env.top_lets.insert(name.clone(), resolved);
+                }
+            }
             _ => {}
         }
     }

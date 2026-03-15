@@ -177,10 +177,19 @@ pub enum VariantKind {
 }
 
 #[derive(Debug, Clone)]
+pub struct TopLet {
+    pub name: String,
+    pub ty: Type,
+    pub value: Expr,
+    pub is_const: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct Program {
     pub prelude: Vec<String>,
     pub structs: Vec<StructDef>,
     pub enums: Vec<EnumDef>,
+    pub top_lets: Vec<TopLet>,
     pub functions: Vec<Function>,
     pub tests: Vec<Function>,
     pub main: Option<Function>,

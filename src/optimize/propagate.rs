@@ -93,7 +93,11 @@ fn propagate_expr(expr: &mut IrExpr, constants: &HashMap<VarId, IrExpr>) {
         IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
             for e in elements { propagate_expr(e, constants); }
         }
-        IrExprKind::Lambda { body, .. } => propagate_expr(body, constants),
+        // Do NOT propagate into lambda bodies — closures capture by value,
+        // and replacing captured vars with literals breaks use-count tracking
+        // (the captured var's use_count drops to 0, DCE removes the binding,
+        // but CallTarget::Named still references the closure by name).
+        IrExprKind::Lambda { .. } => {},
         IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
         | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
         | IrExprKind::Await { expr: e } => propagate_expr(e, constants),

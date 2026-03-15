@@ -74,8 +74,14 @@ pub fn lower(ir: &IrProgram) -> Program {
         .map(|f| f.name.clone())
         .collect();
 
+    // Collect lazy top-level let VarIds
+    let lazy_top_let_ids: std::collections::HashSet<VarId> = ir.top_lets.iter()
+        .filter(|tl| matches!(tl.kind, almide::ir::TopLetKind::Lazy))
+        .map(|tl| tl.var)
+        .collect();
+
     // Top-level lets
-    let top_lets_ctx = LowerCtx { vt: &ir.var_table, ctors: &ctors, anon: &anon, named: &named, borrow_info: &borrow_info, current_fn: String::new(), param_vars: vec![], result_fns: &result_fns, in_effect: false, auto_try: false };
+    let top_lets_ctx = LowerCtx { vt: &ir.var_table, ctors: &ctors, anon: &anon, named: &named, borrow_info: &borrow_info, current_fn: String::new(), param_vars: vec![], result_fns: &result_fns, in_effect: false, auto_try: false, lazy_top_lets: &lazy_top_let_ids };
     let top_lets: Vec<TopLet> = ir.top_lets.iter().map(|tl| {
         let name = ir.var_table.get(tl.var).name.clone();
         let ty = lower_ty_with(&anon, &named, &tl.ty);
@@ -89,7 +95,7 @@ pub fn lower(ir: &IrProgram) -> Program {
     let mut tests = Vec::new();
     for f in &ir.functions {
         let param_vars: Vec<VarId> = f.params.iter().map(|p| p.var).collect();
-        let ctx = LowerCtx { vt: &ir.var_table, ctors: &ctors, anon: &anon, named: &named, borrow_info: &borrow_info, current_fn: f.name.clone(), param_vars, result_fns: &result_fns, in_effect: f.is_effect, auto_try: f.is_effect && !f.is_test };
+        let ctx = LowerCtx { vt: &ir.var_table, ctors: &ctors, anon: &anon, named: &named, borrow_info: &borrow_info, current_fn: f.name.clone(), param_vars, result_fns: &result_fns, in_effect: f.is_effect, auto_try: f.is_effect && !f.is_test, lazy_top_lets: &lazy_top_let_ids };
         let rf = ctx.lower_fn(f);
         if f.is_test { tests.push(rf); } else { functions.push(rf); }
     }
@@ -173,6 +179,8 @@ pub(super) struct LowerCtx<'a> {
     /// true for: effect fn bodies, do blocks
     /// false for: test blocks, regular fn
     pub(super) auto_try: bool,
+    /// VarIds of lazy top-level let bindings (need deref via `*` when accessed)
+    pub(super) lazy_top_lets: &'a std::collections::HashSet<VarId>,
 }
 
 impl<'a> LowerCtx<'a> {

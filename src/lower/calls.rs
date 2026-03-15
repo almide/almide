@@ -97,6 +97,17 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
 pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallTarget {
     match callee {
         ast::Expr::Ident { name, .. } | ast::Expr::TypeName { name, .. } => {
+            // If the name resolves to a local variable (e.g., a closure), use Computed
+            // so that use-count tracking properly counts this as a use of that variable.
+            if let Some(var_id) = ctx.lookup_var(name) {
+                let info = ctx.var_table.get(var_id);
+                if matches!(info.ty, crate::types::Ty::Fn { .. }) {
+                    let ty = ctx.expr_ty(callee);
+                    return CallTarget::Computed {
+                        callee: Box::new(ctx.mk(IrExprKind::Var { id: var_id }, ty, callee.span())),
+                    };
+                }
+            }
             CallTarget::Named { name: name.clone() }
         }
         ast::Expr::Member { object, field, .. } => {

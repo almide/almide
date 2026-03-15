@@ -16,6 +16,7 @@
 - [Platform Async](active/platform-async.md) — `effect fn` = async on all targets
 
 ### Ecosystem
+- [Almide Shell](active/almide-shell.md) — AI-native shell replacing Bash/Zsh
 - [Web Framework](active/web-framework.md) — First-party Hono-equivalent
 - [CLI-First](active/cli-first.md) — `almide run` + `almide build`
 
@@ -45,7 +46,7 @@
 - [LLM Immutable Sugar](on-hold/llm-immutable-sugar.md)
 - [Package Registry](on-hold/package-registry.md)
 - [Rainbow FFI](on-hold/rainbow-ffi.md)
-- [REPL](on-hold/repl.md)
+- [REPL](on-hold/repl.md) — Almide Shell に統合
 - [Research: MSR Paper](on-hold/research-modification-survival-rate-paper.md)
 - [Self-Hosting](on-hold/self-hosting.md)
 - [Stdlib 3-Layer Design](on-hold/stdlib-architecture-3-layer-design.md)

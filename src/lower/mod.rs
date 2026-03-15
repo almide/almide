@@ -181,7 +181,7 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprI
                 type_decls.push(types::lower_type_decl(&mut ctx, name, ty, deriving, visibility, generics.as_ref()));
             }
             ast::Decl::TopLet { name, ty: _, value, .. } => {
-                let val_ty = ctx.expr_ty(value);
+                let val_ty = ctx.env.top_lets.get(name).cloned().unwrap_or_else(|| ctx.expr_ty(value));
                 let var = ctx.define_var(name, val_ty.clone(), Mutability::Let, None);
                 let ir_value = lower_expr(&mut ctx, value);
                 let kind = classify_top_let_kind(&ir_value);
