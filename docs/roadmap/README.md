@@ -5,9 +5,7 @@
 ### Phase 0: Compiler Integrity (健全性・正確性・構造)
 - [Cross-Target Semantics](active/cross-target-semantics.md) — Rust/TS 意味論統一: Map 比較, entries 順序, 整数オーバーフロー, Float 精度
 
-### Phase A: Generated Code Quality
-- [Clone Reduction Phase 4](active/clone-reduction.md) — for-in/list/member/match/spread clone elimination, field-level borrow analysis
-- [IR Optimization Passes](active/ir-optimization-passes.md) — Tier 1 ✅。Tier 2: inlining, CSE, LICM
+### ~~Phase A: Generated Code Quality~~ ✅ COMPLETE
 
 ### Phase B: Type System & Safety
 - [Type System Extensions](active/type-system.md) — Row polymorphism, union types, container protocols, structural generic bounds
@@ -66,6 +64,8 @@
 
 - [2026 Ergonomics](2026-ergonomics.md) — `do` block pure fn, `guard else break/continue`, `unwrap_or`, `json.parse` auto-`?`
 - [Architecture Hardening](done/architecture-hardening.md) — RustIR pipeline migration eliminated Emitter clones and state flags
+- [Clone Reduction Phase 4](done/clone-reduction.md) — Single-use var move, range/literal skip, field-level is_copy
+- [IR Optimization Passes](done/ir-optimization-passes.md) — Constant folding, DCE, constant propagation
 - [--emit-ir](done/emit-ir.md) — `--emit-ir` flag for typed IR JSON export
 - [RustIR Pipeline](done/rust-ir.md) — IR → RustIR → String 2-stage codegen (985 lines, 3 files)
 - [Tail Call Optimization](done/tail-call-optimization.md) — Self-recursive tail calls → labeled loop
