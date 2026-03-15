@@ -174,8 +174,8 @@ fn expr(o: &mut String, e: &Expr, d: usize) {
             for (i, (n, v)) in fields.iter().enumerate() { if i > 0 { o.push_str(", "); } o.push_str(n); o.push_str(": "); expr(o, v, d); }
             o.push_str(" }");
         }
-        Expr::StructUpdate { base, fields } => {
-            o.push_str("{ ");
+        Expr::StructUpdate { name, base, fields } => {
+            o.push_str(name); o.push_str(" { ");
             for (n, v) in fields { o.push_str(n); o.push_str(": "); expr(o, v, d); o.push_str(", "); }
             o.push_str(".."); expr(o, base, d); o.push_str(" }");
         }

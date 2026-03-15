@@ -404,7 +404,7 @@ pub fn gen_generated_call(
             ("string", "len") => format!("almide_rt_string_len(&*{})", args_str[0]),
             ("string", "lines") => format!("almide_rt_string_lines(&*{})", args_str[0]),
             ("string", "pad_left") => format!("almide_rt_string_pad_left(&*{}, {}, &*{})", args_str[0], args_str[1], args_str[2]),
-            ("string", "pad_right") => format!("almide_rt_string_pad_right({}, {}, &*{})", args_str[0], args_str[1], args_str[2]),
+            ("string", "pad_right") => format!("almide_rt_string_pad_right(&*{}, {}, &*{})", args_str[0], args_str[1], args_str[2]),
             ("string", "repeat") => format!("almide_rt_string_repeat(&*{}, {})", args_str[0], args_str[1]),
             ("string", "replace") => format!("almide_rt_string_replace(&*{}, &*{}, &*{})", args_str[0], args_str[1], args_str[2]),
             ("string", "replace_first") => format!("almide_rt_string_replace_first(&*{}, &*{}, &*{})", args_str[0], args_str[1], args_str[2]),

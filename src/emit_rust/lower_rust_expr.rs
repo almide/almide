@@ -232,12 +232,29 @@ impl<'a> LowerCtx<'a> {
                     fnames.sort();
                     self.anon.get(&fnames).cloned().unwrap_or("AnonRecord".into())
                 });
-                Expr::Struct { name: sname, fields: fields.iter().map(|(n, v)| (n.clone(), self.lower_expr(v))).collect() }
+                let mut lowered_fields: Vec<(String, Expr)> = fields.iter().map(|(n, v)| (n.clone(), self.lower_expr(v))).collect();
+                // Fill in default field values for any missing fields in named records
+                if let Some(ctor_name) = name.as_ref() {
+                    let provided: std::collections::HashSet<&str> = fields.iter().map(|(n, _)| n.as_str()).collect();
+                    if let Some(field_decls) = self.find_record_field_decls(ctor_name) {
+                        for fd in field_decls {
+                            if !provided.contains(fd.name.as_str()) {
+                                if let Some(default_expr) = &fd.default {
+                                    lowered_fields.push((fd.name.clone(), self.lower_expr(default_expr)));
+                                }
+                            }
+                        }
+                    }
+                }
+                Expr::Struct { name: sname, fields: lowered_fields }
             }
             IrExprKind::SpreadRecord { base, fields } => {
                 let base_expr = self.lower_expr(base);
                 let base_val = if self.is_single_use_var(base) { base_expr } else { Expr::Clone(Box::new(base_expr)) };
+                // Resolve struct name from the expression's type
+                let sname = self.resolve_record_name(&e.ty);
                 Expr::StructUpdate {
+                    name: sname,
                     base: Box::new(base_val),
                     fields: fields.iter().map(|(n, v)| (n.clone(), self.lower_expr(v))).collect(),
                 }
@@ -428,5 +445,51 @@ impl<'a> LowerCtx<'a> {
             },
             _ => Expr::Return(Some(Box::new(self.lower_expr(e)))),
         }
+    }
+
+    /// Resolve the Rust struct name for a record type.
+    /// Checks named records first, then falls back to anonymous record names.
+    pub(super) fn resolve_record_name(&self, ty: &Ty) -> String {
+        match ty {
+            Ty::Named(n, _) => n.clone(),
+            Ty::Record { fields } | Ty::OpenRecord { fields } => {
+                let mut names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
+                names.sort();
+                if let Some(n) = self.named.get(&names) { return n.clone(); }
+                if let Some(n) = self.anon.get(&names) { return n.clone(); }
+                "AnonRecord".into()
+            }
+            _ => "AnonRecord".into(),
+        }
+    }
+
+    /// Look up the field declarations for a named record constructor.
+    /// Handles both standalone Record types and Variant record cases.
+    fn find_record_field_decls(&self, ctor_name: &str) -> Option<&'a [IrFieldDecl]> {
+        // Check if it's a variant constructor
+        if let Some(enum_name) = self.ctors.get(ctor_name) {
+            for td in self.type_decls {
+                if td.name == *enum_name {
+                    if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
+                        for case in cases {
+                            if case.name == ctor_name {
+                                if let IrVariantKind::Record { fields } = &case.kind {
+                                    return Some(fields);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Check standalone record types
+        for td in self.type_decls {
+            if td.name == ctor_name {
+                if let IrTypeDeclKind::Record { fields } = &td.kind {
+                    return Some(fields);
+                }
+            }
+        }
+        None
     }
 }

@@ -81,7 +81,7 @@ pub fn lower(ir: &IrProgram) -> Program {
         .collect();
 
     // Top-level lets
-    let top_lets_ctx = LowerCtx { vt: &ir.var_table, ctors: &ctors, anon: &anon, named: &named, borrow_info: &borrow_info, current_fn: String::new(), param_vars: vec![], result_fns: &result_fns, in_effect: false, auto_try: false, lazy_top_lets: &lazy_top_let_ids };
+    let top_lets_ctx = LowerCtx { vt: &ir.var_table, ctors: &ctors, anon: &anon, named: &named, borrow_info: &borrow_info, current_fn: String::new(), param_vars: vec![], result_fns: &result_fns, in_effect: false, auto_try: false, lazy_top_lets: &lazy_top_let_ids, type_decls: &ir.type_decls };
     let top_lets: Vec<TopLet> = ir.top_lets.iter().map(|tl| {
         let name = ir.var_table.get(tl.var).name.clone();
         let ty = lower_ty_with(&anon, &named, &tl.ty);
@@ -95,7 +95,7 @@ pub fn lower(ir: &IrProgram) -> Program {
     let mut tests = Vec::new();
     for f in &ir.functions {
         let param_vars: Vec<VarId> = f.params.iter().map(|p| p.var).collect();
-        let ctx = LowerCtx { vt: &ir.var_table, ctors: &ctors, anon: &anon, named: &named, borrow_info: &borrow_info, current_fn: f.name.clone(), param_vars, result_fns: &result_fns, in_effect: f.is_effect, auto_try: f.is_effect && !f.is_test, lazy_top_lets: &lazy_top_let_ids };
+        let ctx = LowerCtx { vt: &ir.var_table, ctors: &ctors, anon: &anon, named: &named, borrow_info: &borrow_info, current_fn: f.name.clone(), param_vars, result_fns: &result_fns, in_effect: f.is_effect, auto_try: f.is_effect && !f.is_test, lazy_top_lets: &lazy_top_let_ids, type_decls: &ir.type_decls };
         let rf = ctx.lower_fn(f);
         if f.is_test { tests.push(rf); } else { functions.push(rf); }
     }
@@ -185,6 +185,8 @@ pub(super) struct LowerCtx<'a> {
     pub(super) auto_try: bool,
     /// VarIds of lazy top-level let bindings (need deref via `*` when accessed)
     pub(super) lazy_top_lets: &'a std::collections::HashSet<VarId>,
+    /// Type declarations for looking up default field values
+    pub(super) type_decls: &'a [IrTypeDecl],
 }
 
 impl<'a> LowerCtx<'a> {
@@ -296,9 +298,24 @@ impl<'a> LowerCtx<'a> {
                 let ty_ann = if needs_ty && !has_unresolved { Some(self.lty(bind_ty)) } else { None };
                 Stmt::Let { name, ty: ty_ann, mutable: matches!(mutability, Mutability::Var), value: val }
             }
-            IrStmtKind::BindDestructure { pattern, value } => Stmt::LetPattern {
-                pattern: self.lower_pat(pattern), value: self.lower_expr(value),
-            },
+            IrStmtKind::BindDestructure { pattern, value } => {
+                let mut pat = self.lower_pat(pattern);
+                // Fill empty struct name from value type for record destructuring
+                if let Pattern::Struct { name, .. } = &mut pat {
+                    if name.is_empty() {
+                        if let Ty::Named(n, _) = &value.ty {
+                            *name = n.clone();
+                        } else if let Ty::Record { fields } = &value.ty {
+                            let mut fnames: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
+                            fnames.sort();
+                            *name = self.anon.get(&fnames).cloned()
+                                .or_else(|| self.named.get(&fnames).cloned())
+                                .unwrap_or_else(|| "AnonRecord".into());
+                        }
+                    }
+                }
+                Stmt::LetPattern { pattern: pat, value: self.lower_expr(value) }
+            }
             IrStmtKind::Assign { var, value } => Stmt::Assign {
                 target: crate::emit_common::sanitize(&self.vt.get(*var).name), value: self.lower_expr(value),
             },

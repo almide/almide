@@ -1,6 +1,13 @@
 // float extern — Rust native implementations
 
-pub fn almide_rt_float_to_string(n: f64) -> String { format!("{}", n) }
+pub fn almide_rt_float_to_string(n: f64) -> String {
+    let s = format!("{}", n);
+    if n.fract() == 0.0 && !s.contains('.') && !s.contains("inf") && !s.contains("NaN") {
+        format!("{}.0", s)
+    } else {
+        s
+    }
+}
 pub fn almide_rt_float_parse(s: String) -> Result<f64, String> { s.trim().parse::<f64>().map_err(|e| e.to_string()) }
 pub fn almide_rt_float_abs(n: f64) -> f64 { n.abs() }
 pub fn almide_rt_float_ceil(n: f64) -> f64 { n.ceil() }

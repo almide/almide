@@ -62,7 +62,7 @@ pub enum Expr {
 
     // Structs
     Struct { name: String, fields: Vec<(String, Expr)> },
-    StructUpdate { base: Box<Expr>, fields: Vec<(String, Expr)> },
+    StructUpdate { name: String, base: Box<Expr>, fields: Vec<(String, Expr)> },
 
     // Lambda
     Closure { params: Vec<String>, body: Box<Expr> },
