@@ -41,8 +41,10 @@ effect fn add_parsed(a: String, b: String) -> Result[Int, String] = {
 }
 
 test "effect fn auto unwrap ok" {
-  let result = add_parsed("10", "20")
-  assert_eq(result, 30)
+  match add_parsed("10", "20") {
+    ok(v) => assert_eq(v, 30),
+    err(_) => assert(false, "expected ok"),
+  }
 }
 
 test "effect fn propagates err" {

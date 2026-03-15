@@ -154,7 +154,7 @@ impl<'a> LowerCtx<'a> {
                 let call = match target {
                     CallTarget::Named { name } => return self.lower_named_call(name, ir_args),
                     CallTarget::Module { module, func } => {
-                        self.lower_stdlib_call(module, func, ir_args, args, e)
+                        return self.lower_stdlib_call(module, func, ir_args, args, e);
                     }
 
                     CallTarget::Method { object, method } => {
@@ -166,7 +166,7 @@ impl<'a> LowerCtx<'a> {
                                 // Reconstruct IR args with object prepended
                                 let mut all_ir: Vec<&IrExpr> = vec![object];
                                 all_ir.extend(args.iter());
-                                self.lower_stdlib_call(module, func, all_exprs, &all_ir.iter().map(|x| (*x).clone()).collect::<Vec<_>>(), e)
+                                return self.lower_stdlib_call(module, func, all_exprs, &all_ir.iter().map(|x| (*x).clone()).collect::<Vec<_>>(), e);
                             } else {
                                 Expr::Call { func: format!("{}_{}", module.replace('.', "_"), crate::emit_common::sanitize(func)), args: all_exprs }
                             }
@@ -402,6 +402,10 @@ impl<'a> LowerCtx<'a> {
                 args: rust_args,
             }
         };
+        // Template already includes ? when in_effect — don't double-wrap
+        if use_template && self.in_effect {
+            return expr; // template handles ? insertion
+        }
         if self.auto_try && self.result_fns.contains(&key) {
             Expr::Try(Box::new(expr))
         } else if self.auto_try && matches!(&e.ty, Ty::Result(_, _)) {
