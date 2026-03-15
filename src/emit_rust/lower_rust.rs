@@ -283,8 +283,9 @@ impl<'a> LowerCtx<'a> {
                 let needs_ty = matches!(&value.kind, IrExprKind::List { elements } if elements.is_empty())
                     || matches!(&value.kind, IrExprKind::EmptyMap | IrExprKind::OptionNone)
                     || is_map_new
+                    || matches!(&value.kind, IrExprKind::OptionSome { .. })
                     || (matches!(&value.kind, IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. })
-                        && matches!(&value.ty, Ty::Result(_, _)) && !value.ty.contains_unknown());
+                        && matches!(&value.ty, Ty::Result(_, _)));
                 // Use var's type (from annotation/inference) for let bindings, not the value's generic type
                 let bind_ty = if var_ty.contains_unknown() { &value.ty } else { var_ty };
                 let has_unresolved = bind_ty.contains_unknown() || contains_typevar(bind_ty);
