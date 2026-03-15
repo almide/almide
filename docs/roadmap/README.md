@@ -8,7 +8,6 @@
 
 ### Phase A: Generated Code Quality
 - [Clone Reduction Phase 4](active/clone-reduction.md) — for-in/list/member/match/spread clone elimination, field-level borrow analysis
-- [Codegen Refinement](active/codegen-refinement.md) — let mut→let, #[inline], constant folding, string literal context
 - [IR Optimization Passes](active/ir-optimization-passes.md) — Tier 1 (constant folding, DCE) ✅。Tier 2: inlining, CSE, LICM
 - [RustIR: Codegen 中間表現](active/rust-ir.md) — IR → RustIR → String の 2 段パイプライン
 - [Tail Call Optimization](active/tail-call-optimization.md) — Self-recursive tail calls → labeled loop
@@ -18,8 +17,6 @@
 - [Type System Extensions](active/type-system.md) — Row polymorphism, union types, container protocols, structural generic bounds
 - [Monomorphization](active/monomorphization.md) — Generic function instantiation for structural bounds (`T: { .. }`)
 - [Derive Conventions](active/derive-conventions.md) — Trait-free polymorphism via fixed convention + colon syntax (`fn Type.method`)
-- [Exhaustiveness Check](active/exhaustiveness-check.md) — Non-exhaustive match → compile error
-- [Compiler Warnings](active/compiler-warnings.md) — Warning infrastructure, unused imports, dead code
 
 ### Phase C: Language Extensions
 - [Syntax Sugar](active/syntax-sugar.md) — Lambda ✅, default args ✅, remaining: comprehensions, named args, raw strings, block comments
@@ -75,6 +72,9 @@
 - [Borrow Inference](done/borrow-inference-design.md) — Lobster-style move/clone analysis
 - [CLI Tool Authoring](done/cli-tool-authoring.md) — err() exit, almide run args
 - [Codegen Correctness](done/codegen-correctness.md) — P1 7項 + P2 1項, auto-?, guard, do-block, string pattern
+- [Codegen Refinement](done/codegen-refinement.md) — let mut→let demotion via IR post-pass
+- [Compiler Warnings](done/compiler-warnings.md) — Unused variables, unused imports
+- [Exhaustiveness Check](done/exhaustiveness-check.md) — Non-exhaustive match → compile error
 - [Codegen IR Redesign](done/ir-redesign.md) — Self-contained typed IR, Phase 1-5 complete
 - [Codegen Optimization](done/codegen-optimization.md) — move analysis, borrow inference (Phase 0-3)
 - [Compiler Bug Fixes](done/compiler-bugs-from-tests.md) — 7 bugs found by test expansion

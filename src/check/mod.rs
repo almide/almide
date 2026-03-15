@@ -89,6 +89,25 @@ impl Checker {
             let ty = ity.to_ty(&self.solutions);
             self.expr_types.insert(*id, InferTy::resolve_inference_vars(&ty, &self.solutions));
         }
+        // Unused import warnings
+        for imp in &program.imports {
+            if let ast::Decl::Import { path, alias, span, .. } = imp {
+                let import_name = alias.as_ref().cloned()
+                    .unwrap_or_else(|| path.last().cloned().unwrap_or_default());
+                if !import_name.is_empty()
+                    && !self.env.used_modules.contains(&import_name)
+                    && !import_name.starts_with('_')
+                    && path.first().map(|s| s.as_str()) != Some("self")
+                {
+                    let line = span.as_ref().map(|s| s.line).unwrap_or(0);
+                    self.diagnostics.push(Diagnostic::warning(
+                        format!("unused import '{}'", import_name),
+                        format!("Remove the import or prefix with '_' to suppress: _{}", import_name),
+                        format!("import at line {}", line),
+                    ));
+                }
+            }
+        }
         std::mem::take(&mut self.diagnostics)
     }
 

@@ -159,6 +159,7 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprI
 
     let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, modules: Vec::new() };
     compute_use_counts(&mut program);
+    demote_unused_mut(&mut program);
     program
 }
 

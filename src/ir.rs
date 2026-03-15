@@ -899,6 +899,77 @@ fn count_uses_in_stmt(stmt: &IrStmt, table: &mut VarTable) {
     }
 }
 
+/// Demote `var` to `let` for variables that are never reassigned.
+/// This is a post-pass optimization that runs after compute_use_counts.
+pub fn demote_unused_mut(program: &mut IrProgram) {
+    let mut assigned_vars: HashSet<u32> = HashSet::new();
+    for func in &program.functions {
+        collect_assigned_vars(&func.body, &mut assigned_vars);
+    }
+    for i in 0..program.var_table.len() {
+        if program.var_table.entries[i].mutability == Mutability::Var
+            && !assigned_vars.contains(&(i as u32))
+        {
+            program.var_table.entries[i].mutability = Mutability::Let;
+        }
+    }
+}
+
+fn collect_assigned_vars(expr: &IrExpr, assigned: &mut HashSet<u32>) {
+    match &expr.kind {
+        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+            for s in stmts { collect_assigned_vars_stmt(s, assigned); }
+            if let Some(e) = expr { collect_assigned_vars(e, assigned); }
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            collect_assigned_vars(cond, assigned);
+            collect_assigned_vars(then, assigned);
+            collect_assigned_vars(else_, assigned);
+        }
+        IrExprKind::Match { subject, arms } => {
+            collect_assigned_vars(subject, assigned);
+            for a in arms { collect_assigned_vars(&a.body, assigned); }
+        }
+        IrExprKind::ForIn { iterable, body, .. } => {
+            collect_assigned_vars(iterable, assigned);
+            for s in body { collect_assigned_vars_stmt(s, assigned); }
+        }
+        IrExprKind::While { cond, body } => {
+            collect_assigned_vars(cond, assigned);
+            for s in body { collect_assigned_vars_stmt(s, assigned); }
+        }
+        IrExprKind::Lambda { body, .. } => collect_assigned_vars(body, assigned),
+        _ => {}
+    }
+}
+
+fn collect_assigned_vars_stmt(stmt: &IrStmt, assigned: &mut HashSet<u32>) {
+    match &stmt.kind {
+        IrStmtKind::Assign { var, value } => {
+            assigned.insert(var.0);
+            collect_assigned_vars(value, assigned);
+        }
+        IrStmtKind::IndexAssign { target, index, value } => {
+            assigned.insert(target.0);
+            collect_assigned_vars(index, assigned);
+            collect_assigned_vars(value, assigned);
+        }
+        IrStmtKind::FieldAssign { target, value, .. } => {
+            assigned.insert(target.0);
+            collect_assigned_vars(value, assigned);
+        }
+        IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. } => {
+            collect_assigned_vars(value, assigned);
+        }
+        IrStmtKind::Expr { expr } => collect_assigned_vars(expr, assigned),
+        IrStmtKind::Guard { cond, else_ } => {
+            collect_assigned_vars(cond, assigned);
+            collect_assigned_vars(else_, assigned);
+        }
+        IrStmtKind::Comment { .. } => {}
+    }
+}
+
 /// Collect warnings for unused variables.
 /// Skips: `_` prefixed names, function parameters, pattern bindings (span is None).
 pub fn collect_unused_var_warnings(program: &IrProgram, file: &str) -> Vec<crate::diagnostic::Diagnostic> {
