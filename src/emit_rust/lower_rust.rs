@@ -130,8 +130,10 @@ pub fn lower(ir: &IrProgram) -> Program {
         out
     }
     rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/int.rs")));
+    rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/float.rs")));
     rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/string.rs")));
     rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/list.rs")));
+    rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/map.rs")));
     rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/value.rs")));
     rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/env.rs")));
     rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/process.rs")));

@@ -187,6 +187,11 @@ impl Lexer {
 // ── String lexing ───────────────────────────────────────────────
 
 fn lex_string(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize) {
+    // Check for triple-quote heredoc: """..."""
+    if start + 2 < chars.len() && chars[start + 1] == '"' && chars[start + 2] == '"' {
+        return lex_heredoc(chars, start, line, col);
+    }
+
     let mut pos = start + 1; // skip opening "
     let mut value = String::new();
     let mut has_interpolation = false;
@@ -224,6 +229,80 @@ fn lex_string(chars: &[char], start: usize, line: usize, col: usize) -> (Token, 
 
     let tt = if has_interpolation { TokenType::InterpolatedString } else { TokenType::String };
     (Token { token_type: tt, value, line, col }, pos)
+}
+
+fn lex_heredoc(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize) {
+    let mut pos = start + 3; // skip opening """
+    let mut raw = String::new();
+    let mut has_interpolation = false;
+
+    // Consume until closing """
+    while pos + 2 < chars.len() && !(chars[pos] == '"' && chars[pos + 1] == '"' && chars[pos + 2] == '"') {
+        if chars[pos] == '\\' && pos + 1 < chars.len() {
+            match chars[pos + 1] {
+                'n' => { raw.push('\n'); pos += 2; }
+                't' => { raw.push('\t'); pos += 2; }
+                'r' => { raw.push('\r'); pos += 2; }
+                '\\' => { raw.push('\\'); pos += 2; }
+                '"' => { raw.push('"'); pos += 2; }
+                '$' => { raw.push('$'); pos += 2; }
+                _ => { raw.push('\\'); raw.push(chars[pos + 1]); pos += 2; }
+            }
+        } else if chars[pos] == '$' && pos + 1 < chars.len() && chars[pos + 1] == '{' {
+            has_interpolation = true;
+            raw.push('$');
+            raw.push('{');
+            pos += 2;
+            let mut depth = 1;
+            while pos < chars.len() && depth > 0 {
+                if chars[pos] == '{' { depth += 1; }
+                if chars[pos] == '}' { depth -= 1; }
+                if depth > 0 { raw.push(chars[pos]); }
+                pos += 1;
+            }
+            raw.push('}');
+        } else {
+            raw.push(chars[pos]);
+            pos += 1;
+        }
+    }
+    if pos + 2 < chars.len() { pos += 3; } // skip closing """
+
+    let value = strip_heredoc_indent(&raw);
+    let tt = if has_interpolation { TokenType::InterpolatedString } else { TokenType::String };
+    (Token { token_type: tt, value, line, col }, pos)
+}
+
+/// Strip common leading indentation from heredoc content.
+/// - First line (after opening """) is skipped if blank
+/// - Last line (before closing """) is dropped if whitespace-only
+/// - Minimum indent of non-empty content lines is stripped from all lines
+fn strip_heredoc_indent(raw: &str) -> String {
+    let lines: Vec<&str> = raw.split('\n').collect();
+    if lines.is_empty() { return String::new(); }
+
+    // If first line is blank (content starts on next line after """), skip it
+    let start = if lines[0].trim().is_empty() { 1 } else { 0 };
+    // If last line is whitespace-only, drop it
+    let end = if lines.len() > 1 && lines[lines.len() - 1].trim().is_empty() {
+        lines.len() - 1
+    } else {
+        lines.len()
+    };
+
+    if start >= end { return String::new(); }
+
+    let content = &lines[start..end];
+    let indent = content.iter()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.len() - l.trim_start().len())
+        .min()
+        .unwrap_or(0);
+
+    content.iter()
+        .map(|l| if l.len() >= indent { &l[indent..] } else { "" })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 // ── Number lexing ───────────────────────────────────────────────
