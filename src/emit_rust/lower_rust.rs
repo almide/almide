@@ -363,6 +363,8 @@ impl<'a> LowerCtx<'a> {
                 let guard_body = match &else_.kind {
                     IrExprKind::Break => Expr::Break,
                     IrExprKind::Continue => Expr::Continue { label: None },
+                    // effect fn: ok(()) → break (ループ脱出), ok(value) → return Ok(value)
+                    IrExprKind::ResultOk { expr } if self.auto_try && matches!(&expr.ty, Ty::Unit) => Expr::Break,
                     _ if self.auto_try => Expr::Return(Some(Box::new(self.lower_expr(else_)))),
                     // In non-auto-try context (tests, pure fn): don't wrap in Ok/Err
                     IrExprKind::ResultOk { expr } if !self.auto_try => {
