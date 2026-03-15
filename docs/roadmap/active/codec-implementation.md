@@ -1,171 +1,223 @@
 # Codec Implementation Plan [ACTIVE]
 
-## 背景
-
-codec-and-json.md に設計が完成している。この文書は **実装の依存関係と実現パス** を整理する。
-
-今日完成した基盤:
-- **Derive Conventions** — `type T: Eq, Repr = ...` + `fn T.method(t: T)` + auto-derive
-- **Operator Protocol** — `==` → `T.eq`, `"${t}"` → `T.repr`, IR 関数自動生成
-- **Call-site expansion** — default args, named args を lowerer で展開
-
-これらの仕組みを **Encode/Decode に拡張する** のが Codec 実装の核心。
-
-## 依存関係グラフ
+## 3層モデル
 
 ```
-[Done] auto-derive (Eq/Repr)
-   │
-   ▼
-Phase 1: json stdlib 拡充
-   │  json.object, json.s/i/f/b, path API
-   │  (stdlib TOML 定義 + runtime 追加のみ)
-   │
-   ▼
-Phase 2: deriving Codec ← 本丸
-   │  auto-derive を Encode/Decode に拡張
-   │  Record: フィールド順に json.object を生成
-   │  Variant: Tagged/Adjacent 表現を生成
-   │  Nested: 再帰的に encode/decode を呼ぶ
-   │
-   ├──▶ Web Framework (Codec 統合で JSON request/response 型安全化)
-   ├──▶ Template (並行する boundary 機構)
-   │
-   ▼
-Phase 3: JsonOptions
-   │  unknown_fields, naming strategy
-   │  (Phase 2 の encode/decode に options パラメータ追加)
-   │
-   ▼
-Phase 4: DecodeError + repair + validate + schema
-   │  構造化エラー, json.repair[T], json.describe[T]
-   │  (LLM 差別化ポイント)
-   │
-   ▼
-Phase 5: 他フォーマット (msgpack, yaml, cbor)
+Layer 1: Codec (コンパイラ)     T ←→ Value
+Layer 2: Format (ライブラリ)    Value ←→ String/Bytes
+Layer 3: User code              T ←→ String (パイプで合成)
 ```
 
-## Phase 2 の実装パス (本丸)
+```
+encode: T ──.encode()──▶ Value ──json.stringify──▶ String
+                               ──yaml.stringify──▶ String
+                               ──toml.stringify──▶ String
 
-### 2a: Encode (T → Json)
+decode: String ──json.parse──▶ Value ──T.decode()──▶ Result[T, E]
+        String ──yaml.parse──▶ Value ──T.decode()──▶ Result[T, E]
 
-**仕組み**: auto-derive と同じパターン。`deriving Codec` を持つ型に `T.encode` 関数を IR で自動生成。
+transform: Value ──rename_keys──▶ Value  (naming strategy)
+           Value ──set_path──▶ Value     (局所操作)
+           Value ──json→yaml──▶ Value    (フォーマット変換、型不要)
+```
+
+**型はフォーマットを知らない。フォーマットは型を知らない。Value が唯一の接点。**
+
+## Value 型 (universal data model)
 
 ```almide
-type Person = { name: String, age: Int } deriving Codec
-
-// auto-generate:
-fn Person.encode(p: Person) -> Json =
-  json.object([("name", json.s(p.name)), ("age", json.i(p.age))])
+type Value =
+  | Null
+  | Bool(Bool)
+  | Int(Int)
+  | Float(Float)
+  | Str(String)
+  | Arr(List[Value])
+  | Obj(List[(String, Value)])
 ```
 
-実装:
-1. `lower.rs` の `generate_auto_derives` に `"Codec"` ケースを追加
-2. Record のフィールドを走査して `json.object([...])` を構築する IR を生成
-3. フィールド型に応じて `json.s` / `json.i` / `json.f` / `json.b` を選択
-4. Nested record (フィールド型が Named で Codec を持つ) → 再帰的に `FieldType.encode(val)` を呼ぶ
-5. Option[T] → `match val { some(v) => json.s(v), none => json.null() }`
-6. List[T] → `json.array(list.map(val, (x) => x.encode()))` ← UFCS 解決必要
+名前は `Value`。`serde_json::Value` と同じ選択。Almide stdlib に Value 型は1つだけなので衝突しない。
 
-### 2b: Decode (Json → T)
+JSON / YAML / TOML / msgpack の data model は全てこれに写像できる。
+TOML の datetime は `Str("2024-01-15T10:30:00Z")` として格納、toml.stringify が ISO 8601 を検出して TOML datetime に変換。
+
+### Obj の内部表現
+
+`Obj(List[(String, Value)])` は挿入順を保持する。decode 時のフィールド検索は線形探索 O(n)。
+
+- 小さい struct (≤20 fields) — 気にしない。実用上の JSON object は大半がこのサイズ
+- 大きい struct — decode 関数内で一度 `Map[String, Value]` に変換してから lookup
+- manual codec — 性能が必要なら手書き
+
+## Codec convention
 
 ```almide
-// auto-generate:
-fn Person.decode(j: Json) -> Result[Person, String] = {
-  let name = json.get(j, "name") |> json.as_string
-  let age = json.get(j, "age") |> json.as_int
-  match (name, age) {
-    (some(n), some(a)) => ok(Person { name: n, age: a })
-    _ => err("decode failed")
-  }
-}
+type Person: Codec = { name: String, age: Int, active: Bool = true }
 ```
 
-実装:
-1. フィールドごとに `json.get(j, "field_name") |> json.as_TYPE` の IR を生成
-2. 全フィールドが Some なら Record 構築、1つでも None なら err
-3. field default がある場合 → `json.get(...).unwrap_or(default)` を使用
-4. Option[T] フィールド → missing/null を none として許容
-5. Nested record → 再帰的に `FieldType.decode(sub_json)` を呼ぶ
-
-### 2c: 便利 API
+`: Codec` は「`T.encode` と `T.decode` が存在する」という宣言。コンパイラが auto-derive する:
 
 ```almide
-// encode_to_string: T → String
-fn json.encode_to_string[T](value: T) -> String =
-  json.stringify(T.encode(value))
+// auto-generated:
+fn Person.encode(p: Person) -> Value =
+  Obj([("name", Str(p.name)), ("age", Int(p.age)), ("active", Bool(p.active))])
 
-// decode_from_string: String → Result[T, String]
-fn json.decode_from_string[T](text: String) -> Result[T, String] = do {
-  let j = json.parse(text)
-  T.decode(j)
-}
+fn Person.decode(v: Value) -> Result[Person, String] = ...
 ```
-
-これらは monomorphization で T を具体型に解決。
-
-### 2d: Variant (ADT) の encode/decode
-
-```almide
-type Shape = Circle(radius: Float) | Rect(w: Float, h: Float) deriving Codec
-
-// Tagged (default):
-// Circle(3.0) → {"Circle": {"radius": 3.0}}
-// Rect(1.0, 2.0) → {"Rect": {"w": 1.0, "h": 2.0}}
-```
-
-実装:
-1. variant の各 case を match で分岐
-2. 各 case の payload を encode (Unit → null, Tuple → array, Record → object)
-3. 外側を `json.object([("CaseName", payload_json)])` で wrap
-
-## 多層の課題
 
 ### Nested types
 
 ```almide
-type Address = { city: String, zip: String } deriving Codec
-type Person = { name: String, address: Address } deriving Codec
+type Address: Codec = { city: String, zip: String }
+type Person: Codec = { name: String, address: Address }
 
-// Person.encode は Address.encode を呼ぶ必要がある
-// → auto-derive 生成時に、フィールド型が Named で Codec を持つか確認
-// → 持っていれば FieldType.encode(val) を IR に挿入
+// Person.encode は Address.encode を呼ぶ:
+fn Person.encode(p: Person) -> Value =
+  Obj([("name", Str(p.name)), ("address", Address.encode(p.address))])
 ```
 
-**解決**: `find_convention_fn` の仕組みを流用。`type_conventions` マップで "Codec" を持つ型を判定。
-
-### Generic types
+### Variant types
 
 ```almide
-type Box[T] = { value: T } deriving Codec
-// T が Codec を満たす場合のみ有効
-// → monomorphization で T を具体化した後に encode/decode を生成
+type Shape: Codec = Circle(radius: Float) | Rect(w: Float, h: Float)
+
+// Tagged (default):
+// Circle(3.0) → Obj([("Circle", Obj([("radius", Float(3.0))]))])
 ```
 
-**解決**: `mono.rs` の既存基盤。`Box[Person]` → `Box__Person` に特殊化後、`Person.encode` を呼ぶコードを生成。
+## Format modules (ライブラリ)
 
-### 循環参照
+### JSON (stdlib)
 
-サポートしない。Almide は immutable-first で循環構造は稀。encode 時にスタックオーバーフロー → ランタイムエラー。
+```almide
+// Value ↔ JSON text
+fn json.stringify(v: Value) -> String
+fn json.stringify_pretty(v: Value) -> String
+fn json.parse(text: String) -> Result[Value, String]
+```
 
-## 優先順位
+### YAML (stdlib or package)
 
-1. **Phase 1 + 2a (encode)** — 最小限の価値。`json.encode_to_string(person)` が動く
-2. **Phase 2b (decode)** — 双方向。`json.decode_from_string[Person](text)` が動く
-3. **Phase 2d (variant)** — ADT 対応
-4. **Phase 3 (options)** — naming strategy, unknown fields
-5. **Phase 4 (repair)** — LLM 差別化
+```almide
+fn yaml.stringify(v: Value) -> String
+fn yaml.parse(text: String) -> Result[Value, String]
+```
 
-Phase 1 は stdlib TOML 追加のみ (コンパイラ変更なし)。
-Phase 2 はコンパイラ変更 (auto-derive 拡張) が必要。
+### ユーザー定義フォーマット
+
+```almide
+// 誰でも書ける。Value ↔ 外部表現 の関数だけ
+fn csv.stringify(v: Value) -> String = ...
+fn csv.parse(text: String) -> Result[Value, String] = ...
+```
+
+## 利用側ユースケース
+
+### JSON encode/decode
+
+```almide
+type Person: Codec = { name: String, age: Int }
+
+let alice = Person { name: "Alice", age: 30 }
+
+// encode
+let json_text = alice.encode() |> json.stringify
+// → '{"name":"Alice","age":30}'
+
+// decode
+let bob = json.parse(input)? |> Person.decode
+```
+
+### 同じ型で YAML
+
+```almide
+// Person の定義は一切変えない
+
+let yaml_text = alice.encode() |> yaml.stringify
+// → "name: Alice\nage: 30\n"
+
+let carol = yaml.parse(yaml_input)? |> Person.decode
+```
+
+### フォーマット変換 (型不要)
+
+```almide
+// JSON → YAML を型を経由せずに変換
+let value = json.parse(json_text)?
+let yaml_text = yaml.stringify(value)
+```
+
+### naming strategy
+
+```almide
+type ApiResponse: Codec = { userId: String, createdAt: String }
+
+// encode はフィールド名そのまま
+let v = response.encode()  // Obj([("userId", ...), ("createdAt", ...)])
+
+// snake_case が欲しい場合は Value 変換関数を挟む
+let v_snake = v |> value.rename_keys(to_snake_case)
+let text = v_snake |> json.stringify
+// → '{"user_id":"...","created_at":"..."}'
+```
+
+## Generic 制約と Codec
+
+```almide
+// mono 時に T.encode の存在をチェック
+fn json.encode_typed[T](value: T) -> String =
+  T.encode(value) |> json.stringify
+```
+
+Almide には trait がないので、mono 時の関数存在チェックで制約を保証。
+エラーメッセージは `: Codec` メタデータを使って改善:
+- ❌ `T.encode が見つからない`
+- ✅ `型 Foo は Codec ではありません。type Foo: Codec = ... で宣言してください`
+
+## 実装順序
+
+```
+Phase 0: Value 型を stdlib に追加
+  └─ type Value = Null | Bool(...) | ...
+  └─ 構築 API: value.str, value.int, value.obj, ...
+
+Phase 1: Codec auto-derive
+  └─ generate_auto_derives に "Codec" ケース追加
+  └─ Record encode (フィールド → Obj)
+  └─ Record decode (Obj → フィールド)
+  └─ Nested (再帰 encode/decode)
+  └─ Variant encode/decode (Tagged)
+
+Phase 2: json module を Value ベースに移行
+  └─ json.stringify(Value) -> String
+  └─ json.parse(String) -> Result[Value, String]
+  └─ 既存 Json 型 → Value 型にリネーム
+
+Phase 3: yaml/toml module
+  └─ yaml.stringify / yaml.parse
+  └─ toml.stringify / toml.parse
+
+Phase 4: DecodeError + repair + validate
+  └─ 構造化エラー、json.repair[T], json.describe[T]
+
+Phase 5: value 変換ユーティリティ
+  └─ value.rename_keys, value.set_path, value.get_path
+```
+
+## 設計判断の根拠
+
+- **trait なしで拡張可能** — Value が具体型として接点になる。抽象じゃなく具体。
+- **convention ベース** — `: Codec` は「.encode と .decode が存在する」の宣言
+- **関数の合成** — `encode() |> json.stringify` がパイプで繋がる
+- **フォーマットは言語の外** — json, yaml はただの module。言語に組み込まない
+- **JSON ファーストではない** — Value は universal data model。JSON はその serialization の1つ
 
 ## 関連ロードマップ
 
-| ロードマップ | Codec との関係 |
-|------------|--------------|
-| codec-and-json.md | 設計ドキュメント (全 Phase の詳細仕様) |
-| derive-conventions (done) | Encode/Decode convention 名を定義 |
-| operator-protocol (done) | auto-derive の仕組みが基盤 |
-| web-framework | Phase 2 完了後に Codec 統合 |
-| template | 並行する typed boundary 機構 |
-| stdlib-strategy | json module 36 関数が Phase 1 の基盤 |
+| ロードマップ | 関係 |
+|------------|------|
+| codec-and-json.md | 元の設計仕様 (Json → Value にリネーム予定) |
+| derive-conventions (done) | convention 宣言の基盤 |
+| operator-protocol (done) | auto-derive の仕組み |
+| web-framework | Phase 1 完了後に Codec 統合 |
+| monomorphization (done) | generic Codec の基盤 |
