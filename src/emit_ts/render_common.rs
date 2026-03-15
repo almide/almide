@@ -193,18 +193,34 @@ fn render_match_normal(o: &mut String, subject: &Expr, arms: &[MatchArm], d: usi
 fn render_match_with_err(o: &mut String, subject: &Expr, arms: &[MatchArm], d: usize) {
     let ok_arms: Vec<&MatchArm> = arms.iter().filter(|a| !matches!(&a.pattern, Pattern::Err(_))).collect();
     let err_arms: Vec<&MatchArm> = arms.iter().filter(|a| matches!(&a.pattern, Pattern::Err(_))).collect();
-    o.push_str("(() => { let __m: any; try { __m = "); expr(o, subject, d);
-    o.push_str("; } catch (__e) { __m = new __Err(__e instanceof Error ? __e.message : String(__e), __e.__almd_value); } ");
-    o.push_str("if (__m instanceof __Err) { ");
+    // Result object: { ok: true, value } | { ok: false, error }
+    o.push_str("(() => { const __m = "); expr(o, subject, d);
+    o.push_str("; if (!__m.ok) { ");
     for arm in &err_arms {
-        if let Pattern::Err(inner) = &arm.pattern { render_err_arm_inline(o, inner, &arm.body, d); }
+        if let Pattern::Err(inner) = &arm.pattern { render_result_err_arm(o, inner, &arm.body, d); }
     }
     o.push_str("}\n");
-    for arm in &ok_arms { render_arm(o, "__m", arm, d + 1); }
+    // ok arms: bind __m.value
+    for arm in &ok_arms {
+        let rewritten = MatchArm {
+            pattern: if let Pattern::Ok(inner) = &arm.pattern { *inner.clone() } else { arm.pattern.clone() },
+            guard: arm.guard.clone(),
+            body: arm.body.clone(),
+        };
+        render_arm(o, "__m.value", &rewritten, d + 1);
+    }
     if !ok_arms.last().map_or(false, |a| a.guard.is_none() && is_unconditional(&a.pattern)) {
         o.push_str(&ind(d + 1)); o.push_str("throw new Error(\"match exhausted\");\n");
     }
     o.push_str(&ind(d)); o.push_str("})()");
+}
+
+fn render_result_err_arm(o: &mut String, inner: &Pattern, body: &Expr, d: usize) {
+    match inner {
+        Pattern::Wild => { o.push_str("return "); expr(o, body, d); o.push_str("; "); }
+        Pattern::Bind(name) => { w!(o, "{{ const {} = __m.error; return ", name); expr(o, body, d); o.push_str("; } "); }
+        _ => { o.push_str("return "); expr(o, body, d); o.push_str("; "); }
+    }
 }
 
 fn render_err_arm_inline(o: &mut String, inner: &Pattern, body: &Expr, d: usize) {

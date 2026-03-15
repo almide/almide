@@ -262,13 +262,8 @@ impl<'a> LowerCtx<'a> {
             IrExprKind::Var { id } => self.vt().get(*id).name.chars().next().map_or(false, |c| c.is_uppercase()),
             _ => false,
         };
-        let msg = self.lower_err_msg(expr, ie, it);
-        if is_variant {
-            let val = self.lower_expr(expr, ie, it);
-            if ie { Expr::ThrowStructuredError { msg: Box::new(msg), value: Box::new(val) } }
-            else { Expr::New { class: "__Err".into(), args: vec![msg, val] } }
-        } else if ie { Expr::ThrowError(Box::new(msg)) }
-        else { Expr::New { class: "__Err".into(), args: vec![msg] } }
+        let inner = self.lower_expr(expr, ie, it);
+        Expr::ResultErr(Box::new(inner))
     }
 
     fn lower_err_msg(&self, expr: &IrExpr, ie: bool, it: bool) -> Expr {
@@ -384,7 +379,7 @@ impl<'a> LowerCtx<'a> {
             IrStmtKind::Bind { var, mutability, value, .. } => {
                 let name = self.var_name(*var);
                 let val = self.lower_expr(value, ie, it);
-                if it && !ie && matches!(&value.kind, IrExprKind::Call { .. }) { Stmt::TryCatchBind { name, value: val } }
+                if it && !ie && matches!(&value.kind, IrExprKind::Call { .. }) { Stmt::ResultUnwrapBind { name, value: val } }
                 else if *mutability == Mutability::Var { Stmt::Let { name, value: val } }
                 else { Stmt::Var { name, value: val } }
             }
@@ -412,8 +407,15 @@ impl<'a> LowerCtx<'a> {
         match &else_.kind {
             IrExprKind::Break => Stmt::If { cond: neg, body: vec![Stmt::Expr(Expr::Break)] },
             IrExprKind::Continue => Stmt::If { cond: neg, body: vec![Stmt::Expr(Expr::Continue)] },
-            IrExprKind::ResultErr { expr } => Stmt::If { cond: neg, body: vec![Stmt::Expr(self.lower_err(expr, true, it))] },
+            IrExprKind::ResultErr { expr } => {
+                let err_val = self.lower_expr(expr, ie, it);
+                Stmt::If { cond: neg, body: vec![Stmt::Expr(Expr::Return(Some(Box::new(Expr::ResultErr(Box::new(err_val))))))] }
+            }
             IrExprKind::ResultOk { expr } if matches!(&expr.kind, IrExprKind::Unit) => Stmt::If { cond: neg, body: vec![Stmt::Expr(Expr::Break)] },
+            IrExprKind::ResultOk { expr } => {
+                let ok_val = self.lower_expr(expr, ie, it);
+                Stmt::If { cond: neg, body: vec![Stmt::Expr(Expr::Return(Some(Box::new(Expr::ResultOk(Box::new(ok_val))))))] }
+            }
             IrExprKind::Unit => Stmt::If { cond: neg, body: vec![Stmt::Expr(Expr::Break)] },
             _ => Stmt::If { cond: neg, body: vec![Stmt::Expr(Expr::Return(Some(Box::new(self.lower_expr(else_, ie, it)))))] },
         }
@@ -424,7 +426,16 @@ impl<'a> LowerCtx<'a> {
         let mut out = Vec::new();
         for s in stmts {
             out.push(self.lower_stmt(s, ie, it));
-            if !has_guard { if let IrStmtKind::Bind { var, .. } = &s.kind { out.push(Stmt::ErrPropagate { name: self.var_name(*var) }); } }
+            // Result 維持: let binding 後に .ok チェックで error 伝播
+            if !has_guard { if let IrStmtKind::Bind { var, value, .. } = &s.kind {
+                if matches!(&value.ty, Ty::Result(_, _)) {
+                    let name = self.var_name(*var);
+                    out.push(Stmt::If {
+                        cond: Expr::UnOp { op: "!", operand: Box::new(Expr::Field(Box::new(Expr::Var(name.clone())), "ok".into())) },
+                        body: vec![Stmt::Expr(Expr::Return(Some(Box::new(Expr::Var(name)))))],
+                    });
+                }
+            } }
         }
         if let Some(t) = tail {
             if has_guard { out.push(Stmt::Expr(self.lower_expr(t, ie, it))); }
