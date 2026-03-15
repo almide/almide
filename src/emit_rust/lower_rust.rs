@@ -240,13 +240,13 @@ impl<'a> LowerCtx<'a> {
             match body_expr {
                 Expr::Block { stmts, tail } => {
                     let wrapped = tail.map(|t| match *t {
-                        Expr::Ok(_) | Expr::Err(_) => *t,
+                        ref e if is_result_expr(e) => *t,
                         other => Expr::Ok(Box::new(other)),
                     }).unwrap_or(Expr::Ok(Box::new(Expr::Unit)));
                     (stmts, Some(wrapped))
                 }
                 other => {
-                    let w = match &other { Expr::Ok(_) | Expr::Err(_) => other, _ => Expr::Ok(Box::new(other)) };
+                    let w = if is_result_expr(&other) { other } else { Expr::Ok(Box::new(other)) };
                     (vec![], Some(w))
                 }
             }
@@ -337,6 +337,18 @@ impl<'a> LowerCtx<'a> {
             IrPattern::Ok { inner } => Pattern::Ctor { name: "Ok".into(), args: vec![self.lower_pat(inner)] },
             IrPattern::Err { inner } => Pattern::Ctor { name: "Err".into(), args: vec![self.lower_pat(inner)] },
         }
+    }
+}
+
+/// Check if an expression already produces a Result (Ok/Err), including through
+/// if/match/block where all branches are Result-producing.
+fn is_result_expr(e: &Expr) -> bool {
+    match e {
+        Expr::Ok(_) | Expr::Err(_) | Expr::Try(_) => true,
+        Expr::If { then, else_: Some(else_), .. } => is_result_expr(then) && is_result_expr(else_),
+        Expr::Match { arms, .. } => !arms.is_empty() && arms.iter().all(|a| is_result_expr(&a.body)),
+        Expr::Block { tail: Some(t), .. } => is_result_expr(t),
+        _ => false,
     }
 }
 
