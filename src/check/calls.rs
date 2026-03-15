@@ -13,9 +13,10 @@ impl Checker {
             ast::Expr::Ident { name, .. } => self.check_named_call(name, &arg_tys),
             ast::Expr::TypeName { name, .. } => {
                 if let Some((type_name, case)) = self.env.constructors.get(name).cloned() {
-                    // Validate constructor argument types
                     self.check_constructor_args(name, &case, &arg_tys);
-                    InferTy::Concrete(Ty::Named(type_name, vec![]))
+                    // Instantiate parent type's generics with fresh inference vars
+                    let generic_args = self.instantiate_type_generics(&type_name);
+                    InferTy::Concrete(Ty::Named(type_name, generic_args))
                 } else { InferTy::Concrete(Ty::Named(name.clone(), vec![])) }
             }
             // Module call: string.trim(s), list.map(xs, f), etc.
@@ -226,14 +227,39 @@ impl Checker {
                     InferTy::from_ty(&ret)
                 } else if let Some((type_name, case)) = self.env.constructors.get(name).cloned() {
                     self.check_constructor_args(name, &case, arg_tys);
-                    InferTy::Concrete(Ty::Named(type_name, vec![]))
+                    let generic_args = self.instantiate_type_generics(&type_name);
+                    InferTy::Concrete(Ty::Named(type_name, generic_args))
                 } else if let Some(ty) = self.env.lookup_var(name).cloned() {
-                    match &ty { Ty::Fn { ret, .. } => InferTy::from_ty(ret), _ => InferTy::from_ty(&ty) }
+                    match &ty {
+                        Ty::Fn { params, ret } => {
+                            // Constrain call args against function params
+                            for (aty, pty) in arg_tys.iter().zip(params.iter()) {
+                                self.constrain(InferTy::from_ty(pty), aty.clone(), format!("call to {}()", name));
+                            }
+                            InferTy::from_ty(ret)
+                        }
+                        _ => InferTy::from_ty(&ty)
+                    }
                 } else {
                     self.diagnostics.push(super::err(format!("undefined function '{}'", name), "Check the function name", format!("call to {}()", name)));
                     InferTy::Concrete(Ty::Unknown)
                 }
             }
+        }
+    }
+
+    /// Create fresh inference variables for a type's generic parameters.
+    fn instantiate_type_generics(&mut self, type_name: &str) -> Vec<Ty> {
+        // Count generics by finding TypeVars in the type definition
+        if let Some(ty_def) = self.env.types.get(type_name).cloned() {
+            let mut type_vars = Vec::new();
+            crate::types::TypeEnv::collect_typevars(&ty_def, &mut type_vars);
+            type_vars.iter().map(|_| {
+                let var = self.fresh_var();
+                var.to_ty(&self.solutions)
+            }).collect()
+        } else {
+            vec![]
         }
     }
 

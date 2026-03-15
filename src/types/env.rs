@@ -235,7 +235,7 @@ impl TypeEnv {
     }
 
     /// Collect unique TypeVar names from a type in the order they first appear
-    fn collect_typevars(ty: &Ty, out: &mut Vec<std::string::String>) {
+    pub fn collect_typevars(ty: &Ty, out: &mut Vec<std::string::String>) {
         match ty {
             Ty::TypeVar(name) => {
                 if !out.contains(name) {
