@@ -490,8 +490,14 @@ impl Checker {
                 }
             }
         }
-        // Named record (Person { ... }) → Named type if the name resolves to a type
+        // Named record: check variant constructor first, then type name
         if let Some(cname) = name.as_ref() {
+            // Variant constructor (Rect { ... }) → parent type (Shape)
+            if let Some((vname, _)) = self.env.constructors.get(cname.as_str()) {
+                for f in fields.iter_mut() { self.check_expr(&mut f.value); }
+                return Ty::Named(vname.clone(), vec![]);
+            }
+            // Regular named type (Person { ... })
             if self.env.types.contains_key(cname) {
                 for f in fields.iter_mut() { self.check_expr(&mut f.value); }
                 return Ty::Named(cname.clone(), vec![]);

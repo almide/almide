@@ -52,7 +52,13 @@ impl Checker {
 
             ast::Expr::Record { name, fields, .. } => {
                 for f in fields.iter_mut() { self.infer_expr(&mut f.value); }
-                if let Some(n) = name { InferTy::Concrete(Ty::Named(n.clone(), vec![])) }
+                if let Some(n) = name {
+                    // Variant constructor → resolve to parent type name
+                    let type_name = self.env.constructors.get(n.as_str())
+                        .map(|(vname, _)| vname.clone())
+                        .unwrap_or_else(|| n.clone());
+                    InferTy::Concrete(Ty::Named(type_name, vec![]))
+                }
                 else {
                     let field_tys: Vec<(String, Ty)> = fields.iter().map(|f| {
                         let ty = self.infer_types.get(&f.value.id()).map(|it| it.to_ty(&self.solutions)).unwrap_or(Ty::Unknown);

@@ -1,0 +1,26 @@
+module variant_codec
+
+type Color: Codec = Red | Green | Blue
+type Shape: Codec = Circle(Float) | Rect { w: Float, h: Float }
+
+fn encode_color(c: Color) -> String = json.stringify(c.encode())
+fn encode_shape(s: Shape) -> String = json.stringify(s.encode())
+
+test "unit variant encode" {
+  assert(string.contains(encode_color(Red), "Red"))
+  assert(string.contains(encode_color(Blue), "Blue"))
+}
+
+test "tuple variant encode" {
+  let s: Shape = Circle(3.14)
+  let text = encode_shape(s)
+  println(text)
+  assert(string.contains(text, "Circle"))
+}
+
+test "record variant encode" {
+  let s: Shape = Rect { w: 10.0, h: 20.0 }
+  let text = encode_shape(s)
+  println(text)
+  assert(string.contains(text, "Rect"))
+}
