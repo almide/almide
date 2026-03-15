@@ -337,9 +337,18 @@ fn substitute_ty(ty: &Ty, bindings: &HashMap<String, Ty>) -> Ty {
         Ty::Record { fields } => Ty::Record {
             fields: fields.iter().map(|(n, t)| (n.clone(), substitute_ty(t, bindings))).collect(),
         },
-        Ty::OpenRecord { fields } => Ty::OpenRecord {
-            fields: fields.iter().map(|(n, t)| (n.clone(), substitute_ty(t, bindings))).collect(),
-        },
+        Ty::OpenRecord { fields } => {
+            // OpenRecord パラメータを具体型に置換（__open_N → 具体型）
+            // bindings の中に OpenRecord と互換の具体型があれば置換する
+            for (_, concrete) in bindings.iter() {
+                if let Ty::Named(_, _) | Ty::Record { .. } = concrete {
+                    return concrete.clone();
+                }
+            }
+            Ty::OpenRecord {
+                fields: fields.iter().map(|(n, t)| (n.clone(), substitute_ty(t, bindings))).collect(),
+            }
+        }
         _ => ty.clone(),
     }
 }
