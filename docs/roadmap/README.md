@@ -6,6 +6,7 @@
 - [Stdlib Runtime Architecture](active/stdlib-self-hosted-redesign.md) — Runtime crate `almide_rt` 基盤完成。@extern 移行中
 - [Stdlib API Reform](active/stdlib-verb-system.md) — Verb 標準化 (from_string, to_upper, len 等)
 - [Stdlib Strategy](active/stdlib-strategy.md) — 282→700+ 関数
+- [Runtime Layout Unification](active/runtime-layout.md) — `runtime/{rust,ts}/` に統一、TS を素 .ts に切り出し
 - **Runtime gaps**: datetime, regex, fs, math, crypto, log 等のランタイム関数が未実装（TOML 定義のみ）
 
 ### Language
