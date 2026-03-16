@@ -86,6 +86,76 @@ impl<'a> LowerCtx<'a> {
                 Expr::UnOp { op: match op { UnOp::Not => "!", _ => "-" }, operand: Box::new(o) }
             }
 
+            // ── Control flow ──
+            IrExprKind::If { .. } | IrExprKind::Match { .. } | IrExprKind::Block { .. }
+            | IrExprKind::DoBlock { .. } | IrExprKind::ForIn { .. } | IrExprKind::While { .. }
+            | IrExprKind::Break | IrExprKind::Continue | IrExprKind::Range { .. }
+            => self.lower_control_flow(e),
+
+            // ── Calls ──
+            IrExprKind::Call { .. } => self.lower_call_expr(e),
+
+            // ── Collections ──
+            IrExprKind::List { .. } | IrExprKind::MapLiteral { .. } | IrExprKind::EmptyMap
+            | IrExprKind::Tuple { .. } | IrExprKind::Record { .. } | IrExprKind::SpreadRecord { .. }
+            => self.lower_collection(e),
+
+            IrExprKind::Member { object, field } => {
+                let obj = self.lower_expr(object);
+                let field_expr = Expr::Field(Box::new(obj), field.clone());
+                if is_copy(&e.ty) || self.is_single_use_var(object) { field_expr }
+                else { Expr::Clone(Box::new(field_expr)) }
+            }
+            IrExprKind::TupleIndex { object, index } => Expr::TupleIdx(Box::new(self.lower_expr(object)), *index),
+            IrExprKind::IndexAccess { object, index } => {
+                if matches!(&object.ty, Ty::Map(_, _)) {
+                    // Map index: m[k] → m.get(&k).cloned()
+                    let obj = self.lower_expr(object);
+                    let idx = self.lower_expr(index);
+                    Expr::Raw(format!("{}.get(&{}).cloned()", super::render::expr_str(&obj), super::render::expr_str(&idx)))
+                } else {
+                    Expr::Index(Box::new(self.lower_expr(object)), Box::new(self.lower_expr(index)))
+                }
+            }
+            IrExprKind::Lambda { params, body } => {
+                let lowered_body = self.lower_expr(body);
+                // If the lambda body is itself a closure (returning a function),
+                // wrap it in Box::new for Rust's nested impl Fn limitation
+                let final_body = if matches!(&body.ty, Ty::Fn { .. }) {
+                    Expr::Call { func: "Box::new".into(), args: vec![lowered_body] }
+                } else {
+                    lowered_body
+                };
+                Expr::Closure {
+                    params: params.iter().map(|(var, _)| self.vt.get(*var).name.clone()).collect(),
+                    body: Box::new(final_body),
+                }
+            }
+            IrExprKind::StringInterp { parts } => self.lower_string_interp(parts),
+            IrExprKind::ResultOk { expr } => Expr::Ok(Box::new(self.lower_expr(expr))),
+            IrExprKind::ResultErr { expr } => Expr::Err(Box::new(self.lower_expr(expr))),
+            IrExprKind::OptionSome { expr } => Expr::Some(Box::new(self.lower_expr(expr))),
+            IrExprKind::OptionNone => {
+                // Option[T] の T が判明していれば None::<T> を生成（Rust の型推論を助ける）
+                if let Ty::Option(inner) = &e.ty {
+                    if !inner.contains_unknown() && !matches!(inner.as_ref(), Ty::TypeVar(_)) {
+                        let mut ty_str = String::new();
+                        super::render::render_type(&mut ty_str, &self.lty(inner));
+                        return Expr::Raw(format!("None::<{}>", ty_str));
+                    }
+                }
+                Expr::None
+            }
+            IrExprKind::Try { expr } => Expr::Try(Box::new(self.lower_expr(expr))),
+            IrExprKind::Await { expr } => self.lower_expr(expr),
+            IrExprKind::Hole | IrExprKind::Todo { .. } => Expr::Raw("todo!()".into()),
+        }
+    }
+
+    // ── Control flow helpers ──
+
+    fn lower_control_flow(&self, e: &IrExpr) -> Expr {
+        match &e.kind {
             IrExprKind::If { cond, then, else_ } => Expr::If {
                 cond: Box::new(self.lower_expr(cond)),
                 then: Box::new(self.lower_expr(then)),
@@ -194,7 +264,14 @@ impl<'a> LowerCtx<'a> {
                 start: Box::new(self.lower_expr(start)), end: Box::new(self.lower_expr(end)),
                 inclusive: *inclusive, elem_ty: match &e.ty { Ty::List(inner) => self.lty(inner), _ => Type::I64 },
             },
+            _ => unreachable!(),
+        }
+    }
 
+    // ── Call expression helper ──
+
+    fn lower_call_expr(&self, e: &IrExpr) -> Expr {
+        match &e.kind {
             IrExprKind::Call { target, args, .. } => {
                 let ir_args: Vec<Expr> = args.iter().map(|a| self.lower_expr(a)).collect();
                 let call = match target {
@@ -233,7 +310,14 @@ impl<'a> LowerCtx<'a> {
                     call
                 }
             }
+            _ => unreachable!(),
+        }
+    }
 
+    // ── Collection helpers ──
+
+    fn lower_collection(&self, e: &IrExpr) -> Expr {
+        match &e.kind {
             IrExprKind::List { elements } => {
                 if elements.is_empty() {
                     // Emit typed empty vec to avoid Rust type inference failure
@@ -331,72 +415,28 @@ impl<'a> LowerCtx<'a> {
                     fields: fields.iter().map(|(n, v)| (n.clone(), self.lower_expr(v))).collect(),
                 }
             }
-            IrExprKind::Member { object, field } => {
-                let obj = self.lower_expr(object);
-                let field_expr = Expr::Field(Box::new(obj), field.clone());
-                if is_copy(&e.ty) || self.is_single_use_var(object) { field_expr }
-                else { Expr::Clone(Box::new(field_expr)) }
-            }
-            IrExprKind::TupleIndex { object, index } => Expr::TupleIdx(Box::new(self.lower_expr(object)), *index),
-            IrExprKind::IndexAccess { object, index } => {
-                if matches!(&object.ty, Ty::Map(_, _)) {
-                    // Map index: m[k] → m.get(&k).cloned()
-                    let obj = self.lower_expr(object);
-                    let idx = self.lower_expr(index);
-                    Expr::Raw(format!("{}.get(&{}).cloned()", super::render::expr_str(&obj), super::render::expr_str(&idx)))
-                } else {
-                    Expr::Index(Box::new(self.lower_expr(object)), Box::new(self.lower_expr(index)))
-                }
-            }
-            IrExprKind::Lambda { params, body } => {
-                let lowered_body = self.lower_expr(body);
-                // If the lambda body is itself a closure (returning a function),
-                // wrap it in Box::new for Rust's nested impl Fn limitation
-                let final_body = if matches!(&body.ty, Ty::Fn { .. }) {
-                    Expr::Call { func: "Box::new".into(), args: vec![lowered_body] }
-                } else {
-                    lowered_body
-                };
-                Expr::Closure {
-                    params: params.iter().map(|(var, _)| self.vt.get(*var).name.clone()).collect(),
-                    body: Box::new(final_body),
-                }
-            }
-            IrExprKind::StringInterp { parts } => {
-                let mut template = String::new();
-                let mut args = Vec::new();
-                for part in parts {
-                    match part {
-                        IrStringPart::Lit { value } => {
-                            for c in value.chars() { match c { '{' => template.push_str("{{"), '}' => template.push_str("}}"), '"' => template.push_str("\\\""), '\\' => template.push_str("\\\\"), _ => template.push(c) } }
-                        }
-                        IrStringPart::Expr { expr } => {
-                            let debug = matches!(&expr.ty, Ty::List(_) | Ty::Option(_) | Ty::Result(_, _) | Ty::Map(_, _) | Ty::Tuple(_) | Ty::Record { .. } | Ty::Variant { .. });
-                            template.push_str(if debug { "{:?}" } else { "{}" });
-                            args.push(self.lower_expr(expr));
-                        }
-                    }
-                }
-                if args.is_empty() { Expr::Str(template) } else { Expr::Format { template: format!("\"{}\"", template), args } }
-            }
-            IrExprKind::ResultOk { expr } => Expr::Ok(Box::new(self.lower_expr(expr))),
-            IrExprKind::ResultErr { expr } => Expr::Err(Box::new(self.lower_expr(expr))),
-            IrExprKind::OptionSome { expr } => Expr::Some(Box::new(self.lower_expr(expr))),
-            IrExprKind::OptionNone => {
-                // Option[T] の T が判明していれば None::<T> を生成（Rust の型推論を助ける）
-                if let Ty::Option(inner) = &e.ty {
-                    if !inner.contains_unknown() && !matches!(inner.as_ref(), Ty::TypeVar(_)) {
-                        let mut ty_str = String::new();
-                        super::render::render_type(&mut ty_str, &self.lty(inner));
-                        return Expr::Raw(format!("None::<{}>", ty_str));
-                    }
-                }
-                Expr::None
-            }
-            IrExprKind::Try { expr } => Expr::Try(Box::new(self.lower_expr(expr))),
-            IrExprKind::Await { expr } => self.lower_expr(expr),
-            IrExprKind::Hole | IrExprKind::Todo { .. } => Expr::Raw("todo!()".into()),
+            _ => unreachable!(),
         }
+    }
+
+    // ── String interpolation helper ──
+
+    fn lower_string_interp(&self, parts: &[IrStringPart]) -> Expr {
+        let mut template = String::new();
+        let mut args = Vec::new();
+        for part in parts {
+            match part {
+                IrStringPart::Lit { value } => {
+                    for c in value.chars() { match c { '{' => template.push_str("{{"), '}' => template.push_str("}}"), '"' => template.push_str("\\\""), '\\' => template.push_str("\\\\"), _ => template.push(c) } }
+                }
+                IrStringPart::Expr { expr } => {
+                    let debug = matches!(&expr.ty, Ty::List(_) | Ty::Option(_) | Ty::Result(_, _) | Ty::Map(_, _) | Ty::Tuple(_) | Ty::Record { .. } | Ty::Variant { .. });
+                    template.push_str(if debug { "{:?}" } else { "{}" });
+                    args.push(self.lower_expr(expr));
+                }
+            }
+        }
+        if args.is_empty() { Expr::Str(template) } else { Expr::Format { template: format!("\"{}\"", template), args } }
     }
 
     fn lower_named_call(&self, name: &str, args: Vec<Expr>) -> Expr {
