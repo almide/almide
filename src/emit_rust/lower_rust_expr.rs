@@ -6,6 +6,23 @@ use super::rust_ir::*;
 use super::lower_types::is_copy;
 use super::lower_rust::LowerCtx;
 
+/// Check if a RustIR expression contains break or continue (indicating internal loop control flow).
+fn expr_has_break_or_continue(e: &Expr) -> bool {
+    match e {
+        Expr::Break => true,
+        Expr::Continue { .. } => true,
+        Expr::If { then, else_, .. } => {
+            expr_has_break_or_continue(then) || else_.as_ref().map_or(false, |e| expr_has_break_or_continue(e))
+        }
+        Expr::Match { arms, .. } => arms.iter().any(|a| expr_has_break_or_continue(&a.body)),
+        Expr::Block { stmts, tail } => {
+            stmts.iter().any(|s| if let Stmt::Expr(e) = s { expr_has_break_or_continue(e) } else { false })
+                || tail.as_ref().map_or(false, |t| expr_has_break_or_continue(t))
+        }
+        _ => false,
+    }
+}
+
 impl<'a> LowerCtx<'a> {
     // ── Expression ──
 
@@ -102,7 +119,15 @@ impl<'a> LowerCtx<'a> {
                     // Wrap in loop { ... } so guard's break/continue work correctly
                     let mut body_stmts: Vec<Stmt> = stmts.iter().map(|s| self.lower_stmt(s)).collect();
                     if let Some(tail) = expr.as_ref() {
-                        body_stmts.push(Stmt::Expr(self.lower_expr(tail)));
+                        let tail_expr = self.lower_expr(tail);
+                        // Only insert return for explicit ok()/err() tail expressions.
+                        // Other tail expressions (if/else with assignments, break, etc.)
+                        // are emitted as-is — the loop exits via guard's return or break.
+                        if super::lower_rust::is_result_expr(&tail_expr) {
+                            body_stmts.push(Stmt::Expr(Expr::Return(Some(Box::new(tail_expr)))));
+                        } else {
+                            body_stmts.push(Stmt::Expr(tail_expr));
+                        }
                     }
                     // Guards generate `return Ok/Err` (effect) or `break`/`continue` (pure).
                     // In both cases, the loop exits via control flow — no trailing break needed.

@@ -433,7 +433,7 @@ fn contains_typevar(ty: &Ty) -> bool {
 
 /// Check if an expression already produces a Result (Ok/Err), including through
 /// if/match/block where all branches are Result-producing.
-fn is_result_expr(e: &Expr) -> bool {
+pub(super) fn is_result_expr(e: &Expr) -> bool {
     match e {
         Expr::Ok(_) | Expr::Err(_) => true,
         Expr::Return(Some(inner)) => is_result_expr(inner),
