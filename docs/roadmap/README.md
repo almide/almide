@@ -3,70 +3,65 @@
 ## Active
 
 ### Stdlib v2
-- [Stdlib Runtime Architecture](active/stdlib-self-hosted-redesign.md) — Runtime crate `almide_rt` 基盤完成。@extern 移行中
 - [Stdlib API Reform](active/stdlib-verb-system.md) — Verb 標準化 (from_string, to_upper, len 等)
 - [Stdlib Strategy](active/stdlib-strategy.md) — 282→700+ 関数
-- [Runtime Layout Unification](active/runtime-layout.md) — `runtime/{rust,ts}/` に統一、TS を素 .ts に切り出し
-
-### Language
-- [Template](active/template.md) — Typed document builder
-- [UFCS External](active/ufcs-external.md) — User-defined UFCS
 
 ### Security
-- [Security Model](active/security-model.md) — 5 層セキュリティ。Layer 1 (Effect Isolation) 実装済み
+- [Security Model](active/security-model.md) — Layer 2-5: Capability restriction, package boundary, runtime sandbox, supply chain
 
 ### Compiler
 - [Borrow/Clone Gaps](active/borrow-clone-gaps.md) — 変数 clone 挿入漏れの修正（関数引数+補間、if/else 分岐）
 
-### Testing
-- [Exercise Suite v0.6.0](active/exercises-v060.md) — 23 exercises / 330+ tests, 6 tiers, cross-target
-
 ### Ecosystem
-- [Almide Shell](active/almide-shell.md) — AI-native shell replacing Bash/Zsh
-- [Web Framework](active/web-framework.md) — First-party Hono-equivalent
 - [CLI-First](active/cli-first.md) — `almide run` + `almide build`
 
 ### Multi-Target
 - [Multi-Target Strategy](active/multi-target-strategy.md) — Python, Go, Kotlin, Swift, C
-- [New Codegen Targets](active/new-codegen-targets.md) — Go, Python 優先
 
-### Tooling
-- [Incremental Compilation](active/incremental-compilation.md) — Skip rustc when unchanged
-- [IR Interpreter](active/ir-interpreter.md) — Direct IR execution
-- [Error-Fix Database](active/error-fix-db.md) — Error → fix mapping
-- [Grammar Codegen](active/grammar-codegen.md) — Single source of truth
-
-### LLM
-- [LLM Integration](active/llm-integration.md) — `almide forge`, `almide fix`
-- [LLM → IR Generation](active/llm-ir-generation.md) — LLM generates typed IR directly
+### Quality
+- [Quality Improvements](active/quality-improvements.md) — エラーメッセージ、テストカバレッジ
 
 ## On Hold
 
+- [Almide Shell](on-hold/almide-shell.md) — AI-native shell replacing Bash/Zsh
+- [Almide UI](on-hold/almide-ui.md) — Almide 製 SolidJS ライクな reactive UI
+- [Async Backend](on-hold/async-backend.md) — tokio opt-in runtime
 - [Benchmark Report](on-hold/benchmark-report.md)
 - [Built-in Protocols](on-hold/trait-impl.md) — Eq, Hash done; Repr remaining
 - [Cross-Target AOT](on-hold/cross-target-aot.md)
 - [Cross-Target Semantics](on-hold/cross-target-semantics.md) — TS 本格化時
+- [Design Debt](on-hold/design-debt.md) — gen_generated_call, anonymous records, borrow analysis
 - [Direct WASM Emission](on-hold/emit-wasm-direct.md)
-- [Platform / Target Separation](on-hold/platform-target-separation.md) — `--target` と `--platform` 分離、@extern プラットフォーム階層
-- [Secure by Design](on-hold/secure-by-design.md) — Web 安全を言語の性質に。opaque 型 + capability 推論 + supply chain integrity
-- [TS Edge-Native Deployment](on-hold/ts-edge-native.md) — Almide→TS でエッジ最速。WASM 不要、V8 JIT フル活用
-- [Almide UI](on-hold/almide-ui.md) — Almide 製 SolidJS ライクな reactive UI。コンパイラ汎用最適化で Svelte 級
 - [Editor & GitHub Integration](on-hold/editor-github-integration.md)
-- [LSP Server](on-hold/lsp.md)
+- [Error-Fix Database](on-hold/error-fix-db.md) — Error → fix mapping
+- [Fan Map Limit](on-hold/fan-map-limit.md) — `fan.map(xs, limit: n, f)` 並行数制限
+- [Grammar Codegen](on-hold/grammar-codegen.md) — Single source of truth
+- [Incremental Compilation](on-hold/incremental-compilation.md) — Skip rustc when unchanged
+- [IR Interpreter](on-hold/ir-interpreter.md) — Direct IR execution
 - [LLM Immutable Sugar](on-hold/llm-immutable-sugar.md)
+- [LLM Integration](on-hold/llm-integration.md) — `almide forge`, `almide fix`
+- [LLM → IR Generation](on-hold/llm-ir-generation.md) — LLM generates typed IR directly
+- [LSP Server](on-hold/lsp.md)
+- [New Codegen Targets](on-hold/new-codegen-targets.md) — Go, Python 優先
 - [Package Registry](on-hold/package-registry.md)
-- [Rainbow Bridge](on-hold/rainbow-bridge.md) — 外部コード (Rust/TS/Python等) を Almide パッケージとしてラップ
-- [Rainbow FFI Gate](on-hold/rainbow-gate.md) — Almide コードを外の言語から呼べるライブラリとして出力
+- [Platform / Target Separation](on-hold/platform-target-separation.md)
+- [Polish (Immediate)](on-hold/polish-immediate.md)
+- [Production Ready](on-hold/production-ready.md)
+- [Rainbow Bridge](on-hold/rainbow-bridge.md) — 外部コードを Almide パッケージとしてラップ
+- [Rainbow FFI Gate](on-hold/rainbow-gate.md) — Almide コードを外の言語から呼べる
 - [REPL](on-hold/repl.md) — Almide Shell に統合
 - [Research: MSR Paper](on-hold/research-modification-survival-rate-paper.md)
+- [Secure by Design](on-hold/secure-by-design.md) — opaque 型 + capability 推論
 - [Self-Hosting](on-hold/self-hosting.md)
-- [Stdlib 3-Layer Design](on-hold/stdlib-architecture-3-layer-design.md)
-- [Async Backend](on-hold/async-backend.md) — tokio opt-in runtime
-- [Fan Map Limit](on-hold/fan-map-limit.md) — `fan.map(xs, limit: n, f)` 並行数制限
 - [Server Async](on-hold/server-async.md) — `http.serve` ハンドラ effect 化
+- [Stdlib 3-Layer Design](on-hold/stdlib-architecture-3-layer-design.md)
 - [Streaming](on-hold/streaming.md) — WebSocket, SSE, Stream
 - [Supervision & Actors](on-hold/supervision-and-actors.md)
+- [Template](on-hold/template.md) — Typed document builder
 - [Tooling (remaining)](on-hold/tooling.md)
+- [TS Edge-Native Deployment](on-hold/ts-edge-native.md)
+- [UFCS External](on-hold/ufcs-external.md) — User-defined UFCS
+- [Web Framework](on-hold/web-framework.md) — First-party Hono-equivalent
 
 ## Done
 
@@ -93,12 +88,15 @@
 - [Cross-Platform Support](done/cross-platform.md)
 - [Default Field Values](done/default-field-values.md)
 - [Derive Conventions](done/derive-conventions.md) — Eq/Repr/Ord/Hash
+- [Effect Isolation](done/effect-isolation.md) — Security Layer 1: pure fn cannot call effect fn
 - [--emit-ir](done/emit-ir.md)
 - [Eq Protocol](done/eq-protocol.md)
 - [Error Diagnostics](done/error-diagnostics.md)
 - [Error Diagnostics — Visual](done/error-diagnostics-visual.md)
 - [Error Recovery](done/error-recovery.md)
 - [Exhaustiveness Check](done/exhaustiveness-check.md)
+- [Exercise Suite v0.6.0](done/exercises-v060.md) — 23 exercises / 330+ tests
+- [Fan Concurrency](done/fan-concurrency.md) — `fan { }` / `fan.map` / `fan.race` / `fan.any` / `fan.settle` / `fan.timeout`
 - [Formatter Rewrite](done/formatter-rewrite.md)
 - [Function Reference Passing](done/function-reference-passing.md)
 - [Generics](done/generics.md)
@@ -125,6 +123,8 @@
 - [Playground Repair](done/playground-repair.md)
 - [Proliferation Blockers](done/proliferation-blockers.md)
 - [Rust Test Coverage](done/rust-test-coverage.md)
+- [Runtime Gaps](done/runtime-gaps.md) — 全 22 モジュール / 355 関数 (100%)
+- [Runtime Layout Unification](done/runtime-layout.md) — `runtime/{rust,ts}/` 統一完了
 - [RustIR Pipeline](done/rust-ir.md)
 - [Scaffold & Proliferation](done/scaffold-and-proliferation.md)
 - [Self-Tooling](done/self-tooling.md)
@@ -132,6 +132,7 @@
 - [Stdlib Completeness](done/stdlib-completeness.md)
 - [Stdlib Declarative Codegen](done/stdlib-codegen.md)
 - [Stdlib Gaps](done/stdlib-gaps.md)
+- [Stdlib Runtime Architecture](done/stdlib-self-hosted-redesign.md) — Runtime crate `almide_rt` 基盤完成
 - [Stdlib Self-Hosting](done/stdlib-self-hosting.md)
 - [String Handling](done/string-handling.md)
 - [Structured Concurrency (Phase 1)](done/structured-concurrency.md)
@@ -149,6 +150,4 @@
 - [UFCS Type Resolution](done/ufcs-type-resolution.md)
 - [Unused Variable Warnings](done/unused-variable-warnings.md)
 - [Variant Record Fields](done/variant-record-fields.md)
-- [Fan Concurrency](done/fan-concurrency.md) — `fan { }` / `fan.map` / `fan.race` / `fan.any` / `fan.settle` / `fan.timeout` — sync/thread backend
-- Runtime Gaps — 全 22 モジュール / 355 関数 (100%)。regex は自前エンジン（350 行、外部 crate 不要）
 - [While Loop](done/while-loop.md)
