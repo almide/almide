@@ -74,7 +74,84 @@ Almide → TS → V8 (JS parse <1ms, full JIT, native ecosystem)
 - [ ] `--target ts` での未使用 stdlib モジュール除去 (npm 同様の tree-shake)
 - [ ] 計測: 最適化前後のバンドルサイズ・実行速度比較
 
-### Phase 2: Edge 向けエントリポイント
+### Phase 2: JS Platform Target の細分化
+
+現在の `@extern(ts, ...)` は JS ランタイムを区別しない。`document.createElement` (ブラウザ専用) と `fs.readFileSync` (Node.js 専用) が同じ `ts` ターゲットに混在するため、「コンパイル通るがランタイムで死ぬ」問題が起きる。
+
+#### ターゲット階層
+
+```
+js                      ← 全 JS ランタイム共通 (JSON, Math, Array, etc.)
+├── js-web              ← Web standard API (fetch, Request/Response, URL, crypto.subtle)
+│   ├── js-browser      ← ブラウザ固有 (DOM, window, navigator, localStorage)
+│   └── js-worker       ← Edge Worker 固有 (Cloudflare KV, Deno.env, etc.)
+└── js-node             ← Node.js 固有 (fs, child_process, Buffer, etc.)
+```
+
+- `js-web` は browser, Deno, Cloudflare Workers で共通。Web standard Fetch API, URL, crypto.subtle 等
+- `js-browser` は DOM API。Workers/Node.js では使えない
+- `js-worker` はエッジ固有 API (KV, D1 等)。ベンダーごとに分ける可能性あり
+- `js-node` は Node.js 固有。fs, child_process, Buffer 等
+
+#### @extern の使い分け
+
+```almide
+// 全 JS ランタイムで動く
+@extern(js, "JSON", "parse")
+fn parse_json(s: String) -> Value
+
+// Web standard — browser + Deno + Workers で共通
+@extern(js-web, "fetch")
+effect fn fetch(url: String) -> Response
+
+// ブラウザ専用 — Workers/Node.js ではコンパイルエラー
+@extern(js-browser, "document", "createElement")
+fn create_element(tag: String) -> DomNode
+
+// Node.js 専用 — browser/Workers ではコンパイルエラー
+@extern(js-node, "fs", "readFileSync")
+fn read_file(path: String) -> String
+```
+
+#### コンパイル時プラットフォーム検証
+
+`--target ts-browser` / `--target ts-node` / `--target ts-worker` でプラットフォームが確定。使えない `@extern` を参照するとコンパイルエラー:
+
+```
+error: fs.read_file requires js-node, but target is js-browser
+  --> app.almd:5:3
+   |
+ 5 |   let data = read_file("config.json")
+   |              ^^^^^^^^^
+   |
+   = hint: fs module is not available in browser target
+```
+
+#### stdlib への影響
+
+stdlib の各モジュールが適切なプラットフォームタグを持つ:
+
+| stdlib モジュール | プラットフォーム | 理由 |
+|---|---|---|
+| string, list, map, int, float, math | `js` | 純粋な計算。全ランタイムで動く |
+| json, regex, crypto (hash) | `js` | 標準 JS API のみ使用 |
+| http (fetch) | `js-web` | Web standard Fetch API |
+| fs, path | `js-node` | Node.js fs API |
+| process (spawn) | `js-node` | child_process |
+| env | `js` (基本) / `js-node` (一部) | `env.get` は全ランタイム、`env.set` は Node.js のみ |
+| dom (Almide UI) | `js-browser` | DOM API |
+
+これにより「エッジで動く stdlib」と「動かない stdlib」がコンパイル時に確定する。
+
+#### 実装
+
+- [ ] `@extern` のターゲットを `rs` / `ts` から `rs` / `js` / `js-web` / `js-browser` / `js-node` / `js-worker` に拡張
+- [ ] `--target` フラグの細分化: `ts-browser`, `ts-node`, `ts-worker` (既存の `ts` は `ts-node` のエイリアス)
+- [ ] コンパイル時プラットフォーム検証: 不適切な `@extern` 参照をエラーにする
+- [ ] stdlib の各 `@extern` にプラットフォームタグを付与
+- [ ] 診断メッセージ: どのプラットフォームで使えるかを hint で表示
+
+### Phase 3: Edge 向けエントリポイント
 
 HTTP ハンドラのパターンを Almide で自然に書けるようにする。
 
@@ -87,11 +164,11 @@ effect fn handle(req: Request) -> Response =
   }
 ```
 
-- [ ] `Request`/`Response` 型の定義 (Web standard Fetch API 準拠)
+- [ ] `Request`/`Response` 型の定義 (Web standard Fetch API 準拠 — `@extern(js-web, ...)`)
 - [ ] `export default { fetch: handle }` 形式の出力
-- [ ] `@extern(ts, ...)` で platform-specific API を呼ぶパターンの検証
+- [ ] Cloudflare Workers / Deno Deploy / Vercel Edge 向けのエントリポイントテンプレート
 
-### Phase 3: ベンチマーク & 実証
+### Phase 4: ベンチマーク & 実証
 
 「WASM より速い」を数値で証明する。
 
