@@ -13,6 +13,7 @@
 - [Error Codes + JSON](active/error-codes-json.md) — 安定エラーコード、`almide check --json`、check < 1 秒
 
 ### Phase III: パッケージ + テスト
+- [Lockfile](active/lockfile.md) — `almide.lock` + git ベース依存解決
 - [CLI-First](active/cli-first.md) — showcase プログラム、`almide run` + `almide build`
 
 ### 全体
