@@ -12,3 +12,8 @@ spec_*-*/
 tools/stdlib-crawler/data/
 __pycache__/
 *.pyc
+__exercises_*/
+__spec_*/
+_dev_stdin-*/
+exercises_*-*/
+tools_stdlib_*/
