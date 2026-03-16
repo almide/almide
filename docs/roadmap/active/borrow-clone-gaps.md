@@ -68,6 +68,18 @@ fn greet(name: String, prefix: String = "Hello") -> String =
 
 `[ICE] lower: missing type for expr id=NNN` が出る。テスト自体は pass するが、checker が default 値の式に ExprId → Ty マッピングを生成していない。
 
+### Case 6: 再帰 variant の Box deref（OPEN）
+
+```almide
+type IntList = | Cons(Int, IntList) | Nil
+fn sum(xs: IntList) -> Int = match xs {
+  Cons(head, tail) => head + sum(tail)   // tail is Box<IntList>, needs *tail
+  Nil => 0
+}
+```
+
+Auto-Box で `IntList` を `Box<IntList>` に変換しているが、パターンマッチで binding された `tail` を関数に渡す際に `*tail` が生成されない。
+
 ## Fix Strategy
 
 根本修正: Var 参照の clone 判定を保守的にする。

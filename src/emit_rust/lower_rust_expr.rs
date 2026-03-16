@@ -56,7 +56,13 @@ impl<'a> LowerCtx<'a> {
                 let l = self.lower_expr(left);
                 let r = self.lower_expr(right);
                 match op {
-                    BinOp::PowFloat => Expr::MethodCall { recv: Box::new(l), method: "powf".into(), args: vec![r] },
+                    BinOp::PowFloat => {
+                        if matches!(&left.ty, Ty::Int) {
+                            Expr::MethodCall { recv: Box::new(l), method: "pow".into(), args: vec![Expr::Raw(format!("{} as u32", super::render::expr_str(&r)))] }
+                        } else {
+                            Expr::MethodCall { recv: Box::new(l), method: "powf".into(), args: vec![r] }
+                        }
+                    }
                     BinOp::ConcatStr | BinOp::ConcatList => Expr::Call { func: "AlmideConcat::concat".into(), args: vec![l, r] },
                     _ => {
                         let op_str = match op {
