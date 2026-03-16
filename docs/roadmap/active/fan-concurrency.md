@@ -539,14 +539,27 @@ fan 内から親スコープの `var` は変更不可。`let` の読み取りの
 - Rust codegen: `async fn` → Rust `async fn`、`await` → `almide_block_on(expr)`
 - TS codegen: `async fn` → TS `async function`、`await` → `await expr`
 - HTTP stdlib: 22 クライアント/サーバー関数実装済み（Rust: `std::net` 同期 I/O）
+- **`fan { }` 基盤実装完了** (2026-03-16):
+  - Lexer: `fan` 予約語
+  - AST: `Expr::Fan { exprs }`
+  - Parser: `fan { expr; expr; ... }` パース
+  - Checker: effect fn 内のみ許可、Result auto-unwrap、型はタプル
+  - IR: `IrExprKind::Fan { exprs }`
+  - Rust codegen: `std::thread::scope` + `spawn` per expr（tokio 不要）
+  - TS codegen: `await Promise.all([...])`
+  - Formatter: `fan { }` 対応
+  - E2E 動作確認済み (`examples/fan_demo.almd`)
+- **Effect isolation (Layer 1 security)** (2026-03-16):
+  - pure fn → effect fn 呼び出しをコンパイルエラーに
+  - fan block も pure fn 内ではエラー
 
 ### 11.2 既知の問題
 
 1. **`almide_block_on` が busy-wait**: dummy waker + `yield_now` ループ。CPU 浪費、真の async I/O 不動作
 2. **`Future[T]` 型がない**: 型システムは `Result` で代用。`await` の型チェック不完全
 3. **async テストがゼロ**: async 関連テストファイル未作成
-4. **`fan` 未実装**: パーサー、チェッカー、IR、codegen すべて未着手
-5. **`http.serve` ハンドラが純粋コンテキスト**: effect fn を呼べない
+4. **`http.serve` ハンドラが純粋コンテキスト**: effect fn を呼べない
+5. **fan 未実装の制約**: `var` キャプチャ禁止、fan 内 `let`/`for` 禁止チェック
 
 ---
 
@@ -581,7 +594,8 @@ fan 内から親スコープの `var` は変更不可。`let` の読み取りの
 
 **テスト**:
 - [x] Rust unit テスト（checker_test.rs — fan in pure fn / fan in effect fn）
-- [ ] E2E テスト (`spec/lang/fan_test.almd`)
+- [x] E2E 動作確認（`examples/fan_demo.almd` — `almide run` で実行成功）
+- [ ] spec テスト (`spec/lang/fan_test.almd`)
 
 ### Phase 1: async backend (将来)
 
