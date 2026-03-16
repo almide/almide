@@ -1,7 +1,7 @@
 # Almide Standard Library Specification
 
 Auto-generated from `stdlib/defs/*.toml`. 362 native functions across 22 modules.
-Runtime implementation: 230/362 (63%).
+Runtime implementation: 241/362 (66%).
 
 ## Module Index
 
@@ -16,13 +16,13 @@ Runtime implementation: 230/362 (63%).
 | float | core | 16 | 16/16 | Ready |
 | fs | platform | 24 | 0/24 | TOML only |
 | http | platform | 26 | 4/26 | Partial (4/26) |
-| int | core | 21 | 19/21 | Partial (19/21) |
+| int | core | 21 | 21/21 | Ready |
 | io | platform | 3 | 0/3 | TOML only |
 | json | core | 36 | 14/36 | Partial (14/36) |
 | list | core | 54 | 54/54 | Ready |
 | log | core | 8 | 0/8 | TOML only |
 | map | core | 16 | 16/16 | Ready |
-| math | core | 21 | 12/21 | Partial (12/21) |
+| math | core | 21 | 21/21 | Ready |
 | process | platform | 6 | 5/6 | Partial (5/6) |
 | random | platform | 4 | 0/4 | TOML only |
 | regex | core | 8 | 0/8 | TOML only |
@@ -1110,7 +1110,7 @@ Example: `let resp = http.request("PUT", url, body, headers)`
 
 ## int
 
-Layer: **core** | 21 functions | 19/21 implemented
+Layer: **core** | 21 functions | 21/21 implemented
 
 ### `int.to_string`
 
@@ -1282,7 +1282,7 @@ rotate_left(a: Int, n: Int, bits: Int) -> Int
 
 Example: `int.rotate_left(128, 1, 8) // => 1`
 
-### `int.to_u32` (not implemented)
+### `int.to_u32`
 
 Truncate an integer to an unsigned 32-bit value (mask to 0..4294967295).
 
@@ -1292,7 +1292,7 @@ to_u32(a: Int) -> Int
 
 Example: `int.to_u32(300) // => 300`
 
-### `int.to_u8` (not implemented)
+### `int.to_u8`
 
 Truncate an integer to an unsigned 8-bit value (mask to 0..255).
 
@@ -2514,9 +2514,9 @@ Example: `map.filter(m, fn(k, v) => v > 0)`
 
 ## math
 
-Layer: **core** | 21 functions | 12/21 implemented
+Layer: **core** | 21 functions | 21/21 implemented
 
-### `math.min` (not implemented)
+### `math.min`
 
 Return the smaller of two integers.
 
@@ -2526,7 +2526,7 @@ min(a: Int, b: Int) -> Int
 
 Example: `math.min(3, 7) // => 3`
 
-### `math.max` (not implemented)
+### `math.max`
 
 Return the larger of two integers.
 
@@ -2656,7 +2656,7 @@ log2(x: Float) -> Float
 
 Example: `math.log2(8.0) // => 3.0`
 
-### `math.sign` (not implemented)
+### `math.sign`
 
 Return the sign of an integer: -1, 0, or 1.
 
@@ -2666,7 +2666,7 @@ sign(n: Int) -> Int
 
 Example: `math.sign(-42) // => -1`
 
-### `math.fmin` (not implemented)
+### `math.fmin`
 
 Return the smaller of two floats.
 
@@ -2676,7 +2676,7 @@ fmin(a: Float, b: Float) -> Float
 
 Example: `math.fmin(1.5, 2.5) // => 1.5`
 
-### `math.fmax` (not implemented)
+### `math.fmax`
 
 Return the larger of two floats.
 
@@ -2686,7 +2686,7 @@ fmax(a: Float, b: Float) -> Float
 
 Example: `math.fmax(1.5, 2.5) // => 2.5`
 
-### `math.fpow` (not implemented)
+### `math.fpow`
 
 Raise a float base to a float exponent.
 
@@ -2696,7 +2696,7 @@ fpow(base: Float, exp: Float) -> Float
 
 Example: `math.fpow(2.0, 0.5) // => 1.4142135623730951`
 
-### `math.factorial` (not implemented)
+### `math.factorial`
 
 Return the factorial of a non-negative integer.
 
@@ -2706,7 +2706,7 @@ factorial(n: Int) -> Int
 
 Example: `math.factorial(5) // => 120`
 
-### `math.choose` (not implemented)
+### `math.choose`
 
 Return the binomial coefficient C(n, k) = n! / (k! * (n-k)!).
 
@@ -2716,7 +2716,7 @@ choose(n: Int, k: Int) -> Int
 
 Example: `math.choose(5, 2) // => 10`
 
-### `math.log_gamma` (not implemented)
+### `math.log_gamma`
 
 Return the natural logarithm of the gamma function at x.
 

@@ -7,7 +7,7 @@ import glob
 
 DEFS_DIR = "stdlib/defs"
 BUNDLED_DIR = "stdlib"
-RUNTIME_DIR = "runtime/rust/src"
+RUNTIME_DIR = "runtime/rs/src"
 OUTPUT = "docs/STDLIB-SPEC.md"
 
 # Module classification

@@ -48,3 +48,6 @@ mod tests {
         assert!(almide_rt_int_from_string("".into()).is_err());
     }
 }
+
+pub fn almide_rt_int_to_u32(n: i64) -> i64 { (n as u32) as i64 }
+pub fn almide_rt_int_to_u8(n: i64) -> i64 { (n as u8) as i64 }
