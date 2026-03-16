@@ -75,3 +75,15 @@ mod tests {
         assert!(result.unwrap().trim() == "hello");
     }
 }
+
+pub fn almide_rt_process_exec_status(cmd: String, args: Vec<String>) -> Result<(i64, String, String), String> {
+    match std::process::Command::new(&cmd).args(&args).output() {
+        Ok(out) => {
+            let code = out.status.code().unwrap_or(-1) as i64;
+            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+            Ok((code, stdout, stderr))
+        }
+        Err(e) => Err(format!("exec failed: {}", e)),
+    }
+}

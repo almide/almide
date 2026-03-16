@@ -1,7 +1,7 @@
 # Almide Standard Library Specification
 
 Auto-generated from `stdlib/defs/*.toml`. 362 native functions across 22 modules.
-Runtime implementation: 241/362 (66%).
+Runtime implementation: 251/362 (69%).
 
 ## Module Index
 
@@ -20,15 +20,15 @@ Runtime implementation: 241/362 (66%).
 | io | platform | 3 | 0/3 | TOML only |
 | json | core | 36 | 14/36 | Partial (14/36) |
 | list | core | 54 | 54/54 | Ready |
-| log | core | 8 | 0/8 | TOML only |
+| log | core | 8 | 8/8 | Ready |
 | map | core | 16 | 16/16 | Ready |
 | math | core | 21 | 21/21 | Ready |
-| process | platform | 6 | 5/6 | Partial (5/6) |
+| process | platform | 6 | 6/6 | Ready |
 | random | platform | 4 | 0/4 | TOML only |
 | regex | core | 8 | 0/8 | TOML only |
 | result | core | 9 | 9/9 | Ready |
 | string | core | 41 | 41/41 | Ready |
-| testing | core | 7 | 0/7 | TOML only |
+| testing | core | 7 | 1/7 | Partial (1/7) |
 | uuid | platform | 6 | 0/6 | TOML only |
 | value | core | 19 | 19/19 | Ready |
 
@@ -2266,9 +2266,9 @@ Example: `[1, 2, 3].fold(0, fn(acc, x) => acc + x) // => 6`
 
 ## log
 
-Layer: **core** | 8 functions | 0/8 implemented
+Layer: **core** | 8 functions | 8/8 implemented
 
-### `log.debug` (not implemented)
+### `log.debug`
 
 Log a debug message to stderr.
 
@@ -2278,7 +2278,7 @@ effect debug(msg: String) -> Unit
 
 Example: `log.debug("cache hit")`
 
-### `log.info` (not implemented)
+### `log.info`
 
 Log an info message to stderr.
 
@@ -2288,7 +2288,7 @@ effect info(msg: String) -> Unit
 
 Example: `log.info("server started")`
 
-### `log.warn` (not implemented)
+### `log.warn`
 
 Log a warning message to stderr.
 
@@ -2298,7 +2298,7 @@ effect warn(msg: String) -> Unit
 
 Example: `log.warn("disk space low")`
 
-### `log.error` (not implemented)
+### `log.error`
 
 Log an error message to stderr.
 
@@ -2308,7 +2308,7 @@ effect error(msg: String) -> Unit
 
 Example: `log.error("connection failed")`
 
-### `log.debug_with` (not implemented)
+### `log.debug_with`
 
 Log a debug message with structured key-value fields.
 
@@ -2318,7 +2318,7 @@ effect debug_with(msg: String, fields: List[(String, String)]) -> Unit
 
 Example: `log.debug_with("cache hit", [("key", cache_key)])`
 
-### `log.info_with` (not implemented)
+### `log.info_with`
 
 Log an info message with structured key-value fields.
 
@@ -2328,7 +2328,7 @@ effect info_with(msg: String, fields: List[(String, String)]) -> Unit
 
 Example: `log.info_with("user login", [("user_id", id), ("ip", addr)])`
 
-### `log.warn_with` (not implemented)
+### `log.warn_with`
 
 Log a warning message with structured key-value fields.
 
@@ -2338,7 +2338,7 @@ effect warn_with(msg: String, fields: List[(String, String)]) -> Unit
 
 Example: `log.warn_with("slow query", [("duration_ms", "500")])`
 
-### `log.error_with` (not implemented)
+### `log.error_with`
 
 Log an error message with structured key-value fields.
 
@@ -2728,7 +2728,7 @@ Example: `math.log_gamma(5.0) // => 3.178...`
 
 ## process
 
-Layer: **platform** | 6 functions | 5/6 implemented
+Layer: **platform** | 6 functions | 6/6 implemented
 
 ### `process.exec`
 
@@ -2780,7 +2780,7 @@ effect exec_with_stdin(cmd: String, args: List[String], input: String) -> Result
 
 Example: `let output = process.exec_with_stdin("cat", [], "hello")`
 
-### `process.exec_status` (not implemented)
+### `process.exec_status`
 
 Execute a command and return exit code, stdout, and stderr
 
@@ -3428,9 +3428,9 @@ Example: `string.to_float("3.14") // => ok(3.14)`
 
 ## testing
 
-Layer: **core** | 7 functions | 0/7 implemented
+Layer: **core** | 7 functions | 1/7 implemented
 
-### `testing.assert_throws` (not implemented)
+### `testing.assert_throws`
 
 Assert that a function throws an error containing the expected message.
 
