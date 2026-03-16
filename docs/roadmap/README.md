@@ -57,7 +57,7 @@
 - [LSP Server](on-hold/lsp.md)
 - [LLM Immutable Sugar](on-hold/llm-immutable-sugar.md)
 - [Package Registry](on-hold/package-registry.md)
-- [Native Bridge](on-hold/native-bridge.md) — Rust crate を Almide パッケージとしてラップ (Flutter plugin モデル)
+- [Rainbow Bridge](on-hold/rainbow-bridge.md) — 外部コード (Rust/TS/Python等) を Almide パッケージとしてラップ
 - [Rainbow FFI](on-hold/rainbow-ffi.md)
 - [REPL](on-hold/repl.md) — Almide Shell に統合
 - [Research: MSR Paper](on-hold/research-modification-survival-rate-paper.md)
