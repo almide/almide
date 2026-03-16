@@ -1,0 +1,127 @@
+// Borrow/clone regression tests
+// Covers: param clone, for-in clone, Box deref, default args
+
+test "variable used 3 times" {
+  let s = "hello"
+  let a = string.len(s)
+  let b = string.to_upper(s)
+  let c = s ++ " world"
+  assert_eq(a, 5)
+  assert_eq(b, "HELLO")
+  assert_eq(c, "hello world")
+}
+
+test "list used in multiple ops" {
+  let xs = [1, 2, 3]
+  let a = list.len(xs)
+  let b = list.map(xs, (x) => x * 2)
+  let c = list.filter(xs, (x) => x > 1)
+  assert_eq(a, 3)
+  assert_eq(b, [2, 4, 6])
+  assert_eq(c, [2, 3])
+}
+
+test "variable in for then used after" {
+  let xs = [1, 2, 3]
+  var total = 0
+  for x in xs { total = total + x }
+  assert_eq(list.len(xs), 3)
+  assert_eq(total, 6)
+}
+
+test "triple nested for" {
+  let as_ = [1, 2]
+  let bs = [10, 20]
+  let cs = [100, 200]
+  var total = 0
+  for a in as_ {
+    for b in bs {
+      for c in cs {
+        total = total + a + b + c
+      }
+    }
+  }
+  assert_eq(total, 1332)
+}
+
+test "string in interpolation then function" {
+  let name = "Alice"
+  let greeting = "Hello, ${name}!"
+  let upper = string.to_upper(name)
+  assert_eq(greeting, "Hello, Alice!")
+  assert_eq(upper, "ALICE")
+}
+
+effect fn validated(s: String) -> Result[String, String] = do {
+  guard string.len(s) > 0 else err("empty")
+  ok(string.to_upper(s))
+}
+
+test "guard then ok in effect fn" {
+  match validated("hi") {
+    ok(v) => assert_eq(v, "HI")
+    err(_) => assert(false)
+  }
+}
+
+fn safe_div(a: Int, b: Int) -> Result[Int, String] = do {
+  guard b != 0 else err("div/0")
+  ok(a / b)
+}
+
+test "guard err in pure Result fn" {
+  match safe_div(10, 3) {
+    ok(v) => assert_eq(v, 3)
+    err(_) => assert(false)
+  }
+  match safe_div(10, 0) {
+    ok(_) => assert(false)
+    err(e) => assert_eq(e, "div/0")
+  }
+}
+
+fn greet(name: String, prefix: String = "Hello") -> String = "${prefix}, ${name}!"
+
+test "default args" {
+  assert_eq(greet("Alice"), "Hello, Alice!")
+  assert_eq(greet("Bob", "Hi"), "Hi, Bob!")
+}
+
+test "power operator int" {
+  assert_eq(2 ** 10, 1024)
+  assert_eq(3 ** 0, 1)
+}
+
+type IntList = | Cons(Int, IntList) | Nil
+
+fn sum_intlist(xs: IntList) -> Int =
+  match xs { Cons(h, t) => h + sum_intlist(t), Nil => 0 }
+
+test "recursive tuple variant Box deref" {
+  assert_eq(sum_intlist(Cons(1, Cons(2, Cons(3, Nil)))), 6)
+}
+
+type Tree = | Leaf(Int) | Node { left: Tree, right: Tree, value: Int }
+
+fn tree_sum(t: Tree) -> Int =
+  match t {
+    Leaf(n) => n
+    Node { left, right, value } => tree_sum(left) + tree_sum(right) + value
+  }
+
+test "recursive record variant Box deref" {
+  let t = Node { left: Leaf(1), right: Node { left: Leaf(2), right: Leaf(3), value: 10 }, value: 5 }
+  assert_eq(tree_sum(t), 21)
+}
+
+effect fn dispatch(cmd: String) -> Unit = {
+  match cmd {
+    "a" => println("a")
+    _ => println("other")
+  }
+}
+
+test "effect fn match dispatch" {
+  let _r1 = dispatch("a")
+  let _r2 = dispatch("x")
+}

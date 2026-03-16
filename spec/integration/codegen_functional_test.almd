@@ -1,0 +1,70 @@
+// Functional pattern regression tests
+// Covers: FnRef, FnMut, nested impl Fn, HOF variable pass, currying
+
+fn double(x: Int) -> Int = x * 2
+fn is_big(x: Int) -> Bool = x > 5
+
+test "pass named fn to map" {
+  assert_eq(list.map([1, 2, 3], double), [2, 4, 6])
+}
+
+test "pass named fn to filter" {
+  assert_eq(list.filter([1, 10, 3, 20], is_big), [10, 20])
+}
+
+fn transform(xs: List[Int], f: (Int) -> Int, pred: (Int) -> Bool) -> List[Int] =
+  xs |> list.map(f) |> list.filter(pred)
+
+test "multi-fn HOF" {
+  assert_eq(transform([1, 2, 3, 4, 5], double, is_big), [6, 8, 10])
+}
+
+fn make_multiplier(factor: Int) -> (Int) -> Int = (x) => x * factor
+
+test "closure factory to HOF" {
+  let triple = make_multiplier(3)
+  assert_eq(list.map([1, 2, 3], triple), [3, 6, 9])
+}
+
+fn curry_add(a: Int) -> (Int) -> (Int) -> Int = (b) => (c) => a + b + c
+
+test "currying" {
+  assert_eq(curry_add(1)(2)(3), 6)
+  assert_eq(curry_add(10)(20)(30), 60)
+}
+
+fn compose(f: (Int) -> Int, g: (Int) -> Int) -> (Int) -> Int = (x) => f(g(x))
+
+test "function composition" {
+  let inc = (x) => x + 1
+  let f = compose(inc, double)
+  assert_eq(f(5), 11)
+}
+
+test "let f = fn ref" {
+  let f = double
+  assert_eq(f(21), 42)
+}
+
+fn running_sum(xs: List[Int]) -> List[Int] = {
+  var acc = 0
+  list.map(xs, (x) => { acc = acc + x; acc })
+}
+
+test "closure mutation (FnMut)" {
+  assert_eq(running_sum([1, 2, 3, 4]), [1, 3, 6, 10])
+}
+
+test "nested map with closures" {
+  let matrix = [[1, 2], [3, 4]]
+  let r = list.map(matrix, (row) => list.map(row, (x) => x * 10))
+  assert_eq(r, [[10, 20], [30, 40]])
+}
+
+test "deeply nested pipe" {
+  let r = [[1, 2, 3], [4, 5, 6]]
+    |> list.map((row) => row |> list.filter((x) => x % 2 != 0) |> list.map((x) => x * x))
+    |> list.flatten
+    |> list.fold(0, (a, x) => a + x)
+  assert_eq(r, 1 + 9 + 25)
+}
