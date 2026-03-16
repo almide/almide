@@ -1,23 +1,23 @@
 // toml — TOML parser and generator
 // Bundled stdlib module (written in Almide, auto multi-target)
-// Outputs to Json type for interop with json module.
+// Outputs to Value type for interop with json module.
 // Supports: key=value, [tables], strings, ints, floats, bools, arrays, inline tables.
 
-fn parse(text: String) -> Result[Json, String] = {
+fn parse(text: String) -> Result[Value, String] = {
   let lines = string.split(text, "\n")
   let result = parse_lines(lines, 0, list.len(lines), "", json.object([]))
   ok(result.0)
 }
 
-fn stringify(value: Json) -> String = {
+fn stringify(value: Value) -> String = {
   stringify_table(value, "")
 }
 
 // ── Parser internals ──
 
-type ParseState = (Json, Int)
+type ParseState = (Value, Int)
 
-fn parse_lines(lines: List[String], i: Int, len: Int, current_table: String, root: Json) -> ParseState = {
+fn parse_lines(lines: List[String], i: Int, len: Int, current_table: String, root: Value) -> ParseState = {
   if i >= len then (root, i)
   else {
     let line = string.trim(match list.get(lines, i) { some(l) => l, none => "" })
@@ -45,7 +45,7 @@ fn parse_lines(lines: List[String], i: Int, len: Int, current_table: String, roo
   }
 }
 
-fn parse_value(s: String) -> Json = {
+fn parse_value(s: String) -> Value = {
   let trimmed = string.trim(s)
   let len = string.len(trimmed)
   if len == 0 then json.null()
@@ -138,7 +138,7 @@ fn split_items_loop(chars: List[String], i: Int, len: Int, bracket_depth: Int, i
   }
 }
 
-fn set_nested(root: Json, table: String, key: String, val: Json) -> Json = {
+fn set_nested(root: Value, table: String, key: String, val: Value) -> Value = {
   if string.len(table) == 0 then {
     // Top-level key
     json_set_key(root, key, val)
@@ -154,13 +154,13 @@ fn set_nested(root: Json, table: String, key: String, val: Json) -> Json = {
   }
 }
 
-fn json_set_key(obj: Json, key: String, val: Json) -> Json = {
+fn json_set_key(obj: Value, key: String, val: Value) -> Value = {
   let keys = json.keys(obj)
   let entries = json_set_key_loop(obj, keys, 0, list.len(keys), key, val, [])
   json.object(entries)
 }
 
-fn json_set_key_loop(obj: Json, keys: List[String], i: Int, len: Int, target_key: String, target_val: Json, acc: List[(String, Json)]) -> List[(String, Json)] = {
+fn json_set_key_loop(obj: Value, keys: List[String], i: Int, len: Int, target_key: String, target_val: Value, acc: List[(String, Value)]) -> List[(String, Value)] = {
   if i >= len then {
     // If target key wasn't in existing keys, append it
     let found = list.any(keys, (k) => k == target_key)
@@ -190,7 +190,7 @@ fn unescape_string(s: String) -> String = {
 
 // ── Stringify internals ──
 
-fn stringify_table(value: Json, prefix: String) -> String = {
+fn stringify_table(value: Value, prefix: String) -> String = {
   let keys = json.keys(value)
   let simple_entries = list.filter(keys, (k) => {
     match json.get(value, k) {
@@ -223,7 +223,7 @@ fn stringify_table(value: Json, prefix: String) -> String = {
   else result
 }
 
-fn stringify_value(v: Json) -> String = {
+fn stringify_value(v: Value) -> String = {
   match json.as_string(v) {
     some(s) => "\"" ++ escape_string(s) ++ "\""
     none => match json.as_int(v) {
@@ -256,7 +256,7 @@ fn stringify_value(v: Json) -> String = {
   }
 }
 
-fn is_table(v: Json) -> Bool = {
+fn is_table(v: Value) -> Bool = {
   // A "table" is a JSON object (has keys) that's not an array
   match json.as_array(v) {
     some(_) => false
