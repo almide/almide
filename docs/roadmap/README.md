@@ -7,7 +7,7 @@
 - [Stdlib API Reform](active/stdlib-verb-system.md) — Verb 標準化 (from_string, to_upper, len 等)
 - [Stdlib Strategy](active/stdlib-strategy.md) — 282→700+ 関数
 - [Runtime Layout Unification](active/runtime-layout.md) — `runtime/{rust,ts}/` に統一、TS を素 .ts に切り出し
-- **Runtime gaps**: http (22 関数) が残り。340/362 (93%) 実装済み。regex は自前エンジン（350 行、外部 crate 不要）
+- **Runtime**: 全 22 モジュール / 355 関数のランタイム実装完了 (100%)。regex は自前エンジン（350 行、外部 crate 不要）
 
 ### Language
 - [Template](active/template.md) — Typed document builder
