@@ -14,11 +14,3 @@
 **修正:** `lex_heredoc` が消費した改行数を返すか、lexer の main loop で `pos` の変化から行番号を再計算
 **見積り:** 1-2時間
 
-## 3. LSP (Language Server Protocol)
-
-**状態:** なし
-**修正方針:** `tower-lsp` crate で最小限の LSP を実装
-- hover: 式の型を表示
-- diagnostics: checker のエラーをリアルタイム表示
-- go-to-definition: import 先のファイルへジャンプ
-**見積り:** 1-2週間
