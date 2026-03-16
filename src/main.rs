@@ -85,6 +85,9 @@ enum Commands {
         /// Treat warnings as errors
         #[arg(long)]
         deny_warnings: bool,
+        /// Output diagnostics as JSON (one per line)
+        #[arg(long)]
+        json: bool,
     },
     /// Format source files
     Fmt {
@@ -355,9 +358,13 @@ fn dispatch(cli: Cli) {
             let file_str = file.as_deref().unwrap_or("");
             cli::cmd_test(file_str, no_check, run.as_deref());
         }
-        Commands::Check { file, deny_warnings } => {
+        Commands::Check { file, deny_warnings, json } => {
             let file = resolve_file(file);
-            cli::cmd_check(&file, deny_warnings);
+            if json {
+                cli::cmd_check_json(&file);
+            } else {
+                cli::cmd_check(&file, deny_warnings);
+            }
         }
         Commands::Fmt { files, check, dry_run } => {
             let write_back = !check && !dry_run;

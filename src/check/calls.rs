@@ -186,7 +186,7 @@ impl Checker {
                             _ => InferTy::from_ty(&ty)
                         };
                     }
-                    self.emit(super::err(format!("undefined function '{}'", name), "Check the function name", format!("call to {}()", name)));
+                    self.emit(super::err(format!("undefined function '{}'", name), "Check the function name", format!("call to {}()", name)).with_code("E002"));
                     return InferTy::Concrete(Ty::Unknown);
                 };
 
@@ -195,7 +195,7 @@ impl Checker {
                     self.emit(super::err(
                         format!("cannot call effect function '{}' from a pure function", name),
                         "Mark the calling function as `effect fn`",
-                        format!("call to {}()", name)));
+                        format!("call to {}()", name)).with_code("E006"));
                 }
 
                 // Validate argument count
@@ -206,7 +206,7 @@ impl Checker {
                 if arg_tys.len() < min_params || arg_tys.len() > sig.params.len() {
                     self.emit(super::err(
                         format!("{}() expects {} argument(s) but got {}", name, sig.params.len(), arg_tys.len()),
-                        "Check the number of arguments", format!("call to {}()", name)));
+                        "Check the number of arguments", format!("call to {}()", name)).with_code("E004"));
                 }
                 // Validate argument types and infer generics
                 let mut bindings = HashMap::new();

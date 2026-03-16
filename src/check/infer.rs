@@ -210,7 +210,7 @@ impl Checker {
                     self.emit(super::err(
                         "fan block can only be used inside an effect fn".to_string(),
                         "Mark the enclosing function as `effect fn`",
-                        "fan block".to_string()));
+                        "fan block".to_string()).with_code("E007"));
                 }
                 // Check for mutable variable capture
                 for e in exprs.iter() {
@@ -221,7 +221,7 @@ impl Checker {
                             self.emit(super::err(
                                 format!("cannot capture mutable variable '{}' inside fan block", name),
                                 "Use a `let` binding instead of `var` for values shared across fan expressions",
-                                "fan block".to_string()));
+                                "fan block".to_string()).with_code("E008"));
                         }
                     }
                 }

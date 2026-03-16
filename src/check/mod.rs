@@ -197,7 +197,7 @@ impl Checker {
                     );
                     self.emit(err(
                         format!("type mismatch in {}: expected {} but got {}", c.context, exp.display(), act.display()),
-                        hint, c.context));
+                        hint, c.context).with_code("E001"));
                 }
             }
         }
@@ -528,7 +528,7 @@ impl Checker {
         let missing: Vec<&String> = required.iter().filter(|c| !covered.contains(*c)).collect();
         if !missing.is_empty() {
             let list = missing.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ");
-            self.emit(Diagnostic::error(format!("non-exhaustive match: missing {}", list), format!("Add arms for {}, or use '_'", list), "match"));
+            self.emit(Diagnostic::error(format!("non-exhaustive match: missing {}", list), format!("Add arms for {}, or use '_'", list), "match").with_code("E010"));
         }
     }
 

@@ -42,6 +42,7 @@ pub struct SecondarySpan {
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
     pub level: Level,
+    pub code: Option<&'static str>,
     pub message: String,
     pub hint: String,
     pub context: String,
@@ -55,30 +56,23 @@ pub struct Diagnostic {
 impl Diagnostic {
     pub fn error(message: impl Into<String>, hint: impl Into<String>, context: impl Into<String>) -> Self {
         Diagnostic {
-            level: Level::Error,
-            message: message.into(),
-            hint: hint.into(),
-            context: context.into(),
-            file: None,
-            line: None,
-            col: None,
-            end_col: None,
-            secondary: Vec::new(),
+            level: Level::Error, code: None,
+            message: message.into(), hint: hint.into(), context: context.into(),
+            file: None, line: None, col: None, end_col: None, secondary: Vec::new(),
         }
     }
 
     pub fn warning(message: impl Into<String>, hint: impl Into<String>, context: impl Into<String>) -> Self {
         Diagnostic {
-            level: Level::Warning,
-            message: message.into(),
-            hint: hint.into(),
-            context: context.into(),
-            file: None,
-            line: None,
-            col: None,
-            end_col: None,
-            secondary: Vec::new(),
+            level: Level::Warning, code: None,
+            message: message.into(), hint: hint.into(), context: context.into(),
+            file: None, line: None, col: None, end_col: None, secondary: Vec::new(),
         }
+    }
+
+    pub fn with_code(mut self, code: &'static str) -> Self {
+        self.code = Some(code);
+        self
     }
 
     /// Add a secondary source location with a label.
@@ -109,10 +103,11 @@ impl Diagnostic {
             Level::Error => (RED, "error"),
             Level::Warning => (YELLOW, "warning"),
         };
+        let code_str = self.code.map(|c| format!("[{}]", c)).unwrap_or_default();
         let mut out = if color {
-            format!("{}{}{}: {}{}{}", prefix_color, prefix, RESET, BOLD, self.message, RESET)
+            format!("{}{}{}{}: {}{}{}", prefix_color, prefix, code_str, RESET, BOLD, self.message, RESET)
         } else {
-            format!("{}: {}", prefix, self.message)
+            format!("{}{}: {}", prefix, code_str, self.message)
         };
         match (&self.file, self.line) {
             (Some(f), Some(l)) => {
@@ -139,6 +134,24 @@ impl Diagnostic {
             out.push_str(&format!("\n  {}", line));
         }
         out
+    }
+
+    pub fn to_json(&self) -> String {
+        let level = match self.level { Level::Error => "error", Level::Warning => "warning" };
+        let code = self.code.unwrap_or("");
+        let file = self.file.as_deref().unwrap_or("");
+        let line = self.line.unwrap_or(0);
+        let col = self.col.unwrap_or(0);
+        // Manual JSON to avoid serde dependency in this module
+        format!(
+            r#"{{"level":"{}","code":"{}","message":"{}","hint":"{}","context":"{}","file":"{}","line":{},"col":{}}}"#,
+            level, code,
+            self.message.replace('"', r#"\""#).replace('\n', "\\n"),
+            self.hint.replace('"', r#"\""#).replace('\n', "\\n"),
+            self.context.replace('"', r#"\""#),
+            file.replace('"', r#"\""#),
+            line, col,
+        )
     }
 
     pub fn display_with_source(&self, source: &str) -> String {
