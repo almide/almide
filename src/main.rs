@@ -196,7 +196,7 @@ fn try_compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust
             if let Some(a) = alias {
                 let is_self_import = path.first().map(|s| s.as_str()) == Some("self");
                 let target = if is_self_import && path.len() >= 2 {
-                    path.last().unwrap().clone()
+                    path.last().cloned().unwrap_or_default()
                 } else if is_self_import {
                     resolved.modules.iter()
                         .find(|(_, _, _, is_self)| *is_self)

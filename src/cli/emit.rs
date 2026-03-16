@@ -28,7 +28,7 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
                 // not the dotted path, because resolved.modules stores canonical names
                 let is_self_import = path.first().map(|s| s.as_str()) == Some("self");
                 let target = if is_self_import && path.len() >= 2 {
-                    path.last().unwrap().clone()
+                    path.last().cloned().unwrap_or_default()
                 } else if is_self_import {
                     // import self as alias → target is the package name (loaded from resolved modules)
                     resolved.modules.iter()

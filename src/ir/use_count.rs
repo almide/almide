@@ -239,7 +239,7 @@ pub fn collect_unused_var_warnings(program: &IrProgram, file: &str) -> Vec<crate
         // Skip if used
         if info.use_count > 0 { continue; }
 
-        let span = info.span.unwrap();
+        let span = match info.span { Some(s) => s, None => continue };
         let diag = crate::diagnostic::Diagnostic::warning(
             format!("unused variable '{}'", info.name),
             format!("Prefix with '_' to suppress: _{}", info.name),

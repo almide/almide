@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "timestamp": "2026-03-16T03:56:29.976985+00:00",
+  "timestamp": "2026-03-16T04:00:00.082518+00:00",
   "overall": {
-    "totalIssues": 132,
+    "totalIssues": 128,
     "totalErrors": 0,
-    "totalWarnings": 114,
+    "totalWarnings": 110,
     "averageComplexity": 6.2,
     "score": 57,
     "grade": "D"
@@ -84,12 +84,12 @@
     },
     {
       "file": "cli/emit.rs",
-      "issueCount": 3,
+      "issueCount": 2,
       "errorCount": 0,
-      "warningCount": 3,
+      "warningCount": 2,
       "maxCyclomatic": 37,
       "maxCognitive": 48,
-      "score": 63
+      "score": 67
     },
     {
       "file": "cli/mod.rs",
@@ -309,12 +309,12 @@
     },
     {
       "file": "ir/use_count.rs",
-      "issueCount": 3,
+      "issueCount": 2,
       "errorCount": 0,
-      "warningCount": 3,
+      "warningCount": 2,
       "maxCyclomatic": 53,
       "maxCognitive": 61,
-      "score": 61
+      "score": 65
     },
     {
       "file": "lexer.rs",
@@ -399,12 +399,12 @@
     },
     {
       "file": "main.rs",
-      "issueCount": 5,
+      "issueCount": 4,
       "errorCount": 0,
-      "warningCount": 5,
+      "warningCount": 4,
       "maxCyclomatic": 33,
       "maxCognitive": 54,
-      "score": 51
+      "score": 55
     },
     {
       "file": "mono.rs",
@@ -651,12 +651,12 @@
     },
     {
       "file": "types/mod.rs",
-      "issueCount": 2,
+      "issueCount": 1,
       "errorCount": 0,
-      "warningCount": 2,
+      "warningCount": 1,
       "maxCyclomatic": 37,
-      "maxCognitive": 12,
-      "score": 61
+      "maxCognitive": 14,
+      "score": 65
     },
     {
       "file": "types/unify.rs",
