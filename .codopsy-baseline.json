@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "timestamp": "2026-03-16T03:25:38.573520+00:00",
+  "timestamp": "2026-03-16T03:45:47.692799+00:00",
   "overall": {
-    "totalIssues": 168,
+    "totalIssues": 161,
     "totalErrors": 0,
-    "totalWarnings": 127,
+    "totalWarnings": 121,
     "averageComplexity": 6.3,
     "score": 55,
     "grade": "D"
@@ -318,12 +318,12 @@
     },
     {
       "file": "lexer.rs",
-      "issueCount": 12,
+      "issueCount": 5,
       "errorCount": 0,
-      "warningCount": 11,
-      "maxCyclomatic": 58,
-      "maxCognitive": 94,
-      "score": 51
+      "warningCount": 5,
+      "maxCyclomatic": 44,
+      "maxCognitive": 33,
+      "score": 55
     },
     {
       "file": "lib.rs",
