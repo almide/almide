@@ -2,152 +2,267 @@
 
 ## Thesis
 
-Almide はコンパイルターゲットを複数持つ。この特性を逆手に取り、各ターゲットのエコシステムをそのまま FFI で吸収する。1つの言語から Python, Ruby, JavaScript, Rust, Swift, Kotlin, Erlang のライブラリを呼べる — これが Rainbow FFI。
+Almide で書いたコードを、どの言語からでもネイティブ速度で呼べるライブラリとして出力する。トランスパイラではなく **ライブラリコンパイラ**。
 
-エコシステムが無い弱点を「全言語のエコシステムが使える」という強みに反転させる。
-
-## Architecture
+Almide の強み（row polymorphism + monomorphization + borrow analysis）はすべて Rust コード生成時に発揮される。Python/Ruby に直接トランスパイルすると、これらの強みがすべて消える。だからターゲット言語を増やすのではなく、Almide → Rust → 共有ライブラリ → 各言語バインディング、という経路で各言語に速度を届ける。
 
 ```
-                    ┌─ Rust FFI ──→ crates.io (300k+ crates)
-                    ├─ C ABI ────→ SQLite, OpenSSL, libcurl, ...
-almide source ──→   ├─ JS FFI ───→ npm (2M+ packages)
-                    ├─ Python ───→ PyPI (500k+ packages) via PyO3/WASM
-                    ├─ Ruby ─────→ RubyGems via native ext
-                    ├─ Swift ────→ Apple frameworks via Rust bridging
-                    ├─ Kotlin ───→ JVM via GraalVM/JNI
-                    └─ Erlang ───→ BEAM via NIF/Port
+almide source
+    ↓
+  Rust codegen（borrow analysis, monomorphization — ゼロコスト）
+    ↓
+  cdylib (.so / .dylib / .dll)
+    ↓
+  ┌─ Python ──→ PyO3 バインディング（pip install 可能）
+  ├─ Ruby ────→ Magnus バインディング（gem 可能）
+  ├─ Node.js ─→ napi-rs バインディング（npm 可能）
+  ├─ Swift ───→ C ABI ブリッジ
+  ├─ Kotlin ──→ JNI / Panama FFI
+  ├─ Erlang ──→ Rustler NIF
+  └─ WASM ────→ wasmtime / wasmer（全言語共通）
 ```
 
 ## Syntax
 
-統一された `extern` 宣言で全ターゲットの FFI を記述:
+`export` マークされた関数が FFI 境界に公開される:
 
 ```almide
-// Rust crate を直接呼ぶ (--target rust)
-extern "rust" fn sha256(data: String) -> String
-  from "sha2"
+// lib.almd
+export fn fibonacci(n: Int) -> Int =
+  if n <= 1 then n
+  else fibonacci(n - 1) + fibonacci(n - 2)
 
-// npm パッケージを呼ぶ (--target ts/js)
-extern "js" fn marked(markdown: String) -> String
-  from "marked"
+export fn greet(user: { name: String, age: Int }) -> String =
+  "Hello, ${user.name} (${int.to_string(user.age)})"
 
-// Python ライブラリを呼ぶ (--target wasm+python)
-extern "python" fn sentiment(text: String) -> Float
-  from "textblob"
-
-// C ABI (via Rust unsafe, 全ターゲット共通)
-extern "c" fn sqlite3_open(filename: String) -> Int
-  from "sqlite3"
+export type Color =
+  | Red
+  | Green
+  | Blue
+  | Custom({ r: Int, g: Int, b: Int })
 ```
 
-### クロスターゲット FFI
+```bash
+# 共有ライブラリを生成
+almide build lib.almd --lib
 
-同じ `.almd` ファイルに複数ターゲットの extern を書ける。コンパイル時にターゲットに応じて適切な実装が選択される:
+# 特定言語のバインディング付きで生成
+almide build lib.almd --lib --bind python
+almide build lib.almd --lib --bind ruby
+almide build lib.almd --lib --bind node
+almide build lib.almd --lib --bind wasm
+```
+
+### 利用側
+
+```python
+# Python
+from almide_lib import fibonacci, greet, Color
+
+print(fibonacci(40))                    # ← ネイティブ速度
+print(greet({"name": "Alice", "age": 30}))
+c = Color.Custom(r=255, g=0, b=128)
+```
+
+```ruby
+# Ruby
+require 'almide_lib'
+
+puts AlmideLib.fibonacci(40)           # ← ネイティブ速度
+puts AlmideLib.greet({ name: "Alice", age: 30 })
+c = AlmideLib::Color.custom(r: 255, g: 0, b: 128)
+```
+
+```javascript
+// Node.js
+const { fibonacci, greet, Color } = require('almide-lib')
+
+console.log(fibonacci(40))            // ← ネイティブ速度
+console.log(greet({ name: "Alice", age: 30 }))
+const c = Color.Custom({ r: 255, g: 0, b: 128 })
+```
+
+## Type Mapping
+
+Almide の型情報がそのままバインディングの型ヒントになる:
+
+| Almide | Rust (内部) | Python | Ruby | Node.js |
+|--------|------------|--------|------|---------|
+| `Int` | `i64` | `int` | `Integer` | `number` / `bigint` |
+| `Float` | `f64` | `float` | `Float` | `number` |
+| `String` | `String` | `str` | `String` | `string` |
+| `Bool` | `bool` | `bool` | `TrueClass/FalseClass` | `boolean` |
+| `List[T]` | `Vec<T>` | `list[T]` | `Array` | `T[]` |
+| `Map[K, V]` | `HashMap<K, V>` | `dict[K, V]` | `Hash` | `Map<K, V>` |
+| `Option[T]` | `Option<T>` | `T \| None` | `T \| nil` | `T \| undefined` |
+| `Result[T, E]` | `Result<T, E>` | 例外に変換 | 例外に変換 | 例外に変換 |
+| `{ x: Int, y: Int }` | `struct` | `TypedDict` / `dataclass` | `Struct` / `Hash` | `interface` |
+| `\| A(T) \| B` | `enum` | `class` (tagged union) | `class` (tagged union) | `class` (tagged union) |
+
+### Record → 構造体
+
+`export` された関数の open record パラメータは、monomorphization 後の具体型が公開される:
 
 ```almide
-// ターゲットに応じて実装が切り替わる
-extern "rust" fn hash(data: String) -> String
-  from "sha2"
+export fn area(shape: { width: Float, height: Float, .. }) -> Float =
+  shape.width * shape.height
+```
 
-extern "js" fn hash(data: String) -> String
-  from "crypto-js"
+```python
+# Python 側: dict でも dataclass でもOK
+area({"width": 3.0, "height": 4.0})
+area({"width": 3.0, "height": 4.0, "color": "red"})  # 余分なフィールドは無視
+```
 
-// 利用側は同じ
-fn main() = {
-  let h = hash("hello")  // Rust → sha2, JS → crypto-js
+### Variant → Tagged Union
+
+```almide
+export type Shape =
+  | Circle(Float)
+  | Rect({ width: Float, height: Float })
+```
+
+```python
+# Python
+s = Shape.Circle(5.0)
+s = Shape.Rect(width=3.0, height=4.0)
+
+match s:
+    case Shape.Circle(r): print(f"circle r={r}")
+    case Shape.Rect(w, h): print(f"rect {w}x{h}")
+```
+
+## Generated Output
+
+`almide build lib.almd --lib --bind python` が生成するもの:
+
+```
+dist/
+├── src/
+│   └── lib.rs              # Almide → Rust 生成コード
+├── bindings/
+│   └── python/
+│       ├── almide_lib/
+│       │   ├── __init__.py  # Python API（PyO3 ラッパー）
+│       │   └── __init__.pyi # 型スタブ（IDE 補完用）
+│       ├── Cargo.toml       # PyO3 依存
+│       ├── pyproject.toml   # pip install 用
+│       └── src/
+│           └── lib.rs       # #[pyfunction] / #[pyclass] 自動生成
+├── Cargo.toml
+└── build.sh                 # maturin build のラッパー
+```
+
+### 生成される Rust FFI コード（Python 向け）
+
+```rust
+// bindings/python/src/lib.rs（自動生成）
+use pyo3::prelude::*;
+use almide_lib;
+
+#[pyfunction]
+fn fibonacci(n: i64) -> i64 {
+    almide_lib::fibonacci(n)
+}
+
+#[pyfunction]
+fn greet(user: &PyDict) -> PyResult<String> {
+    let name: String = user.get_item("name")?.extract()?;
+    let age: i64 = user.get_item("age")?.extract()?;
+    Ok(almide_lib::greet(&AlmideUser { name, age }))
+}
+
+#[pymodule]
+fn almide_lib(_py: Python, m: &PyModule) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(fibonacci, m)?)?;
+    m.add_function(wrap_pyfunction!(greet, m)?)?;
+    Ok(())
 }
 ```
+
+Almide コンパイラが型情報を使って `#[pyfunction]` / `#[pyclass]` を自動生成する。Rust ユーザーが手で書くボイラープレートがゼロになる。
+
+## WASM Path
+
+WASM 経由なら全言語で即座に使える。バインディング生成不要:
+
+```bash
+almide build lib.almd --lib --bind wasm    # → lib.wasm + lib.d.ts
+```
+
+```python
+# Python (wasmtime)
+from wasmtime import Store, Module, Instance
+store = Store()
+module = Module.from_file(store.engine, "lib.wasm")
+instance = Instance(store, module, [])
+print(instance.exports(store)["fibonacci"](40))
+```
+
+WASM は言語間ポータビリティが最大だが、GC型（String, List, Map）の受け渡しに component model が必要。primitive 型（Int, Float, Bool）なら今すぐ動く。
 
 ## Implementation Phases
 
-### Phase 1: Rust FFI (P0)
-Almide の主要ターゲットが Rust なので最も自然。
-- [ ] `extern "rust"` 宣言の構文追加
-- [ ] `from "crate_name"` で Cargo.toml に依存追加
-- [ ] 型マッピング: `String ↔ String`, `Int ↔ i64`, `List[T] ↔ Vec<T>`, `Option[T] ↔ Option<T>`
-- [ ] `Result[T, E]` の自動変換
-- [ ] `almide.toml` の `[dependencies]` セクション
+### Phase 1: `--lib` 基盤 (P0)
 
-### Phase 2: JavaScript FFI (P0)
-TS/JS ターゲットでは npm エコシステムが巨大。
-- [ ] `extern "js"` 宣言
-- [ ] `from "package"` で import 文生成
-- [ ] Promise → Result 自動変換
-- [ ] TypeScript 型定義からの自動バインディング生成
+`almide build --lib` で cdylib を出力する:
 
-### Phase 3: C ABI (P1)
-Rust の unsafe FFI 経由で C ライブラリを呼ぶ。
-- [ ] `extern "c"` 宣言
-- [ ] ポインタ型は Almide 側に露出しない（内部で安全にラップ）
-- [ ] `almide.toml` の `[native-deps]` で pkg-config / vcpkg 連携
+- [ ] `export` キーワードの構文追加（parser）
+- [ ] `export` 関数の型制約チェック（FFI 安全な型のみ許可）
+- [ ] `--lib` フラグで `fn main` なしのコード生成
+- [ ] Cargo.toml に `crate-type = ["cdylib", "rlib"]` を出力
+- [ ] C ABI ヘッダー（`.h`）の自動生成
 
-### Phase 4: Python Interop (P2)
-PyO3 経由 or WASM + Python runtime。
-- [ ] `extern "python"` 宣言
-- [ ] PyO3 バインディング自動生成（Rust ターゲット時）
-- [ ] WASM + Pyodide 統合（Web ターゲット時）
+### Phase 2: Python バインディング (P0)
 
-### Phase 5: Exotic Targets (P3)
-Swift, Kotlin, Ruby, Erlang — 各言語の FFI メカニズムを活用。
-- [ ] Swift: Rust → C ABI → Swift bridging header
-- [ ] Kotlin: GraalVM native-image or JNI via Rust
-- [ ] Ruby: native extension via Rust (rb-sys)
-- [ ] Erlang: NIF (Rustler) or Port protocol
+最も需要が大きい。PyO3 + maturin:
 
-## Rust Universal Host — 多言語同居
+- [ ] `--bind python` で PyO3 ラッパー自動生成
+- [ ] 型マッピング: Almide 型 → PyO3 型変換コード
+- [ ] Record → PyDict 変換
+- [ ] Variant → Python class 生成
+- [ ] `.pyi` スタブ自動生成（IDE 補完）
+- [ ] `pyproject.toml` 生成（pip install 対応）
 
-通常の FFI は「1ビルド = 1ターゲット」だが、Rust ターゲットをユニバーサルホストとして使うことで、**1つのバイナリに複数言語のライブラリを同居**させられる。
+### Phase 3: Node.js バインディング (P1)
 
-```
-almide (--target rust) → single binary
-  ├─ Rust crate  → 直接リンク
-  ├─ C library   → unsafe FFI (標準)
-  ├─ Python      → PyO3 でランタイム埋め込み
-  ├─ JavaScript  → deno_core / v8 埋め込み
-  ├─ Ruby        → rb-sys でネイティブ拡張
-  ├─ Swift       → C ABI 経由ブリッジ
-  ├─ Kotlin      → JNI / GraalVM
-  └─ Erlang      → Rustler NIF
-```
+napi-rs 経由:
 
-```almide
-// 同じファイルで Rust crate と Python ライブラリを同時に使う
-extern "rust" fn compress(data: String) -> String
-  from "zstd"
+- [ ] `--bind node` で napi-rs ラッパー自動生成
+- [ ] `.d.ts` 型定義生成
+- [ ] `package.json` 生成（npm publish 対応）
 
-extern "python" fn sentiment(text: String) -> Float
-  from "textblob"
+### Phase 4: Ruby バインディング (P1)
 
-fn analyze(text: String) -> String = {
-  let score = sentiment(text)       // Python (PyO3 経由)
-  let packed = compress(text)       // Rust (直接リンク)
-  "score=${float.to_string(score)}, size=${int.to_string(string.len(packed))}"
-}
-```
+Magnus 経由:
 
-**仕組み:** Rust は他言語のランタイムを埋め込める。PyO3 で Python、deno_core で JS、rb-sys で Ruby — これらを Rust バイナリの中で同時に動かせる。Almide のコンパイラは `extern` 宣言を見て必要なランタイム埋め込みコードを自動生成する。
+- [ ] `--bind ruby` で Magnus ラッパー自動生成
+- [ ] `.gemspec` 生成
 
-**制約:**
-- バイナリサイズが増加する（Python ランタイムだけで ~30MB）
-- 各言語ランタイムの初期化コストがある
-- Web ターゲット（`--target js`）では Rust ホスト統合は使えない。代わりに WASM + 各言語の Web 対応版（Pyodide 等）を使う
+### Phase 5: WASM バインディング (P2)
 
-## MoonBit との差別化
+wasm-bindgen / component model:
 
-MoonBit は Python FFI を「エコシステム継承」として推進している。Almide は Rust + JS の二刀流をベースに、より多くの言語エコシステムを横断的に吸収する。
+- [ ] `--bind wasm` で WASM モジュール生成
+- [ ] component model 対応（String, List の受け渡し）
+- [ ] WAI / WIT 定義ファイル生成
 
-MoonBit: Python FFI → 1言語のエコシステム継承
-Almide: Rainbow FFI → Rust ホストで全言語エコシステム同居
+## Why Not Transpile?
 
-## 前提条件
+Python/Ruby に直接トランスパイルしない理由:
 
-- Phase 1-2 は現在のコンパイラアーキテクチャで実装可能
-- Phase 3 は Rust ターゲットの unsafe ブロック生成が必要
-- Phase 4-5 は各ランタイムとの統合が必要で、実装コストが高い
-- Rust Universal Host は Phase 1 + 3 以降の組み合わせで段階的に実現
-- `almide forge` との連携: FFI バインディングも自動生成可能にする
+| | トランスパイル | ライブラリ FFI |
+|---|---|---|
+| 実行速度 | Python/Ruby の速度 | Rust ネイティブ速度 |
+| borrow analysis | 無意味（GC 言語） | 完全に活きる |
+| monomorphization | 無意味（動的型付け） | 完全に活きる |
+| ランタイム実装 | 282関数 × 各言語 | 不要（Rust 実装を共有） |
+| 追加コード量 | ~31,000行 / 言語 | ~2,000行 / 言語 |
+| エコシステム統合 | 中途半端な互換 | pip/gem/npm にそのまま乗る |
+| 型安全性 | 消える | バインディング側で型ヒント提供 |
+
+**Almide の価値は「書きやすさ × 速さ」。** トランスパイルは速さを捨てる。FFI は両方残す。
 
 ## Priority
 
-Rust FFI ≧ JS FFI > C ABI > Rust Universal Host > Python > exotic targets
+`--lib` 基盤 > Python バインディング > Node.js > Ruby > WASM component model
