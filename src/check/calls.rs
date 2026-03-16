@@ -190,6 +190,14 @@ impl Checker {
                     return InferTy::Concrete(Ty::Unknown);
                 };
 
+                // Effect isolation: pure fn cannot call effect fn
+                if sig.is_effect && !self.env.in_effect {
+                    self.diagnostics.push(super::err(
+                        format!("cannot call effect function '{}' from a pure function", name),
+                        "Mark the calling function as `effect fn`",
+                        format!("call to {}()", name)));
+                }
+
                 // Validate argument count
                 let min_params = match name.split_once('.') {
                     Some((module, func)) => crate::stdlib::min_params(module, func).unwrap_or(sig.params.len()),
