@@ -235,7 +235,17 @@ test "for...in does not consume list" {
   assert_eq(list.len(xs), 3)
 }
 
-// TODO: nested for-in has borrow issue (inner list moved in outer loop)
+test "nested for...in" {
+  let xs = [1, 2]
+  let ys = [10, 20]
+  var total = 0
+  for x in xs {
+    for y in ys {
+      total = total + x * y
+    }
+  }
+  assert_eq(total, 90)
+}
 
 test "for...in with map.keys" {
   let m = map.set(map.set(map.new(), "a", 1), "b", 2)
