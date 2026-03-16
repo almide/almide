@@ -1,6 +1,8 @@
 # Production Ready Criteria
 
-Almide が「プロダクションレディ」と宣言するための定量指標。全項目を満たした時点で Semver 1.0 をリリースする。
+> **1.0 = 安定性契約。** 既存コードが壊れないことの約束。機能チェックリストではない。
+>
+> — Ruby, Rust, TypeScript の 1.0 全てがこの原則に従った
 
 ---
 
@@ -10,9 +12,7 @@ Almide は「LLM が最も正確に書ける言語」。
 
 単一の `.almd` ソースから Rust, TypeScript, WASM に出力し、async/await を書かずに `fan` で並行処理ができ、`effect fn` の Effect Isolation で supply chain attack を構造的に防ぐ。
 
-LLM が犯す典型的なミス（await 忘れ、型の不一致、可変状態の競合）を文法レベルで構造的に不可能にする — これが他の言語との決定的な差。
-
-1.0 は「LLM エージェントが Almide だけで CLI ツール・Web API・データパイプラインを書き、テストし、デプロイできる」状態。
+LLM が犯す典型的なミス — await 忘れ (Python asyncio)、型の不一致 (JavaScript)、可変状態の競合 (Ruby Ractor)、Pin/Unpin 地獄 (Rust async) — を文法レベルで構造的に不可能にする。
 
 ---
 
@@ -35,147 +35,189 @@ Borrow             use-count ベースの clone 挿入/削除
 
 ---
 
-## v0.1.0 → v0.6.0: 何が変わったか
+## v0.1.0 → v0.6.0
 
 | 機能 | v0.1.0 | v0.6.0 |
 |------|--------|--------|
 | 型システム | Int, String, Bool | + Float, List, Map, Tuple, Record, Variant, Option, Result, Generics, Union |
 | エラー処理 | なし | effect fn, auto-?, do block, guard |
-| 並行処理 | なし | fan ファミリー 6 API (fan, map, race, any, settle, timeout) |
-| セキュリティ | なし | Effect Isolation — pure fn → effect fn 呼び出しコンパイルエラー |
-| Codec | なし | auto-derive encode/decode, Value 型, JSON roundtrip |
-| ターゲット | Rust のみ | Rust + TypeScript + JS + npm + WASM |
-| パターンマッチ | 基本 | 網羅性チェック、ネスト、ガード、Record/Variant destructure |
-| 診断 | 行番号のみ | file:line + context + hint + error recovery (複数エラー同時報告) |
+| 並行処理 | なし | fan ファミリー 6 API |
+| セキュリティ | なし | Effect Isolation |
+| Codec | なし | auto-derive, Value, JSON roundtrip |
+| ターゲット | Rust のみ | Rust + TS + JS + npm + WASM |
+| パターンマッチ | 基本 | 網羅性チェック、ネスト、ガード |
+| 診断 | 行番号のみ | file:line + context + hint + error recovery |
 | テスト | 0 | 2,033+ |
-| stdlib | 数関数 | 22 モジュール / 355 関数 / ランタイム 100% |
+| stdlib | 数関数 | 22 モジュール / 355 関数 |
 | ツール | `almide run` のみ | run, build, test, check, fmt, clean, init |
-| IR | なし | Typed IR + 最適化パス |
-| Borrow | なし | use-count 分析 + clone 自動挿入/削除 |
-| フォーマッタ | なし | `almide fmt` |
-| モジュール | なし | import / module / almide.toml |
 
 ---
 
-## 1.0 基準
+## 1.0 の定義
 
-### 1. コンパイラの正確性
+> TypeScript 1.0 は strictNullChecks なしで出荷された。Rust 1.0 は async なしで出荷された。
+> どちらも「既存コードは壊れない」という約束だけで 1.0 を名乗った。
 
-| 指標 | 基準 | v0.6.0 | Gap |
-|------|------|--------|-----|
-| 型健全性違反 | 0 件 | 残存ケースあり | Unknown 伝播の hardening |
-| クロスターゲット不一致 | 0 件 | 未計測 | CI 仕組み必要 |
-| 生成 Rust の rustc エラー | 0 件 | exercises 25 本通過 | ほぼ達成 |
-| 生成 TS の tsc エラー | 0 件 | npm target 生成可能 | ほぼ達成 |
-| ICE | 0 件 | panic ゼロ目標 | 継続改善 |
-| Borrow/Clone 正確性 | 全パターン正常 | 一部ケースで clone 漏れ | active で修正中 |
+### Almide 1.0 が約束すること
 
-### 2. テストカバレッジ
+1. **構文凍結**: `effect fn`, `fan`, `do`, `guard`, `match`, `for...in` — 現在の構文は永続
+2. **コア stdlib API 凍結**: 22 モジュール / 355 関数のシグネチャは不変。関数の追加はするが、既存の変更はしない
+3. **クロスターゲット一致**: 同じ `.almd` が Rust と TS で同じ出力を生む
+4. **edition フィールド**: `almide.toml` に `edition = "2026"` を追加。将来の破壊的変更は新 edition で吸収
 
-| 指標 | 基準 | v0.6.0 | Gap |
-|------|------|--------|-----|
-| 総テスト数 | 2,500+ | **2,033** | +467 |
-| 言語テスト (spec/lang/) | — | 644 | — |
-| stdlib テスト (spec/stdlib/) | — | 334 (**94%** の関数をカバー) | +21 |
-| 統合テスト (spec/integration/) | — | 143 | — |
-| コンパイラ単体テスト (Rust) | 800+ | **714** | +86 |
-| クロスターゲット通過率 | 100% | 未計測 | CI 構築 |
+### Almide 1.0 に入れないもの
 
-### 3. 標準ライブラリ
+> Rust は async (4.5年後), const generics (6年後), GATs (6.5年後) を延期した。
+> TypeScript は strictNullChecks (2年後), conditional types (4年後) を延期した。
+> どちらもエコシステムは繁栄した。
 
-| 指標 | 基準 | v0.6.0 | Gap |
-|------|------|--------|-----|
-| モジュール数 | 38+ | **22** | +16 (csv, toml, url, html, set, sorted 等) |
-| 関数数 | 700+ | **355** | +345 |
-| ランタイム実装率 | 100% | **100%** ✅ | 達成 |
-| regex | 外部 crate 不要 | **自前 350 行エンジン** ✅ | 達成 |
-
-### 4. エコシステム (1.0 必須)
-
-| 指標 | 基準 | v0.6.0 |
-|------|------|--------|
-| lock ファイル | `almide.lock` で再現性保証 | なし |
-| LSP | diagnostics + hover + go-to-def | なし |
-| FFI | 最低 1 ターゲット (Rust crate 呼び出し) | なし |
-
-### 5. LLM 適性（Almide の存在理由）
-
-| 指標 | 基準 | v0.6.0 | 計測基盤 |
-|------|------|--------|---------|
-| Modification Survival Rate | 85%+ | 未計測 | Grammar Lab あり |
-| エラー自動修復率 | 70%+ | 未計測 | hint system 実装済み |
-| 初回正答率 | 80%+ | 未計測 | exercises 25 本がベンチ候補 |
+| 延期する機能 | 理由 | 予定 |
+|-------------|------|------|
+| LSP | `almide check` + hint が LLM の主要 UX。人間向け IDE 統合は後 | 1.x |
+| FFI / Rainbow Bridge | stdlib でCLI ツール・Web API は書ける | 1.x |
+| パッケージレジストリ | git ベース依存で十分。レジストリは臨界質量が必要 | 1.x |
+| Go / Python / C ターゲット | Rust + TS でユースケースの 90% をカバー | 2.x |
+| Security Layer 2-5 | Layer 1 (Effect Isolation) だけで十分な差別化 | 2.x |
+| Self-Hosting | 信頼性の証明にはなるが、ユーザー価値は薄い | 2.x+ |
+| 38+ モジュール / 700+ 関数 | 1.x で段階的に追加。22 / 355 で実用的 | 1.x incremental |
+| MSR 85%+ | 計測し報告するが、リリースをブロックしない | 計測開始 |
 
 ---
 
-## チェックリスト
+## 1.0 チェックリスト
 
 ```
-Production Ready = ALL of:
+Almide 1.0 = ALL of:
 
-コンパイラ
-  □ 型健全性違反 = 0
-  □ クロスターゲット不一致 = 0
-  □ Borrow/Clone 全パターン正常
+安定性契約
+  □ 構文凍結: 全キーワード・構文の最終確認
+  □ stdlib API 凍結: 22 モジュール / 355 関数のシグネチャ固定
+  □ edition フィールド: almide.toml に edition = "2026"
+  □ 破壊的変更ポリシー: post-1.0 は compile error + migration hint のみ
+                        silent な挙動変更は禁止 (Python 2→3 の教訓)
+
+コンパイラ正確性
+  □ クロスターゲット CI: 全テストを Rust + TS で実行、出力 diff = 0
+  □ ICE = 0: panic/unwrap ゼロ
   ■ 生成コードが rustc/tsc 通過
+  ■ stdlib ランタイム 100%
 
 テスト
   □ テスト 2,500+                        (2,033 — あと 467)
-  ■ stdlib ランタイム 100%               ✅
+  □ 5 つの showcase プログラムが両ターゲットで動作
 
-標準ライブラリ
-  □ 38+ モジュール / 700+ 関数           (22 / 355)
+パッケージ管理
+  □ almide.lock で再現性保証
+  □ almide.toml の [dependencies] + git ベース解決
 
-エコシステム
-  □ lock ファイル
-  □ LSP
-  □ FFI
+エラー品質
+  □ 安定したエラーコード (E0001-E9999)
+  □ almide check --json: LLM agent 向け構造化出力
+  □ hint 適用で修復できる率 70%+ (計測)
 
-LLM
-  □ Modification Survival Rate 85%+
-  □ 自動修復率 70%+
+LLM 計測 (ブロックしないが計測必須)
+  □ MSR 計測開始 (Grammar Lab)
+  □ 初回正答率ベンチマーク (exercises ベース)
 
-■ = 達成 (2/12)   □ = 未達 (10/12)
+■ = 達成 (2)   □ = 未達 (12)
 ```
+
+---
+
+## 1.0 前にやるべき破壊的変更
+
+> Pre-1.0 は破壊的変更ができる唯一の窓。LLM が構文を学習した後では指数関数的に難しくなる。
+> — TypeScript が enum と namespace を後悔しているように
+
+- [ ] Verb system reform 完了 (stdlib-verb-system.md)
+- [ ] コア型 API (String, List, Map, Result, Option) の表面積を監査・凍結
+- [ ] `fan` の命名最終確認
+- [ ] `effect fn` マーカーの最終確認
+- [ ] Rejected Patterns リスト作成（再提案を防ぐ）
 
 ---
 
 ## 1.0 への道
 
-### Phase I: 正確性 + テスト
-- Borrow/Clone gaps の修正（active）
-- テスト +467 → 2,500+
-- クロスターゲット CI 構築
+### Phase I: 正確性 + クロスターゲット CI
+
+> TypeScript: "ターゲット選択がプログラムの挙動を変えてはならない" — これが最重要の品質ゲート
+
+- クロスターゲット CI 構築（全テストを Rust + TS で実行、出力 diff）
+- Borrow/Clone gaps の修正
 - Unknown 伝播 hardening
+- ICE ゼロ化
 
-### Phase II: stdlib 拡充
-- +16 モジュール / +345 関数 → 38 / 700+
-- Verb 標準化 (active: stdlib-verb-system)
-- 全関数テスト + description 100%
+### Phase II: 安定性契約の準備
 
-### Phase III: エコシステム基盤
-- lock ファイル + 依存解決
-- LSP (diagnostics → hover → go-to-def)
-- FFI (Rainbow Bridge — 外部コードを Almide パッケージ化)
+- Verb system reform 完了（1.0 前の最後の破壊的変更）
+- コア型 API 凍結
+- edition フィールド追加
+- 安定エラーコード (E0001-)
+- `almide check --json` 実装
 
-### Phase IV: LLM 計測
-- Grammar Lab で MSR 計測開始
-- exercises ベースの初回正答率ベンチマーク
-- hint system の修復率ベンチマーク
+### Phase III: パッケージ管理 + テスト拡充
+
+> Cargo は Rust 1.0 の 6 ヶ月前に登場し、Rust の最大の競争優位になった
+
+- `almide.lock` 実装
+- テスト +467 → 2,500+
+- 5 showcase プログラム定義・検証
+- `almide test --json` 実装
+
+### Phase IV: LLM 計測 → 1.0 リリース
+
+- Grammar Lab で MSR 計測
+- exercises ベースの初回正答率
+- hint 修復率ベンチマーク
+- 計測結果を公開 → **1.0 リリース**
 
 ---
 
-## Beyond 1.0
+## 1.x: エコシステム拡張
 
-| 項目 | roadmap |
-|------|---------|
-| Go / Python codegen | on-hold/new-codegen-targets.md |
-| Almide Shell (AI-native REPL) | on-hold/almide-shell.md |
-| Self-Hosting | on-hold/self-hosting.md |
-| Security Layer 2-5 | active/security-model.md |
-| Async Backend (tokio opt-in) | on-hold/async-backend.md |
-| Streaming (WebSocket, SSE) | on-hold/streaming.md |
-| LLM → IR 直接生成 | on-hold/llm-ir-generation.md |
-| Web Framework | on-hold/web-framework.md |
-| Almide UI | on-hold/almide-ui.md |
-| パッケージレジストリ | on-hold/package-registry.md |
+> Ruby: RubyGems (2004) → Rails (2005)。パッケージ基盤がキラーアプリに先行した
+
+- stdlib 段階的拡充: csv, toml, url, html, set, sorted (first-party package として)
+- LSP (diagnostics → hover → go-to-def)
+- FFI / Rainbow Bridge
+- `almide doc` 生成
+- `assert_snapshot` + `almide test --update` (MoonBit の教訓)
+- `almide run` キャッシュ（生成 .rs が同一なら rustc スキップ）
+
+---
+
+## Beyond 1.x
+
+| 項目 | roadmap | 先例 |
+|------|---------|------|
+| Go / Python codegen | on-hold/new-codegen-targets.md | Rust: 1.0 は 1 ターゲット |
+| Almide Shell | on-hold/almide-shell.md | Ruby: IRB は初期から |
+| Self-Hosting | on-hold/self-hosting.md | MoonBit: ブートストラップ済み |
+| Security Layer 2-5 | active/security-model.md | — |
+| Async Backend | on-hold/async-backend.md | Rust: 4.5 年後 |
+| Streaming | on-hold/streaming.md | — |
+| LLM → IR 直接生成 | on-hold/llm-ir-generation.md | MoonBit: constrained sampler |
+| Web Framework | on-hold/web-framework.md | Ruby: Rails が言語を定義した |
+| Almide UI | on-hold/almide-ui.md | — |
+| パッケージレジストリ | on-hold/package-registry.md | Python: PyPI は 23 年かかった |
+| Typed errors | — | MoonBit: `T!ErrorType` |
+
+---
+
+## 他言語からの教訓 (詳細)
+
+| 教訓 | 出典 | Almide への反映 |
+|------|------|----------------|
+| 1.0 = 安定性契約 | Rust, TypeScript | 構文凍結 + stdlib API 凍結 |
+| 破壊的変更は compile error で、silent な挙動変更は禁止 | Python 2→3 | 破壊的変更ポリシー |
+| stdlib は lean core + packageable extensions | Python dead batteries, Ruby gemification | 22 built-in + first-party packages |
+| パッケージ管理はキラーアプリより先 | Ruby (RubyGems → Rails), Rust (Cargo → ecosystem) | almide.lock を 1.0 に |
+| edition で将来の進化を保証 | Rust editions (2015/2018/2021/2024) | edition フィールド |
+| fan は「async 未実装」ではなく「完成した並行モデル」 | Rust async の苦しみ, Python asyncio の分断 | fan を complete として文書化 |
+| エラーメッセージは製品 | Rust RFC 1644, TypeScript stable codes | 安定エラーコード + JSON 出力 |
+| Rejected Patterns リストで feature creep を防ぐ | Ruby (Perl 由来の後悔), Python PEP | 明示的な拒否リスト |
+| dev-loop 速度 > build 速度 | Ruby (15 年遅かったが production で稼働) | `almide run` < 2 秒 |
+| 定期リリースでアップグレードの信頼を構築 | Ruby (年次), Rust (6 週), TypeScript (3 ヶ月) | 1.0 後に月次/隔月リリース |
+
+詳細: [docs/research/lang-lessons-*.md](../research/)
