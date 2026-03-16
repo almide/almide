@@ -14,7 +14,15 @@ impl Checker {
     pub(crate) fn check_call_with_type_args(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr], type_args: Option<&[Ty]>) -> InferTy {
         let arg_tys: Vec<InferTy> = args.iter_mut().map(|a| self.infer_expr(a)).collect();
         match callee {
-            ast::Expr::Ident { name, .. } => self.check_named_call_with_type_args(name, &arg_tys, type_args),
+            ast::Expr::Ident { name, .. } => {
+                let name = name.clone();
+                // Register callee's type for variables that hold function values
+                // (Skip for builtins/functions — they don't need ExprId registration)
+                if self.env.lookup_var(&name).is_some() {
+                    let _ = self.infer_expr(callee);
+                }
+                self.check_named_call_with_type_args(&name, &arg_tys, type_args)
+            }
             ast::Expr::TypeName { name, .. } => {
                 if let Some((type_name, case)) = self.env.constructors.get(name).cloned() {
                     self.check_constructor_args(name, &case, &arg_tys);
