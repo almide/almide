@@ -127,6 +127,12 @@ Exercises combining multiple features in realistic scenarios.
     wasmtime /tmp/smoke.wasm
 ```
 
+## Known Compiler Bugs (found during cleanup)
+
+- **Nested for-in borrow**: Inner list is moved in outer loop instead of cloned. `for x in xs { for y in ys { ... } }` fails with E0382.
+- **list.scan**: Implementation produces incorrect results (off-by-one or missing initial accumulator).
+- **is_upper/is_lower with digits**: `string.is_upper("ABC123")` returns `false`. Need to decide: digits-neutral or digits-fail.
+
 ## Success Criteria
 
 - 23 exercises, 330+ tests, 100% pass on Rust + TS + JS
