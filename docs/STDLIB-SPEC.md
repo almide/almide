@@ -1385,7 +1385,7 @@ Example: `json.stringify(person.encode())`
 Get a nested value by key. Returns none if key doesn't exist.
 
 ```
-get(j: Json, key: String) -> Option[Json]
+get(j: Value, key: String) -> Option[Value]
 ```
 
 Example: `json.get(j, "name")`
@@ -1395,7 +1395,7 @@ Example: `json.get(j, "name")`
 Get a string value by key. Returns none if key missing or not a string.
 
 ```
-get_string(j: Json, key: String) -> Option[String]
+get_string(j: Value, key: String) -> Option[String]
 ```
 
 Example: `json.get_string(j, "name")`
@@ -1405,7 +1405,7 @@ Example: `json.get_string(j, "name")`
 Get an integer value by key. Returns none if key missing or not an integer.
 
 ```
-get_int(j: Json, key: String) -> Option[Int]
+get_int(j: Value, key: String) -> Option[Int]
 ```
 
 Example: `json.get_int(j, "age")`
@@ -1415,7 +1415,7 @@ Example: `json.get_int(j, "age")`
 Get a boolean value by key. Returns none if key missing or not a boolean.
 
 ```
-get_bool(j: Json, key: String) -> Option[Bool]
+get_bool(j: Value, key: String) -> Option[Bool]
 ```
 
 Example: `json.get_bool(j, "active")`
@@ -1425,7 +1425,7 @@ Example: `json.get_bool(j, "active")`
 Get an array value by key. Returns none if key missing or not an array.
 
 ```
-get_array(j: Json, key: String) -> Option[List[Json]]
+get_array(j: Value, key: String) -> Option[List[Value]]
 ```
 
 Example: `json.get_array(j, "items")`
@@ -1435,7 +1435,7 @@ Example: `json.get_array(j, "items")`
 Get all keys of a JSON object as a list of strings.
 
 ```
-keys(j: Json) -> List[String]
+keys(j: Value) -> List[String]
 ```
 
 Example: `json.keys(j)`
@@ -1445,7 +1445,7 @@ Example: `json.keys(j)`
 Extract the string value from a Json. Returns none if not a string.
 
 ```
-to_string(j: Json) -> Option[String]
+to_string(j: Value) -> Option[String]
 ```
 
 Example: `json.to_string(json.from_string("hello"))`
@@ -1455,7 +1455,7 @@ Example: `json.to_string(json.from_string("hello"))`
 Extract the integer value from a Json. Returns none if not an integer.
 
 ```
-to_int(j: Json) -> Option[Int]
+to_int(j: Value) -> Option[Int]
 ```
 
 Example: `json.to_int(json.from_int(42))`
@@ -1465,7 +1465,7 @@ Example: `json.to_int(json.from_int(42))`
 Create a Json string value.
 
 ```
-from_string(s: String) -> Json
+from_string(s: String) -> Value
 ```
 
 Example: `json.from_string("hello")`
@@ -1475,7 +1475,7 @@ Example: `json.from_string("hello")`
 Create a Json integer value.
 
 ```
-from_int(n: Int) -> Json
+from_int(n: Int) -> Value
 ```
 
 Example: `json.from_int(42)`
@@ -1485,7 +1485,7 @@ Example: `json.from_int(42)`
 Create a Json boolean value.
 
 ```
-from_bool(b: Bool) -> Json
+from_bool(b: Bool) -> Value
 ```
 
 Example: `json.from_bool(true)`
@@ -1495,7 +1495,7 @@ Example: `json.from_bool(true)`
 Create a Json null value.
 
 ```
-null() -> Json
+null() -> Value
 ```
 
 Example: `json.null()`
@@ -1505,17 +1505,17 @@ Example: `json.null()`
 Create a Json array from a list of Json values.
 
 ```
-array(items: List[Json]) -> Json
+array(items: List[Value]) -> Value
 ```
 
 Example: `json.array([json.i(1), json.i(2)])`
 
 ### `json.from_map`
 
-Create a Json object from a Map[String, Json].
+Create a Json object from a Map[String, Value].
 
 ```
-from_map(m: Map[String, Json]) -> Json
+from_map(m: Map[String, Value]) -> Value
 ```
 
 Example: `json.from_map(map.set(map.new(), "key", json.s("val")))`
@@ -1525,7 +1525,7 @@ Example: `json.from_map(map.set(map.new(), "key", json.s("val")))`
 Get a float value by key. Returns none if key missing or not a number.
 
 ```
-get_float(j: Json, key: String) -> Option[Float]
+get_float(j: Value, key: String) -> Option[Float]
 ```
 
 Example: `json.get_float(j, "score")`
@@ -1535,7 +1535,7 @@ Example: `json.get_float(j, "score")`
 Create a Json float value.
 
 ```
-from_float(n: Float) -> Json
+from_float(n: Float) -> Value
 ```
 
 Example: `json.from_float(3.14)`
@@ -1545,7 +1545,7 @@ Example: `json.from_float(3.14)`
 Convert a Json value to a pretty-printed JSON string with indentation.
 
 ```
-stringify_pretty(j: Json) -> String
+stringify_pretty(j: Value) -> String
 ```
 
 Example: `json.stringify_pretty(j)`
@@ -1555,7 +1555,7 @@ Example: `json.stringify_pretty(j)`
 Create a Json object from a list of (key, value) pairs.
 
 ```
-object(entries: List[(String, Json)]) -> Json
+object(entries: List[(String, Value)]) -> Value
 ```
 
 Example: `json.object([("name", json.s("Alice")), ("age", json.i(30))])`
@@ -1565,7 +1565,7 @@ Example: `json.object([("name", json.s("Alice")), ("age", json.i(30))])`
 Shorthand for json.from_string. Create a Json string value.
 
 ```
-s(v: String) -> Json
+s(v: String) -> Value
 ```
 
 Example: `json.s("hello")`
@@ -1575,7 +1575,7 @@ Example: `json.s("hello")`
 Shorthand for json.from_int. Create a Json integer value.
 
 ```
-i(v: Int) -> Json
+i(v: Int) -> Value
 ```
 
 Example: `json.i(42)`
@@ -1585,7 +1585,7 @@ Example: `json.i(42)`
 Shorthand for json.from_float. Create a Json float value.
 
 ```
-f(v: Float) -> Json
+f(v: Float) -> Value
 ```
 
 Example: `json.f(3.14)`
@@ -1595,7 +1595,7 @@ Example: `json.f(3.14)`
 Shorthand for json.from_bool. Create a Json boolean value.
 
 ```
-b(v: Bool) -> Json
+b(v: Bool) -> Value
 ```
 
 Example: `json.b(true)`
@@ -1605,7 +1605,7 @@ Example: `json.b(true)`
 Extract string from a Json value (without key lookup). Returns none if not a string.
 
 ```
-as_string(j: Json) -> Option[String]
+as_string(j: Value) -> Option[String]
 ```
 
 Example: `json.as_string(j)`
@@ -1615,7 +1615,7 @@ Example: `json.as_string(j)`
 Extract integer from a Json value (without key lookup). Returns none if not an integer.
 
 ```
-as_int(j: Json) -> Option[Int]
+as_int(j: Value) -> Option[Int]
 ```
 
 Example: `json.as_int(j)`
@@ -1625,7 +1625,7 @@ Example: `json.as_int(j)`
 Extract float from a Json value (without key lookup). Returns none if not a number.
 
 ```
-as_float(j: Json) -> Option[Float]
+as_float(j: Value) -> Option[Float]
 ```
 
 Example: `json.as_float(j)`
@@ -1635,7 +1635,7 @@ Example: `json.as_float(j)`
 Extract boolean from a Json value (without key lookup). Returns none if not a boolean.
 
 ```
-as_bool(j: Json) -> Option[Bool]
+as_bool(j: Value) -> Option[Bool]
 ```
 
 Example: `json.as_bool(j)`
@@ -1645,7 +1645,7 @@ Example: `json.as_bool(j)`
 Extract array from a Json value (without key lookup). Returns none if not an array.
 
 ```
-as_array(j: Json) -> Option[List[Json]]
+as_array(j: Value) -> Option[List[Value]]
 ```
 
 Example: `json.as_array(j)`
@@ -1685,7 +1685,7 @@ Example: `json.index(json.field(json.root(), "items"), 0)`
 Get a value at a JSON path. Returns none if path doesn't exist.
 
 ```
-get_path(j: Json, path: JsonPath) -> Option[Json]
+get_path(j: Value, path: JsonPath) -> Option[Value]
 ```
 
 Example: `json.get_path(j, json.field(json.root(), "name"))`
@@ -1695,7 +1695,7 @@ Example: `json.get_path(j, json.field(json.root(), "name"))`
 Set a value at a JSON path. Returns error if path is invalid.
 
 ```
-set_path(j: Json, path: JsonPath, value: Json) -> Result[Json, String]
+set_path(j: Value, path: JsonPath, value: Value) -> Result[Value, String]
 ```
 
 Example: `json.set_path(j, json.field(json.root(), "name"), json.s("Bob"))`
@@ -1705,7 +1705,7 @@ Example: `json.set_path(j, json.field(json.root(), "name"), json.s("Bob"))`
 Set a value at a JSON path, creating intermediate objects as needed.
 
 ```
-upsert_path(j: Json, path: JsonPath, value: Json) -> Json
+upsert_path(j: Value, path: JsonPath, value: Value) -> Value
 ```
 
 Example: `json.upsert_path(j, json.field(json.root(), "name"), json.s("Bob"))`
@@ -1715,7 +1715,7 @@ Example: `json.upsert_path(j, json.field(json.root(), "name"), json.s("Bob"))`
 Remove a value at a JSON path. Returns the Json with the value removed.
 
 ```
-remove_path(j: Json, path: JsonPath) -> Json
+remove_path(j: Value, path: JsonPath) -> Value
 ```
 
 Example: `json.remove_path(j, json.field(json.root(), "temp"))`
