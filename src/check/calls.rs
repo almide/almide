@@ -310,6 +310,86 @@ impl Checker {
         };
 
         if let Some(module) = module_name {
+            // fan.map / fan.race — compiler-known concurrency primitives
+            if module == "fan" {
+                if !self.env.in_effect {
+                    self.diagnostics.push(super::err(
+                        format!("fan.{}() can only be used inside an effect fn", field),
+                        "Mark the enclosing function as `effect fn`",
+                        format!("call to fan.{}()", field)));
+                }
+                match field {
+                    "map" => {
+                        // fan.map(xs, f) -> List[B] where xs: List[A], f: Fn(A) -> B
+                        if arg_tys.len() != 2 {
+                            self.diagnostics.push(super::err(
+                                format!("fan.map() expects 2 arguments but got {}", arg_tys.len()),
+                                "Usage: fan.map(list, fn(item) => result)",
+                                "call to fan.map()".to_string()));
+                            return Some(InferTy::Concrete(Ty::Unknown));
+                        }
+                        let list_ty = arg_tys[0].to_ty(&self.solutions);
+                        let elem_ty = match &list_ty {
+                            Ty::List(inner) => *inner.clone(),
+                            _ => Ty::Unknown,
+                        };
+                        // Infer return type from f's return type
+                        let fn_ty = arg_tys[1].to_ty(&self.solutions);
+                        let result_elem = match &fn_ty {
+                            Ty::Fn { ret, .. } => {
+                                // Auto-unwrap Result
+                                match ret.as_ref() {
+                                    Ty::Result(ok, _) => *ok.clone(),
+                                    other => other.clone(),
+                                }
+                            }
+                            _ => {
+                                // If fn type unknown, constrain it
+                                let ret_var = self.fresh_var();
+                                self.constrain(arg_tys[1].clone(),
+                                    InferTy::Fn { params: vec![InferTy::from_ty(&elem_ty)], ret: Box::new(ret_var.clone()) },
+                                    "fan.map callback");
+                                ret_var.to_ty(&self.solutions)
+                            }
+                        };
+                        return Some(InferTy::Concrete(Ty::List(Box::new(result_elem))));
+                    }
+                    "race" => {
+                        // fan.race(thunks) -> T where thunks: List[Fn() -> T]
+                        if arg_tys.len() != 1 {
+                            self.diagnostics.push(super::err(
+                                format!("fan.race() expects 1 argument but got {}", arg_tys.len()),
+                                "Usage: fan.race([fn() => a, fn() => b])",
+                                "call to fan.race()".to_string()));
+                            return Some(InferTy::Concrete(Ty::Unknown));
+                        }
+                        let list_ty = arg_tys[0].to_ty(&self.solutions);
+                        let result_ty = match &list_ty {
+                            Ty::List(inner) => {
+                                match inner.as_ref() {
+                                    Ty::Fn { ret, .. } => {
+                                        match ret.as_ref() {
+                                            Ty::Result(ok, _) => *ok.clone(),
+                                            other => other.clone(),
+                                        }
+                                    }
+                                    _ => Ty::Unknown,
+                                }
+                            }
+                            _ => Ty::Unknown,
+                        };
+                        return Some(InferTy::Concrete(result_ty));
+                    }
+                    _ => {
+                        self.diagnostics.push(super::err(
+                            format!("unknown function 'fan.{}'", field),
+                            "Available: fan.map, fan.race",
+                            format!("call to fan.{}()", field)));
+                        return Some(InferTy::Concrete(Ty::Unknown));
+                    }
+                }
+            }
+
             // Codec convenience: json.encode(t) → String when t has T.encode
             if field == "encode" && arg_tys.len() == 1 {
                 let arg_concrete = arg_tys[0].to_ty(&self.solutions);

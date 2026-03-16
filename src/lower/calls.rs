@@ -101,7 +101,8 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
         ast::Expr::Member { object, field, .. } => {
             // Check if this is a module call (e.g., string.trim, list.map)
             if let ast::Expr::Ident { name: module, .. } = object.as_ref() {
-                if crate::stdlib::is_stdlib_module(module) || crate::stdlib::is_any_stdlib(module)
+                if module == "fan"
+                    || crate::stdlib::is_stdlib_module(module) || crate::stdlib::is_any_stdlib(module)
                     || ctx.env.user_modules.contains(module)
                 {
                     let resolved = ctx.env.module_aliases.get(module).cloned().unwrap_or(module.clone());

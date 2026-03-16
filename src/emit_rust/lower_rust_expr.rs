@@ -218,6 +218,61 @@ impl<'a> LowerCtx<'a> {
         }
     }
 
+    // ── fan.map / fan.race ──
+
+    fn lower_fan_call(&self, func: &str, ir_args: &[IrExpr], _rust_args: &[Expr], _e: &IrExpr) -> Expr {
+        match func {
+            "map" => {
+                // fan.map(xs, f) → std::thread::scope(|__s| { handles; collect })
+                let xs = super::render::expr_str(&self.lower_expr(&ir_args[0]));
+                let f = super::render::expr_str(&self.lower_expr(&ir_args[1]));
+                let has_result = matches!(&ir_args[1].ty, Ty::Fn { ret, .. } if matches!(ret.as_ref(), Ty::Result(_, _)));
+                if has_result && self.auto_try {
+                    Expr::Raw(format!(
+                        "std::thread::scope(|__s| -> Result<_, String> {{ \
+                        let __fan_handles: Vec<_> = ({xs}).into_iter().map(|__fan_item| __s.spawn(move || ({f})(__fan_item))).collect(); \
+                        let mut __fan_results = Vec::new(); \
+                        for __h in __fan_handles {{ __fan_results.push(__h.join().unwrap()?); }} \
+                        Ok(__fan_results) \
+                        }})?"
+                    ))
+                } else if has_result {
+                    Expr::Raw(format!(
+                        "std::thread::scope(|__s| {{ \
+                        let __fan_handles: Vec<_> = ({xs}).into_iter().map(|__fan_item| __s.spawn(move || ({f})(__fan_item))).collect(); \
+                        __fan_handles.into_iter().map(|__h| __h.join().unwrap().unwrap()).collect::<Vec<_>>() \
+                        }})"
+                    ))
+                } else {
+                    Expr::Raw(format!(
+                        "std::thread::scope(|__s| {{ \
+                        let __fan_handles: Vec<_> = ({xs}).into_iter().map(|__fan_item| __s.spawn(move || ({f})(__fan_item))).collect(); \
+                        __fan_handles.into_iter().map(|__h| __h.join().unwrap()).collect::<Vec<_>>() \
+                        }})"
+                    ))
+                }
+            }
+            "race" => {
+                // fan.race(thunks) → spawn all, recv first via channel
+                let thunks = super::render::expr_str(&self.lower_expr(&ir_args[0]));
+                let has_result = matches!(&ir_args[0].ty, Ty::List(inner) if matches!(inner.as_ref(), Ty::Fn { ret, .. } if matches!(ret.as_ref(), Ty::Result(_, _))));
+                let unwrap_result = if has_result && self.auto_try { "?" } else if has_result { ".unwrap()" } else { "" };
+                Expr::Raw(format!(
+                    "std::thread::scope(|__s| {{ \
+                    let (__fan_tx, __fan_rx) = std::sync::mpsc::channel(); \
+                    for __fan_thunk in {thunks} {{ \
+                        let __tx = __fan_tx.clone(); \
+                        __s.spawn(move || {{ let _ = __tx.send(__fan_thunk()); }}); \
+                    }} \
+                    drop(__fan_tx); \
+                    __fan_rx.recv().unwrap(){unwrap_result} \
+                    }})"
+                ))
+            }
+            _ => Expr::Raw(format!("/* unknown fan.{} */", func)),
+        }
+    }
+
     // ── Control flow helpers ──
 
     fn lower_control_flow(&self, e: &IrExpr) -> Expr {
@@ -329,6 +384,9 @@ impl<'a> LowerCtx<'a> {
                 let call = match target {
                     CallTarget::Named { name } => return self.lower_named_call(name, ir_args),
                     CallTarget::Module { module, func } => {
+                        if module == "fan" {
+                            return self.lower_fan_call(func, args, &ir_args, e);
+                        }
                         return self.lower_stdlib_call(module, func, ir_args, args, e);
                     }
 

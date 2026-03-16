@@ -119,6 +119,13 @@ impl Parser {
             return self.parse_do_block();
         }
         if self.check(TokenType::Fan) {
+            // fan { ... } = fan block; fan.map/fan.race = module-like call
+            if self.peek_at(1).map_or(false, |t| t.token_type == TokenType::Dot) {
+                // Treat `fan` as an identifier for member access
+                let span = Some(self.current_span());
+                self.advance();
+                return Ok(Expr::Ident { name: "fan".to_string(), id: self.next_id(), span, resolved_type: None });
+            }
             self.advance();
             return self.parse_fan_block();
         }

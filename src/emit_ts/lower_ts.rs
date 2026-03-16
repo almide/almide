@@ -325,8 +325,43 @@ impl<'a> LowerCtx<'a> {
                 }
                 Expr::Call { func: Box::new(Expr::Var(sanitize(name))), args: a }
             }
-            CallTarget::Module { module, func } => Expr::Call {
-                func: Box::new(Expr::Field(Box::new(Expr::Var(self.map_module(module))), sanitize(func))), args: a,
+            CallTarget::Module { module, func } => {
+                if module == "fan" {
+                    return match func.as_str() {
+                        "map" => {
+                            // fan.map(xs, f) → await Promise.all(xs.map(f))
+                            Expr::Await(Box::new(Expr::Call {
+                                func: Box::new(Expr::Raw("Promise.all".into())),
+                                args: vec![Expr::MethodCall {
+                                    recv: Box::new(a[0].clone()),
+                                    method: "map".into(),
+                                    args: vec![a[1].clone()],
+                                }],
+                            }))
+                        }
+                        "race" => {
+                            // fan.race(thunks) → await Promise.race(thunks.map(f => f()))
+                            Expr::Await(Box::new(Expr::Call {
+                                func: Box::new(Expr::Raw("Promise.race".into())),
+                                args: vec![Expr::MethodCall {
+                                    recv: Box::new(a[0].clone()),
+                                    method: "map".into(),
+                                    args: vec![Expr::Arrow {
+                                        params: vec!["__f".into()],
+                                        body: Box::new(Expr::Call {
+                                            func: Box::new(Expr::Var("__f".into())),
+                                            args: vec![],
+                                        }),
+                                    }],
+                                }],
+                            }))
+                        }
+                        _ => Expr::Raw(format!("/* unknown fan.{} */", func)),
+                    };
+                }
+                Expr::Call {
+                    func: Box::new(Expr::Field(Box::new(Expr::Var(self.map_module(module))), sanitize(func))), args: a,
+                }
             },
             CallTarget::Method { object, method } => {
                 let obj = self.lower_expr(object, ie, it);
