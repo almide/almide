@@ -138,6 +138,17 @@ impl Parser {
         let mut exprs = Vec::new();
         self.skip_newlines();
         while !self.check(TokenType::RBrace) && !self.check(TokenType::EOF) {
+            // fan blocks only allow expressions — reject statements
+            let tok = self.current().clone();
+            match tok.token_type {
+                TokenType::Let | TokenType::Var => {
+                    return Err(format!("`{}` is not allowed inside fan block at line {}:{}\n  Hint: fan blocks only contain expressions, not statements", tok.value, tok.line, tok.col));
+                }
+                TokenType::For | TokenType::While => {
+                    return Err(format!("`{}` is not allowed inside fan block at line {}:{}\n  Hint: fan blocks only contain expressions, not loops", tok.value, tok.line, tok.col));
+                }
+                _ => {}
+            }
             let expr = self.parse_expr()?;
             exprs.push(expr);
             self.skip_newlines();

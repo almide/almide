@@ -193,17 +193,25 @@ impl<'a> LowerCtx<'a> {
             }
             parts.push(format!("let {} = __s.spawn(move || {{ {} }});", handles[i], rendered));
         }
-        // join results: unwrap thread panic, then ? for Result
+        // join results: unwrap thread panic, then propagate Result
         let join_parts: Vec<String> = handles.iter().enumerate().map(|(i, h)| {
             let is_result = matches!(&exprs[i].ty, Ty::Result(_, _));
-            if is_result { format!("{}.join().unwrap()?", h) } else { format!("{}.join().unwrap()", h) }
+            if is_result {
+                if self.auto_try {
+                    format!("{}.join().unwrap()?", h) // effect fn: ? propagates
+                } else {
+                    format!("{}.join().unwrap().unwrap()", h) // test: unwrap panics on Err
+                }
+            } else {
+                format!("{}.join().unwrap()", h)
+            }
         }).collect();
         let result = if n == 1 { join_parts[0].clone() } else { format!("({})", join_parts.join(", ")) };
         parts.push(result);
-        if any_result {
-            // Scope closure returns Result — spawn stmts then Ok(tuple with ?)
+        if any_result && self.auto_try {
+            // effect fn: scope closure returns Result with ? propagation
             let spawn_stmts = parts[..n].join(" ");
-            let result_expr = &parts[n]; // the tuple with .join().unwrap()?
+            let result_expr = &parts[n];
             Expr::Raw(format!("std::thread::scope(|__s| -> Result<_, String> {{ {} Ok({}) }})?", spawn_stmts, result_expr))
         } else {
             Expr::Raw(format!("std::thread::scope(|__s| {{ {} }})", parts.join(" ")))
