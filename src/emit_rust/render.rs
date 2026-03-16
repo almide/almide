@@ -253,7 +253,23 @@ fn ty(o: &mut String, t: &Type) {
         Type::Ref(inner) => { o.push('&'); ty(o, inner); }
         Type::RefStr => o.push_str("&str"),
         Type::Slice(inner) => { o.push_str("&["); ty(o, inner); o.push(']'); }
-        Type::Fn(params, ret) => { o.push_str("impl Fn("); for (i, p) in params.iter().enumerate() { if i > 0 { o.push_str(", "); } ty(o, p); } o.push_str(") -> "); ty(o, ret); o.push_str(" + Clone"); }
+        Type::Fn(params, ret) => {
+            // Check if return type contains another Fn (nested closures need Box<dyn Fn>)
+            if matches!(ret.as_ref(), Type::Fn(_, _)) {
+                o.push_str("impl Fn(");
+                for (i, p) in params.iter().enumerate() { if i > 0 { o.push_str(", "); } ty(o, p); }
+                o.push_str(") -> Box<dyn Fn(");
+                if let Type::Fn(inner_params, inner_ret) = ret.as_ref() {
+                    for (i, p) in inner_params.iter().enumerate() { if i > 0 { o.push_str(", "); } ty(o, p); }
+                    o.push_str(") -> "); ty(o, inner_ret);
+                }
+                o.push_str("> + Clone");
+            } else {
+                o.push_str("impl Fn(");
+                for (i, p) in params.iter().enumerate() { if i > 0 { o.push_str(", "); } ty(o, p); }
+                o.push_str(") -> "); ty(o, ret); o.push_str(" + Clone");
+            }
+        }
         Type::Infer => o.push('_'),
     }
 }

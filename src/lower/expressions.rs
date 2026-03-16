@@ -36,6 +36,9 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         ast::Expr::Ident { name, .. } => {
             if let Some(var_id) = ctx.lookup_var(name) {
                 ctx.mk(IrExprKind::Var { id: var_id }, ty, span)
+            } else if ctx.env.functions.contains_key(name) {
+                // Function used as a value (e.g., passed to HOF)
+                ctx.mk(IrExprKind::FnRef { name: name.clone() }, ty, span)
             } else {
                 ctx.mk(IrExprKind::Var { id: VarId(0) }, ty, span) // error recovery
             }

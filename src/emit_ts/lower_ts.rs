@@ -138,6 +138,7 @@ impl<'a> LowerCtx<'a> {
             IrExprKind::LitBool { value } => Expr::Bool(*value),
             IrExprKind::Unit => Expr::Undefined,
             IrExprKind::Var { id } => Expr::Var(self.var_name(*id)),
+            IrExprKind::FnRef { name } => Expr::Var(name.clone()),
 
             IrExprKind::BinOp { op, left, right } => self.lower_binop(*op, left, right, ie, it),
             IrExprKind::UnOp { op, operand } => {

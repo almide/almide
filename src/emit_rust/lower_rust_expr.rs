@@ -33,6 +33,9 @@ impl<'a> LowerCtx<'a> {
             IrExprKind::LitStr { value } => Expr::Str(value.clone()),
             IrExprKind::LitBool { value } => Expr::Bool(*value),
             IrExprKind::Unit => Expr::Unit,
+            IrExprKind::FnRef { name } => {
+                Expr::Var(crate::emit_common::sanitize(name))
+            }
             IrExprKind::Var { id } => {
                 let info = self.vt.get(*id);
                 let var = Expr::Var(crate::emit_common::sanitize(&info.name));
@@ -345,10 +348,20 @@ impl<'a> LowerCtx<'a> {
                     Expr::Index(Box::new(self.lower_expr(object)), Box::new(self.lower_expr(index)))
                 }
             }
-            IrExprKind::Lambda { params, body } => Expr::Closure {
-                params: params.iter().map(|(var, _)| self.vt.get(*var).name.clone()).collect(),
-                body: Box::new(self.lower_expr(body)),
-            },
+            IrExprKind::Lambda { params, body } => {
+                let lowered_body = self.lower_expr(body);
+                // If the lambda body is itself a closure (returning a function),
+                // wrap it in Box::new for Rust's nested impl Fn limitation
+                let final_body = if matches!(&body.ty, Ty::Fn { .. }) {
+                    Expr::Call { func: "Box::new".into(), args: vec![lowered_body] }
+                } else {
+                    lowered_body
+                };
+                Expr::Closure {
+                    params: params.iter().map(|(var, _)| self.vt.get(*var).name.clone()).collect(),
+                    body: Box::new(final_body),
+                }
+            }
             IrExprKind::StringInterp { parts } => {
                 let mut template = String::new();
                 let mut args = Vec::new();
@@ -482,11 +495,16 @@ impl<'a> LowerCtx<'a> {
         let use_template = matches!(module, "list" | "string" | "map" | "int" | "float" | "math" | "result" | "option");
         let expr = if use_template {
             let args_str: Vec<String> = rust_args.iter().map(|a| super::render::expr_str(a)).collect();
-            let inline_lambda = |param_idx: usize, _body_idx: usize| -> (Vec<String>, String) {
+            let inline_lambda = |param_idx: usize, arity: usize| -> (Vec<String>, String) {
                 if let Some(Expr::Closure { params, body }) = rust_args.get(param_idx) {
                     (params.clone(), super::render::expr_str(body))
                 } else {
-                    (vec!["__x".into()], args_str.get(param_idx).cloned().unwrap_or_default())
+                    // Non-closure argument (function variable): generate wrapper that calls it
+                    let param_names: Vec<String> = (0..arity).map(|i| format!("__x{}", i)).collect();
+                    let fn_ref = args_str.get(param_idx).cloned().unwrap_or_default();
+                    let call_args = param_names.join(", ");
+                    let body = format!("{}({})", fn_ref, call_args);
+                    (param_names, body)
                 }
             };
             if let Some(code) = almide::generated::emit_rust_calls::gen_generated_call(

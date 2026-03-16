@@ -181,6 +181,8 @@ pub enum IrExprKind {
 
     // ── Variables ──
     Var { id: VarId },
+    /// Reference to a named function used as a value (e.g., `list.map(xs, double)`)
+    FnRef { name: String },
 
     // ── Operators (type-dispatched) ──
     BinOp { op: BinOp, left: Box<IrExpr>, right: Box<IrExpr> },

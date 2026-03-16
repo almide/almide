@@ -143,7 +143,7 @@ fn check_expr_for_unknown(expr: &IrExpr, fn_name: &str, warnings: &mut Vec<Unkno
         }
         // Leaf nodes — no children
         IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
-        | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::Var { .. }
+        | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::Var { .. } | IrExprKind::FnRef { .. }
         | IrExprKind::EmptyMap | IrExprKind::OptionNone | IrExprKind::Break
         | IrExprKind::Continue | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
     }

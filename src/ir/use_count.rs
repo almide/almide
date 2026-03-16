@@ -26,6 +26,7 @@ fn count_uses_in_expr(expr: &IrExpr, table: &mut VarTable) {
         IrExprKind::Var { id } => {
             table.increment_use(*id);
         }
+        IrExprKind::FnRef { .. } => {} // function reference, no VarId to track
         IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
         | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::OptionNone
         | IrExprKind::Hole | IrExprKind::Todo { .. }
