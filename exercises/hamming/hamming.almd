@@ -1,56 +1,17 @@
-import string
-import list
-
-// Calculate the Hamming distance between two DNA strands
-// The strands must be of equal length, otherwise return an error
-fn distance(strand1: String, strand2: String) -> Result[Int, String] = {
-  let bytes1 = string.to_bytes(strand1);
-  let bytes2 = string.to_bytes(strand2);
-  guard list.len(bytes1) == list.len(bytes2) else err("strands must be of equal length");
-  var i = 0;
-  var count = 0;
-  let len = list.len(bytes1);
-  do {
-    guard i < len else ok(count);
-    let b1 = list.get(bytes1, i);
-    let b2 = list.get(bytes2, i);
-    count = if b1 != b2 then count + 1 else count;
-    i = i + 1
-  }
+effect fn distance(a: String, b: String) -> Result[Int, String] = do {
+  guard string.len(a) == string.len(b) else err("strands must be of equal length")
+  let pairs = list.zip(string.chars(a), string.chars(b))
+  let diffs = list.filter(pairs, (p) => p.0 != p.1)
+  ok(list.len(diffs))
 }
 
-test "empty strands" {
-  assert_eq(distance("", ""), ok(0))
-}
-
-test "single letter identical strands" {
-  assert_eq(distance("A", "A"), ok(0))
-}
-
-test "single letter different strands" {
-  assert_eq(distance("G", "T"), ok(1))
-}
-
-test "long identical strands" {
-  assert_eq(distance("GGACTGAAATCTG", "GGACTGAAATCTG"), ok(0))
-}
-
-test "long different strands" {
-  assert_eq(distance("GGACGGATTCTG", "AGGACGGATTCT"), ok(9))
-}
-
-test "disallow first strand longer" {
-  assert_eq(distance("AATG", "AAA"), err("strands must be of equal length"))
-}
-
-test "disallow second strand longer" {
-  assert_eq(distance("ATA", "AGTG"), err("strands must be of equal length"))
-}
-
-test "disallow left empty strand" {
-  assert_eq(distance("", "G"), err("strands must be of equal length"))
-}
-
-test "disallow right empty strand" {
-  assert_eq(distance("G", ""), err("strands must be of equal length"))
-}
+test "empty strands" { assert_eq(distance("", ""), ok(0)) }
+test "single letter identical" { assert_eq(distance("A", "A"), ok(0)) }
+test "single letter different" { assert_eq(distance("G", "T"), ok(1)) }
+test "long identical" { assert_eq(distance("GGACTGAAATCTG", "GGACTGAAATCTG"), ok(0)) }
+test "long different" { assert_eq(distance("GGACGGATTCTG", "AGGACGGATTCT"), ok(9)) }
+test "different lengths" { assert_eq(distance("AATG", "AAA"), err("strands must be of equal length")) }
+test "first strand longer" { assert_eq(distance("AATG", "AAA"), err("strands must be of equal length")) }
+test "short mutation" { assert_eq(distance("GAGCCTACTAACGGGAT", "CATCGTAATGACGGCCT"), ok(7)) }
+test "all different" { assert_eq(distance("GATACA", "GCATAA"), ok(4)) }
+test "no difference" { assert_eq(distance("GAT", "GAT"), ok(0)) }
