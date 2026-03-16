@@ -167,7 +167,12 @@ fn discover_in_expr(
                             }
                         }
                     }
-                    if !bindings.is_empty() {
+                    // Skip bindings with Unknown or unresolved inference vars
+                    let all_concrete = !bindings.is_empty() && bindings.values().all(|ty|
+                        !matches!(ty, Ty::Unknown) && !ty.contains_unknown()
+                        && !matches!(ty, Ty::TypeVar(n) if n.starts_with('?'))
+                    );
+                    if all_concrete {
                         let suffix = mangle_suffix(&bindings);
                         instances.insert((name.clone(), suffix), bindings);
                     }
