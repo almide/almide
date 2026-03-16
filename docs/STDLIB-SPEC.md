@@ -1,7 +1,7 @@
 # Almide Standard Library Specification
 
 Auto-generated from `stdlib/defs/*.toml`. 362 native functions across 22 modules.
-Runtime implementation: 251/362 (69%).
+Runtime implementation: 270/362 (74%).
 
 ## Module Index
 
@@ -10,21 +10,21 @@ Runtime implementation: 251/362 (69%).
 | Module | Layer | Functions | Implemented | Status |
 |--------|-------|-----------|-------------|--------|
 | crypto | platform | 4 | 0/4 | TOML only |
-| datetime | platform | 21 | 9/21 | Partial (9/21) |
+| datetime | platform | 21 | 21/21 | Ready |
 | env | platform | 9 | 9/9 | Ready |
 | error | core | 3 | 3/3 | Ready |
 | float | core | 16 | 16/16 | Ready |
 | fs | platform | 24 | 0/24 | TOML only |
 | http | platform | 26 | 4/26 | Partial (4/26) |
 | int | core | 21 | 21/21 | Ready |
-| io | platform | 3 | 0/3 | TOML only |
+| io | platform | 3 | 3/3 | Ready |
 | json | core | 36 | 14/36 | Partial (14/36) |
 | list | core | 54 | 54/54 | Ready |
 | log | core | 8 | 8/8 | Ready |
 | map | core | 16 | 16/16 | Ready |
 | math | core | 21 | 21/21 | Ready |
 | process | platform | 6 | 6/6 | Ready |
-| random | platform | 4 | 0/4 | TOML only |
+| random | platform | 4 | 4/4 | Ready |
 | regex | core | 8 | 0/8 | TOML only |
 | result | core | 9 | 9/9 | Ready |
 | string | core | 41 | 41/41 | Ready |
@@ -96,9 +96,9 @@ Example: `crypto.hmac_verify("secret", "message", sig) // => ok(true)`
 
 ## datetime
 
-Layer: **platform** | 21 functions | 9/21 implemented
+Layer: **platform** | 21 functions | 21/21 implemented
 
-### `datetime.now` (not implemented)
+### `datetime.now`
 
 Get the current time as a Unix timestamp (seconds, UTC).
 
@@ -108,7 +108,7 @@ effect now() -> Int
 
 Example: `let ts = datetime.now()`
 
-### `datetime.from_parts` (not implemented)
+### `datetime.from_parts`
 
 Create a timestamp from year, month, day, hour, minute, second (UTC).
 
@@ -118,7 +118,7 @@ from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int
 
 Example: `datetime.from_parts(2024, 1, 15, 12, 0, 0)`
 
-### `datetime.parse_iso` (not implemented)
+### `datetime.parse_iso`
 
 Parse an ISO 8601 date string into a timestamp.
 
@@ -138,7 +138,7 @@ from_unix(seconds: Int) -> Int
 
 Example: `datetime.from_unix(1705320000)`
 
-### `datetime.format` (not implemented)
+### `datetime.format`
 
 Format a timestamp using a pattern string.
 
@@ -148,7 +148,7 @@ format(ts: Int, pattern: String) -> String
 
 Example: `datetime.format(ts, "%Y-%m-%d") // => "2024-01-15"`
 
-### `datetime.to_iso` (not implemented)
+### `datetime.to_iso`
 
 Format a timestamp as ISO 8601 string.
 
@@ -168,7 +168,7 @@ to_unix(ts: Int) -> Int
 
 Example: `datetime.to_unix(ts) // => 1705320000`
 
-### `datetime.year` (not implemented)
+### `datetime.year`
 
 Extract the year from a timestamp.
 
@@ -178,7 +178,7 @@ year(ts: Int) -> Int
 
 Example: `datetime.year(ts) // => 2024`
 
-### `datetime.month` (not implemented)
+### `datetime.month`
 
 Extract the month (1-12) from a timestamp.
 
@@ -188,7 +188,7 @@ month(ts: Int) -> Int
 
 Example: `datetime.month(ts) // => 1`
 
-### `datetime.day` (not implemented)
+### `datetime.day`
 
 Extract the day of month (1-31) from a timestamp.
 
@@ -198,7 +198,7 @@ day(ts: Int) -> Int
 
 Example: `datetime.day(ts) // => 15`
 
-### `datetime.hour` (not implemented)
+### `datetime.hour`
 
 Extract the hour (0-23) from a timestamp.
 
@@ -208,7 +208,7 @@ hour(ts: Int) -> Int
 
 Example: `datetime.hour(ts) // => 12`
 
-### `datetime.minute` (not implemented)
+### `datetime.minute`
 
 Extract the minute (0-59) from a timestamp.
 
@@ -218,7 +218,7 @@ minute(ts: Int) -> Int
 
 Example: `datetime.minute(ts) // => 30`
 
-### `datetime.second` (not implemented)
+### `datetime.second`
 
 Extract the second (0-59) from a timestamp.
 
@@ -228,7 +228,7 @@ second(ts: Int) -> Int
 
 Example: `datetime.second(ts) // => 45`
 
-### `datetime.weekday` (not implemented)
+### `datetime.weekday`
 
 Get the day of week as a string (Monday-Sunday).
 
@@ -1324,9 +1324,9 @@ Example: `int.to_float(42) // => 42.0`
 
 ## io
 
-Layer: **platform** | 3 functions | 0/3 implemented
+Layer: **platform** | 3 functions | 3/3 implemented
 
-### `io.read_line` (not implemented)
+### `io.read_line`
 
 Read a single line from standard input
 
@@ -1336,7 +1336,7 @@ effect read_line() -> String
 
 Example: `let name = io.read_line()`
 
-### `io.print` (not implemented)
+### `io.print`
 
 Print a string to stdout without a trailing newline
 
@@ -1346,7 +1346,7 @@ effect print(s: String) -> Unit
 
 Example: `io.print("Enter name: ")`
 
-### `io.read_all` (not implemented)
+### `io.read_all`
 
 Read all of standard input as a single string
 
@@ -2792,9 +2792,9 @@ Example: `let r = process.exec_status("ls", []) // {code, stdout, stderr}`
 
 ## random
 
-Layer: **platform** | 4 functions | 0/4 implemented
+Layer: **platform** | 4 functions | 4/4 implemented
 
-### `random.int` (not implemented)
+### `random.int`
 
 Generate a random integer between min and max (inclusive).
 
@@ -2804,7 +2804,7 @@ effect int(min: Int, max: Int) -> Int
 
 Example: `random.int(1, 100) // => 42`
 
-### `random.float` (not implemented)
+### `random.float`
 
 Generate a random float between 0.0 and 1.0.
 
@@ -2814,7 +2814,7 @@ effect float() -> Float
 
 Example: `random.float() // => 0.7321`
 
-### `random.choice` (not implemented)
+### `random.choice`
 
 Pick a random element from a list, or none if empty.
 
@@ -2824,7 +2824,7 @@ effect choice[T](xs: List[T]) -> Option[T]
 
 Example: `random.choice(["a", "b", "c"]) // => some("b")`
 
-### `random.shuffle` (not implemented)
+### `random.shuffle`
 
 Return a randomly shuffled copy of a list.
 
