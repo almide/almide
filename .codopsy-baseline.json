@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "timestamp": "2026-03-16T04:13:13.340040+00:00",
+  "timestamp": "2026-03-16T04:16:17.973482+00:00",
   "overall": {
-    "totalIssues": 113,
+    "totalIssues": 111,
     "totalErrors": 0,
-    "totalWarnings": 106,
+    "totalWarnings": 104,
     "averageComplexity": 6.2,
-    "score": 58,
+    "score": 59,
     "grade": "D"
   },
   "files": [
@@ -21,9 +21,9 @@
     },
     {
       "file": "check/calls.rs",
-      "issueCount": 5,
+      "issueCount": 3,
       "errorCount": 0,
-      "warningCount": 5,
+      "warningCount": 3,
       "maxCyclomatic": 56,
       "maxCognitive": 64,
       "score": 55

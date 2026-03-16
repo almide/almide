@@ -53,40 +53,9 @@ impl Checker {
             }
             // Module call: string.trim(s), list.map(xs, f), etc.
             ast::Expr::Member { object, field, .. } => {
-                if let ast::Expr::Ident { name: module, .. } = object.as_ref() {
-                    // Codec convenience: module.encode(t) → String when t has T.encode
-                    if field == "encode" && arg_tys.len() == 1 {
-                        let arg_concrete = arg_tys[0].to_ty(&self.solutions);
-                        let has_codec = match &arg_concrete {
-                            Ty::Named(name, _) => self.env.functions.contains_key(&format!("{}.encode", name)),
-                            Ty::Record { .. } | Ty::Variant { .. } => {
-                                self.env.types.iter().any(|(name, ty)| {
-                                    ty == &arg_concrete && self.env.functions.contains_key(&format!("{}.encode", name))
-                                })
-                            }
-                            _ => false,
-                        };
-                        if has_codec {
-                            return InferTy::Concrete(Ty::String);
-                        }
-                    }
-                    if crate::stdlib::is_stdlib_module(module) || self.env.user_modules.contains(module.as_str()) {
-                        let key = format!("{}.{}", module, field);
-                        return self.check_named_call(&key, &arg_tys);
-                    }
-                    // Check module aliases
-                    if let Some(target) = self.env.module_aliases.get(module.as_str()).cloned() {
-                        let key = format!("{}.{}", target, field);
-                        return self.check_named_call(&key, &arg_tys);
-                    }
-                }
-                // TypeName.method(args) → direct convention call (not UFCS)
-                // e.g., Person.decode(v) → Person.decode(v), NOT Person.decode(Person, v)
-                if let ast::Expr::TypeName { name: type_name, .. } = object.as_ref() {
-                    let key = format!("{}.{}", type_name, field);
-                    if self.env.functions.contains_key(&key) {
-                        return self.check_named_call(&key, &arg_tys);
-                    }
+                // Try static resolution: module.func, alias.func, TypeName.method, codec.encode
+                if let Some(result) = self.resolve_static_member(object, field, &arg_tys) {
+                    return result;
                 }
                 // UFCS method: obj.method(args) → module.method(obj, args)
                 let obj_ty = self.infer_expr(object);
@@ -321,6 +290,56 @@ impl Checker {
                     Self::hint_with_conversion("Fix the argument type", &expected, arg_ty),
                     format!("call to {}()", fn_name)));
             }
+        }
+    }
+
+    /// Resolve a member call statically (module.func, alias, TypeName.method, codec).
+    /// Returns Some(InferTy) if resolved, None to fall through to UFCS/convention dispatch.
+    fn resolve_static_member(&mut self, object: &ast::Expr, field: &str, arg_tys: &[InferTy]) -> Option<InferTy> {
+        let module_name = match object {
+            ast::Expr::Ident { name, .. } => Some(name.as_str()),
+            _ => None,
+        };
+
+        if let Some(module) = module_name {
+            // Codec convenience: json.encode(t) → String when t has T.encode
+            if field == "encode" && arg_tys.len() == 1 {
+                let arg_concrete = arg_tys[0].to_ty(&self.solutions);
+                if self.has_codec_encode(&arg_concrete) {
+                    return Some(InferTy::Concrete(Ty::String));
+                }
+            }
+
+            // Direct stdlib/user module call, or resolved alias
+            let resolved_module = if crate::stdlib::is_stdlib_module(module) || self.env.user_modules.contains(module) {
+                Some(module.to_string())
+            } else {
+                self.env.module_aliases.get(module).cloned()
+            };
+            if let Some(m) = resolved_module {
+                return Some(self.check_named_call(&format!("{}.{}", m, field), arg_tys));
+            }
+        }
+
+        // TypeName.method() — direct convention call
+        if let ast::Expr::TypeName { name: type_name, .. } = object {
+            let key = format!("{}.{}", type_name, field);
+            if self.env.functions.contains_key(&key) {
+                return Some(self.check_named_call(&key, arg_tys));
+            }
+        }
+
+        None
+    }
+
+    /// Check if a type has a Codec encode function registered.
+    fn has_codec_encode(&self, ty: &Ty) -> bool {
+        match ty {
+            Ty::Named(name, _) => self.env.functions.contains_key(&format!("{}.encode", name)),
+            Ty::Record { .. } | Ty::Variant { .. } => {
+                self.env.types.iter().any(|(name, t)| t == ty && self.env.functions.contains_key(&format!("{}.encode", name)))
+            }
+            _ => false,
         }
     }
 }
