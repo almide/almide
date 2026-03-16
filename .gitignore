@@ -10,3 +10,5 @@ _tmp_*
 .almide/cache/
 spec_*-*/
 tools/stdlib-crawler/data/
+__pycache__/
+*.pyc
