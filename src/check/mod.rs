@@ -134,22 +134,23 @@ impl Checker {
         }
         // Unused import warnings
         for imp in &program.imports {
-            if let ast::Decl::Import { path, alias, span, .. } = imp {
-                let import_name = alias.as_ref().cloned()
-                    .unwrap_or_else(|| path.last().cloned().unwrap_or_default());
-                if !import_name.is_empty()
-                    && !self.env.used_modules.contains(&import_name)
-                    && !import_name.starts_with('_')
-                    && path.first().map(|s| s.as_str()) != Some("self")
-                {
-                    let line = span.as_ref().map(|s| s.line).unwrap_or(0);
-                    self.diagnostics.push(Diagnostic::warning(
-                        format!("unused import '{}'", import_name),
-                        format!("Remove the import or prefix with '_' to suppress: _{}", import_name),
-                        format!("import at line {}", line),
-                    ));
-                }
-            }
+            let (path, alias, span) = match imp {
+                ast::Decl::Import { path, alias, span, .. } => (path, alias, span),
+                _ => continue,
+            };
+            let import_name = alias.as_ref().cloned()
+                .unwrap_or_else(|| path.last().cloned().unwrap_or_default());
+            if import_name.is_empty()
+                || self.env.used_modules.contains(&import_name)
+                || import_name.starts_with('_')
+                || path.first().map(|s| s.as_str()) == Some("self")
+            { continue; }
+            let line = span.as_ref().map(|s| s.line).unwrap_or(0);
+            self.diagnostics.push(Diagnostic::warning(
+                format!("unused import '{}'", import_name),
+                format!("Remove the import or prefix with '_' to suppress: _{}", import_name),
+                format!("import at line {}", line),
+            ));
         }
         std::mem::take(&mut self.diagnostics)
     }
@@ -279,95 +280,121 @@ impl Checker {
 
     // ── Registration ──
 
+    /// Collect structural bounds from generic params: Record → OpenRecord conversion.
+    fn collect_structural_bounds(&self, generics: &Option<Vec<ast::GenericParam>>) -> HashMap<String, Ty> {
+        let mut sb = HashMap::new();
+        let gs = match generics { Some(gs) => gs, None => return sb };
+        for g in gs {
+            let bte = match &g.structural_bound { Some(bte) => bte, None => continue };
+            let bt = self.resolve_type_expr(bte);
+            sb.insert(g.name.clone(), match bt { Ty::Record { fields } => Ty::OpenRecord { fields }, o => o });
+        }
+        sb
+    }
+
+    /// Build a prefixed key: "module.name" or just "name".
+    fn prefixed_key(prefix: Option<&str>, name: &str) -> String {
+        prefix.map(|p| format!("{}.{}", p, name)).unwrap_or_else(|| name.to_string())
+    }
+
+    fn register_fn_sig(&mut self, name: &str, params: &[ast::Param], return_type: &ast::TypeExpr,
+                        effect: &Option<bool>, r#async: &Option<bool>, generics: &Option<Vec<ast::GenericParam>>, prefix: Option<&str>) {
+        let gnames: Vec<String> = generics.as_ref().map(|gs| gs.iter().map(|g| g.name.clone()).collect()).unwrap_or_default();
+        let sb = self.collect_structural_bounds(generics);
+        for gn in &gnames { self.env.types.insert(gn.clone(), Ty::TypeVar(gn.clone())); }
+        let ptys: Vec<(String, Ty)> = params.iter().map(|p| (p.name.clone(), self.resolve_type_expr(&p.ty))).collect();
+        let ret = self.resolve_type_expr(return_type);
+        for gn in &gnames { self.env.types.remove(gn); }
+        let is_effect = effect.unwrap_or(false) || r#async.unwrap_or(false);
+        let key = Self::prefixed_key(prefix, name);
+        if prefix.is_none() && is_effect { self.env.effect_fns.insert(name.to_string()); }
+        let min_p = params.iter().take_while(|p| p.default.is_none()).count();
+        self.env.functions.insert(key.clone(), FnSig { params: ptys, ret, is_effect, generics: gnames, structural_bounds: sb });
+        if min_p < params.len() {
+            self.env.fn_min_params.insert(key, min_p);
+        }
+    }
+
+    fn validate_derives(&mut self, derives: &[String], type_name: &str) {
+        let valid = ["Eq", "Repr", "Ord", "Hash", "Codec", "Encode", "Decode"];
+        for d in derives {
+            if !valid.contains(&d.as_str()) {
+                self.diagnostics.push(err(
+                    format!("unknown derive convention '{}' on type '{}'", d, type_name),
+                    format!("Valid conventions: {}", valid.join(", ")),
+                    format!("type {}", type_name),
+                ));
+            }
+        }
+    }
+
+    fn register_derive_sigs(&mut self, derives: &[String], type_name: &str) {
+        let type_ty = Ty::Named(type_name.to_string(), vec![]);
+        let value_ty = Ty::Named("Value".to_string(), vec![]);
+        let empty_sb = std::collections::HashMap::new();
+        for d in derives {
+            match d.as_str() {
+                "Eq" => {
+                    let fn_key = format!("{}.eq", type_name);
+                    if !self.env.functions.contains_key(&fn_key) {
+                        self.env.functions.insert(fn_key, FnSig { params: vec![("a".into(), type_ty.clone()), ("b".into(), type_ty.clone())], ret: Ty::Bool, is_effect: false, generics: vec![], structural_bounds: empty_sb.clone() });
+                    }
+                }
+                "Repr" => {
+                    let fn_key = format!("{}.repr", type_name);
+                    if !self.env.functions.contains_key(&fn_key) {
+                        self.env.functions.insert(fn_key, FnSig { params: vec![("v".into(), type_ty.clone())], ret: Ty::String, is_effect: false, generics: vec![], structural_bounds: empty_sb.clone() });
+                    }
+                }
+                "Codec" => {
+                    let encode_key = format!("{}.encode", type_name);
+                    if !self.env.functions.contains_key(&encode_key) {
+                        self.env.functions.insert(encode_key, FnSig { params: vec![("v".into(), type_ty.clone())], ret: value_ty.clone(), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone() });
+                    }
+                    let decode_key = format!("{}.decode", type_name);
+                    if !self.env.functions.contains_key(&decode_key) {
+                        self.env.functions.insert(decode_key, FnSig { params: vec![("v".into(), value_ty.clone())], ret: Ty::Result(Box::new(type_ty.clone()), Box::new(Ty::String)), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone() });
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn register_type_decl(&mut self, name: &str, ty: &ast::TypeExpr, deriving: &Option<Vec<String>>,
+                           generics: &Option<Vec<ast::GenericParam>>, prefix: Option<&str>) {
+        if let Some(derives) = deriving {
+            self.validate_derives(derives, name);
+        }
+        let gnames: Vec<String> = generics.as_ref().map(|gs| gs.iter().map(|g| g.name.clone()).collect()).unwrap_or_default();
+        for gn in &gnames { self.env.types.insert(gn.clone(), Ty::TypeVar(gn.clone())); }
+        let mut resolved = self.resolve_type_expr(ty);
+        for gn in &gnames { self.env.types.remove(gn); }
+        if prefix.is_none() {
+            if let Ty::Variant { name: ref mut vn, ref cases } = resolved {
+                *vn = name.to_string();
+                for case in cases { self.env.constructors.insert(case.name.clone(), (name.to_string(), case.clone())); }
+            }
+        }
+        let key = Self::prefixed_key(prefix, name);
+        self.env.types.insert(key.clone(), resolved);
+        if let Some(derives) = deriving {
+            self.register_derive_sigs(derives, name);
+        }
+    }
+
     fn register_decls(&mut self, decls: &[ast::Decl], prefix: Option<&str>) {
         for decl in decls {
             match decl {
                 ast::Decl::Fn { name, params, return_type, effect, r#async, generics, .. } => {
-                    let gnames: Vec<String> = generics.as_ref().map(|gs| gs.iter().map(|g| g.name.clone()).collect()).unwrap_or_default();
-                    let mut sb = HashMap::new();
-                    if let Some(gs) = generics {
-                        for g in gs {
-                            if let Some(ref bte) = g.structural_bound {
-                                let bt = self.resolve_type_expr(bte);
-                                sb.insert(g.name.clone(), match bt { Ty::Record { fields } => Ty::OpenRecord { fields }, o => o });
-                            }
-                        }
-                    }
-                    for gn in &gnames { self.env.types.insert(gn.clone(), Ty::TypeVar(gn.clone())); }
-                    let ptys: Vec<(String, Ty)> = params.iter().map(|p| (p.name.clone(), self.resolve_type_expr(&p.ty))).collect();
-                    let ret = self.resolve_type_expr(return_type);
-                    for gn in &gnames { self.env.types.remove(gn); }
-                    let is_effect = effect.unwrap_or(false) || r#async.unwrap_or(false);
-                    let key = prefix.map(|p| format!("{}.{}", p, name)).unwrap_or(name.clone());
-                    if prefix.is_none() && is_effect { self.env.effect_fns.insert(name.clone()); }
-                    let min_p = params.iter().take_while(|p| p.default.is_none()).count();
-                    self.env.functions.insert(key.clone(), FnSig { params: ptys, ret, is_effect, generics: gnames, structural_bounds: sb });
-                    if min_p < params.len() {
-                        self.env.fn_min_params.insert(key, min_p);
-                    }
+                    self.register_fn_sig(name, params, return_type, effect, r#async, generics, prefix);
                 }
                 ast::Decl::Type { name, ty, deriving, generics, .. } => {
-                    // Validate derive convention names
-                    if let Some(derives) = deriving {
-                        let valid = ["Eq", "Repr", "Ord", "Hash", "Codec", "Encode", "Decode"];
-                        for d in derives {
-                            if !valid.contains(&d.as_str()) {
-                                self.diagnostics.push(err(
-                                    format!("unknown derive convention '{}' on type '{}'", d, name),
-                                    format!("Valid conventions: {}", valid.join(", ")),
-                                    format!("type {}", name),
-                                ));
-                            }
-                        }
-                    }
-                    let gnames: Vec<String> = generics.as_ref().map(|gs| gs.iter().map(|g| g.name.clone()).collect()).unwrap_or_default();
-                    for gn in &gnames { self.env.types.insert(gn.clone(), Ty::TypeVar(gn.clone())); }
-                    let mut resolved = self.resolve_type_expr(ty);
-                    for gn in &gnames { self.env.types.remove(gn); }
-                    if prefix.is_none() {
-                        if let Ty::Variant { name: ref mut vn, ref cases } = resolved {
-                            *vn = name.clone();
-                            for case in cases { self.env.constructors.insert(case.name.clone(), (name.clone(), case.clone())); }
-                        }
-                    }
-                    let key = prefix.map(|p| format!("{}.{}", p, name)).unwrap_or(name.clone());
-                    self.env.types.insert(key.clone(), resolved);
-                    // Pre-register auto-derive function signatures for conventions
-                    if let Some(derives) = deriving {
-                        let type_ty = Ty::Named(name.clone(), vec![]);
-                        let value_ty = Ty::Named("Value".to_string(), vec![]);
-                        for d in derives {
-                            match d.as_str() {
-                                "Eq" => {
-                                    let fn_key = format!("{}.eq", name);
-                                    if !self.env.functions.contains_key(&fn_key) {
-                                        self.env.functions.insert(fn_key, FnSig { params: vec![("a".into(), type_ty.clone()), ("b".into(), type_ty.clone())], ret: Ty::Bool, is_effect: false, generics: vec![], structural_bounds: std::collections::HashMap::new() });
-                                    }
-                                }
-                                "Repr" => {
-                                    let fn_key = format!("{}.repr", name);
-                                    if !self.env.functions.contains_key(&fn_key) {
-                                        self.env.functions.insert(fn_key, FnSig { params: vec![("v".into(), type_ty.clone())], ret: Ty::String, is_effect: false, generics: vec![], structural_bounds: std::collections::HashMap::new() });
-                                    }
-                                }
-                                "Codec" => {
-                                    let encode_key = format!("{}.encode", name);
-                                    if !self.env.functions.contains_key(&encode_key) {
-                                        self.env.functions.insert(encode_key, FnSig { params: vec![("v".into(), type_ty.clone())], ret: value_ty.clone(), is_effect: false, generics: vec![], structural_bounds: std::collections::HashMap::new() });
-                                    }
-                                    let decode_key = format!("{}.decode", name);
-                                    if !self.env.functions.contains_key(&decode_key) {
-                                        self.env.functions.insert(decode_key, FnSig { params: vec![("v".into(), value_ty.clone())], ret: Ty::Result(Box::new(type_ty.clone()), Box::new(Ty::String)), is_effect: false, generics: vec![], structural_bounds: std::collections::HashMap::new() });
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
+                    self.register_type_decl(name, ty, deriving, generics, prefix);
                 }
                 ast::Decl::TopLet { name, ty, value, .. } => {
                     let rt = ty.as_ref().map(|te| self.resolve_type_expr(te)).unwrap_or_else(|| self.infer_literal_type(value));
-                    let key = prefix.map(|p| format!("{}.{}", p, name)).unwrap_or(name.clone());
+                    let key = Self::prefixed_key(prefix, name);
                     self.env.top_lets.insert(key, rt);
                 }
                 _ => {}
@@ -376,6 +403,39 @@ impl Checker {
     }
 
     // ── Declaration checking ──
+
+    /// Push generic type vars and structural bounds into the environment.
+    fn enter_generics(&mut self, generics: &Option<Vec<ast::GenericParam>>) {
+        let gs = match generics { Some(gs) => gs, None => return };
+        for g in gs.iter() {
+            self.env.types.insert(g.name.clone(), Ty::TypeVar(g.name.clone()));
+            let bte = match &g.structural_bound { Some(bte) => bte, None => continue };
+            let bt = self.resolve_type_expr(bte);
+            self.env.structural_bounds.insert(g.name.clone(), match bt { Ty::Record { fields } => Ty::OpenRecord { fields }, o => o });
+        }
+    }
+
+    /// Remove generic type vars and structural bounds from the environment.
+    fn exit_generics(&mut self, generics: &Option<Vec<ast::GenericParam>>) {
+        let gs = match generics { Some(gs) => gs, None => return };
+        for g in gs.iter() { self.env.types.remove(&g.name); self.env.structural_bounds.remove(&g.name); }
+    }
+
+    /// Constrain an effect fn body against its return type signature.
+    /// Effect fns accept: Unit body (control-flow returns), unwrapped T, or full Result[T, E].
+    fn constrain_effect_body(&mut self, name: &str, ret_ty: &Ty, body_ity: InferTy) {
+        let body_ty = body_ity.to_ty(&self.solutions);
+        if body_ty == Ty::Unit { return; } // do blocks, while loops, guard patterns return via control flow
+        if let Ty::Result(ok, _) = ret_ty {
+            if matches!(&body_ty, Ty::Result(_, _)) {
+                self.constrain(InferTy::from_ty(ret_ty), body_ity, format!("fn '{}'", name));
+            } else {
+                self.constrain(InferTy::from_ty(ok), body_ity, format!("fn '{}'", name));
+            }
+            return;
+        }
+        self.constrain(InferTy::from_ty(ret_ty), body_ity, format!("fn '{}'", name));
+    }
 
     fn check_fn_decl(
         &mut self,
@@ -387,15 +447,7 @@ impl Checker {
         generics: &mut Option<Vec<ast::GenericParam>>,
     ) {
         self.env.push_scope();
-        if let Some(gs) = generics {
-            for g in gs.iter() {
-                self.env.types.insert(g.name.clone(), Ty::TypeVar(g.name.clone()));
-                if let Some(ref bte) = g.structural_bound {
-                    let bt = self.resolve_type_expr(bte);
-                    self.env.structural_bounds.insert(g.name.clone(), match bt { Ty::Record { fields } => Ty::OpenRecord { fields }, o => o });
-                }
-            }
-        }
+        self.enter_generics(generics);
         for p in params.iter_mut() {
             let ty = self.resolve_type_expr(&p.ty);
             self.env.define_var(&p.name, ty.clone());
@@ -410,31 +462,13 @@ impl Checker {
         self.env.current_ret = Some(ret_ty.clone());
         self.env.in_effect = effect.unwrap_or(false);
         let body_ity = self.infer_expr(body);
-        // Signature-driven constraint:
-        // - effect fn with Result[T, E] sig: accept body returning T (auto-wrapped) or Result[T, E] (explicit)
-        // - non-effect: body must match signature exactly
         if effect.unwrap_or(false) {
-            let body_ty = body_ity.to_ty(&self.solutions);
-            // Effect fn: accept Unit body (returns happen via guard/break/ok/err in loops)
-            if body_ty == Ty::Unit {
-                // ok — do blocks, while loops, guard patterns return via control flow
-            } else if let Ty::Result(ok, _) = &ret_ty {
-                // Try unwrapped first (body returns T), fall back to full Result match
-                let unwrapped = InferTy::from_ty(ok);
-                let full = InferTy::from_ty(&ret_ty);
-                if matches!(&body_ty, Ty::Result(_, _)) {
-                    self.constrain(full, body_ity, format!("fn '{}'", name));
-                } else {
-                    self.constrain(unwrapped, body_ity, format!("fn '{}'", name));
-                }
-            } else {
-                self.constrain(InferTy::from_ty(&ret_ty), body_ity, format!("fn '{}'", name));
-            }
+            self.constrain_effect_body(name, &ret_ty, body_ity);
         } else {
             self.constrain(InferTy::from_ty(&ret_ty), body_ity, format!("fn '{}'", name));
         }
         self.env.current_ret = prev.0; self.env.in_effect = prev.1;
-        if let Some(gs) = generics { for g in gs.iter() { self.env.types.remove(&g.name); self.env.structural_bounds.remove(&g.name); } }
+        self.exit_generics(generics);
         self.env.pop_scope();
     }
 

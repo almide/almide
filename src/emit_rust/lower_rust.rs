@@ -230,7 +230,7 @@ impl<'a> LowerCtx<'a> {
         }
     }
 
-    fn find_variant_case<'b>(&self, ctor_name: &str) -> Option<&'b almide::ir::IrVariantDecl>
+    pub(super) fn find_variant_case<'b>(&self, ctor_name: &str) -> Option<&'b almide::ir::IrVariantDecl>
     where 'a: 'b {
         let enum_name = self.ctors.get(ctor_name)?;
         let td = self.type_decls.iter().find(|td| td.name == *enum_name)?;

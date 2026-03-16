@@ -23,6 +23,20 @@ fn expr_has_break_or_continue(e: &Expr) -> bool {
     }
 }
 
+/// Insert deref let-bindings for boxed recursive variant bindings at the top of a body expression.
+fn apply_boxed_deref(body: Expr, deref_vars: Vec<String>) -> Expr {
+    if deref_vars.is_empty() {
+        return body;
+    }
+    let mut stmts: Vec<Stmt> = deref_vars.iter().map(|v| {
+        Stmt::Let { name: v.clone(), ty: None, value: Expr::Raw(format!("*{}", v)), mutable: false }
+    }).collect();
+    match body {
+        Expr::Block { stmts: existing, tail } => { stmts.extend(existing); Expr::Block { stmts, tail } }
+        other => Expr::Block { stmts, tail: Some(Box::new(other)) }
+    }
+}
+
 impl<'a> LowerCtx<'a> {
     // ── Expression ──
 
@@ -184,19 +198,8 @@ impl<'a> LowerCtx<'a> {
                     arms: arms.iter().map(|a| {
                         let pat = self.lower_pat(&a.pattern);
                         let body = self.lower_expr(&a.body);
-                        // Insert deref stmts for boxed recursive variant bindings
                         let deref_vars = self.find_boxed_bindings(&a.pattern);
-                        let body = if deref_vars.is_empty() {
-                            body
-                        } else {
-                            let mut stmts: Vec<Stmt> = deref_vars.iter().map(|v| {
-                                Stmt::Let { name: v.clone(), ty: None, value: Expr::Raw(format!("*{}", v)), mutable: false }
-                            }).collect();
-                            match body {
-                                Expr::Block { stmts: mut existing, tail } => { stmts.extend(existing); Expr::Block { stmts, tail } }
-                                other => Expr::Block { stmts, tail: Some(Box::new(other)) }
-                            }
-                        };
+                        let body = apply_boxed_deref(body, deref_vars);
                         MatchArm { pat, guard: a.guard.as_ref().map(|g| self.lower_expr(g)), body }
                     }).collect(),
                 }
@@ -340,21 +343,7 @@ impl<'a> LowerCtx<'a> {
                 }
             }
             IrExprKind::MapLiteral { entries } => Expr::HashMap(entries.iter().map(|(k, v)| (self.lower_expr(k), self.lower_expr(v))).collect()),
-            IrExprKind::EmptyMap => {
-                if let Ty::Map(k, v) = &e.ty {
-                    if !matches!(k.as_ref(), Ty::Unknown | Ty::TypeVar(_)) {
-                        let mut ks = String::new();
-                        let mut vs = String::new();
-                        super::render::render_type(&mut ks, &self.lty(k));
-                        super::render::render_type(&mut vs, &self.lty(v));
-                        Expr::Raw(format!("HashMap::<{}, {}>::new()", ks, vs))
-                    } else {
-                        Expr::Raw("HashMap::new()".into())
-                    }
-                } else {
-                    Expr::Raw("HashMap::new()".into())
-                }
-            }
+            IrExprKind::EmptyMap => self.lower_empty_map(e),
             IrExprKind::Tuple { elements } => Expr::Tuple(elements.iter().map(|e| self.lower_expr(e)).collect()),
             IrExprKind::Record { name, fields } => self.lower_record(e, name, fields),
             IrExprKind::SpreadRecord { base, fields } => self.lower_spread_record(e, base, fields),
@@ -393,20 +382,9 @@ impl<'a> LowerCtx<'a> {
         // Box recursive fields in variant record constructors
         if let Some(ctor_name) = name.as_ref() {
             let enum_name = self.ctors.get(ctor_name).cloned().unwrap_or_default();
-            if let Some(td) = self.type_decls.iter().find(|td| td.name == enum_name) {
-                if let almide::ir::IrTypeDeclKind::Variant { cases, .. } = &td.kind {
-                    if let Some(case) = cases.iter().find(|c| c.name == *ctor_name) {
-                        if let almide::ir::IrVariantKind::Record { fields: field_decls } = &case.kind {
-                            for (fname, fexpr) in lowered_fields.iter_mut() {
-                                if let Some(fd) = field_decls.iter().find(|fd| fd.name == *fname) {
-                                    if super::lower_rust::ty_contains_name(&fd.ty, &enum_name) {
-                                        let inner = std::mem::replace(fexpr, Expr::Unit);
-                                        *fexpr = Expr::Call { func: "Box::new".into(), args: vec![inner] };
-                                    }
-                                }
-                            }
-                        }
-                    }
+            if let Some(case) = self.find_variant_case(ctor_name) {
+                if let almide::ir::IrVariantKind::Record { fields: field_decls } = &case.kind {
+                    self.box_recursive_record_fields(&mut lowered_fields, field_decls, &enum_name);
                 }
             }
         }
@@ -423,6 +401,31 @@ impl<'a> LowerCtx<'a> {
             base: Box::new(base_val),
             fields: fields.iter().map(|(n, v)| (n.clone(), self.lower_expr(v))).collect(),
         }
+    }
+
+    /// Box recursive fields in variant record constructors (mutates in place).
+    fn box_recursive_record_fields(&self, lowered_fields: &mut Vec<(String, Expr)>, field_decls: &[IrFieldDecl], enum_name: &str) {
+        for (fname, fexpr) in lowered_fields.iter_mut() {
+            if let Some(fd) = field_decls.iter().find(|fd| fd.name == *fname) {
+                if super::lower_rust::ty_contains_name(&fd.ty, enum_name) {
+                    let inner = std::mem::replace(fexpr, Expr::Unit);
+                    *fexpr = Expr::Call { func: "Box::new".into(), args: vec![inner] };
+                }
+            }
+        }
+    }
+
+    /// Lower EmptyMap with typed construction when key/value types are known.
+    fn lower_empty_map(&self, e: &IrExpr) -> Expr {
+        let (k, v) = match &e.ty {
+            Ty::Map(k, v) if !matches!(k.as_ref(), Ty::Unknown | Ty::TypeVar(_)) => (k, v),
+            _ => return Expr::Raw("HashMap::new()".into()),
+        };
+        let mut ks = String::new();
+        let mut vs = String::new();
+        super::render::render_type(&mut ks, &self.lty(k));
+        super::render::render_type(&mut vs, &self.lty(v));
+        Expr::Raw(format!("HashMap::<{}, {}>::new()", ks, vs))
     }
 
     // ── String interpolation helper ──
@@ -514,23 +517,22 @@ impl<'a> LowerCtx<'a> {
     /// 再帰型コンストラクタの引数を Box::new() で包む
     fn box_recursive_args(&self, enum_name: &str, ctor_name: &str, args: Vec<Expr>) -> Vec<Expr> {
         // IR の型定義からコンストラクタのフィールド型を取得
-        if let Some(td) = self.type_decls.iter().find(|td| td.name == enum_name) {
-            if let almide::ir::IrTypeDeclKind::Variant { cases, .. } = &td.kind {
-                if let Some(case) = cases.iter().find(|c| c.name == ctor_name) {
-                    if let almide::ir::IrVariantKind::Tuple { fields } = &case.kind {
-                        return args.into_iter().enumerate().map(|(i, arg)| {
-                            if let Some(field_ty) = fields.get(i) {
-                                if super::lower_rust::ty_contains_name(field_ty, enum_name) {
-                                    return Expr::Call { func: "Box::new".into(), args: vec![arg] };
-                                }
-                            }
-                            arg
-                        }).collect();
-                    }
+        let case = match self.find_variant_case(ctor_name) {
+            Some(c) => c,
+            None => return args,
+        };
+        let fields = match &case.kind {
+            almide::ir::IrVariantKind::Tuple { fields } => fields,
+            _ => return args,
+        };
+        args.into_iter().enumerate().map(|(i, arg)| {
+            if let Some(field_ty) = fields.get(i) {
+                if super::lower_rust::ty_contains_name(field_ty, enum_name) {
+                    return Expr::Call { func: "Box::new".into(), args: vec![arg] };
                 }
             }
-        }
-        args
+            arg
+        }).collect()
     }
 
     /// Lower a stdlib module call using the generated dispatch templates.
