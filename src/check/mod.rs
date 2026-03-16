@@ -390,10 +390,14 @@ impl Checker {
                         }
                     }
                 }
-                for p in params {
+                for p in params.iter_mut() {
                     let ty = self.resolve_type_expr(&p.ty);
-                    self.env.define_var(&p.name, ty);
+                    self.env.define_var(&p.name, ty.clone());
                     self.env.param_vars.insert(p.name.clone());
+                    if let Some(ref mut default_expr) = p.default {
+                        let dty = self.infer_expr(default_expr);
+                        self.constrain(InferTy::from_ty(&ty), dty, format!("default arg '{}'", p.name));
+                    }
                 }
                 let ret_ty = self.resolve_type_expr(return_type);
                 let prev = (self.env.current_ret.take(), self.env.in_effect);
