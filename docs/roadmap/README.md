@@ -7,7 +7,6 @@
 - [Stdlib API Reform](active/stdlib-verb-system.md) — Verb 標準化 (from_string, to_upper, len 等)
 - [Stdlib Strategy](active/stdlib-strategy.md) — 282→700+ 関数
 - [Runtime Layout Unification](active/runtime-layout.md) — `runtime/{rust,ts}/` に統一、TS を素 .ts に切り出し
-- **Runtime**: 全 22 モジュール / 355 関数のランタイム実装完了 (100%)。regex は自前エンジン（350 行、外部 crate 不要）
 
 ### Language
 - [Template](active/template.md) — Typed document builder
@@ -151,4 +150,5 @@
 - [Unused Variable Warnings](done/unused-variable-warnings.md)
 - [Variant Record Fields](done/variant-record-fields.md)
 - [Fan Concurrency](done/fan-concurrency.md) — `fan { }` / `fan.map` / `fan.race` / `fan.any` / `fan.settle` / `fan.timeout` — sync/thread backend
+- Runtime Gaps — 全 22 モジュール / 355 関数 (100%)。regex は自前エンジン（350 行、外部 crate 不要）
 - [While Loop](done/while-loop.md)
