@@ -62,7 +62,11 @@ impl<'a> LowerCtx<'a> {
                         deref
                     }
                 } else {
-                    // Clone if: used more than once AND not a Copy type
+                    // Clone if: used more than once AND not a Copy type.
+                    // Note: use_count doesn't account for loop repetition, but cloning
+                    // all use_count==1 vars breaks type inference in closures.
+                    // While-loop cases are handled by always cloning for-in iterables
+                    // and using .clone() in the concat runtime.
                     if info.use_count > 1 && !is_copy(&info.ty) {
                         Expr::Clone(Box::new(var))
                     } else { var }

@@ -93,11 +93,18 @@ fn count_uses_in_expr(expr: &IrExpr, table: &mut VarTable) {
         }
         IrExprKind::ForIn { iterable, body, .. } => {
             count_uses_in_expr(iterable, table);
+            // Collect vars defined inside the loop body
+            let body_locals = collect_bound_vars(body);
+            // Count body uses normally
             for s in body { count_uses_in_stmt(s, table); }
+            // Extra count for outer vars used in loop body (they're used N times at runtime)
+            bump_outer_vars_in_loop(body, &body_locals, table);
         }
         IrExprKind::While { cond, body } => {
             count_uses_in_expr(cond, table);
+            let body_locals = collect_bound_vars(body);
             for s in body { count_uses_in_stmt(s, table); }
+            bump_outer_vars_in_loop(body, &body_locals, table);
         }
         IrExprKind::Lambda { body, .. } => {
             count_uses_in_expr(body, table);
@@ -136,6 +143,105 @@ fn count_uses_in_stmt(stmt: &IrStmt, table: &mut VarTable) {
         IrStmtKind::Guard { cond, else_ } => {
             count_uses_in_expr(cond, table);
             count_uses_in_expr(else_, table);
+        }
+        IrStmtKind::Comment { .. } => {}
+    }
+}
+
+/// Collect VarIds that are bound (let/var) inside a list of statements.
+fn collect_bound_vars(stmts: &[IrStmt]) -> HashSet<u32> {
+    let mut locals = HashSet::new();
+    for s in stmts {
+        match &s.kind {
+            IrStmtKind::Bind { var, .. } => { locals.insert(var.0); }
+            IrStmtKind::BindDestructure { pattern, .. } => collect_pattern_vars(pattern, &mut locals),
+            _ => {}
+        }
+    }
+    locals
+}
+
+fn collect_pattern_vars(pat: &IrPattern, vars: &mut HashSet<u32>) {
+    match pat {
+        IrPattern::Bind { var } => { vars.insert(var.0); }
+        IrPattern::Constructor { args, .. } => { for a in args { collect_pattern_vars(a, vars); } }
+        IrPattern::Tuple { elements } => { for e in elements { collect_pattern_vars(e, vars); } }
+        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => collect_pattern_vars(inner, vars),
+        IrPattern::RecordPattern { fields, .. } => {
+            for f in fields { if let Some(p) = &f.pattern { collect_pattern_vars(p, vars); } }
+        }
+        _ => {}
+    }
+}
+
+/// Extra-count Var references in loop body for variables defined OUTSIDE the loop.
+/// This makes use_count > 1 for outer vars, triggering clone insertion.
+fn bump_outer_vars_in_loop(stmts: &[IrStmt], locals: &HashSet<u32>, table: &mut VarTable) {
+    for s in stmts {
+        bump_vars_in_stmt(s, locals, table);
+    }
+}
+
+fn bump_vars_in_expr(expr: &IrExpr, locals: &HashSet<u32>, table: &mut VarTable) {
+    match &expr.kind {
+        IrExprKind::Var { id } if !locals.contains(&id.0) => {
+            table.increment_use(*id);
+        }
+        // Recurse into sub-expressions but don't double-count nested loops
+        // (they'll handle their own bumping)
+        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+            for s in stmts { bump_vars_in_stmt(s, locals, table); }
+            if let Some(e) = expr { bump_vars_in_expr(e, locals, table); }
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            bump_vars_in_expr(cond, locals, table);
+            bump_vars_in_expr(then, locals, table);
+            bump_vars_in_expr(else_, locals, table);
+        }
+        IrExprKind::Match { subject, arms } => {
+            bump_vars_in_expr(subject, locals, table);
+            for a in arms { bump_vars_in_expr(&a.body, locals, table); }
+        }
+        IrExprKind::Call { args, .. } => { for a in args { bump_vars_in_expr(a, locals, table); } }
+        IrExprKind::BinOp { left, right, .. } => {
+            bump_vars_in_expr(left, locals, table);
+            bump_vars_in_expr(right, locals, table);
+        }
+        IrExprKind::UnOp { operand, .. } => bump_vars_in_expr(operand, locals, table),
+        IrExprKind::StringInterp { parts } => {
+            for p in parts { if let IrStringPart::Expr { expr } = p { bump_vars_in_expr(expr, locals, table); } }
+        }
+        IrExprKind::Lambda { body, .. } => bump_vars_in_expr(body, locals, table),
+        IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
+        | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr } => bump_vars_in_expr(expr, locals, table),
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => bump_vars_in_expr(object, locals, table),
+        IrExprKind::IndexAccess { object, index } => {
+            bump_vars_in_expr(object, locals, table);
+            bump_vars_in_expr(index, locals, table);
+        }
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
+            for e in elements { bump_vars_in_expr(e, locals, table); }
+        }
+        IrExprKind::Record { fields, .. } => {
+            for (_, v) in fields { bump_vars_in_expr(v, locals, table); }
+        }
+        _ => {}
+    }
+}
+
+fn bump_vars_in_stmt(stmt: &IrStmt, locals: &HashSet<u32>, table: &mut VarTable) {
+    match &stmt.kind {
+        IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
+        | IrStmtKind::Assign { value, .. } => bump_vars_in_expr(value, locals, table),
+        IrStmtKind::IndexAssign { index, value, .. } => {
+            bump_vars_in_expr(index, locals, table);
+            bump_vars_in_expr(value, locals, table);
+        }
+        IrStmtKind::FieldAssign { value, .. } => bump_vars_in_expr(value, locals, table),
+        IrStmtKind::Expr { expr } => bump_vars_in_expr(expr, locals, table),
+        IrStmtKind::Guard { cond, else_ } => {
+            bump_vars_in_expr(cond, locals, table);
+            bump_vars_in_expr(else_, locals, table);
         }
         IrStmtKind::Comment { .. } => {}
     }
