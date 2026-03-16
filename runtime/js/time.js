@@ -1,0 +1,15 @@
+const __almd_time = {
+  now() { return Math.floor(Date.now() / 1000); },
+  millis() { return Date.now(); },
+  sleep(ms) { const end = Date.now() + ms; while (Date.now() < end) {} },
+  _parts(ts) { const d = new Date(ts * 1000); return [d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds()]; },
+  year(ts) { return new Date(ts * 1000).getUTCFullYear(); },
+  month(ts) { return new Date(ts * 1000).getUTCMonth() + 1; },
+  day(ts) { return new Date(ts * 1000).getUTCDate(); },
+  hour(ts) { return new Date(ts * 1000).getUTCHours(); },
+  minute(ts) { return new Date(ts * 1000).getUTCMinutes(); },
+  second(ts) { return new Date(ts * 1000).getUTCSeconds(); },
+  weekday(ts) { const d = new Date(ts * 1000).getUTCDay(); return d === 0 ? 6 : d - 1; },
+  to_iso(ts) { const [y, m, d, h, mi, s] = __almd_time._parts(ts); return `${String(y).padStart(4,"0")}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}T${String(h).padStart(2,"0")}:${String(mi).padStart(2,"0")}:${String(s).padStart(2,"0")}Z`; },
+  from_parts(y, m, d, h, min, s) { return Math.floor(Date.UTC(y, m - 1, d, h, min, s) / 1000); },
+};

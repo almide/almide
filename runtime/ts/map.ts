@@ -1,0 +1,18 @@
+const __almd_map = {
+  new<K, V>(): Map<K, V> { return new Map(); },
+  get<K, V>(m: Map<K, V>, k: K): V | null { return m.has(k) ? m.get(k)! : null; },
+  get_or<K, V>(m: Map<K, V>, k: K, d: V): V { return m.has(k) ? m.get(k)! : d; },
+  set<K, V>(m: Map<K, V>, k: K, v: V): Map<K, V> { const r = new Map(m); r.set(k, v); return r; },
+  contains<K, V>(m: Map<K, V>, k: K): boolean { return m.has(k); },
+  remove<K, V>(m: Map<K, V>, k: K): Map<K, V> { const r = new Map(m); r.delete(k); return r; },
+  keys<K, V>(m: Map<K, V>): K[] { return [...m.keys()].sort() as any; },
+  values<K, V>(m: Map<K, V>): V[] { return [...m.values()]; },
+  len<K, V>(m: Map<K, V>): number { return m.size; },
+  entries<K, V>(m: Map<K, V>): [K, V][] { return [...m.entries()]; },
+  from_list<T, K, V>(xs: T[], f: (x: T) => [K, V]): Map<K, V> { const r = new Map<K, V>(); for (const x of xs) { const [k, v] = f(x); r.set(k, v); } return r; },
+  map_values<K, V, V2>(m: Map<K, V>, f: (v: V) => V2): Map<K, V2> { const r = new Map<K, V2>(); m.forEach((v, k) => r.set(k, f(v))); return r; },
+  filter<K, V>(m: Map<K, V>, f: (k: K, v: V) => boolean): Map<K, V> { const r = new Map<K, V>(); m.forEach((v, k) => { if (f(k, v)) r.set(k, v); }); return r; },
+  from_entries<K, V>(entries: [K, V][]): Map<K, V> { const r = new Map<K, V>(); for (const [k, v] of entries) r.set(k, v); return r; },
+  merge<K, V>(a: Map<K, V>, b: Map<K, V>): Map<K, V> { const r = new Map(a); b.forEach((v, k) => r.set(k, v)); return r; },
+  is_empty<K, V>(m: Map<K, V>): boolean { return m.size === 0; },
+};

@@ -1,22 +1,64 @@
 /// Runtime modules for Almide TypeScript/JavaScript code generation.
 ///
-/// Each stdlib module (`__almd_*`) is defined as a separate constant pair
-/// (TS for Deno, JS for Node.js). The `full_runtime()` function composes them
+/// Each stdlib module (`__almd_*`) is loaded from `runtime/ts/` (Deno) and
+/// `runtime/js/` (Node.js). The `full_runtime()` function composes them
 /// into the monolithic runtime string used by `--target ts` and `--target js`.
 /// Individual modules can be retrieved via `get_module_source()` for the
 /// `--target npm` output.
 
-mod core;
-mod collections;
-mod io;
-mod data;
-mod net;
+// ──────────────────────────────── Module Sources ────────────────────────────────
 
-use self::core::*;
-use self::collections::*;
-use self::io::*;
-use self::data::*;
-use self::net::*;
+// TS (Deno) modules
+const MOD_STRING_TS: &str = include_str!("../../runtime/ts/string.ts");
+const MOD_LIST_TS: &str = include_str!("../../runtime/ts/list.ts");
+const MOD_MAP_TS: &str = include_str!("../../runtime/ts/map.ts");
+const MOD_INT_TS: &str = include_str!("../../runtime/ts/int.ts");
+const MOD_FLOAT_TS: &str = include_str!("../../runtime/ts/float.ts");
+const MOD_MATH_TS: &str = include_str!("../../runtime/ts/math.ts");
+const MOD_RANDOM_TS: &str = include_str!("../../runtime/ts/random.ts");
+const MOD_JSON_TS: &str = include_str!("../../runtime/ts/json.ts");
+const MOD_RESULT_TS: &str = include_str!("../../runtime/ts/result.ts");
+const MOD_ERROR_TS: &str = include_str!("../../runtime/ts/error.ts");
+const MOD_DATETIME_TS: &str = include_str!("../../runtime/ts/datetime.ts");
+const MOD_TESTING_TS: &str = include_str!("../../runtime/ts/testing.ts");
+const MOD_FS_TS: &str = include_str!("../../runtime/ts/fs.ts");
+const MOD_IO_TS: &str = include_str!("../../runtime/ts/io.ts");
+const MOD_PATH_TS: &str = include_str!("../../runtime/ts/path.ts");
+const MOD_ENV_TS: &str = include_str!("../../runtime/ts/env.ts");
+const MOD_PROCESS_TS: &str = include_str!("../../runtime/ts/process.ts");
+const MOD_HTTP_TS: &str = include_str!("../../runtime/ts/http.ts");
+const MOD_REGEX_TS: &str = include_str!("../../runtime/ts/regex.ts");
+const MOD_TIME_TS: &str = include_str!("../../runtime/ts/time.ts");
+const MOD_CRYPTO_TS: &str = include_str!("../../runtime/ts/crypto.ts");
+const MOD_UUID_TS: &str = include_str!("../../runtime/ts/uuid.ts");
+const MOD_LOG_TS: &str = include_str!("../../runtime/ts/log.ts");
+const HELPERS_TS: &str = include_str!("../../runtime/ts/helpers.ts");
+
+// JS (Node.js) modules
+const MOD_STRING_JS: &str = include_str!("../../runtime/js/string.js");
+const MOD_LIST_JS: &str = include_str!("../../runtime/js/list.js");
+const MOD_MAP_JS: &str = include_str!("../../runtime/js/map.js");
+const MOD_INT_JS: &str = include_str!("../../runtime/js/int.js");
+const MOD_FLOAT_JS: &str = include_str!("../../runtime/js/float.js");
+const MOD_MATH_JS: &str = include_str!("../../runtime/js/math.js");
+const MOD_RANDOM_JS: &str = include_str!("../../runtime/js/random.js");
+const MOD_JSON_JS: &str = include_str!("../../runtime/js/json.js");
+const MOD_RESULT_JS: &str = include_str!("../../runtime/js/result.js");
+const MOD_ERROR_JS: &str = include_str!("../../runtime/js/error.js");
+const MOD_DATETIME_JS: &str = include_str!("../../runtime/js/datetime.js");
+const MOD_TESTING_JS: &str = include_str!("../../runtime/js/testing.js");
+const MOD_FS_JS: &str = include_str!("../../runtime/js/fs.js");
+const MOD_IO_JS: &str = include_str!("../../runtime/js/io.js");
+const MOD_PATH_JS: &str = include_str!("../../runtime/js/path.js");
+const MOD_ENV_JS: &str = include_str!("../../runtime/js/env.js");
+const MOD_PROCESS_JS: &str = include_str!("../../runtime/js/process.js");
+const MOD_HTTP_JS: &str = include_str!("../../runtime/js/http.js");
+const MOD_REGEX_JS: &str = include_str!("../../runtime/js/regex.js");
+const MOD_TIME_JS: &str = include_str!("../../runtime/js/time.js");
+const MOD_CRYPTO_JS: &str = include_str!("../../runtime/js/crypto.js");
+const MOD_UUID_JS: &str = include_str!("../../runtime/js/uuid.js");
+const MOD_LOG_JS: &str = include_str!("../../runtime/js/log.js");
+const HELPERS_JS: &str = include_str!("../../runtime/js/helpers.js");
 
 // ──────────────────────────────── Preambles ────────────────────────────────
 
