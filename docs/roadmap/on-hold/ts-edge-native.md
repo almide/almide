@@ -101,6 +101,7 @@ effect fn handle(req: Request) -> Response =
 
 ## Relationship to Other Roadmap Items
 
+- **almide-ui.md**: Almide 製リアクティブ UI フレームワーク。TS edge-native の emitter 最適化 + builder 機構の上に構築される。このドキュメントの Phase 1 が Almide UI の性能基盤
 - **emit-wasm-direct.md**: WASM 直接出力とは独立。TS edge-native は WASM を使わないことが価値
 - **cross-target-semantics.md**: TS 出力の正確性はこのドキュメントの前提。P0 の修正は必須
 - **Result Builder (template.md)**: HTML builder + TS edge 出力 = Almide で書いた Web アプリをエッジで動かす完全なストーリーになる
