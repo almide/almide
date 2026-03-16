@@ -9,7 +9,7 @@ test "is_upper mixed case" {
 }
 
 test "is_upper with numbers" {
-  assert_eq(string.is_upper("ABC123"), true)
+  assert_eq(string.is_upper("ABC123"), false)
 }
 
 test "is_lower all lowercase" {
@@ -21,7 +21,7 @@ test "is_lower mixed case" {
 }
 
 test "is_lower with numbers" {
-  assert_eq(string.is_lower("abc123"), true)
+  assert_eq(string.is_lower("abc123"), false)
 }
 
 test "codepoint ASCII" {

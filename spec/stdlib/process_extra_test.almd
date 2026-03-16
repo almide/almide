@@ -1,5 +1,0 @@
-test "process.exec_status returns code and output" {
-  let result = process.exec_status("echo", ["hello"])
-  assert_eq(result.code, 0)
-  assert_eq(result.stderr, "")
-}

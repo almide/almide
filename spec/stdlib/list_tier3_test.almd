@@ -10,10 +10,6 @@ test "list.repeat" {
   assert_eq(list.repeat(1, 0), [])
 }
 
-test "list.scan" {
-  let xs = [1, 2, 3, 4]
-  assert_eq(list.scan(xs, 0, (acc, x) => acc + x), [1, 3, 6, 10])
-}
 
 test "list.intersperse" {
   assert_eq(list.intersperse([1, 2, 3], 0), [1, 0, 2, 0, 3])

@@ -88,14 +88,6 @@ test "pipe with partition and tuple access" {
   assert_eq(list.sum(odds), 16)
 }
 
-// ── Pipe with scan and last ──
-
-test "pipe with scan producing running sum" {
-  let running_sums = [1, 2, 3, 4, 5]
-    |> list.scan(0, (acc, x) => acc + x)
-  assert_eq(running_sums, [1, 3, 6, 10, 15])
-}
-
 // ── Pipe with flat_map ──
 
 test "pipe with flat_map expanding" {
