@@ -46,6 +46,8 @@
 - [Cross-Target AOT](on-hold/cross-target-aot.md)
 - [Cross-Target Semantics](on-hold/cross-target-semantics.md) — TS 本格化時
 - [Direct WASM Emission](on-hold/emit-wasm-direct.md)
+- [TS Edge-Native Deployment](on-hold/ts-edge-native.md) — Almide→TS でエッジ最速。WASM 不要、V8 JIT フル活用
+- [Almide UI](on-hold/almide-ui.md) — Almide 製 SolidJS ライクな reactive UI。コンパイラ汎用最適化で Svelte 級
 - [Editor & GitHub Integration](on-hold/editor-github-integration.md)
 - [LSP Server](on-hold/lsp.md)
 - [LLM Immutable Sugar](on-hold/llm-immutable-sugar.md)
