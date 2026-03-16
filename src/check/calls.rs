@@ -186,13 +186,13 @@ impl Checker {
                             _ => InferTy::from_ty(&ty)
                         };
                     }
-                    self.diagnostics.push(super::err(format!("undefined function '{}'", name), "Check the function name", format!("call to {}()", name)));
+                    self.emit(super::err(format!("undefined function '{}'", name), "Check the function name", format!("call to {}()", name)));
                     return InferTy::Concrete(Ty::Unknown);
                 };
 
                 // Effect isolation: pure fn cannot call effect fn
                 if sig.is_effect && !self.env.in_effect {
-                    self.diagnostics.push(super::err(
+                    self.emit(super::err(
                         format!("cannot call effect function '{}' from a pure function", name),
                         "Mark the calling function as `effect fn`",
                         format!("call to {}()", name)));
@@ -204,7 +204,7 @@ impl Checker {
                     None => self.env.fn_min_params.get(name).copied().unwrap_or(sig.params.len()),
                 };
                 if arg_tys.len() < min_params || arg_tys.len() > sig.params.len() {
-                    self.diagnostics.push(super::err(
+                    self.emit(super::err(
                         format!("{}() expects {} argument(s) but got {}", name, sig.params.len(), arg_tys.len()),
                         "Check the number of arguments", format!("call to {}()", name)));
                 }
@@ -250,14 +250,14 @@ impl Checker {
     fn check_constructor_args(&mut self, name: &str, case: &crate::types::VariantCase, arg_tys: &[InferTy]) {
         if let crate::types::VariantPayload::Tuple(expected_tys) = &case.payload {
             if arg_tys.len() != expected_tys.len() {
-                self.diagnostics.push(super::err(
+                self.emit(super::err(
                     format!("{}() expects {} argument(s) but got {}", name, expected_tys.len(), arg_tys.len()),
                     "Check the number of arguments", format!("constructor {}()", name)));
             }
             for (i, (aty, ety)) in arg_tys.iter().zip(expected_tys.iter()).enumerate() {
                 let concrete_arg = aty.to_ty(&self.solutions);
                 if concrete_arg != Ty::Unknown && !ety.compatible(&concrete_arg) {
-                    self.diagnostics.push(super::err(
+                    self.emit(super::err(
                         format!("{}() argument {} expects {} but got {}", name, i + 1, ety.display(), concrete_arg.display()),
                         "Fix the argument type", format!("constructor {}()", name)));
                 }
@@ -279,7 +279,7 @@ impl Checker {
                 if bound.compatible(&resolved) || bound.compatible(arg_ty) {
                     bindings.insert(tv.clone(), arg_ty.clone());
                 } else {
-                    self.diagnostics.push(super::err(
+                    self.emit(super::err(
                         format!("argument '{}' does not satisfy bound {}: got {}", param_name, bound.display(), arg_ty.display()),
                         "The argument must have the required fields",
                         format!("call to {}()", fn_name)));
@@ -293,7 +293,7 @@ impl Checker {
             let expected_resolved = self.env.resolve_named(&expected);
             let arg_resolved = self.env.resolve_named(arg_ty);
             if types_mismatch(&expected_resolved, &arg_resolved) {
-                self.diagnostics.push(super::err(
+                self.emit(super::err(
                     format!("argument '{}' expects {} but got {}", param_name, expected.display(), arg_ty.display()),
                     Self::hint_with_conversion("Fix the argument type", &expected, arg_ty),
                     format!("call to {}()", fn_name)));
@@ -313,7 +313,7 @@ impl Checker {
             // fan.map / fan.race — compiler-known concurrency primitives
             if module == "fan" {
                 if !self.env.in_effect {
-                    self.diagnostics.push(super::err(
+                    self.emit(super::err(
                         format!("fan.{}() can only be used inside an effect fn", field),
                         "Mark the enclosing function as `effect fn`",
                         format!("call to fan.{}()", field)));
@@ -322,7 +322,7 @@ impl Checker {
                     "map" => {
                         // fan.map(xs, f) -> List[B] where xs: List[A], f: Fn(A) -> B
                         if arg_tys.len() != 2 {
-                            self.diagnostics.push(super::err(
+                            self.emit(super::err(
                                 format!("fan.map() expects 2 arguments but got {}", arg_tys.len()),
                                 "Usage: fan.map(list, fn(item) => result)",
                                 "call to fan.map()".to_string()));
@@ -357,7 +357,7 @@ impl Checker {
                     "race" => {
                         // fan.race(thunks) -> T where thunks: List[Fn() -> T]
                         if arg_tys.len() != 1 {
-                            self.diagnostics.push(super::err(
+                            self.emit(super::err(
                                 format!("fan.race() expects 1 argument but got {}", arg_tys.len()),
                                 "Usage: fan.race([fn() => a, fn() => b])",
                                 "call to fan.race()".to_string()));
@@ -383,7 +383,7 @@ impl Checker {
                     "any" => {
                         // fan.any(thunks) -> T — first success, all fail = error
                         if arg_tys.len() != 1 {
-                            self.diagnostics.push(super::err(
+                            self.emit(super::err(
                                 format!("fan.any() expects 1 argument but got {}", arg_tys.len()),
                                 "Usage: fan.any([() => a, () => b])",
                                 "call to fan.any()".to_string()));
@@ -405,7 +405,7 @@ impl Checker {
                     "settle" => {
                         // fan.settle(thunks) -> List[Result[T, String]]
                         if arg_tys.len() != 1 {
-                            self.diagnostics.push(super::err(
+                            self.emit(super::err(
                                 format!("fan.settle() expects 1 argument but got {}", arg_tys.len()),
                                 "Usage: fan.settle([() => a, () => b])",
                                 "call to fan.settle()".to_string()));
@@ -427,7 +427,7 @@ impl Checker {
                     "timeout" => {
                         // fan.timeout(ms, thunk) -> T
                         if arg_tys.len() != 2 {
-                            self.diagnostics.push(super::err(
+                            self.emit(super::err(
                                 format!("fan.timeout() expects 2 arguments but got {}", arg_tys.len()),
                                 "Usage: fan.timeout(5000, () => expr)",
                                 "call to fan.timeout()".to_string()));
@@ -445,7 +445,7 @@ impl Checker {
                         return Some(InferTy::Concrete(Ty::Result(Box::new(result_ty), Box::new(Ty::String))));
                     }
                     _ => {
-                        self.diagnostics.push(super::err(
+                        self.emit(super::err(
                             format!("unknown function 'fan.{}'", field),
                             "Available: fan.map, fan.race, fan.any, fan.settle, fan.timeout",
                             format!("call to fan.{}()", field)));

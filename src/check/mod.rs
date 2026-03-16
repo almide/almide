@@ -39,6 +39,8 @@ pub struct Checker {
     pub target: Option<String>,
     pub expr_types: HashMap<ExprId, Ty>,
     pub next_expr_id: u32,
+    /// Current expression span — set by infer_expr, used to annotate diagnostics
+    pub(crate) current_span: Option<crate::ast::Span>,
     // Inference state
     next_tyvar: u32,
     pub(crate) infer_types: HashMap<ExprId, InferTy>,
@@ -51,10 +53,24 @@ impl Checker {
         Checker {
             env: TypeEnv::new(), diagnostics: Vec::new(),
             source_file: None, source_text: None, target: None,
-            expr_types: HashMap::new(), next_expr_id: 0,
+            expr_types: HashMap::new(), next_expr_id: 0, current_span: None,
             next_tyvar: 0, infer_types: HashMap::new(),
             constraints: Vec::new(), solutions: HashMap::new(),
         }
+    }
+
+    /// Push a diagnostic, automatically attaching the current expression's span.
+    pub(crate) fn emit(&mut self, mut diag: Diagnostic) {
+        if diag.line.is_none() {
+            if let Some(span) = &self.current_span {
+                if let Some(file) = &self.source_file {
+                    diag.file = Some(file.clone());
+                }
+                diag.line = Some(span.line);
+                diag.col = Some(span.col);
+            }
+        }
+        self.diagnostics.push(diag);
     }
 
     pub(crate) fn fresh_var(&mut self) -> InferTy {
@@ -179,7 +195,7 @@ impl Checker {
                         "Fix the expression type or change the expected type",
                         &exp, &act,
                     );
-                    self.diagnostics.push(err(
+                    self.emit(err(
                         format!("type mismatch in {}: expected {} but got {}", c.context, exp.display(), act.display()),
                         hint, c.context));
                 }
@@ -317,7 +333,7 @@ impl Checker {
         let valid = ["Eq", "Repr", "Ord", "Hash", "Codec", "Encode", "Decode"];
         for d in derives {
             if !valid.contains(&d.as_str()) {
-                self.diagnostics.push(err(
+                self.emit(err(
                     format!("unknown derive convention '{}' on type '{}'", d, type_name),
                     format!("Valid conventions: {}", valid.join(", ")),
                     format!("type {}", type_name),
@@ -512,7 +528,7 @@ impl Checker {
         let missing: Vec<&String> = required.iter().filter(|c| !covered.contains(*c)).collect();
         if !missing.is_empty() {
             let list = missing.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ");
-            self.diagnostics.push(Diagnostic::error(format!("non-exhaustive match: missing {}", list), format!("Add arms for {}, or use '_'", list), "match"));
+            self.emit(Diagnostic::error(format!("non-exhaustive match: missing {}", list), format!("Add arms for {}, or use '_'", list), "match"));
         }
     }
 

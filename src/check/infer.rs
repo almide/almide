@@ -8,6 +8,10 @@ use super::Checker;
 
 impl Checker {
     pub(crate) fn infer_expr(&mut self, expr: &mut ast::Expr) -> InferTy {
+        // Track current span for diagnostic annotation
+        if let Some(span) = expr.span() {
+            self.current_span = Some(span);
+        }
         let ity = self.infer_expr_inner(expr);
         self.infer_types.insert(expr.id(), ity.clone());
         ity
@@ -42,7 +46,7 @@ impl Checker {
                     }
                 }
                 else {
-                    self.diagnostics.push(super::err(format!("undefined variable '{}'", name), "Check the variable name", format!("variable {}", name)));
+                    self.emit(super::err(format!("undefined variable '{}'", name), "Check the variable name", format!("variable {}", name)));
                     InferTy::Concrete(Ty::Unknown)
                 }
             }
@@ -125,7 +129,7 @@ impl Checker {
                         let rc = rt.to_ty(&self.solutions);
                         let is_numeric = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_));
                         if !is_numeric(&lc) || !is_numeric(&rc) {
-                            self.diagnostics.push(super::err(
+                            self.emit(super::err(
                                 format!("operator '{}' requires numeric types but got {} and {}", op, lc.display(), rc.display()),
                                 "Use numeric types (Int or Float)", format!("operator {}", op)));
                         }
@@ -135,7 +139,7 @@ impl Checker {
                         let lc = lt.to_ty(&self.solutions);
                         let is_concatable = |t: &Ty| matches!(t, Ty::String | Ty::List(_) | Ty::Unknown | Ty::TypeVar(_));
                         if !is_concatable(&lc) {
-                            self.diagnostics.push(super::err(
+                            self.emit(super::err(
                                 format!("operator '++' requires String or List but got {}", lc.display()),
                                 "Use ++ with String or List types", "operator ++"));
                         }
@@ -147,12 +151,12 @@ impl Checker {
                         let rc = rt.to_ty(&self.solutions);
                         let is_bool = |t: &Ty| matches!(t, Ty::Bool | Ty::Unknown | Ty::TypeVar(_));
                         if !is_bool(&lc) {
-                            self.diagnostics.push(super::err(
+                            self.emit(super::err(
                                 format!("operator '{}' requires Bool but got {}", op, lc.display()),
                                 "Use Bool values with logical operators", format!("operator {}", op)));
                         }
                         if !is_bool(&rc) {
-                            self.diagnostics.push(super::err(
+                            self.emit(super::err(
                                 format!("operator '{}' requires Bool but got {}", op, rc.display()),
                                 "Use Bool values with logical operators", format!("operator {}", op)));
                         }
@@ -203,7 +207,7 @@ impl Checker {
 
             ast::Expr::Fan { exprs, .. } => {
                 if !self.env.in_effect {
-                    self.diagnostics.push(super::err(
+                    self.emit(super::err(
                         "fan block can only be used inside an effect fn".to_string(),
                         "Mark the enclosing function as `effect fn`",
                         "fan block".to_string()));
@@ -214,7 +218,7 @@ impl Checker {
                     collect_idents(e, &mut idents);
                     for name in &idents {
                         if self.env.mutable_vars.contains(name) {
-                            self.diagnostics.push(super::err(
+                            self.emit(super::err(
                                 format!("cannot capture mutable variable '{}' inside fan block", name),
                                 "Use a `let` binding instead of `var` for values shared across fan expressions",
                                 "fan block".to_string()));
@@ -481,7 +485,7 @@ impl Checker {
                     } else {
                         format!("Use 'var {0} = ...' instead of 'let {0} = ...' to declare a mutable variable", name)
                     };
-                    self.diagnostics.push(super::err(
+                    self.emit(super::err(
                         format!("cannot reassign immutable binding '{}'", name),
                         hint, format!("{} = ...", name)));
                 }
