@@ -80,6 +80,34 @@ fn sum(xs: IntList) -> Int = match xs {
 
 Auto-Box で `IntList` を `Box<IntList>` に変換しているが、パターンマッチで binding された `tail` を関数に渡す際に `*tail` が生成されない。
 
+### Case 7: ネスト impl Fn 返却（OPEN）
+
+```almide
+fn curry_add(a: Int) -> (Int) -> (Int) -> Int = (b) => (c) => a + b + c
+```
+
+Rust は `impl Fn() -> impl Fn()` を関数戻り値に許可しない。`Box<dyn Fn>` にするか、型消去が必要。
+
+### Case 8: 関数変数を HOF に渡す codegen（OPEN）
+
+```almide
+fn transform(xs: List[Int], f: (Int) -> Int, pred: (Int) -> Bool) -> List[Int] =
+  xs |> list.map(f) |> list.filter(pred)
+```
+
+`list.map(xs, f)` で `f` がクロージャとして展開されず、値として渡される。stdlib の TOML テンプレート `|{f.args}| {{ {f.body} }}` が inline lambda 前提で、変数参照に対応していない。
+
+### Case 9: closure 内の var mutation（OPEN）
+
+```almide
+fn running_sum(xs: List[Int]) -> List[Int] = {
+  var acc = 0
+  list.map(xs, (x) => { acc = acc + x; acc })
+}
+```
+
+`Fn` クロージャで `acc` に代入できない。`FnMut` が必要だが、ランタイムの `almide_rt_list_map` は `Fn` を受け取る。
+
 ## Fix Strategy
 
 根本修正: Var 参照の clone 判定を保守的にする。
