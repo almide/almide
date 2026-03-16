@@ -73,13 +73,11 @@ impl Checker {
     fn instantiate_inner(&mut self, ty: &Ty, mapping: &mut std::collections::HashMap<u32, TyVarId>) -> InferTy {
         match ty {
             Ty::TypeVar(name) if name.starts_with('?') => {
+                // Inference variables (?N) must NOT be freshened — they need to stay
+                // linked to the original constraint. Only user type params (T, A, B)
+                // get fresh vars for let-polymorphism.
                 if let Ok(id) = name[1..].parse::<u32>() {
-                    let fresh_id = mapping.entry(id).or_insert_with(|| {
-                        let fv = TyVarId(self.next_tyvar);
-                        self.next_tyvar += 1;
-                        fv
-                    });
-                    InferTy::Var(*fresh_id)
+                    InferTy::Var(TyVarId(id))
                 } else {
                     InferTy::from_ty(ty)
                 }
