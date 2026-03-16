@@ -224,21 +224,23 @@ impl<'a> LowerCtx<'a> {
     /// Find variable names in a pattern that are bound to Box fields (recursive variants).
     pub(super) fn find_boxed_bindings(&self, pat: &IrPattern) -> Vec<String> {
         let mut result = Vec::new();
-        if let IrPattern::Constructor { name, args } = pat {
-            let enum_name = self.ctors.get(name).cloned().unwrap_or_default();
-            if let Some(td) = self.type_decls.iter().find(|td| td.name == enum_name) {
-                if let almide::ir::IrTypeDeclKind::Variant { cases, .. } = &td.kind {
-                    if let Some(case) = cases.iter().find(|c| c.name == *name) {
-                        let fields = match &case.kind {
-                            almide::ir::IrVariantKind::Tuple { fields } => fields.clone(),
-                            almide::ir::IrVariantKind::Record { fields } => fields.iter().map(|f| f.ty.clone()).collect(),
-                            almide::ir::IrVariantKind::Unit => vec![],
-                        };
-                        for (i, arg) in args.iter().enumerate() {
-                            if let Some(field_ty) = fields.get(i) {
-                                if ty_contains_name(field_ty, &enum_name) {
-                                    if let IrPattern::Bind { var } = arg {
-                                        result.push(self.vt.get(*var).name.clone());
+        match pat {
+            IrPattern::Constructor { name, args } => {
+                let enum_name = self.ctors.get(name).cloned().unwrap_or_default();
+                if let Some(td) = self.type_decls.iter().find(|td| td.name == enum_name) {
+                    if let almide::ir::IrTypeDeclKind::Variant { cases, .. } = &td.kind {
+                        if let Some(case) = cases.iter().find(|c| c.name == *name) {
+                            let fields = match &case.kind {
+                                almide::ir::IrVariantKind::Tuple { fields } => fields.clone(),
+                                almide::ir::IrVariantKind::Record { fields } => fields.iter().map(|f| f.ty.clone()).collect(),
+                                almide::ir::IrVariantKind::Unit => vec![],
+                            };
+                            for (i, arg) in args.iter().enumerate() {
+                                if let Some(field_ty) = fields.get(i) {
+                                    if ty_contains_name(field_ty, &enum_name) {
+                                        if let IrPattern::Bind { var } = arg {
+                                            result.push(self.vt.get(*var).name.clone());
+                                        }
                                     }
                                 }
                             }
@@ -246,6 +248,30 @@ impl<'a> LowerCtx<'a> {
                     }
                 }
             }
+            IrPattern::RecordPattern { name, fields, .. } => {
+                let enum_name = self.ctors.get(name).cloned().unwrap_or_default();
+                if let Some(td) = self.type_decls.iter().find(|td| td.name == enum_name) {
+                    if let almide::ir::IrTypeDeclKind::Variant { cases, .. } = &td.kind {
+                        if let Some(case) = cases.iter().find(|c| c.name == *name) {
+                            if let almide::ir::IrVariantKind::Record { fields: field_decls } = &case.kind {
+                                for fp in fields {
+                                    if let Some(fd) = field_decls.iter().find(|fd| fd.name == fp.name) {
+                                        if ty_contains_name(&fd.ty, &enum_name) {
+                                            if let Some(IrPattern::Bind { var }) = fp.pattern.as_ref() {
+                                                result.push(self.vt.get(*var).name.clone());
+                                            } else {
+                                                // Field name is implicitly the binding
+                                                result.push(fp.name.clone());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
         result
     }

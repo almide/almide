@@ -295,6 +295,26 @@ impl<'a> LowerCtx<'a> {
                         }
                     }
                 }
+                // Box recursive fields in variant record constructors
+                if let Some(ctor_name) = name.as_ref() {
+                    let enum_name = self.ctors.get(ctor_name).cloned().unwrap_or_default();
+                    if let Some(td) = self.type_decls.iter().find(|td| td.name == enum_name) {
+                        if let almide::ir::IrTypeDeclKind::Variant { cases, .. } = &td.kind {
+                            if let Some(case) = cases.iter().find(|c| c.name == *ctor_name) {
+                                if let almide::ir::IrVariantKind::Record { fields: field_decls } = &case.kind {
+                                    for (fname, fexpr) in lowered_fields.iter_mut() {
+                                        if let Some(fd) = field_decls.iter().find(|fd| fd.name == *fname) {
+                                            if super::lower_rust::ty_contains_name(&fd.ty, &enum_name) {
+                                                let inner = std::mem::replace(fexpr, Expr::Unit);
+                                                *fexpr = Expr::Call { func: "Box::new".into(), args: vec![inner] };
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 Expr::Struct { name: sname, fields: lowered_fields }
             }
             IrExprKind::SpreadRecord { base, fields } => {
