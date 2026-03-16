@@ -3,6 +3,7 @@ type Person = { name: String, age: Int, email: String }
 type City = { name: String, population: Int, country: String }
 
 fn describe[T: { name: String, .. }](x: T) -> String = "name: ${x.name}"
+fn set_name[T: { name: String, .. }](x: T, n: String) -> T = { ...x, name: n }
 fn names[T: { name: String, .. }](xs: List[T]) -> List[String] = list.map(xs, (x) => x.name)
 
 test "describe dog" { assert_eq(describe(Dog { name: "Rex", breed: "Lab" }), "name: Rex") }
@@ -14,7 +15,26 @@ test "names from dogs" {
 test "names from cities" {
   assert_eq(names([City { name: "Tokyo", population: 14000000, country: "Japan" }, City { name: "Paris", population: 2100000, country: "France" }]), ["Tokyo", "Paris"])
 }
-test "describe then describe different types" {
+test "set_name dog preserves breed" {
+  let d2 = set_name(Dog { name: "Rex", breed: "Lab" }, "Max")
+  assert_eq(d2.name, "Max")
+  assert_eq(d2.breed, "Lab")
+}
+test "set_name person preserves age" {
+  let p2 = set_name(Person { name: "Alice", age: 30, email: "a@b" }, "Bob")
+  assert_eq(p2.name, "Bob")
+  assert_eq(p2.age, 30)
+}
+test "set_name then describe" {
+  assert_eq(describe(set_name(Dog { name: "Rex", breed: "Lab" }, "Buddy")), "name: Buddy")
+}
+test "describe different types" {
   assert_eq(describe(Dog { name: "Rex", breed: "Lab" }), "name: Rex")
   assert_eq(describe(Person { name: "Alice", age: 30, email: "a@b" }), "name: Alice")
+}
+test "set_name on multiple types" {
+  let d = set_name(Dog { name: "A", breed: "B" }, "C")
+  let p = set_name(Person { name: "X", age: 1, email: "e" }, "Y")
+  assert_eq(d.name, "C")
+  assert_eq(p.name, "Y")
 }

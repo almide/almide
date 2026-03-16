@@ -98,6 +98,11 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
         }
     }
 
+    // Monomorphize row-polymorphic functions
+    if let Some(ref mut ir) = ir_program {
+        almide::mono::monomorphize(ir);
+    }
+
     if emit_ir {
         let ir = ir_program.expect("checker must have run for emit_ir");
         let json = serde_json::to_string_pretty(&ir)

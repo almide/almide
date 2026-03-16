@@ -158,7 +158,6 @@ fn discover_in_expr(
                     let mut bindings: HashMap<String, Ty> = HashMap::new();
                     for bp in bounded_params {
                         if bp.param_idx < args.len() {
-                            // Unify parameter type with argument type to extract T
                             let arg_ty = &args[bp.param_idx].ty;
                             if let Some(param_ty) = param_types.get(bp.param_idx) {
                                 let extracted = extract_typevar_binding(param_ty, arg_ty, &bp.type_var);
