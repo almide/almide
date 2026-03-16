@@ -6,6 +6,7 @@
 - [Stdlib Runtime Architecture](active/stdlib-self-hosted-redesign.md) — Runtime crate `almide_rt` 基盤完成。@extern 移行中
 - [Stdlib API Reform](active/stdlib-verb-system.md) — Verb 標準化 (from_string, to_upper, len 等)
 - [Stdlib Strategy](active/stdlib-strategy.md) — 282→700+ 関数
+- **Runtime gaps**: datetime, regex, fs, math, crypto, log 等のランタイム関数が未実装（TOML 定義のみ）
 
 ### Language
 - [Template](active/template.md) — Typed document builder
@@ -59,15 +60,6 @@
 ## Done
 
 ~~Phase 0~~ ✅ | ~~Phase A~~ ✅ | ~~Phase B~~ ✅
-
-### v0.6.0 (2026-03-16)
-- Effect fn Ok-wrap fix — `is_result_expr` misidentified `Try` as Result-producing
-- Nested for-in clone — always clone variable iterables in for loops
-- list.scan init fix — don't include initial accumulator in output
-- is_upper/is_lower digits — non-alphabetic characters treated as neutral (Python-compatible)
-- Spec test cleanup — removed 53 broken tests (missing runtime), CI now runs all spec/
-- Stdlib crawler rewrite — batch crawl, summary tables, verb analysis for Python stdlib
-- Playground v0.6.0 sync — syntax updates, emit_ts API fix, submodule HTTPS
 
 - [2026 Ergonomics](2026-ergonomics.md)
 - [Architecture Hardening](done/architecture-hardening.md)
