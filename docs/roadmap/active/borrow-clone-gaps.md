@@ -68,7 +68,7 @@ fn greet(name: String, prefix: String = "Hello") -> String =
 
 `[ICE] lower: missing type for expr id=NNN` が出る。テスト自体は pass するが、checker が default 値の式に ExprId → Ty マッピングを生成していない。
 
-### Case 6: 再帰 variant の Box deref（OPEN）
+### Case 6: 再帰 variant の Box deref（FIXED: next commit）
 
 ```almide
 type IntList = | Cons(Int, IntList) | Nil

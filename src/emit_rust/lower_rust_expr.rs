@@ -108,10 +108,23 @@ impl<'a> LowerCtx<'a> {
                 } else { subj };
                 Expr::Match {
                     subject: Box::new(subj),
-                    arms: arms.iter().map(|a| MatchArm {
-                        pat: self.lower_pat(&a.pattern),
-                        guard: a.guard.as_ref().map(|g| self.lower_expr(g)),
-                        body: self.lower_expr(&a.body),
+                    arms: arms.iter().map(|a| {
+                        let pat = self.lower_pat(&a.pattern);
+                        let body = self.lower_expr(&a.body);
+                        // Insert deref stmts for boxed recursive variant bindings
+                        let deref_vars = self.find_boxed_bindings(&a.pattern);
+                        let body = if deref_vars.is_empty() {
+                            body
+                        } else {
+                            let mut stmts: Vec<Stmt> = deref_vars.iter().map(|v| {
+                                Stmt::Let { name: v.clone(), ty: None, value: Expr::Raw(format!("*{}", v)), mutable: false }
+                            }).collect();
+                            match body {
+                                Expr::Block { stmts: mut existing, tail } => { stmts.extend(existing); Expr::Block { stmts, tail } }
+                                other => Expr::Block { stmts, tail: Some(Box::new(other)) }
+                            }
+                        };
+                        MatchArm { pat, guard: a.guard.as_ref().map(|g| self.lower_expr(g)), body }
                     }).collect(),
                 }
             }

@@ -221,6 +221,35 @@ impl<'a> LowerCtx<'a> {
         }
     }
 
+    /// Find variable names in a pattern that are bound to Box fields (recursive variants).
+    pub(super) fn find_boxed_bindings(&self, pat: &IrPattern) -> Vec<String> {
+        let mut result = Vec::new();
+        if let IrPattern::Constructor { name, args } = pat {
+            let enum_name = self.ctors.get(name).cloned().unwrap_or_default();
+            if let Some(td) = self.type_decls.iter().find(|td| td.name == enum_name) {
+                if let almide::ir::IrTypeDeclKind::Variant { cases, .. } = &td.kind {
+                    if let Some(case) = cases.iter().find(|c| c.name == *name) {
+                        let fields = match &case.kind {
+                            almide::ir::IrVariantKind::Tuple { fields } => fields.clone(),
+                            almide::ir::IrVariantKind::Record { fields } => fields.iter().map(|f| f.ty.clone()).collect(),
+                            almide::ir::IrVariantKind::Unit => vec![],
+                        };
+                        for (i, arg) in args.iter().enumerate() {
+                            if let Some(field_ty) = fields.get(i) {
+                                if ty_contains_name(field_ty, &enum_name) {
+                                    if let IrPattern::Bind { var } = arg {
+                                        result.push(self.vt.get(*var).name.clone());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        result
+    }
+
     fn lower_fn(&self, f: &IrFunction) -> Function {
         let fn_name = if f.name == "main" { "almide_main".into() }
             else if f.is_test { format!("test_{}", f.name.replace(|c: char| !c.is_alphanumeric() && c != '_', "_")) }
