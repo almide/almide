@@ -6,6 +6,26 @@ use crate::types::Ty;
 use super::types::InferTy;
 use super::Checker;
 
+/// Map a built-in type to its stdlib UFCS module name.
+pub(crate) fn builtin_module_for_type(ty: &Ty) -> Option<&'static str> {
+    match ty {
+        Ty::List(_) => Some("list"),
+        Ty::Map(_, _) => Some("map"),
+        Ty::String => Some("string"),
+        Ty::Int => Some("int"),
+        Ty::Float => Some("float"),
+        Ty::Result(_, _) => Some("result"),
+        Ty::Option(_) => Some("option"),
+        _ => None,
+    }
+}
+
+/// Check if two types are mismatched (neither Unknown, not compatible in either direction).
+pub(crate) fn types_mismatch(expected: &Ty, actual: &Ty) -> bool {
+    *expected != Ty::Unknown && *actual != Ty::Unknown
+        && !expected.compatible(actual) && !actual.compatible(expected)
+}
+
 impl Checker {
     pub(crate) fn check_call(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr]) -> InferTy {
         self.check_call_with_type_args(callee, args, None)
@@ -72,16 +92,7 @@ impl Checker {
                 let obj_ty = self.infer_expr(object);
                 let obj_concrete = obj_ty.to_ty(&self.solutions);
                 // Built-in generic types → stdlib module UFCS
-                let builtin_module = match &obj_concrete {
-                    Ty::List(_) => Some("list"),
-                    Ty::Map(_, _) => Some("map"),
-                    Ty::String => Some("string"),
-                    Ty::Int => Some("int"),
-                    Ty::Float => Some("float"),
-                    Ty::Result(_, _) => Some("result"),
-                    Ty::Option(_) => Some("option"),
-                    _ => None,
-                };
+                let builtin_module = builtin_module_for_type(&obj_concrete);
                 if let Some(module) = builtin_module {
                     let key = format!("{}.{}", module, field);
                     if self.env.functions.contains_key(&key)
@@ -183,95 +194,63 @@ impl Checker {
             }
             _ => {
                 // Try stdlib lookup for module-qualified calls (e.g. "string.trim")
-                let sig = if let Some(sig) = self.env.functions.get(name).cloned() {
-                    Some(sig)
-                } else if name.contains('.') {
-                    let parts: Vec<&str> = name.splitn(2, '.').collect();
-                    if parts.len() == 2 { crate::stdlib::lookup_sig(parts[0], parts[1]) } else { None }
-                } else {
-                    None
+                let sig = self.env.functions.get(name).cloned().or_else(|| {
+                    let (module, func) = name.split_once('.')?;
+                    crate::stdlib::lookup_sig(module, func)
+                });
+
+                let Some(sig) = sig else {
+                    // No function signature found — try constructor, variable, or report error
+                    if let Some((type_name, case)) = self.env.constructors.get(name).cloned() {
+                        self.check_constructor_args(name, &case, arg_tys);
+                        let generic_args = self.instantiate_type_generics(&type_name);
+                        return InferTy::Concrete(Ty::Named(type_name, generic_args));
+                    }
+                    if let Some(ty) = self.env.lookup_var(name).cloned() {
+                        return match &ty {
+                            Ty::Fn { params, ret } => {
+                                for (aty, pty) in arg_tys.iter().zip(params.iter()) {
+                                    self.constrain(InferTy::from_ty(pty), aty.clone(), format!("call to {}()", name));
+                                }
+                                InferTy::from_ty(ret)
+                            }
+                            _ => InferTy::from_ty(&ty)
+                        };
+                    }
+                    self.diagnostics.push(super::err(format!("undefined function '{}'", name), "Check the function name", format!("call to {}()", name)));
+                    return InferTy::Concrete(Ty::Unknown);
                 };
 
-                if let Some(sig) = sig {
-                    // Validate argument count
-                    let min_params = if name.contains('.') {
-                        let parts: Vec<&str> = name.splitn(2, '.').collect();
-                        crate::stdlib::min_params(parts[0], parts[1]).unwrap_or(sig.params.len())
-                    } else {
-                        self.env.fn_min_params.get(name).copied().unwrap_or(sig.params.len())
-                    };
-                    if arg_tys.len() < min_params || arg_tys.len() > sig.params.len() {
-                        self.diagnostics.push(super::err(
-                            format!("{}() expects {} argument(s) but got {}", name, sig.params.len(), arg_tys.len()),
-                            "Check the number of arguments", format!("call to {}()", name)));
-                    }
-                    // Validate argument types and infer generics
-                    let mut bindings = HashMap::new();
-                    // 明示的な型引数があれば事前に bind (HM の instantiation)
-                    if let Some(ta) = type_args {
-                        for (gname, gty) in sig.generics.iter().zip(ta.iter()) {
-                            bindings.insert(gname.clone(), gty.clone());
-                        }
-                    }
-                    let concrete_args: Vec<Ty> = arg_tys.iter().map(|a| a.to_ty(&self.solutions)).collect();
-                    for ((pname, pty), aty) in sig.params.iter().zip(concrete_args.iter()) {
-                        if let Ty::TypeVar(tv) = pty {
-                            if let Some(bound) = sig.structural_bounds.get(tv) {
-                                let resolved = self.env.resolve_named(aty);
-                                if bound.compatible(&resolved) || bound.compatible(aty) {
-                                    bindings.insert(tv.clone(), aty.clone());
-                                } else {
-                                    self.diagnostics.push(super::err(
-                                        format!("argument '{}' does not satisfy bound {}: got {}", pname, bound.display(), aty.display()),
-                                        "The argument must have the required fields".to_string(),
-                                        format!("call to {}()", name)));
-                                }
-                            } else { crate::types::unify(pty, aty, &mut bindings); }
-                        } else {
-                            crate::types::unify(pty, aty, &mut bindings);
-                            // Generate constraint for argument type checking
-                            let expected_ty = if bindings.is_empty() { pty.clone() } else { crate::types::substitute(pty, &bindings) };
-                            let expected_resolved = self.env.resolve_named(&expected_ty);
-                            let aty_resolved = self.env.resolve_named(aty);
-                            if expected_ty != Ty::Unknown && *aty != Ty::Unknown && !expected_resolved.compatible(&aty_resolved) && !expected_ty.compatible(aty) {
-                                let hint = Self::hint_with_conversion(
-                                    "Fix the argument type",
-                                    &expected_ty, aty,
-                                );
-                                self.diagnostics.push(super::err(
-                                    format!("argument '{}' expects {} but got {}", pname, expected_ty.display(), aty.display()),
-                                    hint, format!("call to {}()", name)));
-                            }
-                        }
-                    }
-                    // Propagate resolved types back to inference variables (fixes lambda param inference)
-                    for ((_, pty), aty) in sig.params.iter().zip(arg_tys.iter()) {
-                        let expected = if bindings.is_empty() { pty.clone() } else { crate::types::substitute(pty, &bindings) };
-                        if expected != Ty::Unknown {
-                            self.constrain(InferTy::from_ty(&expected), aty.clone(), format!("call to {}()", name));
-                        }
-                    }
-                    let ret = if bindings.is_empty() { sig.ret.clone() } else { crate::types::substitute(&sig.ret, &bindings) };
-                    InferTy::from_ty(&ret)
-                } else if let Some((type_name, case)) = self.env.constructors.get(name).cloned() {
-                    self.check_constructor_args(name, &case, arg_tys);
-                    let generic_args = self.instantiate_type_generics(&type_name);
-                    InferTy::Concrete(Ty::Named(type_name, generic_args))
-                } else if let Some(ty) = self.env.lookup_var(name).cloned() {
-                    match &ty {
-                        Ty::Fn { params, ret } => {
-                            // Constrain call args against function params
-                            for (aty, pty) in arg_tys.iter().zip(params.iter()) {
-                                self.constrain(InferTy::from_ty(pty), aty.clone(), format!("call to {}()", name));
-                            }
-                            InferTy::from_ty(ret)
-                        }
-                        _ => InferTy::from_ty(&ty)
-                    }
-                } else {
-                    self.diagnostics.push(super::err(format!("undefined function '{}'", name), "Check the function name", format!("call to {}()", name)));
-                    InferTy::Concrete(Ty::Unknown)
+                // Validate argument count
+                let min_params = match name.split_once('.') {
+                    Some((module, func)) => crate::stdlib::min_params(module, func).unwrap_or(sig.params.len()),
+                    None => self.env.fn_min_params.get(name).copied().unwrap_or(sig.params.len()),
+                };
+                if arg_tys.len() < min_params || arg_tys.len() > sig.params.len() {
+                    self.diagnostics.push(super::err(
+                        format!("{}() expects {} argument(s) but got {}", name, sig.params.len(), arg_tys.len()),
+                        "Check the number of arguments", format!("call to {}()", name)));
                 }
+                // Validate argument types and infer generics
+                let mut bindings = HashMap::new();
+                if let Some(ta) = type_args {
+                    for (gname, gty) in sig.generics.iter().zip(ta.iter()) {
+                        bindings.insert(gname.clone(), gty.clone());
+                    }
+                }
+                let concrete_args: Vec<Ty> = arg_tys.iter().map(|a| a.to_ty(&self.solutions)).collect();
+                for ((pname, pty), aty) in sig.params.iter().zip(concrete_args.iter()) {
+                    self.unify_call_arg(name, pname, pty, aty, &sig.structural_bounds, &mut bindings);
+                }
+                // Propagate resolved types back to inference variables
+                for ((_, pty), aty) in sig.params.iter().zip(arg_tys.iter()) {
+                    let expected = if bindings.is_empty() { pty.clone() } else { crate::types::substitute(pty, &bindings) };
+                    if expected != Ty::Unknown {
+                        self.constrain(InferTy::from_ty(&expected), aty.clone(), format!("call to {}()", name));
+                    }
+                }
+                let ret = if bindings.is_empty() { sig.ret.clone() } else { crate::types::substitute(&sig.ret, &bindings) };
+                InferTy::from_ty(&ret)
             }
         }
     }
@@ -305,6 +284,42 @@ impl Checker {
                         format!("{}() argument {} expects {} but got {}", name, i + 1, ety.display(), concrete_arg.display()),
                         "Fix the argument type", format!("constructor {}()", name)));
                 }
+            }
+        }
+    }
+
+    /// Unify a single call argument against its parameter type, updating bindings.
+    /// Reports diagnostics for structural bound violations and type mismatches.
+    fn unify_call_arg(
+        &mut self, fn_name: &str, param_name: &str,
+        param_ty: &Ty, arg_ty: &Ty,
+        structural_bounds: &HashMap<String, Ty>,
+        bindings: &mut HashMap<String, Ty>,
+    ) {
+        if let Ty::TypeVar(tv) = param_ty {
+            if let Some(bound) = structural_bounds.get(tv) {
+                let resolved = self.env.resolve_named(arg_ty);
+                if bound.compatible(&resolved) || bound.compatible(arg_ty) {
+                    bindings.insert(tv.clone(), arg_ty.clone());
+                } else {
+                    self.diagnostics.push(super::err(
+                        format!("argument '{}' does not satisfy bound {}: got {}", param_name, bound.display(), arg_ty.display()),
+                        "The argument must have the required fields",
+                        format!("call to {}()", fn_name)));
+                }
+            } else {
+                crate::types::unify(param_ty, arg_ty, bindings);
+            }
+        } else {
+            crate::types::unify(param_ty, arg_ty, bindings);
+            let expected = if bindings.is_empty() { param_ty.clone() } else { crate::types::substitute(param_ty, bindings) };
+            let expected_resolved = self.env.resolve_named(&expected);
+            let arg_resolved = self.env.resolve_named(arg_ty);
+            if types_mismatch(&expected_resolved, &arg_resolved) {
+                self.diagnostics.push(super::err(
+                    format!("argument '{}' expects {} but got {}", param_name, expected.display(), arg_ty.display()),
+                    Self::hint_with_conversion("Fix the argument type", &expected, arg_ty),
+                    format!("call to {}()", fn_name)));
             }
         }
     }

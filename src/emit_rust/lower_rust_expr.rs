@@ -151,14 +151,13 @@ impl<'a> LowerCtx<'a> {
             IrExprKind::OptionSome { expr } => Expr::Some(Box::new(self.lower_expr(expr))),
             IrExprKind::OptionNone => {
                 // Option[T] の T が判明していれば None::<T> を生成（Rust の型推論を助ける）
-                if let Ty::Option(inner) = &e.ty {
-                    if !inner.contains_unknown() && !matches!(inner.as_ref(), Ty::TypeVar(_)) {
-                        let mut ty_str = String::new();
-                        super::render::render_type(&mut ty_str, &self.lty(inner));
-                        return Expr::Raw(format!("None::<{}>", ty_str));
-                    }
+                let Ty::Option(inner) = &e.ty else { return Expr::None; };
+                if inner.contains_unknown() || matches!(inner.as_ref(), Ty::TypeVar(_)) {
+                    return Expr::None;
                 }
-                Expr::None
+                let mut ty_str = String::new();
+                super::render::render_type(&mut ty_str, &self.lty(inner));
+                Expr::Raw(format!("None::<{}>", ty_str))
             }
             IrExprKind::Try { expr } => Expr::Try(Box::new(self.lower_expr(expr))),
             IrExprKind::Await { expr } => self.lower_expr(expr),
@@ -210,33 +209,30 @@ impl<'a> LowerCtx<'a> {
             },
             IrExprKind::DoBlock { stmts, expr } => {
                 let has_guard = stmts.iter().any(|s| matches!(&s.kind, IrStmtKind::Guard { .. }));
-                if has_guard {
-                    // Wrap in loop { ... } so guard's break/continue work correctly
-                    let mut body_stmts: Vec<Stmt> = stmts.iter().map(|s| self.lower_stmt(s)).collect();
-                    if let Some(tail) = expr.as_ref() {
-                        let tail_expr = self.lower_expr(tail);
-                        // Only insert return for explicit ok()/err() tail expressions.
-                        // Other tail expressions (if/else with assignments, break, etc.)
-                        // are emitted as-is — the loop exits via guard's return or break.
-                        if super::lower_rust::is_result_expr(&tail_expr) {
-                            body_stmts.push(Stmt::Expr(Expr::Return(Some(Box::new(tail_expr)))));
-                        } else {
-                            body_stmts.push(Stmt::Expr(tail_expr));
-                        }
-                    }
-                    // Guards generate `return Ok/Err` (effect) or `break`/`continue` (pure).
-                    // In both cases, the loop exits via control flow — no trailing break needed.
-                    // (Previously added trailing break for effect context, but this was wrong:
-                    //  it caused one-shot behavior when the loop should iterate until a guard returns.)
-                    Expr::Block {
-                        stmts: vec![Stmt::Expr(Expr::Loop { label: None, body: body_stmts })],
-                        tail: None,
-                    }
-                } else {
-                    Expr::Block {
+                if !has_guard {
+                    return Expr::Block {
                         stmts: stmts.iter().map(|s| self.lower_stmt(s)).collect(),
                         tail: expr.as_ref().map(|e| Box::new(self.lower_expr(e))),
+                    };
+                }
+                // Wrap in loop { ... } so guard's break/continue work correctly
+                let mut body_stmts: Vec<Stmt> = stmts.iter().map(|s| self.lower_stmt(s)).collect();
+                if let Some(tail) = expr.as_ref() {
+                    let tail_expr = self.lower_expr(tail);
+                    // Only insert return for explicit ok()/err() tail expressions.
+                    // Other tail expressions (if/else with assignments, break, etc.)
+                    // are emitted as-is — the loop exits via guard's return or break.
+                    if super::lower_rust::is_result_expr(&tail_expr) {
+                        body_stmts.push(Stmt::Expr(Expr::Return(Some(Box::new(tail_expr)))));
+                    } else {
+                        body_stmts.push(Stmt::Expr(tail_expr));
                     }
+                }
+                // Guards generate `return Ok/Err` (effect) or `break`/`continue` (pure).
+                // In both cases, the loop exits via control flow — no trailing break needed.
+                Expr::Block {
+                    stmts: vec![Stmt::Expr(Expr::Loop { label: None, body: body_stmts })],
+                    tail: None,
                 }
             }
             IrExprKind::ForIn { var, var_tuple, iterable, body } => {
@@ -286,19 +282,17 @@ impl<'a> LowerCtx<'a> {
                     CallTarget::Method { object, method } => {
                         let obj = self.lower_expr(object);
                         let mut all_exprs = vec![obj]; all_exprs.extend(ir_args);
-                        if let Some((module, func)) = method.split_once('.') {
-                            let is_stdlib = crate::stdlib::is_stdlib_module(module) || crate::stdlib::is_any_stdlib(module);
-                            if is_stdlib {
-                                // Reconstruct IR args with object prepended
-                                let mut all_ir: Vec<&IrExpr> = vec![object];
-                                all_ir.extend(args.iter());
-                                return self.lower_stdlib_call(module, func, all_exprs, &all_ir.iter().map(|x| (*x).clone()).collect::<Vec<_>>(), e);
-                            } else {
-                                Expr::Call { func: format!("{}_{}", module.replace('.', "_"), crate::emit_common::sanitize(func)), args: all_exprs }
-                            }
-                        } else {
-                            Expr::Call { func: crate::emit_common::sanitize(method), args: all_exprs }
+                        let Some((module, func)) = method.split_once('.') else {
+                            return Expr::Call { func: crate::emit_common::sanitize(method), args: all_exprs };
+                        };
+                        let is_stdlib = crate::stdlib::is_stdlib_module(module) || crate::stdlib::is_any_stdlib(module);
+                        if !is_stdlib {
+                            return Expr::Call { func: format!("{}_{}", module.replace('.', "_"), crate::emit_common::sanitize(func)), args: all_exprs };
                         }
+                        // Reconstruct IR args with object prepended
+                        let mut all_ir: Vec<&IrExpr> = vec![object];
+                        all_ir.extend(args.iter());
+                        return self.lower_stdlib_call(module, func, all_exprs, &all_ir.iter().map(|x| (*x).clone()).collect::<Vec<_>>(), e);
                     }
                     CallTarget::Computed { callee } => {
                         let c = self.lower_expr(callee);
@@ -322,25 +316,18 @@ impl<'a> LowerCtx<'a> {
     fn lower_collection(&self, e: &IrExpr) -> Expr {
         match &e.kind {
             IrExprKind::List { elements } => {
-                if elements.is_empty() {
-                    // Emit typed empty vec to avoid Rust type inference failure
-                    let inner_ty = match &e.ty {
-                        Ty::List(inner) if !matches!(inner.as_ref(), Ty::Unknown | Ty::TypeVar(_)) => {
-                            let rt = super::lower_types::lower_ty(inner);
-                            let mut s = String::new();
-                            super::render::render_type(&mut s, &rt);
-                            Some(s)
-                        }
-                        _ => None,
-                    };
-                    if let Some(ty_str) = inner_ty {
-                        Expr::Raw(format!("Vec::<{}>::new()", ty_str))
-                    } else {
-                        Expr::Vec(vec![]) // fallback: let Rust infer
-                    }
-                } else {
-                    Expr::Vec(elements.iter().map(|e| self.lower_expr(e)).collect())
+                if !elements.is_empty() {
+                    return Expr::Vec(elements.iter().map(|e| self.lower_expr(e)).collect());
                 }
+                // Emit typed empty vec to avoid Rust type inference failure
+                let Ty::List(inner) = &e.ty else { return Expr::Vec(vec![]); };
+                if matches!(inner.as_ref(), Ty::Unknown | Ty::TypeVar(_)) {
+                    return Expr::Vec(vec![]); // fallback: let Rust infer
+                }
+                let rt = super::lower_types::lower_ty(inner);
+                let mut s = String::new();
+                super::render::render_type(&mut s, &rt);
+                Expr::Raw(format!("Vec::<{}>::new()", s))
             }
             IrExprKind::MapLiteral { entries } => Expr::HashMap(entries.iter().map(|(k, v)| (self.lower_expr(k), self.lower_expr(v))).collect()),
             IrExprKind::EmptyMap => self.lower_empty_map(e),
@@ -366,8 +353,8 @@ impl<'a> LowerCtx<'a> {
                 .unwrap_or("AnonRecord".into())
         });
         let mut lowered_fields: Vec<(String, Expr)> = fields.iter().map(|(n, v)| (n.clone(), self.lower_expr(v))).collect();
-        // Fill in default field values for any missing fields in named records
         if let Some(ctor_name) = name.as_ref() {
+            // Fill in default field values for any missing fields in named records
             let provided: std::collections::HashSet<&str> = fields.iter().map(|(n, _)| n.as_str()).collect();
             if let Some(field_decls) = self.find_record_field_decls(ctor_name) {
                 for fd in field_decls {
@@ -378,9 +365,7 @@ impl<'a> LowerCtx<'a> {
                     }
                 }
             }
-        }
-        // Box recursive fields in variant record constructors
-        if let Some(ctor_name) = name.as_ref() {
+            // Box recursive fields in variant record constructors
             let enum_name = self.ctors.get(ctor_name).cloned().unwrap_or_default();
             if let Some(case) = self.find_variant_case(ctor_name) {
                 if let almide::ir::IrVariantKind::Record { fields: field_decls } = &case.kind {
@@ -470,23 +455,19 @@ impl<'a> LowerCtx<'a> {
                 let is_encode = name.starts_with("__encode_list_");
                 let type_suffix = if is_encode { &name["__encode_list_".len()..] } else { &name["__decode_list_".len()..] };
                 // Primitives have direct runtime helpers
-                match type_suffix {
-                    "string" | "int" | "float" | "bool" => {
-                        Expr::Call { func: format!("almide_rt_{}", crate::emit_common::sanitize(name)), args }
-                    }
-                    // Named types: pass Type_encode/decode as function argument
-                    _ => {
-                        let func_ref = if is_encode {
-                            format!("{}_encode", crate::emit_common::sanitize(type_suffix))
-                        } else {
-                            format!("{}_decode", crate::emit_common::sanitize(type_suffix))
-                        };
-                        let rt_func = if is_encode { "almide_rt_value_encode_list" } else { "almide_rt_value_decode_list" };
-                        let mut all_args = args;
-                        all_args.push(Expr::Var(func_ref));
-                        Expr::Call { func: rt_func.into(), args: all_args }
-                    }
+                if matches!(type_suffix, "string" | "int" | "float" | "bool") {
+                    return Expr::Call { func: format!("almide_rt_{}", crate::emit_common::sanitize(name)), args };
                 }
+                // Named types: pass Type_encode/decode as function argument
+                let func_ref = if is_encode {
+                    format!("{}_encode", crate::emit_common::sanitize(type_suffix))
+                } else {
+                    format!("{}_decode", crate::emit_common::sanitize(type_suffix))
+                };
+                let rt_func = if is_encode { "almide_rt_value_encode_list" } else { "almide_rt_value_decode_list" };
+                let mut all_args = args;
+                all_args.push(Expr::Var(func_ref));
+                Expr::Call { func: rt_func.into(), args: all_args }
             }
             _ => {
                 let call = if let Some(enum_name) = self.ctors.get(name) {
@@ -639,29 +620,17 @@ impl<'a> LowerCtx<'a> {
     /// Look up the field declarations for a named record constructor.
     /// Handles both standalone Record types and Variant record cases.
     fn find_record_field_decls(&self, ctor_name: &str) -> Option<&'a [IrFieldDecl]> {
-        // Check if it's a variant constructor
-        if let Some(enum_name) = self.ctors.get(ctor_name) {
-            for td in self.type_decls {
-                if td.name == *enum_name {
-                    if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
-                        for case in cases {
-                            if case.name == ctor_name {
-                                if let IrVariantKind::Record { fields } = &case.kind {
-                                    return Some(fields);
-                                }
-                            }
-                        }
-                    }
-                }
+        // Check if it's a variant constructor (reuse find_variant_case helper)
+        if let Some(case) = self.find_variant_case(ctor_name) {
+            if let IrVariantKind::Record { fields } = &case.kind {
+                return Some(fields);
             }
         }
         // Check standalone record types
         for td in self.type_decls {
-            if td.name == ctor_name {
-                if let IrTypeDeclKind::Record { fields } = &td.kind {
-                    return Some(fields);
-                }
-            }
+            if td.name != ctor_name { continue; }
+            let IrTypeDeclKind::Record { fields } = &td.kind else { continue; };
+            return Some(fields);
         }
         None
     }
