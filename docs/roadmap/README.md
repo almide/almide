@@ -50,6 +50,7 @@
 - [Cross-Target Semantics](on-hold/cross-target-semantics.md) — TS 本格化時
 - [Direct WASM Emission](on-hold/emit-wasm-direct.md)
 - [Platform / Target Separation](on-hold/platform-target-separation.md) — `--target` と `--platform` 分離、@extern プラットフォーム階層
+- [Secure by Design](on-hold/secure-by-design.md) — Web 安全を言語の性質に。opaque 型 + capability 推論 + supply chain integrity
 - [TS Edge-Native Deployment](on-hold/ts-edge-native.md) — Almide→TS でエッジ最速。WASM 不要、V8 JIT フル活用
 - [Almide UI](on-hold/almide-ui.md) — Almide 製 SolidJS ライクな reactive UI。コンパイラ汎用最適化で Svelte 級
 - [Editor & GitHub Integration](on-hold/editor-github-integration.md)
