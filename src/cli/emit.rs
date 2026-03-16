@@ -1,11 +1,11 @@
-use crate::{parse_file, emit_rust, emit_ts, check, diagnostic, resolve, project};
+use crate::{parse_file, emit_rust, emit_ts, check, diagnostic, resolve, project, project_fetch};
 
 pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_check: bool) {
     let (mut program, source_text, _parse_errors) = parse_file(file);
 
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
-            project::fetch_all_deps(&proj)
+            project_fetch::fetch_all_deps(&proj)
                 .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); })
                 .into_iter()
                 .map(|fd| (fd.pkg_id, fd.source_dir))

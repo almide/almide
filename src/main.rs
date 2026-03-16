@@ -15,6 +15,7 @@ mod check;
 mod cli;
 mod emit_rust;
 mod project;
+mod project_fetch;
 mod resolve;
 
 use std::process::Command;
@@ -176,7 +177,7 @@ fn try_compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust
 
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
-            project::fetch_all_deps(&proj)
+            project_fetch::fetch_all_deps(&proj)
                 .map_err(|e| { eprintln!("{}", e); e.to_string() })?
                 .into_iter()
                 .map(|fd| (fd.pkg_id, fd.source_dir))
@@ -380,9 +381,9 @@ fn dispatch(cli: Cli) {
             let (name, git_url, tag) = if let Some(git_url) = git {
                 (pkg, git_url, tag)
             } else {
-                project::resolve_package_spec(&pkg)
+                project_fetch::resolve_package_spec(&pkg)
             };
-            project::add_dep_to_toml(&name, &git_url, tag.as_deref())
+            project_fetch::add_dep_to_toml(&name, &git_url, tag.as_deref())
                 .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
             let dep = project::Dependency {
                 name: name.clone(),
@@ -391,7 +392,7 @@ fn dispatch(cli: Cli) {
                 branch: None,
                 version: None,
             };
-            project::fetch_dep(&dep)
+            project_fetch::fetch_dep(&dep)
                 .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
         }
         Commands::Deps => {

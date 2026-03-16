@@ -1,13 +1,13 @@
 {
   "version": 1,
-  "timestamp": "2026-03-16T04:28:11.298738+00:00",
+  "timestamp": "2026-03-16T04:45:29.859015+00:00",
   "overall": {
-    "totalIssues": 111,
+    "totalIssues": 108,
     "totalErrors": 0,
-    "totalWarnings": 104,
-    "averageComplexity": 6.1,
-    "score": 59,
-    "grade": "D"
+    "totalWarnings": 101,
+    "averageComplexity": 6.2,
+    "score": 60,
+    "grade": "C"
   },
   "files": [
     {
@@ -153,6 +153,15 @@
       "maxCyclomatic": 69,
       "maxCognitive": 38,
       "score": 55
+    },
+    {
+      "file": "emit_rust/lower_rust_helpers.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 11,
+      "maxCognitive": 3,
+      "score": 96
     },
     {
       "file": "emit_rust/lower_types.rs",
@@ -443,13 +452,22 @@
       "score": 65
     },
     {
-      "file": "parser/compounds.rs",
-      "issueCount": 1,
+      "file": "parser/collections.rs",
+      "issueCount": 0,
       "errorCount": 0,
-      "warningCount": 1,
+      "warningCount": 0,
       "maxCyclomatic": 16,
       "maxCognitive": 18,
-      "score": 55
+      "score": 67
+    },
+    {
+      "file": "parser/compounds.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 13,
+      "maxCognitive": 18,
+      "score": 90
     },
     {
       "file": "parser/declarations.rs",
@@ -606,21 +624,30 @@
     },
     {
       "file": "parser/types.rs",
-      "issueCount": 1,
+      "issueCount": 0,
       "errorCount": 0,
-      "warningCount": 1,
+      "warningCount": 0,
       "maxCyclomatic": 25,
       "maxCognitive": 23,
-      "score": 55
+      "score": 65
     },
     {
       "file": "project.rs",
-      "issueCount": 1,
+      "issueCount": 0,
       "errorCount": 0,
-      "warningCount": 1,
+      "warningCount": 0,
       "maxCyclomatic": 25,
+      "maxCognitive": 26,
+      "score": 65
+    },
+    {
+      "file": "project_fetch.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 19,
       "maxCognitive": 30,
-      "score": 55
+      "score": 65
     },
     {
       "file": "resolve.rs",

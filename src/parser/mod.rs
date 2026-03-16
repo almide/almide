@@ -5,6 +5,7 @@
 /// Owns:     syntax validation, operator precedence, ExprId assignment, depth limiting
 /// Does NOT: type checking, name resolution, semantic validation
 
+mod collections;
 mod compounds;
 mod declarations;
 mod diagnostics;
