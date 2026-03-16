@@ -1,0 +1,671 @@
+{
+  "version": 1,
+  "timestamp": "2026-03-16T03:00:17.577552+00:00",
+  "overall": {
+    "totalIssues": 216,
+    "totalErrors": 0,
+    "totalWarnings": 172,
+    "averageComplexity": 6.3,
+    "score": 52,
+    "grade": "D"
+  },
+  "files": [
+    {
+      "file": "ast.rs",
+      "issueCount": 1,
+      "errorCount": 0,
+      "warningCount": 1,
+      "maxCyclomatic": 3,
+      "maxCognitive": 1,
+      "score": 90
+    },
+    {
+      "file": "check/calls.rs",
+      "issueCount": 7,
+      "errorCount": 0,
+      "warningCount": 5,
+      "maxCyclomatic": 77,
+      "maxCognitive": 117,
+      "score": 47
+    },
+    {
+      "file": "check/infer.rs",
+      "issueCount": 5,
+      "errorCount": 0,
+      "warningCount": 5,
+      "maxCyclomatic": 161,
+      "maxCognitive": 178,
+      "score": 55
+    },
+    {
+      "file": "check/mod.rs",
+      "issueCount": 11,
+      "errorCount": 0,
+      "warningCount": 7,
+      "maxCyclomatic": 60,
+      "maxCognitive": 140,
+      "score": 43
+    },
+    {
+      "file": "check/types.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 26,
+      "maxCognitive": 25,
+      "score": 67
+    },
+    {
+      "file": "cli/build.rs",
+      "issueCount": 1,
+      "errorCount": 0,
+      "warningCount": 1,
+      "maxCyclomatic": 25,
+      "maxCognitive": 32,
+      "score": 65
+    },
+    {
+      "file": "cli/check.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 22,
+      "maxCognitive": 29,
+      "score": 73
+    },
+    {
+      "file": "cli/commands.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 17,
+      "maxCognitive": 17,
+      "score": 69
+    },
+    {
+      "file": "cli/emit.rs",
+      "issueCount": 3,
+      "errorCount": 0,
+      "warningCount": 3,
+      "maxCyclomatic": 37,
+      "maxCognitive": 48,
+      "score": 63
+    },
+    {
+      "file": "cli/mod.rs",
+      "issueCount": 1,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 18,
+      "maxCognitive": 22,
+      "score": 71
+    },
+    {
+      "file": "cli/run.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 17,
+      "maxCognitive": 11,
+      "score": 86
+    },
+    {
+      "file": "diagnostic.rs",
+      "issueCount": 6,
+      "errorCount": 0,
+      "warningCount": 2,
+      "maxCyclomatic": 49,
+      "maxCognitive": 112,
+      "score": 53
+    },
+    {
+      "file": "emit_common.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 7,
+      "maxCognitive": 7,
+      "score": 100
+    },
+    {
+      "file": "emit_rust/borrow.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 18,
+      "maxCognitive": 26,
+      "score": 65
+    },
+    {
+      "file": "emit_rust/lower_rust.rs",
+      "issueCount": 19,
+      "errorCount": 0,
+      "warningCount": 7,
+      "maxCyclomatic": 57,
+      "maxCognitive": 99,
+      "score": 43
+    },
+    {
+      "file": "emit_rust/lower_rust_expr.rs",
+      "issueCount": 18,
+      "errorCount": 0,
+      "warningCount": 6,
+      "maxCyclomatic": 176,
+      "maxCognitive": 218,
+      "score": 43
+    },
+    {
+      "file": "emit_rust/lower_types.rs",
+      "issueCount": 2,
+      "errorCount": 0,
+      "warningCount": 2,
+      "maxCyclomatic": 53,
+      "maxCognitive": 65,
+      "score": 65
+    },
+    {
+      "file": "emit_rust/mod.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 1,
+      "maxCognitive": 0,
+      "score": 100
+    },
+    {
+      "file": "emit_rust/render.rs",
+      "issueCount": 6,
+      "errorCount": 0,
+      "warningCount": 6,
+      "maxCyclomatic": 79,
+      "maxCognitive": 71,
+      "score": 65
+    },
+    {
+      "file": "emit_rust/rust_ir.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 0,
+      "maxCognitive": 0,
+      "score": 100
+    },
+    {
+      "file": "emit_ts/lower_decls.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 21,
+      "maxCognitive": 8,
+      "score": 85
+    },
+    {
+      "file": "emit_ts/lower_ts.rs",
+      "issueCount": 2,
+      "errorCount": 0,
+      "warningCount": 2,
+      "maxCyclomatic": 62,
+      "maxCognitive": 30,
+      "score": 55
+    },
+    {
+      "file": "emit_ts/mod.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 23,
+      "maxCognitive": 30,
+      "score": 65
+    },
+    {
+      "file": "emit_ts/render_common.rs",
+      "issueCount": 7,
+      "errorCount": 0,
+      "warningCount": 7,
+      "maxCyclomatic": 78,
+      "maxCognitive": 59,
+      "score": 55
+    },
+    {
+      "file": "emit_ts/render_js.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 15,
+      "maxCognitive": 17,
+      "score": 87
+    },
+    {
+      "file": "emit_ts/render_npm.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 17,
+      "maxCognitive": 26,
+      "score": 74
+    },
+    {
+      "file": "emit_ts/render_ts.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 15,
+      "maxCognitive": 17,
+      "score": 87
+    },
+    {
+      "file": "emit_ts/ts_ir.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 0,
+      "maxCognitive": 0,
+      "score": 100
+    },
+    {
+      "file": "emit_ts_runtime/mod.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 0,
+      "maxCognitive": 0,
+      "score": 100
+    },
+    {
+      "file": "fmt.rs",
+      "issueCount": 48,
+      "errorCount": 0,
+      "warningCount": 48,
+      "maxCyclomatic": 86,
+      "maxCognitive": 73,
+      "score": 15
+    },
+    {
+      "file": "ir/fold.rs",
+      "issueCount": 2,
+      "errorCount": 0,
+      "warningCount": 2,
+      "maxCyclomatic": 86,
+      "maxCognitive": 85,
+      "score": 73
+    },
+    {
+      "file": "ir/mod.rs",
+      "issueCount": 1,
+      "errorCount": 0,
+      "warningCount": 1,
+      "maxCyclomatic": 1,
+      "maxCognitive": 0,
+      "score": 90
+    },
+    {
+      "file": "ir/unknown.rs",
+      "issueCount": 2,
+      "errorCount": 0,
+      "warningCount": 2,
+      "maxCyclomatic": 52,
+      "maxCognitive": 61,
+      "score": 65
+    },
+    {
+      "file": "ir/use_count.rs",
+      "issueCount": 3,
+      "errorCount": 0,
+      "warningCount": 3,
+      "maxCyclomatic": 53,
+      "maxCognitive": 61,
+      "score": 61
+    },
+    {
+      "file": "lexer.rs",
+      "issueCount": 12,
+      "errorCount": 0,
+      "warningCount": 11,
+      "maxCyclomatic": 58,
+      "maxCognitive": 94,
+      "score": 51
+    },
+    {
+      "file": "lib.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 0,
+      "maxCognitive": 0,
+      "score": 100
+    },
+    {
+      "file": "lower/calls.rs",
+      "issueCount": 6,
+      "errorCount": 0,
+      "warningCount": 4,
+      "maxCyclomatic": 44,
+      "maxCognitive": 73,
+      "score": 57
+    },
+    {
+      "file": "lower/derive.rs",
+      "issueCount": 4,
+      "errorCount": 0,
+      "warningCount": 2,
+      "maxCyclomatic": 34,
+      "maxCognitive": 51,
+      "score": 65
+    },
+    {
+      "file": "lower/derive_codec.rs",
+      "issueCount": 1,
+      "errorCount": 0,
+      "warningCount": 1,
+      "maxCyclomatic": 13,
+      "maxCognitive": 11,
+      "score": 80
+    },
+    {
+      "file": "lower/expressions.rs",
+      "issueCount": 3,
+      "errorCount": 0,
+      "warningCount": 3,
+      "maxCyclomatic": 107,
+      "maxCognitive": 37,
+      "score": 63
+    },
+    {
+      "file": "lower/mod.rs",
+      "issueCount": 2,
+      "errorCount": 0,
+      "warningCount": 1,
+      "maxCyclomatic": 26,
+      "maxCognitive": 36,
+      "score": 64
+    },
+    {
+      "file": "lower/statements.rs",
+      "issueCount": 1,
+      "errorCount": 0,
+      "warningCount": 1,
+      "maxCyclomatic": 34,
+      "maxCognitive": 19,
+      "score": 69
+    },
+    {
+      "file": "lower/types.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 27,
+      "maxCognitive": 11,
+      "score": 85
+    },
+    {
+      "file": "main.rs",
+      "issueCount": 5,
+      "errorCount": 0,
+      "warningCount": 5,
+      "maxCyclomatic": 33,
+      "maxCognitive": 54,
+      "score": 51
+    },
+    {
+      "file": "mono.rs",
+      "issueCount": 9,
+      "errorCount": 0,
+      "warningCount": 8,
+      "maxCyclomatic": 62,
+      "maxCognitive": 89,
+      "score": 51
+    },
+    {
+      "file": "optimize/dce.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 19,
+      "maxCognitive": 23,
+      "score": 65
+    },
+    {
+      "file": "optimize/mod.rs",
+      "issueCount": 5,
+      "errorCount": 0,
+      "warningCount": 5,
+      "maxCyclomatic": 51,
+      "maxCognitive": 62,
+      "score": 55
+    },
+    {
+      "file": "optimize/propagate.rs",
+      "issueCount": 2,
+      "errorCount": 0,
+      "warningCount": 2,
+      "maxCyclomatic": 53,
+      "maxCognitive": 64,
+      "score": 65
+    },
+    {
+      "file": "parser/compounds.rs",
+      "issueCount": 1,
+      "errorCount": 0,
+      "warningCount": 1,
+      "maxCyclomatic": 16,
+      "maxCognitive": 18,
+      "score": 55
+    },
+    {
+      "file": "parser/declarations.rs",
+      "issueCount": 2,
+      "errorCount": 0,
+      "warningCount": 2,
+      "maxCyclomatic": 34,
+      "maxCognitive": 22,
+      "score": 55
+    },
+    {
+      "file": "parser/diagnostics.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 7,
+      "maxCognitive": 5,
+      "score": 100
+    },
+    {
+      "file": "parser/entry.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 22,
+      "maxCognitive": 16,
+      "score": 84
+    },
+    {
+      "file": "parser/expressions.rs",
+      "issueCount": 1,
+      "errorCount": 0,
+      "warningCount": 1,
+      "maxCyclomatic": 15,
+      "maxCognitive": 18,
+      "score": 62
+    },
+    {
+      "file": "parser/helpers.rs",
+      "issueCount": 1,
+      "errorCount": 0,
+      "warningCount": 1,
+      "maxCyclomatic": 14,
+      "maxCognitive": 10,
+      "score": 68
+    },
+    {
+      "file": "parser/hints/catalog.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 1,
+      "maxCognitive": 0,
+      "score": 100
+    },
+    {
+      "file": "parser/hints/delimiter.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 7,
+      "maxCognitive": 1,
+      "score": 100
+    },
+    {
+      "file": "parser/hints/keyword_typo.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 18,
+      "maxCognitive": 9,
+      "score": 85
+    },
+    {
+      "file": "parser/hints/missing_comma.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 15,
+      "maxCognitive": 3,
+      "score": 90
+    },
+    {
+      "file": "parser/hints/mod.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 11,
+      "maxCognitive": 5,
+      "score": 98
+    },
+    {
+      "file": "parser/hints/operator.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 12,
+      "maxCognitive": 6,
+      "score": 94
+    },
+    {
+      "file": "parser/hints/syntax_guide.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 18,
+      "maxCognitive": 19,
+      "score": 65
+    },
+    {
+      "file": "parser/mod.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 3,
+      "maxCognitive": 2,
+      "score": 100
+    },
+    {
+      "file": "parser/patterns.rs",
+      "issueCount": 1,
+      "errorCount": 0,
+      "warningCount": 1,
+      "maxCyclomatic": 32,
+      "maxCognitive": 30,
+      "score": 65
+    },
+    {
+      "file": "parser/primary.rs",
+      "issueCount": 3,
+      "errorCount": 0,
+      "warningCount": 3,
+      "maxCyclomatic": 56,
+      "maxCognitive": 42,
+      "score": 55
+    },
+    {
+      "file": "parser/recovery.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 10,
+      "maxCognitive": 9,
+      "score": 100
+    },
+    {
+      "file": "parser/statements.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 22,
+      "maxCognitive": 16,
+      "score": 72
+    },
+    {
+      "file": "parser/types.rs",
+      "issueCount": 1,
+      "errorCount": 0,
+      "warningCount": 1,
+      "maxCyclomatic": 25,
+      "maxCognitive": 23,
+      "score": 55
+    },
+    {
+      "file": "project.rs",
+      "issueCount": 1,
+      "errorCount": 0,
+      "warningCount": 1,
+      "maxCyclomatic": 25,
+      "maxCognitive": 30,
+      "score": 55
+    },
+    {
+      "file": "resolve.rs",
+      "issueCount": 5,
+      "errorCount": 0,
+      "warningCount": 3,
+      "maxCyclomatic": 31,
+      "maxCognitive": 58,
+      "score": 47
+    },
+    {
+      "file": "stdlib.rs",
+      "issueCount": 0,
+      "errorCount": 0,
+      "warningCount": 0,
+      "maxCyclomatic": 26,
+      "maxCognitive": 4,
+      "score": 71
+    },
+    {
+      "file": "types/env.rs",
+      "issueCount": 1,
+      "errorCount": 0,
+      "warningCount": 1,
+      "maxCyclomatic": 28,
+      "maxCognitive": 44,
+      "score": 65
+    },
+    {
+      "file": "types/mod.rs",
+      "issueCount": 2,
+      "errorCount": 0,
+      "warningCount": 2,
+      "maxCyclomatic": 37,
+      "maxCognitive": 12,
+      "score": 61
+    },
+    {
+      "file": "types/unify.rs",
+      "issueCount": 2,
+      "errorCount": 0,
+      "warningCount": 2,
+      "maxCyclomatic": 42,
+      "maxCognitive": 38,
+      "score": 65
+    }
+  ]
+}
