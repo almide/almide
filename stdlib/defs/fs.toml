@@ -2,7 +2,7 @@
 description = "Read file contents as a UTF-8 string"
 example = 'let text = fs.read_text("config.toml")'
 params = [{ name = "path", type = "String" }]
-return = "Result[String, IoError]"
+return = "Result[String, String]"
 effect = true
 rust = "almide_rt_fs_read_text(&*{path})?"
 ts = "__almd_fs.read_text({path})"
@@ -11,7 +11,7 @@ ts = "__almd_fs.read_text({path})"
 description = "Read file contents as a list of bytes"
 example = 'let bytes = fs.read_bytes("image.png")'
 params = [{ name = "path", type = "String" }]
-return = "Result[List[Int], IoError]"
+return = "Result[List[Int], String]"
 effect = true
 rust = "almide_rt_fs_read_bytes(&*{path})?"
 ts = "__almd_fs.read_bytes({path})"
@@ -20,7 +20,7 @@ ts = "__almd_fs.read_bytes({path})"
 description = "Write a string to a file, creating or overwriting it"
 example = 'fs.write("output.txt", "hello")'
 params = [{ name = "path", type = "String" }, { name = "content", type = "String" }]
-return = "Result[Unit, IoError]"
+return = "Result[Unit, String]"
 effect = true
 rust = "almide_rt_fs_write(&*{path}, &*{content})?"
 ts = "__almd_fs.write({path}, {content})"
@@ -29,7 +29,7 @@ ts = "__almd_fs.write({path}, {content})"
 description = "Write a list of bytes to a file"
 example = 'fs.write_bytes("out.bin", [0, 1, 2])'
 params = [{ name = "path", type = "String" }, { name = "bytes", type = "List[Int]" }]
-return = "Result[Unit, IoError]"
+return = "Result[Unit, String]"
 effect = true
 rust = "almide_rt_fs_write_bytes(&*{path}, &{bytes})?"
 ts = "__almd_fs.write_bytes({path}, {bytes})"
@@ -38,7 +38,7 @@ ts = "__almd_fs.write_bytes({path}, {bytes})"
 description = "Append a string to a file, creating it if it doesn't exist"
 example = 'fs.append("log.txt", "new line\n")'
 params = [{ name = "path", type = "String" }, { name = "content", type = "String" }]
-return = "Result[Unit, IoError]"
+return = "Result[Unit, String]"
 effect = true
 rust = "almide_rt_fs_append(&*{path}, &*{content})?"
 ts = "__almd_fs.append({path}, {content})"
@@ -47,7 +47,7 @@ ts = "__almd_fs.append({path}, {content})"
 description = "Create a directory and all parent directories"
 example = 'fs.mkdir_p("data/cache/images")'
 params = [{ name = "path", type = "String" }]
-return = "Result[Unit, IoError]"
+return = "Result[Unit, String]"
 effect = true
 rust = "almide_rt_fs_mkdir_p(&*{path})?"
 ts = "__almd_fs.mkdir_p({path})"
@@ -65,7 +65,7 @@ ts = "__almd_fs.exists({path})"
 description = "Read a file as a list of lines"
 example = 'let lines = fs.read_lines("data.csv")'
 params = [{ name = "path", type = "String" }]
-return = "Result[List[String], IoError]"
+return = "Result[List[String], String]"
 effect = true
 rust = "almide_rt_fs_read_lines(&*{path})?"
 ts = "__almd_fs.read_lines({path})"
@@ -74,7 +74,7 @@ ts = "__almd_fs.read_lines({path})"
 description = "Delete a file"
 example = 'fs.remove("temp.txt")'
 params = [{ name = "path", type = "String" }]
-return = "Result[Unit, IoError]"
+return = "Result[Unit, String]"
 effect = true
 rust = "almide_rt_fs_remove(&*{path})?"
 ts = "__almd_fs.remove({path})"
@@ -83,7 +83,7 @@ ts = "__almd_fs.remove({path})"
 description = "List entries in a directory"
 example = 'let entries = fs.list_dir("src/")'
 params = [{ name = "path", type = "String" }]
-return = "Result[List[String], IoError]"
+return = "Result[List[String], String]"
 effect = true
 rust = "almide_rt_fs_list_dir(&*{path})?"
 ts = "__almd_fs.list_dir({path})"
@@ -110,7 +110,7 @@ ts = "__almd_fs.is_file({path})"
 description = "Copy a file from src to dst"
 example = 'fs.copy("a.txt", "b.txt")'
 params = [{ name = "src", type = "String" }, { name = "dst", type = "String" }]
-return = "Result[Unit, IoError]"
+return = "Result[Unit, String]"
 effect = true
 rust = "almide_rt_fs_copy(&*{src}, &*{dst})?"
 ts = "__almd_fs.copy({src}, {dst})"
@@ -119,7 +119,7 @@ ts = "__almd_fs.copy({src}, {dst})"
 description = "Rename or move a file"
 example = 'fs.rename("old.txt", "new.txt")'
 params = [{ name = "src", type = "String" }, { name = "dst", type = "String" }]
-return = "Result[Unit, IoError]"
+return = "Result[Unit, String]"
 effect = true
 rust = "almide_rt_fs_rename(&*{src}, &*{dst})?"
 ts = "__almd_fs.rename({src}, {dst})"
@@ -128,7 +128,7 @@ ts = "__almd_fs.rename({src}, {dst})"
 description = "Recursively list all files in a directory tree"
 example = 'let all_files = fs.walk("src/")'
 params = [{ name = "dir", type = "String" }]
-return = "Result[List[String], IoError]"
+return = "Result[List[String], String]"
 effect = true
 rust = "almide_rt_fs_walk(&*{dir})?"
 ts = "__almd_fs.walk({dir})"
@@ -137,7 +137,7 @@ ts = "__almd_fs.walk({dir})"
 description = "Recursively delete a directory and all its contents"
 example = 'fs.remove_all("build/")'
 params = [{ name = "path", type = "String" }]
-return = "Result[Unit, IoError]"
+return = "Result[Unit, String]"
 effect = true
 rust = "almide_rt_fs_remove_all(&*{path})?"
 ts = "__almd_fs.remove_all({path})"
@@ -146,7 +146,7 @@ ts = "__almd_fs.remove_all({path})"
 description = "Get file size in bytes"
 example = 'let size = fs.file_size("data.bin")'
 params = [{ name = "path", type = "String" }]
-return = "Result[Int, IoError]"
+return = "Result[Int, String]"
 effect = true
 rust = "almide_rt_fs_file_size(&*{path})?"
 ts = "__almd_fs.file_size({path})"
@@ -163,7 +163,7 @@ ts = "__almd_fs.temp_dir()"
 description = "Get file metadata: size, type, and modification time"
 example = 'let info = fs.stat("file.txt") // {size, is_dir, is_file, modified}'
 params = [{ name = "path", type = "String" }]
-return = "Result[{size: Int, is_dir: Bool, is_file: Bool, modified: Int}, IoError]"
+return = "Result[{size: Int, is_dir: Bool, is_file: Bool, modified: Int}, String]"
 effect = true
 rust = "almide_rt_fs_stat(&*{path})?"
 ts = "__almd_fs.stat({path})"
@@ -172,7 +172,7 @@ ts = "__almd_fs.stat({path})"
 description = "Find files matching a glob pattern"
 example = 'let files = fs.glob("src/**/*.almd")'
 params = [{ name = "pattern", type = "String" }]
-return = "Result[List[String], IoError]"
+return = "Result[List[String], String]"
 effect = true
 rust = "almide_rt_fs_glob(&*{pattern})?"
 ts = "__almd_fs.glob({pattern})"
@@ -181,7 +181,7 @@ ts = "__almd_fs.glob({pattern})"
 description = "Create a temporary file with a given prefix, return its path"
 example = 'let path = fs.create_temp_file("almide-")'
 params = [{ name = "prefix", type = "String" }]
-return = "Result[String, IoError]"
+return = "Result[String, String]"
 effect = true
 rust = "almide_rt_fs_create_temp_file(&*{prefix})?"
 ts = "__almd_fs.create_temp_file({prefix})"
@@ -190,7 +190,7 @@ ts = "__almd_fs.create_temp_file({prefix})"
 description = "Create a temporary directory with a given prefix, return its path"
 example = 'let dir = fs.create_temp_dir("build-")'
 params = [{ name = "prefix", type = "String" }]
-return = "Result[String, IoError]"
+return = "Result[String, String]"
 effect = true
 rust = "almide_rt_fs_create_temp_dir(&*{prefix})?"
 ts = "__almd_fs.create_temp_dir({prefix})"
@@ -208,7 +208,7 @@ ts = "__almd_fs.is_symlink({path})"
 description = "Get file modification time as Unix timestamp (seconds)"
 example = 'let ts = fs.modified_at("file.txt")'
 params = [{ name = "path", type = "String" }]
-return = "Result[Int, IoError]"
+return = "Result[Int, String]"
 effect = true
 rust = "almide_rt_fs_modified_at(&*{path})?"
 ts = "__almd_fs.modified_at({path})"

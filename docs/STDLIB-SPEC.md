@@ -1,7 +1,7 @@
 # Almide Standard Library Specification
 
 Auto-generated from `stdlib/defs/*.toml`. 362 native functions across 22 modules.
-Runtime implementation: 270/362 (74%).
+Runtime implementation: 294/362 (81%).
 
 ## Module Index
 
@@ -14,7 +14,7 @@ Runtime implementation: 270/362 (74%).
 | env | platform | 9 | 9/9 | Ready |
 | error | core | 3 | 3/3 | Ready |
 | float | core | 16 | 16/16 | Ready |
-| fs | platform | 24 | 0/24 | TOML only |
+| fs | platform | 24 | 24/24 | Ready |
 | http | platform | 26 | 4/26 | Partial (4/26) |
 | int | core | 21 | 21/21 | Ready |
 | io | platform | 3 | 3/3 | Ready |
@@ -602,69 +602,69 @@ Example: `float.is_infinite(1.0 / 0.0) // => true`
 
 ## fs
 
-Layer: **platform** | 24 functions | 0/24 implemented
+Layer: **platform** | 24 functions | 24/24 implemented
 
-### `fs.read_text` (not implemented)
+### `fs.read_text`
 
 Read file contents as a UTF-8 string
 
 ```
-effect read_text(path: String) -> Result[String, IoError]
+effect read_text(path: String) -> Result[String, String]
 ```
 
 Example: `let text = fs.read_text("config.toml")`
 
-### `fs.read_bytes` (not implemented)
+### `fs.read_bytes`
 
 Read file contents as a list of bytes
 
 ```
-effect read_bytes(path: String) -> Result[List[Int], IoError]
+effect read_bytes(path: String) -> Result[List[Int], String]
 ```
 
 Example: `let bytes = fs.read_bytes("image.png")`
 
-### `fs.write` (not implemented)
+### `fs.write`
 
 Write a string to a file, creating or overwriting it
 
 ```
-effect write(path: String, content: String) -> Result[Unit, IoError]
+effect write(path: String, content: String) -> Result[Unit, String]
 ```
 
 Example: `fs.write("output.txt", "hello")`
 
-### `fs.write_bytes` (not implemented)
+### `fs.write_bytes`
 
 Write a list of bytes to a file
 
 ```
-effect write_bytes(path: String, bytes: List[Int]) -> Result[Unit, IoError]
+effect write_bytes(path: String, bytes: List[Int]) -> Result[Unit, String]
 ```
 
 Example: `fs.write_bytes("out.bin", [0, 1, 2])`
 
-### `fs.append` (not implemented)
+### `fs.append`
 
 Append a string to a file, creating it if it doesn't exist
 
 ```
-effect append(path: String, content: String) -> Result[Unit, IoError]
+effect append(path: String, content: String) -> Result[Unit, String]
 ```
 
 Example: `fs.append("log.txt", "new line\n")`
 
-### `fs.mkdir_p` (not implemented)
+### `fs.mkdir_p`
 
 Create a directory and all parent directories
 
 ```
-effect mkdir_p(path: String) -> Result[Unit, IoError]
+effect mkdir_p(path: String) -> Result[Unit, String]
 ```
 
 Example: `fs.mkdir_p("data/cache/images")`
 
-### `fs.exists` (not implemented)
+### `fs.exists`
 
 Check if a file or directory exists
 
@@ -674,37 +674,37 @@ effect exists(path: String) -> Bool
 
 Example: `if fs.exists("config.toml") then ...`
 
-### `fs.read_lines` (not implemented)
+### `fs.read_lines`
 
 Read a file as a list of lines
 
 ```
-effect read_lines(path: String) -> Result[List[String], IoError]
+effect read_lines(path: String) -> Result[List[String], String]
 ```
 
 Example: `let lines = fs.read_lines("data.csv")`
 
-### `fs.remove` (not implemented)
+### `fs.remove`
 
 Delete a file
 
 ```
-effect remove(path: String) -> Result[Unit, IoError]
+effect remove(path: String) -> Result[Unit, String]
 ```
 
 Example: `fs.remove("temp.txt")`
 
-### `fs.list_dir` (not implemented)
+### `fs.list_dir`
 
 List entries in a directory
 
 ```
-effect list_dir(path: String) -> Result[List[String], IoError]
+effect list_dir(path: String) -> Result[List[String], String]
 ```
 
 Example: `let entries = fs.list_dir("src/")`
 
-### `fs.is_dir` (not implemented)
+### `fs.is_dir`
 
 Check if a path is a directory
 
@@ -714,7 +714,7 @@ effect is_dir(path: String) -> Bool
 
 Example: `if fs.is_dir("src") then ...`
 
-### `fs.is_file` (not implemented)
+### `fs.is_file`
 
 Check if a path is a regular file
 
@@ -724,57 +724,57 @@ effect is_file(path: String) -> Bool
 
 Example: `if fs.is_file("readme.md") then ...`
 
-### `fs.copy` (not implemented)
+### `fs.copy`
 
 Copy a file from src to dst
 
 ```
-effect copy(src: String, dst: String) -> Result[Unit, IoError]
+effect copy(src: String, dst: String) -> Result[Unit, String]
 ```
 
 Example: `fs.copy("a.txt", "b.txt")`
 
-### `fs.rename` (not implemented)
+### `fs.rename`
 
 Rename or move a file
 
 ```
-effect rename(src: String, dst: String) -> Result[Unit, IoError]
+effect rename(src: String, dst: String) -> Result[Unit, String]
 ```
 
 Example: `fs.rename("old.txt", "new.txt")`
 
-### `fs.walk` (not implemented)
+### `fs.walk`
 
 Recursively list all files in a directory tree
 
 ```
-effect walk(dir: String) -> Result[List[String], IoError]
+effect walk(dir: String) -> Result[List[String], String]
 ```
 
 Example: `let all_files = fs.walk("src/")`
 
-### `fs.remove_all` (not implemented)
+### `fs.remove_all`
 
 Recursively delete a directory and all its contents
 
 ```
-effect remove_all(path: String) -> Result[Unit, IoError]
+effect remove_all(path: String) -> Result[Unit, String]
 ```
 
 Example: `fs.remove_all("build/")`
 
-### `fs.file_size` (not implemented)
+### `fs.file_size`
 
 Get file size in bytes
 
 ```
-effect file_size(path: String) -> Result[Int, IoError]
+effect file_size(path: String) -> Result[Int, String]
 ```
 
 Example: `let size = fs.file_size("data.bin")`
 
-### `fs.temp_dir` (not implemented)
+### `fs.temp_dir`
 
 Get the system temporary directory path
 
@@ -784,47 +784,47 @@ temp_dir() -> String
 
 Example: `let tmp = fs.temp_dir()`
 
-### `fs.stat` (not implemented)
+### `fs.stat`
 
 Get file metadata: size, type, and modification time
 
 ```
-effect stat(path: String) -> Result[{size: Int, is_dir: Bool, is_file: Bool, modified: Int}, IoError]
+effect stat(path: String) -> Result[{size: Int, is_dir: Bool, is_file: Bool, modified: Int}, String]
 ```
 
 Example: `let info = fs.stat("file.txt") // {size, is_dir, is_file, modified}`
 
-### `fs.glob` (not implemented)
+### `fs.glob`
 
 Find files matching a glob pattern
 
 ```
-effect glob(pattern: String) -> Result[List[String], IoError]
+effect glob(pattern: String) -> Result[List[String], String]
 ```
 
 Example: `let files = fs.glob("src/**/*.almd")`
 
-### `fs.create_temp_file` (not implemented)
+### `fs.create_temp_file`
 
 Create a temporary file with a given prefix, return its path
 
 ```
-effect create_temp_file(prefix: String) -> Result[String, IoError]
+effect create_temp_file(prefix: String) -> Result[String, String]
 ```
 
 Example: `let path = fs.create_temp_file("almide-")`
 
-### `fs.create_temp_dir` (not implemented)
+### `fs.create_temp_dir`
 
 Create a temporary directory with a given prefix, return its path
 
 ```
-effect create_temp_dir(prefix: String) -> Result[String, IoError]
+effect create_temp_dir(prefix: String) -> Result[String, String]
 ```
 
 Example: `let dir = fs.create_temp_dir("build-")`
 
-### `fs.is_symlink` (not implemented)
+### `fs.is_symlink`
 
 Check if a path is a symbolic link
 
@@ -834,12 +834,12 @@ effect is_symlink(path: String) -> Bool
 
 Example: `if fs.is_symlink("link") then ...`
 
-### `fs.modified_at` (not implemented)
+### `fs.modified_at`
 
 Get file modification time as Unix timestamp (seconds)
 
 ```
-effect modified_at(path: String) -> Result[Int, IoError]
+effect modified_at(path: String) -> Result[Int, String]
 ```
 
 Example: `let ts = fs.modified_at("file.txt")`
