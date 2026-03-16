@@ -28,9 +28,8 @@ impl<'a> LowerCtx<'a> {
                         deref
                     }
                 } else {
-                    // Skip clone if: single-use, Copy type, or borrow analysis says this param is borrowed
-                    let is_borrowed_param = self.is_borrowed_param(*id);
-                    if info.use_count > 1 && !is_copy(&info.ty) && !is_borrowed_param {
+                    // Clone if: used more than once AND not a Copy type
+                    if info.use_count > 1 && !is_copy(&info.ty) {
                         Expr::Clone(Box::new(var))
                     } else { var }
                 }

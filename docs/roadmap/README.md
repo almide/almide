@@ -17,6 +17,9 @@
 - [Structured Concurrency](active/structured-concurrency.md) — Conservative async
 - [Platform Async](active/platform-async.md) — `effect fn` = async on all targets
 
+### Compiler
+- [Borrow/Clone Gaps](active/borrow-clone-gaps.md) — 変数 clone 挿入漏れの修正（関数引数+補間、if/else 分岐）
+
 ### Testing
 - [Exercise Suite v0.6.0](active/exercises-v060.md) — 23 exercises / 330+ tests, 6 tiers, cross-target
 

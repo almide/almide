@@ -50,10 +50,9 @@ effect fn list_modules(lang: String) -> Unit = {
 effect fn crawl_module(lang: String, dir: String, mod_name: String, save: Bool) -> Unit = {
   let output = introspect(lang, mod_name)
   if save then {
-    let msg = "Saved: ${dir}/${mod_name}.json"
     let save_cmd = "import os,sys; os.makedirs(sys.argv[1],exist_ok=True); open(os.path.join(sys.argv[1],sys.argv[2]+'.json'),'w').write(sys.stdin.read())"
     let _r = process.exec("python3", ["-c", save_cmd, dir, mod_name])
-    println(msg)
+    println("Saved: ${dir}/${mod_name}.json")
   } else {
     println(string.trim(output))
   }
