@@ -1,4 +1,4 @@
-# Rainbow FFI [ON HOLD]
+# Rainbow FFI Gate [ON HOLD]
 
 ## Thesis
 

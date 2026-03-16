@@ -365,7 +365,7 @@ effect fn raw_set_speed(motor_id: Int, speed: Float) -> Unit =
 
 ## Relationship to Other Roadmap Items
 
-- **rainbow-ffi.md**: 方向が逆。rainbow-ffi は Almide → 外 (Almide をライブラリとして公開)。native-bridge は 外 → Almide (Rust を Almide パッケージにする)。補完関係
+- **rainbow-gate.md**: 方向が逆。Rainbow FFI Gate は Almide → 外 (Almide をライブラリとして公開)。Rainbow Bridge は 外 → Almide (外部コードを Almide パッケージにする)。補完関係
 - **secure-by-design.md**: rainbow bridge パッケージは capability `native` が必要。capability 推論で自動検出される
 - **platform-target-separation.md**: `@extern(rs, ...)` は `platform: native` に相当。rainbow bridge は native platform 前提
 - **package-registry.md**: rainbow bridge パッケージの配布にはレジストリが必要。native 部分のプリビルドバイナリ配布も検討

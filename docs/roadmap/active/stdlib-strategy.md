@@ -378,5 +378,5 @@ LLM 時代の言語も収集対象に含める：
 
 - [Stdlib Architecture: 3-Layer Design](../on-hold/stdlib-architecture-3-layer-design.md) — Layer 分離の詳細設計
 - [Package Registry](../on-hold/package-registry.md) — x/ パッケージの配布基盤
-- [Rainbow FFI](../on-hold/rainbow-ffi.md) — 多言語 FFI（@extern の発展形）
+- [Rainbow FFI Gate](../on-hold/rainbow-gate.md) — 多言語 FFI（@extern の発展形）
 - [Codec Protocol & JSON](active/codec-and-json.md) — JSON の次のフォーマット対応

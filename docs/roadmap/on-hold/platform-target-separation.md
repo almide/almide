@@ -254,7 +254,7 @@ error: platform native is not compatible with target ts
 - **ts-edge-native.md**: このドキュメントが解決する問題の前提。platform 分離がないとエッジで使える API がコンパイル時に分からない。ts-edge-native の Phase 2 は本ドキュメントに移管
 - **almide-ui.md**: Almide UI は `platform: browser` に依存。platform 推論により、Almide UI を使ったコードは自動的に browser platform が要求される
 - **cross-target-semantics.md**: platform 分離により「同じコードが Rust と TS で同じ結果」の検証スコープが `platform: any` の関数に限定できる
-- **rainbow-ffi.md**: FFI は本質的に platform-specific。@extern の platform タグが FFI の基盤になる
+- **rainbow-gate.md**: Rainbow FFI Gate は本質的に platform-specific。@extern の platform タグが FFI の基盤になる
 
 ## Why ON HOLD
 

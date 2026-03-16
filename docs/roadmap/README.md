@@ -58,7 +58,7 @@
 - [LLM Immutable Sugar](on-hold/llm-immutable-sugar.md)
 - [Package Registry](on-hold/package-registry.md)
 - [Rainbow Bridge](on-hold/rainbow-bridge.md) — 外部コード (Rust/TS/Python等) を Almide パッケージとしてラップ
-- [Rainbow FFI](on-hold/rainbow-ffi.md)
+- [Rainbow FFI Gate](on-hold/rainbow-gate.md) — Almide コードを外の言語から呼べるライブラリとして出力
 - [REPL](on-hold/repl.md) — Almide Shell に統合
 - [Research: MSR Paper](on-hold/research-modification-survival-rate-paper.md)
 - [Self-Hosting](on-hold/self-hosting.md)
