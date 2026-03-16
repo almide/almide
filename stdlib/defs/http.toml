@@ -9,7 +9,7 @@ params = [
 ]
 return = "Unit"
 effect = true
-rust = "{ almide_http_serve({port}, |{f.args}| -> Result<AlmideHttpResponse, String> { Ok({ {f.body} }) })?; Ok(()) }"
+rust = "{ almide_http_serve({port}, |{f.args}| -> Result<AlmideHttpResponse, String> { Ok({ {f.body} }) })?; }"
 
 # ── Response builders ──
 
@@ -160,9 +160,9 @@ ts = "await __almd_http.get({url})"
 description = "Send a GET request and parse the response as JSON"
 example = 'let data = http.get_json("https://api.example.com/users")'
 params = [{ name = "url", type = "String" }]
-return = "Result[Json, String]"
+return = "Result[Value, String]"
 effect = true
-rust = "{ let __body = almide_http_get(&{url})?; almide_json_parse(&__body)? }"
+rust = "{ let __body = almide_http_get(&{url})?; almide_rt_json_parse(__body)? }"
 ts = "JSON.parse(await __almd_http.get({url}))"
 
 [post]
@@ -178,9 +178,9 @@ ts = "await __almd_http.post({url}, {body})"
 description = "Send a POST request and parse the response as JSON"
 example = 'let result = http.post_json(url, json.stringify(payload))'
 params = [{ name = "url", type = "String" }, { name = "body", type = "String" }]
-return = "Result[Json, String]"
+return = "Result[Value, String]"
 effect = true
-rust = "{ let __body = almide_http_post(&{url}, &{body})?; almide_json_parse(&__body)? }"
+rust = "{ let __body = almide_http_post(&{url}, &{body})?; almide_rt_json_parse(__body)? }"
 ts = "JSON.parse(await __almd_http.post({url}, {body}))"
 
 [put]

@@ -14,8 +14,7 @@
 - [UFCS External](active/ufcs-external.md) — User-defined UFCS
 
 ### Runtime & Async
-- [Structured Concurrency](active/structured-concurrency.md) — Conservative async
-- [Platform Async](active/platform-async.md) — `effect fn` = async on all targets
+- [Fan Concurrency](active/fan-concurrency.md) — `fan { }` / `fan.map` / `fan.race` — LLM最適化された並行処理（structured-concurrency + platform-async を統合）
 
 ### Compiler
 - [Borrow/Clone Gaps](active/borrow-clone-gaps.md) — 変数 clone 挿入漏れの修正（関数引数+補間、if/else 分岐）

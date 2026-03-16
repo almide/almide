@@ -1,0 +1,65 @@
+test "http.response creates plain text response" {
+  let resp = http.response(200, "Hello")
+  assert_eq(http.body(resp), "Hello")
+}
+
+test "http.json creates json response" {
+  let resp = http.json(200, "{\"ok\":true}")
+  let ct = http.get_header(resp, "Content-Type")
+  match ct {
+    some(v) => assert_eq(v, "application/json")
+    none => assert(false)
+  }
+}
+
+test "http.set_header overwrites existing header" {
+  let resp = http.response(200, "hi")
+  let updated = http.set_header(resp, "Content-Type", "text/html")
+  let ct = http.get_header(updated, "Content-Type")
+  match ct {
+    some(v) => assert_eq(v, "text/html")
+    none => assert(false)
+  }
+}
+
+test "http.set_cookie adds Set-Cookie header" {
+  let resp = http.response(200, "hi")
+  let with_cookie = http.set_cookie(resp, "session", "abc")
+  let cookie = http.get_header(with_cookie, "Set-Cookie")
+  match cookie {
+    some(v) => assert_eq(v, "session=abc")
+    none => assert(false)
+  }
+}
+
+test "http.not_found returns 404" {
+  let resp = http.not_found("Page not found")
+  assert_eq(http.body(resp), "Page not found")
+}
+
+test "http.redirect creates redirect response" {
+  let resp = http.redirect("/new-path")
+  let loc = http.get_header(resp, "Location")
+  match loc {
+    some(v) => assert_eq(v, "/new-path")
+    none => assert(false)
+  }
+}
+
+test "http.status changes status code" {
+  let resp = http.response(200, "hi")
+  let updated = http.status(resp, 201)
+  assert_eq(http.body(updated), "hi")
+}
+
+test "http.with_headers creates response with custom headers" {
+  let headers = map.new()
+    |> map.set("X-Custom", "value")
+    |> map.set("Content-Type", "text/html")
+  let resp = http.with_headers(200, "hi", headers)
+  let ct = http.get_header(resp, "Content-Type")
+  match ct {
+    some(v) => assert_eq(v, "text/html")
+    none => assert(false)
+  }
+}
