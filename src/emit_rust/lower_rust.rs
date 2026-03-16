@@ -207,6 +207,11 @@ impl<'a> LowerCtx<'a> {
         }
     }
 
+    /// Check if the current function returns Result (either effect fn or explicit Result[T, E]).
+    pub(super) fn current_fn_returns_result(&self) -> bool {
+        self.result_fns.contains(&self.current_fn)
+    }
+
     /// Check if an IR expression is a variable used only once (safe to move instead of clone).
     pub(super) fn is_single_use_var(&self, e: &IrExpr) -> bool {
         if let IrExprKind::Var { id } = &e.kind {
@@ -363,9 +368,14 @@ impl<'a> LowerCtx<'a> {
                         Expr::Return(Some(Box::new(inner)))
                     }
                     IrExprKind::ResultErr { expr } if !self.auto_try => {
-                        // In test/pure context, err becomes panic
                         let inner = self.lower_expr(expr);
-                        Expr::Raw(format!("panic!(\"{{:?}}\", {})", super::render::expr_str(&inner)))
+                        // If in a function returning Result, generate return Err(...)
+                        // Otherwise (tests, void fn), panic
+                        if self.in_effect || self.current_fn_returns_result() {
+                            Expr::Return(Some(Box::new(Expr::Err(Box::new(inner)))))
+                        } else {
+                            Expr::Raw(format!("panic!(\"{{:?}}\", {})", super::render::expr_str(&inner)))
+                        }
                     }
                     _ => Expr::Return(Some(Box::new(self.lower_expr(else_)))),
                 };
