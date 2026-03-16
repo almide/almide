@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "timestamp": "2026-03-16T04:16:17.973482+00:00",
+  "timestamp": "2026-03-16T04:28:11.298738+00:00",
   "overall": {
     "totalIssues": 111,
     "totalErrors": 0,
     "totalWarnings": 104,
-    "averageComplexity": 6.2,
+    "averageComplexity": 6.1,
     "score": 59,
     "grade": "D"
   },
@@ -177,8 +177,8 @@
       "issueCount": 6,
       "errorCount": 0,
       "warningCount": 6,
-      "maxCyclomatic": 79,
-      "maxCognitive": 71,
+      "maxCyclomatic": 43,
+      "maxCognitive": 59,
       "score": 65
     },
     {
@@ -222,8 +222,8 @@
       "issueCount": 7,
       "errorCount": 0,
       "warningCount": 7,
-      "maxCyclomatic": 78,
-      "maxCognitive": 59,
+      "maxCyclomatic": 32,
+      "maxCognitive": 38,
       "score": 55
     },
     {

@@ -1,12 +1,5 @@
-/// Shared rendering primitives for all JS-family targets.
-///
-/// Input:    TsIR Expr, Stmt, Pattern, Type, MatchArm
-/// Output:   String fragments (appended to &mut String)
-/// Owns:     expression/statement/pattern/type → string conversion
-/// Does NOT: program-level structure (render_ts/render_js/render_npm own that)
-///
-/// Every target-specific renderer calls these functions.
-/// This file must remain target-agnostic — no js_mode flags.
+// Shared rendering primitives for all JS-family targets.
+// Target-agnostic — no js_mode flags.
 
 use super::ts_ir::*;
 
@@ -20,10 +13,9 @@ pub fn json_string(s: &str) -> String {
     serde_json::to_string(s).unwrap_or_else(|_| format!("\"{}\"", s))
 }
 
-// ── Expression rendering ─────────────────────────────────────────
-
 pub fn expr(o: &mut String, e: &Expr, d: usize) {
     match e {
+        // ── Literals + Variables ──
         Expr::Int(v) => w!(o, "{}", v),
         Expr::BigInt(v) => w!(o, "{}n", v),
         Expr::Float(v) => w!(o, "{}", v),
@@ -33,13 +25,40 @@ pub fn expr(o: &mut String, e: &Expr, d: usize) {
         Expr::Undefined => o.push_str("undefined"),
         Expr::Var(n) => o.push_str(n),
 
+        // ── Operators ──
         Expr::BinOp { op, left, right } => { o.push('('); expr(o, left, d); o.push(' '); o.push_str(op); o.push(' '); expr(o, right, d); o.push(')'); }
         Expr::UnOp { op, operand } => { o.push_str(op); o.push('('); expr(o, operand, d); o.push(')'); }
 
+        // ── Calls ──
         Expr::Call { func, args } => { expr(o, func, d); o.push('('); comma_exprs(o, args, d); o.push(')'); }
         Expr::MethodCall { recv, method, args } => { expr(o, recv, d); o.push('.'); o.push_str(method); o.push('('); comma_exprs(o, args, d); o.push(')'); }
         Expr::New { class, args } => { o.push_str("new "); o.push_str(class); o.push('('); comma_exprs(o, args, d); o.push(')'); }
 
+        // ── Wrappers ──
+        Expr::Iife(inner) => { o.push_str("(() => "); expr(o, inner, d); o.push_str(")()"); }
+        Expr::Await(e) => { o.push_str("await "); expr(o, e, d); }
+        Expr::Raw(code) => o.push_str(code),
+
+        // ── Access ──
+        Expr::Field(e, f) => { expr(o, e, d); o.push('.'); o.push_str(f); }
+        Expr::Index(e, i) => { expr(o, e, d); o.push('['); expr(o, i, d); o.push(']'); }
+        Expr::TupleIdx(e, i) => { o.push('('); expr(o, e, d); w!(o, ")[{}]", i); }
+
+        // ── Control flow ──
+        Expr::Ternary { .. } | Expr::Match { .. } | Expr::Block { .. }
+        | Expr::For { .. } | Expr::ForRange { .. } | Expr::While { .. } | Expr::DoLoop { .. }
+        | Expr::Break | Expr::Continue | Expr::Return(_) | Expr::Throw(_) => render_ts_control(o, e, d),
+
+        // ── Data constructors ──
+        Expr::ResultOk(_) | Expr::ResultErr(_) | Expr::ThrowError(_) | Expr::ThrowStructuredError { .. }
+        | Expr::Array(_) | Expr::MapNew(_) | Expr::Object { .. } | Expr::ObjectWithTag { .. }
+        | Expr::Spread { .. } | Expr::Tuple(_) | Expr::RangeArray { .. }
+        | Expr::Arrow { .. } | Expr::Template { .. } => render_ts_data(o, e, d),
+    }
+}
+
+fn render_ts_control(o: &mut String, e: &Expr, d: usize) {
+    match e {
         Expr::Ternary { cond, then, else_ } => {
             o.push('('); expr(o, cond, d); o.push_str(" ? "); expr(o, then, d); o.push_str(" : "); expr(o, else_, d); o.push(')');
         }
@@ -50,8 +69,6 @@ pub fn expr(o: &mut String, e: &Expr, d: usize) {
             if let Some(t) = tail { o.push_str(&ind(d + 1)); o.push_str("return "); expr(o, t, d + 1); o.push_str(";\n"); }
             o.push_str(&ind(d)); o.push('}');
         }
-        Expr::Iife(inner) => { o.push_str("(() => "); expr(o, inner, d); o.push_str(")()"); }
-
         Expr::For { binding, iter, body } => {
             o.push_str("for (const "); o.push_str(binding); o.push_str(" of "); expr(o, iter, d); o.push_str(") {\n");
             for s in body { stmt(o, s, d + 1); }
@@ -79,7 +96,12 @@ pub fn expr(o: &mut String, e: &Expr, d: usize) {
         Expr::Continue => o.push_str("continue"),
         Expr::Return(v) => { o.push_str("return"); if let Some(e) = v { o.push(' '); expr(o, e, d); } }
         Expr::Throw(e) => { o.push_str("throw "); expr(o, e, d); }
+        _ => {}
+    }
+}
 
+fn render_ts_data(o: &mut String, e: &Expr, d: usize) {
+    match e {
         Expr::ResultOk(v) => { o.push_str("{ ok: true, value: "); expr(o, v, d); o.push_str(" }"); }
         Expr::ResultErr(e) => { o.push_str("{ ok: false, error: "); expr(o, e, d); o.push_str(" }"); }
         Expr::ThrowError(msg) => { o.push_str("__throw("); expr(o, msg, d); o.push(')'); }
@@ -87,7 +109,6 @@ pub fn expr(o: &mut String, e: &Expr, d: usize) {
             o.push_str("(() => { const __e = new Error("); expr(o, msg, d);
             o.push_str("); __e.__almd_value = "); expr(o, value, d); o.push_str("; throw __e; })()");
         }
-
         Expr::Array(elems) => { o.push('['); comma_exprs(o, elems, d); o.push(']'); }
         Expr::MapNew(pairs) => {
             o.push_str("new Map([");
@@ -116,11 +137,6 @@ pub fn expr(o: &mut String, e: &Expr, d: usize) {
                 o.push_str("Array.from({length: ("); expr(o, end, d); o.push_str(") - ("); expr(o, start, d); o.push_str(")}, (_, i) => ("); expr(o, start, d); o.push_str(") + i)");
             }
         }
-
-        Expr::Field(e, f) => { expr(o, e, d); o.push('.'); o.push_str(f); }
-        Expr::Index(e, i) => { expr(o, e, d); o.push('['); expr(o, i, d); o.push(']'); }
-        Expr::TupleIdx(e, i) => { o.push('('); expr(o, e, d); w!(o, ")[{}]", i); }
-
         Expr::Arrow { params, body } => {
             o.push_str("(("); o.push_str(&params.join(", ")); o.push_str(") => "); expr(o, body, d); o.push(')');
         }
@@ -134,12 +150,9 @@ pub fn expr(o: &mut String, e: &Expr, d: usize) {
             }
             o.push('`');
         }
-        Expr::Await(e) => { o.push_str("await "); expr(o, e, d); }
-        Expr::Raw(code) => o.push_str(code),
+        _ => {}
     }
 }
-
-// ── Statement rendering ──────────────────────────────────────────
 
 pub fn stmt(o: &mut String, s: &Stmt, d: usize) {
     let i = ind(d);
@@ -173,8 +186,6 @@ pub fn stmt(o: &mut String, s: &Stmt, d: usize) {
         }
     }
 }
-
-// ── Match rendering ──────────────────────────────────────────────
 
 fn render_match(o: &mut String, subject: &Expr, arms: &[MatchArm], has_err_arm: bool, d: usize) {
     if has_err_arm { render_match_with_err(o, subject, arms, d); }
@@ -220,21 +231,6 @@ fn render_result_err_arm(o: &mut String, inner: &Pattern, body: &Expr, d: usize)
         Pattern::Wild => { o.push_str("return "); expr(o, body, d); o.push_str("; "); }
         Pattern::Bind(name) => { w!(o, "{{ const {} = __m.error; return ", name); expr(o, body, d); o.push_str("; } "); }
         _ => { o.push_str("return "); expr(o, body, d); o.push_str("; "); }
-    }
-}
-
-fn render_err_arm_inline(o: &mut String, inner: &Pattern, body: &Expr, d: usize) {
-    match inner {
-        Pattern::Wild => { o.push_str("return "); expr(o, body, d); o.push_str("; "); }
-        Pattern::Bind(name) => { w!(o, "{{ const {} = __m.value; return ", name); expr(o, body, d); o.push_str("; } "); }
-        _ => {
-            let (cond, binds) = pattern_cond("__m.value", inner);
-            let bs: String = binds.iter().map(|(n, v)| format!("const {} = {};", n, v)).collect::<Vec<_>>().join(" ");
-            if cond == "true" {
-                if bs.is_empty() { o.push_str("return "); expr(o, body, d); o.push_str("; "); }
-                else { w!(o, "{{ {} return ", bs); expr(o, body, d); o.push_str("; } "); }
-            } else { w!(o, "if ({}) {{ {} return ", cond, bs); expr(o, body, d); o.push_str("; } "); }
-        }
     }
 }
 
@@ -293,8 +289,6 @@ pub fn is_unconditional(pat: &Pattern) -> bool {
         || matches!(pat, Pattern::Ok(inner) if is_unconditional(inner))
 }
 
-// ── Type rendering ───────────────────────────────────────────────
-
 pub fn ty(o: &mut String, t: &Type) {
     match t {
         Type::Number => o.push_str("number"),
@@ -314,8 +308,6 @@ pub fn ty(o: &mut String, t: &Type) {
     }
 }
 
-// ── Shared utilities ─────────────────────────────────────────────
-
 pub fn comma_exprs(o: &mut String, exprs: &[Expr], d: usize) {
     for (i, e) in exprs.iter().enumerate() { if i > 0 { o.push_str(", "); } expr(o, e, d); }
 }
@@ -323,8 +315,6 @@ pub fn comma_exprs(o: &mut String, exprs: &[Expr], d: usize) {
 pub fn render_obj_fields(o: &mut String, fields: &[(String, Expr)], d: usize) {
     for (i, (n, v)) in fields.iter().enumerate() { if i > 0 { o.push_str(", "); } o.push_str(n); o.push_str(": "); expr(o, v, d); }
 }
-
-// ── Shared top-level helpers ─────────────────────────────────────
 
 pub fn function(o: &mut String, f: &Function, d: usize, with_types: bool) {
     let i = ind(d);
