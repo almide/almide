@@ -525,7 +525,7 @@ impl<'a> LowerCtx<'a> {
     fn lower_stdlib_call(&self, module: &str, func: &str, rust_args: Vec<Expr>, ir_args: &[IrExpr], e: &IrExpr) -> Expr {
         let key = format!("{}.{}", module, func);
         // Use generated TOML templates for core stdlib modules
-        let use_template = matches!(module, "list" | "string" | "map" | "int" | "float" | "math" | "result" | "option");
+        let use_template = matches!(module, "list" | "string" | "map" | "int" | "float" | "math" | "result" | "option" | "json");
         let expr = if use_template {
             let args_str: Vec<String> = rust_args.iter().map(|a| super::render::expr_str(a)).collect();
             let inline_lambda = |param_idx: usize, arity: usize| -> (Vec<String>, String) {
