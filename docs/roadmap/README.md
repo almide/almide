@@ -67,7 +67,7 @@
 
 ~~Phase 0~~ ✅ | ~~Phase A~~ ✅ | ~~Phase B~~ ✅
 
-- [2026 Ergonomics](2026-ergonomics.md)
+- [2026 Ergonomics](done/2026-ergonomics.md) — do block 純粋化, unwrap_or, json.parse auto-?
 - [Architecture Hardening](done/architecture-hardening.md)
 - [Borrow Inference](done/borrow-inference-design.md)
 - [CLI Tool Authoring](done/cli-tool-authoring.md)
