@@ -1,25 +1,20 @@
 type Dog = { name: String, breed: String }
 type Person = { name: String, age: Int, email: String }
+type City = { name: String, population: Int, country: String }
 
 fn describe[T: { name: String, .. }](x: T) -> String = "name: ${x.name}"
+fn names[T: { name: String, .. }](xs: List[T]) -> List[String] = list.map(xs, (x) => x.name)
 
-fn set_name[T: { name: String, .. }](x: T, n: String) -> T = { ...x, name: n }
-
-fn names[T: { name: String, .. }](xs: List[T]) -> List[String] =
-  list.map(xs, (x) => x.name)
-
-test "describe dog" {
-  assert_eq(describe(Dog { name: "Rex", breed: "Lab" }), "name: Rex")
-}
-test "describe person" {
-  assert_eq(describe(Person { name: "Alice", age: 30, email: "a@b" }), "name: Alice")
-}
-test "set_name dog" {
-  let d = set_name(Dog { name: "Rex", breed: "Lab" }, "Max")
-  assert_eq(d.name, "Max")
-  assert_eq(d.breed, "Lab")
-}
+test "describe dog" { assert_eq(describe(Dog { name: "Rex", breed: "Lab" }), "name: Rex") }
+test "describe person" { assert_eq(describe(Person { name: "Alice", age: 30, email: "a@b" }), "name: Alice") }
+test "describe city" { assert_eq(describe(City { name: "Tokyo", population: 14000000, country: "Japan" }), "name: Tokyo") }
 test "names from dogs" {
-  let dogs = [Dog { name: "Rex", breed: "Lab" }, Dog { name: "Fido", breed: "Poodle" }]
-  assert_eq(names(dogs), ["Rex", "Fido"])
+  assert_eq(names([Dog { name: "Rex", breed: "Lab" }, Dog { name: "Fido", breed: "Poodle" }]), ["Rex", "Fido"])
+}
+test "names from cities" {
+  assert_eq(names([City { name: "Tokyo", population: 14000000, country: "Japan" }, City { name: "Paris", population: 2100000, country: "France" }]), ["Tokyo", "Paris"])
+}
+test "describe then describe different types" {
+  assert_eq(describe(Dog { name: "Rex", breed: "Lab" }), "name: Rex")
+  assert_eq(describe(Person { name: "Alice", age: 30, email: "a@b" }), "name: Alice")
 }

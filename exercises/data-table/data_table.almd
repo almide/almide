@@ -1,0 +1,25 @@
+type Row = { id: Int, name: String, value: Int }
+
+fn pluck_ids[T: { id: Int, .. }](xs: List[T]) -> List[Int] = list.map(xs, (x) => x.id)
+
+fn find_by_id[T: { id: Int, .. }](xs: List[T], target: Int) -> Option[T] =
+  list.find(xs, (x) => x.id == target)
+
+let TABLE = [
+  Row { id: 1, name: "alpha", value: 10 },
+  Row { id: 2, name: "beta", value: 20 },
+  Row { id: 3, name: "gamma", value: 30 },
+]
+
+test "pluck ids" { assert_eq(pluck_ids(TABLE), [1, 2, 3]) }
+test "find by id found" {
+  match find_by_id(TABLE, 2) {
+    some(r) => assert_eq(r.name, "beta")
+    none => assert(false)
+  }
+}
+test "find by id not found" { assert_eq(find_by_id(TABLE, 99), none) }
+test "filter then pluck" {
+  let big = TABLE |> list.filter((r) => r.value > 15) |> pluck_ids
+  assert_eq(big, [2, 3])
+}
