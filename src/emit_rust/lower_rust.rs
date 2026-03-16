@@ -223,57 +223,93 @@ impl<'a> LowerCtx<'a> {
 
     /// Find variable names in a pattern that are bound to Box fields (recursive variants).
     pub(super) fn find_boxed_bindings(&self, pat: &IrPattern) -> Vec<String> {
-        let mut result = Vec::new();
         match pat {
-            IrPattern::Constructor { name, args } => {
-                let enum_name = self.ctors.get(name).cloned().unwrap_or_default();
-                if let Some(td) = self.type_decls.iter().find(|td| td.name == enum_name) {
-                    if let almide::ir::IrTypeDeclKind::Variant { cases, .. } = &td.kind {
-                        if let Some(case) = cases.iter().find(|c| c.name == *name) {
-                            let fields = match &case.kind {
-                                almide::ir::IrVariantKind::Tuple { fields } => fields.clone(),
-                                almide::ir::IrVariantKind::Record { fields } => fields.iter().map(|f| f.ty.clone()).collect(),
-                                almide::ir::IrVariantKind::Unit => vec![],
-                            };
-                            for (i, arg) in args.iter().enumerate() {
-                                if let Some(field_ty) = fields.get(i) {
-                                    if ty_contains_name(field_ty, &enum_name) {
-                                        if let IrPattern::Bind { var } = arg {
-                                            result.push(self.vt.get(*var).name.clone());
-                                        }
-                                    }
-                                }
-                            }
-                        }
+            IrPattern::Constructor { name, args } => self.boxed_bindings_ctor(name, args),
+            IrPattern::RecordPattern { name, fields, .. } => self.boxed_bindings_record(name, fields),
+            _ => vec![],
+        }
+    }
+
+    fn find_variant_case<'b>(&self, ctor_name: &str) -> Option<&'b almide::ir::IrVariantDecl>
+    where 'a: 'b {
+        let enum_name = self.ctors.get(ctor_name)?;
+        let td = self.type_decls.iter().find(|td| td.name == *enum_name)?;
+        let cases = match &td.kind {
+            almide::ir::IrTypeDeclKind::Variant { cases, .. } => cases,
+            _ => return None,
+        };
+        cases.iter().find(|c| c.name == ctor_name)
+    }
+
+    fn boxed_bindings_ctor(&self, name: &str, args: &[IrPattern]) -> Vec<String> {
+        let enum_name = self.ctors.get(name).cloned().unwrap_or_default();
+        let case = match self.find_variant_case(name) {
+            Some(c) => c,
+            None => return vec![],
+        };
+        let field_tys: Vec<Ty> = match &case.kind {
+            almide::ir::IrVariantKind::Tuple { fields } => fields.clone(),
+            almide::ir::IrVariantKind::Record { fields } => fields.iter().map(|f| f.ty.clone()).collect(),
+            almide::ir::IrVariantKind::Unit => vec![],
+        };
+        let mut result = Vec::new();
+        for (i, arg) in args.iter().enumerate() {
+            if let Some(field_ty) = field_tys.get(i) {
+                if ty_contains_name(field_ty, &enum_name) {
+                    if let IrPattern::Bind { var } = arg {
+                        result.push(self.vt.get(*var).name.clone());
                     }
                 }
             }
-            IrPattern::RecordPattern { name, fields, .. } => {
-                let enum_name = self.ctors.get(name).cloned().unwrap_or_default();
-                if let Some(td) = self.type_decls.iter().find(|td| td.name == enum_name) {
-                    if let almide::ir::IrTypeDeclKind::Variant { cases, .. } = &td.kind {
-                        if let Some(case) = cases.iter().find(|c| c.name == *name) {
-                            if let almide::ir::IrVariantKind::Record { fields: field_decls } = &case.kind {
-                                for fp in fields {
-                                    if let Some(fd) = field_decls.iter().find(|fd| fd.name == fp.name) {
-                                        if ty_contains_name(&fd.ty, &enum_name) {
-                                            if let Some(IrPattern::Bind { var }) = fp.pattern.as_ref() {
-                                                result.push(self.vt.get(*var).name.clone());
-                                            } else {
-                                                // Field name is implicitly the binding
-                                                result.push(fp.name.clone());
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            _ => {}
         }
         result
+    }
+
+    fn boxed_bindings_record(&self, name: &str, fields: &[almide::ir::IrFieldPattern]) -> Vec<String> {
+        let enum_name = self.ctors.get(name).cloned().unwrap_or_default();
+        let case = match self.find_variant_case(name) {
+            Some(c) => c,
+            None => return vec![],
+        };
+        let field_decls = match &case.kind {
+            almide::ir::IrVariantKind::Record { fields } => fields,
+            _ => return vec![],
+        };
+        let mut result = Vec::new();
+        for fp in fields {
+            let fd = match field_decls.iter().find(|fd| fd.name == fp.name) {
+                Some(fd) => fd,
+                None => continue,
+            };
+            if !ty_contains_name(&fd.ty, &enum_name) { continue; }
+            if let Some(IrPattern::Bind { var }) = fp.pattern.as_ref() {
+                result.push(self.vt.get(*var).name.clone());
+            } else {
+                result.push(fp.name.clone());
+            }
+        }
+        result
+    }
+
+    /// Determine if a let binding needs an explicit type annotation for Rust type inference.
+    fn compute_bind_type_annotation(&self, var_ty: &Ty, value: &IrExpr) -> Option<Type> {
+        let is_map_new = matches!(&value.kind, IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. }
+            if module == "map" && func == "new" && args.is_empty());
+        let is_generic_variant = matches!(&value.kind, IrExprKind::Call { args, .. } if args.is_empty())
+            && (matches!(&value.ty, Ty::Named(_, args) if !args.is_empty())
+                || matches!(var_ty, Ty::Named(_, args) if !args.is_empty()));
+        let needs_ty = matches!(&value.kind, IrExprKind::List { elements } if elements.is_empty())
+            || matches!(&value.kind, IrExprKind::EmptyMap | IrExprKind::OptionNone | IrExprKind::OptionSome { .. })
+            || is_map_new || is_generic_variant
+            || (matches!(&value.kind, IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. })
+                && matches!(&value.ty, Ty::Result(_, _)))
+            || matches!(var_ty, Ty::Named(_, args) if !args.is_empty());
+        if !needs_ty { return None; }
+        let bind_ty = if var_ty.contains_unknown() { &value.ty } else { var_ty };
+        if bind_ty.contains_unknown() || contains_typevar(bind_ty) || matches!(bind_ty, Ty::Fn { .. }) {
+            return None;
+        }
+        Some(self.lty(bind_ty))
     }
 
     fn lower_fn(&self, f: &IrFunction) -> Function {
@@ -355,39 +391,14 @@ impl<'a> LowerCtx<'a> {
                 let name = crate::emit_common::sanitize(&self.vt.get(*var).name);
                 let var_ty = &self.vt.get(*var).ty;
                 let val = self.lower_expr(value);
-                // 型注釈が必要なケース: Rust の型推論が足りない場合
-                let is_map_new = matches!(&value.kind, IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. }
-                    if module == "map" && func == "new" && args.is_empty());
-                let is_generic_variant = matches!(&value.kind, IrExprKind::Call { args, .. } if args.is_empty())
-                    && (matches!(&value.ty, Ty::Named(_, args) if !args.is_empty())
-                        || matches!(var_ty, Ty::Named(_, args) if !args.is_empty()));
-                let needs_ty = matches!(&value.kind, IrExprKind::List { elements } if elements.is_empty())
-                    || matches!(&value.kind, IrExprKind::EmptyMap | IrExprKind::OptionNone | IrExprKind::OptionSome { .. })
-                    || is_map_new || is_generic_variant
-                    || (matches!(&value.kind, IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. })
-                        && matches!(&value.ty, Ty::Result(_, _)))
-                    // Named 型の値で型引数がある場合（generic enum/struct）
-                    || matches!(var_ty, Ty::Named(_, args) if !args.is_empty());
-                let bind_ty = if var_ty.contains_unknown() { &value.ty } else { var_ty };
-                let has_unresolved = bind_ty.contains_unknown() || contains_typevar(bind_ty);
-                let is_fn_ty = matches!(bind_ty, Ty::Fn { .. });
-                let ty_ann = if needs_ty && !has_unresolved && !is_fn_ty { Some(self.lty(bind_ty)) } else { None };
+                let ty_ann = self.compute_bind_type_annotation(var_ty, value);
                 Stmt::Let { name, ty: ty_ann, mutable: matches!(mutability, Mutability::Var), value: val }
             }
             IrStmtKind::BindDestructure { pattern, value } => {
                 let mut pat = self.lower_pat(pattern);
-                // Fill empty struct name from value type for record destructuring
                 if let Pattern::Struct { name, .. } = &mut pat {
                     if name.is_empty() {
-                        if let Ty::Named(n, _) = &value.ty {
-                            *name = n.clone();
-                        } else if let Ty::Record { fields } = &value.ty {
-                            let mut fnames: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
-                            fnames.sort();
-                            *name = self.anon.get(&fnames).cloned()
-                                .or_else(|| self.named.get(&fnames).cloned())
-                                .unwrap_or_else(|| "AnonRecord".into());
-                        }
+                        *name = self.resolve_record_name(&value.ty);
                     }
                 }
                 Stmt::LetPattern { pattern: pat, value: self.lower_expr(value) }

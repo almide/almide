@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "timestamp": "2026-03-16T03:45:47.692799+00:00",
+  "timestamp": "2026-03-16T03:49:57.640806+00:00",
   "overall": {
-    "totalIssues": 161,
+    "totalIssues": 146,
     "totalErrors": 0,
-    "totalWarnings": 121,
+    "totalWarnings": 118,
     "averageComplexity": 6.3,
     "score": 55,
     "grade": "D"
@@ -138,12 +138,12 @@
     },
     {
       "file": "emit_rust/lower_rust.rs",
-      "issueCount": 16,
+      "issueCount": 1,
       "errorCount": 0,
-      "warningCount": 4,
-      "maxCyclomatic": 41,
-      "maxCognitive": 99,
-      "score": 43
+      "warningCount": 1,
+      "maxCyclomatic": 27,
+      "maxCognitive": 27,
+      "score": 55
     },
     {
       "file": "emit_rust/lower_rust_expr.rs",
