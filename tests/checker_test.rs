@@ -681,6 +681,24 @@ fn effect_isolation_fan_in_effect_fn() {
 }
 
 #[test]
+fn effect_isolation_fan_var_capture_rejected() {
+    let errs = errors(
+        "effect fn a() -> Result[Int, String] = ok(1)\neffect fn f() -> Result[Unit, String] = {\n  var x = 0\n  let _ = fan { a(); a() }\n  ok(())\n}"
+    );
+    // No error — var x is not captured inside fan
+    assert!(errs.is_empty(), "var not captured should be fine, got: {:?}", errs);
+}
+
+#[test]
+fn effect_isolation_fan_var_capture_error() {
+    let errs = errors(
+        "effect fn a(n: Int) -> Result[Int, String] = ok(n)\neffect fn f() -> Result[Unit, String] = {\n  var x = 0\n  let _ = fan { a(x); a(x) }\n  ok(())\n}"
+    );
+    assert!(!errs.is_empty(), "capturing var in fan should error");
+    assert!(errs[0].contains("mutable") || errs[0].contains("var"), "error should mention mutable/var, got: {}", errs[0]);
+}
+
+#[test]
 fn effect_isolation_stdlib_effect_fn() {
     let errs = errors(
         "fn f(path: String) -> String = fs.read_text(path)"

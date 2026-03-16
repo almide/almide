@@ -380,10 +380,74 @@ impl Checker {
                         };
                         return Some(InferTy::Concrete(result_ty));
                     }
+                    "any" => {
+                        // fan.any(thunks) -> T — first success, all fail = error
+                        if arg_tys.len() != 1 {
+                            self.diagnostics.push(super::err(
+                                format!("fan.any() expects 1 argument but got {}", arg_tys.len()),
+                                "Usage: fan.any([() => a, () => b])",
+                                "call to fan.any()".to_string()));
+                            return Some(InferTy::Concrete(Ty::Unknown));
+                        }
+                        let list_ty = arg_tys[0].to_ty(&self.solutions);
+                        let result_ty = match &list_ty {
+                            Ty::List(inner) => match inner.as_ref() {
+                                Ty::Fn { ret, .. } => match ret.as_ref() {
+                                    Ty::Result(ok, _) => *ok.clone(),
+                                    other => other.clone(),
+                                },
+                                _ => Ty::Unknown,
+                            },
+                            _ => Ty::Unknown,
+                        };
+                        return Some(InferTy::Concrete(result_ty));
+                    }
+                    "settle" => {
+                        // fan.settle(thunks) -> List[Result[T, String]]
+                        if arg_tys.len() != 1 {
+                            self.diagnostics.push(super::err(
+                                format!("fan.settle() expects 1 argument but got {}", arg_tys.len()),
+                                "Usage: fan.settle([() => a, () => b])",
+                                "call to fan.settle()".to_string()));
+                            return Some(InferTy::Concrete(Ty::Unknown));
+                        }
+                        let list_ty = arg_tys[0].to_ty(&self.solutions);
+                        let inner_result = match &list_ty {
+                            Ty::List(inner) => match inner.as_ref() {
+                                Ty::Fn { ret, .. } => match ret.as_ref() {
+                                    Ty::Result(ok, err) => Ty::Result(ok.clone(), err.clone()),
+                                    other => Ty::Result(Box::new(other.clone()), Box::new(Ty::String)),
+                                },
+                                _ => Ty::Unknown,
+                            },
+                            _ => Ty::Unknown,
+                        };
+                        return Some(InferTy::Concrete(Ty::List(Box::new(inner_result))));
+                    }
+                    "timeout" => {
+                        // fan.timeout(ms, thunk) -> T
+                        if arg_tys.len() != 2 {
+                            self.diagnostics.push(super::err(
+                                format!("fan.timeout() expects 2 arguments but got {}", arg_tys.len()),
+                                "Usage: fan.timeout(5000, () => expr)",
+                                "call to fan.timeout()".to_string()));
+                            return Some(InferTy::Concrete(Ty::Unknown));
+                        }
+                        self.constrain(InferTy::Concrete(Ty::Int), arg_tys[0].clone(), "fan.timeout ms");
+                        let fn_ty = arg_tys[1].to_ty(&self.solutions);
+                        let result_ty = match &fn_ty {
+                            Ty::Fn { ret, .. } => match ret.as_ref() {
+                                Ty::Result(ok, _) => *ok.clone(),
+                                other => other.clone(),
+                            },
+                            _ => Ty::Unknown,
+                        };
+                        return Some(InferTy::Concrete(Ty::Result(Box::new(result_ty), Box::new(Ty::String))));
+                    }
                     _ => {
                         self.diagnostics.push(super::err(
                             format!("unknown function 'fan.{}'", field),
-                            "Available: fan.map, fan.race",
+                            "Available: fan.map, fan.race, fan.any, fan.settle, fan.timeout",
                             format!("call to fan.{}()", field)));
                         return Some(InferTy::Concrete(Ty::Unknown));
                     }

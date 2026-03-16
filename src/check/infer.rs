@@ -208,6 +208,19 @@ impl Checker {
                         "Mark the enclosing function as `effect fn`",
                         "fan block".to_string()));
                 }
+                // Check for mutable variable capture
+                for e in exprs.iter() {
+                    let mut idents = Vec::new();
+                    collect_idents(e, &mut idents);
+                    for name in &idents {
+                        if self.env.mutable_vars.contains(name) {
+                            self.diagnostics.push(super::err(
+                                format!("cannot capture mutable variable '{}' inside fan block", name),
+                                "Use a `let` binding instead of `var` for values shared across fan expressions",
+                                "fan block".to_string()));
+                        }
+                    }
+                }
                 let tys: Vec<InferTy> = exprs.iter_mut().map(|e| {
                     let ty = self.infer_expr(e);
                     // Auto-unwrap Result: fan unwraps Result<T, E> to T
@@ -512,5 +525,38 @@ impl Checker {
             ast::Pattern::Err { inner } => { let it = match ty { Ty::Result(_, e) => *e.clone(), _ => Ty::Unknown }; self.bind_pattern(inner, &it); }
             ast::Pattern::None | ast::Pattern::Literal { .. } => {}
         }
+    }
+}
+
+/// Collect all Ident names referenced in an expression (shallow, for var capture check).
+fn collect_idents(expr: &ast::Expr, out: &mut Vec<String>) {
+    match expr {
+        ast::Expr::Ident { name, .. } => out.push(name.clone()),
+        ast::Expr::Call { callee, args, .. } => {
+            collect_idents(callee, out);
+            for a in args { collect_idents(a, out); }
+        }
+        ast::Expr::Member { object, .. } | ast::Expr::TupleIndex { object, .. }
+        | ast::Expr::IndexAccess { object, .. } => collect_idents(object, out),
+        ast::Expr::Binary { left, right, .. } | ast::Expr::Pipe { left, right, .. } => {
+            collect_idents(left, out); collect_idents(right, out);
+        }
+        ast::Expr::Unary { operand, .. } | ast::Expr::Paren { expr: operand, .. }
+        | ast::Expr::Some { expr: operand, .. } | ast::Expr::Ok { expr: operand, .. }
+        | ast::Expr::Err { expr: operand, .. } | ast::Expr::Try { expr: operand, .. } => {
+            collect_idents(operand, out);
+        }
+        ast::Expr::If { cond, then, else_, .. } => {
+            collect_idents(cond, out); collect_idents(then, out); collect_idents(else_, out);
+        }
+        ast::Expr::List { elements, .. } | ast::Expr::Tuple { elements, .. } => {
+            for e in elements { collect_idents(e, out); }
+        }
+        ast::Expr::Lambda { body, .. } => collect_idents(body, out),
+        ast::Expr::InterpolatedString { parts, .. } => {
+            for p in parts { if let ast::StringPart::Expr { expr } = p { collect_idents(expr, out); } }
+        }
+        ast::Expr::Record { fields, .. } => { for f in fields { collect_idents(&f.value, out); } }
+        _ => {} // literals, none, unit, etc.
     }
 }

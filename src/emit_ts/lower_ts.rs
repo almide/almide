@@ -356,6 +356,59 @@ impl<'a> LowerCtx<'a> {
                                 }],
                             }))
                         }
+                        "any" => {
+                            // fan.any(thunks) → await Promise.any(thunks.map(f => f()))
+                            Expr::Await(Box::new(Expr::Call {
+                                func: Box::new(Expr::Raw("Promise.any".into())),
+                                args: vec![Expr::MethodCall {
+                                    recv: Box::new(a[0].clone()),
+                                    method: "map".into(),
+                                    args: vec![Expr::Arrow {
+                                        params: vec!["__f".into()],
+                                        body: Box::new(Expr::Call { func: Box::new(Expr::Var("__f".into())), args: vec![] }),
+                                    }],
+                                }],
+                            }))
+                        }
+                        "settle" => {
+                            // fan.settle(thunks) → await Promise.allSettled(thunks.map(f => f()))
+                            Expr::Await(Box::new(Expr::Call {
+                                func: Box::new(Expr::Raw("Promise.allSettled".into())),
+                                args: vec![Expr::MethodCall {
+                                    recv: Box::new(a[0].clone()),
+                                    method: "map".into(),
+                                    args: vec![Expr::Arrow {
+                                        params: vec!["__f".into()],
+                                        body: Box::new(Expr::Call { func: Box::new(Expr::Var("__f".into())), args: vec![] }),
+                                    }],
+                                }],
+                            }))
+                        }
+                        "timeout" => {
+                            // fan.timeout(ms, thunk) → await Promise.race([thunk(), new Promise((_, reject) => setTimeout(() => reject("timeout"), ms))])
+                            Expr::Await(Box::new(Expr::Call {
+                                func: Box::new(Expr::Raw("Promise.race".into())),
+                                args: vec![Expr::Array(vec![
+                                    Expr::Call { func: Box::new(a[1].clone()), args: vec![] },
+                                    Expr::Call {
+                                        func: Box::new(Expr::Raw("new Promise".into())),
+                                        args: vec![Expr::Arrow {
+                                            params: vec!["_".into(), "__rej".into()],
+                                            body: Box::new(Expr::Call {
+                                                func: Box::new(Expr::Var("setTimeout".into())),
+                                                args: vec![
+                                                    Expr::Arrow { params: vec![], body: Box::new(Expr::Call {
+                                                        func: Box::new(Expr::Var("__rej".into())),
+                                                        args: vec![Expr::Raw("new Error(\"fan.timeout: timed out\")".into())],
+                                                    })},
+                                                    a[0].clone(),
+                                                ],
+                                            }),
+                                        }],
+                                    },
+                                ])],
+                            }))
+                        }
                         _ => Expr::Raw(format!("/* unknown fan.{} */", func)),
                     };
                 }

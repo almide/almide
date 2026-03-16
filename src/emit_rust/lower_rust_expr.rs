@@ -269,6 +269,84 @@ impl<'a> LowerCtx<'a> {
                     }})"
                 ))
             }
+            "any" => {
+                // fan.any(thunks) → spawn all, collect results, return first Ok
+                let thunks = super::render::expr_str(&self.lower_expr(&ir_args[0]));
+                if self.auto_try {
+                    Expr::Raw(format!(
+                        "std::thread::scope(|__s| -> Result<_, String> {{ \
+                        let (__fan_tx, __fan_rx) = std::sync::mpsc::channel(); \
+                        for __fan_thunk in {thunks} {{ \
+                            let __tx = __fan_tx.clone(); \
+                            __s.spawn(move || {{ let _ = __tx.send(__fan_thunk()); }}); \
+                        }} \
+                        drop(__fan_tx); \
+                        let mut __fan_last_err = String::new(); \
+                        for __r in __fan_rx {{ \
+                            match __r {{ Ok(__v) => return Ok(__v), Err(__e) => __fan_last_err = __e }} \
+                        }} \
+                        Err(__fan_last_err) \
+                        }})?"
+                    ))
+                } else {
+                    Expr::Raw(format!(
+                        "std::thread::scope(|__s| {{ \
+                        let (__fan_tx, __fan_rx) = std::sync::mpsc::channel(); \
+                        for __fan_thunk in {thunks} {{ \
+                            let __tx = __fan_tx.clone(); \
+                            __s.spawn(move || {{ let _ = __tx.send(__fan_thunk()); }}); \
+                        }} \
+                        drop(__fan_tx); \
+                        let mut __fan_last_err = String::new(); \
+                        for __r in __fan_rx {{ \
+                            match __r {{ Ok(__v) => return __v, Err(__e) => __fan_last_err = __e }} \
+                        }} \
+                        panic!(\"fan.any: all thunks failed: {{}}\", __fan_last_err) \
+                        }})"
+                    ))
+                }
+            }
+            "settle" => {
+                // fan.settle(thunks) → spawn all, collect ALL results (ok or err)
+                let thunks = super::render::expr_str(&self.lower_expr(&ir_args[0]));
+                Expr::Raw(format!(
+                    "std::thread::scope(|__s| {{ \
+                    let __fan_handles: Vec<_> = ({thunks}).into_iter().map(|__fan_thunk| __s.spawn(move || __fan_thunk())).collect(); \
+                    __fan_handles.into_iter().map(|__h| __h.join().unwrap()).collect::<Vec<_>>() \
+                    }})"
+                ))
+            }
+            "timeout" => {
+                // fan.timeout(ms, thunk) → spawn with deadline
+                let ms = super::render::expr_str(&self.lower_expr(&ir_args[0]));
+                let thunk = super::render::expr_str(&self.lower_expr(&ir_args[1]));
+                if self.auto_try {
+                    Expr::Raw(format!(
+                        "std::thread::scope(|__s| -> Result<_, String> {{ \
+                        let __h = __s.spawn(move || ({thunk})()); \
+                        let __deadline = std::time::Instant::now() + std::time::Duration::from_millis({ms} as u64); \
+                        loop {{ \
+                            if __h.is_finished() {{ return Ok(__h.join().unwrap()?); }} \
+                            if std::time::Instant::now() >= __deadline {{ return Err(\"fan.timeout: timed out\".to_string()); }} \
+                            std::thread::sleep(std::time::Duration::from_millis(1)); \
+                        }} \
+                        }})?"
+                    ))
+                } else {
+                    // fan.timeout always returns Result — timeout is a structural failure
+                    Expr::Raw(format!(
+                        "std::thread::scope(|__s| -> Result<_, String> {{ \
+                        let __h = __s.spawn(move || ({thunk})()); \
+                        let __deadline = std::time::Instant::now() + std::time::Duration::from_millis({ms} as u64); \
+                        loop {{ \
+                            if __h.is_finished() {{ return Ok(__h.join().unwrap()?); }} \
+                            if std::time::Instant::now() >= __deadline {{ return Err(\"fan.timeout: timed out\".to_string()); }} \
+                            std::thread::sleep(std::time::Duration::from_millis(1)); \
+                        }} \
+                        }})"
+                    ))
+                }
+            }
             _ => Expr::Raw(format!("/* unknown fan.{} */", func)),
         }
     }
