@@ -59,6 +59,15 @@ Fix: `is_result_expr` から `Try` を除外。
 | Member access | lower_rust_expr.rs:268-273 | `!is_copy && !is_single_use_var` |
 | String interp | lower_rust_expr.rs:289-305 | Var 参照ルールに委譲 |
 
+### Case 5: Default args の式に型が付かない（ICE, OPEN）
+
+```almide
+fn greet(name: String, prefix: String = "Hello") -> String =
+  "${prefix}, ${name}!"
+```
+
+`[ICE] lower: missing type for expr id=NNN` が出る。テスト自体は pass するが、checker が default 値の式に ExprId → Ty マッピングを生成していない。
+
 ## Fix Strategy
 
 根本修正: Var 参照の clone 判定を保守的にする。
