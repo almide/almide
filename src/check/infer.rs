@@ -201,6 +201,28 @@ impl Checker {
                 ty
             }
 
+            ast::Expr::Fan { exprs, .. } => {
+                if !self.env.in_effect {
+                    self.diagnostics.push(super::err(
+                        "fan block can only be used inside an effect fn".to_string(),
+                        "Mark the enclosing function as `effect fn`",
+                        "fan block".to_string()));
+                }
+                let tys: Vec<InferTy> = exprs.iter_mut().map(|e| {
+                    let ty = self.infer_expr(e);
+                    // Auto-unwrap Result: fan unwraps Result<T, E> to T
+                    let concrete = ty.to_ty(&self.solutions);
+                    match &concrete {
+                        Ty::Result(ok, _) => InferTy::from_ty(ok),
+                        _ => ty,
+                    }
+                }).collect();
+                match tys.len() {
+                    1 => tys.into_iter().next().unwrap(),
+                    _ => InferTy::Concrete(Ty::Tuple(tys.iter().map(|t| t.to_ty(&self.solutions)).collect())),
+                }
+            }
+
             ast::Expr::Call { callee, args, named_args, type_args, .. } => {
                 self.infer_call(callee, args, named_args, type_args)
             }

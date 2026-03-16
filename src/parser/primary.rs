@@ -118,6 +118,10 @@ impl Parser {
             self.advance();
             return self.parse_do_block();
         }
+        if self.check(TokenType::Fan) {
+            self.advance();
+            return self.parse_fan_block();
+        }
         if self.check(TokenType::LBrace) {
             return self.parse_brace_expr();
         }

@@ -64,7 +64,8 @@ fn count_uses_in_expr(expr: &IrExpr, table: &mut VarTable) {
             }
             for a in args { count_uses_in_expr(a, table); }
         }
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements }
+        | IrExprKind::Fan { exprs: elements } => {
             for e in elements { count_uses_in_expr(e, table); }
         }
         IrExprKind::Record { fields, .. } => {

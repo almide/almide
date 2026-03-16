@@ -131,6 +131,30 @@ impl Parser {
         Ok(LambdaParam { name, tuple_names: None, ty })
     }
 
+    pub(crate) fn parse_fan_block(&mut self) -> Result<Expr, String> {
+        let span = Some(self.current_span());
+        let open = self.current().clone();
+        self.expect(TokenType::LBrace)?;
+        let mut exprs = Vec::new();
+        self.skip_newlines();
+        while !self.check(TokenType::RBrace) && !self.check(TokenType::EOF) {
+            let expr = self.parse_expr()?;
+            exprs.push(expr);
+            self.skip_newlines();
+            if self.check(TokenType::Semicolon) {
+                self.advance();
+                self.skip_newlines();
+            }
+        }
+        self.expect_closing(TokenType::RBrace, open.line, open.col, "fan block")?;
+        if exprs.is_empty() {
+            return Err(format!("fan block must contain at least one expression at line {}:{}", open.line, open.col));
+        }
+        Ok(Expr::Fan {
+            exprs, id: self.next_id(), span, resolved_type: None,
+        })
+    }
+
     pub(crate) fn parse_do_block(&mut self) -> Result<Expr, String> {
         let span = Some(self.current_span());
         let open = self.current().clone();

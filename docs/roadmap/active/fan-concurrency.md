@@ -552,60 +552,44 @@ fan 内から親スコープの `var` は変更不可。`let` の読み取りの
 
 ## 12. 実装フェーズ
 
-### Phase 0: 非同期基盤
+### Phase 0: `fan { }` 基盤 — sync/thread backend
 
-現在の同期 `effect fn` → 真の async に移行。**ユーザーコードの変更なし。**
-
-**Rust codegen**:
-- [ ] `almide_block_on` → `tokio::runtime` に置換
-- [ ] 生成 `Cargo.toml` に tokio / reqwest / futures 依存追加
-- [ ] `effect fn` → Rust `async fn` codegen
-- [ ] effect fn 呼び出しに `.await` 自動挿入
-- [ ] `main` → `#[tokio::main] async fn main()`
-- [ ] WASM ターゲットでは tokio を使わない分岐
-
-**TS codegen**:
-- [ ] `effect fn` → `async function`
-- [ ] effect fn 呼び出しに `await` 自動挿入
-
-**HTTP 移行**:
-- [ ] Rust HTTP client: `std::net` → `reqwest`（async）
-- [ ] `http.serve`: 内部で `tokio::spawn` per request
-
-**テスト**:
-- [ ] `spec/lang/async_test.almd`: effect fn の宣言と呼び出し
-- [ ] effect fn + do ブロックでのエラー伝播
-- [ ] `almide test` が両ターゲットで通ること
-
-### Phase 1: `fan { }`
+**設計方針変更**: tokio 非依存。`effect fn` は同期のまま。`fan` は `std::thread::scope` で並行化。
 
 **パーサー**:
-- [ ] `fan` を予約語に追加
-- [ ] `fan { expr; expr; ... }` → `Expr::Fan { exprs: Vec<Expr> }`
+- [x] `fan` を予約語に追加
+- [x] `fan { expr; expr; ... }` → `Expr::Fan { exprs: Vec<Expr> }`
 - [ ] fan 内の `let` / `var` / `for` / `match` → パースエラー
 
 **型チェッカー**:
-- [ ] `fan { e1; ...; en }` の型 → `(T1, ..., Tn)`（Result 自動 unwrap）
-- [ ] effect fn 内のみ許可
+- [x] `fan { e1; ...; en }` の型 → `(T1, ..., Tn)`（Result 自動 unwrap）
+- [x] effect fn 内のみ許可
 - [ ] 各式間で変数非共有を検証
 - [ ] 外部 `var` キャプチャ禁止
-- [ ] 文位置 fan は `Unit` 型
 
 **IR**:
-- [ ] `IrExprKind::Fan { exprs: Vec<IrExpr> }` 追加
+- [x] `IrExprKind::Fan { exprs: Vec<IrExpr> }` 追加
 
 **Rust codegen**:
-- [ ] `tokio::try_join!(e1, e2, ...)?` に変換
+- [x] `std::thread::scope` + `spawn` per expr に変換
 
 **TS codegen**:
-- [ ] `await Promise.all([e1, e2, ...])` に変換
+- [x] `await Promise.all([e1, e2, ...])` に変換
 
-**テスト** (`spec/lang/fan_test.almd`):
-- [ ] 基本: 2式の fan
-- [ ] 3式以上
-- [ ] 文位置（代入なし）
-- [ ] 段階的 fan（fan → let → fan）
-- [ ] コンパイルエラー: fan 内で let、pure fn 内、タプル要素数不一致
+**フォーマッター**:
+- [x] `fan { }` のフォーマット対応
+
+**テスト**:
+- [x] Rust unit テスト（checker_test.rs — fan in pure fn / fan in effect fn）
+- [ ] E2E テスト (`spec/lang/fan_test.almd`)
+
+### Phase 1: async backend (将来)
+
+tokio は backend の1実装として後から追加。言語仕様は runtime 非依存。
+
+- [ ] `effect fn` → Rust `async fn` codegen (opt-in backend)
+- [ ] `fan` → `tokio::try_join!` (async backend)
+- [ ] runtime trait 経由で spawn/join/sleep を抽象化
 
 ### Phase 2: `fan.map`
 

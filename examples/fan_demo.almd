@@ -1,0 +1,17 @@
+effect fn slow_add(a: Int, b: Int) -> Result[Int, String] = {
+  ok(a + b)
+}
+
+effect fn slow_mul(a: Int, b: Int) -> Result[Int, String] = {
+  ok(a * b)
+}
+
+effect fn main() -> Result[Unit, String] = {
+  let (sum, product) = fan {
+    slow_add(3, 4)
+    slow_mul(3, 4)
+  }
+  println("sum = " ++ int.to_string(sum))
+  println("product = " ++ int.to_string(product))
+  ok(())
+}

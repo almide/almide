@@ -195,6 +195,7 @@ pub enum IrExprKind {
     Match { subject: Box<IrExpr>, arms: Vec<IrMatchArm> },
     Block { stmts: Vec<IrStmt>, expr: Option<Box<IrExpr>> },
     DoBlock { stmts: Vec<IrStmt>, expr: Option<Box<IrExpr>> },
+    Fan { exprs: Vec<IrExpr> },
 
     // ── Loops ──
     ForIn {

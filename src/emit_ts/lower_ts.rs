@@ -170,6 +170,15 @@ impl<'a> LowerCtx<'a> {
                 }
             }
 
+            IrExprKind::Fan { exprs } => {
+                // fan { e1; e2; ... } → await Promise.all([e1, e2, ...])
+                let elements: Vec<Expr> = exprs.iter().map(|e| self.lower_expr(e, ie, it)).collect();
+                Expr::Await(Box::new(Expr::Call {
+                    func: Box::new(Expr::Raw("Promise.all".to_string())),
+                    args: vec![Expr::Array(elements)],
+                }))
+            }
+
             IrExprKind::ForIn { var, var_tuple, iterable, body } => {
                 let binding = if let Some(tvars) = var_tuple {
                     format!("[{}]", tvars.iter().map(|v| self.var_name(*v)).collect::<Vec<_>>().join(", "))

@@ -110,6 +110,9 @@ impl<'a> LowerCtx<'a> {
             | IrExprKind::Break | IrExprKind::Continue | IrExprKind::Range { .. }
             => self.lower_control_flow(e),
 
+            // ── Fan (concurrency) ──
+            IrExprKind::Fan { .. } => self.lower_fan(e),
+
             // ── Calls ──
             IrExprKind::Call { .. } => self.lower_call_expr(e),
 
@@ -166,6 +169,44 @@ impl<'a> LowerCtx<'a> {
             IrExprKind::Try { expr } => Expr::Try(Box::new(self.lower_expr(expr))),
             IrExprKind::Await { expr } => self.lower_expr(expr),
             IrExprKind::Hole | IrExprKind::Todo { .. } => Expr::Raw("todo!()".into()),
+        }
+    }
+
+    // ── Fan (concurrent execution via std::thread::scope) ──
+
+    fn lower_fan(&self, e: &IrExpr) -> Expr {
+        let IrExprKind::Fan { exprs } = &e.kind else { unreachable!() };
+        let n = exprs.len();
+        let mut parts = Vec::new();
+        let handles: Vec<String> = (0..n).map(|i| format!("__fan_h{}", i)).collect();
+        let mut any_result = false;
+        for (i, expr) in exprs.iter().enumerate() {
+            let lowered = self.lower_expr(expr);
+            let mut rendered = super::render::expr_str(&lowered);
+            // Strip trailing `?` — fan closures return raw Result, propagated after join
+            let is_result = matches!(&expr.ty, Ty::Result(_, _));
+            if is_result {
+                any_result = true;
+                if rendered.ends_with('?') {
+                    rendered.pop();
+                }
+            }
+            parts.push(format!("let {} = __s.spawn(move || {{ {} }});", handles[i], rendered));
+        }
+        // join results: unwrap thread panic, then ? for Result
+        let join_parts: Vec<String> = handles.iter().enumerate().map(|(i, h)| {
+            let is_result = matches!(&exprs[i].ty, Ty::Result(_, _));
+            if is_result { format!("{}.join().unwrap()?", h) } else { format!("{}.join().unwrap()", h) }
+        }).collect();
+        let result = if n == 1 { join_parts[0].clone() } else { format!("({})", join_parts.join(", ")) };
+        parts.push(result);
+        if any_result {
+            // Scope closure returns Result — spawn stmts then Ok(tuple with ?)
+            let spawn_stmts = parts[..n].join(" ");
+            let result_expr = &parts[n]; // the tuple with .join().unwrap()?
+            Expr::Raw(format!("std::thread::scope(|__s| -> Result<_, String> {{ {} Ok({}) }})?", spawn_stmts, result_expr))
+        } else {
+            Expr::Raw(format!("std::thread::scope(|__s| {{ {} }})", parts.join(" ")))
         }
     }
 

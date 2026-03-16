@@ -162,6 +162,10 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             ctx.pop_scope();
             ctx.mk(IrExprKind::DoBlock { stmts: ir_stmts, expr: ir_expr }, ty, span)
         }
+        ast::Expr::Fan { exprs, .. } => {
+            let ir_exprs: Vec<IrExpr> = exprs.iter().map(|e| lower_expr(ctx, e)).collect();
+            ctx.mk(IrExprKind::Fan { exprs: ir_exprs }, ty, span)
+        }
 
         // ── Loops ──
         ast::Expr::ForIn { var, var_tuple, iterable, body, .. } => {

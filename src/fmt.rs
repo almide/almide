@@ -270,6 +270,13 @@ fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
             fmt_block(out, stmts, expr, depth);
         }
         Expr::DoBlock { stmts, expr, .. } => { out.push_str("do "); fmt_block(out, stmts, expr, depth); }
+        Expr::Fan { exprs, .. } => {
+            out.push_str("fan {\n");
+            for e in exprs {
+                out.push_str(&ind(depth + 1)); fmt_expr(out, e, depth + 1); out.push('\n');
+            }
+            out.push_str(&ind(depth)); out.push('}');
+        }
         Expr::Range { start, end, inclusive, .. } => { fmt_expr(out, start, depth); out.push_str(if *inclusive { "..=" } else { ".." }); fmt_expr(out, end, depth); }
         Expr::ForIn { var, var_tuple, iterable, body, .. } => {
             out.push_str("for ");

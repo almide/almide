@@ -665,6 +665,22 @@ fn effect_isolation_pure_can_call_pure() {
 }
 
 #[test]
+fn effect_isolation_fan_in_pure_fn() {
+    let errs = errors(
+        "effect fn a() -> Result[Int, String] = ok(1)\neffect fn b() -> Result[Int, String] = ok(2)\nfn f() -> (Int, Int) = fan { a(); b() }"
+    );
+    assert!(!errs.is_empty(), "fan in pure fn should error");
+    assert!(errs[0].contains("fan") || errs[0].contains("effect"), "error should mention fan or effect, got: {}", errs[0]);
+}
+
+#[test]
+fn effect_isolation_fan_in_effect_fn() {
+    has_no_errors(
+        "effect fn a() -> Result[Int, String] = ok(1)\neffect fn b() -> Result[Int, String] = ok(2)\neffect fn f() -> Result[Unit, String] = {\n  let _ = fan { a(); b() }\n  ok(())\n}"
+    );
+}
+
+#[test]
 fn effect_isolation_stdlib_effect_fn() {
     let errs = errors(
         "fn f(path: String) -> String = fs.read_text(path)"
