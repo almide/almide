@@ -19,10 +19,12 @@ use crate::types::Ty;
 mod unknown;
 mod fold;
 mod use_count;
+pub mod result;
 
 pub use unknown::*;
 pub use fold::*;
 pub use use_count::*;
+pub use result::is_ir_result_expr;
 
 // ── Identifiers ─────────────────────────────────────────────────
 
