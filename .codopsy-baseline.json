@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "timestamp": "2026-03-16T03:14:40.851809+00:00",
+  "timestamp": "2026-03-16T03:25:38.573520+00:00",
   "overall": {
-    "totalIssues": 176,
+    "totalIssues": 168,
     "totalErrors": 0,
-    "totalWarnings": 132,
+    "totalWarnings": 127,
     "averageComplexity": 6.3,
-    "score": 54,
+    "score": 55,
     "grade": "D"
   },
   "files": [
@@ -33,15 +33,15 @@
       "issueCount": 5,
       "errorCount": 0,
       "warningCount": 5,
-      "maxCyclomatic": 161,
-      "maxCognitive": 178,
+      "maxCyclomatic": 122,
+      "maxCognitive": 114,
       "score": 55
     },
     {
       "file": "check/mod.rs",
-      "issueCount": 11,
+      "issueCount": 10,
       "errorCount": 0,
-      "warningCount": 7,
+      "warningCount": 6,
       "maxCyclomatic": 60,
       "maxCognitive": 140,
       "score": 43
@@ -138,20 +138,20 @@
     },
     {
       "file": "emit_rust/lower_rust.rs",
-      "issueCount": 19,
+      "issueCount": 16,
       "errorCount": 0,
-      "warningCount": 7,
-      "maxCyclomatic": 57,
+      "warningCount": 4,
+      "maxCyclomatic": 41,
       "maxCognitive": 99,
       "score": 43
     },
     {
       "file": "emit_rust/lower_rust_expr.rs",
-      "issueCount": 22,
+      "issueCount": 18,
       "errorCount": 0,
-      "warningCount": 10,
+      "warningCount": 9,
       "maxCyclomatic": 71,
-      "maxCognitive": 102,
+      "maxCognitive": 62,
       "score": 43
     },
     {

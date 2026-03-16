@@ -309,23 +309,7 @@ impl<'a> LowerCtx<'a> {
                 other => (vec![], Some(other)),
             }
         } else if f.is_effect {
-            match body_expr {
-                Expr::Block { stmts, tail } => {
-                    if let Some(t) = tail {
-                        let wrapped = if is_result_expr(&t) { *t } else { Expr::Ok(Box::new(*t)) };
-                        (stmts, Some(wrapped))
-                    } else if stmts.iter().any(|s| stmt_has_result_return(s)) {
-                        // Body has return Ok/Err in loops — don't wrap
-                        (stmts, None)
-                    } else {
-                        (stmts, Some(Expr::Ok(Box::new(Expr::Unit))))
-                    }
-                }
-                other => {
-                    let w = if is_result_expr(&other) { other } else { Expr::Ok(Box::new(other)) };
-                    (vec![], Some(w))
-                }
-            }
+            self.wrap_effect_body(body_expr)
         } else {
             match body_expr {
                 Expr::Block { stmts, tail } => (stmts, tail.map(|t| *t)),
@@ -340,6 +324,27 @@ impl<'a> LowerCtx<'a> {
 
         Function { name: fn_name, generics, params, ret, body, tail,
             attrs: if f.is_test { vec!["#[test]".into()] } else { vec![] }, is_pub: !f.is_test }
+    }
+
+    /// Wrap an effect fn body with Ok(...) if needed.
+    fn wrap_effect_body(&self, body_expr: Expr) -> (Vec<Stmt>, Option<Expr>) {
+        match body_expr {
+            Expr::Block { stmts, tail } => {
+                if let Some(t) = tail {
+                    let wrapped = if is_result_expr(&t) { *t } else { Expr::Ok(Box::new(*t)) };
+                    (stmts, Some(wrapped))
+                } else if stmts.iter().any(|s| stmt_has_result_return(s)) {
+                    // Body has return Ok/Err in loops — don't wrap
+                    (stmts, None)
+                } else {
+                    (stmts, Some(Expr::Ok(Box::new(Expr::Unit))))
+                }
+            }
+            other => {
+                let w = if is_result_expr(&other) { other } else { Expr::Ok(Box::new(other)) };
+                (vec![], Some(w))
+            }
+        }
     }
 
     // ── Statements ──
@@ -411,29 +416,7 @@ impl<'a> LowerCtx<'a> {
                 field: field.clone(), value: self.lower_expr(value),
             },
             IrStmtKind::Guard { cond, else_ } => {
-                let guard_body = match &else_.kind {
-                    IrExprKind::Break => Expr::Break,
-                    IrExprKind::Continue => Expr::Continue { label: None },
-                    // effect fn: ok(()) → break (ループ脱出), ok(value) → return Ok(value)
-                    IrExprKind::ResultOk { expr } if self.auto_try && matches!(&expr.ty, Ty::Unit) => Expr::Break,
-                    _ if self.auto_try => Expr::Return(Some(Box::new(self.lower_expr(else_)))),
-                    // In non-auto-try context (tests, pure fn): don't wrap in Ok/Err
-                    IrExprKind::ResultOk { expr } if !self.auto_try => {
-                        let inner = self.lower_expr(expr);
-                        Expr::Return(Some(Box::new(inner)))
-                    }
-                    IrExprKind::ResultErr { expr } if !self.auto_try => {
-                        let inner = self.lower_expr(expr);
-                        // If in a function returning Result, generate return Err(...)
-                        // Otherwise (tests, void fn), panic
-                        if self.in_effect || self.current_fn_returns_result() {
-                            Expr::Return(Some(Box::new(Expr::Err(Box::new(inner)))))
-                        } else {
-                            Expr::Raw(format!("panic!(\"{{:?}}\", {})", super::render::expr_str(&inner)))
-                        }
-                    }
-                    _ => Expr::Return(Some(Box::new(self.lower_expr(else_)))),
-                };
+                let guard_body = self.lower_guard_body(else_);
                 Stmt::Expr(Expr::If {
                     cond: Box::new(Expr::UnOp { op: "!", operand: Box::new(self.lower_expr(cond)) }),
                     then: Box::new(guard_body),
@@ -442,6 +425,33 @@ impl<'a> LowerCtx<'a> {
             }
             IrStmtKind::Expr { expr } => Stmt::Expr(self.lower_expr(expr)),
             IrStmtKind::Comment { text } => Stmt::Expr(Expr::Raw(format!("// {}", text))),
+        }
+    }
+
+    /// Resolve the guard else-branch into a RustIR expression (break/return/panic).
+    fn lower_guard_body(&self, else_: &IrExpr) -> Expr {
+        match &else_.kind {
+            IrExprKind::Break => Expr::Break,
+            IrExprKind::Continue => Expr::Continue { label: None },
+            // effect fn: ok(()) → break (loop exit), ok(value) → return Ok(value)
+            IrExprKind::ResultOk { expr } if self.auto_try && matches!(&expr.ty, Ty::Unit) => Expr::Break,
+            _ if self.auto_try => Expr::Return(Some(Box::new(self.lower_expr(else_)))),
+            // In non-auto-try context (tests, pure fn): don't wrap in Ok/Err
+            IrExprKind::ResultOk { expr } if !self.auto_try => {
+                let inner = self.lower_expr(expr);
+                Expr::Return(Some(Box::new(inner)))
+            }
+            IrExprKind::ResultErr { expr } if !self.auto_try => {
+                let inner = self.lower_expr(expr);
+                // If in a function returning Result, generate return Err(...)
+                // Otherwise (tests, void fn), panic
+                if self.in_effect || self.current_fn_returns_result() {
+                    Expr::Return(Some(Box::new(Expr::Err(Box::new(inner)))))
+                } else {
+                    Expr::Raw(format!("panic!(\"{{:?}}\", {})", super::render::expr_str(&inner)))
+                }
+            }
+            _ => Expr::Return(Some(Box::new(self.lower_expr(else_)))),
         }
     }
 

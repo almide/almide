@@ -202,81 +202,11 @@ impl Checker {
             }
 
             ast::Expr::Call { callee, args, named_args, type_args, .. } => {
-                // Combine positional + named args for type checking
-                let mut all_args: Vec<&mut ast::Expr> = args.iter_mut().collect();
-                let mut named_exprs: Vec<ast::Expr> = named_args.iter().map(|(_, e)| e.clone()).collect();
-                let mut all_flat: Vec<ast::Expr> = args.to_vec();
-                all_flat.extend(named_exprs);
-                // 型引数を解決して渡す
-                let resolved_type_args: Option<Vec<crate::types::Ty>> = type_args.as_ref().map(|tas|
-                    tas.iter().map(|te| self.resolve_type_expr(te)).collect());
-                self.check_call_with_type_args(callee, &mut all_flat, resolved_type_args.as_deref())
+                self.infer_call(callee, args, named_args, type_args)
             }
 
             ast::Expr::Pipe { left, right, .. } => {
-                let left_ty = self.infer_expr(left);
-                match right.as_mut() {
-                    ast::Expr::Call { callee, args, .. } => {
-                        // Pipe inserts left as the first argument
-                        let mut all_arg_tys: Vec<super::types::InferTy> = vec![left_ty];
-                        all_arg_tys.extend(args.iter_mut().map(|a| self.infer_expr(a)));
-                        // Resolve module calls for pipe (e.g. xs |> list.filter(f))
-                        match callee.as_mut() {
-                            ast::Expr::Ident { name, .. } => self.check_named_call(name, &all_arg_tys),
-                            ast::Expr::Member { object, field, .. } => {
-                                if let ast::Expr::Ident { name: module, .. } = object.as_ref() {
-                                    if crate::stdlib::is_stdlib_module(module) || self.env.user_modules.contains(module.as_str()) {
-                                        let key = format!("{}.{}", module, field);
-                                        return self.check_named_call(&key, &all_arg_tys);
-                                    }
-                                    if let Some(target) = self.env.module_aliases.get(module.as_str()).cloned() {
-                                        let key = format!("{}.{}", target, field);
-                                        return self.check_named_call(&key, &all_arg_tys);
-                                    }
-                                }
-                                let ct = self.infer_expr(callee);
-                                let ret = self.fresh_var();
-                                self.constrain(ct, super::types::InferTy::Fn { params: all_arg_tys, ret: Box::new(ret.clone()) }, "pipe call");
-                                ret
-                            }
-                            _ => {
-                                let ct = self.infer_expr(callee);
-                                let ret = self.fresh_var();
-                                self.constrain(ct, super::types::InferTy::Fn { params: all_arg_tys, ret: Box::new(ret.clone()) }, "pipe call");
-                                ret
-                            }
-                        }
-                    }
-                    // Pipe RHS is a bare function name (e.g. `5 |> double`)
-                    ast::Expr::Ident { name, .. } => {
-                        let all_arg_tys = vec![left_ty];
-                        self.check_named_call(name, &all_arg_tys)
-                    }
-                    // Pipe RHS is a module-qualified function (e.g. `5 |> int.abs`)
-                    ast::Expr::Member { object, field, .. } => {
-                        let all_arg_tys = vec![left_ty];
-                        if let ast::Expr::Ident { name: module, .. } = object.as_ref() {
-                            if crate::stdlib::is_stdlib_module(module) || self.env.user_modules.contains(module.as_str()) {
-                                let key = format!("{}.{}", module, field);
-                                return self.check_named_call(&key, &all_arg_tys);
-                            }
-                            if let Some(target) = self.env.module_aliases.get(module.as_str()).cloned() {
-                                let key = format!("{}.{}", target, field);
-                                return self.check_named_call(&key, &all_arg_tys);
-                            }
-                        }
-                        let ct = self.infer_expr(right);
-                        let ret = self.fresh_var();
-                        self.constrain(ct, super::types::InferTy::Fn { params: all_arg_tys, ret: Box::new(ret.clone()) }, "pipe call");
-                        ret
-                    }
-                    _ => {
-                        let rt = self.infer_expr(right);
-                        let ret = self.fresh_var();
-                        self.constrain(rt, super::types::InferTy::Fn { params: vec![left_ty], ret: Box::new(ret.clone()) }, "pipe call");
-                        ret
-                    }
-                }
+                self.infer_pipe(left, right)
             }
 
             ast::Expr::Lambda { params, body, .. } => {
@@ -293,30 +223,7 @@ impl Checker {
             }
 
             ast::Expr::ForIn { var, var_tuple, iterable, body, .. } => {
-                let iter_ty = self.infer_expr(iterable);
-                self.env.push_scope();
-                let elem_ty = match &iter_ty {
-                    InferTy::List(inner) => inner.to_ty(&self.solutions),
-                    InferTy::Concrete(Ty::List(inner)) => *inner.clone(),
-                    InferTy::Map(k, v) => Ty::Tuple(vec![k.to_ty(&self.solutions), v.to_ty(&self.solutions)]),
-                    InferTy::Concrete(Ty::Map(k, v)) => Ty::Tuple(vec![*k.clone(), *v.clone()]),
-                    _ => Ty::Unknown,
-                };
-                if let Some(names) = var_tuple {
-                    // Destructure tuple: for (a, b) in xs
-                    if let Ty::Tuple(tys) = &elem_ty {
-                        for (i, n) in names.iter().enumerate() {
-                            self.env.define_var(n, tys.get(i).cloned().unwrap_or(Ty::Unknown));
-                        }
-                    } else {
-                        for n in names { self.env.define_var(n, Ty::Unknown); }
-                    }
-                } else {
-                    self.env.define_var(var, elem_ty);
-                }
-                for stmt in body.iter_mut() { self.check_stmt(stmt); }
-                self.env.pop_scope();
-                InferTy::Concrete(Ty::Unit)
+                self.infer_for_in(var, var_tuple, iterable, body)
             }
 
             ast::Expr::While { cond, body, .. } => {
@@ -372,6 +279,124 @@ impl Checker {
             }
             ast::Expr::EmptyMap { .. } => InferTy::Map(Box::new(self.fresh_var()), Box::new(self.fresh_var())),
         }
+    }
+
+    // ── Extracted inference helpers ──
+
+    fn infer_call(
+        &mut self,
+        callee: &mut Box<ast::Expr>,
+        args: &mut Vec<ast::Expr>,
+        named_args: &mut Vec<(String, ast::Expr)>,
+        type_args: &Option<Vec<ast::TypeExpr>>,
+    ) -> InferTy {
+        // Combine positional + named args for type checking
+        let named_exprs: Vec<ast::Expr> = named_args.iter().map(|(_, e)| e.clone()).collect();
+        let mut all_flat: Vec<ast::Expr> = args.to_vec();
+        all_flat.extend(named_exprs);
+        // 型引数を解決して渡す
+        let resolved_type_args: Option<Vec<crate::types::Ty>> = type_args.as_ref().map(|tas|
+            tas.iter().map(|te| self.resolve_type_expr(te)).collect());
+        self.check_call_with_type_args(callee, &mut all_flat, resolved_type_args.as_deref())
+    }
+
+    fn infer_pipe(&mut self, left: &mut Box<ast::Expr>, right: &mut Box<ast::Expr>) -> InferTy {
+        let left_ty = self.infer_expr(left);
+        match right.as_mut() {
+            ast::Expr::Call { callee, args, .. } => {
+                // Pipe inserts left as the first argument
+                let mut all_arg_tys: Vec<super::types::InferTy> = vec![left_ty];
+                all_arg_tys.extend(args.iter_mut().map(|a| self.infer_expr(a)));
+                // Resolve module calls for pipe (e.g. xs |> list.filter(f))
+                match callee.as_mut() {
+                    ast::Expr::Ident { name, .. } => self.check_named_call(name, &all_arg_tys),
+                    ast::Expr::Member { object, field, .. } => {
+                        if let ast::Expr::Ident { name: module, .. } = object.as_ref() {
+                            if crate::stdlib::is_stdlib_module(module) || self.env.user_modules.contains(module.as_str()) {
+                                let key = format!("{}.{}", module, field);
+                                return self.check_named_call(&key, &all_arg_tys);
+                            }
+                            if let Some(target) = self.env.module_aliases.get(module.as_str()).cloned() {
+                                let key = format!("{}.{}", target, field);
+                                return self.check_named_call(&key, &all_arg_tys);
+                            }
+                        }
+                        let ct = self.infer_expr(callee);
+                        let ret = self.fresh_var();
+                        self.constrain(ct, super::types::InferTy::Fn { params: all_arg_tys, ret: Box::new(ret.clone()) }, "pipe call");
+                        ret
+                    }
+                    _ => {
+                        let ct = self.infer_expr(callee);
+                        let ret = self.fresh_var();
+                        self.constrain(ct, super::types::InferTy::Fn { params: all_arg_tys, ret: Box::new(ret.clone()) }, "pipe call");
+                        ret
+                    }
+                }
+            }
+            // Pipe RHS is a bare function name (e.g. `5 |> double`)
+            ast::Expr::Ident { name, .. } => {
+                let all_arg_tys = vec![left_ty];
+                self.check_named_call(name, &all_arg_tys)
+            }
+            // Pipe RHS is a module-qualified function (e.g. `5 |> int.abs`)
+            ast::Expr::Member { object, field, .. } => {
+                let all_arg_tys = vec![left_ty];
+                if let ast::Expr::Ident { name: module, .. } = object.as_ref() {
+                    if crate::stdlib::is_stdlib_module(module) || self.env.user_modules.contains(module.as_str()) {
+                        let key = format!("{}.{}", module, field);
+                        return self.check_named_call(&key, &all_arg_tys);
+                    }
+                    if let Some(target) = self.env.module_aliases.get(module.as_str()).cloned() {
+                        let key = format!("{}.{}", target, field);
+                        return self.check_named_call(&key, &all_arg_tys);
+                    }
+                }
+                let ct = self.infer_expr(right);
+                let ret = self.fresh_var();
+                self.constrain(ct, super::types::InferTy::Fn { params: all_arg_tys, ret: Box::new(ret.clone()) }, "pipe call");
+                ret
+            }
+            _ => {
+                let rt = self.infer_expr(right);
+                let ret = self.fresh_var();
+                self.constrain(rt, super::types::InferTy::Fn { params: vec![left_ty], ret: Box::new(ret.clone()) }, "pipe call");
+                ret
+            }
+        }
+    }
+
+    fn infer_for_in(
+        &mut self,
+        var: &str,
+        var_tuple: &Option<Vec<String>>,
+        iterable: &mut Box<ast::Expr>,
+        body: &mut Vec<ast::Stmt>,
+    ) -> InferTy {
+        let iter_ty = self.infer_expr(iterable);
+        self.env.push_scope();
+        let elem_ty = match &iter_ty {
+            InferTy::List(inner) => inner.to_ty(&self.solutions),
+            InferTy::Concrete(Ty::List(inner)) => *inner.clone(),
+            InferTy::Map(k, v) => Ty::Tuple(vec![k.to_ty(&self.solutions), v.to_ty(&self.solutions)]),
+            InferTy::Concrete(Ty::Map(k, v)) => Ty::Tuple(vec![*k.clone(), *v.clone()]),
+            _ => Ty::Unknown,
+        };
+        if let Some(names) = var_tuple {
+            // Destructure tuple: for (a, b) in xs
+            if let Ty::Tuple(tys) = &elem_ty {
+                for (i, n) in names.iter().enumerate() {
+                    self.env.define_var(n, tys.get(i).cloned().unwrap_or(Ty::Unknown));
+                }
+            } else {
+                for n in names { self.env.define_var(n, Ty::Unknown); }
+            }
+        } else {
+            self.env.define_var(var, elem_ty);
+        }
+        for stmt in body.iter_mut() { self.check_stmt(stmt); }
+        self.env.pop_scope();
+        InferTy::Concrete(Ty::Unit)
     }
 
     // ── Statement checking ──

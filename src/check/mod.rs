@@ -377,59 +377,71 @@ impl Checker {
 
     // ── Declaration checking ──
 
+    fn check_fn_decl(
+        &mut self,
+        name: &str,
+        params: &mut [ast::Param],
+        return_type: &ast::TypeExpr,
+        body: &mut ast::Expr,
+        effect: &Option<bool>,
+        generics: &mut Option<Vec<ast::GenericParam>>,
+    ) {
+        self.env.push_scope();
+        if let Some(gs) = generics {
+            for g in gs.iter() {
+                self.env.types.insert(g.name.clone(), Ty::TypeVar(g.name.clone()));
+                if let Some(ref bte) = g.structural_bound {
+                    let bt = self.resolve_type_expr(bte);
+                    self.env.structural_bounds.insert(g.name.clone(), match bt { Ty::Record { fields } => Ty::OpenRecord { fields }, o => o });
+                }
+            }
+        }
+        for p in params.iter_mut() {
+            let ty = self.resolve_type_expr(&p.ty);
+            self.env.define_var(&p.name, ty.clone());
+            self.env.param_vars.insert(p.name.clone());
+            if let Some(ref mut default_expr) = p.default {
+                let dty = self.infer_expr(default_expr);
+                self.constrain(InferTy::from_ty(&ty), dty, format!("default arg '{}'", p.name));
+            }
+        }
+        let ret_ty = self.resolve_type_expr(return_type);
+        let prev = (self.env.current_ret.take(), self.env.in_effect);
+        self.env.current_ret = Some(ret_ty.clone());
+        self.env.in_effect = effect.unwrap_or(false);
+        let body_ity = self.infer_expr(body);
+        // Signature-driven constraint:
+        // - effect fn with Result[T, E] sig: accept body returning T (auto-wrapped) or Result[T, E] (explicit)
+        // - non-effect: body must match signature exactly
+        if effect.unwrap_or(false) {
+            let body_ty = body_ity.to_ty(&self.solutions);
+            // Effect fn: accept Unit body (returns happen via guard/break/ok/err in loops)
+            if body_ty == Ty::Unit {
+                // ok — do blocks, while loops, guard patterns return via control flow
+            } else if let Ty::Result(ok, _) = &ret_ty {
+                // Try unwrapped first (body returns T), fall back to full Result match
+                let unwrapped = InferTy::from_ty(ok);
+                let full = InferTy::from_ty(&ret_ty);
+                if matches!(&body_ty, Ty::Result(_, _)) {
+                    self.constrain(full, body_ity, format!("fn '{}'", name));
+                } else {
+                    self.constrain(unwrapped, body_ity, format!("fn '{}'", name));
+                }
+            } else {
+                self.constrain(InferTy::from_ty(&ret_ty), body_ity, format!("fn '{}'", name));
+            }
+        } else {
+            self.constrain(InferTy::from_ty(&ret_ty), body_ity, format!("fn '{}'", name));
+        }
+        self.env.current_ret = prev.0; self.env.in_effect = prev.1;
+        if let Some(gs) = generics { for g in gs.iter() { self.env.types.remove(&g.name); self.env.structural_bounds.remove(&g.name); } }
+        self.env.pop_scope();
+    }
+
     fn check_decl(&mut self, decl: &mut ast::Decl) {
         match decl {
             ast::Decl::Fn { name, params, return_type, body: Some(body), effect, generics, .. } => {
-                self.env.push_scope();
-                if let Some(gs) = generics {
-                    for g in gs {
-                        self.env.types.insert(g.name.clone(), Ty::TypeVar(g.name.clone()));
-                        if let Some(ref bte) = g.structural_bound {
-                            let bt = self.resolve_type_expr(bte);
-                            self.env.structural_bounds.insert(g.name.clone(), match bt { Ty::Record { fields } => Ty::OpenRecord { fields }, o => o });
-                        }
-                    }
-                }
-                for p in params.iter_mut() {
-                    let ty = self.resolve_type_expr(&p.ty);
-                    self.env.define_var(&p.name, ty.clone());
-                    self.env.param_vars.insert(p.name.clone());
-                    if let Some(ref mut default_expr) = p.default {
-                        let dty = self.infer_expr(default_expr);
-                        self.constrain(InferTy::from_ty(&ty), dty, format!("default arg '{}'", p.name));
-                    }
-                }
-                let ret_ty = self.resolve_type_expr(return_type);
-                let prev = (self.env.current_ret.take(), self.env.in_effect);
-                self.env.current_ret = Some(ret_ty.clone());
-                self.env.in_effect = effect.unwrap_or(false);
-                let body_ity = self.infer_expr(body);
-                // Signature-driven constraint:
-                // - effect fn with Result[T, E] sig: accept body returning T (auto-wrapped) or Result[T, E] (explicit)
-                // - non-effect: body must match signature exactly
-                if effect.unwrap_or(false) {
-                    let body_ty = body_ity.to_ty(&self.solutions);
-                    // Effect fn: accept Unit body (returns happen via guard/break/ok/err in loops)
-                    if body_ty == Ty::Unit {
-                        // ok — do blocks, while loops, guard patterns return via control flow
-                    } else if let Ty::Result(ok, _) = &ret_ty {
-                        // Try unwrapped first (body returns T), fall back to full Result match
-                        let unwrapped = InferTy::from_ty(ok);
-                        let full = InferTy::from_ty(&ret_ty);
-                        if matches!(&body_ty, Ty::Result(_, _)) {
-                            self.constrain(full, body_ity, format!("fn '{}'", name));
-                        } else {
-                            self.constrain(unwrapped, body_ity, format!("fn '{}'", name));
-                        }
-                    } else {
-                        self.constrain(InferTy::from_ty(&ret_ty), body_ity, format!("fn '{}'", name));
-                    }
-                } else {
-                    self.constrain(InferTy::from_ty(&ret_ty), body_ity, format!("fn '{}'", name));
-                }
-                self.env.current_ret = prev.0; self.env.in_effect = prev.1;
-                if let Some(gs) = generics { for g in gs { self.env.types.remove(&g.name); self.env.structural_bounds.remove(&g.name); } }
-                self.env.pop_scope();
+                self.check_fn_decl(name, params, return_type, body, effect, generics);
             }
             ast::Decl::Test { body, .. } => {
                 self.env.push_scope();

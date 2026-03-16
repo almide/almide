@@ -356,66 +356,72 @@ impl<'a> LowerCtx<'a> {
                 }
             }
             IrExprKind::Tuple { elements } => Expr::Tuple(elements.iter().map(|e| self.lower_expr(e)).collect()),
-            IrExprKind::Record { name, fields } => {
-                let sname = name.as_ref().map(|n| self.ctors.get(n).map(|e| format!("{}::{}", e, n)).unwrap_or(n.clone())).unwrap_or_else(|| {
-                    // Check if the expression type is a Named type (e.g., Pair, Stack)
-                    if let Ty::Named(type_name, _) = &e.ty {
-                        return type_name.clone();
-                    }
-                    let mut fnames: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
-                    fnames.sort();
-                    self.anon.get(&fnames).cloned()
-                        .or_else(|| self.named.get(&fnames).cloned())
-                        .unwrap_or("AnonRecord".into())
-                });
-                let mut lowered_fields: Vec<(String, Expr)> = fields.iter().map(|(n, v)| (n.clone(), self.lower_expr(v))).collect();
-                // Fill in default field values for any missing fields in named records
-                if let Some(ctor_name) = name.as_ref() {
-                    let provided: std::collections::HashSet<&str> = fields.iter().map(|(n, _)| n.as_str()).collect();
-                    if let Some(field_decls) = self.find_record_field_decls(ctor_name) {
-                        for fd in field_decls {
-                            if !provided.contains(fd.name.as_str()) {
-                                if let Some(default_expr) = &fd.default {
-                                    lowered_fields.push((fd.name.clone(), self.lower_expr(default_expr)));
-                                }
-                            }
+            IrExprKind::Record { name, fields } => self.lower_record(e, name, fields),
+            IrExprKind::SpreadRecord { base, fields } => self.lower_spread_record(e, base, fields),
+            _ => unreachable!(),
+        }
+    }
+
+    // ── Record helpers ──
+
+    fn lower_record(&self, e: &IrExpr, name: &Option<String>, fields: &[(String, IrExpr)]) -> Expr {
+        let sname = name.as_ref().map(|n| self.ctors.get(n).map(|e| format!("{}::{}", e, n)).unwrap_or(n.clone())).unwrap_or_else(|| {
+            // Check if the expression type is a Named type (e.g., Pair, Stack)
+            if let Ty::Named(type_name, _) = &e.ty {
+                return type_name.clone();
+            }
+            let mut fnames: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
+            fnames.sort();
+            self.anon.get(&fnames).cloned()
+                .or_else(|| self.named.get(&fnames).cloned())
+                .unwrap_or("AnonRecord".into())
+        });
+        let mut lowered_fields: Vec<(String, Expr)> = fields.iter().map(|(n, v)| (n.clone(), self.lower_expr(v))).collect();
+        // Fill in default field values for any missing fields in named records
+        if let Some(ctor_name) = name.as_ref() {
+            let provided: std::collections::HashSet<&str> = fields.iter().map(|(n, _)| n.as_str()).collect();
+            if let Some(field_decls) = self.find_record_field_decls(ctor_name) {
+                for fd in field_decls {
+                    if !provided.contains(fd.name.as_str()) {
+                        if let Some(default_expr) = &fd.default {
+                            lowered_fields.push((fd.name.clone(), self.lower_expr(default_expr)));
                         }
                     }
                 }
-                // Box recursive fields in variant record constructors
-                if let Some(ctor_name) = name.as_ref() {
-                    let enum_name = self.ctors.get(ctor_name).cloned().unwrap_or_default();
-                    if let Some(td) = self.type_decls.iter().find(|td| td.name == enum_name) {
-                        if let almide::ir::IrTypeDeclKind::Variant { cases, .. } = &td.kind {
-                            if let Some(case) = cases.iter().find(|c| c.name == *ctor_name) {
-                                if let almide::ir::IrVariantKind::Record { fields: field_decls } = &case.kind {
-                                    for (fname, fexpr) in lowered_fields.iter_mut() {
-                                        if let Some(fd) = field_decls.iter().find(|fd| fd.name == *fname) {
-                                            if super::lower_rust::ty_contains_name(&fd.ty, &enum_name) {
-                                                let inner = std::mem::replace(fexpr, Expr::Unit);
-                                                *fexpr = Expr::Call { func: "Box::new".into(), args: vec![inner] };
-                                            }
-                                        }
+            }
+        }
+        // Box recursive fields in variant record constructors
+        if let Some(ctor_name) = name.as_ref() {
+            let enum_name = self.ctors.get(ctor_name).cloned().unwrap_or_default();
+            if let Some(td) = self.type_decls.iter().find(|td| td.name == enum_name) {
+                if let almide::ir::IrTypeDeclKind::Variant { cases, .. } = &td.kind {
+                    if let Some(case) = cases.iter().find(|c| c.name == *ctor_name) {
+                        if let almide::ir::IrVariantKind::Record { fields: field_decls } = &case.kind {
+                            for (fname, fexpr) in lowered_fields.iter_mut() {
+                                if let Some(fd) = field_decls.iter().find(|fd| fd.name == *fname) {
+                                    if super::lower_rust::ty_contains_name(&fd.ty, &enum_name) {
+                                        let inner = std::mem::replace(fexpr, Expr::Unit);
+                                        *fexpr = Expr::Call { func: "Box::new".into(), args: vec![inner] };
                                     }
                                 }
                             }
                         }
                     }
                 }
-                Expr::Struct { name: sname, fields: lowered_fields }
             }
-            IrExprKind::SpreadRecord { base, fields } => {
-                let base_expr = self.lower_expr(base);
-                let base_val = if self.is_single_use_var(base) { base_expr } else { Expr::Clone(Box::new(base_expr)) };
-                // Resolve struct name from the expression's type
-                let sname = self.resolve_record_name(&e.ty);
-                Expr::StructUpdate {
-                    name: sname,
-                    base: Box::new(base_val),
-                    fields: fields.iter().map(|(n, v)| (n.clone(), self.lower_expr(v))).collect(),
-                }
-            }
-            _ => unreachable!(),
+        }
+        Expr::Struct { name: sname, fields: lowered_fields }
+    }
+
+    fn lower_spread_record(&self, e: &IrExpr, base: &IrExpr, fields: &[(String, IrExpr)]) -> Expr {
+        let base_expr = self.lower_expr(base);
+        let base_val = if self.is_single_use_var(base) { base_expr } else { Expr::Clone(Box::new(base_expr)) };
+        // Resolve struct name from the expression's type
+        let sname = self.resolve_record_name(&e.ty);
+        Expr::StructUpdate {
+            name: sname,
+            base: Box::new(base_val),
+            fields: fields.iter().map(|(n, v)| (n.clone(), self.lower_expr(v))).collect(),
         }
     }
 
