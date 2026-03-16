@@ -1,7 +1,7 @@
 # Almide Standard Library Specification
 
 Auto-generated from `stdlib/defs/*.toml`. 362 native functions across 22 modules.
-Runtime implementation: 310/362 (85%).
+Runtime implementation: 332/362 (91%).
 
 ## Module Index
 
@@ -18,7 +18,7 @@ Runtime implementation: 310/362 (85%).
 | http | platform | 26 | 4/26 | Partial (4/26) |
 | int | core | 21 | 21/21 | Ready |
 | io | platform | 3 | 3/3 | Ready |
-| json | core | 36 | 14/36 | Partial (14/36) |
+| json | core | 36 | 36/36 | Ready |
 | list | core | 54 | 54/54 | Ready |
 | log | core | 8 | 8/8 | Ready |
 | map | core | 16 | 16/16 | Ready |
@@ -1358,7 +1358,7 @@ Example: `let input = io.read_all()`
 
 ## json
 
-Layer: **core** | 36 functions | 14/36 implemented
+Layer: **core** | 36 functions | 36/36 implemented
 
 ### `json.parse`
 
@@ -1380,7 +1380,7 @@ stringify(v: Value) -> String
 
 Example: `json.stringify(person.encode())`
 
-### `json.get` (not implemented)
+### `json.get`
 
 Get a nested value by key. Returns none if key doesn't exist.
 
@@ -1390,7 +1390,7 @@ get(j: Json, key: String) -> Option[Json]
 
 Example: `json.get(j, "name")`
 
-### `json.get_string` (not implemented)
+### `json.get_string`
 
 Get a string value by key. Returns none if key missing or not a string.
 
@@ -1400,7 +1400,7 @@ get_string(j: Json, key: String) -> Option[String]
 
 Example: `json.get_string(j, "name")`
 
-### `json.get_int` (not implemented)
+### `json.get_int`
 
 Get an integer value by key. Returns none if key missing or not an integer.
 
@@ -1410,7 +1410,7 @@ get_int(j: Json, key: String) -> Option[Int]
 
 Example: `json.get_int(j, "age")`
 
-### `json.get_bool` (not implemented)
+### `json.get_bool`
 
 Get a boolean value by key. Returns none if key missing or not a boolean.
 
@@ -1420,7 +1420,7 @@ get_bool(j: Json, key: String) -> Option[Bool]
 
 Example: `json.get_bool(j, "active")`
 
-### `json.get_array` (not implemented)
+### `json.get_array`
 
 Get an array value by key. Returns none if key missing or not an array.
 
@@ -1430,7 +1430,7 @@ get_array(j: Json, key: String) -> Option[List[Json]]
 
 Example: `json.get_array(j, "items")`
 
-### `json.keys` (not implemented)
+### `json.keys`
 
 Get all keys of a JSON object as a list of strings.
 
@@ -1440,7 +1440,7 @@ keys(j: Json) -> List[String]
 
 Example: `json.keys(j)`
 
-### `json.to_string` (not implemented)
+### `json.to_string`
 
 Extract the string value from a Json. Returns none if not a string.
 
@@ -1450,7 +1450,7 @@ to_string(j: Json) -> Option[String]
 
 Example: `json.to_string(json.from_string("hello"))`
 
-### `json.to_int` (not implemented)
+### `json.to_int`
 
 Extract the integer value from a Json. Returns none if not an integer.
 
@@ -1520,7 +1520,7 @@ from_map(m: Map[String, Json]) -> Json
 
 Example: `json.from_map(map.set(map.new(), "key", json.s("val")))`
 
-### `json.get_float` (not implemented)
+### `json.get_float`
 
 Get a float value by key. Returns none if key missing or not a number.
 
@@ -1530,7 +1530,7 @@ get_float(j: Json, key: String) -> Option[Float]
 
 Example: `json.get_float(j, "score")`
 
-### `json.from_float` (not implemented)
+### `json.from_float`
 
 Create a Json float value.
 
@@ -1540,7 +1540,7 @@ from_float(n: Float) -> Json
 
 Example: `json.from_float(3.14)`
 
-### `json.stringify_pretty` (not implemented)
+### `json.stringify_pretty`
 
 Convert a Json value to a pretty-printed JSON string with indentation.
 
@@ -1550,7 +1550,7 @@ stringify_pretty(j: Json) -> String
 
 Example: `json.stringify_pretty(j)`
 
-### `json.object` (not implemented)
+### `json.object`
 
 Create a Json object from a list of (key, value) pairs.
 
@@ -1580,7 +1580,7 @@ i(v: Int) -> Json
 
 Example: `json.i(42)`
 
-### `json.f` (not implemented)
+### `json.f`
 
 Shorthand for json.from_float. Create a Json float value.
 
@@ -1600,7 +1600,7 @@ b(v: Bool) -> Json
 
 Example: `json.b(true)`
 
-### `json.as_string` (not implemented)
+### `json.as_string`
 
 Extract string from a Json value (without key lookup). Returns none if not a string.
 
@@ -1610,7 +1610,7 @@ as_string(j: Json) -> Option[String]
 
 Example: `json.as_string(j)`
 
-### `json.as_int` (not implemented)
+### `json.as_int`
 
 Extract integer from a Json value (without key lookup). Returns none if not an integer.
 
@@ -1620,7 +1620,7 @@ as_int(j: Json) -> Option[Int]
 
 Example: `json.as_int(j)`
 
-### `json.as_float` (not implemented)
+### `json.as_float`
 
 Extract float from a Json value (without key lookup). Returns none if not a number.
 
@@ -1630,7 +1630,7 @@ as_float(j: Json) -> Option[Float]
 
 Example: `json.as_float(j)`
 
-### `json.as_bool` (not implemented)
+### `json.as_bool`
 
 Extract boolean from a Json value (without key lookup). Returns none if not a boolean.
 
@@ -1640,7 +1640,7 @@ as_bool(j: Json) -> Option[Bool]
 
 Example: `json.as_bool(j)`
 
-### `json.as_array` (not implemented)
+### `json.as_array`
 
 Extract array from a Json value (without key lookup). Returns none if not an array.
 
@@ -1680,7 +1680,7 @@ index(path: JsonPath, i: Int) -> JsonPath
 
 Example: `json.index(json.field(json.root(), "items"), 0)`
 
-### `json.get_path` (not implemented)
+### `json.get_path`
 
 Get a value at a JSON path. Returns none if path doesn't exist.
 
@@ -1690,7 +1690,7 @@ get_path(j: Json, path: JsonPath) -> Option[Json]
 
 Example: `json.get_path(j, json.field(json.root(), "name"))`
 
-### `json.set_path` (not implemented)
+### `json.set_path`
 
 Set a value at a JSON path. Returns error if path is invalid.
 
@@ -1700,7 +1700,7 @@ set_path(j: Json, path: JsonPath, value: Json) -> Result[Json, String]
 
 Example: `json.set_path(j, json.field(json.root(), "name"), json.s("Bob"))`
 
-### `json.upsert_path` (not implemented)
+### `json.upsert_path`
 
 Set a value at a JSON path, creating intermediate objects as needed.
 
@@ -1710,7 +1710,7 @@ upsert_path(j: Json, path: JsonPath, value: Json) -> Json
 
 Example: `json.upsert_path(j, json.field(json.root(), "name"), json.s("Bob"))`
 
-### `json.remove_path` (not implemented)
+### `json.remove_path`
 
 Remove a value at a JSON path. Returns the Json with the value removed.
 
