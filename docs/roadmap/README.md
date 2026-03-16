@@ -13,8 +13,8 @@
 - [Template](active/template.md) — Typed document builder
 - [UFCS External](active/ufcs-external.md) — User-defined UFCS
 
-### Runtime & Async
-- [Fan Concurrency](active/fan-concurrency.md) — `fan { }` / `fan.map` / `fan.race` — LLM最適化された並行処理（structured-concurrency + platform-async を統合）
+### Security
+- [Security Model](active/security-model.md) — 5 層セキュリティ。Layer 1 (Effect Isolation) 実装済み
 
 ### Compiler
 - [Borrow/Clone Gaps](active/borrow-clone-gaps.md) — 変数 clone 挿入漏れの修正（関数引数+補間、if/else 分岐）
@@ -62,6 +62,10 @@
 - [Research: MSR Paper](on-hold/research-modification-survival-rate-paper.md)
 - [Self-Hosting](on-hold/self-hosting.md)
 - [Stdlib 3-Layer Design](on-hold/stdlib-architecture-3-layer-design.md)
+- [Async Backend](on-hold/async-backend.md) — tokio opt-in runtime
+- [Fan Map Limit](on-hold/fan-map-limit.md) — `fan.map(xs, limit: n, f)` 並行数制限
+- [Server Async](on-hold/server-async.md) — `http.serve` ハンドラ effect 化
+- [Streaming](on-hold/streaming.md) — WebSocket, SSE, Stream
 - [Supervision & Actors](on-hold/supervision-and-actors.md)
 - [Tooling (remaining)](on-hold/tooling.md)
 
@@ -146,4 +150,5 @@
 - [UFCS Type Resolution](done/ufcs-type-resolution.md)
 - [Unused Variable Warnings](done/unused-variable-warnings.md)
 - [Variant Record Fields](done/variant-record-fields.md)
+- [Fan Concurrency](done/fan-concurrency.md) — `fan { }` / `fan.map` / `fan.race` / `fan.any` / `fan.settle` / `fan.timeout` — sync/thread backend
 - [While Loop](done/while-loop.md)
