@@ -8,7 +8,7 @@ Rust codegen が変数の clone を挿入し損ねるケースを徹底的に潰
 
 ## Known Cases
 
-### Case 1: 変数が関数引数 + 文字列補間で使われる（OPEN）
+### Case 1: 変数が関数引数 + 文字列補間で使われる（FIXED: fc2b17f）
 
 ```almide
 let dir = "output"
@@ -18,7 +18,7 @@ println("Saved: ${dir}")         // ERROR: use after move
 
 `use_count = 2` で clone は挿入されるが、生成コードの順序によっては move 後のアクセスになる。
 
-### Case 2: 変数が if/else の片方のブランチで move + 後続で再利用（OPEN）
+### Case 2: 変数が if/else の片方のブランチで move + 後続で再利用（FIXED: fc2b17f）
 
 ```almide
 let x = some_list()
