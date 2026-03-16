@@ -38,3 +38,15 @@ test "set_name on multiple types" {
   assert_eq(d.name, "C")
   assert_eq(p.name, "Y")
 }
+
+test "names via map lambda" {
+  let result = [Dog { name: "Rex", breed: "Lab" }, Dog { name: "Fido", breed: "Poodle" }]
+    |> list.map((d) => describe(d))
+  assert_eq(result, ["name: Rex", "name: Fido"])
+}
+test "set_name in map lambda" {
+  let renamed = [Dog { name: "Rex", breed: "Lab" }, Dog { name: "Fido", breed: "Poodle" }]
+    |> list.map((d) => set_name(d, string.to_upper(d.name)))
+    |> names
+  assert_eq(renamed, ["REX", "FIDO"])
+}
