@@ -3,7 +3,7 @@ pub mod rust_ir;
 pub mod render;
 pub mod lower_rust;
 mod lower_rust_expr;
-mod lower_rust_helpers;
+pub(crate) mod lower_rust_helpers;
 pub mod lower_types;
 
 #[allow(dead_code)]

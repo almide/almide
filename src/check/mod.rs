@@ -18,7 +18,7 @@
 
 mod types;
 mod infer;
-mod calls;
+pub(crate) mod calls;
 
 use std::collections::HashMap;
 use crate::ast;

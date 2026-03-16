@@ -343,3 +343,35 @@ impl Checker {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builtin_module_list() { assert_eq!(builtin_module_for_type(&Ty::List(Box::new(Ty::Int))), Some("list")); }
+    #[test]
+    fn builtin_module_string() { assert_eq!(builtin_module_for_type(&Ty::String), Some("string")); }
+    #[test]
+    fn builtin_module_int() { assert_eq!(builtin_module_for_type(&Ty::Int), Some("int")); }
+    #[test]
+    fn builtin_module_float() { assert_eq!(builtin_module_for_type(&Ty::Float), Some("float")); }
+    #[test]
+    fn builtin_module_map() { assert_eq!(builtin_module_for_type(&Ty::Map(Box::new(Ty::String), Box::new(Ty::Int))), Some("map")); }
+    #[test]
+    fn builtin_module_result() { assert_eq!(builtin_module_for_type(&Ty::Result(Box::new(Ty::Int), Box::new(Ty::String))), Some("result")); }
+    #[test]
+    fn builtin_module_option() { assert_eq!(builtin_module_for_type(&Ty::Option(Box::new(Ty::Int))), Some("option")); }
+    #[test]
+    fn builtin_module_none() { assert_eq!(builtin_module_for_type(&Ty::Bool), None); }
+
+    #[test]
+    fn mismatch_same_type() { assert!(!types_mismatch(&Ty::Int, &Ty::Int)); }
+    #[test]
+    fn mismatch_different_types() { assert!(types_mismatch(&Ty::Int, &Ty::String)); }
+    #[test]
+    fn mismatch_unknown_permissive() {
+        assert!(!types_mismatch(&Ty::Unknown, &Ty::Int));
+        assert!(!types_mismatch(&Ty::Int, &Ty::Unknown));
+    }
+}
