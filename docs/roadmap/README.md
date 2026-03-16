@@ -3,9 +3,7 @@
 ## Active — 1.0 Critical Path
 
 ### Phase I: 正確性
-- [Borrow/Clone Gaps](active/borrow-clone-gaps.md) — clone 挿入漏れの修正
 - [Cross-Target CI](active/cross-target-ci.md) — 全テストを Rust + TS で実行、出力 diff = 0
-- [Quality Improvements](active/quality-improvements.md) — エラーメッセージ、テストカバレッジ
 
 ### Phase II: 安定性契約
 - [Stdlib Verb Reform](active/stdlib-verb-system.md) — 1.0 前最後の breaking change
@@ -156,4 +154,6 @@
 - [UFCS Type Resolution](done/ufcs-type-resolution.md)
 - [Unused Variable Warnings](done/unused-variable-warnings.md)
 - [Variant Record Fields](done/variant-record-fields.md)
+- [Borrow/Clone Gaps](done/borrow-clone-gaps.md) — Case 1-9 全 FIXED
+- [Quality Improvements](done/quality-improvements.md) — エラー行番号、heredoc 行追跡
 - [While Loop](done/while-loop.md)

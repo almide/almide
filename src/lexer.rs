@@ -115,10 +115,9 @@ impl Lexer {
 
             // String literal
             if ch == '"' {
-                let (tok, new_pos) = lex_string(&chars, pos, line, col);
-                let len = new_pos - pos;
+                let (tok, new_pos, new_line, new_col) = lex_string(&chars, pos, line, col);
                 tokens.push(tok);
-                pos = new_pos; col += len;
+                pos = new_pos; line = new_line; col = new_col;
                 continue;
             }
 
@@ -221,7 +220,7 @@ fn lex_raw_string(chars: &[char], start: usize, line: usize, col: usize) -> (Tok
 
 // ── String lexing ───────────────────────────────────────────────
 
-fn lex_string(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize) {
+fn lex_string(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize, usize, usize) {
     // Check for triple-quote heredoc: """..."""
     if start + 2 < chars.len() && chars[start + 1] == '"' && chars[start + 2] == '"' {
         return lex_heredoc(chars, start, line, col);
@@ -237,23 +236,35 @@ fn lex_string(chars: &[char], start: usize, line: usize, col: usize) -> (Token, 
     if pos < chars.len() { pos += 1; } // skip closing "
 
     let tt = if has_interpolation { TokenType::InterpolatedString } else { TokenType::String };
-    (Token { token_type: tt, value, line, col }, pos)
+    let len = pos - start;
+    (Token { token_type: tt, value, line, col }, pos, line, col + len)
 }
 
-fn lex_heredoc(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize) {
+fn lex_heredoc(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize, usize, usize) {
     let mut pos = start + 3; // skip opening """
     let mut raw = String::new();
     let mut has_interpolation = false;
+    let mut cur_line = line;
+    let mut cur_col = col + 3;
 
     // Consume until closing """
     while pos + 2 < chars.len() && !(chars[pos] == '"' && chars[pos + 1] == '"' && chars[pos + 2] == '"') {
+        if chars[pos] == '\n' {
+            cur_line += 1;
+            cur_col = 1;
+        } else {
+            cur_col += 1;
+        }
         pos = lex_string_char(chars, pos, &mut raw, &mut has_interpolation);
     }
-    if pos + 2 < chars.len() { pos += 3; } // skip closing """
+    if pos + 2 < chars.len() {
+        cur_col += 3; // closing """
+        pos += 3;
+    }
 
     let value = strip_heredoc_indent(&raw);
     let tt = if has_interpolation { TokenType::InterpolatedString } else { TokenType::String };
-    (Token { token_type: tt, value, line, col }, pos)
+    (Token { token_type: tt, value, line, col }, pos, cur_line, cur_col)
 }
 
 /// Process one character (or escape / interpolation) inside a string body.
