@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "timestamp": "2026-03-16T03:00:17.577552+00:00",
+  "timestamp": "2026-03-16T03:06:00.670861+00:00",
   "overall": {
-    "totalIssues": 216,
+    "totalIssues": 172,
     "totalErrors": 0,
-    "totalWarnings": 172,
+    "totalWarnings": 128,
     "averageComplexity": 6.3,
-    "score": 52,
+    "score": 55,
     "grade": "D"
   },
   "files": [
@@ -273,12 +273,12 @@
     },
     {
       "file": "fmt.rs",
-      "issueCount": 48,
+      "issueCount": 4,
       "errorCount": 0,
-      "warningCount": 48,
+      "warningCount": 4,
       "maxCyclomatic": 86,
       "maxCognitive": 73,
-      "score": 15
+      "score": 55
     },
     {
       "file": "ir/fold.rs",
