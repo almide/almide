@@ -1008,7 +1008,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         if generics.is_empty() {
             String::new()
         } else if ctx.is_rust() {
-            let params = generics.iter().map(|g| format!("{}: Clone + std::fmt::Debug + PartialEq", g.name)).collect::<Vec<_>>().join(", ");
+            let params = generics.iter().map(|g| format!("{}: Clone + std::fmt::Debug + PartialEq + PartialOrd", g.name)).collect::<Vec<_>>().join(", ");
             format!("<{}>", params)
         } else {
             let params = generics.iter().map(|g| g.name.clone()).collect::<Vec<_>>().join(", ");
@@ -1080,7 +1080,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
     if ctx.is_rust() {
         for (field_names, struct_name) in &ctx.anon_records {
             let generics: Vec<String> = (0..field_names.len())
-                .map(|i| format!("T{}: Clone + std::fmt::Debug + PartialEq", i))
+                .map(|i| format!("T{}: Clone + std::fmt::Debug + PartialEq + PartialOrd", i))
                 .collect();
             let fields: Vec<String> = field_names.iter().enumerate()
                 .map(|(i, name)| format!("pub {}: T{},", name, i))
