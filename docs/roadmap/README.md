@@ -2,9 +2,6 @@
 
 ## Active — 1.0 Critical Path
 
-### Phase I: 正確性
-- [Cross-Target CI](active/cross-target-ci.md) — **90/91 (98.9%)** 全ディレクトリ pass。GitHub Actions 自動化済み
-
 ### Phase II: 安定性契約
 - [Stdlib Verb Reform](active/stdlib-verb-system.md) — 1.0 前最後の breaking change
 - [Stability Contract](active/stability-contract.md) — 構文凍結、edition、Rejected Patterns
@@ -156,4 +153,5 @@
 - [Variant Record Fields](done/variant-record-fields.md)
 - [Borrow/Clone Gaps](done/borrow-clone-gaps.md) — Case 1-9 全 FIXED
 - [Quality Improvements](done/quality-improvements.md) — エラー行番号、heredoc 行追跡
+- [Cross-Target CI](done/cross-target-ci.md) — 90/91 (98.9%), GitHub Actions 自動化
 - [While Loop](done/while-loop.md)
