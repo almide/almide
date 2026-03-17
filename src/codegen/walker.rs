@@ -385,6 +385,12 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                             if ctx.is_rust() && name.starts_with("value_") {
                                 return format!("almide_rt_{}({})", name, args_str);
                             }
+                            // Rust: Type.method → Type_method (standalone function)
+                            // These are auto-derived codec functions like Person.encode/Person.decode
+                            if ctx.is_rust() && name.contains('.') {
+                                let flat = name.replace('.', "_");
+                                return format!("{}({})", flat, args_str);
+                            }
                             // Qualify enum constructors (Red → Color::Red)
                             if let Some(enum_name) = ctx.ctor_to_enum.get(name.as_str()) {
                                 if args.is_empty() {
