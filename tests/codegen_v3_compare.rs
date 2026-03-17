@@ -44,7 +44,7 @@ fn make_test_program() -> IrProgram {
                             span: None,
                         }),
                     },
-                    ty: Ty::Fn(vec![Ty::String], Box::new(Ty::Bool)),
+                    ty: Ty::Fn { params: vec![Ty::String], ret: Box::new(Ty::Bool) },
                     span: None,
                 },
             ],
