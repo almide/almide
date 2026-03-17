@@ -381,8 +381,8 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                             if ctx.is_rust() && name == "println" {
                                 return format!("println!(\"{{}}\", {})", args_str);
                             }
-                            // Rust: value_* functions → almide_rt_value_* (codec runtime)
-                            if ctx.is_rust() && name.starts_with("value_") {
+                            // Rust: value_* and __encode/__decode functions → almide_rt_* (codec runtime)
+                            if ctx.is_rust() && (name.starts_with("value_") || name.starts_with("__encode") || name.starts_with("__decode")) {
                                 return format!("almide_rt_{}({})", name, args_str);
                             }
                             // Rust: Type.method → Type_method (standalone function)
