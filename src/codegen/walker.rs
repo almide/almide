@@ -270,7 +270,16 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 })
                 .collect();
             if let Some(e) = expr {
-                parts.push(render_expr(ctx, e));
+                let rendered = render_expr(ctx, e);
+                // In a loop (DoBlock), non-Unit final expressions need `return` to exit the loop
+                let needs_return = ctx.is_rust()
+                    && !matches!(&e.ty, Ty::Unit)
+                    && !matches!(&e.kind, IrExprKind::Unit | IrExprKind::Break);
+                if needs_return && !rendered.starts_with("break") {
+                    parts.push(format!("return {}", rendered));
+                } else {
+                    parts.push(rendered);
+                }
             }
             if ctx.is_rust() {
                 format!("loop {{\n{}\n}}", parts.join("\n"))
@@ -498,11 +507,22 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
 
         IrExprKind::Record { name, fields } => {
+            // Detect parent enum for Box wrapping of recursive fields
+            let parent_enum = name.as_ref().and_then(|n| ctx.ctor_to_enum.get(n)).cloned();
             let fields_str = fields.iter()
                 .map(|(k, v)| {
+                    let mut val_str = render_expr(ctx, v);
+                    // Box recursive fields (value type contains parent enum name)
+                    if ctx.is_rust() {
+                        if let Some(ref pe) = parent_enum {
+                            if ty_contains_name(&v.ty, pe) {
+                                val_str = format!("Box::new({})", val_str);
+                            }
+                        }
+                    }
                     let mut b = HashMap::new();
                     b.insert("name", k.clone());
-                    b.insert("value", render_expr(ctx, v));
+                    b.insert("value", val_str);
                     ctx.templates.render("record_field", None, &[], &b)
                         .unwrap_or_else(|| format!("{}: {}", k, render_expr(ctx, v)))
                 })
@@ -1231,7 +1251,15 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                     }
                     IrVariantKind::Record { fields } => {
                         let fields_str = fields.iter()
-                            .map(|f| format!("{}: {}", f.name, render_type(ctx, &f.ty)))
+                            .map(|f| {
+                                let rendered = render_type(ctx, &f.ty);
+                                let boxed = if ctx.is_rust() && ty_contains_name(&f.ty, &td.name) {
+                                    format!("Box<{}>", rendered)
+                                } else {
+                                    rendered
+                                };
+                                format!("{}: {}", f.name, boxed)
+                            })
                             .collect::<Vec<_>>()
                             .join(", ");
                         format!("{} {{ {} }}", v.name, fields_str)
