@@ -741,9 +741,11 @@ impl<'a> LowerCtx<'a> {
                 args: rust_args,
             }
         };
-        // Template already includes ? when in_effect — don't double-wrap
-        if use_template && self.in_effect {
-            return expr; // template handles ? insertion
+        // Check if template already contains ? (via rendered output)
+        let rendered = super::render::expr_str(&expr);
+        let template_has_try = rendered.ends_with('?');
+        if template_has_try {
+            return expr; // template already handles ?
         }
         if self.auto_try && self.result_fns.contains(&key) {
             Expr::Try(Box::new(expr))

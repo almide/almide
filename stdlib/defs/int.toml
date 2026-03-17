@@ -20,7 +20,6 @@ example = "int.parse(\"42\") // => ok(42)"
 params = [{ name = "s", type = "String" }]
 return = "Result[Int, String]"
 rust = "almide_rt_int_parse(&*{s})"
-rust_effect = "almide_rt_int_parse(&*{s})?"
 ts = "__almd_int.parse({s})"
 
 [from_hex]
@@ -29,7 +28,6 @@ example = "int.parse_hex(\"ff\") // => ok(255)"
 params = [{ name = "s", type = "String" }]
 return = "Result[Int, String]"
 rust = "almide_rt_int_parse_hex(&*{s})"
-rust_effect = "almide_rt_int_parse_hex(&*{s})?"
 ts = "__almd_int.parse_hex({s})"
 
 [abs]
