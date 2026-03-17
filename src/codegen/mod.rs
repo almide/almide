@@ -22,3 +22,4 @@
 pub mod pass;
 pub mod template;
 pub mod target;
+pub mod walker;
