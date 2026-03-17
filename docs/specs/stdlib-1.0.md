@@ -404,8 +404,55 @@ index(path, i) -> JsonPath
 // Keys
 keys(v) -> List[String]
 
-// REMOVED: to_string (use as_string), to_int (use as_int)
+// REMOVED: to_string, to_int (use as_*), s/i/f/b (use from_string/from_int 等)
 // KEPT: get_string, get_int 等 — 2段パイプのショートカットとして実用的
+// NOTE: from_string, from_int 等は json.string(), json.int() に統一検討中
+```
+
+**json / value 整合性ルール:**
+- `as_*` は両モジュールで **`Option`** を返す (型抽出の失敗 = None)
+- `get` は両モジュールで **`Option[Value]`** を返す (キーアクセス)
+- construct は `json.string()` / `value.str()` — 短縮形の扱いは要議論
+
+```
+```
+
+### value
+
+Value 型の操作。json モジュールと共通の Value 型を使うが、value は Codec (encode/decode) 用途。
+
+```
+// Construct
+str(s) -> Value
+int(n) -> Value
+float(f) -> Value
+bool(b) -> Value
+object(pairs) -> Value                         // List[(String, Value)] -> Value
+array(items) -> Value                          // List[Value] -> Value
+null() -> Value
+
+// Type extraction (as_* = Option に統一。json.as_* と同じ戻り値型)
+as_string(v) -> Option[String]                 // 現状は Result — Option に変更
+as_int(v) -> Option[Int]                       // 同上
+as_float(v) -> Option[Float]                   // 同上
+as_bool(v) -> Option[Bool]                     // 同上
+as_array(v) -> Option[List[Value]]             // 同上
+
+// Access
+get(v, key) -> Option[Value]                   // 旧 field。json.get と対称
+
+// Transform
+pick(v, keys) -> Value
+omit(v, keys) -> Value
+merge(a, b) -> Value
+to_camel_case(v) -> Value
+to_snake_case(v) -> Value
+
+// Stringify
+stringify(v) -> String
+
+// BREAKING: as_* の戻り値を Result → Option に変更
+// BREAKING: field → get にリネーム (json.get と対称)
 ```
 
 ### 他の I/O / ユーティリティモジュール
@@ -470,6 +517,10 @@ keys(v) -> List[String]
 | 非変更: `list.remove_at` 維持 | — | map.remove との混同防止 |
 | 非変更: int bitwise niche 関数 | — | hash.almd が依存 |
 | 非変更: `json.get_string` 等 維持 | — | get + as のショートカットとして実用的 |
+| `value.as_*` 戻り値 Result → Option | 型変更 | json.as_* と統一 |
+| `value.field` → `value.get` | リネーム | json.get と対称 |
+| `json.to_string` / `json.to_int` 削除 | 関数削除 | as_* と重複 |
+| `json.s` / `json.i` / `json.f` / `json.b` 削除 | 関数削除 | from_string 等を使う |
 
 ## 新規追加リスト
 
