@@ -1,0 +1,13 @@
+type Product = { name: String, price: Int, category: String }
+
+fn find_price(products: List[Product], target: String) -> Int =
+  list.find(products, (p) => p.name == target)
+    |> option.map((p) => p.price)
+    |> option.unwrap_or(0)
+
+fn cheapest_name(products: List[Product]) -> String =
+  products
+    |> list.sort_by((p) => p.price)
+    |> list.first()
+    |> option.map((p) => p.name)
+    |> option.unwrap_or("empty")

@@ -1,0 +1,6 @@
+{
+  "name": "chain-fields",
+  "instruction": "Modify `describe_product` to return `\"name: $price\"` format instead of just the name. For example, if the product is \"Laptop\" with price 999, return `\"Laptop: 999\"`. Use `\"${p.name}: ${int.to_string(p.price)}\"`. Keep the not-found case returning `\"N/A\"`. Do not change any other function.",
+  "layer3_hint": "Available: `list.find(xs, (x) => bool)` returns `Option[A]`. `int.to_string(n)` converts Int to String. String interpolation: `\"${expr}\"`. `list.filter(xs, (x) => bool)` filters elements.",
+  "test_file": "t05_chain_fields_test.almd"
+}

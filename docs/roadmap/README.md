@@ -5,6 +5,10 @@
 ### Phase II: 安定性契約
 - [Stdlib Verb Reform](active/stdlib-verb-system.md) — 1.0 前最後の breaking change
 
+### Codegen
+- [Codegen v3: 三層アーキテクチャ](active/codegen-v3-architecture.md) — Core IR → Semantic Rewrite (Plugin) → Template Renderer (TOML)。MLIR progressive lowering + Reflaxe plugin 方式
+- [AnonRecord Codegen](active/anon-record-codegen.md) — 空リストの型パラメータで `AnonRecord` が未定義になる。Grammar Lab survival rate に直接影響
+
 
 ### 全体
 - [PRODUCTION_READY.md](PRODUCTION_READY.md) — 1.0 基準、10 言語からの教訓

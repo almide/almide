@@ -1,0 +1,20 @@
+test "find_product found" {
+  let ps = [Product { name: "Laptop", price: 999, category: "tech" }]
+  assert_eq(find_product(ps, "Laptop"), "Laptop: tech")
+}
+
+test "find_product not found with name" {
+  let ps = [Product { name: "Laptop", price: 999, category: "tech" }]
+  assert_eq(find_product(ps, "Phone"), "Product 'Phone' not found")
+}
+
+test "find_product empty list" {
+  let ps: List[Product] = []
+  assert_eq(find_product(ps, "X"), "Product 'X' not found")
+}
+
+test "has_category unchanged" {
+  let ps = [Product { name: "Laptop", price: 999, category: "tech" }]
+  assert_eq(has_category(ps, "tech"), true)
+  assert_eq(has_category(ps, "food"), false)
+}

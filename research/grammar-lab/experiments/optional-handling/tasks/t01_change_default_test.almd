@@ -1,0 +1,17 @@
+test "find_price found" {
+  let ps = [Product { name: "Laptop", price: 999, category: "tech" }]
+  assert_eq(find_price(ps, "Laptop"), 999)
+}
+
+test "find_price not found returns -1" {
+  let ps = [Product { name: "Laptop", price: 999, category: "tech" }]
+  assert_eq(find_price(ps, "Phone"), -1)
+}
+
+test "cheapest_name unchanged" {
+  let ps = [
+    Product { name: "B", price: 20, category: "x" },
+    Product { name: "A", price: 5, category: "y" },
+  ]
+  assert_eq(cheapest_name(ps), "A")
+}

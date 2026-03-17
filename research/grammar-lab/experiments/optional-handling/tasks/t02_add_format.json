@@ -1,0 +1,6 @@
+{
+  "name": "add-format",
+  "instruction": "Modify `lookup_info` so it returns `\"name (category)\"` format instead of just the name. For example, if the product is named \"Laptop\" with category \"tech\", return `\"Laptop (tech)\"`. Use string interpolation: `\"${p.name} (${p.category})\"`. If not found, keep returning `\"not found\"`. Do not change any other function.",
+  "layer3_hint": "Available: `list.find(xs, (x) => bool)` returns `Option[A]`. String interpolation: `\"${expr}\"`. `list.sort_by(xs, (x) => key)` sorts ascending. `list.reverse(xs)` reverses a list.",
+  "test_file": "t02_add_format_test.almd"
+}

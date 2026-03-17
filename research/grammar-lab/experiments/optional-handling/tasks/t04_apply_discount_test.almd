@@ -1,0 +1,22 @@
+test "find_price with discount" {
+  let ps = [Product { name: "Laptop", price: 1000, category: "tech" }]
+  assert_eq(find_price(ps, "Laptop"), 800)
+}
+
+test "find_price not found still 0" {
+  let ps = [Product { name: "Laptop", price: 1000, category: "tech" }]
+  assert_eq(find_price(ps, "Phone"), 0)
+}
+
+test "find_price discount rounds down" {
+  let ps = [Product { name: "Book", price: 15, category: "edu" }]
+  assert_eq(find_price(ps, "Book"), 12)
+}
+
+test "total_value unchanged" {
+  let ps = [
+    Product { name: "A", price: 100, category: "x" },
+    Product { name: "B", price: 200, category: "y" },
+  ]
+  assert_eq(total_value(ps), 300)
+}

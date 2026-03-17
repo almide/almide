@@ -1,0 +1,26 @@
+test "cheapest_name returns cheapest" {
+  let ps = [
+    Product { name: "Laptop", price: 999, category: "tech" },
+    Product { name: "Book", price: 15, category: "edu" },
+    Product { name: "Phone", price: 599, category: "tech" },
+  ]
+  assert_eq(cheapest_name(ps), "Book")
+}
+
+test "cheapest_name single item" {
+  let ps = [Product { name: "Laptop", price: 999, category: "tech" }]
+  assert_eq(cheapest_name(ps), "Laptop")
+}
+
+test "cheapest_name empty" {
+  let ps: List[Product] = []
+  assert_eq(cheapest_name(ps), "none")
+}
+
+test "average_price unchanged" {
+  let ps = [
+    Product { name: "A", price: 100, category: "x" },
+    Product { name: "B", price: 200, category: "y" },
+  ]
+  assert_eq(average_price(ps), 150)
+}

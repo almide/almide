@@ -1,0 +1,9 @@
+type Product = { name: String, price: Int, category: String }
+
+fn find_product(products: List[Product], target: String) -> String =
+  list.find(products, (p) => p.name == target)
+    |> option.map((p) => "${p.name}: ${p.category}")
+    |> option.unwrap_or("not found")
+
+fn has_category(products: List[Product], cat: String) -> Bool =
+  list.len(products |> list.filter((p) => p.category == cat)) > 0

@@ -1,0 +1,22 @@
+test "find_category found" {
+  let ps = [Product { name: "Laptop", price: 999, category: "tech" }]
+  assert_eq(find_category(ps, "Laptop"), "tech")
+}
+
+test "find_category not found" {
+  let ps = [Product { name: "Laptop", price: 999, category: "tech" }]
+  assert_eq(find_category(ps, "Phone"), "unknown")
+}
+
+test "find_price unchanged" {
+  let ps = [Product { name: "Laptop", price: 999, category: "tech" }]
+  assert_eq(find_price(ps, "Laptop"), 999)
+}
+
+test "product_names unchanged" {
+  let ps = [
+    Product { name: "A", price: 10, category: "x" },
+    Product { name: "B", price: 20, category: "y" },
+  ]
+  assert_eq(product_names(ps), ["A", "B"])
+}

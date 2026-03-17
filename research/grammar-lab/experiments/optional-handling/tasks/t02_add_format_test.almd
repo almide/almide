@@ -1,0 +1,17 @@
+test "lookup_info found with format" {
+  let ps = [Product { name: "Laptop", price: 999, category: "tech" }]
+  assert_eq(lookup_info(ps, "Laptop"), "Laptop (tech)")
+}
+
+test "lookup_info not found" {
+  let ps = [Product { name: "Laptop", price: 999, category: "tech" }]
+  assert_eq(lookup_info(ps, "Phone"), "not found")
+}
+
+test "most_expensive unchanged" {
+  let ps = [
+    Product { name: "Book", price: 15, category: "edu" },
+    Product { name: "Laptop", price: 999, category: "tech" },
+  ]
+  assert_eq(most_expensive(ps), "Laptop")
+}

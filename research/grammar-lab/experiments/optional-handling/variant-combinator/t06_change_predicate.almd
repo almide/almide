@@ -1,0 +1,9 @@
+type Product = { name: String, price: Int, category: String }
+
+fn find_by_name(products: List[Product], target: String) -> String =
+  list.find(products, (p) => p.name == target)
+    |> option.map((p) => "${p.name} (${int.to_string(p.price)})")
+    |> option.unwrap_or("not found")
+
+fn all_categories(products: List[Product]) -> List[String] =
+  products |> list.map((p) => p.category)

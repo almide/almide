@@ -1,0 +1,10 @@
+type Product = { name: String, price: Int, category: String }
+
+fn find_product(products: List[Product], target: String) -> String =
+  match list.find(products, (p) => p.name == target) {
+    some(p) => "${p.name}: ${p.category}",
+    none => "not found",
+  }
+
+fn has_category(products: List[Product], cat: String) -> Bool =
+  list.len(products |> list.filter((p) => p.category == cat)) > 0

@@ -1,0 +1,18 @@
+type Product = { name: String, price: Int, category: String }
+
+fn most_expensive_name(products: List[Product]) -> String =
+  products
+    |> list.sort_by((p) => p.price)
+    |> list.reverse()
+    |> list.first()
+    |> option.map((p) => p.name)
+    |> option.unwrap_or("none")
+
+fn average_price(products: List[Product]) -> Int = {
+  let n = list.len(products)
+  if n == 0 then 0
+  else {
+    let total = products |> list.fold(0, (acc, p) => acc + p.price)
+    total / n
+  }
+}
