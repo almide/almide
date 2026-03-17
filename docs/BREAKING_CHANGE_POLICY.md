@@ -1,7 +1,7 @@
 # Breaking Change Policy
 
-> Python 2→3 の教訓: silent な挙動変更は言語を殺す。
-> Swift 1→2→3 の教訓: 連続 breaking release は信頼を壊す。
+> Python 2→3 の教訓: silent な挙動変更はエコシステムに大きな負担をかける。
+> Swift 1→2→3 の教訓: 連続 breaking release はユーザーの移行コストを増大させる。
 > Go 1 の教訓: 「今日コンパイルできるコードは永遠にコンパイルできる」が最大の強み。
 
 ---

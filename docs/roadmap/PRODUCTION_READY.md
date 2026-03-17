@@ -117,14 +117,14 @@ Almide 1.0 = ALL of:
   ■ Rejected Patterns リスト: REJECTED_PATTERNS.md (20+ 項目)
 
 コンパイラ正確性
-  ■ クロスターゲット CI: 90/91 (98.9%) — GitHub Actions 自動化済み
+  ■ クロスターゲット CI: 91/91 (100%) — GitHub Actions 自動化済み
   □ ICE = 0: panic/unwrap ゼロ (継続改善)
   ■ 生成コードが rustc/tsc 通過
   ■ stdlib ランタイム 100%
 
 ターゲット品質
   ■ Tier 1 (Rust): 全テスト通過、全 exercises 動作
-  ■ Tier 2 (TS/JS): 90/91 pass (1 known: do_block break-in-IIFE)
+  ■ Tier 2 (TS/JS): 91/91 pass (100%)
   □ Tier 3 (WASM): 基本動作確認 (CI smoke test あり)
 
 テスト
@@ -153,7 +153,7 @@ LLM 計測 (ブロックしないが計測必須)
 ## 1.0 前にやるべき破壊的変更
 
 > Pre-1.0 は破壊的変更ができる唯一の窓。
-> Swift は 1→2→3 で 3 回壊して信頼を失った。TypeScript は enum を後悔している。
+> Swift は 1→2→3 で 3 回 breaking change があり、移行コストが大きかった。TypeScript は enum の設計を振り返っている。
 > LLM が構文を学習した後では指数関数的に難しくなる。
 
 - [ ] Verb system reform 完了 (stdlib-verb-system.md) — **唯一の残タスク**
