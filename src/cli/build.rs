@@ -1,5 +1,5 @@
 use std::process::Command;
-use crate::{compile_with_options, parse_file, find_rustc, emit_rust, emit_ts, check, diagnostic, resolve, project};
+use crate::{compile_with_options, parse_file, find_rustc, emit_rust, emit_ts, check, diagnostic, resolve, project, project_fetch};
 
 pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release: bool, fast: bool, unchecked_index: bool, no_check: bool) {
     let is_npm = matches!(target, Some("npm"));
@@ -88,7 +88,7 @@ fn cmd_build_npm(file: &str, out_dir: &str, _no_check: bool) {
     // Resolve dependencies
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
-            project::fetch_all_deps(&proj)
+            project_fetch::fetch_all_deps(&proj)
                 .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); })
                 .into_iter()
                 .map(|fd| (fd.pkg_id, fd.source_dir))

@@ -3,7 +3,7 @@
 // ── Effect fn calling multiple effect fns in sequence ──
 
 effect fn parse_int_strict(s: String) -> Result[Int, String] = {
-  let n = string.to_int(s)
+  let n = int.parse(s)
   ok(n)
 }
 

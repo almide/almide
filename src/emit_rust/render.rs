@@ -1,14 +1,5 @@
-/// RustIR → Rust source code renderer.
-///
-/// Input:    &Program (RustIR)
-/// Output:   String
-/// Owns:     formatting, indentation, syntax rules
-/// Does NOT: ANY codegen decisions — pure pattern match → string
-///
-/// Every decision was already made during IR → RustIR lowering.
-
+/// RustIR → Rust source code renderer. Pure pattern match → string.
 use super::rust_ir::*;
-
 const IND: &str = "    ";
 
 pub fn program(p: &Program) -> String {
@@ -91,20 +82,52 @@ fn enum_def(o: &mut String, e: &EnumDef, d: usize) {
 
 fn expr(o: &mut String, e: &Expr, d: usize) {
     match e {
+        // ── Literals + Variables ──
         Expr::Int(v) => { o.push_str(&format!("{}i64", v)); }
         Expr::Float(v) => { o.push_str(&format!("{:?}f64", v)); }
         Expr::Str(s) => { o.push_str(&format!("{:?}.to_string()", s)); }
         Expr::Bool(v) => { o.push_str(if *v { "true" } else { "false" }); }
         Expr::Unit => { o.push_str("()"); }
         Expr::Var(n) => { o.push_str(n); }
+        Expr::Raw(code) => { o.push_str(code); }
 
+        // ── Operators ──
         Expr::BinOp { op, left, right } => { o.push('('); expr(o, left, d); o.push(' '); o.push_str(op); o.push(' '); expr(o, right, d); o.push(')'); }
         Expr::UnOp { op, operand } => { o.push_str(op); expr(o, operand, d); }
 
+        // ── Calls ──
         Expr::Call { func, args } => { o.push_str(func); o.push('('); comma_exprs(o, args, d); o.push(')'); }
         Expr::MethodCall { recv, method, args } => { expr(o, recv, d); o.push('.'); o.push_str(method); o.push('('); comma_exprs(o, args, d); o.push(')'); }
         Expr::Macro { name, args } => { o.push_str(name); o.push_str("!("); comma_exprs(o, args, d); o.push(')'); }
 
+        // ── Wrappers ──
+        Expr::Clone(e) => { expr(o, e, d); o.push_str(".clone()"); }
+        Expr::Borrow(e) => { o.push('&'); expr(o, e, d); }
+        Expr::Try(e) => { expr(o, e, d); o.push('?'); }
+        Expr::Ok(e) => { o.push_str("Ok("); expr(o, e, d); o.push(')'); }
+        Expr::Err(e) => { o.push_str("Err("); expr(o, e, d); o.push(')'); }
+        Expr::Some(e) => { o.push_str("Some("); expr(o, e, d); o.push(')'); }
+        Expr::None => { o.push_str("None"); }
+
+        // ── Access ──
+        Expr::Field(e, f) => { expr(o, e, d); o.push('.'); o.push_str(f); }
+        Expr::Index(e, i) => { expr(o, e, d); o.push_str("[("); expr(o, i, d); o.push_str(") as usize].clone()"); }
+        Expr::TupleIdx(e, i) => { expr(o, e, d); o.push('.'); o.push_str(&i.to_string()); }
+
+        // ── Control flow ──
+        Expr::If { .. } | Expr::Match { .. } | Expr::Block { .. }
+        | Expr::For { .. } | Expr::While { .. } | Expr::Loop { .. }
+        | Expr::Break | Expr::Continue { .. } | Expr::Return(_) => render_control(o, e, d),
+
+        // ── Data constructors ──
+        Expr::Vec(_) | Expr::HashMap(_) | Expr::Tuple(_) | Expr::Range { .. }
+        | Expr::Struct { .. } | Expr::StructUpdate { .. }
+        | Expr::Closure { .. } | Expr::Format { .. } => render_data(o, e, d),
+    }
+}
+
+fn render_control(o: &mut String, e: &Expr, d: usize) {
+    match e {
         Expr::If { cond, then, else_ } => {
             o.push_str("if "); expr(o, cond, d); o.push_str(" { "); expr(o, then, d); o.push_str(" }");
             if let Some(e) = else_ { o.push_str(" else { "); expr(o, e, d); o.push_str(" }"); }
@@ -143,15 +166,12 @@ fn expr(o: &mut String, e: &Expr, d: usize) {
         Expr::Break => { o.push_str("break"); }
         Expr::Continue { label } => { o.push_str("continue"); if let Some(l) = label { o.push_str(&format!(" '{}", l)); } }
         Expr::Return(v) => { o.push_str("return"); if let Some(e) = v { o.push(' '); expr(o, e, d); } }
+        _ => {}
+    }
+}
 
-        Expr::Clone(e) => { expr(o, e, d); o.push_str(".clone()"); }
-        Expr::Borrow(e) => { o.push('&'); expr(o, e, d); }
-        Expr::Try(e) => { expr(o, e, d); o.push('?'); }
-        Expr::Ok(e) => { o.push_str("Ok("); expr(o, e, d); o.push(')'); }
-        Expr::Err(e) => { o.push_str("Err("); expr(o, e, d); o.push(')'); }
-        Expr::Some(e) => { o.push_str("Some("); expr(o, e, d); o.push(')'); }
-        Expr::None => { o.push_str("None"); }
-
+fn render_data(o: &mut String, e: &Expr, d: usize) {
+    match e {
         Expr::Vec(elems) => { o.push_str("vec!["); comma_exprs(o, elems, d); o.push(']'); }
         Expr::HashMap(entries) => {
             o.push_str("HashMap::from([");
@@ -164,11 +184,6 @@ fn expr(o: &mut String, e: &Expr, d: usize) {
             o.push_str(if *inclusive { "..=" } else { ".." });
             expr(o, end, d); o.push_str(").collect::<Vec<"); ty(o, elem_ty); o.push_str(">>()");
         }
-
-        Expr::Field(e, f) => { expr(o, e, d); o.push('.'); o.push_str(f); }
-        Expr::Index(e, i) => { expr(o, e, d); o.push_str("[("); expr(o, i, d); o.push_str(") as usize].clone()"); }
-        Expr::TupleIdx(e, i) => { expr(o, e, d); o.push('.'); o.push_str(&i.to_string()); }
-
         Expr::Struct { name, fields } => {
             o.push_str(name); o.push_str(" { ");
             for (i, (n, v)) in fields.iter().enumerate() { if i > 0 { o.push_str(", "); } o.push_str(n); o.push_str(": "); expr(o, v, d); }
@@ -179,7 +194,6 @@ fn expr(o: &mut String, e: &Expr, d: usize) {
             for (n, v) in fields { o.push_str(n); o.push_str(": "); expr(o, v, d); o.push_str(", "); }
             o.push_str(".."); expr(o, base, d); o.push_str(" }");
         }
-
         Expr::Closure { params, body } => {
             o.push_str("move |"); o.push_str(&params.join(", ")); o.push_str("| "); expr(o, body, d);
         }
@@ -188,7 +202,7 @@ fn expr(o: &mut String, e: &Expr, d: usize) {
             for a in args { o.push_str(", "); expr(o, a, d); }
             o.push(')');
         }
-        Expr::Raw(code) => { o.push_str(code); }
+        _ => {}
     }
 }
 
@@ -253,7 +267,23 @@ fn ty(o: &mut String, t: &Type) {
         Type::Ref(inner) => { o.push('&'); ty(o, inner); }
         Type::RefStr => o.push_str("&str"),
         Type::Slice(inner) => { o.push_str("&["); ty(o, inner); o.push(']'); }
-        Type::Fn(params, ret) => { o.push_str("impl Fn("); for (i, p) in params.iter().enumerate() { if i > 0 { o.push_str(", "); } ty(o, p); } o.push_str(") -> "); ty(o, ret); o.push_str(" + Clone"); }
+        Type::Fn(params, ret) => {
+            // Check if return type contains another Fn (nested closures need Box<dyn Fn>)
+            if matches!(ret.as_ref(), Type::Fn(_, _)) {
+                o.push_str("impl Fn(");
+                for (i, p) in params.iter().enumerate() { if i > 0 { o.push_str(", "); } ty(o, p); }
+                o.push_str(") -> Box<dyn Fn(");
+                if let Type::Fn(inner_params, inner_ret) = ret.as_ref() {
+                    for (i, p) in inner_params.iter().enumerate() { if i > 0 { o.push_str(", "); } ty(o, p); }
+                    o.push_str(") -> "); ty(o, inner_ret);
+                }
+                o.push_str("> + Clone");
+            } else {
+                o.push_str("impl Fn(");
+                for (i, p) in params.iter().enumerate() { if i > 0 { o.push_str(", "); } ty(o, p); }
+                o.push_str(") -> "); ty(o, ret); o.push_str(" + Clone");
+            }
+        }
         Type::Infer => o.push('_'),
     }
 }

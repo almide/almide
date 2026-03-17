@@ -88,8 +88,7 @@ fn find_structurally_bounded_fns(functions: &[IrFunction], type_decls: &[IrTypeD
             for g in generics {
                 if g.structural_bound.is_some() {
                     for (i, param) in func.params.iter().enumerate() {
-                        let is_match = matches!(&param.ty, Ty::TypeVar(n) if n == &g.name)
-                            || matches!(&param.ty, Ty::Named(n, args) if n == &g.name && args.is_empty());
+                        let is_match = ty_contains_typevar(&param.ty, &g.name);
                         if is_match {
                             bounded.push(BoundedParam {
                                 param_idx: i,
@@ -129,11 +128,12 @@ fn discover_instances(
 ) -> HashMap<MonoKey, HashMap<String, Ty>> {
     let mut instances: HashMap<MonoKey, HashMap<String, Ty>> = HashMap::new();
 
-    for func in &program.functions {
-        discover_in_expr(&func.body, bound_fns, &mut instances);
+    let fns = &program.functions;
+    for func in fns {
+        discover_in_expr(&func.body, bound_fns, fns, &mut instances);
     }
     for tl in &program.top_lets {
-        discover_in_expr(&tl.value, bound_fns, &mut instances);
+        discover_in_expr(&tl.value, bound_fns, fns, &mut instances);
     }
 
     instances
@@ -142,99 +142,117 @@ fn discover_instances(
 fn discover_in_expr(
     expr: &IrExpr,
     bound_fns: &HashMap<String, Vec<BoundedParam>>,
+    program_functions: &[IrFunction],
     instances: &mut HashMap<MonoKey, HashMap<String, Ty>>,
 ) {
     match &expr.kind {
         IrExprKind::Call { target, args, .. } => {
             if let CallTarget::Named { name } = target {
                 if let Some(bounded_params) = bound_fns.get(name) {
+                    // Find the original function to get parameter types
+                    let param_types: Vec<Ty> = program_functions.iter()
+                        .find(|f| f.name == *name)
+                        .map(|f| f.params.iter().map(|p| p.ty.clone()).collect())
+                        .unwrap_or_default();
+
                     let mut bindings: HashMap<String, Ty> = HashMap::new();
                     for bp in bounded_params {
                         if bp.param_idx < args.len() {
-                            bindings.insert(bp.type_var.clone(), args[bp.param_idx].ty.clone());
+                            let arg_ty = &args[bp.param_idx].ty;
+                            if let Some(param_ty) = param_types.get(bp.param_idx) {
+                                let extracted = extract_typevar_binding(param_ty, arg_ty, &bp.type_var);
+                                bindings.insert(bp.type_var.clone(), extracted);
+                            } else {
+                                bindings.insert(bp.type_var.clone(), arg_ty.clone());
+                            }
                         }
                     }
-                    if !bindings.is_empty() {
+                    // Skip bindings with Unknown or unresolved inference vars
+                    let all_concrete = !bindings.is_empty() && bindings.values().all(|ty|
+                        !matches!(ty, Ty::Unknown) && !ty.contains_unknown()
+                        && !matches!(ty, Ty::TypeVar(n) if n.starts_with('?'))
+                    );
+                    if all_concrete {
                         let suffix = mangle_suffix(&bindings);
                         instances.insert((name.clone(), suffix), bindings);
                     }
                 }
             }
-            for arg in args { discover_in_expr(arg, bound_fns, instances); }
+            for arg in args { discover_in_expr(arg, bound_fns, program_functions, instances); }
             match target {
                 CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } => {
-                    discover_in_expr(object, bound_fns, instances);
+                    discover_in_expr(object, bound_fns, program_functions, instances);
                 }
                 _ => {}
             }
         }
         IrExprKind::BinOp { left, right, .. } => {
-            discover_in_expr(left, bound_fns, instances);
-            discover_in_expr(right, bound_fns, instances);
+            discover_in_expr(left, bound_fns, program_functions, instances);
+            discover_in_expr(right, bound_fns, program_functions, instances);
         }
-        IrExprKind::UnOp { operand, .. } => discover_in_expr(operand, bound_fns, instances),
+        IrExprKind::UnOp { operand, .. } => discover_in_expr(operand, bound_fns, program_functions, instances),
         IrExprKind::If { cond, then, else_ } => {
-            discover_in_expr(cond, bound_fns, instances);
-            discover_in_expr(then, bound_fns, instances);
-            discover_in_expr(else_, bound_fns, instances);
+            discover_in_expr(cond, bound_fns, program_functions, instances);
+            discover_in_expr(then, bound_fns, program_functions, instances);
+            discover_in_expr(else_, bound_fns, program_functions, instances);
         }
         IrExprKind::Match { subject, arms } => {
-            discover_in_expr(subject, bound_fns, instances);
+            discover_in_expr(subject, bound_fns, program_functions, instances);
             for arm in arms {
-                if let Some(g) = &arm.guard { discover_in_expr(g, bound_fns, instances); }
-                discover_in_expr(&arm.body, bound_fns, instances);
+                if let Some(g) = &arm.guard { discover_in_expr(g, bound_fns, program_functions, instances); }
+                discover_in_expr(&arm.body, bound_fns, program_functions, instances);
             }
         }
         IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
-            for s in stmts { discover_in_stmt(s, bound_fns, instances); }
-            if let Some(e) = expr { discover_in_expr(e, bound_fns, instances); }
+            for s in stmts { discover_in_stmt(s, bound_fns, program_functions, instances); }
+            if let Some(e) = expr { discover_in_expr(e, bound_fns, program_functions, instances); }
         }
         IrExprKind::ForIn { iterable, body, .. } => {
-            discover_in_expr(iterable, bound_fns, instances);
-            for s in body { discover_in_stmt(s, bound_fns, instances); }
+            discover_in_expr(iterable, bound_fns, program_functions, instances);
+            for s in body { discover_in_stmt(s, bound_fns, program_functions, instances); }
         }
         IrExprKind::While { cond, body } => {
-            discover_in_expr(cond, bound_fns, instances);
-            for s in body { discover_in_stmt(s, bound_fns, instances); }
+            discover_in_expr(cond, bound_fns, program_functions, instances);
+            for s in body { discover_in_stmt(s, bound_fns, program_functions, instances); }
         }
         IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
-            for e in elements { discover_in_expr(e, bound_fns, instances); }
+            for e in elements { discover_in_expr(e, bound_fns, program_functions, instances); }
         }
         IrExprKind::Record { fields, .. } => {
-            for (_, e) in fields { discover_in_expr(e, bound_fns, instances); }
+            for (_, e) in fields { discover_in_expr(e, bound_fns, program_functions, instances); }
         }
         IrExprKind::SpreadRecord { base, fields } => {
-            discover_in_expr(base, bound_fns, instances);
-            for (_, e) in fields { discover_in_expr(e, bound_fns, instances); }
+            discover_in_expr(base, bound_fns, program_functions, instances);
+            for (_, e) in fields { discover_in_expr(e, bound_fns, program_functions, instances); }
         }
         IrExprKind::MapLiteral { entries } => {
             for (k, v) in entries {
-                discover_in_expr(k, bound_fns, instances);
-                discover_in_expr(v, bound_fns, instances);
+                discover_in_expr(k, bound_fns, program_functions, instances);
+                discover_in_expr(v, bound_fns, program_functions, instances);
             }
         }
         IrExprKind::Range { start, end, .. } => {
-            discover_in_expr(start, bound_fns, instances);
-            discover_in_expr(end, bound_fns, instances);
+            discover_in_expr(start, bound_fns, program_functions, instances);
+            discover_in_expr(end, bound_fns, program_functions, instances);
         }
         IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
-            discover_in_expr(object, bound_fns, instances);
+            discover_in_expr(object, bound_fns, program_functions, instances);
         }
         IrExprKind::IndexAccess { object, index } => {
-            discover_in_expr(object, bound_fns, instances);
-            discover_in_expr(index, bound_fns, instances);
+            discover_in_expr(object, bound_fns, program_functions, instances);
+            discover_in_expr(index, bound_fns, program_functions, instances);
         }
-        IrExprKind::Lambda { body, .. } => discover_in_expr(body, bound_fns, instances),
+        IrExprKind::Lambda { body, .. } => discover_in_expr(body, bound_fns, program_functions, instances),
         IrExprKind::StringInterp { parts } => {
             for part in parts {
                 if let IrStringPart::Expr { expr } = part {
-                    discover_in_expr(expr, bound_fns, instances);
+                    discover_in_expr(expr, bound_fns, program_functions, instances);
                 }
             }
         }
         IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
         | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
-        | IrExprKind::Await { expr } => discover_in_expr(expr, bound_fns, instances),
+        | IrExprKind::Await { expr } => discover_in_expr(expr, bound_fns, program_functions, instances),
         _ => {}
     }
 }
@@ -242,20 +260,21 @@ fn discover_in_expr(
 fn discover_in_stmt(
     stmt: &IrStmt,
     bound_fns: &HashMap<String, Vec<BoundedParam>>,
+    program_functions: &[IrFunction],
     instances: &mut HashMap<MonoKey, HashMap<String, Ty>>,
 ) {
     match &stmt.kind {
         IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
-        | IrStmtKind::Assign { value, .. } => discover_in_expr(value, bound_fns, instances),
+        | IrStmtKind::Assign { value, .. } => discover_in_expr(value, bound_fns, program_functions, instances),
         IrStmtKind::IndexAssign { index, value, .. } => {
-            discover_in_expr(index, bound_fns, instances);
-            discover_in_expr(value, bound_fns, instances);
+            discover_in_expr(index, bound_fns, program_functions, instances);
+            discover_in_expr(value, bound_fns, program_functions, instances);
         }
-        IrStmtKind::FieldAssign { value, .. } => discover_in_expr(value, bound_fns, instances),
-        IrStmtKind::Expr { expr } => discover_in_expr(expr, bound_fns, instances),
+        IrStmtKind::FieldAssign { value, .. } => discover_in_expr(value, bound_fns, program_functions, instances),
+        IrStmtKind::Expr { expr } => discover_in_expr(expr, bound_fns, program_functions, instances),
         IrStmtKind::Guard { cond, else_ } => {
-            discover_in_expr(cond, bound_fns, instances);
-            discover_in_expr(else_, bound_fns, instances);
+            discover_in_expr(cond, bound_fns, program_functions, instances);
+            discover_in_expr(else_, bound_fns, program_functions, instances);
         }
         IrStmtKind::Comment { .. } => {}
     }
@@ -473,11 +492,17 @@ fn rewrite_calls(
     bound_fns: &HashMap<String, Vec<BoundedParam>>,
     instances: &HashMap<MonoKey, HashMap<String, Ty>>,
 ) {
+    // Pre-collect parameter types for bound functions (needed for type extraction)
+    let fn_param_types: HashMap<String, Vec<Ty>> = program.functions.iter()
+        .filter(|f| bound_fns.contains_key(&f.name))
+        .map(|f| (f.name.clone(), f.params.iter().map(|p| p.ty.clone()).collect()))
+        .collect();
+
     for func in &mut program.functions {
-        rewrite_expr_calls(&mut func.body, bound_fns, instances);
+        rewrite_expr_calls(&mut func.body, bound_fns, instances, &fn_param_types);
     }
     for tl in &mut program.top_lets {
-        rewrite_expr_calls(&mut tl.value, bound_fns, instances);
+        rewrite_expr_calls(&mut tl.value, bound_fns, instances, &fn_param_types);
     }
 }
 
@@ -485,16 +510,23 @@ fn rewrite_expr_calls(
     expr: &mut IrExpr,
     bound_fns: &HashMap<String, Vec<BoundedParam>>,
     instances: &HashMap<MonoKey, HashMap<String, Ty>>,
+    fn_param_types: &HashMap<String, Vec<Ty>>,
 ) {
     match &mut expr.kind {
         IrExprKind::Call { target, args, .. } => {
-            for a in args.iter_mut() { rewrite_expr_calls(a, bound_fns, instances); }
+            for a in args.iter_mut() { rewrite_expr_calls(a, bound_fns, instances, fn_param_types); }
             if let CallTarget::Named { name } = target {
                 if let Some(bounded_params) = bound_fns.get(name.as_str()) {
+                    let param_types = fn_param_types.get(name.as_str());
                     let mut bindings: HashMap<String, Ty> = HashMap::new();
                     for bp in bounded_params {
                         if bp.param_idx < args.len() {
-                            bindings.insert(bp.type_var.clone(), args[bp.param_idx].ty.clone());
+                            let arg_ty = &args[bp.param_idx].ty;
+                            if let Some(pt) = param_types.and_then(|pts| pts.get(bp.param_idx)) {
+                                bindings.insert(bp.type_var.clone(), extract_typevar_binding(pt, arg_ty, &bp.type_var));
+                            } else {
+                                bindings.insert(bp.type_var.clone(), arg_ty.clone());
+                            }
                         }
                     }
                     if !bindings.is_empty() {
@@ -507,78 +539,78 @@ fn rewrite_expr_calls(
             }
             match target {
                 CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } => {
-                    rewrite_expr_calls(object, bound_fns, instances);
+                    rewrite_expr_calls(object, bound_fns, instances, fn_param_types);
                 }
                 _ => {}
             }
         }
         IrExprKind::BinOp { left, right, .. } => {
-            rewrite_expr_calls(left, bound_fns, instances);
-            rewrite_expr_calls(right, bound_fns, instances);
+            rewrite_expr_calls(left, bound_fns, instances, fn_param_types);
+            rewrite_expr_calls(right, bound_fns, instances, fn_param_types);
         }
-        IrExprKind::UnOp { operand, .. } => rewrite_expr_calls(operand, bound_fns, instances),
+        IrExprKind::UnOp { operand, .. } => rewrite_expr_calls(operand, bound_fns, instances, fn_param_types),
         IrExprKind::If { cond, then, else_ } => {
-            rewrite_expr_calls(cond, bound_fns, instances);
-            rewrite_expr_calls(then, bound_fns, instances);
-            rewrite_expr_calls(else_, bound_fns, instances);
+            rewrite_expr_calls(cond, bound_fns, instances, fn_param_types);
+            rewrite_expr_calls(then, bound_fns, instances, fn_param_types);
+            rewrite_expr_calls(else_, bound_fns, instances, fn_param_types);
         }
         IrExprKind::Match { subject, arms } => {
-            rewrite_expr_calls(subject, bound_fns, instances);
+            rewrite_expr_calls(subject, bound_fns, instances, fn_param_types);
             for arm in arms {
-                if let Some(g) = &mut arm.guard { rewrite_expr_calls(g, bound_fns, instances); }
-                rewrite_expr_calls(&mut arm.body, bound_fns, instances);
+                if let Some(g) = &mut arm.guard { rewrite_expr_calls(g, bound_fns, instances, fn_param_types); }
+                rewrite_expr_calls(&mut arm.body, bound_fns, instances, fn_param_types);
             }
         }
         IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
-            for s in stmts { rewrite_stmt_calls(s, bound_fns, instances); }
-            if let Some(e) = expr { rewrite_expr_calls(e, bound_fns, instances); }
+            for s in stmts { rewrite_stmt_calls(s, bound_fns, instances, fn_param_types); }
+            if let Some(e) = expr { rewrite_expr_calls(e, bound_fns, instances, fn_param_types); }
         }
         IrExprKind::ForIn { iterable, body, .. } => {
-            rewrite_expr_calls(iterable, bound_fns, instances);
-            for s in body { rewrite_stmt_calls(s, bound_fns, instances); }
+            rewrite_expr_calls(iterable, bound_fns, instances, fn_param_types);
+            for s in body { rewrite_stmt_calls(s, bound_fns, instances, fn_param_types); }
         }
         IrExprKind::While { cond, body } => {
-            rewrite_expr_calls(cond, bound_fns, instances);
-            for s in body { rewrite_stmt_calls(s, bound_fns, instances); }
+            rewrite_expr_calls(cond, bound_fns, instances, fn_param_types);
+            for s in body { rewrite_stmt_calls(s, bound_fns, instances, fn_param_types); }
         }
         IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
-            for e in elements { rewrite_expr_calls(e, bound_fns, instances); }
+            for e in elements { rewrite_expr_calls(e, bound_fns, instances, fn_param_types); }
         }
         IrExprKind::Record { fields, .. } => {
-            for (_, e) in fields { rewrite_expr_calls(e, bound_fns, instances); }
+            for (_, e) in fields { rewrite_expr_calls(e, bound_fns, instances, fn_param_types); }
         }
         IrExprKind::SpreadRecord { base, fields } => {
-            rewrite_expr_calls(base, bound_fns, instances);
-            for (_, e) in fields { rewrite_expr_calls(e, bound_fns, instances); }
+            rewrite_expr_calls(base, bound_fns, instances, fn_param_types);
+            for (_, e) in fields { rewrite_expr_calls(e, bound_fns, instances, fn_param_types); }
         }
         IrExprKind::MapLiteral { entries } => {
             for (k, v) in entries {
-                rewrite_expr_calls(k, bound_fns, instances);
-                rewrite_expr_calls(v, bound_fns, instances);
+                rewrite_expr_calls(k, bound_fns, instances, fn_param_types);
+                rewrite_expr_calls(v, bound_fns, instances, fn_param_types);
             }
         }
         IrExprKind::Range { start, end, .. } => {
-            rewrite_expr_calls(start, bound_fns, instances);
-            rewrite_expr_calls(end, bound_fns, instances);
+            rewrite_expr_calls(start, bound_fns, instances, fn_param_types);
+            rewrite_expr_calls(end, bound_fns, instances, fn_param_types);
         }
         IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
-            rewrite_expr_calls(object, bound_fns, instances);
+            rewrite_expr_calls(object, bound_fns, instances, fn_param_types);
         }
         IrExprKind::IndexAccess { object, index } => {
-            rewrite_expr_calls(object, bound_fns, instances);
-            rewrite_expr_calls(index, bound_fns, instances);
+            rewrite_expr_calls(object, bound_fns, instances, fn_param_types);
+            rewrite_expr_calls(index, bound_fns, instances, fn_param_types);
         }
-        IrExprKind::Lambda { body, .. } => rewrite_expr_calls(body, bound_fns, instances),
+        IrExprKind::Lambda { body, .. } => rewrite_expr_calls(body, bound_fns, instances, fn_param_types),
         IrExprKind::StringInterp { parts } => {
             for part in parts {
                 if let IrStringPart::Expr { expr } = part {
-                    rewrite_expr_calls(expr, bound_fns, instances);
+                    rewrite_expr_calls(expr, bound_fns, instances, fn_param_types);
                 }
             }
         }
         IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
         | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
-        | IrExprKind::Await { expr } => rewrite_expr_calls(expr, bound_fns, instances),
+        | IrExprKind::Await { expr } => rewrite_expr_calls(expr, bound_fns, instances, fn_param_types),
         _ => {}
     }
 }
@@ -587,20 +619,64 @@ fn rewrite_stmt_calls(
     stmt: &mut IrStmt,
     bound_fns: &HashMap<String, Vec<BoundedParam>>,
     instances: &HashMap<MonoKey, HashMap<String, Ty>>,
+    fn_param_types: &HashMap<String, Vec<Ty>>,
 ) {
     match &mut stmt.kind {
         IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
-        | IrStmtKind::Assign { value, .. } => rewrite_expr_calls(value, bound_fns, instances),
+        | IrStmtKind::Assign { value, .. } => rewrite_expr_calls(value, bound_fns, instances, fn_param_types),
         IrStmtKind::IndexAssign { index, value, .. } => {
-            rewrite_expr_calls(index, bound_fns, instances);
-            rewrite_expr_calls(value, bound_fns, instances);
+            rewrite_expr_calls(index, bound_fns, instances, fn_param_types);
+            rewrite_expr_calls(value, bound_fns, instances, fn_param_types);
         }
-        IrStmtKind::FieldAssign { value, .. } => rewrite_expr_calls(value, bound_fns, instances),
-        IrStmtKind::Expr { expr } => rewrite_expr_calls(expr, bound_fns, instances),
+        IrStmtKind::FieldAssign { value, .. } => rewrite_expr_calls(value, bound_fns, instances, fn_param_types),
+        IrStmtKind::Expr { expr } => rewrite_expr_calls(expr, bound_fns, instances, fn_param_types),
         IrStmtKind::Guard { cond, else_ } => {
-            rewrite_expr_calls(cond, bound_fns, instances);
-            rewrite_expr_calls(else_, bound_fns, instances);
+            rewrite_expr_calls(cond, bound_fns, instances, fn_param_types);
+            rewrite_expr_calls(else_, bound_fns, instances, fn_param_types);
         }
         IrStmtKind::Comment { .. } => {}
+    }
+}
+
+/// Check if a type contains a specific TypeVar anywhere in its structure.
+fn ty_contains_typevar(ty: &Ty, name: &str) -> bool {
+    match ty {
+        Ty::TypeVar(n) => n == name,
+        Ty::Named(n, args) => (n == name && args.is_empty()) || args.iter().any(|a| ty_contains_typevar(a, name)),
+        Ty::List(inner) | Ty::Option(inner) => ty_contains_typevar(inner, name),
+        Ty::Result(a, b) | Ty::Map(a, b) => ty_contains_typevar(a, name) || ty_contains_typevar(b, name),
+        Ty::Tuple(ts) => ts.iter().any(|t| ty_contains_typevar(t, name)),
+        Ty::Fn { params, ret } => params.iter().any(|p| ty_contains_typevar(p, name)) || ty_contains_typevar(ret, name),
+        Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| ty_contains_typevar(t, name)),
+        _ => false,
+    }
+}
+
+/// Extract the concrete type for a TypeVar by matching parameter type structure against argument type.
+/// e.g., param=List[T], arg=List[Dog] → T=Dog
+///       param=T, arg=Dog → T=Dog
+///       param=Map[String, T], arg=Map[String, Int] → T=Int
+fn extract_typevar_binding(param_ty: &Ty, arg_ty: &Ty, var_name: &str) -> Ty {
+    match (param_ty, arg_ty) {
+        (Ty::TypeVar(n), _) if n == var_name => arg_ty.clone(),
+        (Ty::Named(n, _), _) if n == var_name => arg_ty.clone(),
+        (Ty::List(p_inner), Ty::List(a_inner)) => extract_typevar_binding(p_inner, a_inner, var_name),
+        (Ty::Option(p_inner), Ty::Option(a_inner)) => extract_typevar_binding(p_inner, a_inner, var_name),
+        (Ty::Result(po, pe), Ty::Result(ao, ae)) => {
+            let ok = extract_typevar_binding(po, ao, var_name);
+            if !matches!(ok, Ty::Unknown) { ok } else { extract_typevar_binding(pe, ae, var_name) }
+        }
+        (Ty::Map(pk, pv), Ty::Map(ak, av)) => {
+            let k = extract_typevar_binding(pk, ak, var_name);
+            if !matches!(k, Ty::Unknown) { k } else { extract_typevar_binding(pv, av, var_name) }
+        }
+        (Ty::Tuple(pts), Ty::Tuple(ats)) if pts.len() == ats.len() => {
+            for (p, a) in pts.iter().zip(ats.iter()) {
+                let r = extract_typevar_binding(p, a, var_name);
+                if !matches!(r, Ty::Unknown) { return r; }
+            }
+            Ty::Unknown
+        }
+        _ => arg_ty.clone(), // fallback: use arg type directly
     }
 }

@@ -42,25 +42,7 @@ pub fn get_bundled_source(name: &str) -> Option<&'static str> {
     }
 }
 
-/// Get the extern.rs source for a core stdlib module (compiled into the binary).
-pub fn get_core_extern_rs(name: &str) -> Option<&'static str> {
-    match name {
-        "int" => Some(include_str!("../stdlib/core/int/extern.rs")),
-        "string" => Some(include_str!("../stdlib/core/string/extern.rs")),
-        "list" => Some(include_str!("../stdlib/core/list/extern.rs")),
-        _ => None,
-    }
-}
 
-/// Get the .almd source for a core v2 stdlib module.
-pub fn get_core_source(name: &str) -> Option<&'static str> {
-    match name {
-        "int" => Some(include_str!("../stdlib/core/int/mod.almd")),
-        "string" => Some(include_str!("../stdlib/core/string/mod.almd")),
-        "list" => Some(include_str!("../stdlib/core/list/mod.almd")),
-        _ => None,
-    }
-}
 
 /// Check if a module name is any kind of stdlib (hardcoded or bundled).
 pub fn is_any_stdlib(name: &str) -> bool {
@@ -88,15 +70,15 @@ pub fn resolve_ufcs_module(method: &str) -> Option<&'static str> {
 pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
     match method {
         // ── string-only ──
-        "trim" | "split" | "pad_left"
+        "trim" | "split" | "pad_start"
         | "starts_with" | "ends_with"
         | "to_bytes" | "to_upper" | "to_lower" | "capitalize"
-        | "to_int" | "replace" | "char_at" | "lines"
+        | "replace" | "lines"
         | "chars" | "repeat" | "from_bytes"
         | "is_digit" | "is_alpha" | "is_alphanumeric"
         | "is_whitespace" | "is_upper" | "is_lower"
-        | "codepoint" | "from_codepoint" | "char_count"
-        | "pad_right" | "trim_start" | "trim_end"
+        | "codepoint" | "from_codepoint"
+        | "pad_end" | "trim_start" | "trim_end"
         | "strip_prefix" | "strip_suffix"
         | "replace_first" | "last_index_of" => vec!["string"],
 
@@ -104,8 +86,8 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         "each" | "fold" | "find" | "any" | "all"
         | "enumerate" | "zip" | "flatten" | "take" | "drop"
         | "sort_by" | "unique"
-        | "last" | "chunk" | "sum" | "product" | "sum_float" | "product_float"
-        | "first" | "flat_map"
+        | "last" | "chunk" | "sum" | "product"
+        | "first"
         | "filter_map" | "take_while" | "drop_while"
         | "partition" | "reduce" | "group_by"
         | "insert" | "remove_at" | "find_index"
@@ -114,7 +96,7 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
 
         // ── map-only ──
         "keys" | "values" | "entries" | "merge"
-        | "map_values" => vec!["map"],
+        => vec!["map"],
 
         // ── int-only ──
         "to_string" | "to_hex" => vec!["int"],
@@ -124,7 +106,7 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         | "is_nan" | "is_infinite" => vec!["float"],
 
         // ── result-only ──
-        "map_err" | "and_then" | "unwrap_or" | "unwrap_or_else"
+        "map_err" | "unwrap_or" | "unwrap_or_else"
         | "is_ok" | "is_err"
         | "to_err_option" => vec!["result"],
 
@@ -146,8 +128,13 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         "contains" => vec!["string", "list", "map"],
         "is_empty" => vec!["string", "list", "map"],
 
+        // ── ambiguous: list + result ──
+        "flat_map" => vec!["list", "result"],
+        "map" | "filter" => vec!["list", "map", "result"],
+
         // ── ambiguous: list + map ──
-        "get" | "get_or" | "set" => vec!["list", "map"],
+        "get" | "get_or" => vec!["string", "list", "map"],
+        "set" => vec!["list", "map"],
         "swap" => vec!["list"],
         "sort" => vec!["list"],
         "map" | "filter" => vec!["list", "result"],

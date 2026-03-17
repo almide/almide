@@ -1,75 +1,78 @@
 # Almide Roadmap
 
-## Active
+## Active — 1.0 Critical Path
 
-### Stdlib v2
-- [Stdlib Runtime Architecture](active/stdlib-self-hosted-redesign.md) — Runtime crate `almide_rt` 基盤完成。@extern 移行中
-- [Stdlib API Reform](active/stdlib-verb-system.md) — Verb 標準化 (from_string, to_upper, len 等)
-- [Stdlib Strategy](active/stdlib-strategy.md) — 282→700+ 関数
+### Phase II: 安定性契約
+- [Stdlib Verb Reform](active/stdlib-verb-system.md) — 1.0 前最後の breaking change
 
-### Language
-- [Template](active/template.md) — Typed document builder
-- [UFCS External](active/ufcs-external.md) — User-defined UFCS
 
-### Runtime & Async
-- [Structured Concurrency](active/structured-concurrency.md) — Conservative async
-- [Platform Async](active/platform-async.md) — `effect fn` = async on all targets
-
-### Testing
-- [Exercise Suite v0.6.0](active/exercises-v060.md) — 23 exercises / 330+ tests, 6 tiers, cross-target
-
-### Ecosystem
-- [Almide Shell](active/almide-shell.md) — AI-native shell replacing Bash/Zsh
-- [Web Framework](active/web-framework.md) — First-party Hono-equivalent
-- [CLI-First](active/cli-first.md) — `almide run` + `almide build`
-
-### Multi-Target
-- [Multi-Target Strategy](active/multi-target-strategy.md) — Python, Go, Kotlin, Swift, C
-- [New Codegen Targets](active/new-codegen-targets.md) — Go, Python 優先
-
-### Tooling
-- [Incremental Compilation](active/incremental-compilation.md) — Skip rustc when unchanged
-- [IR Interpreter](active/ir-interpreter.md) — Direct IR execution
-- [Error-Fix Database](active/error-fix-db.md) — Error → fix mapping
-- [Grammar Codegen](active/grammar-codegen.md) — Single source of truth
-
-### LLM
-- [LLM Integration](active/llm-integration.md) — `almide forge`, `almide fix`
-- [LLM → IR Generation](active/llm-ir-generation.md) — LLM generates typed IR directly
+### 全体
+- [PRODUCTION_READY.md](PRODUCTION_READY.md) — 1.0 基準、10 言語からの教訓
 
 ## On Hold
 
+### 1.x (post-1.0)
+- [Async Backend](on-hold/async-backend.md) — tokio opt-in runtime
+- [Design Debt](on-hold/design-debt.md) — gen_generated_call, anonymous records
+- [Error-Fix Database](on-hold/error-fix-db.md) — Error → fix mapping
+- [Fan Map Limit](on-hold/fan-map-limit.md) — `fan.map(xs, limit: n, f)`
+- [Grammar Codegen](on-hold/grammar-codegen.md) — Single source of truth
+- [Incremental Compilation](on-hold/incremental-compilation.md) — Skip rustc when unchanged
+- [IR Interpreter](on-hold/ir-interpreter.md) — Direct IR execution
+- [LSP Server](on-hold/lsp.md)
+- [Multi-Target Strategy](on-hold/multi-target-strategy.md) — Go, Python 優先
+- [New Codegen Targets](on-hold/new-codegen-targets.md) — Go, Python
+- [Package Registry](on-hold/package-registry.md)
+- [Polish (Immediate)](on-hold/polish-immediate.md)
+- [Production Ready (old)](on-hold/production-ready.md)
+- [Server Async](on-hold/server-async.md) — `http.serve` effect 化
+- [Stdlib Strategy](on-hold/stdlib-strategy.md) — 282→700+ 関数 (段階的)
+- [Streaming](on-hold/streaming.md) — WebSocket, SSE
+- [Template](on-hold/template.md) — Typed document builder
+- [UFCS External](on-hold/ufcs-external.md) — User-defined UFCS
+
+### 2.x+
+- [Almide Shell](on-hold/almide-shell.md) — AI-native REPL
+- [Almide UI](on-hold/almide-ui.md) — Reactive UI framework
+- [LLM Immutable Sugar](on-hold/llm-immutable-sugar.md)
+- [LLM Integration](on-hold/llm-integration.md) — `almide forge`, `almide fix`
+- [LLM → IR Generation](on-hold/llm-ir-generation.md) — Parser bypass
+- [Rainbow Bridge](on-hold/rainbow-bridge.md) — 外部コード → Almide パッケージ
+- [Rainbow FFI Gate](on-hold/rainbow-gate.md) — Almide → 外部言語ライブラリ
+- [Security Model](on-hold/security-model.md) — Layer 2-5
+- [Self-Hosting](on-hold/self-hosting.md)
+- [Supervision & Actors](on-hold/supervision-and-actors.md)
+- [Web Framework](on-hold/web-framework.md) — Hono 相当
+
+### その他
 - [Benchmark Report](on-hold/benchmark-report.md)
-- [Built-in Protocols](on-hold/trait-impl.md) — Eq, Hash done; Repr remaining
+- [Built-in Protocols](on-hold/trait-impl.md) — Repr remaining
 - [Cross-Target AOT](on-hold/cross-target-aot.md)
-- [Cross-Target Semantics](on-hold/cross-target-semantics.md) — TS 本格化時
+- [Cross-Target Semantics](on-hold/cross-target-semantics.md)
 - [Direct WASM Emission](on-hold/emit-wasm-direct.md)
 - [Editor & GitHub Integration](on-hold/editor-github-integration.md)
-- [LSP Server](on-hold/lsp.md)
-- [LLM Immutable Sugar](on-hold/llm-immutable-sugar.md)
-- [Package Registry](on-hold/package-registry.md)
-- [Rainbow FFI](on-hold/rainbow-ffi.md)
-- [REPL](on-hold/repl.md) — Almide Shell に統合
+- [Platform / Target Separation](on-hold/platform-target-separation.md)
+- [REPL](on-hold/repl.md)
 - [Research: MSR Paper](on-hold/research-modification-survival-rate-paper.md)
-- [Self-Hosting](on-hold/self-hosting.md)
+- [Secure by Design](on-hold/secure-by-design.md)
 - [Stdlib 3-Layer Design](on-hold/stdlib-architecture-3-layer-design.md)
-- [Supervision & Actors](on-hold/supervision-and-actors.md)
 - [Tooling (remaining)](on-hold/tooling.md)
+- [TS Edge-Native](on-hold/ts-edge-native.md)
 
 ## Done
 
 ~~Phase 0~~ ✅ | ~~Phase A~~ ✅ | ~~Phase B~~ ✅
 
-- [2026 Ergonomics](2026-ergonomics.md)
+- [2026 Ergonomics](done/2026-ergonomics.md) — do block 純粋化, unwrap_or, json.parse auto-?
 - [Architecture Hardening](done/architecture-hardening.md)
 - [Borrow Inference](done/borrow-inference-design.md)
 - [CLI Tool Authoring](done/cli-tool-authoring.md)
 - [Clone Reduction Phase 4](done/clone-reduction.md)
-- [Codec Implementation](done/codec-implementation.md) — Value, auto-derive, JSON roundtrip, runtime crate
-- [Codec Protocol & JSON](done/codec-and-json.md) — 設計仕様完成
-- [Codec Advanced](done/codec-advanced.md) — Variant decode, DecodeError, value utils
-- [Codec Remaining](done/codec-remaining.md) — Variant encode, value utils, naming strategy
-- [Codec Test Spec](done/codec-test-spec.md) — P0 14/14 ✅
+- [Codec Implementation](done/codec-implementation.md)
+- [Codec Protocol & JSON](done/codec-and-json.md)
+- [Codec Advanced](done/codec-advanced.md)
+- [Codec Remaining](done/codec-remaining.md)
+- [Codec Test Spec](done/codec-test-spec.md)
 - [Codegen Correctness](done/codegen-correctness.md)
 - [Codegen IR Redesign](done/ir-redesign.md)
 - [Codegen Optimization](done/codegen-optimization.md)
@@ -80,13 +83,16 @@
 - [Control Flow Extensions](done/control-flow.md)
 - [Cross-Platform Support](done/cross-platform.md)
 - [Default Field Values](done/default-field-values.md)
-- [Derive Conventions](done/derive-conventions.md) — Eq/Repr/Ord/Hash
+- [Derive Conventions](done/derive-conventions.md)
+- [Effect Isolation](done/effect-isolation.md) — Security Layer 1
 - [--emit-ir](done/emit-ir.md)
 - [Eq Protocol](done/eq-protocol.md)
 - [Error Diagnostics](done/error-diagnostics.md)
 - [Error Diagnostics — Visual](done/error-diagnostics-visual.md)
 - [Error Recovery](done/error-recovery.md)
 - [Exhaustiveness Check](done/exhaustiveness-check.md)
+- [Exercise Suite v0.6.0](done/exercises-v060.md)
+- [Fan Concurrency](done/fan-concurrency.md) — fan { }, map, race, any, settle, timeout
 - [Formatter Rewrite](done/formatter-rewrite.md)
 - [Function Reference Passing](done/function-reference-passing.md)
 - [Generics](done/generics.md)
@@ -108,11 +114,13 @@
 - [Module System v2](done/module-system-v2.md)
 - [Monomorphization](done/monomorphization.md)
 - [npm Package Target](done/npm-package-target-target-npm.md)
-- [Operator Protocol](done/operator-protocol.md) — `==` dispatch, auto-derive
+- [Operator Protocol](done/operator-protocol.md)
 - [Parser Error Recovery](done/parser-error-recovery.md)
 - [Playground Repair](done/playground-repair.md)
 - [Proliferation Blockers](done/proliferation-blockers.md)
 - [Rust Test Coverage](done/rust-test-coverage.md)
+- [Runtime Gaps](done/runtime-gaps.md) — 22 モジュール / 355 関数 (100%)
+- [Runtime Layout Unification](done/runtime-layout.md)
 - [RustIR Pipeline](done/rust-ir.md)
 - [Scaffold & Proliferation](done/scaffold-and-proliferation.md)
 - [Self-Tooling](done/self-tooling.md)
@@ -120,10 +128,11 @@
 - [Stdlib Completeness](done/stdlib-completeness.md)
 - [Stdlib Declarative Codegen](done/stdlib-codegen.md)
 - [Stdlib Gaps](done/stdlib-gaps.md)
+- [Stdlib Runtime Architecture](done/stdlib-self-hosted-redesign.md)
 - [Stdlib Self-Hosting](done/stdlib-self-hosting.md)
 - [String Handling](done/string-handling.md)
 - [Structured Concurrency (Phase 1)](done/structured-concurrency.md)
-- [Syntax Sugar](done/syntax-sugar.md) — Lambda, default/named args, block comments, raw strings
+- [Syntax Sugar](done/syntax-sugar.md)
 - [Tail Call Optimization](done/tail-call-optimization.md)
 - [Test Coverage](done/test-coverage.md)
 - [Test Directory Structure](done/test-directory-structure.md)
@@ -137,4 +146,11 @@
 - [UFCS Type Resolution](done/ufcs-type-resolution.md)
 - [Unused Variable Warnings](done/unused-variable-warnings.md)
 - [Variant Record Fields](done/variant-record-fields.md)
+- [Borrow/Clone Gaps](done/borrow-clone-gaps.md) — Case 1-9 全 FIXED
+- [Quality Improvements](done/quality-improvements.md) — エラー行番号、heredoc 行追跡
+- [Cross-Target CI](done/cross-target-ci.md) — 90/91 (98.9%), GitHub Actions 自動化
+- [CLI-First](done/cli-first.md) — run, build, test, check, fmt, clean, init, add
+- [Error Codes + JSON](done/error-codes-json.md) — E001-E010, --json, --explain, test --json, check < 100ms
+- [Lockfile](done/lockfile.md) — almide.lock, git deps, almide add, recursive resolution
+- [Stability Contract](done/stability-contract.md) — edition, BREAKING_CHANGE_POLICY, FROZEN_API, REJECTED_PATTERNS, HIDDEN_OPERATIONS
 - [While Loop](done/while-loop.md)

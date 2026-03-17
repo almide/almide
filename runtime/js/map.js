@@ -1,0 +1,18 @@
+const __almd_map = {
+  new() { return new Map(); },
+  get(m, k) { return m.has(k) ? m.get(k) : null; },
+  get_or(m, k, d) { return m.has(k) ? m.get(k) : d; },
+  set(m, k, v) { const r = new Map(m); r.set(k, v); return r; },
+  contains(m, k) { return m.has(k); },
+  remove(m, k) { const r = new Map(m); r.delete(k); return r; },
+  keys(m) { return [...m.keys()].sort(); },
+  values(m) { return [...m.values()]; },
+  len(m) { return m.size; },
+  entries(m) { return [...m.entries()]; },
+  from_list(xs, f) { const r = new Map(); for (const x of xs) { const [k, v] = f(x); r.set(k, v); } return r; },
+  map_values(m, f) { const r = new Map(); m.forEach((v, k) => r.set(k, f(v))); return r; },
+  filter(m, f) { const r = new Map(); m.forEach((v, k) => { if (f(k, v)) r.set(k, v); }); return r; },
+  from_entries(entries) { const r = new Map(); for (const [k, v] of entries) r.set(k, v); return r; },
+  merge(a, b) { const r = new Map(a); b.forEach((v, k) => r.set(k, v)); return r; },
+  is_empty(m) { return m.size === 0; },
+};

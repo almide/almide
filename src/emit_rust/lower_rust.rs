@@ -161,18 +161,9 @@ pub fn lower(ir: &IrProgram) -> Program {
         }
         out
     }
-    rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/int.rs")));
-    rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/float.rs")));
-    rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/string.rs")));
-    rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/list.rs")));
-    rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/map.rs")));
-    rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/result.rs")));
-    rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/option.rs")));
-    rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/error.rs")));
-    rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/testing.rs")));
-    rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/value.rs")));
-    rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/env.rs")));
-    rt.push_str(&strip_test_blocks(include_str!("../../runtime/rust/src/process.rs")));
+    for (_name, source) in almide::generated::rust_runtime::RUST_RUNTIME_MODULES {
+        rt.push_str(&strip_test_blocks(source));
+    }
 
     Program {
         prelude: vec!["#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use)]".into()],
@@ -216,6 +207,11 @@ impl<'a> LowerCtx<'a> {
         }
     }
 
+    /// Check if the current function returns Result (either effect fn or explicit Result[T, E]).
+    pub(super) fn current_fn_returns_result(&self) -> bool {
+        self.result_fns.contains(&self.current_fn)
+    }
+
     /// Check if an IR expression is a variable used only once (safe to move instead of clone).
     pub(super) fn is_single_use_var(&self, e: &IrExpr) -> bool {
         if let IrExprKind::Var { id } = &e.kind {
@@ -223,6 +219,97 @@ impl<'a> LowerCtx<'a> {
         } else {
             false
         }
+    }
+
+    /// Find variable names in a pattern that are bound to Box fields (recursive variants).
+    pub(super) fn find_boxed_bindings(&self, pat: &IrPattern) -> Vec<String> {
+        match pat {
+            IrPattern::Constructor { name, args } => self.boxed_bindings_ctor(name, args),
+            IrPattern::RecordPattern { name, fields, .. } => self.boxed_bindings_record(name, fields),
+            _ => vec![],
+        }
+    }
+
+    pub(super) fn find_variant_case<'b>(&self, ctor_name: &str) -> Option<&'b almide::ir::IrVariantDecl>
+    where 'a: 'b {
+        let enum_name = self.ctors.get(ctor_name)?;
+        let td = self.type_decls.iter().find(|td| td.name == *enum_name)?;
+        let cases = match &td.kind {
+            almide::ir::IrTypeDeclKind::Variant { cases, .. } => cases,
+            _ => return None,
+        };
+        cases.iter().find(|c| c.name == ctor_name)
+    }
+
+    fn boxed_bindings_ctor(&self, name: &str, args: &[IrPattern]) -> Vec<String> {
+        let enum_name = self.ctors.get(name).cloned().unwrap_or_default();
+        let case = match self.find_variant_case(name) {
+            Some(c) => c,
+            None => return vec![],
+        };
+        let field_tys: Vec<Ty> = match &case.kind {
+            almide::ir::IrVariantKind::Tuple { fields } => fields.clone(),
+            almide::ir::IrVariantKind::Record { fields } => fields.iter().map(|f| f.ty.clone()).collect(),
+            almide::ir::IrVariantKind::Unit => vec![],
+        };
+        let mut result = Vec::new();
+        for (i, arg) in args.iter().enumerate() {
+            if let Some(field_ty) = field_tys.get(i) {
+                if ty_contains_name(field_ty, &enum_name) {
+                    if let IrPattern::Bind { var } = arg {
+                        result.push(self.vt.get(*var).name.clone());
+                    }
+                }
+            }
+        }
+        result
+    }
+
+    fn boxed_bindings_record(&self, name: &str, fields: &[almide::ir::IrFieldPattern]) -> Vec<String> {
+        let enum_name = self.ctors.get(name).cloned().unwrap_or_default();
+        let case = match self.find_variant_case(name) {
+            Some(c) => c,
+            None => return vec![],
+        };
+        let field_decls = match &case.kind {
+            almide::ir::IrVariantKind::Record { fields } => fields,
+            _ => return vec![],
+        };
+        let mut result = Vec::new();
+        for fp in fields {
+            let fd = match field_decls.iter().find(|fd| fd.name == fp.name) {
+                Some(fd) => fd,
+                None => continue,
+            };
+            if !ty_contains_name(&fd.ty, &enum_name) { continue; }
+            if let Some(IrPattern::Bind { var }) = fp.pattern.as_ref() {
+                result.push(self.vt.get(*var).name.clone());
+            } else {
+                result.push(fp.name.clone());
+            }
+        }
+        result
+    }
+
+    /// Determine if a let binding needs an explicit type annotation for Rust type inference.
+    fn compute_bind_type_annotation(&self, var_ty: &Ty, value: &IrExpr) -> Option<Type> {
+        let is_map_new = matches!(&value.kind, IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. }
+            if module == "map" && func == "new" && args.is_empty());
+        let is_generic_variant = matches!(&value.kind, IrExprKind::Call { args, .. } if args.is_empty())
+            && (matches!(&value.ty, Ty::Named(_, args) if !args.is_empty())
+                || matches!(var_ty, Ty::Named(_, args) if !args.is_empty()));
+        let needs_ty = matches!(&value.kind, IrExprKind::List { elements } if elements.is_empty())
+            || matches!(&value.kind, IrExprKind::EmptyMap | IrExprKind::OptionNone | IrExprKind::OptionSome { .. })
+            || is_map_new || is_generic_variant
+            || (matches!(&value.kind, IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. })
+                && matches!(&value.ty, Ty::Result(_, _)))
+            || matches!(var_ty, Ty::Named(_, args) if !args.is_empty());
+        if !needs_ty { return None; }
+        let bind_ty = if var_ty.contains_unknown() { &value.ty } else { var_ty };
+        if bind_ty.contains_unknown() || contains_typevar(bind_ty) || matches!(bind_ty, Ty::Fn { .. }) {
+            return None;
+        }
+        Some(self.lty(bind_ty))
     }
 
     fn lower_fn(&self, f: &IrFunction) -> Function {
@@ -258,23 +345,7 @@ impl<'a> LowerCtx<'a> {
                 other => (vec![], Some(other)),
             }
         } else if f.is_effect {
-            match body_expr {
-                Expr::Block { stmts, tail } => {
-                    if let Some(t) = tail {
-                        let wrapped = if is_result_expr(&t) { *t } else { Expr::Ok(Box::new(*t)) };
-                        (stmts, Some(wrapped))
-                    } else if stmts.iter().any(|s| stmt_has_result_return(s)) {
-                        // Body has return Ok/Err in loops — don't wrap
-                        (stmts, None)
-                    } else {
-                        (stmts, Some(Expr::Ok(Box::new(Expr::Unit))))
-                    }
-                }
-                other => {
-                    let w = if is_result_expr(&other) { other } else { Expr::Ok(Box::new(other)) };
-                    (vec![], Some(w))
-                }
-            }
+            self.wrap_effect_body(body_expr)
         } else {
             match body_expr {
                 Expr::Block { stmts, tail } => (stmts, tail.map(|t| *t)),
@@ -291,6 +362,27 @@ impl<'a> LowerCtx<'a> {
             attrs: if f.is_test { vec!["#[test]".into()] } else { vec![] }, is_pub: !f.is_test }
     }
 
+    /// Wrap an effect fn body with Ok(...) if needed.
+    fn wrap_effect_body(&self, body_expr: Expr) -> (Vec<Stmt>, Option<Expr>) {
+        match body_expr {
+            Expr::Block { stmts, tail } => {
+                if let Some(t) = tail {
+                    let wrapped = if is_result_expr(&t) { *t } else { Expr::Ok(Box::new(*t)) };
+                    (stmts, Some(wrapped))
+                } else if stmts.iter().any(|s| stmt_has_result_return(s)) {
+                    // Body has return Ok/Err in loops — don't wrap
+                    (stmts, None)
+                } else {
+                    (stmts, Some(Expr::Ok(Box::new(Expr::Unit))))
+                }
+            }
+            other => {
+                let w = if is_result_expr(&other) { other } else { Expr::Ok(Box::new(other)) };
+                (vec![], Some(w))
+            }
+        }
+    }
+
     // ── Statements ──
 
     pub(super) fn lower_stmt(&self, s: &IrStmt) -> Stmt {
@@ -299,39 +391,14 @@ impl<'a> LowerCtx<'a> {
                 let name = crate::emit_common::sanitize(&self.vt.get(*var).name);
                 let var_ty = &self.vt.get(*var).ty;
                 let val = self.lower_expr(value);
-                // 型注釈が必要なケース: Rust の型推論が足りない場合
-                let is_map_new = matches!(&value.kind, IrExprKind::Call { target: CallTarget::Module { module, func }, args, .. }
-                    if module == "map" && func == "new" && args.is_empty());
-                let is_generic_variant = matches!(&value.kind, IrExprKind::Call { args, .. } if args.is_empty())
-                    && (matches!(&value.ty, Ty::Named(_, args) if !args.is_empty())
-                        || matches!(var_ty, Ty::Named(_, args) if !args.is_empty()));
-                let needs_ty = matches!(&value.kind, IrExprKind::List { elements } if elements.is_empty())
-                    || matches!(&value.kind, IrExprKind::EmptyMap | IrExprKind::OptionNone | IrExprKind::OptionSome { .. })
-                    || is_map_new || is_generic_variant
-                    || (matches!(&value.kind, IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. })
-                        && matches!(&value.ty, Ty::Result(_, _)))
-                    // Named 型の値で型引数がある場合（generic enum/struct）
-                    || matches!(var_ty, Ty::Named(_, args) if !args.is_empty());
-                let bind_ty = if var_ty.contains_unknown() { &value.ty } else { var_ty };
-                let has_unresolved = bind_ty.contains_unknown() || contains_typevar(bind_ty);
-                let is_fn_ty = matches!(bind_ty, Ty::Fn { .. });
-                let ty_ann = if needs_ty && !has_unresolved && !is_fn_ty { Some(self.lty(bind_ty)) } else { None };
+                let ty_ann = self.compute_bind_type_annotation(var_ty, value);
                 Stmt::Let { name, ty: ty_ann, mutable: matches!(mutability, Mutability::Var), value: val }
             }
             IrStmtKind::BindDestructure { pattern, value } => {
                 let mut pat = self.lower_pat(pattern);
-                // Fill empty struct name from value type for record destructuring
                 if let Pattern::Struct { name, .. } = &mut pat {
                     if name.is_empty() {
-                        if let Ty::Named(n, _) = &value.ty {
-                            *name = n.clone();
-                        } else if let Ty::Record { fields } = &value.ty {
-                            let mut fnames: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
-                            fnames.sort();
-                            *name = self.anon.get(&fnames).cloned()
-                                .or_else(|| self.named.get(&fnames).cloned())
-                                .unwrap_or_else(|| "AnonRecord".into());
-                        }
+                        *name = self.resolve_record_name(&value.ty);
                     }
                 }
                 Stmt::LetPattern { pattern: pat, value: self.lower_expr(value) }
@@ -360,24 +427,7 @@ impl<'a> LowerCtx<'a> {
                 field: field.clone(), value: self.lower_expr(value),
             },
             IrStmtKind::Guard { cond, else_ } => {
-                let guard_body = match &else_.kind {
-                    IrExprKind::Break => Expr::Break,
-                    IrExprKind::Continue => Expr::Continue { label: None },
-                    // effect fn: ok(()) → break (ループ脱出), ok(value) → return Ok(value)
-                    IrExprKind::ResultOk { expr } if self.auto_try && matches!(&expr.ty, Ty::Unit) => Expr::Break,
-                    _ if self.auto_try => Expr::Return(Some(Box::new(self.lower_expr(else_)))),
-                    // In non-auto-try context (tests, pure fn): don't wrap in Ok/Err
-                    IrExprKind::ResultOk { expr } if !self.auto_try => {
-                        let inner = self.lower_expr(expr);
-                        Expr::Return(Some(Box::new(inner)))
-                    }
-                    IrExprKind::ResultErr { expr } if !self.auto_try => {
-                        // In test/pure context, err becomes panic
-                        let inner = self.lower_expr(expr);
-                        Expr::Raw(format!("panic!(\"{{:?}}\", {})", super::render::expr_str(&inner)))
-                    }
-                    _ => Expr::Return(Some(Box::new(self.lower_expr(else_)))),
-                };
+                let guard_body = self.lower_guard_body(else_);
                 Stmt::Expr(Expr::If {
                     cond: Box::new(Expr::UnOp { op: "!", operand: Box::new(self.lower_expr(cond)) }),
                     then: Box::new(guard_body),
@@ -386,6 +436,33 @@ impl<'a> LowerCtx<'a> {
             }
             IrStmtKind::Expr { expr } => Stmt::Expr(self.lower_expr(expr)),
             IrStmtKind::Comment { text } => Stmt::Expr(Expr::Raw(format!("// {}", text))),
+        }
+    }
+
+    /// Resolve the guard else-branch into a RustIR expression (break/return/panic).
+    fn lower_guard_body(&self, else_: &IrExpr) -> Expr {
+        match &else_.kind {
+            IrExprKind::Break => Expr::Break,
+            IrExprKind::Continue => Expr::Continue { label: None },
+            // effect fn: ok(()) → break (loop exit), ok(value) → return Ok(value)
+            IrExprKind::ResultOk { expr } if self.auto_try && matches!(&expr.ty, Ty::Unit) => Expr::Break,
+            _ if self.auto_try => Expr::Return(Some(Box::new(self.lower_expr(else_)))),
+            // In non-auto-try context (tests, pure fn): don't wrap in Ok/Err
+            IrExprKind::ResultOk { expr } if !self.auto_try => {
+                let inner = self.lower_expr(expr);
+                Expr::Return(Some(Box::new(inner)))
+            }
+            IrExprKind::ResultErr { expr } if !self.auto_try => {
+                let inner = self.lower_expr(expr);
+                // If in a function returning Result, generate return Err(...)
+                // Otherwise (tests, void fn), panic
+                if self.in_effect || self.current_fn_returns_result() {
+                    Expr::Return(Some(Box::new(Expr::Err(Box::new(inner)))))
+                } else {
+                    Expr::Raw(format!("panic!(\"{{:?}}\", {})", super::render::expr_str(&inner)))
+                }
+            }
+            _ => Expr::Return(Some(Box::new(self.lower_expr(else_)))),
         }
     }
 
@@ -417,94 +494,5 @@ impl<'a> LowerCtx<'a> {
     }
 }
 
-/// 型が特定の名前の Named 型を**直接**含むか（再帰型検出用）
-/// List/Option/Map の中は間接参照なので Box 不要 → 無視
-pub(super) fn ty_contains_name(ty: &Ty, name: &str) -> bool {
-    match ty {
-        Ty::Named(n, args) => n == name || args.iter().any(|a| ty_contains_name(a, name)),
-        Ty::Tuple(ts) => ts.iter().any(|t| ty_contains_name(t, name)),
-        // List, Option, Map, Result は既に heap 上の indirection なので再帰とみなさない
-        _ => false,
-    }
-}
-
-fn contains_typevar(ty: &Ty) -> bool {
-    match ty {
-        Ty::TypeVar(_) => true,
-        Ty::List(inner) | Ty::Option(inner) => contains_typevar(inner),
-        Ty::Result(a, b) | Ty::Map(a, b) => contains_typevar(a) || contains_typevar(b),
-        Ty::Tuple(ts) => ts.iter().any(contains_typevar),
-        Ty::Named(_, args) => args.iter().any(contains_typevar),
-        Ty::Fn { params, ret } => params.iter().any(contains_typevar) || contains_typevar(ret),
-        _ => false,
-    }
-}
-
-/// Check if an expression already produces a Result (Ok/Err), including through
-/// if/match/block where all branches are Result-producing.
-fn is_result_expr(e: &Expr) -> bool {
-    match e {
-        Expr::Ok(_) | Expr::Err(_) | Expr::Try(_) => true,
-        Expr::Return(Some(inner)) => is_result_expr(inner),
-        Expr::If { then, else_: Some(else_), .. } => is_result_expr(then) && is_result_expr(else_),
-        Expr::Match { arms, .. } => !arms.is_empty() && arms.iter().all(|a| is_result_expr(&a.body)),
-        Expr::Block { tail: Some(t), .. } => is_result_expr(t),
-        // Block with no tail but containing a loop with return Ok/Err (do-block pattern)
-        Expr::Block { stmts, tail: None } => stmts.iter().any(|s| stmt_has_result_return(s)),
-        _ => false,
-    }
-}
-
-fn stmt_has_result_return(s: &Stmt) -> bool {
-    match s {
-        Stmt::Expr(e) => expr_has_result_return(e),
-        _ => false,
-    }
-}
-
-fn expr_has_result_return(e: &Expr) -> bool {
-    match e {
-        Expr::Return(Some(inner)) => is_result_expr(inner),
-        Expr::Block { stmts, tail } => {
-            stmts.iter().any(|s| stmt_has_result_return(s))
-                || tail.as_ref().map_or(false, |t| expr_has_result_return(t))
-        }
-        Expr::Loop { body, .. } => body.iter().any(|s| stmt_has_result_return(s)),
-        Expr::If { then, else_, .. } => {
-            expr_has_result_return(then) || else_.as_ref().map_or(false, |e| expr_has_result_return(e))
-        }
-        _ => false,
-    }
-}
-
-/// Map Almide derive conventions to Rust #[derive(...)] attributes.
-/// Base derives (Clone) are always included. Convention-specific derives are added
-/// based on the `deriving` field in IrTypeDecl.
-fn rust_derives(td: &IrTypeDecl) -> Vec<String> {
-    let mut derives = vec!["Clone".to_string()];
-    let conventions = td.deriving.as_deref().unwrap_or_default();
-    // Eq → PartialEq + Eq
-    if conventions.iter().any(|d| d == "Eq") {
-        derives.push("PartialEq".into());
-        derives.push("Eq".into());
-    } else {
-        // Default: PartialEq for backward compatibility (== uses almide_eq! macro)
-        derives.push("PartialEq".into());
-    }
-    // Repr → Debug
-    if conventions.iter().any(|d| d == "Repr") {
-        derives.push("Debug".into());
-    } else {
-        derives.push("Debug".into()); // always derive Debug for now
-    }
-    // Ord → PartialOrd + Ord
-    if conventions.iter().any(|d| d == "Ord") {
-        derives.push("PartialOrd".into());
-        derives.push("Ord".into());
-    }
-    // Hash → Hash
-    if conventions.iter().any(|d| d == "Hash") {
-        derives.push("Hash".into());
-    }
-    derives
-}
+// Helper functions moved to lower_rust_helpers.rs
+pub(super) use super::lower_rust_helpers::{ty_contains_name, contains_typevar, is_result_expr, stmt_has_result_return, rust_derives};

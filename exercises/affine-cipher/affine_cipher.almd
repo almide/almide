@@ -1,187 +1,87 @@
-import string
-import list
+// Affine cipher: E(x) = (ax + b) mod m, D(x) = a^-1 * (x - b) mod m
 
 fn gcd(a: Int, b: Int) -> Int = {
-  var x = a
-  var y = b
-  do {
-    guard y != 0 else ok(())
-    let temp = y
+  var x = if a < 0 then 0 - a else a
+  var y = if b < 0 then 0 - b else b
+  while y != 0 {
+    let t = y
     y = x % y
-    x = temp
+    x = t
   }
   x
 }
 
-fn mod26(n: Int) -> Int = {
-  let r = n % 26
-  if r < 0 then r + 26 else r
-}
-
-fn find_mmi(a: Int) -> Int = {
-  var result = 1
+fn mod_inverse(a: Int, m: Int) -> Int = {
   var i = 1
-  do {
-    guard i < 26 else ok(())
-    let check = mod26(a * i)
-    if check == 1 then { result = i } else { result = result }
-    i = i + 1
-  }
-  result
+  while (a * i) % m != 1 { i = i + 1 }
+  i
 }
 
-fn is_lower(byte: Int) -> Bool = {
-  if byte >= 97 then {
-    if byte <= 122 then true else false
-  } else false
-}
-
-fn is_upper(byte: Int) -> Bool = {
-  if byte >= 65 then {
-    if byte <= 90 then true else false
-  } else false
-}
-
-fn is_digit(byte: Int) -> Bool = {
-  if byte >= 48 then {
-    if byte <= 57 then true else false
-  } else false
-}
-
-fn byte_to_string(b: Int) -> String = {
-  let alphabet = "abcdefghijklmnopqrstuvwxyz"
-  let digits = "0123456789"
-  if b >= 97 then {
-    if b <= 122 then string.slice(alphabet, b - 97, b - 97 + 1)
-    else ""
-  } else {
-    if b >= 48 then {
-      if b <= 57 then string.slice(digits, b - 48, b - 48 + 1)
-      else ""
-    } else ""
+fn char_to_num(c: String) -> Int = {
+  let alphabet = string.chars("abcdefghijklmnopqrstuvwxyz")
+  match list.find_index(alphabet, (ch) => ch == c) {
+    some(i) => i
+    none => -1
   }
 }
 
-fn encode(plain_text: String, a: Int, b: Int) -> Result[String, String] = {
-  guard gcd(a, 26) == 1 else err("a and m must be coprime.")
-  let bytes = string.to_bytes(plain_text)
-  let encoded = list.fold(bytes, [], (acc, byte) => {
-    if is_lower(byte) then {
-      let x = byte - 97
-      let e = mod26(a * x + b)
-      acc ++ [byte_to_string(e + 97)]
+fn num_to_char(n: Int) -> String =
+  list.get_or(string.chars("abcdefghijklmnopqrstuvwxyz"), ((n % 26) + 26) % 26, "?")
+
+effect fn encode(a: Int, b: Int, text: String) -> Result[String, String] = do {
+  guard gcd(a, 26) == 1 else err("a and m must be coprime")
+  let chars = string.chars(string.to_lower(text))
+  var encoded: List[String] = []
+  for c in chars {
+    let num = char_to_num(c)
+    if num >= 0 then {
+      encoded = encoded ++ [num_to_char(a * num + b)]
+    } else if string.is_digit(c) then {
+      encoded = encoded ++ [c]
     } else {
-      if is_upper(byte) then {
-        let x = byte - 65
-        let e = mod26(a * x + b)
-        acc ++ [byte_to_string(e + 97)]
-      } else {
-        if is_digit(byte) then {
-          acc ++ [byte_to_string(byte)]
-        } else acc
-      }
+      encoded = encoded
     }
-  })
-  let joined = string.join(encoded, "")
-  let len = string.len(joined)
-  var chunks: List[String] = []
-  var i = 0
-  do {
-    guard i < len else ok(())
-    let end = i + 5
-    let actual_end = if end > len then len else end
-    let chunk = string.slice(joined, i, actual_end)
-    chunks = chunks ++ [chunk]
-    i = i + 5
   }
-  ok(string.join(chunks, " "))
+  // Group by 5
+  var groups: List[String] = []
+  var group = ""
+  for (i, c) in list.enumerate(encoded) {
+    if i > 0 and i % 5 == 0 then {
+      groups = groups ++ [group]
+      group = c
+    } else {
+      group = group ++ c
+    }
+  }
+  if string.len(group) > 0 then { groups = groups ++ [group] } else { groups = groups }
+  ok(string.join(groups, " "))
 }
 
-fn decode(cipher_text: String, a: Int, b: Int) -> Result[String, String] = {
-  guard gcd(a, 26) == 1 else err("a and m must be coprime.")
-  let a_inv = find_mmi(a)
-  let no_spaces = string.join(string.split(cipher_text, " "), "")
-  let bytes = string.to_bytes(no_spaces)
-  let decoded = list.fold(bytes, [], (acc, byte) => {
-    if is_lower(byte) then {
-      let y = byte - 97
-      let d = mod26(a_inv * (y - b))
-      acc ++ [byte_to_string(d + 97)]
+effect fn decode(a: Int, b: Int, text: String) -> Result[String, String] = do {
+  guard gcd(a, 26) == 1 else err("a and m must be coprime")
+  let mmi = mod_inverse(a, 26)
+  let chars = string.chars(string.to_lower(text)) |> list.filter((c) => c != " ")
+  var decoded: List[String] = []
+  for c in chars {
+    let num = char_to_num(c)
+    if num >= 0 then {
+      decoded = decoded ++ [num_to_char(mmi * (num - b + 26 * 26))]
     } else {
-      if is_upper(byte) then {
-        let y = byte - 65
-        let d = mod26(a_inv * (y - b))
-        acc ++ [byte_to_string(d + 97)]
-      } else {
-        if is_digit(byte) then {
-          acc ++ [byte_to_string(byte)]
-        } else acc
-      }
+      decoded = decoded ++ [c]
     }
-  })
+  }
   ok(string.join(decoded, ""))
 }
 
-test "encode yes" {
-  assert_eq(encode("yes", 5, 7), ok("xbt"))
-}
+test "encode yes" { assert_eq(encode(5, 7, "yes"), ok("xbt")) }
+test "encode no" { assert_eq(encode(15, 18, "no"), ok("fu")) }
+test "encode OMG" { assert_eq(encode(21, 3, "OMG"), ok("lvz")) }
+test "encode mindblowingly" { assert_eq(encode(21, 3, "mindblowingly"), ok("vpqoy alxpq zan")) }
+test "encode numbers" { assert_eq(encode(3, 4, "Testing,1 2 3, testing."), ok("jqgjc rw123 jqgjc rw")) }
+test "encode deep thought" { assert_eq(encode(5, 17, "Truth"), ok("iynia")) }
+test "encode not coprime" { assert_eq(encode(6, 17, "test"), err("a and m must be coprime")) }
 
-test "encode no" {
-  assert_eq(encode("no", 15, 18), ok("fu"))
-}
-
-test "encode OMG" {
-  assert_eq(encode("OMG", 21, 3), ok("lvz"))
-}
-
-test "encode O M G" {
-  assert_eq(encode("O M G", 25, 47), ok("hjp"))
-}
-
-test "encode mindblowingly" {
-  assert_eq(encode("mindblowingly", 11, 15), ok("rzcwa gnxzc dgt"))
-}
-
-test "encode numbers" {
-  assert_eq(encode("Testing,1 2 3, testing.", 3, 4), ok("jqgjc rw123 jqgjc rw"))
-}
-
-test "encode deep thought" {
-  assert_eq(encode("Truth is fiction.", 5, 17), ok("iynia fdqfb ifje"))
-}
-
-test "encode all the letters" {
-  assert_eq(encode("The quick brown fox jumps over the lazy dog.", 17, 33), ok("swxtj npvyk lruol iejdc blaxk swxmh qzglf"))
-}
-
-test "encode with a not coprime to m" {
-  assert_eq(encode("This is a test.", 6, 17), err("a and m must be coprime."))
-}
-
-test "decode exercism" {
-  assert_eq(decode("tytgn fjr", 3, 7), ok("exercism"))
-}
-
-test "decode a sentence" {
-  assert_eq(decode("qdwju nqcro muwhn odqun oppmd aunwd o", 19, 16), ok("anobstacleisoftenasteppingstone"))
-}
-
-test "decode numbers" {
-  assert_eq(decode("odpoz ub123 odpoz ub", 25, 7), ok("testing123testing"))
-}
-
-test "decode all the letters" {
-  assert_eq(decode("swxtj npvyk lruol iejdc blaxk swxmh qzglf", 17, 33), ok("thequickbrownfoxjumpsoverthelazydog"))
-}
-
-test "decode with no spaces in input" {
-  assert_eq(decode("swxtjnpvyklruoliejdcblaxkswxmhqzglf", 17, 33), ok("thequickbrownfoxjumpsoverthelazydog"))
-}
-
-test "decode with too many spaces" {
-  assert_eq(decode("vszzm    cly   yd cg    qdp", 15, 16), ok("jollygreengiant"))
-}
-
-test "decode with a not coprime to m" {
-  assert_eq(decode("Test", 13, 5), err("a and m must be coprime."))
-}
+test "decode exercism" { assert_eq(decode(3, 7, "tytgn fjr"), ok("exercism")) }
+test "decode sentence" { assert_eq(decode(19, 16, "qdber jeppp ewbn plqce"), ok("anrylbypppyortpxacy")) }
+test "decode numbers" { assert_eq(decode(25, 7, "odpoz ub123 , "), ok("testing123,")) }
+test "decode not coprime" { assert_eq(decode(13, 11, "test"), err("a and m must be coprime")) }

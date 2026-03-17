@@ -1,11 +1,11 @@
-use crate::{parse_file, emit_rust, emit_ts, check, diagnostic, resolve, project};
+use crate::{parse_file, emit_rust, emit_ts, check, diagnostic, resolve, project, project_fetch};
 
 pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_check: bool) {
     let (mut program, source_text, _parse_errors) = parse_file(file);
 
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
-            project::fetch_all_deps(&proj)
+            project_fetch::fetch_all_deps(&proj)
                 .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); })
                 .into_iter()
                 .map(|fd| (fd.pkg_id, fd.source_dir))
@@ -28,7 +28,7 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
                 // not the dotted path, because resolved.modules stores canonical names
                 let is_self_import = path.first().map(|s| s.as_str()) == Some("self");
                 let target = if is_self_import && path.len() >= 2 {
-                    path.last().unwrap().clone()
+                    path.last().cloned().unwrap_or_default()
                 } else if is_self_import {
                     // import self as alias → target is the package name (loaded from resolved modules)
                     resolved.modules.iter()
@@ -96,6 +96,11 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
                 ir.modules.push(mod_ir_module);
             }
         }
+    }
+
+    // Monomorphize row-polymorphic functions
+    if let Some(ref mut ir) = ir_program {
+        almide::mono::monomorphize(ir);
     }
 
     if emit_ir {

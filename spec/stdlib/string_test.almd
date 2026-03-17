@@ -120,20 +120,20 @@ test "string.slice empty result" {
 
 // ── pad_left / pad_right ──
 
-test "string.pad_left shorter string" {
-  assert_eq(string.pad_left("42", 5, "0"), "00042")
+test "string.pad_start shorter string" {
+  assert_eq(string.pad_start("42", 5, "0"), "00042")
 }
 
-test "string.pad_left already long enough" {
-  assert_eq(string.pad_left("hello", 3, " "), "hello")
+test "string.pad_start already long enough" {
+  assert_eq(string.pad_start("hello", 3, " "), "hello")
 }
 
-test "string.pad_right shorter string" {
-  assert_eq(string.pad_right("x", 4, "."), "x...")
+test "string.pad_end shorter string" {
+  assert_eq(string.pad_end("x", 4, "."), "x...")
 }
 
-test "string.pad_right exact length" {
-  assert_eq(string.pad_right("abc", 3, " "), "abc")
+test "string.pad_end exact length" {
+  assert_eq(string.pad_end("abc", 3, " "), "abc")
 }
 
 // ── to_upper / to_lower ──
@@ -174,16 +174,16 @@ test "string.replace with empty" {
 
 // ── char_at ──
 
-test "string.char_at middle" {
-  assert_eq(string.char_at("hello", 2), some("l"))
+test "string.get middle" {
+  assert_eq(string.get("hello", 2), some("l"))
 }
 
-test "string.char_at last" {
-  assert_eq(string.char_at("abc", 2), some("c"))
+test "string.get last" {
+  assert_eq(string.get("abc", 2), some("c"))
 }
 
-test "string.char_at negative index" {
-  assert_eq(string.char_at("abc", -1), none)
+test "string.get negative index" {
+  assert_eq(string.get("abc", -1), none)
 }
 
 // ── lines ──

@@ -1,0 +1,150 @@
+// Python stdlib crawler
+// Usage:
+//   almide run tools/stdlib-crawler/python.almd -- --list
+//   almide run tools/stdlib-crawler/python.almd -- --all [--force]
+//   almide run tools/stdlib-crawler/python.almd -- --verbs
+//   almide run tools/stdlib-crawler/python.almd -- <module> [--save]
+
+let DATA_DIR = "tools/stdlib-crawler/data/python"
+
+effect fn main() -> Unit = do {
+  let args = env.args()
+  guard list.len(args) >= 1 else err("Usage: python.almd <command|module>")
+  let command = args[0]
+  let flags = list.drop(args, 1)
+
+  if command == "--list" then list_modules()
+  else if command == "--all" then crawl_all(list.contains(flags, "--force"))
+  else if command == "--verbs" then verb_analysis()
+  else crawl_module(command, list.contains(flags, "--save"))
+}
+
+effect fn list_modules() -> Unit = {
+  let output = process.exec("python3", ["-c", """
+import sys, json
+names = sorted(sys.stdlib_module_names - {'__main__', '__phello__', '_thread'})
+for n in names:
+    if not n.startswith('_'):
+        print(n)
+"""])
+  println(string.trim(output))
+}
+
+effect fn crawl_module(mod_name: String, save: Bool) -> Unit = {
+  let output = process.exec("python3", ["-c", introspect_script(), mod_name])
+  if save then {
+    fs.mkdir_p(DATA_DIR)
+    fs.write("${DATA_DIR}/${mod_name}.json", output)
+    println("Saved: ${DATA_DIR}/${mod_name}.json")
+  } else {
+    println(string.trim(output))
+  }
+}
+
+effect fn crawl_all(force: Bool) -> Unit = {
+  let script = """
+import sys, os, json, subprocess
+data_dir = sys.argv[1]
+force = sys.argv[2] == "1"
+introspect = sys.argv[3]
+r = subprocess.run(["python3", "-c", "import sys,json;names=sorted(sys.stdlib_module_names-{'__main__','__phello__','_thread'});print(json.dumps([n for n in names if not n.startswith('_')]))"], capture_output=True, text=True)
+names = json.loads(r.stdout.strip())
+os.makedirs(data_dir, exist_ok=True)
+crawled = skipped = errors = 0
+for mod_name in names:
+    path = os.path.join(data_dir, f"{mod_name}.json")
+    if os.path.exists(path) and not force:
+        skipped += 1; continue
+    try:
+        result = subprocess.run(["python3", "-c", introspect, mod_name], capture_output=True, text=True, timeout=30)
+        output = result.stdout.strip()
+        if not output or '"error"' in output:
+            errors += 1
+        else:
+            with open(path, "w") as f: f.write(output)
+            crawled += 1
+            try:
+                data = json.loads(output)
+                print(f"  OK: {mod_name} ({data.get('function_count',0)} fns)")
+            except: print(f"  OK: {mod_name}")
+    except subprocess.TimeoutExpired:
+        errors += 1
+print(f"\\nDone: {crawled} crawled, {skipped} cached, {errors} errors")
+"""
+  let force_flag = if force then "1" else "0"
+  let output = process.exec("python3", ["-c", script, DATA_DIR, force_flag, introspect_script()])
+  println(string.trim(output))
+}
+
+effect fn verb_analysis() -> Unit = {
+  let output = process.exec("python3", ["-c", verb_script(), DATA_DIR, "python"])
+  println(string.trim(output))
+}
+
+fn introspect_script() -> String = """
+import sys, json, inspect, importlib
+mod_name = sys.argv[1]
+try: mod = importlib.import_module(mod_name)
+except ImportError as e:
+    print(json.dumps({"error": str(e)})); sys.exit(0)
+def get_sig(obj):
+    try: return str(inspect.signature(obj))
+    except: return ""
+def get_doc(obj): return (obj.__doc__ or "").strip().split("\\n")[0][:200]
+functions, classes, constants = [], [], []
+for name, obj in sorted(inspect.getmembers(mod)):
+    if name.startswith("_"): continue
+    if inspect.isfunction(obj) or inspect.isbuiltin(obj):
+        sig = get_sig(obj)
+        functions.append({"name": name, "signature": sig, "description": get_doc(obj)})
+    elif inspect.isclass(obj):
+        if getattr(obj, "__module__", "") != mod_name: continue
+        methods = []
+        for mname, mobj in sorted(inspect.getmembers(obj)):
+            if mname.startswith("_") and mname != "__init__": continue
+            if not callable(mobj): continue
+            methods.append({"name": mname, "signature": get_sig(mobj), "description": get_doc(mobj)})
+        classes.append({"name": name, "description": get_doc(obj), "methods": methods})
+    elif not callable(obj) and isinstance(obj, (int, float, str)):
+        constants.append({"name": name, "type": type(obj).__name__, "value": str(obj)[:100]})
+total_fns = len(functions) + sum(len(c["methods"]) for c in classes)
+print(json.dumps({"language": "python", "version": sys.version.split()[0], "module": mod_name,
+    "description": get_doc(mod), "function_count": total_fns,
+    "functions": functions, "classes": classes, "constants": constants
+}, indent=2, ensure_ascii=False))
+"""
+
+fn verb_script() -> String = """
+import os, json, sys
+from collections import Counter
+data_dir, lang = sys.argv[1], sys.argv[2]
+if not os.path.exists(data_dir): print(f"No data. Run: almide run python.almd -- --all"); sys.exit(0)
+verb_counter = Counter()
+verb_examples = {}
+total = 0
+for fname in sorted(os.listdir(data_dir)):
+    if not fname.endswith(".json"): continue
+    mod = fname[:-5]
+    with open(os.path.join(data_dir, fname)) as f:
+        try: data = json.load(f)
+        except: continue
+    for fn in data.get("functions", []):
+        total += 1; verb = fn["name"].split("_")[0]
+        if len(verb) > 2:
+            verb_counter[verb] += 1
+            verb_examples.setdefault(verb, [])
+            if len(verb_examples[verb]) < 3: verb_examples[verb].append(f"{mod}.{fn['name']}")
+    for cls in data.get("classes", []):
+        for m in cls.get("methods", []):
+            if m["name"] in ("__init__",): continue
+            total += 1; verb = m["name"].split("_")[0]
+            if len(verb) > 2:
+                verb_counter[verb] += 1
+                verb_examples.setdefault(verb, [])
+                if len(verb_examples[verb]) < 3: verb_examples[verb].append(f"{mod}.{cls['name']}.{m['name']}")
+print(f"{lang.title()} Verb Analysis ({total} functions)")
+print("=" * 50)
+for verb, count in verb_counter.most_common(30):
+    examples = ", ".join(verb_examples.get(verb, []))
+    print(f"  {count:>4}x  {verb:<15}  {examples}")
+"""

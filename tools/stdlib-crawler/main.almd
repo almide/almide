@@ -1,82 +1,530 @@
-// stdlib-crawler: Collect stdlib function encyclopedia from other languages.
+// stdlib-crawler: Collect and analyze stdlib APIs from multiple languages.
 //
 // Usage:
-//   almide run tools/stdlib-crawler/main.almd -- python --list
-//   almide run tools/stdlib-crawler/main.almd -- python datetime
+//   almide run tools/stdlib-crawler/main.almd -- <lang> --list
+//   almide run tools/stdlib-crawler/main.almd -- <lang> <module>
+//   almide run tools/stdlib-crawler/main.almd -- <lang> <module> --save
+//   almide run tools/stdlib-crawler/main.almd -- <lang> --all [--force]
+//   almide run tools/stdlib-crawler/main.almd -- <lang> --summary
+//   almide run tools/stdlib-crawler/main.almd -- <lang> --verbs
+//
+// Supported languages: python, ruby, node
+
+fn data_dir(lang: String) -> String = "tools/stdlib-crawler/data/${lang}"
+
+// ── Entry ──────────────────────────────────────────
 
 effect fn main() -> Unit = do {
   let args = env.args()
-  guard list.len(args) >= 2 else err("Usage: stdlib-crawler <language> <module|--list>")
+  guard list.len(args) >= 2 else err("Usage: stdlib-crawler <language> <command>")
 
-  let language = args[0]
+  let lang = args[0]
   let command = args[1]
+  let flags = list.drop(args, 2)
+  let force = list.contains(flags, "--force")
+  let save = list.contains(flags, "--save")
 
-  match language {
-    "python" =>
-      if command == "--list" then
-        python_list_modules()
-      else
-        python_collect_module(command)
-    _ => {
-      eprintln("Unsupported language: {language}")
-      process.exit(1)
-    }
+  if command == "--list" then list_modules(lang)
+  else if command == "--all" then crawl_all(lang, data_dir(lang), force)
+  else if command == "--summary" then print_summary(data_dir(lang), lang)
+  else if command == "--verbs" then verb_analysis(data_dir(lang), lang)
+  else crawl_module(lang, data_dir(lang), command, save)
+}
+
+// ── List modules (language-specific) ───────────────
+
+fn lang_list_script(lang: String) -> String =
+  if lang == "python" then python_list_script()
+  else if lang == "ruby" then ruby_list_script()
+  else node_list_script()
+
+effect fn list_modules(lang: String) -> Unit = {
+  let cmd = lang_cmd(lang)
+  let script = lang_list_script(lang)
+  let output = process.exec(cmd[0], [cmd[1], script])
+  println(string.trim(output))
+}
+
+// ── Crawl single module ────────────────────────────
+
+effect fn crawl_module(lang: String, dir: String, mod_name: String, save: Bool) -> Unit = {
+  let output = introspect(lang, mod_name)
+  if save then {
+    let save_cmd = "import os,sys; os.makedirs(sys.argv[1],exist_ok=True); open(os.path.join(sys.argv[1],sys.argv[2]+'.json'),'w').write(sys.stdin.read())"
+    let _r = process.exec("python3", ["-c", save_cmd, dir, mod_name])
+    println("Saved: ${dir}/${mod_name}.json")
+  } else {
+    println(string.trim(output))
   }
 }
 
-// ── Python: list all stdlib modules ─────────────────
-
-effect fn python_list_modules() -> Unit = do {
-  let script = string.join([
-    "import sys, json",
-    "names = sorted(sys.stdlib_module_names - {'__main__', '__phello__', '_thread'})",
-    "names = [n for n in names if not n.startswith('_')]",
-    "for n in names: print(n)"
-  ], "\n")
-  let output = process.exec("python3", ["-c", script])
-  let lines = string.split(output, "\n")
-  let count = list.len(list.filter(lines, (l) => string.len(l) > 0))
-  println("Python stdlib: ${int.to_string(count)} modules")
-  println(output)
+effect fn introspect(lang: String, mod_name: String) -> String = {
+  let cmd = lang_cmd(lang)
+  let script = lang_introspect_script(lang)
+  let output = process.exec(cmd[0], [cmd[1], script, mod_name])
+  output
 }
 
-// ── Python: collect a single module ─────────────────
+// ── Crawl all modules ──────────────────────────────
 
-effect fn python_collect_module(mod_name: String) -> Unit = do {
-  let script = string.join([
-    "import sys,json,inspect,importlib",
-    "mod_name=sys.argv[1]",
-    "try:",
-    "    mod=importlib.import_module(mod_name)",
-    "except ImportError as e:",
-    "    print(json.dumps({'language':'python','module':mod_name,'error':str(e)}))",
-    "    sys.exit(0)",
-    "functions=[]",
-    "classes=[]",
-    "for name,obj in inspect.getmembers(mod):",
-    "    if name.startswith('_'): continue",
-    "    if inspect.isfunction(obj) or inspect.isbuiltin(obj):",
-    "        try: sig=str(inspect.signature(obj))",
-    "        except: sig=''",
-    "        doc=(obj.__doc__ or '').strip().split(chr(10))[0][:200]",
-    "        functions.append({'name':name,'signature':sig,'description':doc})",
-    "    elif inspect.isclass(obj) and getattr(obj,'__module__','')==mod_name:",
-    "        methods=[]",
-    "        for mname,mobj in inspect.getmembers(obj):",
-    "            if mname.startswith('_') and mname!='__init__': continue",
-    "            if not callable(mobj): continue",
-    "            try: sig=str(inspect.signature(mobj))",
-    "            except: sig=''",
-    "            doc=(mobj.__doc__ or '').strip().split(chr(10))[0][:200]",
-    "            methods.append({'name':mname,'signature':sig,'description':doc})",
-    "        cdoc=(obj.__doc__ or '').strip().split(chr(10))[0][:200]",
-    "        classes.append({'name':name,'description':cdoc,'methods':methods})",
-    "mod_doc=(mod.__doc__ or '').strip().split(chr(10))[0][:200]",
-    "total=len(functions)+sum(len(c['methods']) for c in classes)",
-    "result={'language':'python','version':sys.version.split()[0],'module':mod_name,'description':mod_doc,'function_count':total,'functions':functions,'classes':classes}",
-    "print(json.dumps(result,ensure_ascii=False))"
-  ], "\n")
-  let output = process.exec("python3", ["-c", script, mod_name])
-  let parsed = json.parse(output)
-  println(json.stringify(parsed))
+fn lang_cmd(lang: String) -> List[String] =
+  if lang == "python" then ["python3", "-c"]
+  else if lang == "ruby" then ["ruby", "-e"]
+  else ["node", "-e"]
+
+fn lang_list_json_script(lang: String) -> String =
+  if lang == "python" then python_list_json_script()
+  else if lang == "ruby" then ruby_list_json_script()
+  else node_list_json_script()
+
+fn lang_introspect_script(lang: String) -> String =
+  if lang == "python" then python_introspect_script()
+  else if lang == "ruby" then ruby_introspect_script()
+  else node_introspect_script()
+
+effect fn crawl_all(lang: String, dir: String, force: Bool) -> Unit = {
+  let force_flag = if force then "1" else "0"
+  let introspect_cmd = lang_cmd(lang)
+  let list_script = lang_list_json_script(lang)
+  let introspect_script = lang_introspect_script(lang)
+
+  // Use Python as orchestrator (handles file I/O and subprocess)
+  let script = """
+    import sys, os, json, subprocess
+
+    data_dir = sys.argv[1]
+    force = sys.argv[2] == "1"
+    cmd_parts = sys.argv[3].split("\\x00")
+    introspect_script = sys.argv[4]
+    list_script = sys.argv[5]
+
+    # Get module list
+    r = subprocess.run(cmd_parts + [list_script], capture_output=True, text=True)
+    names = json.loads(r.stdout.strip())
+
+    os.makedirs(data_dir, exist_ok=True)
+    crawled = skipped = errors = 0
+
+    for mod_name in names:
+        path = os.path.join(data_dir, f"{mod_name}.json")
+        if os.path.exists(path) and not force:
+            skipped += 1
+            continue
+
+        try:
+            result = subprocess.run(
+                cmd_parts + [introspect_script, mod_name],
+                capture_output=True, text=True, timeout=30
+            )
+            output = result.stdout.strip()
+            if not output or '"error"' in output:
+                errors += 1
+                print(f"  SKIP: {mod_name}", file=sys.stderr)
+            else:
+                with open(path, "w") as f:
+                    f.write(output)
+                crawled += 1
+                try:
+                    data = json.loads(output)
+                    fn_count = data.get("function_count", 0)
+                    cls_count = data.get("class_count", 0)
+                    print(f"  OK: {mod_name} ({fn_count} fns, {cls_count} classes)")
+                except:
+                    print(f"  OK: {mod_name}")
+        except subprocess.TimeoutExpired:
+            errors += 1
+            print(f"  TIMEOUT: {mod_name}", file=sys.stderr)
+
+    print()
+    print(f"Done: {crawled} crawled, {skipped} cached, {errors} errors")
+  """
+  let cmd_str = string.join(introspect_cmd, "\0")
+  let output = process.exec("python3", ["-c", script, dir, force_flag, cmd_str, introspect_script, list_script])
+  println(string.trim(output))
 }
+
+// ── Summary (language-agnostic, reads cached JSON) ─
+
+effect fn print_summary(dir: String, lang: String) -> Unit = {
+  let script = """
+    import os, json, sys
+
+    data_dir = sys.argv[1]
+    lang = sys.argv[2]
+    if not os.path.exists(data_dir):
+        print(f"No data. Run: stdlib-crawler {lang} --all")
+        sys.exit(0)
+
+    modules = []
+    for fname in sorted(os.listdir(data_dir)):
+        if not fname.endswith(".json"):
+            continue
+        with open(os.path.join(data_dir, fname)) as f:
+            try:
+                data = json.load(f)
+            except:
+                continue
+        fn_count = len(data.get("functions", []))
+        method_count = sum(len(c.get("methods", [])) for c in data.get("classes", []))
+        modules.append((
+            data.get("module", fname[:-5]),
+            fn_count,
+            len(data.get("classes", [])),
+            method_count,
+            len(data.get("constants", [])),
+            fn_count + method_count,
+        ))
+
+    modules.sort(key=lambda m: m[5], reverse=True)
+    total = sum(m[5] for m in modules)
+
+    print(f"{lang.title()} Stdlib Summary")
+    print("=" * (len(lang) + 16))
+    print(f"{len(modules)} modules, {total} total functions/methods")
+    print()
+    print(f"  {'Module':<25} {'Fns':>5} {'Classes':>8} {'Methods':>8} {'Consts':>8}")
+    print(f"  {'─'*25} {'─'*5} {'─'*8} {'─'*8} {'─'*8}")
+    for name, fns, cls, methods, consts, _ in modules:
+        print(f"  {name:<25} {fns:>5} {cls:>8} {methods:>8} {consts:>8}")
+    print(f"  {'─'*25} {'─'*5} {'─'*8} {'─'*8} {'─'*8}")
+    print(f"  {'TOTAL':<25} {sum(m[1] for m in modules):>5} {sum(m[2] for m in modules):>8} {sum(m[3] for m in modules):>8} {sum(m[4] for m in modules):>8}")
+  """
+  let output = process.exec("python3", ["-c", script, dir, lang])
+  println(string.trim(output))
+}
+
+// ── Verb analysis (language-agnostic) ──────────────
+
+effect fn verb_analysis(dir: String, lang: String) -> Unit = {
+  let script = """
+    import os, json, sys
+    from collections import Counter
+
+    data_dir = sys.argv[1]
+    lang = sys.argv[2]
+    if not os.path.exists(data_dir):
+        print(f"No data. Run: stdlib-crawler {lang} --all")
+        sys.exit(0)
+
+    verb_counter = Counter()
+    verb_examples = {}
+    total_fns = 0
+
+    for fname in sorted(os.listdir(data_dir)):
+        if not fname.endswith(".json"):
+            continue
+        mod_name = fname[:-5]
+        with open(os.path.join(data_dir, fname)) as f:
+            try:
+                data = json.load(f)
+            except:
+                continue
+
+        for fn in data.get("functions", []):
+            name = fn["name"]
+            total_fns += 1
+            parts = name.split("_")
+            verb = parts[0] if parts else name
+            if len(verb) > 2:
+                verb_counter[verb] += 1
+                verb_examples.setdefault(verb, [])
+                if len(verb_examples[verb]) < 3:
+                    verb_examples[verb].append(f"{mod_name}.{name}")
+
+        for cls in data.get("classes", []):
+            for method in cls.get("methods", []):
+                name = method["name"]
+                if name in ("__init__", "initialize", "constructor"):
+                    continue
+                total_fns += 1
+                parts = name.split("_")
+                verb = parts[0] if parts else name
+                if len(verb) > 2:
+                    verb_counter[verb] += 1
+                    verb_examples.setdefault(verb, [])
+                    if len(verb_examples[verb]) < 3:
+                        verb_examples[verb].append(f"{mod_name}.{cls['name']}.{name}")
+
+    print(f"{lang.title()} Verb Analysis")
+    print("=" * (len(lang) + 15))
+    print(f"Total functions analyzed: {total_fns}")
+    print(f"Unique verb prefixes: {len(verb_counter)}")
+    print()
+    print("Top 50 verbs:")
+    print("─" * 60)
+    for verb, count in verb_counter.most_common(50):
+        examples = ", ".join(verb_examples.get(verb, []))
+        print(f"  {count:>4}x  {verb:<15}  {examples}")
+  """
+  let output = process.exec("python3", ["-c", script, dir, lang])
+  println(string.trim(output))
+}
+
+// ════════════════════════════════════════════════════
+// ── Python scripts ─────────────────────────────────
+// ════════════════════════════════════════════════════
+
+fn python_list_script() -> String = """
+  import sys
+  names = sorted(sys.stdlib_module_names - {'__main__', '__phello__', '_thread'})
+  for n in names:
+      if not n.startswith('_'):
+          print(n)
+"""
+
+fn python_list_json_script() -> String = """
+  import sys, json
+  names = sorted(sys.stdlib_module_names - {'__main__', '__phello__', '_thread'})
+  names = [n for n in names if not n.startswith('_')]
+  print(json.dumps(names))
+"""
+
+fn python_introspect_script() -> String = """
+  import sys, json, inspect, importlib
+
+  mod_name = sys.argv[1]
+  try:
+      mod = importlib.import_module(mod_name)
+  except ImportError as e:
+      print(json.dumps({"error": str(e)}, indent=2))
+      sys.exit(0)
+
+  def get_sig(obj):
+      try: return str(inspect.signature(obj))
+      except (ValueError, TypeError): return ""
+
+  def get_doc(obj):
+      return (obj.__doc__ or "").strip().split("\\n")[0][:200]
+
+  def classify_params(sig_str):
+      if not sig_str: return {"required": 0, "optional": 0, "variadic": False}
+      required = optional = 0; variadic = False
+      for part in sig_str.strip("()").split(","):
+          part = part.strip()
+          if not part or part == "/": continue
+          if part.startswith("*") or part.startswith("**"): variadic = True
+          elif "=" in part: optional += 1
+          else: required += 1
+      return {"required": required, "optional": optional, "variadic": variadic}
+
+  functions, classes, constants = [], [], []
+  for name, obj in sorted(inspect.getmembers(mod)):
+      if name.startswith("_"): continue
+      if inspect.isfunction(obj) or inspect.isbuiltin(obj):
+          sig = get_sig(obj)
+          functions.append({"name": name, "signature": sig, "params": classify_params(sig), "description": get_doc(obj)})
+      elif inspect.isclass(obj):
+          if getattr(obj, "__module__", "") != mod_name: continue
+          methods = []
+          for mname, mobj in sorted(inspect.getmembers(obj)):
+              if mname.startswith("_") and mname != "__init__": continue
+              if not callable(mobj): continue
+              sig = get_sig(mobj)
+              methods.append({"name": mname, "signature": sig, "params": classify_params(sig), "description": get_doc(mobj)})
+          classes.append({"name": name, "description": get_doc(obj), "method_count": len(methods), "methods": methods})
+      elif not callable(obj) and isinstance(obj, (int, float, str)):
+          constants.append({"name": name, "type": type(obj).__name__, "value": str(obj)[:100]})
+
+  total_fns = len(functions) + sum(c["method_count"] for c in classes)
+  print(json.dumps({"language": "python", "version": sys.version.split()[0], "module": mod_name,
+      "description": get_doc(mod), "function_count": total_fns, "class_count": len(classes),
+      "constant_count": len(constants), "functions": functions, "classes": classes, "constants": constants
+  }, indent=2, ensure_ascii=False))
+"""
+
+// ════════════════════════════════════════════════════
+// ── Ruby scripts ───────────────────────────────────
+// ════════════════════════════════════════════════════
+
+fn ruby_list_script() -> String = """
+  # List Ruby stdlib modules (gems that ship with Ruby)
+  require 'rubygems'
+  stdlib = %w[
+    abbrev base64 benchmark bigdecimal cgi csv date delegate digest drb
+    english erb etc fcntl fiddle fileutils find forwardable io-console
+    io-nonblock io-wait ipaddr json logger matrix minitest mutex_m net-http
+    net-ftp net-imap net-pop net-smtp nkf observer open-uri open3 openssl
+    optparse ostruct pathname pp prettyprint prime pstore psych racc
+    readline reline resolv ripper securerandom set shellwords singleton
+    socket stringio strscan syslog tempfile time timeout tmpdir tsort
+    un uri weakref yaml zlib
+  ]
+  stdlib.sort.each { |n| puts n }
+"""
+
+fn ruby_list_json_script() -> String = """
+  require 'json'
+  stdlib = %w[
+    abbrev base64 benchmark bigdecimal cgi csv date delegate digest drb
+    english erb etc fcntl fiddle fileutils find forwardable io-console
+    io-nonblock io-wait ipaddr json logger matrix minitest mutex_m net-http
+    net-ftp net-imap net-pop net-smtp nkf observer open-uri open3 openssl
+    optparse ostruct pathname pp prettyprint prime pstore psych racc
+    readline reline resolv ripper securerandom set shellwords singleton
+    socket stringio strscan syslog tempfile time timeout tmpdir tsort
+    un uri weakref yaml zlib
+  ]
+  puts JSON.generate(stdlib.sort)
+"""
+
+fn ruby_introspect_script() -> String = """
+  require 'json'
+
+  mod_name = ARGV[0]
+  begin
+    require mod_name.gsub('-', '/')
+  rescue LoadError => e
+    puts JSON.pretty_generate({error: e.message})
+    exit 0
+  end
+
+  # Find the top-level module/class
+  mod_const = mod_name.split('-').map { |p|
+    p.split('/').map(&:capitalize).join('::')
+  }.join('::')
+
+  # Try common capitalizations
+  target = nil
+  [mod_const, mod_const.upcase, mod_name.capitalize, mod_name.upcase].each do |name|
+    begin
+      target = Object.const_get(name)
+      break
+    rescue NameError
+      next
+    end
+  end
+
+  unless target
+    # Fallback: find any new constants added after require
+    puts JSON.pretty_generate({error: "Cannot resolve module constant for #{mod_name}"})
+    exit 0
+  end
+
+  functions = []
+  classes = []
+  constants = []
+
+  if target.is_a?(Module)
+    # Module/class methods
+    (target.methods - Object.methods).sort.each do |m|
+      meth = target.method(m)
+      params = meth.parameters.map { |type, name| {name: (name || type).to_s, kind: type.to_s} }
+      req = params.count { |p| p[:kind] == "req" }
+      opt = params.count { |p| p[:kind] == "opt" }
+      rest = params.any? { |p| p[:kind] == "rest" }
+      sig = meth.parameters.map { |t, n| n ? "#{n}: #{t}" : t.to_s }.join(", ")
+      functions << {name: m.to_s, signature: "(#{sig})", params: {required: req, optional: opt, variadic: rest}, description: ""}
+    end
+
+    # Instance methods (if it's a class)
+    if target.is_a?(Class)
+      methods = []
+      (target.instance_methods(false)).sort.each do |m|
+        begin
+          meth = target.instance_method(m)
+          params = meth.parameters.map { |type, name| {name: (name || type).to_s, kind: type.to_s} }
+          req = params.count { |p| p[:kind] == "req" }
+          opt = params.count { |p| p[:kind] == "opt" }
+          rest = params.any? { |p| p[:kind] == "rest" }
+          sig = meth.parameters.map { |t, n| n ? "#{n}: #{t}" : t.to_s }.join(", ")
+          methods << {name: m.to_s, signature: "(#{sig})", params: {required: req, optional: opt, variadic: rest}, description: ""}
+        rescue
+          next
+        end
+      end
+      classes << {name: target.name || mod_name, description: "", method_count: methods.length, methods: methods} unless methods.empty?
+    end
+
+    # Constants
+    target.constants(false).sort.each do |c|
+      begin
+        val = target.const_get(c)
+        next if val.is_a?(Module) || val.is_a?(Class)
+        constants << {name: c.to_s, type: val.class.name, value: val.to_s[0..100]}
+      rescue
+        next
+      end
+    end
+  end
+
+  total_fns = functions.length + classes.sum { |c| c[:method_count] }
+  result = {
+    language: "ruby", version: RUBY_VERSION, module: mod_name,
+    description: "", function_count: total_fns, class_count: classes.length,
+    constant_count: constants.length, functions: functions, classes: classes, constants: constants
+  }
+  puts JSON.pretty_generate(result)
+"""
+
+// ════════════════════════════════════════════════════
+// ── Node.js scripts ────────────────────────────────
+// ════════════════════════════════════════════════════
+
+fn node_list_script() -> String = r"""
+  const mods = require('module').builtinModules
+    .filter(m => !m.startsWith('_') && !m.startsWith('internal/'))
+    .sort();
+  mods.forEach(m => console.log(m));
+"""
+
+fn node_list_json_script() -> String = r"""
+  const mods = require('module').builtinModules
+    .filter(m => !m.startsWith('_') && !m.startsWith('internal/'))
+    .sort();
+  console.log(JSON.stringify(mods));
+"""
+
+fn node_introspect_script() -> String = r"""
+  const modName = process.argv[1];
+  let mod;
+  try {
+    mod = require(modName);
+  } catch (e) {
+    console.log(JSON.stringify({error: e.message}, null, 2));
+    process.exit(0);
+  }
+
+  const functions = [];
+  const classes = [];
+  const constants = [];
+
+  for (const [name, val] of Object.entries(mod).sort()) {
+    if (name.startsWith('_')) continue;
+
+    if (typeof val === 'function') {
+      // Check if it's a class (has prototype methods beyond constructor)
+      const protoMethods = Object.getOwnPropertyNames(val.prototype || {})
+        .filter(m => m !== 'constructor' && typeof (val.prototype || {})[m] === 'function');
+
+      if (protoMethods.length > 0) {
+        const methods = protoMethods.sort().map(m => ({
+          name: m,
+          signature: `(${val.prototype[m].length} args)`,
+          params: {required: val.prototype[m].length, optional: 0, variadic: false},
+          description: ""
+        }));
+        classes.push({
+          name, description: "", method_count: methods.length, methods
+        });
+      }
+
+      // Also add as a function (constructor or plain function)
+      functions.push({
+        name,
+        signature: `(${val.length} args)`,
+        params: {required: val.length, optional: 0, variadic: false},
+        description: ""
+      });
+    } else if (typeof val !== 'object' || val === null) {
+      constants.push({name, type: typeof val, value: String(val).slice(0, 100)});
+    }
+  }
+
+  const totalFns = functions.length + classes.reduce((s, c) => s + c.method_count, 0);
+  const result = {
+    language: "node", version: process.version, module: modName,
+    description: "", function_count: totalFns, class_count: classes.length,
+    constant_count: constants.length, functions, classes, constants
+  };
+  console.log(JSON.stringify(result, null, 2));
+"""

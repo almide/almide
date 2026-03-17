@@ -1,0 +1,10 @@
+{
+  "model": "claude-sonnet-4-20250514",
+  "total": 58,
+  "correct": 58,
+  "partial": 0,
+  "wrong": 0,
+  "accuracy_exact": 100.0,
+  "accuracy_with_alts": 100.0,
+  "note": "Manual test. All 58 function names predicted correctly on first try."
+}

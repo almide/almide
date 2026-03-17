@@ -76,7 +76,7 @@ jobs:
       - name: Almide spec tests
         run: |
           ALMIDE=/tmp/almide-bin/almide
-          $ALMIDE test spec/lang/ || true
+          $ALMIDE test spec/
 
   checks:
     name: Emit & Format

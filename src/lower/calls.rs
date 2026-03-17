@@ -25,67 +25,56 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
                     }, Ty::String, span);
                 }
             }
-            if field == "decode" && args.len() == 1 {
-                if let Some(type_args) = type_args {
-                    if let Some(ast::TypeExpr::Simple { name: type_name }) = type_args.first() {
-                        let ir_arg = lower_expr(ctx, &args[0]);
-                        // json.decode[T](text) → T.decode(json.parse(text)?)
-                        let parsed = ctx.mk(IrExprKind::Try { expr: Box::new(ctx.mk(IrExprKind::Call {
-                            target: CallTarget::Module { module: module.clone(), func: "parse".into() },
-                            args: vec![ir_arg], type_args: vec![],
-                        }, Ty::Result(Box::new(Ty::Named("Value".into(), vec![])), Box::new(Ty::String)), span)) },
-                        Ty::Named("Value".into(), vec![]), span);
-                        let decode_fn = format!("{}.decode", type_name);
-                        return ctx.mk(IrExprKind::Call {
-                            target: CallTarget::Named { name: decode_fn },
-                            args: vec![parsed], type_args: vec![],
-                        }, ty, span);
-                    }
-                }
+            if field == "decode" && args.len() == 1
+                && let Some(type_args) = type_args
+                && let Some(ast::TypeExpr::Simple { name: type_name }) = type_args.first()
+            {
+                let ir_arg = lower_expr(ctx, &args[0]);
+                // json.decode[T](text) → T.decode(json.parse(text)?)
+                let parsed = ctx.mk(IrExprKind::Try { expr: Box::new(ctx.mk(IrExprKind::Call {
+                    target: CallTarget::Module { module: module.clone(), func: "parse".into() },
+                    args: vec![ir_arg], type_args: vec![],
+                }, Ty::Result(Box::new(Ty::Named("Value".into(), vec![])), Box::new(Ty::String)), span)) },
+                Ty::Named("Value".into(), vec![]), span);
+                let decode_fn = format!("{}.decode", type_name);
+                return ctx.mk(IrExprKind::Call {
+                    target: CallTarget::Named { name: decode_fn },
+                    args: vec![parsed], type_args: vec![],
+                }, ty, span);
             }
         }
     }
+
 
     let mut ir_args: Vec<IrExpr> = args.iter().map(|a| lower_expr(ctx, a)).collect();
     let ta = type_args.map(|tas| tas.iter().map(|t| resolve_type_expr(t)).collect()).unwrap_or_default();
     let target = lower_call_target(ctx, callee);
 
     // Named args: resolve to positional order using function signature
-    if !named_args.is_empty() {
-        let fn_name = match &target {
-            CallTarget::Named { name } => Some(name.clone()),
-            _ => None,
-        };
-        if let Some(ref name) = fn_name {
-            let param_names: Vec<String> = ctx.env.functions.get(name)
-                .map(|sig| sig.params.iter().map(|(n, _)| n.clone()).collect())
-                .unwrap_or_default();
-            let defaults = ctx.fn_defaults.get(name).cloned();
-            let positional_count = ir_args.len();
-            for i in positional_count..param_names.len() {
-                let param_name = &param_names[i];
-                if let Some((_, expr)) = named_args.iter().find(|(n, _)| n == param_name) {
-                    ir_args.push(lower_expr(ctx, expr));
-                } else if let Some(ref defs) = defaults {
-                    if let Some(Some(default_expr)) = defs.get(i) {
-                        ir_args.push(lower_expr(ctx, default_expr));
-                    }
-                }
+    if let (false, CallTarget::Named { name }) = (named_args.is_empty(), &target) {
+        let param_names: Vec<String> = ctx.env.functions.get(name)
+            .map(|sig| sig.params.iter().map(|(n, _)| n.clone()).collect())
+            .unwrap_or_default();
+        let defaults = ctx.fn_defaults.get(name).cloned();
+        let positional_count = ir_args.len();
+        for i in positional_count..param_names.len() {
+            let param_name = &param_names[i];
+            if let Some((_, expr)) = named_args.iter().find(|(n, _)| n == param_name) {
+                ir_args.push(lower_expr(ctx, expr));
+            } else if let Some(ref defs) = defaults
+                && let Some(Some(default_expr)) = defs.get(i)
+            {
+                ir_args.push(lower_expr(ctx, default_expr));
             }
         }
     }
 
     // Default args: fill in remaining defaults (for calls without named args)
-    if named_args.is_empty() {
-        if let CallTarget::Named { ref name } = target {
-            if let Some(defaults) = ctx.fn_defaults.get(name).cloned() {
-                let expected = defaults.len();
-                if ir_args.len() < expected {
-                    for i in ir_args.len()..expected {
-                        if let Some(Some(default_expr)) = defaults.get(i) {
-                            ir_args.push(lower_expr(ctx, &default_expr));
-                        }
-                    }
+    if let (true, CallTarget::Named { name }) = (named_args.is_empty(), &target) {
+        if let Some(defaults) = ctx.fn_defaults.get(name).cloned() {
+            for i in ir_args.len()..defaults.len() {
+                if let Some(Some(default_expr)) = defaults.get(i) {
+                    ir_args.push(lower_expr(ctx, &default_expr));
                 }
             }
         }
@@ -99,21 +88,21 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
         ast::Expr::Ident { name, .. } | ast::Expr::TypeName { name, .. } => {
             // If the name resolves to a local variable (e.g., a closure), use Computed
             // so that use-count tracking properly counts this as a use of that variable.
-            if let Some(var_id) = ctx.lookup_var(name) {
-                let info = ctx.var_table.get(var_id);
-                if matches!(info.ty, crate::types::Ty::Fn { .. }) {
-                    let ty = ctx.expr_ty(callee);
-                    return CallTarget::Computed {
-                        callee: Box::new(ctx.mk(IrExprKind::Var { id: var_id }, ty, callee.span())),
-                    };
-                }
+            if let Some(var_id) = ctx.lookup_var(name)
+                && matches!(ctx.var_table.get(var_id).ty, crate::types::Ty::Fn { .. })
+            {
+                let ty = ctx.expr_ty(callee);
+                return CallTarget::Computed {
+                    callee: Box::new(ctx.mk(IrExprKind::Var { id: var_id }, ty, callee.span())),
+                };
             }
             CallTarget::Named { name: name.clone() }
         }
         ast::Expr::Member { object, field, .. } => {
             // Check if this is a module call (e.g., string.trim, list.map)
             if let ast::Expr::Ident { name: module, .. } = object.as_ref() {
-                if crate::stdlib::is_stdlib_module(module) || crate::stdlib::is_any_stdlib(module)
+                if module == "fan"
+                    || crate::stdlib::is_stdlib_module(module) || crate::stdlib::is_any_stdlib(module)
                     || ctx.env.user_modules.contains(module)
                 {
                     let resolved = ctx.env.module_aliases.get(module).cloned().unwrap_or(module.clone());

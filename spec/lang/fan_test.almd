@@ -1,0 +1,65 @@
+// fan — concurrent execution
+
+effect fn add(a: Int, b: Int) -> Result[Int, String] = ok(a + b)
+effect fn mul(a: Int, b: Int) -> Result[Int, String] = ok(a * b)
+effect fn pure_val(x: Int) -> Result[Int, String] = ok(x)
+
+// ── basic: 2 expressions ──
+
+test "fan basic two expressions" {
+  let (sum, product) = fan {
+    add(3, 4)
+    mul(3, 4)
+  }
+  assert_eq(sum, 7)
+  assert_eq(product, 12)
+}
+
+// ── 3 expressions ──
+
+test "fan three expressions" {
+  let (a, b, c) = fan {
+    add(1, 2)
+    mul(3, 4)
+    pure_val(99)
+  }
+  assert_eq(a, 3)
+  assert_eq(b, 12)
+  assert_eq(c, 99)
+}
+
+// ── single expression (no tuple) ──
+
+test "fan single expression" {
+  let result = fan {
+    add(10, 20)
+  }
+  assert_eq(result, 30)
+}
+
+// ── staged fan (fan → let → fan) ──
+
+test "fan staged dependency" {
+  let (a, b) = fan {
+    add(1, 2)
+    mul(3, 4)
+  }
+  let (c, d) = fan {
+    add(a, b)
+    mul(a, b)
+  }
+  assert_eq(c, 15)
+  assert_eq(d, 36)
+}
+
+// ── fan captures outer let bindings ──
+
+test "fan captures let binding" {
+  let x = 10
+  let (a, b) = fan {
+    add(x, 1)
+    mul(x, 2)
+  }
+  assert_eq(a, 11)
+  assert_eq(b, 20)
+}

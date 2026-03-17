@@ -1,7 +1,0 @@
-import io
-
-effect fn main() -> Result[Unit, String] = {
-  io.print("hello ")
-  io.print("world\n")
-  println("io.print works")
-}

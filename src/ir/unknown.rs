@@ -87,7 +87,8 @@ fn check_expr_for_unknown(expr: &IrExpr, fn_name: &str, warnings: &mut Vec<Unkno
         IrExprKind::UnOp { operand, .. } => {
             check_expr_for_unknown(operand, fn_name, warnings);
         }
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements }
+        | IrExprKind::Fan { exprs: elements } => {
             for e in elements { check_expr_for_unknown(e, fn_name, warnings); }
         }
         IrExprKind::Lambda { body, .. } => {
@@ -143,7 +144,7 @@ fn check_expr_for_unknown(expr: &IrExpr, fn_name: &str, warnings: &mut Vec<Unkno
         }
         // Leaf nodes — no children
         IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
-        | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::Var { .. }
+        | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::Var { .. } | IrExprKind::FnRef { .. }
         | IrExprKind::EmptyMap | IrExprKind::OptionNone | IrExprKind::Break
         | IrExprKind::Continue | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
     }

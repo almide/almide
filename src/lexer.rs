@@ -23,7 +23,7 @@ pub enum TokenType {
     If, Then, Else, Match, Ok, Err, Some, None, Try, Do, Todo, Unsafe,
     True, False, Not, And, Or,
     Strict, Pub, Effect, Deriving, Test, Async, Await,
-    Guard, Break, Continue, While, Local, Mod, Newtype,
+    Guard, Break, Continue, While, Local, Mod, Newtype, Fan,
     // Delimiters
     LParen, RParen, LBrace, RBrace, LBracket, RBracket,
     LAngle, RAngle,
@@ -91,67 +91,33 @@ impl Lexer {
 
             // Line comment
             if ch == '/' && peek(&chars, pos + 1) == Some('/') {
-                let start = pos;
-                while pos < chars.len() && chars[pos] != '\n' { pos += 1; }
-                let text: String = chars[start..pos].iter().collect();
-                tokens.push(Token { token_type: TokenType::Comment, value: text, line, col });
-                col += pos - start;
+                let (tok, new_pos) = lex_line_comment(&chars, pos, line, col);
+                col += new_pos - pos;
+                pos = new_pos;
+                tokens.push(tok);
                 continue;
             }
 
             // Block comment /* ... */ — nestable, fully skipped (not a token)
             if ch == '/' && peek(&chars, pos + 1) == Some('*') {
-                pos += 2; col += 2;
-                let mut depth = 1;
-                while pos < chars.len() && depth > 0 {
-                    if chars[pos] == '/' && peek(&chars, pos + 1) == Some('*') {
-                        depth += 1; pos += 2; col += 2;
-                    } else if chars[pos] == '*' && peek(&chars, pos + 1) == Some('/') {
-                        depth -= 1; pos += 2; col += 2;
-                    } else if chars[pos] == '\n' {
-                        line += 1; col = 1; pos += 1;
-                    } else {
-                        col += 1; pos += 1;
-                    }
-                }
+                let result = skip_block_comment(&chars, pos, line, col);
+                pos = result.0; line = result.1; col = result.2;
                 continue;
             }
 
-            // Raw string literal: r"..." or r"""...""" (triple-quote allows embedded ")
+            // Raw string literal: r"..." or r"""..."""
             if ch == 'r' && peek(&chars, pos + 1) == Some('"') {
-                pos += 1; col += 1; // skip 'r'
-                // Check for triple-quote r"""..."""
-                if peek(&chars, pos + 1) == Some('"') && peek(&chars, pos + 2) == Some('"') {
-                    pos += 3; col += 3; // skip """
-                    let start = pos;
-                    while pos + 2 < chars.len() && !(chars[pos] == '"' && chars[pos + 1] == '"' && chars[pos + 2] == '"') {
-                        if chars[pos] == '\n' { line += 1; col = 1; } else { col += 1; }
-                        pos += 1;
-                    }
-                    let value: String = chars[start..pos].iter().collect();
-                    if pos + 2 < chars.len() { pos += 3; col += 3; } // skip closing """
-                    tokens.push(Token { token_type: TokenType::String, value, line, col });
-                } else {
-                    // Single-quote r"..."
-                    let start = pos + 1;
-                    pos += 1; col += 1; // skip opening "
-                    while pos < chars.len() && chars[pos] != '"' {
-                        if chars[pos] == '\n' { line += 1; col = 1; } else { col += 1; }
-                        pos += 1;
-                    }
-                    let value: String = chars[start..pos].iter().collect();
-                    if pos < chars.len() { pos += 1; col += 1; } // skip closing "
-                    tokens.push(Token { token_type: TokenType::String, value, line, col });
-                }
+                let (tok, new_pos, new_line, new_col) = lex_raw_string(&chars, pos, line, col);
+                tokens.push(tok);
+                pos = new_pos; line = new_line; col = new_col;
                 continue;
             }
 
             // String literal
             if ch == '"' {
-                let (tok, new_pos) = lex_string(&chars, pos, line, col);
-                let len = new_pos - pos;
+                let (tok, new_pos, new_line, new_col) = lex_string(&chars, pos, line, col);
                 tokens.push(tok);
-                pos = new_pos; col += len;
+                pos = new_pos; line = new_line; col = new_col;
                 continue;
             }
 
@@ -184,9 +150,77 @@ impl Lexer {
     }
 }
 
+// ── Line comment lexing ─────────────────────────────────────────
+
+fn lex_line_comment(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize) {
+    let mut pos = start;
+    while pos < chars.len() && chars[pos] != '\n' { pos += 1; }
+    let text: String = chars[start..pos].iter().collect();
+    (Token { token_type: TokenType::Comment, value: text, line, col }, pos)
+}
+
+// ── Block comment skipping ──────────────────────────────────────
+
+/// Skip a nestable block comment /* ... */. Returns (new_pos, new_line, new_col).
+fn skip_block_comment(chars: &[char], start: usize, line: usize, col: usize) -> (usize, usize, usize) {
+    let mut pos = start + 2;
+    let mut ln = line;
+    let mut cl = col + 2;
+    let mut depth = 1;
+
+    while pos < chars.len() && depth > 0 {
+        if chars[pos] == '/' && peek(chars, pos + 1) == Some('*') {
+            depth += 1; pos += 2; cl += 2;
+        } else if chars[pos] == '*' && peek(chars, pos + 1) == Some('/') {
+            depth -= 1; pos += 2; cl += 2;
+        } else if chars[pos] == '\n' {
+            ln += 1; cl = 1; pos += 1;
+        } else {
+            cl += 1; pos += 1;
+        }
+    }
+
+    (pos, ln, cl)
+}
+
+// ── Raw string lexing ───────────────────────────────────────────
+
+/// Lex a raw string: r"..." or r"""...""". Returns (token, new_pos, new_line, new_col).
+fn lex_raw_string(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize, usize, usize) {
+    let mut pos = start + 1; // skip 'r'
+    let mut ln = line;
+    let mut cl = col + 1;
+
+    // Check for triple-quote r"""..."""
+    if peek(chars, pos + 1) == Some('"') && peek(chars, pos + 2) == Some('"') {
+        pos += 3; cl += 3; // skip """
+        let content_start = pos;
+        while pos + 2 < chars.len() && !(chars[pos] == '"' && chars[pos + 1] == '"' && chars[pos + 2] == '"') {
+            if chars[pos] == '\n' { ln += 1; cl = 1; } else { cl += 1; }
+            pos += 1;
+        }
+        let value: String = chars[content_start..pos].iter().collect();
+        if pos + 2 < chars.len() { pos += 3; cl += 3; } // skip closing """
+        let tok = Token { token_type: TokenType::String, value, line, col };
+        (tok, pos, ln, cl)
+    } else {
+        // Single-quote r"..."
+        let content_start = pos + 1;
+        pos += 1; cl += 1; // skip opening "
+        while pos < chars.len() && chars[pos] != '"' {
+            if chars[pos] == '\n' { ln += 1; cl = 1; } else { cl += 1; }
+            pos += 1;
+        }
+        let value: String = chars[content_start..pos].iter().collect();
+        if pos < chars.len() { pos += 1; cl += 1; } // skip closing "
+        let tok = Token { token_type: TokenType::String, value, line, col };
+        (tok, pos, ln, cl)
+    }
+}
+
 // ── String lexing ───────────────────────────────────────────────
 
-fn lex_string(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize) {
+fn lex_string(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize, usize, usize) {
     // Check for triple-quote heredoc: """..."""
     if start + 2 < chars.len() && chars[start + 1] == '"' && chars[start + 2] == '"' {
         return lex_heredoc(chars, start, line, col);
@@ -197,80 +231,83 @@ fn lex_string(chars: &[char], start: usize, line: usize, col: usize) -> (Token, 
     let mut has_interpolation = false;
 
     while pos < chars.len() && chars[pos] != '"' {
-        if chars[pos] == '\\' && pos + 1 < chars.len() {
-            match chars[pos + 1] {
-                'n' => { value.push('\n'); pos += 2; }
-                't' => { value.push('\t'); pos += 2; }
-                'r' => { value.push('\r'); pos += 2; }
-                '\\' => { value.push('\\'); pos += 2; }
-                '"' => { value.push('"'); pos += 2; }
-                '$' => { value.push('$'); pos += 2; }
-                _ => { value.push('\\'); value.push(chars[pos + 1]); pos += 2; }
-            }
-        } else if chars[pos] == '$' && pos + 1 < chars.len() && chars[pos + 1] == '{' {
-            has_interpolation = true;
-            value.push('$');
-            value.push('{');
-            pos += 2;
-            let mut depth = 1;
-            while pos < chars.len() && depth > 0 {
-                if chars[pos] == '{' { depth += 1; }
-                if chars[pos] == '}' { depth -= 1; }
-                if depth > 0 { value.push(chars[pos]); }
-                pos += 1;
-            }
-            value.push('}');
-        } else {
-            value.push(chars[pos]);
-            pos += 1;
-        }
+        pos = lex_string_char(chars, pos, &mut value, &mut has_interpolation);
     }
     if pos < chars.len() { pos += 1; } // skip closing "
 
     let tt = if has_interpolation { TokenType::InterpolatedString } else { TokenType::String };
-    (Token { token_type: tt, value, line, col }, pos)
+    let len = pos - start;
+    (Token { token_type: tt, value, line, col }, pos, line, col + len)
 }
 
-fn lex_heredoc(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize) {
+fn lex_heredoc(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize, usize, usize) {
     let mut pos = start + 3; // skip opening """
     let mut raw = String::new();
     let mut has_interpolation = false;
+    let mut cur_line = line;
+    let mut cur_col = col + 3;
 
     // Consume until closing """
     while pos + 2 < chars.len() && !(chars[pos] == '"' && chars[pos + 1] == '"' && chars[pos + 2] == '"') {
-        if chars[pos] == '\\' && pos + 1 < chars.len() {
-            match chars[pos + 1] {
-                'n' => { raw.push('\n'); pos += 2; }
-                't' => { raw.push('\t'); pos += 2; }
-                'r' => { raw.push('\r'); pos += 2; }
-                '\\' => { raw.push('\\'); pos += 2; }
-                '"' => { raw.push('"'); pos += 2; }
-                '$' => { raw.push('$'); pos += 2; }
-                _ => { raw.push('\\'); raw.push(chars[pos + 1]); pos += 2; }
-            }
-        } else if chars[pos] == '$' && pos + 1 < chars.len() && chars[pos + 1] == '{' {
-            has_interpolation = true;
-            raw.push('$');
-            raw.push('{');
-            pos += 2;
-            let mut depth = 1;
-            while pos < chars.len() && depth > 0 {
-                if chars[pos] == '{' { depth += 1; }
-                if chars[pos] == '}' { depth -= 1; }
-                if depth > 0 { raw.push(chars[pos]); }
-                pos += 1;
-            }
-            raw.push('}');
+        if chars[pos] == '\n' {
+            cur_line += 1;
+            cur_col = 1;
         } else {
-            raw.push(chars[pos]);
-            pos += 1;
+            cur_col += 1;
         }
+        pos = lex_string_char(chars, pos, &mut raw, &mut has_interpolation);
     }
-    if pos + 2 < chars.len() { pos += 3; } // skip closing """
+    if pos + 2 < chars.len() {
+        cur_col += 3; // closing """
+        pos += 3;
+    }
 
     let value = strip_heredoc_indent(&raw);
     let tt = if has_interpolation { TokenType::InterpolatedString } else { TokenType::String };
-    (Token { token_type: tt, value, line, col }, pos)
+    (Token { token_type: tt, value, line, col }, pos, cur_line, cur_col)
+}
+
+/// Process one character (or escape / interpolation) inside a string body.
+/// Returns the new position after consuming the character(s).
+fn lex_string_char(chars: &[char], pos: usize, buf: &mut String, has_interpolation: &mut bool) -> usize {
+    if chars[pos] == '\\' && pos + 1 < chars.len() {
+        lex_escape(chars, pos, buf)
+    } else if chars[pos] == '$' && pos + 1 < chars.len() && chars[pos + 1] == '{' {
+        *has_interpolation = true;
+        lex_interpolation(chars, pos, buf)
+    } else {
+        buf.push(chars[pos]);
+        pos + 1
+    }
+}
+
+/// Process a backslash escape sequence. Returns the new position.
+fn lex_escape(chars: &[char], pos: usize, buf: &mut String) -> usize {
+    match chars[pos + 1] {
+        'n' => { buf.push('\n'); pos + 2 }
+        't' => { buf.push('\t'); pos + 2 }
+        'r' => { buf.push('\r'); pos + 2 }
+        '\\' => { buf.push('\\'); pos + 2 }
+        '"' => { buf.push('"'); pos + 2 }
+        '$' => { buf.push('$'); pos + 2 }
+        other => { buf.push('\\'); buf.push(other); pos + 2 }
+    }
+}
+
+/// Process an interpolation `${...}` block. Returns the new position.
+fn lex_interpolation(chars: &[char], start: usize, buf: &mut String) -> usize {
+    buf.push('$');
+    buf.push('{');
+    let mut pos = start + 2;
+    let mut depth = 1;
+    while pos < chars.len() && depth > 0 {
+        if chars[pos] == '{' { depth += 1; }
+        if chars[pos] == '}' { depth -= 1; }
+        if depth > 0 { buf.push(chars[pos]); }
+        pos += 1;
+    }
+    buf.push('}');
+    pos
 }
 
 /// Strip common leading indentation from heredoc content.
@@ -386,6 +423,7 @@ fn keyword(s: &str) -> Option<TokenType> {
         "continue" => Some(TokenType::Continue), "while" => Some(TokenType::While),
         "local" => Some(TokenType::Local), "mod" => Some(TokenType::Mod),
         "newtype" => Some(TokenType::Newtype),
+        "fan" => Some(TokenType::Fan),
         _ => None,
     }
 }

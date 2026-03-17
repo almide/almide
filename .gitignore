@@ -2,10 +2,23 @@ target/
 .test/
 .minigit/
 codopsy-report.json
+.claude/settings.local.json
+.almide/cache/
+tools/stdlib-crawler/data/
+__pycache__/
+*.pyc
+
+# Test compilation cache (almide test generates these)
+_tmp_*
+_dev_stdin-*/
 main-*/
 test_inc-*/
-.claude/settings.local.json
-codopsy-report.json
-_tmp_*
-.almide/cache/
+__exercises_*/
+__spec_*/
+exercises_*-*/
+exercises_*_almd-*/
+examples_*_almd-*/
+spec_*_almd-*/
 spec_*-*/
+spec__*_almd-*/
+tools_stdlib_*/

@@ -3,7 +3,7 @@ description = "Parse a JSON string into a Value."
 example = 'let v = json.parse("{\"name\": \"Alice\"}")'
 params = [{ name = "text", type = "String" }]
 return = "Result[Value, String]"
-rust = "json_parse({text})"
+rust = "almide_rt_json_parse({text})"
 ts = "__almd_json.parse({text})"
 
 [stringify]
@@ -11,21 +11,21 @@ description = "Convert a Value to a JSON string."
 example = 'json.stringify(person.encode())'
 params = [{ name = "v", type = "Value" }]
 return = "String"
-rust = "json_stringify({v})"
+rust = "almide_rt_json_stringify({v})"
 ts = "__almd_json.stringify({v})"
 
 [get]
 description = "Get a nested value by key. Returns none if key doesn't exist."
 example = 'json.get(j, "name")'
-params = [{ name = "j", type = "Json" }, { name = "key", type = "String" }]
-return = "Option[Json]"
+params = [{ name = "j", type = "Value" }, { name = "key", type = "String" }]
+return = "Option[Value]"
 rust = "almide_json_get(&{j}, &{key})"
 ts = "__almd_json.get({j}, {key})"
 
 [get_string]
 description = "Get a string value by key. Returns none if key missing or not a string."
 example = 'json.get_string(j, "name")'
-params = [{ name = "j", type = "Json" }, { name = "key", type = "String" }]
+params = [{ name = "j", type = "Value" }, { name = "key", type = "String" }]
 return = "Option[String]"
 rust = "almide_json_get_string(&{j}, &{key})"
 ts = "__almd_json.get_string({j}, {key})"
@@ -33,7 +33,7 @@ ts = "__almd_json.get_string({j}, {key})"
 [get_int]
 description = "Get an integer value by key. Returns none if key missing or not an integer."
 example = 'json.get_int(j, "age")'
-params = [{ name = "j", type = "Json" }, { name = "key", type = "String" }]
+params = [{ name = "j", type = "Value" }, { name = "key", type = "String" }]
 return = "Option[Int]"
 rust = "almide_json_get_int(&{j}, &{key})"
 ts = "__almd_json.get_int({j}, {key})"
@@ -41,7 +41,7 @@ ts = "__almd_json.get_int({j}, {key})"
 [get_bool]
 description = "Get a boolean value by key. Returns none if key missing or not a boolean."
 example = 'json.get_bool(j, "active")'
-params = [{ name = "j", type = "Json" }, { name = "key", type = "String" }]
+params = [{ name = "j", type = "Value" }, { name = "key", type = "String" }]
 return = "Option[Bool]"
 rust = "almide_json_get_bool(&{j}, &{key})"
 ts = "__almd_json.get_bool({j}, {key})"
@@ -49,87 +49,71 @@ ts = "__almd_json.get_bool({j}, {key})"
 [get_array]
 description = "Get an array value by key. Returns none if key missing or not an array."
 example = 'json.get_array(j, "items")'
-params = [{ name = "j", type = "Json" }, { name = "key", type = "String" }]
-return = "Option[List[Json]]"
+params = [{ name = "j", type = "Value" }, { name = "key", type = "String" }]
+return = "Option[List[Value]]"
 rust = "almide_json_get_array(&{j}, &{key})"
 ts = "__almd_json.get_array({j}, {key})"
 
 [keys]
 description = "Get all keys of a JSON object as a list of strings."
 example = 'json.keys(j)'
-params = [{ name = "j", type = "Json" }]
+params = [{ name = "j", type = "Value" }]
 return = "List[String]"
 rust = "almide_json_keys(&{j})"
 ts = "__almd_json.keys({j})"
-
-[to_string]
-description = "Extract the string value from a Json. Returns none if not a string."
-example = 'json.to_string(json.from_string("hello"))'
-params = [{ name = "j", type = "Json" }]
-return = "Option[String]"
-rust = "almide_json_to_string(&{j})"
-ts = "__almd_json.to_string({j})"
-
-[to_int]
-description = "Extract the integer value from a Json. Returns none if not an integer."
-example = 'json.to_int(json.from_int(42))'
-params = [{ name = "j", type = "Json" }]
-return = "Option[Int]"
-rust = "almide_json_to_int(&{j})"
-ts = "__almd_json.to_int({j})"
 
 [from_string]
 description = "Create a Json string value."
 example = 'json.from_string("hello")'
 params = [{ name = "s", type = "String" }]
-return = "Json"
-rust = "JStr({s})"
+return = "Value"
+rust = "Value::Str({s})"
 ts = "__almd_json.from_string({s})"
 
 [from_int]
 description = "Create a Json integer value."
 example = 'json.from_int(42)'
 params = [{ name = "n", type = "Int" }]
-return = "Json"
-rust = "JInt({n})"
+return = "Value"
+rust = "Value::Int({n})"
 ts = "__almd_json.from_int({n})"
 
 [from_bool]
 description = "Create a Json boolean value."
 example = 'json.from_bool(true)'
 params = [{ name = "b", type = "Bool" }]
-return = "Json"
-rust = "JBool({b})"
+return = "Value"
+rust = "Value::Bool({b})"
 ts = "__almd_json.from_bool({b})"
 
 [null]
 description = "Create a Json null value."
 example = 'json.null()'
 params = []
-return = "Json"
-rust = "JNull"
+return = "Value"
+rust = "Value::Null"
 ts = "__almd_json.null()"
 
 [array]
 description = "Create a Json array from a list of Json values."
 example = 'json.array([json.i(1), json.i(2)])'
-params = [{ name = "items", type = "List[Json]" }]
-return = "Json"
-rust = "JArray({items})"
+params = [{ name = "items", type = "List[Value]" }]
+return = "Value"
+rust = "Value::Array({items})"
 ts = "__almd_json.array({items})"
 
 [from_map]
-description = "Create a Json object from a Map[String, Json]."
+description = "Create a Json object from a Map[String, Value]."
 example = 'json.from_map(map.set(map.new(), "key", json.s("val")))'
-params = [{ name = "m", type = "Map[String, Json]" }]
-return = "Json"
-rust = "JObject({m})"
+params = [{ name = "m", type = "Map[String, Value]" }]
+return = "Value"
+rust = "Value::Object({m}.into_iter().collect())"
 ts = "__almd_json.from_map({m})"
 
 [get_float]
 description = "Get a float value by key. Returns none if key missing or not a number."
 example = 'json.get_float(j, "score")'
-params = [{ name = "j", type = "Json" }, { name = "key", type = "String" }]
+params = [{ name = "j", type = "Value" }, { name = "key", type = "String" }]
 return = "Option[Float]"
 rust = "almide_json_get_float(&{j}, &{key})"
 ts = "__almd_json.get_float({j}, {key})"
@@ -138,14 +122,14 @@ ts = "__almd_json.get_float({j}, {key})"
 description = "Create a Json float value."
 example = 'json.from_float(3.14)'
 params = [{ name = "n", type = "Float" }]
-return = "Json"
-rust = "almide_json_from_float({n})"
+return = "Value"
+rust = "Value::Float({n})"
 ts = "__almd_json.from_float({n})"
 
 [stringify_pretty]
 description = "Convert a Json value to a pretty-printed JSON string with indentation."
 example = 'json.stringify_pretty(j)'
-params = [{ name = "j", type = "Json" }]
+params = [{ name = "j", type = "Value" }]
 return = "String"
 rust = "almide_json_stringify_pretty(&{j})"
 ts = "__almd_json.stringify_pretty({j})"
@@ -155,49 +139,17 @@ ts = "__almd_json.stringify_pretty({j})"
 [object]
 description = "Create a Json object from a list of (key, value) pairs."
 example = 'json.object([("name", json.s("Alice")), ("age", json.i(30))])'
-params = [{ name = "entries", type = "List[(String, Json)]" }]
-return = "Json"
-rust = "almide_json_object({entries})"
+params = [{ name = "entries", type = "List[(String, Value)]" }]
+return = "Value"
+rust = "Value::Object({entries})"
 ts = "__almd_json.object({entries})"
-
-[s]
-description = "Shorthand for json.from_string. Create a Json string value."
-example = 'json.s("hello")'
-params = [{ name = "v", type = "String" }]
-return = "Json"
-rust = "JStr({v})"
-ts = "__almd_json.from_string({v})"
-
-[i]
-description = "Shorthand for json.from_int. Create a Json integer value."
-example = 'json.i(42)'
-params = [{ name = "v", type = "Int" }]
-return = "Json"
-rust = "JInt({v})"
-ts = "__almd_json.from_int({v})"
-
-[f]
-description = "Shorthand for json.from_float. Create a Json float value."
-example = 'json.f(3.14)'
-params = [{ name = "v", type = "Float" }]
-return = "Json"
-rust = "almide_json_from_float({v})"
-ts = "__almd_json.from_float({v})"
-
-[b]
-description = "Shorthand for json.from_bool. Create a Json boolean value."
-example = 'json.b(true)'
-params = [{ name = "v", type = "Bool" }]
-return = "Json"
-rust = "JBool({v})"
-ts = "__almd_json.from_bool({v})"
 
 # ── Value extraction (keyless, on Json value itself) ───────────────
 
 [as_string]
 description = "Extract string from a Json value (without key lookup). Returns none if not a string."
 example = 'json.as_string(j)'
-params = [{ name = "j", type = "Json" }]
+params = [{ name = "j", type = "Value" }]
 return = "Option[String]"
 rust = "almide_json_to_string(&{j})"
 ts = "__almd_json.to_string({j})"
@@ -205,7 +157,7 @@ ts = "__almd_json.to_string({j})"
 [as_int]
 description = "Extract integer from a Json value (without key lookup). Returns none if not an integer."
 example = 'json.as_int(j)'
-params = [{ name = "j", type = "Json" }]
+params = [{ name = "j", type = "Value" }]
 return = "Option[Int]"
 rust = "almide_json_to_int(&{j})"
 ts = "__almd_json.to_int({j})"
@@ -213,7 +165,7 @@ ts = "__almd_json.to_int({j})"
 [as_float]
 description = "Extract float from a Json value (without key lookup). Returns none if not a number."
 example = 'json.as_float(j)'
-params = [{ name = "j", type = "Json" }]
+params = [{ name = "j", type = "Value" }]
 return = "Option[Float]"
 rust = "almide_json_as_float(&{j})"
 ts = "__almd_json.as_float({j})"
@@ -221,7 +173,7 @@ ts = "__almd_json.as_float({j})"
 [as_bool]
 description = "Extract boolean from a Json value (without key lookup). Returns none if not a boolean."
 example = 'json.as_bool(j)'
-params = [{ name = "j", type = "Json" }]
+params = [{ name = "j", type = "Value" }]
 return = "Option[Bool]"
 rust = "almide_json_as_bool(&{j})"
 ts = "__almd_json.as_bool({j})"
@@ -229,8 +181,8 @@ ts = "__almd_json.as_bool({j})"
 [as_array]
 description = "Extract array from a Json value (without key lookup). Returns none if not an array."
 example = 'json.as_array(j)'
-params = [{ name = "j", type = "Json" }]
-return = "Option[List[Json]]"
+params = [{ name = "j", type = "Value" }]
+return = "Option[List[Value]]"
 rust = "almide_json_as_array(&{j})"
 ts = "__almd_json.as_array({j})"
 
@@ -263,31 +215,31 @@ ts = "__almd_json.path_index({path}, {i})"
 [get_path]
 description = "Get a value at a JSON path. Returns none if path doesn't exist."
 example = 'json.get_path(j, json.field(json.root(), "name"))'
-params = [{ name = "j", type = "Json" }, { name = "path", type = "JsonPath" }]
-return = "Option[Json]"
+params = [{ name = "j", type = "Value" }, { name = "path", type = "JsonPath" }]
+return = "Option[Value]"
 rust = "almide_json_get_path(&{j}, &{path})"
 ts = "__almd_json.get_path({j}, {path})"
 
 [set_path]
 description = "Set a value at a JSON path. Returns error if path is invalid."
 example = 'json.set_path(j, json.field(json.root(), "name"), json.s("Bob"))'
-params = [{ name = "j", type = "Json" }, { name = "path", type = "JsonPath" }, { name = "value", type = "Json" }]
-return = "Result[Json, String]"
+params = [{ name = "j", type = "Value" }, { name = "path", type = "JsonPath" }, { name = "value", type = "Value" }]
+return = "Result[Value, String]"
 rust = "almide_json_set_path(&{j}, &{path}, {value})?"
 ts = "__almd_json.set_path({j}, {path}, {value})"
 
 [upsert_path]
 description = "Set a value at a JSON path, creating intermediate objects as needed."
 example = 'json.upsert_path(j, json.field(json.root(), "name"), json.s("Bob"))'
-params = [{ name = "j", type = "Json" }, { name = "path", type = "JsonPath" }, { name = "value", type = "Json" }]
-return = "Json"
+params = [{ name = "j", type = "Value" }, { name = "path", type = "JsonPath" }, { name = "value", type = "Value" }]
+return = "Value"
 rust = "almide_json_upsert_path(&{j}, &{path}, {value})"
 ts = "__almd_json.upsert_path({j}, {path}, {value})"
 
 [remove_path]
 description = "Remove a value at a JSON path. Returns the Json with the value removed."
 example = 'json.remove_path(j, json.field(json.root(), "temp"))'
-params = [{ name = "j", type = "Json" }, { name = "path", type = "JsonPath" }]
-return = "Json"
+params = [{ name = "j", type = "Value" }, { name = "path", type = "JsonPath" }]
+return = "Value"
 rust = "almide_json_remove_path(&{j}, &{path})"
 ts = "__almd_json.remove_path({j}, {path})"

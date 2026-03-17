@@ -631,3 +631,78 @@ fn multi_error_mixed_stmt_types() {
     let errs = errors("fn f(a: Int) -> Unit = {\n  let x = a + \"hello\"\n  let y = a - true\n  ()\n}");
     assert!(errs.len() >= 2, "should report both binary op errors, got: {:?}", errs);
 }
+
+// ---- Effect isolation (Layer 1 security) ----
+
+#[test]
+fn effect_isolation_pure_cannot_call_effect() {
+    let errs = errors(
+        "effect fn load() -> Result[String, String] = ok(\"data\")\nfn f() -> String = load()"
+    );
+    assert!(!errs.is_empty(), "pure fn calling effect fn should error");
+    assert!(errs[0].contains("effect"), "error should mention effect, got: {}", errs[0]);
+}
+
+#[test]
+fn effect_isolation_effect_can_call_effect() {
+    has_no_errors(
+        "effect fn load() -> Result[String, String] = ok(\"data\")\neffect fn f() -> Result[String, String] = load()"
+    );
+}
+
+#[test]
+fn effect_isolation_test_can_call_effect() {
+    has_no_errors(
+        "effect fn load() -> Result[String, String] = ok(\"data\")\ntest \"use effect\" {\n  let _ = load()\n  assert(true)\n}"
+    );
+}
+
+#[test]
+fn effect_isolation_pure_can_call_pure() {
+    has_no_errors(
+        "fn double(x: Int) -> Int = x * 2\nfn f() -> Int = double(5)"
+    );
+}
+
+#[test]
+fn effect_isolation_fan_in_pure_fn() {
+    let errs = errors(
+        "effect fn a() -> Result[Int, String] = ok(1)\neffect fn b() -> Result[Int, String] = ok(2)\nfn f() -> (Int, Int) = fan { a(); b() }"
+    );
+    assert!(!errs.is_empty(), "fan in pure fn should error");
+    assert!(errs[0].contains("fan") || errs[0].contains("effect"), "error should mention fan or effect, got: {}", errs[0]);
+}
+
+#[test]
+fn effect_isolation_fan_in_effect_fn() {
+    has_no_errors(
+        "effect fn a() -> Result[Int, String] = ok(1)\neffect fn b() -> Result[Int, String] = ok(2)\neffect fn f() -> Result[Unit, String] = {\n  let _ = fan { a(); b() }\n  ok(())\n}"
+    );
+}
+
+#[test]
+fn effect_isolation_fan_var_capture_rejected() {
+    let errs = errors(
+        "effect fn a() -> Result[Int, String] = ok(1)\neffect fn f() -> Result[Unit, String] = {\n  var x = 0\n  let _ = fan { a(); a() }\n  ok(())\n}"
+    );
+    // No error — var x is not captured inside fan
+    assert!(errs.is_empty(), "var not captured should be fine, got: {:?}", errs);
+}
+
+#[test]
+fn effect_isolation_fan_var_capture_error() {
+    let errs = errors(
+        "effect fn a(n: Int) -> Result[Int, String] = ok(n)\neffect fn f() -> Result[Unit, String] = {\n  var x = 0\n  let _ = fan { a(x); a(x) }\n  ok(())\n}"
+    );
+    assert!(!errs.is_empty(), "capturing var in fan should error");
+    assert!(errs[0].contains("mutable") || errs[0].contains("var"), "error should mention mutable/var, got: {}", errs[0]);
+}
+
+#[test]
+fn effect_isolation_stdlib_effect_fn() {
+    let errs = errors(
+        "fn f(path: String) -> String = fs.read_text(path)"
+    );
+    assert!(!errs.is_empty(), "pure fn calling stdlib effect fn should error");
+    assert!(errs[0].contains("effect"), "error should mention effect, got: {}", errs[0]);
+}

@@ -62,20 +62,20 @@ test "int.parse float string fails" {
 
 // ── parse_hex ──
 
-test "int.parse_hex lowercase" {
-  assert_eq(int.parse_hex("a"), ok(10))
+test "int.from_hex lowercase" {
+  assert_eq(int.from_hex("a"), ok(10))
 }
 
-test "int.parse_hex uppercase" {
-  assert_eq(int.parse_hex("FF"), ok(255))
+test "int.from_hex uppercase" {
+  assert_eq(int.from_hex("FF"), ok(255))
 }
 
-test "int.parse_hex zero" {
-  assert_eq(int.parse_hex("0"), ok(0))
+test "int.from_hex zero" {
+  assert_eq(int.from_hex("0"), ok(0))
 }
 
-test "int.parse_hex large" {
-  assert_eq(int.parse_hex("ffff"), ok(65535))
+test "int.from_hex large" {
+  assert_eq(int.from_hex("ffff"), ok(65535))
 }
 
 // ── abs ──

@@ -15,6 +15,7 @@ mod check;
 mod cli;
 mod emit_rust;
 mod project;
+mod project_fetch;
 mod resolve;
 
 use std::process::Command;
@@ -76,6 +77,9 @@ enum Commands {
         /// Skip type checking
         #[arg(long)]
         no_check: bool,
+        /// Output test results as JSON (one per line)
+        #[arg(long)]
+        json: bool,
     },
     /// Type check only
     Check {
@@ -84,6 +88,12 @@ enum Commands {
         /// Treat warnings as errors
         #[arg(long)]
         deny_warnings: bool,
+        /// Output diagnostics as JSON (one per line)
+        #[arg(long)]
+        json: bool,
+        /// Explain an error code (e.g., --explain E001)
+        #[arg(long)]
+        explain: Option<String>,
     },
     /// Format source files
     Fmt {
@@ -176,7 +186,7 @@ fn try_compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust
 
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
-            project::fetch_all_deps(&proj)
+            project_fetch::fetch_all_deps(&proj)
                 .map_err(|e| { eprintln!("{}", e); e.to_string() })?
                 .into_iter()
                 .map(|fd| (fd.pkg_id, fd.source_dir))
@@ -196,7 +206,7 @@ fn try_compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust
             if let Some(a) = alias {
                 let is_self_import = path.first().map(|s| s.as_str()) == Some("self");
                 let target = if is_self_import && path.len() >= 2 {
-                    path.last().unwrap().clone()
+                    path.last().cloned().unwrap_or_default()
                 } else if is_self_import {
                     resolved.modules.iter()
                         .find(|(_, _, _, is_self)| *is_self)
@@ -320,6 +330,25 @@ fn resolve_file(file: Option<String>) -> String {
     })
 }
 
+fn print_error_explanation(code: &str) {
+    let explanation = match code {
+        "E001" => "E001: Type mismatch\n\n  The expression's type does not match what was expected.\n\n  Example:\n    fn f() -> Int = \"hello\"  // error: expected Int but got String\n\n  Fix: Change the expression to match the expected type, or use a\n  conversion function like int.to_string() or int.parse().",
+        "E002" => "E002: Undefined function\n\n  The function name was not found in the current scope, stdlib, or imports.\n\n  Example:\n    fn f() -> Int = nonexistent()  // error: undefined function\n\n  Fix: Check the function name for typos, or import the module that defines it.",
+        "E004" => "E004: Wrong argument count\n\n  The function was called with the wrong number of arguments.\n\n  Example:\n    fn add(a: Int, b: Int) -> Int = a + b\n    let x = add(1)  // error: expects 2 arguments but got 1\n\n  Fix: Provide the correct number of arguments.",
+        "E005" => "E005: Argument type mismatch\n\n  A function argument's type does not match the parameter type.\n\n  Example:\n    fn greet(name: String) -> String = name\n    greet(42)  // error: expects String but got Int\n\n  Fix: Pass the correct type, or use a conversion function.",
+        "E006" => "E006: Effect isolation violation\n\n  A pure function (fn) is calling an effect function (effect fn).\n  This violates Almide's security model — pure functions cannot perform I/O.\n\n  Example:\n    fn f() -> String = fs.read_text(\"file.txt\")  // error\n\n  Fix: Mark the calling function as `effect fn`.",
+        "E007" => "E007: Fan block in pure function\n\n  A `fan` block can only be used inside an `effect fn`.\n  Fan expressions perform concurrent I/O, which requires effect context.\n\n  Example:\n    fn f() -> (Int, Int) = fan { a(); b() }  // error\n\n  Fix: Mark the enclosing function as `effect fn`.",
+        "E008" => "E008: Mutable variable capture in fan\n\n  A `fan` block cannot capture mutable variables (var) from the outer scope.\n  This prevents data races in concurrent execution.\n\n  Example:\n    var x = 0\n    fan { use(x); ... }  // error: cannot capture var x\n\n  Fix: Use a `let` binding instead of `var`.",
+        "E009" => "E009: Assignment to immutable variable\n\n  Cannot assign to a variable declared with `let` or a function parameter.\n\n  Example:\n    let x = 1\n    x = 2  // error\n\n  Fix: Use `var` instead of `let` if the variable needs to be mutable.",
+        "E010" => "E010: Non-exhaustive match\n\n  The match expression does not cover all possible cases of the subject type.\n\n  Example:\n    type Color = | Red | Green | Blue\n    match c { Red => 1 }  // error: missing Green, Blue\n\n  Fix: Add the missing arms, or use `_` as a catch-all.",
+        _ => {
+            eprintln!("Unknown error code: {}", code);
+            std::process::exit(1);
+        }
+    };
+    println!("{}", explanation);
+}
+
 fn main() {
     almide::diagnostic::init_color();
     // Legacy mode: `almide file.almd [--target X]` → rewrite as `almide emit file.almd [--target X]`
@@ -350,13 +379,25 @@ fn dispatch(cli: Cli) {
             let file = resolve_file(file);
             cli::cmd_build(&file, o.as_deref(), target.as_deref(), release || fast, fast, unchecked_index, no_check);
         }
-        Commands::Test { file, run, no_check } => {
+        Commands::Test { file, run, no_check, json } => {
             let file_str = file.as_deref().unwrap_or("");
-            cli::cmd_test(file_str, no_check, run.as_deref());
+            if json {
+                cli::cmd_test_json(file_str, run.as_deref());
+            } else {
+                cli::cmd_test(file_str, no_check, run.as_deref());
+            }
         }
-        Commands::Check { file, deny_warnings } => {
+        Commands::Check { file, deny_warnings, json, explain } => {
+            if let Some(code) = explain {
+                print_error_explanation(&code);
+                return;
+            }
             let file = resolve_file(file);
-            cli::cmd_check(&file, deny_warnings);
+            if json {
+                cli::cmd_check_json(&file);
+            } else {
+                cli::cmd_check(&file, deny_warnings);
+            }
         }
         Commands::Fmt { files, check, dry_run } => {
             let write_back = !check && !dry_run;
@@ -380,9 +421,9 @@ fn dispatch(cli: Cli) {
             let (name, git_url, tag) = if let Some(git_url) = git {
                 (pkg, git_url, tag)
             } else {
-                project::resolve_package_spec(&pkg)
+                project_fetch::resolve_package_spec(&pkg)
             };
-            project::add_dep_to_toml(&name, &git_url, tag.as_deref())
+            project_fetch::add_dep_to_toml(&name, &git_url, tag.as_deref())
                 .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
             let dep = project::Dependency {
                 name: name.clone(),
@@ -391,7 +432,7 @@ fn dispatch(cli: Cli) {
                 branch: None,
                 version: None,
             };
-            project::fetch_dep(&dep)
+            project_fetch::fetch_dep(&dep)
                 .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
         }
         Commands::Deps => {

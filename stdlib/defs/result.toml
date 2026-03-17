@@ -22,7 +22,7 @@ return = "Result[A, F]"
 rust = "({r}).map_err(|{f.args}| {{ {f.body} }})"
 ts = "{r}"
 
-[and_then]
+[flat_map]
 description = "Chain a Result-returning function on the ok value. Flattens nested Results."
 example = 'result.and_then(ok(5), fn(x) => if x > 0 then ok(x) else err("negative"))'
 type_params = ["A", "B", "E"]

@@ -1,84 +1,34 @@
-import string
-import list
+// Raindrops: convert a number to raindrop sounds.
+//
+// Rules:
+//   - If the number has 3 as a factor, add "Pling"
+//   - If the number has 5 as a factor, add "Plang"
+//   - If the number has 7 as a factor, add "Plong"
+//   - If the number has none of those factors, return the number as a string
 
-// Convert a number to raindrop sounds:
-// If factor of 3, add "Pling"
-// If factor of 5, add "Plang"
-// If factor of 7, add "Plong"
-// If none apply, return the number as a string
 fn convert(n: Int) -> String = {
-  let result = "" ++ (if n % 3 == 0 then "Pling" else "") ++ (if n % 5 == 0 then "Plang" else "") ++ (if n % 7 == 0 then "Plong" else "");
+  var result = ""
+  if n % 3 == 0 then { result = result ++ "Pling" } else { result = result }
+  if n % 5 == 0 then { result = result ++ "Plang" } else { result = result }
+  if n % 7 == 0 then { result = result ++ "Plong" } else { result = result }
   if string.len(result) == 0 then int.to_string(n) else result
 }
 
-test "the sound for 1 is 1" {
-  assert_eq(convert(1), "1")
-}
-
-test "the sound for 3 is Pling" {
-  assert_eq(convert(3), "Pling")
-}
-
-test "the sound for 5 is Plang" {
-  assert_eq(convert(5), "Plang")
-}
-
-test "the sound for 7 is Plong" {
-  assert_eq(convert(7), "Plong")
-}
-
-test "the sound for 6 is Pling" {
-  assert_eq(convert(6), "Pling")
-}
-
-test "the sound for 8 is 8" {
-  assert_eq(convert(8), "8")
-}
-
-test "the sound for 9 is Pling" {
-  assert_eq(convert(9), "Pling")
-}
-
-test "the sound for 10 is Plang" {
-  assert_eq(convert(10), "Plang")
-}
-
-test "the sound for 14 is Plong" {
-  assert_eq(convert(14), "Plong")
-}
-
-test "the sound for 15 is PlingPlang" {
-  assert_eq(convert(15), "PlingPlang")
-}
-
-test "the sound for 21 is PlingPlong" {
-  assert_eq(convert(21), "PlingPlong")
-}
-
-test "the sound for 25 is Plang" {
-  assert_eq(convert(25), "Plang")
-}
-
-test "the sound for 27 is Pling" {
-  assert_eq(convert(27), "Pling")
-}
-
-test "the sound for 35 is PlangPlong" {
-  assert_eq(convert(35), "PlangPlong")
-}
-
-test "the sound for 49 is Plong" {
-  assert_eq(convert(49), "Plong")
-}
-
-test "the sound for 52 is 52" {
-  assert_eq(convert(52), "52")
-}
-
-test "the sound for 105 is PlingPlangPlong" {
-  assert_eq(convert(105), "PlingPlangPlong")
-}
-
-test "the sound for 3125 is Plang" {
-  assert_eq(convert(3125), "Plang")
-}
+test "the sound for 1 is 1" { assert_eq(convert(1), "1") }
+test "the sound for 3 is Pling" { assert_eq(convert(3), "Pling") }
+test "the sound for 5 is Plang" { assert_eq(convert(5), "Plang") }
+test "the sound for 7 is Plong" { assert_eq(convert(7), "Plong") }
+test "the sound for 6 is Pling" { assert_eq(convert(6), "Pling") }
+test "the sound for 8 is 8" { assert_eq(convert(8), "8") }
+test "the sound for 9 is Pling" { assert_eq(convert(9), "Pling") }
+test "the sound for 10 is Plang" { assert_eq(convert(10), "Plang") }
+test "the sound for 14 is Plong" { assert_eq(convert(14), "Plong") }
+test "the sound for 15 is PlingPlang" { assert_eq(convert(15), "PlingPlang") }
+test "the sound for 21 is PlingPlong" { assert_eq(convert(21), "PlingPlong") }
+test "the sound for 25 is Plang" { assert_eq(convert(25), "Plang") }
+test "the sound for 27 is Pling" { assert_eq(convert(27), "Pling") }
+test "the sound for 35 is PlangPlong" { assert_eq(convert(35), "PlangPlong") }
+test "the sound for 49 is Plong" { assert_eq(convert(49), "Plong") }
+test "the sound for 52 is 52" { assert_eq(convert(52), "52") }
+test "the sound for 105 is PlingPlangPlong" { assert_eq(convert(105), "PlingPlangPlong") }
+test "the sound for 3125 is Plang" { assert_eq(convert(3125), "Plang") }

@@ -145,9 +145,9 @@ test "string repeat" {
 }
 
 test "string char_at" {
-  assert_eq(string.char_at("hello", 0), some("h"))
-  assert_eq(string.char_at("hello", 4), some("o"))
-  assert_eq(string.char_at("hello", 10), none)
+  assert_eq(string.get("hello", 0), some("h"))
+  assert_eq(string.get("hello", 4), some("o"))
+  assert_eq(string.get("hello", 10), none)
 }
 
 test "string index_of" {
@@ -164,13 +164,13 @@ test "string slice" {
 }
 
 test "string pad_left" {
-  assert_eq(string.pad_left("42", 5, "0"), "00042")
-  assert_eq(string.pad_left("hello", 3, " "), "hello")
+  assert_eq(string.pad_start("42", 5, "0"), "00042")
+  assert_eq(string.pad_start("hello", 3, " "), "hello")
 }
 
 test "string pad_right" {
-  assert_eq(string.pad_right("hi", 5, "."), "hi...")
-  assert_eq(string.pad_right("hello", 3, " "), "hello")
+  assert_eq(string.pad_end("hi", 5, "."), "hi...")
+  assert_eq(string.pad_end("hello", 3, " "), "hello")
 }
 
 test "string trim_start and trim_end" {

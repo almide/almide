@@ -177,7 +177,7 @@ impl Ty {
         unique.sort_by(|a, b| a.display().cmp(&b.display()));
         match unique.len() {
             0 => Ty::Unit,
-            1 => unique.into_iter().next().unwrap(),
+            1 => match unique.into_iter().next() { Some(t) => t, None => Ty::Unit },
             _ => Ty::Union(unique),
         }
     }

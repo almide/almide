@@ -1,11 +1,11 @@
-use crate::{parse_file, check as check_mod, diagnostic, resolve, project};
+use crate::{parse_file, check as check_mod, diagnostic, resolve, project, project_fetch};
 
 pub fn cmd_check(file: &str, deny_warnings: bool) {
     let (mut program, source_text, parse_errors) = parse_file(file);
 
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
-            project::fetch_all_deps(&proj)
+            project_fetch::fetch_all_deps(&proj)
                 .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); })
                 .into_iter()
                 .map(|fd| (fd.pkg_id, fd.source_dir))
@@ -69,4 +69,49 @@ pub fn cmd_check(file: &str, deny_warnings: bool) {
     }
 
     eprintln!("No errors found");
+}
+
+pub fn cmd_check_json(file: &str) {
+    let (mut program, source_text, parse_errors) = parse_file(file);
+
+    let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
+        if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
+            project_fetch::fetch_all_deps(&proj)
+                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); })
+                .into_iter()
+                .map(|fd| (fd.pkg_id, fd.source_dir))
+                .collect()
+        } else {
+            vec![]
+        }
+    } else {
+        vec![]
+    };
+
+    let resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
+        .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+
+    let mut checker = check_mod::Checker::new();
+    checker.set_source(file, &source_text);
+    for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
+        checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
+    }
+    let diagnostics = checker.check_program(&mut program);
+
+    // Output each diagnostic as JSON (one per line)
+    for d in &parse_errors {
+        println!("{}", d.to_json());
+    }
+    for d in &diagnostics {
+        println!("{}", d.to_json());
+    }
+
+    // Lower to IR for unused variable warnings
+    if parse_errors.is_empty() {
+        let ir = almide::lower::lower_program(&program, &checker.expr_types, &checker.env);
+        let unused = almide::ir::collect_unused_var_warnings(&ir, file);
+        for d in &unused {
+            println!("{}", d.to_json());
+        }
+    }
 }

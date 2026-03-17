@@ -9,8 +9,8 @@ mod commands;
 pub use run::{cmd_run, cmd_run_inner};
 pub use build::cmd_build;
 pub use emit::cmd_emit;
-pub use check::cmd_check;
-pub use commands::{cmd_init, cmd_test, cmd_fmt, cmd_clean};
+pub use check::{cmd_check, cmd_check_json};
+pub use commands::{cmd_init, cmd_test, cmd_test_json, cmd_fmt, cmd_clean};
 
 use std::hash::{Hash, Hasher};
 

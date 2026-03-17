@@ -1,7 +1,6 @@
 use crate::lexer::TokenType;
 use crate::ast::*;
 use super::Parser;
-
 impl Parser {
     pub(crate) fn parse_type_expr(&mut self) -> Result<TypeExpr, String> {
         self.enter_depth()?;
@@ -9,7 +8,6 @@ impl Parser {
         self.exit_depth();
         result
     }
-
     fn parse_type_expr_inner(&mut self) -> Result<TypeExpr, String> {
         if self.check(TokenType::Newtype) {
             self.advance();
@@ -20,7 +18,6 @@ impl Parser {
         if self.check(TokenType::LBrace) { return self.parse_record_type(); }
         if self.check(TokenType::Fn) { return self.parse_fn_type(); }
         if self.check(TokenType::LParen) { return self.parse_tuple_type(); }
-
         let name = self.expect_type_name()?;
         if self.check(TokenType::LBracket) {
             let args = self.parse_type_args()?;
@@ -50,7 +47,6 @@ impl Parser {
         }
         Ok(TypeExpr::Simple { name })
     }
-
     fn parse_tuple_type(&mut self) -> Result<TypeExpr, String> {
         self.expect(TokenType::LParen)?;
         if self.check(TokenType::RParen) {
@@ -88,7 +84,6 @@ impl Parser {
         }
         Ok(TypeExpr::Tuple { elements })
     }
-
     fn parse_variant_type(&mut self) -> Result<TypeExpr, String> {
         let mut cases = Vec::new();
         while self.check(TokenType::Pipe) {
@@ -119,7 +114,6 @@ impl Parser {
         }
         Ok(TypeExpr::Variant { cases })
     }
-
     fn try_parse_inline_variant(&mut self, first_name: String, first_args: Vec<TypeExpr>) -> Result<TypeExpr, String> {
         let mut cases = Vec::new();
         let mut all_simple = first_args.is_empty();
@@ -167,7 +161,6 @@ impl Parser {
             Ok(TypeExpr::Variant { cases })
         }
     }
-
     fn parse_record_type(&mut self) -> Result<TypeExpr, String> {
         self.expect(TokenType::LBrace)?;
         self.skip_newlines();
@@ -199,7 +192,6 @@ impl Parser {
         if open { Ok(TypeExpr::OpenRecord { fields }) }
         else { Ok(TypeExpr::Record { fields }) }
     }
-
     pub(crate) fn parse_field_type_list(&mut self) -> Result<Vec<FieldType>, String> {
         let mut fields = Vec::new();
         while !self.check(TokenType::RBrace) {
@@ -220,7 +212,6 @@ impl Parser {
         }
         Ok(fields)
     }
-
     /// Parse optional `as "alias"` after field name.
     fn parse_field_alias(&mut self) -> Result<Option<String>, String> {
         if self.check_ident("as") {
@@ -236,7 +227,6 @@ impl Parser {
             Ok(None)
         }
     }
-
     fn parse_fn_type(&mut self) -> Result<TypeExpr, String> {
         self.expect(TokenType::Fn)?;
         self.expect(TokenType::LParen)?;
@@ -253,7 +243,6 @@ impl Parser {
         let ret = self.parse_type_expr()?;
         Ok(TypeExpr::Fn { params, ret: Box::new(ret) })
     }
-
     pub(crate) fn parse_type_args(&mut self) -> Result<Vec<TypeExpr>, String> {
         self.expect(TokenType::LBracket)?;
         let mut args = Vec::new();
@@ -267,7 +256,6 @@ impl Parser {
         self.expect(TokenType::RBracket)?;
         Ok(args)
     }
-
     pub(crate) fn try_parse_generic_params(&mut self) -> Result<Option<Vec<GenericParam>>, String> {
         if !self.check(TokenType::LBracket) { return Ok(None); }
         self.advance();
@@ -282,7 +270,6 @@ impl Parser {
         self.expect(TokenType::RBracket)?;
         Ok(Some(params))
     }
-
     fn parse_generic_param(&mut self) -> Result<GenericParam, String> {
         let name = self.expect_type_name()?;
         let mut bounds = Vec::new();

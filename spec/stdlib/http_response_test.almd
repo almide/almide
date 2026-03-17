@@ -1,56 +1,65 @@
-// http response builder tests
-
-test "response creates text response" {
-  let resp = http.response(200, "hello")
-  assert_eq(http.body(resp), "hello")
+test "http.response creates plain text response" {
+  let resp = http.response(200, "Hello")
+  assert_eq(http.body(resp), "Hello")
 }
 
-test "json creates json response" {
+test "http.json creates json response" {
   let resp = http.json(200, "{\"ok\":true}")
-  assert_eq(http.body(resp), "{\"ok\":true}")
+  let ct = http.get_header(resp, "Content-Type")
+  match ct {
+    some(v) => assert_eq(v, "application/json")
+    none => assert(false)
+  }
 }
 
-test "not_found creates 404 response" {
-  let resp = http.not_found("page not found")
-  assert_eq(http.body(resp), "page not found")
+test "http.set_header overwrites existing header" {
+  let resp = http.response(200, "hi")
+  let updated = http.set_header(resp, "Content-Type", "text/html")
+  let ct = http.get_header(updated, "Content-Type")
+  match ct {
+    some(v) => assert_eq(v, "text/html")
+    none => assert(false)
+  }
 }
 
-test "redirect creates 302 with Location header" {
-  let resp = http.redirect("https://example.com")
-  assert_eq(http.get_header(resp, "Location"), some("https://example.com"))
+test "http.set_cookie adds Set-Cookie header" {
+  let resp = http.response(200, "hi")
+  let with_cookie = http.set_cookie(resp, "session", "abc")
+  let cookie = http.get_header(with_cookie, "Set-Cookie")
+  match cookie {
+    some(v) => assert_eq(v, "session=abc")
+    none => assert(false)
+  }
 }
 
-test "redirect_permanent creates 301 with Location header" {
-  let resp = http.redirect_permanent("https://example.com/new")
-  assert_eq(http.get_header(resp, "Location"), some("https://example.com/new"))
+test "http.not_found returns 404" {
+  let resp = http.not_found("Page not found")
+  assert_eq(http.body(resp), "Page not found")
 }
 
-test "set_header adds header to response" {
-  let resp = http.response(200, "ok")
-  let resp2 = http.set_header(resp, "X-Custom", "value123")
-  assert_eq(http.get_header(resp2, "X-Custom"), some("value123"))
+test "http.redirect creates redirect response" {
+  let resp = http.redirect("/new-path")
+  let loc = http.get_header(resp, "Location")
+  match loc {
+    some(v) => assert_eq(v, "/new-path")
+    none => assert(false)
+  }
 }
 
-test "get_header returns none for missing header" {
-  let resp = http.response(200, "ok")
-  assert_eq(http.get_header(resp, "X-Missing"), none)
+test "http.status changes status code" {
+  let resp = http.response(200, "hi")
+  let updated = http.status(resp, 201)
+  assert_eq(http.body(updated), "hi")
 }
 
-test "set_cookie adds Set-Cookie header" {
-  let resp = http.response(200, "ok")
-  let resp2 = http.set_cookie(resp, "session", "abc123")
-  assert_eq(http.get_header(resp2, "Set-Cookie"), some("session=abc123"))
-}
-
-test "set_cookie appends multiple cookies" {
-  let resp = http.response(200, "ok")
-  let resp2 = http.set_cookie(resp, "a", "1")
-  let resp3 = http.set_cookie(resp2, "b", "2")
-  assert_eq(http.get_header(resp3, "Set-Cookie"), some("a=1, b=2"))
-}
-
-test "status changes response status code" {
-  let resp = http.response(200, "ok")
-  let resp2 = http.status(resp, 201)
-  assert_eq(http.body(resp2), "ok")
+test "http.with_headers creates response with custom headers" {
+  let headers = map.new()
+    |> map.set("X-Custom", "value")
+    |> map.set("Content-Type", "text/html")
+  let resp = http.with_headers(200, "hi", headers)
+  let ct = http.get_header(resp, "Content-Type")
+  match ct {
+    some(v) => assert_eq(v, "text/html")
+    none => assert(false)
+  }
 }

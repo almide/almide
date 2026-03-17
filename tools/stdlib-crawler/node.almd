@@ -1,0 +1,144 @@
+// Node.js stdlib crawler
+// Usage:
+//   almide run tools/stdlib-crawler/node.almd -- --list
+//   almide run tools/stdlib-crawler/node.almd -- --all [--force]
+//   almide run tools/stdlib-crawler/node.almd -- --verbs
+//   almide run tools/stdlib-crawler/node.almd -- <module> [--save]
+
+let DATA_DIR = "tools/stdlib-crawler/data/node"
+
+effect fn main() -> Unit = do {
+  let args = env.args()
+  guard list.len(args) >= 1 else err("Usage: node.almd <command|module>")
+  let command = args[0]
+  let flags = list.drop(args, 1)
+
+  if command == "--list" then list_modules()
+  else if command == "--all" then crawl_all(list.contains(flags, "--force"))
+  else if command == "--verbs" then verb_analysis()
+  else crawl_module(command, list.contains(flags, "--save"))
+}
+
+effect fn list_modules() -> Unit = {
+  let output = process.exec("node", ["-e", r"""
+const mods = require('module').builtinModules
+  .filter(m => !m.startsWith('_') && !m.startsWith('internal/'))
+  .sort();
+mods.forEach(m => console.log(m));
+"""])
+  println(string.trim(output))
+}
+
+effect fn crawl_module(mod_name: String, save: Bool) -> Unit = {
+  let output = process.exec("node", ["-e", introspect_script(), mod_name])
+  if save then {
+    fs.mkdir_p(DATA_DIR)
+    fs.write("${DATA_DIR}/${mod_name}.json", output)
+    println("Saved: ${DATA_DIR}/${mod_name}.json")
+  } else {
+    println(string.trim(output))
+  }
+}
+
+effect fn crawl_all(force: Bool) -> Unit = {
+  let script = r"""
+import sys, os, json, subprocess
+data_dir = sys.argv[1]
+force = sys.argv[2] == "1"
+introspect = sys.argv[3]
+r = subprocess.run(["node", "-e", "const m=require('module').builtinModules.filter(m=>!m.startsWith('_')&&!m.startsWith('internal/')).sort();console.log(JSON.stringify(m))"], capture_output=True, text=True)
+names = json.loads(r.stdout.strip())
+os.makedirs(data_dir, exist_ok=True)
+crawled = skipped = errors = 0
+for mod_name in names:
+    path = os.path.join(data_dir, f"{mod_name}.json")
+    if os.path.exists(path) and not force:
+        skipped += 1; continue
+    try:
+        result = subprocess.run(["node", "-e", introspect, mod_name], capture_output=True, text=True, timeout=30)
+        output = result.stdout.strip()
+        if not output or '"error"' in output:
+            errors += 1
+        else:
+            with open(path, "w") as f: f.write(output)
+            crawled += 1
+            try:
+                data = json.loads(output)
+                print(f"  OK: {mod_name} ({data.get('function_count',0)} fns)")
+            except: print(f"  OK: {mod_name}")
+    except subprocess.TimeoutExpired:
+        errors += 1
+print(f"\nDone: {crawled} crawled, {skipped} cached, {errors} errors")
+"""
+  let force_flag = if force then "1" else "0"
+  let output = process.exec("python3", ["-c", script, DATA_DIR, force_flag, introspect_script()])
+  println(string.trim(output))
+}
+
+effect fn verb_analysis() -> Unit = {
+  let output = process.exec("python3", ["-c", verb_script(), DATA_DIR, "node"])
+  println(string.trim(output))
+}
+
+fn introspect_script() -> String = r"""
+const modName = process.argv[1];
+let mod;
+try { mod = require(modName); }
+catch (e) { console.log(JSON.stringify({error: e.message}, null, 2)); process.exit(0); }
+const functions = [], classes = [], constants = [];
+for (const [name, val] of Object.entries(mod).sort()) {
+  if (name.startsWith('_')) continue;
+  if (typeof val === 'function') {
+    const protoMethods = Object.getOwnPropertyNames(val.prototype || {})
+      .filter(m => m !== 'constructor' && typeof (val.prototype || {})[m] === 'function');
+    if (protoMethods.length > 0) {
+      const methods = protoMethods.sort().map(m => ({
+        name: m, signature: `(${val.prototype[m].length} args)`, description: ""
+      }));
+      classes.push({ name, description: "", methods });
+    }
+    functions.push({ name, signature: `(${val.length} args)`, description: "" });
+  } else if (typeof val !== 'object' || val === null) {
+    constants.push({name, type: typeof val, value: String(val).slice(0, 100)});
+  }
+}
+const totalFns = functions.length + classes.reduce((s, c) => s + c.methods.length, 0);
+console.log(JSON.stringify({language: "node", version: process.version, module: modName,
+  description: "", function_count: totalFns,
+  functions, classes, constants
+}, null, 2));
+"""
+
+fn verb_script() -> String = """
+import os, json, sys
+from collections import Counter
+data_dir, lang = sys.argv[1], sys.argv[2]
+if not os.path.exists(data_dir): print(f"No data. Run: almide run node.almd -- --all"); sys.exit(0)
+verb_counter = Counter()
+verb_examples = {}
+total = 0
+for fname in sorted(os.listdir(data_dir)):
+    if not fname.endswith(".json"): continue
+    mod = fname[:-5]
+    with open(os.path.join(data_dir, fname)) as f:
+        try: data = json.load(f)
+        except: continue
+    for fn in data.get("functions", []):
+        total += 1; verb = fn["name"].split("_")[0]
+        if len(verb) > 2:
+            verb_counter[verb] += 1
+            verb_examples.setdefault(verb, [])
+            if len(verb_examples[verb]) < 3: verb_examples[verb].append(f"{mod}.{fn['name']}")
+    for cls in data.get("classes", []):
+        for m in cls.get("methods", []):
+            total += 1; verb = m["name"].split("_")[0]
+            if len(verb) > 2:
+                verb_counter[verb] += 1
+                verb_examples.setdefault(verb, [])
+                if len(verb_examples[verb]) < 3: verb_examples[verb].append(f"{mod}.{cls['name']}.{m['name']}")
+print(f"{lang.title()} Verb Analysis ({total} functions)")
+print("=" * 50)
+for verb, count in verb_counter.most_common(30):
+    examples = ", ".join(verb_examples.get(verb, []))
+    print(f"  {count:>4}x  {verb:<15}  {examples}")
+"""

@@ -1,104 +1,37 @@
-import string
-import list
-
-// Check if a string is a valid ISBN-10
-// ISBN-10: format is d-ddd-ddddd-c where d is digit, c is digit or X (=10)
-// Dashes are optional but only digits and X (at end) are valid characters
-// Validation: (d1*10 + d2*9 + d3*8 + ... + d10*1) mod 11 == 0
-fn valid?(isbn: String) -> Bool = {
-  let chars = string.split(isbn, "")
-    |> list.filter((c) => c != "-");
-  if list.len(chars) != 10 then false
+fn is_valid(isbn: String) -> Bool = {
+  let clean = string.chars(isbn) |> list.filter((c) => c != "-")
+  if list.len(clean) != 10 then false
   else {
-    let result = list.fold(chars, ok([0, 0]), (acc, c) => {
-      match acc {
-        err(e) => err(e),
-        ok(state) => {
-          let idx = list.get(state, 0) |> match { some(v) => v, _ => 0, };
-          let sum = list.get(state, 1) |> match { some(v) => v, _ => 0, };
-          if c == "X" then {
-            if idx == 9 then ok([10, sum + 10 * 1])
-            else err("X in wrong position")
-          }
-          else {
-            let code = string.to_bytes(c);
-            let zero = string.to_bytes("0");
-            let nine = string.to_bytes("9");
-            let c_byte = list.get(code, 0) |> match { some(v) => v, _ => 0, };
-            let zero_byte = list.get(zero, 0) |> match { some(v) => v, _ => 0, };
-            let nine_byte = list.get(nine, 0) |> match { some(v) => v, _ => 0, };
-            if c_byte >= zero_byte and c_byte <= nine_byte then {
-              let digit = c_byte - zero_byte;
-              let weight = 10 - idx;
-              ok([idx + 1, sum + digit * weight])
-            }
-            else err("invalid char")
-          }
-        },
+    var sum = 0
+    var valid = true
+    for (i, c) in list.enumerate(clean) {
+      let pos = 10 - i
+      if i == 9 and c == "X" then {
+        sum = sum + 10
+      } else if string.is_digit(c) then {
+        let digit = match int.parse(c) { ok(n) => n, err(_) => 0 }
+        sum = sum + digit * pos
+      } else {
+        valid = false
       }
-    });
-    match result {
-      ok(state) => {
-        let sum = list.get(state, 1) |> match { some(v) => v, _ => 1, };
-        sum % 11 == 0
-      },
-      err(_) => false,
     }
+    valid and sum % 11 == 0
   }
 }
 
-test "valid isbn" {
-  assert_eq(valid?("3-598-21508-8"), true)
-}
-
-test "invalid isbn check digit" {
-  assert_eq(valid?("3-598-21508-9"), false)
-}
-
-test "valid isbn with X check digit" {
-  assert_eq(valid?("3-598-21507-X"), true)
-}
-
-test "invalid isbn with X elsewhere" {
-  assert_eq(valid?("3-598-2X507-9"), false)
-}
-
-test "valid isbn without dashes" {
-  assert_eq(valid?("3598215088"), true)
-}
-
-test "invalid isbn without dashes and X" {
-  assert_eq(valid?("359821507X"), true)
-}
-
-test "invalid isbn with wrong length" {
-  assert_eq(valid?("3-598-21507"), false)
-}
-
-test "invalid isbn with too many dashes" {
-  assert_eq(valid?("3-598-21507-X-X"), false)
-}
-
-test "invalid isbn with letters" {
-  assert_eq(valid?("3-598-2150B-8"), false)
-}
-
-test "too long isbn" {
-  assert_eq(valid?("3-598-21507-XA"), false)
-}
-
-test "too short isbn" {
-  assert_eq(valid?("3-598-2150"), false)
-}
-
-test "isbn without check digit" {
-  assert_eq(valid?("3-598-21507"), false)
-}
-
-test "empty isbn" {
-  assert_eq(valid?(""), false)
-}
-
-test "input is 9 characters" {
-  assert_eq(valid?("134456729"), false)
+test "valid isbn" { assert_eq(is_valid("3-598-21508-8"), true) }
+test "invalid isbn check digit" { assert_eq(is_valid("3-598-21508-9"), false) }
+test "valid isbn with X check digit" { assert_eq(is_valid("3-598-21507-X"), true) }
+test "invalid isbn with X not at end" { assert_eq(is_valid("3-598-2X507-0"), false) }
+test "valid isbn without dashes" { assert_eq(is_valid("3598215088"), true) }
+test "invalid isbn without dashes" { assert_eq(is_valid("3598215089"), false) }
+test "too short" { assert_eq(is_valid("3-598-2150"), false) }
+test "too long" { assert_eq(is_valid("3-598-21508-88"), false) }
+test "empty" { assert_eq(is_valid(""), false) }
+test "invalid characters" { assert_eq(is_valid("3-598-abc-8"), false) }
+test "valid with X check digit no dashes" { assert_eq(is_valid("359821507X"), true) }
+test "invalid with letters" { assert_eq(is_valid("3-598-P1581-X"), false) }
+test "X only at end" { assert_eq(is_valid("X-598-21507-0"), false) }
+test "all valid isbns" {
+  assert_eq(is_valid("0-306-40615-2"), true)
 }

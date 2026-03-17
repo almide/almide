@@ -19,10 +19,12 @@ use crate::types::Ty;
 mod unknown;
 mod fold;
 mod use_count;
+pub mod result;
 
 pub use unknown::*;
 pub use fold::*;
 pub use use_count::*;
+pub use result::is_ir_result_expr;
 
 // ── Identifiers ─────────────────────────────────────────────────
 
@@ -181,6 +183,8 @@ pub enum IrExprKind {
 
     // ── Variables ──
     Var { id: VarId },
+    /// Reference to a named function used as a value (e.g., `list.map(xs, double)`)
+    FnRef { name: String },
 
     // ── Operators (type-dispatched) ──
     BinOp { op: BinOp, left: Box<IrExpr>, right: Box<IrExpr> },
@@ -191,6 +195,7 @@ pub enum IrExprKind {
     Match { subject: Box<IrExpr>, arms: Vec<IrMatchArm> },
     Block { stmts: Vec<IrStmt>, expr: Option<Box<IrExpr>> },
     DoBlock { stmts: Vec<IrStmt>, expr: Option<Box<IrExpr>> },
+    Fan { exprs: Vec<IrExpr> },
 
     // ── Loops ──
     ForIn {
