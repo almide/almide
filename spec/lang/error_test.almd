@@ -30,7 +30,7 @@ test "match on err" {
 // ── effect fn with auto-? ──
 
 effect fn parse_int(s: String) -> Result[Int, String] = {
-  let n = string.to_int(s)
+  let n = int.parse(s)
   ok(n)
 }
 

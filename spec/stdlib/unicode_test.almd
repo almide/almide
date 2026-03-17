@@ -40,8 +40,8 @@ test "from_codepoint ASCII" {
 }
 
 test "char_count ASCII" {
-  assert_eq(string.char_count("hello"), 5)
-  assert_eq(string.char_count(""), 0)
+  assert_eq(string.len("hello"), 5)
+  assert_eq(string.len(""), 0)
 }
 
 test "is_upper via UFCS" {

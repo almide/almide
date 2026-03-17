@@ -131,9 +131,9 @@ test "string repeat zero" {
 
 test "string char_at boundaries" {
   let s = "ab"
-  assert_eq(string.char_at(s, 0), some("a"))
-  assert_eq(string.char_at(s, 1), some("b"))
-  assert_eq(string.char_at(s, 2), none)
+  assert_eq(string.get(s, 0), some("a"))
+  assert_eq(string.get(s, 1), some("b"))
+  assert_eq(string.get(s, 2), none)
 }
 
 // ── Boolean edge cases ──
@@ -170,7 +170,7 @@ test "string concat chain" {
 test "long string" {
   let s = string.repeat("x", 100)
   assert_eq(string.len(s), 100)
-  assert_eq(string.char_at(s, 99), some("x"))
+  assert_eq(string.get(s, 99), some("x"))
 }
 
 test "deeply nested if expression" {
@@ -238,7 +238,7 @@ test "list of options" {
 
 test "map from entries" {
   let entries = [("a", 1), ("b", 2), ("c", 3)]
-  let m = map.from_entries(entries)
+  let m = map.from_list(entries)
   assert_eq(map.len(m), 3)
   assert_eq(map.get(m, "b"), some(2))
 }
