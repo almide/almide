@@ -124,8 +124,9 @@ fn test_emit_end_to_end_ts() {
 
     assert!(output.contains("function find_price"), "should have function");
     assert!(output.contains("__almd_list.fold"), "should have stdlib call (fold)");
-    // NOTE: __almd_list.find is inside match subject, which doesn't render correctly yet
-    // (TS match needs MatchLowering Nanopass to convert match → if/else chain)
+    assert!(output.contains("__almd_list.find"), "should have stdlib call (find) — MatchLowering exposes it");
+    assert!(output.contains("__deep_eq"), "should have __deep_eq — MatchLowering exposes equality");
     assert!(output.contains("interface Product"), "should have interface");
     assert!(output.contains("`Hello,"), "should have template literal");
+    assert!(!output.contains("(() =>"), "should NOT have IIFE match — MatchLowering replaces it");
 }

@@ -13,6 +13,7 @@ use super::pass::{
     self, BorrowInsertionPass, CloneInsertionPass, FanLoweringPass, NanoPass,
     OptionErasurePass, Pipeline, ResultPropagationPass, Target, TypeConcretizationPass,
 };
+use super::pass_match_lowering::MatchLoweringPass;
 use super::template::TemplateSet;
 
 /// Full configuration for a codegen target.
@@ -46,6 +47,8 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(FanLoweringPass),
 
         Target::TypeScript => Pipeline::new()
+            // Semantic lowering
+            .add(MatchLoweringPass)
             // Local passes
             .add(OptionErasurePass)
             // Shared passes

@@ -20,6 +20,7 @@
 //! - Cranelift ISLE (rules-as-data for verifiability)
 
 pub mod pass;
+pub mod pass_match_lowering;
 pub mod template;
 pub mod target;
 pub mod walker;
