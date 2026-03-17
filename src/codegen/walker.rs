@@ -426,6 +426,32 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                             name.clone()
                         }
                         CallTarget::Method { object, method } => {
+                            // Rust: codec encode/decode methods → Type_method(object)
+                            // Rust: codec encode/decode methods → Type_method(object, ...)
+                            if ctx.is_rust() {
+                                let is_codec = method == "encode" || method == "decode"
+                                    || method.ends_with(".encode") || method.ends_with(".decode");
+                                if is_codec {
+                                    // Method might be "encode" or "Color.encode"
+                                    let flat_method = method.replace('.', "_");
+                                    let call_name = if method.contains('.') {
+                                        flat_method // "Color_encode" — type already in method name
+                                    } else {
+                                        let type_name = match &object.ty {
+                                            Ty::Named(n, _) => n.clone(),
+                                            Ty::Variant { name, .. } => name.clone(),
+                                            _ => render_type(ctx, &object.ty),
+                                        };
+                                        format!("{}_{}", type_name, method)
+                                    };
+                                    let obj_str = render_expr(ctx, object);
+                                    if args_str.is_empty() {
+                                        return format!("{}({})", call_name, obj_str);
+                                    } else {
+                                        return format!("{}({}, {})", call_name, obj_str, args_str);
+                                    }
+                                }
+                            }
                             format!("{}.{}", render_expr(ctx, object), method)
                         }
                         CallTarget::Computed { callee } => render_expr(ctx, callee),
