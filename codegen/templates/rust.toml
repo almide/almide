@@ -172,8 +172,9 @@ template = "{value}"
 [fn_decl]
 template = "pub fn {name}({params}) -> {return_type} {{ {body} }}"
 
+# Effect fn: ret_ty in IR is already Result<T, String>, so use it directly
 [effect_fn_decl]
-template = "pub fn {name}({params}) -> Result<{return_type}, String> {{ {body} }}"
+template = "pub fn {name}({params}) -> {return_type} {{ {body} }}"
 
 [[fn_param]]
 template = "{name}: {type}"

@@ -20,11 +20,13 @@ pub struct RenderContext<'a> {
     pub target: Target,
     /// Are we inside an effect fn? (for auto-? insertion)
     pub in_effect_fn: bool,
+    /// Constructor name → enum name mapping (e.g. "Red" → "Color")
+    pub ctor_to_enum: HashMap<String, String>,
 }
 
 impl<'a> RenderContext<'a> {
     pub fn new(templates: &'a TemplateSet, var_table: &'a VarTable) -> Self {
-        Self { templates, var_table, indent: 0, target: Target::Rust, in_effect_fn: false }
+        Self { templates, var_table, indent: 0, target: Target::Rust, in_effect_fn: false, ctor_to_enum: HashMap::new() }
     }
 
     pub fn with_target(mut self, target: Target) -> Self {
@@ -262,6 +264,16 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                             // Rust: assert_some → assert!(x.is_some())
                             if ctx.is_rust() && name == "assert_some" {
                                 return format!("assert!(({}).is_some());", args_str);
+                            }
+                            // Rust: qualify enum constructors (Red → Color::Red)
+                            if ctx.is_rust() {
+                                if let Some(enum_name) = ctx.ctor_to_enum.get(name.as_str()) {
+                                    if args.is_empty() {
+                                        return format!("{}::{}", enum_name, name);
+                                    } else {
+                                        return format!("{}::{}({})", enum_name, name, args_str);
+                                    }
+                                }
                             }
                             name.clone()
                         }
@@ -588,8 +600,17 @@ fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {
                 .unwrap_or_else(|| format!("Err(_)"))
         }
         IrPattern::Constructor { name, args } => {
-            let args_str = args.iter().map(|a| render_pattern(ctx, a)).collect::<Vec<_>>().join(", ");
-            format!("{}({})", name, args_str)
+            let qualified = if let Some(enum_name) = ctx.ctor_to_enum.get(name) {
+                format!("{}::{}", enum_name, name)
+            } else {
+                name.clone()
+            };
+            if args.is_empty() {
+                qualified
+            } else {
+                let args_str = args.iter().map(|a| render_pattern(ctx, a)).collect::<Vec<_>>().join(", ");
+                format!("{}({})", qualified, args_str)
+            }
         }
         IrPattern::Tuple { elements } => {
             let elems = elements.iter().map(|e| render_pattern(ctx, e)).collect::<Vec<_>>().join(", ");
@@ -678,6 +699,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         indent: ctx.indent,
         target: ctx.target,
         in_effect_fn: func.is_effect,
+        ctor_to_enum: ctx.ctor_to_enum.clone(),
     };
 
     let params_str = func.params.iter()
@@ -718,19 +740,36 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
 // ── Full program rendering ──
 
 pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
+    // Build constructor → enum name map
+    let mut ctx = RenderContext {
+        templates: ctx.templates,
+        var_table: ctx.var_table,
+        indent: ctx.indent,
+        target: ctx.target,
+        in_effect_fn: ctx.in_effect_fn,
+        ctor_to_enum: ctx.ctor_to_enum.clone(),
+    };
+    for td in &program.type_decls {
+        if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
+            for c in cases {
+                ctx.ctor_to_enum.insert(c.name.clone(), td.name.clone());
+            }
+        }
+    }
+
     let mut parts = Vec::new();
 
     // Type declarations
     for td in &program.type_decls {
-        parts.push(render_type_decl(ctx, td));
+        parts.push(render_type_decl(&ctx, td));
     }
 
     // Top-level lets
     for tl in &program.top_lets {
         let mut b = HashMap::new();
         b.insert("name", ctx.var_table.get(tl.var).name.clone());
-        b.insert("type", render_type(ctx, &tl.ty));
-        b.insert("value", render_expr(ctx, &tl.value));
+        b.insert("type", render_type(&ctx, &tl.ty));
+        b.insert("value", render_expr(&ctx, &tl.value));
         let rendered = ctx.templates.render("let_binding", None, &[], &b)
             .unwrap_or_else(|| format!("let _ = _;"));
         parts.push(rendered);
@@ -738,7 +777,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
 
     // Functions
     for func in &program.functions {
-        parts.push(render_function(ctx, func));
+        parts.push(render_function(&ctx, func));
     }
 
     parts.join("\n\n")
