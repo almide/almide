@@ -114,7 +114,7 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
         println!("{}", json);
     } else {
         let code = match target {
-            "v3-rust" => {
+            "v3-rs" => {
                 let ir = ir_program.as_mut().expect("IR required for codegen");
                 codegen::emit(ir, codegen::pass::Target::Rust)
             }
@@ -138,7 +138,7 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
                 let ir = ir_program.as_ref().expect("IR required for JS codegen");
                 emit_ts::emit_js_with_modules(ir)
             }
-            other => { eprintln!("Unknown target: {}. Use rust, ts, js, v3-rust, or v3-ts.", other); std::process::exit(1); }
+            other => { eprintln!("Unknown target: {}. Use rust, ts, js, v3-rs, or v3-ts.", other); std::process::exit(1); }
         };
         print!("{}", code);
     }
