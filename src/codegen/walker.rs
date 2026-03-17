@@ -412,10 +412,22 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
-            // Resolve type name: explicit name, or from expr.ty, or from fields
+            // Resolve type name: explicit name, or from expr.ty
+            // For record literals, use bare struct name (no generics — Rust infers them)
             let mut type_name = name.clone().unwrap_or_else(|| {
                 match &expr.ty {
                     Ty::Named(n, _) => n.clone(),
+                    Ty::Record { fields: ty_fields } | Ty::OpenRecord { fields: ty_fields } => {
+                        let mut names: Vec<String> = ty_fields.iter().map(|(n, _)| n.clone()).collect();
+                        names.sort();
+                        if let Some(n) = ctx.named_records.get(&names) {
+                            n.clone()
+                        } else if let Some(n) = ctx.anon_records.get(&names) {
+                            n.clone() // bare name, no generics
+                        } else {
+                            names.join("_")
+                        }
+                    }
                     _ => render_type(ctx, &expr.ty),
                 }
             });
