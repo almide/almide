@@ -456,7 +456,7 @@ mod tests {
         bindings.insert("right", "b".to_string());
 
         let str_result = ts.render("concat_expr", Some("String"), &[], &bindings);
-        assert_eq!(str_result, Some("format!(\"{}{}\", a, b)".to_string()));
+        assert_eq!(str_result, Some("format!(\"{{}}{{}}\", a, b)".to_string()));
 
         let list_result = ts.render("concat_expr", Some("List"), &[], &bindings);
         assert_eq!(list_result, Some("AlmideConcat::concat(a, b)".to_string()));
@@ -520,7 +520,7 @@ template = "[...{left}, ...{right}]"
 when_attr = "needs_try"
 template = "{callee}({args})?"
 
-[call_expr]
+[[call_expr]]
 template = "{callee}({args})"
 "#;
         let ts = load_from_toml("test", toml);
