@@ -129,7 +129,14 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
             let parts = elems.iter().map(|t| render_type(ctx, t)).collect::<Vec<_>>().join(", ");
             format!("({})", parts)
         }
-        Ty::TypeVar(n) => n.clone(),
+        Ty::TypeVar(n) => {
+            // TypeVars like "?23" should be rendered as _ (infer) in Rust
+            if n.starts_with('?') {
+                if ctx.is_rust() { "_".into() } else { "any".into() }
+            } else {
+                n.clone()
+            }
+        }
         Ty::Unknown | Ty::Union(_) => {
             // Unknown types: use a generic placeholder that won't break compilation
             if ctx.is_rust() { "_".into() } else { "any".into() }
@@ -301,23 +308,40 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                         return format!("println!(\"{{}}\", {})", args_str);
                     }
 
-                    // Stdlib module call — render args with target-specific decorations
-                    let args_str = if ctx.is_rust() {
-                        render_stdlib_args_rust(ctx, args)
-                    } else {
-                        args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ")
-                    };
+                    if ctx.is_rust() {
+                        // Use the generated stdlib dispatch (handles &*, .to_vec(), ?, lambda formatting)
+                        let rendered_args: Vec<String> = args.iter().map(|a| render_expr(ctx, a)).collect();
+                        let inline_lambda = |arg_idx: usize, param_count: usize| -> (Vec<String>, String) {
+                            if let Some(arg) = args.get(arg_idx) {
+                                if let IrExprKind::Lambda { params, body } = &arg.kind {
+                                    let names: Vec<String> = params.iter()
+                                        .take(param_count)
+                                        .map(|(id, _)| ctx.var_name(*id).to_string())
+                                        .collect();
+                                    let body_str = render_expr(ctx, body);
+                                    return (names, body_str);
+                                }
+                            }
+                            (vec!["_".into()], "()".into())
+                        };
+                        if let Some(result) = crate::generated::emit_rust_calls::gen_generated_call(
+                            module, func, &rendered_args, ctx.in_effect_fn, &inline_lambda
+                        ) {
+                            return result;
+                        }
+                        // Fallback: simple module call
+                        let args_str = rendered_args.join(", ");
+                        return format!("almide_rt_{}_{}({})", module, func, args_str);
+                    }
+
+                    // TS/other: simple module call
+                    let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
                     let mut b = HashMap::new();
                     b.insert("module", module.clone());
                     b.insert("func", func.clone());
                     b.insert("args", args_str);
-                    let mut rendered = ctx.templates.render("module_call", None, &[], &b)
-                        .unwrap_or_else(|| format!("{}_{}", module, func));
-                    // Rust: auto-? for effect fn calls that return Result
-                    if ctx.is_rust() && ctx.in_effect_fn && matches!(&expr.ty, Ty::Result(_, _)) {
-                        rendered.push('?');
-                    }
-                    rendered
+                    ctx.templates.render("module_call", None, &[], &b)
+                        .unwrap_or_else(|| format!("__almd_{}.{}()", module, func))
                 }
                 _ => {
                     let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
@@ -448,7 +472,14 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             let mut arg_parts = Vec::new();
             for part in parts {
                 match part {
-                    IrStringPart::Lit { value } => fmt_parts.push(value.clone()),
+                    IrStringPart::Lit { value } => {
+                        // Escape { and } in literal parts for Rust format! strings
+                        if ctx.is_rust() {
+                            fmt_parts.push(value.replace('{', "{{").replace('}', "}}"));
+                        } else {
+                            fmt_parts.push(value.clone());
+                        }
+                    }
                     IrStringPart::Expr { expr } => {
                         fmt_parts.push("{}".to_string());
                         arg_parts.push(render_expr(ctx, expr));
@@ -1029,9 +1060,9 @@ fn render_stdlib_args_rust(ctx: &RenderContext, args: &[IrExpr]) -> String {
             _ => {
                 let rendered = render_expr(ctx, arg);
                 match &arg.ty {
-                    // List → .to_vec()
-                    Ty::List(_) => format!("({}).to_vec()", rendered),
-                    // String → &*
+                    // List → &(expr).to_vec() — pass as reference to owned copy
+                    Ty::List(_) => format!("&({}).to_vec()", rendered),
+                    // String → &* — pass as &str
                     Ty::String => format!("&*{}", rendered),
                     _ => rendered,
                 }
