@@ -10,7 +10,7 @@ fn fizzbuzz(n: Int) -> String = {
   else int.to_string(n)
 }
 
-effect fn main(args: List[String]) -> Result[Unit, String] = {
+effect fn main() -> Result[Unit, String] = {
   let fib10 = fibonacci(10)
   guard fib10 == 55 else err("fibonacci(10) should be 55")
 

@@ -125,7 +125,7 @@ Almide 1.0 = ALL of:
 ターゲット品質
   ■ Tier 1 (Rust): 全テスト通過、全 exercises 動作
   ■ Tier 2 (TS/JS): 91/91 pass (100%)
-  □ Tier 3 (WASM): 基本動作確認 (CI smoke test あり)
+  ■ Tier 3 (WASM): smoke test pass (fibonacci + fizzbuzz + list.map, 305KB)
 
 テスト
   □ テスト 2,500+                        (2,033 — あと 467)
