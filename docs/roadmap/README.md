@@ -3,7 +3,7 @@
 ## Active — 1.0 Critical Path
 
 ### Phase I: 正確性
-- [Cross-Target CI](active/cross-target-ci.md) — **45/45 spec/lang TS 実行 pass**。残: spec/stdlib + integration、CI 自動化
+- [Cross-Target CI](active/cross-target-ci.md) — **90/91 (98.9%)** 全ディレクトリ pass。GitHub Actions 自動化済み
 
 ### Phase II: 安定性契約
 - [Stdlib Verb Reform](active/stdlib-verb-system.md) — 1.0 前最後の breaking change
