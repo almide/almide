@@ -29,6 +29,7 @@ params = [{ name = "s", type = "String" }]
 return = "Result[Int, String]"
 rust = "almide_rt_int_parse_hex(&*{s})"
 ts = "__almd_int.parse_hex({s})"
+aliases = ["from_hex"]
 
 [abs]
 description = "Return the absolute value of an integer."

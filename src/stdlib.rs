@@ -87,7 +87,7 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         | "enumerate" | "zip" | "flatten" | "take" | "drop"
         | "sort_by" | "unique"
         | "last" | "chunk" | "sum" | "product" | "sum_float" | "product_float"
-        | "first" | "flat_map"
+        | "first"
         | "filter_map" | "take_while" | "drop_while"
         | "partition" | "reduce" | "group_by"
         | "insert" | "remove_at" | "find_index"
@@ -132,7 +132,7 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         "get" | "get_or" | "set" => vec!["list", "map"],
         "swap" => vec!["list"],
         "sort" => vec!["list"],
-        "map" | "filter" => vec!["list", "result"],
+        "map" | "filter" | "flat_map" => vec!["list", "result"],
         "to_option" => vec!["result"],
 
         // ── ambiguous: string + int ──

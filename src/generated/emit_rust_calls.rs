@@ -126,6 +126,7 @@ pub fn gen_generated_call(
             ("int", "min") => format!("almide_rt_int_min({}, {})", args_str[0], args_str[1]),
             ("int", "parse") => format!("almide_rt_int_parse(&*{})", args_str[0]),
             ("int", "parse_hex") => format!("almide_rt_int_parse_hex(&*{})", args_str[0]),
+            ("int", "from_hex") => format!("almide_rt_int_parse_hex(&*{})", args_str[0]),
             ("int", "rotate_left") => format!("almide_rt_int_rotate_left({}, {}, {})", args_str[0], args_str[1], args_str[2]),
             ("int", "rotate_right") => format!("almide_rt_int_rotate_right({}, {}, {})", args_str[0], args_str[1], args_str[2]),
             ("int", "to_float") => format!("almide_rt_int_to_float({})", args_str[0]),
@@ -361,6 +362,10 @@ pub fn gen_generated_call(
             ("regex", "replace_first") => format!("almide_regex_replace_first(&{}, &{}, &{})", args_str[0], args_str[1], args_str[2]),
             ("regex", "split") => format!("almide_regex_split(&{}, &{})", args_str[0], args_str[1]),
             ("result", "and_then") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
+                format!("({}).and_then(|{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body)
+            },
+            ("result", "flat_map") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
                 format!("({}).and_then(|{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body)
             },

@@ -1,0 +1,46 @@
+// result.flat_map — alias for result.and_then
+
+test "result.flat_map chains ok" {
+  let r: Result[Int, String] = ok(5)
+  let chained = result.flat_map(r, (x) => if x > 0 then ok(x * 10) else err("negative"))
+  match chained {
+    ok(v) => assert_eq(v, 50),
+    err(_) => assert(false, "expected ok"),
+  }
+}
+
+test "result.flat_map propagates err" {
+  let r: Result[Int, String] = err("fail")
+  let chained = result.flat_map(r, (x) => ok(x * 10))
+  match chained {
+    ok(_) => assert(false, "expected err"),
+    err(e) => assert_eq(e, "fail"),
+  }
+}
+
+test "result.flat_map chains to err" {
+  let r: Result[Int, String] = ok(-3)
+  let chained = result.flat_map(r, (x) => if x > 0 then ok(x) else err("negative"))
+  match chained {
+    ok(_) => assert(false, "expected err"),
+    err(e) => assert_eq(e, "negative"),
+  }
+}
+
+test "result.flat_map UFCS" {
+  let r: Result[Int, String] = ok(7)
+  let chained = r.flat_map((x) => ok(x + 1))
+  match chained {
+    ok(v) => assert_eq(v, 8),
+    err(_) => assert(false, "expected ok"),
+  }
+}
+
+test "result.and_then still works" {
+  let r: Result[Int, String] = ok(3)
+  let chained = result.and_then(r, (x) => ok(x * 2))
+  match chained {
+    ok(v) => assert_eq(v, 6),
+    err(_) => assert(false, "expected ok"),
+  }
+}
