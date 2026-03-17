@@ -36,14 +36,6 @@ struct FnDef {
     /// Usage example in Almide syntax
     #[serde(default)]
     example: Option<String>,
-    /// Whether this function is deprecated (still works, but discouraged)
-    #[serde(default)]
-    #[allow(dead_code)]
-    deprecated: bool,
-    /// Migration hint shown when deprecated function is used (e.g. "use int.parse() instead")
-    #[serde(default)]
-    #[allow(dead_code)]
-    deprecated_message: Option<String>,
 }
 
 #[derive(Deserialize)]

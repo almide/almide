@@ -104,16 +104,13 @@ return = "String"
 rust = "almide_rt_string_to_lower(&*{s})"
 ts = "__almd_string.to_lower({s})"
 
-# DEPRECATED: use int.parse() instead
 [to_int]
-description = "Deprecated: use int.parse() instead. Parse a string as an integer. Returns err if invalid."
+description = "Parse a string as an integer. Returns err if invalid."
 example = 'string.to_int("42") // => ok(42)'
 params = [{ name = "s", type = "String" }]
 return = "Result[Int, String]"
 rust = "almide_rt_string_to_int(&*{s})?"
 ts = "__almd_string.to_int({s})"
-deprecated = true
-deprecated_message = "use int.parse() instead"
 
 [replace]
 description = "Replace all occurrences of a substring."
@@ -236,7 +233,7 @@ rust = "almide_rt_string_from_codepoint({n})"
 ts = "String.fromCodePoint({n})"
 
 [char_count]
-description = "Deprecated: use string.len() instead. Return the number of Unicode characters (not bytes) in a string."
+description = "Return the number of Unicode characters (not bytes) in a string."
 example = 'string.char_count("hello") // => 5'
 params = [{ name = "s", type = "String" }]
 return = "Int"
@@ -323,13 +320,10 @@ return = "Option[Int]"
 rust = "almide_rt_string_last_index_of(&*{s}, &*{needle})"
 ts = "__almd_string.last_index_of({s}, {needle})"
 
-# DEPRECATED: use float.parse() instead
 [to_float]
-description = "Deprecated: use float.parse() instead. Parse a string as a float. Returns err if invalid."
+description = "Parse a string as a float. Returns err if invalid."
 example = 'string.to_float("3.14") // => ok(3.14)'
 params = [{ name = "s", type = "String" }]
 return = "Result[Float, String]"
 rust = "almide_rt_string_to_float(&*{s})?"
 ts = "__almd_string.to_float({s})"
-deprecated = true
-deprecated_message = "use float.parse() instead"

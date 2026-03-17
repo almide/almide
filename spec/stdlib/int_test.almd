@@ -78,20 +78,6 @@ test "int.parse_hex large" {
   assert_eq(int.parse_hex("ffff"), ok(65535))
 }
 
-// ── from_hex (alias for parse_hex) ──
-
-test "int.from_hex basic" {
-  assert_eq(int.from_hex("ff"), ok(255))
-}
-
-test "int.from_hex zero" {
-  assert_eq(int.from_hex("0"), ok(0))
-}
-
-test "int.from_hex uppercase" {
-  assert_eq(int.from_hex("AB"), ok(171))
-}
-
 // ── abs ──
 
 test "int.abs negative" {

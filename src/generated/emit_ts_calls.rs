@@ -116,7 +116,6 @@ pub fn gen_generated_call(module: &str, func: &str, args_str: &[String]) -> Opti
             ("int", "min") => format!("__almd_int.min({}, {})", args_str[0], args_str[1]),
             ("int", "parse") => format!("__almd_int.parse({})", args_str[0]),
             ("int", "parse_hex") => format!("__almd_int.parse_hex({})", args_str[0]),
-            ("int", "from_hex") => format!("__almd_int.parse_hex({})", args_str[0]),
             ("int", "rotate_left") => format!("__almd_int.rotate_left({}, {}, {})", args_str[0], args_str[1], args_str[2]),
             ("int", "rotate_right") => format!("__almd_int.rotate_right({}, {}, {})", args_str[0], args_str[1], args_str[2]),
             ("int", "to_float") => format!("__almd_int.to_float({})", args_str[0]),

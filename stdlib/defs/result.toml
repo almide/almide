@@ -33,7 +33,6 @@ params = [
 return = "Result[B, E]"
 rust = "({r}).and_then(|{f.args}| {{ {f.body} }})"
 ts = "(({f.args}) => {f.body})({r})"
-aliases = ["flat_map"]
 
 [unwrap_or]
 description = "Get the ok value, or return a default if err."
