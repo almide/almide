@@ -3,7 +3,7 @@
 ## Active — 1.0 Critical Path
 
 ### Phase I: 正確性
-- [Cross-Target CI](active/cross-target-ci.md) — スクリプト作成済み、70/71 TS emit OK。残: 実行出力の diff 検証、CI 自動化
+- [Cross-Target CI](active/cross-target-ci.md) — **45/45 spec/lang TS 実行 pass**。残: spec/stdlib + integration、CI 自動化
 
 ### Phase II: 安定性契約
 - [Stdlib Verb Reform](active/stdlib-verb-system.md) — 1.0 前最後の breaking change
