@@ -46,7 +46,7 @@ impl Checker {
                     }
                 }
                 else {
-                    self.emit(super::err(format!("undefined variable '{}'", name), "Check the variable name", format!("variable {}", name)));
+                    self.emit(super::err(format!("undefined variable '{}'", name), "Check the variable name", format!("variable {}", name)).with_code("E003"));
                     InferTy::Concrete(Ty::Unknown)
                 }
             }
@@ -487,7 +487,7 @@ impl Checker {
                     };
                     self.emit(super::err(
                         format!("cannot reassign immutable binding '{}'", name),
-                        hint, format!("{} = ...", name)));
+                        hint, format!("{} = ...", name)).with_code("E009"));
                 }
             }
             ast::Stmt::IndexAssign { index, value, .. } => { self.infer_expr(index); self.infer_expr(value); }

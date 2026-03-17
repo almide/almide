@@ -259,7 +259,7 @@ impl Checker {
                 if concrete_arg != Ty::Unknown && !ety.compatible(&concrete_arg) {
                     self.emit(super::err(
                         format!("{}() argument {} expects {} but got {}", name, i + 1, ety.display(), concrete_arg.display()),
-                        "Fix the argument type", format!("constructor {}()", name)));
+                        "Fix the argument type", format!("constructor {}()", name)).with_code("E005"));
                 }
             }
         }
@@ -296,7 +296,7 @@ impl Checker {
                 self.emit(super::err(
                     format!("argument '{}' expects {} but got {}", param_name, expected.display(), arg_ty.display()),
                     Self::hint_with_conversion("Fix the argument type", &expected, arg_ty),
-                    format!("call to {}()", fn_name)));
+                    format!("call to {}()", fn_name)).with_code("E005"));
             }
         }
     }

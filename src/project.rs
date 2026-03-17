@@ -52,6 +52,7 @@ pub struct FetchedDep {
 pub struct Package {
     pub name: String,
     pub version: String,
+    pub edition: String,
 }
 
 #[derive(Debug, Clone)]
@@ -76,6 +77,7 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
 
     let mut name = String::new();
     let mut version = "0.1.0".to_string();
+    let mut edition = "2026".to_string();
     let mut deps: Vec<Dependency> = Vec::new();
     let mut section = "";
 
@@ -100,6 +102,7 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
                     match key {
                         "name" => name = val,
                         "version" => version = val,
+                        "edition" => edition = val,
                         _ => {}
                     }
                 }
@@ -114,7 +117,7 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
     }
 
     Ok(Project {
-        package: Package { name, version },
+        package: Package { name, version, edition },
         dependencies: deps,
     })
 }

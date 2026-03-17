@@ -11,7 +11,7 @@ pub fn cmd_init() {
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
         .unwrap_or_else(|| "myapp".to_string());
 
-    let toml = format!("[package]\nname = \"{}\"\nversion = \"0.1.0\"\n", dir_name);
+    let toml = format!("[package]\nname = \"{}\"\nversion = \"0.1.0\"\nedition = \"2026\"\n", dir_name);
 
     if let Err(e) = std::fs::write("almide.toml", toml) {
         eprintln!("Failed to write almide.toml: {}", e);

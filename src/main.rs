@@ -88,6 +88,9 @@ enum Commands {
         /// Output diagnostics as JSON (one per line)
         #[arg(long)]
         json: bool,
+        /// Explain an error code (e.g., --explain E001)
+        #[arg(long)]
+        explain: Option<String>,
     },
     /// Format source files
     Fmt {
@@ -324,6 +327,25 @@ fn resolve_file(file: Option<String>) -> String {
     })
 }
 
+fn print_error_explanation(code: &str) {
+    let explanation = match code {
+        "E001" => "E001: Type mismatch\n\n  The expression's type does not match what was expected.\n\n  Example:\n    fn f() -> Int = \"hello\"  // error: expected Int but got String\n\n  Fix: Change the expression to match the expected type, or use a\n  conversion function like int.to_string() or int.parse().",
+        "E002" => "E002: Undefined function\n\n  The function name was not found in the current scope, stdlib, or imports.\n\n  Example:\n    fn f() -> Int = nonexistent()  // error: undefined function\n\n  Fix: Check the function name for typos, or import the module that defines it.",
+        "E004" => "E004: Wrong argument count\n\n  The function was called with the wrong number of arguments.\n\n  Example:\n    fn add(a: Int, b: Int) -> Int = a + b\n    let x = add(1)  // error: expects 2 arguments but got 1\n\n  Fix: Provide the correct number of arguments.",
+        "E005" => "E005: Argument type mismatch\n\n  A function argument's type does not match the parameter type.\n\n  Example:\n    fn greet(name: String) -> String = name\n    greet(42)  // error: expects String but got Int\n\n  Fix: Pass the correct type, or use a conversion function.",
+        "E006" => "E006: Effect isolation violation\n\n  A pure function (fn) is calling an effect function (effect fn).\n  This violates Almide's security model — pure functions cannot perform I/O.\n\n  Example:\n    fn f() -> String = fs.read_text(\"file.txt\")  // error\n\n  Fix: Mark the calling function as `effect fn`.",
+        "E007" => "E007: Fan block in pure function\n\n  A `fan` block can only be used inside an `effect fn`.\n  Fan expressions perform concurrent I/O, which requires effect context.\n\n  Example:\n    fn f() -> (Int, Int) = fan { a(); b() }  // error\n\n  Fix: Mark the enclosing function as `effect fn`.",
+        "E008" => "E008: Mutable variable capture in fan\n\n  A `fan` block cannot capture mutable variables (var) from the outer scope.\n  This prevents data races in concurrent execution.\n\n  Example:\n    var x = 0\n    fan { use(x); ... }  // error: cannot capture var x\n\n  Fix: Use a `let` binding instead of `var`.",
+        "E009" => "E009: Assignment to immutable variable\n\n  Cannot assign to a variable declared with `let` or a function parameter.\n\n  Example:\n    let x = 1\n    x = 2  // error\n\n  Fix: Use `var` instead of `let` if the variable needs to be mutable.",
+        "E010" => "E010: Non-exhaustive match\n\n  The match expression does not cover all possible cases of the subject type.\n\n  Example:\n    type Color = | Red | Green | Blue\n    match c { Red => 1 }  // error: missing Green, Blue\n\n  Fix: Add the missing arms, or use `_` as a catch-all.",
+        _ => {
+            eprintln!("Unknown error code: {}", code);
+            std::process::exit(1);
+        }
+    };
+    println!("{}", explanation);
+}
+
 fn main() {
     almide::diagnostic::init_color();
     // Legacy mode: `almide file.almd [--target X]` → rewrite as `almide emit file.almd [--target X]`
@@ -358,7 +380,11 @@ fn dispatch(cli: Cli) {
             let file_str = file.as_deref().unwrap_or("");
             cli::cmd_test(file_str, no_check, run.as_deref());
         }
-        Commands::Check { file, deny_warnings, json } => {
+        Commands::Check { file, deny_warnings, json, explain } => {
+            if let Some(code) = explain {
+                print_error_explanation(&code);
+                return;
+            }
             let file = resolve_file(file);
             if json {
                 cli::cmd_check_json(&file);
