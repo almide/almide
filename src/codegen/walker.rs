@@ -914,10 +914,26 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
         IrStmtKind::Guard { cond, else_ } => {
             let cond_str = render_expr(ctx, cond);
             let else_str = render_expr(ctx, else_);
+            // Determine action: break for loop guards, return for function guards
+            let is_loop_break = matches!(&else_.kind, IrExprKind::Unit | IrExprKind::Break)
+                || (matches!(&else_.kind, IrExprKind::ResultOk { .. }) && {
+                    if let IrExprKind::ResultOk { expr: inner } = &else_.kind {
+                        matches!(&inner.kind, IrExprKind::Unit)
+                    } else { false }
+                });
+            let action = if is_loop_break { "break" } else { "return" };
             if ctx.is_rust() {
-                format!("if !({}) {{ return {} }}", cond_str, else_str)
+                if action == "break" {
+                    format!("if !({}) {{ break }}", cond_str)
+                } else {
+                    format!("if !({}) {{ return {} }}", cond_str, else_str)
+                }
             } else {
-                format!("if (!{}) {{ return {} }}", cond_str, else_str)
+                if action == "break" {
+                    format!("if (!{}) {{ break }}", cond_str)
+                } else {
+                    format!("if (!{}) {{ return {} }}", cond_str, else_str)
+                }
             }
         }
         IrStmtKind::IndexAssign { target, index, value } => {

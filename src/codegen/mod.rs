@@ -21,6 +21,7 @@
 
 pub mod pass;
 pub mod pass_match_lowering;
+pub mod pass_result_propagation;
 pub mod template;
 pub mod target;
 pub mod walker;

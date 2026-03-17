@@ -11,9 +11,10 @@
 
 use super::pass::{
     self, BorrowInsertionPass, CloneInsertionPass, FanLoweringPass, NanoPass,
-    OptionErasurePass, Pipeline, ResultPropagationPass, Target, TypeConcretizationPass,
+    OptionErasurePass, Pipeline, Target, TypeConcretizationPass,
 };
 use super::pass_match_lowering::MatchLoweringPass;
+use super::pass_result_propagation::ResultPropagationPass;
 use super::template::TemplateSet;
 
 /// Full configuration for a codegen target.
