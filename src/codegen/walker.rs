@@ -382,7 +382,31 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                                 return format!("println!(\"{{}}\", {})", args_str);
                             }
                             // Rust: value_* and __encode/__decode functions → almide_rt_* (codec runtime)
-                            if ctx.is_rust() && (name.starts_with("value_") || name.starts_with("__encode") || name.starts_with("__decode")) {
+                            if ctx.is_rust() && name.starts_with("value_") {
+                                return format!("almide_rt_{}({})", name, args_str);
+                            }
+                            // Rust: __encode_list_Type / __decode_list_Type → runtime or inline
+                            if ctx.is_rust() && (name.starts_with("__encode_list_") || name.starts_with("__decode_list_")) {
+                                let type_name = if name.starts_with("__encode_list_") {
+                                    &name["__encode_list_".len()..]
+                                } else {
+                                    &name["__decode_list_".len()..]
+                                };
+                                let primitives = ["string", "int", "float", "bool"];
+                                if primitives.contains(&type_name) {
+                                    // Primitive: runtime has almide_rt___encode_list_string etc.
+                                    return format!("almide_rt_{}({})", name, args_str);
+                                } else {
+                                    // Custom type: use generic encode/decode with Type_encode/Type_decode
+                                    if name.starts_with("__encode") {
+                                        return format!("almide_rt_value_encode_list({}, {}_encode)", args_str, type_name);
+                                    } else {
+                                        return format!("almide_rt_value_decode_list({}, {}_decode)", args_str, type_name);
+                                    }
+                                }
+                            }
+                            // Rust: other __ prefixed functions
+                            if ctx.is_rust() && name.starts_with("__") {
                                 return format!("almide_rt_{}({})", name, args_str);
                             }
                             // Rust: Type.method → Type_method (standalone function)
@@ -875,9 +899,42 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             format!("{}.{} = {};", target_str, field, val_str)
         }
         IrStmtKind::BindDestructure { pattern, value } => {
-            // Simplified: just render as let _ = value
+            // For record patterns with empty name, resolve from value type
+            let pat_str = match pattern {
+                IrPattern::RecordPattern { name, fields, rest } if name.is_empty() => {
+                    let type_name = match &value.ty {
+                        Ty::Named(n, _) => n.clone(),
+                        Ty::Record { fields: ty_fields } | Ty::OpenRecord { fields: ty_fields } => {
+                            let mut names: Vec<String> = ty_fields.iter().map(|(n, _)| n.clone()).collect();
+                            names.sort();
+                            ctx.named_records.get(&names).cloned()
+                                .or_else(|| ctx.anon_records.get(&names).cloned())
+                                .unwrap_or_else(|| names.join("_"))
+                        }
+                        _ => "_".into(),
+                    };
+                    let qualified = if let Some(enum_name) = ctx.ctor_to_enum.get(&type_name) {
+                        format!("{}::{}", enum_name, type_name)
+                    } else {
+                        type_name
+                    };
+                    let fields_str = fields.iter()
+                        .map(|f| match &f.pattern {
+                            Some(p) => format!("{}: {}", f.name, render_pattern(ctx, p)),
+                            None => f.name.clone(),
+                        })
+                        .collect::<Vec<_>>().join(", ");
+                    if *rest && ctx.is_rust() {
+                        if fields_str.is_empty() { format!("{} {{ .. }}", qualified) }
+                        else { format!("{} {{ {}, .. }}", qualified, fields_str) }
+                    } else {
+                        format!("{} {{ {} }}", qualified, fields_str)
+                    }
+                }
+                _ => render_pattern(ctx, pattern),
+            };
             let val_str = render_expr(ctx, value);
-            format!("let _ = {};", val_str)
+            format!("let {} = {};", pat_str, val_str)
         }
         IrStmtKind::Comment { text } => format!("// {}", text),
     }
