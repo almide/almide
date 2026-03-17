@@ -153,7 +153,13 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
         IrExprKind::LitStr { value } => {
             let mut b = HashMap::new();
-            b.insert("value", value.clone());
+            // Escape backslashes and special chars for target language
+            let escaped = if ctx.is_rust() {
+                value.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\t', "\\t").replace('\r', "\\r")
+            } else {
+                value.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\t', "\\t")
+            };
+            b.insert("value", escaped);
             ctx.templates.render("string_literal", None, &[], &b)
                 .unwrap_or_else(|| format!("\"{}\"", value))
         }
@@ -212,7 +218,29 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .unwrap_or(fallback)
         }
 
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::DoBlock { stmts, expr } => {
+            // DoBlock with guard → loop { body }
+            let mut parts: Vec<String> = stmts.iter()
+                .map(|s| {
+                    let rendered = render_stmt(ctx, s);
+                    if ctx.is_rust() && !rendered.ends_with(';') && !rendered.ends_with('}') {
+                        format!("{};", rendered)
+                    } else {
+                        rendered
+                    }
+                })
+                .collect();
+            if let Some(e) = expr {
+                parts.push(render_expr(ctx, e));
+            }
+            if ctx.is_rust() {
+                format!("loop {{\n{}\n}}", parts.join("\n"))
+            } else {
+                format!("while (true) {{\n{}\n}}", parts.join("\n"))
+            }
+        }
+
+        IrExprKind::Block { stmts, expr } => {
             let mut parts: Vec<String> = stmts.iter()
                 .map(|s| {
                     let rendered = render_stmt(ctx, s);
@@ -741,14 +769,30 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     let body_str = render_expr(&fn_ctx, &func.body);
     let ret_str = render_type(ctx, &func.ret_ty);
 
-    let mut b = HashMap::new();
-    b.insert("name", func.name.clone());
-    b.insert("params", params_str);
-    b.insert("return_type", ret_str);
-    b.insert("body", body_str);
+    // Build generics string for functions
+    let fn_generics = if let Some(generics) = &func.generics {
+        if generics.is_empty() {
+            String::new()
+        } else if ctx.is_rust() {
+            let params = generics.iter().map(|g| format!("{}: Clone + std::fmt::Debug + PartialEq", g.name)).collect::<Vec<_>>().join(", ");
+            format!("<{}>", params)
+        } else {
+            let params = generics.iter().map(|g| g.name.clone()).collect::<Vec<_>>().join(", ");
+            format!("<{}>", params)
+        }
+    } else {
+        String::new()
+    };
 
     // Sanitize function name: spaces/dots/hyphens → underscores
     let safe_name = func.name.replace(' ', "_").replace('-', "_").replace('.', "_");
+    let safe_name = format!("{}{}", safe_name, fn_generics);
+
+    let mut b = HashMap::new();
+    b.insert("name", safe_name.clone());
+    b.insert("params", params_str);
+    b.insert("return_type", ret_str);
+    b.insert("body", body_str);
     b.insert("name", safe_name);
 
     let construct = if func.is_test {
@@ -817,12 +861,21 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
 
     // Top-level lets
     for tl in &program.top_lets {
-        let mut b = HashMap::new();
-        b.insert("name", ctx.var_table.get(tl.var).name.clone());
-        b.insert("type", render_type(&ctx, &tl.ty));
-        b.insert("value", render_expr(&ctx, &tl.value));
-        let rendered = ctx.templates.render("let_binding", None, &[], &b)
-            .unwrap_or_else(|| format!("let _ = _;"));
+        let name = ctx.var_table.get(tl.var).name.clone();
+        let ty_str = render_type(&ctx, &tl.ty);
+        let val_str = render_expr(&ctx, &tl.value);
+        let rendered = if ctx.is_rust() {
+            match tl.kind {
+                TopLetKind::Const => {
+                    format!("const {}: {} = {};", name.to_uppercase(), ty_str, val_str)
+                }
+                TopLetKind::Lazy => {
+                    format!("static {}: std::sync::LazyLock<{}> = std::sync::LazyLock::new(|| {});", name.to_uppercase(), ty_str, val_str)
+                }
+            }
+        } else {
+            format!("const {} = {};", name, val_str)
+        };
         parts.push(rendered);
     }
 
