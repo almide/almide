@@ -95,6 +95,38 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
     eprintln!("\nAll {} test file(s) passed", test_files.len());
 }
 
+pub fn cmd_test_json(file: &str, run_filter: Option<&str>) {
+    let test_files: Vec<String> = if !file.is_empty() {
+        let path = std::path::Path::new(file);
+        if path.is_dir() {
+            let mut files = collect_test_files(path);
+            files.sort();
+            files
+        } else {
+            vec![file.to_string()]
+        }
+    } else {
+        let mut files = collect_test_files(std::path::Path::new("."));
+        files.sort();
+        files
+    };
+
+    let mut program_args: Vec<String> = Vec::new();
+    if let Some(filter) = run_filter {
+        program_args.push(filter.to_string());
+    }
+
+    for test_file in &test_files {
+        let code = cmd_run_inner(test_file, &program_args, false);
+        // Emit JSON per file
+        let status = if code == 0 { "pass" } else { "fail" };
+        println!(
+            r#"{{"file":"{}","status":"{}","exit_code":{}}}"#,
+            test_file.replace('"', r#"\""#), status, code
+        );
+    }
+}
+
 pub fn cmd_fmt(files: &[String], write_back: bool) {
     for file in files {
         let (program, _, _) = parse_file(file);

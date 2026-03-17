@@ -77,6 +77,9 @@ enum Commands {
         /// Skip type checking
         #[arg(long)]
         no_check: bool,
+        /// Output test results as JSON (one per line)
+        #[arg(long)]
+        json: bool,
     },
     /// Type check only
     Check {
@@ -376,9 +379,13 @@ fn dispatch(cli: Cli) {
             let file = resolve_file(file);
             cli::cmd_build(&file, o.as_deref(), target.as_deref(), release || fast, fast, unchecked_index, no_check);
         }
-        Commands::Test { file, run, no_check } => {
+        Commands::Test { file, run, no_check, json } => {
             let file_str = file.as_deref().unwrap_or("");
-            cli::cmd_test(file_str, no_check, run.as_deref());
+            if json {
+                cli::cmd_test_json(file_str, run.as_deref());
+            } else {
+                cli::cmd_test(file_str, no_check, run.as_deref());
+            }
         }
         Commands::Check { file, deny_warnings, json, explain } => {
             if let Some(code) = explain {

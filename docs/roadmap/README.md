@@ -4,7 +4,6 @@
 
 ### Phase II: 安定性契約
 - [Stdlib Verb Reform](active/stdlib-verb-system.md) — 1.0 前最後の breaking change
-- [Error Codes + JSON](active/error-codes-json.md) — **E001-E010 + --json + --explain 実装済み**。残: test --json, check 速度計測
 
 ### Phase III: パッケージ + テスト
 - [Lockfile](active/lockfile.md) — `almide.lock` + git ベース依存解決
@@ -153,5 +152,6 @@
 - [Borrow/Clone Gaps](done/borrow-clone-gaps.md) — Case 1-9 全 FIXED
 - [Quality Improvements](done/quality-improvements.md) — エラー行番号、heredoc 行追跡
 - [Cross-Target CI](done/cross-target-ci.md) — 90/91 (98.9%), GitHub Actions 自動化
+- [Error Codes + JSON](done/error-codes-json.md) — E001-E010, --json, --explain, test --json, check < 100ms
 - [Stability Contract](done/stability-contract.md) — edition, BREAKING_CHANGE_POLICY, FROZEN_API, REJECTED_PATTERNS, HIDDEN_OPERATIONS
 - [While Loop](done/while-loop.md)
