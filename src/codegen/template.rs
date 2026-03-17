@@ -99,28 +99,41 @@ impl TemplateSet {
 }
 
 /// Fill `{placeholder}` holes in a template string.
+/// `{{` and `}}` are escape sequences for literal `{` and `}`.
 fn fill_template(template: &str, bindings: &HashMap<&str, String>) -> String {
     let mut result = String::with_capacity(template.len() * 2);
     let mut chars = template.chars().peekable();
 
     while let Some(ch) = chars.next() {
         if ch == '{' {
-            // Collect placeholder name until '}'
-            let mut name = String::new();
-            for inner in chars.by_ref() {
-                if inner == '}' {
-                    break;
-                }
-                name.push(inner);
-            }
-            // Look up binding; if not found, keep placeholder as-is
-            if let Some(value) = bindings.get(name.as_str()) {
-                result.push_str(value);
-            } else {
+            // Check for `{{` escape → literal `{`
+            if chars.peek() == Some(&'{') {
+                chars.next();
                 result.push('{');
-                result.push_str(&name);
-                result.push('}');
+            } else {
+                // Collect placeholder name until '}'
+                let mut name = String::new();
+                for inner in chars.by_ref() {
+                    if inner == '}' {
+                        break;
+                    }
+                    name.push(inner);
+                }
+                // Look up binding; if not found, keep placeholder as-is
+                if let Some(value) = bindings.get(name.as_str()) {
+                    result.push_str(value);
+                } else {
+                    result.push('{');
+                    result.push_str(&name);
+                    result.push('}');
+                }
             }
+        } else if ch == '}' {
+            // Check for `}}` escape → literal `}`
+            if chars.peek() == Some(&'}') {
+                chars.next();
+            }
+            result.push('}');
         } else {
             result.push(ch);
         }
@@ -456,7 +469,7 @@ mod tests {
         bindings.insert("right", "b".to_string());
 
         let str_result = ts.render("concat_expr", Some("String"), &[], &bindings);
-        assert_eq!(str_result, Some("format!(\"{{}}{{}}\", a, b)".to_string()));
+        assert_eq!(str_result, Some("format!(\"{}{}\", a, b)".to_string()));
 
         let list_result = ts.render("concat_expr", Some("List"), &[], &bindings);
         assert_eq!(list_result, Some("AlmideConcat::concat(a, b)".to_string()));
