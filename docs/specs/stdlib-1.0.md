@@ -1,13 +1,14 @@
-# Stdlib 1.0 Specification — Draft
+# Stdlib 1.0 Specification
 
 > これは Almide 1.0 codefreeze 時の stdlib のあるべき姿。
 > 現状との差分ではなく、理想状態を定義する。
+> LLM validation: Claude 100%, Gemini 100% (58/58 関数名予測正答)
 
 ---
 
 ## 設計原則
 
-1. **1 verb = 1 meaning** — 同じ動詞は全モジュールで同じ意味
+1. **1 verb = 1 meaning** — 同じ動詞は全モジュールで同じ意味。エイリアスなし (Canonicity)
 2. **data-first** — 第一引数がデータ。UFCS と `|>` で自然に使える
 3. **`to_*` は infallible、`parse` は fallible** — 失敗しない変換は `to_`、失敗しうる解釈は `parse`
 4. **`from_*` はターゲット側構築** — `int.from_hex("ff")` のように変換先モジュールに配置
@@ -15,6 +16,8 @@
 6. **`is_*` は Bool 述語** — `?` suffix なし
 7. **Option と Result は独立モジュール** — wrapper 型にも map/flat_map/unwrap_or
 8. **Map はコレクションとして一人前** — fold/any/all/each/count が使える
+9. **Char 型なし** — 文字 = 長さ 1 の String。`string.get(s, i)` は `Option[String]` を返す
+10. **半開区間** — `range(start, end)` は `[start, end)` (Python/Rust/Go と同じ)
 
 ---
 
@@ -112,6 +115,7 @@ codepoint(s) -> Option[Int]
 from_codepoint(n) -> String
 
 // REMOVED: to_int (use int.parse), to_float (use float.parse), char_at (use get), char_count (use len)
+// NOT INCLUDED: format — 文字列補間 "${expr}" が言語構文として存在するため不要
 ```
 
 ### int
@@ -206,10 +210,8 @@ flatten(xss) -> List[A]
 fold(xs, init, f) -> B
 reduce(xs, f) -> Option[A]
 scan(xs, init, f) -> List[B]
-sum(xs) -> Int
-sum_float(xs) -> Float
-product(xs) -> Int
-product_float(xs) -> Float
+sum(xs) -> Int | Float                        // 要素型に応じて返り値型が決まる
+product(xs) -> Int | Float                     // 同上
 min(xs) -> Option[A]
 max(xs) -> Option[A]
 min_by(xs, f) -> Option[A]                    // NEW
@@ -249,7 +251,7 @@ dedup(xs) -> List[A]
 // Mutate (返り値は新しい List)
 set(xs, i, value) -> List[A]
 insert(xs, i, value) -> List[A]
-remove(xs, i) -> List[A]                       // 旧 remove_at
+remove_at(xs, i) -> List[A]                    // インデックス指定を明示。map.remove(key) との混同防止
 swap(xs, i, j) -> List[A]
 update(xs, i, f) -> List[A]
 repeat(value, n) -> List[A]
@@ -258,7 +260,7 @@ repeat(value, n) -> List[A]
 each(xs, f) -> Unit
 
 // Convert
-range(start, end) -> List[Int]
+range(start, end) -> List[Int]                 // [start, end) 半開区間
 ```
 
 ### map
@@ -280,7 +282,7 @@ any(m, f) -> Bool                              // NEW: f(k, v) -> Bool
 all(m, f) -> Bool                              // NEW: f(k, v) -> Bool
 
 // Transform
-map(m, f) -> Map[K, V2]                        // 旧 map_values。f(v) -> V2
+map(m, f) -> Map[K, V2]                        // f(k, v) -> V2。filter と対称
 filter(m, f) -> Map[K, V]                      // f(k, v) -> Bool
 
 // Aggregate
@@ -291,6 +293,7 @@ each(m, f) -> Unit                             // NEW: f(k, v) -> Unit
 // Mutate (返り値は新しい Map)
 set(m, key, value) -> Map[K, V]
 remove(m, key) -> Map[K, V]
+update(m, key, f) -> Map[K, V]                // NEW: f(v) -> V。キーが存在すれば値を変換
 merge(m1, m2) -> Map[K, V]
 
 // Construct
@@ -382,11 +385,12 @@ to_err_option(r) -> Option[E]
 | `result.and_then` 削除 → `result.flat_map` | リネーム + 旧名削除 | エイリアスなし。Canonicity |
 | `map.map_values` → `map.map` | リネーム | callback は (v) -> V2 |
 | `map.from_entries` 削除 | 関数削除 | `map.from_list` に統一 |
-| `list.remove_at` → `list.remove` | リネーム | |
-| `json.to_string` → `json.as_string` | リネーム | 動的抽出は as_*。json.to_* 全て as_* に |
-| `json.to_int` → `json.as_int` | リネーム | 同上 |
+| `list.remove_at` 維持 | 変更なし | map.remove との混同防止で remove_at を維持 |
 | `string.pad_left` → `string.pad_start` | リネーム | start/end 統一 |
 | `string.pad_right` → `string.pad_end` | リネーム | 同上 |
+| `list.sum_float` / `list.product_float` 削除 | 関数削除 | sum/product が型に応じて動作 |
+| `json.to_string` → `json.as_string` | リネーム | 動的抽出は as_*。json.to_* 全て as_* に |
+| `json.to_int` → `json.as_int` | リネーム | 同上 |
 | int bitwise niche 関数 | 維持 | hash.almd が依存。削除しない |
 
 ## 新規追加リスト
@@ -394,7 +398,7 @@ to_err_option(r) -> Option[E]
 | 追加 | モジュール |
 |------|-----------|
 | option モジュール全体 (TOML+runtime) | option (11 関数: map, flat_map, filter, flatten, unwrap_or, unwrap_or_else, is_some, is_none, to_result, to_list) |
-| map.fold, map.each, map.any, map.all, map.count, map.find | map (+6) |
+| map.fold, map.each, map.any, map.all, map.count, map.find, map.update | map (+7) |
 | string.get, string.first, string.last, string.take, string.drop, string.take_end, string.drop_end | string (+7) |
 | list.min_by, list.max_by, list.unique_by | list (+3) |
 | result.flat_map, result.flatten | result (+2) |
