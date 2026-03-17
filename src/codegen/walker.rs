@@ -178,19 +178,32 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         // ── Calls ──
         IrExprKind::Call { target, args, .. } => {
             let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
-            let callee = match target {
-                CallTarget::Named { name } => name.clone(),
-                CallTarget::Module { module, func } => format!("{}_{}", module, func),
-                CallTarget::Method { object, method } => {
-                    format!("{}.{}", render_expr(ctx, object), method)
+            match target {
+                CallTarget::Module { module, func } => {
+                    // Stdlib module call — use module_call template
+                    let mut b = HashMap::new();
+                    b.insert("module", module.clone());
+                    b.insert("func", func.clone());
+                    b.insert("args", args_str);
+                    ctx.templates.render("module_call", None, &[], &b)
+                        .unwrap_or_else(|| format!("{}_{}", module, func))
                 }
-                CallTarget::Computed { callee } => render_expr(ctx, callee),
-            };
-            let mut b = HashMap::new();
-            b.insert("callee", callee);
-            b.insert("args", args_str);
-            ctx.templates.render("call_expr", None, &[], &b)
-                .unwrap_or_else(|| format!("call(...)"))
+                _ => {
+                    let callee = match target {
+                        CallTarget::Named { name } => name.clone(),
+                        CallTarget::Method { object, method } => {
+                            format!("{}.{}", render_expr(ctx, object), method)
+                        }
+                        CallTarget::Computed { callee } => render_expr(ctx, callee),
+                        CallTarget::Module { .. } => unreachable!(),
+                    };
+                    let mut b = HashMap::new();
+                    b.insert("callee", callee);
+                    b.insert("args", args_str);
+                    ctx.templates.render("call_expr", None, &[], &b)
+                        .unwrap_or_else(|| format!("call(...)"))
+                }
+            }
         }
 
         // ── Collections ──

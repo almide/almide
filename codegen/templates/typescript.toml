@@ -12,6 +12,11 @@ template = "({cond}) ? ({then}) : ({else})"
 [call_expr]
 template = "{callee}({args})"
 
+# ── Stdlib module calls ──
+
+[module_call]
+template = "__almd_{module}.{func}({args})"
+
 [binary_op]
 template = "({left} {op} {right})"
 
@@ -211,6 +216,13 @@ template = "({params}) => {body}"
 
 [type_alias]
 template = "type {name} = {type};"
+
+# Walker calls struct_decl for records — TS renders as interface
+[struct_decl]
+template = "interface {name} {{ {fields} }}"
+
+[struct_field]
+template = "{name}: {type};"
 
 [interface_decl]
 template = "interface {name} {{ {fields} }}"

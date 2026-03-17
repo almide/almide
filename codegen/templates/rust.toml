@@ -23,6 +23,11 @@ template = "{callee}({args})"
 when_attr = "needs_try"
 template = "{callee}({args})?"
 
+# ── Stdlib module calls ──
+
+[module_call]
+template = "almide_rt_{module}_{func}({args})"
+
 [binary_op]
 template = "({left} {op} {right})"
 
