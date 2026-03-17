@@ -130,12 +130,85 @@ fn fill_template(template: &str, bindings: &HashMap<&str, String>) -> String {
 }
 
 // ── TOML Loading ──
-// Templates are loaded from codegen/templates/*.toml at build time
-// (similar to stdlib/defs/*.toml → build.rs).
-// For now, we define them inline for prototyping.
 
-/// Load built-in Rust templates (will be replaced by TOML loading)
+/// Load templates from a TOML string.
+/// Handles both single `[construct]` and array `[[construct]]` forms.
+pub fn load_from_toml(target_name: &str, toml_str: &str) -> TemplateSet {
+    let mut ts = TemplateSet::new(target_name);
+    let table: toml::Table = toml_str.parse().expect("invalid template TOML");
+
+    for (key, value) in &table {
+        let mut rules = Vec::new();
+
+        match value {
+            // Single rule: [construct_name]
+            toml::Value::Table(t) => {
+                if let Some(rule) = parse_rule(t) {
+                    rules.push(rule);
+                }
+            }
+            // Array of rules: [[construct_name]]
+            toml::Value::Array(arr) => {
+                for item in arr {
+                    if let toml::Value::Table(t) = item {
+                        if let Some(rule) = parse_rule(t) {
+                            rules.push(rule);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        if !rules.is_empty() {
+            // Merge with existing entry (allows [[construct]] to extend [construct])
+            let entry = ts.entries.entry(key.clone()).or_insert_with(|| TemplateEntry {
+                rules: Vec::new(),
+            });
+            // Guarded rules first, default rules last
+            let mut guarded: Vec<TemplateRule> = Vec::new();
+            let mut defaults: Vec<TemplateRule> = Vec::new();
+            for r in rules {
+                if r.when_type.is_some() || r.when_attr.is_some() {
+                    guarded.push(r);
+                } else {
+                    defaults.push(r);
+                }
+            }
+            // Prepend guarded rules (checked first), then append defaults
+            let mut merged = guarded;
+            merged.append(&mut defaults);
+            merged.append(&mut entry.rules);
+            entry.rules = merged;
+        }
+    }
+
+    ts
+}
+
+fn parse_rule(t: &toml::Table) -> Option<TemplateRule> {
+    let template = t.get("template")?.as_str()?.to_string();
+    let when_type = t.get("when_type").and_then(|v| v.as_str()).map(String::from);
+    let when_attr = t.get("when_attr").and_then(|v| v.as_str()).map(String::from);
+    Some(TemplateRule {
+        template,
+        when_type,
+        when_attr,
+    })
+}
+
+/// Load Rust templates from embedded TOML
 pub fn rust_templates() -> TemplateSet {
+    load_from_toml("rust", include_str!("../../codegen/templates/rust.toml"))
+}
+
+/// Load TypeScript templates from embedded TOML
+pub fn typescript_templates() -> TemplateSet {
+    load_from_toml("typescript", include_str!("../../codegen/templates/typescript.toml"))
+}
+
+/// Load built-in Rust templates (inline fallback — kept for reference)
+pub fn rust_templates_inline() -> TemplateSet {
     let mut ts = TemplateSet::new("rust");
 
     // if/else
@@ -245,8 +318,8 @@ pub fn rust_templates() -> TemplateSet {
     ts
 }
 
-/// Load built-in TypeScript templates (will be replaced by TOML loading)
-pub fn typescript_templates() -> TemplateSet {
+/// Load built-in TypeScript templates (inline fallback — kept for reference)
+pub fn typescript_templates_inline() -> TemplateSet {
     let mut ts = TemplateSet::new("typescript");
 
     // if/else
@@ -403,5 +476,79 @@ mod tests {
         // With try
         let with_try = ts.render("call_expr", None, &["needs_try"], &bindings);
         assert_eq!(with_try, Some("fs_read(path)?".to_string()));
+    }
+
+    #[test]
+    fn test_toml_loader_basic() {
+        let toml = r#"
+[if_expr]
+template = "if ({cond}) {{ {then} }} else {{ {else} }}"
+
+[some_expr]
+template = "{inner}"
+"#;
+        let ts = load_from_toml("test", toml);
+        let mut b = HashMap::new();
+        b.insert("inner", "42".to_string());
+        assert_eq!(ts.render("some_expr", None, &[], &b), Some("42".to_string()));
+    }
+
+    #[test]
+    fn test_toml_loader_array_rules() {
+        let toml = r#"
+[[concat_expr]]
+when_type = "String"
+template = "{left} + {right}"
+
+[[concat_expr]]
+when_type = "List"
+template = "[...{left}, ...{right}]"
+"#;
+        let ts = load_from_toml("test", toml);
+        let mut b = HashMap::new();
+        b.insert("left", "a".to_string());
+        b.insert("right", "b".to_string());
+
+        assert_eq!(ts.render("concat_expr", Some("String"), &[], &b), Some("a + b".to_string()));
+        assert_eq!(ts.render("concat_expr", Some("List"), &[], &b), Some("[...a, ...b]".to_string()));
+    }
+
+    #[test]
+    fn test_toml_loader_attr_guard() {
+        let toml = r#"
+[[call_expr]]
+when_attr = "needs_try"
+template = "{callee}({args})?"
+
+[call_expr]
+template = "{callee}({args})"
+"#;
+        let ts = load_from_toml("test", toml);
+        let mut b = HashMap::new();
+        b.insert("callee", "read".to_string());
+        b.insert("args", "f".to_string());
+
+        assert_eq!(ts.render("call_expr", None, &[], &b), Some("read(f)".to_string()));
+        assert_eq!(ts.render("call_expr", None, &["needs_try"], &b), Some("read(f)?".to_string()));
+    }
+
+    #[test]
+    fn test_rust_toml_loads() {
+        // Verify the actual rust.toml loads without panicking
+        let ts = rust_templates();
+        assert!(ts.get("if_expr").is_some());
+        assert!(ts.get("some_expr").is_some());
+        assert!(ts.get("fn_decl").is_some());
+        assert!(ts.get("type_int").is_some());
+    }
+
+    #[test]
+    fn test_ts_toml_loads() {
+        // Verify the actual typescript.toml loads without panicking
+        let ts = typescript_templates();
+        assert!(ts.get("if_expr").is_some());
+        assert!(ts.get("some_expr").is_some());
+        assert!(ts.get("fn_decl").is_some());
+        assert!(ts.get("type_int").is_some());
     }
 }
