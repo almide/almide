@@ -295,6 +295,12 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::Call { target, args, .. } => {
             match target {
                 CallTarget::Module { module, func } => {
+                    // Special cases: io.print → println! in Rust
+                    if ctx.is_rust() && module == "io" && func == "print" {
+                        let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
+                        return format!("println!(\"{{}}\", {})", args_str);
+                    }
+
                     // Stdlib module call — render args with target-specific decorations
                     let args_str = if ctx.is_rust() {
                         render_stdlib_args_rust(ctx, args)
@@ -317,13 +323,17 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                     let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
                     let callee = match target {
                         CallTarget::Named { name } => {
-                            // Rust: assert_eq/assert_ne → macro invocation (no trailing ;, caller adds it)
+                            // Rust: assert_eq/assert_ne → macro invocation
                             if ctx.is_rust() && (name == "assert_eq" || name == "assert_ne") {
                                 return format!("{}!({})", name, args_str);
                             }
                             // Rust: assert_some → assert!(x.is_some())
                             if ctx.is_rust() && name == "assert_some" {
                                 return format!("assert!(({}).is_some())", args_str);
+                            }
+                            // Rust: println → println! macro
+                            if ctx.is_rust() && name == "println" {
+                                return format!("println!(\"{{}}\", {})", args_str);
                             }
                             // Qualify enum constructors (Red → Color::Red)
                             if let Some(enum_name) = ctx.ctor_to_enum.get(name.as_str()) {
