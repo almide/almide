@@ -4,7 +4,16 @@
 /// Replaces `?` with `_hdlm_qm_` (e.g., `exists?` → `exists_hdlm_qm_`).
 /// The `_hdlm_` prefix prevents collisions with user-defined identifiers.
 pub fn sanitize(name: &str) -> String {
-    name.replace('?', "_hdlm_qm_").replace('.', "_")
+    let s = name.replace('?', "_hdlm_qm_").replace('.', "_");
+    // Avoid JS/TS reserved words as identifiers
+    match s.as_str() {
+        "default" | "delete" | "switch" | "case" | "class" | "extends"
+        | "super" | "new" | "this" | "typeof" | "instanceof" | "void"
+        | "with" | "yield" | "enum" | "implements" | "interface"
+        | "package" | "private" | "protected" | "public" | "static"
+        | "arguments" | "eval" => format!("{}_", s),
+        _ => s,
+    }
 }
 
 /// Convert a sanitized or snake_case name to a clean camelCase export name

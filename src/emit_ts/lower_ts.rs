@@ -37,6 +37,8 @@ pub(super) struct LowerCtx<'a> {
     pub(super) variant_ctors: HashSet<String>,
     pub(super) user_modules: Vec<String>,
     tmp_counter: std::cell::Cell<u32>,
+    /// VarId → unique TS name (handles shadowing by appending $N suffix)
+    var_names: std::collections::HashMap<VarId, String>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -50,9 +52,23 @@ impl<'a> LowerCtx<'a> {
             for td in &m.type_decls { Self::collect_variant_info(td, &mut unit_variants, &mut generic_unit_ctors, &mut variant_ctors); }
         }
         let user_modules = ir.modules.iter().map(|m| m.name.clone()).collect();
+        // Build unique var names: if multiple VarIds share a source name, suffix with $1, $2, ...
+        let mut var_names = std::collections::HashMap::new();
+        let mut name_counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        for i in 0..ir.var_table.len() {
+            let vid = VarId(i as u32);
+            let base = sanitize(&ir.var_table.get(vid).name);
+            let count = name_counts.entry(base.clone()).or_insert(0);
+            if *count == 0 {
+                var_names.insert(vid, base);
+            } else {
+                var_names.insert(vid, format!("{}${}", base, count));
+            }
+            *count += 1;
+        }
         LowerCtx { ir, js_mode: opts.js_mode, npm_mode: opts.npm_mode,
             unit_variants, generic_unit_ctors, variant_ctors, user_modules,
-            tmp_counter: std::cell::Cell::new(0) }
+            tmp_counter: std::cell::Cell::new(0), var_names }
     }
 
     fn collect_variant_info(td: &IrTypeDecl, unit: &mut HashSet<String>, generic_unit: &mut HashSet<String>, record: &mut HashSet<String>) {
@@ -69,7 +85,9 @@ impl<'a> LowerCtx<'a> {
 
     fn next_tmp(&self) -> u32 { let n = self.tmp_counter.get(); self.tmp_counter.set(n + 1); n }
     pub(super) fn vt(&self) -> &VarTable { &self.ir.var_table }
-    pub(super) fn var_name(&self, id: VarId) -> String { sanitize(&self.vt().get(id).name) }
+    pub(super) fn var_name(&self, id: VarId) -> String {
+        self.var_names.get(&id).cloned().unwrap_or_else(|| sanitize(&self.vt().get(id).name))
+    }
 
     pub(super) fn lower_program(self) -> Program {
         let runtime = if self.npm_mode { String::new() } else { crate::emit_ts_runtime::full_runtime(self.js_mode) };
@@ -117,12 +135,12 @@ impl<'a> LowerCtx<'a> {
         match &body.kind {
             IrExprKind::Block { stmts, expr } => {
                 let s: Vec<Stmt> = stmts.iter().map(|s| self.lower_stmt(s, in_effect, in_test)).collect();
-                FnBody::Block { stmts: s, tail: expr.as_ref().map(|e| self.lower_expr(e, in_effect, in_test)) }
+                FnBody::Block { stmts: s, tail: expr.as_ref().map(|e| self.lower_expr_value(e, in_effect, in_test)) }
             }
             IrExprKind::DoBlock { stmts, expr } => {
                 FnBody::Block { stmts: self.lower_do_stmts(stmts, expr.as_deref(), in_effect, in_test), tail: None }
             }
-            _ => FnBody::Expr(self.lower_expr(body, in_effect, in_test)),
+            _ => FnBody::Expr(self.lower_expr_value(body, in_effect, in_test)),
         }
     }
 
@@ -159,7 +177,7 @@ impl<'a> LowerCtx<'a> {
 
             IrExprKind::Block { stmts, expr } => {
                 let s: Vec<Stmt> = stmts.iter().map(|s| self.lower_stmt(s, ie, it)).collect();
-                Expr::Block { stmts: s, tail: expr.as_ref().map(|e| Box::new(self.lower_expr(e, ie, it))) }
+                Expr::Block { stmts: s, tail: expr.as_ref().map(|e| Box::new(self.lower_expr_value(e, ie, it))) }
             }
             IrExprKind::DoBlock { stmts, expr } => {
                 let s = self.lower_do_stmts(stmts, expr.as_deref(), ie, it);
@@ -261,7 +279,16 @@ impl<'a> LowerCtx<'a> {
     fn lower_expr_value(&self, expr: &IrExpr, ie: bool, it: bool) -> Expr {
         match &expr.kind {
             IrExprKind::Block { stmts, expr: Some(tail) } if stmts.is_empty() => self.lower_expr_value(tail, ie, it),
-            IrExprKind::Block { .. } | IrExprKind::DoBlock { .. } => Expr::Iife(Box::new(self.lower_expr(expr, ie, it))),
+            IrExprKind::Block { .. } | IrExprKind::DoBlock { .. }
+            => Expr::Iife(Box::new(self.lower_expr(expr, ie, it))),
+            // While/ForIn are statements in TS — wrap in block-body IIFE
+            IrExprKind::While { .. } | IrExprKind::ForIn { .. }
+            => Expr::Raw({
+                let inner = self.lower_expr(expr, ie, it);
+                let mut s = String::new();
+                super::render_common::expr(&mut s, &inner, 0);
+                format!("(() => {{ {} }})()", s)
+            }),
             _ => self.lower_expr(expr, ie, it),
         }
     }
@@ -315,7 +342,7 @@ impl<'a> LowerCtx<'a> {
     }
 
     fn lower_call(&self, target: &CallTarget, args: &[IrExpr], ie: bool, it: bool) -> Expr {
-        let a: Vec<Expr> = args.iter().map(|a| self.lower_expr(a, ie, it)).collect();
+        let a: Vec<Expr> = args.iter().map(|a| self.lower_expr_value(a, ie, it)).collect();
         match target {
             CallTarget::Named { name } => {
                 if a.is_empty() && self.unit_variants.contains(name) {
@@ -419,7 +446,7 @@ impl<'a> LowerCtx<'a> {
             CallTarget::Method { object, method } => {
                 let obj = self.lower_expr(object, ie, it);
                 if method == "unwrap_or" && a.len() == 1 {
-                    return Expr::Call { func: Box::new(Expr::Var("unwrap_or".into())), args: vec![obj, a.into_iter().next().unwrap()] };
+                    return Expr::Call { func: Box::new(Expr::Var("__almd_unwrap_or".into())), args: vec![obj, a.into_iter().next().unwrap()] };
                 }
                 let mut all = vec![obj]; all.extend(a);
                 // Module-qualified UFCS: "list.len" → same path as Module call
@@ -476,15 +503,15 @@ impl<'a> LowerCtx<'a> {
         match &stmt.kind {
             IrStmtKind::Bind { var, mutability, value, .. } => {
                 let name = self.var_name(*var);
-                let val = self.lower_expr(value, ie, it);
+                let val = self.lower_expr_value(value, ie, it);
                 if it && !ie && matches!(&value.kind, IrExprKind::Call { .. }) { Stmt::ResultUnwrapBind { name, value: val } }
                 else if *mutability == Mutability::Var { Stmt::Let { name, value: val } }
                 else { Stmt::Var { name, value: val } }
             }
             IrStmtKind::BindDestructure { pattern, value } => Stmt::VarDestructure {
-                pattern: self.destructure_pattern(pattern), value: self.lower_expr(value, ie, it),
+                pattern: self.destructure_pattern(pattern), value: self.lower_expr_value(value, ie, it),
             },
-            IrStmtKind::Assign { var, value } => Stmt::Assign { target: self.var_name(*var), value: self.lower_expr(value, ie, it) },
+            IrStmtKind::Assign { var, value } => Stmt::Assign { target: self.var_name(*var), value: self.lower_expr_value(value, ie, it) },
             IrStmtKind::IndexAssign { target, index, value } => {
                 let name = self.var_name(*target);
                 if matches!(self.vt().get(*target).ty, Ty::Map(_, _)) {

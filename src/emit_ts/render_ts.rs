@@ -18,7 +18,7 @@ pub fn render(p: &Program) -> String {
     for s in &p.top_lets { stmt(&mut o, s, 0); o.push('\n'); }
     for f in &p.functions { function(&mut o, f, 0, true); o.push_str("\n\n"); }
     for t in &p.tests {
-        o.push_str(&format!("Deno.test({}, () => ", json_string(&t.name)));
+        o.push_str(&format!("Deno.test({}, async () => ", json_string(&t.name)));
         expr(&mut o, &t.body, 0);
         o.push_str(");\n\n");
     }

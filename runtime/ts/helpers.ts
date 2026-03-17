@@ -55,7 +55,7 @@ function __deep_eq(a: any, b: any): boolean {
 function assert_eq<T>(a: T, b: T, msg?: string): void { if (!__deep_eq(a, b)) { const m = msg ? msg + ": " : ""; throw new Error(`${m}assert_eq failed\n  expected: ${JSON.stringify(b)}\n       got: ${JSON.stringify(a)}`); } }
 function assert_ne<T>(a: T, b: T, msg?: string): void { if (__deep_eq(a, b)) { const m = msg ? msg + ": " : ""; throw new Error(`${m}assert_ne failed\n  both are: ${JSON.stringify(a)}`); } }
 function assert(c: boolean, msg?: string): void { if (!c) throw new Error(msg ? msg : "assertion failed"); }
-function unwrap_or<T>(x: T | null, d: T): T { return x !== null ? x : d; }
+function __almd_unwrap_or<T>(x: T | null, d: T): T { return x !== null ? x : d; }
 function __concat(a: any, b: any): any { return typeof a === "string" ? a + b : [...a, ...b]; }
 function __throw(msg: string): never { throw new Error(msg); }
 type Result<T, E> = { ok: true, value: T } | { ok: false, error: E };

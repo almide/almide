@@ -71,7 +71,7 @@ pub fn emit_npm_package(ir: &IrProgram, config: &NpmConfig) -> NpmOutput {
 
     // Build import preamble
     let mut imports = String::new();
-    imports.push_str("import { __bigop, __div, __deep_eq, __concat, __throw, println, eprintln, assert_eq, assert_ne, assert, unwrap_or, __assert_throws } from \"./_runtime/helpers.js\";\n");
+    imports.push_str("import { __bigop, __div, __deep_eq, __concat, __throw, println, eprintln, assert_eq, assert_ne, assert, __almd_unwrap_or, __assert_throws } from \"./_runtime/helpers.js\";\n");
     for mod_name in &used_modules {
         imports.push_str(&format!("import {{ __almd_{name} as __{name} }} from \"./_runtime/{name}.js\";\n", name = mod_name));
     }

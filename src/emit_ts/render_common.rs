@@ -35,7 +35,16 @@ pub fn expr(o: &mut String, e: &Expr, d: usize) {
         Expr::New { class, args } => { o.push_str("new "); o.push_str(class); o.push('('); comma_exprs(o, args, d); o.push(')'); }
 
         // ── Wrappers ──
-        Expr::Iife(inner) => { o.push_str("(() => "); expr(o, inner, d); o.push_str(")()"); }
+        Expr::Iife(inner) => {
+            // Block/DoLoop/While need block-body IIFE: (() => { stmts; return expr; })()
+            let needs_block = matches!(inner.as_ref(),
+                Expr::Block { .. } | Expr::DoLoop { .. } | Expr::While { .. } | Expr::For { .. } | Expr::ForRange { .. });
+            if needs_block {
+                o.push_str("(() => { "); expr(o, inner, d); o.push_str(" })()");
+            } else {
+                o.push_str("(() => "); expr(o, inner, d); o.push_str(")()");
+            }
+        }
         Expr::Await(e) => { o.push_str("await "); expr(o, e, d); }
         Expr::Raw(code) => o.push_str(code),
 
@@ -174,8 +183,12 @@ pub fn stmt(o: &mut String, s: &Stmt, d: usize) {
         Stmt::Expr(e) => { expr(o, e, d); o.push_str(";\n"); }
         Stmt::Comment(text) => { o.push_str(text); o.push('\n'); }
         Stmt::ResultUnwrapBind { name, value } => {
-            w!(o, "const __r_{0} = ", name); expr(o, value, d);
-            w!(o, "; if (!__r_{0}.ok) return __r_{0}; const {0} = __r_{0}.value;\n", name);
+            use std::sync::atomic::{AtomicU32, Ordering};
+            static COUNTER: AtomicU32 = AtomicU32::new(0);
+            let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+            let tmp = format!("__r_{}_{}", name, id);
+            w!(o, "const {} = ", tmp); expr(o, value, d);
+            w!(o, "; if (!{0}.ok) return {0}; const {1} = {0}.value;\n", tmp, name);
         }
         Stmt::TryCatchBind { name, value } => {
             w!(o, "var {}; try {{ {} = ", name, name); expr(o, value, d);
