@@ -254,7 +254,17 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 _ => {
                     let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
                     let callee = match target {
-                        CallTarget::Named { name } => name.clone(),
+                        CallTarget::Named { name } => {
+                            // Rust: assert_eq/assert_ne → macro invocation
+                            if ctx.is_rust() && (name == "assert_eq" || name == "assert_ne") {
+                                return format!("{}!({});", name, args_str);
+                            }
+                            // Rust: assert_some → assert!(x.is_some())
+                            if ctx.is_rust() && name == "assert_some" {
+                                return format!("assert!(({}).is_some());", args_str);
+                            }
+                            name.clone()
+                        }
                         CallTarget::Method { object, method } => {
                             format!("{}.{}", render_expr(ctx, object), method)
                         }
@@ -290,8 +300,15 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
+            // Resolve type name: explicit name, or from expr.ty, or from fields
+            let type_name = name.clone().unwrap_or_else(|| {
+                match &expr.ty {
+                    Ty::Named(n, _) => n.clone(),
+                    _ => render_type(ctx, &expr.ty),
+                }
+            });
             let mut b = HashMap::new();
-            b.insert("type_name", name.clone().unwrap_or_default());
+            b.insert("type_name", type_name);
             let fallback = format!("{{ {} }}", &fields_str);
             b.insert("fields", fields_str);
             ctx.templates.render("record_literal", None, &[], &b)
@@ -380,8 +397,90 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .unwrap_or_else(|| format!("\"...\""))
         }
 
-        // ── Fallback for not-yet-templated nodes ──
-        _ => format!("/* TODO: {} */", std::any::type_name::<IrExprKind>()),
+        // ── Range ──
+        IrExprKind::Range { start, end, inclusive } => {
+            let s = render_expr(ctx, start);
+            let e = render_expr(ctx, end);
+            if *inclusive {
+                format!("({}..={})", s, e)
+            } else {
+                format!("({}..{})", s, e)
+            }
+        }
+
+        // ── Tuple ──
+        IrExprKind::Tuple { elements } => {
+            let parts = elements.iter().map(|e| render_expr(ctx, e)).collect::<Vec<_>>().join(", ");
+            format!("({})", parts)
+        }
+        IrExprKind::TupleIndex { object, index } => {
+            format!("{}.{}", render_expr(ctx, object), index)
+        }
+        IrExprKind::IndexAccess { object, index } => {
+            format!("{}[{}]", render_expr(ctx, object), render_expr(ctx, index))
+        }
+
+        // ── Map ──
+        IrExprKind::MapLiteral { entries } => {
+            if ctx.is_rust() {
+                let parts: Vec<String> = entries.iter()
+                    .map(|(k, v)| format!("({}, {})", render_expr(ctx, k), render_expr(ctx, v)))
+                    .collect();
+                format!("HashMap::from([{}])", parts.join(", "))
+            } else {
+                let parts: Vec<String> = entries.iter()
+                    .map(|(k, v)| format!("[{}, {}]", render_expr(ctx, k), render_expr(ctx, v)))
+                    .collect();
+                format!("new Map([{}])", parts.join(", "))
+            }
+        }
+        IrExprKind::EmptyMap => {
+            if ctx.is_rust() { "HashMap::new()".into() } else { "new Map()".into() }
+        }
+
+        // ── SpreadRecord ──
+        IrExprKind::SpreadRecord { base, fields } => {
+            let base_str = render_expr(ctx, base);
+            let fields_str = fields.iter()
+                .map(|(k, v)| format!("{}: {}", k, render_expr(ctx, v)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let type_name = match &expr.ty {
+                Ty::Named(n, _) => n.clone(),
+                _ => render_type(ctx, &expr.ty),
+            };
+            if ctx.is_rust() {
+                format!("{} {{ {}, ..{} }}", type_name, fields_str, base_str)
+            } else {
+                format!("{{ ...{}, {} }}", base_str, fields_str)
+            }
+        }
+
+        // ── Try / Await ──
+        IrExprKind::Try { expr: inner } => {
+            let s = render_expr(ctx, inner);
+            if ctx.is_rust() { format!("({})?", s) } else { s }
+        }
+        IrExprKind::Await { expr: inner } => {
+            let s = render_expr(ctx, inner);
+            if ctx.is_rust() { format!("{}.await", s) } else { format!("await {}", s) }
+        }
+
+        // ── Hole / Todo ──
+        IrExprKind::Hole => if ctx.is_rust() { "todo!()".into() } else { "undefined".into() },
+        IrExprKind::Todo { message } => {
+            if ctx.is_rust() { format!("todo!(\"{}\")", message) } else { format!("throw new Error(\"{}\")", message) }
+        }
+
+        // ── Fan (concurrency) ──
+        IrExprKind::Fan { exprs } => {
+            // Placeholder: render as tuple of expressions
+            let parts = exprs.iter().map(|e| render_expr(ctx, e)).collect::<Vec<_>>().join(", ");
+            format!("/* fan */ ({})", parts)
+        }
+
+        // ── Fallback ──
+        // _ => format!("/* TODO: unhandled IR node */"),
     }
 }
 
@@ -540,8 +639,32 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                 rendered
             }
         }
+        IrStmtKind::Guard { cond, else_ } => {
+            let cond_str = render_expr(ctx, cond);
+            let else_str = render_expr(ctx, else_);
+            if ctx.is_rust() {
+                format!("if !({}) {{ {} }}", cond_str, else_str)
+            } else {
+                format!("if (!{}) {{ {} }}", cond_str, else_str)
+            }
+        }
+        IrStmtKind::IndexAssign { target, index, value } => {
+            let target_str = ctx.var_name(*target).to_string();
+            let idx_str = render_expr(ctx, index);
+            let val_str = render_expr(ctx, value);
+            format!("{}[{}] = {};", target_str, idx_str, val_str)
+        }
+        IrStmtKind::FieldAssign { target, field, value } => {
+            let target_str = ctx.var_name(*target).to_string();
+            let val_str = render_expr(ctx, value);
+            format!("{}.{} = {};", target_str, field, val_str)
+        }
+        IrStmtKind::BindDestructure { pattern, value } => {
+            // Simplified: just render as let _ = value
+            let val_str = render_expr(ctx, value);
+            format!("let _ = {};", val_str)
+        }
         IrStmtKind::Comment { text } => format!("// {}", text),
-        _ => format!("/* TODO: stmt */"),
     }
 }
 
@@ -577,8 +700,8 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     b.insert("return_type", ret_str);
     b.insert("body", body_str);
 
-    // Sanitize function name: spaces → underscores, Rust keywords avoided
-    let safe_name = func.name.replace(' ', "_").replace('-', "_");
+    // Sanitize function name: spaces/dots/hyphens → underscores
+    let safe_name = func.name.replace(' ', "_").replace('-', "_").replace('.', "_");
     b.insert("name", safe_name);
 
     let construct = if func.is_test {
