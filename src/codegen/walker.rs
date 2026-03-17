@@ -219,7 +219,15 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
 
         IrExprKind::Match { subject, arms } => {
-            let subj = render_expr(ctx, subject);
+            let mut subj = render_expr(ctx, subject);
+            // Rust: string subjects need .as_str() for pattern matching
+            if ctx.is_rust() && matches!(&subject.ty, Ty::String) {
+                // Check if any arm has a string literal pattern
+                let has_str_pat = arms.iter().any(|a| matches!(&a.pattern, IrPattern::Literal { expr } if matches!(&expr.kind, IrExprKind::LitStr { .. })));
+                if has_str_pat {
+                    subj = format!("{}.as_str()", subj);
+                }
+            }
             let arms_str = arms.iter()
                 .map(|arm| render_match_arm(ctx, arm))
                 .collect::<Vec<_>>()
@@ -405,12 +413,16 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .collect::<Vec<_>>()
                 .join(", ");
             // Resolve type name: explicit name, or from expr.ty, or from fields
-            let type_name = name.clone().unwrap_or_else(|| {
+            let mut type_name = name.clone().unwrap_or_else(|| {
                 match &expr.ty {
                     Ty::Named(n, _) => n.clone(),
                     _ => render_type(ctx, &expr.ty),
                 }
             });
+            // Qualify enum variant constructors: Circle → Shape::Circle
+            if let Some(enum_name) = ctx.ctor_to_enum.get(&type_name) {
+                type_name = format!("{}::{}", enum_name, type_name);
+            }
             let mut b = HashMap::new();
             b.insert("type_name", type_name);
             let fallback = format!("{{ {} }}", &fields_str);
@@ -678,7 +690,23 @@ fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {
     match pat {
         IrPattern::Wildcard => template_or(ctx, "pattern_wildcard", &[], "_"),
         IrPattern::Bind { var } => ctx.var_name(*var).to_string(),
-        IrPattern::Literal { expr } => render_expr(ctx, expr),
+        IrPattern::Literal { expr } => {
+            // In patterns, literals must be bare (no .to_string(), no i64 suffix for match)
+            match &expr.kind {
+                IrExprKind::LitStr { value } => {
+                    let escaped = if ctx.is_rust() {
+                        value.replace('\\', "\\\\").replace('"', "\\\"")
+                    } else {
+                        value.clone()
+                    };
+                    format!("\"{}\"", escaped)
+                }
+                IrExprKind::LitInt { value } => format!("{}", value),
+                IrExprKind::LitFloat { value } => format!("{}", value),
+                IrExprKind::LitBool { value } => format!("{}", value),
+                _ => render_expr(ctx, expr),
+            }
+        }
         IrPattern::Some { inner } => {
             let mut b = HashMap::new();
             b.insert("binding", render_pattern(ctx, inner));
@@ -716,6 +744,12 @@ fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {
             format!("({})", elems)
         }
         IrPattern::RecordPattern { name, fields, .. } => {
+            // Qualify enum variant record patterns: Circle → Shape::Circle
+            let qualified_name = if let Some(enum_name) = ctx.ctor_to_enum.get(name) {
+                format!("{}::{}", enum_name, name)
+            } else {
+                name.clone()
+            };
             let fields_str = fields.iter()
                 .map(|f| match &f.pattern {
                     Some(p) => format!("{}: {}", f.name, render_pattern(ctx, p)),
@@ -723,7 +757,7 @@ fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("{} {{ {} }}", name, fields_str)
+            format!("{} {{ {} }}", qualified_name, fields_str)
         }
     }
 }
