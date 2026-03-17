@@ -334,6 +334,18 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                     }
 
                     if ctx.is_rust() {
+                        // If any arg is a FnRef (not a lambda), use simple rendering
+                        // gen_generated_call's inline_lambda doesn't handle FnRef
+                        let has_fn_ref = args.iter().any(|a| matches!(&a.kind, IrExprKind::FnRef { .. }));
+                        if has_fn_ref {
+                            let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
+                            let mut result = format!("almide_rt_{}_{}({})", module, func, args_str);
+                            if ctx.in_effect_fn && matches!(&expr.ty, Ty::Result(_, _)) {
+                                result.push('?');
+                            }
+                            return result;
+                        }
+
                         // Use the generated stdlib dispatch (handles &*, .to_vec(), ?, lambda formatting)
                         let rendered_args: Vec<String> = args.iter().map(|a| render_expr(ctx, a)).collect();
                         let inline_lambda = |arg_idx: usize, param_count: usize| -> (Vec<String>, String) {
@@ -341,13 +353,16 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                                 if let IrExprKind::Lambda { params, body } = &arg.kind {
                                     let names: Vec<String> = params.iter()
                                         .take(param_count)
-                                        .map(|(id, _)| ctx.var_name(*id).to_string())
+                                        .map(|(id, _)| {
+                                            let n = ctx.var_name(*id).to_string();
+                                            if n == "_" { "__unused".into() } else { n }
+                                        })
                                         .collect();
                                     let body_str = render_expr(ctx, body);
                                     return (names, body_str);
                                 }
                             }
-                            (vec!["_".into()], "()".into())
+                            (vec!["__unused".into()], "()".into())
                         };
                         if let Some(mut result) = crate::generated::emit_rust_calls::gen_generated_call(
                             module, func, &rendered_args, ctx.in_effect_fn, &inline_lambda
@@ -1035,12 +1050,20 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     };
 
     // Sanitize function name: spaces/dots/hyphens → underscores
-    let safe_name = func.name.replace(' ', "_").replace('-', "_").replace('.', "_")
+    let mut safe_name = func.name.replace(' ', "_").replace('-', "_").replace('.', "_")
         .replace('+', "_plus_").replace('/', "_div_").replace('*', "_mul_")
         .replace('(', "").replace(')', "").replace(',', "_").replace(':', "_")
         .replace('=', "_eq_").replace('!', "_bang_").replace('?', "_q_")
         .replace('<', "_lt_").replace('>', "_gt_").replace('[', "_").replace(']', "_")
         .replace('|', "_pipe_").replace('&', "_amp_").replace('%', "_mod_");
+    // Escape Rust keywords with r# prefix
+    let rust_keywords = ["while", "for", "if", "else", "match", "loop", "break", "continue",
+        "return", "fn", "let", "mut", "use", "mod", "pub", "struct", "enum", "impl", "trait",
+        "type", "where", "as", "in", "ref", "self", "super", "crate", "const", "static",
+        "unsafe", "async", "await", "dyn", "move", "true", "false"];
+    if ctx.is_rust() && rust_keywords.contains(&safe_name.as_str()) {
+        safe_name = format!("r#{}", safe_name);
+    }
     let safe_name = format!("{}{}", safe_name, fn_generics);
 
     let mut b = HashMap::new();
