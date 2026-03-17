@@ -64,7 +64,7 @@ rust_min = "almide_rt_string_slice(&*{s}, {start}, None)"
 ts = "__almd_string.slice({s}, {start}, {end})"
 ts_min = "__almd_string.slice({s}, {start})"
 
-[pad_left]
+[pad_start]
 description = "Pad a string on the left to reach a target length."
 example = 'string.pad_left("42", 5, "0") // => "00042"'
 params = [{ name = "s", type = "String" }, { name = "n", type = "Int" }, { name = "ch", type = "String" }]
@@ -104,14 +104,6 @@ return = "String"
 rust = "almide_rt_string_to_lower(&*{s})"
 ts = "__almd_string.to_lower({s})"
 
-[to_int]
-description = "Parse a string as an integer. Returns err if invalid."
-example = 'string.to_int("42") // => ok(42)'
-params = [{ name = "s", type = "String" }]
-return = "Result[Int, String]"
-rust = "almide_rt_string_to_int(&*{s})?"
-ts = "__almd_string.to_int({s})"
-
 [replace]
 description = "Replace all occurrences of a substring."
 example = 'string.replace("aabbcc", "bb", "XX") // => "aaXXcc"'
@@ -120,7 +112,7 @@ return = "String"
 rust = "almide_rt_string_replace(&*{s}, &*{from}, &*{to})"
 ts = "__almd_string.replace({s}, {from}, {to})"
 
-[char_at]
+[get]
 description = "Get the character at a given index, or none if out of bounds."
 example = 'string.char_at("hello", 1) // => some("e")'
 params = [{ name = "s", type = "String" }, { name = "i", type = "Int" }]
@@ -232,15 +224,7 @@ return = "String"
 rust = "almide_rt_string_from_codepoint({n})"
 ts = "String.fromCodePoint({n})"
 
-[char_count]
-description = "Return the number of Unicode characters (not bytes) in a string."
-example = 'string.char_count("hello") // => 5'
-params = [{ name = "s", type = "String" }]
-return = "Int"
-rust = "almide_rt_string_char_count(&*{s})"
-ts = "__almd_string.char_count({s})"
-
-[pad_right]
+[pad_end]
 description = "Pad a string on the right to reach a target length."
 example = 'string.pad_right("hi", 5, ".") // => "hi..."'
 params = [{ name = "s", type = "String" }, { name = "n", type = "Int" }, { name = "ch", type = "String" }]
@@ -319,11 +303,3 @@ params = [{ name = "s", type = "String" }, { name = "needle", type = "String" }]
 return = "Option[Int]"
 rust = "almide_rt_string_last_index_of(&*{s}, &*{needle})"
 ts = "__almd_string.last_index_of({s}, {needle})"
-
-[to_float]
-description = "Parse a string as a float. Returns err if invalid."
-example = 'string.to_float("3.14") // => ok(3.14)'
-params = [{ name = "s", type = "String" }]
-return = "Result[Float, String]"
-rust = "almide_rt_string_to_float(&*{s})?"
-ts = "__almd_string.to_float({s})"

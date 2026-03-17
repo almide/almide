@@ -1,4 +1,4 @@
-[field]
+[get]
 description = "Get a field from a Value object by key. Returns err if missing."
 params = [{ name = "v", type = "Value" }, { name = "key", type = "String" }]
 return = "Result[Value, String]"
@@ -8,35 +8,35 @@ ts = "__almd_value.field({v}, {key})"
 [as_string]
 description = "Extract a String from a Value. Returns err if not a Str."
 params = [{ name = "v", type = "Value" }]
-return = "Result[String, String]"
+return = "Option[String]"
 rust = "value_as_string({v})"
 ts = "__almd_value.as_string({v})"
 
 [as_int]
 description = "Extract an Int from a Value. Returns err if not an Int."
 params = [{ name = "v", type = "Value" }]
-return = "Result[Int, String]"
+return = "Option[Int]"
 rust = "value_as_int({v})"
 ts = "__almd_value.as_int({v})"
 
 [as_float]
 description = "Extract a Float from a Value. Returns err if not a Float."
 params = [{ name = "v", type = "Value" }]
-return = "Result[Float, String]"
+return = "Option[Float]"
 rust = "value_as_float({v})"
 ts = "__almd_value.as_float({v})"
 
 [as_bool]
 description = "Extract a Bool from a Value. Returns err if not a Bool."
 params = [{ name = "v", type = "Value" }]
-return = "Result[Bool, String]"
+return = "Option[Bool]"
 rust = "value_as_bool({v})"
 ts = "__almd_value.as_bool({v})"
 
 [as_array]
 description = "Extract a List[Value] from a Value. Returns err if not an Array."
 params = [{ name = "v", type = "Value" }]
-return = "Result[List[Value], String]"
+return = "Option[List[Value]]"
 rust = "value_as_array({v})"
 ts = "__almd_value.as_array({v})"
 

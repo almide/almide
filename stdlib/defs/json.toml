@@ -62,22 +62,6 @@ return = "List[String]"
 rust = "almide_json_keys(&{j})"
 ts = "__almd_json.keys({j})"
 
-[to_string]
-description = "Extract the string value from a Json. Returns none if not a string."
-example = 'json.to_string(json.from_string("hello"))'
-params = [{ name = "j", type = "Value" }]
-return = "Option[String]"
-rust = "almide_json_to_string(&{j})"
-ts = "__almd_json.to_string({j})"
-
-[to_int]
-description = "Extract the integer value from a Json. Returns none if not an integer."
-example = 'json.to_int(json.from_int(42))'
-params = [{ name = "j", type = "Value" }]
-return = "Option[Int]"
-rust = "almide_json_to_int(&{j})"
-ts = "__almd_json.to_int({j})"
-
 [from_string]
 description = "Create a Json string value."
 example = 'json.from_string("hello")'
@@ -159,38 +143,6 @@ params = [{ name = "entries", type = "List[(String, Value)]" }]
 return = "Value"
 rust = "Value::Object({entries})"
 ts = "__almd_json.object({entries})"
-
-[s]
-description = "Shorthand for json.from_string. Create a Json string value."
-example = 'json.s("hello")'
-params = [{ name = "v", type = "String" }]
-return = "Value"
-rust = "Value::Str({v})"
-ts = "__almd_json.from_string({v})"
-
-[i]
-description = "Shorthand for json.from_int. Create a Json integer value."
-example = 'json.i(42)'
-params = [{ name = "v", type = "Int" }]
-return = "Value"
-rust = "Value::Int({v})"
-ts = "__almd_json.from_int({v})"
-
-[f]
-description = "Shorthand for json.from_float. Create a Json float value."
-example = 'json.f(3.14)'
-params = [{ name = "v", type = "Float" }]
-return = "Value"
-rust = "Value::Float({v})"
-ts = "__almd_json.from_float({v})"
-
-[b]
-description = "Shorthand for json.from_bool. Create a Json boolean value."
-example = 'json.b(true)'
-params = [{ name = "v", type = "Bool" }]
-return = "Value"
-rust = "Value::Bool({v})"
-ts = "__almd_json.from_bool({v})"
 
 # ── Value extraction (keyless, on Json value itself) ───────────────
 
