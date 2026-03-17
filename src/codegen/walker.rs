@@ -129,7 +129,14 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
             let parts = elems.iter().map(|t| render_type(ctx, t)).collect::<Vec<_>>().join(", ");
             format!("({})", parts)
         }
+        Ty::TypeVar(n) => n.clone(),
+        Ty::Unknown | Ty::Union(_) => {
+            // Unknown types: use a generic placeholder that won't break compilation
+            if ctx.is_rust() { "_".into() } else { "any".into() }
+        }
+        Ty::Variant { name, .. } => name.clone(),
         // Fallback
+        #[allow(unreachable_patterns)]
         _ => format!("{}", ty.display()),
     }
 }
@@ -715,9 +722,9 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let cond_str = render_expr(ctx, cond);
             let else_str = render_expr(ctx, else_);
             if ctx.is_rust() {
-                format!("if !({}) {{ {} }}", cond_str, else_str)
+                format!("if !({}) {{ return {} }}", cond_str, else_str)
             } else {
-                format!("if (!{}) {{ {} }}", cond_str, else_str)
+                format!("if (!{}) {{ return {} }}", cond_str, else_str)
             }
         }
         IrStmtKind::IndexAssign { target, index, value } => {
