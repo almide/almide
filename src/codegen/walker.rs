@@ -867,7 +867,12 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     };
 
     // Sanitize function name: spaces/dots/hyphens → underscores
-    let safe_name = func.name.replace(' ', "_").replace('-', "_").replace('.', "_");
+    let safe_name = func.name.replace(' ', "_").replace('-', "_").replace('.', "_")
+        .replace('+', "_plus_").replace('/', "_div_").replace('*', "_mul_")
+        .replace('(', "").replace(')', "").replace(',', "_").replace(':', "_")
+        .replace('=', "_eq_").replace('!', "_bang_").replace('?', "_q_")
+        .replace('<', "_lt_").replace('>', "_gt_").replace('[', "_").replace(']', "_")
+        .replace('|', "_pipe_").replace('&', "_amp_").replace('%', "_mod_");
     let safe_name = format!("{}{}", safe_name, fn_generics);
 
     let mut b = HashMap::new();
