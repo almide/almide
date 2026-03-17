@@ -26,11 +26,13 @@ pub struct RenderContext<'a> {
     pub anon_records: HashMap<Vec<String>, String>,
     /// Named record field names → type name (e.g. ["age","name"] → "User")
     pub named_records: HashMap<Vec<String>, String>,
+    /// Top-level lazy let VarIds (need * deref in Rust)
+    pub lazy_vars: HashSet<VarId>,
 }
 
 impl<'a> RenderContext<'a> {
     pub fn new(templates: &'a TemplateSet, var_table: &'a VarTable) -> Self {
-        Self { templates, var_table, indent: 0, target: Target::Rust, in_effect_fn: false, ctor_to_enum: HashMap::new(), anon_records: HashMap::new(), named_records: HashMap::new() }
+        Self { templates, var_table, indent: 0, target: Target::Rust, in_effect_fn: false, ctor_to_enum: HashMap::new(), anon_records: HashMap::new(), named_records: HashMap::new(), lazy_vars: HashSet::new() }
     }
 
     pub fn with_target(mut self, target: Target) -> Self {
@@ -186,8 +188,16 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         // ── Variables ──
         IrExprKind::Var { id } => {
             let name = ctx.var_name(*id).to_string();
+            // Rust: top-level lazy vars need * deref
+            if ctx.is_rust() && ctx.lazy_vars.contains(id) {
+                let deref_name = format!("(*{})", name.to_uppercase());
+                if needs_clone(&expr.ty) {
+                    format!("{}.clone()", deref_name)
+                } else {
+                    deref_name
+                }
             // Rust: clone heap types (String, Vec, HashMap, records) when used
-            if ctx.is_rust() && needs_clone(&expr.ty) {
+            } else if ctx.is_rust() && needs_clone(&expr.ty) {
                 format!("{}.clone()", name)
             } else {
                 name
@@ -469,10 +479,20 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .unwrap_or_else(|| format!("Ok({})", render_expr(ctx, inner)))
         }
         IrExprKind::ResultErr { expr: inner } => {
-            let mut b = HashMap::new();
-            b.insert("inner", render_expr(ctx, inner));
-            ctx.templates.render("err_expr", None, &[], &b)
-                .unwrap_or_else(|| format!("Err({})", render_expr(ctx, inner)))
+            let inner_str = render_expr(ctx, inner);
+            if ctx.is_rust() {
+                // If inner type is already String, use .to_string()
+                // If not, pass as-is (custom error types)
+                match &inner.ty {
+                    Ty::String => format!("Err({}.to_string())", inner_str),
+                    _ => format!("Err({})", inner_str),
+                }
+            } else {
+                let mut b = HashMap::new();
+                b.insert("inner", inner_str);
+                ctx.templates.render("err_expr", None, &[], &b)
+                    .unwrap_or_else(|| format!("Err({})", render_expr(ctx, inner)))
+            }
         }
 
         // ── Lambda ──
@@ -862,6 +882,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         ctor_to_enum: ctx.ctor_to_enum.clone(),
         anon_records: ctx.anon_records.clone(),
         named_records: ctx.named_records.clone(),
+        lazy_vars: ctx.lazy_vars.clone(),
     };
 
     let params_str = func.params.iter()
@@ -933,6 +954,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         ctor_to_enum: ctx.ctor_to_enum.clone(),
         anon_records: HashMap::new(),
         named_records: HashMap::new(),
+        lazy_vars: HashSet::new(),
     };
     for td in &program.type_decls {
         if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
@@ -984,6 +1006,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
                     format!("const {}: {} = {};", name.to_uppercase(), ty_str, val_str)
                 }
                 TopLetKind::Lazy => {
+                    ctx.lazy_vars.insert(tl.var);
                     format!("static {}: std::sync::LazyLock<{}> = std::sync::LazyLock::new(|| {});", name.to_uppercase(), ty_str, val_str)
                 }
             }

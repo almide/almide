@@ -84,7 +84,7 @@ template = "None"
 template = "Ok({inner})"
 
 [err_expr]
-template = "Err({inner}.to_string())"
+template = "Err(format!(\"{:?}\", {inner}))"
 
 [unwrap_or_expr]
 template = "{expr}.unwrap_or({default})"
