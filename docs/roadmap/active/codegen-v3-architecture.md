@@ -4,6 +4,107 @@
 **見積り:** 3–4 週間（段階的移行）
 **ブランチ:** develop
 
+## 全体アーキテクチャとスコープ
+
+```mermaid
+flowchart TB
+    subgraph Frontend["Frontend（変更なし）"]
+        SRC["*.almd ソースコード"]
+        LEX["Lexer"]
+        PARSE["Parser"]
+        AST["Untyped AST"]
+        RESOLVE["Import Resolution"]
+        CHECK["Type Checker"]
+        IR["Typed IR (IrProgram)"]
+
+        SRC --> LEX --> PARSE --> AST --> RESOLVE --> CHECK --> IR
+    end
+
+    subgraph CodegenV3["Codegen v3 ← ★ ここが対象"]
+        direction TB
+        subgraph L1["Layer 1: Core IR"]
+            NORM["正規化パス\n(定数畳み込み, DCE)"]
+        end
+        subgraph L2["Layer 2: Semantic Rewrite (Nanopass)"]
+            direction LR
+            P1["OptionErasure\n(TS: some→x)"]
+            P2["ResultPropagation\n(Rust: auto-?)"]
+            P3["BorrowInsertion\n(Rust: clone/&)"]
+            P4["FanLowering\n(thread/Promise)"]
+            P5["TypeConcretization\n(Box, AnonRecord)"]
+            P6["..."]
+        end
+        subgraph L3["Layer 3: Template Renderer"]
+            TOML_R["rust.toml"]
+            TOML_T["typescript.toml"]
+            TOML_G["go.toml (将来)"]
+            ENGINE["Template Engine"]
+
+            TOML_R --> ENGINE
+            TOML_T --> ENGINE
+            TOML_G --> ENGINE
+        end
+
+        NORM --> P1 & P2 & P3 & P4 & P5 & P6
+        P1 & P2 & P3 & P4 & P5 & P6 --> ENGINE
+    end
+
+    subgraph Stdlib["Stdlib Codegen（現行 TOML そのまま）"]
+        STDLIB_TOML["stdlib/defs/*.toml"]
+        BUILDRS["build.rs"]
+        GEN["generated/\nemit_rust_calls.rs\nemit_ts_calls.rs"]
+
+        STDLIB_TOML --> BUILDRS --> GEN
+    end
+
+    subgraph Output["出力"]
+        RUST_OUT["Rust ソースコード"]
+        TS_OUT["TypeScript ソースコード"]
+        GO_OUT["Go ソースコード (将来)"]
+    end
+
+    subgraph Feedback["フィードバックループ（Almide 独自）"]
+        GLAB["Grammar Lab\nA/B テスト"]
+        SURV["Survival Rate\n測定"]
+        IMPROVE["Template / Pass\n改善"]
+
+        GLAB --> SURV --> IMPROVE
+    end
+
+    IR --> NORM
+    ENGINE --> RUST_OUT & TS_OUT & GO_OUT
+    GEN -.-> ENGINE
+
+    RUST_OUT & TS_OUT -.-> GLAB
+    IMPROVE -.-> TOML_R & TOML_T & P1 & P2
+
+    style CodegenV3 fill:#1a1a2e,stroke:#e94560,stroke-width:3px
+    style L1 fill:#16213e,stroke:#0f3460
+    style L2 fill:#16213e,stroke:#0f3460
+    style L3 fill:#16213e,stroke:#0f3460
+    style Feedback fill:#0a0a0a,stroke:#e94560,stroke-dasharray:5 5
+```
+
+### 現行との差分
+
+```mermaid
+flowchart LR
+    subgraph Current["現行"]
+        IR_C["Typed IR"] --> LR["lower_rust.rs\n(800行)"] --> RR["render.rs\n(300行)"] --> RUST_C["Rust"]
+        IR_C --> LT["lower_ts.rs\n(680行)"] --> RT["render_common.rs\n(420行)"] --> TS_C["TS"]
+    end
+
+    subgraph New["Codegen v3"]
+        IR_N["Typed IR"] --> NORM_N["正規化"] --> NP["Nanopass\n(各50-100行 × N)"] --> TE["Template Engine\n+ TOML"] --> OUT_N["Rust / TS / Go"]
+    end
+
+    style Current fill:#1a0000,stroke:#ff0000
+    style New fill:#001a00,stroke:#00ff00
+```
+
+**現行:** target ごとに独立した 800-1100 行の手続きコード。重複 ~400 行。
+**v3:** 共通 walker + 小パス (各 50-100 行) + TOML テンプレート。target 追加 = TOML + パス ON/OFF。
+
 ## 動機
 
 現行 codegen は ~4000 LOC の手続きコード。Rust と TS の lowering が ~400 行の並列コピペで、Option/Result の意味差が暗黙的に散在し、特殊ケースが各所にハードコードされている。
