@@ -354,6 +354,84 @@ to_err_option(r) -> Option[E]
 
 ---
 
+## Data Format
+
+### json
+
+json モジュールは Value 型（動的型付きデータ）を扱う。命名規則:
+- **`parse` / `stringify`** — 文字列 ↔ Value の変換
+- **`as_*`** — Value からの型抽出 (Option を返す)
+- **`get`** — キーで子 Value を取得 (Option)
+- **`get_*`** — キー指定 + 型抽出のショートカット (利便性で維持)
+
+```
+// Parse / Stringify
+parse(s) -> Result[Value, String]
+stringify(v) -> String
+stringify_pretty(v) -> String
+
+// Construct
+object(entries) -> Value                       // List[(String, Value)] -> Value
+array(items) -> Value                          // List[Value] -> Value
+string(s) -> Value                             // String -> Value (json.s は予約語回避)
+int(n) -> Value
+float(n) -> Value
+bool(b) -> Value
+null() -> Value
+
+// Type extraction (as_* = dynamic, returns Option)
+as_string(v) -> Option[String]                 // 旧 to_string
+as_int(v) -> Option[Int]                       // 旧 to_int
+as_float(v) -> Option[Float]
+as_bool(v) -> Option[Bool]
+as_array(v) -> Option[List[Value]]
+
+// Key access
+get(v, key) -> Option[Value]
+get_string(v, key) -> Option[String]           // get + as_string のショートカット
+get_int(v, key) -> Option[Int]                 // get + as_int のショートカット
+get_float(v, key) -> Option[Float]
+get_bool(v, key) -> Option[Bool]
+get_array(v, key) -> Option[List[Value]]
+
+// Path access
+get_path(v, path) -> Option[Value]
+set_path(v, path, value) -> Value
+remove_path(v, path) -> Value
+field(path, name) -> JsonPath
+index(path, i) -> JsonPath
+
+// Keys
+keys(v) -> List[String]
+
+// REMOVED: to_string (use as_string), to_int (use as_int)
+// KEPT: get_string, get_int 等 — 2段パイプのショートカットとして実用的
+```
+
+### 他の I/O / ユーティリティモジュール
+
+以下のモジュールは命名規則の違反なし。1.0 で現状の API をそのまま凍結:
+
+| Module | Functions | 備考 |
+|--------|-----------|------|
+| value | 19 | json と対称。as_*/from_* 命名済み |
+| math | 19 | min/max/abs/sqrt/sin/cos/pow 等 |
+| regex | 8 | is_match/find/find_all/replace/split 等 |
+| fs | 24 | read_text/write/mkdir_p/glob 等 (全 effect) |
+| http | 26 | get/post/serve 等 (全 effect) |
+| io | 3 | read_line/read_all/print (全 effect) |
+| process | 6 | exec/exit 等 (全 effect) |
+| env | 9 | get/set/args/os 等 (大半 effect) |
+| log | 8 | debug/info/warn/error 等 (全 effect) |
+| random | 4 | int/float/choice/shuffle (全 effect) |
+| crypto | 3 | sha256/hmac_sha256/hmac_verify (全 effect) |
+| datetime | 21 | now/parse_iso/format 等 (now のみ effect) |
+| uuid | 4 | v4/v5/parse/is_valid (v4 のみ effect) |
+| testing | 7 | assert/assert_eq/assert_ne 等 |
+| error | 3 | message/wrap/chain |
+
+---
+
 ## Naming Conventions Summary
 
 | パターン | 意味 | 例 | 失敗 |
@@ -379,19 +457,19 @@ to_err_option(r) -> Option[E]
 | `string.to_int` 削除 | 関数削除 | `int.parse` を使う |
 | `string.to_float` 削除 | 関数削除 | `float.parse` を使う |
 | `string.char_count` 削除 | 関数削除 | `string.len` を使う |
-| `string.char_at` → `string.get` | リネーム | Option[String] の戻り値は同じ |
 | `string.char_at` → `string.get` | リネーム | list.get との対称性。LLM 100% 正答 |
-| `int.parse_hex` → `int.from_hex` | リネーム | from_* パターン。LLM 100% 正答 |
-| `result.and_then` 削除 → `result.flat_map` | リネーム + 旧名削除 | エイリアスなし。Canonicity |
-| `map.map_values` → `map.map` | リネーム | callback は (v) -> V2 |
-| `map.from_entries` 削除 | 関数削除 | `map.from_list` に統一 |
-| `list.remove_at` 維持 | 変更なし | map.remove との混同防止で remove_at を維持 |
 | `string.pad_left` → `string.pad_start` | リネーム | start/end 統一 |
 | `string.pad_right` → `string.pad_end` | リネーム | 同上 |
+| `int.parse_hex` → `int.from_hex` | リネーム | from_* パターン。LLM 100% 正答 |
+| `result.and_then` 削除 → `result.flat_map` | リネーム + 旧名削除 | エイリアスなし。Canonicity |
+| `map.map_values` → `map.map` | リネーム | callback は f(k, v) -> V2 |
+| `map.from_entries` 削除 | 関数削除 | `map.from_list` に統一 |
 | `list.sum_float` / `list.product_float` 削除 | 関数削除 | sum/product が型に応じて動作 |
-| `json.to_string` → `json.as_string` | リネーム | 動的抽出は as_*。json.to_* 全て as_* に |
+| `json.to_string` → `json.as_string` | リネーム | 動的抽出は as_* |
 | `json.to_int` → `json.as_int` | リネーム | 同上 |
-| int bitwise niche 関数 | 維持 | hash.almd が依存。削除しない |
+| 非変更: `list.remove_at` 維持 | — | map.remove との混同防止 |
+| 非変更: int bitwise niche 関数 | — | hash.almd が依存 |
+| 非変更: `json.get_string` 等 維持 | — | get + as のショートカットとして実用的 |
 
 ## 新規追加リスト
 
