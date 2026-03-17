@@ -19,7 +19,8 @@ description = "Parse a decimal string into an integer. Returns err if the string
 example = "int.parse(\"42\") // => ok(42)"
 params = [{ name = "s", type = "String" }]
 return = "Result[Int, String]"
-rust = "almide_rt_int_parse(&*{s})?"
+rust = "almide_rt_int_parse(&*{s})"
+rust_effect = "almide_rt_int_parse(&*{s})?"
 ts = "__almd_int.parse({s})"
 
 [from_hex]
@@ -27,7 +28,8 @@ description = "Parse a hexadecimal string into an integer. Returns err if the st
 example = "int.parse_hex(\"ff\") // => ok(255)"
 params = [{ name = "s", type = "String" }]
 return = "Result[Int, String]"
-rust = "almide_rt_int_parse_hex(&*{s})?"
+rust = "almide_rt_int_parse_hex(&*{s})"
+rust_effect = "almide_rt_int_parse_hex(&*{s})?"
 ts = "__almd_int.parse_hex({s})"
 
 [abs]
