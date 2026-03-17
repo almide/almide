@@ -5,9 +5,6 @@
 ### Phase II: 安定性契約
 - [Stdlib Verb Reform](active/stdlib-verb-system.md) — 1.0 前最後の breaking change
 
-### Phase III: パッケージ + テスト
-- [Lockfile](active/lockfile.md) — `almide.lock` + git ベース依存解決
-- [CLI-First](active/cli-first.md) — showcase プログラム、`almide run` + `almide build`
 
 ### 全体
 - [PRODUCTION_READY.md](PRODUCTION_READY.md) — 1.0 基準、10 言語からの教訓
@@ -152,6 +149,8 @@
 - [Borrow/Clone Gaps](done/borrow-clone-gaps.md) — Case 1-9 全 FIXED
 - [Quality Improvements](done/quality-improvements.md) — エラー行番号、heredoc 行追跡
 - [Cross-Target CI](done/cross-target-ci.md) — 90/91 (98.9%), GitHub Actions 自動化
+- [CLI-First](done/cli-first.md) — run, build, test, check, fmt, clean, init, add
 - [Error Codes + JSON](done/error-codes-json.md) — E001-E010, --json, --explain, test --json, check < 100ms
+- [Lockfile](done/lockfile.md) — almide.lock, git deps, almide add, recursive resolution
 - [Stability Contract](done/stability-contract.md) — edition, BREAKING_CHANGE_POLICY, FROZEN_API, REJECTED_PATTERNS, HIDDEN_OPERATIONS
 - [While Loop](done/while-loop.md)
