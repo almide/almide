@@ -1174,7 +1174,15 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                             .unwrap_or_else(|| v.name.clone())
                     }
                     IrVariantKind::Tuple { fields } => {
-                        let fields_str = fields.iter().map(|t| render_type(ctx, t)).collect::<Vec<_>>().join(", ");
+                        let fields_str = fields.iter().map(|t| {
+                            let rendered = render_type(ctx, t);
+                            // Box recursive references (field type contains the enum name)
+                            if ctx.is_rust() && ty_contains_name(t, &td.name) {
+                                format!("Box<{}>", rendered)
+                            } else {
+                                rendered
+                            }
+                        }).collect::<Vec<_>>().join(", ");
                         let mut b = HashMap::new();
                         b.insert("name", v.name.clone());
                         let fallback = format!("{}({})", v.name, &fields_str);
@@ -1220,6 +1228,19 @@ fn template_or(ctx: &RenderContext, construct: &str, attrs: &[&str], fallback: &
 }
 
 // ── Rust-specific helpers ──
+
+/// Check if a type contains a reference to a named type (for recursive Box detection).
+fn ty_contains_name(ty: &Ty, name: &str) -> bool {
+    match ty {
+        Ty::Named(n, args) => n == name || args.iter().any(|a| ty_contains_name(a, name)),
+        Ty::Variant { name: vn, .. } => vn == name,
+        Ty::List(inner) | Ty::Option(inner) => ty_contains_name(inner, name),
+        Ty::Result(a, b) | Ty::Map(a, b) => ty_contains_name(a, name) || ty_contains_name(b, name),
+        Ty::Tuple(elems) => elems.iter().any(|e| ty_contains_name(e, name)),
+        Ty::Fn { params, ret } => params.iter().any(|p| ty_contains_name(p, name)) || ty_contains_name(ret, name),
+        _ => false,
+    }
+}
 
 /// Does this type need .clone() when used as a variable in Rust?
 fn needs_clone(ty: &Ty) -> bool {
