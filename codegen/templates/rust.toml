@@ -16,7 +16,7 @@
 [if_expr]
 template = "if {cond} {{ {then} }} else {{ {else} }}"
 
-[call_expr]
+[[call_expr]]
 template = "{callee}({args})"
 
 [[call_expr]]
@@ -72,7 +72,7 @@ template = "Some({inner})"
 when_attr = "none_type_hint"
 template = "None::<{type_hint}>"
 
-[none_expr]
+[[none_expr]]
 template = "None"
 
 [ok_expr]
@@ -170,7 +170,7 @@ template = "fn {name}({params}) -> {return_type} {{ {body} }}"
 [effect_fn_decl]
 template = "fn {name}({params}) -> Result<{return_type}, String> {{ {body} }}"
 
-[fn_param]
+[[fn_param]]
 template = "{name}: {type}"
 
 [[fn_param]]
