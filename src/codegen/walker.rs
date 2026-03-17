@@ -133,9 +133,10 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .join("\n");
             let mut b = HashMap::new();
             b.insert("subject", subj);
+            let fallback = format!("match {{ {} }}", &arms_str);
             b.insert("arms", arms_str);
             ctx.templates.render("match_expr", None, &[], &b)
-                .unwrap_or_else(|| format!("match {{ {} }}", arms_str))
+                .unwrap_or(fallback)
         }
 
         IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
@@ -214,9 +215,10 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .join(", ");
             let mut b = HashMap::new();
             b.insert("type_name", name.clone().unwrap_or_default());
+            let fallback = format!("{{ {} }}", &fields_str);
             b.insert("fields", fields_str);
             ctx.templates.render("record_literal", None, &[], &b)
-                .unwrap_or_else(|| format!("{{ {} }}", fields_str))
+                .unwrap_or(fallback)
         }
 
         // ── Access ──
@@ -531,9 +533,10 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                 .join("\n");
             let mut b = HashMap::new();
             b.insert("name", td.name.clone());
+            let fallback = format!("struct {} {{ {} }}", td.name, &fields_str);
             b.insert("fields", fields_str);
             ctx.templates.render("struct_decl", None, &[], &b)
-                .unwrap_or_else(|| format!("struct {} {{ {} }}", td.name, fields_str))
+                .unwrap_or(fallback)
         }
         IrTypeDeclKind::Variant { cases, .. } => {
             let variants_str = cases.iter()
@@ -548,9 +551,10 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                         let fields_str = fields.iter().map(|t| render_type(ctx, t)).collect::<Vec<_>>().join(", ");
                         let mut b = HashMap::new();
                         b.insert("name", v.name.clone());
+                        let fallback = format!("{}({})", v.name, &fields_str);
                         b.insert("fields", fields_str);
                         ctx.templates.render("enum_variant", None, &[], &b)
-                            .unwrap_or_else(|| format!("{}({})", v.name, fields_str))
+                            .unwrap_or(fallback)
                     }
                     IrVariantKind::Record { fields } => {
                         let fields_str = fields.iter()
@@ -564,9 +568,10 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                 .join(",\n");
             let mut b = HashMap::new();
             b.insert("name", td.name.clone());
+            let fallback = format!("enum {} {{ {} }}", td.name, &variants_str);
             b.insert("variants", variants_str);
             ctx.templates.render("enum_decl", None, &[], &b)
-                .unwrap_or_else(|| format!("enum {} {{ {} }}", td.name, variants_str))
+                .unwrap_or(fallback)
         }
         IrTypeDeclKind::Alias { target } => {
             let mut b = HashMap::new();
