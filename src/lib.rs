@@ -1,5 +1,6 @@
 pub mod ast;
 pub mod check;
+pub mod codegen;
 pub mod emit_common;
 pub mod emit_ts;
 pub mod emit_ts_runtime;
