@@ -180,6 +180,13 @@ pub fn stmt(o: &mut String, s: &Stmt, d: usize) {
             for s in body { stmt(o, s, d + 1); }
             o.push_str(&i); o.push_str("}\n");
         }
+        Stmt::IfElse { cond, then_body, else_body } => {
+            o.push_str("if ("); expr(o, cond, d); o.push_str(") {\n");
+            for s in then_body { stmt(o, s, d + 1); }
+            o.push_str(&i); o.push_str("} else {\n");
+            for s in else_body { stmt(o, s, d + 1); }
+            o.push_str(&i); o.push_str("}\n");
+        }
         Stmt::Expr(e) => { expr(o, e, d); o.push_str(";\n"); }
         Stmt::Comment(text) => { o.push_str(text); o.push('\n'); }
         Stmt::ResultUnwrapBind { name, value } => {

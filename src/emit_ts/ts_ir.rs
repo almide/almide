@@ -101,6 +101,7 @@ pub enum Stmt {
     IndexAssign { target: String, index: Expr, value: Expr },
     MapSet { target: String, key: Expr, value: Expr },
     If { cond: Expr, body: Vec<Stmt> },
+    IfElse { cond: Expr, then_body: Vec<Stmt>, else_body: Vec<Stmt> },
     Expr(Expr),
     Comment(String),
     /// Result unwrap bind: `const name = value; if (!name.ok) return name;`

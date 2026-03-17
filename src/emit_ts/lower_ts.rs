@@ -542,7 +542,19 @@ impl<'a> LowerCtx<'a> {
                 target: self.var_name(*target), field: field.clone(), value: self.lower_expr(value, ie, it),
             },
             IrStmtKind::Guard { cond, else_ } => self.lower_guard(&self.lower_expr(cond, ie, it), else_, ie, it),
-            IrStmtKind::Expr { expr } => Stmt::Expr(self.lower_expr(expr, ie, it)),
+            IrStmtKind::Expr { expr } => {
+                // If expr is an if/else containing break/continue, emit as statement
+                if let IrExprKind::If { cond, then, else_ } = &expr.kind {
+                    if ir_contains_break_continue(then) || ir_contains_break_continue(else_) {
+                        return Stmt::IfElse {
+                            cond: self.lower_expr(cond, ie, it),
+                            then_body: self.flatten_block_to_stmts(then, ie, it),
+                            else_body: self.flatten_block_to_stmts(else_, ie, it),
+                        };
+                    }
+                }
+                Stmt::Expr(self.lower_expr(expr, ie, it))
+            }
             IrStmtKind::Comment { text } => Stmt::Comment(text.clone()),
         }
     }
@@ -583,6 +595,17 @@ impl<'a> LowerCtx<'a> {
             } }
         }
         if let Some(t) = tail {
+            // If tail is an if/else containing break/continue, emit as if/else stmt
+            if let IrExprKind::If { cond, then, else_ } = &t.kind {
+                if ir_contains_break_continue(then) || ir_contains_break_continue(else_) {
+                    out.push(Stmt::IfElse {
+                        cond: self.lower_expr(cond, ie, it),
+                        then_body: self.flatten_block_to_stmts(then, ie, it),
+                        else_body: self.flatten_block_to_stmts(else_, ie, it),
+                    });
+                    return out;
+                }
+            }
             out.push(Stmt::Expr(Expr::Return(Some(Box::new(self.lower_expr(t, ie, it))))));
         }
         out
@@ -602,5 +625,56 @@ impl<'a> LowerCtx<'a> {
         if self.user_modules.contains(&name.to_string()) { name.to_string() }
         else if crate::stdlib::is_stdlib_module(name) { format!("__almd_{}", name) }
         else { name.to_string() }
+    }
+}
+
+impl<'a> LowerCtx<'a> {
+    /// Flatten a block expression into a list of statements (for if/else branches with break/continue).
+    fn flatten_block_to_stmts(&self, expr: &IrExpr, ie: bool, it: bool) -> Vec<Stmt> {
+        match &expr.kind {
+            IrExprKind::Block { stmts, expr: tail } => {
+                let mut out: Vec<Stmt> = stmts.iter().map(|s| self.lower_stmt(s, ie, it)).collect();
+                if let Some(t) = tail {
+                    out.extend(self.flatten_block_to_stmts(t, ie, it));
+                }
+                out
+            }
+            IrExprKind::Break => vec![Stmt::Expr(Expr::Break)],
+            IrExprKind::Continue => vec![Stmt::Expr(Expr::Continue)],
+            _ => vec![Stmt::Expr(self.lower_expr(expr, ie, it))],
+        }
+    }
+}
+
+/// Check if an IR expression contains Break or Continue anywhere in its tree.
+fn ir_contains_break_continue(expr: &IrExpr) -> bool {
+    match &expr.kind {
+        IrExprKind::Break | IrExprKind::Continue => true,
+        IrExprKind::If { cond, then, else_ } =>
+            ir_contains_break_continue(cond) || ir_contains_break_continue(then) || ir_contains_break_continue(else_),
+        IrExprKind::Block { stmts, expr } => {
+            stmts.iter().any(|s| ir_stmt_contains_break_continue(s))
+                || expr.as_ref().map_or(false, |e| ir_contains_break_continue(e))
+        }
+        IrExprKind::DoBlock { stmts, expr } => {
+            stmts.iter().any(|s| ir_stmt_contains_break_continue(s))
+                || expr.as_ref().map_or(false, |e| ir_contains_break_continue(e))
+        }
+        IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
+        | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
+        | IrExprKind::UnOp { operand: expr, .. } => ir_contains_break_continue(expr),
+        IrExprKind::BinOp { left, right, .. } =>
+            ir_contains_break_continue(left) || ir_contains_break_continue(right),
+        _ => false,
+    }
+}
+
+fn ir_stmt_contains_break_continue(stmt: &IrStmt) -> bool {
+    match &stmt.kind {
+        IrStmtKind::Bind { value, .. } => ir_contains_break_continue(value),
+        IrStmtKind::Assign { value, .. } => ir_contains_break_continue(value),
+        IrStmtKind::Expr { expr } => ir_contains_break_continue(expr),
+        IrStmtKind::Guard { else_, .. } => ir_contains_break_continue(else_),
+        _ => false,
     }
 }
