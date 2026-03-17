@@ -22,11 +22,15 @@ pub struct RenderContext<'a> {
     pub in_effect_fn: bool,
     /// Constructor name → enum name mapping (e.g. "Red" → "Color")
     pub ctor_to_enum: HashMap<String, String>,
+    /// Anonymous record field names → struct name (e.g. ["age","name"] → "AlmdRec0")
+    pub anon_records: HashMap<Vec<String>, String>,
+    /// Named record field names → type name (e.g. ["age","name"] → "User")
+    pub named_records: HashMap<Vec<String>, String>,
 }
 
 impl<'a> RenderContext<'a> {
     pub fn new(templates: &'a TemplateSet, var_table: &'a VarTable) -> Self {
-        Self { templates, var_table, indent: 0, target: Target::Rust, in_effect_fn: false, ctor_to_enum: HashMap::new() }
+        Self { templates, var_table, indent: 0, target: Target::Rust, in_effect_fn: false, ctor_to_enum: HashMap::new(), anon_records: HashMap::new(), named_records: HashMap::new() }
     }
 
     pub fn with_target(mut self, target: Target) -> Self {
@@ -78,11 +82,32 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
                 .unwrap_or_else(|| format!("Vec<{}>", render_type(ctx, inner)))
         }
         Ty::Named(name, _) => name.clone(),
-        Ty::Record { fields } => {
-            // For anonymous records, generate a placeholder name from sorted fields
-            let mut names: Vec<&str> = fields.iter().map(|(n, _)| n.as_str()).collect();
+        Ty::Record { fields } | Ty::OpenRecord { fields } => {
+            let mut names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
             names.sort();
-            names.join("_")
+            // Check named records first (user-defined types)
+            if let Some(n) = ctx.named_records.get(&names) {
+                return n.clone();
+            }
+            // Check anonymous records
+            if let Some(n) = ctx.anon_records.get(&names) {
+                if ctx.is_rust() {
+                    // Generic anonymous record: AlmdRec0<Type0, Type1, ...>
+                    let mut sorted_fields: Vec<_> = fields.iter().collect();
+                    sorted_fields.sort_by(|a, b| a.0.cmp(&b.0));
+                    let args: Vec<String> = sorted_fields.iter().map(|(_, t)| render_type(ctx, t)).collect();
+                    if args.is_empty() {
+                        n.clone()
+                    } else {
+                        format!("{}<{}>", n, args.join(", "))
+                    }
+                } else {
+                    n.clone()
+                }
+            } else {
+                // Fallback: sorted field names
+                names.join("_")
+            }
         }
         Ty::Map(k, v) => {
             let mut b = HashMap::new();
@@ -698,6 +723,8 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         target: ctx.target,
         in_effect_fn: func.is_effect,
         ctor_to_enum: ctx.ctor_to_enum.clone(),
+        anon_records: ctx.anon_records.clone(),
+        named_records: ctx.named_records.clone(),
     };
 
     let params_str = func.params.iter()
@@ -746,6 +773,8 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         target: ctx.target,
         in_effect_fn: ctx.in_effect_fn,
         ctor_to_enum: ctx.ctor_to_enum.clone(),
+        anon_records: HashMap::new(),
+        named_records: HashMap::new(),
     };
     for td in &program.type_decls {
         if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
@@ -755,7 +784,31 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         }
     }
 
+    // Build anonymous record maps (Rust only)
+    if ctx.is_rust() {
+        ctx.named_records = collect_named_records(program);
+        ctx.anon_records = collect_anon_records(program, &ctx.named_records);
+    }
+
     let mut parts = Vec::new();
+
+    // Anonymous record struct definitions (Rust only)
+    if ctx.is_rust() {
+        for (field_names, struct_name) in &ctx.anon_records {
+            let generics: Vec<String> = (0..field_names.len())
+                .map(|i| format!("T{}: Clone + std::fmt::Debug + PartialEq", i))
+                .collect();
+            let fields: Vec<String> = field_names.iter().enumerate()
+                .map(|(i, name)| format!("pub {}: T{},", name, i))
+                .collect();
+            parts.push(format!(
+                "#[derive(Debug, Clone, PartialEq)]\nstruct {}<{}> {{\n{}\n}}",
+                struct_name,
+                generics.join(", "),
+                fields.join("\n")
+            ));
+        }
+    }
 
     // Type declarations
     for td in &program.type_decls {
@@ -915,4 +968,59 @@ fn render_stdlib_args_rust(ctx: &RenderContext, args: &[IrExpr]) -> String {
             }
         }
     }).collect::<Vec<_>>().join(", ")
+}
+
+// ── Anonymous record collection ──
+// Simplified version of emit_rust::lower_types logic, directly in codegen.
+
+use std::collections::HashSet;
+
+fn collect_named_records(program: &IrProgram) -> HashMap<Vec<String>, String> {
+    let mut map = HashMap::new();
+    for td in &program.type_decls {
+        if let IrTypeDeclKind::Record { fields } = &td.kind {
+            let mut names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+            names.sort();
+            map.insert(names, td.name.clone());
+        }
+    }
+    map
+}
+
+fn collect_anon_records(program: &IrProgram, named: &HashMap<Vec<String>, String>) -> HashMap<Vec<String>, String> {
+    let named_set: HashSet<Vec<String>> = named.keys().cloned().collect();
+    let mut seen: HashSet<Vec<String>> = HashSet::new();
+
+    // Collect from all types in the program
+    for func in &program.functions {
+        for p in &func.params { collect_anon_from_ty(&p.ty, &named_set, &mut seen); }
+        collect_anon_from_ty(&func.ret_ty, &named_set, &mut seen);
+    }
+    for tl in &program.top_lets {
+        collect_anon_from_ty(&tl.ty, &named_set, &mut seen);
+    }
+
+    let mut map = HashMap::new();
+    let mut keys: Vec<Vec<String>> = seen.into_iter().collect();
+    keys.sort();
+    for (i, key) in keys.into_iter().enumerate() {
+        map.insert(key, format!("AlmdRec{}", i));
+    }
+    map
+}
+
+fn collect_anon_from_ty(ty: &Ty, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+    match ty {
+        Ty::Record { fields } | Ty::OpenRecord { fields } => {
+            let mut names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
+            names.sort();
+            if !named.contains(&names) { seen.insert(names); }
+            for (_, t) in fields { collect_anon_from_ty(t, named, seen); }
+        }
+        Ty::List(inner) | Ty::Option(inner) => collect_anon_from_ty(inner, named, seen),
+        Ty::Result(a, b) | Ty::Map(a, b) => { collect_anon_from_ty(a, named, seen); collect_anon_from_ty(b, named, seen); }
+        Ty::Tuple(elems) => { for e in elems { collect_anon_from_ty(e, named, seen); } }
+        Ty::Fn { params, ret } => { for p in params { collect_anon_from_ty(p, named, seen); } collect_anon_from_ty(ret, named, seen); }
+        _ => {}
+    }
 }
