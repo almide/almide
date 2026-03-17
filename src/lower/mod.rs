@@ -177,6 +177,12 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprI
                 let f = lower_fn(&mut ctx, name, params, body, effect, r#async, span, generics, extern_attrs, visibility, None);
                 functions.push(f);
             }
+            // Extern fn without body: include in IR with Hole body (codegen emits `use` import)
+            ast::Decl::Fn { name, params, body: None, effect, r#async, span, generics, extern_attrs, visibility, .. } if !extern_attrs.is_empty() => {
+                let hole_body = ast::Expr::Hole { id: ast::ExprId(0), span: span.clone(), resolved_type: None };
+                let f = lower_fn(&mut ctx, name, params, &hole_body, effect, r#async, span, generics, extern_attrs, visibility, None);
+                functions.push(f);
+            }
             ast::Decl::Type { name, ty, deriving, visibility, generics, .. } => {
                 type_decls.push(types::lower_type_decl(&mut ctx, name, ty, deriving, visibility, generics.as_ref()));
             }

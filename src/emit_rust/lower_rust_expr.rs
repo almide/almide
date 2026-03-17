@@ -169,6 +169,14 @@ impl<'a> LowerCtx<'a> {
             IrExprKind::Try { expr } => Expr::Try(Box::new(self.lower_expr(expr))),
             IrExprKind::Await { expr } => self.lower_expr(expr),
             IrExprKind::Hole | IrExprKind::Todo { .. } => Expr::Raw("todo!()".into()),
+            // Codegen-specific nodes (v3 only — old codegen passes through)
+            IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
+            | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
+            | IrExprKind::ToVec { expr } => self.lower_expr(expr),
+            IrExprKind::RustMacro { args, .. } => {
+                if !args.is_empty() { self.lower_expr(&args[0]) } else { Expr::Unit }
+            }
+            IrExprKind::RenderedCall { code } => Expr::Raw(code.clone()),
         }
     }
 

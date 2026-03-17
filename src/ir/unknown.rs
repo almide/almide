@@ -147,6 +147,15 @@ fn check_expr_for_unknown(expr: &IrExpr, fn_name: &str, warnings: &mut Vec<Unkno
         | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::Var { .. } | IrExprKind::FnRef { .. }
         | IrExprKind::EmptyMap | IrExprKind::OptionNone | IrExprKind::Break
         | IrExprKind::Continue | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
+        // Codegen-specific nodes (not present in type-checked IR)
+        IrExprKind::Clone { expr } | IrExprKind::Deref { expr } | IrExprKind::Borrow { expr, .. }
+        | IrExprKind::BoxNew { expr } | IrExprKind::ToVec { expr } => {
+            check_expr_for_unknown(expr, fn_name, warnings);
+        }
+        IrExprKind::RustMacro { args, .. } => {
+            for a in args { check_expr_for_unknown(a, fn_name, warnings); }
+        }
+        IrExprKind::RenderedCall { .. } => {}
     }
 }
 

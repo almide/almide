@@ -1,5 +1,6 @@
 // Re-export library modules (shared with playground WASM crate)
 pub use almide::ast;
+pub use almide::codegen;
 pub use almide::diagnostic;
 pub use almide::emit_common;
 pub use almide::emit_ts;

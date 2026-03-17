@@ -84,7 +84,7 @@ template = "None"
 template = "Ok({inner})"
 
 [err_expr]
-template = "Err({inner}.to_string())"
+template = "Err(format!(\"{:?}\", {inner}))"
 
 [unwrap_or_expr]
 template = "{expr}.unwrap_or({default})"
@@ -172,8 +172,9 @@ template = "{value}"
 [fn_decl]
 template = "pub fn {name}({params}) -> {return_type} {{ {body} }}"
 
+# Effect fn: ret_ty in IR is already Result<T, String>, so use it directly
 [effect_fn_decl]
-template = "pub fn {name}({params}) -> Result<{return_type}, String> {{ {body} }}"
+template = "pub fn {name}({params}) -> {return_type} {{ {body} }}"
 
 [[fn_param]]
 template = "{name}: {type}"
@@ -231,10 +232,10 @@ template = "continue;"
 # ── Lambda ──
 
 [lambda]
-template = "|{params}| {{ {body} }}"
+template = "move |{params}| {{ {body} }}"
 
 [lambda_single]
-template = "|{params}| {body}"
+template = "move |{params}| {body}"
 
 # ── Type declarations ──
 

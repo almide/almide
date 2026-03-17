@@ -9,19 +9,37 @@
 use std::collections::HashMap;
 use crate::ir::*;
 use crate::types::Ty;
+use super::annotations::CodegenAnnotations;
+use super::pass::Target;
 use super::template::TemplateSet;
 
-/// Render context: carries the variable table and indentation state.
+/// Render context: carries the variable table, target, and annotations.
+/// The walker NEVER checks types — all codegen decisions come from annotations.
 pub struct RenderContext<'a> {
     pub templates: &'a TemplateSet,
     pub var_table: &'a VarTable,
     pub indent: usize,
+    pub target: Target,
+    pub in_effect_fn: bool,
+    pub ann: CodegenAnnotations,
 }
 
 impl<'a> RenderContext<'a> {
     pub fn new(templates: &'a TemplateSet, var_table: &'a VarTable) -> Self {
-        Self { templates, var_table, indent: 0 }
+        Self { templates, var_table, indent: 0, target: Target::Rust, in_effect_fn: false, ann: CodegenAnnotations::default() }
     }
+
+    pub fn with_target(mut self, target: Target) -> Self {
+        self.target = target;
+        self
+    }
+
+    pub fn with_annotations(mut self, ann: CodegenAnnotations) -> Self {
+        self.ann = ann;
+        self
+    }
+
+    fn is_rust(&self) -> bool { self.target == Target::Rust }
 
     fn indent_str(&self) -> String {
         "    ".repeat(self.indent)
@@ -64,7 +82,83 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
             ctx.templates.render("type_list", None, &[], &b)
                 .unwrap_or_else(|| format!("Vec<{}>", render_type(ctx, inner)))
         }
-        // Fallback for complex types not yet templated
+        Ty::Named(name, args) => {
+            if args.is_empty() {
+                name.clone()
+            } else {
+                let args_str = args.iter().map(|a| render_type(ctx, a)).collect::<Vec<_>>().join(", ");
+                format!("{}<{}>", name, args_str)
+            }
+        }
+        Ty::Record { fields } | Ty::OpenRecord { fields } => {
+            let mut names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
+            names.sort();
+            // Check named records first (user-defined types)
+            if let Some(n) = ctx.ann.named_records.get(&names) {
+                return n.clone();
+            }
+            // Check anonymous records
+            if let Some(n) = ctx.ann.anon_records.get(&names) {
+                if ctx.is_rust() {
+                    // Generic anonymous record: AlmdRec0<Type0, Type1, ...>
+                    let mut sorted_fields: Vec<_> = fields.iter().collect();
+                    sorted_fields.sort_by(|a, b| a.0.cmp(&b.0));
+                    let args: Vec<String> = sorted_fields.iter().map(|(_, t)| render_type(ctx, t)).collect();
+                    if args.is_empty() {
+                        n.clone()
+                    } else {
+                        format!("{}<{}>", n, args.join(", "))
+                    }
+                } else {
+                    n.clone()
+                }
+            } else {
+                // Fallback: sorted field names
+                names.join("_")
+            }
+        }
+        Ty::Map(k, v) => {
+            let mut b = HashMap::new();
+            b.insert("key", render_type(ctx, k));
+            b.insert("value", render_type(ctx, v));
+            ctx.templates.render("type_map", None, &[], &b)
+                .unwrap_or_else(|| format!("HashMap<{}, {}>", render_type(ctx, k), render_type(ctx, v)))
+        }
+        Ty::Fn { params, ret } => {
+            let params_str = params.iter().map(|p| render_type(ctx, p)).collect::<Vec<_>>().join(", ");
+            if ctx.is_rust() {
+                // Nested Fn return → Box<dyn Fn> (Rust doesn't allow nested impl Trait)
+                if matches!(ret.as_ref(), Ty::Fn { .. }) {
+                    let ret_str = render_type_boxed_fn(ctx, ret);
+                    format!("impl Fn({}) -> {} + Clone", params_str, ret_str)
+                } else {
+                    let ret_str = render_type(ctx, ret);
+                    format!("impl Fn({}) -> {} + Clone", params_str, ret_str)
+                }
+            } else {
+                let ret_str = render_type(ctx, ret);
+                format!("({}) => {}", params_str, ret_str)
+            }
+        }
+        Ty::Tuple(elems) => {
+            let parts = elems.iter().map(|t| render_type(ctx, t)).collect::<Vec<_>>().join(", ");
+            format!("({})", parts)
+        }
+        Ty::TypeVar(n) => {
+            // TypeVars like "?23" should be rendered as _ (infer) in Rust
+            if n.starts_with('?') {
+                if ctx.is_rust() { "_".into() } else { "any".into() }
+            } else {
+                n.clone()
+            }
+        }
+        Ty::Unknown | Ty::Union(_) => {
+            // Unknown types: use a generic placeholder that won't break compilation
+            if ctx.is_rust() { "_".into() } else { "any".into() }
+        }
+        Ty::Variant { name, .. } => name.clone(),
+        // Fallback
+        #[allow(unreachable_patterns)]
         _ => format!("{}", ty.display()),
     }
 }
@@ -88,7 +182,13 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
         IrExprKind::LitStr { value } => {
             let mut b = HashMap::new();
-            b.insert("value", value.clone());
+            // Escape backslashes and special chars for target language
+            let escaped = if ctx.is_rust() {
+                value.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\t', "\\t").replace('\r', "\\r")
+            } else {
+                value.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\t', "\\t")
+            };
+            b.insert("value", escaped);
             ctx.templates.render("string_literal", None, &[], &b)
                 .unwrap_or_else(|| format!("\"{}\"", value))
         }
@@ -99,7 +199,26 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::Unit => template_or(ctx, "unit_literal", &[], "()"),
 
         // ── Variables ──
-        IrExprKind::Var { id } => ctx.var_name(*id).to_string(),
+        IrExprKind::Var { id } => {
+            let name = ctx.var_name(*id).to_string();
+            // Deref: top-level lazy vars or Box'd pattern bindings
+            let needs_deref = ctx.ann.lazy_vars.contains(id) || ctx.ann.deref_vars.contains(id);
+            let base = if needs_deref {
+                if ctx.ann.lazy_vars.contains(id) {
+                    format!("(*{})", name.to_uppercase())
+                } else {
+                    format!("(*{})", name)
+                }
+            } else {
+                name
+            };
+            // Clone: annotation-based (set by ClonePass)
+            if ctx.ann.clone_vars.contains(id) {
+                format!("{}.clone()", base)
+            } else {
+                base
+            }
+        }
         IrExprKind::FnRef { name } => name.clone(),
 
         // ── Operators ──
@@ -126,7 +245,15 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
 
         IrExprKind::Match { subject, arms } => {
-            let subj = render_expr(ctx, subject);
+            let mut subj = render_expr(ctx, subject);
+            // Rust: string subjects need .as_str() for pattern matching
+            if ctx.is_rust() && matches!(&subject.ty, Ty::String) {
+                // Check if any arm has a string literal pattern
+                let has_str_pat = arms.iter().any(|a| matches!(&a.pattern, IrPattern::Literal { expr } if matches!(&expr.kind, IrExprKind::LitStr { .. })));
+                if has_str_pat {
+                    subj = format!("{}.as_str()", subj);
+                }
+            }
             let arms_str = arms.iter()
                 .map(|arm| render_match_arm(ctx, arm))
                 .collect::<Vec<_>>()
@@ -139,9 +266,48 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .unwrap_or(fallback)
         }
 
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::DoBlock { stmts, expr } => {
+            // DoBlock with guard → loop { body }
             let mut parts: Vec<String> = stmts.iter()
-                .map(|s| render_stmt(ctx, s))
+                .map(|s| {
+                    let rendered = render_stmt(ctx, s);
+                    if ctx.is_rust() && !rendered.ends_with(';') && !rendered.ends_with('}') {
+                        format!("{};", rendered)
+                    } else {
+                        rendered
+                    }
+                })
+                .collect();
+            if let Some(e) = expr {
+                let rendered = render_expr(ctx, e);
+                // In a loop (DoBlock), non-Unit final expressions need `return` to exit the loop
+                let needs_return = ctx.is_rust()
+                    && !matches!(&e.ty, Ty::Unit)
+                    && !matches!(&e.kind, IrExprKind::Unit | IrExprKind::Break);
+                if needs_return && !rendered.starts_with("break") {
+                    parts.push(format!("return {}", rendered));
+                } else {
+                    parts.push(rendered);
+                }
+            }
+            if ctx.is_rust() {
+                format!("loop {{\n{}\n}}", parts.join("\n"))
+            } else {
+                format!("while (true) {{\n{}\n}}", parts.join("\n"))
+            }
+        }
+
+        IrExprKind::Block { stmts, expr } => {
+            let mut parts: Vec<String> = stmts.iter()
+                .map(|s| {
+                    let rendered = render_stmt(ctx, s);
+                    // Add ; if the stmt doesn't already end with one
+                    if ctx.is_rust() && !rendered.ends_with(';') && !rendered.ends_with('}') {
+                        format!("{};", rendered)
+                    } else {
+                        rendered
+                    }
+                })
                 .collect();
             if let Some(e) = expr {
                 parts.push(render_expr(ctx, e));
@@ -175,28 +341,53 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::Break => template_or(ctx, "break_stmt", &[], "break"),
         IrExprKind::Continue => template_or(ctx, "continue_stmt", &[], "continue"),
 
+        // ── Codegen pre-rendered call ──
+        IrExprKind::RenderedCall { code } => code.clone(),
+
         // ── Calls ──
         IrExprKind::Call { target, args, .. } => {
-            let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
             match target {
                 CallTarget::Module { module, func } => {
-                    // Stdlib module call — use module_call template
+                    // Module calls: use template (TS/other) or should have been
+                    // converted to RenderedCall by StdlibLoweringPass (Rust)
+                    let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
                     let mut b = HashMap::new();
                     b.insert("module", module.clone());
                     b.insert("func", func.clone());
                     b.insert("args", args_str);
                     ctx.templates.render("module_call", None, &[], &b)
-                        .unwrap_or_else(|| format!("{}_{}", module, func))
+                        .unwrap_or_else(|| format!("__almd_{}.{}()", module, func))
                 }
                 _ => {
                     let callee = match target {
-                        CallTarget::Named { name } => name.clone(),
+                        CallTarget::Named { name } => {
+                            // Qualify enum constructors (Red → Color::Red)
+                            if let Some(enum_name) = ctx.ann.ctor_to_enum.get(name.as_str()) {
+                                // Box-wrap args for recursive enum constructors
+                                let boxed_args: Vec<String> = args.iter().map(|a| {
+                                    let rendered = render_expr(ctx, a);
+                                    if ctx.ann.recursive_enums.contains(enum_name) && ty_contains_name(&a.ty, enum_name) {
+                                        format!("Box::new({})", rendered)
+                                    } else {
+                                        rendered
+                                    }
+                                }).collect();
+                                let args_str = boxed_args.join(", ");
+                                if args.is_empty() {
+                                    return format!("{}::{}", enum_name, name);
+                                } else {
+                                    return format!("{}::{}({})", enum_name, name, args_str);
+                                }
+                            }
+                            name.clone()
+                        }
                         CallTarget::Method { object, method } => {
                             format!("{}.{}", render_expr(ctx, object), method)
                         }
                         CallTarget::Computed { callee } => render_expr(ctx, callee),
                         CallTarget::Module { .. } => unreachable!(),
                     };
+                    let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
                     let mut b = HashMap::new();
                     b.insert("callee", callee);
                     b.insert("args", args_str);
@@ -216,18 +407,52 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
 
         IrExprKind::Record { name, fields } => {
+            // Detect parent enum for Box wrapping of recursive fields
+            let parent_enum = name.as_ref().and_then(|n| ctx.ann.ctor_to_enum.get(n)).cloned();
             let fields_str = fields.iter()
                 .map(|(k, v)| {
+                    let mut val_str = render_expr(ctx, v);
+                    // Box recursive fields (value type contains parent enum name)
+                    if ctx.is_rust() {
+                        if let Some(ref pe) = parent_enum {
+                            if ty_contains_name(&v.ty, pe) {
+                                val_str = format!("Box::new({})", val_str);
+                            }
+                        }
+                    }
                     let mut b = HashMap::new();
                     b.insert("name", k.clone());
-                    b.insert("value", render_expr(ctx, v));
+                    b.insert("value", val_str);
                     ctx.templates.render("record_field", None, &[], &b)
                         .unwrap_or_else(|| format!("{}: {}", k, render_expr(ctx, v)))
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
+            // Resolve type name: explicit name, or from expr.ty
+            // For record literals, use bare struct name (no generics — Rust infers them)
+            let mut type_name = name.clone().unwrap_or_else(|| {
+                match &expr.ty {
+                    Ty::Named(n, _) => n.clone(),
+                    Ty::Record { fields: ty_fields } | Ty::OpenRecord { fields: ty_fields } => {
+                        let mut names: Vec<String> = ty_fields.iter().map(|(n, _)| n.clone()).collect();
+                        names.sort();
+                        if let Some(n) = ctx.ann.named_records.get(&names) {
+                            n.clone()
+                        } else if let Some(n) = ctx.ann.anon_records.get(&names) {
+                            n.clone() // bare name, no generics
+                        } else {
+                            names.join("_")
+                        }
+                    }
+                    _ => render_type(ctx, &expr.ty),
+                }
+            });
+            // Qualify enum variant constructors: Circle → Shape::Circle
+            if let Some(enum_name) = ctx.ann.ctor_to_enum.get(&type_name) {
+                type_name = format!("{}::{}", enum_name, type_name);
+            }
             let mut b = HashMap::new();
-            b.insert("type_name", name.clone().unwrap_or_default());
+            b.insert("type_name", type_name);
             let fallback = format!("{{ {} }}", &fields_str);
             b.insert("fields", fields_str);
             ctx.templates.render("record_literal", None, &[], &b)
@@ -260,10 +485,20 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .unwrap_or_else(|| format!("Ok({})", render_expr(ctx, inner)))
         }
         IrExprKind::ResultErr { expr: inner } => {
-            let mut b = HashMap::new();
-            b.insert("inner", render_expr(ctx, inner));
-            ctx.templates.render("err_expr", None, &[], &b)
-                .unwrap_or_else(|| format!("Err({})", render_expr(ctx, inner)))
+            let inner_str = render_expr(ctx, inner);
+            if ctx.is_rust() {
+                // If inner type is already String, use .to_string()
+                // If not, pass as-is (custom error types)
+                match &inner.ty {
+                    Ty::String => format!("Err({}.to_string())", inner_str),
+                    _ => format!("Err({})", inner_str),
+                }
+            } else {
+                let mut b = HashMap::new();
+                b.insert("inner", inner_str);
+                ctx.templates.render("err_expr", None, &[], &b)
+                    .unwrap_or_else(|| format!("Err({})", render_expr(ctx, inner)))
+            }
         }
 
         // ── Lambda ──
@@ -272,7 +507,11 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .map(|(id, _ty)| ctx.var_name(*id).to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
-            let body_str = render_expr(ctx, body);
+            let mut body_str = render_expr(ctx, body);
+            // Rust: if body is a nested lambda, wrap in Box::new (for Box<dyn Fn> return types)
+            if ctx.is_rust() && matches!(&body.kind, IrExprKind::Lambda { .. }) {
+                body_str = format!("Box::new({})", body_str);
+            }
             let mut b = HashMap::new();
             b.insert("params", params_str);
             b.insert("body", body_str);
@@ -287,7 +526,14 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             let mut arg_parts = Vec::new();
             for part in parts {
                 match part {
-                    IrStringPart::Lit { value } => fmt_parts.push(value.clone()),
+                    IrStringPart::Lit { value } => {
+                        // Escape { and } in literal parts for Rust format! strings
+                        if ctx.is_rust() {
+                            fmt_parts.push(value.replace('{', "{{").replace('}', "}}"));
+                        } else {
+                            fmt_parts.push(value.clone());
+                        }
+                    }
                     IrStringPart::Expr { expr } => {
                         fmt_parts.push("{}".to_string());
                         arg_parts.push(render_expr(ctx, expr));
@@ -316,8 +562,131 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .unwrap_or_else(|| format!("\"...\""))
         }
 
-        // ── Fallback for not-yet-templated nodes ──
-        _ => format!("/* TODO: {} */", std::any::type_name::<IrExprKind>()),
+        // ── Range ──
+        IrExprKind::Range { start, end, inclusive } => {
+            let s = render_expr(ctx, start);
+            let e = render_expr(ctx, end);
+            if *inclusive {
+                format!("({}..={})", s, e)
+            } else {
+                format!("({}..{})", s, e)
+            }
+        }
+
+        // ── Tuple ──
+        IrExprKind::Tuple { elements } => {
+            let parts = elements.iter().map(|e| render_expr(ctx, e)).collect::<Vec<_>>().join(", ");
+            format!("({})", parts)
+        }
+        IrExprKind::TupleIndex { object, index } => {
+            format!("{}.{}", render_expr(ctx, object), index)
+        }
+        IrExprKind::IndexAccess { object, index } => {
+            format!("{}[{}]", render_expr(ctx, object), render_expr(ctx, index))
+        }
+
+        // ── Map ──
+        IrExprKind::MapLiteral { entries } => {
+            if ctx.is_rust() {
+                let parts: Vec<String> = entries.iter()
+                    .map(|(k, v)| format!("({}, {})", render_expr(ctx, k), render_expr(ctx, v)))
+                    .collect();
+                format!("HashMap::from([{}])", parts.join(", "))
+            } else {
+                let parts: Vec<String> = entries.iter()
+                    .map(|(k, v)| format!("[{}, {}]", render_expr(ctx, k), render_expr(ctx, v)))
+                    .collect();
+                format!("new Map([{}])", parts.join(", "))
+            }
+        }
+        IrExprKind::EmptyMap => {
+            if ctx.is_rust() { "HashMap::new()".into() } else { "new Map()".into() }
+        }
+
+        // ── SpreadRecord ──
+        IrExprKind::SpreadRecord { base, fields } => {
+            let base_str = render_expr(ctx, base);
+            let fields_str = fields.iter()
+                .map(|(k, v)| format!("{}: {}", k, render_expr(ctx, v)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let type_name = match &expr.ty {
+                Ty::Named(n, _) => n.clone(),
+                Ty::Record { fields: ty_fields } | Ty::OpenRecord { fields: ty_fields } => {
+                    let mut names: Vec<String> = ty_fields.iter().map(|(n, _)| n.clone()).collect();
+                    names.sort();
+                    ctx.ann.named_records.get(&names).cloned()
+                        .or_else(|| ctx.ann.anon_records.get(&names).cloned())
+                        .unwrap_or_else(|| names.join("_"))
+                }
+                _ => render_type(ctx, &expr.ty),
+            };
+            if ctx.is_rust() {
+                format!("{} {{ {}, ..{} }}", type_name, fields_str, base_str)
+            } else {
+                format!("{{ ...{}, {} }}", base_str, fields_str)
+            }
+        }
+
+        // ── Try / Await ──
+        IrExprKind::Try { expr: inner } => {
+            let s = render_expr(ctx, inner);
+            if ctx.is_rust() { format!("({})?", s) } else { s }
+        }
+        IrExprKind::Await { expr: inner } => {
+            let s = render_expr(ctx, inner);
+            if ctx.is_rust() { format!("{}.await", s) } else { format!("await {}", s) }
+        }
+
+        // ── Codegen nodes (inserted by passes — walker just renders) ──
+        IrExprKind::Clone { expr: inner } => {
+            format!("{}.clone()", render_expr(ctx, inner))
+        }
+        IrExprKind::Deref { expr: inner } => {
+            format!("(*{})", render_expr(ctx, inner))
+        }
+        IrExprKind::Borrow { expr: inner, as_str } => {
+            if *as_str {
+                format!("&*{}", render_expr(ctx, inner))
+            } else {
+                format!("&{}", render_expr(ctx, inner))
+            }
+        }
+        IrExprKind::BoxNew { expr: inner } => {
+            format!("Box::new({})", render_expr(ctx, inner))
+        }
+        IrExprKind::RustMacro { name, args } => {
+            // Render macro args — LitStr rendered as bare &str (no .to_string())
+            let args_str = args.iter().map(|a| {
+                match &a.kind {
+                    IrExprKind::LitStr { value } => {
+                        let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+                        format!("\"{}\"", escaped)
+                    }
+                    _ => render_expr(ctx, a),
+                }
+            }).collect::<Vec<_>>().join(", ");
+            format!("{}!({})", name, args_str)
+        }
+        IrExprKind::ToVec { expr: inner } => {
+            format!("({}).to_vec()", render_expr(ctx, inner))
+        }
+
+        // ── Hole / Todo ──
+        IrExprKind::Hole => template_or(ctx, "hole", &[], "todo!()"),
+        IrExprKind::Todo { message } => {
+            template_or(ctx, "todo", &[], &format!("todo!(\"{}\")", message))
+        }
+
+        // ── Fan (concurrency) ──
+        IrExprKind::Fan { exprs } => {
+            // Placeholder: render as tuple of expressions
+            let parts = exprs.iter().map(|e| render_expr(ctx, e)).collect::<Vec<_>>().join(", ");
+            format!("/* fan */ ({})", parts)
+        }
+
+        // ── Fallback ──
+        // _ => format!("/* TODO: unhandled IR node */"),
     }
 }
 
@@ -404,7 +773,23 @@ fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {
     match pat {
         IrPattern::Wildcard => template_or(ctx, "pattern_wildcard", &[], "_"),
         IrPattern::Bind { var } => ctx.var_name(*var).to_string(),
-        IrPattern::Literal { expr } => render_expr(ctx, expr),
+        IrPattern::Literal { expr } => {
+            // In patterns, literals must be bare (no .to_string(), no i64 suffix for match)
+            match &expr.kind {
+                IrExprKind::LitStr { value } => {
+                    let escaped = if ctx.is_rust() {
+                        value.replace('\\', "\\\\").replace('"', "\\\"")
+                    } else {
+                        value.clone()
+                    };
+                    format!("\"{}\"", escaped)
+                }
+                IrExprKind::LitInt { value } => format!("{}", value),
+                IrExprKind::LitFloat { value } => format!("{}", value),
+                IrExprKind::LitBool { value } => format!("{}", value),
+                _ => render_expr(ctx, expr),
+            }
+        }
         IrPattern::Some { inner } => {
             let mut b = HashMap::new();
             b.insert("binding", render_pattern(ctx, inner));
@@ -425,14 +810,29 @@ fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {
                 .unwrap_or_else(|| format!("Err(_)"))
         }
         IrPattern::Constructor { name, args } => {
-            let args_str = args.iter().map(|a| render_pattern(ctx, a)).collect::<Vec<_>>().join(", ");
-            format!("{}({})", name, args_str)
+            let qualified = if let Some(enum_name) = ctx.ann.ctor_to_enum.get(name) {
+                format!("{}::{}", enum_name, name)
+            } else {
+                name.clone()
+            };
+            if args.is_empty() {
+                qualified
+            } else {
+                let args_str = args.iter().map(|a| render_pattern(ctx, a)).collect::<Vec<_>>().join(", ");
+                format!("{}({})", qualified, args_str)
+            }
         }
         IrPattern::Tuple { elements } => {
             let elems = elements.iter().map(|e| render_pattern(ctx, e)).collect::<Vec<_>>().join(", ");
             format!("({})", elems)
         }
-        IrPattern::RecordPattern { name, fields, .. } => {
+        IrPattern::RecordPattern { name, fields, rest } => {
+            // Qualify enum variant record patterns: Circle → Shape::Circle
+            let qualified_name = if let Some(enum_name) = ctx.ann.ctor_to_enum.get(name) {
+                format!("{}::{}", enum_name, name)
+            } else {
+                name.clone()
+            };
             let fields_str = fields.iter()
                 .map(|f| match &f.pattern {
                     Some(p) => format!("{}: {}", f.name, render_pattern(ctx, p)),
@@ -440,7 +840,15 @@ fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("{} {{ {} }}", name, fields_str)
+            if *rest && ctx.is_rust() {
+                if fields_str.is_empty() {
+                    format!("{} {{ .. }}", qualified_name)
+                } else {
+                    format!("{} {{ {}, .. }}", qualified_name, fields_str)
+                }
+            } else {
+                format!("{} {{ {} }}", qualified_name, fields_str)
+            }
         }
     }
 }
@@ -468,70 +876,307 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             ctx.templates.render("assignment", None, &[], &b)
                 .unwrap_or_else(|| format!("_ = _;"))
         }
-        IrStmtKind::Expr { expr } => render_expr(ctx, expr),
+        IrStmtKind::Expr { expr } => {
+            let rendered = render_expr(ctx, expr);
+            if ctx.is_rust() && !rendered.ends_with(';') && !rendered.ends_with('}') {
+                format!("{};", rendered)
+            } else {
+                rendered
+            }
+        }
+        IrStmtKind::Guard { cond, else_ } => {
+            let cond_str = render_expr(ctx, cond);
+            let else_str = render_expr(ctx, else_);
+            // Determine action: break for loop guards, return for function guards
+            let is_loop_break = matches!(&else_.kind, IrExprKind::Unit | IrExprKind::Break)
+                || (matches!(&else_.kind, IrExprKind::ResultOk { .. }) && {
+                    if let IrExprKind::ResultOk { expr: inner } = &else_.kind {
+                        matches!(&inner.kind, IrExprKind::Unit)
+                    } else { false }
+                });
+            let action = if is_loop_break { "break" } else { "return" };
+            if ctx.is_rust() {
+                if action == "break" {
+                    format!("if !({}) {{ break }}", cond_str)
+                } else {
+                    format!("if !({}) {{ return {} }}", cond_str, else_str)
+                }
+            } else {
+                if action == "break" {
+                    format!("if (!{}) {{ break }}", cond_str)
+                } else {
+                    format!("if (!{}) {{ return {} }}", cond_str, else_str)
+                }
+            }
+        }
+        IrStmtKind::IndexAssign { target, index, value } => {
+            let target_str = ctx.var_name(*target).to_string();
+            let idx_str = render_expr(ctx, index);
+            let val_str = render_expr(ctx, value);
+            format!("{}[{}] = {};", target_str, idx_str, val_str)
+        }
+        IrStmtKind::FieldAssign { target, field, value } => {
+            let target_str = ctx.var_name(*target).to_string();
+            let val_str = render_expr(ctx, value);
+            format!("{}.{} = {};", target_str, field, val_str)
+        }
+        IrStmtKind::BindDestructure { pattern, value } => {
+            // For record patterns with empty name, resolve from value type
+            let pat_str = match pattern {
+                IrPattern::RecordPattern { name, fields, rest } if name.is_empty() => {
+                    let type_name = match &value.ty {
+                        Ty::Named(n, _) => n.clone(),
+                        Ty::Record { fields: ty_fields } | Ty::OpenRecord { fields: ty_fields } => {
+                            let mut names: Vec<String> = ty_fields.iter().map(|(n, _)| n.clone()).collect();
+                            names.sort();
+                            ctx.ann.named_records.get(&names).cloned()
+                                .or_else(|| ctx.ann.anon_records.get(&names).cloned())
+                                .unwrap_or_else(|| names.join("_"))
+                        }
+                        _ => "_".into(),
+                    };
+                    let qualified = if let Some(enum_name) = ctx.ann.ctor_to_enum.get(&type_name) {
+                        format!("{}::{}", enum_name, type_name)
+                    } else {
+                        type_name
+                    };
+                    let fields_str = fields.iter()
+                        .map(|f| match &f.pattern {
+                            Some(p) => format!("{}: {}", f.name, render_pattern(ctx, p)),
+                            None => f.name.clone(),
+                        })
+                        .collect::<Vec<_>>().join(", ");
+                    if *rest && ctx.is_rust() {
+                        if fields_str.is_empty() { format!("{} {{ .. }}", qualified) }
+                        else { format!("{} {{ {}, .. }}", qualified, fields_str) }
+                    } else {
+                        format!("{} {{ {} }}", qualified, fields_str)
+                    }
+                }
+                _ => render_pattern(ctx, pattern),
+            };
+            let val_str = render_expr(ctx, value);
+            format!("let {} = {};", pat_str, val_str)
+        }
         IrStmtKind::Comment { text } => format!("// {}", text),
-        _ => format!("/* TODO: stmt */"),
     }
 }
 
 // ── Function rendering ──
 
 pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
+    // Set effect fn context for auto-? insertion
+    let fn_ctx = RenderContext {
+        templates: ctx.templates,
+        var_table: ctx.var_table,
+        indent: ctx.indent,
+        target: ctx.target,
+        in_effect_fn: func.is_effect,
+        ann: ctx.ann.clone(),
+    };
+
+    // Extern fn: emit `use module::function as name;` instead of function body
+    if !func.extern_attrs.is_empty() {
+        let target_str = if ctx.is_rust() { "rs" } else { "ts" };
+        for attr in &func.extern_attrs {
+            if attr.target == target_str {
+                if ctx.is_rust() {
+                    return format!("use {}::{} as {};", attr.module, attr.function, func.name);
+                } else {
+                    // TS: import handled differently
+                    return format!("// extern: {}.{} as {}", attr.module, attr.function, func.name);
+                }
+            }
+        }
+    }
+
     let params_str = func.params.iter()
         .map(|p| {
             let mut b = HashMap::new();
             b.insert("name", p.name.clone());
-            b.insert("type", render_type(ctx, &p.ty));
-            ctx.templates.render("fn_param", None, &[], &b)
-                .unwrap_or_else(|| format!("{}: {}", p.name, render_type(ctx, &p.ty)))
+            b.insert("type", render_type(&fn_ctx, &p.ty));
+            fn_ctx.templates.render("fn_param", None, &[], &b)
+                .unwrap_or_else(|| format!("{}: {}", p.name, render_type(&fn_ctx, &p.ty)))
         })
         .collect::<Vec<_>>()
         .join(", ");
 
-    let body_str = render_expr(ctx, &func.body);
+    let body_str = render_expr(&fn_ctx, &func.body);
     let ret_str = render_type(ctx, &func.ret_ty);
 
+    // Build generics string for functions
+    let fn_generics = if let Some(generics) = &func.generics {
+        if generics.is_empty() {
+            String::new()
+        } else if ctx.is_rust() {
+            let params = generics.iter().map(|g| format!("{}: Clone + std::fmt::Debug + PartialEq + PartialOrd", g.name)).collect::<Vec<_>>().join(", ");
+            format!("<{}>", params)
+        } else {
+            let params = generics.iter().map(|g| g.name.clone()).collect::<Vec<_>>().join(", ");
+            format!("<{}>", params)
+        }
+    } else {
+        String::new()
+    };
+
+    // Sanitize function name: spaces/dots/hyphens → underscores
+    let mut safe_name = func.name.replace(' ', "_").replace('-', "_").replace('.', "_")
+        .replace('+', "_plus_").replace('/', "_div_").replace('*', "_mul_")
+        .replace('(', "").replace(')', "").replace(',', "_").replace(':', "_")
+        .replace('=', "_eq_").replace('!', "_bang_").replace('?', "_q_")
+        .replace('<', "_lt_").replace('>', "_gt_").replace('[', "_").replace(']', "_")
+        .replace('|', "_pipe_").replace('&', "_amp_").replace('%', "_mod_");
+    // Escape Rust keywords with r# prefix
+    let rust_keywords = ["while", "for", "if", "else", "match", "loop", "break", "continue",
+        "return", "fn", "let", "mut", "use", "mod", "pub", "struct", "enum", "impl", "trait",
+        "type", "where", "as", "in", "ref", "self", "super", "crate", "const", "static",
+        "unsafe", "async", "await", "dyn", "move", "true", "false"];
+    if ctx.is_rust() && rust_keywords.contains(&safe_name.as_str()) {
+        safe_name = format!("r#{}", safe_name);
+    }
+    let safe_name = format!("{}{}", safe_name, fn_generics);
+
     let mut b = HashMap::new();
-    b.insert("name", func.name.clone());
+    b.insert("name", safe_name.clone());
     b.insert("params", params_str);
     b.insert("return_type", ret_str);
     b.insert("body", body_str);
+    b.insert("name", safe_name);
 
-    let construct = if func.is_effect { "effect_fn_decl" } else { "fn_decl" };
-    ctx.templates.render(construct, None, &[], &b)
+    let construct = if func.is_test {
+        "test_block"
+    } else if func.is_effect {
+        "effect_fn_decl"
+    } else {
+        "fn_decl"
+    };
+    fn_ctx.templates.render(construct, None, &[], &b)
         .unwrap_or_else(|| format!("fn {}() {{ }}", func.name))
 }
 
 // ── Full program rendering ──
 
 pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
+    // Build constructor → enum name map
+    let mut ctx = RenderContext {
+        templates: ctx.templates,
+        var_table: ctx.var_table,
+        indent: ctx.indent,
+        target: ctx.target,
+        in_effect_fn: ctx.in_effect_fn,
+        ann: ctx.ann.clone(),
+    };
+    for td in &program.type_decls {
+        if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
+            for c in cases {
+                ctx.ann.ctor_to_enum.insert(c.name.clone(), td.name.clone());
+            }
+        }
+    }
+
+    // Build anonymous record maps (Rust only)
+    if ctx.is_rust() {
+        ctx.ann.named_records = collect_named_records(program);
+        ctx.ann.anon_records = collect_anon_records(program, &ctx.ann.named_records);
+    }
+
     let mut parts = Vec::new();
+
+    // Anonymous record struct definitions (Rust only)
+    if ctx.is_rust() {
+        for (field_names, struct_name) in &ctx.ann.anon_records {
+            let generics: Vec<String> = (0..field_names.len())
+                .map(|i| format!("T{}: Clone + std::fmt::Debug + PartialEq + PartialOrd", i))
+                .collect();
+            let fields: Vec<String> = field_names.iter().enumerate()
+                .map(|(i, name)| format!("pub {}: T{},", name, i))
+                .collect();
+            parts.push(format!(
+                "#[derive(Debug, Clone, PartialEq)]\nstruct {}<{}> {{\n{}\n}}",
+                struct_name,
+                generics.join(", "),
+                fields.join("\n")
+            ));
+        }
+    }
 
     // Type declarations
     for td in &program.type_decls {
-        parts.push(render_type_decl(ctx, td));
+        parts.push(render_type_decl(&ctx, td));
     }
 
     // Top-level lets
     for tl in &program.top_lets {
-        let mut b = HashMap::new();
-        b.insert("name", ctx.var_table.get(tl.var).name.clone());
-        b.insert("type", render_type(ctx, &tl.ty));
-        b.insert("value", render_expr(ctx, &tl.value));
-        let rendered = ctx.templates.render("let_binding", None, &[], &b)
-            .unwrap_or_else(|| format!("let _ = _;"));
+        let name = ctx.var_table.get(tl.var).name.clone();
+        let ty_str = render_type(&ctx, &tl.ty);
+        let val_str = render_expr(&ctx, &tl.value);
+        let rendered = if ctx.is_rust() {
+            match tl.kind {
+                TopLetKind::Const => {
+                    format!("const {}: {} = {};", name.to_uppercase(), ty_str, val_str)
+                }
+                TopLetKind::Lazy => {
+                    ctx.ann.lazy_vars.insert(tl.var);
+                    format!("static {}: std::sync::LazyLock<{}> = std::sync::LazyLock::new(|| {});", name.to_uppercase(), ty_str, val_str)
+                }
+            }
+        } else {
+            format!("const {} = {};", name, val_str)
+        };
         parts.push(rendered);
     }
 
     // Functions
     for func in &program.functions {
-        parts.push(render_function(ctx, func));
+        parts.push(render_function(&ctx, func));
+    }
+
+    // Imported modules: render their type decls and functions
+    for module in &program.modules {
+        let mod_ctx = RenderContext {
+            templates: ctx.templates,
+            var_table: &module.var_table,
+            indent: ctx.indent,
+            target: ctx.target,
+            in_effect_fn: false,
+            ann: ctx.ann.clone(),
+        };
+        // Module type decls
+        for td in &module.type_decls {
+            parts.push(render_type_decl(&mod_ctx, td));
+        }
+        // Module functions (prefixed with module name)
+        for func in &module.functions {
+            let rendered = render_function(&mod_ctx, func);
+            // Rename: fn name → fn modulename_name (to match almide_rt_module_func naming)
+            let prefixed = rendered.replacen(
+                &format!("fn {}", func.name.replace(' ', "_").replace('-', "_").replace('.', "_")),
+                &format!("fn almide_rt_{}_{}", module.name, func.name.replace(' ', "_").replace('-', "_").replace('.', "_")),
+                1
+            );
+            parts.push(prefixed);
+        }
     }
 
     parts.join("\n\n")
 }
 
 fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
+    // Build generics string e.g. "<T>" or "<T, U>"
+    let generics_str = if let Some(generics) = &td.generics {
+        if generics.is_empty() {
+            String::new()
+        } else if ctx.is_rust() {
+            let params = generics.iter().map(|g| format!("{}: Clone", g.name)).collect::<Vec<_>>().join(", ");
+            format!("<{}>", params)
+        } else {
+            let params = generics.iter().map(|g| g.name.clone()).collect::<Vec<_>>().join(", ");
+            format!("<{}>", params)
+        }
+    } else {
+        String::new()
+    };
+
     match &td.kind {
         IrTypeDeclKind::Record { fields } => {
             let fields_str = fields.iter()
@@ -545,8 +1190,9 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                 .collect::<Vec<_>>()
                 .join("\n");
             let mut b = HashMap::new();
-            b.insert("name", td.name.clone());
-            let fallback = format!("struct {} {{ {} }}", td.name, &fields_str);
+            let full_name = format!("{}{}", td.name, generics_str);
+            b.insert("name", full_name.clone());
+            let fallback = format!("struct {} {{ {} }}", full_name, &fields_str);
             b.insert("fields", fields_str);
             ctx.templates.render("struct_decl", None, &[], &b)
                 .unwrap_or(fallback)
@@ -561,7 +1207,15 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                             .unwrap_or_else(|| v.name.clone())
                     }
                     IrVariantKind::Tuple { fields } => {
-                        let fields_str = fields.iter().map(|t| render_type(ctx, t)).collect::<Vec<_>>().join(", ");
+                        let fields_str = fields.iter().map(|t| {
+                            let rendered = render_type(ctx, t);
+                            // Box recursive references (field type contains the enum name)
+                            if ctx.is_rust() && ty_contains_name(t, &td.name) {
+                                format!("Box<{}>", rendered)
+                            } else {
+                                rendered
+                            }
+                        }).collect::<Vec<_>>().join(", ");
                         let mut b = HashMap::new();
                         b.insert("name", v.name.clone());
                         let fallback = format!("{}({})", v.name, &fields_str);
@@ -571,7 +1225,15 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                     }
                     IrVariantKind::Record { fields } => {
                         let fields_str = fields.iter()
-                            .map(|f| format!("{}: {}", f.name, render_type(ctx, &f.ty)))
+                            .map(|f| {
+                                let rendered = render_type(ctx, &f.ty);
+                                let boxed = if ctx.is_rust() && ty_contains_name(&f.ty, &td.name) {
+                                    format!("Box<{}>", rendered)
+                                } else {
+                                    rendered
+                                };
+                                format!("{}: {}", f.name, boxed)
+                            })
                             .collect::<Vec<_>>()
                             .join(", ");
                         format!("{} {{ {} }}", v.name, fields_str)
@@ -580,8 +1242,9 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                 .collect::<Vec<_>>()
                 .join(",\n");
             let mut b = HashMap::new();
-            b.insert("name", td.name.clone());
-            let fallback = format!("enum {} {{ {} }}", td.name, &variants_str);
+            let full_name = format!("{}{}", td.name, generics_str);
+            b.insert("name", full_name.clone());
+            let fallback = format!("enum {} {{ {} }}", full_name, &variants_str);
             b.insert("variants", variants_str);
             ctx.templates.render("enum_decl", None, &[], &b)
                 .unwrap_or(fallback)
@@ -599,8 +1262,219 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
 // ── Helpers ──
 
 /// Try to render via template, fallback to default string.
+/// Render a Fn type as Box<dyn Fn(...) -> T> (for nested impl Trait in Rust)
+fn render_type_boxed_fn(ctx: &RenderContext, ty: &Ty) -> String {
+    match ty {
+        Ty::Fn { params, ret } => {
+            let params_str = params.iter().map(|p| render_type(ctx, p)).collect::<Vec<_>>().join(", ");
+            let ret_str = if matches!(ret.as_ref(), Ty::Fn { .. }) {
+                render_type_boxed_fn(ctx, ret)
+            } else {
+                render_type(ctx, ret)
+            };
+            format!("Box<dyn Fn({}) -> {}>", params_str, ret_str)
+        }
+        _ => render_type(ctx, ty),
+    }
+}
+
 fn template_or(ctx: &RenderContext, construct: &str, attrs: &[&str], fallback: &str) -> String {
     let b = HashMap::new();
     ctx.templates.render(construct, None, attrs, &b)
         .unwrap_or_else(|| fallback.to_string())
+}
+
+// ── Rust-specific helpers ──
+
+/// Check if a type contains a reference to a named type (for recursive Box detection).
+fn ty_contains_name(ty: &Ty, name: &str) -> bool {
+    match ty {
+        Ty::Named(n, args) => n == name || args.iter().any(|a| ty_contains_name(a, name)),
+        Ty::Variant { name: vn, .. } => vn == name,
+        Ty::List(inner) | Ty::Option(inner) => ty_contains_name(inner, name),
+        Ty::Result(a, b) | Ty::Map(a, b) => ty_contains_name(a, name) || ty_contains_name(b, name),
+        Ty::Tuple(elems) => elems.iter().any(|e| ty_contains_name(e, name)),
+        Ty::Fn { params, ret } => params.iter().any(|p| ty_contains_name(p, name)) || ty_contains_name(ret, name),
+        _ => false,
+    }
+}
+
+/// Does this type need .clone() when used as a variable in Rust?
+fn needs_clone(ty: &Ty) -> bool {
+    matches!(ty, Ty::String | Ty::List(_) | Ty::Map(_, _) | Ty::Record { .. } | Ty::Named(_, _) | Ty::Option(_) | Ty::Result(_, _))
+}
+
+/// Render stdlib function arguments with Rust-specific decorations.
+/// - List args → `({arg}).to_vec()`
+/// - String args used as &str → `&*{arg}`
+/// - Lambda args → `|params| { clone_bindings; body }`
+fn render_stdlib_args_rust(ctx: &RenderContext, args: &[IrExpr]) -> String {
+    args.iter().map(|arg| {
+        match &arg.kind {
+            // Lambda: render with clone bindings for captured variables
+            IrExprKind::Lambda { params, body } => {
+                let params_str = params.iter()
+                    .map(|(id, _)| ctx.var_name(*id).to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                // Clone all parameters inside the closure
+                let clone_bindings: Vec<String> = params.iter()
+                    .map(|(id, _)| format!("let {} = {}.clone();", ctx.var_name(*id), ctx.var_name(*id)))
+                    .collect();
+                let body_str = render_expr(ctx, body);
+                if clone_bindings.is_empty() {
+                    format!("|{}| {{ {} }}", params_str, body_str)
+                } else {
+                    format!("|{}| {{ {} {} }}", params_str, clone_bindings.join(" "), body_str)
+                }
+            }
+            _ => {
+                let rendered = render_expr(ctx, arg);
+                match &arg.ty {
+                    // List → &(expr).to_vec() — pass as reference to owned copy
+                    Ty::List(_) => format!("&({}).to_vec()", rendered),
+                    // String → &* — pass as &str
+                    Ty::String => format!("&*{}", rendered),
+                    _ => rendered,
+                }
+            }
+        }
+    }).collect::<Vec<_>>().join(", ")
+}
+
+// ── Anonymous record collection ──
+// Simplified version of emit_rust::lower_types logic, directly in codegen.
+
+use std::collections::HashSet;
+
+fn collect_named_records(program: &IrProgram) -> HashMap<Vec<String>, String> {
+    let mut map = HashMap::new();
+    for td in &program.type_decls {
+        if let IrTypeDeclKind::Record { fields } = &td.kind {
+            let mut names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+            names.sort();
+            map.insert(names, td.name.clone());
+        }
+    }
+    map
+}
+
+fn collect_anon_records(program: &IrProgram, named: &HashMap<Vec<String>, String>) -> HashMap<Vec<String>, String> {
+    let named_set: HashSet<Vec<String>> = named.keys().cloned().collect();
+    let mut seen: HashSet<Vec<String>> = HashSet::new();
+
+    // Collect from all types AND expressions in the program
+    for func in &program.functions {
+        for p in &func.params { collect_anon_from_ty(&p.ty, &named_set, &mut seen); }
+        collect_anon_from_ty(&func.ret_ty, &named_set, &mut seen);
+        collect_anon_from_expr(&func.body, &named_set, &mut seen);
+    }
+    for tl in &program.top_lets {
+        collect_anon_from_ty(&tl.ty, &named_set, &mut seen);
+        collect_anon_from_expr(&tl.value, &named_set, &mut seen);
+    }
+
+    let mut map = HashMap::new();
+    let mut keys: Vec<Vec<String>> = seen.into_iter().collect();
+    keys.sort();
+    for (i, key) in keys.into_iter().enumerate() {
+        map.insert(key, format!("AlmdRec{}", i));
+    }
+    map
+}
+
+fn collect_anon_from_expr(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+    collect_anon_from_ty(&expr.ty, named, seen);
+    match &expr.kind {
+        IrExprKind::Block { stmts, expr: e } | IrExprKind::DoBlock { stmts, expr: e } => {
+            for s in stmts { collect_anon_from_stmt(s, named, seen); }
+            if let Some(e) = e { collect_anon_from_expr(e, named, seen); }
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            collect_anon_from_expr(cond, named, seen);
+            collect_anon_from_expr(then, named, seen);
+            collect_anon_from_expr(else_, named, seen);
+        }
+        IrExprKind::Match { subject, arms } => {
+            collect_anon_from_expr(subject, named, seen);
+            for arm in arms { collect_anon_from_expr(&arm.body, named, seen); }
+        }
+        IrExprKind::Call { args, target, .. } => {
+            if let CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } = target {
+                collect_anon_from_expr(object, named, seen);
+            }
+            for a in args { collect_anon_from_expr(a, named, seen); }
+        }
+        IrExprKind::BinOp { left, right, .. } => {
+            collect_anon_from_expr(left, named, seen);
+            collect_anon_from_expr(right, named, seen);
+        }
+        IrExprKind::UnOp { operand, .. } => collect_anon_from_expr(operand, named, seen),
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
+            for e in elements { collect_anon_from_expr(e, named, seen); }
+        }
+        IrExprKind::Lambda { body, .. } => collect_anon_from_expr(body, named, seen),
+        IrExprKind::Record { fields, .. } | IrExprKind::SpreadRecord { fields, .. } => {
+            for (_, v) in fields { collect_anon_from_expr(v, named, seen); }
+        }
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
+            collect_anon_from_expr(object, named, seen);
+        }
+        IrExprKind::ForIn { iterable, body, .. } => {
+            collect_anon_from_expr(iterable, named, seen);
+            for s in body { collect_anon_from_stmt(s, named, seen); }
+        }
+        IrExprKind::While { cond, body } => {
+            collect_anon_from_expr(cond, named, seen);
+            for s in body { collect_anon_from_stmt(s, named, seen); }
+        }
+        IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
+        | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr } => {
+            collect_anon_from_expr(expr, named, seen);
+        }
+        IrExprKind::StringInterp { parts } => {
+            for p in parts {
+                if let IrStringPart::Expr { expr } = p { collect_anon_from_expr(expr, named, seen); }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_anon_from_stmt(stmt: &IrStmt, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+    match &stmt.kind {
+        IrStmtKind::Bind { value, ty, .. } => {
+            collect_anon_from_ty(ty, named, seen);
+            collect_anon_from_expr(value, named, seen);
+        }
+        IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => {
+            collect_anon_from_expr(value, named, seen);
+        }
+        IrStmtKind::IndexAssign { index, value, .. } => {
+            collect_anon_from_expr(index, named, seen);
+            collect_anon_from_expr(value, named, seen);
+        }
+        IrStmtKind::Guard { cond, else_ } => {
+            collect_anon_from_expr(cond, named, seen);
+            collect_anon_from_expr(else_, named, seen);
+        }
+        IrStmtKind::Expr { expr } => collect_anon_from_expr(expr, named, seen),
+        _ => {}
+    }
+}
+
+fn collect_anon_from_ty(ty: &Ty, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+    match ty {
+        Ty::Record { fields } | Ty::OpenRecord { fields } => {
+            let mut names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
+            names.sort();
+            if !named.contains(&names) { seen.insert(names); }
+            for (_, t) in fields { collect_anon_from_ty(t, named, seen); }
+        }
+        Ty::List(inner) | Ty::Option(inner) => collect_anon_from_ty(inner, named, seen),
+        Ty::Result(a, b) | Ty::Map(a, b) => { collect_anon_from_ty(a, named, seen); collect_anon_from_ty(b, named, seen); }
+        Ty::Tuple(elems) => { for e in elems { collect_anon_from_ty(e, named, seen); } }
+        Ty::Fn { params, ret } => { for p in params { collect_anon_from_ty(p, named, seen); } collect_anon_from_ty(ret, named, seen); }
+        _ => {}
+    }
 }
