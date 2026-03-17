@@ -975,6 +975,21 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         ann: ctx.ann.clone(),
     };
 
+    // Extern fn: emit `use module::function as name;` instead of function body
+    if !func.extern_attrs.is_empty() {
+        let target_str = if ctx.is_rust() { "rs" } else { "ts" };
+        for attr in &func.extern_attrs {
+            if attr.target == target_str {
+                if ctx.is_rust() {
+                    return format!("use {}::{} as {};", attr.module, attr.function, func.name);
+                } else {
+                    // TS: import handled differently
+                    return format!("// extern: {}.{} as {}", attr.module, attr.function, func.name);
+                }
+            }
+        }
+    }
+
     let params_str = func.params.iter()
         .map(|p| {
             let mut b = HashMap::new();
