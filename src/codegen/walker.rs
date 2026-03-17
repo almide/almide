@@ -257,22 +257,20 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                     let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
                     let callee = match target {
                         CallTarget::Named { name } => {
-                            // Rust: assert_eq/assert_ne → macro invocation
+                            // Rust: assert_eq/assert_ne → macro invocation (no trailing ;, caller adds it)
                             if ctx.is_rust() && (name == "assert_eq" || name == "assert_ne") {
-                                return format!("{}!({});", name, args_str);
+                                return format!("{}!({})", name, args_str);
                             }
                             // Rust: assert_some → assert!(x.is_some())
                             if ctx.is_rust() && name == "assert_some" {
-                                return format!("assert!(({}).is_some());", args_str);
+                                return format!("assert!(({}).is_some())", args_str);
                             }
-                            // Rust: qualify enum constructors (Red → Color::Red)
-                            if ctx.is_rust() {
-                                if let Some(enum_name) = ctx.ctor_to_enum.get(name.as_str()) {
-                                    if args.is_empty() {
-                                        return format!("{}::{}", enum_name, name);
-                                    } else {
-                                        return format!("{}::{}({})", enum_name, name, args_str);
-                                    }
+                            // Qualify enum constructors (Red → Color::Red)
+                            if let Some(enum_name) = ctx.ctor_to_enum.get(name.as_str()) {
+                                if args.is_empty() {
+                                    return format!("{}::{}", enum_name, name);
+                                } else {
+                                    return format!("{}::{}({})", enum_name, name, args_str);
                                 }
                             }
                             name.clone()
@@ -784,6 +782,21 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
 }
 
 fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
+    // Build generics string e.g. "<T>" or "<T, U>"
+    let generics_str = if let Some(generics) = &td.generics {
+        if generics.is_empty() {
+            String::new()
+        } else if ctx.is_rust() {
+            let params = generics.iter().map(|g| format!("{}: Clone", g.name)).collect::<Vec<_>>().join(", ");
+            format!("<{}>", params)
+        } else {
+            let params = generics.iter().map(|g| g.name.clone()).collect::<Vec<_>>().join(", ");
+            format!("<{}>", params)
+        }
+    } else {
+        String::new()
+    };
+
     match &td.kind {
         IrTypeDeclKind::Record { fields } => {
             let fields_str = fields.iter()
@@ -797,8 +810,9 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                 .collect::<Vec<_>>()
                 .join("\n");
             let mut b = HashMap::new();
-            b.insert("name", td.name.clone());
-            let fallback = format!("struct {} {{ {} }}", td.name, &fields_str);
+            let full_name = format!("{}{}", td.name, generics_str);
+            b.insert("name", full_name.clone());
+            let fallback = format!("struct {} {{ {} }}", full_name, &fields_str);
             b.insert("fields", fields_str);
             ctx.templates.render("struct_decl", None, &[], &b)
                 .unwrap_or(fallback)
@@ -832,8 +846,9 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                 .collect::<Vec<_>>()
                 .join(",\n");
             let mut b = HashMap::new();
-            b.insert("name", td.name.clone());
-            let fallback = format!("enum {} {{ {} }}", td.name, &variants_str);
+            let full_name = format!("{}{}", td.name, generics_str);
+            b.insert("name", full_name.clone());
+            let fallback = format!("enum {} {{ {} }}", full_name, &variants_str);
             b.insert("variants", variants_str);
             ctx.templates.render("enum_decl", None, &[], &b)
                 .unwrap_or(fallback)
