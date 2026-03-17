@@ -138,14 +138,27 @@ impl<'a> LowerCtx<'a> {
                 // If tail is a DoBlock, flatten it into stmts (avoid IIFE wrapping)
                 if let Some(tail_expr) = expr {
                     if let IrExprKind::DoBlock { stmts: do_stmts, expr: do_tail } = &tail_expr.kind {
-                        s.extend(self.lower_do_stmts(do_stmts, do_tail.as_deref(), in_effect, in_test));
+                        let do_s = self.lower_do_stmts(do_stmts, do_tail.as_deref(), in_effect, in_test);
+                        let has_guard = do_stmts.iter().any(|st| matches!(&st.kind, IrStmtKind::Guard { .. }));
+                        if has_guard {
+                            // Guard-based do block → while loop as a statement
+                            s.push(Stmt::Expr(Expr::DoLoop { body: do_s }));
+                        } else {
+                            s.extend(do_s);
+                        }
                         return FnBody::Block { stmts: s, tail: None };
                     }
                 }
                 FnBody::Block { stmts: s, tail: expr.as_ref().map(|e| self.lower_expr_value(e, in_effect, in_test)) }
             }
             IrExprKind::DoBlock { stmts, expr } => {
-                FnBody::Block { stmts: self.lower_do_stmts(stmts, expr.as_deref(), in_effect, in_test), tail: None }
+                let do_s = self.lower_do_stmts(stmts, expr.as_deref(), in_effect, in_test);
+                let has_guard = stmts.iter().any(|st| matches!(&st.kind, IrStmtKind::Guard { .. }));
+                if has_guard {
+                    FnBody::Block { stmts: vec![Stmt::Expr(Expr::DoLoop { body: do_s })], tail: None }
+                } else {
+                    FnBody::Block { stmts: do_s, tail: None }
+                }
             }
             _ => FnBody::Expr(self.lower_expr_value(body, in_effect, in_test)),
         }
