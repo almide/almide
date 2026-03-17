@@ -126,8 +126,14 @@ fn count_uses_in_expr(expr: &IrExpr, table: &mut VarTable) {
         }
         IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
         | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
-        | IrExprKind::Await { expr } => {
+        | IrExprKind::Await { expr }
+        | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
+        | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
+        | IrExprKind::ToVec { expr } => {
             count_uses_in_expr(expr, table);
+        }
+        IrExprKind::RustMacro { args, .. } => {
+            for a in args { count_uses_in_expr(a, table); }
         }
     }
 }

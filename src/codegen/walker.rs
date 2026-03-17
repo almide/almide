@@ -747,10 +747,35 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             if ctx.is_rust() { format!("{}.await", s) } else { format!("await {}", s) }
         }
 
+        // ── Codegen nodes (inserted by passes — walker just renders) ──
+        IrExprKind::Clone { expr: inner } => {
+            format!("{}.clone()", render_expr(ctx, inner))
+        }
+        IrExprKind::Deref { expr: inner } => {
+            format!("(*{})", render_expr(ctx, inner))
+        }
+        IrExprKind::Borrow { expr: inner, as_str } => {
+            if *as_str {
+                format!("&*{}", render_expr(ctx, inner))
+            } else {
+                format!("&{}", render_expr(ctx, inner))
+            }
+        }
+        IrExprKind::BoxNew { expr: inner } => {
+            format!("Box::new({})", render_expr(ctx, inner))
+        }
+        IrExprKind::RustMacro { name, args } => {
+            let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
+            format!("{}!({})", name, args_str)
+        }
+        IrExprKind::ToVec { expr: inner } => {
+            format!("({}).to_vec()", render_expr(ctx, inner))
+        }
+
         // ── Hole / Todo ──
-        IrExprKind::Hole => if ctx.is_rust() { "todo!()".into() } else { "undefined".into() },
+        IrExprKind::Hole => template_or(ctx, "hole", &[], "todo!()"),
         IrExprKind::Todo { message } => {
-            if ctx.is_rust() { format!("todo!(\"{}\")", message) } else { format!("throw new Error(\"{}\")", message) }
+            template_or(ctx, "todo", &[], &format!("todo!(\"{}\")", message))
         }
 
         // ── Fan (concurrency) ──
