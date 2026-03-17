@@ -743,7 +743,7 @@ fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {
             let elems = elements.iter().map(|e| render_pattern(ctx, e)).collect::<Vec<_>>().join(", ");
             format!("({})", elems)
         }
-        IrPattern::RecordPattern { name, fields, .. } => {
+        IrPattern::RecordPattern { name, fields, rest } => {
             // Qualify enum variant record patterns: Circle → Shape::Circle
             let qualified_name = if let Some(enum_name) = ctx.ctor_to_enum.get(name) {
                 format!("{}::{}", enum_name, name)
@@ -757,7 +757,15 @@ fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("{} {{ {} }}", qualified_name, fields_str)
+            if *rest && ctx.is_rust() {
+                if fields_str.is_empty() {
+                    format!("{} {{ .. }}", qualified_name)
+                } else {
+                    format!("{} {{ {}, .. }}", qualified_name, fields_str)
+                }
+            } else {
+                format!("{} {{ {} }}", qualified_name, fields_str)
+            }
         }
     }
 }
