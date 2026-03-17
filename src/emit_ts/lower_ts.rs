@@ -134,7 +134,14 @@ impl<'a> LowerCtx<'a> {
     pub(super) fn lower_fn_body(&self, body: &IrExpr, in_effect: bool, in_test: bool) -> FnBody {
         match &body.kind {
             IrExprKind::Block { stmts, expr } => {
-                let s: Vec<Stmt> = stmts.iter().map(|s| self.lower_stmt(s, in_effect, in_test)).collect();
+                let mut s: Vec<Stmt> = stmts.iter().map(|s| self.lower_stmt(s, in_effect, in_test)).collect();
+                // If tail is a DoBlock, flatten it into stmts (avoid IIFE wrapping)
+                if let Some(tail_expr) = expr {
+                    if let IrExprKind::DoBlock { stmts: do_stmts, expr: do_tail } = &tail_expr.kind {
+                        s.extend(self.lower_do_stmts(do_stmts, do_tail.as_deref(), in_effect, in_test));
+                        return FnBody::Block { stmts: s, tail: None };
+                    }
+                }
                 FnBody::Block { stmts: s, tail: expr.as_ref().map(|e| self.lower_expr_value(e, in_effect, in_test)) }
             }
             IrExprKind::DoBlock { stmts, expr } => {
@@ -563,8 +570,7 @@ impl<'a> LowerCtx<'a> {
             } }
         }
         if let Some(t) = tail {
-            if has_guard { out.push(Stmt::Expr(self.lower_expr(t, ie, it))); }
-            else { out.push(Stmt::Expr(Expr::Return(Some(Box::new(self.lower_expr(t, ie, it)))))); }
+            out.push(Stmt::Expr(Expr::Return(Some(Box::new(self.lower_expr(t, ie, it))))));
         }
         out
     }
