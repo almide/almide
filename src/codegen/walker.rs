@@ -582,6 +582,13 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .join(", ");
             let type_name = match &expr.ty {
                 Ty::Named(n, _) => n.clone(),
+                Ty::Record { fields: ty_fields } | Ty::OpenRecord { fields: ty_fields } => {
+                    let mut names: Vec<String> = ty_fields.iter().map(|(n, _)| n.clone()).collect();
+                    names.sort();
+                    ctx.named_records.get(&names).cloned()
+                        .or_else(|| ctx.anon_records.get(&names).cloned())
+                        .unwrap_or_else(|| names.join("_"))
+                }
                 _ => render_type(ctx, &expr.ty),
             };
             if ctx.is_rust() {
@@ -1151,13 +1158,15 @@ fn collect_anon_records(program: &IrProgram, named: &HashMap<Vec<String>, String
     let named_set: HashSet<Vec<String>> = named.keys().cloned().collect();
     let mut seen: HashSet<Vec<String>> = HashSet::new();
 
-    // Collect from all types in the program
+    // Collect from all types AND expressions in the program
     for func in &program.functions {
         for p in &func.params { collect_anon_from_ty(&p.ty, &named_set, &mut seen); }
         collect_anon_from_ty(&func.ret_ty, &named_set, &mut seen);
+        collect_anon_from_expr(&func.body, &named_set, &mut seen);
     }
     for tl in &program.top_lets {
         collect_anon_from_ty(&tl.ty, &named_set, &mut seen);
+        collect_anon_from_expr(&tl.value, &named_set, &mut seen);
     }
 
     let mut map = HashMap::new();
@@ -1167,6 +1176,86 @@ fn collect_anon_records(program: &IrProgram, named: &HashMap<Vec<String>, String
         map.insert(key, format!("AlmdRec{}", i));
     }
     map
+}
+
+fn collect_anon_from_expr(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+    collect_anon_from_ty(&expr.ty, named, seen);
+    match &expr.kind {
+        IrExprKind::Block { stmts, expr: e } | IrExprKind::DoBlock { stmts, expr: e } => {
+            for s in stmts { collect_anon_from_stmt(s, named, seen); }
+            if let Some(e) = e { collect_anon_from_expr(e, named, seen); }
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            collect_anon_from_expr(cond, named, seen);
+            collect_anon_from_expr(then, named, seen);
+            collect_anon_from_expr(else_, named, seen);
+        }
+        IrExprKind::Match { subject, arms } => {
+            collect_anon_from_expr(subject, named, seen);
+            for arm in arms { collect_anon_from_expr(&arm.body, named, seen); }
+        }
+        IrExprKind::Call { args, target, .. } => {
+            if let CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } = target {
+                collect_anon_from_expr(object, named, seen);
+            }
+            for a in args { collect_anon_from_expr(a, named, seen); }
+        }
+        IrExprKind::BinOp { left, right, .. } => {
+            collect_anon_from_expr(left, named, seen);
+            collect_anon_from_expr(right, named, seen);
+        }
+        IrExprKind::UnOp { operand, .. } => collect_anon_from_expr(operand, named, seen),
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
+            for e in elements { collect_anon_from_expr(e, named, seen); }
+        }
+        IrExprKind::Lambda { body, .. } => collect_anon_from_expr(body, named, seen),
+        IrExprKind::Record { fields, .. } | IrExprKind::SpreadRecord { fields, .. } => {
+            for (_, v) in fields { collect_anon_from_expr(v, named, seen); }
+        }
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
+            collect_anon_from_expr(object, named, seen);
+        }
+        IrExprKind::ForIn { iterable, body, .. } => {
+            collect_anon_from_expr(iterable, named, seen);
+            for s in body { collect_anon_from_stmt(s, named, seen); }
+        }
+        IrExprKind::While { cond, body } => {
+            collect_anon_from_expr(cond, named, seen);
+            for s in body { collect_anon_from_stmt(s, named, seen); }
+        }
+        IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
+        | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr } => {
+            collect_anon_from_expr(expr, named, seen);
+        }
+        IrExprKind::StringInterp { parts } => {
+            for p in parts {
+                if let IrStringPart::Expr { expr } = p { collect_anon_from_expr(expr, named, seen); }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_anon_from_stmt(stmt: &IrStmt, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+    match &stmt.kind {
+        IrStmtKind::Bind { value, ty, .. } => {
+            collect_anon_from_ty(ty, named, seen);
+            collect_anon_from_expr(value, named, seen);
+        }
+        IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => {
+            collect_anon_from_expr(value, named, seen);
+        }
+        IrStmtKind::IndexAssign { index, value, .. } => {
+            collect_anon_from_expr(index, named, seen);
+            collect_anon_from_expr(value, named, seen);
+        }
+        IrStmtKind::Guard { cond, else_ } => {
+            collect_anon_from_expr(cond, named, seen);
+            collect_anon_from_expr(else_, named, seen);
+        }
+        IrStmtKind::Expr { expr } => collect_anon_from_expr(expr, named, seen),
+        _ => {}
+    }
 }
 
 fn collect_anon_from_ty(ty: &Ty, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
