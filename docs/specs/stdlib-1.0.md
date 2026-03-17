@@ -377,20 +377,23 @@ to_err_option(r) -> Option[E]
 | `string.to_float` 削除 | 関数削除 | `float.parse` を使う |
 | `string.char_count` 削除 | 関数削除 | `string.len` を使う |
 | `string.char_at` → `string.get` | リネーム | Option[String] の戻り値は同じ |
-| `int.parse_hex` → `int.from_hex` | リネーム | シグネチャ同じ |
-| `result.and_then` → `result.flat_map` | リネーム | シグネチャ同じ |
-| `map.map_values` → `map.map` | リネーム | シグネチャ同じ |
-| `map.from_entries` 削除 | 関数削除 | `map.from_list` を使う |
-| `list.remove_at` → `list.remove` | リネーム | シグネチャ同じ |
-| `json.to_string` → `json.as_string` | リネーム | 動的抽出の意図を明確に |
+| `string.char_at` → `string.get` | リネーム | list.get との対称性。LLM 100% 正答 |
+| `int.parse_hex` → `int.from_hex` | リネーム | from_* パターン。LLM 100% 正答 |
+| `result.and_then` 削除 → `result.flat_map` | リネーム + 旧名削除 | エイリアスなし。Canonicity |
+| `map.map_values` → `map.map` | リネーム | callback は (v) -> V2 |
+| `map.from_entries` 削除 | 関数削除 | `map.from_list` に統一 |
+| `list.remove_at` → `list.remove` | リネーム | |
+| `json.to_string` → `json.as_string` | リネーム | 動的抽出は as_*。json.to_* 全て as_* に |
 | `json.to_int` → `json.as_int` | リネーム | 同上 |
-| int bitwise の niche 関数移動 | 移動 | wrap_add, rotate_* → math or 削除 |
+| `string.pad_left` → `string.pad_start` | リネーム | start/end 統一 |
+| `string.pad_right` → `string.pad_end` | リネーム | 同上 |
+| int bitwise niche 関数 | 維持 | hash.almd が依存。削除しない |
 
 ## 新規追加リスト
 
 | 追加 | モジュール |
 |------|-----------|
-| option モジュール全体 | option (10 関数) |
+| option モジュール全体 (TOML+runtime) | option (11 関数: map, flat_map, filter, flatten, unwrap_or, unwrap_or_else, is_some, is_none, to_result, to_list) |
 | map.fold, map.each, map.any, map.all, map.count, map.find | map (+6) |
 | string.get, string.first, string.last, string.take, string.drop, string.take_end, string.drop_end | string (+7) |
 | list.min_by, list.max_by, list.unique_by | list (+3) |
@@ -399,9 +402,18 @@ to_err_option(r) -> Option[E]
 
 ---
 
-## Open Questions
+## Resolved Questions
 
-1. **`json.to_string` → `json.as_string`** — `json` モジュール内の `to_*` は全部 `as_*` にすべきか？`to_string` は他で stringify の意味もあるので混乱する
-2. **Map の `map` callback** — `map.map(m, f)` の `f` は `(v) -> V2` か `(k, v) -> V2` か？現在の `map_values` は `(v) -> V2`
-3. **Option モジュールの実装方式** — TOML 定義 + ランタイム？それとも bundled .almd？
-4. **`and_then` を残すか完全に消すか** — Rust ユーザー向けエイリアスとして残す価値はあるか
+1. **`json.to_*` → `json.as_*`** — ✅ 全て as_* にリネーム。`json.stringify` は維持
+2. **Map の `map` callback** — ✅ `(v) -> V2` (value-only)。他の動詞 (fold, each, any, all, filter, find) は `(k, v)`
+3. **Option モジュール実装** — ✅ TOML + runtime (Rust Option<T> / TS nullable の最適 codegen のため)
+4. **`and_then` retention** — ✅ **削除**。エイリアスなし。`flat_map` が唯一の名前 (Canonicity 原則)
+
+## LLM Validation
+
+| Model | Score | Note |
+|-------|-------|------|
+| Claude Sonnet | 58/58 (100%) | 全関数名を正確に予測 |
+| Gemini | 58/58 (100%) | 全関数名を正確に予測 |
+
+**この命名体系は LLM が迷わず書ける。** Almide の理念「LLM が最も正確に書ける言語」に合致。
