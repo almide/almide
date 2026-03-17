@@ -9,34 +9,33 @@
 use std::collections::HashMap;
 use crate::ir::*;
 use crate::types::Ty;
+use super::annotations::CodegenAnnotations;
 use super::pass::Target;
 use super::template::TemplateSet;
 
-/// Render context: carries the variable table, target, and scope state.
+/// Render context: carries the variable table, target, and annotations.
+/// The walker NEVER checks types — all codegen decisions come from annotations.
 pub struct RenderContext<'a> {
     pub templates: &'a TemplateSet,
     pub var_table: &'a VarTable,
     pub indent: usize,
     pub target: Target,
-    /// Are we inside an effect fn? (for auto-? insertion)
     pub in_effect_fn: bool,
-    /// Constructor name → enum name mapping (e.g. "Red" → "Color")
-    pub ctor_to_enum: HashMap<String, String>,
-    /// Anonymous record field names → struct name (e.g. ["age","name"] → "AlmdRec0")
-    pub anon_records: HashMap<Vec<String>, String>,
-    /// Named record field names → type name (e.g. ["age","name"] → "User")
-    pub named_records: HashMap<Vec<String>, String>,
-    /// Top-level lazy let VarIds (need * deref in Rust)
-    pub lazy_vars: HashSet<VarId>,
+    pub ann: CodegenAnnotations,
 }
 
 impl<'a> RenderContext<'a> {
     pub fn new(templates: &'a TemplateSet, var_table: &'a VarTable) -> Self {
-        Self { templates, var_table, indent: 0, target: Target::Rust, in_effect_fn: false, ctor_to_enum: HashMap::new(), anon_records: HashMap::new(), named_records: HashMap::new(), lazy_vars: HashSet::new() }
+        Self { templates, var_table, indent: 0, target: Target::Rust, in_effect_fn: false, ann: CodegenAnnotations::default() }
     }
 
     pub fn with_target(mut self, target: Target) -> Self {
         self.target = target;
+        self
+    }
+
+    pub fn with_annotations(mut self, ann: CodegenAnnotations) -> Self {
+        self.ann = ann;
         self
     }
 
@@ -95,11 +94,11 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
             let mut names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
             names.sort();
             // Check named records first (user-defined types)
-            if let Some(n) = ctx.named_records.get(&names) {
+            if let Some(n) = ctx.ann.named_records.get(&names) {
                 return n.clone();
             }
             // Check anonymous records
-            if let Some(n) = ctx.anon_records.get(&names) {
+            if let Some(n) = ctx.ann.anon_records.get(&names) {
                 if ctx.is_rust() {
                     // Generic anonymous record: AlmdRec0<Type0, Type1, ...>
                     let mut sorted_fields: Vec<_> = fields.iter().collect();
@@ -195,19 +194,22 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         // ── Variables ──
         IrExprKind::Var { id } => {
             let name = ctx.var_name(*id).to_string();
-            // Rust: top-level lazy vars need * deref
-            if ctx.is_rust() && ctx.lazy_vars.contains(id) {
-                let deref_name = format!("(*{})", name.to_uppercase());
-                if needs_clone(&expr.ty) {
-                    format!("{}.clone()", deref_name)
+            // Deref: top-level lazy vars or Box'd pattern bindings
+            let needs_deref = ctx.ann.lazy_vars.contains(id) || ctx.ann.deref_vars.contains(id);
+            let base = if needs_deref {
+                if ctx.ann.lazy_vars.contains(id) {
+                    format!("(*{})", name.to_uppercase())
                 } else {
-                    deref_name
+                    format!("(*{})", name)
                 }
-            // Rust: clone heap types (String, Vec, HashMap, records) when used
-            } else if ctx.is_rust() && needs_clone(&expr.ty) {
-                format!("{}.clone()", name)
             } else {
                 name
+            };
+            // Clone: annotation-based (set by ClonePass)
+            if ctx.ann.clone_vars.contains(id) {
+                format!("{}.clone()", base)
+            } else {
+                base
             }
         }
         IrExprKind::FnRef { name } => name.clone(),
@@ -458,7 +460,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                                 return format!("{}({})", flat, args_str);
                             }
                             // Qualify enum constructors (Red → Color::Red)
-                            if let Some(enum_name) = ctx.ctor_to_enum.get(name.as_str()) {
+                            if let Some(enum_name) = ctx.ann.ctor_to_enum.get(name.as_str()) {
                                 if args.is_empty() {
                                     return format!("{}::{}", enum_name, name);
                                 } else {
@@ -519,7 +521,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
 
         IrExprKind::Record { name, fields } => {
             // Detect parent enum for Box wrapping of recursive fields
-            let parent_enum = name.as_ref().and_then(|n| ctx.ctor_to_enum.get(n)).cloned();
+            let parent_enum = name.as_ref().and_then(|n| ctx.ann.ctor_to_enum.get(n)).cloned();
             let fields_str = fields.iter()
                 .map(|(k, v)| {
                     let mut val_str = render_expr(ctx, v);
@@ -547,9 +549,9 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                     Ty::Record { fields: ty_fields } | Ty::OpenRecord { fields: ty_fields } => {
                         let mut names: Vec<String> = ty_fields.iter().map(|(n, _)| n.clone()).collect();
                         names.sort();
-                        if let Some(n) = ctx.named_records.get(&names) {
+                        if let Some(n) = ctx.ann.named_records.get(&names) {
                             n.clone()
-                        } else if let Some(n) = ctx.anon_records.get(&names) {
+                        } else if let Some(n) = ctx.ann.anon_records.get(&names) {
                             n.clone() // bare name, no generics
                         } else {
                             names.join("_")
@@ -559,7 +561,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 }
             });
             // Qualify enum variant constructors: Circle → Shape::Circle
-            if let Some(enum_name) = ctx.ctor_to_enum.get(&type_name) {
+            if let Some(enum_name) = ctx.ann.ctor_to_enum.get(&type_name) {
                 type_name = format!("{}::{}", enum_name, type_name);
             }
             let mut b = HashMap::new();
@@ -722,8 +724,8 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 Ty::Record { fields: ty_fields } | Ty::OpenRecord { fields: ty_fields } => {
                     let mut names: Vec<String> = ty_fields.iter().map(|(n, _)| n.clone()).collect();
                     names.sort();
-                    ctx.named_records.get(&names).cloned()
-                        .or_else(|| ctx.anon_records.get(&names).cloned())
+                    ctx.ann.named_records.get(&names).cloned()
+                        .or_else(|| ctx.ann.anon_records.get(&names).cloned())
                         .unwrap_or_else(|| names.join("_"))
                 }
                 _ => render_type(ctx, &expr.ty),
@@ -883,7 +885,7 @@ fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {
                 .unwrap_or_else(|| format!("Err(_)"))
         }
         IrPattern::Constructor { name, args } => {
-            let qualified = if let Some(enum_name) = ctx.ctor_to_enum.get(name) {
+            let qualified = if let Some(enum_name) = ctx.ann.ctor_to_enum.get(name) {
                 format!("{}::{}", enum_name, name)
             } else {
                 name.clone()
@@ -901,7 +903,7 @@ fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {
         }
         IrPattern::RecordPattern { name, fields, rest } => {
             // Qualify enum variant record patterns: Circle → Shape::Circle
-            let qualified_name = if let Some(enum_name) = ctx.ctor_to_enum.get(name) {
+            let qualified_name = if let Some(enum_name) = ctx.ann.ctor_to_enum.get(name) {
                 format!("{}::{}", enum_name, name)
             } else {
                 name.clone()
@@ -1002,13 +1004,13 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                         Ty::Record { fields: ty_fields } | Ty::OpenRecord { fields: ty_fields } => {
                             let mut names: Vec<String> = ty_fields.iter().map(|(n, _)| n.clone()).collect();
                             names.sort();
-                            ctx.named_records.get(&names).cloned()
-                                .or_else(|| ctx.anon_records.get(&names).cloned())
+                            ctx.ann.named_records.get(&names).cloned()
+                                .or_else(|| ctx.ann.anon_records.get(&names).cloned())
                                 .unwrap_or_else(|| names.join("_"))
                         }
                         _ => "_".into(),
                     };
-                    let qualified = if let Some(enum_name) = ctx.ctor_to_enum.get(&type_name) {
+                    let qualified = if let Some(enum_name) = ctx.ann.ctor_to_enum.get(&type_name) {
                         format!("{}::{}", enum_name, type_name)
                     } else {
                         type_name
@@ -1039,16 +1041,13 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
 
 pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     // Set effect fn context for auto-? insertion
-    let mut fn_ctx = RenderContext {
+    let fn_ctx = RenderContext {
         templates: ctx.templates,
         var_table: ctx.var_table,
         indent: ctx.indent,
         target: ctx.target,
         in_effect_fn: func.is_effect,
-        ctor_to_enum: ctx.ctor_to_enum.clone(),
-        anon_records: ctx.anon_records.clone(),
-        named_records: ctx.named_records.clone(),
-        lazy_vars: ctx.lazy_vars.clone(),
+        ann: ctx.ann.clone(),
     };
 
     let params_str = func.params.iter()
@@ -1125,30 +1124,27 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         indent: ctx.indent,
         target: ctx.target,
         in_effect_fn: ctx.in_effect_fn,
-        ctor_to_enum: ctx.ctor_to_enum.clone(),
-        anon_records: HashMap::new(),
-        named_records: HashMap::new(),
-        lazy_vars: HashSet::new(),
+        ann: ctx.ann.clone(),
     };
     for td in &program.type_decls {
         if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
             for c in cases {
-                ctx.ctor_to_enum.insert(c.name.clone(), td.name.clone());
+                ctx.ann.ctor_to_enum.insert(c.name.clone(), td.name.clone());
             }
         }
     }
 
     // Build anonymous record maps (Rust only)
     if ctx.is_rust() {
-        ctx.named_records = collect_named_records(program);
-        ctx.anon_records = collect_anon_records(program, &ctx.named_records);
+        ctx.ann.named_records = collect_named_records(program);
+        ctx.ann.anon_records = collect_anon_records(program, &ctx.ann.named_records);
     }
 
     let mut parts = Vec::new();
 
     // Anonymous record struct definitions (Rust only)
     if ctx.is_rust() {
-        for (field_names, struct_name) in &ctx.anon_records {
+        for (field_names, struct_name) in &ctx.ann.anon_records {
             let generics: Vec<String> = (0..field_names.len())
                 .map(|i| format!("T{}: Clone + std::fmt::Debug + PartialEq + PartialOrd", i))
                 .collect();
@@ -1180,7 +1176,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
                     format!("const {}: {} = {};", name.to_uppercase(), ty_str, val_str)
                 }
                 TopLetKind::Lazy => {
-                    ctx.lazy_vars.insert(tl.var);
+                    ctx.ann.lazy_vars.insert(tl.var);
                     format!("static {}: std::sync::LazyLock<{}> = std::sync::LazyLock::new(|| {});", name.to_uppercase(), ty_str, val_str)
                 }
             }

@@ -19,7 +19,10 @@
 //! - NLLB-200 (shared encoder + language-specific decoder)
 //! - Cranelift ISLE (rules-as-data for verifiability)
 
+pub mod annotations;
 pub mod pass;
+pub mod pass_box_deref;
+pub mod pass_clone;
 pub mod pass_match_lowering;
 pub mod pass_result_propagation;
 pub mod template;
@@ -29,20 +32,26 @@ pub mod walker;
 use crate::ir::IrProgram;
 use pass::Target;
 
-/// Full codegen v3 pipeline: IR → Nanopass → Walker → source code.
-///
-/// ```text
-/// IrProgram → [Pass 1] → [Pass 2] → ... → [Pass N] → Walker → String
-/// ```
-/// Full codegen v3 pipeline: IR → Nanopass → Walker → source code.
+/// Full codegen v3 pipeline: IR → Nanopass → Annotations → Walker → source code.
 pub fn emit(program: &mut IrProgram, target: Target) -> String {
     let config = target::configure(target);
 
-    // Layer 2: Run Nanopass pipeline (semantic rewrites)
+    // Layer 2: Run Nanopass pipeline (semantic rewrites — modifies IR)
     config.pipeline.run(program, target);
 
-    // Layer 3: Template-driven rendering
-    let ctx = walker::RenderContext::new(&config.templates, &program.var_table).with_target(target);
+    // Build annotations (pass decisions as data — walker reads these)
+    let mut ann = annotations::CodegenAnnotations::default();
+    if target == Target::Rust {
+        ann.clone_vars = pass_clone::collect_clone_vars(program);
+        let (deref, recursive) = pass_box_deref::collect_deref_vars(program);
+        ann.deref_vars = deref;
+        ann.recursive_enums = recursive;
+    }
+
+    // Layer 3: Template-driven rendering (walker reads annotations, never checks types)
+    let ctx = walker::RenderContext::new(&config.templates, &program.var_table)
+        .with_target(target)
+        .with_annotations(ann);
     let user_code = walker::render_program(&ctx, program);
 
     // Prepend runtime preamble
