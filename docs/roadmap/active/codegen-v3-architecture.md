@@ -18,6 +18,61 @@
 | **Haxe/Reflaxe** | Plugin trait: `compileExprImpl()` を実装するだけ | target 追加コスト最小。3 メソッドで新 target が作れる |
 | **Kotlin K2** | 統一 IR + target backend | 共通最適化が可能。ただし規模が巨大 |
 | **MLIR** | 多段 IR + progressive lowering | 高→中→低の段階的変換。各レベルで最適化可能 |
+| **NLLB-200** (Meta, NMT) | Shared Encoder + Language-Specific MoE + Decoder | 共通意味表現 + target 固有 experts。encoder experts の方が重要 (3:1) |
+| **Amazon Oxidizer** (PLDI 2025) | ルールベース Feature Mapping + LLM Translation | ハイブリッドが最強。Go→Rust で 73% 関数が等価性検証成功 |
+| **Nanopass** (Indiana大) | 多数の小さなパス、1パス1変換 | 小パスの方がテストしやすく、生成コードも 15-27% 高速 |
+| **Cranelift ISLE** | Term rewriting DSL、ルールをデータとして表現 | ルール＝データにすると overlap checker で検証可能 |
+
+### 翻訳研究との構造対応
+
+三層設計は NMT (自然言語翻訳) とコード翻訳の両方で独立に validated されている。
+
+```
+NMT (NLLB-200)          Code Translation         Almide 三層
+──────────────          ────────────────         ──────────
+Shared Encoder       ≒  Feature Mapping        ≒  Core IR
+  (interlingua)           (ルール抽出)              (意味だけ持つ)
+
+Language Experts     ≒  LLM Translation        ≒  Semantic Rewrite
+  (MoE, target別)        (複雑な変換)              (Plugin, target別)
+
+Decoder              ≒  Code Generation        ≒  Template Renderer
+  (target言語出力)        (Rust コード出力)          (TOML 駆動出力)
+```
+
+**NMT の知見から得た設計指針:**
+
+1. **Encoder experts > Decoder experts (最適比率 3:1)** → Core IR + Semantic Rewrite に注力。Template Renderer は薄くていい
+2. **言語固有情報は「除去可能なオフセット」** → Semantic Rewrite は IR を壊さずアトリビュートを付加する設計が正しい
+3. **Decoder experts は target 言語でクラスタリング (類似度 68-87%)** → Template は target ごとに独立ファイル (rust.toml, ts.toml) が正しい
+4. **ルールベース + ニューラルのハイブリッドが最強 (Amazon)** → Template (ルール) + Plugin (プログラム) のハイブリッドは validated
+
+### Nanopass 化: Semantic Rewrite を小パスに分解
+
+Nanopass 研究 (商用 Chez Scheme で実証) に従い、Semantic Rewrite を 1 つの大きな trait ではなく小パスの列に分解する。
+
+```
+Pass 1: OptionErasure        — some(x) → x (TS), Some(x) (Rust)
+Pass 2: ResultPropagation    — effect fn 内の auto-?
+Pass 3: BorrowInsertion      — clone/& 挿入 (Rust のみ)
+Pass 4: FanLowering          — fan → thread::scope / Promise.all
+Pass 5: TypeConcretization   — Box 化, AnonRecord 具象化
+Pass 6: LazyInitialization   — top-level let → LazyLock (Rust のみ)
+```
+
+各パスが独立 → テスト可能 → target ごとにパスの ON/OFF ができる。
+
+### IR アトリビュート: target 固有情報をノードに付与
+
+CrossTL + NMT の interlingua 研究に基づき、IR 構造を壊さず target 情報をアトリビュートとして付加する。
+
+```rust
+struct IrExpr {
+    kind: IrExprKind,
+    ty: Ty,
+    attrs: TargetAttrs,  // ← 追加
+}
+```
 
 ## 設計: 三層パイプライン
 
