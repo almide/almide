@@ -23,3 +23,22 @@ pub mod pass;
 pub mod template;
 pub mod target;
 pub mod walker;
+
+use crate::ir::IrProgram;
+use pass::Target;
+
+/// Full codegen v3 pipeline: IR → Nanopass → Walker → source code.
+///
+/// ```text
+/// IrProgram → [Pass 1] → [Pass 2] → ... → [Pass N] → Walker → String
+/// ```
+pub fn emit(program: &mut IrProgram, target: Target) -> String {
+    let config = target::configure(target);
+
+    // Layer 2: Run Nanopass pipeline (semantic rewrites)
+    config.pipeline.run(program, target);
+
+    // Layer 3: Template-driven rendering
+    let ctx = walker::RenderContext::new(&config.templates, &program.var_table);
+    walker::render_program(&ctx, program)
+}

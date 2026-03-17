@@ -170,10 +170,10 @@ template = "{value}"
 # ── Declarations ──
 
 [fn_decl]
-template = "fn {name}({params}) -> {return_type} {{ {body} }}"
+template = "pub fn {name}({params}) -> {return_type} {{ {body} }}"
 
 [effect_fn_decl]
-template = "fn {name}({params}) -> Result<{return_type}, String> {{ {body} }}"
+template = "pub fn {name}({params}) -> Result<{return_type}, String> {{ {body} }}"
 
 [[fn_param]]
 template = "{name}: {type}"
