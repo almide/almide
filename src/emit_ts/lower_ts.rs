@@ -62,7 +62,7 @@ impl<'a> LowerCtx<'a> {
             if *count == 0 {
                 var_names.insert(vid, base);
             } else {
-                var_names.insert(vid, format!("{}${}", base, count));
+                var_names.insert(vid, format!("{}_v{}", base, count));
             }
             *count += 1;
         }
