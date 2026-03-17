@@ -32,7 +32,7 @@
 | map | collection | 24 | pure |
 | option | wrapper | 10 | pure |
 | result | wrapper | 11 | pure |
-| math | utility | 19 | pure |
+| math | utility | 21 | pure |
 | regex | utility | 8 | pure |
 | json | data format | 32 | pure |
 | value | data format | 19 | pure |
@@ -43,9 +43,9 @@
 | env | I/O | 9 | effect |
 | log | I/O | 8 | effect |
 | random | I/O | 4 | effect |
-| crypto | I/O | 3 | effect |
+| crypto | I/O | 4 | effect |
 | datetime | I/O | 21 | now() のみ effect |
-| uuid | I/O | 4 | v4 のみ effect |
+| uuid | I/O | 6 | v4 のみ effect |
 | testing | utility | 7 | pure |
 | error | utility | 3 | pure |
 
@@ -462,7 +462,7 @@ stringify(v) -> String
 | Module | Functions | 備考 |
 |--------|-----------|------|
 | value | 19 | json と対称。as_*/from_* 命名済み |
-| math | 19 | min/max/abs/sqrt/sin/cos/pow 等 |
+| math | 21 | min/max/abs/sqrt/sin/cos/pow/factorial 等。fmin/fmax/fpow の f-prefix は要検討 |
 | regex | 8 | is_match/find/find_all/replace/split 等 |
 | fs | 24 | read_text/write/mkdir_p/glob 等 (全 effect) |
 | http | 26 | get/post/serve 等 (全 effect) |
@@ -471,11 +471,11 @@ stringify(v) -> String
 | env | 9 | get/set/args/os 等 (大半 effect) |
 | log | 8 | debug/info/warn/error 等 (全 effect) |
 | random | 4 | int/float/choice/shuffle (全 effect) |
-| crypto | 3 | sha256/hmac_sha256/hmac_verify (全 effect) |
+| crypto | 4 | random_bytes/random_hex/hmac_sha256/hmac_verify (全 effect) |
 | datetime | 21 | now/parse_iso/format 等 (now のみ effect) |
-| uuid | 4 | v4/v5/parse/is_valid (v4 のみ effect) |
+| uuid | 6 | v4/v5/nil/version/parse/is_valid (v4 のみ effect) |
 | testing | 7 | assert/assert_eq/assert_ne 等 |
-| error | 3 | message/wrap/chain |
+| error | 3 | message/context/chain |
 
 ---
 
