@@ -1,0 +1,822 @@
+{
+  "functions": [
+    {
+      "name": "find_price",
+      "params": [
+        {
+          "var": 0,
+          "ty": {
+            "kind": "list",
+            "value": {
+              "kind": "named",
+              "value": [
+                "Product",
+                []
+              ]
+            }
+          },
+          "name": "products",
+          "borrow": "own"
+        },
+        {
+          "var": 1,
+          "ty": {
+            "kind": "string"
+          },
+          "name": "target",
+          "borrow": "own"
+        }
+      ],
+      "ret_ty": {
+        "kind": "int"
+      },
+      "body": {
+        "kind": "match",
+        "subject": {
+          "kind": "call",
+          "target": {
+            "kind": "module",
+            "module": "list",
+            "func": "find"
+          },
+          "args": [
+            {
+              "kind": "var",
+              "id": 0,
+              "ty": {
+                "kind": "list",
+                "value": {
+                  "kind": "record",
+                  "value": {
+                    "fields": [
+                      [
+                        "name",
+                        {
+                          "kind": "string"
+                        }
+                      ],
+                      [
+                        "price",
+                        {
+                          "kind": "int"
+                        }
+                      ],
+                      [
+                        "category",
+                        {
+                          "kind": "string"
+                        }
+                      ]
+                    ]
+                  }
+                }
+              },
+              "span": {
+                "line": 4,
+                "col": 19
+              }
+            },
+            {
+              "kind": "lambda",
+              "params": [
+                [
+                  2,
+                  {
+                    "kind": "record",
+                    "value": {
+                      "fields": [
+                        [
+                          "name",
+                          {
+                            "kind": "string"
+                          }
+                        ],
+                        [
+                          "price",
+                          {
+                            "kind": "int"
+                          }
+                        ],
+                        [
+                          "category",
+                          {
+                            "kind": "string"
+                          }
+                        ]
+                      ]
+                    }
+                  }
+                ]
+              ],
+              "body": {
+                "kind": "bin_op",
+                "op": "eq",
+                "left": {
+                  "kind": "member",
+                  "object": {
+                    "kind": "var",
+                    "id": 2,
+                    "ty": {
+                      "kind": "record",
+                      "value": {
+                        "fields": [
+                          [
+                            "name",
+                            {
+                              "kind": "string"
+                            }
+                          ],
+                          [
+                            "price",
+                            {
+                              "kind": "int"
+                            }
+                          ],
+                          [
+                            "category",
+                            {
+                              "kind": "string"
+                            }
+                          ]
+                        ]
+                      }
+                    },
+                    "span": {
+                      "line": 4,
+                      "col": 36
+                    }
+                  },
+                  "field": "name",
+                  "ty": {
+                    "kind": "unknown"
+                  },
+                  "span": {
+                    "line": 4,
+                    "col": 37
+                  }
+                },
+                "right": {
+                  "kind": "var",
+                  "id": 1,
+                  "ty": {
+                    "kind": "string"
+                  },
+                  "span": {
+                    "line": 4,
+                    "col": 46
+                  }
+                },
+                "ty": {
+                  "kind": "bool"
+                },
+                "span": {
+                  "line": 4,
+                  "col": 43
+                }
+              },
+              "ty": {
+                "kind": "fn",
+                "value": {
+                  "params": [
+                    {
+                      "kind": "record",
+                      "value": {
+                        "fields": [
+                          [
+                            "name",
+                            {
+                              "kind": "string"
+                            }
+                          ],
+                          [
+                            "price",
+                            {
+                              "kind": "int"
+                            }
+                          ],
+                          [
+                            "category",
+                            {
+                              "kind": "string"
+                            }
+                          ]
+                        ]
+                      }
+                    }
+                  ],
+                  "ret": {
+                    "kind": "bool"
+                  }
+                }
+              },
+              "span": {
+                "line": 4,
+                "col": 29
+              }
+            }
+          ],
+          "ty": {
+            "kind": "option",
+            "value": {
+              "kind": "record",
+              "value": {
+                "fields": [
+                  [
+                    "name",
+                    {
+                      "kind": "string"
+                    }
+                  ],
+                  [
+                    "price",
+                    {
+                      "kind": "int"
+                    }
+                  ],
+                  [
+                    "category",
+                    {
+                      "kind": "string"
+                    }
+                  ]
+                ]
+              }
+            }
+          },
+          "span": {
+            "line": 4,
+            "col": 18
+          }
+        },
+        "arms": [
+          {
+            "pattern": {
+              "kind": "some",
+              "inner": {
+                "kind": "bind",
+                "var": 3
+              }
+            },
+            "body": {
+              "kind": "member",
+              "object": {
+                "kind": "var",
+                "id": 3,
+                "ty": {
+                  "kind": "record",
+                  "value": {
+                    "fields": [
+                      [
+                        "name",
+                        {
+                          "kind": "string"
+                        }
+                      ],
+                      [
+                        "price",
+                        {
+                          "kind": "int"
+                        }
+                      ],
+                      [
+                        "category",
+                        {
+                          "kind": "string"
+                        }
+                      ]
+                    ]
+                  }
+                },
+                "span": {
+                  "line": 5,
+                  "col": 16
+                }
+              },
+              "field": "price",
+              "ty": {
+                "kind": "int"
+              },
+              "span": {
+                "line": 5,
+                "col": 17
+              }
+            }
+          },
+          {
+            "pattern": {
+              "kind": "none"
+            },
+            "body": {
+              "kind": "lit_int",
+              "value": 0,
+              "ty": {
+                "kind": "int"
+              },
+              "span": {
+                "line": 6,
+                "col": 13
+              }
+            }
+          }
+        ],
+        "ty": {
+          "kind": "int"
+        },
+        "span": {
+          "line": 4,
+          "col": 3
+        }
+      },
+      "is_effect": false,
+      "is_async": false,
+      "is_test": false,
+      "visibility": "public"
+    },
+    {
+      "name": "total",
+      "params": [
+        {
+          "var": 4,
+          "ty": {
+            "kind": "list",
+            "value": {
+              "kind": "named",
+              "value": [
+                "Product",
+                []
+              ]
+            }
+          },
+          "name": "products",
+          "borrow": "own"
+        }
+      ],
+      "ret_ty": {
+        "kind": "int"
+      },
+      "body": {
+        "kind": "call",
+        "target": {
+          "kind": "module",
+          "module": "list",
+          "func": "fold"
+        },
+        "args": [
+          {
+            "kind": "var",
+            "id": 4,
+            "ty": {
+              "kind": "list",
+              "value": {
+                "kind": "record",
+                "value": {
+                  "fields": [
+                    [
+                      "name",
+                      {
+                        "kind": "string"
+                      }
+                    ],
+                    [
+                      "price",
+                      {
+                        "kind": "int"
+                      }
+                    ],
+                    [
+                      "category",
+                      {
+                        "kind": "string"
+                      }
+                    ]
+                  ]
+                }
+              }
+            },
+            "span": {
+              "line": 10,
+              "col": 3
+            }
+          },
+          {
+            "kind": "lit_int",
+            "value": 0,
+            "ty": {
+              "kind": "int"
+            },
+            "span": {
+              "line": 10,
+              "col": 25
+            }
+          },
+          {
+            "kind": "lambda",
+            "params": [
+              [
+                5,
+                {
+                  "kind": "int"
+                }
+              ],
+              [
+                6,
+                {
+                  "kind": "record",
+                  "value": {
+                    "fields": [
+                      [
+                        "name",
+                        {
+                          "kind": "string"
+                        }
+                      ],
+                      [
+                        "price",
+                        {
+                          "kind": "int"
+                        }
+                      ],
+                      [
+                        "category",
+                        {
+                          "kind": "string"
+                        }
+                      ]
+                    ]
+                  }
+                }
+              ]
+            ],
+            "body": {
+              "kind": "bin_op",
+              "op": "add_int",
+              "left": {
+                "kind": "var",
+                "id": 5,
+                "ty": {
+                  "kind": "int"
+                },
+                "span": {
+                  "line": 10,
+                  "col": 40
+                }
+              },
+              "right": {
+                "kind": "member",
+                "object": {
+                  "kind": "var",
+                  "id": 6,
+                  "ty": {
+                    "kind": "record",
+                    "value": {
+                      "fields": [
+                        [
+                          "name",
+                          {
+                            "kind": "string"
+                          }
+                        ],
+                        [
+                          "price",
+                          {
+                            "kind": "int"
+                          }
+                        ],
+                        [
+                          "category",
+                          {
+                            "kind": "string"
+                          }
+                        ]
+                      ]
+                    }
+                  },
+                  "span": {
+                    "line": 10,
+                    "col": 46
+                  }
+                },
+                "field": "price",
+                "ty": {
+                  "kind": "unknown"
+                },
+                "span": {
+                  "line": 10,
+                  "col": 47
+                }
+              },
+              "ty": {
+                "kind": "int"
+              },
+              "span": {
+                "line": 10,
+                "col": 44
+              }
+            },
+            "ty": {
+              "kind": "fn",
+              "value": {
+                "params": [
+                  {
+                    "kind": "int"
+                  },
+                  {
+                    "kind": "record",
+                    "value": {
+                      "fields": [
+                        [
+                          "name",
+                          {
+                            "kind": "string"
+                          }
+                        ],
+                        [
+                          "price",
+                          {
+                            "kind": "int"
+                          }
+                        ],
+                        [
+                          "category",
+                          {
+                            "kind": "string"
+                          }
+                        ]
+                      ]
+                    }
+                  }
+                ],
+                "ret": {
+                  "kind": "int"
+                }
+              }
+            },
+            "span": {
+              "line": 10,
+              "col": 28
+            }
+          }
+        ],
+        "ty": {
+          "kind": "int"
+        },
+        "span": {
+          "line": 10,
+          "col": 12
+        }
+      },
+      "is_effect": false,
+      "is_async": false,
+      "is_test": false,
+      "visibility": "public"
+    },
+    {
+      "name": "greet",
+      "params": [
+        {
+          "var": 7,
+          "ty": {
+            "kind": "string"
+          },
+          "name": "name",
+          "borrow": "own"
+        }
+      ],
+      "ret_ty": {
+        "kind": "string"
+      },
+      "body": {
+        "kind": "string_interp",
+        "parts": [
+          {
+            "kind": "lit",
+            "value": "Hello, "
+          },
+          {
+            "kind": "expr",
+            "expr": {
+              "kind": "var",
+              "id": 7,
+              "ty": {
+                "kind": "string"
+              },
+              "span": {
+                "line": 13,
+                "col": 13
+              }
+            }
+          },
+          {
+            "kind": "lit",
+            "value": "!"
+          }
+        ],
+        "ty": {
+          "kind": "string"
+        },
+        "span": {
+          "line": 13,
+          "col": 3
+        }
+      },
+      "is_effect": false,
+      "is_async": false,
+      "is_test": false,
+      "visibility": "public"
+    }
+  ],
+  "top_lets": [],
+  "type_decls": [
+    {
+      "name": "Product",
+      "kind": {
+        "kind": "record",
+        "fields": [
+          {
+            "name": "name",
+            "ty": {
+              "kind": "string"
+            }
+          },
+          {
+            "name": "price",
+            "ty": {
+              "kind": "int"
+            }
+          },
+          {
+            "name": "category",
+            "ty": {
+              "kind": "string"
+            }
+          }
+        ]
+      },
+      "visibility": "public"
+    }
+  ],
+  "var_table": {
+    "entries": [
+      {
+        "name": "products",
+        "ty": {
+          "kind": "list",
+          "value": {
+            "kind": "named",
+            "value": [
+              "Product",
+              []
+            ]
+          }
+        },
+        "mutability": "let",
+        "span": {
+          "line": 3,
+          "col": 1
+        },
+        "use_count": 1
+      },
+      {
+        "name": "target",
+        "ty": {
+          "kind": "string"
+        },
+        "mutability": "let",
+        "span": {
+          "line": 3,
+          "col": 1
+        },
+        "use_count": 2
+      },
+      {
+        "name": "p",
+        "ty": {
+          "kind": "record",
+          "value": {
+            "fields": [
+              [
+                "name",
+                {
+                  "kind": "string"
+                }
+              ],
+              [
+                "price",
+                {
+                  "kind": "int"
+                }
+              ],
+              [
+                "category",
+                {
+                  "kind": "string"
+                }
+              ]
+            ]
+          }
+        },
+        "mutability": "let",
+        "use_count": 1
+      },
+      {
+        "name": "p",
+        "ty": {
+          "kind": "record",
+          "value": {
+            "fields": [
+              [
+                "name",
+                {
+                  "kind": "string"
+                }
+              ],
+              [
+                "price",
+                {
+                  "kind": "int"
+                }
+              ],
+              [
+                "category",
+                {
+                  "kind": "string"
+                }
+              ]
+            ]
+          }
+        },
+        "mutability": "let",
+        "use_count": 1
+      },
+      {
+        "name": "products",
+        "ty": {
+          "kind": "list",
+          "value": {
+            "kind": "named",
+            "value": [
+              "Product",
+              []
+            ]
+          }
+        },
+        "mutability": "let",
+        "span": {
+          "line": 9,
+          "col": 1
+        },
+        "use_count": 1
+      },
+      {
+        "name": "acc",
+        "ty": {
+          "kind": "int"
+        },
+        "mutability": "let",
+        "use_count": 1
+      },
+      {
+        "name": "p",
+        "ty": {
+          "kind": "record",
+          "value": {
+            "fields": [
+              [
+                "name",
+                {
+                  "kind": "string"
+                }
+              ],
+              [
+                "price",
+                {
+                  "kind": "int"
+                }
+              ],
+              [
+                "category",
+                {
+                  "kind": "string"
+                }
+              ]
+            ]
+          }
+        },
+        "mutability": "let",
+        "use_count": 1
+      },
+      {
+        "name": "name",
+        "ty": {
+          "kind": "string"
+        },
+        "mutability": "let",
+        "span": {
+          "line": 12,
+          "col": 1
+        },
+        "use_count": 1
+      }
+    ]
+  }
+}
