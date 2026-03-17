@@ -83,7 +83,14 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
             ctx.templates.render("type_list", None, &[], &b)
                 .unwrap_or_else(|| format!("Vec<{}>", render_type(ctx, inner)))
         }
-        Ty::Named(name, _) => name.clone(),
+        Ty::Named(name, args) => {
+            if args.is_empty() {
+                name.clone()
+            } else {
+                let args_str = args.iter().map(|a| render_type(ctx, a)).collect::<Vec<_>>().join(", ");
+                format!("{}<{}>", name, args_str)
+            }
+        }
         Ty::Record { fields } | Ty::OpenRecord { fields } => {
             let mut names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
             names.sort();
