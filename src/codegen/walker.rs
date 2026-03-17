@@ -9,19 +9,30 @@
 use std::collections::HashMap;
 use crate::ir::*;
 use crate::types::Ty;
+use super::pass::Target;
 use super::template::TemplateSet;
 
-/// Render context: carries the variable table and indentation state.
+/// Render context: carries the variable table, target, and scope state.
 pub struct RenderContext<'a> {
     pub templates: &'a TemplateSet,
     pub var_table: &'a VarTable,
     pub indent: usize,
+    pub target: Target,
+    /// Are we inside an effect fn? (for auto-? insertion)
+    pub in_effect_fn: bool,
 }
 
 impl<'a> RenderContext<'a> {
     pub fn new(templates: &'a TemplateSet, var_table: &'a VarTable) -> Self {
-        Self { templates, var_table, indent: 0 }
+        Self { templates, var_table, indent: 0, target: Target::Rust, in_effect_fn: false }
     }
+
+    pub fn with_target(mut self, target: Target) -> Self {
+        self.target = target;
+        self
+    }
+
+    fn is_rust(&self) -> bool { self.target == Target::Rust }
 
     fn indent_str(&self) -> String {
         "    ".repeat(self.indent)
@@ -99,7 +110,15 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::Unit => template_or(ctx, "unit_literal", &[], "()"),
 
         // ── Variables ──
-        IrExprKind::Var { id } => ctx.var_name(*id).to_string(),
+        IrExprKind::Var { id } => {
+            let name = ctx.var_name(*id).to_string();
+            // Rust: clone heap types (String, Vec, HashMap, records) when used
+            if ctx.is_rust() && needs_clone(&expr.ty) {
+                format!("{}.clone()", name)
+            } else {
+                name
+            }
+        }
         IrExprKind::FnRef { name } => name.clone(),
 
         // ── Operators ──
@@ -177,18 +196,28 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
 
         // ── Calls ──
         IrExprKind::Call { target, args, .. } => {
-            let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
             match target {
                 CallTarget::Module { module, func } => {
-                    // Stdlib module call — use module_call template
+                    // Stdlib module call — render args with target-specific decorations
+                    let args_str = if ctx.is_rust() {
+                        render_stdlib_args_rust(ctx, args)
+                    } else {
+                        args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ")
+                    };
                     let mut b = HashMap::new();
                     b.insert("module", module.clone());
                     b.insert("func", func.clone());
                     b.insert("args", args_str);
-                    ctx.templates.render("module_call", None, &[], &b)
-                        .unwrap_or_else(|| format!("{}_{}", module, func))
+                    let mut rendered = ctx.templates.render("module_call", None, &[], &b)
+                        .unwrap_or_else(|| format!("{}_{}", module, func));
+                    // Rust: auto-? for effect fn calls that return Result
+                    if ctx.is_rust() && ctx.in_effect_fn && matches!(&expr.ty, Ty::Result(_, _)) {
+                        rendered.push('?');
+                    }
+                    rendered
                 }
                 _ => {
+                    let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
                     let callee = match target {
                         CallTarget::Named { name } => name.clone(),
                         CallTarget::Method { object, method } => {
@@ -477,18 +506,27 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
 // ── Function rendering ──
 
 pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
+    // Set effect fn context for auto-? insertion
+    let mut fn_ctx = RenderContext {
+        templates: ctx.templates,
+        var_table: ctx.var_table,
+        indent: ctx.indent,
+        target: ctx.target,
+        in_effect_fn: func.is_effect,
+    };
+
     let params_str = func.params.iter()
         .map(|p| {
             let mut b = HashMap::new();
             b.insert("name", p.name.clone());
-            b.insert("type", render_type(ctx, &p.ty));
-            ctx.templates.render("fn_param", None, &[], &b)
-                .unwrap_or_else(|| format!("{}: {}", p.name, render_type(ctx, &p.ty)))
+            b.insert("type", render_type(&fn_ctx, &p.ty));
+            fn_ctx.templates.render("fn_param", None, &[], &b)
+                .unwrap_or_else(|| format!("{}: {}", p.name, render_type(&fn_ctx, &p.ty)))
         })
         .collect::<Vec<_>>()
         .join(", ");
 
-    let body_str = render_expr(ctx, &func.body);
+    let body_str = render_expr(&fn_ctx, &func.body);
     let ret_str = render_type(ctx, &func.ret_ty);
 
     let mut b = HashMap::new();
@@ -498,7 +536,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     b.insert("body", body_str);
 
     let construct = if func.is_effect { "effect_fn_decl" } else { "fn_decl" };
-    ctx.templates.render(construct, None, &[], &b)
+    fn_ctx.templates.render(construct, None, &[], &b)
         .unwrap_or_else(|| format!("fn {}() {{ }}", func.name))
 }
 
@@ -603,4 +641,49 @@ fn template_or(ctx: &RenderContext, construct: &str, attrs: &[&str], fallback: &
     let b = HashMap::new();
     ctx.templates.render(construct, None, attrs, &b)
         .unwrap_or_else(|| fallback.to_string())
+}
+
+// ── Rust-specific helpers ──
+
+/// Does this type need .clone() when used as a variable in Rust?
+fn needs_clone(ty: &Ty) -> bool {
+    matches!(ty, Ty::String | Ty::List(_) | Ty::Map(_, _) | Ty::Record { .. } | Ty::Named(_, _) | Ty::Option(_) | Ty::Result(_, _))
+}
+
+/// Render stdlib function arguments with Rust-specific decorations.
+/// - List args → `({arg}).to_vec()`
+/// - String args used as &str → `&*{arg}`
+/// - Lambda args → `|params| { clone_bindings; body }`
+fn render_stdlib_args_rust(ctx: &RenderContext, args: &[IrExpr]) -> String {
+    args.iter().map(|arg| {
+        match &arg.kind {
+            // Lambda: render with clone bindings for captured variables
+            IrExprKind::Lambda { params, body } => {
+                let params_str = params.iter()
+                    .map(|(id, _)| ctx.var_name(*id).to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                // Clone all parameters inside the closure
+                let clone_bindings: Vec<String> = params.iter()
+                    .map(|(id, _)| format!("let {} = {}.clone();", ctx.var_name(*id), ctx.var_name(*id)))
+                    .collect();
+                let body_str = render_expr(ctx, body);
+                if clone_bindings.is_empty() {
+                    format!("|{}| {{ {} }}", params_str, body_str)
+                } else {
+                    format!("|{}| {{ {} {} }}", params_str, clone_bindings.join(" "), body_str)
+                }
+            }
+            _ => {
+                let rendered = render_expr(ctx, arg);
+                match &arg.ty {
+                    // List → .to_vec()
+                    Ty::List(_) => format!("({}).to_vec()", rendered),
+                    // String → &*
+                    Ty::String => format!("&*{}", rendered),
+                    _ => rendered,
+                }
+            }
+        }
+    }).collect::<Vec<_>>().join(", ")
 }

@@ -41,7 +41,7 @@ pub fn emit(program: &mut IrProgram, target: Target) -> String {
     config.pipeline.run(program, target);
 
     // Layer 3: Template-driven rendering
-    let ctx = walker::RenderContext::new(&config.templates, &program.var_table);
+    let ctx = walker::RenderContext::new(&config.templates, &program.var_table).with_target(target);
     let user_code = walker::render_program(&ctx, program);
 
     // Prepend runtime preamble
