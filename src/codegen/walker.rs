@@ -402,6 +402,17 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                         CallTarget::Named { name } => {
                             // Rust: assert_eq/assert_ne → macro invocation
                             if ctx.is_rust() && (name == "assert_eq" || name == "assert_ne") {
+                                if args.len() == 3 {
+                                    // 3-arg assert: (left, right, message)
+                                    // Message should be &str, not .to_string()
+                                    let left = render_expr(ctx, &args[0]);
+                                    let right = render_expr(ctx, &args[1]);
+                                    let msg = match &args[2].kind {
+                                        IrExprKind::LitStr { value } => format!("\"{}\"", value),
+                                        _ => render_expr(ctx, &args[2]),
+                                    };
+                                    return format!("{}!({}, {}, {})", name, left, right, msg);
+                                }
                                 return format!("{}!({})", name, args_str);
                             }
                             // Rust: assert_some → assert!(x.is_some())
