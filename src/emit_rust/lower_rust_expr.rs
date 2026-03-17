@@ -513,10 +513,15 @@ impl<'a> LowerCtx<'a> {
                 if matches!(inner.as_ref(), Ty::Unknown | Ty::TypeVar(_)) {
                     return Expr::Vec(vec![]); // fallback: let Rust infer
                 }
-                let rt = super::lower_types::lower_ty(inner);
+                // Use lower_ty_with to resolve Record types to their named type
+                let rt = super::lower_types::lower_ty_with(self.anon, self.named, inner);
                 let mut s = String::new();
                 super::render::render_type(&mut s, &rt);
-                Expr::Raw(format!("Vec::<{}>::new()", s))
+                if s == "AnonRecord" {
+                    Expr::Vec(vec![]) // fallback: let Rust infer
+                } else {
+                    Expr::Raw(format!("Vec::<{}>::new()", s))
+                }
             }
             IrExprKind::MapLiteral { entries } => Expr::HashMap(entries.iter().map(|(k, v)| (self.lower_expr(k), self.lower_expr(v))).collect()),
             IrExprKind::EmptyMap => self.lower_empty_map(e),
