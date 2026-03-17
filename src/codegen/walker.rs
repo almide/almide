@@ -75,7 +75,34 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
             ctx.templates.render("type_list", None, &[], &b)
                 .unwrap_or_else(|| format!("Vec<{}>", render_type(ctx, inner)))
         }
-        // Fallback for complex types not yet templated
+        Ty::Named(name, _) => name.clone(),
+        Ty::Record { fields } => {
+            // For anonymous records, generate a placeholder name from sorted fields
+            let mut names: Vec<&str> = fields.iter().map(|(n, _)| n.as_str()).collect();
+            names.sort();
+            names.join("_")
+        }
+        Ty::Map(k, v) => {
+            let mut b = HashMap::new();
+            b.insert("key", render_type(ctx, k));
+            b.insert("value", render_type(ctx, v));
+            ctx.templates.render("type_map", None, &[], &b)
+                .unwrap_or_else(|| format!("HashMap<{}, {}>", render_type(ctx, k), render_type(ctx, v)))
+        }
+        Ty::Fn { params, ret } => {
+            let params_str = params.iter().map(|p| render_type(ctx, p)).collect::<Vec<_>>().join(", ");
+            let ret_str = render_type(ctx, ret);
+            if ctx.is_rust() {
+                format!("impl Fn({}) -> {}", params_str, ret_str)
+            } else {
+                format!("({}) => {}", params_str, ret_str)
+            }
+        }
+        Ty::Tuple(elems) => {
+            let parts = elems.iter().map(|t| render_type(ctx, t)).collect::<Vec<_>>().join(", ");
+            format!("({})", parts)
+        }
+        // Fallback
         _ => format!("{}", ty.display()),
     }
 }
@@ -160,7 +187,15 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
 
         IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
             let mut parts: Vec<String> = stmts.iter()
-                .map(|s| render_stmt(ctx, s))
+                .map(|s| {
+                    let rendered = render_stmt(ctx, s);
+                    // Add ; if the stmt doesn't already end with one
+                    if ctx.is_rust() && !rendered.ends_with(';') && !rendered.ends_with('}') {
+                        format!("{};", rendered)
+                    } else {
+                        rendered
+                    }
+                })
                 .collect();
             if let Some(e) = expr {
                 parts.push(render_expr(ctx, e));
@@ -497,7 +532,14 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             ctx.templates.render("assignment", None, &[], &b)
                 .unwrap_or_else(|| format!("_ = _;"))
         }
-        IrStmtKind::Expr { expr } => render_expr(ctx, expr),
+        IrStmtKind::Expr { expr } => {
+            let rendered = render_expr(ctx, expr);
+            if ctx.is_rust() && !rendered.ends_with(';') && !rendered.ends_with('}') {
+                format!("{};", rendered)
+            } else {
+                rendered
+            }
+        }
         IrStmtKind::Comment { text } => format!("// {}", text),
         _ => format!("/* TODO: stmt */"),
     }
@@ -535,7 +577,17 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     b.insert("return_type", ret_str);
     b.insert("body", body_str);
 
-    let construct = if func.is_effect { "effect_fn_decl" } else { "fn_decl" };
+    // Sanitize function name: spaces → underscores, Rust keywords avoided
+    let safe_name = func.name.replace(' ', "_").replace('-', "_");
+    b.insert("name", safe_name);
+
+    let construct = if func.is_test {
+        "test_block"
+    } else if func.is_effect {
+        "effect_fn_decl"
+    } else {
+        "fn_decl"
+    };
     fn_ctx.templates.render(construct, None, &[], &b)
         .unwrap_or_else(|| format!("fn {}() {{ }}", func.name))
 }
