@@ -4,8 +4,8 @@
 
 ### Phase II: 安定性契約
 - [Stdlib Verb Reform](active/stdlib-verb-system.md) — 1.0 前最後の breaking change
-- [Stability Contract](active/stability-contract.md) — 構文凍結、edition、Rejected Patterns
-- [Error Codes + JSON](active/error-codes-json.md) — E001-E010 実装済み、`almide check --json` 実装済み。残: --explain, test --json, check 速度計測
+- [Stability Contract](active/stability-contract.md) — **edition フィールド実装済み**。残: 破壊的変更ポリシー文書、Rejected Patterns
+- [Error Codes + JSON](active/error-codes-json.md) — **E001-E010 + --json + --explain 実装済み**。残: test --json, check 速度計測
 
 ### Phase III: パッケージ + テスト
 - [Lockfile](active/lockfile.md) — `almide.lock` + git ベース依存解決
