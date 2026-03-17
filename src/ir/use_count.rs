@@ -135,6 +135,7 @@ fn count_uses_in_expr(expr: &IrExpr, table: &mut VarTable) {
         IrExprKind::RustMacro { args, .. } => {
             for a in args { count_uses_in_expr(a, table); }
         }
+        IrExprKind::RenderedCall { .. } => {}
     }
 }
 

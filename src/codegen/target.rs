@@ -16,6 +16,7 @@ use super::pass::{
 use super::pass_builtin_lowering::BuiltinLoweringPass;
 use super::pass_match_lowering::MatchLoweringPass;
 use super::pass_result_propagation::ResultPropagationPass;
+use super::pass_stdlib_lowering::StdlibLoweringPass;
 use super::template::TemplateSet;
 
 /// Full configuration for a codegen target.
@@ -45,6 +46,7 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(CloneInsertionPass)
             // Semantic lowering
             .add(BuiltinLoweringPass)
+            .add(StdlibLoweringPass)
             .add(ResultPropagationPass)
             // Shared passes
             .add(FanLoweringPass),

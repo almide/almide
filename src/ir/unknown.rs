@@ -155,6 +155,7 @@ fn check_expr_for_unknown(expr: &IrExpr, fn_name: &str, warnings: &mut Vec<Unkno
         IrExprKind::RustMacro { args, .. } => {
             for a in args { check_expr_for_unknown(a, fn_name, warnings); }
         }
+        IrExprKind::RenderedCall { .. } => {}
     }
 }
 

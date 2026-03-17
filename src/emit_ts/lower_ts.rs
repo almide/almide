@@ -300,6 +300,7 @@ impl<'a> LowerCtx<'a> {
             IrExprKind::RustMacro { args, .. } => {
                 if !args.is_empty() { self.lower_expr(&args[0], ie, it) } else { Expr::Null }
             }
+            IrExprKind::RenderedCall { code } => Expr::Raw(code.clone()),
         }
     }
 

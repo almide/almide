@@ -334,62 +334,15 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::Break => template_or(ctx, "break_stmt", &[], "break"),
         IrExprKind::Continue => template_or(ctx, "continue_stmt", &[], "continue"),
 
+        // ── Codegen pre-rendered call ──
+        IrExprKind::RenderedCall { code } => code.clone(),
+
         // ── Calls ──
         IrExprKind::Call { target, args, .. } => {
             match target {
                 CallTarget::Module { module, func } => {
-                    // Special cases: io.print → println! in Rust
-                    if ctx.is_rust() && module == "io" && func == "print" {
-                        let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
-                        return format!("println!(\"{{}}\", {})", args_str);
-                    }
-
-                    if ctx.is_rust() {
-                        // If any arg is a FnRef (not a lambda), use simple rendering
-                        // gen_generated_call's inline_lambda doesn't handle FnRef
-                        let has_fn_ref = args.iter().any(|a| matches!(&a.kind, IrExprKind::FnRef { .. }));
-                        if has_fn_ref {
-                            let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
-                            let mut result = format!("almide_rt_{}_{}({})", module, func, args_str);
-                            if ctx.in_effect_fn && matches!(&expr.ty, Ty::Result(_, _)) {
-                                result.push('?');
-                            }
-                            return result;
-                        }
-
-                        // Use the generated stdlib dispatch (handles &*, .to_vec(), ?, lambda formatting)
-                        let rendered_args: Vec<String> = args.iter().map(|a| render_expr(ctx, a)).collect();
-                        let inline_lambda = |arg_idx: usize, param_count: usize| -> (Vec<String>, String) {
-                            if let Some(arg) = args.get(arg_idx) {
-                                if let IrExprKind::Lambda { params, body } = &arg.kind {
-                                    let names: Vec<String> = params.iter()
-                                        .take(param_count)
-                                        .map(|(id, _)| {
-                                            let n = ctx.var_name(*id).to_string();
-                                            if n == "_" { "__unused".into() } else { n }
-                                        })
-                                        .collect();
-                                    let body_str = render_expr(ctx, body);
-                                    return (names, body_str);
-                                }
-                            }
-                            (vec!["__unused".into()], "()".into())
-                        };
-                        if let Some(mut result) = crate::generated::emit_rust_calls::gen_generated_call(
-                            module, func, &rendered_args, ctx.in_effect_fn, &inline_lambda
-                        ) {
-                            // Fix value module: TOML templates emit value_str() but runtime uses almide_rt_value_str()
-                            if module == "value" && result.starts_with("value_") {
-                                result = format!("almide_rt_{}", result);
-                            }
-                            return result;
-                        }
-                        // Fallback: simple module call
-                        let args_str = rendered_args.join(", ");
-                        return format!("almide_rt_{}_{}({})", module, func, args_str);
-                    }
-
-                    // TS/other: simple module call
+                    // Module calls: use template (TS/other) or should have been
+                    // converted to RenderedCall by StdlibLoweringPass (Rust)
                     let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
                     let mut b = HashMap::new();
                     b.insert("module", module.clone());

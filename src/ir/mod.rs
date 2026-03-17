@@ -253,6 +253,10 @@ pub enum IrExprKind {
     /// ToVec: `(expr).to_vec()`
     ToVec { expr: Box<IrExpr> },
 
+    /// Pre-rendered code string (produced by StdlibLoweringPass).
+    /// Walker outputs this verbatim — no further processing.
+    RenderedCall { code: String },
+
     // ── Misc ──
     Hole,
     Todo { message: String },
