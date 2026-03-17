@@ -269,7 +269,7 @@ impl<'a> LowerCtx<'a> {
             }
 
             IrExprKind::Lambda { params, body } => Expr::Arrow {
-                params: params.iter().map(|(v, _)| self.vt().get(*v).name.clone()).collect(),
+                params: params.iter().map(|(v, _)| self.var_name(*v)).collect(),
                 body: Box::new(self.lower_expr(body, ie, it)),
             },
             IrExprKind::StringInterp { parts } => Expr::Template { parts: parts.iter().map(|p| match p {
