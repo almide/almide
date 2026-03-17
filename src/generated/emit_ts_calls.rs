@@ -197,6 +197,7 @@ pub fn gen_generated_call(module: &str, func: &str, args_str: &[String]) -> Opti
             ("log", "warn_with") => format!("__almd_log.warn_with({}, {})", args_str[0], args_str[1]),
             ("map", "contains") => format!("__almd_map.contains({}, {})", args_str[0], args_str[1]),
             ("map", "entries") => format!("__almd_map.entries({})", args_str[0]),
+            ("map", "from_entries") => format!("__almd_map.from_entries({})", args_str[0]),
             ("map", "get") => format!("__almd_map.get({}, {})", args_str[0], args_str[1]),
             ("map", "get_or") => format!("__almd_map.get_or({}, {}, {})", args_str[0], args_str[1], args_str[2]),
             ("map", "is_empty") => format!("__almd_map.is_empty({})", args_str[0]),

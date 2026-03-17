@@ -106,6 +106,15 @@ return = "Bool"
 rust = "almide_rt_map_is_empty(&{m})"
 ts = "__almd_map.is_empty({m})"
 
+[from_entries]
+description = "Create a map from a list of (key, value) pairs."
+example = 'map.from_entries([("a", 1), ("b", 2)])'
+type_params = ["K", "V"]
+params = [{ name = "entries", type = "List[(K, V)]" }]
+return = "Map[K, V]"
+rust = "almide_rt_map_from_entries({entries})"
+ts = "__almd_map.from_entries({entries})"
+
 # ── Closure-taking functions ──
 
 [from_list]

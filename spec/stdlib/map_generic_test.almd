@@ -12,7 +12,7 @@ test "map.new inferred from usage" {
 
 test "map.from_list with typed tuples" {
   let entries = [("a", 1), ("b", 2)]
-  let m = map.from_list(entries)
+  let m = map.from_entries(entries)
   assert_eq(map.get(m, "a"), some(1))
   assert_eq(map.get(m, "b"), some(2))
 }

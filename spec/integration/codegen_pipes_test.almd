@@ -42,7 +42,7 @@ test "pipe chain string processing" {
 
 test "pipe chain with map" {
   let result = [("a", 1), ("b", 2), ("c", 3)]
-    |> map.from_list()
+    |> map.from_entries()
     |> map.values()
     |> list.sort()
     |> list.sum()
