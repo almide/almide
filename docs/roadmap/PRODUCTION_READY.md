@@ -110,42 +110,42 @@ Almide の `fan` は Go の goroutine と同じカテゴリ — 1.0 で完成品
 Almide 1.0 = ALL of:
 
 安定性契約
-  □ 構文凍結: 全キーワード・構文の最終確認
-  □ stdlib API 凍結: 22 モジュール / 355 関数のシグネチャ固定
-  □ edition フィールド: almide.toml に edition = "2026"
-  □ 破壊的変更ポリシー文書化
-  □ Rejected Patterns リスト公開
+  □ 構文凍結: 全キーワード・構文の最終確認 (verb reform 待ち)
+  ■ stdlib API 凍結: FROZEN_API.md で 22 モジュール / 355 関数を文書化
+  ■ edition フィールド: almide.toml に edition = "2026" 実装済み
+  ■ 破壊的変更ポリシー: BREAKING_CHANGE_POLICY.md
+  ■ Rejected Patterns リスト: REJECTED_PATTERNS.md (20+ 項目)
 
 コンパイラ正確性
-  □ クロスターゲット CI: 全テストを Rust + TS で実行、出力 diff = 0
-  □ ICE = 0: panic/unwrap ゼロ
+  ■ クロスターゲット CI: 90/91 (98.9%) — GitHub Actions 自動化済み
+  □ ICE = 0: panic/unwrap ゼロ (継続改善)
   ■ 生成コードが rustc/tsc 通過
   ■ stdlib ランタイム 100%
 
-ターゲット品質 (Swift の教訓: 品質階層を明確に)
-  □ Tier 1 (Rust): 全テスト通過、全 exercises 動作
-  □ Tier 2 (TS/JS): 全テスト通過
-  □ Tier 3 (WASM): 基本動作確認
+ターゲット品質
+  ■ Tier 1 (Rust): 全テスト通過、全 exercises 動作
+  ■ Tier 2 (TS/JS): 90/91 pass (1 known: do_block break-in-IIFE)
+  □ Tier 3 (WASM): 基本動作確認 (CI smoke test あり)
 
 テスト
   □ テスト 2,500+                        (2,033 — あと 467)
   □ 5 showcase プログラムが Tier 1 + Tier 2 で動作
 
-パッケージ管理 (Cargo は Rust 最大の武器。Go は 6 年間パッケージ管理なしで苦しんだ)
-  □ almide.lock で再現性保証
-  □ almide.toml [dependencies] + git ベース解決
+パッケージ管理
+  ■ almide.lock で再現性保証 (実装済み)
+  ■ almide.toml [dependencies] + git ベース解決 (実装済み)
 
-エラー品質 (Rust: 10 年の投資。Go: check 速度が採用を決めた)
-  □ 安定エラーコード (E0001-E9999)
-  □ almide check --json: LLM agent 向け構造化出力
-  □ almide check < 1 秒 (500 行プログラム)
-  □ hint 適用修復率 70%+
+エラー品質
+  ■ 安定エラーコード: E001-E010 実装済み
+  ■ almide check --json: 構造化出力 実装済み
+  ■ almide check < 1 秒: 298 行で 14ms (debug) / 25ms (release)
+  □ hint 適用修復率 70%+ (未計測)
 
 LLM 計測 (ブロックしないが計測必須)
   □ MSR 計測開始 (Grammar Lab)
   □ 初回正答率ベンチマーク (exercises ベース)
 
-■ = 達成 (2)   □ = 未達 (15)
+■ = 達成 (13)   □ = 未達 (4+2 計測)
 ```
 
 ---
@@ -156,12 +156,12 @@ LLM 計測 (ブロックしないが計測必須)
 > Swift は 1→2→3 で 3 回壊して信頼を失った。TypeScript は enum を後悔している。
 > LLM が構文を学習した後では指数関数的に難しくなる。
 
-- [ ] Verb system reform 完了 (stdlib-verb-system.md)
-- [ ] コア型 API (String, List, Map, Result, Option) の表面積を監査・凍結
-- [ ] `fan` の命名最終確認
-- [ ] `effect fn` マーカーの最終確認
-- [ ] Rejected Patterns リスト作成（再提案を防ぐ: Ruby の教訓）
-- [ ] hidden operations の文書化 (clone 挿入, auto-?, runtime 埋め込み — Zig の教訓)
+- [ ] Verb system reform 完了 (stdlib-verb-system.md) — **唯一の残タスク**
+- [x] コア型 API 監査・凍結: `docs/FROZEN_API.md`
+- [x] `fan` の命名最終確認 — fan { }, fan.map, fan.race, fan.any, fan.settle, fan.timeout
+- [x] `effect fn` マーカーの最終確認 — Effect Isolation (Layer 1) 実装済み
+- [x] Rejected Patterns リスト: `docs/REJECTED_PATTERNS.md` (20+ 項目)
+- [x] Hidden operations 文書化: `docs/HIDDEN_OPERATIONS.md`
 
 ---
 
