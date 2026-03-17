@@ -1131,6 +1131,33 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         parts.push(render_function(&ctx, func));
     }
 
+    // Imported modules: render their type decls and functions
+    for module in &program.modules {
+        let mod_ctx = RenderContext {
+            templates: ctx.templates,
+            var_table: &module.var_table,
+            indent: ctx.indent,
+            target: ctx.target,
+            in_effect_fn: false,
+            ann: ctx.ann.clone(),
+        };
+        // Module type decls
+        for td in &module.type_decls {
+            parts.push(render_type_decl(&mod_ctx, td));
+        }
+        // Module functions (prefixed with module name)
+        for func in &module.functions {
+            let rendered = render_function(&mod_ctx, func);
+            // Rename: fn name → fn modulename_name (to match almide_rt_module_func naming)
+            let prefixed = rendered.replacen(
+                &format!("fn {}", func.name.replace(' ', "_").replace('-', "_").replace('.', "_")),
+                &format!("fn almide_rt_{}_{}", module.name, func.name.replace(' ', "_").replace('-', "_").replace('.', "_")),
+                1
+            );
+            parts.push(prefixed);
+        }
+    }
+
     parts.join("\n\n")
 }
 
