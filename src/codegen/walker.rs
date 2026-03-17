@@ -402,63 +402,6 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                     let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
                     let callee = match target {
                         CallTarget::Named { name } => {
-                            // Rust: assert_eq/assert_ne → macro invocation
-                            if ctx.is_rust() && (name == "assert_eq" || name == "assert_ne") {
-                                if args.len() == 3 {
-                                    // 3-arg assert: (left, right, message)
-                                    // Message should be &str, not .to_string()
-                                    let left = render_expr(ctx, &args[0]);
-                                    let right = render_expr(ctx, &args[1]);
-                                    let msg = match &args[2].kind {
-                                        IrExprKind::LitStr { value } => format!("\"{}\"", value),
-                                        _ => render_expr(ctx, &args[2]),
-                                    };
-                                    return format!("{}!({}, {}, {})", name, left, right, msg);
-                                }
-                                return format!("{}!({})", name, args_str);
-                            }
-                            // Rust: assert_some → assert!(x.is_some())
-                            if ctx.is_rust() && name == "assert_some" {
-                                return format!("assert!(({}).is_some())", args_str);
-                            }
-                            // Rust: println → println! macro
-                            if ctx.is_rust() && name == "println" {
-                                return format!("println!(\"{{}}\", {})", args_str);
-                            }
-                            // Rust: value_* and __encode/__decode functions → almide_rt_* (codec runtime)
-                            if ctx.is_rust() && name.starts_with("value_") {
-                                return format!("almide_rt_{}({})", name, args_str);
-                            }
-                            // Rust: __encode_list_Type / __decode_list_Type → runtime or inline
-                            if ctx.is_rust() && (name.starts_with("__encode_list_") || name.starts_with("__decode_list_")) {
-                                let type_name = if name.starts_with("__encode_list_") {
-                                    &name["__encode_list_".len()..]
-                                } else {
-                                    &name["__decode_list_".len()..]
-                                };
-                                let primitives = ["string", "int", "float", "bool"];
-                                if primitives.contains(&type_name) {
-                                    // Primitive: runtime has almide_rt___encode_list_string etc.
-                                    return format!("almide_rt_{}({})", name, args_str);
-                                } else {
-                                    // Custom type: use generic encode/decode with Type_encode/Type_decode
-                                    if name.starts_with("__encode") {
-                                        return format!("almide_rt_value_encode_list({}, {}_encode)", args_str, type_name);
-                                    } else {
-                                        return format!("almide_rt_value_decode_list({}, {}_decode)", args_str, type_name);
-                                    }
-                                }
-                            }
-                            // Rust: other __ prefixed functions
-                            if ctx.is_rust() && name.starts_with("__") {
-                                return format!("almide_rt_{}({})", name, args_str);
-                            }
-                            // Rust: Type.method → Type_method (standalone function)
-                            // These are auto-derived codec functions like Person.encode/Person.decode
-                            if ctx.is_rust() && name.contains('.') {
-                                let flat = name.replace('.', "_");
-                                return format!("{}({})", flat, args_str);
-                            }
                             // Qualify enum constructors (Red → Color::Red)
                             if let Some(enum_name) = ctx.ann.ctor_to_enum.get(name.as_str()) {
                                 if args.is_empty() {
@@ -470,32 +413,6 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                             name.clone()
                         }
                         CallTarget::Method { object, method } => {
-                            // Rust: codec encode/decode methods → Type_method(object)
-                            // Rust: codec encode/decode methods → Type_method(object, ...)
-                            if ctx.is_rust() {
-                                let is_codec = method == "encode" || method == "decode"
-                                    || method.ends_with(".encode") || method.ends_with(".decode");
-                                if is_codec {
-                                    // Method might be "encode" or "Color.encode"
-                                    let flat_method = method.replace('.', "_");
-                                    let call_name = if method.contains('.') {
-                                        flat_method // "Color_encode" — type already in method name
-                                    } else {
-                                        let type_name = match &object.ty {
-                                            Ty::Named(n, _) => n.clone(),
-                                            Ty::Variant { name, .. } => name.clone(),
-                                            _ => render_type(ctx, &object.ty),
-                                        };
-                                        format!("{}_{}", type_name, method)
-                                    };
-                                    let obj_str = render_expr(ctx, object);
-                                    if args_str.is_empty() {
-                                        return format!("{}({})", call_name, obj_str);
-                                    } else {
-                                        return format!("{}({}, {})", call_name, obj_str, args_str);
-                                    }
-                                }
-                            }
                             format!("{}.{}", render_expr(ctx, object), method)
                         }
                         CallTarget::Computed { callee } => render_expr(ctx, callee),
@@ -765,7 +682,16 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             format!("Box::new({})", render_expr(ctx, inner))
         }
         IrExprKind::RustMacro { name, args } => {
-            let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
+            // Render macro args — LitStr rendered as bare &str (no .to_string())
+            let args_str = args.iter().map(|a| {
+                match &a.kind {
+                    IrExprKind::LitStr { value } => {
+                        let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+                        format!("\"{}\"", escaped)
+                    }
+                    _ => render_expr(ctx, a),
+                }
+            }).collect::<Vec<_>>().join(", ");
             format!("{}!({})", name, args_str)
         }
         IrExprKind::ToVec { expr: inner } => {

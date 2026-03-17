@@ -13,6 +13,7 @@ use super::pass::{
     self, BorrowInsertionPass, CloneInsertionPass, FanLoweringPass, NanoPass,
     OptionErasurePass, Pipeline, Target, TypeConcretizationPass,
 };
+use super::pass_builtin_lowering::BuiltinLoweringPass;
 use super::pass_match_lowering::MatchLoweringPass;
 use super::pass_result_propagation::ResultPropagationPass;
 use super::template::TemplateSet;
@@ -42,7 +43,8 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(TypeConcretizationPass)
             .add(BorrowInsertionPass)
             .add(CloneInsertionPass)
-            // Local passes
+            // Semantic lowering
+            .add(BuiltinLoweringPass)
             .add(ResultPropagationPass)
             // Shared passes
             .add(FanLoweringPass),
