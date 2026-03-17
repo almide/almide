@@ -47,6 +47,6 @@ fn needs_clone(ty: &Ty) -> bool {
         Ty::String | Ty::List(_) | Ty::Map(_, _) |
         Ty::Record { .. } | Ty::OpenRecord { .. } |
         Ty::Named(_, _) | Ty::Option(_) | Ty::Result(_, _) |
-        Ty::Variant { .. }
+        Ty::Variant { .. } | Ty::Fn { .. }
     )
 }

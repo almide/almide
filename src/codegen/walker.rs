@@ -126,10 +126,17 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
         }
         Ty::Fn { params, ret } => {
             let params_str = params.iter().map(|p| render_type(ctx, p)).collect::<Vec<_>>().join(", ");
-            let ret_str = render_type(ctx, ret);
             if ctx.is_rust() {
-                format!("impl Fn({}) -> {}", params_str, ret_str)
+                // Nested Fn return → Box<dyn Fn> (Rust doesn't allow nested impl Trait)
+                if matches!(ret.as_ref(), Ty::Fn { .. }) {
+                    let ret_str = render_type_boxed_fn(ctx, ret);
+                    format!("impl Fn({}) -> {} + Clone", params_str, ret_str)
+                } else {
+                    let ret_str = render_type(ctx, ret);
+                    format!("impl Fn({}) -> {} + Clone", params_str, ret_str)
+                }
             } else {
+                let ret_str = render_type(ctx, ret);
                 format!("({}) => {}", params_str, ret_str)
             }
         }
@@ -352,11 +359,20 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                         .unwrap_or_else(|| format!("__almd_{}.{}()", module, func))
                 }
                 _ => {
-                    let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
                     let callee = match target {
                         CallTarget::Named { name } => {
                             // Qualify enum constructors (Red → Color::Red)
                             if let Some(enum_name) = ctx.ann.ctor_to_enum.get(name.as_str()) {
+                                // Box-wrap args for recursive enum constructors
+                                let boxed_args: Vec<String> = args.iter().map(|a| {
+                                    let rendered = render_expr(ctx, a);
+                                    if ctx.ann.recursive_enums.contains(enum_name) && ty_contains_name(&a.ty, enum_name) {
+                                        format!("Box::new({})", rendered)
+                                    } else {
+                                        rendered
+                                    }
+                                }).collect();
+                                let args_str = boxed_args.join(", ");
                                 if args.is_empty() {
                                     return format!("{}::{}", enum_name, name);
                                 } else {
@@ -371,6 +387,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                         CallTarget::Computed { callee } => render_expr(ctx, callee),
                         CallTarget::Module { .. } => unreachable!(),
                     };
+                    let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
                     let mut b = HashMap::new();
                     b.insert("callee", callee);
                     b.insert("args", args_str);
@@ -490,7 +507,11 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .map(|(id, _ty)| ctx.var_name(*id).to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
-            let body_str = render_expr(ctx, body);
+            let mut body_str = render_expr(ctx, body);
+            // Rust: if body is a nested lambda, wrap in Box::new (for Box<dyn Fn> return types)
+            if ctx.is_rust() && matches!(&body.kind, IrExprKind::Lambda { .. }) {
+                body_str = format!("Box::new({})", body_str);
+            }
             let mut b = HashMap::new();
             b.insert("params", params_str);
             b.insert("body", body_str);
@@ -1199,6 +1220,22 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
 // ── Helpers ──
 
 /// Try to render via template, fallback to default string.
+/// Render a Fn type as Box<dyn Fn(...) -> T> (for nested impl Trait in Rust)
+fn render_type_boxed_fn(ctx: &RenderContext, ty: &Ty) -> String {
+    match ty {
+        Ty::Fn { params, ret } => {
+            let params_str = params.iter().map(|p| render_type(ctx, p)).collect::<Vec<_>>().join(", ");
+            let ret_str = if matches!(ret.as_ref(), Ty::Fn { .. }) {
+                render_type_boxed_fn(ctx, ret)
+            } else {
+                render_type(ctx, ret)
+            };
+            format!("Box<dyn Fn({}) -> {}>", params_str, ret_str)
+        }
+        _ => render_type(ctx, ty),
+    }
+}
+
 fn template_or(ctx: &RenderContext, construct: &str, attrs: &[&str], fallback: &str) -> String {
     let b = HashMap::new();
     ctx.templates.render(construct, None, attrs, &b)
