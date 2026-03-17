@@ -232,10 +232,10 @@ template = "continue;"
 # ── Lambda ──
 
 [lambda]
-template = "|{params}| {{ {body} }}"
+template = "move |{params}| {{ {body} }}"
 
 [lambda_single]
-template = "|{params}| {body}"
+template = "move |{params}| {body}"
 
 # ── Type declarations ──
 
