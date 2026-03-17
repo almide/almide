@@ -342,9 +342,13 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                             }
                             (vec!["_".into()], "()".into())
                         };
-                        if let Some(result) = crate::generated::emit_rust_calls::gen_generated_call(
+                        if let Some(mut result) = crate::generated::emit_rust_calls::gen_generated_call(
                             module, func, &rendered_args, ctx.in_effect_fn, &inline_lambda
                         ) {
+                            // Fix value module: TOML templates emit value_str() but runtime uses almide_rt_value_str()
+                            if module == "value" && result.starts_with("value_") {
+                                result = format!("almide_rt_{}", result);
+                            }
                             return result;
                         }
                         // Fallback: simple module call
@@ -376,6 +380,10 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                             // Rust: println → println! macro
                             if ctx.is_rust() && name == "println" {
                                 return format!("println!(\"{{}}\", {})", args_str);
+                            }
+                            // Rust: value_* functions → almide_rt_value_* (codec runtime)
+                            if ctx.is_rust() && name.starts_with("value_") {
+                                return format!("almide_rt_{}({})", name, args_str);
                             }
                             // Qualify enum constructors (Red → Color::Red)
                             if let Some(enum_name) = ctx.ctor_to_enum.get(name.as_str()) {
