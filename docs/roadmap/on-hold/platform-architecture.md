@@ -5,7 +5,9 @@
 
 ## ビジョン
 
-Almideを**UIフレームワークではなく、app runtime**として設計する。
+Almideを「app runtime **にもなる** 汎用言語」として設計する。
+CLI/server/scriptingの実用性を維持しつつ、app runtime層を追加レイヤーとして乗せる。
+言語が先、プラットフォームは後。Kotlinの軌跡（JVM → Android → Multiplatform → Server）と同じ方向。
 
 ```
 [Almide Language + DSL]
