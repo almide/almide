@@ -203,7 +203,17 @@ fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
     match expr {
         Expr::Int { raw, .. } => out.push_str(raw),
         Expr::Float { value, .. } => { let s = format!("{value}"); if s.contains('.') { out.push_str(&s); } else { out.push_str(&s); out.push_str(".0"); } }
-        Expr::String { value, .. } => w!(out, "{value:?}"),
+        Expr::String { value, .. } => {
+            if value.contains('"') && !value.contains('\'') {
+                out.push('\'');
+                for ch in value.chars() {
+                    match ch { '\'' => out.push_str("\\'"), '\\' => out.push_str("\\\\"), '\n' => out.push_str("\\n"), '\t' => out.push_str("\\t"), o => out.push(o) }
+                }
+                out.push('\'');
+            } else {
+                w!(out, "{value:?}");
+            }
+        }
         Expr::InterpolatedString { parts, .. } => fmt_istring_parts(out, parts, depth),
         Expr::Bool { value, .. } => out.push_str(if *value { "true" } else { "false" }),
         Expr::Unit { .. } => out.push_str("()"),
@@ -337,12 +347,22 @@ fn fmt_map(out: &mut String, entries: &[(Expr, Expr)], depth: usize) {
 }
 
 fn fmt_istring_parts(out: &mut String, parts: &[StringPart], depth: usize) {
-    out.push('"');
+    // Use single quotes if any literal part contains a double quote (avoids \")
+    let has_dquote = parts.iter().any(|p| matches!(p, StringPart::Lit { value } if value.contains('"')));
+    let has_squote = parts.iter().any(|p| matches!(p, StringPart::Lit { value } if value.contains('\'')));
+    let use_single = has_dquote && !has_squote;
+
+    let quote = if use_single { '\'' } else { '"' };
+    out.push(quote);
     for part in parts {
         match part {
             StringPart::Lit { value } => {
                 for ch in value.chars() {
-                    match ch { '\n' => out.push_str("\\n"), '\t' => out.push_str("\\t"), '\\' => out.push_str("\\\\"), '"' => out.push_str("\\\""), o => out.push(o) }
+                    if ch == '\n' { out.push_str("\\n"); }
+                    else if ch == '\t' { out.push_str("\\t"); }
+                    else if ch == '\\' { out.push_str("\\\\"); }
+                    else if ch == quote { out.push('\\'); out.push(ch); }
+                    else { out.push(ch); }
                 }
             }
             StringPart::Expr { expr } => {
@@ -352,7 +372,7 @@ fn fmt_istring_parts(out: &mut String, parts: &[StringPart], depth: usize) {
             }
         }
     }
-    out.push('"');
+    out.push(quote);
 }
 
 fn fmt_stmt(out: &mut String, stmt: &Stmt, depth: usize) {

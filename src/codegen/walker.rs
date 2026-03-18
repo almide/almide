@@ -566,8 +566,12 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             for part in parts {
                 match part {
                     IrStringPart::Lit { value } => {
-                        // Escape { and } for format!-style templates (safe for all targets)
-                        fmt_parts.push(value.replace('{', "{{").replace('}', "}}"));
+                        // Escape special chars for format!-style templates
+                        fmt_parts.push(value
+                            .replace('\\', "\\\\")
+                            .replace('"', "\\\"")
+                            .replace('{', "{{")
+                            .replace('}', "}}"));
                     }
                     IrStringPart::Expr { expr } => {
                         fmt_parts.push("{}".to_string());
