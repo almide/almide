@@ -488,9 +488,24 @@ fn main() {
                     };
                     transforms.push(format!("{}", transform));
                 }
+                // Extract actual runtime function name from template
+                let rt_name = {
+                    let tmpl = &def.rust;
+                    // Find function name: first almide_rt_... or other identifier before (
+                    if let Some(paren) = tmpl.find('(') {
+                        let prefix = &tmpl[..paren];
+                        // Handle: "{ almide_rt_xxx(" → extract "almide_rt_xxx"
+                        let name = prefix.rsplit(|c: char| !c.is_alphanumeric() && c != '_')
+                            .next().unwrap_or("");
+                        if !name.is_empty() { name.to_string() } else { format!("almide_rt_{}_{}", module_name, fn_name) }
+                    } else {
+                        format!("almide_rt_{}_{}", module_name, fn_name)
+                    }
+                };
+
                 let effect_suffix = if def.effect { "true" } else { "false" };
                 arg_transform_arms.push_str(&format!(
-                    "            (\"{module}\", \"{func}\") => Some(StdlibCallInfo {{ args: &[{transforms}], effect: {effect}, name: \"almide_rt_{module}_{func}\" }}),\n",
+                    "            (\"{module}\", \"{func}\") => Some(StdlibCallInfo {{ args: &[{transforms}], effect: {effect}, name: \"{rt_name}\" }}),\n",
                     module = module_name,
                     func = fn_name,
                     transforms = transforms.join(", "),

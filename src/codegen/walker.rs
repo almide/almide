@@ -316,8 +316,14 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
 
         // ── Loops ──
-        IrExprKind::ForIn { var, iterable, body, .. } => {
-            let var_name = ctx.var_name(*var).to_string();
+        IrExprKind::ForIn { var, var_tuple, iterable, body } => {
+            let var_name = if let Some(tuple_vars) = var_tuple {
+                // Tuple destructure: for (k, v) in ...
+                let names: Vec<String> = tuple_vars.iter().map(|id| ctx.var_name(*id).to_string()).collect();
+                format!("({})", names.join(", "))
+            } else {
+                ctx.var_name(*var).to_string()
+            };
             let iter = render_expr(ctx, iterable);
             let body_str = body.iter().map(|s| render_stmt(ctx, s)).collect::<Vec<_>>().join("\n");
             let mut b = HashMap::new();
