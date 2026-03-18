@@ -8,10 +8,6 @@ pub fn gen_generated_call(
         inline_lambda: &dyn Fn(usize, usize) -> (Vec<String>, String),
 ) -> Option<String> {
     let expr = match (module, func) {
-            ("crypto", "hmac_sha256") => if in_effect { format!("almide_rt_crypto_hmac_sha256(&*{}, &*{})?", args_str[0], args_str[1]) } else { format!("almide_rt_crypto_hmac_sha256(&*{}, &*{})", args_str[0], args_str[1]) },
-            ("crypto", "hmac_verify") => if in_effect { format!("almide_rt_crypto_hmac_verify(&*{}, &*{}, &*{})?", args_str[0], args_str[1], args_str[2]) } else { format!("almide_rt_crypto_hmac_verify(&*{}, &*{}, &*{})", args_str[0], args_str[1], args_str[2]) },
-            ("crypto", "random_bytes") => if in_effect { format!("almide_rt_crypto_random_bytes({})?", args_str[0]) } else { format!("almide_rt_crypto_random_bytes({})", args_str[0]) },
-            ("crypto", "random_hex") => if in_effect { format!("almide_rt_crypto_random_hex({})?", args_str[0]) } else { format!("almide_rt_crypto_random_hex({})", args_str[0]) },
             ("datetime", "add_days") => format!("{} + {} * 86400", args_str[0], args_str[1]),
             ("datetime", "add_hours") => format!("{} + {} * 3600", args_str[0], args_str[1]),
             ("datetime", "add_minutes") => format!("{} + {} * 60", args_str[0], args_str[1]),
@@ -483,12 +479,6 @@ pub fn gen_generated_call(
             ("testing", "assert_ok") => format!("almide_rt_test_assert_ok(&{})", args_str[0]),
             ("testing", "assert_some") => format!("almide_rt_test_assert_some(&{})", args_str[0]),
             ("testing", "assert_throws") => format!("almide_rt_test_assert_throws({}, &*{})", args_str[0], args_str[1]),
-            ("uuid", "is_valid") => format!("almide_rt_uuid_is_valid(&*{})", args_str[0]),
-            ("uuid", "nil") => "almide_rt_uuid_nil()".to_string(),
-            ("uuid", "parse") => if in_effect { format!("almide_rt_uuid_parse(&*{})?", args_str[0]) } else { format!("almide_rt_uuid_parse(&*{})", args_str[0]) },
-            ("uuid", "v4") => if in_effect { "almide_rt_uuid_v4()?".to_string() } else { "almide_rt_uuid_v4()".to_string() },
-            ("uuid", "v5") => if in_effect { format!("almide_rt_uuid_v5(&*{}, &*{})?", args_str[0], args_str[1]) } else { format!("almide_rt_uuid_v5(&*{}, &*{})", args_str[0], args_str[1]) },
-            ("uuid", "version") => if in_effect { format!("almide_rt_uuid_version(&*{})?", args_str[0]) } else { format!("almide_rt_uuid_version(&*{})", args_str[0]) },
             ("value", "array") => format!("value_array({})", args_str[0]),
             ("value", "as_array") => format!("value_as_array({})", args_str[0]),
             ("value", "as_bool") => format!("value_as_bool({})", args_str[0]),

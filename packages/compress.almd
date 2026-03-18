@@ -1,0 +1,33 @@
+// compress — gzip compression/decompression
+// Bundled stdlib module (written in Almide, auto multi-target)
+// Delegates to system gzip/gunzip commands via temp files.
+
+// Compress data using gzip
+effect fn gzip(data: List[Int]) -> List[Int] = {
+  let tmp = fs.create_temp_file("almide-gz-input-")
+  fs.write_bytes(tmp, data)
+  process.exec("gzip", ["-f", tmp])
+  let gz_path = tmp + ".gz"
+  let compressed = fs.read_bytes(gz_path)
+  fs.remove(gz_path)
+  compressed
+}
+
+// Decompress gzip data
+effect fn gunzip(data: List[Int]) -> List[Int] = {
+  let tmp = fs.create_temp_file("almide-gz-")
+  let gz_path = tmp + ".gz"
+  fs.write_bytes(gz_path, data)
+  process.exec("gunzip", ["-f", gz_path])
+  let decompressed = fs.read_bytes(tmp)
+  fs.remove(tmp)
+  decompressed
+}
+
+// Compress a string using gzip and return bytes
+effect fn gzip_string(s: String) -> List[Int] =
+  gzip(string.to_bytes(s))
+
+// Decompress gzip bytes back to a string
+effect fn gunzip_string(data: List[Int]) -> String =
+  string.from_bytes(gunzip(data))

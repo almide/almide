@@ -212,6 +212,9 @@ template = "Result<{ok}, {err}>"
 [type_map]
 template = "HashMap<{key}, {value}>"
 
+[type_set]
+template = "std::collections::HashSet<{inner}>"
+
 [type_fn]
 template = "impl Fn({params}) -> {return} + Clone"
 

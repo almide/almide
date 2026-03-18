@@ -2,10 +2,6 @@
 
 pub fn gen_generated_call(module: &str, func: &str, args_str: &[String]) -> Option<String> {
     let expr = match (module, func) {
-            ("crypto", "hmac_sha256") => format!("__almd_crypto.hmac_sha256({}, {})", args_str[0], args_str[1]),
-            ("crypto", "hmac_verify") => format!("__almd_crypto.hmac_verify({}, {}, {})", args_str[0], args_str[1], args_str[2]),
-            ("crypto", "random_bytes") => format!("__almd_crypto.random_bytes({})", args_str[0]),
-            ("crypto", "random_hex") => format!("__almd_crypto.random_hex({})", args_str[0]),
             ("datetime", "add_days") => format!("{} + {} * 86400", args_str[0], args_str[1]),
             ("datetime", "add_hours") => format!("{} + {} * 3600", args_str[0], args_str[1]),
             ("datetime", "add_minutes") => format!("{} + {} * 60", args_str[0], args_str[1]),
@@ -314,12 +310,6 @@ pub fn gen_generated_call(module: &str, func: &str, args_str: &[String]) -> Opti
             ("testing", "assert_ok") => format!("__almd_testing.assert_ok({})", args_str[0]),
             ("testing", "assert_some") => format!("__almd_testing.assert_some({})", args_str[0]),
             ("testing", "assert_throws") => format!("__almd_testing.assert_throws({}, {})", args_str[0], args_str[1]),
-            ("uuid", "is_valid") => format!("__almd_uuid.is_valid({})", args_str[0]),
-            ("uuid", "nil") => "__almd_uuid.nil()".to_string(),
-            ("uuid", "parse") => format!("__almd_uuid.parse({})", args_str[0]),
-            ("uuid", "v4") => "__almd_uuid.v4()".to_string(),
-            ("uuid", "v5") => format!("__almd_uuid.v5({}, {})", args_str[0], args_str[1]),
-            ("uuid", "version") => format!("__almd_uuid.version({})", args_str[0]),
             ("value", "array") => format!("__almd_value.array({})", args_str[0]),
             ("value", "as_array") => format!("__almd_value.as_array({})", args_str[0]),
             ("value", "as_bool") => format!("__almd_value.as_bool({})", args_str[0]),

@@ -20,10 +20,6 @@ pub struct StdlibCallInfo {
 
 pub fn lookup(module: &str, func: &str) -> Option<StdlibCallInfo> {
     match (module, func) {
-            ("crypto", "hmac_sha256") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::Direct], effect: true, name: "almide_rt_crypto_hmac_sha256", required: 2 }),
-            ("crypto", "hmac_verify") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::Direct, ArgTransform::Direct], effect: true, name: "almide_rt_crypto_hmac_verify", required: 3 }),
-            ("crypto", "random_bytes") => Some(StdlibCallInfo { args: &[ArgTransform::Direct], effect: true, name: "almide_rt_crypto_random_bytes", required: 1 }),
-            ("crypto", "random_hex") => Some(StdlibCallInfo { args: &[ArgTransform::Direct], effect: true, name: "almide_rt_crypto_random_hex", required: 1 }),
             ("datetime", "add_days") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::Direct], effect: false, name: "almide_rt_datetime_add_days", required: 2 }),
             ("datetime", "add_hours") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::Direct], effect: false, name: "almide_rt_datetime_add_hours", required: 2 }),
             ("datetime", "add_minutes") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::Direct], effect: false, name: "almide_rt_datetime_add_minutes", required: 2 }),
@@ -375,12 +371,6 @@ pub fn lookup(module: &str, func: &str) -> Option<StdlibCallInfo> {
             ("testing", "assert_ok") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, name: "almide_rt_test_assert_ok", required: 1 }),
             ("testing", "assert_some") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, name: "almide_rt_test_assert_some", required: 1 }),
             ("testing", "assert_throws") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::BorrowStr], effect: false, name: "almide_rt_test_assert_throws", required: 2 }),
-            ("uuid", "is_valid") => Some(StdlibCallInfo { args: &[ArgTransform::Direct], effect: false, name: "almide_rt_uuid_is_valid", required: 1 }),
-            ("uuid", "nil") => Some(StdlibCallInfo { args: &[], effect: false, name: "almide_rt_uuid_nil", required: 0 }),
-            ("uuid", "parse") => Some(StdlibCallInfo { args: &[ArgTransform::Direct], effect: false, name: "almide_rt_uuid_parse", required: 1 }),
-            ("uuid", "v4") => Some(StdlibCallInfo { args: &[], effect: true, name: "almide_rt_uuid_v4", required: 0 }),
-            ("uuid", "v5") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::Direct], effect: true, name: "almide_rt_uuid_v5", required: 2 }),
-            ("uuid", "version") => Some(StdlibCallInfo { args: &[ArgTransform::Direct], effect: false, name: "almide_rt_uuid_version", required: 1 }),
             ("value", "array") => Some(StdlibCallInfo { args: &[ArgTransform::Direct], effect: false, name: "value_array", required: 1 }),
             ("value", "as_array") => Some(StdlibCallInfo { args: &[ArgTransform::Direct], effect: false, name: "value_as_array", required: 1 }),
             ("value", "as_bool") => Some(StdlibCallInfo { args: &[ArgTransform::Direct], effect: false, name: "value_as_bool", required: 1 }),
