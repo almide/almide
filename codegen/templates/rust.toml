@@ -356,6 +356,9 @@ template = "{enum_name}::{ctor_name}({args})"
 [ctor_qualify]
 template = "{enum_name}::{ctor_name}"
 
+[enum_variant_sep]
+template = ",\n"
+
 [enum_variant_record]
 template = "{name} {{ {fields} }}"
 

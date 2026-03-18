@@ -225,10 +225,13 @@ template = "{name}: {type};"
 template = "// type {name} = variant union\n{variants}"
 
 [enum_variant]
-template = "function {name}({fields}): any {{ return {{ tag: \"{name}\", value: [{fields}] }}; }}"
+template = "function {name}({params}): any {{ return {{ tag: \"{name}\", value: [{param_names}] }}; }}"
 
 [enum_variant_unit]
 template = "const {name} = {{ tag: \"{name}\" }};"
+
+[enum_variant_sep]
+template = "\n"
 
 [enum_variant_record]
 template = "function {name}({fields}): any {{ return {{ tag: \"{name}\", {field_names} }}; }}"

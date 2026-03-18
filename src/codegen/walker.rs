@@ -1412,7 +1412,7 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                 .unwrap_or(fallback)
         }
         IrTypeDeclKind::Variant { cases, .. } => {
-            let variants_str = cases.iter()
+            let variants_parts: Vec<String> = cases.iter()
                 .map(|v| match &v.kind {
                     IrVariantKind::Unit => {
                         let mut b = HashMap::new();
@@ -1421,18 +1421,27 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                             .unwrap_or_else(|| v.name.clone())
                     }
                     IrVariantKind::Tuple { fields } => {
-                        let fields_str = fields.iter().map(|t| {
+                        let types: Vec<String> = fields.iter().map(|t| {
                             let rendered = render_type(ctx, t);
                             if ctx.ann.recursive_enums.contains(&td.name) && ty_contains_name(t, &td.name) {
                                 format!("Box<{}>", rendered)
                             } else {
                                 rendered
                             }
-                        }).collect::<Vec<_>>().join(", ");
+                        }).collect();
+                        let fields_str = types.join(", ");
+                        // Named params for TS: v0: type0, v1: type1
+                        let params_str = types.iter().enumerate()
+                            .map(|(i, t)| format!("v{}: {}", i, t))
+                            .collect::<Vec<_>>().join(", ");
+                        let param_names = (0..types.len()).map(|i| format!("v{}", i))
+                            .collect::<Vec<_>>().join(", ");
                         let mut b = HashMap::new();
                         b.insert("name", v.name.clone());
                         let fallback = format!("{}({})", v.name, &fields_str);
                         b.insert("fields", fields_str);
+                        b.insert("params", params_str);
+                        b.insert("param_names", param_names);
                         ctx.templates.render("enum_variant", None, &[], &b)
                             .unwrap_or(fallback)
                     }
@@ -1458,8 +1467,9 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                             .unwrap_or_else(|| format!("{} {{ {} }}", v.name, b.get("fields").unwrap()))
                     }
                 })
-                .collect::<Vec<_>>()
-                .join(",\n");
+                .collect::<Vec<_>>();
+            let sep = template_or(ctx, "enum_variant_sep", &[], ",\n");
+            let variants_str = variants_parts.join(&sep);
             let mut b = HashMap::new();
             let full_name = format!("{}{}", td.name, generics_str);
             b.insert("name", full_name.clone());
