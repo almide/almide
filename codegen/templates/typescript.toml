@@ -133,7 +133,7 @@ template = "`{template_str}`"
 # ── Statements ──
 
 [let_binding]
-template = "const {name}: {type} = {value};"
+template = "let {name}: {type} = {value};"
 
 [var_binding]
 template = "let {name}: {type} = {value};"

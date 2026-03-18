@@ -273,8 +273,8 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 let rendered = render_expr(ctx, e);
                 // In a loop (DoBlock), non-Unit final expressions need `return` to exit
                 let needs_return = !matches!(&e.ty, Ty::Unit)
-                    && !matches!(&e.kind, IrExprKind::Unit | IrExprKind::Break);
-                if needs_return && !rendered.starts_with("break") {
+                    && !matches!(&e.kind, IrExprKind::Unit | IrExprKind::Break | IrExprKind::Continue);
+                if needs_return && !rendered.starts_with("break") && !rendered.starts_with("continue") {
                     parts.push(format!("return {}", rendered));
                 } else {
                     parts.push(rendered);
@@ -1045,19 +1045,21 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let cond_str = render_expr(ctx, cond);
             let else_str = render_expr(ctx, else_);
             // Determine action: break for loop guards, return for function guards
-            let is_loop_break = matches!(&else_.kind, IrExprKind::Unit | IrExprKind::Break)
+            let is_loop_control = matches!(&else_.kind, IrExprKind::Unit | IrExprKind::Break | IrExprKind::Continue)
                 || (matches!(&else_.kind, IrExprKind::ResultOk { .. }) && {
                     if let IrExprKind::ResultOk { expr: inner } = &else_.kind {
                         matches!(&inner.kind, IrExprKind::Unit)
                     } else { false }
                 });
-            let action = if is_loop_break { "break" } else { "return" };
+            let action = if is_loop_control {
+                if matches!(&else_.kind, IrExprKind::Continue) { "continue" } else { "break" }
+            } else { "return" };
             let mut b = HashMap::new();
             b.insert("cond", cond_str);
             let neg = ctx.templates.render("guard_negate", None, &[], &b)
                 .unwrap_or_else(|| format!("!cond"));
-            if action == "break" {
-                format!("if {} {{ break }}", neg)
+            if action == "break" || action == "continue" {
+                format!("if {} {{ {} }}", neg, action)
             } else {
                 format!("if {} {{ return {} }}", neg, else_str)
             }
