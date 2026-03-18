@@ -304,3 +304,21 @@ template = "{target}.insert({key}, {value});"
 
 [index_assign]
 template = "{target}[{index} as usize] = {value};"
+
+[stmt_terminator]
+template = ";"
+
+[spread_record]
+template = "{type_name} {{ {fields}, ..{base} }}"
+
+[string_match_subject]
+template = "{subject}.as_str()"
+
+[guard_negate]
+template = "!({cond})"
+
+[empty_list]
+template = "Vec::<{inner_type}>::new()"
+
+[extern_fn]
+template = "use {module}::{function} as {name};"

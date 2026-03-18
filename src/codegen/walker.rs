@@ -244,12 +244,14 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
 
         IrExprKind::Match { subject, arms } => {
             let mut subj = render_expr(ctx, subject);
-            // Rust: string subjects need .as_str() for pattern matching
-            if ctx.is_rust() && matches!(&subject.ty, Ty::String) {
-                // Check if any arm has a string literal pattern
+            // String subjects may need transformation for pattern matching (e.g., .as_str() in Rust)
+            if matches!(&subject.ty, Ty::String) {
                 let has_str_pat = arms.iter().any(|a| matches!(&a.pattern, IrPattern::Literal { expr } if matches!(&expr.kind, IrExprKind::LitStr { .. })));
                 if has_str_pat {
-                    subj = format!("{}.as_str()", subj);
+                    let mut b = HashMap::new();
+                    b.insert("subject", subj.clone());
+                    subj = ctx.templates.render("string_match_subject", None, &[], &b)
+                        .unwrap_or(subj);
                 }
             }
             let arms_str = arms.iter()
@@ -269,11 +271,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             let mut parts: Vec<String> = stmts.iter()
                 .map(|s| {
                     let rendered = render_stmt(ctx, s);
-                    if ctx.is_rust() && !rendered.ends_with(';') && !rendered.ends_with('}') {
-                        format!("{};", rendered)
-                    } else {
-                        rendered
-                    }
+                    terminate_stmt(ctx, rendered)
                 })
                 .collect();
             if let Some(e) = expr {
@@ -300,11 +298,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .map(|s| {
                     let rendered = render_stmt(ctx, s);
                     // Add ; if the stmt doesn't already end with one
-                    if ctx.is_rust() && !rendered.ends_with(';') && !rendered.ends_with('}') {
-                        format!("{};", rendered)
-                    } else {
-                        rendered
-                    }
+                    terminate_stmt(ctx, rendered)
                 })
                 .collect();
             if let Some(e) = expr {
@@ -432,13 +426,17 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
 
         // ── Collections ──
         IrExprKind::List { elements } => {
-            // Rust: empty vec needs type annotation to avoid inference failure
-            if ctx.is_rust() && elements.is_empty() {
+            // Empty list: use typed template (Rust needs Vec::<T>::new(), TS uses [])
+            if elements.is_empty() {
                 let inner_ty = match &expr.ty {
                     Ty::List(inner) => render_type(ctx, inner),
                     _ => "_".into(),
                 };
-                return format!("Vec::<{}>::new()", inner_ty);
+                let mut b = HashMap::new();
+                b.insert("inner_type", inner_ty);
+                if let Some(rendered) = ctx.templates.render("empty_list", None, &[], &b) {
+                    return rendered;
+                }
             }
             let elems = elements.iter().map(|e| render_expr(ctx, e)).collect::<Vec<_>>().join(", ");
             let mut b = HashMap::new();
@@ -710,11 +708,12 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 }
                 _ => render_type(ctx, &expr.ty),
             };
-            if ctx.is_rust() {
-                format!("{} {{ {}, ..{} }}", type_name, fields_str, base_str)
-            } else {
-                format!("{{ ...{}, {} }}", base_str, fields_str)
-            }
+            let mut b = HashMap::new();
+            b.insert("type_name", type_name);
+            b.insert("fields", fields_str);
+            b.insert("base", base_str);
+            ctx.templates.render("spread_record", None, &[], &b)
+                .unwrap_or_else(|| "{ ...spread }".into())
         }
 
         // ── Try / Await ──
@@ -1036,11 +1035,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
         }
         IrStmtKind::Expr { expr } => {
             let rendered = render_expr(ctx, expr);
-            if ctx.is_rust() && !rendered.ends_with(';') && !rendered.ends_with('}') {
-                format!("{};", rendered)
-            } else {
-                rendered
-            }
+            terminate_stmt(ctx, rendered)
         }
         IrStmtKind::Guard { cond, else_ } => {
             let cond_str = render_expr(ctx, cond);
@@ -1053,18 +1048,14 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                     } else { false }
                 });
             let action = if is_loop_break { "break" } else { "return" };
-            if ctx.is_rust() {
-                if action == "break" {
-                    format!("if !({}) {{ break }}", cond_str)
-                } else {
-                    format!("if !({}) {{ return {} }}", cond_str, else_str)
-                }
+            let mut b = HashMap::new();
+            b.insert("cond", cond_str);
+            let neg = ctx.templates.render("guard_negate", None, &[], &b)
+                .unwrap_or_else(|| format!("!cond"));
+            if action == "break" {
+                format!("if {} {{ break }}", neg)
             } else {
-                if action == "break" {
-                    format!("if (!{}) {{ break }}", cond_str)
-                } else {
-                    format!("if (!{}) {{ return {} }}", cond_str, else_str)
-                }
+                format!("if {} {{ return {} }}", neg, else_str)
             }
         }
         IrStmtKind::IndexAssign { target, index, value } => {
@@ -1147,17 +1138,21 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         ann: ctx.ann.clone(),
     };
 
-    // Extern fn: emit `use module::function as name;` instead of function body
+    // Extern fn: emit import/use via template
     if !func.extern_attrs.is_empty() {
-        let target_str = if ctx.is_rust() { "rs" } else { "ts" };
+        let target_str = match ctx.target {
+            Target::Rust => "rs",
+            Target::TypeScript => "ts",
+            _ => "",
+        };
         for attr in &func.extern_attrs {
             if attr.target == target_str {
-                if ctx.is_rust() {
-                    return format!("use {}::{} as {};", attr.module, attr.function, func.name);
-                } else {
-                    // TS: import handled differently
-                    return format!("// extern: {}.{} as {}", attr.module, attr.function, func.name);
-                }
+                let mut b = HashMap::new();
+                b.insert("module", attr.module.clone());
+                b.insert("function", attr.function.clone());
+                b.insert("name", func.name.clone());
+                return ctx.templates.render("extern_fn", None, &[], &b)
+                    .unwrap_or_else(|| format!("// extern: {}.{}", attr.module, attr.function));
             }
         }
     }
@@ -1466,6 +1461,16 @@ fn template_or(ctx: &RenderContext, construct: &str, attrs: &[&str], fallback: &
     let b = HashMap::new();
     ctx.templates.render(construct, None, attrs, &b)
         .unwrap_or_else(|| fallback.to_string())
+}
+
+/// Add statement terminator (`;` in Rust, `;` in TS) if the rendered string doesn't already end with one
+fn terminate_stmt(ctx: &RenderContext, rendered: String) -> String {
+    let term = template_or(ctx, "stmt_terminator", &[], ";");
+    if !term.is_empty() && !rendered.ends_with(';') && !rendered.ends_with('}') {
+        format!("{}{}", rendered, term)
+    } else {
+        rendered
+    }
 }
 
 // ── Rust-specific helpers ──
