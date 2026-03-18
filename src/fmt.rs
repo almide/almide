@@ -130,7 +130,10 @@ fn fmt_decl(out: &mut String, decl: &Decl, depth: usize) {
             w!(out, "fn {name}");
             maybe_generics(out, generics);
             out.push('(');
-            comma_sep(out, params, |out, p| { w!(out, "{}: ", p.name); fmt_type(out, &p.ty, depth); });
+            comma_sep(out, params, |out, p| {
+                w!(out, "{}: ", p.name); fmt_type(out, &p.ty, depth);
+                if let Some(ref d) = p.default { out.push_str(" = "); fmt_expr(out, d, depth); }
+            });
             out.push_str(") -> "); fmt_type(out, return_type, depth);
             if let Some(b) = body { out.push_str(" = "); fmt_expr(out, b, depth); }
         }
@@ -204,15 +207,28 @@ fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
         Expr::Int { raw, .. } => out.push_str(raw),
         Expr::Float { value, .. } => { let s = format!("{value}"); if s.contains('.') { out.push_str(&s); } else { out.push_str(&s); out.push_str(".0"); } }
         Expr::String { value, .. } => {
-            if value.contains('"') && !value.contains('\'') {
-                out.push('\'');
-                for ch in value.chars() {
-                    match ch { '\'' => out.push_str("\\'"), '\\' => out.push_str("\\\\"), '\n' => out.push_str("\\n"), '\t' => out.push_str("\\t"), o => out.push(o) }
+            let has_dquote = value.contains('"');
+            let has_squote = value.contains('\'');
+            let use_single = has_dquote && !has_squote;
+            let quote = if use_single { '\'' } else { '"' };
+            out.push(quote);
+            let chars: Vec<char> = value.chars().collect();
+            let mut i = 0;
+            while i < chars.len() {
+                let ch = chars[i];
+                if ch == '\n' { out.push_str("\\n"); }
+                else if ch == '\t' { out.push_str("\\t"); }
+                else if ch == '\r' { out.push_str("\\r"); }
+                else if ch == '\\' { out.push_str("\\\\"); }
+                else if ch == quote { out.push('\\'); out.push(ch); }
+                else if ch == '$' && i + 1 < chars.len() && chars[i + 1] == '{' {
+                    out.push_str("\\${");
+                    i += 2; continue;
                 }
-                out.push('\'');
-            } else {
-                w!(out, "{value:?}");
+                else { out.push(ch); }
+                i += 1;
             }
+            out.push(quote);
         }
         Expr::InterpolatedString { parts, .. } => fmt_istring_parts(out, parts, depth),
         Expr::Bool { value, .. } => out.push_str(if *value { "true" } else { "false" }),
@@ -240,10 +256,19 @@ fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
             for f in fields { w!(out, ", {}: ", f.name); fmt_expr(out, &f.value, depth); }
             out.push_str(" }");
         }
-        Expr::Call { callee, args, type_args, .. } => {
+        Expr::Call { callee, args, type_args, named_args, .. } => {
             fmt_expr(out, callee, depth);
             if let Some(ta) = type_args { out.push('['); comma_sep(out, ta, |out, t| fmt_type(out, t, depth)); out.push(']'); }
-            out.push('('); comma_sep(out, args, |out, a| fmt_expr(out, a, depth)); out.push(')');
+            out.push('(');
+            comma_sep(out, args, |out, a| fmt_expr(out, a, depth));
+            if !named_args.is_empty() {
+                if !args.is_empty() { out.push_str(", "); }
+                comma_sep(out, named_args, |out, (name, expr)| {
+                    w!(out, "{name}: ");
+                    fmt_expr(out, expr, depth);
+                });
+            }
+            out.push(')');
         }
         Expr::Member { object, field, .. } => { fmt_expr(out, object, depth); w!(out, ".{field}"); }
         Expr::TupleIndex { object, index, .. } => { fmt_expr(out, object, depth); w!(out, ".{index}"); }
