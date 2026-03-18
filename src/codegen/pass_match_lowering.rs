@@ -145,6 +145,10 @@ fn rewrite_stmts(stmts: Vec<IrStmt>, vt: &mut VarTable) -> Vec<IrStmt> {
                 cond: rewrite_expr(cond, vt),
                 else_: rewrite_expr(else_, vt),
             },
+            IrStmtKind::BindDestructure { pattern, value } => IrStmtKind::BindDestructure {
+                pattern,
+                value: rewrite_expr(value, vt),
+            },
             other => other,
         };
         IrStmt { kind, span: s.span }
@@ -193,26 +197,63 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
     let rest = &arms[1..];
 
     match &arm.pattern {
-        // Wildcard or bind — always matches, no else needed
-        IrPattern::Wildcard => arm.body.clone(),
-        IrPattern::Bind { var } => {
-            // let var = subject; body
-            IrExpr {
-                kind: IrExprKind::Block {
-                    stmts: vec![IrStmt {
-                        kind: IrStmtKind::Bind {
-                            var: *var,
-                            mutability: Mutability::Let,
-                            ty: subject.ty.clone(),
-                            value: subject.clone(),
-                        },
-                        span: None,
-                    }],
-                    expr: Some(Box::new(arm.body.clone())),
-                },
-                ty: result_ty.clone(),
-                span: None,
+        // Wildcard — always matches (unless guarded)
+        IrPattern::Wildcard => {
+            if let Some(ref guard) = arm.guard {
+                let else_body = build_if_chain(subject, rest, result_ty, vt);
+                IrExpr {
+                    kind: IrExprKind::If {
+                        cond: Box::new(guard.clone()),
+                        then: Box::new(arm.body.clone()),
+                        else_: Box::new(else_body),
+                    },
+                    ty: result_ty.clone(),
+                    span: None,
+                }
+            } else {
+                arm.body.clone()
             }
+        }
+        IrPattern::Bind { var } => {
+            // let var = subject; body (with optional guard)
+            let bind_stmt = IrStmt {
+                kind: IrStmtKind::Bind {
+                    var: *var,
+                    mutability: Mutability::Let,
+                    ty: subject.ty.clone(),
+                    value: subject.clone(),
+                },
+                span: None,
+            };
+            let body_with_bind = if let Some(ref guard) = arm.guard {
+                let else_body = build_if_chain(subject, rest, result_ty, vt);
+                IrExpr {
+                    kind: IrExprKind::Block {
+                        stmts: vec![bind_stmt],
+                        expr: Some(Box::new(IrExpr {
+                            kind: IrExprKind::If {
+                                cond: Box::new(guard.clone()),
+                                then: Box::new(arm.body.clone()),
+                                else_: Box::new(else_body),
+                            },
+                            ty: result_ty.clone(),
+                            span: None,
+                        })),
+                    },
+                    ty: result_ty.clone(),
+                    span: None,
+                }
+            } else {
+                IrExpr {
+                    kind: IrExprKind::Block {
+                        stmts: vec![bind_stmt],
+                        expr: Some(Box::new(arm.body.clone())),
+                    },
+                    ty: result_ty.clone(),
+                    span: None,
+                }
+            };
+            body_with_bind
         }
 
         // some(inner) → if (subject !== null) { let inner = subject; body }
@@ -375,7 +416,167 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
             }
         }
 
-        // Unsupported patterns — leave as-is (fallback to walker's match rendering)
+        // Constructor(args) → if (subject.tag === "Name") { let args = subject.value; body }
+        IrPattern::Constructor { name, args } => {
+            let cond = IrExpr {
+                kind: IrExprKind::BinOp {
+                    op: BinOp::Eq,
+                    left: Box::new(IrExpr {
+                        kind: IrExprKind::Member {
+                            object: Box::new(subject.clone()),
+                            field: "tag".into(),
+                        },
+                        ty: Ty::String,
+                        span: None,
+                    }),
+                    right: Box::new(IrExpr { kind: IrExprKind::LitStr { value: name.clone() }, ty: Ty::String, span: None }),
+                },
+                ty: Ty::Bool,
+                span: None,
+            };
+
+            // Bind tuple args from subject.value array
+            let mut bind_stmts = Vec::new();
+            for (i, arg) in args.iter().enumerate() {
+                if let IrPattern::Bind { var } = arg {
+                    let val_expr = IrExpr {
+                        kind: IrExprKind::IndexAccess {
+                            object: Box::new(IrExpr {
+                                kind: IrExprKind::Member {
+                                    object: Box::new(subject.clone()),
+                                    field: "value".into(),
+                                },
+                                ty: Ty::Unknown,
+                                span: None,
+                            }),
+                            index: Box::new(IrExpr { kind: IrExprKind::LitInt { value: i as i64 }, ty: Ty::Int, span: None }),
+                        },
+                        ty: Ty::Unknown,
+                        span: None,
+                    };
+                    bind_stmts.push(IrStmt {
+                        kind: IrStmtKind::Bind {
+                            var: *var,
+                            mutability: Mutability::Let,
+                            ty: Ty::Unknown,
+                            value: val_expr,
+                        },
+                        span: None,
+                    });
+                }
+            }
+
+            let then_body = IrExpr {
+                kind: IrExprKind::Block {
+                    stmts: bind_stmts,
+                    expr: Some(Box::new(arm.body.clone())),
+                },
+                ty: result_ty.clone(),
+                span: None,
+            };
+            let else_body = build_if_chain(subject, rest, result_ty, vt);
+
+            IrExpr {
+                kind: IrExprKind::If {
+                    cond: Box::new(cond),
+                    then: Box::new(then_body),
+                    else_: Box::new(else_body),
+                },
+                ty: result_ty.clone(),
+                span: None,
+            }
+        }
+
+        // RecordPattern { fields } → if (subject.tag === "Name") { let field = subject.field; body }
+        IrPattern::RecordPattern { name, fields, .. } => {
+            let cond = IrExpr {
+                kind: IrExprKind::BinOp {
+                    op: BinOp::Eq,
+                    left: Box::new(IrExpr {
+                        kind: IrExprKind::Member {
+                            object: Box::new(subject.clone()),
+                            field: "tag".into(),
+                        },
+                        ty: Ty::String,
+                        span: None,
+                    }),
+                    right: Box::new(IrExpr { kind: IrExprKind::LitStr { value: name.clone() }, ty: Ty::String, span: None }),
+                },
+                ty: Ty::Bool,
+                span: None,
+            };
+
+            // Bind each field from subject
+            let mut bind_stmts = Vec::new();
+            for fp in fields {
+                if fp.pattern.is_none() {
+                    // Shorthand: field name = var name
+                    let field_var = vt.alloc(fp.name.clone(), Ty::Unknown, Mutability::Let, None);
+                    let val_expr = IrExpr {
+                        kind: IrExprKind::Member {
+                            object: Box::new(subject.clone()),
+                            field: fp.name.clone(),
+                        },
+                        ty: Ty::Unknown,
+                        span: None,
+                    };
+                    bind_stmts.push(IrStmt {
+                        kind: IrStmtKind::Bind {
+                            var: field_var,
+                            mutability: Mutability::Let,
+                            ty: Ty::Unknown,
+                            value: val_expr,
+                        },
+                        span: None,
+                    });
+                } else if let Some(IrPattern::Bind { var }) = &fp.pattern {
+                    let val_expr = IrExpr {
+                        kind: IrExprKind::Member {
+                            object: Box::new(subject.clone()),
+                            field: fp.name.clone(),
+                        },
+                        ty: Ty::Unknown,
+                        span: None,
+                    };
+                    bind_stmts.push(IrStmt {
+                        kind: IrStmtKind::Bind {
+                            var: *var,
+                            mutability: Mutability::Let,
+                            ty: Ty::Unknown,
+                            value: val_expr,
+                        },
+                        span: None,
+                    });
+                }
+            }
+
+            let then_body = IrExpr {
+                kind: IrExprKind::Block {
+                    stmts: bind_stmts,
+                    expr: Some(Box::new(arm.body.clone())),
+                },
+                ty: result_ty.clone(),
+                span: None,
+            };
+            let else_body = build_if_chain(subject, rest, result_ty, vt);
+
+            IrExpr {
+                kind: IrExprKind::If {
+                    cond: Box::new(cond),
+                    then: Box::new(then_body),
+                    else_: Box::new(else_body),
+                },
+                ty: result_ty.clone(),
+                span: None,
+            }
+        }
+
+        // Tuple pattern — pass through (shouldn't appear in variant match)
+        IrPattern::Tuple { .. } => {
+            arm.body.clone()
+        }
+
+        // Unsupported patterns — leave as-is
         _ => {
             return IrExpr {
                 kind: IrExprKind::Match { subject: Box::new(subject.clone()), arms: arms.to_vec() },

@@ -4,10 +4,7 @@
 # ── Expressions ──
 
 [if_expr]
-template = "if ({cond}) {{ {then} }} else {{ {else} }}"
-
-[if_expr_ternary]
-template = "({cond}) ? ({then}) : ({else})"
+template = "(({cond}) ? ({then}) : ({else}))"
 
 [call_expr]
 template = "{callee}({args})"
@@ -136,7 +133,7 @@ template = "`{template_str}`"
 # ── Statements ──
 
 [let_binding]
-template = "const {name}: {type} = {value};"
+template = "let {name}: {type} = {value};"
 
 [var_binding]
 template = "let {name}: {type} = {value};"
@@ -224,6 +221,30 @@ template = "interface {name} {{ {fields} }}"
 [struct_field]
 template = "{name}: {type};"
 
+[enum_decl]
+template = "// type {name} = variant union\n{variants}"
+
+[enum_variant]
+template = "function {name}({params}): any {{ return {{ tag: \"{name}\", value: [{param_names}] }}; }}"
+
+[enum_variant_unit]
+template = "const {name} = {{ tag: \"{name}\" }};"
+
+[type_tuple]
+template = "[{elements}]"
+
+[tuple_literal]
+template = "[{elements}]"
+
+[tuple_index]
+template = "{object}[{index}]"
+
+[enum_variant_sep]
+template = "\n"
+
+[enum_variant_record]
+template = "function {name}({fields}): any {{ return {{ tag: \"{name}\", {field_names} }}; }}"
+
 [interface_decl]
 template = "interface {name} {{ {fields} }}"
 
@@ -237,8 +258,56 @@ template = "import {{ {names} }} from \"{module}\";"
 
 # ── Test ──
 
+[unit_literal]
+template = "undefined"
+
+[deref_lazy]
+template = "{name}"
+
+[deref_var]
+template = "{name}"
+
+[clone_expr]
+template = "{expr}"
+
+[range_expr]
+template = "Array.from({{ length: ({end}) - ({start}) }}, (_, i) => ({start}) + i)"
+
+[range_inclusive]
+template = "Array.from({{ length: ({end}) - ({start}) + 1 }}, (_, i) => ({start}) + i)"
+
+[for_tuple_destructure]
+template = "[{vars}]"
+
+[ctor_unit]
+template = "{ctor_name}"
+
+[ctor_call]
+template = "{ctor_name}({args})"
+
+[ctor_qualify]
+template = "{ctor_name}"
+
+[ctor_record]
+template = "{{ tag: \"{ctor_name}\", {fields} }}"
+
+[destructure_pattern]
+template = "{{ {fields} }}"
+
+[bind_destructure]
+template = "const {pattern} = {value};"
+
+[block_expr]
+template = "(() => {{\n{body}\n}})()"
+
+[block_result_expr]
+template = "return {expr};"
+
+[test_module]
+template = "{tests}"
+
 [test_block]
-template = "Deno.test(\"{name}\", () => {{ {body} }});"
+template = "Deno.test(\"{name}\", async () => {{ {body} }});"
 
 [assert_eq]
 template = "if (!__deep_eq({left}, {right})) throw new Error(`assertion failed`);"
@@ -261,7 +330,7 @@ template = "{inner}"
 template = "await {inner}"
 
 [keyword_escape]
-template = "{name}"
+template = "_{name}"
 
 [map_literal]
 template = "new Map([{entries}])"
@@ -288,16 +357,22 @@ template = "{{ ...{base}, {fields} }}"
 template = "{subject}"
 
 [guard_negate]
-template = "!{cond}"
+template = "(!({cond}))"
 
 [empty_list]
 template = "[]"
+
+[fan_expr]
+template = "await Promise.all([{exprs}])"
+
+[fan_effect]
+template = "await Promise.all([{exprs}])"
 
 [extern_fn]
 template = "// extern: {module}.{function} as {name}"
 
 [loop_block]
-template = "while (true) {{\n{body}\n}}"
+template = "(() => {{ while (true) {{\n{body}\n}} }})()"
 
 [err_inner_string]
 template = "(() => {{ throw new Error({inner}) }})()"

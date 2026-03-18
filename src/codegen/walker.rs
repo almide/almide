@@ -45,8 +45,19 @@ impl<'a> RenderContext<'a> {
         "    ".repeat(self.indent)
     }
 
-    fn var_name(&self, id: VarId) -> &str {
-        &self.var_table.get(id).name
+    fn var_name(&self, id: VarId) -> String {
+        let name = &self.var_table.get(id).name;
+        let kw = ["default", "switch", "case", "class", "new", "delete",
+            "typeof", "void", "with", "yield", "export", "import",
+            "try", "catch", "finally", "throw", "eval", "arguments"];
+        if kw.contains(&name.as_str()) {
+            let mut b = HashMap::new();
+            b.insert("name", name.clone());
+            self.templates.render("keyword_escape", None, &[], &b)
+                .unwrap_or_else(|| name.clone())
+        } else {
+            name.clone()
+        }
     }
 
     fn bindings(&self) -> HashMap<&'static str, String> {
@@ -136,7 +147,10 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
         }
         Ty::Tuple(elems) => {
             let parts = elems.iter().map(|t| render_type(ctx, t)).collect::<Vec<_>>().join(", ");
-            format!("({})", parts)
+            let mut b = HashMap::new();
+            b.insert("elements", parts);
+            ctx.templates.render("type_tuple", None, &[], &b)
+                .unwrap_or_else(|| "tuple".into())
         }
         Ty::TypeVar(n) => {
             if n.starts_with('?') {
@@ -189,20 +203,25 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         // ── Variables ──
         IrExprKind::Var { id } => {
             let name = ctx.var_name(*id).to_string();
-            // Deref: top-level lazy vars or Box'd pattern bindings
-            let needs_deref = ctx.ann.lazy_vars.contains(id) || ctx.ann.deref_vars.contains(id);
-            let base = if needs_deref {
-                if ctx.ann.lazy_vars.contains(id) {
-                    format!("(*{})", name.to_uppercase())
-                } else {
-                    format!("(*{})", name)
-                }
+            // Deref/clone via templates (Rust: (*name), .clone(); TS: identity)
+            let base = if ctx.ann.lazy_vars.contains(id) {
+                let mut b = HashMap::new();
+                b.insert("name", name.to_uppercase());
+                ctx.templates.render("deref_lazy", None, &[], &b)
+                    .unwrap_or_else(|| name.to_uppercase())
+            } else if ctx.ann.deref_vars.contains(id) {
+                let mut b = HashMap::new();
+                b.insert("name", name.clone());
+                ctx.templates.render("deref_var", None, &[], &b)
+                    .unwrap_or(name)
             } else {
                 name
             };
-            // Clone: annotation-based (set by ClonePass)
             if ctx.ann.clone_vars.contains(id) {
-                format!("{}.clone()", base)
+                let mut b = HashMap::new();
+                b.insert("expr", base.clone());
+                ctx.templates.render("clone_expr", None, &[], &b)
+                    .unwrap_or(base)
             } else {
                 base
             }
@@ -223,13 +242,21 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
 
         // ── Control flow ──
         IrExprKind::If { cond, then, else_ } => {
-            let mut b = HashMap::new();
-            b.insert("cond", render_expr(ctx, cond));
-            b.insert("then", render_expr(ctx, then));
-            b.insert("else", render_expr(ctx, else_));
-            ctx.templates.render("if_expr", None, &[], &b)
-                .unwrap_or_else(|| format!("if {} {{ {} }} else {{ {} }}",
-                    render_expr(ctx, cond), render_expr(ctx, then), render_expr(ctx, else_)))
+            // If branches contain break/continue, use statement form (not ternary/IIFE)
+            if contains_loop_control(then) || contains_loop_control(else_) {
+                let cond_str = render_expr(ctx, cond);
+                let then_str = render_expr(ctx, then);
+                let else_str = render_expr(ctx, else_);
+                format!("if ({}) {{ {} }} else {{ {} }}", cond_str, then_str, else_str)
+            } else {
+                let mut b = HashMap::new();
+                b.insert("cond", render_expr(ctx, cond));
+                b.insert("then", render_expr(ctx, then));
+                b.insert("else", render_expr(ctx, else_));
+                ctx.templates.render("if_expr", None, &[], &b)
+                    .unwrap_or_else(|| format!("if {} {{ {} }} else {{ {} }}",
+                        render_expr(ctx, cond), render_expr(ctx, then), render_expr(ctx, else_)))
+            }
         }
 
         IrExprKind::Match { subject, arms } => {
@@ -268,8 +295,8 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 let rendered = render_expr(ctx, e);
                 // In a loop (DoBlock), non-Unit final expressions need `return` to exit
                 let needs_return = !matches!(&e.ty, Ty::Unit)
-                    && !matches!(&e.kind, IrExprKind::Unit | IrExprKind::Break);
-                if needs_return && !rendered.starts_with("break") {
+                    && !matches!(&e.kind, IrExprKind::Unit | IrExprKind::Break | IrExprKind::Continue);
+                if needs_return && !rendered.starts_with("break") && !rendered.starts_with("continue") {
                     parts.push(format!("return {}", rendered));
                 } else {
                     parts.push(rendered);
@@ -283,24 +310,46 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
 
         IrExprKind::Block { stmts, expr } => {
             let mut parts: Vec<String> = stmts.iter()
-                .map(|s| {
-                    let rendered = render_stmt(ctx, s);
-                    // Add ; if the stmt doesn't already end with one
-                    terminate_stmt(ctx, rendered)
-                })
+                .map(|s| terminate_stmt(ctx, render_stmt(ctx, s)))
                 .collect();
             if let Some(e) = expr {
-                parts.push(render_expr(ctx, e));
+                let expr_str = render_expr(ctx, e);
+                // break/continue are statements — don't wrap in return
+                let is_control_flow = matches!(&e.kind, IrExprKind::Break | IrExprKind::Continue);
+                if is_control_flow {
+                    parts.push(expr_str);
+                } else {
+                    let mut b = HashMap::new();
+                    b.insert("expr", expr_str);
+                    parts.push(ctx.templates.render("block_result_expr", None, &[], &b)
+                        .unwrap_or_else(|| b.get("expr").unwrap().clone()));
+                }
             }
-            format!("{{\n{}\n}}", parts.join("\n"))
+            let body = parts.join("\n");
+            // If block contains break/continue, don't wrap in IIFE — use bare block
+            let has_control = stmts.iter().any(|s| match &s.kind {
+                IrStmtKind::Expr { expr } => contains_loop_control(expr),
+                IrStmtKind::Bind { value, .. } => contains_loop_control(value),
+                _ => false,
+            }) || expr.as_ref().map_or(false, |e| contains_loop_control(e));
+            if has_control {
+                format!("{{\n{}\n}}", body)
+            } else {
+                let mut b = HashMap::new();
+                b.insert("body", body);
+                ctx.templates.render("block_expr", None, &[], &b)
+                    .unwrap_or_else(|| format!("{{\n{}\n}}", b.get("body").unwrap()))
+            }
         }
 
         // ── Loops ──
         IrExprKind::ForIn { var, var_tuple, iterable, body } => {
             let var_name = if let Some(tuple_vars) = var_tuple {
-                // Tuple destructure: for (k, v) in ...
                 let names: Vec<String> = tuple_vars.iter().map(|id| ctx.var_name(*id).to_string()).collect();
-                format!("({})", names.join(", "))
+                let mut b = HashMap::new();
+                b.insert("vars", names.join(", "));
+                ctx.templates.render("for_tuple_destructure", None, &[], &b)
+                    .unwrap_or_else(|| format!("({})", names.join(", ")))
             } else {
                 ctx.var_name(*var).to_string()
             };
@@ -359,10 +408,16 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                                     }
                                 }).collect();
                                 let args_str = boxed_args.join(", ");
+                                let mut b = HashMap::new();
+                                b.insert("enum_name", enum_name.clone());
+                                b.insert("ctor_name", name.clone());
+                                b.insert("args", args_str.clone());
                                 if args.is_empty() {
-                                    return format!("{}::{}", enum_name, name);
+                                    return ctx.templates.render("ctor_unit", None, &[], &b)
+                                        .unwrap_or_else(|| format!("{}::{}", enum_name, name));
                                 } else {
-                                    return format!("{}::{}({})", enum_name, name, args_str);
+                                    return ctx.templates.render("ctor_call", None, &[], &b)
+                                        .unwrap_or_else(|| format!("{}::{}({})", enum_name, name, args_str));
                                 }
                             }
                             name.clone()
@@ -388,6 +443,23 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                                 all_args.extend(args.iter().map(|a| render_expr(ctx, a)));
                                 let all_args_str = all_args.join(", ");
                                 return format!("{}({})", method, all_args_str);
+                            }
+                            // Module.func UFCS: render via module_call template
+                            if method.contains('.') {
+                                let obj_str = render_expr(ctx, object);
+                                let mut all_args = vec![obj_str];
+                                all_args.extend(args.iter().map(|a| render_expr(ctx, a)));
+                                let all_args_str = all_args.join(", ");
+                                if let Some(dot_pos) = method.find('.') {
+                                    let module = &method[..dot_pos];
+                                    let func = &method[dot_pos+1..];
+                                    let mut b = HashMap::new();
+                                    b.insert("module", module.to_string());
+                                    b.insert("func", func.to_string());
+                                    b.insert("args", all_args_str);
+                                    return ctx.templates.render("module_call", None, &[], &b)
+                                        .unwrap_or_else(|| format!("{}.{}()", module, func));
+                                }
                             }
                             format!("{}.{}", render_expr(ctx, object), method)
                         }
@@ -495,9 +567,18 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                     _ => render_type(ctx, &expr.ty),
                 }
             });
-            // Qualify enum variant constructors: Circle → Shape::Circle
+            // Qualify enum variant constructors via template
             if let Some(enum_name) = ctx.ann.ctor_to_enum.get(&type_name) {
-                type_name = format!("{}::{}", enum_name, type_name);
+                let mut b = HashMap::new();
+                b.insert("enum_name", enum_name.clone());
+                b.insert("ctor_name", type_name.clone());
+                b.insert("fields", fields_str.clone());
+                // Try ctor_record template first (TS: function call), fallback to record_literal
+                if let Some(rendered) = ctx.templates.render("ctor_record", None, &[], &b) {
+                    return rendered;
+                }
+                type_name = ctx.templates.render("ctor_qualify", None, &[], &b)
+                    .unwrap_or_else(|| format!("{}::{}", enum_name, type_name));
             }
             let mut b = HashMap::new();
             b.insert("type_name", type_name);
@@ -615,20 +696,28 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::Range { start, end, inclusive } => {
             let s = render_expr(ctx, start);
             let e = render_expr(ctx, end);
-            if *inclusive {
-                format!("({}..={})", s, e)
-            } else {
-                format!("({}..{})", s, e)
-            }
+            let mut b = HashMap::new();
+            b.insert("start", s);
+            b.insert("end", e);
+            let construct = if *inclusive { "range_inclusive" } else { "range_expr" };
+            ctx.templates.render(construct, None, &[], &b)
+                .unwrap_or_else(|| "range(...)".into())
         }
 
         // ── Tuple ──
         IrExprKind::Tuple { elements } => {
             let parts = elements.iter().map(|e| render_expr(ctx, e)).collect::<Vec<_>>().join(", ");
-            format!("({})", parts)
+            let mut b = HashMap::new();
+            b.insert("elements", parts);
+            ctx.templates.render("tuple_literal", None, &[], &b)
+                .unwrap_or_else(|| "tuple(...)".into())
         }
         IrExprKind::TupleIndex { object, index } => {
-            format!("{}.{}", render_expr(ctx, object), index)
+            let mut b = HashMap::new();
+            b.insert("object", render_expr(ctx, object));
+            b.insert("index", format!("{}", index));
+            ctx.templates.render("tuple_index", None, &[], &b)
+                .unwrap_or_else(|| format!("{}.{}", render_expr(ctx, object), index))
         }
         IrExprKind::IndexAccess { object, index } => {
             let obj_str = render_expr(ctx, object);
@@ -748,57 +837,44 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             template_or(ctx, "todo", &[], &format!("todo!(\"{}\")", message))
         }
 
-        // ── Fan (concurrency) — target-specific runtime model ──
+        // ── Fan (concurrency) — fully template-driven ──
         IrExprKind::Fan { exprs } => {
-            if ctx.target == Target::Rust {
-                let n = exprs.len();
-                let handles: Vec<String> = (0..n).map(|i| format!("__fan_h{}", i)).collect();
-
-                // Spawn threads
-                let spawns: Vec<String> = exprs.iter().enumerate().map(|(i, e)| {
-                    let mut body = render_expr(ctx, e);
-                    let is_result = matches!(&e.ty, Ty::Result(_, _));
-                    // Strip trailing ? from body (fan closures return raw Result)
-                    if is_result && body.ends_with('?') {
-                        body.pop();
-                    }
-                    format!("let {} = __s.spawn(move || {{ {} }});", handles[i], body)
-                }).collect();
-
-                // Join threads
-                let any_result = exprs.iter().any(|e| matches!(&e.ty, Ty::Result(_, _)));
-                let joins: Vec<String> = exprs.iter().enumerate().map(|(i, e)| {
-                    let is_result = matches!(&e.ty, Ty::Result(_, _));
-                    if is_result {
-                        // In effect fn: use ? for propagation. In test/pure fn: use .unwrap()
-                        if ctx.in_effect_fn {
-                            format!("{}.join().unwrap()?", handles[i])
-                        } else {
-                            format!("{}.join().unwrap().unwrap()", handles[i])
-                        }
-                    } else {
-                        format!("{}.join().unwrap()", handles[i])
-                    }
-                }).collect();
-
-                let join_expr = if n == 1 {
-                    joins[0].clone()
-                } else {
-                    format!("({})", joins.join(", "))
-                };
-
-                if any_result && ctx.in_effect_fn {
-                    format!("std::thread::scope(|__s| -> Result<_, String> {{ {} Ok({}) }})",
-                        spawns.join(" "), join_expr)
-                } else {
-                    format!("std::thread::scope(|__s| {{ {} {} }})",
-                        spawns.join(" "), join_expr)
+            let rendered: Vec<String> = exprs.iter().map(|e| {
+                let mut body = render_expr(ctx, e);
+                // Strip trailing ? from body (fan closures return raw Result)
+                if matches!(&e.ty, Ty::Result(_, _)) && body.ends_with('?') {
+                    body.pop();
                 }
-            } else {
-                // TS: Promise.all
-                let parts: Vec<String> = exprs.iter().map(|e| render_expr(ctx, e)).collect();
-                format!("await Promise.all([{}])", parts.join(", "))
-            }
+                body
+            }).collect();
+            let mut b = HashMap::new();
+            b.insert("exprs", rendered.join(", "));
+            b.insert("count", format!("{}", exprs.len()));
+            // Build spawn/join parts for thread-based template
+            let handles: Vec<String> = (0..exprs.len()).map(|i| format!("__fan_h{}", i)).collect();
+            let spawns: Vec<String> = rendered.iter().enumerate()
+                .map(|(i, body)| format!("let {} = __s.spawn(move || {{ {} }});", handles[i], body))
+                .collect();
+            let any_result = exprs.iter().any(|e| matches!(&e.ty, Ty::Result(_, _)));
+            let joins: Vec<String> = exprs.iter().enumerate().map(|(i, e)| {
+                if matches!(&e.ty, Ty::Result(_, _)) {
+                    if ctx.in_effect_fn {
+                        format!("{}.join().unwrap()?", handles[i])
+                    } else {
+                        format!("{}.join().unwrap().unwrap()", handles[i])
+                    }
+                } else {
+                    format!("{}.join().unwrap()", handles[i])
+                }
+            }).collect();
+            let join_expr = if joins.len() == 1 { joins[0].clone() }
+                else { format!("({})", joins.join(", ")) };
+            b.insert("spawns", spawns.join(" "));
+            b.insert("join_expr", join_expr.clone());
+            // Select template variant
+            let construct = if any_result && ctx.in_effect_fn { "fan_effect" } else { "fan_expr" };
+            ctx.templates.render(construct, None, &[], &b)
+                .unwrap_or_else(|| format!("fan({})", rendered.join(", ")))
         }
 
         // ── Fallback ──
@@ -930,7 +1006,11 @@ fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {
         }
         IrPattern::Constructor { name, args } => {
             let qualified = if let Some(enum_name) = ctx.ann.ctor_to_enum.get(name) {
-                format!("{}::{}", enum_name, name)
+                let mut b = HashMap::new();
+                b.insert("enum_name", enum_name.clone());
+                b.insert("ctor_name", name.clone());
+                ctx.templates.render("ctor_qualify", None, &[], &b)
+                    .unwrap_or_else(|| format!("{}::{}", enum_name, name))
             } else {
                 name.clone()
             };
@@ -943,7 +1023,10 @@ fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {
         }
         IrPattern::Tuple { elements } => {
             let elems = elements.iter().map(|e| render_pattern(ctx, e)).collect::<Vec<_>>().join(", ");
-            format!("({})", elems)
+            let mut b = HashMap::new();
+            b.insert("elements", elems);
+            ctx.templates.render("tuple_literal", None, &[], &b)
+                .unwrap_or_else(|| "tuple(...)".into())
         }
         IrPattern::RecordPattern { name, fields, rest } => {
             // Qualify enum variant record patterns: Circle → Shape::Circle
@@ -1014,19 +1097,21 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let cond_str = render_expr(ctx, cond);
             let else_str = render_expr(ctx, else_);
             // Determine action: break for loop guards, return for function guards
-            let is_loop_break = matches!(&else_.kind, IrExprKind::Unit | IrExprKind::Break)
+            let is_loop_control = matches!(&else_.kind, IrExprKind::Unit | IrExprKind::Break | IrExprKind::Continue)
                 || (matches!(&else_.kind, IrExprKind::ResultOk { .. }) && {
                     if let IrExprKind::ResultOk { expr: inner } = &else_.kind {
                         matches!(&inner.kind, IrExprKind::Unit)
                     } else { false }
                 });
-            let action = if is_loop_break { "break" } else { "return" };
+            let action = if is_loop_control {
+                if matches!(&else_.kind, IrExprKind::Continue) { "continue" } else { "break" }
+            } else { "return" };
             let mut b = HashMap::new();
             b.insert("cond", cond_str);
             let neg = ctx.templates.render("guard_negate", None, &[], &b)
                 .unwrap_or_else(|| format!("!cond"));
-            if action == "break" {
-                format!("if {} {{ break }}", neg)
+            if action == "break" || action == "continue" {
+                format!("if {} {{ {} }}", neg, action)
             } else {
                 format!("if {} {{ return {} }}", neg, else_str)
             }
@@ -1072,7 +1157,11 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                         _ => "_".into(),
                     };
                     let qualified = if let Some(enum_name) = ctx.ann.ctor_to_enum.get(&type_name) {
-                        format!("{}::{}", enum_name, type_name)
+                        let mut b = HashMap::new();
+                        b.insert("enum_name", enum_name.clone());
+                        b.insert("ctor_name", type_name.clone());
+                        ctx.templates.render("ctor_qualify", None, &[], &b)
+                            .unwrap_or_else(|| format!("{}::{}", enum_name, type_name))
                     } else {
                         type_name
                     };
@@ -1082,21 +1171,26 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                             None => f.name.clone(),
                         })
                         .collect::<Vec<_>>().join(", ");
+                    let mut b = HashMap::new();
+                    b.insert("name", qualified.clone());
+                    b.insert("fields", fields_str.clone());
                     if *rest {
-                        let mut b = HashMap::new();
-                        b.insert("name", qualified.clone());
-                        b.insert("fields", fields_str.clone());
                         let construct = if fields_str.is_empty() { "record_pattern_rest_empty" } else { "record_pattern_rest" };
                         ctx.templates.render(construct, None, &[], &b)
                             .unwrap_or_else(|| format!("{} {{ {} }}", qualified, fields_str))
                     } else {
-                        format!("{} {{ {} }}", qualified, fields_str)
+                        ctx.templates.render("destructure_pattern", None, &[], &b)
+                            .unwrap_or_else(|| format!("{} {{ {} }}", qualified, fields_str))
                     }
                 }
                 _ => render_pattern(ctx, pattern),
             };
             let val_str = render_expr(ctx, value);
-            format!("let {} = {};", pat_str, val_str)
+            let mut b = HashMap::new();
+            b.insert("pattern", pat_str);
+            b.insert("value", val_str);
+            ctx.templates.render("bind_destructure", None, &[], &b)
+                .unwrap_or_else(|| format!("let _ = _;"))
         }
         IrStmtKind::Comment { text } => format!("// {}", text),
     }
@@ -1136,8 +1230,19 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
 
     let params_str = func.params.iter()
         .map(|p| {
+            let mut param_name = p.name.clone();
+            // Escape target-specific keywords in param names
+            let kw_list = ["default", "switch", "case", "class", "new", "delete",
+                "typeof", "void", "with", "yield", "export", "import",
+                "try", "catch", "finally", "throw"];
+            if kw_list.contains(&param_name.as_str()) {
+                let mut kb = HashMap::new();
+                kb.insert("name", param_name.clone());
+                param_name = fn_ctx.templates.render("keyword_escape", None, &[], &kb)
+                    .unwrap_or(param_name);
+            }
             let mut b = HashMap::new();
-            b.insert("name", p.name.clone());
+            b.insert("name", param_name);
             b.insert("type", render_type(&fn_ctx, &p.ty));
             fn_ctx.templates.render("fn_param", None, &[], &b)
                 .unwrap_or_else(|| format!("{}: {}", p.name, render_type(&fn_ctx, &p.ty)))
@@ -1145,7 +1250,39 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         .collect::<Vec<_>>()
         .join(", ");
 
-    let body_str = render_expr(&fn_ctx, &func.body);
+    // Function body: render Block/DoBlock contents directly (no IIFE wrapper)
+    let body_str = match &func.body.kind {
+        IrExprKind::Block { stmts, expr } => {
+            let mut parts: Vec<String> = stmts.iter()
+                .map(|s| terminate_stmt(&fn_ctx, render_stmt(&fn_ctx, s)))
+                .collect();
+            if let Some(e) = expr {
+                let expr_str = render_expr(&fn_ctx, e);
+                let is_control = matches!(&e.kind, IrExprKind::Break | IrExprKind::Continue);
+                if is_control {
+                    parts.push(expr_str);
+                } else {
+                    let mut b = HashMap::new();
+                    b.insert("expr", expr_str);
+                    parts.push(fn_ctx.templates.render("block_result_expr", None, &[], &b)
+                        .unwrap_or_else(|| b.get("expr").unwrap().clone()));
+                }
+            }
+            parts.join("\n")
+        }
+        _ => {
+            let body_raw = render_expr(&fn_ctx, &func.body);
+            let is_control = matches!(&func.body.kind, IrExprKind::Break | IrExprKind::Continue);
+            if is_control {
+                body_raw
+            } else {
+                let mut b = HashMap::new();
+                b.insert("expr", body_raw.clone());
+                fn_ctx.templates.render("block_result_expr", None, &[], &b)
+                    .unwrap_or(body_raw)
+            }
+        }
+    };
     let ret_str = render_type(ctx, &func.ret_ty);
 
     // Build generics string for functions
@@ -1176,7 +1313,10 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     let target_keywords = ["while", "for", "if", "else", "match", "loop", "break", "continue",
         "return", "fn", "let", "mut", "use", "mod", "pub", "struct", "enum", "impl", "trait",
         "type", "where", "as", "in", "ref", "self", "super", "crate", "const", "static",
-        "unsafe", "async", "await", "dyn", "move", "true", "false"];
+        "unsafe", "async", "await", "dyn", "move", "true", "false",
+        "default", "switch", "case", "class", "extends", "new", "delete", "typeof",
+        "void", "with", "yield", "export", "import", "try", "catch", "finally", "throw",
+        "eval", "arguments"];
     if target_keywords.contains(&safe_name.as_str()) {
         let mut b = HashMap::new();
         b.insert("name", safe_name.clone());
@@ -1241,7 +1381,13 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
                 })
                 .collect();
             let fields: Vec<String> = field_names.iter().enumerate()
-                .map(|(i, name)| format!("pub {}: T{},", name, i))
+                .map(|(i, name)| {
+                    let mut b = HashMap::new();
+                    b.insert("name", name.clone());
+                    b.insert("type", format!("T{}", i));
+                    ctx.templates.render("struct_field", None, &[], &b)
+                        .unwrap_or_else(|| format!("{}: T{}", name, i))
+                })
                 .collect();
             let fields_str = fields.join("\n");
             let full_name = format!("{}<{}>", struct_name, generics.join(", "));
@@ -1284,13 +1430,17 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         parts.push(render_function(&ctx, func));
     }
 
-    // Test functions wrapped in mod tests { }
+    // Test functions
     let test_fns: Vec<&IrFunction> = program.functions.iter().filter(|f| f.is_test).collect();
     if !test_fns.is_empty() {
         let test_parts: Vec<String> = test_fns.iter()
             .map(|f| render_function(&ctx, f))
             .collect();
-        parts.push(format!("mod tests {{\n    use super::*;\n{}\n}}", test_parts.join("\n\n")));
+        let mut b = HashMap::new();
+        b.insert("tests", test_parts.join("\n\n"));
+        let wrapped = ctx.templates.render("test_module", None, &[], &b)
+            .unwrap_or_else(|| test_parts.join("\n\n"));
+        parts.push(wrapped);
     }
 
     // Imported modules: render their type decls and functions
@@ -1362,7 +1512,7 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                 .unwrap_or(fallback)
         }
         IrTypeDeclKind::Variant { cases, .. } => {
-            let variants_str = cases.iter()
+            let variants_parts: Vec<String> = cases.iter()
                 .map(|v| match &v.kind {
                     IrVariantKind::Unit => {
                         let mut b = HashMap::new();
@@ -1371,18 +1521,27 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                             .unwrap_or_else(|| v.name.clone())
                     }
                     IrVariantKind::Tuple { fields } => {
-                        let fields_str = fields.iter().map(|t| {
+                        let types: Vec<String> = fields.iter().map(|t| {
                             let rendered = render_type(ctx, t);
                             if ctx.ann.recursive_enums.contains(&td.name) && ty_contains_name(t, &td.name) {
                                 format!("Box<{}>", rendered)
                             } else {
                                 rendered
                             }
-                        }).collect::<Vec<_>>().join(", ");
+                        }).collect();
+                        let fields_str = types.join(", ");
+                        // Named params for TS: v0: type0, v1: type1
+                        let params_str = types.iter().enumerate()
+                            .map(|(i, t)| format!("v{}: {}", i, t))
+                            .collect::<Vec<_>>().join(", ");
+                        let param_names = (0..types.len()).map(|i| format!("v{}", i))
+                            .collect::<Vec<_>>().join(", ");
                         let mut b = HashMap::new();
                         b.insert("name", v.name.clone());
                         let fallback = format!("{}({})", v.name, &fields_str);
                         b.insert("fields", fields_str);
+                        b.insert("params", params_str);
+                        b.insert("param_names", param_names);
                         ctx.templates.render("enum_variant", None, &[], &b)
                             .unwrap_or(fallback)
                     }
@@ -1399,11 +1558,18 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                             })
                             .collect::<Vec<_>>()
                             .join(", ");
-                        format!("{} {{ {} }}", v.name, fields_str)
+                        let field_names = fields.iter().map(|f| f.name.clone()).collect::<Vec<_>>().join(", ");
+                        let mut b = HashMap::new();
+                        b.insert("name", v.name.clone());
+                        b.insert("fields", fields_str);
+                        b.insert("field_names", field_names);
+                        ctx.templates.render("enum_variant_record", None, &[], &b)
+                            .unwrap_or_else(|| format!("{} {{ {} }}", v.name, b.get("fields").unwrap()))
                     }
                 })
-                .collect::<Vec<_>>()
-                .join(",\n");
+                .collect::<Vec<_>>();
+            let sep = template_or(ctx, "enum_variant_sep", &[], ",\n");
+            let variants_str = variants_parts.join(&sep);
             let mut b = HashMap::new();
             let full_name = format!("{}{}", td.name, generics_str);
             b.insert("name", full_name.clone());
@@ -1473,6 +1639,24 @@ pub fn ty_contains_name(ty: &Ty, name: &str) -> bool {
         Ty::Result(a, b) | Ty::Map(a, b) => ty_contains_name(a, name) || ty_contains_name(b, name),
         Ty::Tuple(elems) => elems.iter().any(|e| ty_contains_name(e, name)),
         Ty::Fn { params, ret } => params.iter().any(|p| ty_contains_name(p, name)) || ty_contains_name(ret, name),
+        _ => false,
+    }
+}
+
+/// Check if an expression tree contains break or continue (for IIFE avoidance)
+fn contains_loop_control(expr: &IrExpr) -> bool {
+    match &expr.kind {
+        IrExprKind::Break | IrExprKind::Continue => true,
+        IrExprKind::Block { stmts, expr } => {
+            stmts.iter().any(|s| match &s.kind {
+                IrStmtKind::Expr { expr } => contains_loop_control(expr),
+                IrStmtKind::Bind { value, .. } => contains_loop_control(value),
+                IrStmtKind::Assign { value, .. } => contains_loop_control(value),
+                _ => false,
+            }) || expr.as_ref().map_or(false, |e| contains_loop_control(e))
+        }
+        IrExprKind::If { cond, then, else_ } =>
+            contains_loop_control(cond) || contains_loop_control(then) || contains_loop_control(else_),
         _ => false,
     }
 }
