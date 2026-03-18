@@ -21,7 +21,9 @@ impl NanoPass for ResultPropagationPass {
 
     fn run(&self, program: &mut IrProgram, _target: Target) {
         for func in &mut program.functions {
-            if func.is_effect {
+            // Insert Try in effect fns, but NOT in test functions
+            // (Rust #[test] fn returns () which doesn't support ?)
+            if func.is_effect && !func.is_test {
                 func.body = insert_try(func.body.clone(), false);
             }
         }
