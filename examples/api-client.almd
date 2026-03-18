@@ -1,15 +1,13 @@
 // api-client — typed HTTP API client
 //
-// Demonstrates: convention methods, json, effect fn, option, result
-
-// ── Domain types ──
+// Demonstrates: convention methods (Go-style), json, option, result
 
 type User = { id: Int, name: String, email: String }
 type Post = { id: Int, title: String, body: String, user_id: Int }
 
-// ── Convention methods (Go-style: method exists = interface satisfied) ──
+// Convention methods — "method exists = interface satisfied"
 
-fn from_json_user(v: Value) -> Option[User] = {
+fn User.from_json(v: Value) -> Option[User] = {
   let id = json.get_int(v, "id")
   let name = json.get_string(v, "name")
   let email = json.get_string(v, "email")
@@ -19,7 +17,7 @@ fn from_json_user(v: Value) -> Option[User] = {
   }
 }
 
-fn from_json_post(v: Value) -> Option[Post] = {
+fn Post.from_json(v: Value) -> Option[Post] = {
   let id = json.get_int(v, "id")
   let title = json.get_string(v, "title")
   let body = json.get_string(v, "body")
@@ -30,22 +28,21 @@ fn from_json_post(v: Value) -> Option[Post] = {
   }
 }
 
-fn to_json_user(u: User) -> String =
+fn User.to_json(u: User) -> String =
   json.stringify(json.object([
     ("id", json.from_int(u.id)),
     ("name", json.from_string(u.name)),
     ("email", json.from_string(u.email))
   ]))
 
-fn to_json_post(p: Post) -> String =
-  json.stringify(json.object([
-    ("id", json.from_int(p.id)),
-    ("title", json.from_string(p.title)),
-    ("body", json.from_string(p.body)),
-    ("user_id", json.from_int(p.user_id))
-  ]))
+// ── API helpers ──
 
-// ── Tests (pure, no HTTP) ──
+effect fn api_get(base_url: String, path: String) -> Result[Value, String] = {
+  let body = http.get(base_url + path)
+  json.parse(body)
+}
+
+// ── Tests ──
 
 test "User.from_json parses valid" {
   let v = json.object([
@@ -53,7 +50,7 @@ test "User.from_json parses valid" {
     ("name", json.from_string("Alice")),
     ("email", json.from_string("alice@example.com"))
   ])
-  match from_json_user(v) {
+  match User.from_json(v) {
     some(u) => {
       assert_eq(u.name, "Alice")
       assert_eq(u.email, "alice@example.com")
@@ -64,7 +61,8 @@ test "User.from_json parses valid" {
 
 test "User.from_json rejects invalid" {
   let v = json.object([("id", json.from_int(1))])
-  assert_eq(option.is_none(from_json_user(v)), true)
+  let result = User.from_json(v)
+  assert_eq(option.is_none(result), true)
 }
 
 test "Post.from_json parses valid" {
@@ -74,7 +72,7 @@ test "Post.from_json parses valid" {
     ("body", json.from_string("World")),
     ("user_id", json.from_int(1))
   ])
-  match from_json_post(v) {
+  match Post.from_json(v) {
     some(p) => {
       assert_eq(p.title, "Hello")
       assert_eq(p.user_id, 1)
@@ -85,7 +83,7 @@ test "Post.from_json parses valid" {
 
 test "User.to_json roundtrip" {
   let u = User { id: 1, name: "Bob", email: "bob@test.com" }
-  let s = to_json_user(u)
+  let s = User.to_json(u)
   assert(string.contains(s, "Bob"))
   assert(string.contains(s, "bob@test.com"))
 }

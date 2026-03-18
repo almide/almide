@@ -24,10 +24,45 @@ impl NanoPass for ResultPropagationPass {
             // Insert Try in effect fns, but NOT in test functions
             // (Rust #[test] fn returns () which doesn't support ?)
             if func.is_effect && !func.is_test {
-                func.body = insert_try(func.body.clone(), false);
+                let returns_result = matches!(&func.ret_ty, Ty::Result(_, _));
+                func.body = insert_try_body(func.body.clone(), returns_result);
             }
         }
     }
+}
+
+/// Insert Try in function body — skip final expression if fn returns Result.
+fn insert_try_body(expr: IrExpr, fn_returns_result: bool) -> IrExpr {
+    if fn_returns_result {
+        // Don't wrap the outermost tail expression — it's the return value
+        match expr.kind {
+            IrExprKind::Block { stmts, expr: Some(tail) } => {
+                let stmts = stmts.into_iter().map(insert_try_stmt).collect();
+                let tail = Box::new(insert_try(*tail, false));
+                // If tail is now Try { Result-call }, unwrap the Try
+                // (the Result should flow through as the return value)
+                let tail = if fn_returns_result {
+                    if let IrExprKind::Try { expr: inner } = &tail.kind {
+                        if matches!(&inner.ty, Ty::Result(_, _)) {
+                            *inner.clone()
+                        } else {
+                            *tail
+                        }
+                    } else {
+                        *tail
+                    }
+                } else {
+                    *tail
+                };
+                return IrExpr {
+                    kind: IrExprKind::Block { stmts, expr: Some(Box::new(tail)) },
+                    ty: expr.ty, span: expr.span,
+                };
+            }
+            _ => {}
+        }
+    }
+    insert_try(expr, false)
 }
 
 /// Recursively insert Try around Result-returning calls.
