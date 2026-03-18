@@ -984,7 +984,10 @@ fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {
         }
         IrPattern::Tuple { elements } => {
             let elems = elements.iter().map(|e| render_pattern(ctx, e)).collect::<Vec<_>>().join(", ");
-            format!("({})", elems)
+            let mut b = HashMap::new();
+            b.insert("elements", elems);
+            ctx.templates.render("tuple_literal", None, &[], &b)
+                .unwrap_or_else(|| "tuple(...)".into())
         }
         IrPattern::RecordPattern { name, fields, rest } => {
             // Qualify enum variant record patterns: Circle → Shape::Circle
@@ -1197,7 +1200,16 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         .collect::<Vec<_>>()
         .join(", ");
 
-    let body_str = render_expr(&fn_ctx, &func.body);
+    let body_raw = render_expr(&fn_ctx, &func.body);
+    // Function body: wrap in return if it's a bare expression (template decides)
+    let body_str = if !matches!(&func.body.kind, IrExprKind::Block { .. } | IrExprKind::DoBlock { .. }) {
+        let mut b = HashMap::new();
+        b.insert("expr", body_raw.clone());
+        ctx.templates.render("block_result_expr", None, &[], &b)
+            .unwrap_or(body_raw)
+    } else {
+        body_raw
+    };
     let ret_str = render_type(ctx, &func.ret_ty);
 
     // Build generics string for functions
