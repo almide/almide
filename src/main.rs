@@ -2,7 +2,6 @@
 pub use almide::ast;
 pub use almide::codegen;
 pub use almide::diagnostic;
-pub use almide::emit_common;
 pub use almide::emit_ts_runtime;
 pub use almide::fmt;
 pub use almide::lexer;
