@@ -230,6 +230,9 @@ template = "function {name}({fields}): any {{ return {{ tag: \"{name}\", value: 
 [enum_variant_unit]
 template = "const {name} = {{ tag: \"{name}\" }};"
 
+[enum_variant_record]
+template = "function {name}({fields}): any {{ return {{ tag: \"{name}\", {field_names} }}; }}"
+
 [interface_decl]
 template = "interface {name} {{ {fields} }}"
 
@@ -272,6 +275,9 @@ template = "{ctor_name}({args})"
 
 [ctor_qualify]
 template = "{ctor_name}"
+
+[ctor_record]
+template = "{{ tag: \"{ctor_name}\", {fields} }}"
 
 [destructure_pattern]
 template = "{{ {fields} }}"

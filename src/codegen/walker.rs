@@ -517,6 +517,11 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 let mut b = HashMap::new();
                 b.insert("enum_name", enum_name.clone());
                 b.insert("ctor_name", type_name.clone());
+                b.insert("fields", fields_str.clone());
+                // Try ctor_record template first (TS: function call), fallback to record_literal
+                if let Some(rendered) = ctx.templates.render("ctor_record", None, &[], &b) {
+                    return rendered;
+                }
                 type_name = ctx.templates.render("ctor_qualify", None, &[], &b)
                     .unwrap_or_else(|| format!("{}::{}", enum_name, type_name));
             }
@@ -1444,7 +1449,13 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                             })
                             .collect::<Vec<_>>()
                             .join(", ");
-                        format!("{} {{ {} }}", v.name, fields_str)
+                        let field_names = fields.iter().map(|f| f.name.clone()).collect::<Vec<_>>().join(", ");
+                        let mut b = HashMap::new();
+                        b.insert("name", v.name.clone());
+                        b.insert("fields", fields_str);
+                        b.insert("field_names", field_names);
+                        ctx.templates.render("enum_variant_record", None, &[], &b)
+                            .unwrap_or_else(|| format!("{} {{ {} }}", v.name, b.get("fields").unwrap()))
                     }
                 })
                 .collect::<Vec<_>>()
