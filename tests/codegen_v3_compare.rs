@@ -272,9 +272,9 @@ fn test_walker_if_formatting() {
     assert!(rust_out.starts_with("if ("), "Rust if: {}", rust_out);
     assert!(!rust_out.contains("if (("), "Rust should not double-paren: {}", rust_out);
 
-    // TS: if (cond) { ... } else { ... }  (parens around cond)
+    // TS: ternary (cond) ? (then) : (else)
     let ts_templates = template::typescript_templates();
     let ts_ctx = RenderContext::new(&ts_templates, &var_table);
     let ts_out = walker::render_expr(&ts_ctx, &if_expr);
-    assert!(ts_out.contains("if ("), "TS if should have parens: {}", ts_out);
+    assert!(ts_out.contains("?") && ts_out.contains(":"), "TS if should be ternary: {}", ts_out);
 }
