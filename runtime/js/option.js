@@ -10,4 +10,5 @@ const __almd_option = {
   filter(o, f) { return o !== null && f(o) ? o : null; },
   zip(a, b) { return a !== null && b !== null ? [a, b] : null; },
   or_else(o, f) { return o !== null ? o : f(); },
+  to_list(o) { return o !== null ? [o] : []; },
 };

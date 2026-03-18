@@ -132,7 +132,7 @@ test "variable used in closure and then directly" {
 // ── Map used after multiple operations ──
 
 test "map used after multiple operations" {
-  let m = map.from_entries([("a", 1), ("b", 2), ("c", 3)])
+  let m = map.from_list([("a", 1), ("b", 2), ("c", 3)])
   let keys = list.sort(map.keys(m))
   let values = list.sort(map.values(m))
   let has_a = map.contains(m, "a")

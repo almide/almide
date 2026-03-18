@@ -238,7 +238,7 @@ test "list of options" {
 
 test "map from entries" {
   let entries = [("a", 1), ("b", 2), ("c", 3)]
-  let m = map.from_entries(entries)
+  let m = map.from_list(entries)
   assert_eq(map.len(m), 3)
   assert_eq(map.get(m, "b"), some(2))
 }

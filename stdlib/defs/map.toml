@@ -106,28 +106,16 @@ return = "Bool"
 rust = "almide_rt_map_is_empty(&{m})"
 ts = "__almd_map.is_empty({m})"
 
-[from_entries]
-description = "Create a map from a list of (key, value) pairs."
-example = 'map.from_entries([("a", 1), ("b", 2)])'
-type_params = ["K", "V"]
-params = [{ name = "entries", type = "List[(K, V)]" }]
-return = "Map[K, V]"
-rust = "almide_rt_map_from_entries({entries})"
-ts = "__almd_map.from_entries({entries})"
-
-# ── Closure-taking functions ──
+# ── Construction ──
 
 [from_list]
-description = "Create a map by applying a function to each element that returns a (key, value) pair."
-example = 'map.from_list(["a", "b"], fn(s) => (s, string.len(s)))'
-type_params = ["A", "K", "V"]
-params = [
-    { name = "xs", type = "List[A]" },
-    { name = "f", type = "Fn[A] -> (K, V)" },
-]
+description = "Create a map from a list of (key, value) pairs."
+example = 'map.from_list([("a", 1), ("b", 2)])'
+type_params = ["K", "V"]
+params = [{ name = "pairs", type = "List[(K, V)]" }]
 return = "Map[K, V]"
-rust = "almide_rt_map_from_list(({xs}).to_vec(), |{f.args}| {{ {f.clone_bindings}{f.body} }})"
-ts = "__almd_map.from_list({xs}, {f.args} => {f.body})"
+rust = "almide_rt_map_from_entries({pairs})"
+ts = "__almd_map.from_entries({pairs})"
 
 [map]
 description = "Transform all values in the map using a function, keeping keys unchanged."

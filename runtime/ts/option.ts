@@ -36,4 +36,7 @@ const __almd_option = {
   or_else<T>(o: T | null, f: () => T | null): T | null {
     return o !== null ? o : f();
   },
+  to_list<T>(o: T | null): T[] {
+    return o !== null ? [o] : [];
+  },
 };

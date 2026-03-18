@@ -11,3 +11,6 @@ pub fn almide_rt_option_unwrap_or_else<T>(o: Option<T>, f: impl Fn() -> T) -> T 
 pub fn almide_rt_option_filter<T: Clone>(o: Option<T>, f: impl Fn(T) -> bool) -> Option<T> { o.filter(|x| f(x.clone())) }
 pub fn almide_rt_option_zip<T, U>(a: Option<T>, b: Option<U>) -> Option<(T, U)> { a.zip(b) }
 pub fn almide_rt_option_or_else<T>(o: Option<T>, f: impl Fn() -> Option<T>) -> Option<T> { o.or_else(f) }
+pub fn almide_rt_option_to_list<T>(o: Option<T>) -> Vec<T> {
+    match o { Some(v) => vec![v], None => vec![] }
+}

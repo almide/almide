@@ -110,7 +110,7 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
 
         // ── option-only ──
         "is_some" | "is_none" | "to_result" | "or_else"
-        | "zip" => vec!["option"],
+        | "zip" | "to_list" => vec!["option"],
 
         // ── result-only ──
         "map_err"
