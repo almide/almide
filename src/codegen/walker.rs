@@ -145,19 +145,14 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
             format!("({})", parts)
         }
         Ty::TypeVar(n) => {
-            // ?-prefixed TypeVars are inference variables → _ in Rust, "any" in TS
             if n.starts_with('?') {
-                if ctx.is_rust() { "_".into() } else { "any".into() }
+                template_or(ctx, "typevar_infer", &[], "_")
             } else {
-                // Named TypeVars (K, V, T, A, B): keep as-is for function signatures,
-                // but use _ for local bindings. Since we lack context here, keep the name
-                // (Rust will infer when used in let bindings anyway).
                 n.clone()
             }
         }
         Ty::Unknown | Ty::Union(_) => {
-            // Unknown types: use a generic placeholder that won't break compilation
-            if ctx.is_rust() { "_".into() } else { "any".into() }
+            template_or(ctx, "unknown_type", &[], "_")
         }
         Ty::Variant { name, .. } => name.clone(),
         // Fallback
@@ -691,7 +686,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             }
         }
         IrExprKind::EmptyMap => {
-            if ctx.is_rust() { "HashMap::new()".into() } else { "new Map()".into() }
+            template_or(ctx, "empty_map", &[], "HashMap::new()")
         }
 
         // ── SpreadRecord ──
@@ -722,11 +717,17 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         // ── Try / Await ──
         IrExprKind::Try { expr: inner } => {
             let s = render_expr(ctx, inner);
-            if ctx.is_rust() { format!("({})?", s) } else { s }
+            let mut b = HashMap::new();
+            b.insert("inner", s);
+            ctx.templates.render("try_expr", None, &[], &b)
+                .unwrap_or_else(|| "try(...)".into())
         }
         IrExprKind::Await { expr: inner } => {
             let s = render_expr(ctx, inner);
-            if ctx.is_rust() { format!("{}.await", s) } else { format!("await {}", s) }
+            let mut b = HashMap::new();
+            b.insert("inner", s);
+            ctx.templates.render("await_expr", None, &[], &b)
+                .unwrap_or_else(|| "await(...)".into())
         }
 
         // ── Codegen nodes (inserted by passes — walker just renders) ──
@@ -1189,13 +1190,16 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         .replace('=', "_eq_").replace('!', "_bang_").replace('?', "_q_")
         .replace('<', "_lt_").replace('>', "_gt_").replace('[', "_").replace(']', "_")
         .replace('|', "_pipe_").replace('&', "_amp_").replace('%', "_mod_");
-    // Escape Rust keywords with r# prefix
-    let rust_keywords = ["while", "for", "if", "else", "match", "loop", "break", "continue",
+    // Escape target-specific keywords via template
+    let target_keywords = ["while", "for", "if", "else", "match", "loop", "break", "continue",
         "return", "fn", "let", "mut", "use", "mod", "pub", "struct", "enum", "impl", "trait",
         "type", "where", "as", "in", "ref", "self", "super", "crate", "const", "static",
         "unsafe", "async", "await", "dyn", "move", "true", "false"];
-    if ctx.is_rust() && rust_keywords.contains(&safe_name.as_str()) {
-        safe_name = format!("r#{}", safe_name);
+    if target_keywords.contains(&safe_name.as_str()) {
+        let mut b = HashMap::new();
+        b.insert("name", safe_name.clone());
+        safe_name = ctx.templates.render("keyword_escape", None, &[], &b)
+            .unwrap_or(safe_name);
     }
     let safe_name = format!("{}{}", safe_name, fn_generics);
 

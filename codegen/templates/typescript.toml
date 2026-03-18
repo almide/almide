@@ -242,3 +242,23 @@ template = "Deno.test(\"{name}\", () => {{ {body} }});"
 
 [assert_eq]
 template = "if (!__deep_eq({left}, {right})) throw new Error(`assertion failed`);"
+
+# ── Target-agnostic constructs ──
+
+[typevar_infer]
+template = "any"
+
+[unknown_type]
+template = "any"
+
+[empty_map]
+template = "new Map()"
+
+[try_expr]
+template = "{inner}"
+
+[await_expr]
+template = "await {inner}"
+
+[keyword_escape]
+template = "{name}"

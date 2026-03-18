@@ -269,3 +269,23 @@ template = "#[test]\nfn {name}() {{ {body} }}"
 
 [assert_eq]
 template = "assert!(almide_eq!({left}, {right}), \"assertion failed: {{:?}} != {{:?}}\", {left}, {right});"
+
+# ── Target-agnostic constructs ──
+
+[typevar_infer]
+template = "_"
+
+[unknown_type]
+template = "_"
+
+[empty_map]
+template = "HashMap::new()"
+
+[try_expr]
+template = "({inner})?"
+
+[await_expr]
+template = "{inner}.await"
+
+[keyword_escape]
+template = "r#{name}"
