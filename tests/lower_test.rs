@@ -123,13 +123,13 @@ fn lower_int_modulo() {
 
 #[test]
 fn lower_string_concat() {
-    let ir = lower("fn f(a: String, b: String) -> String = a ++ b");
+    let ir = lower("fn f(a: String, b: String) -> String = a + b");
     assert!(matches!(ir.functions[0].body.kind, IrExprKind::BinOp { op: BinOp::ConcatStr, .. }));
 }
 
 #[test]
 fn lower_list_concat() {
-    let ir = lower("fn f(a: List[Int], b: List[Int]) -> List[Int] = a ++ b");
+    let ir = lower("fn f(a: List[Int], b: List[Int]) -> List[Int] = a + b");
     assert!(matches!(ir.functions[0].body.kind, IrExprKind::BinOp { op: BinOp::ConcatList, .. }));
 }
 

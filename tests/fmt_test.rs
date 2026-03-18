@@ -172,8 +172,8 @@ fn fmt_binary_ops() {
 
 #[test]
 fn fmt_concat_ops() {
-    let out = roundtrip("fn f() -> String = \"hello\" ++ \" world\"");
-    assert!(out.contains("++"));
+    let out = roundtrip("fn f() -> String = \"hello\" + \" world\"");
+    assert!(out.contains("+") && !out.contains("++"));
 }
 
 #[test]

@@ -8,7 +8,7 @@
 //! - MLIR dialect conversion patterns
 //! - NLLB-200 Mixture of Experts (shared + language-specific)
 
-use crate::ir::{IrExpr, IrExprKind, IrFunction, IrProgram, IrStmt};
+use crate::ir::IrProgram;
 use crate::types::Ty;
 
 // ── Scope Context ──

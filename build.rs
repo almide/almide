@@ -32,9 +32,11 @@ struct FnDef {
     aliases: Vec<String>,
     /// Human-readable description (English)
     #[serde(default)]
+    #[allow(dead_code)]
     description: Option<String>,
     /// Usage example in Almide syntax
     #[serde(default)]
+    #[allow(dead_code)]
     example: Option<String>,
 }
 

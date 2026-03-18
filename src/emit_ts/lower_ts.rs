@@ -15,7 +15,7 @@ use std::collections::HashSet;
 use crate::ir::*;
 use crate::types::Ty;
 use super::ts_ir::*;
-use super::lower_decls::{sanitize, pascal_to_message};
+use super::lower_decls::sanitize;
 
 pub struct LowerOpts {
     pub js_mode: bool,
@@ -36,7 +36,6 @@ pub(super) struct LowerCtx<'a> {
     generic_unit_ctors: HashSet<String>,
     pub(super) variant_ctors: HashSet<String>,
     pub(super) user_modules: Vec<String>,
-    tmp_counter: std::cell::Cell<u32>,
     /// VarId → unique TS name (handles shadowing by appending $N suffix)
     var_names: std::collections::HashMap<VarId, String>,
 }
@@ -68,7 +67,7 @@ impl<'a> LowerCtx<'a> {
         }
         LowerCtx { ir, js_mode: opts.js_mode, npm_mode: opts.npm_mode,
             unit_variants, generic_unit_ctors, variant_ctors, user_modules,
-            tmp_counter: std::cell::Cell::new(0), var_names }
+            var_names }
     }
 
     fn collect_variant_info(td: &IrTypeDecl, unit: &mut HashSet<String>, generic_unit: &mut HashSet<String>, record: &mut HashSet<String>) {
@@ -83,7 +82,6 @@ impl<'a> LowerCtx<'a> {
         }
     }
 
-    fn next_tmp(&self) -> u32 { let n = self.tmp_counter.get(); self.tmp_counter.set(n + 1); n }
     pub(super) fn vt(&self) -> &VarTable { &self.ir.var_table }
     pub(super) fn var_name(&self, id: VarId) -> String {
         self.var_names.get(&id).cloned().unwrap_or_else(|| sanitize(&self.vt().get(id).name))
@@ -318,28 +316,6 @@ impl<'a> LowerCtx<'a> {
                 format!("(() => {{ {} }})()", s)
             }),
             _ => self.lower_expr(expr, ie, it),
-        }
-    }
-
-    fn lower_err(&self, expr: &IrExpr, ie: bool, it: bool) -> Expr {
-        let is_variant = match &expr.kind {
-            IrExprKind::Call { target: CallTarget::Named { name }, .. } => name.chars().next().map_or(false, |c| c.is_uppercase()),
-            IrExprKind::Var { id } => self.vt().get(*id).name.chars().next().map_or(false, |c| c.is_uppercase()),
-            _ => false,
-        };
-        let inner = self.lower_expr(expr, ie, it);
-        Expr::ResultErr(Box::new(inner))
-    }
-
-    fn lower_err_msg(&self, expr: &IrExpr, ie: bool, it: bool) -> Expr {
-        match &expr.kind {
-            IrExprKind::LitStr { value } => Expr::Str(value.clone()),
-            IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
-                let cs = if name.chars().next().map_or(false, |c| c.is_uppercase()) { pascal_to_message(name) } else { name.clone() };
-                let arg = if !args.is_empty() { self.lower_expr(&args[0], ie, it) } else { Expr::Str(String::new()) };
-                Expr::BinOp { op: "+", left: Box::new(Expr::BinOp { op: "+", left: Box::new(Expr::Str(cs)), right: Box::new(Expr::Str(": ".into())) }), right: Box::new(arg) }
-            }
-            _ => Expr::Call { func: Box::new(Expr::Var("String".into())), args: vec![self.lower_expr(expr, ie, it)] },
         }
     }
 

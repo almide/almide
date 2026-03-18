@@ -83,7 +83,7 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         | "replace_first" | "last_index_of" => vec!["string"],
 
         // ── list-only ──
-        "enumerate" | "zip" | "take" | "drop"
+        "enumerate" | "take" | "drop"
         | "sort_by" | "unique"
         | "last" | "chunk" | "sum" | "product"
         | "first"
@@ -110,7 +110,7 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
 
         // ── option-only ──
         "is_some" | "is_none" | "to_result" | "or_else"
-        | "zip" | "to_list" => vec!["option"],
+        | "to_list" => vec!["option"],
 
         // ── result-only ──
         "map_err"
@@ -139,14 +139,13 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         "flat_map" => vec!["list", "result", "option"],
         "map" | "filter" => vec!["list", "map", "result", "option"],
         "unwrap_or" | "unwrap_or_else" => vec!["result", "option"],
-        "flatten" => vec!["list", "option"],
+        "flatten" | "zip" => vec!["list", "option"],
 
         // ── ambiguous: list + map ──
         "get" | "get_or" => vec!["string", "list", "map"],
         "set" => vec!["list", "map"],
         "swap" => vec!["list"],
         "sort" => vec!["list"],
-        "map" | "filter" => vec!["list", "result"],
         "to_option" => vec!["result"],
 
         // ── ambiguous: string + int ──

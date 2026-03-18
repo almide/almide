@@ -6,7 +6,6 @@
 use std::collections::HashSet;
 use crate::ir::*;
 use crate::types::Ty;
-use super::annotations::CodegenAnnotations;
 use super::pass::{NanoPass, Target};
 
 #[derive(Debug)]
@@ -19,7 +18,7 @@ impl NanoPass for BoxDerefPass {
         Some(vec![Target::Rust])
     }
 
-    fn run(&self, program: &mut IrProgram, _target: Target) {
+    fn run(&self, _program: &mut IrProgram, _target: Target) {
         // Populates annotations via collect_deref_vars()
     }
 }

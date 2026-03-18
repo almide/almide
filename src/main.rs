@@ -173,10 +173,6 @@ fn parse_file(file: &str) -> (ast::Program, String, Vec<diagnostic::Diagnostic>)
     }
 }
 
-fn compile(file: &str, no_check: bool) -> String {
-    try_compile(file, no_check).unwrap_or_else(|_| std::process::exit(1))
-}
-
 fn try_compile(file: &str, no_check: bool) -> Result<String, String> {
     try_compile_with_ir(file, no_check).map(|(code, _)| code)
 }

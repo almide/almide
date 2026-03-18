@@ -36,9 +36,7 @@ pub struct Checker {
     pub diagnostics: Vec<Diagnostic>,
     pub source_file: Option<String>,
     pub source_text: Option<String>,
-    pub target: Option<String>,
     pub expr_types: HashMap<ExprId, Ty>,
-    pub next_expr_id: u32,
     /// Current expression span — set by infer_expr, used to annotate diagnostics
     pub(crate) current_span: Option<crate::ast::Span>,
     // Inference state
@@ -52,8 +50,8 @@ impl Checker {
     pub fn new() -> Self {
         Checker {
             env: TypeEnv::new(), diagnostics: Vec::new(),
-            source_file: None, source_text: None, target: None,
-            expr_types: HashMap::new(), next_expr_id: 0, current_span: None,
+            source_file: None, source_text: None,
+            expr_types: HashMap::new(), current_span: None,
             next_tyvar: 0, infer_types: HashMap::new(),
             constraints: Vec::new(), solutions: HashMap::new(),
         }
@@ -125,7 +123,6 @@ impl Checker {
     }
 
     pub fn set_source(&mut self, file: &str, text: &str) { self.source_file = Some(file.into()); self.source_text = Some(text.into()); }
-    pub fn set_target(&mut self, target: &str) { self.target = Some(target.into()); }
 
     pub fn register_module(&mut self, name: &str, prog: &ast::Program, _pkg_id: Option<&crate::project::PkgId>, _is_self: bool) {
         self.env.user_modules.insert(name.into());

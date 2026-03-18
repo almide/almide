@@ -227,63 +227,6 @@ pub(super) fn auto_derive_decode(vt: &mut VarTable, type_name: &str, type_ty: &T
     }
 }
 
-/// Generate `__encode_list_T(items: List[T]) -> Value` for a Codec type
-fn auto_derive_list_encode(vt: &mut VarTable, type_name: &str, type_ty: &Ty) -> IrFunction {
-    let value_ty = Ty::Named("Value".to_string(), vec![]);
-    let list_ty = Ty::List(Box::new(type_ty.clone()));
-    let var = vt.alloc("_items".to_string(), list_ty.clone(), Mutability::Let, None);
-
-    // value_encode_list(_items, T_encode)
-    let body = IrExpr {
-        kind: IrExprKind::Call {
-            target: CallTarget::Named { name: "value_encode_list".to_string() },
-            args: vec![
-                IrExpr { kind: IrExprKind::Var { id: var }, ty: list_ty.clone(), span: None },
-            ],
-            type_args: vec![],
-        },
-        ty: value_ty.clone(), span: None,
-    };
-
-    IrFunction {
-        name: format!("__encode_list_{}", type_name),
-        params: vec![IrParam { var, ty: list_ty, name: "_items".to_string(), borrow: ParamBorrow::Own, open_record: None, default: None }],
-        ret_ty: value_ty,
-        body,
-        is_effect: false, is_async: false, is_test: false,
-        generics: None, extern_attrs: vec![], visibility: IrVisibility::Public,
-    }
-}
-
-/// Generate `__decode_list_T(v: Value) -> Result[List[T], String]` for a Codec type
-fn auto_derive_list_decode(vt: &mut VarTable, type_name: &str, type_ty: &Ty) -> IrFunction {
-    let value_ty = Ty::Named("Value".to_string(), vec![]);
-    let list_ty = Ty::List(Box::new(type_ty.clone()));
-    let result_ty = Ty::Result(Box::new(list_ty.clone()), Box::new(Ty::String));
-    let var = vt.alloc("_v".to_string(), value_ty.clone(), Mutability::Let, None);
-
-    // value_decode_list(_v, T_decode)
-    let body = IrExpr {
-        kind: IrExprKind::Call {
-            target: CallTarget::Named { name: "value_decode_list".to_string() },
-            args: vec![
-                IrExpr { kind: IrExprKind::Var { id: var }, ty: value_ty.clone(), span: None },
-            ],
-            type_args: vec![],
-        },
-        ty: result_ty.clone(), span: None,
-    };
-
-    IrFunction {
-        name: format!("__decode_list_{}", type_name),
-        params: vec![IrParam { var, ty: value_ty, name: "_v".to_string(), borrow: ParamBorrow::Own, open_record: None, default: None }],
-        ret_ty: result_ty,
-        body,
-        is_effect: false, is_async: false, is_test: false,
-        generics: None, extern_attrs: vec![], visibility: IrVisibility::Public,
-    }
-}
-
 fn decode_func_suffix(ty: &Ty) -> &'static str {
     match ty {
         Ty::String => "string",
@@ -295,7 +238,7 @@ fn decode_func_suffix(ty: &Ty) -> &'static str {
 }
 
 /// Generate decode expression for a field based on its type.
-fn decode_field_value(get_field_expr: IrExpr, field_ty: &Ty, value_ty: &Ty) -> IrExpr {
+fn decode_field_value(get_field_expr: IrExpr, field_ty: &Ty, _value_ty: &Ty) -> IrExpr {
     let (module, func) = match field_ty {
         Ty::String => ("value", "as_string"),
         Ty::Int => ("value", "as_int"),

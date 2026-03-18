@@ -27,10 +27,6 @@ pub(crate) fn types_mismatch(expected: &Ty, actual: &Ty) -> bool {
 }
 
 impl Checker {
-    pub(crate) fn check_call(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr]) -> InferTy {
-        self.check_call_with_type_args(callee, args, None)
-    }
-
     pub(crate) fn check_call_with_type_args(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr], type_args: Option<&[Ty]>) -> InferTy {
         let arg_tys: Vec<InferTy> = args.iter_mut().map(|a| self.infer_expr(a)).collect();
         match callee {

@@ -1,7 +1,7 @@
 use std::process::Command;
 use crate::{compile_with_ir, parse_file, find_rustc, emit_ts, check, diagnostic, resolve, project, project_fetch};
 
-pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release: bool, fast: bool, unchecked_index: bool, no_check: bool) {
+pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release: bool, fast: bool, _unchecked_index: bool, no_check: bool) {
     let is_npm = matches!(target, Some("npm"));
     let is_wasm = matches!(target, Some("wasm" | "wasm32" | "wasi"));
 

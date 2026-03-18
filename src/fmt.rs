@@ -47,7 +47,7 @@ pub fn format_program(program: &Program) -> String {
     let mut out = String::new();
     let cm = &program.comment_map;
     let mut ci = 0;
-    let mut emit_comments = |out: &mut String, idx: &mut usize| {
+    let emit_comments = |out: &mut String, idx: &mut usize| {
         if let Some(comments) = cm.get(*idx) {
             for c in comments { wln!(out, "{c}"); }
         }

@@ -89,7 +89,7 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             let r = lower_expr(ctx, right);
             let left_ty = &l.ty;
             // Operator protocol: dispatch == / != to convention methods if available
-            if (op == "==" || op == "!=") {
+            if op == "==" || op == "!=" {
                 if let Some(eq_fn) = ctx.find_convention_fn(left_ty, "eq") {
                     let call = ctx.mk(IrExprKind::Call {
                         target: CallTarget::Named { name: eq_fn },

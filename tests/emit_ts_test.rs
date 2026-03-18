@@ -94,7 +94,7 @@ fn emit_string_interpolation() {
 
 #[test]
 fn emit_list_concat() {
-    let out = parse_and_emit_js("module app\nfn foo() -> List[Int] = [1, 2] ++ [3, 4]");
+    let out = parse_and_emit_js("module app\nfn foo() -> List[Int] = [1, 2] + [3, 4]");
     let code = user_code(&out);
     assert!(code.contains("__concat"));
 }

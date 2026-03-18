@@ -125,17 +125,3 @@ pub(super) fn sanitize(name: &str) -> String {
     crate::emit_common::sanitize(name)
 }
 
-pub(super) fn pascal_to_message(name: &str) -> String {
-    let mut result = String::new();
-    for (i, c) in name.chars().enumerate() {
-        if i > 0 && c.is_uppercase() {
-            result.push(' ');
-            result.push(c.to_lowercase().next().unwrap_or(c));
-        } else if i == 0 {
-            result.push(c.to_uppercase().next().unwrap_or(c));
-        } else {
-            result.push(c);
-        }
-    }
-    result
-}

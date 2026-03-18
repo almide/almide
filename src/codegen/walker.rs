@@ -41,10 +41,6 @@ impl<'a> RenderContext<'a> {
 
 
 
-    fn indent_str(&self) -> String {
-        "    ".repeat(self.indent)
-    }
-
     fn var_name(&self, id: VarId) -> String {
         let name = &self.var_table.get(id).name;
         let kw = ["default", "switch", "case", "class", "new", "delete",
@@ -774,7 +770,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
 
 // ── Binary operator rendering ──
 
-fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, ty: &Ty) -> String {
+fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _ty: &Ty) -> String {
     let l = render_expr(ctx, left);
     let r = render_expr(ctx, right);
 
@@ -1471,49 +1467,6 @@ fn erase_named_typevars(ty: Ty) -> Ty {
         },
         other => other,
     }
-}
-
-/// Does this type need .clone() when used as a variable in Rust?
-fn needs_clone(ty: &Ty) -> bool {
-    matches!(ty, Ty::String | Ty::List(_) | Ty::Map(_, _) | Ty::Record { .. } | Ty::Named(_, _) | Ty::Option(_) | Ty::Result(_, _))
-}
-
-/// Render stdlib function arguments with Rust-specific decorations.
-/// - List args → `({arg}).to_vec()`
-/// - String args used as &str → `&*{arg}`
-/// - Lambda args → `|params| { clone_bindings; body }`
-fn render_stdlib_args_rust(ctx: &RenderContext, args: &[IrExpr]) -> String {
-    args.iter().map(|arg| {
-        match &arg.kind {
-            // Lambda: render with clone bindings for captured variables
-            IrExprKind::Lambda { params, body } => {
-                let params_str = params.iter()
-                    .map(|(id, _)| ctx.var_name(*id).to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                // Clone all parameters inside the closure
-                let clone_bindings: Vec<String> = params.iter()
-                    .map(|(id, _)| format!("let {} = {}.clone();", ctx.var_name(*id), ctx.var_name(*id)))
-                    .collect();
-                let body_str = render_expr(ctx, body);
-                if clone_bindings.is_empty() {
-                    format!("|{}| {{ {} }}", params_str, body_str)
-                } else {
-                    format!("|{}| {{ {} {} }}", params_str, clone_bindings.join(" "), body_str)
-                }
-            }
-            _ => {
-                let rendered = render_expr(ctx, arg);
-                match &arg.ty {
-                    // List → &(expr).to_vec() — pass as reference to owned copy
-                    Ty::List(_) => format!("&({}).to_vec()", rendered),
-                    // String → &* — pass as &str
-                    Ty::String => format!("&*{}", rendered),
-                    _ => rendered,
-                }
-            }
-        }
-    }).collect::<Vec<_>>().join(", ")
 }
 
 // ── Anonymous record collection ──
