@@ -41,6 +41,7 @@ fn errors(input: &str) -> Vec<String> {
         .collect()
 }
 
+#[allow(dead_code)]
 fn warnings(input: &str) -> Vec<String> {
     check(input)
         .into_iter()
