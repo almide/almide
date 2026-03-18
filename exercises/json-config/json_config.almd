@@ -1,69 +1,79 @@
+
 test "parse and get string" {
-  let j = json.parse("{\"name\": \"Alice\", \"age\": 30}")
+  let j = json.parse('{"name": "Alice", "age": 30}');
   match j {
     ok(v) => {
-      assert_eq(json.get_string(v, "name"), some("Alice"))
+      assert_eq(json.get_string(v, "name"), some("Alice"));
       assert_eq(json.get_int(v, "age"), some(30))
-    }
-    err(_) => assert(false)
+    },
+    err(_) => assert(false),
   }
 }
+
 test "get missing key" {
-  match json.parse("{\"x\": 1}") {
-    ok(v) => assert_eq(json.get_string(v, "missing"), none)
-    err(_) => assert(false)
+  match json.parse('{"x": 1}') {
+    ok(v) => assert_eq(json.get_string(v, "missing"), none),
+    err(_) => assert(false),
   }
 }
+
 test "get nested" {
-  match json.parse("{\"a\": {\"b\": 42}}") {
+  match json.parse('{"a": {"b": 42}}') {
     ok(v) => match json.get(v, "a") {
-      some(a) => assert_eq(json.get_int(a, "b"), some(42))
-      none => assert(false)
-    }
-    err(_) => assert(false)
+      some(a) => assert_eq(json.get_int(a, "b"), some(42)),
+      none => assert(false),
+    },
+    err(_) => assert(false),
   }
 }
+
 test "get array" {
-  match json.parse("{\"items\": [1, 2, 3]}") {
+  match json.parse('{"items": [1, 2, 3]}') {
     ok(v) => match json.get_array(v, "items") {
-      some(a) => assert_eq(list.len(a), 3)
-      none => assert(false)
-    }
-    err(_) => assert(false)
+      some(a) => assert_eq(list.len(a), 3),
+      none => assert(false),
+    },
+    err(_) => assert(false),
   }
 }
+
 test "stringify roundtrip" {
-  match json.parse("{\"key\": \"value\"}") {
-    ok(v) => assert_eq(string.contains(json.stringify(v), "key"), true)
-    err(_) => assert(false)
+  match json.parse('{"key": "value"}') {
+    ok(v) => assert_eq(string.contains(json.stringify(v), "key"), true),
+    err(_) => assert(false),
   }
 }
+
 test "get bool" {
-  match json.parse("{\"active\": true}") {
-    ok(v) => assert_eq(json.get_bool(v, "active"), some(true))
-    err(_) => assert(false)
+  match json.parse('{"active": true}') {
+    ok(v) => assert_eq(json.get_bool(v, "active"), some(true)),
+    err(_) => assert(false),
   }
 }
+
 test "parse invalid" {
   match json.parse("not json") {
-    ok(_) => assert(false)
-    err(_) => assert(true)
+    ok(_) => assert(false),
+    err(_) => assert(true),
   }
 }
+
 test "keys" {
-  match json.parse("{\"a\": 1, \"b\": 2}") {
-    ok(v) => assert_eq(list.len(json.keys(v)), 2)
-    err(_) => assert(false)
+  match json.parse('{"a": 1, "b": 2}') {
+    ok(v) => assert_eq(list.len(json.keys(v)), 2),
+    err(_) => assert(false),
   }
 }
+
 test "stringify pretty" {
-  match json.parse("{\"name\": \"Alice\"}") {
-    ok(v) => assert_eq(string.contains(json.stringify_pretty(v), "\n"), true)
-    err(_) => assert(false)
+  match json.parse('{"name": "Alice"}') {
+    ok(v) => assert_eq(string.contains(json.stringify_pretty(v), "\n"), true),
+    err(_) => assert(false),
   }
 }
+
 test "builder shortcuts" {
-  let v = json.object([("name", json.s("Alice")), ("age", json.i(30))])
-  assert_eq(json.get_string(v, "name"), some("Alice"))
+  let v = json.object([("name", json.s("Alice")), ("age", json.i(30))]);
+  assert_eq(json.get_string(v, "name"), some("Alice"));
   assert_eq(json.get_int(v, "age"), some(30))
 }
