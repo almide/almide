@@ -213,7 +213,10 @@ template = "Result<{ok}, {err}>"
 template = "HashMap<{key}, {value}>"
 
 [type_fn]
-template = "impl Fn({params}) -> {return}"
+template = "impl Fn({params}) -> {return} + Clone"
+
+[type_fn_boxed]
+template = "Box<dyn Fn({params}) -> {return}>"
 
 # ── Loops ──
 
@@ -319,6 +322,9 @@ template = "!({cond})"
 
 [empty_list]
 template = "Vec::<{inner_type}>::new()"
+
+[box_wrap]
+template = "Box::new({inner})"
 
 [extern_fn]
 template = "use {module}::{function} as {name};"
