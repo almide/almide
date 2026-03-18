@@ -334,6 +334,32 @@ pub fn gen_generated_call(
             ("math", "sin") => format!("almide_rt_math_sin({})", args_str[0]),
             ("math", "sqrt") => format!("almide_rt_math_sqrt({})", args_str[0]),
             ("math", "tan") => format!("almide_rt_math_tan({})", args_str[0]),
+            ("option", "filter") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
+                format!("almide_rt_option_filter({}, |{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body)
+            },
+            ("option", "flat_map") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
+                format!("almide_rt_option_and_then({}, |{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body)
+            },
+            ("option", "flatten") => format!("almide_rt_option_flatten({})", args_str[0]),
+            ("option", "is_none") => format!("almide_rt_option_is_none(&{})", args_str[0]),
+            ("option", "is_some") => format!("almide_rt_option_is_some(&{})", args_str[0]),
+            ("option", "map") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
+                format!("almide_rt_option_map({}, |{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body)
+            },
+            ("option", "or_else") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
+                format!("almide_rt_option_or_else({}, || {{{{ {} }}}})", args_str[0], __cl_f_body)
+            },
+            ("option", "to_result") => format!("almide_rt_option_to_result({}, {})", args_str[0], args_str[1]),
+            ("option", "unwrap_or") => format!("almide_rt_option_unwrap_or({}, {})", args_str[0], args_str[1]),
+            ("option", "unwrap_or_else") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
+                format!("almide_rt_option_unwrap_or_else({}, || {{{{ {} }}}})", args_str[0], __cl_f_body)
+            },
+            ("option", "zip") => format!("almide_rt_option_zip({}, {})", args_str[0], args_str[1]),
             ("process", "exec") => if in_effect { format!("almide_rt_process_exec(&*{}, &{{ let __a: Vec<String> = {}; __a }})?", args_str[0], args_str[1]) } else { format!("almide_rt_process_exec(&*{}, &{{ let __a: Vec<String> = {}; __a }})", args_str[0], args_str[1]) },
             ("process", "exec_in") => if in_effect { format!("almide_rt_process_exec_in(&*{}, &*{}, &{{ let __a: Vec<String> = {}; __a }})?", args_str[0], args_str[1], args_str[2]) } else { format!("almide_rt_process_exec_in(&*{}, &*{}, &{{ let __a: Vec<String> = {}; __a }})", args_str[0], args_str[1], args_str[2]) },
             ("process", "exec_status") => if in_effect { format!("almide_rt_process_exec_status(&*{}, &{{ let __a: Vec<String> = {}; __a }})?", args_str[0], args_str[1]) } else { format!("almide_rt_process_exec_status(&*{}, &{{ let __a: Vec<String> = {}; __a }})", args_str[0], args_str[1]) },

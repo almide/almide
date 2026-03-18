@@ -5,7 +5,7 @@
 use crate::types::FnSig;
 
 /// All built-in stdlib module names (hardcoded in the compiler).
-pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "http", "process", "math", "random", "regex", "io", "result", "error", "datetime", "testing", "crypto", "uuid", "log", "value"];
+pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "http", "process", "math", "random", "regex", "io", "result", "option", "error", "datetime", "testing", "crypto", "uuid", "log", "value"];
 
 /// Prelude modules: automatically available without explicit `import`.
 /// These are core modules that virtually every program needs.
@@ -105,8 +105,12 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         "to_fixed" | "round" | "floor" | "ceil" | "sqrt"
         | "is_nan" | "is_infinite" => vec!["float"],
 
+        // ── option-only ──
+        "is_some" | "is_none" | "to_result" | "or_else"
+        | "zip" => vec!["option"],
+
         // ── result-only ──
-        "map_err" | "unwrap_or" | "unwrap_or_else"
+        "map_err"
         | "is_ok" | "is_err"
         | "to_err_option" => vec!["result"],
 
@@ -128,9 +132,11 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         "contains" => vec!["string", "list", "map"],
         "is_empty" => vec!["string", "list", "map"],
 
-        // ── ambiguous: list + result ──
-        "flat_map" => vec!["list", "result"],
-        "map" | "filter" => vec!["list", "map", "result"],
+        // ── ambiguous: list + result + option ──
+        "flat_map" => vec!["list", "result", "option"],
+        "map" | "filter" => vec!["list", "map", "result", "option"],
+        "unwrap_or" | "unwrap_or_else" => vec!["result", "option"],
+        "flatten" => vec!["list", "option"],
 
         // ── ambiguous: list + map ──
         "get" | "get_or" => vec!["string", "list", "map"],
