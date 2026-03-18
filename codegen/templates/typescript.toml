@@ -362,6 +362,12 @@ template = "(!({cond}))"
 [empty_list]
 template = "[]"
 
+[fan_expr]
+template = "await Promise.all([{exprs}])"
+
+[fan_effect]
+template = "await Promise.all([{exprs}])"
+
 [extern_fn]
 template = "// extern: {module}.{function} as {name}"
 

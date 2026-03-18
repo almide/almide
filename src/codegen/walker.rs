@@ -837,57 +837,44 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             template_or(ctx, "todo", &[], &format!("todo!(\"{}\")", message))
         }
 
-        // ── Fan (concurrency) — target-specific runtime model ──
+        // ── Fan (concurrency) — fully template-driven ──
         IrExprKind::Fan { exprs } => {
-            if ctx.target == Target::Rust {
-                let n = exprs.len();
-                let handles: Vec<String> = (0..n).map(|i| format!("__fan_h{}", i)).collect();
-
-                // Spawn threads
-                let spawns: Vec<String> = exprs.iter().enumerate().map(|(i, e)| {
-                    let mut body = render_expr(ctx, e);
-                    let is_result = matches!(&e.ty, Ty::Result(_, _));
-                    // Strip trailing ? from body (fan closures return raw Result)
-                    if is_result && body.ends_with('?') {
-                        body.pop();
-                    }
-                    format!("let {} = __s.spawn(move || {{ {} }});", handles[i], body)
-                }).collect();
-
-                // Join threads
-                let any_result = exprs.iter().any(|e| matches!(&e.ty, Ty::Result(_, _)));
-                let joins: Vec<String> = exprs.iter().enumerate().map(|(i, e)| {
-                    let is_result = matches!(&e.ty, Ty::Result(_, _));
-                    if is_result {
-                        // In effect fn: use ? for propagation. In test/pure fn: use .unwrap()
-                        if ctx.in_effect_fn {
-                            format!("{}.join().unwrap()?", handles[i])
-                        } else {
-                            format!("{}.join().unwrap().unwrap()", handles[i])
-                        }
-                    } else {
-                        format!("{}.join().unwrap()", handles[i])
-                    }
-                }).collect();
-
-                let join_expr = if n == 1 {
-                    joins[0].clone()
-                } else {
-                    format!("({})", joins.join(", "))
-                };
-
-                if any_result && ctx.in_effect_fn {
-                    format!("std::thread::scope(|__s| -> Result<_, String> {{ {} Ok({}) }})",
-                        spawns.join(" "), join_expr)
-                } else {
-                    format!("std::thread::scope(|__s| {{ {} {} }})",
-                        spawns.join(" "), join_expr)
+            let rendered: Vec<String> = exprs.iter().map(|e| {
+                let mut body = render_expr(ctx, e);
+                // Strip trailing ? from body (fan closures return raw Result)
+                if matches!(&e.ty, Ty::Result(_, _)) && body.ends_with('?') {
+                    body.pop();
                 }
-            } else {
-                // TS: Promise.all
-                let parts: Vec<String> = exprs.iter().map(|e| render_expr(ctx, e)).collect();
-                format!("await Promise.all([{}])", parts.join(", "))
-            }
+                body
+            }).collect();
+            let mut b = HashMap::new();
+            b.insert("exprs", rendered.join(", "));
+            b.insert("count", format!("{}", exprs.len()));
+            // Build spawn/join parts for thread-based template
+            let handles: Vec<String> = (0..exprs.len()).map(|i| format!("__fan_h{}", i)).collect();
+            let spawns: Vec<String> = rendered.iter().enumerate()
+                .map(|(i, body)| format!("let {} = __s.spawn(move || {{ {} }});", handles[i], body))
+                .collect();
+            let any_result = exprs.iter().any(|e| matches!(&e.ty, Ty::Result(_, _)));
+            let joins: Vec<String> = exprs.iter().enumerate().map(|(i, e)| {
+                if matches!(&e.ty, Ty::Result(_, _)) {
+                    if ctx.in_effect_fn {
+                        format!("{}.join().unwrap()?", handles[i])
+                    } else {
+                        format!("{}.join().unwrap().unwrap()", handles[i])
+                    }
+                } else {
+                    format!("{}.join().unwrap()", handles[i])
+                }
+            }).collect();
+            let join_expr = if joins.len() == 1 { joins[0].clone() }
+                else { format!("({})", joins.join(", ")) };
+            b.insert("spawns", spawns.join(" "));
+            b.insert("join_expr", join_expr.clone());
+            // Select template variant
+            let construct = if any_result && ctx.in_effect_fn { "fan_effect" } else { "fan_expr" };
+            ctx.templates.render(construct, None, &[], &b)
+                .unwrap_or_else(|| format!("fan({})", rendered.join(", ")))
         }
 
         // ── Fallback ──
