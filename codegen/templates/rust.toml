@@ -356,6 +356,15 @@ template = "{enum_name}::{ctor_name}({args})"
 [ctor_qualify]
 template = "{enum_name}::{ctor_name}"
 
+[type_tuple]
+template = "({elements})"
+
+[tuple_literal]
+template = "({elements})"
+
+[tuple_index]
+template = "{object}.{index}"
+
 [enum_variant_sep]
 template = ",\n"
 

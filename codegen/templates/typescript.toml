@@ -230,6 +230,15 @@ template = "function {name}({params}): any {{ return {{ tag: \"{name}\", value: 
 [enum_variant_unit]
 template = "const {name} = {{ tag: \"{name}\" }};"
 
+[type_tuple]
+template = "[{elements}]"
+
+[tuple_literal]
+template = "[{elements}]"
+
+[tuple_index]
+template = "{object}[{index}]"
+
 [enum_variant_sep]
 template = "\n"
 

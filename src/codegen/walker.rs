@@ -136,7 +136,10 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
         }
         Ty::Tuple(elems) => {
             let parts = elems.iter().map(|t| render_type(ctx, t)).collect::<Vec<_>>().join(", ");
-            format!("({})", parts)
+            let mut b = HashMap::new();
+            b.insert("elements", parts);
+            ctx.templates.render("type_tuple", None, &[], &b)
+                .unwrap_or_else(|| "tuple".into())
         }
         Ty::TypeVar(n) => {
             if n.starts_with('?') {
@@ -652,10 +655,17 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         // ── Tuple ──
         IrExprKind::Tuple { elements } => {
             let parts = elements.iter().map(|e| render_expr(ctx, e)).collect::<Vec<_>>().join(", ");
-            format!("({})", parts)
+            let mut b = HashMap::new();
+            b.insert("elements", parts);
+            ctx.templates.render("tuple_literal", None, &[], &b)
+                .unwrap_or_else(|| "tuple(...)".into())
         }
         IrExprKind::TupleIndex { object, index } => {
-            format!("{}.{}", render_expr(ctx, object), index)
+            let mut b = HashMap::new();
+            b.insert("object", render_expr(ctx, object));
+            b.insert("index", format!("{}", index));
+            ctx.templates.render("tuple_index", None, &[], &b)
+                .unwrap_or_else(|| format!("{}.{}", render_expr(ctx, object), index))
         }
         IrExprKind::IndexAccess { object, index } => {
             let obj_str = render_expr(ctx, object);
