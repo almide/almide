@@ -307,9 +307,11 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         // ── Loops ──
         IrExprKind::ForIn { var, var_tuple, iterable, body } => {
             let var_name = if let Some(tuple_vars) = var_tuple {
-                // Tuple destructure: for (k, v) in ...
                 let names: Vec<String> = tuple_vars.iter().map(|id| ctx.var_name(*id).to_string()).collect();
-                format!("({})", names.join(", "))
+                let mut b = HashMap::new();
+                b.insert("vars", names.join(", "));
+                ctx.templates.render("for_tuple_destructure", None, &[], &b)
+                    .unwrap_or_else(|| format!("({})", names.join(", ")))
             } else {
                 ctx.var_name(*var).to_string()
             };
@@ -368,10 +370,16 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                                     }
                                 }).collect();
                                 let args_str = boxed_args.join(", ");
+                                let mut b = HashMap::new();
+                                b.insert("enum_name", enum_name.clone());
+                                b.insert("ctor_name", name.clone());
+                                b.insert("args", args_str.clone());
                                 if args.is_empty() {
-                                    return format!("{}::{}", enum_name, name);
+                                    return ctx.templates.render("ctor_unit", None, &[], &b)
+                                        .unwrap_or_else(|| format!("{}::{}", enum_name, name));
                                 } else {
-                                    return format!("{}::{}({})", enum_name, name, args_str);
+                                    return ctx.templates.render("ctor_call", None, &[], &b)
+                                        .unwrap_or_else(|| format!("{}::{}({})", enum_name, name, args_str));
                                 }
                             }
                             name.clone()
@@ -504,9 +512,13 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                     _ => render_type(ctx, &expr.ty),
                 }
             });
-            // Qualify enum variant constructors: Circle → Shape::Circle
+            // Qualify enum variant constructors via template
             if let Some(enum_name) = ctx.ann.ctor_to_enum.get(&type_name) {
-                type_name = format!("{}::{}", enum_name, type_name);
+                let mut b = HashMap::new();
+                b.insert("enum_name", enum_name.clone());
+                b.insert("ctor_name", type_name.clone());
+                type_name = ctx.templates.render("ctor_qualify", None, &[], &b)
+                    .unwrap_or_else(|| format!("{}::{}", enum_name, type_name));
             }
             let mut b = HashMap::new();
             b.insert("type_name", type_name);
@@ -624,11 +636,12 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::Range { start, end, inclusive } => {
             let s = render_expr(ctx, start);
             let e = render_expr(ctx, end);
-            if *inclusive {
-                format!("({}..={})", s, e)
-            } else {
-                format!("({}..{})", s, e)
-            }
+            let mut b = HashMap::new();
+            b.insert("start", s);
+            b.insert("end", e);
+            let construct = if *inclusive { "range_inclusive" } else { "range_expr" };
+            ctx.templates.render(construct, None, &[], &b)
+                .unwrap_or_else(|| "range(...)".into())
         }
 
         // ── Tuple ──
@@ -939,7 +952,11 @@ fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {
         }
         IrPattern::Constructor { name, args } => {
             let qualified = if let Some(enum_name) = ctx.ann.ctor_to_enum.get(name) {
-                format!("{}::{}", enum_name, name)
+                let mut b = HashMap::new();
+                b.insert("enum_name", enum_name.clone());
+                b.insert("ctor_name", name.clone());
+                ctx.templates.render("ctor_qualify", None, &[], &b)
+                    .unwrap_or_else(|| format!("{}::{}", enum_name, name))
             } else {
                 name.clone()
             };

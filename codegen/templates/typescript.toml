@@ -221,6 +221,15 @@ template = "interface {name} {{ {fields} }}"
 [struct_field]
 template = "{name}: {type};"
 
+[enum_decl]
+template = "// type {name} = variant union\n{variants}"
+
+[enum_variant]
+template = "function {name}({fields}): any {{ return {{ tag: \"{name}\", value: [{fields}] }}; }}"
+
+[enum_variant_unit]
+template = "const {name} = {{ tag: \"{name}\" }};"
+
 [interface_decl]
 template = "interface {name} {{ {fields} }}"
 
@@ -245,6 +254,24 @@ template = "{name}"
 
 [clone_expr]
 template = "{expr}"
+
+[range_expr]
+template = "Array.from({{ length: ({end}) - ({start}) }}, (_, i) => ({start}) + i)"
+
+[range_inclusive]
+template = "Array.from({{ length: ({end}) - ({start}) + 1 }}, (_, i) => ({start}) + i)"
+
+[for_tuple_destructure]
+template = "[{vars}]"
+
+[ctor_unit]
+template = "{ctor_name}"
+
+[ctor_call]
+template = "{ctor_name}({args})"
+
+[ctor_qualify]
+template = "{ctor_name}"
 
 [block_expr]
 template = "(() => {{\n{body}\n}})()"

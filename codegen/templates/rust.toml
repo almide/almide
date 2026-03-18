@@ -338,6 +338,24 @@ template = "(*{name})"
 [clone_expr]
 template = "{expr}.clone()"
 
+[range_expr]
+template = "({start}..{end})"
+
+[range_inclusive]
+template = "({start}..={end})"
+
+[for_tuple_destructure]
+template = "({vars})"
+
+[ctor_unit]
+template = "{enum_name}::{ctor_name}"
+
+[ctor_call]
+template = "{enum_name}::{ctor_name}({args})"
+
+[ctor_qualify]
+template = "{enum_name}::{ctor_name}"
+
 [block_expr]
 template = "{{\n{body}\n}}"
 
