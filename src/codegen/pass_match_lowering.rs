@@ -145,6 +145,10 @@ fn rewrite_stmts(stmts: Vec<IrStmt>, vt: &mut VarTable) -> Vec<IrStmt> {
                 cond: rewrite_expr(cond, vt),
                 else_: rewrite_expr(else_, vt),
             },
+            IrStmtKind::BindDestructure { pattern, value } => IrStmtKind::BindDestructure {
+                pattern,
+                value: rewrite_expr(value, vt),
+            },
             other => other,
         };
         IrStmt { kind, span: s.span }
@@ -193,26 +197,63 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
     let rest = &arms[1..];
 
     match &arm.pattern {
-        // Wildcard or bind — always matches, no else needed
-        IrPattern::Wildcard => arm.body.clone(),
-        IrPattern::Bind { var } => {
-            // let var = subject; body
-            IrExpr {
-                kind: IrExprKind::Block {
-                    stmts: vec![IrStmt {
-                        kind: IrStmtKind::Bind {
-                            var: *var,
-                            mutability: Mutability::Let,
-                            ty: subject.ty.clone(),
-                            value: subject.clone(),
-                        },
-                        span: None,
-                    }],
-                    expr: Some(Box::new(arm.body.clone())),
-                },
-                ty: result_ty.clone(),
-                span: None,
+        // Wildcard — always matches (unless guarded)
+        IrPattern::Wildcard => {
+            if let Some(ref guard) = arm.guard {
+                let else_body = build_if_chain(subject, rest, result_ty, vt);
+                IrExpr {
+                    kind: IrExprKind::If {
+                        cond: Box::new(guard.clone()),
+                        then: Box::new(arm.body.clone()),
+                        else_: Box::new(else_body),
+                    },
+                    ty: result_ty.clone(),
+                    span: None,
+                }
+            } else {
+                arm.body.clone()
             }
+        }
+        IrPattern::Bind { var } => {
+            // let var = subject; body (with optional guard)
+            let bind_stmt = IrStmt {
+                kind: IrStmtKind::Bind {
+                    var: *var,
+                    mutability: Mutability::Let,
+                    ty: subject.ty.clone(),
+                    value: subject.clone(),
+                },
+                span: None,
+            };
+            let body_with_bind = if let Some(ref guard) = arm.guard {
+                let else_body = build_if_chain(subject, rest, result_ty, vt);
+                IrExpr {
+                    kind: IrExprKind::Block {
+                        stmts: vec![bind_stmt],
+                        expr: Some(Box::new(IrExpr {
+                            kind: IrExprKind::If {
+                                cond: Box::new(guard.clone()),
+                                then: Box::new(arm.body.clone()),
+                                else_: Box::new(else_body),
+                            },
+                            ty: result_ty.clone(),
+                            span: None,
+                        })),
+                    },
+                    ty: result_ty.clone(),
+                    span: None,
+                }
+            } else {
+                IrExpr {
+                    kind: IrExprKind::Block {
+                        stmts: vec![bind_stmt],
+                        expr: Some(Box::new(arm.body.clone())),
+                    },
+                    ty: result_ty.clone(),
+                    span: None,
+                }
+            };
+            body_with_bind
         }
 
         // some(inner) → if (subject !== null) { let inner = subject; body }

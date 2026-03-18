@@ -420,6 +420,23 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                                 let all_args_str = all_args.join(", ");
                                 return format!("{}({})", method, all_args_str);
                             }
+                            // Module.func UFCS: render via module_call template
+                            if method.contains('.') {
+                                let obj_str = render_expr(ctx, object);
+                                let mut all_args = vec![obj_str];
+                                all_args.extend(args.iter().map(|a| render_expr(ctx, a)));
+                                let all_args_str = all_args.join(", ");
+                                if let Some(dot_pos) = method.find('.') {
+                                    let module = &method[..dot_pos];
+                                    let func = &method[dot_pos+1..];
+                                    let mut b = HashMap::new();
+                                    b.insert("module", module.to_string());
+                                    b.insert("func", func.to_string());
+                                    b.insert("args", all_args_str);
+                                    return ctx.templates.render("module_call", None, &[], &b)
+                                        .unwrap_or_else(|| format!("{}.{}()", module, func));
+                                }
+                            }
                             format!("{}.{}", render_expr(ctx, object), method)
                         }
                         CallTarget::Computed { callee } => {
