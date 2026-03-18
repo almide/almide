@@ -5,17 +5,12 @@
 
 ## 項目
 
-### 1. clone/deref IR化 (ROI: 高)
+### ✅ 1. clone/deref IR化 (完了)
 
-**現状:** `clone_vars` / `deref_vars` を annotation に入れ、walker が読んで `.clone()` / `(*x)` を出力。
-**理想:** ClonePass / DerefPass が IR を直接書き換え (`IrExprKind::Clone { expr }`, `IrExprKind::Deref { expr }`)。walker は annotation 不要。
-
-- [ ] ClonePass: `Var { id }` → `Clone { expr: Var { id } }` に変換
-- [ ] DerefPass: lazy/box変数の `Var { id }` → `Deref { expr: Var { id } }` に変換
-- [ ] walker から `ann.clone_vars` / `ann.deref_vars` 参照を削除
-- [ ] テンプレート `clone_expr` / `deref_var` は IR node rendering として残す
-
-**見積:** ±200行, 中難度
+- [x] CloneInsertionPass: `Var { id }` → `Clone { Var { id } }` (heap-type variables)
+- [x] BoxDerefPass: `Var { id }` → `Deref { Var { id } }` (box'd pattern bindings)
+- [x] walker から `ann.clone_vars` / `ann.deref_vars` 参照を削除
+- [x] annotations から `clone_vars` / `deref_vars` フィールド削除
 
 ### 2. lower 2パス分離 (ROI: 中)
 
