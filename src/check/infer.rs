@@ -1,13 +1,13 @@
 /// Expression type inference — Pass 1 of the constraint-based checker.
-/// Walks the AST, assigns InferTy to each expression, collects constraints.
+/// Walks the AST, assigns Ty to each expression, collects constraints.
 
 use crate::ast;
 use crate::types::{Ty, VariantPayload};
-use super::types::InferTy;
+use super::types::resolve_vars;
 use super::Checker;
 
 impl Checker {
-    pub(crate) fn infer_expr(&mut self, expr: &mut ast::Expr) -> InferTy {
+    pub(crate) fn infer_expr(&mut self, expr: &mut ast::Expr) -> Ty {
         // Track current span for diagnostic annotation
         if let Some(span) = expr.span() {
             self.current_span = Some(span);
@@ -17,56 +17,56 @@ impl Checker {
         ity
     }
 
-    fn infer_expr_inner(&mut self, expr: &mut ast::Expr) -> InferTy {
+    fn infer_expr_inner(&mut self, expr: &mut ast::Expr) -> Ty {
         match expr {
-            ast::Expr::Int { .. } => InferTy::Concrete(Ty::Int),
-            ast::Expr::Float { .. } => InferTy::Concrete(Ty::Float),
-            ast::Expr::String { .. } => InferTy::Concrete(Ty::String),
+            ast::Expr::Int { .. } => Ty::Int,
+            ast::Expr::Float { .. } => Ty::Float,
+            ast::Expr::String { .. } => Ty::String,
             ast::Expr::InterpolatedString { parts, .. } => {
                 for part in parts.iter_mut() {
                     if let ast::StringPart::Expr { expr } = part {
                         self.infer_expr(expr);
                     }
                 }
-                InferTy::Concrete(Ty::String)
+                Ty::String
             }
-            ast::Expr::Bool { .. } => InferTy::Concrete(Ty::Bool),
-            ast::Expr::Unit { .. } => InferTy::Concrete(Ty::Unit),
+            ast::Expr::Bool { .. } => Ty::Bool,
+            ast::Expr::Unit { .. } => Ty::Unit,
 
-            ast::Expr::None { .. } => InferTy::Option(Box::new(self.fresh_var())),
+            ast::Expr::None { .. } => Ty::Option(Box::new(self.fresh_var())),
 
             ast::Expr::Ident { name, .. } => {
                 self.env.used_vars.insert(name.clone());
                 if let Some(ty) = self.env.lookup_var(name).cloned() { self.instantiate_ty(&ty) }
                 else if let Some(ty) = self.env.top_lets.get(name).cloned() { self.instantiate_ty(&ty) }
                 else if let Some(sig) = self.env.functions.get(name).cloned() {
-                    InferTy::Fn {
-                        params: sig.params.iter().map(|(_, t)| InferTy::from_ty(t)).collect(),
-                        ret: Box::new(InferTy::from_ty(&sig.ret)),
+                    Ty::Fn {
+                        params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
+                        ret: Box::new(sig.ret.clone()),
                     }
                 }
                 else {
                     self.emit(super::err(format!("undefined variable '{}'", name), "Check the variable name", format!("variable {}", name)).with_code("E003"));
-                    InferTy::Concrete(Ty::Unknown)
+                    Ty::Unknown
                 }
             }
 
             ast::Expr::TypeName { name, .. } => {
-                if let Some((type_name, _)) = self.env.constructors.get(name) { InferTy::Concrete(Ty::Named(type_name.clone(), vec![])) }
-                else if let Some(ty) = self.env.top_lets.get(name).cloned() { InferTy::from_ty(&ty) }
-                else { InferTy::Concrete(Ty::Named(name.clone(), vec![])) }
+                if let Some((type_name, _)) = self.env.constructors.get(name) { Ty::Named(type_name.clone(), vec![]) }
+                else if let Some(ty) = self.env.top_lets.get(name).cloned() { ty }
+                else { Ty::Named(name.clone(), vec![]) }
             }
 
             ast::Expr::List { elements, .. } => {
-                if elements.is_empty() { InferTy::List(Box::new(self.fresh_var())) }
+                if elements.is_empty() { Ty::List(Box::new(self.fresh_var())) }
                 else {
                     let first = self.infer_expr(&mut elements[0]);
                     for elem in elements.iter_mut().skip(1) { let et = self.infer_expr(elem); self.constrain(first.clone(), et, "list element"); }
-                    InferTy::List(Box::new(first))
+                    Ty::List(Box::new(first))
                 }
             }
 
-            ast::Expr::Tuple { elements, .. } => InferTy::Tuple(elements.iter_mut().map(|e| self.infer_expr(e)).collect()),
+            ast::Expr::Tuple { elements, .. } => Ty::Tuple(elements.iter_mut().map(|e| self.infer_expr(e)).collect()),
 
             ast::Expr::Record { name, fields, .. } => {
                 for f in fields.iter_mut() { self.infer_expr(&mut f.value); }
@@ -75,14 +75,14 @@ impl Checker {
                     let type_name = self.env.constructors.get(n.as_str())
                         .map(|(vname, _)| vname.clone())
                         .unwrap_or_else(|| n.clone());
-                    InferTy::Concrete(Ty::Named(type_name, vec![]))
+                    Ty::Named(type_name, vec![])
                 }
                 else {
                     let field_tys: Vec<(String, Ty)> = fields.iter().map(|f| {
-                        let ty = self.infer_types.get(&f.value.id()).map(|it| it.to_ty(&self.solutions)).unwrap_or(Ty::Unknown);
+                        let ty = self.infer_types.get(&f.value.id()).map(|it| resolve_vars(it, &self.solutions)).unwrap_or(Ty::Unknown);
                         (f.name.clone(), ty)
                     }).collect();
-                    InferTy::Concrete(Ty::Record { fields: field_tys })
+                    Ty::Record { fields: field_tys }
                 }
             }
 
@@ -94,17 +94,17 @@ impl Checker {
 
             ast::Expr::Member { object, field, .. } => {
                 let obj_ty = self.infer_expr(object);
-                let concrete = obj_ty.to_ty(&self.solutions);
-                InferTy::from_ty(&self.resolve_field_type(&concrete, field))
+                let concrete = resolve_vars(&obj_ty, &self.solutions);
+                self.resolve_field_type(&concrete, field)
             }
 
             ast::Expr::TupleIndex { object, index, .. } => {
                 let obj_ty = self.infer_expr(object);
                 match &obj_ty {
-                    InferTy::Tuple(elems) if *index < elems.len() => elems[*index].clone(),
+                    Ty::Tuple(elems) if *index < elems.len() => elems[*index].clone(),
                     _ => {
-                        let concrete = obj_ty.to_ty(&self.solutions);
-                        match &concrete { Ty::Tuple(elems) if *index < elems.len() => InferTy::from_ty(&elems[*index]), _ => InferTy::Concrete(Ty::Unknown) }
+                        let concrete = resolve_vars(&obj_ty, &self.solutions);
+                        match &concrete { Ty::Tuple(elems) if *index < elems.len() => elems[*index].clone(), _ => Ty::Unknown }
                     }
                 }
             }
@@ -112,11 +112,11 @@ impl Checker {
             ast::Expr::IndexAccess { object, index, .. } => {
                 let obj_ty = self.infer_expr(object);
                 self.infer_expr(index);
-                let concrete = obj_ty.to_ty(&self.solutions);
+                let concrete = resolve_vars(&obj_ty, &self.solutions);
                 match &concrete {
-                    Ty::List(inner) => InferTy::from_ty(inner),
-                    Ty::Map(_, v) => InferTy::Option(Box::new(InferTy::from_ty(v))),
-                    _ => InferTy::Concrete(Ty::Unknown),
+                    Ty::List(inner) => inner.as_ref().clone(),
+                    Ty::Map(_, v) => Ty::Option(Box::new(v.as_ref().clone())),
+                    _ => Ty::Unknown,
                 }
             }
 
@@ -125,8 +125,8 @@ impl Checker {
                 let rt = self.infer_expr(right);
                 match op.as_str() {
                     "+" => {
-                        let lc = lt.to_ty(&self.solutions);
-                        let rc = rt.to_ty(&self.solutions);
+                        let lc = resolve_vars(&lt, &self.solutions);
+                        let rc = resolve_vars(&rt, &self.solutions);
                         // + works for: String+String, List+List (concat), numeric+numeric (add)
                         let l_concat = matches!(&lc, Ty::String | Ty::List(_));
                         let r_concat = matches!(&rc, Ty::String | Ty::List(_));
@@ -143,19 +143,19 @@ impl Checker {
                                     format!("operator '+' requires numeric, String, or List types but got {} and {}", lc.display(), rc.display()),
                                     "Use + with numeric types, String, or List", format!("operator +")));
                             }
-                            if lc == Ty::Float || rc == Ty::Float { InferTy::Concrete(Ty::Float) } else { lt }
+                            if lc == Ty::Float || rc == Ty::Float { Ty::Float } else { lt }
                         }
                     }
                     "-" | "*" | "/" | "%" => {
-                        let lc = lt.to_ty(&self.solutions);
-                        let rc = rt.to_ty(&self.solutions);
+                        let lc = resolve_vars(&lt, &self.solutions);
+                        let rc = resolve_vars(&rt, &self.solutions);
                         let is_numeric = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_));
                         if !is_numeric(&lc) || !is_numeric(&rc) {
                             self.emit(super::err(
                                 format!("operator '{}' requires numeric types but got {} and {}", op, lc.display(), rc.display()),
                                 "Use numeric types (Int or Float)", format!("operator {}", op)));
                         }
-                        if lc == Ty::Float || rc == Ty::Float { InferTy::Concrete(Ty::Float) } else { lt }
+                        if lc == Ty::Float || rc == Ty::Float { Ty::Float } else { lt }
                     }
                     "++" => {
                         self.emit(super::err(
@@ -163,10 +163,10 @@ impl Checker {
                             "Replace ++ with +", "operator ++"));
                         lt
                     }
-                    "==" | "!=" | "<" | ">" | "<=" | ">=" => InferTy::Concrete(Ty::Bool),
+                    "==" | "!=" | "<" | ">" | "<=" | ">=" => Ty::Bool,
                     "and" | "or" => {
-                        let lc = lt.to_ty(&self.solutions);
-                        let rc = rt.to_ty(&self.solutions);
+                        let lc = resolve_vars(&lt, &self.solutions);
+                        let rc = resolve_vars(&rt, &self.solutions);
                         let is_bool = |t: &Ty| matches!(t, Ty::Bool | Ty::Unknown | Ty::TypeVar(_));
                         if !is_bool(&lc) {
                             self.emit(super::err(
@@ -178,16 +178,16 @@ impl Checker {
                                 format!("operator '{}' requires Bool but got {}", op, rc.display()),
                                 "Use Bool values with logical operators", format!("operator {}", op)));
                         }
-                        InferTy::Concrete(Ty::Bool)
+                        Ty::Bool
                     }
-                    "^" => InferTy::Concrete(Ty::Int),
+                    "^" => Ty::Int,
                     _ => lt,
                 }
             }
 
             ast::Expr::Unary { op, operand, .. } => {
                 let t = self.infer_expr(operand);
-                match op.as_str() { "not" => InferTy::Concrete(Ty::Bool), _ => t }
+                match op.as_str() { "not" => Ty::Bool, _ => t }
             }
 
             ast::Expr::If { cond, then, else_, .. } => {
@@ -200,12 +200,12 @@ impl Checker {
 
             ast::Expr::Match { subject, arms, .. } => {
                 let subject_ty = self.infer_expr(subject);
-                let sc = subject_ty.to_ty(&self.solutions);
+                let sc = resolve_vars(&subject_ty, &self.solutions);
                 self.check_match_exhaustiveness(&sc, arms);
                 let result = self.fresh_var();
                 for arm in arms.iter_mut() {
                     self.env.push_scope();
-                    let sub_c = subject_ty.to_ty(&self.solutions);
+                    let sub_c = resolve_vars(&subject_ty, &self.solutions);
                     self.bind_pattern(&arm.pattern, &sub_c);
                     if let Some(ref mut guard) = arm.guard { self.infer_expr(guard); }
                     let arm_ty = self.infer_expr(&mut arm.body);
@@ -218,7 +218,7 @@ impl Checker {
             ast::Expr::Block { stmts, expr, .. } | ast::Expr::DoBlock { stmts, expr, .. } => {
                 self.env.push_scope();
                 for stmt in stmts.iter_mut() { self.check_stmt(stmt); }
-                let ty = if let Some(e) = expr { self.infer_expr(e) } else { InferTy::Concrete(Ty::Unit) };
+                let ty = if let Some(e) = expr { self.infer_expr(e) } else { Ty::Unit };
                 self.env.pop_scope();
                 ty
             }
@@ -243,18 +243,18 @@ impl Checker {
                         }
                     }
                 }
-                let tys: Vec<InferTy> = exprs.iter_mut().map(|e| {
+                let tys: Vec<Ty> = exprs.iter_mut().map(|e| {
                     let ty = self.infer_expr(e);
                     // Auto-unwrap Result: fan unwraps Result<T, E> to T
-                    let concrete = ty.to_ty(&self.solutions);
+                    let concrete = resolve_vars(&ty, &self.solutions);
                     match &concrete {
-                        Ty::Result(ok, _) => InferTy::from_ty(ok),
+                        Ty::Result(ok, _) => ok.as_ref().clone(),
                         _ => ty,
                     }
                 }).collect();
                 match tys.len() {
                     1 => tys.into_iter().next().unwrap(),
-                    _ => InferTy::Concrete(Ty::Tuple(tys.iter().map(|t| t.to_ty(&self.solutions)).collect())),
+                    _ => Ty::Tuple(tys.iter().map(|t| resolve_vars(t, &self.solutions)).collect()),
                 }
             }
 
@@ -268,15 +268,15 @@ impl Checker {
 
             ast::Expr::Lambda { params, body, .. } => {
                 self.env.push_scope();
-                let param_tys: Vec<InferTy> = params.iter().map(|p| {
-                    let ty = p.ty.as_ref().map(|te| InferTy::from_ty(&self.resolve_type_expr(te))).unwrap_or_else(|| self.fresh_var());
-                    let concrete = ty.to_ty(&self.solutions);
+                let param_tys: Vec<Ty> = params.iter().map(|p| {
+                    let ty = p.ty.as_ref().map(|te| self.resolve_type_expr(te)).unwrap_or_else(|| self.fresh_var());
+                    let concrete = resolve_vars(&ty, &self.solutions);
                     self.env.define_var(&p.name, concrete);
                     ty
                 }).collect();
                 let ret_ty = self.infer_expr(body);
                 self.env.pop_scope();
-                InferTy::Fn { params: param_tys, ret: Box::new(ret_ty) }
+                Ty::Fn { params: param_tys, ret: Box::new(ret_ty) }
             }
 
             ast::Expr::ForIn { var, var_tuple, iterable, body, .. } => {
@@ -288,53 +288,52 @@ impl Checker {
                 self.env.push_scope();
                 for stmt in body.iter_mut() { self.check_stmt(stmt); }
                 self.env.pop_scope();
-                InferTy::Concrete(Ty::Unit)
+                Ty::Unit
             }
 
-            ast::Expr::Range { start, end, .. } => { let st = self.infer_expr(start); self.infer_expr(end); InferTy::List(Box::new(st)) }
+            ast::Expr::Range { start, end, .. } => { let st = self.infer_expr(start); self.infer_expr(end); Ty::List(Box::new(st)) }
 
-            ast::Expr::Some { expr, .. } => { let inner = self.infer_expr(expr); InferTy::Option(Box::new(inner)) }
+            ast::Expr::Some { expr, .. } => { let inner = self.infer_expr(expr); Ty::Option(Box::new(inner)) }
             ast::Expr::Ok { expr, .. } => {
                 let ok_ty = self.infer_expr(expr);
                 let err_ty = match &self.env.current_ret {
-                    Some(Ty::Result(_, e)) => InferTy::from_ty(e),
+                    Some(Ty::Result(_, e)) => e.as_ref().clone(),
                     _ => self.fresh_var(),
                 };
-                InferTy::Result(Box::new(ok_ty), Box::new(err_ty))
+                Ty::Result(Box::new(ok_ty), Box::new(err_ty))
             }
             ast::Expr::Err { expr, .. } => {
                 let err_ty = self.infer_expr(expr);
                 let ok_ty = match &self.env.current_ret {
-                    Some(Ty::Result(o, _)) => InferTy::from_ty(o),
+                    Some(Ty::Result(o, _)) => o.as_ref().clone(),
                     _ => self.fresh_var(),
                 };
-                InferTy::Result(Box::new(ok_ty), Box::new(err_ty))
+                Ty::Result(Box::new(ok_ty), Box::new(err_ty))
             }
             ast::Expr::Try { expr, .. } => {
                 let ty = self.infer_expr(expr);
                 match &ty {
-                    InferTy::Result(ok, _) => *ok.clone(),
-                    InferTy::Concrete(Ty::Result(ok, _)) => InferTy::from_ty(ok),
+                    Ty::Result(ok, _) => ok.as_ref().clone(),
                     _ => ty,
                 }
             }
 
             ast::Expr::Paren { expr, .. } => self.infer_expr(expr),
-            ast::Expr::Break { .. } | ast::Expr::Continue { .. } => InferTy::Concrete(Ty::Unit),
+            ast::Expr::Break { .. } | ast::Expr::Continue { .. } => Ty::Unit,
             ast::Expr::Hole { .. } | ast::Expr::Todo { .. } => self.fresh_var(),
             ast::Expr::Await { expr, .. } => self.infer_expr(expr),
-            ast::Expr::Error { .. } | ast::Expr::Placeholder { .. } => InferTy::Concrete(Ty::Unknown),
+            ast::Expr::Error { .. } | ast::Expr::Placeholder { .. } => Ty::Unknown,
 
             ast::Expr::MapLiteral { entries, .. } => {
-                if entries.is_empty() { InferTy::Map(Box::new(self.fresh_var()), Box::new(self.fresh_var())) }
+                if entries.is_empty() { Ty::Map(Box::new(self.fresh_var()), Box::new(self.fresh_var())) }
                 else {
                     let kt = self.infer_expr(&mut entries[0].0);
                     let vt = self.infer_expr(&mut entries[0].1);
                     for entry in entries.iter_mut().skip(1) { self.infer_expr(&mut entry.0); self.infer_expr(&mut entry.1); }
-                    InferTy::Map(Box::new(kt), Box::new(vt))
+                    Ty::Map(Box::new(kt), Box::new(vt))
                 }
             }
-            ast::Expr::EmptyMap { .. } => InferTy::Map(Box::new(self.fresh_var()), Box::new(self.fresh_var())),
+            ast::Expr::EmptyMap { .. } => Ty::Map(Box::new(self.fresh_var()), Box::new(self.fresh_var())),
         }
     }
 
@@ -346,7 +345,7 @@ impl Checker {
         args: &mut Vec<ast::Expr>,
         named_args: &mut Vec<(String, ast::Expr)>,
         type_args: &Option<Vec<ast::TypeExpr>>,
-    ) -> InferTy {
+    ) -> Ty {
         // Combine positional + named args for type checking
         let named_exprs: Vec<ast::Expr> = named_args.iter().map(|(_, e)| e.clone()).collect();
         let mut all_flat: Vec<ast::Expr> = args.to_vec();
@@ -357,12 +356,12 @@ impl Checker {
         self.check_call_with_type_args(callee, &mut all_flat, resolved_type_args.as_deref())
     }
 
-    fn infer_pipe(&mut self, left: &mut Box<ast::Expr>, right: &mut Box<ast::Expr>) -> InferTy {
+    fn infer_pipe(&mut self, left: &mut Box<ast::Expr>, right: &mut Box<ast::Expr>) -> Ty {
         let left_ty = self.infer_expr(left);
         match right.as_mut() {
             ast::Expr::Call { callee, args, .. } => {
                 // Pipe inserts left as the first argument
-                let mut all_arg_tys: Vec<super::types::InferTy> = vec![left_ty];
+                let mut all_arg_tys: Vec<Ty> = vec![left_ty];
                 all_arg_tys.extend(args.iter_mut().map(|a| self.infer_expr(a)));
                 // Resolve module calls for pipe (e.g. xs |> list.filter(f))
                 match callee.as_mut() {
@@ -380,13 +379,13 @@ impl Checker {
                         }
                         let ct = self.infer_expr(callee);
                         let ret = self.fresh_var();
-                        self.constrain(ct, super::types::InferTy::Fn { params: all_arg_tys, ret: Box::new(ret.clone()) }, "pipe call");
+                        self.constrain(ct, Ty::Fn { params: all_arg_tys, ret: Box::new(ret.clone()) }, "pipe call");
                         ret
                     }
                     _ => {
                         let ct = self.infer_expr(callee);
                         let ret = self.fresh_var();
-                        self.constrain(ct, super::types::InferTy::Fn { params: all_arg_tys, ret: Box::new(ret.clone()) }, "pipe call");
+                        self.constrain(ct, Ty::Fn { params: all_arg_tys, ret: Box::new(ret.clone()) }, "pipe call");
                         ret
                     }
                 }
@@ -411,13 +410,13 @@ impl Checker {
                 }
                 let ct = self.infer_expr(right);
                 let ret = self.fresh_var();
-                self.constrain(ct, super::types::InferTy::Fn { params: all_arg_tys, ret: Box::new(ret.clone()) }, "pipe call");
+                self.constrain(ct, Ty::Fn { params: all_arg_tys, ret: Box::new(ret.clone()) }, "pipe call");
                 ret
             }
             _ => {
                 let rt = self.infer_expr(right);
                 let ret = self.fresh_var();
-                self.constrain(rt, super::types::InferTy::Fn { params: vec![left_ty], ret: Box::new(ret.clone()) }, "pipe call");
+                self.constrain(rt, Ty::Fn { params: vec![left_ty], ret: Box::new(ret.clone()) }, "pipe call");
                 ret
             }
         }
@@ -429,14 +428,13 @@ impl Checker {
         var_tuple: &Option<Vec<String>>,
         iterable: &mut Box<ast::Expr>,
         body: &mut Vec<ast::Stmt>,
-    ) -> InferTy {
+    ) -> Ty {
         let iter_ty = self.infer_expr(iterable);
         self.env.push_scope();
-        let elem_ty = match &iter_ty {
-            InferTy::List(inner) => inner.to_ty(&self.solutions),
-            InferTy::Concrete(Ty::List(inner)) => *inner.clone(),
-            InferTy::Map(k, v) => Ty::Tuple(vec![k.to_ty(&self.solutions), v.to_ty(&self.solutions)]),
-            InferTy::Concrete(Ty::Map(k, v)) => Ty::Tuple(vec![*k.clone(), *v.clone()]),
+        let iter_resolved = resolve_vars(&iter_ty, &self.solutions);
+        let elem_ty = match &iter_resolved {
+            Ty::List(inner) => inner.as_ref().clone(),
+            Ty::Map(k, v) => Ty::Tuple(vec![k.as_ref().clone(), v.as_ref().clone()]),
             _ => Ty::Unknown,
         };
         if let Some(names) = var_tuple {
@@ -453,7 +451,7 @@ impl Checker {
         }
         for stmt in body.iter_mut() { self.check_stmt(stmt); }
         self.env.pop_scope();
-        InferTy::Concrete(Ty::Unit)
+        Ty::Unit
     }
 
     // ── Statement checking ──
@@ -461,13 +459,13 @@ impl Checker {
     pub(crate) fn check_stmt(&mut self, stmt: &mut ast::Stmt) {
         match stmt {
             ast::Stmt::Let { name, ty, value, .. } => {
-                let val_ity = self.infer_expr(value);
+                let val_ty = self.infer_expr(value);
                 let final_ty = if let Some(te) = ty {
                     let declared = self.resolve_type_expr(te);
-                    self.constrain(InferTy::from_ty(&declared), val_ity, format!("let {}", name));
+                    self.constrain(declared.clone(), val_ty, format!("let {}", name));
                     declared
                 } else {
-                    let t = val_ity.to_ty(&self.solutions);
+                    let t = resolve_vars(&val_ty, &self.solutions);
                     // Auto-unwrap Result in do blocks
                     if self.env.in_effect {
                         match t { Ty::Result(ok, _) => *ok, other => other }
@@ -476,13 +474,13 @@ impl Checker {
                 self.env.define_var(name, final_ty);
             }
             ast::Stmt::Var { name, ty, value, .. } => {
-                let val_ity = self.infer_expr(value);
+                let val_ty = self.infer_expr(value);
                 let final_ty = if let Some(te) = ty {
                     let declared = self.resolve_type_expr(te);
-                    self.constrain(InferTy::from_ty(&declared), val_ity, format!("let {}", name));
+                    self.constrain(declared.clone(), val_ty, format!("let {}", name));
                     declared
                 } else {
-                    let t = val_ity.to_ty(&self.solutions);
+                    let t = resolve_vars(&val_ty, &self.solutions);
                     if self.env.in_effect {
                         match t { Ty::Result(ok, _) => *ok, other => other }
                     } else { t }
@@ -491,9 +489,9 @@ impl Checker {
                 self.env.mutable_vars.insert(name.clone());
             }
             ast::Stmt::LetDestructure { pattern, value, .. } => {
-                let val_ity = self.infer_expr(value);
-                let val_ty = val_ity.to_ty(&self.solutions);
-                self.bind_pattern(pattern, &val_ty);
+                let val_ty = self.infer_expr(value);
+                let val_resolved = resolve_vars(&val_ty, &self.solutions);
+                self.bind_pattern(pattern, &val_resolved);
             }
             ast::Stmt::Assign { name, value, .. } => {
                 self.infer_expr(value);
