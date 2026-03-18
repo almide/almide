@@ -267,6 +267,9 @@ template = "// use {module};"
 
 # ── Test ──
 
+[test_module]
+template = "mod tests {{\n    use super::*;\n{tests}\n}}"
+
 [test_block]
 template = "#[test]\nfn {name}() {{ {body} }}"
 
@@ -322,6 +325,12 @@ template = "!({cond})"
 
 [empty_list]
 template = "Vec::<{inner_type}>::new()"
+
+[block_expr]
+template = "{{\n{body}\n}}"
+
+[block_result_expr]
+template = "{expr}"
 
 [box_wrap]
 template = "Box::new({inner})"

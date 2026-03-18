@@ -4,10 +4,7 @@
 # ── Expressions ──
 
 [if_expr]
-template = "if ({cond}) {{ {then} }} else {{ {else} }}"
-
-[if_expr_ternary]
-template = "({cond}) ? ({then}) : ({else})"
+template = "(({cond}) ? ({then}) : ({else}))"
 
 [call_expr]
 template = "{callee}({args})"
@@ -236,6 +233,15 @@ template = "{name}: {type};"
 template = "import {{ {names} }} from \"{module}\";"
 
 # ── Test ──
+
+[block_expr]
+template = "(() => {{\n{body}\n}})()"
+
+[block_result_expr]
+template = "return {expr};"
+
+[test_module]
+template = "{tests}"
 
 [test_block]
 template = "Deno.test(\"{name}\", () => {{ {body} }});"

@@ -283,16 +283,20 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
 
         IrExprKind::Block { stmts, expr } => {
             let mut parts: Vec<String> = stmts.iter()
-                .map(|s| {
-                    let rendered = render_stmt(ctx, s);
-                    // Add ; if the stmt doesn't already end with one
-                    terminate_stmt(ctx, rendered)
-                })
+                .map(|s| terminate_stmt(ctx, render_stmt(ctx, s)))
                 .collect();
             if let Some(e) = expr {
-                parts.push(render_expr(ctx, e));
+                let expr_str = render_expr(ctx, e);
+                let mut b = HashMap::new();
+                b.insert("expr", expr_str);
+                // Template decides: Rust uses bare expr, TS uses "return expr"
+                parts.push(ctx.templates.render("block_result_expr", None, &[], &b)
+                    .unwrap_or_else(|| b.get("expr").unwrap().clone()));
             }
-            format!("{{\n{}\n}}", parts.join("\n"))
+            let mut b = HashMap::new();
+            b.insert("body", parts.join("\n"));
+            ctx.templates.render("block_expr", None, &[], &b)
+                .unwrap_or_else(|| format!("{{\n{}\n}}", parts.join("\n")))
         }
 
         // ── Loops ──
@@ -1241,7 +1245,13 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
                 })
                 .collect();
             let fields: Vec<String> = field_names.iter().enumerate()
-                .map(|(i, name)| format!("pub {}: T{},", name, i))
+                .map(|(i, name)| {
+                    let mut b = HashMap::new();
+                    b.insert("name", name.clone());
+                    b.insert("type", format!("T{}", i));
+                    ctx.templates.render("struct_field", None, &[], &b)
+                        .unwrap_or_else(|| format!("{}: T{}", name, i))
+                })
                 .collect();
             let fields_str = fields.join("\n");
             let full_name = format!("{}<{}>", struct_name, generics.join(", "));
@@ -1284,13 +1294,17 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         parts.push(render_function(&ctx, func));
     }
 
-    // Test functions wrapped in mod tests { }
+    // Test functions
     let test_fns: Vec<&IrFunction> = program.functions.iter().filter(|f| f.is_test).collect();
     if !test_fns.is_empty() {
         let test_parts: Vec<String> = test_fns.iter()
             .map(|f| render_function(&ctx, f))
             .collect();
-        parts.push(format!("mod tests {{\n    use super::*;\n{}\n}}", test_parts.join("\n\n")));
+        let mut b = HashMap::new();
+        b.insert("tests", test_parts.join("\n\n"));
+        let wrapped = ctx.templates.render("test_module", None, &[], &b)
+            .unwrap_or_else(|| test_parts.join("\n\n"));
+        parts.push(wrapped);
     }
 
     // Imported modules: render their type decls and functions
