@@ -50,11 +50,11 @@ pub fn almide_rt_env_temp_dir() -> String {
     std::env::temp_dir().to_string_lossy().replace('\\', "/")
 }
 
-pub fn almide_rt_env_os() -> &'static str {
-    if cfg!(target_os = "windows") { "windows" }
-    else if cfg!(target_os = "macos") { "macos" }
-    else if cfg!(target_os = "linux") { "linux" }
-    else { "unknown" }
+pub fn almide_rt_env_os() -> String {
+    if cfg!(target_os = "windows") { "windows".to_string() }
+    else if cfg!(target_os = "macos") { "macos".to_string() }
+    else if cfg!(target_os = "linux") { "linux".to_string() }
+    else { "unknown".to_string() }
 }
 
 #[cfg(test)]

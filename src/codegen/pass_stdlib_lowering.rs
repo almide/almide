@@ -41,6 +41,17 @@ fn rewrite_expr(expr: IrExpr, in_effect: bool) -> IrExpr {
                 .unwrap_or_else(|| format!("almide_rt_{}_{}", module, func));
             let is_effect_call = info.as_ref().map(|i| i.effect).unwrap_or(false);
 
+            // Fill missing optional args with OptionNone
+            let total_params = info.as_ref().map(|i| i.args.len()).unwrap_or(args.len());
+            let mut args = args;
+            while args.len() < total_params {
+                args.push(IrExpr {
+                    kind: IrExprKind::OptionNone,
+                    ty: Ty::Option(Box::new(Ty::Unknown)),
+                    span: None,
+                });
+            }
+
             // Decorate each arg based on the transform table
             let decorated_args: Vec<IrExpr> = args.into_iter().enumerate().map(|(i, arg)| {
                 let transform = info.as_ref()
@@ -311,11 +322,15 @@ fn decorate_arg(arg: IrExpr, transform: ArgTransform) -> IrExpr {
         }
 
         ArgTransform::WrapSome => {
-            // Some(expr)
-            IrExpr {
-                kind: IrExprKind::OptionSome { expr: Box::new(arg) },
-                ty: Ty::Option(Box::new(ty)),
-                span,
+            // Some(expr) — but if arg is already OptionNone, pass as-is (optional param omitted)
+            if matches!(&arg.kind, IrExprKind::OptionNone) {
+                arg
+            } else {
+                IrExpr {
+                    kind: IrExprKind::OptionSome { expr: Box::new(arg) },
+                    ty: Ty::Option(Box::new(ty)),
+                    span,
+                }
             }
         }
     }

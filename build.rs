@@ -493,11 +493,11 @@ fn main() {
                 // Extract actual runtime function name from template
                 let rt_name = {
                     let tmpl = &def.rust;
-                    // Find function name: first almide_rt_... or other identifier before (
+                    // Find function/method call: identifier (possibly Type::method) before (
                     if let Some(paren) = tmpl.find('(') {
                         let prefix = &tmpl[..paren];
-                        // Handle: "{ almide_rt_xxx(" → extract "almide_rt_xxx"
-                        let name = prefix.rsplit(|c: char| !c.is_alphanumeric() && c != '_')
+                        // Handle "Type::method(" or "almide_rt_xxx(" — include :: in identifier chars
+                        let name = prefix.rsplit(|c: char| !c.is_alphanumeric() && c != '_' && c != ':')
                             .next().unwrap_or("");
                         if !name.is_empty() { name.to_string() } else { format!("almide_rt_{}_{}", module_name, fn_name) }
                     } else {
@@ -506,12 +506,14 @@ fn main() {
                 };
 
                 let effect_suffix = if def.effect { "true" } else { "false" };
+                let required_count = def.params.iter().filter(|p| !p.optional).count();
                 arg_transform_arms.push_str(&format!(
-                    "            (\"{module}\", \"{func}\") => Some(StdlibCallInfo {{ args: &[{transforms}], effect: {effect}, name: \"{rt_name}\" }}),\n",
+                    "            (\"{module}\", \"{func}\") => Some(StdlibCallInfo {{ args: &[{transforms}], effect: {effect}, name: \"{rt_name}\", required: {required} }}),\n",
                     module = module_name,
                     func = fn_name,
                     transforms = transforms.join(", "),
                     effect = effect_suffix,
+                    required = required_count,
                 ));
             }
 
@@ -792,6 +794,7 @@ fn main() {
          \x20   pub args: &'static [ArgTransform],\n\
          \x20   pub effect: bool,\n\
          \x20   pub name: &'static str,\n\
+         \x20   pub required: usize,\n\
          }}\n\n\
          pub fn lookup(module: &str, func: &str) -> Option<StdlibCallInfo> {{\n\
          \x20   match (module, func) {{\n\
