@@ -189,20 +189,25 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         // ── Variables ──
         IrExprKind::Var { id } => {
             let name = ctx.var_name(*id).to_string();
-            // Deref: top-level lazy vars or Box'd pattern bindings
-            let needs_deref = ctx.ann.lazy_vars.contains(id) || ctx.ann.deref_vars.contains(id);
-            let base = if needs_deref {
-                if ctx.ann.lazy_vars.contains(id) {
-                    format!("(*{})", name.to_uppercase())
-                } else {
-                    format!("(*{})", name)
-                }
+            // Deref/clone via templates (Rust: (*name), .clone(); TS: identity)
+            let base = if ctx.ann.lazy_vars.contains(id) {
+                let mut b = HashMap::new();
+                b.insert("name", name.to_uppercase());
+                ctx.templates.render("deref_lazy", None, &[], &b)
+                    .unwrap_or_else(|| name.to_uppercase())
+            } else if ctx.ann.deref_vars.contains(id) {
+                let mut b = HashMap::new();
+                b.insert("name", name.clone());
+                ctx.templates.render("deref_var", None, &[], &b)
+                    .unwrap_or(name)
             } else {
                 name
             };
-            // Clone: annotation-based (set by ClonePass)
             if ctx.ann.clone_vars.contains(id) {
-                format!("{}.clone()", base)
+                let mut b = HashMap::new();
+                b.insert("expr", base.clone());
+                ctx.templates.render("clone_expr", None, &[], &b)
+                    .unwrap_or(base)
             } else {
                 base
             }

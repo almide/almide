@@ -326,6 +326,18 @@ template = "!({cond})"
 [empty_list]
 template = "Vec::<{inner_type}>::new()"
 
+[unit_literal]
+template = "()"
+
+[deref_lazy]
+template = "(*{name})"
+
+[deref_var]
+template = "(*{name})"
+
+[clone_expr]
+template = "{expr}.clone()"
+
 [block_expr]
 template = "{{\n{body}\n}}"
 

@@ -234,6 +234,18 @@ template = "import {{ {names} }} from \"{module}\";"
 
 # ── Test ──
 
+[unit_literal]
+template = "undefined"
+
+[deref_lazy]
+template = "{name}"
+
+[deref_var]
+template = "{name}"
+
+[clone_expr]
+template = "{expr}"
+
 [block_expr]
 template = "(() => {{\n{body}\n}})()"
 
@@ -294,7 +306,7 @@ template = "{{ ...{base}, {fields} }}"
 template = "{subject}"
 
 [guard_negate]
-template = "!{cond}"
+template = "(!({cond}))"
 
 [empty_list]
 template = "[]"
@@ -303,7 +315,7 @@ template = "[]"
 template = "// extern: {module}.{function} as {name}"
 
 [loop_block]
-template = "while (true) {{\n{body}\n}}"
+template = "(() => {{ while (true) {{\n{body}\n}} }})()"
 
 [err_inner_string]
 template = "(() => {{ throw new Error({inner}) }})()"
