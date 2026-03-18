@@ -128,7 +128,7 @@ test "variant record deeply nested" {
 test "variant record make and match round trip" {
   let p = make_match("test_scope", "test_regex");
   let result = match p {
-    Match { scope, regex } => scope ++ ":" ++ regex,
+    Match { scope, regex } => scope + ":" + regex,
     _ => "other",
   };
   assert_eq(result, "test_scope:test_regex")

@@ -5,7 +5,7 @@ test "variable used 3 times" {
   let s = "hello"
   let a = string.len(s)
   let b = string.to_upper(s)
-  let c = s ++ " world"
+  let c = s + " world"
   assert_eq(a, 5)
   assert_eq(b, "HELLO")
   assert_eq(c, "hello world")

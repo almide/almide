@@ -49,7 +49,7 @@ test "pipe: enumerate then collect evens" {
   let items = ["a", "b", "c", "d", "e"]
   var evens: List[String] = []
   for (i, v) in list.enumerate(items) {
-    evens = if i % 2 == 0 then evens ++ [v] else evens
+    evens = if i % 2 == 0 then evens + [v] else evens
   }
   assert_eq(evens, ["a", "c", "e"])
 }

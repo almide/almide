@@ -1,7 +1,7 @@
 // fan.map — dynamic fan-out/fan-in
 
 effect fn double(x: Int) -> Result[Int, String] = ok(x * 2)
-effect fn to_label(x: Int) -> Result[String, String] = ok("item-" ++ int.to_string(x))
+effect fn to_label(x: Int) -> Result[String, String] = ok("item-" + int.to_string(x))
 effect fn add_offset(x: Int, n: Int) -> Result[Int, String] = ok(x + n)
 
 test "fan.map basic" {

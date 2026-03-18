@@ -82,7 +82,7 @@ fn to_iso(ts: Int) -> String = {
   let h_str = string.pad_left(int.to_string(p.hour), 2, "0")
   let mi_str = string.pad_left(int.to_string(p.minute), 2, "0")
   let s_str = string.pad_left(int.to_string(p.second), 2, "0")
-  y_str ++ "-" ++ m_str ++ "-" ++ d_str ++ "T" ++ h_str ++ ":" ++ mi_str ++ ":" ++ s_str ++ "Z"
+  y_str + "-" + m_str + "-" + d_str + "T" + h_str + ":" + mi_str + ":" + s_str + "Z"
 }
 
 fn from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int = {
@@ -146,8 +146,8 @@ fn format(ts: Int, fmt: String) -> String = {
   let mo_str = month_name(ts)
   // Replace specifiers (longer patterns first to avoid partial matches)
   let result = fmt
-  let result = string.replace(result, "%F", y_str ++ "-" ++ m_str ++ "-" ++ d_str)
-  let result = string.replace(result, "%T", h_str ++ ":" ++ mi_str ++ ":" ++ s_str)
+  let result = string.replace(result, "%F", y_str + "-" + m_str + "-" + d_str)
+  let result = string.replace(result, "%T", h_str + ":" + mi_str + ":" + s_str)
   let result = string.replace(result, "%Y", y_str)
   let result = string.replace(result, "%m", m_str)
   let result = string.replace(result, "%d", d_str)

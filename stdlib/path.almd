@@ -7,7 +7,7 @@ fn join(base: String, child: String) -> String = {
   else {
     let b = if string.ends_with(base, "/") then string.slice(base, 0, string.len(base) - 1) else base
     if string.len(b) == 0 then child
-    else b ++ "/" ++ child
+    else b + "/" + child
   }
 }
 
@@ -68,7 +68,7 @@ fn normalize(p: String) -> String = {
       if acc_len == 0 then {
         // Nothing to pop — keep ".." only if relative
         if absolute then acc
-        else [".."] ++ acc
+        else [".."] + acc
       }
       else {
         let top = match list.first(acc) {
@@ -76,15 +76,15 @@ fn normalize(p: String) -> String = {
           none => ""
         }
         // Can't pop past ".."
-        if top == ".." then [".."] ++ acc
+        if top == ".." then [".."] + acc
         else list.drop(acc, 1)
       }
     }
-    else [seg] ++ acc
+    else [seg] + acc
   })
   let ordered = list.reverse(resolved)
   let joined = string.join(ordered, "/")
-  if absolute then "/" ++ joined
+  if absolute then "/" + joined
   else if string.len(joined) == 0 then "."
   else joined
 }

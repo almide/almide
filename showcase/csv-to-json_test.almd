@@ -12,11 +12,11 @@ fn csv_to_json(input: String) -> String = {
     let pairs = columns |> list.enumerate() |> list.map((pair) => {
       let col = pair.1;
       let val = list.get(values, pair.0) |> option.unwrap_or("");
-      '"' ++ col ++ '":"' ++ val ++ '"'
+      '"' + col + '":"' + val + '"'
     });
-    "{" ++ string.join(pairs, ",") ++ "}"
+    "{" + string.join(pairs, ",") + "}"
   });
-  "[" ++ string.join(records, ",\n") ++ "]"
+  "[" + string.join(records, ",\n") + "]"
 }
 
 test "csv_to_json basic" {

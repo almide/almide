@@ -137,7 +137,7 @@ test "closure captures multiple variables" {
 
 fn double(x: Int) -> Int = x * 2
 
-fn exclaim(s: String) -> String = s ++ "!"
+fn exclaim(s: String) -> String = s + "!"
 
 test "UFCS basic" {
   assert_eq(3.double(), 6)

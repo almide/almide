@@ -25,20 +25,20 @@ fn tree_map[A, B](t: Tree[A], f: (A) -> B) -> Tree[B] =
 fn main() -> Unit = {
   // Test 1: Simple leaf
   let t1 = Leaf(42)
-  println("test 1: " ++ int.to_string(tree_sum(t1)))
+  println("test 1: " + int.to_string(tree_sum(t1)))
 
   // Test 2: Simple tree
   let t2 = Node(Leaf(1), Leaf(2))
-  println("test 2: " ++ int.to_string(tree_sum(t2)))
+  println("test 2: " + int.to_string(tree_sum(t2)))
 
   // Test 3: Deeper tree
   let t3 = Node(Node(Leaf(1), Leaf(2)), Leaf(3))
-  println("test 3: " ++ int.to_string(tree_sum(t3)))
+  println("test 3: " + int.to_string(tree_sum(t3)))
 
   // Test 4: tree_size
-  println("test 4: " ++ int.to_string(tree_size(t3)))
+  println("test 4: " + int.to_string(tree_size(t3)))
 
   // Test 5: tree_map
   let t4 = tree_map(t2, (x: Int) => x * 10)
-  println("test 5: " ++ int.to_string(tree_sum(t4)))
+  println("test 5: " + int.to_string(tree_sum(t4)))
 }

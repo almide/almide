@@ -102,6 +102,8 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                 }
             }
             let bin_op = match (op.as_str(), left_ty) {
+                ("+", Ty::String) => BinOp::ConcatStr,
+                ("+", Ty::List(_)) => BinOp::ConcatList,
                 ("+", Ty::Float) => BinOp::AddFloat, ("+", _) => BinOp::AddInt,
                 ("-", Ty::Float) => BinOp::SubFloat, ("-", _) => BinOp::SubInt,
                 ("*", Ty::Float) => BinOp::MulFloat, ("*", _) => BinOp::MulInt,
@@ -109,8 +111,8 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                 ("%", Ty::Float) => BinOp::ModFloat, ("%", _) => BinOp::ModInt,
                 ("**", _) => BinOp::PowFloat,
                 ("^", _) => BinOp::XorInt,
-                ("++", Ty::String) => BinOp::ConcatStr,
-                ("++", _) => BinOp::ConcatList,
+                ("++", Ty::String) => BinOp::ConcatStr, // legacy
+                ("++", _) => BinOp::ConcatList,         // legacy
                 ("==", _) => BinOp::Eq, ("!=", _) => BinOp::Neq,
                 ("<", _) => BinOp::Lt, (">", _) => BinOp::Gt,
                 ("<=", _) => BinOp::Lte, (">=", _) => BinOp::Gte,

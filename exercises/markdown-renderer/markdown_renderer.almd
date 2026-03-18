@@ -14,10 +14,10 @@ fn parse_line(line: String) -> Token =
 
 fn render(token: Token) -> String =
   match token {
-    Heading(1, text) => string.to_upper(text) ++ "\n" ++ string.repeat("=", string.len(text))
-    Heading(_, text) => text ++ "\n" ++ string.repeat("-", string.len(text))
-    Paragraph(text) => "  " ++ text
-    Bullet(text) => "  * " ++ text
+    Heading(1, text) => string.to_upper(text) + "\n" + string.repeat("=", string.len(text))
+    Heading(_, text) => text + "\n" + string.repeat("-", string.len(text))
+    Paragraph(text) => "  " + text
+    Bullet(text) => "  * " + text
     Divider => string.repeat("~", 40)
   }
 

@@ -21,7 +21,7 @@ effect fn main() -> Result[Unit, String] = {
     println("All keys present.")
   else {
     println("Missing keys:")
-    list.each(missing, (k) => println("  - " ++ k))
+    list.each(missing, (k) => println("  - " + k))
   }
   ok(())
 }

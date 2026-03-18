@@ -1,7 +1,7 @@
 
 test "greeting format" {
   let name = "alice";
-  let result = '{"greeting":"Hello, ' ++ name ++ '!"}';
+  let result = '{"greeting":"Hello, ' + name + '!"}';
   assert(string.contains(result, "alice"))
 }
 

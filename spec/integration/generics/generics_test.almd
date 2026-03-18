@@ -17,7 +17,7 @@ type Stack[T] = { items: List[T], size: Int }
 fn stack_new[T]() -> Stack[T] = { items: [], size: 0 }
 
 fn stack_push[T](s: Stack[T], item: T) -> Stack[T] = {
-  { items: s.items ++ [item], size: s.size + 1 }
+  { items: s.items + [item], size: s.size + 1 }
 }
 
 fn stack_peek[T](s: Stack[T]) -> Option[T] = {

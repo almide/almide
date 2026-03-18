@@ -31,16 +31,16 @@ test "pipe chain list operations" {
 // ── String concatenation (++) ──
 
 test "string concat operator" {
-  assert_eq("foo" ++ "bar", "foobar")
-  assert_eq("" ++ "", "")
-  assert_eq("a" ++ "b" ++ "c", "abc")
+  assert_eq("foo" + "bar", "foobar")
+  assert_eq("" + "", "")
+  assert_eq("a" + "b" + "c", "abc")
 }
 
 // ── List concatenation (++) ──
 
 test "list concat operator" {
-  assert_eq([1, 2] ++ [3], [1, 2, 3])
-  assert_eq([1] ++ [2] ++ [3], [1, 2, 3])
+  assert_eq([1, 2] + [3], [1, 2, 3])
+  assert_eq([1] + [2] + [3], [1, 2, 3])
 }
 
 // ── Deep equality (==, !=) ──
@@ -171,17 +171,17 @@ test "float power edge cases" {
 
 test "concat with empty string" {
   let s = "hello"
-  assert_eq(s ++ "", s)
-  assert_eq("" ++ s, s)
-  assert_eq("" ++ "" ++ "" ++ s ++ "" ++ "", s)
+  assert_eq(s + "", s)
+  assert_eq("" + s, s)
+  assert_eq("" + "" + "" + s + "" + "", s)
 }
 
 test "concat with empty list" {
   let xs = [1, 2, 3]
   let empty: List[Int] = []
-  assert_eq(xs ++ empty, xs)
-  assert_eq(empty ++ xs, xs)
-  assert_eq(empty ++ empty, empty)
+  assert_eq(xs + empty, xs)
+  assert_eq(empty + xs, xs)
+  assert_eq(empty + empty, empty)
 }
 
 test "string interpolation with boolean" {

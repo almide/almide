@@ -7,7 +7,7 @@ fn to_roman(n: Int) -> String = {
     let value = list.get_or(values, i, 0)
     let symbol = list.get_or(symbols, i, "")
     while remaining >= value {
-      result = result ++ symbol
+      result = result + symbol
       remaining = remaining - value
     }
   }

@@ -17,7 +17,7 @@ fn hex_encode(bytes: List[Int]) -> String = {
       some(c) => c
       none => "0"
     }
-    acc ++ h ++ l
+    acc + h + l
   })
 }
 
@@ -69,7 +69,7 @@ fn base64_encode(bytes: List[Int]) -> String = {
     let c1 = b64_char(int.band(int.bshr(n, 12), 63))
     let c2 = b64_char(int.band(int.bshr(n, 6), 63))
     let c3 = b64_char(int.band(n, 63))
-    acc ++ c0 ++ c1 ++ c2 ++ c3
+    acc + c0 + c1 + c2 + c3
   })
 
   // Handle remainder with padding
@@ -78,7 +78,7 @@ fn base64_encode(bytes: List[Int]) -> String = {
     let n = int.bshl(b0, 16)
     let c0 = b64_char(int.band(int.bshr(n, 18), 63))
     let c1 = b64_char(int.band(int.bshr(n, 12), 63))
-    result ++ c0 ++ c1 ++ "=="
+    result + c0 + c1 + "=="
   } else if remainder == 2 then {
     let b0 = list.get_or(bytes, full_chunks * 3, 0)
     let b1 = list.get_or(bytes, full_chunks * 3 + 1, 0)
@@ -86,7 +86,7 @@ fn base64_encode(bytes: List[Int]) -> String = {
     let c0 = b64_char(int.band(int.bshr(n, 18), 63))
     let c1 = b64_char(int.band(int.bshr(n, 12), 63))
     let c2 = b64_char(int.band(int.bshr(n, 6), 63))
-    result ++ c0 ++ c1 ++ c2 ++ "="
+    result + c0 + c1 + c2 + "="
   } else result
 }
 
@@ -105,7 +105,7 @@ fn base64_decode(s: String) -> List[Int] = {
     let n2 = b64_char_val(list.get_or(chunk, 2, "A"))
     let n3 = b64_char_val(list.get_or(chunk, 3, "A"))
     let n = int.bor(int.bor(int.bor(int.bshl(n0, 18), int.bshl(n1, 12)), int.bshl(n2, 6)), n3)
-    acc ++ [int.band(int.bshr(n, 16), 255), int.band(int.bshr(n, 8), 255), int.band(n, 255)]
+    acc + [int.band(int.bshr(n, 16), 255), int.band(int.bshr(n, 8), 255), int.band(n, 255)]
   })
 
   // Handle remainder
@@ -113,13 +113,13 @@ fn base64_decode(s: String) -> List[Int] = {
     let n0 = b64_char_val(list.get_or(clean, full_chunks * 4, "A"))
     let n1 = b64_char_val(list.get_or(clean, full_chunks * 4 + 1, "A"))
     let n = int.bor(int.bshl(n0, 18), int.bshl(n1, 12))
-    result ++ [int.band(int.bshr(n, 16), 255)]
+    result + [int.band(int.bshr(n, 16), 255)]
   } else if remainder == 3 then {
     let n0 = b64_char_val(list.get_or(clean, full_chunks * 4, "A"))
     let n1 = b64_char_val(list.get_or(clean, full_chunks * 4 + 1, "A"))
     let n2 = b64_char_val(list.get_or(clean, full_chunks * 4 + 2, "A"))
     let n = int.bor(int.bor(int.bshl(n0, 18), int.bshl(n1, 12)), int.bshl(n2, 6))
-    result ++ [int.band(int.bshr(n, 16), 255), int.band(int.bshr(n, 8), 255)]
+    result + [int.band(int.bshr(n, 16), 255), int.band(int.bshr(n, 8), 255)]
   } else result
 }
 
