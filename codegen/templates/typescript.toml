@@ -295,3 +295,30 @@ template = "[]"
 
 [extern_fn]
 template = "// extern: {module}.{function} as {name}"
+
+[loop_block]
+template = "while (true) {{\n{body}\n}}"
+
+[err_inner_string]
+template = "(() => {{ throw new Error({inner}) }})()"
+
+[err_inner_other]
+template = "(() => {{ throw new Error(String({inner})) }})()"
+
+[record_pattern_rest]
+template = "{name}"
+
+[record_pattern_rest_empty]
+template = "{name}"
+
+[top_let_const]
+template = "const {name} = {value};"
+
+[top_let_lazy]
+template = "const {name} = {value};"
+
+[generic_bound]
+template = "{name}"
+
+[generic_bound_full]
+template = "{name}"

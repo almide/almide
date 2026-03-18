@@ -286,11 +286,10 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                     parts.push(rendered);
                 }
             }
-            if ctx.is_rust() {
-                format!("loop {{\n{}\n}}", parts.join("\n"))
-            } else {
-                format!("while (true) {{\n{}\n}}", parts.join("\n"))
-            }
+            let mut b = HashMap::new();
+            b.insert("body", parts.join("\n"));
+            ctx.templates.render("loop_block", None, &[], &b)
+                .unwrap_or_else(|| format!("loop {{ ... }}"))
         }
 
         IrExprKind::Block { stmts, expr } => {
@@ -453,12 +452,10 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             // Render explicit fields
             for (k, v) in fields.iter() {
                 let mut val_str = render_expr(ctx, v);
-                // Box recursive fields
-                if ctx.is_rust() {
-                    if let Some(cn) = name {
-                        if ctx.ann.boxed_fields.contains(&(cn.clone(), k.clone())) {
-                            val_str = format!("Box::new({})", val_str);
-                        }
+                // Box recursive fields (annotation is target-aware — empty for non-Rust)
+                if let Some(cn) = name {
+                    if ctx.ann.boxed_fields.contains(&(cn.clone(), k.clone())) {
+                        val_str = format!("Box::new({})", val_str);
                     }
                 }
                 let mut b = HashMap::new();
@@ -476,11 +473,9 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 if !explicit_names.contains(field_name.as_str()) {
                     if let Some(default_expr) = ctx.ann.default_fields.get(&(ctor_name_str.to_string(), field_name.clone())) {
                         let mut val_str = render_expr(ctx, default_expr);
-                        if ctx.is_rust() {
-                            if let Some(cn) = name {
-                                if ctx.ann.boxed_fields.contains(&(cn.clone(), field_name.clone())) {
-                                    val_str = format!("Box::new({})", val_str);
-                                }
+                        if let Some(cn) = name {
+                            if ctx.ann.boxed_fields.contains(&(cn.clone(), field_name.clone())) {
+                                val_str = format!("Box::new({})", val_str);
                             }
                         }
                         let mut b = HashMap::new();
@@ -559,19 +554,12 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
         IrExprKind::ResultErr { expr: inner } => {
             let inner_str = render_expr(ctx, inner);
-            if ctx.is_rust() {
-                // If inner type is already String, use .to_string()
-                // If not, pass as-is (custom error types)
-                match &inner.ty {
-                    Ty::String => format!("Err({}.to_string())", inner_str),
-                    _ => format!("Err({})", inner_str),
-                }
-            } else {
-                let mut b = HashMap::new();
-                b.insert("inner", inner_str);
-                ctx.templates.render("err_expr", None, &[], &b)
-                    .unwrap_or_else(|| format!("Err({})", render_expr(ctx, inner)))
-            }
+            let mut b = HashMap::new();
+            b.insert("inner", inner_str);
+            let construct = if matches!(&inner.ty, Ty::String) { "err_inner_string" } else { "err_inner_other" };
+            ctx.templates.render(construct, None, &[], &b)
+                .or_else(|| ctx.templates.render("err_expr", None, &[], &b))
+                .unwrap_or_else(|| format!("Err({})", render_expr(ctx, inner)))
         }
 
         // ── Lambda ──
@@ -987,12 +975,13 @@ fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
-            if *rest && ctx.is_rust() {
-                if fields_str.is_empty() {
-                    format!("{} {{ .. }}", qualified_name)
-                } else {
-                    format!("{} {{ {}, .. }}", qualified_name, fields_str)
-                }
+            if *rest {
+                let mut b = HashMap::new();
+                b.insert("name", qualified_name.clone());
+                b.insert("fields", fields_str.clone());
+                let construct = if fields_str.is_empty() { "record_pattern_rest_empty" } else { "record_pattern_rest" };
+                ctx.templates.render(construct, None, &[], &b)
+                    .unwrap_or_else(|| format!("{} {{ {} }}", qualified_name, fields_str))
             } else {
                 format!("{} {{ {} }}", qualified_name, fields_str)
             }
@@ -1109,9 +1098,13 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                             None => f.name.clone(),
                         })
                         .collect::<Vec<_>>().join(", ");
-                    if *rest && ctx.is_rust() {
-                        if fields_str.is_empty() { format!("{} {{ .. }}", qualified) }
-                        else { format!("{} {{ {}, .. }}", qualified, fields_str) }
+                    if *rest {
+                        let mut b = HashMap::new();
+                        b.insert("name", qualified.clone());
+                        b.insert("fields", fields_str.clone());
+                        let construct = if fields_str.is_empty() { "record_pattern_rest_empty" } else { "record_pattern_rest" };
+                        ctx.templates.render(construct, None, &[], &b)
+                            .unwrap_or_else(|| format!("{} {{ {} }}", qualified, fields_str))
                     } else {
                         format!("{} {{ {} }}", qualified, fields_str)
                     }
@@ -1175,11 +1168,13 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     let fn_generics = if let Some(generics) = &func.generics {
         if generics.is_empty() {
             String::new()
-        } else if ctx.is_rust() {
-            let params = generics.iter().map(|g| format!("{}: Clone + std::fmt::Debug + PartialEq + PartialOrd", g.name)).collect::<Vec<_>>().join(", ");
-            format!("<{}>", params)
         } else {
-            let params = generics.iter().map(|g| g.name.clone()).collect::<Vec<_>>().join(", ");
+            let params = generics.iter().map(|g| {
+                let mut b = HashMap::new();
+                b.insert("name", g.name.clone());
+                ctx.templates.render("generic_bound_full", None, &[], &b)
+                    .unwrap_or_else(|| g.name.clone())
+            }).collect::<Vec<_>>().join(", ");
             format!("<{}>", params)
         }
     } else {
@@ -1280,19 +1275,19 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         let name = ctx.var_table.get(tl.var).name.clone();
         let ty_str = render_type(&ctx, &tl.ty);
         let val_str = render_expr(&ctx, &tl.value);
-        let rendered = if ctx.is_rust() {
-            match tl.kind {
-                TopLetKind::Const => {
-                    format!("const {}: {} = {};", name.to_uppercase(), ty_str, val_str)
-                }
-                TopLetKind::Lazy => {
-                    ctx.ann.lazy_vars.insert(tl.var);
-                    format!("static {}: std::sync::LazyLock<{}> = std::sync::LazyLock::new(|| {});", name.to_uppercase(), ty_str, val_str)
-                }
-            }
-        } else {
-            format!("const {} = {};", name, val_str)
+        if matches!(tl.kind, TopLetKind::Lazy) {
+            ctx.ann.lazy_vars.insert(tl.var);
+        }
+        let construct = match tl.kind {
+            TopLetKind::Const => "top_let_const",
+            TopLetKind::Lazy => "top_let_lazy",
         };
+        let mut b = HashMap::new();
+        b.insert("name", name.to_uppercase());
+        b.insert("type", ty_str);
+        b.insert("value", val_str.clone());
+        let rendered = ctx.templates.render(construct, None, &[], &b)
+            .unwrap_or_else(|| format!("const {} = {};", name, val_str));
         parts.push(rendered);
     }
 
@@ -1345,11 +1340,13 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
     let generics_str = if let Some(generics) = &td.generics {
         if generics.is_empty() {
             String::new()
-        } else if ctx.is_rust() {
-            let params = generics.iter().map(|g| format!("{}: Clone + PartialEq + PartialOrd", g.name)).collect::<Vec<_>>().join(", ");
-            format!("<{}>", params)
         } else {
-            let params = generics.iter().map(|g| g.name.clone()).collect::<Vec<_>>().join(", ");
+            let params = generics.iter().map(|g| {
+                let mut b = HashMap::new();
+                b.insert("name", g.name.clone());
+                ctx.templates.render("generic_bound", None, &[], &b)
+                    .unwrap_or_else(|| g.name.clone())
+            }).collect::<Vec<_>>().join(", ");
             format!("<{}>", params)
         }
     } else {
@@ -1388,8 +1385,7 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                     IrVariantKind::Tuple { fields } => {
                         let fields_str = fields.iter().map(|t| {
                             let rendered = render_type(ctx, t);
-                            // Box recursive references (field type contains the enum name)
-                            if ctx.is_rust() && ty_contains_name(t, &td.name) {
+                            if ctx.ann.recursive_enums.contains(&td.name) && ty_contains_name(t, &td.name) {
                                 format!("Box<{}>", rendered)
                             } else {
                                 rendered
@@ -1406,7 +1402,7 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                         let fields_str = fields.iter()
                             .map(|f| {
                                 let rendered = render_type(ctx, &f.ty);
-                                let boxed = if ctx.is_rust() && ty_contains_name(&f.ty, &td.name) {
+                                let boxed = if ctx.ann.recursive_enums.contains(&td.name) && ty_contains_name(&f.ty, &td.name) {
                                     format!("Box<{}>", rendered)
                                 } else {
                                     rendered
