@@ -203,28 +203,16 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         // ── Variables ──
         IrExprKind::Var { id } => {
             let name = ctx.var_name(*id).to_string();
-            // Deref/clone via templates (Rust: (*name), .clone(); TS: identity)
-            let base = if ctx.ann.lazy_vars.contains(id) {
+            // Lazy vars need deref via template
+            if ctx.ann.lazy_vars.contains(id) {
                 let mut b = HashMap::new();
                 b.insert("name", name.to_uppercase());
                 ctx.templates.render("deref_lazy", None, &[], &b)
                     .unwrap_or_else(|| name.to_uppercase())
-            } else if ctx.ann.deref_vars.contains(id) {
-                let mut b = HashMap::new();
-                b.insert("name", name.clone());
-                ctx.templates.render("deref_var", None, &[], &b)
-                    .unwrap_or(name)
             } else {
                 name
-            };
-            if ctx.ann.clone_vars.contains(id) {
-                let mut b = HashMap::new();
-                b.insert("expr", base.clone());
-                ctx.templates.render("clone_expr", None, &[], &b)
-                    .unwrap_or(base)
-            } else {
-                base
             }
+            // Clone/Deref are now IR nodes (CloneInsertionPass / BoxDerefPass)
         }
         IrExprKind::FnRef { name } => name.clone(),
 
@@ -799,10 +787,16 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
 
         // ── Codegen nodes (inserted by passes — walker just renders) ──
         IrExprKind::Clone { expr: inner } => {
-            format!("{}.clone()", render_expr(ctx, inner))
+            let mut b = HashMap::new();
+            b.insert("expr", render_expr(ctx, inner));
+            ctx.templates.render("clone_expr", None, &[], &b)
+                .unwrap_or_else(|| format!("{}.clone()", b.get("expr").unwrap()))
         }
         IrExprKind::Deref { expr: inner } => {
-            format!("(*{})", render_expr(ctx, inner))
+            let mut b = HashMap::new();
+            b.insert("name", render_expr(ctx, inner));
+            ctx.templates.render("deref_var", None, &[], &b)
+                .unwrap_or_else(|| format!("(*{})", b.get("name").unwrap()))
         }
         IrExprKind::Borrow { expr: inner, as_str } => {
             if *as_str {

@@ -10,9 +10,10 @@
 //! - Ownership language (Rust, Go): ~800 LOC (need borrow analysis)
 
 use super::pass::{
-    self, BorrowInsertionPass, CloneInsertionPass, FanLoweringPass, NanoPass,
+    self, BorrowInsertionPass, FanLoweringPass, NanoPass,
     OptionErasurePass, Pipeline, Target, TypeConcretizationPass,
 };
+use super::pass_clone::CloneInsertionPass;
 use super::pass_builtin_lowering::BuiltinLoweringPass;
 use super::pass_match_lowering::MatchLoweringPass;
 use super::pass_result_erasure::ResultErasurePass;

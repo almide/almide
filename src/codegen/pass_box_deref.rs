@@ -70,6 +70,113 @@ pub fn collect_deref_vars(program: &IrProgram) -> (HashSet<VarId>, HashSet<Strin
     (deref_vars, recursive_enums)
 }
 
+/// Insert Deref IR nodes for box'd pattern variables
+pub fn insert_deref_nodes(program: &mut IrProgram, deref_ids: &HashSet<VarId>) {
+    if deref_ids.is_empty() { return; }
+    for func in &mut program.functions {
+        func.body = insert_derefs(func.body.clone(), deref_ids);
+    }
+    for tl in &mut program.top_lets {
+        tl.value = insert_derefs(tl.value.clone(), deref_ids);
+    }
+}
+
+fn insert_derefs(expr: IrExpr, deref_ids: &HashSet<VarId>) -> IrExpr {
+    let ty = expr.ty.clone();
+    let span = expr.span;
+
+    let kind = match expr.kind {
+        IrExprKind::Var { id } if deref_ids.contains(&id) => {
+            return IrExpr {
+                kind: IrExprKind::Deref {
+                    expr: Box::new(IrExpr { kind: IrExprKind::Var { id }, ty: ty.clone(), span }),
+                },
+                ty, span,
+            };
+        }
+        // Recurse
+        IrExprKind::Call { target, args, type_args } => {
+            let args = args.into_iter().map(|a| insert_derefs(a, deref_ids)).collect();
+            let target = match target {
+                CallTarget::Method { object, method } => CallTarget::Method {
+                    object: Box::new(insert_derefs(*object, deref_ids)), method,
+                },
+                CallTarget::Computed { callee } => CallTarget::Computed {
+                    callee: Box::new(insert_derefs(*callee, deref_ids)),
+                },
+                other => other,
+            };
+            IrExprKind::Call { target, args, type_args }
+        }
+        IrExprKind::If { cond, then, else_ } => IrExprKind::If {
+            cond: Box::new(insert_derefs(*cond, deref_ids)),
+            then: Box::new(insert_derefs(*then, deref_ids)),
+            else_: Box::new(insert_derefs(*else_, deref_ids)),
+        },
+        IrExprKind::Block { stmts, expr } => IrExprKind::Block {
+            stmts: insert_deref_stmts(stmts, deref_ids),
+            expr: expr.map(|e| Box::new(insert_derefs(*e, deref_ids))),
+        },
+        IrExprKind::DoBlock { stmts, expr } => IrExprKind::DoBlock {
+            stmts: insert_deref_stmts(stmts, deref_ids),
+            expr: expr.map(|e| Box::new(insert_derefs(*e, deref_ids))),
+        },
+        IrExprKind::Match { subject, arms } => IrExprKind::Match {
+            subject: Box::new(insert_derefs(*subject, deref_ids)),
+            arms: arms.into_iter().map(|arm| IrMatchArm {
+                pattern: arm.pattern,
+                guard: arm.guard.map(|g| insert_derefs(g, deref_ids)),
+                body: insert_derefs(arm.body, deref_ids),
+            }).collect(),
+        },
+        IrExprKind::BinOp { op, left, right } => IrExprKind::BinOp {
+            op, left: Box::new(insert_derefs(*left, deref_ids)), right: Box::new(insert_derefs(*right, deref_ids)),
+        },
+        IrExprKind::Lambda { params, body } => IrExprKind::Lambda {
+            params, body: Box::new(insert_derefs(*body, deref_ids)),
+        },
+        IrExprKind::List { elements } => IrExprKind::List {
+            elements: elements.into_iter().map(|e| insert_derefs(e, deref_ids)).collect(),
+        },
+        IrExprKind::Record { name, fields } => IrExprKind::Record {
+            name, fields: fields.into_iter().map(|(k, v)| (k, insert_derefs(v, deref_ids))).collect(),
+        },
+        IrExprKind::Member { object, field } => IrExprKind::Member {
+            object: Box::new(insert_derefs(*object, deref_ids)), field,
+        },
+        IrExprKind::ForIn { var, var_tuple, iterable, body } => IrExprKind::ForIn {
+            var, var_tuple, iterable: Box::new(insert_derefs(*iterable, deref_ids)),
+            body: insert_deref_stmts(body, deref_ids),
+        },
+        IrExprKind::StringInterp { parts } => IrExprKind::StringInterp {
+            parts: parts.into_iter().map(|p| match p {
+                IrStringPart::Expr { expr } => IrStringPart::Expr { expr: insert_derefs(expr, deref_ids) },
+                other => other,
+            }).collect(),
+        },
+        other => other,
+    };
+
+    IrExpr { kind, ty, span }
+}
+
+fn insert_deref_stmts(stmts: Vec<IrStmt>, deref_ids: &HashSet<VarId>) -> Vec<IrStmt> {
+    stmts.into_iter().map(|s| {
+        let kind = match s.kind {
+            IrStmtKind::Bind { var, mutability, ty, value } => IrStmtKind::Bind {
+                var, mutability, ty, value: insert_derefs(value, deref_ids),
+            },
+            IrStmtKind::Assign { var, value } => IrStmtKind::Assign { var, value: insert_derefs(value, deref_ids) },
+            IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: insert_derefs(expr, deref_ids) },
+            IrStmtKind::Guard { cond, else_ } => IrStmtKind::Guard {
+                cond: insert_derefs(cond, deref_ids), else_: insert_derefs(else_, deref_ids),
+            },
+            other => other,
+        };
+        IrStmt { kind, span: s.span }
+    }).collect()
+}
+
 fn collect_from_expr(expr: &IrExpr, recursive_enums: &HashSet<String>, type_decls: &[IrTypeDecl], name_to_var: &std::collections::HashMap<String, Vec<VarId>>, deref_vars: &mut HashSet<VarId>) {
     match &expr.kind {
         IrExprKind::Match { subject, arms } => {

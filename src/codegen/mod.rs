@@ -67,15 +67,11 @@ fn strip_test_blocks(src: &str) -> String {
 pub fn emit(program: &mut IrProgram, target: Target) -> String {
     let config = target::configure(target);
 
-    // Layer 2: Run Nanopass pipeline (semantic rewrites — modifies IR)
-    config.pipeline.run(program, target);
-
-    // Build annotations (pass decisions as data — walker reads these)
+    // Pre-pipeline: insert Deref IR nodes (must happen before CloneInsertion)
     let mut ann = annotations::CodegenAnnotations::default();
     if target == Target::Rust {
-        ann.clone_vars = pass_clone::collect_clone_vars(program);
-        let (deref, recursive) = pass_box_deref::collect_deref_vars(program);
-        ann.deref_vars = deref;
+        let (deref_ids, recursive) = pass_box_deref::collect_deref_vars(program);
+        pass_box_deref::insert_deref_nodes(program, &deref_ids);
         ann.recursive_enums = recursive.clone();
         // Build boxed_fields: for each recursive enum, find which variant fields reference the enum
         for td in &program.type_decls {
@@ -131,6 +127,9 @@ pub fn emit(program: &mut IrProgram, target: Target) -> String {
             }
         }
     }
+
+    // Layer 2: Run Nanopass pipeline (semantic rewrites — modifies IR)
+    config.pipeline.run(program, target);
 
     // Layer 3: Template-driven rendering (walker reads annotations, never checks types)
     let ctx = walker::RenderContext::new(&config.templates, &program.var_table)
