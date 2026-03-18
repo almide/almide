@@ -1,0 +1,10 @@
+type Product = { name: String, price: Int, category: String }
+
+fn find_price(products: List[Product], target: String) -> Int =
+  match list.find(products, (p) => p.name == target) {
+    some(p) => p.price,
+    none => 0,
+  }
+
+fn total_value(products: List[Product]) -> Int =
+  products |> list.fold(0, (acc, p) => acc + p.price)

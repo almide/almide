@@ -18,7 +18,7 @@ description = "Create a plain text HTTP response with status code"
 example = 'http.response(200, "Hello!")'
 params = [{ name = "status", type = "Int" }, { name = "body", type = "String" }]
 return = "Response"
-rust = "AlmideHttpResponse::new({status}, {body}.to_string())"
+rust = "almide_rt_http_response({status}, {body})"
 ts = "__almd_http.response({status}, {body})"
 
 [json]
@@ -26,7 +26,7 @@ description = "Create a JSON HTTP response with status code"
 example = 'http.json(200, json.stringify(data))'
 params = [{ name = "status", type = "Int" }, { name = "body", type = "String" }]
 return = "Response"
-rust = "AlmideHttpResponse::json({status}, {body}.to_string())"
+rust = "almide_rt_http_json({status}, {body})"
 ts = "__almd_http.json({status}, {body})"
 
 [with_headers]
@@ -34,7 +34,7 @@ description = "Create a response with custom headers"
 example = 'http.with_headers(200, body, {"Content-Type": "text/html"})'
 params = [{ name = "status", type = "Int" }, { name = "body", type = "String" }, { name = "headers", type = "Map[String, String]" }]
 return = "Response"
-rust = "AlmideHttpResponse::with_headers({status}, {body}.to_string(), {headers})"
+rust = "almide_rt_http_with_headers({status}, {body}, &{headers})"
 ts = "__almd_http.with_headers({status}, {body}, {headers})"
 
 [redirect]
@@ -42,7 +42,7 @@ description = "Create a 302 temporary redirect response"
 example = 'http.redirect("/new-path")'
 params = [{ name = "url", type = "String" }]
 return = "Response"
-rust = "almide_http_redirect(&{url}, 302)"
+rust = "almide_rt_http_redirect(&*{url})"
 ts = "__almd_http.redirect({url})"
 
 [redirect_permanent]
@@ -50,7 +50,7 @@ description = "Create a 301 permanent redirect response"
 example = 'http.redirect_permanent("/new-path")'
 params = [{ name = "url", type = "String" }]
 return = "Response"
-rust = "almide_http_redirect(&{url}, 301)"
+rust = "almide_http_redirect(&*{url}, 301)"
 ts = "__almd_http.redirect_permanent({url})"
 
 [not_found]
@@ -58,7 +58,7 @@ description = "Create a 404 Not Found response"
 example = 'http.not_found("Page not found")'
 params = [{ name = "body", type = "String" }]
 return = "Response"
-rust = "AlmideHttpResponse::new(404, {body}.to_string())"
+rust = "almide_rt_http_not_found({body})"
 ts = "__almd_http.not_found({body})"
 
 # ── Response accessors/mutators ──

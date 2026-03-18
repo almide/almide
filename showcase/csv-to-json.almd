@@ -1,0 +1,51 @@
+
+// csv-to-json — CSV to JSON converter
+//
+// Usage: almide run showcase/csv-to-json.almd -- input.csv
+effect fn main() -> Result[Unit, String] = {
+  let args = env.args();
+  guard list.len(args) >= 1 else err("usage: csv-to-json <file.csv>");
+  let path = list.get(args, 0) |> option.unwrap_or("");
+  let content = fs.read_text(path);
+  let result = csv_to_json(content);
+  println(result);
+  ok(())
+}
+
+fn csv_to_json(input: String) -> String = {
+  let lines = string.lines(input) |> list.filter((line) => string.len(string.trim(line)) > 0);
+  guard list.len(lines) >= 1 else "";
+  let header = list.get(lines, 0) |> option.unwrap_or("");
+  let columns = parse_row(header);
+  let data_lines = list.drop(lines, 1);
+  let records = data_lines |> list.map((line) => {
+    let values = parse_row(line);
+    let pairs = columns |> list.enumerate() |> list.map((pair) => {
+      let col = pair.1;
+      let val = list.get(values, pair.0) |> option.unwrap_or("");
+      '"' + col + '":"' + val + '"'
+    });
+    "{" + string.join(pairs, ",") + "}"
+  });
+  "[" + string.join(records, ",\n") + "]"
+}
+
+fn parse_row(line: String) -> List[String] = string.split(line, ",") |> list.map((cell) => string.trim(cell))
+
+test "csv_to_json basic" {
+  let csv = "name,age,city\nalice,30,tokyo\nbob,25,osaka";
+  let result = csv_to_json(csv);
+  assert(string.contains(result, '"name":"alice"'));
+  assert(string.contains(result, '"age":"30"'));
+  assert(string.contains(result, '"city":"osaka"'))
+}
+
+test "csv_to_json empty" {
+  assert_eq(csv_to_json(""), "")
+}
+
+test "parse_row splits and trims" {
+  let row = " a , b , c ";
+  let cells = parse_row(row);
+  assert_eq(cells, ["a", "b", "c"])
+}

@@ -62,7 +62,7 @@ test "pipe chain on named record functions" {
 type TodoList = { name: String, items: List[String] }
 
 fn add_item(t: TodoList, item: String) -> TodoList =
-  { ...t, items: t.items ++ [item] }
+  { ...t, items: t.items + [item] }
 
 fn item_count(t: TodoList) -> Int = list.len(t.items)
 

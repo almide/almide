@@ -157,7 +157,7 @@ description = "Create a string from a list of UTF-8 byte values."
 example = 'string.from_bytes([72, 105]) // => "Hi"'
 params = [{ name = "bytes", type = "List[Int]" }]
 return = "String"
-rust = "almide_rt_string_from_bytes(&{ let __bytes: Vec<i64> = {bytes}; __bytes })"
+rust = "almide_rt_string_from_bytes(&{bytes})"
 ts = "__almd_string.from_bytes({bytes})"
 
 [is_digit]
@@ -303,3 +303,51 @@ params = [{ name = "s", type = "String" }, { name = "needle", type = "String" }]
 return = "Option[Int]"
 rust = "almide_rt_string_last_index_of(&*{s}, &*{needle})"
 ts = "__almd_string.last_index_of({s}, {needle})"
+
+[first]
+description = "Get the first character of a string."
+example = 'string.first("hello") // => some("h")'
+params = [{ name = "s", type = "String" }]
+return = "Option[String]"
+rust = "almide_rt_string_first(&*{s})"
+ts = "__almd_string.first({s})"
+
+[last]
+description = "Get the last character of a string."
+example = 'string.last("hello") // => some("o")'
+params = [{ name = "s", type = "String" }]
+return = "Option[String]"
+rust = "almide_rt_string_last(&*{s})"
+ts = "__almd_string.last({s})"
+
+[take]
+description = "Take the first N characters."
+example = 'string.take("hello", 3) // => "hel"'
+params = [{ name = "s", type = "String" }, { name = "n", type = "Int" }]
+return = "String"
+rust = "almide_rt_string_take(&*{s}, {n})"
+ts = "__almd_string.take({s}, {n})"
+
+[take_end]
+description = "Take the last N characters."
+example = 'string.take_end("hello", 3) // => "llo"'
+params = [{ name = "s", type = "String" }, { name = "n", type = "Int" }]
+return = "String"
+rust = "almide_rt_string_take_end(&*{s}, {n})"
+ts = "__almd_string.take_end({s}, {n})"
+
+[drop]
+description = "Drop the first N characters."
+example = 'string.drop("hello", 2) // => "llo"'
+params = [{ name = "s", type = "String" }, { name = "n", type = "Int" }]
+return = "String"
+rust = "almide_rt_string_drop(&*{s}, {n})"
+ts = "__almd_string.drop({s}, {n})"
+
+[drop_end]
+description = "Drop the last N characters."
+example = 'string.drop_end("hello", 2) // => "hel"'
+params = [{ name = "s", type = "String" }, { name = "n", type = "Int" }]
+return = "String"
+rust = "almide_rt_string_drop_end(&*{s}, {n})"
+ts = "__almd_string.drop_end({s}, {n})"

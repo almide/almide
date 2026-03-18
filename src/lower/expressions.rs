@@ -101,20 +101,24 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                     return call;
                 }
             }
-            let bin_op = match (op.as_str(), left_ty) {
-                ("+", Ty::Float) => BinOp::AddFloat, ("+", _) => BinOp::AddInt,
-                ("-", Ty::Float) => BinOp::SubFloat, ("-", _) => BinOp::SubInt,
-                ("*", Ty::Float) => BinOp::MulFloat, ("*", _) => BinOp::MulInt,
-                ("/", Ty::Float) => BinOp::DivFloat, ("/", _) => BinOp::DivInt,
-                ("%", Ty::Float) => BinOp::ModFloat, ("%", _) => BinOp::ModInt,
-                ("**", _) => BinOp::PowFloat,
-                ("^", _) => BinOp::XorInt,
-                ("++", Ty::String) => BinOp::ConcatStr,
-                ("++", _) => BinOp::ConcatList,
-                ("==", _) => BinOp::Eq, ("!=", _) => BinOp::Neq,
-                ("<", _) => BinOp::Lt, (">", _) => BinOp::Gt,
-                ("<=", _) => BinOp::Lte, (">=", _) => BinOp::Gte,
-                ("and", _) => BinOp::And, ("or", _) => BinOp::Or,
+            let right_ty = &r.ty;
+            let bin_op = match (op.as_str(), left_ty, right_ty) {
+                ("+", Ty::String, _) | ("+", _, Ty::String) => BinOp::ConcatStr,
+                ("+", Ty::List(_), _) | ("+", _, Ty::List(_)) => BinOp::ConcatList,
+                ("+", Ty::Float, _) | ("+", _, Ty::Float) => BinOp::AddFloat,
+                ("+", _, _) => BinOp::AddInt,
+                ("-", Ty::Float, _) | ("-", _, Ty::Float) => BinOp::SubFloat, ("-", _, _) => BinOp::SubInt,
+                ("*", Ty::Float, _) | ("*", _, Ty::Float) => BinOp::MulFloat, ("*", _, _) => BinOp::MulInt,
+                ("/", Ty::Float, _) | ("/", _, Ty::Float) => BinOp::DivFloat, ("/", _, _) => BinOp::DivInt,
+                ("%", Ty::Float, _) | ("%", _, Ty::Float) => BinOp::ModFloat, ("%", _, _) => BinOp::ModInt,
+                ("**", _, _) => BinOp::PowFloat,
+                ("^", _, _) => BinOp::XorInt,
+                ("++", Ty::String, _) => BinOp::ConcatStr, // legacy
+                ("++", _, _) => BinOp::ConcatList,         // legacy
+                ("==", _, _) => BinOp::Eq, ("!=", _, _) => BinOp::Neq,
+                ("<", _, _) => BinOp::Lt, (">", _, _) => BinOp::Gt,
+                ("<=", _, _) => BinOp::Lte, (">=", _, _) => BinOp::Gte,
+                ("and", _, _) => BinOp::And, ("or", _, _) => BinOp::Or,
                 _ => BinOp::AddInt,
             };
             ctx.mk(IrExprKind::BinOp { op: bin_op, left: Box::new(l), right: Box::new(r) }, ty, span)

@@ -1,0 +1,17 @@
+type Product = { name: String, price: Int, category: String }
+
+fn top_in_category(products: List[Product], cat: String) -> String =
+  products
+    |> list.filter((p) => p.category == cat)
+    |> list.sort_by((p) => p.price)
+    |> list.reverse()
+    |> list.first()
+    |> match {
+      some(p) => p.name,
+      none => "none",
+    }
+
+fn category_total(products: List[Product], cat: String) -> Int =
+  products
+    |> list.filter((p) => p.category == cat)
+    |> list.fold(0, (acc, p) => acc + p.price)

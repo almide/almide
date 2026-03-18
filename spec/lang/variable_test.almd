@@ -36,7 +36,7 @@ test "var and reassignment" {
 
 test "var string reassignment" {
   var s = "hello"
-  s = s ++ " world"
+  s = s + " world"
   assert_eq(s, "hello world")
 }
 
@@ -86,7 +86,7 @@ test "var accumulation in for" {
 test "var list accumulation in for" {
   var result: List[Int] = []
   for x in [1, 2, 3] {
-    result = result ++ [x * x]
+    result = result + [x * x]
   }
   assert_eq(result, [1, 4, 9])
 }
@@ -154,7 +154,7 @@ test "let record destructure" {
 test "var list build in for" {
   var xs: List[String] = []
   for i in 0..5 {
-    xs = xs ++ [int.to_string(i)]
+    xs = xs + [int.to_string(i)]
   }
   assert_eq(xs, ["0", "1", "2", "3", "4"])
 }
@@ -195,8 +195,8 @@ test "var swap pattern" {
 test "var string building" {
   var result = ""
   for i in 1..=5 {
-    if i > 1 then { result = result ++ ", " } else { () }
-    result = result ++ int.to_string(i)
+    if i > 1 then { result = result + ", " } else { () }
+    result = result + int.to_string(i)
   }
   assert_eq(result, "1, 2, 3, 4, 5")
 }
@@ -258,7 +258,7 @@ test "var accumulate string in do" {
   var i = 0
   do {
     guard i < 3 else break
-    result = result ++ int.to_string(i)
+    result = result + int.to_string(i)
     i = i + 1
   }
   assert_eq(result, "012")

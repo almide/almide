@@ -1,0 +1,6 @@
+{
+  "name": "apply-discount",
+  "instruction": "Modify `find_price` to return the price with a 20% discount. Multiply the price by 80 and divide by 100: `p.price * 80 / 100`. Keep the default value (0) unchanged. Do not change any other function.",
+  "layer3_hint": "Available: `list.find(xs, (x) => bool)` returns `Option[A]`. Integer arithmetic: `*`, `/`. `list.fold(xs, init, (acc, x) => val)` reduces a list.",
+  "test_file": "t04_apply_discount_test.almd"
+}

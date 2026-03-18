@@ -37,4 +37,10 @@ const __almd_string = {
   ends_with(s, suffix) { return s.endsWith(suffix); },
   is_upper(s) { return s.length > 0 && s === s.toUpperCase() && s !== s.toLowerCase(); },
   is_lower(s) { return s.length > 0 && s === s.toLowerCase() && s !== s.toUpperCase(); },
+  first(s) { return s.length > 0 ? s[0] : null; },
+  last(s) { return s.length > 0 ? s[s.length - 1] : null; },
+  take(s, n) { return s.slice(0, n); },
+  take_end(s, n) { return n >= s.length ? s : s.slice(s.length - n); },
+  drop(s, n) { return s.slice(n); },
+  drop_end(s, n) { return n >= s.length ? "" : s.slice(0, s.length - n); },
 };

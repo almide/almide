@@ -160,12 +160,12 @@ fn check_test_block() {
 
 #[test]
 fn check_list_concat() {
-    has_no_errors("fn f() -> List[Int] = [1, 2] ++ [3, 4]");
+    has_no_errors("fn f() -> List[Int] = [1, 2] + [3, 4]");
 }
 
 #[test]
 fn check_string_concat() {
-    has_no_errors("fn f() -> String = \"hello\" ++ \" world\"");
+    has_no_errors("fn f() -> String = \"hello\" + \" world\"");
 }
 
 #[test]
@@ -307,11 +307,9 @@ fn check_chained_pipe() {
 // ---- Type error messages ----
 
 #[test]
-fn check_arithmetic_on_string_error_message() {
-    let errs = errors("fn f(a: String, b: String) -> String = a + b");
-    assert!(!errs.is_empty());
-    let msg = &errs[0];
-    assert!(msg.contains("numeric") || msg.contains("String"), "error should mention type, got: {}", msg);
+fn check_string_plus_is_concat() {
+    // + on String is now concat, not an error
+    has_no_errors("fn f(a: String, b: String) -> String = a + b");
 }
 
 #[test]
@@ -329,9 +327,9 @@ fn check_or_on_non_bool_error() {
 
 #[test]
 fn check_concat_mismatch_error() {
+    // ++ is removed, produces error
     let errs = errors("fn f(a: Int, b: Int) -> Int = a ++ b");
     assert!(!errs.is_empty());
-    assert!(errs[0].contains("String") || errs[0].contains("List"), "should mention String/List, got: {}", errs[0]);
 }
 
 #[test]

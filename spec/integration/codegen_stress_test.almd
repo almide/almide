@@ -8,7 +8,7 @@ test "variable used 3 times" {
   let s = "hello"
   let a = string.len(s)
   let b = string.to_upper(s)
-  let c = s ++ " world"
+  let c = s + " world"
   assert_eq(a, 5)
   assert_eq(b, "HELLO")
   assert_eq(c, "hello world")
@@ -82,7 +82,7 @@ test "list passed to two functions" {
 test "string concat then interpolation" {
   let first = "Hello"
   let second = "World"
-  let combined = first ++ " " ++ second
+  let combined = first + " " + second
   let msg = "${first} says ${second}"
   assert_eq(combined, "Hello World")
   assert_eq(msg, "Hello says World")

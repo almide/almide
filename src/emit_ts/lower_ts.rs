@@ -293,6 +293,14 @@ impl<'a> LowerCtx<'a> {
 
             IrExprKind::Hole => if self.js_mode { Expr::Null } else { Expr::Raw("null as any".into()) },
             IrExprKind::Todo { message } => Expr::ThrowError(Box::new(Expr::Str(message.clone()))),
+            // Codegen-specific nodes — pass through inner expression (TS doesn't use these)
+            IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
+            | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
+            | IrExprKind::ToVec { expr } => self.lower_expr(expr, ie, it),
+            IrExprKind::RustMacro { args, .. } => {
+                if !args.is_empty() { self.lower_expr(&args[0], ie, it) } else { Expr::Null }
+            }
+            IrExprKind::RenderedCall { code } => Expr::Raw(code.clone()),
         }
     }
 

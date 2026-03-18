@@ -1,0 +1,6 @@
+{
+  "name": "change-none-msg",
+  "instruction": "Modify `find_product` so that when the product is not found, it returns `\"Product 'TARGET' not found\"` instead of `\"not found\"`, where TARGET is the `target` parameter. Use string interpolation: `\"Product '${target}' not found\"`. Keep the found case unchanged. Do not change any other function.",
+  "layer3_hint": "Available: `list.find(xs, (x) => bool)` returns `Option[A]`. String interpolation: `\"${expr}\"`. Variables from the enclosing scope are accessible inside closures and match arms.",
+  "test_file": "t07_change_none_msg_test.almd"
+}

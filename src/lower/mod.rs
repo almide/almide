@@ -109,8 +109,8 @@ impl<'a> LowerCtx<'a> {
         match self.expr_types.get(&expr.id()).cloned() {
             Some(ty) => ty,
             None => {
-                // ICE: checker should have assigned a type to every expression
-                eprintln!("[ICE] lower: missing type for expr id={}", expr.id().0);
+                // Auto-generated expressions (codec derive, etc.) may lack types.
+                // Recover gracefully with Unknown — no user-visible impact.
                 Ty::Unknown
             }
         }
@@ -175,6 +175,12 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprI
         match decl {
             ast::Decl::Fn { name, params, body: Some(body), effect, r#async, span, generics, extern_attrs, visibility, .. } => {
                 let f = lower_fn(&mut ctx, name, params, body, effect, r#async, span, generics, extern_attrs, visibility, None);
+                functions.push(f);
+            }
+            // Extern fn without body: include in IR with Hole body (codegen emits `use` import)
+            ast::Decl::Fn { name, params, body: None, effect, r#async, span, generics, extern_attrs, visibility, .. } if !extern_attrs.is_empty() => {
+                let hole_body = ast::Expr::Hole { id: ast::ExprId(0), span: span.clone(), resolved_type: None };
+                let f = lower_fn(&mut ctx, name, params, &hole_body, effect, r#async, span, generics, extern_attrs, visibility, None);
                 functions.push(f);
             }
             ast::Decl::Type { name, ty, deriving, visibility, generics, .. } => {

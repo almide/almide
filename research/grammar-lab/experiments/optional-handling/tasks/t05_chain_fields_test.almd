@@ -1,0 +1,18 @@
+test "describe_product found" {
+  let ps = [Product { name: "Laptop", price: 999, category: "tech" }]
+  assert_eq(describe_product(ps, "Laptop"), "Laptop: 999")
+}
+
+test "describe_product not found" {
+  let ps = [Product { name: "Laptop", price: 999, category: "tech" }]
+  assert_eq(describe_product(ps, "Phone"), "N/A")
+}
+
+test "count_in_category unchanged" {
+  let ps = [
+    Product { name: "A", price: 10, category: "tech" },
+    Product { name: "B", price: 20, category: "edu" },
+    Product { name: "C", price: 30, category: "tech" },
+  ]
+  assert_eq(count_in_category(ps, "tech"), 2)
+}

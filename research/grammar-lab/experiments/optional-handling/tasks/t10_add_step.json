@@ -1,0 +1,6 @@
+{
+  "name": "add-step",
+  "instruction": "Add a new function `describe_top(products: List[Product], cat: String) -> String` that finds the most expensive product in a category and returns `\"name: $price\"` format. If no products in that category, return `\"empty\"`. Follow the same coding style as `top_in_category`. Use `int.to_string(p.price)` to convert the price. Keep all existing functions unchanged.",
+  "layer3_hint": "Available: `list.filter(xs, (x) => bool)` filters elements. `list.sort_by(xs, (x) => key)` sorts ascending. `list.reverse(xs)` reverses. `list.first(xs)` returns `Option[A]`. `int.to_string(n)` converts Int to String. String interpolation: `\"${expr}\"`. `list.fold(xs, init, (acc, x) => val)` reduces.",
+  "test_file": "t10_add_step_test.almd"
+}

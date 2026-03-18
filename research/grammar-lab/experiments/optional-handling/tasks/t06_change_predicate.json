@@ -1,0 +1,6 @@
+{
+  "name": "change-predicate",
+  "instruction": "Rename `find_by_name` to `find_by_category` and change it to search by category instead of name. The lookup predicate should be `p.category == target` instead of `p.name == target`. Keep the return format and default value the same. Do not change any other function.",
+  "layer3_hint": "Available: `list.find(xs, (x) => bool)` returns `Option[A]`. Record field access: `p.category`, `p.name`, `p.price`. `int.to_string(n)` converts Int to String.",
+  "test_file": "t06_change_predicate_test.almd"
+}

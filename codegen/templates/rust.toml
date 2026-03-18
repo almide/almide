@@ -1,0 +1,423 @@
+# Rust target syntax templates
+# Pure formatting — no semantic logic.
+# Semantic decisions are in Nanopass passes.
+#
+# Format:
+#   [construct_name]
+#   template = "output with {placeholders}"
+#   when_type = "Int"          # optional: only when node type matches
+#   when_attr = "needs_try"    # optional: only when TargetAttr is set
+#
+# Multiple rules per construct: use [[construct_name]] array syntax.
+# First matching rule wins.
+
+# ── Expressions ──
+
+[if_expr]
+template = "if {cond} {{ {then} }} else {{ {else} }}"
+
+[[call_expr]]
+template = "{callee}({args})"
+
+[[call_expr]]
+when_attr = "needs_try"
+template = "{callee}({args})?"
+
+# ── Stdlib module calls ──
+
+[module_call]
+template = "almide_rt_{module}_{func}({args})"
+
+[binary_op]
+template = "({left} {op} {right})"
+
+[field_access]
+template = "{expr}.{field}"
+
+[index_access]
+template = "{object}[{index} as usize]"
+
+[pipe_call]
+template = "{callee}({pipe_arg}, {args})"
+
+# ── Concat (type-dispatched) ──
+
+[[concat_expr]]
+when_type = "String"
+template = "format!(\"{{}}{{}}\", {left}, {right})"
+
+[[concat_expr]]
+when_type = "List"
+template = "AlmideConcat::concat({left}, {right})"
+
+# ── Equality ──
+
+[eq_expr]
+template = "almide_eq!({left}, {right})"
+
+[ne_expr]
+template = "almide_ne!({left}, {right})"
+
+# ── Power (type-dispatched) ──
+
+[[power_expr]]
+when_type = "Int"
+template = "{left}.pow({right} as u32)"
+
+[[power_expr]]
+when_type = "Float"
+template = "{left}.powf({right})"
+
+# ── Option / Result ──
+
+[some_expr]
+template = "Some({inner})"
+
+[[none_expr]]
+when_attr = "none_type_hint"
+template = "None::<{type_hint}>"
+
+[[none_expr]]
+template = "None"
+
+[ok_expr]
+template = "Ok({inner})"
+
+[err_expr]
+template = "Err(format!(\"{:?}\", {inner}))"
+
+[unwrap_or_expr]
+template = "{expr}.unwrap_or({default})"
+
+# ── Match ──
+
+[match_expr]
+template = "match {subject} {{ {arms} }}"
+
+[match_arm]
+template = "{pattern} => {{ {body} }}"
+
+[match_arm_inline]
+template = "{pattern} => {body},"
+
+# Match patterns
+[pattern_some]
+template = "Some({binding})"
+
+[pattern_none]
+template = "None"
+
+[pattern_ok]
+template = "Ok({binding})"
+
+[pattern_err]
+template = "Err({binding})"
+
+[pattern_wildcard]
+template = "_"
+
+[pattern_literal]
+template = "{value}"
+
+[pattern_variant]
+template = "{type}::{name}({fields})"
+
+# ── Literals ──
+
+[int_literal]
+template = "{value}i64"
+
+[float_literal]
+template = "{value}f64"
+
+[string_literal]
+template = "\"{value}\".to_string()"
+
+[bool_literal_true]
+template = "true"
+
+[bool_literal_false]
+template = "false"
+
+[list_literal]
+template = "vec![{elements}]"
+
+[record_literal]
+template = "{type_name} {{ {fields} }}"
+
+[record_field]
+template = "{name}: {value}"
+
+# ── String Interpolation ──
+
+[string_interp]
+template = "format!(\"{format_str}\", {args})"
+
+# ── Statements ──
+
+[let_binding]
+template = "let {name}: {type} = {value};"
+
+[var_binding]
+template = "let mut {name}: {type} = {value};"
+
+[assignment]
+template = "{target} = {value};"
+
+[return_expr]
+template = "{value}"
+
+# ── Declarations ──
+
+[fn_decl]
+template = "pub fn {name}({params}) -> {return_type} {{ {body} }}"
+
+# Effect fn: ret_ty in IR is already Result<T, String>, so use it directly
+[effect_fn_decl]
+template = "pub fn {name}({params}) -> {return_type} {{ {body} }}"
+
+[[fn_param]]
+template = "{name}: {type}"
+
+[[fn_param]]
+when_attr = "needs_borrow"
+template = "{name}: &{type}"
+
+# ── Type annotations ──
+
+[type_int]
+template = "i64"
+
+[type_float]
+template = "f64"
+
+[type_string]
+template = "String"
+
+[type_bool]
+template = "bool"
+
+[type_unit]
+template = "()"
+
+[type_list]
+template = "Vec<{inner}>"
+
+[type_option]
+template = "Option<{inner}>"
+
+[type_result]
+template = "Result<{ok}, {err}>"
+
+[type_map]
+template = "HashMap<{key}, {value}>"
+
+[type_fn]
+template = "impl Fn({params}) -> {return} + Clone"
+
+[type_fn_boxed]
+template = "Box<dyn Fn({params}) -> {return}>"
+
+# ── Loops ──
+
+[for_loop]
+template = "for {var} in {iter} {{ {body} }}"
+
+[while_loop]
+template = "while {cond} {{ {body} }}"
+
+[break_stmt]
+template = "break;"
+
+[continue_stmt]
+template = "continue;"
+
+# ── Lambda ──
+
+[lambda]
+template = "move |{params}| {{ {body} }}"
+
+[lambda_single]
+template = "move |{params}| {body}"
+
+# ── Type declarations ──
+
+[type_alias]
+template = "type {name} = {type};"
+
+[struct_decl]
+template = "#[derive(Clone, Debug, PartialEq, PartialOrd)]\nstruct {name} {{ {fields} }}"
+
+[struct_field]
+template = "{name}: {type},"
+
+[enum_decl]
+template = "#[derive(Clone, Debug, PartialEq, PartialOrd)]\nenum {name} {{ {variants} }}"
+
+[enum_variant]
+template = "{name}({fields})"
+
+[enum_variant_unit]
+template = "{name}"
+
+# ── Imports ──
+
+[import]
+template = "// use {module};"
+
+# ── Test ──
+
+[test_module]
+template = "mod tests {{\n    use super::*;\n{tests}\n}}"
+
+[test_block]
+template = "#[test]\nfn {name}() {{ {body} }}"
+
+[assert_eq]
+template = "assert!(almide_eq!({left}, {right}), \"assertion failed: {{:?}} != {{:?}}\", {left}, {right});"
+
+# ── Target-agnostic constructs ──
+
+[typevar_infer]
+template = "_"
+
+[unknown_type]
+template = "_"
+
+[empty_map]
+template = "HashMap::new()"
+
+[try_expr]
+template = "({inner})?"
+
+[await_expr]
+template = "{inner}.await"
+
+[keyword_escape]
+template = "r#{name}"
+
+[map_literal]
+template = "HashMap::from([{entries}])"
+
+[map_entry]
+template = "({key}, {value})"
+
+[map_get]
+template = "{object}.get(&{key}).cloned()"
+
+[map_insert]
+template = "{target}.insert({key}, {value});"
+
+[index_assign]
+template = "{target}[{index} as usize] = {value};"
+
+[stmt_terminator]
+template = ";"
+
+[spread_record]
+template = "{type_name} {{ {fields}, ..{base} }}"
+
+[string_match_subject]
+template = "{subject}.as_str()"
+
+[guard_negate]
+template = "!({cond})"
+
+[empty_list]
+template = "Vec::<{inner_type}>::new()"
+
+[unit_literal]
+template = "()"
+
+[deref_lazy]
+template = "(*{name})"
+
+[deref_var]
+template = "(*{name})"
+
+[clone_expr]
+template = "{expr}.clone()"
+
+[range_expr]
+template = "({start}..{end})"
+
+[range_inclusive]
+template = "({start}..={end})"
+
+[for_tuple_destructure]
+template = "({vars})"
+
+[ctor_unit]
+template = "{enum_name}::{ctor_name}"
+
+[ctor_call]
+template = "{enum_name}::{ctor_name}({args})"
+
+[ctor_qualify]
+template = "{enum_name}::{ctor_name}"
+
+[type_tuple]
+template = "({elements})"
+
+[tuple_literal]
+template = "({elements})"
+
+[tuple_index]
+template = "{object}.{index}"
+
+[enum_variant_sep]
+template = ",\n"
+
+[enum_variant_record]
+template = "{name} {{ {fields} }}"
+
+[destructure_pattern]
+template = "{name} {{ {fields} }}"
+
+[bind_destructure]
+template = "let {pattern} = {value};"
+
+[block_expr]
+template = "{{\n{body}\n}}"
+
+[block_result_expr]
+template = "{expr}"
+
+[box_wrap]
+template = "Box::new({inner})"
+
+[fan_expr]
+template = "std::thread::scope(|__s| {{ {spawns} {join_expr} }})"
+
+[fan_effect]
+template = "std::thread::scope(|__s| -> Result<_, String> {{ {spawns} Ok({join_expr}) }})"
+
+[extern_fn]
+template = "use {module}::{function} as {name};"
+
+[loop_block]
+template = "loop {{\n{body}\n}}"
+
+[err_inner_string]
+template = "Err({inner}.to_string())"
+
+[err_inner_other]
+template = "Err({inner})"
+
+[record_pattern_rest]
+template = "{name} {{ {fields}, .. }}"
+
+[record_pattern_rest_empty]
+template = "{name} {{ .. }}"
+
+[top_let_const]
+template = "const {name}: {type} = {value};"
+
+[top_let_lazy]
+template = "static {name}: std::sync::LazyLock<{type}> = std::sync::LazyLock::new(|| {value});"
+
+[generic_bound]
+template = "{name}: Clone + PartialEq + PartialOrd"
+
+[generic_bound_full]
+template = "{name}: Clone + std::fmt::Debug + PartialEq + PartialOrd"

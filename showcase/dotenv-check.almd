@@ -1,0 +1,44 @@
+// dotenv-check — validate .env against .env.example
+//
+// Usage: almide run showcase/dotenv-check.almd -- .env .env.example
+
+effect fn main() -> Result[Unit, String] = {
+  let args = env.args()
+  guard list.len(args) >= 2 else err("usage: dotenv-check <.env> <.env.example>")
+
+  let env_path = list.get(args, 0) |> option.unwrap_or(".env")
+  let example_path = list.get(args, 1) |> option.unwrap_or(".env.example")
+
+  let env_content = fs.read_text(env_path)
+  let env_keys = parse_dotenv(env_content)
+  let example_content = fs.read_text(example_path)
+  let example_keys = parse_dotenv(example_content)
+
+  let missing = map.keys(example_keys)
+    |> list.filter((k) => option.is_none(map.get(env_keys, k)))
+
+  if list.is_empty(missing) then
+    println("All keys present.")
+  else {
+    println("Missing keys:")
+    list.each(missing, (k) => println("  - " + k))
+  }
+  ok(())
+}
+
+fn parse_dotenv(content: String) -> Map[String, String] = {
+  let lines = string.lines(content)
+    |> list.filter((line) => {
+      let trimmed = string.trim(line)
+      string.len(trimmed) > 0 and not string.starts_with(trimmed, "#")
+    })
+  var m: Map[String, String] = map.new()
+  for line in lines {
+    let parts = string.split(line, "=")
+    let key = list.get(parts, 0) |> option.unwrap_or("") |> string.trim()
+    let val = list.get(parts, 1) |> option.unwrap_or("") |> string.trim()
+    guard string.len(key) > 0 else continue
+    m = map.set(m, key, val)
+  }
+  m
+}

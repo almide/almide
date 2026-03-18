@@ -6,6 +6,7 @@ use std::io::{Read, Write, BufRead, BufReader};
 use std::net::{TcpStream, TcpListener};
 
 // ── Response type ──
+pub type Response = AlmideHttpResponse;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AlmideHttpResponse {
@@ -30,6 +31,31 @@ impl AlmideHttpResponse {
 
 pub fn almide_http_redirect(url: &str, code: i64) -> AlmideHttpResponse {
     AlmideHttpResponse { status: code, body: String::new(), headers: vec![("Location".into(), url.to_string())] }
+}
+
+pub fn almide_rt_http_not_found(body: String) -> AlmideHttpResponse {
+    AlmideHttpResponse::new(404, body)
+}
+
+pub fn almide_rt_http_redirect(url: &str) -> AlmideHttpResponse {
+    almide_http_redirect(url, 302)
+}
+
+pub fn almide_rt_http_response(status: i64, body: String) -> AlmideHttpResponse {
+    AlmideHttpResponse::new(status, body)
+}
+
+pub fn almide_rt_http_json(status: i64, body: String) -> AlmideHttpResponse {
+    AlmideHttpResponse::json(status, body)
+}
+
+pub fn almide_rt_http_with_headers(status: i64, body: String, headers: &HashMap<String, String>) -> AlmideHttpResponse {
+    let mut resp = AlmideHttpResponse::new(status, body);
+    for (k, v) in headers {
+        resp.headers.retain(|(ek, _)| !ek.eq_ignore_ascii_case(k));
+        resp.headers.push((k.clone(), v.clone()));
+    }
+    resp
 }
 
 pub fn almide_http_set_status(mut resp: AlmideHttpResponse, code: i64) -> AlmideHttpResponse {

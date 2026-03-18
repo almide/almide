@@ -27,9 +27,9 @@ fn field(v: Value, key: String) -> Result[Value, String] =
     Object(pairs) =>
       match list.find(pairs, (k, _) => k == key) {
         some((_, val)) => ok(val)
-        none => err("missing field '" ++ key ++ "'")
+        none => err("missing field '" + key + "'")
       }
-    _ => err("expected Object but got " ++ type_name(v))
+    _ => err("expected Object but got " + type_name(v))
   }
 
 fn index(v: Value, i: Int) -> Result[Value, String] =
@@ -37,9 +37,9 @@ fn index(v: Value, i: Int) -> Result[Value, String] =
     Array(items) =>
       match items[i] {
         some(val) => ok(val)
-        none => err("index " ++ int.to_string(i) ++ " out of bounds")
+        none => err("index " + int.to_string(i) + " out of bounds")
       }
-    _ => err("expected Array but got " ++ type_name(v))
+    _ => err("expected Array but got " + type_name(v))
   }
 
 // ── Type extraction (Result — chainable with ?) ──
@@ -47,37 +47,37 @@ fn index(v: Value, i: Int) -> Result[Value, String] =
 fn as_string(v: Value) -> Result[String, String] =
   match v {
     Str(s) => ok(s)
-    _ => err("expected Str but got " ++ type_name(v))
+    _ => err("expected Str but got " + type_name(v))
   }
 
 fn as_int(v: Value) -> Result[Int, String] =
   match v {
     Int(n) => ok(n)
-    _ => err("expected Int but got " ++ type_name(v))
+    _ => err("expected Int but got " + type_name(v))
   }
 
 fn as_float(v: Value) -> Result[Float, String] =
   match v {
     Float(f) => ok(f)
-    _ => err("expected Float but got " ++ type_name(v))
+    _ => err("expected Float but got " + type_name(v))
   }
 
 fn as_bool(v: Value) -> Result[Bool, String] =
   match v {
     Bool(b) => ok(b)
-    _ => err("expected Bool but got " ++ type_name(v))
+    _ => err("expected Bool but got " + type_name(v))
   }
 
 fn as_array(v: Value) -> Result[List[Value], String] =
   match v {
     Array(items) => ok(items)
-    _ => err("expected Array but got " ++ type_name(v))
+    _ => err("expected Array but got " + type_name(v))
   }
 
 fn as_object(v: Value) -> Result[List[(String, Value)], String] =
   match v {
     Object(pairs) => ok(pairs)
-    _ => err("expected Object but got " ++ type_name(v))
+    _ => err("expected Object but got " + type_name(v))
   }
 
 // ── Utilities ──

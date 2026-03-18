@@ -1,0 +1,34 @@
+test "describe_top found" {
+  let ps = [
+    Product { name: "Laptop", price: 999, category: "tech" },
+    Product { name: "Phone", price: 599, category: "tech" },
+    Product { name: "Book", price: 15, category: "edu" },
+  ]
+  assert_eq(describe_top(ps, "tech"), "Laptop: 999")
+}
+
+test "describe_top no match" {
+  let ps = [Product { name: "Book", price: 15, category: "edu" }]
+  assert_eq(describe_top(ps, "tech"), "empty")
+}
+
+test "describe_top empty list" {
+  let ps: List[Product] = []
+  assert_eq(describe_top(ps, "tech"), "empty")
+}
+
+test "top_in_category unchanged" {
+  let ps = [
+    Product { name: "Laptop", price: 999, category: "tech" },
+    Product { name: "Phone", price: 599, category: "tech" },
+  ]
+  assert_eq(top_in_category(ps, "tech"), "Laptop")
+}
+
+test "category_total unchanged" {
+  let ps = [
+    Product { name: "A", price: 100, category: "tech" },
+    Product { name: "B", price: 200, category: "tech" },
+  ]
+  assert_eq(category_total(ps, "tech"), 300)
+}

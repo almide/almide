@@ -239,6 +239,24 @@ pub enum IrExprKind {
     Try { expr: Box<IrExpr> },
     Await { expr: Box<IrExpr> },
 
+    // ── Codegen-specific (inserted by Nanopass passes) ──
+    /// Explicit clone: `expr.clone()` (Rust)
+    Clone { expr: Box<IrExpr> },
+    /// Explicit deref: `*expr` (Box'd pattern bindings)
+    Deref { expr: Box<IrExpr> },
+    /// Explicit borrow: `&expr` or `&*expr`
+    Borrow { expr: Box<IrExpr>, as_str: bool },
+    /// Box wrapping: `Box::new(expr)`
+    BoxNew { expr: Box<IrExpr> },
+    /// Macro invocation: `name!(args)` (Rust assert_eq!, println!, etc.)
+    RustMacro { name: String, args: Vec<IrExpr> },
+    /// ToVec: `(expr).to_vec()`
+    ToVec { expr: Box<IrExpr> },
+
+    /// Pre-rendered code string (produced by StdlibLoweringPass).
+    /// Walker outputs this verbatim — no further processing.
+    RenderedCall { code: String },
+
     // ── Misc ──
     Hole,
     Todo { message: String },

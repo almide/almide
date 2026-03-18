@@ -15,4 +15,11 @@ const __almd_map = {
   from_entries(entries) { const r = new Map(); for (const [k, v] of entries) r.set(k, v); return r; },
   merge(a, b) { const r = new Map(a); b.forEach((v, k) => r.set(k, v)); return r; },
   is_empty(m) { return m.size === 0; },
+  fold(m, init, f) { let a = init; m.forEach((v, k) => { a = f(a, k, v); }); return a; },
+  any(m, f) { for (const [k, v] of m) { if (f(k, v)) return true; } return false; },
+  all(m, f) { for (const [k, v] of m) { if (!f(k, v)) return false; } return true; },
+  count(m, f) { let n = 0; m.forEach((v, k) => { if (f(k, v)) n++; }); return n; },
+  each(m, f) { m.forEach((v, k) => f(k, v)); },
+  find(m, f) { for (const [k, v] of m) { if (f(k, v)) return [k, v]; } return null; },
+  update(m, key, f) { const r = new Map(m); if (r.has(key)) r.set(key, f(r.get(key))); return r; },
 };

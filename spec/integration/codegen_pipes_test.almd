@@ -33,7 +33,7 @@ test "pipe chain string processing" {
     |> string.trim()
     |> string.to_lower()
     |> string.split(" ")
-    |> list.map((w) => string.to_upper(string.slice(w, 0, 1)) ++ string.slice(w, 1, string.len(w)))
+    |> list.map((w) => string.to_upper(string.slice(w, 0, 1)) + string.slice(w, 1, string.len(w)))
     |> string.join(" ")
   assert_eq(result, "Hello, World!")
 }
@@ -42,7 +42,7 @@ test "pipe chain string processing" {
 
 test "pipe chain with map" {
   let result = [("a", 1), ("b", 2), ("c", 3)]
-    |> map.from_entries()
+    |> map.from_list()
     |> map.values()
     |> list.sort()
     |> list.sum()

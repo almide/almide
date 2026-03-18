@@ -142,7 +142,7 @@ test "closure in for loop" {
   var results: List[Int] = []
   for x in [1, 2, 3] {
     let f = (v: Int) => v * multiplier
-    results = results ++ [f(x)]
+    results = results + [f(x)]
   }
   assert_eq(results, [10, 20, 30])
 }
@@ -186,8 +186,8 @@ test "for loop body scope isolation" {
   let prefix = "item"
   var items: List[String] = []
   for i in 0..3 {
-    let label = prefix ++ int.to_string(i)
-    items = items ++ [label]
+    let label = prefix + int.to_string(i)
+    items = items + [label]
   }
   assert_eq(items, ["item0", "item1", "item2"])
 }

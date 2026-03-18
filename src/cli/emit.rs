@@ -1,4 +1,4 @@
-use crate::{parse_file, emit_rust, emit_ts, check, diagnostic, resolve, project, project_fetch};
+use crate::{parse_file, emit_ts, codegen, check, diagnostic, resolve, project, project_fetch};
 
 pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_check: bool) {
     let (mut program, source_text, _parse_errors) = parse_file(file);
@@ -114,23 +114,21 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
         println!("{}", json);
     } else {
         let code = match target {
+            // v3 codegen (default)
             "rust" | "rs" => {
-                let ir = ir_program.as_ref().expect("IR required for Rust codegen");
-                emit_rust::emit_with_options(ir, &emit_rust::EmitOptions::default(), &import_aliases, &module_irs)
-            }
-            "rust-ir" => {
-                let ir = ir_program.as_ref().expect("IR required for RustIR codegen");
-                emit_rust::emit_with_options(ir, &emit_rust::EmitOptions::default(), &import_aliases, &module_irs)
+                let ir = ir_program.as_mut().expect("IR required for codegen");
+                codegen::emit(ir, codegen::pass::Target::Rust)
             }
             "ts" | "typescript" => {
-                let ir = ir_program.as_ref().expect("IR required for TS codegen");
-                emit_ts::emit_with_modules(ir)
+                let ir = ir_program.as_mut().expect("IR required for codegen");
+                codegen::emit(ir, codegen::pass::Target::TypeScript)
             }
+            // Legacy codegen (for comparison/fallback)
             "js" | "javascript" => {
                 let ir = ir_program.as_ref().expect("IR required for JS codegen");
                 emit_ts::emit_js_with_modules(ir)
             }
-            other => { eprintln!("Unknown target: {}. Use rust, ts, or js.", other); std::process::exit(1); }
+            other => { eprintln!("Unknown target: {}. Use rust, ts, js.", other); std::process::exit(1); }
         };
         print!("{}", code);
     }

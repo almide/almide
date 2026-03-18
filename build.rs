@@ -368,6 +368,41 @@ fn main() {
     let mut ts_arms = String::new();
     let mut needs_closures = false;
     let mut module_fn_map: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut arg_transform_arms = String::new();
+
+    // Scan runtime .rs files for actual function signatures
+    // This determines whether a String param in TOML is passed as String (owned) or &str (borrowed)
+    let mut runtime_param_types: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    let runtime_dir = Path::new("runtime/rs/src");
+    if runtime_dir.exists() {
+        for entry in fs::read_dir(runtime_dir).unwrap().filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if path.extension().map_or(true, |e| e != "rs") { continue; }
+            let content = fs::read_to_string(&path).unwrap_or_default();
+            for line in content.lines() {
+                // Match: pub fn almide_rt_xxx(param1: Type1, param2: Type2) -> RetType {
+                if let Some(start) = line.find("pub fn almide_rt_") {
+                    let rest = &line[start..];
+                    if let (Some(paren_open), Some(paren_close)) = (rest.find('('), rest.find(')')) {
+                        let fn_name_end = paren_open;
+                        let fn_name = &rest[7..fn_name_end]; // skip "pub fn "
+                        let params_str = &rest[paren_open+1..paren_close];
+                        let param_types: Vec<String> = params_str.split(',')
+                            .map(|p| {
+                                let p = p.trim();
+                                if let Some(colon_pos) = p.find(':') {
+                                    p[colon_pos+1..].trim().to_string()
+                                } else {
+                                    "unknown".to_string()
+                                }
+                            })
+                            .collect();
+                        runtime_param_types.insert(fn_name.to_string(), param_types);
+                    }
+                }
+            }
+        }
+    }
 
     let mut entries: Vec<_> = fs::read_dir(defs_dir)
         .unwrap()
@@ -420,6 +455,73 @@ fn main() {
             ));
 
             module_fn_map.entry(module_name.clone()).or_default().push(fn_name.clone());
+
+            // Generate arg transform table entry
+            {
+                let rust_tmpl = &def.rust;
+                let mut transforms = Vec::new();
+                for (i, param) in def.params.iter().enumerate() {
+                    let pname = &param.name;
+                    let _ptype = &param.ty;
+                    // Check actual runtime function signature for this param
+                    let rt_fn_name = format!("almide_rt_{}_{}", module_name, fn_name);
+                    let runtime_ty = runtime_param_types.get(&rt_fn_name)
+                        .and_then(|types| types.get(i))
+                        .map(|s| s.as_str())
+                        .unwrap_or("");
+
+                    let transform = if rust_tmpl.contains(&format!("{{{}.args}}", pname)) || rust_tmpl.contains(&format!("{{{}.body}}", pname)) {
+                        // Check if lambda body is wrapped in Ok({ ... })
+                        let body_placeholder = format!("{{{}.body}}", pname);
+                        if rust_tmpl.contains("Ok(") && rust_tmpl.contains(&body_placeholder) {
+                            "ArgTransform::LambdaResultWrap"
+                        } else {
+                            "ArgTransform::LambdaClone"
+                        }
+                    } else if rust_tmpl.contains(&format!("({{{}}}).to_vec()", pname)) {
+                        "ArgTransform::ToVec"
+                    } else if rust_tmpl.contains(&format!("Some({{{}}}", pname)) {
+                        "ArgTransform::WrapSome"
+                    } else if rust_tmpl.contains(&format!("&*{{{}}}", pname)) {
+                        // BorrowStr: check runtime signature — if it takes String (owned), use Direct
+                        if runtime_ty == "String" {
+                            "ArgTransform::Direct"
+                        } else {
+                            "ArgTransform::BorrowStr"
+                        }
+                    } else if rust_tmpl.contains(&format!("&{{{}}}", pname)) {
+                        "ArgTransform::BorrowRef"
+                    } else {
+                        "ArgTransform::Direct"
+                    };
+                    transforms.push(format!("{}", transform));
+                }
+                // Extract actual runtime function name from template
+                let rt_name = {
+                    let tmpl = &def.rust;
+                    // Find function/method call: identifier (possibly Type::method) before (
+                    if let Some(paren) = tmpl.find('(') {
+                        let prefix = &tmpl[..paren];
+                        // Handle "Type::method(" or "almide_rt_xxx(" — include :: in identifier chars
+                        let name = prefix.rsplit(|c: char| !c.is_alphanumeric() && c != '_' && c != ':')
+                            .next().unwrap_or("");
+                        if !name.is_empty() { name.to_string() } else { format!("almide_rt_{}_{}", module_name, fn_name) }
+                    } else {
+                        format!("almide_rt_{}_{}", module_name, fn_name)
+                    }
+                };
+
+                let effect_suffix = if def.effect { "true" } else { "false" };
+                let required_count = def.params.iter().filter(|p| !p.optional).count();
+                arg_transform_arms.push_str(&format!(
+                    "            (\"{module}\", \"{func}\") => Some(StdlibCallInfo {{ args: &[{transforms}], effect: {effect}, name: \"{rt_name}\", required: {required} }}),\n",
+                    module = module_name,
+                    func = fn_name,
+                    transforms = transforms.join(", "),
+                    effect = effect_suffix,
+                    required = required_count,
+                ));
+            }
 
             // Generate Rust codegen
             let has_opt = has_optional(def);
@@ -682,9 +784,38 @@ fn main() {
         ts_arms
     );
 
+    // Arg transform table for codegen v3
+    let arg_transforms_file = format!(
+        "// AUTO-GENERATED by build.rs from stdlib/defs/*.toml — DO NOT EDIT\n\n\
+         #[derive(Debug, Clone, Copy, PartialEq, Eq)]\n\
+         pub enum ArgTransform {{\n\
+         \x20   Direct,     // pass as-is\n\
+         \x20   BorrowStr,  // &*expr (borrow as &str)\n\
+         \x20   BorrowRef,  // &expr (borrow as reference)\n\
+         \x20   ToVec,      // (expr).to_vec() (owned copy)\n\
+         \x20   LambdaClone, // lambda with clone bindings\n\
+         \x20   WrapSome,   // Some(expr) (wrap in Option)\n\
+         \x20   LambdaResultWrap, // lambda with Ok(body) wrapping\n\
+         }}\n\n\
+         pub struct StdlibCallInfo {{\n\
+         \x20   pub args: &'static [ArgTransform],\n\
+         \x20   pub effect: bool,\n\
+         \x20   pub name: &'static str,\n\
+         \x20   pub required: usize,\n\
+         }}\n\n\
+         pub fn lookup(module: &str, func: &str) -> Option<StdlibCallInfo> {{\n\
+         \x20   match (module, func) {{\n\
+         {arms}\
+         \x20       _ => None,\n\
+         \x20   }}\n\
+         }}\n",
+        arms = arg_transform_arms
+    );
+
     fs::write(out_dir.join("stdlib_sigs.rs"), sig_file).unwrap();
     fs::write(out_dir.join("emit_rust_calls.rs"), rust_file).unwrap();
     fs::write(out_dir.join("emit_ts_calls.rs"), ts_file).unwrap();
+    fs::write(out_dir.join("arg_transforms.rs"), arg_transforms_file).unwrap();
 
     // Tell cargo to rerun if defs change
     println!("cargo:rerun-if-changed=stdlib/defs");

@@ -12,7 +12,7 @@ fn event_label(e: Event) -> String = match e {
   Click { button, .. } => "click:${button}",
   KeyPress { key, ctrl, shift } => {
     let mods = if ctrl then "ctrl+" else ""
-    let mods = if shift then mods ++ "shift+" else mods
+    let mods = if shift then mods + "shift+" else mods
     "key:${mods}${key}"
   },
   Resize { width, height } => "resize:${int.to_string(width)}x${int.to_string(height)}",

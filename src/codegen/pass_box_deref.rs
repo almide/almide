@@ -1,0 +1,314 @@
+//! BoxDerefPass: mark pattern-bound variables from Box'd fields for *deref.
+//!
+//! When a recursive enum has Box'd fields (e.g., Node(Box<Tree>, Box<Tree>)),
+//! variables bound in match patterns from those fields need *deref when used.
+
+use std::collections::HashSet;
+use crate::ir::*;
+use crate::types::Ty;
+use super::annotations::CodegenAnnotations;
+use super::pass::{NanoPass, Target};
+
+#[derive(Debug)]
+pub struct BoxDerefPass;
+
+impl NanoPass for BoxDerefPass {
+    fn name(&self) -> &str { "BoxDeref" }
+
+    fn targets(&self) -> Option<Vec<Target>> {
+        Some(vec![Target::Rust])
+    }
+
+    fn run(&self, program: &mut IrProgram, _target: Target) {
+        // Populates annotations via collect_deref_vars()
+    }
+}
+
+/// Find which enums have recursive variants and collect
+/// VarIds that are bound from Box'd fields in match patterns.
+pub fn collect_deref_vars(program: &IrProgram) -> (HashSet<VarId>, HashSet<String>) {
+    // Build name → VarId reverse map for shorthand record pattern lookup
+    let mut name_to_var: std::collections::HashMap<String, Vec<VarId>> = std::collections::HashMap::new();
+    for i in 0..program.var_table.len() {
+        let id = VarId(i as u32);
+        let info = program.var_table.get(id);
+        name_to_var.entry(info.name.clone()).or_default().push(id);
+    }
+    let mut deref_vars = HashSet::new();
+    let mut recursive_enums = HashSet::new();
+
+    // Step 1: Find recursive enums
+    for td in &program.type_decls {
+        if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
+            for case in cases {
+                match &case.kind {
+                    IrVariantKind::Tuple { fields } => {
+                        for f in fields {
+                            if ty_contains_name(f, &td.name) {
+                                recursive_enums.insert(td.name.clone());
+                            }
+                        }
+                    }
+                    IrVariantKind::Record { fields } => {
+                        for f in fields {
+                            if ty_contains_name(&f.ty, &td.name) {
+                                recursive_enums.insert(td.name.clone());
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    // Step 2: Walk all match expressions and find Bind vars in recursive positions
+    for func in &program.functions {
+        collect_from_expr(&func.body, &recursive_enums, &program.type_decls, &name_to_var, &mut deref_vars);
+    }
+
+    (deref_vars, recursive_enums)
+}
+
+/// Insert Deref IR nodes for box'd pattern variables
+pub fn insert_deref_nodes(program: &mut IrProgram, deref_ids: &HashSet<VarId>) {
+    if deref_ids.is_empty() { return; }
+    for func in &mut program.functions {
+        func.body = insert_derefs(func.body.clone(), deref_ids);
+    }
+    for tl in &mut program.top_lets {
+        tl.value = insert_derefs(tl.value.clone(), deref_ids);
+    }
+}
+
+fn insert_derefs(expr: IrExpr, deref_ids: &HashSet<VarId>) -> IrExpr {
+    let ty = expr.ty.clone();
+    let span = expr.span;
+
+    let kind = match expr.kind {
+        IrExprKind::Var { id } if deref_ids.contains(&id) => {
+            return IrExpr {
+                kind: IrExprKind::Deref {
+                    expr: Box::new(IrExpr { kind: IrExprKind::Var { id }, ty: ty.clone(), span }),
+                },
+                ty, span,
+            };
+        }
+        // Recurse
+        IrExprKind::Call { target, args, type_args } => {
+            let args = args.into_iter().map(|a| insert_derefs(a, deref_ids)).collect();
+            let target = match target {
+                CallTarget::Method { object, method } => CallTarget::Method {
+                    object: Box::new(insert_derefs(*object, deref_ids)), method,
+                },
+                CallTarget::Computed { callee } => CallTarget::Computed {
+                    callee: Box::new(insert_derefs(*callee, deref_ids)),
+                },
+                other => other,
+            };
+            IrExprKind::Call { target, args, type_args }
+        }
+        IrExprKind::If { cond, then, else_ } => IrExprKind::If {
+            cond: Box::new(insert_derefs(*cond, deref_ids)),
+            then: Box::new(insert_derefs(*then, deref_ids)),
+            else_: Box::new(insert_derefs(*else_, deref_ids)),
+        },
+        IrExprKind::Block { stmts, expr } => IrExprKind::Block {
+            stmts: insert_deref_stmts(stmts, deref_ids),
+            expr: expr.map(|e| Box::new(insert_derefs(*e, deref_ids))),
+        },
+        IrExprKind::DoBlock { stmts, expr } => IrExprKind::DoBlock {
+            stmts: insert_deref_stmts(stmts, deref_ids),
+            expr: expr.map(|e| Box::new(insert_derefs(*e, deref_ids))),
+        },
+        IrExprKind::Match { subject, arms } => IrExprKind::Match {
+            subject: Box::new(insert_derefs(*subject, deref_ids)),
+            arms: arms.into_iter().map(|arm| IrMatchArm {
+                pattern: arm.pattern,
+                guard: arm.guard.map(|g| insert_derefs(g, deref_ids)),
+                body: insert_derefs(arm.body, deref_ids),
+            }).collect(),
+        },
+        IrExprKind::BinOp { op, left, right } => IrExprKind::BinOp {
+            op, left: Box::new(insert_derefs(*left, deref_ids)), right: Box::new(insert_derefs(*right, deref_ids)),
+        },
+        IrExprKind::Lambda { params, body } => IrExprKind::Lambda {
+            params, body: Box::new(insert_derefs(*body, deref_ids)),
+        },
+        IrExprKind::List { elements } => IrExprKind::List {
+            elements: elements.into_iter().map(|e| insert_derefs(e, deref_ids)).collect(),
+        },
+        IrExprKind::Record { name, fields } => IrExprKind::Record {
+            name, fields: fields.into_iter().map(|(k, v)| (k, insert_derefs(v, deref_ids))).collect(),
+        },
+        IrExprKind::Member { object, field } => IrExprKind::Member {
+            object: Box::new(insert_derefs(*object, deref_ids)), field,
+        },
+        IrExprKind::ForIn { var, var_tuple, iterable, body } => IrExprKind::ForIn {
+            var, var_tuple, iterable: Box::new(insert_derefs(*iterable, deref_ids)),
+            body: insert_deref_stmts(body, deref_ids),
+        },
+        IrExprKind::StringInterp { parts } => IrExprKind::StringInterp {
+            parts: parts.into_iter().map(|p| match p {
+                IrStringPart::Expr { expr } => IrStringPart::Expr { expr: insert_derefs(expr, deref_ids) },
+                other => other,
+            }).collect(),
+        },
+        other => other,
+    };
+
+    IrExpr { kind, ty, span }
+}
+
+fn insert_deref_stmts(stmts: Vec<IrStmt>, deref_ids: &HashSet<VarId>) -> Vec<IrStmt> {
+    stmts.into_iter().map(|s| {
+        let kind = match s.kind {
+            IrStmtKind::Bind { var, mutability, ty, value } => IrStmtKind::Bind {
+                var, mutability, ty, value: insert_derefs(value, deref_ids),
+            },
+            IrStmtKind::Assign { var, value } => IrStmtKind::Assign { var, value: insert_derefs(value, deref_ids) },
+            IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: insert_derefs(expr, deref_ids) },
+            IrStmtKind::Guard { cond, else_ } => IrStmtKind::Guard {
+                cond: insert_derefs(cond, deref_ids), else_: insert_derefs(else_, deref_ids),
+            },
+            other => other,
+        };
+        IrStmt { kind, span: s.span }
+    }).collect()
+}
+
+fn collect_from_expr(expr: &IrExpr, recursive_enums: &HashSet<String>, type_decls: &[IrTypeDecl], name_to_var: &std::collections::HashMap<String, Vec<VarId>>, deref_vars: &mut HashSet<VarId>) {
+    match &expr.kind {
+        IrExprKind::Match { subject, arms } => {
+            // Check if subject type is a recursive enum
+            let enum_name = match &subject.ty {
+                Ty::Named(n, _) => Some(n.clone()),
+                Ty::Variant { name, .. } => Some(name.clone()),
+                _ => None,
+            };
+
+            if let Some(ref ename) = enum_name {
+                if recursive_enums.contains(ename) {
+                    // Find the type decl to know which fields are recursive
+                    let td = type_decls.iter().find(|td| &td.name == ename);
+                    for arm in arms {
+                        collect_deref_from_pattern(&arm.pattern, ename, td, name_to_var, deref_vars);
+                        collect_from_expr(&arm.body, recursive_enums, type_decls, name_to_var, deref_vars);
+                    }
+                } else {
+                    for arm in arms {
+                        collect_from_expr(&arm.body, recursive_enums, type_decls, name_to_var, deref_vars);
+                    }
+                }
+            } else {
+                for arm in arms {
+                    collect_from_expr(&arm.body, recursive_enums, type_decls, name_to_var, deref_vars);
+                }
+            }
+            collect_from_expr(subject, recursive_enums, type_decls, name_to_var, deref_vars);
+        }
+        IrExprKind::Block { stmts, expr: e } | IrExprKind::DoBlock { stmts, expr: e } => {
+            for s in stmts { collect_from_stmt(s, recursive_enums, type_decls, name_to_var, deref_vars); }
+            if let Some(e) = e { collect_from_expr(e, recursive_enums, type_decls, name_to_var, deref_vars); }
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            collect_from_expr(cond, recursive_enums, type_decls, name_to_var, deref_vars);
+            collect_from_expr(then, recursive_enums, type_decls, name_to_var, deref_vars);
+            collect_from_expr(else_, recursive_enums, type_decls, name_to_var, deref_vars);
+        }
+        IrExprKind::Call { args, .. } => {
+            for a in args { collect_from_expr(a, recursive_enums, type_decls, name_to_var, deref_vars); }
+        }
+        IrExprKind::BinOp { left, right, .. } => {
+            collect_from_expr(left, recursive_enums, type_decls, name_to_var, deref_vars);
+            collect_from_expr(right, recursive_enums, type_decls, name_to_var, deref_vars);
+        }
+        IrExprKind::Lambda { body, .. } => collect_from_expr(body, recursive_enums, type_decls, name_to_var, deref_vars),
+        _ => {}
+    }
+}
+
+fn collect_from_stmt(stmt: &IrStmt, recursive_enums: &HashSet<String>, type_decls: &[IrTypeDecl], name_to_var: &std::collections::HashMap<String, Vec<VarId>>, deref_vars: &mut HashSet<VarId>) {
+    match &stmt.kind {
+        IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => {
+            collect_from_expr(value, recursive_enums, type_decls, name_to_var, deref_vars);
+        }
+        IrStmtKind::Expr { expr } => collect_from_expr(expr, recursive_enums, type_decls, name_to_var, deref_vars),
+        _ => {}
+    }
+}
+
+/// Given a pattern matching a recursive enum, find Bind vars in recursive positions.
+fn collect_deref_from_pattern(pattern: &IrPattern, enum_name: &str, td: Option<&IrTypeDecl>, name_to_var: &std::collections::HashMap<String, Vec<VarId>>, deref_vars: &mut HashSet<VarId>) {
+    match pattern {
+        IrPattern::Constructor { name, args } => {
+            // Find the variant in the type decl
+            if let Some(td) = td {
+                if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
+                    if let Some(case) = cases.iter().find(|c| &c.name == name) {
+                        if let IrVariantKind::Tuple { fields } = &case.kind {
+                            for (i, arg) in args.iter().enumerate() {
+                                if let Some(field_ty) = fields.get(i) {
+                                    if ty_contains_name(field_ty, enum_name) {
+                                        // This field is Box'd — any Bind in this pattern position needs deref
+                                        collect_bind_vars(arg, deref_vars);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        IrPattern::RecordPattern { name, fields, .. } => {
+            if let Some(td) = td {
+                if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
+                    if let Some(case) = cases.iter().find(|c| &c.name == name) {
+                        if let IrVariantKind::Record { fields: case_fields } = &case.kind {
+                            for field_pat in fields {
+                                if let Some(case_field) = case_fields.iter().find(|f| f.name == field_pat.name) {
+                                    if ty_contains_name(&case_field.ty, enum_name) {
+                                        if let Some(ref p) = field_pat.pattern {
+                                            collect_bind_vars(p, deref_vars);
+                                        } else {
+                                            // Shorthand: lookup VarId by name, but only if unambiguous
+                                            if let Some(var_ids) = name_to_var.get(&field_pat.name) {
+                                                if var_ids.len() == 1 {
+                                                    deref_vars.insert(var_ids[0]);
+                                                }
+                                                // If ambiguous (multiple vars with same name), skip —
+                                                // we can't tell which one is the pattern binding
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_bind_vars(pattern: &IrPattern, deref_vars: &mut HashSet<VarId>) {
+    match pattern {
+        IrPattern::Bind { var } => { deref_vars.insert(*var); }
+        IrPattern::Constructor { args, .. } => {
+            for a in args { collect_bind_vars(a, deref_vars); }
+        }
+        _ => {}
+    }
+}
+
+fn ty_contains_name(ty: &Ty, name: &str) -> bool {
+    match ty {
+        Ty::Named(n, args) => n == name || args.iter().any(|a| ty_contains_name(a, name)),
+        Ty::Variant { name: vn, .. } => vn == name,
+        Ty::List(inner) | Ty::Option(inner) => ty_contains_name(inner, name),
+        Ty::Result(a, b) | Ty::Map(a, b) => ty_contains_name(a, name) || ty_contains_name(b, name),
+        Ty::Tuple(elems) => elems.iter().any(|e| ty_contains_name(e, name)),
+        _ => false,
+    }
+}

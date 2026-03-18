@@ -71,3 +71,26 @@ mod tests {
     #[test] fn test_len() { assert_eq!(almide_rt_string_len("hello"), 5); }
     #[test] fn test_contains() { assert!(almide_rt_string_contains("hello world", "world")); }
 }
+
+pub fn almide_rt_string_first(s: &str) -> Option<String> {
+    s.chars().next().map(|c| c.to_string())
+}
+pub fn almide_rt_string_last(s: &str) -> Option<String> {
+    s.chars().last().map(|c| c.to_string())
+}
+pub fn almide_rt_string_take(s: &str, n: i64) -> String {
+    s.chars().take(n as usize).collect()
+}
+pub fn almide_rt_string_take_end(s: &str, n: i64) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let start = if n as usize >= chars.len() { 0 } else { chars.len() - n as usize };
+    chars[start..].iter().collect()
+}
+pub fn almide_rt_string_drop(s: &str, n: i64) -> String {
+    s.chars().skip(n as usize).collect()
+}
+pub fn almide_rt_string_drop_end(s: &str, n: i64) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let end = if n as usize >= chars.len() { 0 } else { chars.len() - n as usize };
+    chars[..end].iter().collect()
+}

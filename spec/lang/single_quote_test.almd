@@ -1,0 +1,28 @@
+
+test "single quote basic" {
+  let s = "hello world";
+  assert_eq(s, "hello world")
+}
+
+test "single quote with double quotes inside" {
+  let json = '{"name": "alice", "age": 30}';
+  assert(string.contains(json, '"name"'));
+  assert(string.contains(json, '"alice"'))
+}
+
+test "single quote with interpolation" {
+  let name = "bob";
+  let greeting = "Hello, ${name}!";
+  assert_eq(greeting, "Hello, bob!")
+}
+
+test "single quote with escape" {
+  let s = "it's fine";
+  assert(string.contains(s, "'"))
+}
+
+test "single quote with interpolation and quotes" {
+  let name = "alice";
+  let json = '{"user": "${name}"}';
+  assert(string.contains(json, "alice"))
+}

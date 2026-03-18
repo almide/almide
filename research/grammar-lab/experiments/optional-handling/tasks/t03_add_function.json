@@ -1,0 +1,6 @@
+{
+  "name": "add-function",
+  "instruction": "Add a new function `find_category(products: List[Product], target: String) -> String` that looks up a product by name and returns its category. If the product is not found, return `\"unknown\"`. Follow the same coding style as `find_price`. Keep all existing functions unchanged.",
+  "layer3_hint": "Available: `list.find(xs, (x) => bool)` returns `Option[A]`. Record field access: `p.category`. `list.map(xs, (x) => y)` transforms each element.",
+  "test_file": "t03_add_function_test.almd"
+}

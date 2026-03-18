@@ -1,0 +1,6 @@
+{
+  "name": "change-default",
+  "instruction": "Change the default price in `find_price` from `0` to `-1` when the product is not found. Do not change any other function.",
+  "layer3_hint": "Available: `list.find(xs, (x) => bool)` returns `Option[A]`. `list.first(xs)` returns `Option[A]`. `list.sort_by(xs, (x) => key)` sorts ascending.",
+  "test_file": "t01_change_default_test.almd"
+}

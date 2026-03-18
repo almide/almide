@@ -113,9 +113,15 @@ impl Lexer {
                 continue;
             }
 
-            // String literal
+            // String literal (double or single quote)
             if ch == '"' {
                 let (tok, new_pos, new_line, new_col) = lex_string(&chars, pos, line, col);
+                tokens.push(tok);
+                pos = new_pos; line = new_line; col = new_col;
+                continue;
+            }
+            if ch == '\'' {
+                let (tok, new_pos, new_line, new_col) = lex_single_quote_string(&chars, pos, line, col);
                 tokens.push(tok);
                 pos = new_pos; line = new_line; col = new_col;
                 continue;
@@ -234,6 +240,39 @@ fn lex_string(chars: &[char], start: usize, line: usize, col: usize) -> (Token, 
         pos = lex_string_char(chars, pos, &mut value, &mut has_interpolation);
     }
     if pos < chars.len() { pos += 1; } // skip closing "
+
+    let tt = if has_interpolation { TokenType::InterpolatedString } else { TokenType::String };
+    let len = pos - start;
+    (Token { token_type: tt, value, line, col }, pos, line, col + len)
+}
+
+/// Single-quote string: `'...'` — double quotes don't need escaping.
+/// Supports interpolation `${expr}` and escape sequences (`\\`, `\'`, `\n`, `\t`).
+fn lex_single_quote_string(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize, usize, usize) {
+    let mut pos = start + 1; // skip opening '
+    let mut value = String::new();
+    let mut has_interpolation = false;
+
+    while pos < chars.len() && chars[pos] != '\'' {
+        if chars[pos] == '\\' && pos + 1 < chars.len() {
+            let next = chars[pos + 1];
+            match next {
+                '\'' => { value.push('\''); pos += 2; }
+                '\\' => { value.push('\\'); pos += 2; }
+                'n' => { value.push('\n'); pos += 2; }
+                't' => { value.push('\t'); pos += 2; }
+                'r' => { value.push('\r'); pos += 2; }
+                _ => { value.push(chars[pos]); pos += 1; }
+            }
+        } else if chars[pos] == '$' && pos + 1 < chars.len() && chars[pos + 1] == '{' {
+            has_interpolation = true;
+            pos = lex_interpolation(chars, pos, &mut value);
+        } else {
+            value.push(chars[pos]);
+            pos += 1;
+        }
+    }
+    if pos < chars.len() { pos += 1; } // skip closing '
 
     let tt = if has_interpolation { TokenType::InterpolatedString } else { TokenType::String };
     let len = pos - start;

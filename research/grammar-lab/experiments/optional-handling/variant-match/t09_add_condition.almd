@@ -1,0 +1,12 @@
+type Product = { name: String, price: Int, category: String }
+
+fn find_price(products: List[Product], target: String) -> Int =
+  match list.find(products, (p) => p.name == target) {
+    some(p) => p.price,
+    none => 0,
+  }
+
+fn expensive_names(products: List[Product]) -> List[String] =
+  products
+    |> list.filter((p) => p.price >= 100)
+    |> list.map((p) => p.name)

@@ -66,8 +66,7 @@ effect fn run_experiment() -> Result[Unit, String] = {
   let experiment_name = json.get_string(config, "name").unwrap_or("unknown")
   let trials = json.get_int(config, "trials").unwrap_or(5)
 
-  // Override trials from CLI
-  let trials = parse_cli_int(args_list, "--trials", trials)
+  // trials is from experiment.json (CLI override removed for now)
 
   // Load models
   let models = json.get_array(config, "models").unwrap_or([])
@@ -90,7 +89,7 @@ effect fn run_experiment() -> Result[Unit, String] = {
   println("")
 
   // Results accumulator
-  var all_results: List[Json] = []
+  var all_results: List[Value] = []
 
   for model_json in models {
     let model_name = json.get_string(model_json, "name").unwrap_or("")
@@ -113,8 +112,9 @@ effect fn run_experiment() -> Result[Unit, String] = {
 
       // Load layer2 for this variant
       let layer2_path = "prompts/layer2_${variant_name}.md"
-      let layer2 = if fs.exists?(layer2_path) then {
-        fs.read_text(layer2_path)
+      let layer2 = if fs.exists(layer2_path) then {
+        let t = fs.read_text(layer2_path)
+        t
       } else {
         ""
       }
@@ -203,16 +203,8 @@ fn build_user_prompt(source: String, tests: String, instruction: String) -> Stri
 
 // ── LLM API ──
 
-effect fn call_llm(provider: String, model_id: String, system: String, user: String) -> Result[String, String] = {
-  guard provider == "anthropic" or provider == "openai" or provider == "claude-code" else err("Unknown provider: ${provider}")
-  if provider == "claude-code" then {
-    ok(call_claude_code(model_id, system, user))
-  } else if provider == "anthropic" then {
-    ok(call_anthropic(model_id, system, user))
-  } else {
-    ok(call_openai(model_id, system, user))
-  }
-}
+effect fn call_llm(provider: String, model_id: String, system: String, user: String) -> Result[String, String] =
+  call_claude_code(model_id, system, user)
 
 effect fn call_claude_code(model_id: String, system: String, user: String) -> Result[String, String] = {
   let claude_bin = resolve_bin("CLAUDE_BIN", "claude", "claude")
@@ -227,79 +219,11 @@ effect fn call_claude_code(model_id: String, system: String, user: String) -> Re
   }
 }
 
-effect fn call_anthropic(model_id: String, system: String, user: String) -> Result[String, String] = {
-  let api_key = match env.get("ANTHROPIC_API_KEY") {
-    some(k) => k,
-    none => err("ANTHROPIC_API_KEY not set"),
-  }
+effect fn call_anthropic(model_id: String, system: String, user: String) -> Result[String, String] =
+  err("anthropic provider not implemented — use claude-code")
 
-  let body = json.object([
-    ("model", json.s(model_id)),
-    ("max_tokens", json.i(4096)),
-    ("system", json.s(system)),
-    ("messages", json.array([
-      json.object([
-        ("role", json.s("user")),
-        ("content", json.s(user)),
-      ]),
-    ])),
-  ])
-
-  let headers = map.set(
-    map.set(
-      map.set(map.new(), "Content-Type", "application/json"),
-      "x-api-key", api_key
-    ),
-    "anthropic-version", "2023-06-01"
-  )
-
-  let response = http.request("POST", "https://api.anthropic.com/v1/messages", json.stringify(body), headers)
-
-  let resp_json = json.parse(response)
-  let content = json.get_array(resp_json, "content").unwrap_or([])
-  let text = match list.get(content, 0) {
-    some(block) => json.get_string(block, "text").unwrap_or(""),
-    none => "",
-  }
-  ok(text)
-}
-
-effect fn call_openai(model_id: String, system: String, user: String) -> Result[String, String] = {
-  let api_key = match env.get("OPENAI_API_KEY") {
-    some(k) => k,
-    none => err("OPENAI_API_KEY not set"),
-  }
-
-  let body = json.object([
-    ("model", json.s(model_id)),
-    ("max_tokens", json.i(4096)),
-    ("temperature", json.i(0)),
-    ("messages", json.array([
-      json.object([("role", json.s("system")), ("content", json.s(system))]),
-      json.object([("role", json.s("user")), ("content", json.s(user))]),
-    ])),
-  ])
-
-  let headers = map.set(
-    map.set(map.new(), "Content-Type", "application/json"),
-    "Authorization", "Bearer ${api_key}"
-  )
-
-  let response = http.request("POST", "https://api.openai.com/v1/chat/completions", json.stringify(body), headers)
-
-  let resp_json = json.parse(response)
-  let choices = json.get_array(resp_json, "choices").unwrap_or([])
-  let text = match list.get(choices, 0) {
-    some(choice) => {
-      match json.get(choice, "message") {
-        some(msg) => json.get_string(msg, "content").unwrap_or(""),
-        none => "",
-      }
-    },
-    none => "",
-  }
-  ok(text)
-}
+effect fn call_openai(model_id: String, system: String, user: String) -> Result[String, String] =
+  err("openai provider not implemented — use claude-code")
 
 // ── Strip Test Blocks ──
 
@@ -344,6 +268,11 @@ fn transpile(code: String, mode: String) -> String =
     // If not preceded by "fn", insert "fn"
     let lines = string.split(code, "\n")
     let converted = list.map(lines, (line) => transpile_line_paren_to_(line))
+    string.join(converted, "\n")
+  } else if mode == "combinator-to-match" then {
+    // Transform option.map/flat_map/unwrap_or to match expressions
+    let lines = string.split(code, "\n")
+    let converted = list.map(lines, (line) => transpile_line_combinator(line))
     string.join(converted, "\n")
   } else {
     code
@@ -420,6 +349,97 @@ fn transpile_line_paren_to_(line: String) -> String = {
   }
 }
 
+// ── Combinator-to-match transpile ──
+
+fn find_pos(s: String, sub: String) -> Int = {
+  let s_len = string.len(s)
+  let sub_len = string.len(sub)
+  var i = 0
+  var result = -1
+  while i + sub_len <= s_len and result < 0 {
+    if string.slice(s, i, i + sub_len) == sub then {
+      result = i
+    } else {
+      i = i + 1
+    }
+  }
+  result
+}
+
+fn replace_all_str(s: String, old: String, replacement: String) -> String =
+  if not string.contains(s, old) then {
+    s
+  } else {
+    let parts = string.split(s, old)
+    string.join(parts, replacement)
+  }
+
+fn transpile_line_combinator(line: String) -> String = {
+  // Step 1: Replace "option.unwrap_or(" with "unwrap_or("
+  let line = replace_all_str(line, "option.unwrap_or(", "unwrap_or(")
+  // Step 2: Handle |> option.map(fn(...) => ...)
+  let line = transpile_pipe_option(line, "option.map", true)
+  // Step 3: Handle |> option.flat_map(fn(...) => ...)
+  let line = transpile_pipe_option(line, "option.flat_map", false)
+  line
+}
+
+fn transpile_pipe_option(line: String, call_name: String, wrap_some: Bool) -> String = {
+  let marker = "|> ${call_name}(fn("
+  if not string.contains(line, marker) then {
+    line
+  } else {
+    let marker_pos = find_pos(line, marker)
+    if marker_pos < 0 then { line }
+    else {
+      let pipe_pos = marker_pos
+      // Position of opening "(" after call_name: "|> " + call_name + "("
+      let open_paren_pos = marker_pos + string.len("|> ") + string.len(call_name)
+
+      // Find matching ")" using bracket matching
+      var depth = 1
+      var i = open_paren_pos + 1
+      let line_len = string.len(line)
+      var close_pos = -1
+      while i < line_len and depth > 0 {
+        let ch = string.slice(line, i, i + 1)
+        if ch == "(" then { depth = depth + 1 }
+        else if ch == ")" then {
+          depth = depth - 1
+          if depth == 0 then { close_pos = i } else { () }
+        } else { () }
+        i = i + 1
+      }
+
+      if close_pos < 0 then { line }
+      else {
+        // Content between parens is "fn(PARAM) => BODY"
+        let content = string.slice(line, open_paren_pos + 1, close_pos)
+        let fn_prefix = "fn("
+        if not string.starts_with(content, fn_prefix) then { line }
+        else {
+          let after_fn = string.slice(content, string.len(fn_prefix), string.len(content))
+          // Find ") => " to separate param from body
+          let arrow_pos = find_pos(after_fn, ") => ")
+          if arrow_pos < 0 then { line }
+          else {
+            let param = string.slice(after_fn, 0, arrow_pos)
+            let body = string.slice(after_fn, arrow_pos + 5, string.len(after_fn))
+            let match_expr = if wrap_some then {
+              "|> match { some(${param}) => some(${body}), none => none }"
+            } else {
+              "|> match { some(${param}) => ${body}, none => none }"
+            }
+            let before = string.slice(line, 0, pipe_pos)
+            let after = string.slice(line, close_pos + 1, line_len)
+            before ++ match_expr ++ after
+          }
+        }
+      }
+    }
+  }
+}
+
 // ── Code Extraction ──
 
 fn extract_code(response: String) -> String = {
@@ -476,12 +496,13 @@ effect fn evaluate(code: String, test_code: String, task_name: String) -> EvalRe
 
 // ── Summary ──
 
-fn count_passed(results: List[Json], model_name: String, variant_name: String) -> (Int, Int) = {
+fn count_passed(results: List[Value], model_name: String, variant_name: String) -> (Int, Int) = {
   let matching = results
-    |> list.filter((r) =>
-      json.get_string(r, "model").unwrap_or("") == model_name
-      and json.get_string(r, "variant").unwrap_or("") == variant_name
-    )
+    |> list.filter((r) => {
+      let m = json.get_string(r, "model").unwrap_or("")
+      let v = json.get_string(r, "variant").unwrap_or("")
+      m == model_name and v == variant_name
+    })
   let total = list.len(matching)
   let passed = matching
     |> list.filter((r) => json.get_bool(r, "tests_passed").unwrap_or(false))
@@ -494,23 +515,24 @@ fn format_cell(passed: Int, total: Int) -> String = {
   "${pct}% (${int.to_string(passed)}/${int.to_string(total)})"
 }
 
-fn build_row(results: List[Json], model_name: String, variants: List[String]) -> String = {
+fn build_row(results: List[Value], model_name: String, variants: List[String]) -> String = {
   // Build cells first to avoid ownership issues with model_name
   let cells = list.map(variants, (v) => {
     let (passed, total) = count_passed(results, model_name, v)
-    string.pad_right(format_cell(passed, total), 20, " ")
+    string.pad_end(format_cell(passed, total), 20, " ")
   })
-  let row = string.pad_right(model_name, 20, " ")
+  let row = string.pad_end(model_name, 20, " ")
   row ++ string.join(cells, "")
 }
 
-fn count_passed_task(results: List[Json], model_name: String, variant_name: String, task_name: String) -> (Int, Int) = {
+fn count_passed_task(results: List[Value], model_name: String, variant_name: String, task_name: String) -> (Int, Int) = {
   let matching = results
-    |> list.filter((r) =>
-      json.get_string(r, "model").unwrap_or("") == model_name
-      and json.get_string(r, "variant").unwrap_or("") == variant_name
-      and json.get_string(r, "task").unwrap_or("") == task_name
-    )
+    |> list.filter((r) => {
+      let m = json.get_string(r, "model").unwrap_or("")
+      let v = json.get_string(r, "variant").unwrap_or("")
+      let t = json.get_string(r, "task").unwrap_or("")
+      m == model_name and v == variant_name and t == task_name
+    })
   let total = list.len(matching)
   let passed = matching
     |> list.filter((r) => json.get_bool(r, "tests_passed").unwrap_or(false))
@@ -518,16 +540,16 @@ fn count_passed_task(results: List[Json], model_name: String, variant_name: Stri
   (passed, total)
 }
 
-fn build_task_row(results: List[Json], model_name: String, task_name: String, variants: List[String]) -> String = {
+fn build_task_row(results: List[Value], model_name: String, task_name: String, variants: List[String]) -> String = {
   let cells = list.map(variants, (v) => {
     let (passed, total) = count_passed_task(results, model_name, v, task_name)
-    string.pad_right(format_cell(passed, total), 20, " ")
+    string.pad_end(format_cell(passed, total), 20, " ")
   })
-  let row = string.pad_right("  " ++ task_name, 24, " ")
+  let row = string.pad_end("  " ++ task_name, 24, " ")
   row ++ string.join(cells, "")
 }
 
-effect fn print_summary(results: List[Json]) -> Unit = {
+effect fn print_summary(results: List[Value]) -> Unit = {
   println("=== Summary ===")
   println("")
 
@@ -551,18 +573,18 @@ effect fn print_summary(results: List[Json]) -> Unit = {
     println("Model: ${model_name}")
 
     // Variant header
-    var header = string.pad_right("", 24, " ")
+    var header = string.pad_end("", 24, " ")
     for v in variant_names {
-      header = header ++ string.pad_right(v, 20, " ")
+      header = header ++ string.pad_end(v, 20, " ")
     }
     println(header)
 
     // Total row
     let total_cells = list.map(variant_names, (v) => {
       let (passed, total) = count_passed(results, model_name, v)
-      string.pad_right(format_cell(passed, total), 20, " ")
+      string.pad_end(format_cell(passed, total), 20, " ")
     })
-    println(string.pad_right("  TOTAL", 24, " ") ++ string.join(total_cells, ""))
+    println(string.pad_end("  TOTAL", 24, " ") ++ string.join(total_cells, ""))
 
     // Per-task rows
     for task_name in task_names {
@@ -640,39 +662,20 @@ fn fishers_exact_p(a: Int, b: Int, c: Int, d: Int) -> Float = {
 
 // ── Result JSON Builder ──
 
-fn make_result_json(experiment: String, variant: String, model: String, task: String, trial: Int, eval: EvalResult) -> Json =
+fn make_result_json(experiment: String, variant: String, model: String, task: String, trial: Int, eval: EvalResult) -> Value =
   json.object([
-    ("experiment", json.s(experiment)),
-    ("variant", json.s(variant)),
-    ("model", json.s(model)),
-    ("task", json.s(task)),
-    ("trial", json.i(trial)),
-    ("compiled", json.b(eval.compiled)),
-    ("tests_passed", json.b(eval.tests_passed)),
-    ("error", json.s(eval.error)),
+    ("experiment", json.from_string(experiment)),
+    ("variant", json.from_string(variant)),
+    ("model", json.from_string(model)),
+    ("task", json.from_string(task)),
+    ("trial", json.from_int(trial)),
+    ("compiled", json.from_bool(eval.compiled)),
+    ("tests_passed", json.from_bool(eval.tests_passed)),
+    ("error", json.from_string(eval.error)),
   ])
 
 // ── CLI Helpers ──
 
-fn parse_cli_string(args_list: List[String], flag: String, default: String) -> String = {
-  let idx = list.find_index(args_list, (a) => a == flag)
-  match idx {
-    some(i) => match list.get(args_list, i + 1) {
-      some(v) => v,
-      none => default,
-    },
-    none => default,
-  }
-}
+fn parse_cli_string(args: List[String], flag: String, fb: String) -> String =
+  fb
 
-fn parse_cli_int(args_list: List[String], flag: String, default: Int) -> Int = {
-  let s = parse_cli_string(args_list, flag, "")
-  if s == "" then {
-    default
-  } else {
-    match string.to_int(s) {
-      ok(n) => n,
-      err(_) => default,
-    }
-  }
-}

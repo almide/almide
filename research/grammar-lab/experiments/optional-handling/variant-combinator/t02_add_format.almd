@@ -1,0 +1,14 @@
+type Product = { name: String, price: Int, category: String }
+
+fn lookup_info(products: List[Product], target: String) -> String =
+  list.find(products, (p) => p.name == target)
+    |> option.map((p) => p.name)
+    |> option.unwrap_or("not found")
+
+fn most_expensive(products: List[Product]) -> String =
+  products
+    |> list.sort_by((p) => p.price)
+    |> list.reverse()
+    |> list.first()
+    |> option.map((p) => p.name)
+    |> option.unwrap_or("empty")

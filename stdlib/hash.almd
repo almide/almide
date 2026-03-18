@@ -76,19 +76,19 @@ local fn sha256_pad(msg: List[Int]) -> List[Int] = {
   let len = list.len(msg)
   let bit_len = len * 8
   // append 0x80
-  var padded = msg ++ [128]
+  var padded = msg + [128]
   // pad with zeros until length mod 64 == 56
   var plen = list.len(padded)
   for _ in 0..64 {
     if plen % 64 != 56 then {
-      padded = padded ++ [0]
+      padded = padded + [0]
       plen = plen + 1
     } else {
       plen = plen
     }
   }
   // append 64-bit big-endian length
-  padded ++ [
+  padded + [
     0, 0, 0, 0,
     int.to_u8(int.bshr(bit_len, 24)),
     int.to_u8(int.bshr(bit_len, 16)),
@@ -103,7 +103,7 @@ local fn sha256_process_block(block: List[Int], h_in: List[Int]) -> List[Int] = 
   // Prepare message schedule w[0..15]
   var w: List[Int] = []
   for i in 0..16 {
-    w = w ++ [bytes_to_u32_be(block, i * 4)]
+    w = w + [bytes_to_u32_be(block, i * 4)]
   }
   // Extend to w[16..63]
   for i in 16..64 {
@@ -112,7 +112,7 @@ local fn sha256_process_block(block: List[Int], h_in: List[Int]) -> List[Int] = 
     let s0 = int.bxor(int.bxor(rotr(w15, 7), rotr(w15, 18)), int.bshr(w15, 3))
     let s1 = int.bxor(int.bxor(rotr(w2, 17), rotr(w2, 19)), int.bshr(w2, 10))
     let new_w = w_add4(list.get_or(w, i - 16, 0), s0, list.get_or(w, i - 7, 0), s1)
-    w = w ++ [new_w]
+    w = w + [new_w]
   }
 
   // Initialize working variables
@@ -173,7 +173,7 @@ fn sha256(data: String) -> String = {
     let offset = i * 64
     var block: List[Int] = []
     for j in 0..64 {
-      block = block ++ [list.get_or(padded, offset + j, 0)]
+      block = block + [list.get_or(padded, offset + j, 0)]
     }
     hash = sha256_process_block(block, hash)
   }
@@ -193,17 +193,17 @@ fn sha256(data: String) -> String = {
 local fn sha1_pad(msg: List[Int]) -> List[Int] = {
   let len = list.len(msg)
   let bit_len = len * 8
-  var padded = msg ++ [128]
+  var padded = msg + [128]
   var plen = list.len(padded)
   for _ in 0..64 {
     if plen % 64 != 56 then {
-      padded = padded ++ [0]
+      padded = padded + [0]
       plen = plen + 1
     } else {
       plen = plen
     }
   }
-  padded ++ [
+  padded + [
     0, 0, 0, 0,
     int.to_u8(int.bshr(bit_len, 24)),
     int.to_u8(int.bshr(bit_len, 16)),
@@ -216,7 +216,7 @@ local fn sha1_process_block(block: List[Int], h_in: List[Int]) -> List[Int] = {
   // Prepare message schedule w[0..15]
   var w: List[Int] = []
   for i in 0..16 {
-    w = w ++ [bytes_to_u32_be(block, i * 4)]
+    w = w + [bytes_to_u32_be(block, i * 4)]
   }
   // Extend to w[16..79]
   for i in 16..80 {
@@ -224,7 +224,7 @@ local fn sha1_process_block(block: List[Int], h_in: List[Int]) -> List[Int] = {
       int.bxor(list.get_or(w, i - 3, 0), list.get_or(w, i - 8, 0)),
       int.bxor(list.get_or(w, i - 14, 0), list.get_or(w, i - 16, 0))
     )
-    w = w ++ [rotl(val, 1)]
+    w = w + [rotl(val, 1)]
   }
 
   var a = list.get_or(h_in, 0, 0)
@@ -279,7 +279,7 @@ fn sha1(data: String) -> String = {
     let offset = i * 64
     var block: List[Int] = []
     for j in 0..64 {
-      block = block ++ [list.get_or(padded, offset + j, 0)]
+      block = block + [list.get_or(padded, offset + j, 0)]
     }
     hash = sha1_process_block(block, hash)
   }
@@ -322,18 +322,18 @@ local fn md5_s() -> List[Int] = [
 local fn md5_pad(msg: List[Int]) -> List[Int] = {
   let len = list.len(msg)
   let bit_len = len * 8
-  var padded = msg ++ [128]
+  var padded = msg + [128]
   var plen = list.len(padded)
   for _ in 0..64 {
     if plen % 64 != 56 then {
-      padded = padded ++ [0]
+      padded = padded + [0]
       plen = plen + 1
     } else {
       plen = plen
     }
   }
   // append 64-bit little-endian length
-  padded ++ [
+  padded + [
     int.to_u8(bit_len),
     int.to_u8(int.bshr(bit_len, 8)),
     int.to_u8(int.bshr(bit_len, 16)),
@@ -349,7 +349,7 @@ local fn md5_process_block(block: List[Int], h_in: List[Int]) -> List[Int] = {
   // Read 16 words as little-endian
   var m: List[Int] = []
   for i in 0..16 {
-    m = m ++ [bytes_to_u32_le(block, i * 4)]
+    m = m + [bytes_to_u32_le(block, i * 4)]
   }
 
   var a = list.get_or(h_in, 0, 0)
@@ -398,7 +398,7 @@ local fn u32_to_hex_le(w: Int) -> String = {
   let b1 = byte_to_hex(int.to_u8(int.bshr(w, 8)))
   let b2 = byte_to_hex(int.to_u8(int.bshr(w, 16)))
   let b3 = byte_to_hex(int.to_u8(int.bshr(w, 24)))
-  b0 ++ b1 ++ b2 ++ b3
+  b0 + b1 + b2 + b3
 }
 
 fn md5(data: String) -> String = {
@@ -415,7 +415,7 @@ fn md5(data: String) -> String = {
     let offset = i * 64
     var block: List[Int] = []
     for j in 0..64 {
-      block = block ++ [list.get_or(padded, offset + j, 0)]
+      block = block + [list.get_or(padded, offset + j, 0)]
     }
     hash = md5_process_block(block, hash)
   }

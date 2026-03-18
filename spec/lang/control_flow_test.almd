@@ -148,7 +148,7 @@ test "for in inclusive range" {
 test "for with var accumulation" {
   var result = ""
   for x in ["a", "b", "c"] {
-    result = result ++ x
+    result = result + x
   }
   assert_eq(result, "abc")
 }
@@ -164,7 +164,7 @@ test "for with enumerate" {
 test "for with zip" {
   var result: List[String] = []
   for (a, b) in list.zip(["x", "y"], [1, 2]) {
-    result = result ++ ["${a}${int.to_string(b)}"]
+    result = result + ["${a}${int.to_string(b)}"]
   }
   assert_eq(result, ["x1", "y2"])
 }
@@ -291,7 +291,7 @@ test "do guard ok with collatz sequence" {
 effect fn find_index_of(xs: List[String], target: String) -> Result[Int, String] = {
   var i = 0
   do {
-    guard i < list.len(xs) else err("not found: " ++ target)
+    guard i < list.len(xs) else err("not found: " + target)
     let v = match list.get(xs, i) {
       some(x) => x,
       none => "",
@@ -333,7 +333,7 @@ test "for guard else continue" {
   var result = ""
   for ch in ["a", " ", "b", " ", "c"] {
     guard ch != " " else continue
-    result = result ++ ch
+    result = result + ch
   }
   assert_eq(result, "abc")
 }
@@ -342,7 +342,7 @@ test "for guard else break" {
   var result = ""
   for ch in ["a", "b", "!", "c", "d"] {
     guard ch != "!" else break
-    result = result ++ ch
+    result = result + ch
   }
   assert_eq(result, "ab")
 }
@@ -369,8 +369,8 @@ test "if-else as expression in let" {
 test "match on tuple" {
   let p = (1, "a")
   let result = match p {
-    (1, s) => "one-" ++ s,
-    (2, s) => "two-" ++ s,
+    (1, s) => "one-" + s,
+    (2, s) => "two-" + s,
     _ => "other",
   }
   assert_eq(result, "one-a")
@@ -404,7 +404,7 @@ test "match with block body" {
     2 => "two",
     n => {
       let s = int.to_string(n)
-      "number: " ++ s
+      "number: " + s
     },
   }
   assert_eq(result, "number: 3")
@@ -432,7 +432,7 @@ test "for nested with accumulation" {
   var pairs: List[String] = []
   for i in 0..3 {
     for j in 0..3 {
-      pairs = pairs ++ ["${int.to_string(i)}${int.to_string(j)}"]
+      pairs = pairs + ["${int.to_string(i)}${int.to_string(j)}"]
     }
   }
   assert_eq(list.len(pairs), 9)
@@ -468,7 +468,7 @@ test "for guard continue skip odds" {
   var evens: List[Int] = []
   for x in 1..=10 {
     guard x % 2 == 0 else continue
-    evens = evens ++ [x]
+    evens = evens + [x]
   }
   assert_eq(evens, [2, 4, 6, 8, 10])
 }
@@ -477,7 +477,7 @@ test "for guard continue skip negatives" {
   var positives: List[Int] = []
   for x in [-3, -1, 0, 2, 5, -4, 7] {
     guard x > 0 else continue
-    positives = positives ++ [x]
+    positives = positives + [x]
   }
   assert_eq(positives, [2, 5, 7])
 }
@@ -516,7 +516,7 @@ test "if else with block bodies" {
 test "for in with list.enumerate" {
   var result: List[String] = []
   for (i, v) in list.enumerate(["a", "b", "c"]) {
-    result = result ++ ["${int.to_string(i)}:${v}"]
+    result = result + ["${int.to_string(i)}:${v}"]
   }
   assert_eq(result, ["0:a", "1:b", "2:c"])
 }
@@ -526,7 +526,7 @@ test "do guard building list" {
   var i = 0
   do {
     guard i < 5 else break
-    xs = xs ++ [i * i]
+    xs = xs + [i * i]
     i = i + 1
   }
   assert_eq(xs, [0, 1, 4, 9, 16])

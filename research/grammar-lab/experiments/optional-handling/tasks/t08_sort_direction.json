@@ -1,0 +1,6 @@
+{
+  "name": "sort-direction",
+  "instruction": "Rename `most_expensive_name` to `cheapest_name` and change it to return the name of the cheapest product instead of the most expensive. Remove the `list.reverse()` call so the sort is ascending (cheapest first). Do not change any other function.",
+  "layer3_hint": "Available: `list.sort_by(xs, (x) => key)` sorts ascending. `list.reverse(xs)` reverses a list. `list.first(xs)` returns `Option[A]`. `list.fold(xs, init, (acc, x) => val)` reduces a list.",
+  "test_file": "t08_sort_direction_test.almd"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "add-condition",
+  "instruction": "Modify `find_price` so that if the found product's price is greater than 500, return `0` instead (treat very expensive items as unavailable). Use `if p.price <= 500 then p.price else 0` to add the condition. Keep the not-found default (0) unchanged. Do not change any other function.",
+  "layer3_hint": "Available: `list.find(xs, (x) => bool)` returns `Option[A]`. Conditional: `if cond then a else b`. Comparison: `<=`, `>`. `list.filter(xs, (x) => bool)` filters elements.",
+  "test_file": "t09_add_condition_test.almd"
+}

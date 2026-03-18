@@ -1,0 +1,11 @@
+type Product = { name: String, price: Int, category: String }
+
+fn describe_product(products: List[Product], target: String) -> String =
+  list.find(products, (p) => p.name == target)
+    |> option.map((p) => p.name)
+    |> option.unwrap_or("N/A")
+
+fn count_in_category(products: List[Product], cat: String) -> Int =
+  products
+    |> list.filter((p) => p.category == cat)
+    |> list.len()

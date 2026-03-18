@@ -53,4 +53,9 @@ const __almd_list = {
   zip_with(a, b, f) { return a.slice(0, Math.min(a.length, b.length)).map((x, i) => f(x, b[i])); },
   sum_float(xs) { return xs.reduce((a, b) => a + b, 0); },
   product_float(xs) { return xs.reduce((a, b) => a * b, 1); },
+  take_end(xs, n) { return n >= xs.length ? xs.slice() : xs.slice(xs.length - n); },
+  drop_end(xs, n) { return n >= xs.length ? [] : xs.slice(0, xs.length - n); },
+  unique_by(xs, f) { const seen = new Set(); return xs.filter(x => { const k = f(x); if (seen.has(k)) return false; seen.add(k); return true; }); },
+  shuffle(xs) { const r = [...xs]; for (let i = r.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [r[i], r[j]] = [r[j], r[i]]; } return r; },
+  window(xs, n) { const r = []; for (let i = 0; i <= xs.length - n; i++) r.push(xs.slice(i, i + n)); return r; },
 };

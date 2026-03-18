@@ -1,0 +1,27 @@
+test "find_price under limit" {
+  let ps = [Product { name: "Book", price: 25, category: "edu" }]
+  assert_eq(find_price(ps, "Book"), 25)
+}
+
+test "find_price at limit" {
+  let ps = [Product { name: "Gadget", price: 500, category: "tech" }]
+  assert_eq(find_price(ps, "Gadget"), 500)
+}
+
+test "find_price over limit returns 0" {
+  let ps = [Product { name: "Laptop", price: 999, category: "tech" }]
+  assert_eq(find_price(ps, "Laptop"), 0)
+}
+
+test "find_price not found" {
+  let ps = [Product { name: "Book", price: 25, category: "edu" }]
+  assert_eq(find_price(ps, "Phone"), 0)
+}
+
+test "expensive_names unchanged" {
+  let ps = [
+    Product { name: "Book", price: 25, category: "edu" },
+    Product { name: "Laptop", price: 999, category: "tech" },
+  ]
+  assert_eq(expensive_names(ps), ["Laptop"])
+}

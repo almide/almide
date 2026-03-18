@@ -5,6 +5,7 @@ pub const RUST_RUNTIME_MODULES: &[(&str, &str)] = &[
     ("datetime", include_str!("../../runtime/rs/src/datetime.rs")),
     ("env", include_str!("../../runtime/rs/src/env.rs")),
     ("error", include_str!("../../runtime/rs/src/error.rs")),
+    ("fan", include_str!("../../runtime/rs/src/fan.rs")),
     ("float", include_str!("../../runtime/rs/src/float.rs")),
     ("fs", include_str!("../../runtime/rs/src/fs.rs")),
     ("http", include_str!("../../runtime/rs/src/http.rs")),

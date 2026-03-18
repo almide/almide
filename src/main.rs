@@ -1,5 +1,6 @@
 // Re-export library modules (shared with playground WASM crate)
 pub use almide::ast;
+pub use almide::codegen;
 pub use almide::diagnostic;
 pub use almide::emit_common;
 pub use almide::emit_ts;
@@ -13,7 +14,7 @@ pub use almide::types;
 // CLI-only modules
 mod check;
 mod cli;
-mod emit_rust;
+
 mod project;
 mod project_fetch;
 mod resolve;
@@ -177,10 +178,10 @@ fn compile(file: &str, no_check: bool) -> String {
 }
 
 fn try_compile(file: &str, no_check: bool) -> Result<String, String> {
-    try_compile_with_options(file, no_check, &emit_rust::EmitOptions::default(), None).map(|(code, _)| code)
+    try_compile_with_ir(file, no_check).map(|(code, _)| code)
 }
 
-fn try_compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::EmitOptions, build_target: Option<&str>) -> Result<(String, Option<almide::ir::IrProgram>), String> {
+fn try_compile_with_ir(file: &str, no_check: bool) -> Result<(String, Option<almide::ir::IrProgram>), String> {
     let (mut program, source_text, parse_errors) = parse_file(file);
     let has_parse_errors = !parse_errors.is_empty();
 
@@ -232,9 +233,6 @@ fn try_compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust
     if !no_check {
         let mut checker = check::Checker::new();
         checker.set_source(file, &source_text);
-        if let Some(t) = build_target {
-            checker.set_target(t);
-        }
         for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
             checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
         }
@@ -293,13 +291,14 @@ fn try_compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust
         almide::mono::monomorphize(ir);
     }
 
-    let ir = ir_program.as_ref().expect("IR required for codegen");
-    let code = emit_rust::emit_with_options(ir, emit_options, &import_aliases, &module_irs);
+    // Codegen v3: three-layer pipeline (Nanopass + Templates)
+    let ir = ir_program.as_mut().expect("IR required for codegen");
+    let code = codegen::emit(ir, codegen::pass::Target::Rust);
     Ok((code, ir_program))
 }
 
-fn compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust::EmitOptions, build_target: Option<&str>) -> (String, Option<almide::ir::IrProgram>) {
-    try_compile_with_options(file, no_check, emit_options, build_target)
+fn compile_with_ir(file: &str, no_check: bool) -> (String, Option<almide::ir::IrProgram>) {
+    try_compile_with_ir(file, no_check)
         .unwrap_or_else(|_| std::process::exit(1))
 }
 

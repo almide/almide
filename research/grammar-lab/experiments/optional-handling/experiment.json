@@ -1,0 +1,25 @@
+{
+  "name": "optional-handling",
+  "hypothesis": "Combinator-style Option handling (option.map/flat_map + unwrap_or) has higher modification survival rate than match-based handling",
+  "variants": [
+    { "name": "match", "dir": "variant-match", "transpile_regex": "" },
+    { "name": "combinator", "dir": "variant-combinator", "transpile_regex": "combinator-to-match" }
+  ],
+  "tasks": [
+    "t01_change_default",
+    "t02_add_format",
+    "t03_add_function",
+    "t04_apply_discount",
+    "t05_chain_fields",
+    "t06_change_predicate",
+    "t07_change_none_msg",
+    "t08_sort_direction",
+    "t09_add_condition",
+    "t10_add_step"
+  ],
+  "trials": 5,
+  "models": [
+    { "name": "claude-sonnet-4-6", "provider": "claude-code", "model_id": "claude-sonnet-4-6" },
+    { "name": "claude-haiku-4-5", "provider": "claude-code", "model_id": "claude-haiku-4-5" }
+  ]
+}

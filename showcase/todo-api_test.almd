@@ -1,0 +1,11 @@
+
+test "greeting format" {
+  let name = "alice";
+  let result = '{"greeting":"Hello, ' + name + '!"}';
+  assert(string.contains(result, "alice"))
+}
+
+test "not found response" {
+  let msg = '{"error":"not found"}';
+  assert(string.contains(msg, "not found"))
+}
