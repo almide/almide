@@ -45,8 +45,19 @@ impl<'a> RenderContext<'a> {
         "    ".repeat(self.indent)
     }
 
-    fn var_name(&self, id: VarId) -> &str {
-        &self.var_table.get(id).name
+    fn var_name(&self, id: VarId) -> String {
+        let name = &self.var_table.get(id).name;
+        let kw = ["default", "switch", "case", "class", "new", "delete",
+            "typeof", "void", "with", "yield", "export", "import",
+            "try", "catch", "finally", "throw", "eval", "arguments"];
+        if kw.contains(&name.as_str()) {
+            let mut b = HashMap::new();
+            b.insert("name", name.clone());
+            self.templates.render("keyword_escape", None, &[], &b)
+                .unwrap_or_else(|| name.clone())
+        } else {
+            name.clone()
+        }
     }
 
     fn bindings(&self) -> HashMap<&'static str, String> {
@@ -1191,8 +1202,19 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
 
     let params_str = func.params.iter()
         .map(|p| {
+            let mut param_name = p.name.clone();
+            // Escape target-specific keywords in param names
+            let kw_list = ["default", "switch", "case", "class", "new", "delete",
+                "typeof", "void", "with", "yield", "export", "import",
+                "try", "catch", "finally", "throw"];
+            if kw_list.contains(&param_name.as_str()) {
+                let mut kb = HashMap::new();
+                kb.insert("name", param_name.clone());
+                param_name = fn_ctx.templates.render("keyword_escape", None, &[], &kb)
+                    .unwrap_or(param_name);
+            }
             let mut b = HashMap::new();
-            b.insert("name", p.name.clone());
+            b.insert("name", param_name);
             b.insert("type", render_type(&fn_ctx, &p.ty));
             fn_ctx.templates.render("fn_param", None, &[], &b)
                 .unwrap_or_else(|| format!("{}: {}", p.name, render_type(&fn_ctx, &p.ty)))
@@ -1255,7 +1277,8 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         "type", "where", "as", "in", "ref", "self", "super", "crate", "const", "static",
         "unsafe", "async", "await", "dyn", "move", "true", "false",
         "default", "switch", "case", "class", "extends", "new", "delete", "typeof",
-        "void", "with", "yield", "export", "import", "try", "catch", "finally", "throw"];
+        "void", "with", "yield", "export", "import", "try", "catch", "finally", "throw",
+        "eval", "arguments"];
     if target_keywords.contains(&safe_name.as_str()) {
         let mut b = HashMap::new();
         b.insert("name", safe_name.clone());

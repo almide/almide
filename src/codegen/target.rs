@@ -17,6 +17,7 @@ use super::pass_builtin_lowering::BuiltinLoweringPass;
 use super::pass_match_lowering::MatchLoweringPass;
 use super::pass_result_erasure::ResultErasurePass;
 use super::pass_result_propagation::ResultPropagationPass;
+use super::pass_shadow_resolve::ShadowResolvePass;
 use super::pass_stdlib_lowering::StdlibLoweringPass;
 use super::template::TemplateSet;
 
@@ -60,6 +61,8 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(MatchLoweringPass)
             // Result/Option erasure: ok(x)→x, err(e)→throw, some(x)→x, none→null
             .add(ResultErasurePass)
+            // Shadow resolution: let x = 1; let x = 2 → let x = 1; x = 2
+            .add(ShadowResolvePass)
             // Shared passes
             .add(FanLoweringPass),
 
