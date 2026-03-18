@@ -3,7 +3,7 @@
 ## Active — 1.0 Critical Path
 
 ### Phase II: 安定性契約
-- [Stdlib Verb Reform](active/stdlib-verb-system.md) — 1.0 前最後の breaking change
+- ~~Stdlib Verb Reform~~ ✅ — Steps 1-7 全完了。32 関数追加、`from_entries` 削除
 
 ### Codegen
 - [Codegen v3: 三層アーキテクチャ](active/codegen-v3-architecture.md) — Phase 4 完了。is_rust()=0, cross-target 106/106。Phase 6 (Go target) が次
@@ -159,3 +159,4 @@
 - [Lockfile](done/lockfile.md) — almide.lock, git deps, almide add, recursive resolution
 - [Stability Contract](done/stability-contract.md) — edition, BREAKING_CHANGE_POLICY, FROZEN_API, REJECTED_PATTERNS, HIDDEN_OPERATIONS
 - [While Loop](done/while-loop.md)
+- [Stdlib Verb Reform](done/stdlib-verb-system.md) — Steps 1-7 全完了。option module, Map/String/List 拡張

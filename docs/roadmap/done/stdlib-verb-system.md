@@ -95,9 +95,11 @@ String と List のスライス操作を対称にする。
 | `list.take_end` | 🔲 |
 | `list.drop_end` | 🔲 |
 
-### 🔲 Step 7: 旧名削除
+### ✅ Step 7: 旧名削除 (完了)
 
-deprecation period を経て旧名を削除。Step 2 の `parse` → `from_string` が完了してから。
+- `map.from_entries` 削除 → `map.from_list` に統一 (spec準拠)
+- `parse` は維持 (spec原則3: `parse` = fallible解釈。`from_string` はスコープ外)
+- `option.to_list` 追加 (spec準拠)
 
 ---
 
