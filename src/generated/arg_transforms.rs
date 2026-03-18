@@ -8,6 +8,7 @@ pub enum ArgTransform {
     ToVec,      // (expr).to_vec() (owned copy)
     LambdaClone, // lambda with clone bindings
     WrapSome,   // Some(expr) (wrap in Option)
+    LambdaResultWrap, // lambda with Ok(body) wrapping
 }
 
 pub struct StdlibCallInfo {
@@ -117,7 +118,7 @@ pub fn lookup(module: &str, func: &str) -> Option<StdlibCallInfo> {
             ("http", "req_path") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, name: "almide_http_req_path", required: 1 }),
             ("http", "request") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef, ArgTransform::BorrowRef, ArgTransform::BorrowRef, ArgTransform::BorrowRef], effect: true, name: "almide_http_request", required: 4 }),
             ("http", "response") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::Direct], effect: false, name: "almide_rt_http_response", required: 2 }),
-            ("http", "serve") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::LambdaClone], effect: true, name: "almide_http_serve", required: 2 }),
+            ("http", "serve") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::LambdaResultWrap], effect: true, name: "almide_http_serve", required: 2 }),
             ("http", "set_cookie") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::BorrowRef, ArgTransform::BorrowRef], effect: false, name: "almide_http_set_cookie", required: 3 }),
             ("http", "set_header") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::BorrowRef, ArgTransform::BorrowRef], effect: false, name: "almide_http_set_header", required: 3 }),
             ("http", "status") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::Direct], effect: false, name: "almide_http_set_status", required: 2 }),

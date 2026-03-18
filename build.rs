@@ -471,7 +471,13 @@ fn main() {
                         .unwrap_or("");
 
                     let transform = if rust_tmpl.contains(&format!("{{{}.args}}", pname)) || rust_tmpl.contains(&format!("{{{}.body}}", pname)) {
-                        "ArgTransform::LambdaClone"
+                        // Check if lambda body is wrapped in Ok({ ... })
+                        let body_placeholder = format!("{{{}.body}}", pname);
+                        if rust_tmpl.contains("Ok(") && rust_tmpl.contains(&body_placeholder) {
+                            "ArgTransform::LambdaResultWrap"
+                        } else {
+                            "ArgTransform::LambdaClone"
+                        }
                     } else if rust_tmpl.contains(&format!("({{{}}}).to_vec()", pname)) {
                         "ArgTransform::ToVec"
                     } else if rust_tmpl.contains(&format!("Some({{{}}}", pname)) {
@@ -789,6 +795,7 @@ fn main() {
          \x20   ToVec,      // (expr).to_vec() (owned copy)\n\
          \x20   LambdaClone, // lambda with clone bindings\n\
          \x20   WrapSome,   // Some(expr) (wrap in Option)\n\
+         \x20   LambdaResultWrap, // lambda with Ok(body) wrapping\n\
          }}\n\n\
          pub struct StdlibCallInfo {{\n\
          \x20   pub args: &'static [ArgTransform],\n\

@@ -333,5 +333,64 @@ fn decorate_arg(arg: IrExpr, transform: ArgTransform) -> IrExpr {
                 }
             }
         }
+
+        ArgTransform::LambdaResultWrap => {
+            // Lambda with Ok(body) wrapping: callback body gets wrapped in ResultOk
+            match arg.kind {
+                IrExprKind::Lambda { params, body } => {
+                    // Clone bindings (same as LambdaClone)
+                    let clone_stmts: Vec<IrStmt> = params.iter()
+                        .filter(|(_, t)| !matches!(t, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit))
+                        .map(|(id, param_ty)| {
+                            IrStmt {
+                                kind: IrStmtKind::Bind {
+                                    var: *id,
+                                    mutability: Mutability::Let,
+                                    ty: param_ty.clone(),
+                                    value: IrExpr {
+                                        kind: IrExprKind::Clone {
+                                            expr: Box::new(IrExpr {
+                                                kind: IrExprKind::Var { id: *id },
+                                                ty: param_ty.clone(),
+                                                span: None,
+                                            }),
+                                        },
+                                        ty: param_ty.clone(),
+                                        span: None,
+                                    },
+                                },
+                                span: None,
+                            }
+                        }).collect();
+
+                    // Wrap body in ResultOk
+                    let body_ty = body.ty.clone();
+                    let ok_body = IrExpr {
+                        kind: IrExprKind::ResultOk { expr: body },
+                        ty: Ty::Result(Box::new(body_ty.clone()), Box::new(Ty::String)),
+                        span: None,
+                    };
+
+                    let wrapped_body = if clone_stmts.is_empty() {
+                        ok_body
+                    } else {
+                        IrExpr {
+                            kind: IrExprKind::Block {
+                                stmts: clone_stmts,
+                                expr: Some(Box::new(ok_body)),
+                            },
+                            ty: Ty::Result(Box::new(body_ty), Box::new(Ty::String)),
+                            span: None,
+                        }
+                    };
+
+                    IrExpr {
+                        kind: IrExprKind::Lambda { params, body: Box::new(wrapped_body) },
+                        ty, span,
+                    }
+                }
+                _ => arg,
+            }
+        }
     }
 }
