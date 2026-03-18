@@ -19,7 +19,7 @@ pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool) -> i32
     let bin_path = tmp_dir.join(&file_stem);
 
     // Detect test-only files (no main function)
-    let is_test_only = !rs_code.contains("\nfn almide_main(") && !rs_code.contains("\nfn main(");
+    let is_test_only = !rs_code.contains("\nfn almide_main(") && !rs_code.contains("\nfn main(") && !rs_code.contains("\npub fn main(");
 
     // Incremental: hash generated Rust code + test mode, skip rustc if unchanged
     let hash_input = format!("{}:test={}", &rs_code, is_test_only);
