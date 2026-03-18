@@ -115,11 +115,12 @@ flowchart TB
 - `almide emit --target rust/ts` で v3 出力
 - legacy codegen は `legacy-rust/legacy-ts` でアクセス可能
 
-### 🔲 Phase 6: 新ターゲット
+### Phase 6: 新ターゲット (post-1.0)
 
-1. Go target プロトタイプ: `go.toml` + Go-specific passes
+Go/Python targetは1.0後。アーキテクチャは準備完了（TOML + pass追加のみで対応可能）。
+
+1. Go target: `go.toml` + Go-specific passes
 2. Python target: `python.toml` + Python passes
-3. Runtime 統一: 同一定義から Rust/TS/Go runtime 生成
 
 ## 成功基準
 
@@ -133,4 +134,4 @@ flowchart TB
 - [x] walker `is_rust()` ゼロ
 - [x] walker `ctx.target ==` 分岐ゼロ
 - [x] 既存 codegen 完全置換
-- [ ] Go target プロトタイプ
+- Go target → [on-hold](../on-hold/go-target.md)
