@@ -81,9 +81,28 @@ fn rewrite_expr(expr: IrExpr, in_effect: bool) -> IrExpr {
         IrExprKind::Call { target, args, type_args } => {
             let args = args.into_iter().map(|a| rewrite_expr(a, in_effect)).collect();
             let target = match target {
-                CallTarget::Method { object, method } => CallTarget::Method {
-                    object: Box::new(rewrite_expr(*object, in_effect)), method,
-                },
+                CallTarget::Method { object, method } => {
+                    let object = Box::new(rewrite_expr(*object, in_effect));
+                    // UFCS: "module.func" method → convert to Module call and process
+                    if method.contains('.') && !method.ends_with(".encode") && !method.ends_with(".decode") {
+                        if let Some(dot_pos) = method.find('.') {
+                            let mod_name = &method[..dot_pos];
+                            let func_name = &method[dot_pos+1..];
+                            let mut call_args = vec![*object];
+                            call_args.extend(args);
+                            // Recursively process as Module call
+                            let module_call = IrExpr {
+                                kind: IrExprKind::Call {
+                                    target: CallTarget::Module { module: mod_name.to_string(), func: func_name.to_string() },
+                                    args: call_args, type_args,
+                                },
+                                ty: ty.clone(), span,
+                            };
+                            return rewrite_expr(module_call, in_effect);
+                        }
+                    }
+                    CallTarget::Method { object, method }
+                }
                 CallTarget::Computed { callee } => CallTarget::Computed {
                     callee: Box::new(rewrite_expr(*callee, in_effect)),
                 },

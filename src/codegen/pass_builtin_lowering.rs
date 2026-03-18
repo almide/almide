@@ -134,6 +134,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                 }
                 CallTarget::Method { object, method } => {
                     let object = Box::new(rewrite_expr(*object));
+
                     // encode/decode methods → Type_encode/Type_decode standalone calls
                     if method == "encode" || method == "decode"
                         || method.ends_with(".encode") || method.ends_with(".decode")
