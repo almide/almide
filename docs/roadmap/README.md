@@ -8,6 +8,9 @@
 ### 1.0 Showcase
 - ~~5 Showcases~~ ✅ — CLI/API/Data/DevTool/Script 全完成
 
+### Language
+- [Concat Operator Reform](active/concat-operator-reform.md) — `++` の扱い。維持 or List専用化
+
 ### Compiler
 - ~~Compiler Architecture Cleanup~~ ✅ — clone/deref IR化, HashMap→slice (emit_rust/ -2,340行削除)
 
