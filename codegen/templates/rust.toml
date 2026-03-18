@@ -35,7 +35,7 @@ template = "({left} {op} {right})"
 template = "{expr}.{field}"
 
 [index_access]
-template = "{expr}[{index}]"
+template = "{object}[{index} as usize]"
 
 [pipe_call]
 template = "{callee}({pipe_arg}, {args})"
@@ -289,3 +289,18 @@ template = "{inner}.await"
 
 [keyword_escape]
 template = "r#{name}"
+
+[map_literal]
+template = "HashMap::from([{entries}])"
+
+[map_entry]
+template = "({key}, {value})"
+
+[map_get]
+template = "{object}.get(&{key}).cloned()"
+
+[map_insert]
+template = "{target}.insert({key}, {value});"
+
+[index_assign]
+template = "{target}[{index} as usize] = {value};"

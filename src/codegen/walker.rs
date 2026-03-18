@@ -659,31 +659,34 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::IndexAccess { object, index } => {
             let obj_str = render_expr(ctx, object);
             let idx = render_expr(ctx, index);
-            if ctx.is_rust() && matches!(&object.ty, Ty::Map(_, _)) {
-                // Map access: m.get(&key).cloned() → Option<V>
-                format!("{}.get(&{}).cloned()", obj_str, idx)
+            let mut b = HashMap::new();
+            if matches!(&object.ty, Ty::Map(_, _)) {
+                b.insert("object", obj_str);
+                b.insert("key", idx);
+                ctx.templates.render("map_get", None, &[], &b)
+                    .unwrap_or_else(|| "map_get(...)".into())
             } else {
-                // List/other: index must be usize, not i64
-                let idx = if ctx.is_rust() && matches!(&index.ty, Ty::Int) {
-                    format!("{} as usize", idx)
-                } else { idx };
-                format!("{}[{}]", obj_str, idx)
+                b.insert("object", obj_str);
+                b.insert("index", idx);
+                ctx.templates.render("index_access", None, &[], &b)
+                    .unwrap_or_else(|| "idx[...]".into())
             }
         }
 
         // ── Map ──
         IrExprKind::MapLiteral { entries } => {
-            if ctx.is_rust() {
-                let parts: Vec<String> = entries.iter()
-                    .map(|(k, v)| format!("({}, {})", render_expr(ctx, k), render_expr(ctx, v)))
-                    .collect();
-                format!("HashMap::from([{}])", parts.join(", "))
-            } else {
-                let parts: Vec<String> = entries.iter()
-                    .map(|(k, v)| format!("[{}, {}]", render_expr(ctx, k), render_expr(ctx, v)))
-                    .collect();
-                format!("new Map([{}])", parts.join(", "))
-            }
+            let entry_template = ctx.templates.render("map_entry", None, &[], &HashMap::new())
+                .unwrap_or_else(|| "({key}, {value})".into());
+            let parts: Vec<String> = entries.iter()
+                .map(|(k, v)| {
+                    entry_template.replace("{key}", &render_expr(ctx, k))
+                        .replace("{value}", &render_expr(ctx, v))
+                })
+                .collect();
+            let mut b = HashMap::new();
+            b.insert("entries", parts.join(", "));
+            ctx.templates.render("map_literal", None, &[], &b)
+                .unwrap_or_else(|| format!("map([{}])", parts.join(", ")))
         }
         IrExprKind::EmptyMap => {
             template_or(ctx, "empty_map", &[], "HashMap::new()")
@@ -1068,15 +1071,20 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let target_str = ctx.var_name(*target).to_string();
             let idx_str = render_expr(ctx, index);
             let val_str = render_expr(ctx, value);
-            // Check if the target variable is a Map
             let target_ty = &ctx.var_table.get(*target).ty;
-            if ctx.is_rust() && matches!(target_ty, Ty::Map(_, _)) {
-                format!("{}.insert({}, {});", target_str, idx_str, val_str)
+            let mut b = HashMap::new();
+            if matches!(target_ty, Ty::Map(_, _)) {
+                b.insert("target", target_str);
+                b.insert("key", idx_str);
+                b.insert("value", val_str);
+                ctx.templates.render("map_insert", None, &[], &b)
+                    .unwrap_or_else(|| "map_set(...)".into())
             } else {
-                let idx_str = if ctx.is_rust() && matches!(&index.ty, Ty::Int) {
-                    format!("{} as usize", idx_str)
-                } else { idx_str };
-                format!("{}[{}] = {};", target_str, idx_str, val_str)
+                b.insert("target", target_str);
+                b.insert("index", idx_str);
+                b.insert("value", val_str);
+                ctx.templates.render("index_assign", None, &[], &b)
+                    .unwrap_or_else(|| "idx[...] = ...;".into())
             }
         }
         IrStmtKind::FieldAssign { target, field, value } => {
