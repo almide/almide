@@ -242,13 +242,21 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
 
         // ── Control flow ──
         IrExprKind::If { cond, then, else_ } => {
-            let mut b = HashMap::new();
-            b.insert("cond", render_expr(ctx, cond));
-            b.insert("then", render_expr(ctx, then));
-            b.insert("else", render_expr(ctx, else_));
-            ctx.templates.render("if_expr", None, &[], &b)
-                .unwrap_or_else(|| format!("if {} {{ {} }} else {{ {} }}",
-                    render_expr(ctx, cond), render_expr(ctx, then), render_expr(ctx, else_)))
+            // If branches contain break/continue, use statement form (not ternary/IIFE)
+            if contains_loop_control(then) || contains_loop_control(else_) {
+                let cond_str = render_expr(ctx, cond);
+                let then_str = render_expr(ctx, then);
+                let else_str = render_expr(ctx, else_);
+                format!("if ({}) {{ {} }} else {{ {} }}", cond_str, then_str, else_str)
+            } else {
+                let mut b = HashMap::new();
+                b.insert("cond", render_expr(ctx, cond));
+                b.insert("then", render_expr(ctx, then));
+                b.insert("else", render_expr(ctx, else_));
+                ctx.templates.render("if_expr", None, &[], &b)
+                    .unwrap_or_else(|| format!("if {} {{ {} }} else {{ {} }}",
+                        render_expr(ctx, cond), render_expr(ctx, then), render_expr(ctx, else_)))
+            }
         }
 
         IrExprKind::Match { subject, arms } => {
@@ -306,16 +314,32 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .collect();
             if let Some(e) = expr {
                 let expr_str = render_expr(ctx, e);
-                let mut b = HashMap::new();
-                b.insert("expr", expr_str);
-                // Template decides: Rust uses bare expr, TS uses "return expr"
-                parts.push(ctx.templates.render("block_result_expr", None, &[], &b)
-                    .unwrap_or_else(|| b.get("expr").unwrap().clone()));
+                // break/continue are statements — don't wrap in return
+                let is_control_flow = matches!(&e.kind, IrExprKind::Break | IrExprKind::Continue);
+                if is_control_flow {
+                    parts.push(expr_str);
+                } else {
+                    let mut b = HashMap::new();
+                    b.insert("expr", expr_str);
+                    parts.push(ctx.templates.render("block_result_expr", None, &[], &b)
+                        .unwrap_or_else(|| b.get("expr").unwrap().clone()));
+                }
             }
-            let mut b = HashMap::new();
-            b.insert("body", parts.join("\n"));
-            ctx.templates.render("block_expr", None, &[], &b)
-                .unwrap_or_else(|| format!("{{\n{}\n}}", parts.join("\n")))
+            let body = parts.join("\n");
+            // If block contains break/continue, don't wrap in IIFE — use bare block
+            let has_control = stmts.iter().any(|s| match &s.kind {
+                IrStmtKind::Expr { expr } => contains_loop_control(expr),
+                IrStmtKind::Bind { value, .. } => contains_loop_control(value),
+                _ => false,
+            }) || expr.as_ref().map_or(false, |e| contains_loop_control(e));
+            if has_control {
+                format!("{{\n{}\n}}", body)
+            } else {
+                let mut b = HashMap::new();
+                b.insert("body", body);
+                ctx.templates.render("block_expr", None, &[], &b)
+                    .unwrap_or_else(|| format!("{{\n{}\n}}", b.get("body").unwrap()))
+            }
         }
 
         // ── Loops ──
@@ -1247,19 +1271,29 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
                 .collect();
             if let Some(e) = expr {
                 let expr_str = render_expr(&fn_ctx, e);
-                let mut b = HashMap::new();
-                b.insert("expr", expr_str);
-                parts.push(fn_ctx.templates.render("block_result_expr", None, &[], &b)
-                    .unwrap_or_else(|| b.get("expr").unwrap().clone()));
+                let is_control = matches!(&e.kind, IrExprKind::Break | IrExprKind::Continue);
+                if is_control {
+                    parts.push(expr_str);
+                } else {
+                    let mut b = HashMap::new();
+                    b.insert("expr", expr_str);
+                    parts.push(fn_ctx.templates.render("block_result_expr", None, &[], &b)
+                        .unwrap_or_else(|| b.get("expr").unwrap().clone()));
+                }
             }
             parts.join("\n")
         }
         _ => {
             let body_raw = render_expr(&fn_ctx, &func.body);
-            let mut b = HashMap::new();
-            b.insert("expr", body_raw.clone());
-            fn_ctx.templates.render("block_result_expr", None, &[], &b)
-                .unwrap_or(body_raw)
+            let is_control = matches!(&func.body.kind, IrExprKind::Break | IrExprKind::Continue);
+            if is_control {
+                body_raw
+            } else {
+                let mut b = HashMap::new();
+                b.insert("expr", body_raw.clone());
+                fn_ctx.templates.render("block_result_expr", None, &[], &b)
+                    .unwrap_or(body_raw)
+            }
         }
     };
     let ret_str = render_type(ctx, &func.ret_ty);
@@ -1618,6 +1652,24 @@ pub fn ty_contains_name(ty: &Ty, name: &str) -> bool {
         Ty::Result(a, b) | Ty::Map(a, b) => ty_contains_name(a, name) || ty_contains_name(b, name),
         Ty::Tuple(elems) => elems.iter().any(|e| ty_contains_name(e, name)),
         Ty::Fn { params, ret } => params.iter().any(|p| ty_contains_name(p, name)) || ty_contains_name(ret, name),
+        _ => false,
+    }
+}
+
+/// Check if an expression tree contains break or continue (for IIFE avoidance)
+fn contains_loop_control(expr: &IrExpr) -> bool {
+    match &expr.kind {
+        IrExprKind::Break | IrExprKind::Continue => true,
+        IrExprKind::Block { stmts, expr } => {
+            stmts.iter().any(|s| match &s.kind {
+                IrStmtKind::Expr { expr } => contains_loop_control(expr),
+                IrStmtKind::Bind { value, .. } => contains_loop_control(value),
+                IrStmtKind::Assign { value, .. } => contains_loop_control(value),
+                _ => false,
+            }) || expr.as_ref().map_or(false, |e| contains_loop_control(e))
+        }
+        IrExprKind::If { cond, then, else_ } =>
+            contains_loop_control(cond) || contains_loop_control(then) || contains_loop_control(else_),
         _ => false,
     }
 }
