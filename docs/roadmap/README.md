@@ -6,8 +6,7 @@
 - [Stdlib Verb Reform](active/stdlib-verb-system.md) — 1.0 前最後の breaking change
 
 ### Codegen
-- [Codegen v3: 三層アーキテクチャ](active/codegen-v3-architecture.md) — Core IR → Semantic Rewrite (Plugin) → Template Renderer (TOML)。MLIR progressive lowering + Reflaxe plugin 方式
-- [AnonRecord Codegen](active/anon-record-codegen.md) — 空リストの型パラメータで `AnonRecord` が未定義になる。Grammar Lab survival rate に直接影響
+- [Codegen v3: 三層アーキテクチャ](active/codegen-v3-architecture.md) — Phase 4 完了。is_rust()=0, cross-target 106/106。Phase 6 (Go target) が次
 
 
 ### 全体
@@ -152,7 +151,9 @@
 - [Variant Record Fields](done/variant-record-fields.md)
 - [Borrow/Clone Gaps](done/borrow-clone-gaps.md) — Case 1-9 全 FIXED
 - [Quality Improvements](done/quality-improvements.md) — エラー行番号、heredoc 行追跡
-- [Cross-Target CI](done/cross-target-ci.md) — 90/91 (98.9%), GitHub Actions 自動化
+- [Cross-Target CI](done/cross-target-ci.md) — 106/106 (100%), is_rust()=0, codegen v3 完全移行
+- [AnonRecord Codegen](done/anon-record-codegen.md) — 空リスト型注釈 Vec::<T>::new() テンプレート化
+- [Codegen v3 Transform Classification](done/codegen-v3-transform-classification.md) — 42 is_rust() → 0, 全てテンプレート/pass/annotation化
 - [CLI-First](done/cli-first.md) — run, build, test, check, fmt, clean, init, add
 - [Error Codes + JSON](done/error-codes-json.md) — E001-E010, --json, --explain, test --json, check < 100ms
 - [Lockfile](done/lockfile.md) — almide.lock, git deps, almide add, recursive resolution
