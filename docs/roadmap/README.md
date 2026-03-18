@@ -5,12 +5,8 @@
 ### Phase II: 安定性契約
 - ~~Stdlib Verb Reform~~ ✅ — Steps 1-7 全完了。32 関数追加、`from_entries` 削除
 
-### 1.0 Showcase (5本)
-- [Showcase 1: almide-grep](active/showcase-1-cli-grep.md) — CLI tool (fan, regex, effect fn)
-- [Showcase 2: Todo API](active/showcase-2-http-api.md) — HTTP API (http.serve, json, codec)
-- [Showcase 3: CSV→JSON](active/showcase-3-data-pipeline.md) — Data processing (list, pipe, map)
-- [Showcase 4: md2html](active/showcase-4-devtool-md2html.md) — DevTool (variant型, match)
-- [Showcase 5: dotenv](active/showcase-5-script-dotenv.md) — Script (option, guard, fs)
+### 1.0 Showcase
+- ~~5 Showcases~~ ✅ — CLI/API/Data/DevTool/Script 全完成
 
 ### Compiler
 - ~~Compiler Architecture Cleanup~~ ✅ — clone/deref IR化, HashMap→slice (emit_rust/ -2,340行削除)
