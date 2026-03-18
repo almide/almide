@@ -68,3 +68,35 @@ mod tests {
     #[test] fn test_map() { assert_eq!(almide_rt_list_map(vec![1, 2, 3], |x| x * 2), vec![2, 4, 6]); }
     #[test] fn test_filter() { assert_eq!(almide_rt_list_filter(vec![1, 2, 3, 4], |x| x % 2 == 0), vec![2, 4]); }
 }
+
+pub fn almide_rt_list_take_end<T: Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
+    let start = if n as usize >= xs.len() { 0 } else { xs.len() - n as usize };
+    xs[start..].to_vec()
+}
+pub fn almide_rt_list_drop_end<T: Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
+    let end = if n as usize >= xs.len() { 0 } else { xs.len() - n as usize };
+    xs[..end].to_vec()
+}
+pub fn almide_rt_list_unique_by<T: Clone, K: Eq + std::hash::Hash>(xs: Vec<T>, f: impl Fn(T) -> K) -> Vec<T> {
+    let mut seen = std::collections::HashSet::new();
+    let mut result = Vec::new();
+    for x in xs { if seen.insert(f(x.clone())) { result.push(x); } }
+    result
+}
+pub fn almide_rt_list_shuffle<T>(mut xs: Vec<T>) -> Vec<T> {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos() as u64;
+    for i in (1..xs.len()).rev() {
+        let mut h = DefaultHasher::new();
+        seed.hash(&mut h);
+        i.hash(&mut h);
+        let j = (h.finish() as usize) % (i + 1);
+        xs.swap(i, j);
+        seed = seed.wrapping_add(1);
+    }
+    xs
+}
+pub fn almide_rt_list_window<T: Clone>(xs: Vec<T>, n: i64) -> Vec<Vec<T>> {
+    xs.windows(n as usize).map(|w| w.to_vec()).collect()
+}

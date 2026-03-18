@@ -28,6 +28,8 @@ const MOD_MAP_TS: &str = include_str!("../../runtime/ts/map.ts");
 const MOD_MAP_JS: &str = include_str!("../../runtime/js/map.js");
 const MOD_MATH_TS: &str = include_str!("../../runtime/ts/math.ts");
 const MOD_MATH_JS: &str = include_str!("../../runtime/js/math.js");
+const MOD_OPTION_TS: &str = include_str!("../../runtime/ts/option.ts");
+const MOD_OPTION_JS: &str = include_str!("../../runtime/js/option.js");
 const MOD_PATH_TS: &str = include_str!("../../runtime/ts/path.ts");
 const MOD_PATH_JS: &str = include_str!("../../runtime/js/path.js");
 const MOD_PROCESS_TS: &str = include_str!("../../runtime/ts/process.ts");
@@ -76,6 +78,7 @@ pub static ALL_MODULES: &[RuntimeModule] = &[
     RuntimeModule { name: "log", ts_source: MOD_LOG_TS, js_source: MOD_LOG_JS },
     RuntimeModule { name: "map", ts_source: MOD_MAP_TS, js_source: MOD_MAP_JS },
     RuntimeModule { name: "math", ts_source: MOD_MATH_TS, js_source: MOD_MATH_JS },
+    RuntimeModule { name: "option", ts_source: MOD_OPTION_TS, js_source: MOD_OPTION_JS },
     RuntimeModule { name: "path", ts_source: MOD_PATH_TS, js_source: MOD_PATH_JS },
     RuntimeModule { name: "process", ts_source: MOD_PROCESS_TS, js_source: MOD_PROCESS_JS },
     RuntimeModule { name: "random", ts_source: MOD_RANDOM_TS, js_source: MOD_RANDOM_JS },

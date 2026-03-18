@@ -15,4 +15,11 @@ const __almd_map = {
   from_entries<K, V>(entries: [K, V][]): Map<K, V> { const r = new Map<K, V>(); for (const [k, v] of entries) r.set(k, v); return r; },
   merge<K, V>(a: Map<K, V>, b: Map<K, V>): Map<K, V> { const r = new Map(a); b.forEach((v, k) => r.set(k, v)); return r; },
   is_empty<K, V>(m: Map<K, V>): boolean { return m.size === 0; },
+  fold<K, V, A>(m: Map<K, V>, init: A, f: (acc: A, k: K, v: V) => A): A { let a = init; m.forEach((v, k) => { a = f(a, k, v); }); return a; },
+  any<K, V>(m: Map<K, V>, f: (k: K, v: V) => boolean): boolean { for (const [k, v] of m) { if (f(k, v)) return true; } return false; },
+  all<K, V>(m: Map<K, V>, f: (k: K, v: V) => boolean): boolean { for (const [k, v] of m) { if (!f(k, v)) return false; } return true; },
+  count<K, V>(m: Map<K, V>, f: (k: K, v: V) => boolean): number { let n = 0; m.forEach((v, k) => { if (f(k, v)) n++; }); return n; },
+  each<K, V>(m: Map<K, V>, f: (k: K, v: V) => void): void { m.forEach((v, k) => f(k, v)); },
+  find<K, V>(m: Map<K, V>, f: (k: K, v: V) => boolean): [K, V] | null { for (const [k, v] of m) { if (f(k, v)) return [k, v]; } return null; },
+  update<K, V>(m: Map<K, V>, key: K, f: (v: V) => V): Map<K, V> { const r = new Map(m); if (r.has(key)) r.set(key, f(r.get(key)!)); return r; },
 };

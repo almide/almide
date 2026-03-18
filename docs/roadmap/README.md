@@ -3,10 +3,10 @@
 ## Active — 1.0 Critical Path
 
 ### Phase II: 安定性契約
-- [Stdlib Verb Reform](active/stdlib-verb-system.md) — 1.0 前最後の breaking change
+- ~~Stdlib Verb Reform~~ ✅ — Steps 1-7 全完了。32 関数追加、`from_entries` 削除
 
 ### Codegen
-- [Codegen v3: 三層アーキテクチャ](active/codegen-v3-architecture.md) — Phase 4 完了。is_rust()=0, cross-target 106/106。Phase 6 (Go target) が次
+- ~~Codegen v3~~ ✅ — Phase 1-5 全完了。is_rust()=0, cross-target 106/106。Go target は [on-hold](on-hold/go-target.md)
 
 
 ### 全体
@@ -25,6 +25,7 @@
 - [LSP Server](on-hold/lsp.md)
 - [Multi-Target Strategy](on-hold/multi-target-strategy.md) — Go, Python 優先
 - [New Codegen Targets](on-hold/new-codegen-targets.md) — Go, Python
+- [Go Target](on-hold/go-target.md) — TOML + 2-3 pass。v3 アーキテクチャ準備完了
 - [Package Registry](on-hold/package-registry.md)
 - [Polish (Immediate)](on-hold/polish-immediate.md)
 - [Production Ready (old)](on-hold/production-ready.md)
@@ -153,9 +154,11 @@
 - [Quality Improvements](done/quality-improvements.md) — エラー行番号、heredoc 行追跡
 - [Cross-Target CI](done/cross-target-ci.md) — 106/106 (100%), is_rust()=0, codegen v3 完全移行
 - [AnonRecord Codegen](done/anon-record-codegen.md) — 空リスト型注釈 Vec::<T>::new() テンプレート化
+- [Codegen v3 Architecture](done/codegen-v3-architecture.md) — Phase 1-5 完了。is_rust()=0, 106/106 cross-target, 9 nanopass
 - [Codegen v3 Transform Classification](done/codegen-v3-transform-classification.md) — 42 is_rust() → 0, 全てテンプレート/pass/annotation化
 - [CLI-First](done/cli-first.md) — run, build, test, check, fmt, clean, init, add
 - [Error Codes + JSON](done/error-codes-json.md) — E001-E010, --json, --explain, test --json, check < 100ms
 - [Lockfile](done/lockfile.md) — almide.lock, git deps, almide add, recursive resolution
 - [Stability Contract](done/stability-contract.md) — edition, BREAKING_CHANGE_POLICY, FROZEN_API, REJECTED_PATTERNS, HIDDEN_OPERATIONS
 - [While Loop](done/while-loop.md)
+- [Stdlib Verb Reform](done/stdlib-verb-system.md) — Steps 1-7 全完了。option module, Map/String/List 拡張

@@ -106,28 +106,16 @@ return = "Bool"
 rust = "almide_rt_map_is_empty(&{m})"
 ts = "__almd_map.is_empty({m})"
 
-[from_entries]
-description = "Create a map from a list of (key, value) pairs."
-example = 'map.from_entries([("a", 1), ("b", 2)])'
-type_params = ["K", "V"]
-params = [{ name = "entries", type = "List[(K, V)]" }]
-return = "Map[K, V]"
-rust = "almide_rt_map_from_entries({entries})"
-ts = "__almd_map.from_entries({entries})"
-
-# ── Closure-taking functions ──
+# ── Construction ──
 
 [from_list]
-description = "Create a map by applying a function to each element that returns a (key, value) pair."
-example = 'map.from_list(["a", "b"], fn(s) => (s, string.len(s)))'
-type_params = ["A", "K", "V"]
-params = [
-    { name = "xs", type = "List[A]" },
-    { name = "f", type = "Fn[A] -> (K, V)" },
-]
+description = "Create a map from a list of (key, value) pairs."
+example = 'map.from_list([("a", 1), ("b", 2)])'
+type_params = ["K", "V"]
+params = [{ name = "pairs", type = "List[(K, V)]" }]
 return = "Map[K, V]"
-rust = "almide_rt_map_from_list(({xs}).to_vec(), |{f.args}| {{ {f.clone_bindings}{f.body} }})"
-ts = "__almd_map.from_list({xs}, {f.args} => {f.body})"
+rust = "almide_rt_map_from_entries({pairs})"
+ts = "__almd_map.from_entries({pairs})"
 
 [map]
 description = "Transform all values in the map using a function, keeping keys unchanged."
@@ -152,3 +140,89 @@ params = [
 return = "Map[K, V]"
 rust = "almide_rt_map_filter(&{m}, |{f.args}| {{ {f.clone_bindings}{f.body} }})"
 ts = "__almd_map.filter({m}, ({f.args}) => {f.body})"
+
+[fold]
+description = "Accumulate over all entries with an initial value."
+example = 'map.fold(scores, 0, (acc, k, v) => acc + v)'
+type_params = ["K", "V", "A"]
+params = [
+    { name = "m", type = "Map[K, V]" },
+    { name = "init", type = "A" },
+    { name = "f", type = "Fn[A, K, V] -> A" },
+]
+return = "A"
+rust = "almide_rt_map_fold(&{m}, {init}, |{f.args}| {{ {f.clone_bindings}{f.body} }})"
+ts = "__almd_map.fold({m}, {init}, ({f.args}) => {f.body})"
+
+[any]
+description = "Check if any entry satisfies the predicate."
+example = 'map.any(scores, (k, v) => v >= 90)'
+type_params = ["K", "V"]
+params = [
+    { name = "m", type = "Map[K, V]" },
+    { name = "f", type = "Fn[K, V] -> Bool" },
+]
+return = "Bool"
+rust = "almide_rt_map_any(&{m}, |{f.args}| {{ {f.clone_bindings}{f.body} }})"
+ts = "__almd_map.any({m}, ({f.args}) => {f.body})"
+
+[all]
+description = "Check if all entries satisfy the predicate."
+example = 'map.all(scores, (k, v) => v > 0)'
+type_params = ["K", "V"]
+params = [
+    { name = "m", type = "Map[K, V]" },
+    { name = "f", type = "Fn[K, V] -> Bool" },
+]
+return = "Bool"
+rust = "almide_rt_map_all(&{m}, |{f.args}| {{ {f.clone_bindings}{f.body} }})"
+ts = "__almd_map.all({m}, ({f.args}) => {f.body})"
+
+[count]
+description = "Count entries that satisfy the predicate."
+example = 'map.count(scores, (k, v) => v >= 80)'
+type_params = ["K", "V"]
+params = [
+    { name = "m", type = "Map[K, V]" },
+    { name = "f", type = "Fn[K, V] -> Bool" },
+]
+return = "Int"
+rust = "almide_rt_map_count(&{m}, |{f.args}| {{ {f.clone_bindings}{f.body} }})"
+ts = "__almd_map.count({m}, ({f.args}) => {f.body})"
+
+[each]
+description = "Execute a side effect for each entry."
+example = 'map.each(scores, (k, v) => println(k ++ ": " ++ int.to_string(v)))'
+type_params = ["K", "V"]
+params = [
+    { name = "m", type = "Map[K, V]" },
+    { name = "f", type = "Fn[K, V] -> Unit" },
+]
+return = "Unit"
+rust = "almide_rt_map_each(&{m}, |{f.args}| {{ {f.clone_bindings}{f.body} }})"
+ts = "__almd_map.each({m}, ({f.args}) => {f.body})"
+
+[find]
+description = "Find the first entry matching the predicate. Returns Option[(K, V)]."
+example = 'map.find(scores, (k, v) => v >= 90)'
+type_params = ["K", "V"]
+params = [
+    { name = "m", type = "Map[K, V]" },
+    { name = "f", type = "Fn[K, V] -> Bool" },
+]
+return = "Option[(K, V)]"
+rust = "almide_rt_map_find(&{m}, |{f.args}| {{ {f.clone_bindings}{f.body} }})"
+ts = "__almd_map.find({m}, ({f.args}) => {f.body})"
+
+[update]
+description = "Update the value at a key using a function. Key must exist."
+example = 'map.update(scores, "alice", (v) => v + 10)'
+type_params = ["K", "V"]
+params = [
+    { name = "m", type = "Map[K, V]" },
+    { name = "key", type = "K" },
+    { name = "f", type = "Fn[V] -> V" },
+]
+return = "Map[K, V]"
+rust = "almide_rt_map_update({m}, {key}, |{f.args}| {{ {f.clone_bindings}{f.body} }})"
+ts = "__almd_map.update({m}, {key}, ({f.args}) => {f.body})"
