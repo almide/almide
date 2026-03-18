@@ -25,6 +25,7 @@ pub mod pass_box_deref;
 pub mod pass_builtin_lowering;
 pub mod pass_clone;
 pub mod pass_match_lowering;
+pub mod pass_result_erasure;
 pub mod pass_result_propagation;
 pub mod pass_stdlib_lowering;
 pub mod template;

@@ -15,6 +15,7 @@ use super::pass::{
 };
 use super::pass_builtin_lowering::BuiltinLoweringPass;
 use super::pass_match_lowering::MatchLoweringPass;
+use super::pass_result_erasure::ResultErasurePass;
 use super::pass_result_propagation::ResultPropagationPass;
 use super::pass_stdlib_lowering::StdlibLoweringPass;
 use super::template::TemplateSet;
@@ -57,8 +58,8 @@ fn build_pipeline(target: Target) -> Pipeline {
         Target::TypeScript => Pipeline::new()
             // Semantic lowering
             .add(MatchLoweringPass)
-            // Local passes
-            .add(OptionErasurePass)
+            // Result/Option erasure: ok(x)→x, err(e)→throw, some(x)→x, none→null
+            .add(ResultErasurePass)
             // Shared passes
             .add(FanLoweringPass),
 
