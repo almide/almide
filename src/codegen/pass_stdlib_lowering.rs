@@ -18,28 +18,27 @@ impl NanoPass for StdlibLoweringPass {
     fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Rust]) }
     fn run(&self, program: &mut IrProgram, _target: Target) {
         for func in &mut program.functions {
-            func.body = rewrite_expr(func.body.clone(), func.is_effect);
+            func.body = rewrite_expr(func.body.clone());
         }
         for tl in &mut program.top_lets {
-            tl.value = rewrite_expr(tl.value.clone(), false);
+            tl.value = rewrite_expr(tl.value.clone());
         }
     }
 }
 
-fn rewrite_expr(expr: IrExpr, in_effect: bool) -> IrExpr {
+fn rewrite_expr(expr: IrExpr) -> IrExpr {
     let ty = expr.ty.clone();
     let span = expr.span;
 
     let kind = match expr.kind {
         IrExprKind::Call { target: CallTarget::Module { module, func }, args, type_args } => {
             // Recurse into args first (fan auto-try is handled by FanLoweringPass)
-            let args: Vec<IrExpr> = args.into_iter().map(|a| rewrite_expr(a, in_effect)).collect();
+            let args: Vec<IrExpr> = args.into_iter().map(|a| rewrite_expr(a)).collect();
 
             // Look up per-function transform table
             let info = arg_transforms::lookup(&module, &func);
             let rt_name = info.as_ref().map(|i| i.name.to_string())
                 .unwrap_or_else(|| format!("almide_rt_{}_{}", module, func));
-            let is_effect_call = info.as_ref().map(|i| i.effect).unwrap_or(false);
 
             // Fill missing optional args with OptionNone
             let total_params = info.as_ref().map(|i| i.args.len()).unwrap_or(args.len());
@@ -62,7 +61,7 @@ fn rewrite_expr(expr: IrExpr, in_effect: bool) -> IrExpr {
             }).collect();
 
             // Build the Named call
-            let mut call = IrExpr {
+            let call = IrExpr {
                 kind: IrExprKind::Call {
                     target: CallTarget::Named { name: rt_name },
                     args: decorated_args,
@@ -72,28 +71,16 @@ fn rewrite_expr(expr: IrExpr, in_effect: bool) -> IrExpr {
                 span,
             };
 
-            // Effect fn: auto-? for Result-returning effect calls
-            if in_effect && is_effect_call && matches!(&ty, Ty::Result(_, _)) {
-                let inner_ty = match &ty {
-                    Ty::Result(ok, _) => ok.as_ref().clone(),
-                    _ => ty.clone(),
-                };
-                call = IrExpr {
-                    kind: IrExprKind::Try { expr: Box::new(call) },
-                    ty: inner_ty,
-                    span,
-                };
-            }
-
+            // auto-? is handled by ResultPropagationPass (runs after this pass)
             return call;
         }
 
         // Recurse into all sub-expressions (same as before)
         IrExprKind::Call { target, args, type_args } => {
-            let args = args.into_iter().map(|a| rewrite_expr(a, in_effect)).collect();
+            let args = args.into_iter().map(|a| rewrite_expr(a)).collect();
             let target = match target {
                 CallTarget::Method { object, method } => {
-                    let object = Box::new(rewrite_expr(*object, in_effect));
+                    let object = Box::new(rewrite_expr(*object));
                     // UFCS: "module.func" method → convert to Module call and process
                     // Only if the module.func exists in stdlib (arg_transforms table)
                     if method.contains('.') && !method.ends_with(".encode") && !method.ends_with(".decode") {
@@ -118,98 +105,98 @@ fn rewrite_expr(expr: IrExpr, in_effect: bool) -> IrExpr {
                                 },
                                 ty: ty.clone(), span,
                             };
-                            return rewrite_expr(module_call, in_effect);
+                            return rewrite_expr(module_call);
                         }
                     }
                     CallTarget::Method { object, method }
                 }
                 CallTarget::Computed { callee } => CallTarget::Computed {
-                    callee: Box::new(rewrite_expr(*callee, in_effect)),
+                    callee: Box::new(rewrite_expr(*callee)),
                 },
                 other => other,
             };
             IrExprKind::Call { target, args, type_args }
         }
         IrExprKind::If { cond, then, else_ } => IrExprKind::If {
-            cond: Box::new(rewrite_expr(*cond, in_effect)),
-            then: Box::new(rewrite_expr(*then, in_effect)),
-            else_: Box::new(rewrite_expr(*else_, in_effect)),
+            cond: Box::new(rewrite_expr(*cond)),
+            then: Box::new(rewrite_expr(*then)),
+            else_: Box::new(rewrite_expr(*else_)),
         },
         IrExprKind::Block { stmts, expr } => IrExprKind::Block {
-            stmts: rewrite_stmts(stmts, in_effect),
-            expr: expr.map(|e| Box::new(rewrite_expr(*e, in_effect))),
+            stmts: rewrite_stmts(stmts),
+            expr: expr.map(|e| Box::new(rewrite_expr(*e))),
         },
         IrExprKind::DoBlock { stmts, expr } => IrExprKind::DoBlock {
-            stmts: rewrite_stmts(stmts, in_effect),
-            expr: expr.map(|e| Box::new(rewrite_expr(*e, in_effect))),
+            stmts: rewrite_stmts(stmts),
+            expr: expr.map(|e| Box::new(rewrite_expr(*e))),
         },
         IrExprKind::Match { subject, arms } => IrExprKind::Match {
-            subject: Box::new(rewrite_expr(*subject, in_effect)),
+            subject: Box::new(rewrite_expr(*subject)),
             arms: arms.into_iter().map(|arm| IrMatchArm {
                 pattern: arm.pattern,
-                guard: arm.guard.map(|g| rewrite_expr(g, in_effect)),
-                body: rewrite_expr(arm.body, in_effect),
+                guard: arm.guard.map(|g| rewrite_expr(g)),
+                body: rewrite_expr(arm.body),
             }).collect(),
         },
         IrExprKind::BinOp { op, left, right } => IrExprKind::BinOp {
-            op, left: Box::new(rewrite_expr(*left, in_effect)), right: Box::new(rewrite_expr(*right, in_effect)),
+            op, left: Box::new(rewrite_expr(*left)), right: Box::new(rewrite_expr(*right)),
         },
         IrExprKind::UnOp { op, operand } => IrExprKind::UnOp {
-            op, operand: Box::new(rewrite_expr(*operand, in_effect)),
+            op, operand: Box::new(rewrite_expr(*operand)),
         },
         IrExprKind::Lambda { params, body } => IrExprKind::Lambda {
-            params, body: Box::new(rewrite_expr(*body, in_effect)),
+            params, body: Box::new(rewrite_expr(*body)),
         },
         IrExprKind::List { elements } => IrExprKind::List {
-            elements: elements.into_iter().map(|e| rewrite_expr(e, in_effect)).collect(),
+            elements: elements.into_iter().map(|e| rewrite_expr(e)).collect(),
         },
         IrExprKind::Tuple { elements } => IrExprKind::Tuple {
-            elements: elements.into_iter().map(|e| rewrite_expr(e, in_effect)).collect(),
+            elements: elements.into_iter().map(|e| rewrite_expr(e)).collect(),
         },
         IrExprKind::Record { name, fields } => IrExprKind::Record {
-            name, fields: fields.into_iter().map(|(k, v)| (k, rewrite_expr(v, in_effect))).collect(),
+            name, fields: fields.into_iter().map(|(k, v)| (k, rewrite_expr(v))).collect(),
         },
         IrExprKind::SpreadRecord { base, fields } => IrExprKind::SpreadRecord {
-            base: Box::new(rewrite_expr(*base, in_effect)),
-            fields: fields.into_iter().map(|(k, v)| (k, rewrite_expr(v, in_effect))).collect(),
+            base: Box::new(rewrite_expr(*base)),
+            fields: fields.into_iter().map(|(k, v)| (k, rewrite_expr(v))).collect(),
         },
-        IrExprKind::OptionSome { expr } => IrExprKind::OptionSome { expr: Box::new(rewrite_expr(*expr, in_effect)) },
-        IrExprKind::ResultOk { expr } => IrExprKind::ResultOk { expr: Box::new(rewrite_expr(*expr, in_effect)) },
-        IrExprKind::ResultErr { expr } => IrExprKind::ResultErr { expr: Box::new(rewrite_expr(*expr, in_effect)) },
+        IrExprKind::OptionSome { expr } => IrExprKind::OptionSome { expr: Box::new(rewrite_expr(*expr)) },
+        IrExprKind::ResultOk { expr } => IrExprKind::ResultOk { expr: Box::new(rewrite_expr(*expr)) },
+        IrExprKind::ResultErr { expr } => IrExprKind::ResultErr { expr: Box::new(rewrite_expr(*expr)) },
         IrExprKind::Member { object, field } => IrExprKind::Member {
-            object: Box::new(rewrite_expr(*object, in_effect)), field,
+            object: Box::new(rewrite_expr(*object)), field,
         },
         IrExprKind::ForIn { var, var_tuple, iterable, body } => IrExprKind::ForIn {
             var, var_tuple,
-            iterable: Box::new(rewrite_expr(*iterable, in_effect)),
-            body: rewrite_stmts(body, in_effect),
+            iterable: Box::new(rewrite_expr(*iterable)),
+            body: rewrite_stmts(body),
         },
         IrExprKind::While { cond, body } => IrExprKind::While {
-            cond: Box::new(rewrite_expr(*cond, in_effect)),
-            body: rewrite_stmts(body, in_effect),
+            cond: Box::new(rewrite_expr(*cond)),
+            body: rewrite_stmts(body),
         },
         IrExprKind::StringInterp { parts } => IrExprKind::StringInterp {
             parts: parts.into_iter().map(|p| match p {
-                IrStringPart::Expr { expr } => IrStringPart::Expr { expr: rewrite_expr(expr, in_effect) },
+                IrStringPart::Expr { expr } => IrStringPart::Expr { expr: rewrite_expr(expr) },
                 other => other,
             }).collect(),
         },
-        IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(rewrite_expr(*expr, in_effect)) },
+        IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(rewrite_expr(*expr)) },
         IrExprKind::MapLiteral { entries } => IrExprKind::MapLiteral {
-            entries: entries.into_iter().map(|(k, v)| (rewrite_expr(k, in_effect), rewrite_expr(v, in_effect))).collect(),
+            entries: entries.into_iter().map(|(k, v)| (rewrite_expr(k), rewrite_expr(v))).collect(),
         },
         IrExprKind::Range { start, end, inclusive } => IrExprKind::Range {
-            start: Box::new(rewrite_expr(*start, in_effect)),
-            end: Box::new(rewrite_expr(*end, in_effect)),
+            start: Box::new(rewrite_expr(*start)),
+            end: Box::new(rewrite_expr(*end)),
             inclusive,
         },
         IrExprKind::IndexAccess { object, index } => IrExprKind::IndexAccess {
-            object: Box::new(rewrite_expr(*object, in_effect)),
-            index: Box::new(rewrite_expr(*index, in_effect)),
+            object: Box::new(rewrite_expr(*object)),
+            index: Box::new(rewrite_expr(*index)),
         },
         IrExprKind::Fan { exprs } => IrExprKind::Fan {
             // FanLoweringPass will strip auto-try from these later
-            exprs: exprs.into_iter().map(|e| rewrite_expr(e, in_effect)).collect(),
+            exprs: exprs.into_iter().map(|e| rewrite_expr(e)).collect(),
         },
         other => other,
     };
@@ -217,19 +204,19 @@ fn rewrite_expr(expr: IrExpr, in_effect: bool) -> IrExpr {
     IrExpr { kind, ty, span }
 }
 
-fn rewrite_stmts(stmts: Vec<IrStmt>, in_effect: bool) -> Vec<IrStmt> {
+fn rewrite_stmts(stmts: Vec<IrStmt>) -> Vec<IrStmt> {
     stmts.into_iter().map(|s| {
         let kind = match s.kind {
             IrStmtKind::Bind { var, mutability, ty, value } => IrStmtKind::Bind {
-                var, mutability, ty, value: rewrite_expr(value, in_effect),
+                var, mutability, ty, value: rewrite_expr(value),
             },
-            IrStmtKind::Assign { var, value } => IrStmtKind::Assign { var, value: rewrite_expr(value, in_effect) },
-            IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: rewrite_expr(expr, in_effect) },
+            IrStmtKind::Assign { var, value } => IrStmtKind::Assign { var, value: rewrite_expr(value) },
+            IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: rewrite_expr(expr) },
             IrStmtKind::Guard { cond, else_ } => IrStmtKind::Guard {
-                cond: rewrite_expr(cond, in_effect), else_: rewrite_expr(else_, in_effect),
+                cond: rewrite_expr(cond), else_: rewrite_expr(else_),
             },
             IrStmtKind::BindDestructure { pattern, value } => IrStmtKind::BindDestructure {
-                pattern, value: rewrite_expr(value, in_effect),
+                pattern, value: rewrite_expr(value),
             },
             other => other,
         };
