@@ -506,11 +506,35 @@ impl Checker {
                     self.env.top_lets.insert(name.clone(), resolved);
                 }
             }
+            ast::Decl::Type { ty, .. } => {
+                // Infer types for default value expressions in variant record fields
+                infer_default_exprs(self, ty);
+            }
             _ => {}
         }
     }
 
     // ── Exhaustiveness ──
+
+}
+
+/// Infer types for default value expressions in type declarations.
+/// Prevents ICE "missing type for expr" during lowering.
+fn infer_default_exprs(checker: &mut Checker, ty: &mut ast::TypeExpr) {
+    if let ast::TypeExpr::Variant { cases } = ty {
+        for case in cases {
+            if let ast::VariantCase::Record { fields, .. } = case {
+                for field in fields {
+                    if let Some(ref mut default_expr) = field.default {
+                        checker.infer_expr(default_expr);
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl Checker {
 
     pub(crate) fn check_match_exhaustiveness(&mut self, subject_ty: &Ty, arms: &[ast::MatchArm]) {
         let resolved = self.env.resolve_named(subject_ty);
