@@ -53,4 +53,9 @@ const __almd_list = {
   zip_with<A, B, C>(a: A[], b: B[], f: (x: A, y: B) => C): C[] { return a.slice(0, Math.min(a.length, b.length)).map((x, i) => f(x, b[i])); },
   sum_float(xs: number[]): number { return xs.reduce((a, b) => a + b, 0); },
   product_float(xs: number[]): number { return xs.reduce((a, b) => a * b, 1); },
+  take_end<T>(xs: T[], n: number): T[] { return n >= xs.length ? xs.slice() : xs.slice(xs.length - n); },
+  drop_end<T>(xs: T[], n: number): T[] { return n >= xs.length ? [] : xs.slice(0, xs.length - n); },
+  unique_by<T, K>(xs: T[], f: (x: T) => K): T[] { const seen = new Set<K>(); return xs.filter(x => { const k = f(x); if (seen.has(k)) return false; seen.add(k); return true; }); },
+  shuffle<T>(xs: T[]): T[] { const r = [...xs]; for (let i = r.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [r[i], r[j]] = [r[j], r[i]]; } return r; },
+  window<T>(xs: T[], n: number): T[][] { const r: T[][] = []; for (let i = 0; i <= xs.length - n; i++) r.push(xs.slice(i, i + n)); return r; },
 };

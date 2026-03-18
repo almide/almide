@@ -530,3 +530,51 @@ return = "B"
 rust = "almide_rt_list_fold(({xs}).to_vec(), {init}, |{f.args}| {{ {f.clone_bindings}{f.body} }})"
 rust_effect = "almide_rt_list_fold_effect(({xs}).to_vec(), {init}, |{f.args}| -> Result<_, String> {{ Ok({{ {f.clone_bindings}{f.body} }}) }})?"
 ts = "__almd_list.fold({xs}, {init}, ({f.args}) => {f.body})"
+
+[take_end]
+description = "Take the last N elements."
+example = "list.take_end([1, 2, 3, 4], 2) // => [3, 4]"
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }, { name = "n", type = "Int" }]
+return = "List[A]"
+rust = "almide_rt_list_take_end(({xs}).to_vec(), {n})"
+ts = "__almd_list.take_end({xs}, {n})"
+
+[drop_end]
+description = "Drop the last N elements."
+example = "list.drop_end([1, 2, 3, 4], 2) // => [1, 2]"
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }, { name = "n", type = "Int" }]
+return = "List[A]"
+rust = "almide_rt_list_drop_end(({xs}).to_vec(), {n})"
+ts = "__almd_list.drop_end({xs}, {n})"
+
+[unique_by]
+description = "Remove duplicates by key function, preserving first occurrence."
+example = 'list.unique_by(["aa", "ab", "ba"], (s) => string.get(s, 0))'
+type_params = ["A", "K"]
+params = [
+    { name = "xs", type = "List[A]" },
+    { name = "f", type = "Fn[A] -> K" },
+]
+return = "List[A]"
+rust = "almide_rt_list_unique_by(({xs}).to_vec(), |{f.args}| {{ {f.clone_bindings}{f.body} }})"
+ts = "__almd_list.unique_by({xs}, ({f.args}) => {f.body})"
+
+[shuffle]
+description = "Return a randomly shuffled copy of the list."
+example = "list.shuffle([1, 2, 3, 4])"
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }]
+return = "List[A]"
+rust = "almide_rt_list_shuffle(({xs}).to_vec())"
+ts = "__almd_list.shuffle({xs})"
+
+[window]
+description = "Sliding window of size N over the list."
+example = "list.window([1, 2, 3, 4], 2) // => [[1, 2], [2, 3], [3, 4]]"
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }, { name = "n", type = "Int" }]
+return = "List[List[A]]"
+rust = "almide_rt_list_window(({xs}).to_vec(), {n})"
+ts = "__almd_list.window({xs}, {n})"

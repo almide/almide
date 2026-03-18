@@ -184,6 +184,7 @@ pub fn gen_generated_call(
             },
             ("list", "dedup") => format!("almide_rt_list_dedup(&{})", args_str[0]),
             ("list", "drop") => format!("almide_rt_list_drop(({}).to_vec(), {})", args_str[0], args_str[1]),
+            ("list", "drop_end") => format!("almide_rt_list_drop_end(({}).to_vec(), {})", args_str[0], args_str[1]),
             ("list", "drop_while") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
                 format!("almide_rt_list_drop_while(({}).to_vec(), |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
@@ -256,6 +257,7 @@ pub fn gen_generated_call(
                 format!("almide_rt_list_scan(({}).to_vec(), {}, |{}| {{{{ {}{} }}}})", args_str[0], args_str[1], __cl_f_names.join(", "), __cl_f_names.iter().map(|n| format!("let {} = {}.clone(); ", n, n)).collect::<Vec<_>>().join(""), __cl_f_body)
             },
             ("list", "set") => format!("almide_rt_list_set(&{}, {}, {})", args_str[0], args_str[1], args_str[2]),
+            ("list", "shuffle") => format!("almide_rt_list_shuffle(({}).to_vec())", args_str[0]),
             ("list", "slice") => format!("almide_rt_list_slice(({}).to_vec(), {}, {})", args_str[0], args_str[1], args_str[2]),
             ("list", "sort") => format!("almide_rt_list_sort(&{})", args_str[0]),
             ("list", "sort_by") => {
@@ -265,15 +267,21 @@ pub fn gen_generated_call(
             ("list", "sum") => format!("almide_rt_list_sum(&{})", args_str[0]),
             ("list", "swap") => format!("almide_rt_list_swap(&{}, {}, {})", args_str[0], args_str[1], args_str[2]),
             ("list", "take") => format!("almide_rt_list_take(({}).to_vec(), {})", args_str[0], args_str[1]),
+            ("list", "take_end") => format!("almide_rt_list_take_end(({}).to_vec(), {})", args_str[0], args_str[1]),
             ("list", "take_while") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
                 format!("almide_rt_list_take_while(({}).to_vec(), |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
             },
             ("list", "unique") => format!("almide_rt_list_unique(&{})", args_str[0]),
+            ("list", "unique_by") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
+                format!("almide_rt_list_unique_by(({}).to_vec(), |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
+            },
             ("list", "update") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(2, 1);
                 format!("almide_rt_list_update(({}).to_vec(), {}, |{}| {{{{ {}{} }}}})", args_str[0], args_str[1], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
             },
+            ("list", "window") => format!("almide_rt_list_window(({}).to_vec(), {})", args_str[0], args_str[1]),
             ("list", "windows") => format!("almide_rt_list_windows(&{}, {})", args_str[0], args_str[1]),
             ("list", "zip") => format!("almide_rt_list_zip(({}).to_vec(), ({}).to_vec())", args_str[0], args_str[1]),
             ("list", "zip_with") => {
