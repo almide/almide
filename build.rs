@@ -370,6 +370,40 @@ fn main() {
     let mut module_fn_map: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut arg_transform_arms = String::new();
 
+    // Scan runtime .rs files for actual function signatures
+    // This determines whether a String param in TOML is passed as String (owned) or &str (borrowed)
+    let mut runtime_param_types: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    let runtime_dir = Path::new("runtime/rs/src");
+    if runtime_dir.exists() {
+        for entry in fs::read_dir(runtime_dir).unwrap().filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if path.extension().map_or(true, |e| e != "rs") { continue; }
+            let content = fs::read_to_string(&path).unwrap_or_default();
+            for line in content.lines() {
+                // Match: pub fn almide_rt_xxx(param1: Type1, param2: Type2) -> RetType {
+                if let Some(start) = line.find("pub fn almide_rt_") {
+                    let rest = &line[start..];
+                    if let (Some(paren_open), Some(paren_close)) = (rest.find('('), rest.find(')')) {
+                        let fn_name_end = paren_open;
+                        let fn_name = &rest[7..fn_name_end]; // skip "pub fn "
+                        let params_str = &rest[paren_open+1..paren_close];
+                        let param_types: Vec<String> = params_str.split(',')
+                            .map(|p| {
+                                let p = p.trim();
+                                if let Some(colon_pos) = p.find(':') {
+                                    p[colon_pos+1..].trim().to_string()
+                                } else {
+                                    "unknown".to_string()
+                                }
+                            })
+                            .collect();
+                        runtime_param_types.insert(fn_name.to_string(), param_types);
+                    }
+                }
+            }
+        }
+    }
+
     let mut entries: Vec<_> = fs::read_dir(defs_dir)
         .unwrap()
         .filter_map(|e| e.ok())
@@ -428,15 +462,25 @@ fn main() {
                 let mut transforms = Vec::new();
                 for (i, param) in def.params.iter().enumerate() {
                     let pname = &param.name;
-                    let ptype = &param.ty;
+                    let _ptype = &param.ty;
+                    // Check actual runtime function signature for this param
+                    let rt_fn_name = format!("almide_rt_{}_{}", module_name, fn_name);
+                    let runtime_ty = runtime_param_types.get(&rt_fn_name)
+                        .and_then(|types| types.get(i))
+                        .map(|s| s.as_str())
+                        .unwrap_or("");
+
                     let transform = if rust_tmpl.contains(&format!("{{{}.args}}", pname)) || rust_tmpl.contains(&format!("{{{}.body}}", pname)) {
                         "ArgTransform::LambdaClone"
                     } else if rust_tmpl.contains(&format!("({{{}}}).to_vec()", pname)) {
                         "ArgTransform::ToVec"
                     } else if rust_tmpl.contains(&format!("&*{{{}}}", pname)) {
-                        // BorrowStr: but if param type is "String" (owned), the runtime
-                        // expects String, not &str. Use Direct to avoid type mismatch.
-                        if ptype == "String" { "ArgTransform::Direct" } else { "ArgTransform::BorrowStr" }
+                        // BorrowStr: check runtime signature — if it takes String (owned), use Direct
+                        if runtime_ty == "String" {
+                            "ArgTransform::Direct"
+                        } else {
+                            "ArgTransform::BorrowStr"
+                        }
                     } else if rust_tmpl.contains(&format!("&{{{}}}", pname)) {
                         "ArgTransform::BorrowRef"
                     } else {

@@ -860,6 +860,8 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
         IrStmtKind::Bind { var, ty, value, mutability } => {
             let mut b = HashMap::new();
             b.insert("name", ctx.var_name(*var).to_string());
+            // Rust: Fn types can't be used in let bindings as `impl Fn` — use type inference
+            let ty = if ctx.is_rust() && matches!(ty, Ty::Fn { .. }) { &Ty::Unknown } else { ty };
             b.insert("type", render_type(ctx, ty));
             b.insert("value", render_expr(ctx, value));
             let construct = match mutability {
