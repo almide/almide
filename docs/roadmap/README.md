@@ -14,10 +14,6 @@
 
 | 項目 | 説明 | Grand Plan |
 |---|---|---|
-| [LSP Server](on-hold/lsp.md) | diagnostics → hover → go-to-def | Phase 2 |
-| [Incremental Compilation](on-hold/incremental-compilation.md) | rustc skip when unchanged | Phase 2 |
-| [Package Registry](on-hold/package-registry.md) | 公開パッケージ配布 | Phase 2 |
-| [Go Target](on-hold/go-target.md) | TOML + 2-3 pass | Phase 2 |
 | [Streaming](on-hold/streaming.md) | WebSocket, SSE | Phase 2 |
 | [Fan Map Limit](on-hold/fan-map-limit.md) | `fan.map(xs, limit: n, f)` | Phase 2 |
 | [Server Async](on-hold/server-async.md) | http.serve effect 化 | Phase 2 |
@@ -26,6 +22,10 @@
 
 | 項目 | 説明 | Grand Plan |
 |---|---|---|
+| [LSP Server](on-hold/lsp.md) | diagnostics → hover → go-to-def | Phase 3 |
+| [Incremental Compilation](on-hold/incremental-compilation.md) | rustc skip when unchanged | Phase 3 |
+| [Package Registry](on-hold/package-registry.md) | 公開パッケージ配布 | Phase 3 |
+| [Go Target](on-hold/go-target.md) | TOML + 2-3 pass | Phase 3 |
 | [Platform Architecture](on-hold/platform-architecture.md) | 5層 app runtime ビジョン | Phase 3-5 |
 | [Security Model](on-hold/security-model.md) | Layer 2-5, capability | Phase 3 |
 | [Secure by Design](on-hold/secure-by-design.md) | | Phase 3 |
