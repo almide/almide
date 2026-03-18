@@ -10,11 +10,8 @@
 
 - [PRODUCTION_READY.md](PRODUCTION_READY.md) — チェックリスト (残: examples/cookbook, LLM計測)
 
-## On Hold — Phase 2: Production Language (1.x)
-
 | 項目 | 説明 | Grand Plan |
 |---|---|---|
-| [Streaming](on-hold/streaming.md) | WebSocket, SSE | Phase 2 |
 
 ## On Hold — Phase 3: Runtime Foundation (2.x)
 
