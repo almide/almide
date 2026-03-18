@@ -1,0 +1,32 @@
+fn parse_dotenv(content: String) -> Map[String, String] = {
+  let lines = string.lines(content)
+    |> list.filter((line) => {
+      let trimmed = string.trim(line)
+      string.len(trimmed) > 0 and not string.starts_with(trimmed, "#")
+    })
+  var m: Map[String, String] = map.new()
+  for line in lines {
+    let parts = string.split(line, "=")
+    let key = list.get(parts, 0) |> option.unwrap_or("") |> string.trim()
+    let val = list.get(parts, 1) |> option.unwrap_or("") |> string.trim()
+    guard string.len(key) > 0 else continue
+    m = map.set(m, key, val)
+  }
+  m
+}
+
+test "parse_dotenv basic" {
+  let content = "DB_HOST=localhost\nDB_PORT=5432\n# comment\nAPI_KEY=secret"
+  let m = parse_dotenv(content)
+  assert_eq(map.get(m, "DB_HOST"), some("localhost"))
+  assert_eq(map.get(m, "DB_PORT"), some("5432"))
+  assert_eq(map.get(m, "API_KEY"), some("secret"))
+  assert_eq(map.len(m), 3)
+}
+
+test "parse_dotenv skips comments and empty lines" {
+  let content = "# header\n\nKEY=val\n  # indented comment\n"
+  let m = parse_dotenv(content)
+  assert_eq(map.len(m), 1)
+  assert_eq(map.get(m, "KEY"), some("val"))
+}

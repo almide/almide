@@ -1,0 +1,34 @@
+fn convert_line(line: String) -> String = {
+  if string.starts_with(line, "### ") then
+    "<h3>" ++ string.drop(line, 4) ++ "</h3>"
+  else if string.starts_with(line, "## ") then
+    "<h2>" ++ string.drop(line, 3) ++ "</h2>"
+  else if string.starts_with(line, "# ") then
+    "<h1>" ++ string.drop(line, 2) ++ "</h1>"
+  else if string.starts_with(line, "- ") then
+    "<li>" ++ string.drop(line, 2) ++ "</li>"
+  else if string.len(string.trim(line)) == 0 then
+    "<br>"
+  else
+    "<p>" ++ line ++ "</p>"
+}
+
+test "heading 1" {
+  assert_eq(convert_line("# Hello"), "<h1>Hello</h1>")
+}
+
+test "heading 2" {
+  assert_eq(convert_line("## World"), "<h2>World</h2>")
+}
+
+test "list item" {
+  assert_eq(convert_line("- item"), "<li>item</li>")
+}
+
+test "paragraph" {
+  assert_eq(convert_line("some text"), "<p>some text</p>")
+}
+
+test "empty line" {
+  assert_eq(convert_line(""), "<br>")
+}

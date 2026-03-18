@@ -1,0 +1,60 @@
+// todo-api — REST API server
+//
+// Usage: almide run showcase/todo-api.almd
+// Then:  curl localhost:3000/todos
+//        curl -X POST -d '{"title":"buy milk"}' localhost:3000/todos
+//        curl -X DELETE localhost:3000/todos/1
+
+type Todo = { id: Int, title: String, done: Bool }
+
+fn format_todo(t: Todo) -> String =
+  "{\"id\":" ++ int.to_string(t.id) ++ ",\"title\":\"" ++ t.title ++ "\",\"done\":" ++ if t.done then "true" else "false" ++ "}"
+
+fn format_todos(ts: List[Todo]) -> String =
+  "[" ++ string.join(list.map(ts, (t) => format_todo(t)), ",") ++ "]"
+
+effect fn main() -> Result[Unit, String] = {
+  var todos: List[Todo] = []
+  var next_id = 1
+
+  println("Todo API listening on http://localhost:3000")
+
+  http.serve(3000, (req) => {
+    let method = http.req_method(req)
+    let path = http.req_path(req)
+
+    if method == "GET" and path == "/todos" then
+      http.json(200, format_todos(todos))
+    else if method == "POST" and path == "/todos" then {
+      let body = http.req_body(req)
+      let title = match json.parse(body) {
+        ok(v) => option.unwrap_or(json.get_string(v, "title"), "untitled")
+        _ => "untitled"
+      }
+      let item = Todo { id: next_id, title: title, done: false }
+      todos = todos ++ [item]
+      next_id = next_id + 1
+      http.json(201, format_todo(item))
+    } else if method == "DELETE" and string.starts_with(path, "/todos/") then {
+      let id_str = string.drop(path, 7)
+      let id = match int.parse(id_str) { ok(n) => n, _ => 0 }
+      todos = list.filter(todos, (t) => t.id != id)
+      http.json(200, "{\"deleted\":" ++ int.to_string(id) ++ "}")
+    } else
+      http.not_found("not found")
+  })
+}
+
+test "format_todo" {
+  let t = Todo { id: 1, title: "test", done: false }
+  let j = format_todo(t)
+  assert(string.contains(j, "\"id\":1"))
+  assert(string.contains(j, "\"title\":\"test\""))
+}
+
+test "format_todos" {
+  let ts = [Todo { id: 1, title: "a", done: false }, Todo { id: 2, title: "b", done: true }]
+  let j = format_todos(ts)
+  assert(string.starts_with(j, "["))
+  assert(string.ends_with(j, "]"))
+}

@@ -1,0 +1,48 @@
+// md2html — Markdown to HTML converter (subset)
+//
+// Usage: almide run showcase/md2html.almd -- README.md
+
+effect fn main() -> Result[Unit, String] = {
+  let args = env.args()
+  guard list.len(args) >= 1 else err("usage: md2html <file.md>")
+  let path = list.get(args, 0) |> option.unwrap_or("")
+
+  let content = fs.read_text(path)
+  let html = md_to_html(content)
+  println(html)
+  ok(())
+}
+
+fn md_to_html(input: String) -> String = {
+  let lines = string.lines(input)
+  let body = list.map(lines, (line) => convert_line(line))
+    |> string.join("\n")
+  "<!DOCTYPE html>\n<html><body>\n" ++ body ++ "\n</body></html>"
+}
+
+fn convert_line(line: String) -> String = {
+  if string.starts_with(line, "### ") then
+    "<h3>" ++ inline(string.drop(line, 4)) ++ "</h3>"
+  else if string.starts_with(line, "## ") then
+    "<h2>" ++ inline(string.drop(line, 3)) ++ "</h2>"
+  else if string.starts_with(line, "# ") then
+    "<h1>" ++ inline(string.drop(line, 2)) ++ "</h1>"
+  else if string.starts_with(line, "- ") then
+    "<li>" ++ inline(string.drop(line, 2)) ++ "</li>"
+  else if string.starts_with(line, "> ") then
+    "<blockquote>" ++ inline(string.drop(line, 2)) ++ "</blockquote>"
+  else if string.len(string.trim(line)) == 0 then
+    "<br>"
+  else
+    "<p>" ++ inline(line) ++ "</p>"
+}
+
+fn inline(text: String) -> String =
+  text
+    |> replace_bold()
+    |> replace_italic()
+    |> replace_code()
+
+fn replace_bold(s: String) -> String = string.replace(s, "**", "<b>")
+fn replace_italic(s: String) -> String = string.replace(s, "*", "<i>")
+fn replace_code(s: String) -> String = string.replace(s, "`", "<code>")
