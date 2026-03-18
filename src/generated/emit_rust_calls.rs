@@ -379,7 +379,7 @@ pub fn gen_generated_call(
             ("string", "contains") => format!("almide_rt_string_contains(&*{}, &*{})", args_str[0], args_str[1]),
             ("string", "count") => format!("almide_rt_string_count(&*{}, &*{})", args_str[0], args_str[1]),
             ("string", "ends_with") => format!("almide_rt_string_ends_with(&*{}, &*{})", args_str[0], args_str[1]),
-            ("string", "from_bytes") => format!("almide_rt_string_from_bytes(&{{ let __bytes: Vec<i64> = {}; __bytes }})", args_str[0]),
+            ("string", "from_bytes") => format!("almide_rt_string_from_bytes(&{})", args_str[0]),
             ("string", "from_codepoint") => format!("almide_rt_string_from_codepoint({})", args_str[0]),
             ("string", "get") => format!("almide_rt_string_char_at(&*{}, {})", args_str[0], args_str[1]),
             ("string", "index_of") => format!("almide_rt_string_index_of(&*{}, &*{})", args_str[0], args_str[1]),

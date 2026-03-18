@@ -474,6 +474,8 @@ fn main() {
                         "ArgTransform::LambdaClone"
                     } else if rust_tmpl.contains(&format!("({{{}}}).to_vec()", pname)) {
                         "ArgTransform::ToVec"
+                    } else if rust_tmpl.contains(&format!("Some({{{}}}", pname)) {
+                        "ArgTransform::WrapSome"
                     } else if rust_tmpl.contains(&format!("&*{{{}}}", pname)) {
                         // BorrowStr: check runtime signature — if it takes String (owned), use Direct
                         if runtime_ty == "String" {
@@ -784,6 +786,7 @@ fn main() {
          \x20   BorrowRef,  // &expr (borrow as reference)\n\
          \x20   ToVec,      // (expr).to_vec() (owned copy)\n\
          \x20   LambdaClone, // lambda with clone bindings\n\
+         \x20   WrapSome,   // Some(expr) (wrap in Option)\n\
          }}\n\n\
          pub struct StdlibCallInfo {{\n\
          \x20   pub args: &'static [ArgTransform],\n\

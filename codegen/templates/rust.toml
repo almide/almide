@@ -243,13 +243,13 @@ template = "move |{params}| {body}"
 template = "type {name} = {type};"
 
 [struct_decl]
-template = "#[derive(Clone, Debug)]\nstruct {name} {{ {fields} }}"
+template = "#[derive(Clone, Debug, PartialEq, PartialOrd)]\nstruct {name} {{ {fields} }}"
 
 [struct_field]
 template = "{name}: {type},"
 
 [enum_decl]
-template = "#[derive(Clone, Debug)]\nenum {name} {{ {variants} }}"
+template = "#[derive(Clone, Debug, PartialEq, PartialOrd)]\nenum {name} {{ {variants} }}"
 
 [enum_variant]
 template = "{name}({fields})"

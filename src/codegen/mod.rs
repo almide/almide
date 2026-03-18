@@ -31,7 +31,7 @@ pub mod template;
 pub mod target;
 pub mod walker;
 
-use crate::ir::IrProgram;
+use crate::ir::{IrProgram, IrTypeDeclKind, IrVariantKind};
 use pass::Target;
 
 /// Strip `mod tests { ... }` blocks from runtime source (avoid conflicts with user tests)
@@ -74,7 +74,60 @@ pub fn emit(program: &mut IrProgram, target: Target) -> String {
         ann.clone_vars = pass_clone::collect_clone_vars(program);
         let (deref, recursive) = pass_box_deref::collect_deref_vars(program);
         ann.deref_vars = deref;
-        ann.recursive_enums = recursive;
+        ann.recursive_enums = recursive.clone();
+        // Build boxed_fields: for each recursive enum, find which variant fields reference the enum
+        for td in &program.type_decls {
+            if recursive.contains(&td.name) {
+                if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
+                    for c in cases {
+                        if let IrVariantKind::Record { fields } = &c.kind {
+                            for f in fields {
+                                if walker::ty_contains_name(&f.ty, &td.name) {
+                                    ann.boxed_fields.insert((c.name.clone(), f.name.clone()));
+                                }
+                            }
+                        }
+                        if let IrVariantKind::Tuple { fields } = &c.kind {
+                            for (i, t) in fields.iter().enumerate() {
+                                if walker::ty_contains_name(t, &td.name) {
+                                    ann.boxed_fields.insert((c.name.clone(), format!("{}", i)));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Build default_fields: for each variant/record constructor with default field values
+        for td in &program.type_decls {
+            match &td.kind {
+                IrTypeDeclKind::Variant { cases, .. } => {
+                    for c in cases {
+                        if let IrVariantKind::Record { fields } = &c.kind {
+                            for f in fields {
+                                if let Some(ref def) = f.default {
+                                    ann.default_fields.insert(
+                                        (c.name.clone(), f.name.clone()),
+                                        def.clone(),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                IrTypeDeclKind::Record { fields } => {
+                    for f in fields {
+                        if let Some(ref def) = f.default {
+                            ann.default_fields.insert(
+                                (td.name.clone(), f.name.clone()),
+                                def.clone(),
+                            );
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     // Layer 3: Template-driven rendering (walker reads annotations, never checks types)

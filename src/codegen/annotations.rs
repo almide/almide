@@ -29,4 +29,11 @@ pub struct CodegenAnnotations {
 
     /// Set of enum names that have recursive variants (for Box detection)
     pub recursive_enums: HashSet<String>,
+
+    /// (constructor_name, field_name) pairs where the field needs Box::new() wrapping
+    /// because the field's declared type recursively references the parent enum
+    pub boxed_fields: HashSet<(String, String)>,
+
+    /// Default field values for constructors/records: (ctor_name, field_name) → default IR expr
+    pub default_fields: HashMap<(String, String), crate::ir::IrExpr>,
 }

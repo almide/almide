@@ -309,5 +309,14 @@ fn decorate_arg(arg: IrExpr, transform: ArgTransform) -> IrExpr {
                 _ => arg,
             }
         }
+
+        ArgTransform::WrapSome => {
+            // Some(expr)
+            IrExpr {
+                kind: IrExprKind::OptionSome { expr: Box::new(arg) },
+                ty: Ty::Option(Box::new(ty)),
+                span,
+            }
+        }
     }
 }

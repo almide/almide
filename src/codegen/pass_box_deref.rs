@@ -163,14 +163,10 @@ fn collect_deref_from_pattern(pattern: &IrPattern, enum_name: &str, td: Option<&
                                     if ty_contains_name(&case_field.ty, enum_name) {
                                         if let Some(ref p) = field_pat.pattern {
                                             collect_bind_vars(p, deref_vars);
-                                        } else {
-                                            // Shorthand: field name = var name, lookup VarId
-                                            if let Some(var_ids) = name_to_var.get(&field_pat.name) {
-                                                for vid in var_ids {
-                                                    deref_vars.insert(*vid);
-                                                }
-                                            }
                                         }
+                                        // Shorthand: skip global name lookup — too imprecise.
+                                        // The walker handles Box deref for shorthand record patterns
+                                        // by inserting *deref at the pattern site if needed.
                                     }
                                 }
                             }

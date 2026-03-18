@@ -157,7 +157,7 @@ description = "Create a string from a list of UTF-8 byte values."
 example = 'string.from_bytes([72, 105]) // => "Hi"'
 params = [{ name = "bytes", type = "List[Int]" }]
 return = "String"
-rust = "almide_rt_string_from_bytes(&{ let __bytes: Vec<i64> = {bytes}; __bytes })"
+rust = "almide_rt_string_from_bytes(&{bytes})"
 ts = "__almd_string.from_bytes({bytes})"
 
 [is_digit]
