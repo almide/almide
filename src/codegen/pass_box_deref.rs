@@ -163,10 +163,16 @@ fn collect_deref_from_pattern(pattern: &IrPattern, enum_name: &str, td: Option<&
                                     if ty_contains_name(&case_field.ty, enum_name) {
                                         if let Some(ref p) = field_pat.pattern {
                                             collect_bind_vars(p, deref_vars);
+                                        } else {
+                                            // Shorthand: lookup VarId by name, but only if unambiguous
+                                            if let Some(var_ids) = name_to_var.get(&field_pat.name) {
+                                                if var_ids.len() == 1 {
+                                                    deref_vars.insert(var_ids[0]);
+                                                }
+                                                // If ambiguous (multiple vars with same name), skip —
+                                                // we can't tell which one is the pattern binding
+                                            }
                                         }
-                                        // Shorthand: skip global name lookup — too imprecise.
-                                        // The walker handles Box deref for shorthand record patterns
-                                        // by inserting *deref at the pattern site if needed.
                                     }
                                 }
                             }
