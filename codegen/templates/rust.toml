@@ -356,6 +356,12 @@ template = "{enum_name}::{ctor_name}({args})"
 [ctor_qualify]
 template = "{enum_name}::{ctor_name}"
 
+[destructure_pattern]
+template = "{name} {{ {fields} }}"
+
+[bind_destructure]
+template = "let {pattern} = {value};"
+
 [block_expr]
 template = "{{\n{body}\n}}"
 

@@ -273,6 +273,12 @@ template = "{ctor_name}({args})"
 [ctor_qualify]
 template = "{ctor_name}"
 
+[destructure_pattern]
+template = "{{ {fields} }}"
+
+[bind_destructure]
+template = "const {pattern} = {value};"
+
 [block_expr]
 template = "(() => {{\n{body}\n}})()"
 

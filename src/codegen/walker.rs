@@ -1098,7 +1098,11 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                         _ => "_".into(),
                     };
                     let qualified = if let Some(enum_name) = ctx.ann.ctor_to_enum.get(&type_name) {
-                        format!("{}::{}", enum_name, type_name)
+                        let mut b = HashMap::new();
+                        b.insert("enum_name", enum_name.clone());
+                        b.insert("ctor_name", type_name.clone());
+                        ctx.templates.render("ctor_qualify", None, &[], &b)
+                            .unwrap_or_else(|| format!("{}::{}", enum_name, type_name))
                     } else {
                         type_name
                     };
@@ -1108,21 +1112,26 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                             None => f.name.clone(),
                         })
                         .collect::<Vec<_>>().join(", ");
+                    let mut b = HashMap::new();
+                    b.insert("name", qualified.clone());
+                    b.insert("fields", fields_str.clone());
                     if *rest {
-                        let mut b = HashMap::new();
-                        b.insert("name", qualified.clone());
-                        b.insert("fields", fields_str.clone());
                         let construct = if fields_str.is_empty() { "record_pattern_rest_empty" } else { "record_pattern_rest" };
                         ctx.templates.render(construct, None, &[], &b)
                             .unwrap_or_else(|| format!("{} {{ {} }}", qualified, fields_str))
                     } else {
-                        format!("{} {{ {} }}", qualified, fields_str)
+                        ctx.templates.render("destructure_pattern", None, &[], &b)
+                            .unwrap_or_else(|| format!("{} {{ {} }}", qualified, fields_str))
                     }
                 }
                 _ => render_pattern(ctx, pattern),
             };
             let val_str = render_expr(ctx, value);
-            format!("let {} = {};", pat_str, val_str)
+            let mut b = HashMap::new();
+            b.insert("pattern", pat_str);
+            b.insert("value", val_str);
+            ctx.templates.render("bind_destructure", None, &[], &b)
+                .unwrap_or_else(|| format!("let _ = _;"))
         }
         IrStmtKind::Comment { text } => format!("// {}", text),
     }
