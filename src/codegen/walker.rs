@@ -1200,15 +1200,28 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         .collect::<Vec<_>>()
         .join(", ");
 
-    let body_raw = render_expr(&fn_ctx, &func.body);
-    // Function body: wrap in return if it's a bare expression (template decides)
-    let body_str = if !matches!(&func.body.kind, IrExprKind::Block { .. } | IrExprKind::DoBlock { .. }) {
-        let mut b = HashMap::new();
-        b.insert("expr", body_raw.clone());
-        ctx.templates.render("block_result_expr", None, &[], &b)
-            .unwrap_or(body_raw)
-    } else {
-        body_raw
+    // Function body: render Block/DoBlock contents directly (no IIFE wrapper)
+    let body_str = match &func.body.kind {
+        IrExprKind::Block { stmts, expr } => {
+            let mut parts: Vec<String> = stmts.iter()
+                .map(|s| terminate_stmt(&fn_ctx, render_stmt(&fn_ctx, s)))
+                .collect();
+            if let Some(e) = expr {
+                let expr_str = render_expr(&fn_ctx, e);
+                let mut b = HashMap::new();
+                b.insert("expr", expr_str);
+                parts.push(fn_ctx.templates.render("block_result_expr", None, &[], &b)
+                    .unwrap_or_else(|| b.get("expr").unwrap().clone()));
+            }
+            parts.join("\n")
+        }
+        _ => {
+            let body_raw = render_expr(&fn_ctx, &func.body);
+            let mut b = HashMap::new();
+            b.insert("expr", body_raw.clone());
+            fn_ctx.templates.render("block_result_expr", None, &[], &b)
+                .unwrap_or(body_raw)
+        }
     };
     let ret_str = render_type(ctx, &func.ret_ty);
 
@@ -1240,7 +1253,9 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     let target_keywords = ["while", "for", "if", "else", "match", "loop", "break", "continue",
         "return", "fn", "let", "mut", "use", "mod", "pub", "struct", "enum", "impl", "trait",
         "type", "where", "as", "in", "ref", "self", "super", "crate", "const", "static",
-        "unsafe", "async", "await", "dyn", "move", "true", "false"];
+        "unsafe", "async", "await", "dyn", "move", "true", "false",
+        "default", "switch", "case", "class", "extends", "new", "delete", "typeof",
+        "void", "with", "yield", "export", "import", "try", "catch", "finally", "throw"];
     if target_keywords.contains(&safe_name.as_str()) {
         let mut b = HashMap::new();
         b.insert("name", safe_name.clone());

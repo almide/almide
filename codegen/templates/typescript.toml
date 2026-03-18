@@ -307,7 +307,7 @@ template = "return {expr};"
 template = "{tests}"
 
 [test_block]
-template = "Deno.test(\"{name}\", () => {{ {body} }});"
+template = "Deno.test(\"{name}\", async () => {{ {body} }});"
 
 [assert_eq]
 template = "if (!__deep_eq({left}, {right})) throw new Error(`assertion failed`);"
@@ -330,7 +330,7 @@ template = "{inner}"
 template = "await {inner}"
 
 [keyword_escape]
-template = "{name}"
+template = "_{name}"
 
 [map_literal]
 template = "new Map([{entries}])"
