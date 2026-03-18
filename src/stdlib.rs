@@ -5,12 +5,12 @@
 use crate::types::FnSig;
 
 /// All built-in stdlib module names (hardcoded in the compiler).
-pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "http", "process", "math", "random", "regex", "io", "result", "option", "error", "datetime", "testing", "crypto", "uuid", "log", "value"];
+pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "http", "process", "math", "random", "regex", "io", "result", "option", "error", "datetime", "testing", "log", "value", "set", "set"];
 
 /// Prelude modules: automatically available without explicit `import`.
 /// These are core modules that virtually every program needs.
 pub const PRELUDE_MODULES: &[&str] = &[
-    "string", "list", "int", "float", "math", "map", "result", "option", "value",
+    "string", "list", "int", "float", "math", "map", "result", "option", "value", "set",
 ];
 
 /// Check if a module name is a prelude module (auto-imported).
@@ -32,11 +32,8 @@ pub fn get_bundled_source(name: &str) -> Option<&'static str> {
         "time" => Some(include_str!("../stdlib/time.almd")),
         "encoding" => Some(include_str!("../stdlib/encoding.almd")),
         "hash" => Some(include_str!("../stdlib/hash.almd")),
-        "term" => Some(include_str!("../stdlib/term.almd")),
         "url" => Some(include_str!("../stdlib/url.almd")),
-        "toml" => Some(include_str!("../stdlib/toml.almd")),
         "csv" => Some(include_str!("../stdlib/csv.almd")),
-        "compress" => Some(include_str!("../stdlib/compress.almd")),
         "value" => Some(include_str!("../stdlib/value.almd")),
         _ => None,
     }
@@ -83,7 +80,7 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         | "replace_first" | "last_index_of" => vec!["string"],
 
         // ── list-only ──
-        "enumerate" | "zip" | "take" | "drop"
+        "enumerate" | "take" | "drop"
         | "sort_by" | "unique"
         | "last" | "chunk" | "sum" | "product"
         | "first"
@@ -110,7 +107,7 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
 
         // ── option-only ──
         "is_some" | "is_none" | "to_result" | "or_else"
-        | "zip" | "to_list" => vec!["option"],
+        | "to_list" => vec!["option"],
 
         // ── result-only ──
         "map_err"
@@ -139,14 +136,13 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         "flat_map" => vec!["list", "result", "option"],
         "map" | "filter" => vec!["list", "map", "result", "option"],
         "unwrap_or" | "unwrap_or_else" => vec!["result", "option"],
-        "flatten" => vec!["list", "option"],
+        "flatten" | "zip" => vec!["list", "option"],
 
         // ── ambiguous: list + map ──
         "get" | "get_or" => vec!["string", "list", "map"],
         "set" => vec!["list", "map"],
         "swap" => vec!["list"],
         "sort" => vec!["list"],
-        "map" | "filter" => vec!["list", "result"],
         "to_option" => vec!["result"],
 
         // ── ambiguous: string + int ──

@@ -1,0 +1,53 @@
+test "set.from_list and contains" {
+  let s = set.from_list([1, 2, 3])
+  assert_eq(set.contains(s, 1), true)
+  assert_eq(set.contains(s, 4), false)
+}
+
+test "set.insert and len" {
+  let s = set.from_list([1, 2])
+  let s2 = set.insert(s, 3)
+  assert_eq(set.len(s2), 3)
+  assert_eq(set.contains(s2, 3), true)
+}
+
+test "set.remove" {
+  let s = set.from_list([1, 2, 3])
+  let s2 = set.remove(s, 2)
+  assert_eq(set.len(s2), 2)
+  assert_eq(set.contains(s2, 2), false)
+}
+
+test "set.union" {
+  let a = set.from_list([1, 2, 3])
+  let b = set.from_list([3, 4, 5])
+  let c = set.union(a, b)
+  assert_eq(set.len(c), 5)
+}
+
+test "set.intersection" {
+  let a = set.from_list([1, 2, 3])
+  let b = set.from_list([2, 3, 4])
+  let c = set.intersection(a, b)
+  assert_eq(set.len(c), 2)
+}
+
+test "set.difference" {
+  let a = set.from_list([1, 2, 3])
+  let b = set.from_list([2, 3, 4])
+  let c = set.difference(a, b)
+  assert_eq(set.len(c), 1)
+  assert_eq(set.contains(c, 1), true)
+}
+
+test "set.is_empty" {
+  let empty: Set[Int] = set.new()
+  assert_eq(set.is_empty(empty), true)
+  assert_eq(set.is_empty(set.from_list([1])), false)
+}
+
+test "set.to_list" {
+  let s = set.from_list([1, 2, 3])
+  let xs = set.to_list(s)
+  assert_eq(list.len(xs), 3)
+}

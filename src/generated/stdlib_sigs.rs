@@ -4,10 +4,6 @@ use crate::types::{Ty, FnSig};
 pub fn lookup_generated_sig(module: &str, func: &str) -> Option<FnSig> {
     let s = |n: &str| -> String { n.to_string() };
     let sig = match (module, func) {
-        ("crypto", "hmac_sha256") => FnSig { generics: vec![], params: vec![(s("key"), Ty::String), (s("data"), Ty::String)], ret: Ty::Result(Box::new(Ty::String), Box::new(Ty::String)), is_effect: true, structural_bounds: std::collections::HashMap::new() },
-        ("crypto", "hmac_verify") => FnSig { generics: vec![], params: vec![(s("key"), Ty::String), (s("data"), Ty::String), (s("signature"), Ty::String)], ret: Ty::Result(Box::new(Ty::Bool), Box::new(Ty::String)), is_effect: true, structural_bounds: std::collections::HashMap::new() },
-        ("crypto", "random_bytes") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Int)], ret: Ty::Result(Box::new(Ty::List(Box::new(Ty::Int))), Box::new(Ty::String)), is_effect: true, structural_bounds: std::collections::HashMap::new() },
-        ("crypto", "random_hex") => FnSig { generics: vec![], params: vec![(s("n"), Ty::Int)], ret: Ty::Result(Box::new(Ty::String), Box::new(Ty::String)), is_effect: true, structural_bounds: std::collections::HashMap::new() },
         ("datetime", "add_days") => FnSig { generics: vec![], params: vec![(s("ts"), Ty::Int), (s("n"), Ty::Int)], ret: Ty::Int, is_effect: false, structural_bounds: std::collections::HashMap::new() },
         ("datetime", "add_hours") => FnSig { generics: vec![], params: vec![(s("ts"), Ty::Int), (s("n"), Ty::Int)], ret: Ty::Int, is_effect: false, structural_bounds: std::collections::HashMap::new() },
         ("datetime", "add_minutes") => FnSig { generics: vec![], params: vec![(s("ts"), Ty::Int), (s("n"), Ty::Int)], ret: Ty::Int, is_effect: false, structural_bounds: std::collections::HashMap::new() },
@@ -308,6 +304,17 @@ pub fn lookup_generated_sig(module: &str, func: &str) -> Option<FnSig> {
         ("result", "to_option") => FnSig { generics: vec![s("A"), s("E")], params: vec![(s("r"), Ty::Result(Box::new(Ty::TypeVar(s("A"))), Box::new(Ty::TypeVar(s("E")))))], ret: Ty::Option(Box::new(Ty::TypeVar(s("A")))), is_effect: false, structural_bounds: std::collections::HashMap::new() },
         ("result", "unwrap_or") => FnSig { generics: vec![s("A"), s("E")], params: vec![(s("r"), Ty::Result(Box::new(Ty::TypeVar(s("A"))), Box::new(Ty::TypeVar(s("E"))))), (s("default"), Ty::TypeVar(s("A")))], ret: Ty::TypeVar(s("A")), is_effect: false, structural_bounds: std::collections::HashMap::new() },
         ("result", "unwrap_or_else") => FnSig { generics: vec![s("A"), s("E")], params: vec![(s("r"), Ty::Result(Box::new(Ty::TypeVar(s("A"))), Box::new(Ty::TypeVar(s("E"))))), (s("f"), Ty::Fn { params: vec![Ty::TypeVar(s("E"))], ret: Box::new(Ty::TypeVar(s("A"))) })], ret: Ty::TypeVar(s("A")), is_effect: false, structural_bounds: std::collections::HashMap::new() },
+        ("set", "contains") => FnSig { generics: vec![s("A")], params: vec![(s("s"), Ty::Named(s("Set"), vec![Ty::TypeVar(s("A"))])), (s("value"), Ty::TypeVar(s("A")))], ret: Ty::Bool, is_effect: false, structural_bounds: std::collections::HashMap::new() },
+        ("set", "difference") => FnSig { generics: vec![s("A")], params: vec![(s("a"), Ty::Named(s("Set"), vec![Ty::TypeVar(s("A"))])), (s("b"), Ty::Named(s("Set"), vec![Ty::TypeVar(s("A"))]))], ret: Ty::Named(s("Set"), vec![Ty::TypeVar(s("A"))]), is_effect: false, structural_bounds: std::collections::HashMap::new() },
+        ("set", "from_list") => FnSig { generics: vec![s("A")], params: vec![(s("xs"), Ty::List(Box::new(Ty::TypeVar(s("A")))))], ret: Ty::Named(s("Set"), vec![Ty::TypeVar(s("A"))]), is_effect: false, structural_bounds: std::collections::HashMap::new() },
+        ("set", "insert") => FnSig { generics: vec![s("A")], params: vec![(s("s"), Ty::Named(s("Set"), vec![Ty::TypeVar(s("A"))])), (s("value"), Ty::TypeVar(s("A")))], ret: Ty::Named(s("Set"), vec![Ty::TypeVar(s("A"))]), is_effect: false, structural_bounds: std::collections::HashMap::new() },
+        ("set", "intersection") => FnSig { generics: vec![s("A")], params: vec![(s("a"), Ty::Named(s("Set"), vec![Ty::TypeVar(s("A"))])), (s("b"), Ty::Named(s("Set"), vec![Ty::TypeVar(s("A"))]))], ret: Ty::Named(s("Set"), vec![Ty::TypeVar(s("A"))]), is_effect: false, structural_bounds: std::collections::HashMap::new() },
+        ("set", "is_empty") => FnSig { generics: vec![s("A")], params: vec![(s("s"), Ty::Named(s("Set"), vec![Ty::TypeVar(s("A"))]))], ret: Ty::Bool, is_effect: false, structural_bounds: std::collections::HashMap::new() },
+        ("set", "len") => FnSig { generics: vec![s("A")], params: vec![(s("s"), Ty::Named(s("Set"), vec![Ty::TypeVar(s("A"))]))], ret: Ty::Int, is_effect: false, structural_bounds: std::collections::HashMap::new() },
+        ("set", "new") => FnSig { generics: vec![s("A")], params: vec![], ret: Ty::Named(s("Set"), vec![Ty::TypeVar(s("A"))]), is_effect: false, structural_bounds: std::collections::HashMap::new() },
+        ("set", "remove") => FnSig { generics: vec![s("A")], params: vec![(s("s"), Ty::Named(s("Set"), vec![Ty::TypeVar(s("A"))])), (s("value"), Ty::TypeVar(s("A")))], ret: Ty::Named(s("Set"), vec![Ty::TypeVar(s("A"))]), is_effect: false, structural_bounds: std::collections::HashMap::new() },
+        ("set", "to_list") => FnSig { generics: vec![s("A")], params: vec![(s("s"), Ty::Named(s("Set"), vec![Ty::TypeVar(s("A"))]))], ret: Ty::List(Box::new(Ty::TypeVar(s("A")))), is_effect: false, structural_bounds: std::collections::HashMap::new() },
+        ("set", "union") => FnSig { generics: vec![s("A")], params: vec![(s("a"), Ty::Named(s("Set"), vec![Ty::TypeVar(s("A"))])), (s("b"), Ty::Named(s("Set"), vec![Ty::TypeVar(s("A"))]))], ret: Ty::Named(s("Set"), vec![Ty::TypeVar(s("A"))]), is_effect: false, structural_bounds: std::collections::HashMap::new() },
         ("string", "capitalize") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::String, is_effect: false, structural_bounds: std::collections::HashMap::new() },
         ("string", "chars") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::List(Box::new(Ty::String)), is_effect: false, structural_bounds: std::collections::HashMap::new() },
         ("string", "codepoint") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::Option(Box::new(Ty::Int)), is_effect: false, structural_bounds: std::collections::HashMap::new() },
@@ -359,12 +366,6 @@ pub fn lookup_generated_sig(module: &str, func: &str) -> Option<FnSig> {
         ("testing", "assert_ok") => FnSig { generics: vec![], params: vec![(s("result"), Ty::Result(Box::new(Ty::String), Box::new(Ty::String)))], ret: Ty::Unit, is_effect: false, structural_bounds: std::collections::HashMap::new() },
         ("testing", "assert_some") => FnSig { generics: vec![], params: vec![(s("opt"), Ty::Option(Box::new(Ty::String)))], ret: Ty::Unit, is_effect: false, structural_bounds: std::collections::HashMap::new() },
         ("testing", "assert_throws") => FnSig { generics: vec![], params: vec![(s("f"), Ty::Named(s("fn() -> Unit"), vec![])), (s("expected"), Ty::String)], ret: Ty::Unit, is_effect: false, structural_bounds: std::collections::HashMap::new() },
-        ("uuid", "is_valid") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::Bool, is_effect: false, structural_bounds: std::collections::HashMap::new() },
-        ("uuid", "nil") => FnSig { generics: vec![], params: vec![], ret: Ty::String, is_effect: false, structural_bounds: std::collections::HashMap::new() },
-        ("uuid", "parse") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::Result(Box::new(Ty::String), Box::new(Ty::String)), is_effect: false, structural_bounds: std::collections::HashMap::new() },
-        ("uuid", "v4") => FnSig { generics: vec![], params: vec![], ret: Ty::Result(Box::new(Ty::String), Box::new(Ty::String)), is_effect: true, structural_bounds: std::collections::HashMap::new() },
-        ("uuid", "v5") => FnSig { generics: vec![], params: vec![(s("namespace"), Ty::String), (s("name"), Ty::String)], ret: Ty::Result(Box::new(Ty::String), Box::new(Ty::String)), is_effect: true, structural_bounds: std::collections::HashMap::new() },
-        ("uuid", "version") => FnSig { generics: vec![], params: vec![(s("s"), Ty::String)], ret: Ty::Result(Box::new(Ty::Int), Box::new(Ty::String)), is_effect: false, structural_bounds: std::collections::HashMap::new() },
         ("value", "array") => FnSig { generics: vec![], params: vec![(s("items"), Ty::List(Box::new(Ty::Named(s("Value"), vec![]))))], ret: Ty::Named(s("Value"), vec![]), is_effect: false, structural_bounds: std::collections::HashMap::new() },
         ("value", "as_array") => FnSig { generics: vec![], params: vec![(s("v"), Ty::Named(s("Value"), vec![]))], ret: Ty::Option(Box::new(Ty::List(Box::new(Ty::Named(s("Value"), vec![]))))), is_effect: false, structural_bounds: std::collections::HashMap::new() },
         ("value", "as_bool") => FnSig { generics: vec![], params: vec![(s("v"), Ty::Named(s("Value"), vec![]))], ret: Ty::Option(Box::new(Ty::Bool)), is_effect: false, structural_bounds: std::collections::HashMap::new() },
@@ -391,7 +392,6 @@ pub fn lookup_generated_sig(module: &str, func: &str) -> Option<FnSig> {
 
 pub fn generated_module_functions(module: &str) -> Vec<&'static str> {
     match module {
-        "crypto" => vec!["hmac_sha256", "hmac_verify", "random_bytes", "random_hex"],
         "datetime" => vec!["add_days", "add_hours", "add_minutes", "add_seconds", "day", "diff_seconds", "format", "from_parts", "from_unix", "hour", "is_after", "is_before", "minute", "month", "now", "parse_iso", "second", "to_iso", "to_unix", "weekday", "year"],
         "env" => vec!["args", "cwd", "get", "millis", "os", "set", "sleep_ms", "temp_dir", "unix_timestamp"],
         "error" => vec!["chain", "context", "message"],
@@ -410,9 +410,9 @@ pub fn generated_module_functions(module: &str) -> Vec<&'static str> {
         "random" => vec!["choice", "float", "int", "shuffle"],
         "regex" => vec!["captures", "find", "find_all", "full_match", "is_match", "replace", "replace_first", "split"],
         "result" => vec!["flat_map", "is_err", "is_ok", "map", "map_err", "to_err_option", "to_option", "unwrap_or", "unwrap_or_else"],
+        "set" => vec!["contains", "difference", "from_list", "insert", "intersection", "is_empty", "len", "new", "remove", "to_list", "union"],
         "string" => vec!["capitalize", "chars", "codepoint", "contains", "count", "drop", "drop_end", "ends_with", "first", "from_bytes", "from_codepoint", "get", "index_of", "is_alpha", "is_alphanumeric", "is_digit", "is_empty", "is_lower", "is_upper", "is_whitespace", "join", "last", "last_index_of", "len", "lines", "pad_end", "pad_start", "repeat", "replace", "replace_first", "reverse", "slice", "split", "starts_with", "strip_prefix", "strip_suffix", "take", "take_end", "to_bytes", "to_lower", "to_upper", "trim", "trim_end", "trim_start"],
         "testing" => vec!["assert_approx", "assert_contains", "assert_gt", "assert_lt", "assert_ok", "assert_some", "assert_throws"],
-        "uuid" => vec!["is_valid", "nil", "parse", "v4", "v5", "version"],
         "value" => vec!["array", "as_array", "as_bool", "as_float", "as_int", "as_string", "bool", "float", "get", "int", "merge", "null", "object", "omit", "pick", "str", "stringify", "to_camel_case", "to_snake_case"],
         _ => vec![],
     }

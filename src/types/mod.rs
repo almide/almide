@@ -230,7 +230,6 @@ impl Ty {
             // Named ↔ Record: Named types are compatible with their structural expansion
             // (this handles the case where one side is resolve_named'd and the other isn't)
             (Ty::Named(_, _), Ty::Record { .. }) | (Ty::Record { .. }, Ty::Named(_, _)) => true,
-            (Ty::Named(_, _), Ty::Variant { .. }) | (Ty::Variant { .. }, Ty::Named(_, _)) => true,
             // Union: a concrete type is compatible with a union if it matches any member
             (Ty::Union(members), other) => members.iter().any(|m| m.compatible(other)),
             (other, Ty::Union(members)) => members.iter().any(|m| other.compatible(m)),

@@ -2,8 +2,6 @@
 pub use almide::ast;
 pub use almide::codegen;
 pub use almide::diagnostic;
-pub use almide::emit_common;
-pub use almide::emit_ts;
 pub use almide::emit_ts_runtime;
 pub use almide::fmt;
 pub use almide::lexer;
@@ -171,10 +169,6 @@ fn parse_file(file: &str) -> (ast::Program, String, Vec<diagnostic::Diagnostic>)
         let parse_errors = std::mem::take(&mut parser.errors);
         (prog, input, parse_errors)
     }
-}
-
-fn compile(file: &str, no_check: bool) -> String {
-    try_compile(file, no_check).unwrap_or_else(|_| std::process::exit(1))
 }
 
 fn try_compile(file: &str, no_check: bool) -> Result<String, String> {

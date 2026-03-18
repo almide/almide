@@ -8,7 +8,7 @@
 //! - MLIR dialect conversion patterns
 //! - NLLB-200 Mixture of Experts (shared + language-specific)
 
-use crate::ir::{IrExpr, IrExprKind, IrFunction, IrProgram, IrStmt};
+use crate::ir::IrProgram;
 use crate::types::Ty;
 
 // ── Scope Context ──
@@ -180,11 +180,8 @@ impl NanoPass for FanLoweringPass {
     fn targets(&self) -> Option<Vec<Target>> {
         None // All targets need this
     }
-    fn run(&self, _program: &mut IrProgram, _target: Target) {
-        // Rust: fan → std::thread::scope
-        // TS: fan → Promise.all
-        // Go: fan → goroutine + channel
-        // TODO: implement during Phase 2 migration
+    fn run(&self, program: &mut IrProgram, _target: Target) {
+        super::pass_fan_lowering::strip_fan_auto_try(program);
     }
 }
 

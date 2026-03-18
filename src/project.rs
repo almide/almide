@@ -1,7 +1,6 @@
 /// Project configuration (almide.toml) and dependency management.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// Package identity for diamond dependency resolution.
 /// Two packages with the same (name, major) are considered the same package

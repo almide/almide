@@ -212,6 +212,9 @@ template = "Result<{ok}, {err}>"
 [type_map]
 template = "HashMap<{key}, {value}>"
 
+[type_set]
+template = "std::collections::HashSet<{inner}>"
+
 [type_fn]
 template = "impl Fn({params}) -> {return} + Clone"
 
@@ -390,7 +393,7 @@ template = "Box::new({inner})"
 template = "std::thread::scope(|__s| {{ {spawns} {join_expr} }})"
 
 [fan_effect]
-template = "std::thread::scope(|__s| -> Result<_, String> {{ {spawns} Ok({join_expr}) }})"
+template = "std::thread::scope(|__s| -> Result<_, String> {{ {spawns} Ok({join_expr}) }})?"
 
 [extern_fn]
 template = "use {module}::{function} as {name};"

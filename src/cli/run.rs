@@ -1,5 +1,5 @@
 use std::process::Command;
-use crate::{compile, try_compile, find_rustc};
+use crate::{try_compile, find_rustc};
 use super::{hash64, incremental_cache_dir};
 
 pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool) -> i32 {

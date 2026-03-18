@@ -1,7 +1,7 @@
 use std::process::Command;
-use crate::{compile_with_ir, parse_file, find_rustc, emit_ts, check, diagnostic, resolve, project, project_fetch};
+use crate::{compile_with_ir, parse_file, find_rustc, check, diagnostic, resolve, project, project_fetch};
 
-pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release: bool, fast: bool, unchecked_index: bool, no_check: bool) {
+pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release: bool, fast: bool, _unchecked_index: bool, no_check: bool) {
     let is_npm = matches!(target, Some("npm"));
     let is_wasm = matches!(target, Some("wasm" | "wasm32" | "wasi"));
 
@@ -136,12 +136,14 @@ fn cmd_build_npm(file: &str, out_dir: &str, _no_check: bool) {
         (file.strip_suffix(".almd").unwrap_or("my-package").to_string(), "0.1.0".to_string())
     };
 
-    let config = emit_ts::NpmConfig {
-        name: pkg_name,
-        version: pkg_version,
-    };
+    // Generate JS via v3 codegen
+    almide::mono::monomorphize(&mut ir_program);
+    let js_code = almide::codegen::emit(&mut ir_program, almide::codegen::pass::Target::TypeScript);
 
-    let output = emit_ts::emit_npm_package(&ir_program, &config);
+    let package_json = format!(
+        r#"{{"name":"{}","version":"{}","main":"index.js","type":"module"}}"#,
+        pkg_name, pkg_version
+    );
 
     // Write files
     let out_path = std::path::Path::new(out_dir);
@@ -150,39 +152,16 @@ fn cmd_build_npm(file: &str, out_dir: &str, _no_check: bool) {
         std::process::exit(1);
     });
 
-    std::fs::write(out_path.join("package.json"), &output.package_json).unwrap_or_else(|e| {
+    std::fs::write(out_path.join("package.json"), &package_json).unwrap_or_else(|e| {
         eprintln!("Failed to write package.json: {}", e);
         std::process::exit(1);
     });
-    std::fs::write(out_path.join("index.js"), &output.index_js).unwrap_or_else(|e| {
+    std::fs::write(out_path.join("index.js"), &js_code).unwrap_or_else(|e| {
         eprintln!("Failed to write index.js: {}", e);
         std::process::exit(1);
     });
-    std::fs::write(out_path.join("index.d.ts"), &output.index_dts).unwrap_or_else(|e| {
-        eprintln!("Failed to write index.d.ts: {}", e);
-        std::process::exit(1);
-    });
-
-    // Write runtime files
-    for (path, content) in &output.runtime_files {
-        let full_path = out_path.join(path);
-        if let Some(parent) = full_path.parent() {
-            std::fs::create_dir_all(parent).unwrap_or_else(|e| {
-                eprintln!("Failed to create directory: {}", e);
-                std::process::exit(1);
-            });
-        }
-        std::fs::write(&full_path, content).unwrap_or_else(|e| {
-            eprintln!("Failed to write {}: {}", path, e);
-            std::process::exit(1);
-        });
-    }
 
     eprintln!("Built npm package in {}/", out_dir);
     eprintln!("  package.json");
     eprintln!("  index.js");
-    eprintln!("  index.d.ts");
-    for (path, _) in &output.runtime_files {
-        eprintln!("  {}", path);
-    }
 }

@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use crate::ast;
 use crate::types::Ty;
-use super::types::InferTy;
+use super::types::resolve_vars;
 use super::Checker;
 
 /// Map a built-in type to its stdlib UFCS module name.
@@ -27,12 +27,8 @@ pub(crate) fn types_mismatch(expected: &Ty, actual: &Ty) -> bool {
 }
 
 impl Checker {
-    pub(crate) fn check_call(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr]) -> InferTy {
-        self.check_call_with_type_args(callee, args, None)
-    }
-
-    pub(crate) fn check_call_with_type_args(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr], type_args: Option<&[Ty]>) -> InferTy {
-        let arg_tys: Vec<InferTy> = args.iter_mut().map(|a| self.infer_expr(a)).collect();
+    pub(crate) fn check_call_with_type_args(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr], type_args: Option<&[Ty]>) -> Ty {
+        let arg_tys: Vec<Ty> = args.iter_mut().map(|a| self.infer_expr(a)).collect();
         match callee {
             ast::Expr::Ident { name, .. } => {
                 let name = name.clone();
@@ -48,8 +44,8 @@ impl Checker {
                     self.check_constructor_args(name, &case, &arg_tys);
                     // Instantiate parent type's generics with fresh inference vars
                     let generic_args = self.instantiate_type_generics(&type_name);
-                    InferTy::Concrete(Ty::Named(type_name, generic_args))
-                } else { InferTy::Concrete(Ty::Named(name.clone(), vec![])) }
+                    Ty::Named(type_name, generic_args)
+                } else { Ty::Named(name.clone(), vec![]) }
             }
             // Module call: string.trim(s), list.map(xs, f), etc.
             ast::Expr::Member { object, field, .. } => {
@@ -59,7 +55,7 @@ impl Checker {
                 }
                 // UFCS method: obj.method(args) → module.method(obj, args)
                 let obj_ty = self.infer_expr(object);
-                let obj_concrete = obj_ty.to_ty(&self.solutions);
+                let obj_concrete = resolve_vars(&obj_ty, &self.solutions);
                 // Built-in generic types → stdlib module UFCS
                 let builtin_module = builtin_module_for_type(&obj_concrete);
                 if let Some(module) = builtin_module {
@@ -100,64 +96,64 @@ impl Checker {
                     return self.check_named_call(field, &all_args);
                 }
                 let ret = self.fresh_var();
-                self.constrain(obj_ty, InferTy::Fn { params: arg_tys.to_vec(), ret: Box::new(ret.clone()) }, "method call");
+                self.constrain(obj_ty, Ty::Fn { params: arg_tys.to_vec(), ret: Box::new(ret.clone()) }, "method call");
                 ret
             }
             _ => {
                 let ct = self.infer_expr(callee);
                 let ret = self.fresh_var();
-                self.constrain(ct, InferTy::Fn { params: arg_tys.to_vec(), ret: Box::new(ret.clone()) }, "function call");
+                self.constrain(ct, Ty::Fn { params: arg_tys.to_vec(), ret: Box::new(ret.clone()) }, "function call");
                 ret
             }
         }
     }
 
-    pub(crate) fn check_named_call(&mut self, name: &str, arg_tys: &[InferTy]) -> InferTy {
+    pub(crate) fn check_named_call(&mut self, name: &str, arg_tys: &[Ty]) -> Ty {
         self.check_named_call_with_type_args(name, arg_tys, None)
     }
 
-    pub(crate) fn check_named_call_with_type_args(&mut self, name: &str, arg_tys: &[InferTy], type_args: Option<&[Ty]>) -> InferTy {
+    pub(crate) fn check_named_call_with_type_args(&mut self, name: &str, arg_tys: &[Ty], type_args: Option<&[Ty]>) -> Ty {
         // Builtins that accept any types
         match name {
             "println" | "eprintln" => {
                 // println/eprintln require String argument
                 if let Some(first) = arg_tys.first() {
-                    self.constrain(InferTy::Concrete(Ty::String), first.clone(), format!("call to {}()", name));
+                    self.constrain(Ty::String, first.clone(), format!("call to {}()", name));
                 }
-                return InferTy::Concrete(Ty::Unit);
+                return Ty::Unit;
             }
-            "assert" => return InferTy::Concrete(Ty::Unit),
+            "assert" => return Ty::Unit,
             "assert_eq" | "assert_ne" => {
                 if arg_tys.len() >= 2 {
                     self.constrain(arg_tys[0].clone(), arg_tys[1].clone(), format!("call to {}()", name));
                 }
-                return InferTy::Concrete(Ty::Unit);
+                return Ty::Unit;
             }
             _ => {}
         }
         match name {
             "ok" => {
-                let ok_ty = arg_tys.first().cloned().unwrap_or(InferTy::Concrete(Ty::Unit));
+                let ok_ty = arg_tys.first().cloned().unwrap_or(Ty::Unit);
                 let err_ty = match &self.env.current_ret {
-                    Some(Ty::Result(_, e)) => InferTy::from_ty(e),
-                    _ => InferTy::Concrete(Ty::String),
+                    Some(Ty::Result(_, e)) => e.as_ref().clone(),
+                    _ => Ty::String,
                 };
-                InferTy::Result(Box::new(ok_ty), Box::new(err_ty))
+                Ty::Result(Box::new(ok_ty), Box::new(err_ty))
             }
             "err" => {
-                let err_ty = arg_tys.first().cloned().unwrap_or(InferTy::Concrete(Ty::String));
+                let err_ty = arg_tys.first().cloned().unwrap_or(Ty::String);
                 let ok_ty = match &self.env.current_ret {
-                    Some(Ty::Result(o, _)) => InferTy::from_ty(o),
-                    _ => InferTy::Concrete(Ty::Unit),
+                    Some(Ty::Result(o, _)) => o.as_ref().clone(),
+                    _ => Ty::Unit,
                 };
-                InferTy::Result(Box::new(ok_ty), Box::new(err_ty))
+                Ty::Result(Box::new(ok_ty), Box::new(err_ty))
             }
-            "some" => InferTy::Option(Box::new(arg_tys.first().cloned().unwrap_or(self.fresh_var()))),
+            "some" => Ty::Option(Box::new(arg_tys.first().cloned().unwrap_or_else(|| self.fresh_var()))),
             "unwrap_or" if arg_tys.len() >= 2 => {
-                let concrete = arg_tys[0].to_ty(&self.solutions);
+                let concrete = resolve_vars(&arg_tys[0], &self.solutions);
                 match &concrete {
-                    Ty::Option(inner) => InferTy::from_ty(inner),
-                    Ty::Result(ok, _) => InferTy::from_ty(ok),
+                    Ty::Option(inner) => inner.as_ref().clone(),
+                    Ty::Result(ok, _) => ok.as_ref().clone(),
                     _ => arg_tys[1].clone(),
                 }
             }
@@ -173,21 +169,21 @@ impl Checker {
                     if let Some((type_name, case)) = self.env.constructors.get(name).cloned() {
                         self.check_constructor_args(name, &case, arg_tys);
                         let generic_args = self.instantiate_type_generics(&type_name);
-                        return InferTy::Concrete(Ty::Named(type_name, generic_args));
+                        return Ty::Named(type_name, generic_args);
                     }
                     if let Some(ty) = self.env.lookup_var(name).cloned() {
                         return match &ty {
                             Ty::Fn { params, ret } => {
                                 for (aty, pty) in arg_tys.iter().zip(params.iter()) {
-                                    self.constrain(InferTy::from_ty(pty), aty.clone(), format!("call to {}()", name));
+                                    self.constrain(pty.clone(), aty.clone(), format!("call to {}()", name));
                                 }
-                                InferTy::from_ty(ret)
+                                ret.as_ref().clone()
                             }
-                            _ => InferTy::from_ty(&ty)
+                            _ => ty
                         };
                     }
                     self.emit(super::err(format!("undefined function '{}'", name), "Check the function name", format!("call to {}()", name)).with_code("E002"));
-                    return InferTy::Concrete(Ty::Unknown);
+                    return Ty::Unknown;
                 };
 
                 // Effect isolation: pure fn cannot call effect fn
@@ -215,7 +211,7 @@ impl Checker {
                         bindings.insert(gname.clone(), gty.clone());
                     }
                 }
-                let concrete_args: Vec<Ty> = arg_tys.iter().map(|a| a.to_ty(&self.solutions)).collect();
+                let concrete_args: Vec<Ty> = arg_tys.iter().map(|a| resolve_vars(a, &self.solutions)).collect();
                 for ((pname, pty), aty) in sig.params.iter().zip(concrete_args.iter()) {
                     self.unify_call_arg(name, pname, pty, aty, &sig.structural_bounds, &mut bindings);
                 }
@@ -223,11 +219,18 @@ impl Checker {
                 for ((_, pty), aty) in sig.params.iter().zip(arg_tys.iter()) {
                     let expected = if bindings.is_empty() { pty.clone() } else { crate::types::substitute(pty, &bindings) };
                     if expected != Ty::Unknown {
-                        self.constrain(InferTy::from_ty(&expected), aty.clone(), format!("call to {}()", name));
+                        self.constrain(expected, aty.clone(), format!("call to {}()", name));
                     }
                 }
-                let ret = if bindings.is_empty() { sig.ret.clone() } else { crate::types::substitute(&sig.ret, &bindings) };
-                InferTy::from_ty(&ret)
+                // Instantiate unresolved generics with fresh vars
+                let mut final_bindings = bindings.clone();
+                for g in &sig.generics {
+                    if !final_bindings.contains_key(g) {
+                        final_bindings.insert(g.clone(), self.fresh_var());
+                    }
+                }
+                let ret = if final_bindings.is_empty() { sig.ret.clone() } else { crate::types::substitute(&sig.ret, &final_bindings) };
+                ret
             }
         }
     }
@@ -239,15 +242,14 @@ impl Checker {
             let mut type_vars = Vec::new();
             crate::types::TypeEnv::collect_typevars(&ty_def, &mut type_vars);
             type_vars.iter().map(|_| {
-                let var = self.fresh_var();
-                var.to_ty(&self.solutions)
+                self.fresh_var()
             }).collect()
         } else {
             vec![]
         }
     }
 
-    fn check_constructor_args(&mut self, name: &str, case: &crate::types::VariantCase, arg_tys: &[InferTy]) {
+    fn check_constructor_args(&mut self, name: &str, case: &crate::types::VariantCase, arg_tys: &[Ty]) {
         if let crate::types::VariantPayload::Tuple(expected_tys) = &case.payload {
             if arg_tys.len() != expected_tys.len() {
                 self.emit(super::err(
@@ -255,7 +257,7 @@ impl Checker {
                     "Check the number of arguments", format!("constructor {}()", name)));
             }
             for (i, (aty, ety)) in arg_tys.iter().zip(expected_tys.iter()).enumerate() {
-                let concrete_arg = aty.to_ty(&self.solutions);
+                let concrete_arg = resolve_vars(aty, &self.solutions);
                 if concrete_arg != Ty::Unknown && !ety.compatible(&concrete_arg) {
                     self.emit(super::err(
                         format!("{}() argument {} expects {} but got {}", name, i + 1, ety.display(), concrete_arg.display()),
@@ -302,8 +304,8 @@ impl Checker {
     }
 
     /// Resolve a member call statically (module.func, alias, TypeName.method, codec).
-    /// Returns Some(InferTy) if resolved, None to fall through to UFCS/convention dispatch.
-    fn resolve_static_member(&mut self, object: &ast::Expr, field: &str, arg_tys: &[InferTy]) -> Option<InferTy> {
+    /// Returns Some(Ty) if resolved, None to fall through to UFCS/convention dispatch.
+    fn resolve_static_member(&mut self, object: &ast::Expr, field: &str, arg_tys: &[Ty]) -> Option<Ty> {
         let module_name = match object {
             ast::Expr::Ident { name, .. } => Some(name.as_str()),
             _ => None,
@@ -326,15 +328,15 @@ impl Checker {
                                 format!("fan.map() expects 2 arguments but got {}", arg_tys.len()),
                                 "Usage: fan.map(list, fn(item) => result)",
                                 "call to fan.map()".to_string()));
-                            return Some(InferTy::Concrete(Ty::Unknown));
+                            return Some(Ty::Unknown);
                         }
-                        let list_ty = arg_tys[0].to_ty(&self.solutions);
+                        let list_ty = resolve_vars(&arg_tys[0], &self.solutions);
                         let elem_ty = match &list_ty {
                             Ty::List(inner) => *inner.clone(),
                             _ => Ty::Unknown,
                         };
                         // Infer return type from f's return type
-                        let fn_ty = arg_tys[1].to_ty(&self.solutions);
+                        let fn_ty = resolve_vars(&arg_tys[1], &self.solutions);
                         let result_elem = match &fn_ty {
                             Ty::Fn { ret, .. } => {
                                 // Auto-unwrap Result
@@ -347,12 +349,12 @@ impl Checker {
                                 // If fn type unknown, constrain it
                                 let ret_var = self.fresh_var();
                                 self.constrain(arg_tys[1].clone(),
-                                    InferTy::Fn { params: vec![InferTy::from_ty(&elem_ty)], ret: Box::new(ret_var.clone()) },
+                                    Ty::Fn { params: vec![elem_ty], ret: Box::new(ret_var.clone()) },
                                     "fan.map callback");
-                                ret_var.to_ty(&self.solutions)
+                                resolve_vars(&ret_var, &self.solutions)
                             }
                         };
-                        return Some(InferTy::Concrete(Ty::List(Box::new(result_elem))));
+                        return Some(Ty::List(Box::new(result_elem)));
                     }
                     "race" => {
                         // fan.race(thunks) -> T where thunks: List[Fn() -> T]
@@ -361,9 +363,9 @@ impl Checker {
                                 format!("fan.race() expects 1 argument but got {}", arg_tys.len()),
                                 "Usage: fan.race([fn() => a, fn() => b])",
                                 "call to fan.race()".to_string()));
-                            return Some(InferTy::Concrete(Ty::Unknown));
+                            return Some(Ty::Unknown);
                         }
-                        let list_ty = arg_tys[0].to_ty(&self.solutions);
+                        let list_ty = resolve_vars(&arg_tys[0], &self.solutions);
                         let result_ty = match &list_ty {
                             Ty::List(inner) => {
                                 match inner.as_ref() {
@@ -378,7 +380,7 @@ impl Checker {
                             }
                             _ => Ty::Unknown,
                         };
-                        return Some(InferTy::Concrete(result_ty));
+                        return Some(result_ty);
                     }
                     "any" => {
                         // fan.any(thunks) -> T — first success, all fail = error
@@ -387,9 +389,9 @@ impl Checker {
                                 format!("fan.any() expects 1 argument but got {}", arg_tys.len()),
                                 "Usage: fan.any([() => a, () => b])",
                                 "call to fan.any()".to_string()));
-                            return Some(InferTy::Concrete(Ty::Unknown));
+                            return Some(Ty::Unknown);
                         }
-                        let list_ty = arg_tys[0].to_ty(&self.solutions);
+                        let list_ty = resolve_vars(&arg_tys[0], &self.solutions);
                         let result_ty = match &list_ty {
                             Ty::List(inner) => match inner.as_ref() {
                                 Ty::Fn { ret, .. } => match ret.as_ref() {
@@ -400,7 +402,7 @@ impl Checker {
                             },
                             _ => Ty::Unknown,
                         };
-                        return Some(InferTy::Concrete(result_ty));
+                        return Some(result_ty);
                     }
                     "settle" => {
                         // fan.settle(thunks) -> List[Result[T, String]]
@@ -409,9 +411,9 @@ impl Checker {
                                 format!("fan.settle() expects 1 argument but got {}", arg_tys.len()),
                                 "Usage: fan.settle([() => a, () => b])",
                                 "call to fan.settle()".to_string()));
-                            return Some(InferTy::Concrete(Ty::Unknown));
+                            return Some(Ty::Unknown);
                         }
-                        let list_ty = arg_tys[0].to_ty(&self.solutions);
+                        let list_ty = resolve_vars(&arg_tys[0], &self.solutions);
                         let inner_result = match &list_ty {
                             Ty::List(inner) => match inner.as_ref() {
                                 Ty::Fn { ret, .. } => match ret.as_ref() {
@@ -422,7 +424,7 @@ impl Checker {
                             },
                             _ => Ty::Unknown,
                         };
-                        return Some(InferTy::Concrete(Ty::List(Box::new(inner_result))));
+                        return Some(Ty::List(Box::new(inner_result)));
                     }
                     "timeout" => {
                         // fan.timeout(ms, thunk) -> T
@@ -431,10 +433,10 @@ impl Checker {
                                 format!("fan.timeout() expects 2 arguments but got {}", arg_tys.len()),
                                 "Usage: fan.timeout(5000, () => expr)",
                                 "call to fan.timeout()".to_string()));
-                            return Some(InferTy::Concrete(Ty::Unknown));
+                            return Some(Ty::Unknown);
                         }
-                        self.constrain(InferTy::Concrete(Ty::Int), arg_tys[0].clone(), "fan.timeout ms");
-                        let fn_ty = arg_tys[1].to_ty(&self.solutions);
+                        self.constrain(Ty::Int, arg_tys[0].clone(), "fan.timeout ms");
+                        let fn_ty = resolve_vars(&arg_tys[1], &self.solutions);
                         let result_ty = match &fn_ty {
                             Ty::Fn { ret, .. } => match ret.as_ref() {
                                 Ty::Result(ok, _) => *ok.clone(),
@@ -442,23 +444,23 @@ impl Checker {
                             },
                             _ => Ty::Unknown,
                         };
-                        return Some(InferTy::Concrete(Ty::Result(Box::new(result_ty), Box::new(Ty::String))));
+                        return Some(Ty::Result(Box::new(result_ty), Box::new(Ty::String)));
                     }
                     _ => {
                         self.emit(super::err(
                             format!("unknown function 'fan.{}'", field),
                             "Available: fan.map, fan.race, fan.any, fan.settle, fan.timeout",
                             format!("call to fan.{}()", field)));
-                        return Some(InferTy::Concrete(Ty::Unknown));
+                        return Some(Ty::Unknown);
                     }
                 }
             }
 
             // Codec convenience: json.encode(t) → String when t has T.encode
             if field == "encode" && arg_tys.len() == 1 {
-                let arg_concrete = arg_tys[0].to_ty(&self.solutions);
+                let arg_concrete = resolve_vars(&arg_tys[0], &self.solutions);
                 if self.has_codec_encode(&arg_concrete) {
-                    return Some(InferTy::Concrete(Ty::String));
+                    return Some(Ty::String);
                 }
             }
 

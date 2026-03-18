@@ -184,6 +184,9 @@ template = "{{ ok: true, value: {ok} }} | {{ ok: false, error: {err} }}"
 [type_map]
 template = "Map<{key}, {value}>"
 
+[type_set]
+template = "Set<{inner}>"
+
 [type_fn]
 template = "({params}) => {return}"
 

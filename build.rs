@@ -32,9 +32,11 @@ struct FnDef {
     aliases: Vec<String>,
     /// Human-readable description (English)
     #[serde(default)]
+    #[allow(dead_code)]
     description: Option<String>,
     /// Usage example in Almide syntax
     #[serde(default)]
+    #[allow(dead_code)]
     example: Option<String>,
 }
 
@@ -138,6 +140,10 @@ fn parse_type(s: &str, type_params: &[String]) -> String {
                 parse_type(ok_ty, type_params),
                 parse_type(err_ty, type_params)
             )
+        }
+        other if other.starts_with("Set[") => {
+            let inner = &other[4..other.len() - 1];
+            format!("Ty::Named(s(\"Set\"), vec![{}])", parse_type(inner, type_params))
         }
         other if other.starts_with("Map[") => {
             let inner = &other[4..other.len() - 1];

@@ -37,30 +37,6 @@ impl Parser {
         }
     }
 
-    pub(crate) fn skip_to_next_stmt(&mut self) {
-        loop {
-            let tt = &self.current().token_type;
-            match tt {
-                TokenType::EOF | TokenType::RBrace => break,
-                TokenType::Newline => {
-                    self.advance();
-                    if matches!(self.current().token_type,
-                        TokenType::Let | TokenType::Var | TokenType::Guard
-                        | TokenType::If | TokenType::Match | TokenType::For
-                        | TokenType::While | TokenType::Do
-                        | TokenType::Ident | TokenType::TypeName
-                        | TokenType::RBrace | TokenType::EOF
-                        | TokenType::Fn | TokenType::Effect | TokenType::Async
-                        | TokenType::Type | TokenType::Test | TokenType::Pub
-                    ) {
-                        break;
-                    }
-                }
-                _ => { self.advance(); }
-            }
-        }
-    }
-
     pub(crate) fn skip_to_next_decl(&mut self) {
         loop {
             let tt = &self.current().token_type;

@@ -575,15 +575,6 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
         IrPattern::Tuple { .. } => {
             arm.body.clone()
         }
-
-        // Unsupported patterns — leave as-is
-        _ => {
-            return IrExpr {
-                kind: IrExprKind::Match { subject: Box::new(subject.clone()), arms: arms.to_vec() },
-                ty: result_ty.clone(),
-                span: None,
-            };
-        }
     }
 }
 
