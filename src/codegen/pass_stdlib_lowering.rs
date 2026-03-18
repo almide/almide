@@ -32,7 +32,7 @@ fn rewrite_expr(expr: IrExpr, in_effect: bool) -> IrExpr {
 
     let kind = match expr.kind {
         IrExprKind::Call { target: CallTarget::Module { module, func }, args, type_args } => {
-            // Recurse into args first
+            // Recurse into args first (fan auto-try is handled by FanLoweringPass)
             let args: Vec<IrExpr> = args.into_iter().map(|a| rewrite_expr(a, in_effect)).collect();
 
             // Look up per-function transform table
@@ -208,6 +208,7 @@ fn rewrite_expr(expr: IrExpr, in_effect: bool) -> IrExpr {
             index: Box::new(rewrite_expr(*index, in_effect)),
         },
         IrExprKind::Fan { exprs } => IrExprKind::Fan {
+            // FanLoweringPass will strip auto-try from these later
             exprs: exprs.into_iter().map(|e| rewrite_expr(e, in_effect)).collect(),
         },
         other => other,
