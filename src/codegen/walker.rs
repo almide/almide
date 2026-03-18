@@ -51,17 +51,11 @@ impl<'a> RenderContext<'a> {
             "typeof", "void", "with", "yield", "export", "import",
             "try", "catch", "finally", "throw", "eval", "arguments"];
         if kw.contains(&name.as_str()) {
-            let mut b = HashMap::new();
-            b.insert("name", name.clone());
-            self.templates.render("keyword_escape", None, &[], &b)
+            self.templates.render_with("keyword_escape", None, &[], &[("name", name.as_str())])
                 .unwrap_or_else(|| name.clone())
         } else {
             name.clone()
         }
-    }
-
-    fn bindings(&self) -> HashMap<&'static str, String> {
-        HashMap::new()
     }
 }
 
@@ -75,22 +69,19 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
         Ty::Bool => template_or(ctx, "type_bool", &[], "bool"),
         Ty::Unit => template_or(ctx, "type_unit", &[], "()"),
         Ty::Option(inner) => {
-            let mut b = HashMap::new();
-            b.insert("inner", render_type(ctx, inner));
-            ctx.templates.render("type_option", None, &[], &b)
+            let inner_s = render_type(ctx, inner);
+            ctx.templates.render_with("type_option", None, &[], &[("inner", inner_s.as_str())])
                 .unwrap_or_else(|| format!("Option<{}>", render_type(ctx, inner)))
         }
         Ty::Result(ok, err) => {
-            let mut b = HashMap::new();
-            b.insert("ok", render_type(ctx, ok));
-            b.insert("err", render_type(ctx, err));
-            ctx.templates.render("type_result", None, &[], &b)
+            let ok_s = render_type(ctx, ok);
+            let err_s = render_type(ctx, err);
+            ctx.templates.render_with("type_result", None, &[], &[("ok", ok_s.as_str()), ("err", err_s.as_str())])
                 .unwrap_or_else(|| format!("Result<{}, {}>", render_type(ctx, ok), render_type(ctx, err)))
         }
         Ty::List(inner) => {
-            let mut b = HashMap::new();
-            b.insert("inner", render_type(ctx, inner));
-            ctx.templates.render("type_list", None, &[], &b)
+            let inner_s = render_type(ctx, inner);
+            ctx.templates.render_with("type_list", None, &[], &[("inner", inner_s.as_str())])
                 .unwrap_or_else(|| format!("Vec<{}>", render_type(ctx, inner)))
         }
         Ty::Named(name, args) => {
@@ -125,10 +116,9 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
             }
         }
         Ty::Map(k, v) => {
-            let mut b = HashMap::new();
-            b.insert("key", render_type(ctx, k));
-            b.insert("value", render_type(ctx, v));
-            ctx.templates.render("type_map", None, &[], &b)
+            let key_s = render_type(ctx, k);
+            let value_s = render_type(ctx, v);
+            ctx.templates.render_with("type_map", None, &[], &[("key", key_s.as_str()), ("value", value_s.as_str())])
                 .unwrap_or_else(|| format!("HashMap<{}, {}>", render_type(ctx, k), render_type(ctx, v)))
         }
         Ty::Fn { params, ret } => {
@@ -139,17 +129,12 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
             } else {
                 render_type(ctx, ret)
             };
-            let mut b = HashMap::new();
-            b.insert("params", params_str);
-            b.insert("return", ret_str);
-            ctx.templates.render("type_fn", None, &[], &b)
-                .unwrap_or_else(|| format!("Fn({})", b.get("params").unwrap()))
+            ctx.templates.render_with("type_fn", None, &[], &[("params", params_str.as_str()), ("return", ret_str.as_str())])
+                .unwrap_or_else(|| format!("Fn({})", params_str))
         }
         Ty::Tuple(elems) => {
             let parts = elems.iter().map(|t| render_type(ctx, t)).collect::<Vec<_>>().join(", ");
-            let mut b = HashMap::new();
-            b.insert("elements", parts);
-            ctx.templates.render("type_tuple", None, &[], &b)
+            ctx.templates.render_with("type_tuple", None, &[], &[("elements", parts.as_str())])
                 .unwrap_or_else(|| "tuple".into())
         }
         Ty::TypeVar(n) => {
@@ -175,23 +160,19 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
     match &expr.kind {
         // ── Literals ──
         IrExprKind::LitInt { value } => {
-            let mut b = HashMap::new();
-            b.insert("value", value.to_string());
-            ctx.templates.render("int_literal", None, &[], &b)
+            let value_s = value.to_string();
+            ctx.templates.render_with("int_literal", None, &[], &[("value", value_s.as_str())])
                 .unwrap_or_else(|| value.to_string())
         }
         IrExprKind::LitFloat { value } => {
-            let mut b = HashMap::new();
-            b.insert("value", format!("{}", value));
-            ctx.templates.render("float_literal", None, &[], &b)
+            let value_s = format!("{}", value);
+            ctx.templates.render_with("float_literal", None, &[], &[("value", value_s.as_str())])
                 .unwrap_or_else(|| format!("{}", value))
         }
         IrExprKind::LitStr { value } => {
-            let mut b = HashMap::new();
             let escaped = value.replace('\\', "\\\\").replace('"', "\\\"")
                 .replace('\n', "\\n").replace('\t', "\\t").replace('\r', "\\r");
-            b.insert("value", escaped);
-            ctx.templates.render("string_literal", None, &[], &b)
+            ctx.templates.render_with("string_literal", None, &[], &[("value", escaped.as_str())])
                 .unwrap_or_else(|| format!("\"{}\"", value))
         }
         IrExprKind::LitBool { value } => {
@@ -205,9 +186,8 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             let name = ctx.var_name(*id).to_string();
             // Lazy vars need deref via template
             if ctx.ann.lazy_vars.contains(id) {
-                let mut b = HashMap::new();
-                b.insert("name", name.to_uppercase());
-                ctx.templates.render("deref_lazy", None, &[], &b)
+                let upper = name.to_uppercase();
+                ctx.templates.render_with("deref_lazy", None, &[], &[("name", upper.as_str())])
                     .unwrap_or_else(|| name.to_uppercase())
             } else {
                 name
@@ -237,11 +217,10 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 let else_str = render_expr(ctx, else_);
                 format!("if ({}) {{ {} }} else {{ {} }}", cond_str, then_str, else_str)
             } else {
-                let mut b = HashMap::new();
-                b.insert("cond", render_expr(ctx, cond));
-                b.insert("then", render_expr(ctx, then));
-                b.insert("else", render_expr(ctx, else_));
-                ctx.templates.render("if_expr", None, &[], &b)
+                let cond_s = render_expr(ctx, cond);
+                let then_s = render_expr(ctx, then);
+                let else_s = render_expr(ctx, else_);
+                ctx.templates.render_with("if_expr", None, &[], &[("cond", cond_s.as_str()), ("then", then_s.as_str()), ("else", else_s.as_str())])
                     .unwrap_or_else(|| format!("if {} {{ {} }} else {{ {} }}",
                         render_expr(ctx, cond), render_expr(ctx, then), render_expr(ctx, else_)))
             }
@@ -253,21 +232,16 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             if matches!(&subject.ty, Ty::String) {
                 let has_str_pat = arms.iter().any(|a| matches!(&a.pattern, IrPattern::Literal { expr } if matches!(&expr.kind, IrExprKind::LitStr { .. })));
                 if has_str_pat {
-                    let mut b = HashMap::new();
-                    b.insert("subject", subj.clone());
-                    subj = ctx.templates.render("string_match_subject", None, &[], &b)
-                        .unwrap_or(subj);
+                    subj = ctx.templates.render_with("string_match_subject", None, &[], &[("subject", subj.as_str())])
+                        .unwrap_or_else(|| subj.clone());
                 }
             }
             let arms_str = arms.iter()
                 .map(|arm| render_match_arm(ctx, arm))
                 .collect::<Vec<_>>()
                 .join("\n");
-            let mut b = HashMap::new();
-            b.insert("subject", subj);
             let fallback = format!("match {{ {} }}", &arms_str);
-            b.insert("arms", arms_str);
-            ctx.templates.render("match_expr", None, &[], &b)
+            ctx.templates.render_with("match_expr", None, &[], &[("subject", subj.as_str()), ("arms", arms_str.as_str())])
                 .unwrap_or(fallback)
         }
 
@@ -290,9 +264,8 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                     parts.push(rendered);
                 }
             }
-            let mut b = HashMap::new();
-            b.insert("body", parts.join("\n"));
-            ctx.templates.render("loop_block", None, &[], &b)
+            let body_s = parts.join("\n");
+            ctx.templates.render_with("loop_block", None, &[], &[("body", body_s.as_str())])
                 .unwrap_or_else(|| format!("loop {{ ... }}"))
         }
 
@@ -307,10 +280,8 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 if is_control_flow {
                     parts.push(expr_str);
                 } else {
-                    let mut b = HashMap::new();
-                    b.insert("expr", expr_str);
-                    parts.push(ctx.templates.render("block_result_expr", None, &[], &b)
-                        .unwrap_or_else(|| b.get("expr").unwrap().clone()));
+                    parts.push(ctx.templates.render_with("block_result_expr", None, &[], &[("expr", expr_str.as_str())])
+                        .unwrap_or_else(|| expr_str.clone()));
                 }
             }
             let body = parts.join("\n");
@@ -323,10 +294,8 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             if has_control {
                 format!("{{\n{}\n}}", body)
             } else {
-                let mut b = HashMap::new();
-                b.insert("body", body);
-                ctx.templates.render("block_expr", None, &[], &b)
-                    .unwrap_or_else(|| format!("{{\n{}\n}}", b.get("body").unwrap()))
+                ctx.templates.render_with("block_expr", None, &[], &[("body", body.as_str())])
+                    .unwrap_or_else(|| format!("{{\n{}\n}}", body))
             }
         }
 
@@ -334,30 +303,22 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::ForIn { var, var_tuple, iterable, body } => {
             let var_name = if let Some(tuple_vars) = var_tuple {
                 let names: Vec<String> = tuple_vars.iter().map(|id| ctx.var_name(*id).to_string()).collect();
-                let mut b = HashMap::new();
-                b.insert("vars", names.join(", "));
-                ctx.templates.render("for_tuple_destructure", None, &[], &b)
+                let vars_s = names.join(", ");
+                ctx.templates.render_with("for_tuple_destructure", None, &[], &[("vars", vars_s.as_str())])
                     .unwrap_or_else(|| format!("({})", names.join(", ")))
             } else {
                 ctx.var_name(*var).to_string()
             };
             let iter = render_expr(ctx, iterable);
             let body_str = body.iter().map(|s| render_stmt(ctx, s)).collect::<Vec<_>>().join("\n");
-            let mut b = HashMap::new();
-            b.insert("var", var_name);
-            b.insert("iter", iter);
-            b.insert("body", body_str);
-            ctx.templates.render("for_loop", None, &[], &b)
+            ctx.templates.render_with("for_loop", None, &[], &[("var", var_name.as_str()), ("iter", iter.as_str()), ("body", body_str.as_str())])
                 .unwrap_or_else(|| format!("for _ in _ {{ }}"))
         }
 
         IrExprKind::While { cond, body } => {
             let cond_str = render_expr(ctx, cond);
             let body_str = body.iter().map(|s| render_stmt(ctx, s)).collect::<Vec<_>>().join("\n");
-            let mut b = HashMap::new();
-            b.insert("cond", cond_str);
-            b.insert("body", body_str);
-            ctx.templates.render("while_loop", None, &[], &b)
+            ctx.templates.render_with("while_loop", None, &[], &[("cond", cond_str.as_str()), ("body", body_str.as_str())])
                 .unwrap_or_else(|| format!("while _ {{ }}"))
         }
 
@@ -374,11 +335,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                     // Module calls: use template (TS/other) or should have been
                     // converted to RenderedCall by StdlibLoweringPass (Rust)
                     let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
-                    let mut b = HashMap::new();
-                    b.insert("module", module.clone());
-                    b.insert("func", func.clone());
-                    b.insert("args", args_str);
-                    ctx.templates.render("module_call", None, &[], &b)
+                    ctx.templates.render_with("module_call", None, &[], &[("module", module.as_str()), ("func", func.as_str()), ("args", args_str.as_str())])
                         .unwrap_or_else(|| format!("__almd_{}.{}()", module, func))
                 }
                 _ => {
@@ -396,15 +353,11 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                                     }
                                 }).collect();
                                 let args_str = boxed_args.join(", ");
-                                let mut b = HashMap::new();
-                                b.insert("enum_name", enum_name.clone());
-                                b.insert("ctor_name", name.clone());
-                                b.insert("args", args_str.clone());
                                 if args.is_empty() {
-                                    return ctx.templates.render("ctor_unit", None, &[], &b)
+                                    return ctx.templates.render_with("ctor_unit", None, &[], &[("enum_name", enum_name.as_str()), ("ctor_name", name.as_str()), ("args", args_str.as_str())])
                                         .unwrap_or_else(|| format!("{}::{}", enum_name, name));
                                 } else {
-                                    return ctx.templates.render("ctor_call", None, &[], &b)
+                                    return ctx.templates.render_with("ctor_call", None, &[], &[("enum_name", enum_name.as_str()), ("ctor_name", name.as_str()), ("args", args_str.as_str())])
                                         .unwrap_or_else(|| format!("{}::{}({})", enum_name, name, args_str));
                                 }
                             }
@@ -441,11 +394,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                                 if let Some(dot_pos) = method.find('.') {
                                     let module = &method[..dot_pos];
                                     let func = &method[dot_pos+1..];
-                                    let mut b = HashMap::new();
-                                    b.insert("module", module.to_string());
-                                    b.insert("func", func.to_string());
-                                    b.insert("args", all_args_str);
-                                    return ctx.templates.render("module_call", None, &[], &b)
+                                    return ctx.templates.render_with("module_call", None, &[], &[("module", module), ("func", func), ("args", all_args_str.as_str())])
                                         .unwrap_or_else(|| format!("{}.{}()", module, func));
                                 }
                             }
@@ -463,10 +412,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                         CallTarget::Module { .. } => unreachable!(),
                     };
                     let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
-                    let mut b = HashMap::new();
-                    b.insert("callee", callee);
-                    b.insert("args", args_str);
-                    ctx.templates.render("call_expr", None, &[], &b)
+                    ctx.templates.render_with("call_expr", None, &[], &[("callee", callee.as_str()), ("args", args_str.as_str())])
                         .unwrap_or_else(|| format!("call(...)"))
                 }
             }
@@ -480,16 +426,12 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                     Ty::List(inner) => render_type(ctx, inner),
                     _ => "_".into(),
                 };
-                let mut b = HashMap::new();
-                b.insert("inner_type", inner_ty);
-                if let Some(rendered) = ctx.templates.render("empty_list", None, &[], &b) {
+                if let Some(rendered) = ctx.templates.render_with("empty_list", None, &[], &[("inner_type", inner_ty.as_str())]) {
                     return rendered;
                 }
             }
             let elems = elements.iter().map(|e| render_expr(ctx, e)).collect::<Vec<_>>().join(", ");
-            let mut b = HashMap::new();
-            b.insert("elements", elems);
-            ctx.templates.render("list_literal", None, &[], &b)
+            ctx.templates.render_with("list_literal", None, &[], &[("elements", elems.as_str())])
                 .unwrap_or_else(|| format!("[...]"))
         }
 
@@ -507,10 +449,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                         val_str = format!("Box::new({})", val_str);
                     }
                 }
-                let mut b = HashMap::new();
-                b.insert("name", k.clone());
-                b.insert("value", val_str.clone());
-                field_strs.push(ctx.templates.render("record_field", None, &[], &b)
+                field_strs.push(ctx.templates.render_with("record_field", None, &[], &[("name", k.as_str()), ("value", val_str.as_str())])
                     .unwrap_or_else(|| format!("{}: {}", k, val_str)));
             }
             // Fill in default fields that were not explicitly provided
@@ -527,10 +466,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                                 val_str = format!("Box::new({})", val_str);
                             }
                         }
-                        let mut b = HashMap::new();
-                        b.insert("name", field_name.clone());
-                        b.insert("value", val_str.clone());
-                        field_strs.push(ctx.templates.render("record_field", None, &[], &b)
+                        field_strs.push(ctx.templates.render_with("record_field", None, &[], &[("name", field_name.as_str()), ("value", val_str.as_str())])
                             .unwrap_or_else(|| format!("{}: {}", field_name, val_str)));
                     }
                 }
@@ -557,66 +493,52 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             });
             // Qualify enum variant constructors via template
             if let Some(enum_name) = ctx.ann.ctor_to_enum.get(&type_name) {
-                let mut b = HashMap::new();
-                b.insert("enum_name", enum_name.clone());
-                b.insert("ctor_name", type_name.clone());
-                b.insert("fields", fields_str.clone());
                 // Try ctor_record template first (TS: function call), fallback to record_literal
-                if let Some(rendered) = ctx.templates.render("ctor_record", None, &[], &b) {
+                if let Some(rendered) = ctx.templates.render_with("ctor_record", None, &[], &[("enum_name", enum_name.as_str()), ("ctor_name", type_name.as_str()), ("fields", fields_str.as_str())]) {
                     return rendered;
                 }
-                type_name = ctx.templates.render("ctor_qualify", None, &[], &b)
+                type_name = ctx.templates.render_with("ctor_qualify", None, &[], &[("enum_name", enum_name.as_str()), ("ctor_name", type_name.as_str()), ("fields", fields_str.as_str())])
                     .unwrap_or_else(|| format!("{}::{}", enum_name, type_name));
             }
-            let mut b = HashMap::new();
-            b.insert("type_name", type_name);
             let fallback = format!("{{ {} }}", &fields_str);
-            b.insert("fields", fields_str);
-            ctx.templates.render("record_literal", None, &[], &b)
+            ctx.templates.render_with("record_literal", None, &[], &[("type_name", type_name.as_str()), ("fields", fields_str.as_str())])
                 .unwrap_or(fallback)
         }
 
         // ── Access ──
         IrExprKind::Member { object, field } => {
-            let mut b = HashMap::new();
-            b.insert("expr", render_expr(ctx, object));
-            b.insert("field", field.clone());
-            ctx.templates.render("field_access", None, &[], &b)
+            let expr_s = render_expr(ctx, object);
+            ctx.templates.render_with("field_access", None, &[], &[("expr", expr_s.as_str()), ("field", field.as_str())])
                 .unwrap_or_else(|| format!("{}.{}", render_expr(ctx, object), field))
         }
 
         // ── Option / Result ──
         IrExprKind::OptionSome { expr: inner } => {
-            let mut b = HashMap::new();
-            b.insert("inner", render_expr(ctx, inner));
-            ctx.templates.render("some_expr", None, &[], &b)
+            let inner_s = render_expr(ctx, inner);
+            ctx.templates.render_with("some_expr", None, &[], &[("inner", inner_s.as_str())])
                 .unwrap_or_else(|| format!("Some({})", render_expr(ctx, inner)))
         }
         IrExprKind::OptionNone => {
             // Typed None: pass inner type via bindings + attribute for template guard
             if let Ty::Option(inner) = &expr.ty {
                 if !matches!(inner.as_ref(), Ty::Unknown | Ty::TypeVar(_)) {
-                    let mut b = HashMap::new();
-                    b.insert("type_hint", render_type(ctx, inner));
-                    return ctx.templates.render("none_expr", None, &["none_type_hint"], &b)
+                    let type_hint_s = render_type(ctx, inner);
+                    return ctx.templates.render_with("none_expr", None, &["none_type_hint"], &[("type_hint", type_hint_s.as_str())])
                         .unwrap_or_else(|| "None".into());
                 }
             }
             template_or(ctx, "none_expr", &[], "None")
         }
         IrExprKind::ResultOk { expr: inner } => {
-            let mut b = HashMap::new();
-            b.insert("inner", render_expr(ctx, inner));
-            ctx.templates.render("ok_expr", None, &[], &b)
+            let inner_s = render_expr(ctx, inner);
+            ctx.templates.render_with("ok_expr", None, &[], &[("inner", inner_s.as_str())])
                 .unwrap_or_else(|| format!("Ok({})", render_expr(ctx, inner)))
         }
         IrExprKind::ResultErr { expr: inner } => {
             let inner_str = render_expr(ctx, inner);
-            let mut b = HashMap::new();
-            b.insert("inner", inner_str);
             let construct = if matches!(&inner.ty, Ty::String) { "err_inner_string" } else { "err_inner_other" };
-            ctx.templates.render(construct, None, &[], &b)
-                .or_else(|| ctx.templates.render("err_expr", None, &[], &b))
+            ctx.templates.render_with(construct, None, &[], &[("inner", inner_str.as_str())])
+                .or_else(|| ctx.templates.render_with("err_expr", None, &[], &[("inner", inner_str.as_str())]))
                 .unwrap_or_else(|| format!("Err({})", render_expr(ctx, inner)))
         }
 
@@ -629,15 +551,10 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             let mut body_str = render_expr(ctx, body);
             // Nested lambda: wrap in Box for languages that need it (template returns identity in TS)
             if matches!(&body.kind, IrExprKind::Lambda { .. }) {
-                let mut b = HashMap::new();
-                b.insert("inner", body_str.clone());
-                body_str = ctx.templates.render("box_wrap", None, &[], &b)
+                body_str = ctx.templates.render_with("box_wrap", None, &[], &[("inner", body_str.as_str())])
                     .unwrap_or(body_str);
             }
-            let mut b = HashMap::new();
-            b.insert("params", params_str);
-            b.insert("body", body_str);
-            ctx.templates.render("lambda_single", None, &[], &b)
+            ctx.templates.render_with("lambda_single", None, &[], &[("params", params_str.as_str()), ("body", body_str.as_str())])
                 .unwrap_or_else(|| format!("|_| {{ }}"))
         }
 
@@ -658,10 +575,9 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                     }
                 }
             }
-            let mut b = HashMap::new();
-            b.insert("format_str", fmt_parts.join(""));
-            b.insert("args", arg_parts.join(", "));
-            b.insert("template_str", {
+            let format_str_s = fmt_parts.join("");
+            let args_s = arg_parts.join(", ");
+            let template_str_s = {
                 // For TS-style template literals: `${expr}`
                 let mut s = String::new();
                 for part in parts {
@@ -675,8 +591,8 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                     }
                 }
                 s
-            });
-            ctx.templates.render("string_interp", None, &[], &b)
+            };
+            ctx.templates.render_with("string_interp", None, &[], &[("format_str", format_str_s.as_str()), ("args", args_s.as_str()), ("template_str", template_str_s.as_str())])
                 .unwrap_or_else(|| format!("\"...\""))
         }
 
@@ -684,49 +600,38 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::Range { start, end, inclusive } => {
             let s = render_expr(ctx, start);
             let e = render_expr(ctx, end);
-            let mut b = HashMap::new();
-            b.insert("start", s);
-            b.insert("end", e);
             let construct = if *inclusive { "range_inclusive" } else { "range_expr" };
-            ctx.templates.render(construct, None, &[], &b)
+            ctx.templates.render_with(construct, None, &[], &[("start", s.as_str()), ("end", e.as_str())])
                 .unwrap_or_else(|| "range(...)".into())
         }
 
         // ── Tuple ──
         IrExprKind::Tuple { elements } => {
             let parts = elements.iter().map(|e| render_expr(ctx, e)).collect::<Vec<_>>().join(", ");
-            let mut b = HashMap::new();
-            b.insert("elements", parts);
-            ctx.templates.render("tuple_literal", None, &[], &b)
+            ctx.templates.render_with("tuple_literal", None, &[], &[("elements", parts.as_str())])
                 .unwrap_or_else(|| "tuple(...)".into())
         }
         IrExprKind::TupleIndex { object, index } => {
-            let mut b = HashMap::new();
-            b.insert("object", render_expr(ctx, object));
-            b.insert("index", format!("{}", index));
-            ctx.templates.render("tuple_index", None, &[], &b)
+            let object_s = render_expr(ctx, object);
+            let index_s = format!("{}", index);
+            ctx.templates.render_with("tuple_index", None, &[], &[("object", object_s.as_str()), ("index", index_s.as_str())])
                 .unwrap_or_else(|| format!("{}.{}", render_expr(ctx, object), index))
         }
         IrExprKind::IndexAccess { object, index } => {
             let obj_str = render_expr(ctx, object);
             let idx = render_expr(ctx, index);
-            let mut b = HashMap::new();
             if matches!(&object.ty, Ty::Map(_, _)) {
-                b.insert("object", obj_str);
-                b.insert("key", idx);
-                ctx.templates.render("map_get", None, &[], &b)
+                ctx.templates.render_with("map_get", None, &[], &[("object", obj_str.as_str()), ("key", idx.as_str())])
                     .unwrap_or_else(|| "map_get(...)".into())
             } else {
-                b.insert("object", obj_str);
-                b.insert("index", idx);
-                ctx.templates.render("index_access", None, &[], &b)
+                ctx.templates.render_with("index_access", None, &[], &[("object", obj_str.as_str()), ("index", idx.as_str())])
                     .unwrap_or_else(|| "idx[...]".into())
             }
         }
 
         // ── Map ──
         IrExprKind::MapLiteral { entries } => {
-            let entry_template = ctx.templates.render("map_entry", None, &[], &HashMap::new())
+            let entry_template = ctx.templates.render_with("map_entry", None, &[], &[])
                 .unwrap_or_else(|| "({key}, {value})".into());
             let parts: Vec<String> = entries.iter()
                 .map(|(k, v)| {
@@ -734,9 +639,8 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                         .replace("{value}", &render_expr(ctx, v))
                 })
                 .collect();
-            let mut b = HashMap::new();
-            b.insert("entries", parts.join(", "));
-            ctx.templates.render("map_literal", None, &[], &b)
+            let entries_s = parts.join(", ");
+            ctx.templates.render_with("map_literal", None, &[], &[("entries", entries_s.as_str())])
                 .unwrap_or_else(|| format!("map([{}])", parts.join(", ")))
         }
         IrExprKind::EmptyMap => {
@@ -761,42 +665,32 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 }
                 _ => render_type(ctx, &expr.ty),
             };
-            let mut b = HashMap::new();
-            b.insert("type_name", type_name);
-            b.insert("fields", fields_str);
-            b.insert("base", base_str);
-            ctx.templates.render("spread_record", None, &[], &b)
+            ctx.templates.render_with("spread_record", None, &[], &[("type_name", type_name.as_str()), ("fields", fields_str.as_str()), ("base", base_str.as_str())])
                 .unwrap_or_else(|| "{ ...spread }".into())
         }
 
         // ── Try / Await ──
         IrExprKind::Try { expr: inner } => {
             let s = render_expr(ctx, inner);
-            let mut b = HashMap::new();
-            b.insert("inner", s);
-            ctx.templates.render("try_expr", None, &[], &b)
+            ctx.templates.render_with("try_expr", None, &[], &[("inner", s.as_str())])
                 .unwrap_or_else(|| "try(...)".into())
         }
         IrExprKind::Await { expr: inner } => {
             let s = render_expr(ctx, inner);
-            let mut b = HashMap::new();
-            b.insert("inner", s);
-            ctx.templates.render("await_expr", None, &[], &b)
+            ctx.templates.render_with("await_expr", None, &[], &[("inner", s.as_str())])
                 .unwrap_or_else(|| "await(...)".into())
         }
 
         // ── Codegen nodes (inserted by passes — walker just renders) ──
         IrExprKind::Clone { expr: inner } => {
-            let mut b = HashMap::new();
-            b.insert("expr", render_expr(ctx, inner));
-            ctx.templates.render("clone_expr", None, &[], &b)
-                .unwrap_or_else(|| format!("{}.clone()", b.get("expr").unwrap()))
+            let expr_s = render_expr(ctx, inner);
+            ctx.templates.render_with("clone_expr", None, &[], &[("expr", expr_s.as_str())])
+                .unwrap_or_else(|| format!("{}.clone()", expr_s))
         }
         IrExprKind::Deref { expr: inner } => {
-            let mut b = HashMap::new();
-            b.insert("name", render_expr(ctx, inner));
-            ctx.templates.render("deref_var", None, &[], &b)
-                .unwrap_or_else(|| format!("(*{})", b.get("name").unwrap()))
+            let name_s = render_expr(ctx, inner);
+            ctx.templates.render_with("deref_var", None, &[], &[("name", name_s.as_str())])
+                .unwrap_or_else(|| format!("(*{})", name_s))
         }
         IrExprKind::Borrow { expr: inner, as_str } => {
             if *as_str {
@@ -841,9 +735,8 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 }
                 body
             }).collect();
-            let mut b = HashMap::new();
-            b.insert("exprs", rendered.join(", "));
-            b.insert("count", format!("{}", exprs.len()));
+            let exprs_s = rendered.join(", ");
+            let count_s = format!("{}", exprs.len());
             // Build spawn/join parts for thread-based template
             let handles: Vec<String> = (0..exprs.len()).map(|i| format!("__fan_h{}", i)).collect();
             let spawns: Vec<String> = rendered.iter().enumerate()
@@ -863,11 +756,10 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             }).collect();
             let join_expr = if joins.len() == 1 { joins[0].clone() }
                 else { format!("({})", joins.join(", ")) };
-            b.insert("spawns", spawns.join(" "));
-            b.insert("join_expr", join_expr.clone());
+            let spawns_s = spawns.join(" ");
             // Select template variant
             let construct = if any_result && ctx.in_effect_fn { "fan_effect" } else { "fan_expr" };
-            ctx.templates.render(construct, None, &[], &b)
+            ctx.templates.render_with(construct, None, &[], &[("exprs", exprs_s.as_str()), ("count", count_s.as_str()), ("spawns", spawns_s.as_str()), ("join_expr", join_expr.as_str())])
                 .unwrap_or_else(|| format!("fan({})", rendered.join(", ")))
         }
 
@@ -885,36 +777,24 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, t
     // Type-dispatched operators
     match op {
         BinOp::ConcatStr | BinOp::ConcatList => {
-            let mut b = HashMap::new();
-            b.insert("left", l);
-            b.insert("right", r);
             let ty_tag = if op == BinOp::ConcatStr { "String" } else { "List" };
-            ctx.templates.render("concat_expr", Some(ty_tag), &[], &b)
+            ctx.templates.render_with("concat_expr", Some(ty_tag), &[], &[("left", l.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("concat(_, _)"))
         }
         BinOp::Eq => {
-            let mut b = HashMap::new();
-            b.insert("left", l);
-            b.insert("right", r);
-            ctx.templates.render("eq_expr", None, &[], &b)
+            ctx.templates.render_with("eq_expr", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("_ == _"))
         }
         BinOp::Neq => {
-            let mut b = HashMap::new();
-            b.insert("left", l);
-            b.insert("right", r);
-            ctx.templates.render("ne_expr", None, &[], &b)
+            ctx.templates.render_with("ne_expr", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("_ != _"))
         }
         BinOp::PowFloat => {
-            let mut b = HashMap::new();
-            b.insert("left", l);
-            b.insert("right", r);
             let ty_tag = match &left.ty {
                 Ty::Int => "Int",
                 _ => "Float",
             };
-            ctx.templates.render("power_expr", Some(ty_tag), &[], &b)
+            ctx.templates.render_with("power_expr", Some(ty_tag), &[], &[("left", l.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("pow(_, _)"))
         }
         _ => {
@@ -933,11 +813,8 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, t
                 BinOp::Or => "||",
                 _ => "??",
             };
-            let mut b = HashMap::new();
-            b.insert("left", l);
-            b.insert("op", op_str.to_string());
-            b.insert("right", r);
-            ctx.templates.render("binary_op", None, &[], &b)
+            let op_s = op_str.to_string();
+            ctx.templates.render_with("binary_op", None, &[], &[("left", l.as_str()), ("op", op_s.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("({} {} {})", "l", op_str, "r"))
         }
     }
@@ -948,7 +825,6 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, t
 fn render_match_arm(ctx: &RenderContext, arm: &IrMatchArm) -> String {
     let pattern = render_pattern(ctx, &arm.pattern);
     let body = render_expr(ctx, &arm.body);
-    let mut b = HashMap::new();
     // Append guard to pattern if present
     let full_pattern = if let Some(ref guard) = arm.guard {
         let guard_str = render_expr(ctx, guard);
@@ -956,9 +832,7 @@ fn render_match_arm(ctx: &RenderContext, arm: &IrMatchArm) -> String {
     } else {
         pattern
     };
-    b.insert("pattern", full_pattern);
-    b.insert("body", body);
-    ctx.templates.render("match_arm_inline", None, &[], &b)
+    ctx.templates.render_with("match_arm_inline", None, &[], &[("pattern", full_pattern.as_str()), ("body", body.as_str())])
         .unwrap_or_else(|| format!("_ => _,"))
 }
 
@@ -980,30 +854,24 @@ fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {
             }
         }
         IrPattern::Some { inner } => {
-            let mut b = HashMap::new();
-            b.insert("binding", render_pattern(ctx, inner));
-            ctx.templates.render("pattern_some", None, &[], &b)
+            let binding_s = render_pattern(ctx, inner);
+            ctx.templates.render_with("pattern_some", None, &[], &[("binding", binding_s.as_str())])
                 .unwrap_or_else(|| format!("Some(_)"))
         }
         IrPattern::None => template_or(ctx, "pattern_none", &[], "None"),
         IrPattern::Ok { inner } => {
-            let mut b = HashMap::new();
-            b.insert("binding", render_pattern(ctx, inner));
-            ctx.templates.render("pattern_ok", None, &[], &b)
+            let binding_s = render_pattern(ctx, inner);
+            ctx.templates.render_with("pattern_ok", None, &[], &[("binding", binding_s.as_str())])
                 .unwrap_or_else(|| format!("Ok(_)"))
         }
         IrPattern::Err { inner } => {
-            let mut b = HashMap::new();
-            b.insert("binding", render_pattern(ctx, inner));
-            ctx.templates.render("pattern_err", None, &[], &b)
+            let binding_s = render_pattern(ctx, inner);
+            ctx.templates.render_with("pattern_err", None, &[], &[("binding", binding_s.as_str())])
                 .unwrap_or_else(|| format!("Err(_)"))
         }
         IrPattern::Constructor { name, args } => {
             let qualified = if let Some(enum_name) = ctx.ann.ctor_to_enum.get(name) {
-                let mut b = HashMap::new();
-                b.insert("enum_name", enum_name.clone());
-                b.insert("ctor_name", name.clone());
-                ctx.templates.render("ctor_qualify", None, &[], &b)
+                ctx.templates.render_with("ctor_qualify", None, &[], &[("enum_name", enum_name.as_str()), ("ctor_name", name.as_str())])
                     .unwrap_or_else(|| format!("{}::{}", enum_name, name))
             } else {
                 name.clone()
@@ -1017,9 +885,7 @@ fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {
         }
         IrPattern::Tuple { elements } => {
             let elems = elements.iter().map(|e| render_pattern(ctx, e)).collect::<Vec<_>>().join(", ");
-            let mut b = HashMap::new();
-            b.insert("elements", elems);
-            ctx.templates.render("tuple_literal", None, &[], &b)
+            ctx.templates.render_with("tuple_literal", None, &[], &[("elements", elems.as_str())])
                 .unwrap_or_else(|| "tuple(...)".into())
         }
         IrPattern::RecordPattern { name, fields, rest } => {
@@ -1037,11 +903,8 @@ fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {
                 .collect::<Vec<_>>()
                 .join(", ");
             if *rest {
-                let mut b = HashMap::new();
-                b.insert("name", qualified_name.clone());
-                b.insert("fields", fields_str.clone());
                 let construct = if fields_str.is_empty() { "record_pattern_rest_empty" } else { "record_pattern_rest" };
-                ctx.templates.render(construct, None, &[], &b)
+                ctx.templates.render_with(construct, None, &[], &[("name", qualified_name.as_str()), ("fields", fields_str.as_str())])
                     .unwrap_or_else(|| format!("{} {{ {} }}", qualified_name, fields_str))
             } else {
                 format!("{} {{ {} }}", qualified_name, fields_str)
@@ -1055,8 +918,7 @@ fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {
 pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
     match &stmt.kind {
         IrStmtKind::Bind { var, ty, value, mutability } => {
-            let mut b = HashMap::new();
-            b.insert("name", ctx.var_name(*var).to_string());
+            let name_s = ctx.var_name(*var).to_string();
             // Erase Fn types in bindings (Rust can't write `impl Fn` in let position; TS gets `any`)
             let ty = if matches!(ty, Ty::Fn { .. }) { &Ty::Unknown } else { ty };
             // Erase named TypeVars (K, V, B) — not in scope for bindings
@@ -1067,20 +929,19 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             } else {
                 ty
             };
-            b.insert("type", render_type(ctx, ty));
-            b.insert("value", render_expr(ctx, value));
+            let type_s = render_type(ctx, ty);
+            let value_s = render_expr(ctx, value);
             let construct = match mutability {
                 Mutability::Let => "let_binding",
                 Mutability::Var => "var_binding",
             };
-            ctx.templates.render(construct, None, &[], &b)
+            ctx.templates.render_with(construct, None, &[], &[("name", name_s.as_str()), ("type", type_s.as_str()), ("value", value_s.as_str())])
                 .unwrap_or_else(|| format!("let _ = _;"))
         }
         IrStmtKind::Assign { var, value } => {
-            let mut b = HashMap::new();
-            b.insert("target", ctx.var_name(*var).to_string());
-            b.insert("value", render_expr(ctx, value));
-            ctx.templates.render("assignment", None, &[], &b)
+            let target_s = ctx.var_name(*var).to_string();
+            let value_s = render_expr(ctx, value);
+            ctx.templates.render_with("assignment", None, &[], &[("target", target_s.as_str()), ("value", value_s.as_str())])
                 .unwrap_or_else(|| format!("_ = _;"))
         }
         IrStmtKind::Expr { expr } => {
@@ -1100,9 +961,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let action = if is_loop_control {
                 if matches!(&else_.kind, IrExprKind::Continue) { "continue" } else { "break" }
             } else { "return" };
-            let mut b = HashMap::new();
-            b.insert("cond", cond_str);
-            let neg = ctx.templates.render("guard_negate", None, &[], &b)
+            let neg = ctx.templates.render_with("guard_negate", None, &[], &[("cond", cond_str.as_str())])
                 .unwrap_or_else(|| format!("!cond"));
             if action == "break" || action == "continue" {
                 format!("if {} {{ {} }}", neg, action)
@@ -1115,18 +974,11 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let idx_str = render_expr(ctx, index);
             let val_str = render_expr(ctx, value);
             let target_ty = &ctx.var_table.get(*target).ty;
-            let mut b = HashMap::new();
             if matches!(target_ty, Ty::Map(_, _)) {
-                b.insert("target", target_str);
-                b.insert("key", idx_str);
-                b.insert("value", val_str);
-                ctx.templates.render("map_insert", None, &[], &b)
+                ctx.templates.render_with("map_insert", None, &[], &[("target", target_str.as_str()), ("key", idx_str.as_str()), ("value", val_str.as_str())])
                     .unwrap_or_else(|| "map_set(...)".into())
             } else {
-                b.insert("target", target_str);
-                b.insert("index", idx_str);
-                b.insert("value", val_str);
-                ctx.templates.render("index_assign", None, &[], &b)
+                ctx.templates.render_with("index_assign", None, &[], &[("target", target_str.as_str()), ("index", idx_str.as_str()), ("value", val_str.as_str())])
                     .unwrap_or_else(|| "idx[...] = ...;".into())
             }
         }
@@ -1151,10 +1003,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                         _ => "_".into(),
                     };
                     let qualified = if let Some(enum_name) = ctx.ann.ctor_to_enum.get(&type_name) {
-                        let mut b = HashMap::new();
-                        b.insert("enum_name", enum_name.clone());
-                        b.insert("ctor_name", type_name.clone());
-                        ctx.templates.render("ctor_qualify", None, &[], &b)
+                        ctx.templates.render_with("ctor_qualify", None, &[], &[("enum_name", enum_name.as_str()), ("ctor_name", type_name.as_str())])
                             .unwrap_or_else(|| format!("{}::{}", enum_name, type_name))
                     } else {
                         type_name
@@ -1165,25 +1014,19 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                             None => f.name.clone(),
                         })
                         .collect::<Vec<_>>().join(", ");
-                    let mut b = HashMap::new();
-                    b.insert("name", qualified.clone());
-                    b.insert("fields", fields_str.clone());
                     if *rest {
                         let construct = if fields_str.is_empty() { "record_pattern_rest_empty" } else { "record_pattern_rest" };
-                        ctx.templates.render(construct, None, &[], &b)
+                        ctx.templates.render_with(construct, None, &[], &[("name", qualified.as_str()), ("fields", fields_str.as_str())])
                             .unwrap_or_else(|| format!("{} {{ {} }}", qualified, fields_str))
                     } else {
-                        ctx.templates.render("destructure_pattern", None, &[], &b)
+                        ctx.templates.render_with("destructure_pattern", None, &[], &[("name", qualified.as_str()), ("fields", fields_str.as_str())])
                             .unwrap_or_else(|| format!("{} {{ {} }}", qualified, fields_str))
                     }
                 }
                 _ => render_pattern(ctx, pattern),
             };
             let val_str = render_expr(ctx, value);
-            let mut b = HashMap::new();
-            b.insert("pattern", pat_str);
-            b.insert("value", val_str);
-            ctx.templates.render("bind_destructure", None, &[], &b)
+            ctx.templates.render_with("bind_destructure", None, &[], &[("pattern", pat_str.as_str()), ("value", val_str.as_str())])
                 .unwrap_or_else(|| format!("let _ = _;"))
         }
         IrStmtKind::Comment { text } => format!("// {}", text),
@@ -1212,11 +1055,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         };
         for attr in &func.extern_attrs {
             if attr.target == target_str {
-                let mut b = HashMap::new();
-                b.insert("module", attr.module.clone());
-                b.insert("function", attr.function.clone());
-                b.insert("name", func.name.clone());
-                return ctx.templates.render("extern_fn", None, &[], &b)
+                return ctx.templates.render_with("extern_fn", None, &[], &[("module", attr.module.as_str()), ("function", attr.function.as_str()), ("name", func.name.as_str())])
                     .unwrap_or_else(|| format!("// extern: {}.{}", attr.module, attr.function));
             }
         }
@@ -1230,15 +1069,11 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
                 "typeof", "void", "with", "yield", "export", "import",
                 "try", "catch", "finally", "throw"];
             if kw_list.contains(&param_name.as_str()) {
-                let mut kb = HashMap::new();
-                kb.insert("name", param_name.clone());
-                param_name = fn_ctx.templates.render("keyword_escape", None, &[], &kb)
+                param_name = fn_ctx.templates.render_with("keyword_escape", None, &[], &[("name", param_name.as_str())])
                     .unwrap_or(param_name);
             }
-            let mut b = HashMap::new();
-            b.insert("name", param_name);
-            b.insert("type", render_type(&fn_ctx, &p.ty));
-            fn_ctx.templates.render("fn_param", None, &[], &b)
+            let type_s = render_type(&fn_ctx, &p.ty);
+            fn_ctx.templates.render_with("fn_param", None, &[], &[("name", param_name.as_str()), ("type", type_s.as_str())])
                 .unwrap_or_else(|| format!("{}: {}", p.name, render_type(&fn_ctx, &p.ty)))
         })
         .collect::<Vec<_>>()
@@ -1256,10 +1091,8 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
                 if is_control {
                     parts.push(expr_str);
                 } else {
-                    let mut b = HashMap::new();
-                    b.insert("expr", expr_str);
-                    parts.push(fn_ctx.templates.render("block_result_expr", None, &[], &b)
-                        .unwrap_or_else(|| b.get("expr").unwrap().clone()));
+                    parts.push(fn_ctx.templates.render_with("block_result_expr", None, &[], &[("expr", expr_str.as_str())])
+                        .unwrap_or_else(|| expr_str.clone()));
                 }
             }
             parts.join("\n")
@@ -1270,10 +1103,8 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
             if is_control {
                 body_raw
             } else {
-                let mut b = HashMap::new();
-                b.insert("expr", body_raw.clone());
-                fn_ctx.templates.render("block_result_expr", None, &[], &b)
-                    .unwrap_or(body_raw)
+                fn_ctx.templates.render_with("block_result_expr", None, &[], &[("expr", body_raw.as_str())])
+                    .unwrap_or_else(|| body_raw.clone())
             }
         }
     };
@@ -1285,9 +1116,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
             String::new()
         } else {
             let params = generics.iter().map(|g| {
-                let mut b = HashMap::new();
-                b.insert("name", g.name.clone());
-                ctx.templates.render("generic_bound_full", None, &[], &b)
+                ctx.templates.render_with("generic_bound_full", None, &[], &[("name", g.name.as_str())])
                     .unwrap_or_else(|| g.name.clone())
             }).collect::<Vec<_>>().join(", ");
             format!("<{}>", params)
@@ -1312,19 +1141,10 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         "void", "with", "yield", "export", "import", "try", "catch", "finally", "throw",
         "eval", "arguments"];
     if target_keywords.contains(&safe_name.as_str()) {
-        let mut b = HashMap::new();
-        b.insert("name", safe_name.clone());
-        safe_name = ctx.templates.render("keyword_escape", None, &[], &b)
+        safe_name = ctx.templates.render_with("keyword_escape", None, &[], &[("name", safe_name.as_str())])
             .unwrap_or(safe_name);
     }
     let safe_name = format!("{}{}", safe_name, fn_generics);
-
-    let mut b = HashMap::new();
-    b.insert("name", safe_name.clone());
-    b.insert("params", params_str);
-    b.insert("return_type", ret_str);
-    b.insert("body", body_str);
-    b.insert("name", safe_name);
 
     let construct = if func.is_test {
         "test_block"
@@ -1333,7 +1153,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     } else {
         "fn_decl"
     };
-    fn_ctx.templates.render(construct, None, &[], &b)
+    fn_ctx.templates.render_with(construct, None, &[], &[("name", safe_name.as_str()), ("params", params_str.as_str()), ("return_type", ret_str.as_str()), ("body", body_str.as_str())])
         .unwrap_or_else(|| format!("fn {}() {{ }}", func.name))
 }
 
@@ -1368,27 +1188,21 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         for (field_names, struct_name) in &ctx.ann.anon_records {
             let generics: Vec<String> = (0..field_names.len())
                 .map(|i| {
-                    let mut b = HashMap::new();
-                    b.insert("name", format!("T{}", i));
-                    ctx.templates.render("generic_bound_full", None, &[], &b)
+                    let name_s = format!("T{}", i);
+                    ctx.templates.render_with("generic_bound_full", None, &[], &[("name", name_s.as_str())])
                         .unwrap_or_else(|| format!("T{}", i))
                 })
                 .collect();
             let fields: Vec<String> = field_names.iter().enumerate()
                 .map(|(i, name)| {
-                    let mut b = HashMap::new();
-                    b.insert("name", name.clone());
-                    b.insert("type", format!("T{}", i));
-                    ctx.templates.render("struct_field", None, &[], &b)
+                    let type_s = format!("T{}", i);
+                    ctx.templates.render_with("struct_field", None, &[], &[("name", name.as_str()), ("type", type_s.as_str())])
                         .unwrap_or_else(|| format!("{}: T{}", name, i))
                 })
                 .collect();
             let fields_str = fields.join("\n");
             let full_name = format!("{}<{}>", struct_name, generics.join(", "));
-            let mut b = HashMap::new();
-            b.insert("name", full_name);
-            b.insert("fields", fields_str.clone());
-            parts.push(ctx.templates.render("struct_decl", None, &[], &b)
+            parts.push(ctx.templates.render_with("struct_decl", None, &[], &[("name", full_name.as_str()), ("fields", fields_str.as_str())])
                 .unwrap_or_else(|| format!("struct {} {{ {} }}", struct_name, fields_str)));
         }
     }
@@ -1410,11 +1224,8 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             TopLetKind::Const => "top_let_const",
             TopLetKind::Lazy => "top_let_lazy",
         };
-        let mut b = HashMap::new();
-        b.insert("name", name.to_uppercase());
-        b.insert("type", ty_str);
-        b.insert("value", val_str.clone());
-        let rendered = ctx.templates.render(construct, None, &[], &b)
+        let name_upper = name.to_uppercase();
+        let rendered = ctx.templates.render_with(construct, None, &[], &[("name", name_upper.as_str()), ("type", ty_str.as_str()), ("value", val_str.as_str())])
             .unwrap_or_else(|| format!("const {} = {};", name, val_str));
         parts.push(rendered);
     }
@@ -1430,9 +1241,8 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         let test_parts: Vec<String> = test_fns.iter()
             .map(|f| render_function(&ctx, f))
             .collect();
-        let mut b = HashMap::new();
-        b.insert("tests", test_parts.join("\n\n"));
-        let wrapped = ctx.templates.render("test_module", None, &[], &b)
+        let tests_s = test_parts.join("\n\n");
+        let wrapped = ctx.templates.render_with("test_module", None, &[], &[("tests", tests_s.as_str())])
             .unwrap_or_else(|| test_parts.join("\n\n"));
         parts.push(wrapped);
     }
@@ -1474,9 +1284,7 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
             String::new()
         } else {
             let params = generics.iter().map(|g| {
-                let mut b = HashMap::new();
-                b.insert("name", g.name.clone());
-                ctx.templates.render("generic_bound", None, &[], &b)
+                ctx.templates.render_with("generic_bound", None, &[], &[("name", g.name.as_str())])
                     .unwrap_or_else(|| g.name.clone())
             }).collect::<Vec<_>>().join(", ");
             format!("<{}>", params)
@@ -1489,29 +1297,22 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
         IrTypeDeclKind::Record { fields } => {
             let fields_str = fields.iter()
                 .map(|f| {
-                    let mut b = HashMap::new();
-                    b.insert("name", f.name.clone());
-                    b.insert("type", render_type(ctx, &f.ty));
-                    ctx.templates.render("struct_field", None, &[], &b)
+                    let type_s = render_type(ctx, &f.ty);
+                    ctx.templates.render_with("struct_field", None, &[], &[("name", f.name.as_str()), ("type", type_s.as_str())])
                         .unwrap_or_else(|| format!("{}: {},", f.name, render_type(ctx, &f.ty)))
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
-            let mut b = HashMap::new();
             let full_name = format!("{}{}", td.name, generics_str);
-            b.insert("name", full_name.clone());
             let fallback = format!("struct {} {{ {} }}", full_name, &fields_str);
-            b.insert("fields", fields_str);
-            ctx.templates.render("struct_decl", None, &[], &b)
+            ctx.templates.render_with("struct_decl", None, &[], &[("name", full_name.as_str()), ("fields", fields_str.as_str())])
                 .unwrap_or(fallback)
         }
         IrTypeDeclKind::Variant { cases, .. } => {
             let variants_parts: Vec<String> = cases.iter()
                 .map(|v| match &v.kind {
                     IrVariantKind::Unit => {
-                        let mut b = HashMap::new();
-                        b.insert("name", v.name.clone());
-                        ctx.templates.render("enum_variant_unit", None, &[], &b)
+                        ctx.templates.render_with("enum_variant_unit", None, &[], &[("name", v.name.as_str())])
                             .unwrap_or_else(|| v.name.clone())
                     }
                     IrVariantKind::Tuple { fields } => {
@@ -1530,13 +1331,8 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                             .collect::<Vec<_>>().join(", ");
                         let param_names = (0..types.len()).map(|i| format!("v{}", i))
                             .collect::<Vec<_>>().join(", ");
-                        let mut b = HashMap::new();
-                        b.insert("name", v.name.clone());
                         let fallback = format!("{}({})", v.name, &fields_str);
-                        b.insert("fields", fields_str);
-                        b.insert("params", params_str);
-                        b.insert("param_names", param_names);
-                        ctx.templates.render("enum_variant", None, &[], &b)
+                        ctx.templates.render_with("enum_variant", None, &[], &[("name", v.name.as_str()), ("fields", fields_str.as_str()), ("params", params_str.as_str()), ("param_names", param_names.as_str())])
                             .unwrap_or(fallback)
                     }
                     IrVariantKind::Record { fields } => {
@@ -1553,30 +1349,21 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                             .collect::<Vec<_>>()
                             .join(", ");
                         let field_names = fields.iter().map(|f| f.name.clone()).collect::<Vec<_>>().join(", ");
-                        let mut b = HashMap::new();
-                        b.insert("name", v.name.clone());
-                        b.insert("fields", fields_str);
-                        b.insert("field_names", field_names);
-                        ctx.templates.render("enum_variant_record", None, &[], &b)
-                            .unwrap_or_else(|| format!("{} {{ {} }}", v.name, b.get("fields").unwrap()))
+                        ctx.templates.render_with("enum_variant_record", None, &[], &[("name", v.name.as_str()), ("fields", fields_str.as_str()), ("field_names", field_names.as_str())])
+                            .unwrap_or_else(|| format!("{} {{ {} }}", v.name, fields_str))
                     }
                 })
                 .collect::<Vec<_>>();
             let sep = template_or(ctx, "enum_variant_sep", &[], ",\n");
             let variants_str = variants_parts.join(&sep);
-            let mut b = HashMap::new();
             let full_name = format!("{}{}", td.name, generics_str);
-            b.insert("name", full_name.clone());
             let fallback = format!("enum {} {{ {} }}", full_name, &variants_str);
-            b.insert("variants", variants_str);
-            ctx.templates.render("enum_decl", None, &[], &b)
+            ctx.templates.render_with("enum_decl", None, &[], &[("name", full_name.as_str()), ("variants", variants_str.as_str())])
                 .unwrap_or(fallback)
         }
         IrTypeDeclKind::Alias { target } => {
-            let mut b = HashMap::new();
-            b.insert("name", td.name.clone());
-            b.insert("type", render_type(ctx, target));
-            ctx.templates.render("type_alias", None, &[], &b)
+            let type_s = render_type(ctx, target);
+            ctx.templates.render_with("type_alias", None, &[], &[("name", td.name.as_str()), ("type", type_s.as_str())])
                 .unwrap_or_else(|| format!("type {} = {};", td.name, render_type(ctx, target)))
         }
     }
@@ -1595,11 +1382,8 @@ fn render_type_boxed_fn(ctx: &RenderContext, ty: &Ty) -> String {
             } else {
                 render_type(ctx, ret)
             };
-            let mut b = HashMap::new();
-            b.insert("params", params_str);
-            b.insert("return", ret_str);
-            ctx.templates.render("type_fn_boxed", None, &[], &b)
-                .unwrap_or_else(|| ctx.templates.render("type_fn", None, &[], &b)
+            ctx.templates.render_with("type_fn_boxed", None, &[], &[("params", params_str.as_str()), ("return", ret_str.as_str())])
+                .unwrap_or_else(|| ctx.templates.render_with("type_fn", None, &[], &[("params", params_str.as_str()), ("return", ret_str.as_str())])
                     .unwrap_or_else(|| "BoxFn".into()))
         }
         _ => render_type(ctx, ty),
@@ -1607,8 +1391,7 @@ fn render_type_boxed_fn(ctx: &RenderContext, ty: &Ty) -> String {
 }
 
 fn template_or(ctx: &RenderContext, construct: &str, attrs: &[&str], fallback: &str) -> String {
-    let b = HashMap::new();
-    ctx.templates.render(construct, None, attrs, &b)
+    ctx.templates.render_with(construct, None, attrs, &[])
         .unwrap_or_else(|| fallback.to_string())
 }
 

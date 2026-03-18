@@ -94,13 +94,28 @@ impl TemplateSet {
     ) -> Option<String> {
         let entry = self.get(construct)?;
         let rule = entry.select(ty, attrs)?;
+        // Convert HashMap to slice for fill_template
+        let pairs: Vec<(&str, &str)> = bindings.iter().map(|(&k, v)| (k, v.as_str())).collect();
+        Some(fill_template(&rule.template, &pairs))
+    }
+
+    /// Render with slice bindings (avoids HashMap allocation)
+    pub fn render_with(
+        &self,
+        construct: &str,
+        ty: Option<&str>,
+        attrs: &[&str],
+        bindings: &[(&str, &str)],
+    ) -> Option<String> {
+        let entry = self.get(construct)?;
+        let rule = entry.select(ty, attrs)?;
         Some(fill_template(&rule.template, bindings))
     }
 }
 
 /// Fill `{placeholder}` holes in a template string.
 /// `{{` and `}}` are escape sequences for literal `{` and `}`.
-fn fill_template(template: &str, bindings: &HashMap<&str, String>) -> String {
+fn fill_template(template: &str, bindings: &[(&str, &str)]) -> String {
     let mut result = String::with_capacity(template.len() * 2);
     let mut chars = template.chars().peekable();
 
@@ -120,7 +135,7 @@ fn fill_template(template: &str, bindings: &HashMap<&str, String>) -> String {
                     name.push(inner);
                 }
                 // Look up binding; if not found, keep placeholder as-is
-                if let Some(value) = bindings.get(name.as_str()) {
+                if let Some(value) = bindings.iter().find(|(k, _)| *k == name.as_str()).map(|(_, v)| *v) {
                     result.push_str(value);
                 } else {
                     result.push('{');
