@@ -38,6 +38,8 @@ const MOD_REGEX_TS: &str = include_str!("../../runtime/ts/regex.ts");
 const MOD_REGEX_JS: &str = include_str!("../../runtime/js/regex.js");
 const MOD_RESULT_TS: &str = include_str!("../../runtime/ts/result.ts");
 const MOD_RESULT_JS: &str = include_str!("../../runtime/js/result.js");
+const MOD_SET_TS: &str = include_str!("../../runtime/ts/set.ts");
+const MOD_SET_JS: &str = include_str!("../../runtime/js/set.js");
 const MOD_STRING_TS: &str = include_str!("../../runtime/ts/string.ts");
 const MOD_STRING_JS: &str = include_str!("../../runtime/js/string.js");
 const MOD_TESTING_TS: &str = include_str!("../../runtime/ts/testing.ts");
@@ -79,6 +81,7 @@ pub static ALL_MODULES: &[RuntimeModule] = &[
     RuntimeModule { name: "random", ts_source: MOD_RANDOM_TS, js_source: MOD_RANDOM_JS },
     RuntimeModule { name: "regex", ts_source: MOD_REGEX_TS, js_source: MOD_REGEX_JS },
     RuntimeModule { name: "result", ts_source: MOD_RESULT_TS, js_source: MOD_RESULT_JS },
+    RuntimeModule { name: "set", ts_source: MOD_SET_TS, js_source: MOD_SET_JS },
     RuntimeModule { name: "string", ts_source: MOD_STRING_TS, js_source: MOD_STRING_JS },
     RuntimeModule { name: "testing", ts_source: MOD_TESTING_TS, js_source: MOD_TESTING_JS },
     RuntimeModule { name: "time", ts_source: MOD_TIME_TS, js_source: MOD_TIME_JS },

@@ -222,7 +222,14 @@ impl Checker {
                         self.constrain(expected, aty.clone(), format!("call to {}()", name));
                     }
                 }
-                let ret = if bindings.is_empty() { sig.ret.clone() } else { crate::types::substitute(&sig.ret, &bindings) };
+                // Instantiate unresolved generics with fresh vars
+                let mut final_bindings = bindings.clone();
+                for g in &sig.generics {
+                    if !final_bindings.contains_key(g) {
+                        final_bindings.insert(g.clone(), self.fresh_var());
+                    }
+                }
+                let ret = if final_bindings.is_empty() { sig.ret.clone() } else { crate::types::substitute(&sig.ret, &final_bindings) };
                 ret
             }
         }

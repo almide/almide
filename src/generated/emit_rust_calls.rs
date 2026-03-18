@@ -428,6 +428,17 @@ pub fn gen_generated_call(
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
                 format!("({}).unwrap_or_else(|{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body)
             },
+            ("set", "contains") => format!("almide_rt_set_contains(&{}, &{})", args_str[0], args_str[1]),
+            ("set", "difference") => format!("almide_rt_set_difference(&{}, &{})", args_str[0], args_str[1]),
+            ("set", "from_list") => format!("almide_rt_set_from_list({})", args_str[0]),
+            ("set", "insert") => format!("almide_rt_set_insert({}, {})", args_str[0], args_str[1]),
+            ("set", "intersection") => format!("almide_rt_set_intersection(&{}, &{})", args_str[0], args_str[1]),
+            ("set", "is_empty") => format!("almide_rt_set_is_empty(&{})", args_str[0]),
+            ("set", "len") => format!("almide_rt_set_len(&{})", args_str[0]),
+            ("set", "new") => "almide_rt_set_new()".to_string(),
+            ("set", "remove") => format!("almide_rt_set_remove({}, &{})", args_str[0], args_str[1]),
+            ("set", "to_list") => format!("almide_rt_set_to_list({})", args_str[0]),
+            ("set", "union") => format!("almide_rt_set_union(&{}, &{})", args_str[0], args_str[1]),
             ("string", "capitalize") => format!("almide_rt_string_capitalize(&*{})", args_str[0]),
             ("string", "chars") => format!("almide_rt_string_chars(&*{})", args_str[0]),
             ("string", "codepoint") => format!("almide_rt_string_codepoint(&*{})", args_str[0]),

@@ -1,0 +1,98 @@
+[new]
+description = "Create an empty set."
+example = "set.new()"
+type_params = ["A"]
+params = []
+return = "Set[A]"
+rust = "almide_rt_set_new()"
+ts = "new Set()"
+
+[from_list]
+description = "Create a set from a list of values."
+example = "set.from_list([1, 2, 3])"
+type_params = ["A"]
+params = [{ name = "xs", type = "List[A]" }]
+return = "Set[A]"
+rust = "almide_rt_set_from_list({xs})"
+ts = "new Set({xs})"
+
+[insert]
+description = "Add a value to the set. Returns a new set."
+example = "set.insert(s, 42)"
+type_params = ["A"]
+params = [{ name = "s", type = "Set[A]" }, { name = "value", type = "A" }]
+return = "Set[A]"
+rust = "almide_rt_set_insert({s}, {value})"
+ts = "__almd_set.insert({s}, {value})"
+
+[remove]
+description = "Remove a value from the set. Returns a new set."
+example = "set.remove(s, 42)"
+type_params = ["A"]
+params = [{ name = "s", type = "Set[A]" }, { name = "value", type = "A" }]
+return = "Set[A]"
+rust = "almide_rt_set_remove({s}, &{value})"
+ts = "__almd_set.remove({s}, {value})"
+
+[contains]
+description = "Check if a value is in the set."
+example = "set.contains(s, 42)"
+type_params = ["A"]
+params = [{ name = "s", type = "Set[A]" }, { name = "value", type = "A" }]
+return = "Bool"
+rust = "almide_rt_set_contains(&{s}, &{value})"
+ts = "{s}.has({value})"
+
+[len]
+description = "Return the number of elements."
+example = "set.len(s)"
+type_params = ["A"]
+params = [{ name = "s", type = "Set[A]" }]
+return = "Int"
+rust = "almide_rt_set_len(&{s})"
+ts = "{s}.size"
+
+[is_empty]
+description = "Check if the set has no elements."
+example = "set.is_empty(s)"
+type_params = ["A"]
+params = [{ name = "s", type = "Set[A]" }]
+return = "Bool"
+rust = "almide_rt_set_is_empty(&{s})"
+ts = "{s}.size === 0"
+
+[to_list]
+description = "Convert a set to a list."
+example = "set.to_list(s)"
+type_params = ["A"]
+params = [{ name = "s", type = "Set[A]" }]
+return = "List[A]"
+rust = "almide_rt_set_to_list({s})"
+ts = "[...{s}]"
+
+[union]
+description = "Return the union of two sets."
+example = "set.union(a, b)"
+type_params = ["A"]
+params = [{ name = "a", type = "Set[A]" }, { name = "b", type = "Set[A]" }]
+return = "Set[A]"
+rust = "almide_rt_set_union(&{a}, &{b})"
+ts = "__almd_set.union({a}, {b})"
+
+[intersection]
+description = "Return the intersection of two sets."
+example = "set.intersection(a, b)"
+type_params = ["A"]
+params = [{ name = "a", type = "Set[A]" }, { name = "b", type = "Set[A]" }]
+return = "Set[A]"
+rust = "almide_rt_set_intersection(&{a}, &{b})"
+ts = "__almd_set.intersection({a}, {b})"
+
+[difference]
+description = "Return elements in a that are not in b."
+example = "set.difference(a, b)"
+type_params = ["A"]
+params = [{ name = "a", type = "Set[A]" }, { name = "b", type = "Set[A]" }]
+return = "Set[A]"
+rust = "almide_rt_set_difference(&{a}, &{b})"
+ts = "__almd_set.difference({a}, {b})"

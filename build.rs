@@ -141,6 +141,10 @@ fn parse_type(s: &str, type_params: &[String]) -> String {
                 parse_type(err_ty, type_params)
             )
         }
+        other if other.starts_with("Set[") => {
+            let inner = &other[4..other.len() - 1];
+            format!("Ty::Named(s(\"Set\"), vec![{}])", parse_type(inner, type_params))
+        }
         other if other.starts_with("Map[") => {
             let inner = &other[4..other.len() - 1];
             let split_pos = split_top_level_comma(inner).expect("Map type needs two type params");

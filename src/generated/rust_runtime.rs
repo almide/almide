@@ -20,6 +20,7 @@ pub const RUST_RUNTIME_MODULES: &[(&str, &str)] = &[
     ("random", include_str!("../../runtime/rs/src/random.rs")),
     ("regex", include_str!("../../runtime/rs/src/regex.rs")),
     ("result", include_str!("../../runtime/rs/src/result.rs")),
+    ("set", include_str!("../../runtime/rs/src/set.rs")),
     ("string", include_str!("../../runtime/rs/src/string.rs")),
     ("testing", include_str!("../../runtime/rs/src/testing.rs")),
     ("value", include_str!("../../runtime/rs/src/value.rs")),

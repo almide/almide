@@ -81,6 +81,12 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
                 .unwrap_or_else(|| format!("Vec<{}>", render_type(ctx, inner)))
         }
         Ty::Named(name, args) => {
+            // Set type → template
+            if name == "Set" && args.len() == 1 {
+                let inner = render_type(ctx, &args[0]);
+                return ctx.templates.render_with("type_set", None, &[], &[("inner", &inner)])
+                    .unwrap_or_else(|| format!("Set<{}>", inner));
+            }
             if args.is_empty() {
                 name.clone()
             } else {
