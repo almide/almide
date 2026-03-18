@@ -24,3 +24,29 @@ pub fn almide_rt_map_map_values<K: Eq + std::hash::Hash + Clone, V: Clone, W>(m:
 
 pub fn almide_rt_map_from_entries<K: Eq + std::hash::Hash, V>(entries: Vec<(K, V)>) -> HashMap<K, V> { entries.into_iter().collect() }
 pub fn almide_rt_map_from_list<K: Eq + std::hash::Hash + Clone, V: Clone>(keys: Vec<K>, values: Vec<V>) -> HashMap<K, V> { keys.into_iter().zip(values.into_iter()).collect() }
+
+pub fn almide_rt_map_fold<K: Clone, V: Clone, A>(m: &HashMap<K, V>, init: A, mut f: impl FnMut(A, K, V) -> A) -> A {
+    let mut acc = init;
+    for (k, v) in m { acc = f(acc, k.clone(), v.clone()); }
+    acc
+}
+pub fn almide_rt_map_any<K: Clone, V: Clone>(m: &HashMap<K, V>, f: impl Fn(K, V) -> bool) -> bool {
+    m.iter().any(|(k, v)| f(k.clone(), v.clone()))
+}
+pub fn almide_rt_map_all<K: Clone, V: Clone>(m: &HashMap<K, V>, f: impl Fn(K, V) -> bool) -> bool {
+    m.iter().all(|(k, v)| f(k.clone(), v.clone()))
+}
+pub fn almide_rt_map_count<K: Clone, V: Clone>(m: &HashMap<K, V>, f: impl Fn(K, V) -> bool) -> i64 {
+    m.iter().filter(|&(k, v)| f(k.clone(), v.clone())).count() as i64
+}
+pub fn almide_rt_map_each<K: Clone, V: Clone>(m: &HashMap<K, V>, f: impl Fn(K, V)) {
+    for (k, v) in m.iter() { f(k.clone(), v.clone()); }
+}
+pub fn almide_rt_map_find<K: Clone + Eq + std::hash::Hash, V: Clone>(m: &HashMap<K, V>, f: impl Fn(K, V) -> bool) -> Option<(K, V)> {
+    m.iter().find(|&(k, v)| f(k.clone(), v.clone())).map(|(k, v)| (k.clone(), v.clone()))
+}
+pub fn almide_rt_map_update<K: Eq + std::hash::Hash + Clone, V: Clone>(m: HashMap<K, V>, key: K, f: impl Fn(V) -> V) -> HashMap<K, V> {
+    let mut m = m;
+    if let Some(v) = m.get(&key).cloned() { m.insert(key, f(v)); }
+    m
+}

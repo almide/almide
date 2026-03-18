@@ -83,16 +83,19 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         | "replace_first" | "last_index_of" => vec!["string"],
 
         // ── list-only ──
-        "each" | "fold" | "find" | "any" | "all"
-        | "enumerate" | "zip" | "flatten" | "take" | "drop"
+        "enumerate" | "zip" | "take" | "drop"
         | "sort_by" | "unique"
         | "last" | "chunk" | "sum" | "product"
         | "first"
         | "filter_map" | "take_while" | "drop_while"
-        | "partition" | "reduce" | "group_by"
+        | "reduce" | "group_by"
         | "insert" | "remove_at" | "find_index"
-        | "update" | "scan" | "intersperse"
+        | "scan" | "intersperse"
         | "windows" | "dedup" | "zip_with" => vec!["list"],
+
+        // ── list + map ──
+        "each" | "fold" | "find" | "any" | "all"
+        | "partition" | "update" => vec!["list", "map"],
 
         // ── map-only ──
         "keys" | "values" | "entries" | "merge"
@@ -124,7 +127,7 @@ pub fn resolve_ufcs_candidates(method: &str) -> Vec<&'static str> {
         "reverse" => vec!["string", "list"],
         "index_of" => vec!["string", "list"],
         "join" => vec!["string", "list"],
-        "count" => vec!["string", "list"],
+        "count" => vec!["string", "list", "map"],
         "slice" => vec!["string", "list"],
 
         // ── ambiguous: string + list + map ──

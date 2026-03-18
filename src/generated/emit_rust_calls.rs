@@ -288,11 +288,35 @@ pub fn gen_generated_call(
             ("log", "info_with") => format!("almide_rt_log_info_with(&*{}, &{})", args_str[0], args_str[1]),
             ("log", "warn") => format!("almide_rt_log_warn(&*{})", args_str[0]),
             ("log", "warn_with") => format!("almide_rt_log_warn_with(&*{}, &{})", args_str[0], args_str[1]),
+            ("map", "all") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 2);
+                format!("almide_rt_map_all(&{}, |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_names.iter().map(|n| format!("let {} = {}.clone(); ", n, n)).collect::<Vec<_>>().join(""), __cl_f_body)
+            },
+            ("map", "any") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 2);
+                format!("almide_rt_map_any(&{}, |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_names.iter().map(|n| format!("let {} = {}.clone(); ", n, n)).collect::<Vec<_>>().join(""), __cl_f_body)
+            },
             ("map", "contains") => format!("almide_rt_map_contains(&{}, &{})", args_str[0], args_str[1]),
+            ("map", "count") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 2);
+                format!("almide_rt_map_count(&{}, |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_names.iter().map(|n| format!("let {} = {}.clone(); ", n, n)).collect::<Vec<_>>().join(""), __cl_f_body)
+            },
+            ("map", "each") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 2);
+                format!("almide_rt_map_each(&{}, |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_names.iter().map(|n| format!("let {} = {}.clone(); ", n, n)).collect::<Vec<_>>().join(""), __cl_f_body)
+            },
             ("map", "entries") => format!("almide_rt_map_entries(&{})", args_str[0]),
             ("map", "filter") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 2);
                 format!("almide_rt_map_filter(&{}, |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_names.iter().map(|n| format!("let {} = {}.clone(); ", n, n)).collect::<Vec<_>>().join(""), __cl_f_body)
+            },
+            ("map", "find") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 2);
+                format!("almide_rt_map_find(&{}, |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_names.iter().map(|n| format!("let {} = {}.clone(); ", n, n)).collect::<Vec<_>>().join(""), __cl_f_body)
+            },
+            ("map", "fold") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(2, 3);
+                format!("almide_rt_map_fold(&{}, {}, |{}| {{{{ {}{} }}}})", args_str[0], args_str[1], __cl_f_names.join(", "), __cl_f_names.iter().map(|n| format!("let {} = {}.clone(); ", n, n)).collect::<Vec<_>>().join(""), __cl_f_body)
             },
             ("map", "from_entries") => format!("almide_rt_map_from_entries({})", args_str[0]),
             ("map", "from_list") => {
@@ -312,6 +336,10 @@ pub fn gen_generated_call(
             ("map", "new") => "almide_rt_map_new()".to_string(),
             ("map", "remove") => format!("almide_rt_map_remove(&{}, &{})", args_str[0], args_str[1]),
             ("map", "set") => format!("almide_rt_map_set(&{}, {}, {})", args_str[0], args_str[1], args_str[2]),
+            ("map", "update") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(2, 1);
+                format!("almide_rt_map_update({}, {}, |{}| {{{{ {}{} }}}})", args_str[0], args_str[1], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
+            },
             ("map", "values") => format!("almide_rt_map_values(&{})", args_str[0]),
             ("math", "abs") => format!("almide_rt_math_abs({})", args_str[0]),
             ("math", "choose") => format!("almide_rt_math_choose({}, {})", args_str[0], args_str[1]),
