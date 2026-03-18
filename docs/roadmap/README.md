@@ -16,7 +16,6 @@
 |---|---|---|
 | [Streaming](on-hold/streaming.md) | WebSocket, SSE | Phase 2 |
 | [Fan Map Limit](on-hold/fan-map-limit.md) | `fan.map(xs, limit: n, f)` | Phase 2 |
-| [Server Async](on-hold/server-async.md) | http.serve effect 化 | Phase 2 |
 
 ## On Hold — Phase 3: Runtime Foundation (2.x)
 
