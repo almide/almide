@@ -588,7 +588,12 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             format!("{}.{}", render_expr(ctx, object), index)
         }
         IrExprKind::IndexAccess { object, index } => {
-            format!("{}[{}]", render_expr(ctx, object), render_expr(ctx, index))
+            let idx = render_expr(ctx, index);
+            // Rust: index must be usize, not i64
+            let idx = if ctx.is_rust() && matches!(&index.ty, Ty::Int) {
+                format!("{} as usize", idx)
+            } else { idx };
+            format!("{}[{}]", render_expr(ctx, object), idx)
         }
 
         // ── Map ──
@@ -919,7 +924,10 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
         }
         IrStmtKind::IndexAssign { target, index, value } => {
             let target_str = ctx.var_name(*target).to_string();
-            let idx_str = render_expr(ctx, index);
+            let mut idx_str = render_expr(ctx, index);
+            if ctx.is_rust() && matches!(&index.ty, Ty::Int) {
+                idx_str = format!("{} as usize", idx_str);
+            }
             let val_str = render_expr(ctx, value);
             format!("{}[{}] = {};", target_str, idx_str, val_str)
         }

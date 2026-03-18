@@ -158,6 +158,17 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                         }, ty, span };
                     }
 
+                    // Other Type.method patterns → Type_method standalone calls
+                    if method.contains('.') {
+                        let flat = method.replace('.', "_");
+                        let mut call_args = vec![*object];
+                        call_args.extend(args);
+                        return IrExpr { kind: IrExprKind::Call {
+                            target: CallTarget::Named { name: flat },
+                            args: call_args, type_args,
+                        }, ty, span };
+                    }
+
                     IrExprKind::Call {
                         target: CallTarget::Method { object, method },
                         args, type_args,

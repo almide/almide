@@ -84,10 +84,19 @@ fn rewrite_expr(expr: IrExpr, in_effect: bool) -> IrExpr {
                 CallTarget::Method { object, method } => {
                     let object = Box::new(rewrite_expr(*object, in_effect));
                     // UFCS: "module.func" method → convert to Module call and process
+                    // Only if the module.func exists in stdlib (arg_transforms table)
                     if method.contains('.') && !method.ends_with(".encode") && !method.ends_with(".decode") {
                         if let Some(dot_pos) = method.find('.') {
                             let mod_name = &method[..dot_pos];
                             let func_name = &method[dot_pos+1..];
+                            // Check if this is a real stdlib function
+                            if arg_transforms::lookup(mod_name, func_name).is_none() {
+                                // Not a stdlib function — leave as Method call for BuiltinLoweringPass
+                                return IrExpr { kind: IrExprKind::Call {
+                                    target: CallTarget::Method { object, method },
+                                    args, type_args,
+                                }, ty, span };
+                            }
                             let mut call_args = vec![*object];
                             call_args.extend(args);
                             // Recursively process as Module call
