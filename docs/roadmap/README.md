@@ -12,6 +12,9 @@
 - [Showcase 4: md2html](active/showcase-4-devtool-md2html.md) — DevTool (variant型, match)
 - [Showcase 5: dotenv](active/showcase-5-script-dotenv.md) — Script (option, guard, fs)
 
+### Compiler
+- [Compiler Architecture Cleanup](active/compiler-architecture-cleanup.md) — clone/deref IR化, lower分離, checker統一, allocation削減
+
 ### Codegen
 - ~~Codegen v3~~ ✅ — Phase 1-5 全完了。is_rust()=0, cross-target 106/106。Go target は [on-hold](on-hold/go-target.md)
 
