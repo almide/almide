@@ -18,7 +18,7 @@ fn parse_config(content: String) -> Result[List[List[String]], String] = {
     let lines = string.split(content, "\n");
     let indexed = list.fold(lines, [], (acc, line) => {
       let idx = list.len(acc) + 1;
-      acc ++ [[int.to_string(idx), line]]
+      acc + [[int.to_string(idx), line]]
     });
     list.fold(indexed, ok([]), (acc, entry) => {
       match acc {
@@ -34,7 +34,7 @@ fn parse_config(content: String) -> Result[List[List[String]], String] = {
             let key = match list.get(parts, 0) { some(v) => v, none => "" };
             if key == "" then err("line ${line_num}: empty key")
             else {
-              let indexed_parts = list.fold(parts, [], (a, p) => a ++ [[int.to_string(list.len(a)), p]]);
+              let indexed_parts = list.fold(parts, [], (a, p) => a + [[int.to_string(list.len(a)), p]]);
               let rest = list.filter(indexed_parts, (ip) => {
                 match list.get(ip, 0) { some(v) => v != "0", none => false }
               });
@@ -42,7 +42,7 @@ fn parse_config(content: String) -> Result[List[List[String]], String] = {
               let value = string.join(rest_vals, "=");
               let existing_keys = list.map(pairs, (p) => match list.get(p, 0) { some(v) => v, none => "" });
               if list.contains(existing_keys, key) then err("line ${line_num}: duplicate key: ${key}")
-              else ok(pairs ++ [[key, value]])
+              else ok(pairs + [[key, value]])
             }
           }
           else err("line ${line_num}: missing '='")
@@ -70,7 +70,7 @@ fn merge_configs(base: List[List[String]], overlay: List[List[String]]) -> List[
     let key = match list.get(p, 0) { some(v) => v, none => "" };
     not list.contains(base_keys, key)
   });
-  merged_base ++ new_overlay
+  merged_base + new_overlay
 }
 
 // Serialize config pairs back to string format (key=value lines)
@@ -78,7 +78,7 @@ fn serialize_config(pairs: List[List[String]]) -> String = {
   let lines = list.map(pairs, (pair) => {
     let key = match list.get(pair, 0) { some(v) => v, none => "" };
     let value = match list.get(pair, 1) { some(v) => v, none => "" };
-    key ++ "=" ++ value
+    key + "=" + value
   });
   string.join(lines, "\n")
 }
@@ -232,7 +232,7 @@ test "filter by prefix no match" {
 
 test "load and parse config file" {
   let td = env.temp_dir()
-  let f = td ++ "/almide_test_base.conf"
+  let f = td + "/almide_test_base.conf"
   fs.write(f, "host=localhost\nport=3000")
   let result = load_config(f)
   assert_eq(result, ok([["host", "localhost"], ["port", "3000"]]))
@@ -240,19 +240,19 @@ test "load and parse config file" {
 
 test "load config file not found" {
   let td = env.temp_dir()
-  assert(match load_config(td ++ "/almide_test_nonexistent_file.conf") { err(_e) => true, _ => false })
+  assert(match load_config(td + "/almide_test_nonexistent_file.conf") { err(_e) => true, _ => false })
 }
 
 test "load config with parse error" {
   let td = env.temp_dir()
-  let f = td ++ "/almide_test_bad.conf"
+  let f = td + "/almide_test_bad.conf"
   fs.write(f, "good=ok\nbadline")
-  assert_eq(load_config(f), err(f ++ ": line 2: missing '='"))
+  assert_eq(load_config(f), err(f + ": line 2: missing '='"))
 }
 
 test "save config file" {
   let td = env.temp_dir()
-  let f = td ++ "/almide_test_output.conf"
+  let f = td + "/almide_test_output.conf"
   let pairs = [["host", "localhost"], ["port", "8080"]]
   save_config(f, pairs)
   let content = fs.read_text(f)
@@ -261,8 +261,8 @@ test "save config file" {
 
 test "merge two files" {
   let td = env.temp_dir()
-  let f1 = td ++ "/almide_test_m1.conf"
-  let f2 = td ++ "/almide_test_m2.conf"
+  let f1 = td + "/almide_test_m1.conf"
+  let f2 = td + "/almide_test_m2.conf"
   fs.write(f1, "host=localhost\nport=3000")
   fs.write(f2, "port=8080\ndebug=true")
   let result = merge_files([f1, f2])
@@ -271,9 +271,9 @@ test "merge two files" {
 
 test "merge three files" {
   let td = env.temp_dir()
-  let f1 = td ++ "/almide_test_t1.conf"
-  let f2 = td ++ "/almide_test_t2.conf"
-  let f3 = td ++ "/almide_test_t3.conf"
+  let f1 = td + "/almide_test_t1.conf"
+  let f2 = td + "/almide_test_t2.conf"
+  let f3 = td + "/almide_test_t3.conf"
   fs.write(f1, "host=a\nport=1")
   fs.write(f2, "port=2\nmode=dev")
   fs.write(f3, "mode=prod\nlog=true")
@@ -283,18 +283,18 @@ test "merge three files" {
 
 test "merge files error propagation" {
   let td = env.temp_dir()
-  let f1 = td ++ "/almide_test_e1.conf"
-  let f2 = td ++ "/almide_test_e2.conf"
+  let f1 = td + "/almide_test_e1.conf"
+  let f2 = td + "/almide_test_e2.conf"
   fs.write(f1, "ok=yes")
   fs.write(f2, "badline")
-  assert_eq(merge_files([f1, f2]), err(f2 ++ ": line 1: missing '='"))
+  assert_eq(merge_files([f1, f2]), err(f2 + ": line 1: missing '='"))
 }
 
 test "merge and save full pipeline" {
   let td = env.temp_dir()
-  let f1 = td ++ "/almide_test_p1.conf"
-  let f2 = td ++ "/almide_test_p2.conf"
-  let out = td ++ "/almide_test_merged.conf"
+  let f1 = td + "/almide_test_p1.conf"
+  let f2 = td + "/almide_test_p2.conf"
+  let out = td + "/almide_test_merged.conf"
   fs.write(f1, "host=localhost\nport=3000")
   fs.write(f2, "port=8080\ndebug=true")
   let result = merge_and_save([f1, f2], out)
@@ -305,11 +305,11 @@ test "merge and save full pipeline" {
 
 test "merge and save error propagation" {
   let td = env.temp_dir()
-  let f1 = td ++ "/almide_test_ep1.conf"
-  let out = td ++ "/almide_test_should_not_exist.conf"
+  let f1 = td + "/almide_test_ep1.conf"
+  let out = td + "/almide_test_should_not_exist.conf"
   fs.write(f1, "ok=yes")
   assert(match merge_and_save(
-    [f1, td ++ "/almide_test_nonexistent_file.conf"],
+    [f1, td + "/almide_test_nonexistent_file.conf"],
     out
   ) { err(_e) => true, _ => false })
   assert_eq(fs.exists(out), false)

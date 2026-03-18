@@ -155,13 +155,13 @@ test "mixed logical operators" {
 test "list concat with empty" {
   let xs = [1, 2, 3]
   let empty: List[Int] = []
-  assert_eq(xs ++ empty, xs)
-  assert_eq(empty ++ xs, xs)
-  assert_eq(empty ++ empty, empty)
+  assert_eq(xs + empty, xs)
+  assert_eq(empty + xs, xs)
+  assert_eq(empty + empty, empty)
 }
 
 test "string concat chain" {
-  let result = "" ++ "" ++ "a" ++ "" ++ "b" ++ ""
+  let result = "" + "" + "a" + "" + "b" + ""
   assert_eq(result, "ab")
 }
 
@@ -189,7 +189,7 @@ test "deeply nested if expression" {
 test "many-element list" {
   var xs: List[Int] = []
   for i in 0..50 {
-    xs = xs ++ [i]
+    xs = xs + [i]
   }
   assert_eq(list.len(xs), 50)
   assert_eq(list.get(xs, 0), some(0))

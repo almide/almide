@@ -35,9 +35,9 @@ effect fn encode(a: Int, b: Int, text: String) -> Result[String, String] = do {
   for c in chars {
     let num = char_to_num(c)
     if num >= 0 then {
-      encoded = encoded ++ [num_to_char(a * num + b)]
+      encoded = encoded + [num_to_char(a * num + b)]
     } else if string.is_digit(c) then {
-      encoded = encoded ++ [c]
+      encoded = encoded + [c]
     } else {
       encoded = encoded
     }
@@ -47,13 +47,13 @@ effect fn encode(a: Int, b: Int, text: String) -> Result[String, String] = do {
   var group = ""
   for (i, c) in list.enumerate(encoded) {
     if i > 0 and i % 5 == 0 then {
-      groups = groups ++ [group]
+      groups = groups + [group]
       group = c
     } else {
-      group = group ++ c
+      group = group + c
     }
   }
-  if string.len(group) > 0 then { groups = groups ++ [group] } else { groups = groups }
+  if string.len(group) > 0 then { groups = groups + [group] } else { groups = groups }
   ok(string.join(groups, " "))
 }
 
@@ -65,9 +65,9 @@ effect fn decode(a: Int, b: Int, text: String) -> Result[String, String] = do {
   for c in chars {
     let num = char_to_num(c)
     if num >= 0 then {
-      decoded = decoded ++ [num_to_char(mmi * (num - b + 26 * 26))]
+      decoded = decoded + [num_to_char(mmi * (num - b + 26 * 26))]
     } else {
-      decoded = decoded ++ [c]
+      decoded = decoded + [c]
     }
   }
   ok(string.join(decoded, ""))

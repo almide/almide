@@ -126,8 +126,8 @@ test "list.fold" {
 }
 
 test "list concat with ++" {
-  assert_eq([1, 2] ++ [3, 4], [1, 2, 3, 4])
-  assert_eq([] ++ [1], [1])
+  assert_eq([1, 2] + [3, 4], [1, 2, 3, 4])
+  assert_eq([] + [1], [1])
 }
 
 // ============================================================
@@ -192,7 +192,7 @@ test "int.to_hex" {
 // ============================================================
 
 test "string concat" {
-  assert_eq("hello" ++ " " ++ "world", "hello world")
+  assert_eq("hello" + " " + "world", "hello world")
 }
 
 test "string interpolation" {
@@ -583,7 +583,7 @@ test "for...in with enumerate destructuring" {
   let items = ["a", "b", "c"]
   var result = ""
   for (i, x) in list.enumerate(items) {
-    result = result ++ int.to_string(i) ++ x
+    result = result + int.to_string(i) + x
   }
   assert_eq(result, "0a1b2c")
 }

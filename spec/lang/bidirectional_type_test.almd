@@ -5,13 +5,13 @@
 test "empty list with type annotation" {
   let xs: List[Int] = []
   assert_eq(xs.len(), 0)
-  let ys = xs ++ [1, 2, 3]
+  let ys = xs + [1, 2, 3]
   assert_eq(ys, [1, 2, 3])
 }
 
 test "empty list of strings" {
   let xs: List[String] = []
-  let result = xs ++ ["hello"]
+  let result = xs + ["hello"]
   assert_eq(result, ["hello"])
 }
 

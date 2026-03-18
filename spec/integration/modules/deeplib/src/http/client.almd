@@ -1,1 +1,1 @@
-fn get(url: String) -> String = "GET " ++ url
+fn get(url: String) -> String = "GET " + url

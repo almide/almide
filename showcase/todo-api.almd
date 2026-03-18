@@ -13,19 +13,19 @@ effect fn main() -> Result[Unit, String] = {
     let path = http.req_path(req)
 
     if path == "/hello" then
-      http.json(200, "{\"message\":\"Hello from Almide!\"}")
+      http.json(200, '{"message": "Hello from Almide!"}')
     else if method == "POST" and path == "/greet" then {
       let body = http.req_body(req)
       let name = match json.parse(body) {
         ok(v) => option.unwrap_or(json.get_string(v, "name"), "world")
         _ => "world"
       }
-      http.json(200, "{\"greeting\":\"Hello, " ++ name ++ "!\"}")
+      http.json(200, '{"greeting": "Hello, ${name}!"}')
     } else if path == "/time" then {
       let ts = env.unix_timestamp()
-      http.json(200, "{\"timestamp\":" ++ int.to_string(ts) ++ "}")
+      http.json(200, '{"timestamp": ${int.to_string(ts)}}')
     } else
-      http.not_found("{\"error\":\"not found\"}")
+      http.not_found('{"error": "not found"}')
   })
 }
 

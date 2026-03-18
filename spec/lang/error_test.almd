@@ -302,7 +302,7 @@ effect fn try_parse_list(strs: List[String]) -> Result[List[Int], String] = {
   var result: List[Int] = []
   for s in strs {
     let n = parse_int(s)
-    result = result ++ [n]
+    result = result + [n]
   }
   ok(result)
 }
@@ -366,10 +366,10 @@ test "result match in for loop" {
   let items: List[Result[Int, String]] = [ok(1), err("bad"), ok(3)]
   for item in items {
     let label = match item {
-      ok(v) => "ok:" ++ int.to_string(v),
-      err(e) => "err:" ++ e,
+      ok(v) => "ok:" + int.to_string(v),
+      err(e) => "err:" + e,
     }
-    results = results ++ [label]
+    results = results + [label]
   }
   assert_eq(results, ["ok:1", "err:bad", "ok:3"])
 }

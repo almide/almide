@@ -118,23 +118,23 @@ fn split_array_items(s: String) -> List[String] = {
 fn split_items_loop(chars: List[String], i: Int, len: Int, bracket_depth: Int, in_quote: Int, current: String, acc: List[String]) -> List[String] = {
   if i >= len then {
     let trimmed = string.trim(current)
-    if string.len(trimmed) > 0 then acc ++ [trimmed]
+    if string.len(trimmed) > 0 then acc + [trimmed]
     else acc
   }
   else {
     let ch = match list.get(chars, i) { some(c) => c, none => "" }
     if in_quote > 0 then {
-      if ch == "\"" then split_items_loop(chars, i + 1, len, bracket_depth, 0, current ++ ch, acc)
-      else split_items_loop(chars, i + 1, len, bracket_depth, in_quote, current ++ ch, acc)
+      if ch == "\"" then split_items_loop(chars, i + 1, len, bracket_depth, 0, current + ch, acc)
+      else split_items_loop(chars, i + 1, len, bracket_depth, in_quote, current + ch, acc)
     }
-    else if ch == "\"" then split_items_loop(chars, i + 1, len, bracket_depth, 1, current ++ ch, acc)
-    else if ch == "[" or ch == "{" then split_items_loop(chars, i + 1, len, bracket_depth + 1, in_quote, current ++ ch, acc)
-    else if ch == "]" or ch == "}" then split_items_loop(chars, i + 1, len, bracket_depth - 1, in_quote, current ++ ch, acc)
+    else if ch == "\"" then split_items_loop(chars, i + 1, len, bracket_depth, 1, current + ch, acc)
+    else if ch == "[" or ch == "{" then split_items_loop(chars, i + 1, len, bracket_depth + 1, in_quote, current + ch, acc)
+    else if ch == "]" or ch == "}" then split_items_loop(chars, i + 1, len, bracket_depth - 1, in_quote, current + ch, acc)
     else if ch == "," and bracket_depth == 0 then {
       let trimmed = string.trim(current)
-      split_items_loop(chars, i + 1, len, 0, 0, "", acc ++ [trimmed])
+      split_items_loop(chars, i + 1, len, 0, 0, "", acc + [trimmed])
     }
-    else split_items_loop(chars, i + 1, len, bracket_depth, in_quote, current ++ ch, acc)
+    else split_items_loop(chars, i + 1, len, bracket_depth, in_quote, current + ch, acc)
   }
 }
 
@@ -165,17 +165,17 @@ fn json_set_key_loop(obj: Value, keys: List[String], i: Int, len: Int, target_ke
     // If target key wasn't in existing keys, append it
     let found = list.any(keys, (k) => k == target_key)
     if found then acc
-    else acc ++ [(target_key, target_val)]
+    else acc + [(target_key, target_val)]
   }
   else {
     let k = match list.get(keys, i) { some(v) => v, none => "" }
-    let k2 = k ++ ""
+    let k2 = k + ""
     if k == target_key then {
-      json_set_key_loop(obj, keys, i + 1, len, target_key, json.null(), acc ++ [(k2, target_val)])
+      json_set_key_loop(obj, keys, i + 1, len, target_key, json.null(), acc + [(k2, target_val)])
     }
     else {
       let v = match json.get(obj, k) { some(v) => v, none => json.null() }
-      json_set_key_loop(obj, keys, i + 1, len, target_key, target_val, acc ++ [(k2, v)])
+      json_set_key_loop(obj, keys, i + 1, len, target_key, target_val, acc + [(k2, v)])
     }
   }
 }
@@ -207,17 +207,17 @@ fn stringify_table(value: Value, prefix: String) -> String = {
   // Simple key=value pairs
   let simple_lines = list.map(simple_entries, (k) => {
     let v = match json.get(value, k) { some(x) => x, none => json.null() }
-    k ++ " = " ++ stringify_value(v)
+    k + " = " + stringify_value(v)
   })
   let result = string.join(simple_lines, "\n")
   // Nested tables
   let table_lines = list.map(table_entries, (k) => {
     let v = match json.get(value, k) { some(x) => x, none => json.null() }
-    let section = if string.len(prefix) > 0 then prefix ++ "." ++ k else k
-    "\n[" ++ section ++ "]\n" ++ stringify_table(v, section)
+    let section = if string.len(prefix) > 0 then prefix + "." + k else k
+    "\n[" + section + "]\n" + stringify_table(v, section)
   })
   if list.len(table_lines) > 0 then {
-    if string.len(result) > 0 then result ++ "\n" ++ string.join(table_lines, "\n")
+    if string.len(result) > 0 then result + "\n" + string.join(table_lines, "\n")
     else string.join(table_lines, "\n")
   }
   else result
@@ -225,7 +225,7 @@ fn stringify_table(value: Value, prefix: String) -> String = {
 
 fn stringify_value(v: Value) -> String = {
   match json.as_string(v) {
-    some(s) => "\"" ++ escape_string(s) ++ "\""
+    some(s) => "\"" + escape_string(s) + "\""
     none => match json.as_int(v) {
       some(n) => int.to_string(n)
       none => match json.as_float(v) {
@@ -235,7 +235,7 @@ fn stringify_value(v: Value) -> String = {
           none => match json.as_array(v) {
             some(arr) => {
               let items = list.map(arr, (item) => stringify_value(item))
-              "[" ++ string.join(items, ", ") ++ "]"
+              "[" + string.join(items, ", ") + "]"
             }
             none => {
               // Inline table or null
@@ -243,9 +243,9 @@ fn stringify_value(v: Value) -> String = {
               if list.len(keys) > 0 then {
                 let pairs = list.map(keys, (k) => {
                   let val = match json.get(v, k) { some(x) => x, none => json.null() }
-                  k ++ " = " ++ stringify_value(val)
+                  k + " = " + stringify_value(val)
                 })
-                "{ " ++ string.join(pairs, ", ") ++ " }"
+                "{ " + string.join(pairs, ", ") + " }"
               }
               else json.stringify(v)
             }

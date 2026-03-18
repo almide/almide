@@ -31,7 +31,7 @@ fn grep_lines(path: String, lines: List[String], pattern: String) -> List[String
       let line = pair.1
       if string.contains(line, pattern) then {
         let i = pair.0
-        some(path ++ ":" ++ int.to_string(i + 1) ++ ": " ++ string.trim(line))
+        some(path + ":" + int.to_string(i + 1) + ": " + string.trim(line))
       } else none
     })
 

@@ -13,7 +13,7 @@ test "for map key access" {
   let m = ["a": 1, "b": 2]
   var keys: List[String] = []
   for (k, v) in m {
-    keys = keys ++ [k]
+    keys = keys + [k]
   }
   assert_eq(list.len(keys), 2)
 }

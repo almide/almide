@@ -21,11 +21,11 @@ fn str_to_int(s: String) -> Result[Int, String] = {
     else {
       // Get digit bytes (skip leading minus if present)
       let digit_bytes = if is_negative then {
-        let indices = list.fold(bytes, [], (acc, _b) => acc ++ [list.len(acc)])
+        let indices = list.fold(bytes, [], (acc, _b) => acc + [list.len(acc)])
         list.fold(indices, [], (acc, i) => {
           if i >= start_index then {
             match list.get(bytes, i) {
-              some(v) => acc ++ [v],
+              some(v) => acc + [v],
               none => acc,
             }
           } else acc
@@ -76,10 +76,10 @@ fn parse_student(line: String) -> Result[List[String], String] = {
             err(e) => err(e),
             ok(validated) => {
               match str_to_int(s) {
-                err(_e) => err("invalid score: " ++ s),
+                err(_e) => err("invalid score: " + s),
                 ok(n) => {
-                  if n < 0 or n > 100 then err("score out of range: " ++ s)
-                  else ok(validated ++ [s])
+                  if n < 0 or n > 100 then err("score out of range: " + s)
+                  else ok(validated + [s])
                 },
               }
             },
@@ -87,7 +87,7 @@ fn parse_student(line: String) -> Result[List[String], String] = {
         })
         match validation {
           err(e) => err(e),
-          ok(scores) => ok([name] ++ scores),
+          ok(scores) => ok([name] + scores),
         }
       }
     }
@@ -103,7 +103,7 @@ fn parse_all(input: String) -> Result[List[List[String]], String] = {
     let lines = string.split(input, "\n")
     let indexed_lines = list.fold(lines, [], (acc, line) => {
       let idx = list.len(acc) + 1
-      acc ++ [[int.to_string(idx), line]]
+      acc + [[int.to_string(idx), line]]
     })
     list.fold(indexed_lines, ok([]), (acc, entry) => {
       match acc {
@@ -118,7 +118,7 @@ fn parse_all(input: String) -> Result[List[List[String]], String] = {
             none => "",
           }
           match parse_student(line) {
-            err(e) => err("line " ++ line_num ++ ": " ++ e),
+            err(e) => err("line " + line_num + ": " + e),
             ok(student) => {
               let name = match list.get(student, 0) {
                 some(v) => v,
@@ -130,8 +130,8 @@ fn parse_all(input: String) -> Result[List[List[String]], String] = {
                   none => "",
                 }
               })
-              if list.contains(names, name) then err("duplicate name: " ++ name)
-              else ok(students ++ [student])
+              if list.contains(names, name) then err("duplicate name: " + name)
+              else ok(students + [student])
             },
           }
         },
@@ -146,7 +146,7 @@ fn average(student: List[String]) -> Result[Int, String] = {
   let len = list.len(student)
   if len <= 1 then err("no scores")
   else {
-    let indices = list.fold(student, [], (acc, _s) => acc ++ [list.len(acc)])
+    let indices = list.fold(student, [], (acc, _s) => acc + [list.len(acc)])
     let score_indices = list.filter(indices, (i) => i >= 1)
     let sum_result = list.fold(score_indices, ok(0), (acc, i) => {
       match acc {
@@ -197,7 +197,7 @@ fn honor_roll(students: List[List[String]]) -> Result[List[String], String] = {
                 some(v) => v,
                 none => "",
               }
-              ok(names ++ [name])
+              ok(names + [name])
             } else ok(names)
           },
         }
@@ -243,7 +243,7 @@ fn format_student(student: List[String]) -> Result[String, String] = {
     err(e) => err(e),
     ok(avg) => {
       let grade = letter_grade(avg)
-      ok(name ++ ": " ++ int.to_string(avg) ++ " (" ++ grade ++ ")")
+      ok(name + ": " + int.to_string(avg) + " (" + grade + ")")
     },
   }
 }
@@ -259,7 +259,7 @@ fn generate_report(input: String) -> Result[String, String] = {
           ok(lines) => {
             match format_student(student) {
               err(e) => err(e),
-              ok(line) => ok(lines ++ [line]),
+              ok(line) => ok(lines + [line]),
             }
           },
         }
@@ -274,9 +274,9 @@ fn generate_report(input: String) -> Result[String, String] = {
                 err(e) => err(e),
                 ok(honors) => {
                   let student_lines = string.join(lines, "\n")
-                  let class_line = "class average: " ++ int.to_string(cavg)
-                  let honor_line = "honor roll: " ++ string.join(honors, ", ")
-                  ok(student_lines ++ "\n" ++ class_line ++ "\n" ++ honor_line)
+                  let class_line = "class average: " + int.to_string(cavg)
+                  let honor_line = "honor roll: " + string.join(honors, ", ")
+                  ok(student_lines + "\n" + class_line + "\n" + honor_line)
                 },
               }
             },

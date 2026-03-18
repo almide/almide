@@ -264,8 +264,8 @@ test "match returns option" {
 test "pattern on result ok variant" {
   let r: Result[String, String] = ok("success")
   let msg = match r {
-    ok(s) => "got: " ++ s,
-    err(e) => "err: " ++ e,
+    ok(s) => "got: " + s,
+    err(e) => "err: " + e,
   }
   assert_eq(msg, "got: success")
 }

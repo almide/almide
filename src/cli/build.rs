@@ -1,5 +1,5 @@
 use std::process::Command;
-use crate::{compile_with_options, parse_file, find_rustc, emit_rust, emit_ts, check, diagnostic, resolve, project, project_fetch};
+use crate::{compile_with_ir, parse_file, find_rustc, emit_ts, check, diagnostic, resolve, project, project_fetch};
 
 pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release: bool, fast: bool, unchecked_index: bool, no_check: bool) {
     let is_npm = matches!(target, Some("npm"));
@@ -34,9 +34,7 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
         output_raw.to_string()
     };
 
-    let emit_options = emit_rust::EmitOptions { no_thread_wrap: is_wasm, fast_mode: unchecked_index };
-    let wasm_target = if is_wasm { Some("wasm") } else { None };
-    let (rs_code, _ir) = compile_with_options(file, no_check, &emit_options, wasm_target);
+    let (rs_code, _ir) = compile_with_ir(file, no_check);
 
     let stem = output.strip_suffix(".wasm")
         .or_else(|| output.strip_suffix(".exe"))

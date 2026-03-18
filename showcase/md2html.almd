@@ -17,24 +17,24 @@ fn md_to_html(input: String) -> String = {
   let lines = string.lines(input)
   let body = list.map(lines, (line) => convert_line(line))
     |> string.join("\n")
-  "<!DOCTYPE html>\n<html><body>\n" ++ body ++ "\n</body></html>"
+  "<!DOCTYPE html>\n<html><body>\n" + body + "\n</body></html>"
 }
 
 fn convert_line(line: String) -> String = {
   if string.starts_with(line, "### ") then
-    "<h3>" ++ inline(string.drop(line, 4)) ++ "</h3>"
+    "<h3>" + inline(string.drop(line, 4)) + "</h3>"
   else if string.starts_with(line, "## ") then
-    "<h2>" ++ inline(string.drop(line, 3)) ++ "</h2>"
+    "<h2>" + inline(string.drop(line, 3)) + "</h2>"
   else if string.starts_with(line, "# ") then
-    "<h1>" ++ inline(string.drop(line, 2)) ++ "</h1>"
+    "<h1>" + inline(string.drop(line, 2)) + "</h1>"
   else if string.starts_with(line, "- ") then
-    "<li>" ++ inline(string.drop(line, 2)) ++ "</li>"
+    "<li>" + inline(string.drop(line, 2)) + "</li>"
   else if string.starts_with(line, "> ") then
-    "<blockquote>" ++ inline(string.drop(line, 2)) ++ "</blockquote>"
+    "<blockquote>" + inline(string.drop(line, 2)) + "</blockquote>"
   else if string.len(string.trim(line)) == 0 then
     "<br>"
   else
-    "<p>" ++ inline(line) ++ "</p>"
+    "<p>" + inline(line) + "</p>"
 }
 
 fn inline(text: String) -> String =

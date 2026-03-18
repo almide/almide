@@ -124,18 +124,18 @@ test "short-circuit or" {
 // ── String concatenation ──
 
 test "string concat" {
-  assert_eq("hello" ++ " " ++ "world", "hello world")
-  assert_eq("" ++ "a", "a")
-  assert_eq("a" ++ "", "a")
+  assert_eq("hello" + " " + "world", "hello world")
+  assert_eq("" + "a", "a")
+  assert_eq("a" + "", "a")
 }
 
 // ── List concatenation ──
 
 test "list concat" {
-  assert_eq([1, 2] ++ [3, 4], [1, 2, 3, 4])
+  assert_eq([1, 2] + [3, 4], [1, 2, 3, 4])
   let empty: List[Int] = []
-  assert_eq(empty ++ [1], [1])
-  assert_eq([1] ++ empty, [1])
+  assert_eq(empty + [1], [1])
+  assert_eq([1] + empty, [1])
 }
 
 // ── Parenthesized grouping ──
@@ -242,13 +242,13 @@ test "float power" {
 test "concat with variables" {
   let a = "foo"
   let b = "bar"
-  let c = a ++ b
+  let c = a + b
   assert_eq(c, "foobar")
-  assert_eq(c ++ "!", "foobar!")
+  assert_eq(c + "!", "foobar!")
 }
 
 test "list concat chained" {
-  let result = [1] ++ [2] ++ [3] ++ [4]
+  let result = [1] + [2] + [3] + [4]
   assert_eq(result, [1, 2, 3, 4])
 }
 

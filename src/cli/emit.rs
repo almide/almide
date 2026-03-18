@@ -1,4 +1,4 @@
-use crate::{parse_file, emit_rust, emit_ts, codegen, check, diagnostic, resolve, project, project_fetch};
+use crate::{parse_file, emit_ts, codegen, check, diagnostic, resolve, project, project_fetch};
 
 pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_check: bool) {
     let (mut program, source_text, _parse_errors) = parse_file(file);
@@ -124,14 +124,6 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
                 codegen::emit(ir, codegen::pass::Target::TypeScript)
             }
             // Legacy codegen (for comparison/fallback)
-            "legacy-rust" => {
-                let ir = ir_program.as_ref().expect("IR required for Rust codegen");
-                emit_rust::emit_with_options(ir, &emit_rust::EmitOptions::default(), &import_aliases, &module_irs)
-            }
-            "legacy-ts" => {
-                let ir = ir_program.as_ref().expect("IR required for TS codegen");
-                emit_ts::emit_with_modules(ir)
-            }
             "js" | "javascript" => {
                 let ir = ir_program.as_ref().expect("IR required for JS codegen");
                 emit_ts::emit_js_with_modules(ir)

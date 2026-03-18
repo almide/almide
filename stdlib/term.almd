@@ -4,7 +4,7 @@
 local fn esc() -> String = string.from_bytes([27])
 
 local fn wrap(s: String, code: String) -> String =
-  esc() ++ "[" ++ code ++ "m" ++ s ++ esc() ++ "[0m"
+  esc() + "[" + code + "m" + s + esc() + "[0m"
 
 // Foreground colors
 
@@ -38,7 +38,7 @@ fn strikethrough(s: String) -> String = wrap(s, "9")
 
 // Reset
 
-fn reset() -> String = esc() ++ "[0m"
+fn reset() -> String = esc() + "[0m"
 
 // Background colors
 
@@ -53,14 +53,14 @@ fn bg_blue(s: String) -> String = wrap(s, "44")
 // 256-color support
 
 fn color(s: String, code: Int) -> String =
-  wrap(s, "38;5;" ++ int.to_string(code))
+  wrap(s, "38;5;" + int.to_string(code))
 
 fn bg_color(s: String, code: Int) -> String =
-  wrap(s, "48;5;" ++ int.to_string(code))
+  wrap(s, "48;5;" + int.to_string(code))
 
 // Strip ANSI escape sequences
 
 fn strip(s: String) -> String = {
-  let pattern = esc() ++ r"\[[0-9;]*m"
+  let pattern = esc() + r"\[[0-9;]*m"
   regex.replace(pattern, s, "")
 }

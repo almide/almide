@@ -51,18 +51,18 @@ fn parse(s: String) -> Result[Url, String] = {
 }
 
 fn to_string(u: Url) -> String = {
-  let result = u.scheme ++ "://" ++ u.host
+  let result = u.scheme + "://" + u.host
   let result = match u.port {
-    some(p) => result ++ ":" ++ int.to_string(p)
+    some(p) => result + ":" + int.to_string(p)
     none => result
   }
-  let result = result ++ u.path
+  let result = result + u.path
   let result = match u.query {
-    some(q) => result ++ "?" ++ q
+    some(q) => result + "?" + q
     none => result
   }
   match u.fragment {
-    some(f) => result ++ "#" ++ f
+    some(f) => result + "#" + f
     none => result
   }
 }
@@ -86,10 +86,10 @@ fn query_params(u: Url) -> Map[String, String] = {
 
 fn set_query_param(u: Url, key: String, value: String) -> Url = {
   let params = query_params(u)
-  let k = key ++ ""
-  let v = value ++ ""
+  let k = key + ""
+  let v = value + ""
   let params = map.set(params, k, v)
-  let parts = list.map(map.entries(params), (entry) => entry.0 ++ "=" ++ encode(entry.1))
+  let parts = list.map(map.entries(params), (entry) => entry.0 + "=" + encode(entry.1))
   let new_query = string.join(parts, "&")
   Url {
     scheme: u.scheme,
@@ -189,8 +189,8 @@ fn percent_encode_char(ch: String) -> String = {
   let bytes = string.to_bytes(ch)
   let encoded = list.map(bytes, (b) => {
     let hex = int.to_hex(b)
-    let hex = if string.len(hex) == 1 then "0" ++ hex else hex
-    "%" ++ string.to_upper(hex)
+    let hex = if string.len(hex) == 1 then "0" + hex else hex
+    "%" + string.to_upper(hex)
   })
   string.join(encoded, "")
 }
@@ -208,15 +208,15 @@ fn percent_decode_loop(chars: List[String], i: Int, len: Int, acc: String) -> St
     if ch == "%" and i + 2 < len then {
       let h1 = match list.get(chars, i + 1) { some(c) => c, none => "0" }
       let h2 = match list.get(chars, i + 2) { some(c) => c, none => "0" }
-      let hex = h1 ++ h2
+      let hex = h1 + h2
       match int.parse_hex(hex) {
         ok(byte) => {
           let decoded = string.from_bytes([byte])
-          percent_decode_loop(chars, i + 3, len, acc ++ decoded)
+          percent_decode_loop(chars, i + 3, len, acc + decoded)
         }
-        err(_) => percent_decode_loop(chars, i + 1, len, acc ++ ch)
+        err(_) => percent_decode_loop(chars, i + 1, len, acc + ch)
       }
     }
-    else percent_decode_loop(chars, i + 1, len, acc ++ ch)
+    else percent_decode_loop(chars, i + 1, len, acc + ch)
   }
 }

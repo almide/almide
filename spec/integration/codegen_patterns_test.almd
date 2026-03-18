@@ -8,9 +8,9 @@ type Msg =
   | Pair(Int, Int)
 
 fn msg_to_string(m: Msg) -> String = match m {
-  Text(s) => "text:" ++ s,
-  Number(n) => "num:" ++ int.to_string(n),
-  Pair(a, b) => "pair:" ++ int.to_string(a) ++ "," ++ int.to_string(b),
+  Text(s) => "text:" + s,
+  Number(n) => "num:" + int.to_string(n),
+  Pair(a, b) => "pair:" + int.to_string(a) + "," + int.to_string(b),
 }
 
 test "variant match with all arms" {
@@ -63,7 +63,7 @@ test "for loop with tuple destructure from zip" {
   let scores = [90, 85, 95]
   var results: List[String] = []
   for (name, score) in list.zip(names, scores) {
-    results = results ++ ["${name}:${int.to_string(score)}"]
+    results = results + ["${name}:${int.to_string(score)}"]
   }
   assert_eq(results, ["alice:90", "bob:85", "carol:95"])
 }
@@ -72,7 +72,7 @@ test "for loop with enumerate tuple destructure" {
   let items = ["a", "b", "c"]
   var indexed: List[String] = []
   for (i, item) in list.enumerate(items) {
-    indexed = indexed ++ ["${int.to_string(i)}=${item}"]
+    indexed = indexed + ["${int.to_string(i)}=${item}"]
   }
   assert_eq(indexed, ["0=a", "1=b", "2=c"])
 }
@@ -178,7 +178,7 @@ test "match wildcard in variant payload" {
       _ => none,
     }
     match maybe_sum {
-      some(s) => { pair_sums = pair_sums ++ [s] },
+      some(s) => { pair_sums = pair_sums + [s] },
       none => { () },
     }
   }

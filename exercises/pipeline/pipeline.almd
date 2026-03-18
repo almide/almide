@@ -5,7 +5,7 @@ effect fn parse_pairs(input: String) -> Result[List[(String, String)], String] =
   for line in lines {
     let parts = string.split(line, "=")
     guard list.len(parts) == 2 else err("invalid line: ${line}")
-    pairs = pairs ++ [(list.get_or(parts, 0, ""), list.get_or(parts, 1, ""))]
+    pairs = pairs + [(list.get_or(parts, 0, ""), list.get_or(parts, 1, ""))]
   }
   ok(pairs)
 }

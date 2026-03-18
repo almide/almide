@@ -9,11 +9,7 @@ use crate::ir::VarId;
 /// Annotations populated by Nanopass passes, read by the walker.
 #[derive(Debug, Clone, Default)]
 pub struct CodegenAnnotations {
-    /// Variables that need .clone() when used (Rust only)
-    pub clone_vars: HashSet<VarId>,
-
-    /// Variables that need *deref when used (Box'd pattern bindings)
-    pub deref_vars: HashSet<VarId>,
+    // clone_vars/deref_vars: removed — now handled by IR nodes (Clone/Deref)
 
     /// Variables that are top-level lazy (need *DEREF in Rust)
     pub lazy_vars: HashSet<VarId>,

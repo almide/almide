@@ -124,7 +124,25 @@ impl Checker {
                 let lt = self.infer_expr(left);
                 let rt = self.infer_expr(right);
                 match op.as_str() {
-                    "+" | "-" | "*" | "/" | "%" => {
+                    "+" => {
+                        let lc = lt.to_ty(&self.solutions);
+                        let rc = rt.to_ty(&self.solutions);
+                        // + works for: Int, Float (arithmetic), String (concat), List (concat)
+                        let is_concat = matches!(&lc, Ty::String | Ty::List(_))
+                            || matches!(&rc, Ty::String | Ty::List(_));
+                        if is_concat {
+                            lt // concat: return same type
+                        } else {
+                            let is_numeric = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_));
+                            if !is_numeric(&lc) || !is_numeric(&rc) {
+                                self.emit(super::err(
+                                    format!("operator '+' requires numeric, String, or List types but got {} and {}", lc.display(), rc.display()),
+                                    "Use + with numeric types, String, or List", format!("operator +")));
+                            }
+                            if lc == Ty::Float || rc == Ty::Float { InferTy::Concrete(Ty::Float) } else { lt }
+                        }
+                    }
+                    "-" | "*" | "/" | "%" => {
                         let lc = lt.to_ty(&self.solutions);
                         let rc = rt.to_ty(&self.solutions);
                         let is_numeric = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_));
@@ -136,13 +154,9 @@ impl Checker {
                         if lc == Ty::Float || rc == Ty::Float { InferTy::Concrete(Ty::Float) } else { lt }
                     }
                     "++" => {
-                        let lc = lt.to_ty(&self.solutions);
-                        let is_concatable = |t: &Ty| matches!(t, Ty::String | Ty::List(_) | Ty::Unknown | Ty::TypeVar(_));
-                        if !is_concatable(&lc) {
-                            self.emit(super::err(
-                                format!("operator '++' requires String or List but got {}", lc.display()),
-                                "Use ++ with String or List types", "operator ++"));
-                        }
+                        self.emit(super::err(
+                            format!("operator '++' has been removed. Use '+' for concatenation"),
+                            "Replace ++ with +", "operator ++"));
                         lt
                     }
                     "==" | "!=" | "<" | ">" | "<=" | ">=" => InferTy::Concrete(Ty::Bool),

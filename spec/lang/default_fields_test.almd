@@ -4,15 +4,15 @@ type Shape =
   | Group { label: String, items: List[Shape] = [] }
 
 fn describe(s: Shape) -> String = match s {
-  Circle { radius } => "circle r=" ++ float.to_string(radius)
+  Circle { radius } => "circle r=" + float.to_string(radius)
   Rect { width, height, color, filled } => {
-    let base = "rect " ++ float.to_string(width) ++ "x" ++ float.to_string(height)
-    let base = if color != "" then base ++ " color=" ++ color else base
-    if filled then base ++ " filled" else base
+    let base = "rect " + float.to_string(width) + "x" + float.to_string(height)
+    let base = if color != "" then base + " color=" + color else base
+    if filled then base + " filled" else base
   }
   Group { label, items } => {
     let count = list.len(items)
-    label ++ " (" ++ int.to_string(count) ++ " items)"
+    label + " (" + int.to_string(count) + " items)"
   }
 }
 
