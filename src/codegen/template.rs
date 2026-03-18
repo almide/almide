@@ -447,62 +447,43 @@ mod tests {
 
     #[test]
     fn test_fill_template() {
-        let mut bindings = HashMap::new();
-        bindings.insert("name", "x".to_string());
-        bindings.insert("value", "42".to_string());
-        bindings.insert("type", "i64".to_string());
-
-        let result = fill_template("let {name}: {type} = {value};", &bindings);
+        let result = fill_template("let {name}: {type} = {value};", &[("name", "x"), ("value", "42"), ("type", "i64")]);
         assert_eq!(result, "let x: i64 = 42;");
     }
 
     #[test]
     fn test_rust_some() {
         let ts = rust_templates();
-        let mut bindings = HashMap::new();
-        bindings.insert("inner", "x".to_string());
-
-        let result = ts.render("some_expr", None, &[], &bindings);
+        let result = ts.render_with("some_expr", None, &[], &[("inner", "x")]);
         assert_eq!(result, Some("Some(x)".to_string()));
     }
 
     #[test]
     fn test_ts_some_erased() {
         let ts = typescript_templates();
-        let mut bindings = HashMap::new();
-        bindings.insert("inner", "x".to_string());
-
-        let result = ts.render("some_expr", None, &[], &bindings);
+        let result = ts.render_with("some_expr", None, &[], &[("inner", "x")]);
         assert_eq!(result, Some("x".to_string()));
     }
 
     #[test]
     fn test_concat_type_dispatch() {
         let ts = rust_templates();
-        let mut bindings = HashMap::new();
-        bindings.insert("left", "a".to_string());
-        bindings.insert("right", "b".to_string());
-
-        let str_result = ts.render("concat_expr", Some("String"), &[], &bindings);
+        let str_result = ts.render_with("concat_expr", Some("String"), &[], &[("left", "a"), ("right", "b")]);
         assert_eq!(str_result, Some("format!(\"{}{}\", a, b)".to_string()));
 
-        let list_result = ts.render("concat_expr", Some("List"), &[], &bindings);
+        let list_result = ts.render_with("concat_expr", Some("List"), &[], &[("left", "a"), ("right", "b")]);
         assert_eq!(list_result, Some("AlmideConcat::concat(a, b)".to_string()));
     }
 
     #[test]
     fn test_call_with_try() {
         let ts = rust_templates();
-        let mut bindings = HashMap::new();
-        bindings.insert("callee", "fs_read".to_string());
-        bindings.insert("args", "path".to_string());
+        let b = &[("callee", "fs_read"), ("args", "path")];
 
-        // Without try
-        let normal = ts.render("call_expr", None, &[], &bindings);
+        let normal = ts.render_with("call_expr", None, &[], b);
         assert_eq!(normal, Some("fs_read(path)".to_string()));
 
-        // With try
-        let with_try = ts.render("call_expr", None, &["needs_try"], &bindings);
+        let with_try = ts.render_with("call_expr", None, &["needs_try"], b);
         assert_eq!(with_try, Some("fs_read(path)?".to_string()));
     }
 
@@ -516,9 +497,7 @@ template = "if ({cond}) {{ {then} }} else {{ {else} }}"
 template = "{inner}"
 "#;
         let ts = load_from_toml("test", toml);
-        let mut b = HashMap::new();
-        b.insert("inner", "42".to_string());
-        assert_eq!(ts.render("some_expr", None, &[], &b), Some("42".to_string()));
+        assert_eq!(ts.render_with("some_expr", None, &[], &[("inner", "42")]), Some("42".to_string()));
     }
 
     #[test]

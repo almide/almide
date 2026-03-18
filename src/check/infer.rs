@@ -127,9 +127,13 @@ impl Checker {
                     "+" => {
                         let lc = lt.to_ty(&self.solutions);
                         let rc = rt.to_ty(&self.solutions);
-                        // + works for: Int, Float (arithmetic), String (concat), List (concat)
-                        let is_concat = matches!(&lc, Ty::String | Ty::List(_))
-                            || matches!(&rc, Ty::String | Ty::List(_));
+                        // + works for: String+String, List+List (concat), numeric+numeric (add)
+                        let l_concat = matches!(&lc, Ty::String | Ty::List(_));
+                        let r_concat = matches!(&rc, Ty::String | Ty::List(_));
+                        let l_unknown = matches!(&lc, Ty::Unknown | Ty::TypeVar(_));
+                        let r_unknown = matches!(&rc, Ty::Unknown | Ty::TypeVar(_));
+                        let is_concat = (l_concat && (r_concat || r_unknown))
+                            || (r_concat && l_unknown);
                         if is_concat {
                             lt // concat: return same type
                         } else {
