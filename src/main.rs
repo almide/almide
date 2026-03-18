@@ -294,8 +294,9 @@ fn try_compile_with_options(file: &str, no_check: bool, emit_options: &emit_rust
         almide::mono::monomorphize(ir);
     }
 
-    let ir = ir_program.as_ref().expect("IR required for codegen");
-    let code = emit_rust::emit_with_options(ir, emit_options, &import_aliases, &module_irs);
+    // Codegen v3: three-layer pipeline (Nanopass + Templates)
+    let ir = ir_program.as_mut().expect("IR required for codegen");
+    let code = codegen::emit(ir, codegen::pass::Target::Rust);
     Ok((code, ir_program))
 }
 

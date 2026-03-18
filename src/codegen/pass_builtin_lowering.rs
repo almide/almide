@@ -43,8 +43,8 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
 
             match target {
                 CallTarget::Named { ref name } => {
-                    // assert_eq / assert_ne → RustMacro
-                    if name == "assert_eq" || name == "assert_ne" {
+                    // assert / assert_eq / assert_ne → RustMacro
+                    if name == "assert" || name == "assert_eq" || name == "assert_ne" {
                         return IrExpr { kind: IrExprKind::RustMacro { name: name.clone(), args }, ty, span };
                     }
                     // assert_some → assert!(x.is_some())

@@ -34,6 +34,33 @@ pub mod walker;
 use crate::ir::IrProgram;
 use pass::Target;
 
+/// Strip `mod tests { ... }` blocks from runtime source (avoid conflicts with user tests)
+fn strip_test_blocks(src: &str) -> String {
+    let mut out = String::new();
+    let mut depth = 0i32;
+    let mut in_test_mod = false;
+    for line in src.lines() {
+        let trimmed = line.trim();
+        if !in_test_mod && (trimmed.starts_with("#[cfg(test)]") || trimmed.starts_with("mod tests")) {
+            in_test_mod = true;
+            depth = 0;
+        }
+        if in_test_mod {
+            for ch in line.chars() {
+                if ch == '{' { depth += 1; }
+                if ch == '}' { depth -= 1; }
+            }
+            if depth <= 0 && line.contains('}') {
+                in_test_mod = false;
+            }
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
 /// Full codegen v3 pipeline: IR → Nanopass → Annotations → Walker → source code.
 pub fn emit(program: &mut IrProgram, target: Target) -> String {
     let config = target::configure(target);
@@ -71,9 +98,9 @@ pub fn emit(program: &mut IrProgram, target: Target) -> String {
             output.push_str("impl<T: Clone> AlmideConcat<Vec<T>> for Vec<T> { type Output = Vec<T>; #[inline(always)] fn concat(self, rhs: Vec<T>) -> Vec<T> { let mut r = self; r.extend(rhs); r } }\n");
             output.push_str("macro_rules! almide_eq { ($a:expr, $b:expr) => { ($a) == ($b) }; }\n");
             output.push_str("macro_rules! almide_ne { ($a:expr, $b:expr) => { ($a) != ($b) }; }\n");
-            // Embed the full Rust runtime (stdlib functions)
+            // Embed the full Rust runtime (stdlib functions), strip test blocks
             for (_name, source) in crate::generated::rust_runtime::RUST_RUNTIME_MODULES {
-                output.push_str(source);
+                output.push_str(&strip_test_blocks(source));
                 output.push('\n');
             }
             output.push('\n');

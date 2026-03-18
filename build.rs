@@ -428,12 +428,15 @@ fn main() {
                 let mut transforms = Vec::new();
                 for (i, param) in def.params.iter().enumerate() {
                     let pname = &param.name;
+                    let ptype = &param.ty;
                     let transform = if rust_tmpl.contains(&format!("{{{}.args}}", pname)) || rust_tmpl.contains(&format!("{{{}.body}}", pname)) {
                         "ArgTransform::LambdaClone"
-                    } else if rust_tmpl.contains(&format!("&*{{{}}}", pname)) {
-                        "ArgTransform::BorrowStr"
                     } else if rust_tmpl.contains(&format!("({{{}}}).to_vec()", pname)) {
                         "ArgTransform::ToVec"
+                    } else if rust_tmpl.contains(&format!("&*{{{}}}", pname)) {
+                        // BorrowStr: but if param type is "String" (owned), the runtime
+                        // expects String, not &str. Use Direct to avoid type mismatch.
+                        if ptype == "String" { "ArgTransform::Direct" } else { "ArgTransform::BorrowStr" }
                     } else if rust_tmpl.contains(&format!("&{{{}}}", pname)) {
                         "ArgTransform::BorrowRef"
                     } else {

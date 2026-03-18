@@ -44,10 +44,13 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(TypeConcretizationPass)
             .add(BorrowInsertionPass)
             .add(CloneInsertionPass)
-            // Semantic lowering
-            .add(BuiltinLoweringPass)
+            // Semantic lowering (order matters!)
+            // 1. Stdlib first: Module calls → Named calls with arg decoration
             .add(StdlibLoweringPass)
+            // 2. ResultPropagation: insert Try (?) for effect fn calls
             .add(ResultPropagationPass)
+            // 3. Builtin last: Named calls (assert_eq, println, etc.) → RustMacro
+            .add(BuiltinLoweringPass)
             // Shared passes
             .add(FanLoweringPass),
 

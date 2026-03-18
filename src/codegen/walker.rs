@@ -1126,9 +1126,18 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         parts.push(rendered);
     }
 
-    // Functions
-    for func in &program.functions {
+    // Functions (non-test)
+    for func in program.functions.iter().filter(|f| !f.is_test) {
         parts.push(render_function(&ctx, func));
+    }
+
+    // Test functions wrapped in mod tests { }
+    let test_fns: Vec<&IrFunction> = program.functions.iter().filter(|f| f.is_test).collect();
+    if !test_fns.is_empty() {
+        let test_parts: Vec<String> = test_fns.iter()
+            .map(|f| render_function(&ctx, f))
+            .collect();
+        parts.push(format!("mod tests {{\n    use super::*;\n{}\n}}", test_parts.join("\n\n")));
     }
 
     // Imported modules: render their type decls and functions
@@ -1436,6 +1445,15 @@ fn collect_anon_from_expr(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mu
             for p in parts {
                 if let IrStringPart::Expr { expr } = p { collect_anon_from_expr(expr, named, seen); }
             }
+        }
+        // Codegen-specific nodes
+        IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
+        | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
+        | IrExprKind::ToVec { expr } | IrExprKind::Await { expr } => {
+            collect_anon_from_expr(expr, named, seen);
+        }
+        IrExprKind::RustMacro { args, .. } => {
+            for a in args { collect_anon_from_expr(a, named, seen); }
         }
         _ => {}
     }
