@@ -178,9 +178,9 @@ impl FuncCompiler<'_> {
                 self.emit_match(subject, arms, &expr.ty);
             }
 
-            // ── Record construction ──
-            IrExprKind::Record { fields, .. } => {
-                self.emit_record(fields, &expr.ty);
+            // ── Record/Variant construction ──
+            IrExprKind::Record { name, fields, .. } => {
+                self.emit_record(name.as_deref(), fields, &expr.ty);
             }
 
             // ── Field access ──
@@ -379,6 +379,23 @@ impl FuncCompiler<'_> {
                         }
                     }
                     _ => {
+                        // Check if this is a unit variant constructor (e.g., Red, None)
+                        if args.is_empty() {
+                            if let Some(tag) = self.find_unit_variant_tag(name) {
+                                // Allocate [tag:i32]
+                                self.func.instruction(&Instruction::I32Const(4));
+                                self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+                                let scratch = self.match_i32_base + self.match_depth;
+                                self.func.instruction(&Instruction::LocalSet(scratch));
+                                self.func.instruction(&Instruction::LocalGet(scratch));
+                                self.func.instruction(&Instruction::I32Const(tag as i32));
+                                self.func.instruction(&Instruction::I32Store(MemArg {
+                                    offset: 0, align: 2, memory_index: 0,
+                                }));
+                                self.func.instruction(&Instruction::LocalGet(scratch));
+                                return;
+                            }
+                        }
                         // User-defined function call
                         for arg in args {
                             self.emit_expr(arg);
@@ -510,54 +527,42 @@ impl FuncCompiler<'_> {
             }
         }
     }
-    /// Emit a record construction: allocate memory, store each field.
-    fn emit_record(&mut self, fields: &[(String, IrExpr)], _result_ty: &Ty) {
+    /// Emit a record/variant construction: allocate memory, store fields.
+    /// For variants (detected via name + type), prepends a tag i32 before fields.
+    fn emit_record(&mut self, name: Option<&str>, fields: &[(String, IrExpr)], result_ty: &Ty) {
+        // Check if this is a variant constructor
+        let tag = self.resolve_variant_tag(name, result_ty);
+        let tag_size: u32 = if tag.is_some() { 4 } else { 0 };
+
         // Compute field types and total size
         let field_types: Vec<(String, Ty)> = fields.iter()
-            .map(|(name, expr)| (name.clone(), expr.ty.clone()))
+            .map(|(n, expr)| (n.clone(), expr.ty.clone()))
             .collect();
-        let total_size = values::record_size(&field_types);
+        let total_size = tag_size + values::record_size(&field_types);
 
         // Allocate
         self.func.instruction(&Instruction::I32Const(total_size as i32));
         self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
-        // ptr is on stack — we need to store it, then write fields, then return it
 
-        // We'll use local.tee to keep ptr on stack while storing fields
-        // But we need a scratch local... Actually, we can store each field
-        // by computing ptr + offset for each. We need the ptr available.
-        // Use the match scratch i32 slot as a temporary.
         let scratch = self.match_i32_base + self.match_depth;
-
         self.func.instruction(&Instruction::LocalSet(scratch));
 
-        // Store each field
-        let mut offset = 0u32;
+        // Write tag if variant
+        if let Some(tag_val) = tag {
+            self.func.instruction(&Instruction::LocalGet(scratch));
+            self.func.instruction(&Instruction::I32Const(tag_val as i32));
+            self.func.instruction(&Instruction::I32Store(MemArg {
+                offset: 0, align: 2, memory_index: 0,
+            }));
+        }
+
+        // Store each field (offset starts after tag)
+        let mut offset = tag_size;
         for (_, field_expr) in fields {
             let field_size = values::byte_size(&field_expr.ty);
-            // Address = scratch + offset
             self.func.instruction(&Instruction::LocalGet(scratch));
-            // Emit value
             self.emit_expr(field_expr);
-            // Store based on type
-            match values::ty_to_valtype(&field_expr.ty) {
-                Some(ValType::I64) => {
-                    self.func.instruction(&Instruction::I64Store(MemArg {
-                        offset: offset as u64, align: 3, memory_index: 0,
-                    }));
-                }
-                Some(ValType::F64) => {
-                    self.func.instruction(&Instruction::F64Store(MemArg {
-                        offset: offset as u64, align: 3, memory_index: 0,
-                    }));
-                }
-                Some(ValType::I32) => {
-                    self.func.instruction(&Instruction::I32Store(MemArg {
-                        offset: offset as u64, align: 2, memory_index: 0,
-                    }));
-                }
-                _ => {} // Unit: nothing to store
-            }
+            self.emit_store_at(&field_expr.ty, offset);
             offset += field_size;
         }
 
@@ -565,36 +570,94 @@ impl FuncCompiler<'_> {
         self.func.instruction(&Instruction::LocalGet(scratch));
     }
 
-    /// Emit a field access: load from record pointer + field offset.
+    /// Look up variant tag for a constructor name within a variant type.
+    fn resolve_variant_tag(&self, name: Option<&str>, result_ty: &Ty) -> Option<u32> {
+        let ctor_name = name?;
+        if let Ty::Named(type_name, _) = result_ty {
+            if let Some(cases) = self.emitter.variant_info.get(type_name.as_str()) {
+                for case in cases {
+                    if case.name == ctor_name {
+                        return Some(case.tag);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Emit a store instruction for a value at base_ptr + offset.
+    /// Assumes base_ptr is already on stack, followed by the value.
+    fn emit_store_at(&mut self, ty: &Ty, offset: u32) {
+        match values::ty_to_valtype(ty) {
+            Some(ValType::I64) => {
+                self.func.instruction(&Instruction::I64Store(MemArg {
+                    offset: offset as u64, align: 3, memory_index: 0,
+                }));
+            }
+            Some(ValType::F64) => {
+                self.func.instruction(&Instruction::F64Store(MemArg {
+                    offset: offset as u64, align: 3, memory_index: 0,
+                }));
+            }
+            Some(ValType::I32) => {
+                self.func.instruction(&Instruction::I32Store(MemArg {
+                    offset: offset as u64, align: 2, memory_index: 0,
+                }));
+            }
+            _ => {}
+        }
+    }
+
+    /// Emit a field access: load from record/variant pointer + field offset.
     fn emit_member(&mut self, object: &IrExpr, field: &str) {
-        // Get the record's field list from the object's type
         let fields = self.extract_record_fields(&object.ty);
+        // If the object is a variant type, fields start after the tag (offset +4)
+        let tag_offset = self.variant_tag_offset(&object.ty);
 
         self.emit_expr(object); // ptr on stack
 
-        if let Some((offset, field_ty)) = values::field_offset(&fields, field) {
-            match values::ty_to_valtype(&field_ty) {
-                Some(ValType::I64) => {
-                    self.func.instruction(&Instruction::I64Load(MemArg {
-                        offset: offset as u64, align: 3, memory_index: 0,
-                    }));
-                }
-                Some(ValType::F64) => {
-                    self.func.instruction(&Instruction::F64Load(MemArg {
-                        offset: offset as u64, align: 3, memory_index: 0,
-                    }));
-                }
-                Some(ValType::I32) => {
-                    self.func.instruction(&Instruction::I32Load(MemArg {
-                        offset: offset as u64, align: 2, memory_index: 0,
-                    }));
-                }
-                _ => {} // Unit
-            }
+        if let Some((field_offset, field_ty)) = values::field_offset(&fields, field) {
+            let total_offset = tag_offset + field_offset;
+            self.emit_load_at(&field_ty, total_offset);
         } else {
-            // Field not found — shouldn't happen with correct IR
             self.func.instruction(&Instruction::Unreachable);
         }
+    }
+
+    /// Emit a load instruction from base_ptr (on stack) + offset.
+    fn emit_load_at(&mut self, ty: &Ty, offset: u32) {
+        match values::ty_to_valtype(ty) {
+            Some(ValType::I64) => {
+                self.func.instruction(&Instruction::I64Load(MemArg {
+                    offset: offset as u64, align: 3, memory_index: 0,
+                }));
+            }
+            Some(ValType::F64) => {
+                self.func.instruction(&Instruction::F64Load(MemArg {
+                    offset: offset as u64, align: 3, memory_index: 0,
+                }));
+            }
+            Some(ValType::I32) => {
+                self.func.instruction(&Instruction::I32Load(MemArg {
+                    offset: offset as u64, align: 2, memory_index: 0,
+                }));
+            }
+            _ => {}
+        }
+    }
+
+    /// Returns 4 if the type is a variant (fields start after tag), 0 otherwise.
+    fn variant_tag_offset(&self, ty: &Ty) -> u32 {
+        if let Ty::Named(name, _) = ty {
+            if self.emitter.variant_info.contains_key(name.as_str()) {
+                return 4;
+            }
+        }
+        // Also check Variant type directly
+        if let Ty::Variant { .. } = ty {
+            return 4;
+        }
+        0
     }
 
     /// Extract field names and types from a record/named type.
@@ -763,11 +826,31 @@ impl FuncCompiler<'_> {
                 self.func.instruction(&Instruction::End);
             }
 
-            // Constructor pattern (e.g., Some(x), None)
-            IrPattern::Constructor { name: _, args: _ } => {
-                // Phase 2+: needs variant memory layout
-                // For now, handle Option None/Some as special cases
-                if is_last {
+            // Constructor pattern (e.g., Red, Some(x), None)
+            IrPattern::Constructor { name: ctor_name, args: _ } => {
+                // Look up tag for this constructor
+                if let Some(tag_val) = self.find_variant_tag_by_ctor(ctor_name, subject_ty) {
+                    // Load tag from subject and compare
+                    self.func.instruction(&Instruction::LocalGet(scratch));
+                    self.func.instruction(&Instruction::I32Load(MemArg {
+                        offset: 0, align: 2, memory_index: 0,
+                    }));
+                    self.func.instruction(&Instruction::I32Const(tag_val as i32));
+                    self.func.instruction(&Instruction::I32Eq);
+
+                    let bt = values::block_type(result_ty);
+                    self.func.instruction(&Instruction::If(bt));
+                    self.depth += 1;
+                    self.emit_expr(&arm.body);
+                    self.func.instruction(&Instruction::Else);
+                    if is_last {
+                        self.func.instruction(&Instruction::Unreachable);
+                    } else {
+                        self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1);
+                    }
+                    self.depth -= 1;
+                    self.func.instruction(&Instruction::End);
+                } else if is_last {
                     self.emit_expr(&arm.body);
                 } else {
                     self.func.instruction(&Instruction::Unreachable);
@@ -793,16 +876,113 @@ impl FuncCompiler<'_> {
                 self.func.instruction(&Instruction::End);
             }
 
+            // RecordPattern: variant constructor match (e.g., Circle { radius })
+            IrPattern::RecordPattern { name: ctor_name, fields: pat_fields, .. } => {
+                // Look up the tag for this constructor
+                let tag = self.find_variant_tag_by_ctor(ctor_name, subject_ty);
+
+                if let Some(tag_val) = tag {
+                    // Load tag from subject pointer
+                    self.func.instruction(&Instruction::LocalGet(scratch));
+                    self.func.instruction(&Instruction::I32Load(MemArg {
+                        offset: 0, align: 2, memory_index: 0,
+                    }));
+                    self.func.instruction(&Instruction::I32Const(tag_val as i32));
+                    self.func.instruction(&Instruction::I32Eq);
+
+                    let bt = values::block_type(result_ty);
+                    self.func.instruction(&Instruction::If(bt));
+                    self.depth += 1;
+
+                    // Bind fields: load each field from subject + tag_offset + field_offset
+                    let case_fields = self.emitter.record_fields.get(ctor_name).cloned().unwrap_or_default();
+                    for pf in pat_fields {
+                        // Find the field in the case's fields
+                        if let Some((foff, fty)) = values::field_offset(&case_fields, &pf.name) {
+                            let total_offset = 4 + foff; // 4 = tag size
+                            // Look up VarId for this field name in var_map
+                            // The pattern binds to a var with the same name
+                            // We need to find the VarId — it should be in var_map
+                            // The IR guarantees pattern fields create bindings in var_table
+                            // with the field name. We search by checking all var_map entries.
+                            // Actually, the var_table is indexed by VarId and has names.
+                            // We need to find the VarId that was allocated for this field name.
+                            // The scan_pattern in statements.rs should have registered it.
+                            // For now, find the local by searching var_map for the right VarId.
+
+                            // Simple approach: find the VarId from var_map whose name matches
+                            // This is set up by scan_pattern which registers field bindings
+                            if let Some(&local_idx) = self.find_var_by_field(&pf.name, &case_fields) {
+                                self.func.instruction(&Instruction::LocalGet(scratch));
+                                self.emit_load_at(&fty, total_offset);
+                                self.func.instruction(&Instruction::LocalSet(local_idx));
+                            }
+                        }
+                    }
+
+                    self.emit_expr(&arm.body);
+                    self.func.instruction(&Instruction::Else);
+
+                    if is_last {
+                        self.func.instruction(&Instruction::Unreachable);
+                    } else {
+                        self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1);
+                    }
+
+                    self.depth -= 1;
+                    self.func.instruction(&Instruction::End);
+                } else {
+                    // Not a variant — treat as plain record (always matches)
+                    self.emit_expr(&arm.body);
+                }
+            }
+
             // Catch-all for unsupported patterns
             _ => {
                 if is_last {
-                    // Treat as wildcard
                     self.emit_expr(&arm.body);
                 } else {
                     self.func.instruction(&Instruction::Unreachable);
                 }
             }
         }
+    }
+
+    /// Find the variant tag for a constructor name, searching variant_info by subject type.
+    fn find_variant_tag_by_ctor(&self, ctor_name: &str, subject_ty: &Ty) -> Option<u32> {
+        let type_name = match subject_ty {
+            Ty::Named(name, _) => name.as_str(),
+            Ty::Variant { name, .. } => name.as_str(),
+            _ => return None,
+        };
+        let cases = self.emitter.variant_info.get(type_name)?;
+        cases.iter().find(|c| c.name == ctor_name).map(|c| c.tag)
+    }
+
+    /// Find variant tag for a unit constructor called as a function (e.g., `Red`).
+    fn find_unit_variant_tag(&self, name: &str) -> Option<u32> {
+        for cases in self.emitter.variant_info.values() {
+            for case in cases {
+                if case.name == name && case.fields.is_empty() {
+                    return Some(case.tag);
+                }
+            }
+        }
+        None
+    }
+
+    /// Find local index for a pattern field binding by name.
+    fn find_var_by_field(&self, field_name: &str, _case_fields: &[(String, Ty)]) -> Option<&u32> {
+        // Search var_map for VarIds whose name in var_table matches field_name
+        for (&var_id, local_idx) in &self.var_map {
+            if (var_id as usize) < self.var_table.len() {
+                let info = self.var_table.get(crate::ir::VarId(var_id));
+                if info.name == field_name {
+                    return Some(local_idx);
+                }
+            }
+        }
+        None
     }
 }
 

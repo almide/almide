@@ -65,10 +65,11 @@ pub struct LocalScanResult {
 
 /// Pre-scan a function body to collect all local variable bindings
 /// and count scratch local depth.
-pub fn collect_locals(body: &IrExpr) -> LocalScanResult {
+pub fn collect_locals(body: &IrExpr, var_table: &crate::ir::VarTable) -> LocalScanResult {
     let mut binds = Vec::new();
-    scan_expr(body, &mut binds);
-    let scratch_depth = count_scratch_depth(body);
+    scan_expr(body, &mut binds, var_table);
+    // Always at least 1 scratch level (used by record/variant construction)
+    let scratch_depth = count_scratch_depth(body).max(1);
     LocalScanResult { binds, scratch_depth }
 }
 
@@ -127,114 +128,103 @@ fn count_scratch_depth_stmt(stmt: &IrStmt) -> usize {
     }
 }
 
-fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>) {
+fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::VarTable) {
     match &expr.kind {
         IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
-            for stmt in stmts {
-                scan_stmt(stmt, locals);
-            }
-            if let Some(e) = expr {
-                scan_expr(e, locals);
-            }
+            for stmt in stmts { scan_stmt(stmt, locals, vt); }
+            if let Some(e) = expr { scan_expr(e, locals, vt); }
         }
         IrExprKind::If { cond, then, else_ } => {
-            scan_expr(cond, locals);
-            scan_expr(then, locals);
-            scan_expr(else_, locals);
+            scan_expr(cond, locals, vt);
+            scan_expr(then, locals, vt);
+            scan_expr(else_, locals, vt);
         }
         IrExprKind::While { cond, body } => {
-            scan_expr(cond, locals);
-            for stmt in body {
-                scan_stmt(stmt, locals);
-            }
+            scan_expr(cond, locals, vt);
+            for stmt in body { scan_stmt(stmt, locals, vt); }
         }
         IrExprKind::ForIn { var, body, iterable, .. } => {
-            // The loop variable needs a local (Int for Range iterables)
             locals.push((*var, ValType::I64));
-            scan_expr(iterable, locals);
-            for stmt in body {
-                scan_stmt(stmt, locals);
-            }
+            scan_expr(iterable, locals, vt);
+            for stmt in body { scan_stmt(stmt, locals, vt); }
         }
         IrExprKind::BinOp { left, right, .. } => {
-            scan_expr(left, locals);
-            scan_expr(right, locals);
+            scan_expr(left, locals, vt);
+            scan_expr(right, locals, vt);
         }
-        IrExprKind::UnOp { operand, .. } => {
-            scan_expr(operand, locals);
-        }
+        IrExprKind::UnOp { operand, .. } => scan_expr(operand, locals, vt),
         IrExprKind::Call { args, target, .. } => {
-            if let crate::ir::CallTarget::Method { object, .. } = target {
-                scan_expr(object, locals);
-            }
-            if let crate::ir::CallTarget::Computed { callee } = target {
-                scan_expr(callee, locals);
-            }
-            for arg in args {
-                scan_expr(arg, locals);
-            }
+            if let crate::ir::CallTarget::Method { object, .. } = target { scan_expr(object, locals, vt); }
+            if let crate::ir::CallTarget::Computed { callee } = target { scan_expr(callee, locals, vt); }
+            for arg in args { scan_expr(arg, locals, vt); }
         }
         IrExprKind::Match { subject, arms } => {
-            scan_expr(subject, locals);
+            scan_expr(subject, locals, vt);
             for arm in arms {
-                scan_pattern(&arm.pattern, &subject.ty, locals);
-                scan_expr(&arm.body, locals);
+                scan_pattern(&arm.pattern, &subject.ty, locals, vt);
+                scan_expr(&arm.body, locals, vt);
             }
         }
         _ => {}
     }
 }
 
-fn scan_stmt(stmt: &IrStmt, locals: &mut Vec<(VarId, ValType)>) {
+fn scan_stmt(stmt: &IrStmt, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::VarTable) {
     match &stmt.kind {
         IrStmtKind::Bind { var, ty, value, .. } => {
-            if let Some(vt) = values::ty_to_valtype(ty) {
-                locals.push((*var, vt));
+            if let Some(val_type) = values::ty_to_valtype(ty) {
+                locals.push((*var, val_type));
             }
-            scan_expr(value, locals);
+            scan_expr(value, locals, vt);
         }
-        IrStmtKind::Assign { value, .. } => {
-            scan_expr(value, locals);
-        }
-        IrStmtKind::Expr { expr } => {
-            scan_expr(expr, locals);
-        }
+        IrStmtKind::Assign { value, .. } => scan_expr(value, locals, vt),
+        IrStmtKind::Expr { expr } => scan_expr(expr, locals, vt),
         IrStmtKind::Guard { cond, else_ } => {
-            scan_expr(cond, locals);
-            scan_expr(else_, locals);
+            scan_expr(cond, locals, vt);
+            scan_expr(else_, locals, vt);
         }
         _ => {}
     }
 }
 
 /// Scan a match pattern for variable bindings.
-fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, locals: &mut Vec<(VarId, ValType)>) {
+fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::VarTable) {
     match pattern {
         crate::ir::IrPattern::Bind { var } => {
-            if let Some(vt) = values::ty_to_valtype(subject_ty) {
-                locals.push((*var, vt));
+            if let Some(val_type) = values::ty_to_valtype(subject_ty) {
+                locals.push((*var, val_type));
             }
         }
         crate::ir::IrPattern::Constructor { args, .. } => {
-            for arg in args {
-                scan_pattern(arg, subject_ty, locals);
-            }
+            for arg in args { scan_pattern(arg, subject_ty, locals, vt); }
         }
         crate::ir::IrPattern::Tuple { elements } => {
-            for elem in elements {
-                scan_pattern(elem, subject_ty, locals);
-            }
+            for elem in elements { scan_pattern(elem, subject_ty, locals, vt); }
         }
         crate::ir::IrPattern::Some { inner } | crate::ir::IrPattern::Ok { inner } | crate::ir::IrPattern::Err { inner } => {
-            scan_pattern(inner, subject_ty, locals);
+            scan_pattern(inner, subject_ty, locals, vt);
         }
-        crate::ir::IrPattern::RecordPattern { fields, .. } => {
+        crate::ir::IrPattern::RecordPattern { name: _, fields, .. } => {
+            // For pattern=None fields, the binding is implicit (field name = var name).
+            // The lowerer has already allocated VarIds for these in the VarTable.
+            // We find them by searching VarTable for entries matching the field names.
             for field in fields {
                 if let Some(pat) = &field.pattern {
-                    scan_pattern(pat, subject_ty, locals);
+                    scan_pattern(pat, subject_ty, locals, vt);
+                } else {
+                    // Implicit bind: find VarId by field name in VarTable
+                    for i in 0..vt.len() {
+                        let info = vt.get(crate::ir::VarId(i as u32));
+                        if info.name == field.name {
+                            if let Some(val_type) = values::ty_to_valtype(&info.ty) {
+                                locals.push((crate::ir::VarId(i as u32), val_type));
+                            }
+                            break;
+                        }
+                    }
                 }
             }
         }
-        _ => {} // Wildcard, Literal, None — no bindings
+        _ => {}
     }
 }

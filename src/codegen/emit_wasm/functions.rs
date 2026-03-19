@@ -24,7 +24,7 @@ pub fn compile_function(
     }
 
     // Pre-scan body for variable bindings and match scratch requirements
-    let scan = collect_locals(&func.body);
+    let scan = collect_locals(&func.body, _var_table);
     let mut local_decls = Vec::new();
 
     // Bind locals
@@ -57,6 +57,7 @@ pub fn compile_function(
         match_i64_base,
         match_i32_base,
         match_depth: 0,
+        var_table: _var_table,
     };
 
     compiler.emit_expr(&func.body);

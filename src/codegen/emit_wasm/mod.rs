@@ -84,8 +84,17 @@ pub struct WasmEmitter {
     // Globals
     pub heap_ptr_global: u32,
 
-    // Type info: record name → field list (for field offset computation)
+    // Type info: record/variant name → field list (for field offset computation)
     pub record_fields: HashMap<String, Vec<(String, crate::types::Ty)>>,
+    // Variant info: variant type name → list of (case_name, tag, fields)
+    pub variant_info: HashMap<String, Vec<VariantCase>>,
+}
+
+/// A single case of a variant type.
+pub struct VariantCase {
+    pub name: String,
+    pub tag: u32,
+    pub fields: Vec<(String, crate::types::Ty)>,
 }
 
 impl WasmEmitter {
@@ -112,6 +121,7 @@ impl WasmEmitter {
             },
             heap_ptr_global: 0,
             record_fields: HashMap::new(),
+            variant_info: HashMap::new(),
         }
     }
 
@@ -163,10 +173,12 @@ pub struct FuncCompiler<'a> {
     pub var_map: HashMap<u32, u32>,
     pub depth: u32,
     pub loop_stack: Vec<LoopLabels>,
-    // Match scratch locals (one i64 + one i32 per nesting depth)
+    // Match/record scratch locals (one i64 + one i32 per nesting depth)
     pub match_i64_base: u32,
     pub match_i32_base: u32,
     pub match_depth: u32,
+    // Variable table for name lookups (pattern matching)
+    pub var_table: &'a crate::ir::VarTable,
 }
 
 // ── Public API ──────────────────────────────────────────────────────
@@ -188,13 +200,40 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         }).unwrap() as u32,
     });
 
-    // Register type declarations (record field layouts)
+    // Register type declarations (record and variant field layouts)
     for td in &program.type_decls {
-        if let crate::ir::IrTypeDeclKind::Record { fields } = &td.kind {
-            let field_list: Vec<(String, crate::types::Ty)> = fields.iter()
-                .map(|f| (f.name.clone(), f.ty.clone()))
-                .collect();
-            emitter.record_fields.insert(td.name.clone(), field_list);
+        match &td.kind {
+            crate::ir::IrTypeDeclKind::Record { fields } => {
+                let field_list: Vec<(String, crate::types::Ty)> = fields.iter()
+                    .map(|f| (f.name.clone(), f.ty.clone()))
+                    .collect();
+                emitter.record_fields.insert(td.name.clone(), field_list);
+            }
+            crate::ir::IrTypeDeclKind::Variant { cases, .. } => {
+                let mut variant_cases = Vec::new();
+                for (tag, case) in cases.iter().enumerate() {
+                    let fields = match &case.kind {
+                        crate::ir::IrVariantKind::Record { fields } => {
+                            fields.iter().map(|f| (f.name.clone(), f.ty.clone())).collect()
+                        }
+                        crate::ir::IrVariantKind::Tuple { fields } => {
+                            fields.iter().enumerate()
+                                .map(|(i, ty)| (format!("_{}", i), ty.clone()))
+                                .collect()
+                        }
+                        crate::ir::IrVariantKind::Unit => vec![],
+                    };
+                    // Also register each case name in record_fields for field access
+                    emitter.record_fields.insert(case.name.clone(), fields.clone());
+                    variant_cases.push(VariantCase {
+                        name: case.name.clone(),
+                        tag: tag as u32,
+                        fields,
+                    });
+                }
+                emitter.variant_info.insert(td.name.clone(), variant_cases);
+            }
+            _ => {}
         }
     }
 
