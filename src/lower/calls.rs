@@ -2,7 +2,7 @@
 
 use crate::ast;
 use crate::ir::*;
-use crate::types::Ty;
+use crate::types::{Ty, TypeConstructorId};
 use super::LowerCtx;
 use super::expressions::lower_expr;
 use super::types::resolve_type_expr;
@@ -34,7 +34,7 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
                 let parsed = ctx.mk(IrExprKind::Try { expr: Box::new(ctx.mk(IrExprKind::Call {
                     target: CallTarget::Module { module: module.clone(), func: "parse".into() },
                     args: vec![ir_arg], type_args: vec![],
-                }, Ty::Result(Box::new(Ty::Named("Value".into(), vec![])), Box::new(Ty::String)), span)) },
+                }, Ty::result(Ty::Named("Value".into(), vec![]), Ty::String), span)) },
                 Ty::Named("Value".into(), vec![]), span);
                 let decode_fn = format!("{}.decode", type_name);
                 return ctx.mk(IrExprKind::Call {
@@ -122,13 +122,13 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
             // Built-in generic types: xs.len() → list.len(xs) for List, Map, etc.
             let obj_ty = ctx.expr_ty(object);
             let builtin_module = match &obj_ty {
-                Ty::List(_) => Some("list"),
-                Ty::Map(_, _) => Some("map"),
+                Ty::Applied(TypeConstructorId::List, _) => Some("list"),
+                Ty::Applied(TypeConstructorId::Map, _) => Some("map"),
                 Ty::String => Some("string"),
                 Ty::Int => Some("int"),
                 Ty::Float => Some("float"),
-                Ty::Result(_, _) => Some("result"),
-                Ty::Option(_) => Some("option"),
+                Ty::Applied(TypeConstructorId::Result, _) => Some("result"),
+                Ty::Applied(TypeConstructorId::Option, _) => Some("option"),
                 _ => None,
             };
             if let Some(module) = builtin_module {

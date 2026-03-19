@@ -17,7 +17,7 @@ fn make_test_program() -> IrProgram {
     let mut var_table = VarTable::new();
 
     // fn find_price(products: List[Product], target: String) -> Int
-    let v_products = var_table.alloc("products".into(), Ty::List(Box::new(Ty::String)), Mutability::Let, None);
+    let v_products = var_table.alloc("products".into(), Ty::list(Ty::String), Mutability::Let, None);
     let v_target = var_table.alloc("target".into(), Ty::String, Mutability::Let, None);
     let v_p = var_table.alloc("p".into(), Ty::String, Mutability::Let, None);
     let v_x = var_table.alloc("x".into(), Ty::Int, Mutability::Let, None);
@@ -30,7 +30,7 @@ fn make_test_program() -> IrProgram {
                 func: "find".into(),
             },
             args: vec![
-                IrExpr { kind: IrExprKind::Var { id: v_products }, ty: Ty::List(Box::new(Ty::String)), span: None },
+                IrExpr { kind: IrExprKind::Var { id: v_products }, ty: Ty::list(Ty::String), span: None },
                 IrExpr {
                     kind: IrExprKind::Lambda {
                         params: vec![(v_p, Ty::String)],
@@ -50,7 +50,7 @@ fn make_test_program() -> IrProgram {
             ],
             type_args: vec![],
         },
-        ty: Ty::Option(Box::new(Ty::String)),
+        ty: Ty::option(Ty::String),
         span: None,
     };
 
@@ -79,7 +79,7 @@ fn make_test_program() -> IrProgram {
         params: vec![
             IrParam {
                 var: v_products,
-                ty: Ty::List(Box::new(Ty::String)),
+                ty: Ty::list(Ty::String),
                 name: "products".into(),
                 borrow: ParamBorrow::Own,
                 open_record: None,
@@ -110,6 +110,8 @@ fn make_test_program() -> IrProgram {
         type_decls: vec![],
         var_table,
         modules: vec![],
+        type_registry: Default::default(),
+        effect_map: Default::default(),
     }
 }
 
@@ -166,7 +168,7 @@ fn test_walker_option_some_divergence() {
                 span: None,
             }),
         },
-        ty: Ty::Option(Box::new(Ty::Int)),
+        ty: Ty::option(Ty::Int),
         span: None,
     };
 
@@ -196,7 +198,7 @@ fn test_walker_result_divergence() {
                 span: None,
             }),
         },
-        ty: Ty::Result(Box::new(Ty::String), Box::new(Ty::String)),
+        ty: Ty::result(Ty::String, Ty::String),
         span: None,
     };
 

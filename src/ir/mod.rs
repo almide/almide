@@ -458,4 +458,12 @@ pub struct IrProgram {
     /// Imported user modules, lowered to IR
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub modules: Vec<IrModule>,
+    /// Type constructor registry with kind info and algebraic laws (HKT foundation).
+    /// Populated during lowering with user-defined types.
+    #[serde(skip)]
+    pub type_registry: crate::types::TypeConstructorRegistry,
+    /// Effect inference results: per-function capability analysis.
+    /// Populated by EffectInferencePass during codegen pipeline.
+    #[serde(skip)]
+    pub effect_map: crate::codegen::pass_effect_inference::EffectMap,
 }

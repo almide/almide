@@ -2,7 +2,7 @@
 
 use crate::ast;
 use crate::ir::*;
-use crate::types::Ty;
+use crate::types::{Ty, TypeConstructorId};
 use super::LowerCtx;
 use super::calls::{lower_call, lower_call_target};
 use super::statements::lower_stmt;
@@ -104,7 +104,7 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             let right_ty = &r.ty;
             let bin_op = match (op.as_str(), left_ty, right_ty) {
                 ("+", Ty::String, _) | ("+", _, Ty::String) => BinOp::ConcatStr,
-                ("+", Ty::List(_), _) | ("+", _, Ty::List(_)) => BinOp::ConcatList,
+                ("+", Ty::Applied(TypeConstructorId::List, _), _) | ("+", _, Ty::Applied(TypeConstructorId::List, _)) => BinOp::ConcatList,
                 ("+", Ty::Float, _) | ("+", _, Ty::Float) => BinOp::AddFloat,
                 ("+", _, _) => BinOp::AddInt,
                 ("-", Ty::Float, _) | ("-", _, Ty::Float) => BinOp::SubFloat, ("-", _, _) => BinOp::SubInt,
@@ -176,8 +176,8 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             let ir_iter = lower_expr(ctx, iterable);
             ctx.push_scope();
             let elem_ty = match &ir_iter.ty {
-                Ty::List(inner) => *inner.clone(),
-                Ty::Map(k, v) => Ty::Tuple(vec![*k.clone(), *v.clone()]),
+                Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => args[0].clone(),
+                Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => Ty::Tuple(vec![args[0].clone(), args[1].clone()]),
                 _ => Ty::Unknown,
             };
             let var_id = ctx.define_var(var, elem_ty.clone(), Mutability::Let, span.clone());

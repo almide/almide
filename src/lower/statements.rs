@@ -2,7 +2,7 @@
 
 use crate::ast;
 use crate::ir::*;
-use crate::types::Ty;
+use crate::types::{Ty, TypeConstructorId};
 use super::LowerCtx;
 use super::expressions::lower_expr;
 
@@ -130,16 +130,16 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
             IrPattern::Tuple { elements: ir_elems }
         }
         ast::Pattern::Some { inner } => {
-            let inner_ty = match ty { Ty::Option(t) => *t.clone(), _ => Ty::Unknown };
+            let inner_ty = match ty { Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args[0].clone(), _ => Ty::Unknown };
             IrPattern::Some { inner: Box::new(lower_pattern(ctx, inner, &inner_ty)) }
         }
         ast::Pattern::None => IrPattern::None,
         ast::Pattern::Ok { inner } => {
-            let inner_ty = match ty { Ty::Result(t, _) => *t.clone(), _ => Ty::Unknown };
+            let inner_ty = match ty { Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(), _ => Ty::Unknown };
             IrPattern::Ok { inner: Box::new(lower_pattern(ctx, inner, &inner_ty)) }
         }
         ast::Pattern::Err { inner } => {
-            let inner_ty = match ty { Ty::Result(_, e) => *e.clone(), _ => Ty::Unknown };
+            let inner_ty = match ty { Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[1].clone(), _ => Ty::Unknown };
             IrPattern::Err { inner: Box::new(lower_pattern(ctx, inner, &inner_ty)) }
         }
     }

@@ -63,16 +63,16 @@ pub(super) fn resolve_type_expr(te: &ast::TypeExpr) -> Ty {
         ast::TypeExpr::Generic { name, args } => {
             let ra: Vec<Ty> = args.iter().map(resolve_type_expr).collect();
             match name.as_str() {
-                "List" => Ty::List(Box::new(ra.first().cloned().unwrap_or_else(|| {
+                "List" => Ty::list(ra.first().cloned().unwrap_or_else(|| {
                     eprintln!("[ICE] lower: List[] without type argument");
                     Ty::Unknown
-                }))),
-                "Option" => Ty::Option(Box::new(ra.first().cloned().unwrap_or_else(|| {
+                })),
+                "Option" => Ty::option(ra.first().cloned().unwrap_or_else(|| {
                     eprintln!("[ICE] lower: Option[] without type argument");
                     Ty::Unknown
-                }))),
-                "Result" if ra.len() >= 2 => Ty::Result(Box::new(ra[0].clone()), Box::new(ra[1].clone())),
-                "Map" if ra.len() >= 2 => Ty::Map(Box::new(ra[0].clone()), Box::new(ra[1].clone())),
+                })),
+                "Result" if ra.len() >= 2 => Ty::result(ra[0].clone(), ra[1].clone()),
+                "Map" if ra.len() >= 2 => Ty::map_of(ra[0].clone(), ra[1].clone()),
                 _ => Ty::Named(name.clone(), ra),
             }
         },

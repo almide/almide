@@ -1,19 +1,9 @@
 use super::Ty;
 
 /// Check if binding TypeVar `var` to `ty` would create an infinite type.
-/// Recursively checks all type constructors: List, Option, Result, Map, Tuple, Record, Fn.
+/// Uses Ty::any_child_recursive for uniform traversal across all type constructors.
 fn occurs_in(var: &str, ty: &Ty) -> bool {
-    match ty {
-        Ty::TypeVar(name) => name == var,
-        Ty::List(inner) | Ty::Option(inner) => occurs_in(var, inner),
-        Ty::Result(a, b) | Ty::Map(a, b) => occurs_in(var, a) || occurs_in(var, b),
-        Ty::Tuple(elems) => elems.iter().any(|e| occurs_in(var, e)),
-        Ty::Record { fields } | Ty::OpenRecord { fields, .. } => fields.iter().any(|(_, t)| occurs_in(var, t)),
-        Ty::Fn { params, ret } => params.iter().any(|p| occurs_in(var, p)) || occurs_in(var, ret),
-        Ty::Named(_, args) => args.iter().any(|a| occurs_in(var, a)),
-        Ty::Union(members) => members.iter().any(|m| occurs_in(var, m)),
-        _ => false,
-    }
+    ty.any_child_recursive(&|t| matches!(t, Ty::TypeVar(name) if name == var))
 }
 
 /// Unify a signature type against a concrete type, collecting TypeVar bindings.
@@ -48,10 +38,9 @@ pub fn unify(sig_ty: &Ty, actual_ty: &Ty, bindings: &mut std::collections::HashM
         return true;
     }
     match (sig_ty, actual_ty) {
-        (Ty::List(a), Ty::List(b)) => unify(a, b, bindings),
-        (Ty::Option(a), Ty::Option(b)) => unify(a, b, bindings),
-        (Ty::Result(a1, a2), Ty::Result(b1, b2)) => unify(a1, b1, bindings) && unify(a2, b2, bindings),
-        (Ty::Map(k1, v1), Ty::Map(k2, v2)) => unify(k1, k2, bindings) && unify(v1, v2, bindings),
+        (Ty::Applied(id1, args1), Ty::Applied(id2, args2)) if id1 == id2 && args1.len() == args2.len() => {
+            args1.iter().zip(args2.iter()).all(|(a, b)| unify(a, b, bindings))
+        }
         (Ty::Fn { params: p1, ret: r1 }, Ty::Fn { params: p2, ret: r2 }) => {
             if p1.len() != p2.len() { return false; }
             p1.iter().zip(p2.iter()).all(|(a, b)| unify(a, b, bindings)) && unify(r1, r2, bindings)
@@ -83,47 +72,21 @@ pub fn unify(sig_ty: &Ty, actual_ty: &Ty, bindings: &mut std::collections::HashM
 }
 
 /// Substitute TypeVars in a type using the collected bindings.
+/// Uses Ty::map_children for uniform recursive traversal.
 pub fn substitute(ty: &Ty, bindings: &std::collections::HashMap<std::string::String, Ty>) -> Ty {
     if bindings.is_empty() {
         return ty.clone();
     }
     match ty {
+        // TypeVar: look up binding or keep as-is
         Ty::TypeVar(name) => bindings.get(name).cloned().unwrap_or_else(|| Ty::TypeVar(name.clone())),
-        Ty::Unknown => Ty::Unknown,
-        Ty::List(inner) => Ty::List(Box::new(substitute(inner, bindings))),
-        Ty::Option(inner) => Ty::Option(Box::new(substitute(inner, bindings))),
-        Ty::Result(ok, err) => Ty::Result(Box::new(substitute(ok, bindings)), Box::new(substitute(err, bindings))),
-        Ty::Map(k, v) => Ty::Map(Box::new(substitute(k, bindings)), Box::new(substitute(v, bindings))),
-        Ty::Fn { params, ret } => Ty::Fn {
-            params: params.iter().map(|p| substitute(p, bindings)).collect(),
-            ret: Box::new(substitute(ret, bindings)),
-        },
-        Ty::Tuple(tys) => Ty::Tuple(tys.iter().map(|t| substitute(t, bindings)).collect()),
-        Ty::Record { fields } => Ty::Record {
-            fields: fields.iter().map(|(n, t)| (n.clone(), substitute(t, bindings))).collect(),
-        },
-        Ty::OpenRecord { fields } => Ty::OpenRecord {
-            fields: fields.iter().map(|(n, t)| (n.clone(), substitute(t, bindings))).collect(),
-        },
-        Ty::Union(members) => Ty::union(members.iter().map(|m| substitute(m, bindings)).collect()),
-        Ty::Named(name, args) if !args.is_empty() => {
-            Ty::Named(name.clone(), args.iter().map(|a| substitute(a, bindings)).collect())
-        }
-        _ => ty.clone(),
+        // All other types: recursively substitute children
+        _ => ty.map_children(&|child| substitute(child, bindings)),
     }
 }
 
 /// Check if a type contains any unbound TypeVars.
+/// Uses Ty::any_child_recursive for uniform traversal.
 pub fn contains_typevar(ty: &Ty) -> bool {
-    match ty {
-        Ty::TypeVar(_) => true,
-        Ty::List(inner) | Ty::Option(inner) => contains_typevar(inner),
-        Ty::Result(a, b) | Ty::Map(a, b) => contains_typevar(a) || contains_typevar(b),
-        Ty::Tuple(elems) => elems.iter().any(contains_typevar),
-        Ty::Fn { params, ret } => params.iter().any(contains_typevar) || contains_typevar(ret),
-        Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| contains_typevar(t)),
-        Ty::Union(members) => members.iter().any(contains_typevar),
-        Ty::Named(_, args) => args.iter().any(contains_typevar),
-        _ => false,
-    }
+    ty.any_child_recursive(&|t| matches!(t, Ty::TypeVar(_)))
 }

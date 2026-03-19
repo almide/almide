@@ -20,6 +20,8 @@ use super::pass_result_erasure::ResultErasurePass;
 use super::pass_result_propagation::ResultPropagationPass;
 use super::pass_shadow_resolve::ShadowResolvePass;
 use super::pass_stdlib_lowering::StdlibLoweringPass;
+use super::pass_effect_inference::EffectInferencePass;
+use super::pass_stream_fusion::StreamFusionPass;
 use super::template::TemplateSet;
 
 /// Full configuration for a codegen target.
@@ -47,6 +49,9 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(TypeConcretizationPass)
             .add(BorrowInsertionPass)
             .add(CloneInsertionPass)
+            // Analysis passes (before lowering, while Module calls still visible)
+            .add(EffectInferencePass)
+            .add(StreamFusionPass)
             // Semantic lowering (order matters!)
             // 1. Stdlib first: Module calls → Named calls with arg decoration
             .add(StdlibLoweringPass)
@@ -58,6 +63,9 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(FanLoweringPass),
 
         Target::TypeScript | Target::JavaScript => Pipeline::new()
+            // Analysis passes
+            .add(EffectInferencePass)
+            .add(StreamFusionPass)
             // Semantic lowering
             .add(MatchLoweringPass)
             // Result/Option erasure: ok(x)→x, err(e)→throw, some(x)→x, none→null

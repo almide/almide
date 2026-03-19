@@ -382,8 +382,7 @@ fn ty_contains_name(ty: &Ty, name: &str) -> bool {
     match ty {
         Ty::Named(n, args) => n == name || args.iter().any(|a| ty_contains_name(a, name)),
         Ty::Variant { name: vn, .. } => vn == name,
-        Ty::List(inner) | Ty::Option(inner) => ty_contains_name(inner, name),
-        Ty::Result(a, b) | Ty::Map(a, b) => ty_contains_name(a, name) || ty_contains_name(b, name),
+        Ty::Applied(_, args) => args.iter().any(|a| ty_contains_name(a, name)),
         Ty::Tuple(elems) => elems.iter().any(|e| ty_contains_name(e, name)),
         _ => false,
     }

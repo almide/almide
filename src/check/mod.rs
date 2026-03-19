@@ -85,30 +85,13 @@ impl Checker {
     }
 
     fn instantiate_inner(&mut self, ty: &Ty, mapping: &mut std::collections::HashMap<u32, TyVarId>) -> Ty {
-        match ty {
-            Ty::TypeVar(name) if name.starts_with('?') => {
-                // Inference variables (?N) must NOT be freshened — they need to stay
-                // linked to the original constraint. Only user type params (T, A, B)
-                // get fresh vars for let-polymorphism.
-                ty.clone()
-            }
-            Ty::List(inner) => Ty::List(Box::new(self.instantiate_inner(inner, mapping))),
-            Ty::Option(inner) => Ty::Option(Box::new(self.instantiate_inner(inner, mapping))),
-            Ty::Result(ok, err) => Ty::Result(
-                Box::new(self.instantiate_inner(ok, mapping)),
-                Box::new(self.instantiate_inner(err, mapping)),
-            ),
-            Ty::Map(k, v) => Ty::Map(
-                Box::new(self.instantiate_inner(k, mapping)),
-                Box::new(self.instantiate_inner(v, mapping)),
-            ),
-            Ty::Tuple(elems) => Ty::Tuple(elems.iter().map(|e| self.instantiate_inner(e, mapping)).collect()),
-            Ty::Fn { params, ret } => Ty::Fn {
-                params: params.iter().map(|p| self.instantiate_inner(p, mapping)).collect(),
-                ret: Box::new(self.instantiate_inner(ret, mapping)),
-            },
-            other => other.clone(),
+        // Inference variables (?N) must NOT be freshened — they need to stay
+        // linked to the original constraint.
+        if matches!(ty, Ty::TypeVar(name) if name.starts_with('?')) {
+            return ty.clone();
         }
+        // Recursively instantiate all children
+        ty.map_children_mut(&mut |child| self.instantiate_inner(child, mapping))
     }
 
     pub(crate) fn constrain(&mut self, expected: Ty, actual: Ty, context: impl Into<String>) {
@@ -231,10 +214,9 @@ impl Checker {
             return true;
         }
         match (a, b) {
-            (Ty::List(a), Ty::List(b)) => self.unify_infer(a, b),
-            (Ty::Option(a), Ty::Option(b)) => self.unify_infer(a, b),
-            (Ty::Result(ao, ae), Ty::Result(bo, be)) => self.unify_infer(ao, bo) && self.unify_infer(ae, be),
-            (Ty::Map(ak, av), Ty::Map(bk, bv)) => self.unify_infer(ak, bk) && self.unify_infer(av, bv),
+            (Ty::Applied(id1, args1), Ty::Applied(id2, args2)) if id1 == id2 && args1.len() == args2.len() => {
+                args1.iter().zip(args2.iter()).all(|(x, y)| self.unify_infer(x, y))
+            }
             (Ty::Tuple(a), Ty::Tuple(b)) if a.len() == b.len() => a.iter().zip(b.iter()).all(|(x, y)| self.unify_infer(x, y)),
             (Ty::Fn { params: ap, ret: ar }, Ty::Fn { params: bp, ret: br }) if ap.len() == bp.len() =>
                 ap.iter().zip(bp.iter()).all(|(x, y)| self.unify_infer(x, y)) && self.unify_infer(ar, br),
@@ -280,8 +262,7 @@ impl Checker {
                     id == var.0 || self.solutions.get(&TyVarId(id)).map_or(false, |s| self.occurs(var, s))
                 } else { false }
             }
-            Ty::List(inner) | Ty::Option(inner) => self.occurs(var, inner),
-            Ty::Result(a, b) | Ty::Map(a, b) => self.occurs(var, a) || self.occurs(var, b),
+            Ty::Applied(_, args) => args.iter().any(|a| self.occurs(var, a)),
             Ty::Tuple(elems) => elems.iter().any(|e| self.occurs(var, e)),
             Ty::Fn { params, ret } => params.iter().any(|p| self.occurs(var, p)) || self.occurs(var, ret),
             _ => false,
@@ -363,7 +344,7 @@ impl Checker {
                     }
                     let decode_key = format!("{}.decode", type_name);
                     if !self.env.functions.contains_key(&decode_key) {
-                        self.env.functions.insert(decode_key, FnSig { params: vec![("v".into(), value_ty.clone())], ret: Ty::Result(Box::new(type_ty.clone()), Box::new(Ty::String)), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone() });
+                        self.env.functions.insert(decode_key, FnSig { params: vec![("v".into(), value_ty.clone())], ret: Ty::result(type_ty.clone(), Ty::String), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone() });
                     }
                 }
                 _ => {}
@@ -441,13 +422,16 @@ impl Checker {
     fn constrain_effect_body(&mut self, name: &str, ret_ty: &Ty, body_ty: Ty) {
         let body_resolved = resolve_vars(&body_ty, &self.solutions);
         if body_resolved == Ty::Unit { return; } // do blocks, while loops, guard patterns return via control flow
-        if let Ty::Result(ok, _) = ret_ty {
-            if matches!(&body_resolved, Ty::Result(_, _)) {
-                self.constrain(ret_ty.clone(), body_ty, format!("fn '{}'", name));
-            } else {
-                self.constrain(ok.as_ref().clone(), body_ty, format!("fn '{}'", name));
+        if let Ty::Applied(crate::types::TypeConstructorId::Result, args) = ret_ty {
+            if args.len() >= 1 {
+                let ok = &args[0];
+                if body_resolved.is_result() {
+                    self.constrain(ret_ty.clone(), body_ty, format!("fn '{}'", name));
+                } else {
+                    self.constrain(ok.clone(), body_ty, format!("fn '{}'", name));
+                }
+                return;
             }
-            return;
         }
         self.constrain(ret_ty.clone(), body_ty, format!("fn '{}'", name));
     }
@@ -543,8 +527,8 @@ impl Checker {
         let resolved = self.env.resolve_named(subject_ty);
         let required: Vec<String> = match &resolved {
             Ty::Variant { cases, .. } => cases.iter().map(|c| c.name.clone()).collect(),
-            Ty::Option(_) => vec!["some".into(), "none".into()],
-            Ty::Result(_, _) => vec!["ok".into(), "err".into()],
+            Ty::Applied(crate::types::TypeConstructorId::Option, _) => vec!["some".into(), "none".into()],
+            Ty::Applied(crate::types::TypeConstructorId::Result, _) => vec!["ok".into(), "err".into()],
             Ty::Bool => vec!["true".into(), "false".into()],
             _ => return,
         };
@@ -584,10 +568,10 @@ impl Checker {
             ast::TypeExpr::Generic { name, args } => {
                 let ra: Vec<Ty> = args.iter().map(|a| self.resolve_type_expr(a)).collect();
                 match name.as_str() {
-                    "List" => Ty::List(Box::new(ra.first().cloned().unwrap_or(Ty::Unknown))),
-                    "Option" => Ty::Option(Box::new(ra.first().cloned().unwrap_or(Ty::Unknown))),
-                    "Result" if ra.len() >= 2 => Ty::Result(Box::new(ra[0].clone()), Box::new(ra[1].clone())),
-                    "Map" if ra.len() >= 2 => Ty::Map(Box::new(ra[0].clone()), Box::new(ra[1].clone())),
+                    "List" => Ty::list(ra.first().cloned().unwrap_or(Ty::Unknown)),
+                    "Option" => Ty::option(ra.first().cloned().unwrap_or(Ty::Unknown)),
+                    "Result" if ra.len() >= 2 => Ty::result(ra[0].clone(), ra[1].clone()),
+                    "Map" if ra.len() >= 2 => Ty::map_of(ra[0].clone(), ra[1].clone()),
                     _ => Ty::Named(name.clone(), ra),
                 }
             },

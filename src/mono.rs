@@ -305,7 +305,14 @@ fn mangle_ty(ty: &Ty) -> String {
         Ty::Float => "Float".into(),
         Ty::String => "String".into(),
         Ty::Bool => "Bool".into(),
-        Ty::List(inner) => format!("List_{}", mangle_ty(inner)),
+        Ty::Applied(crate::types::TypeConstructorId::List, args) if args.len() == 1 => format!("List_{}", mangle_ty(&args[0])),
+        Ty::Applied(id, args) => {
+            let name = format!("{:?}", id);
+            if args.is_empty() { name } else {
+                let arg_strs: Vec<String> = args.iter().map(mangle_ty).collect();
+                format!("{}_{}", name, arg_strs.join("_"))
+            }
+        }
         _ => "Unknown".into(),
     }
 }
@@ -342,6 +349,7 @@ fn specialize_function(
 }
 
 /// Substitute TypeVars with concrete types.
+/// Uses Ty::map_children for uniform recursive traversal.
 fn substitute_ty(ty: &Ty, bindings: &HashMap<String, Ty>) -> Ty {
     match ty {
         Ty::TypeVar(name) => bindings.get(name).cloned().unwrap_or_else(|| ty.clone()),
@@ -349,31 +357,17 @@ fn substitute_ty(ty: &Ty, bindings: &HashMap<String, Ty>) -> Ty {
         Ty::Named(name, args) if args.is_empty() && bindings.contains_key(name) => {
             bindings[name].clone()
         }
-        Ty::List(inner) => Ty::List(Box::new(substitute_ty(inner, bindings))),
-        Ty::Option(inner) => Ty::Option(Box::new(substitute_ty(inner, bindings))),
-        Ty::Result(ok, err) => Ty::Result(Box::new(substitute_ty(ok, bindings)), Box::new(substitute_ty(err, bindings))),
-        Ty::Map(k, v) => Ty::Map(Box::new(substitute_ty(k, bindings)), Box::new(substitute_ty(v, bindings))),
-        Ty::Fn { params, ret } => Ty::Fn {
-            params: params.iter().map(|p| substitute_ty(p, bindings)).collect(),
-            ret: Box::new(substitute_ty(ret, bindings)),
-        },
-        Ty::Tuple(tys) => Ty::Tuple(tys.iter().map(|t| substitute_ty(t, bindings)).collect()),
-        Ty::Record { fields } => Ty::Record {
-            fields: fields.iter().map(|(n, t)| (n.clone(), substitute_ty(t, bindings))).collect(),
-        },
-        Ty::OpenRecord { fields } => {
+        Ty::OpenRecord { .. } => {
             // OpenRecord パラメータを具体型に置換（__open_N → 具体型）
-            // bindings の中に OpenRecord と互換の具体型があれば置換する
             for (_, concrete) in bindings.iter() {
                 if let Ty::Named(_, _) | Ty::Record { .. } = concrete {
                     return concrete.clone();
                 }
             }
-            Ty::OpenRecord {
-                fields: fields.iter().map(|(n, t)| (n.clone(), substitute_ty(t, bindings))).collect(),
-            }
+            ty.map_children(&|child| substitute_ty(child, bindings))
         }
-        _ => ty.clone(),
+        // All other types: recursively substitute children
+        _ => ty.map_children(&|child| substitute_ty(child, bindings)),
     }
 }
 
@@ -639,44 +633,44 @@ fn rewrite_stmt_calls(
 }
 
 /// Check if a type contains a specific TypeVar anywhere in its structure.
+/// Uses Ty::any_child_recursive for uniform traversal.
 fn ty_contains_typevar(ty: &Ty, name: &str) -> bool {
-    match ty {
+    ty.any_child_recursive(&|t| match t {
         Ty::TypeVar(n) => n == name,
-        Ty::Named(n, args) => (n == name && args.is_empty()) || args.iter().any(|a| ty_contains_typevar(a, name)),
-        Ty::List(inner) | Ty::Option(inner) => ty_contains_typevar(inner, name),
-        Ty::Result(a, b) | Ty::Map(a, b) => ty_contains_typevar(a, name) || ty_contains_typevar(b, name),
-        Ty::Tuple(ts) => ts.iter().any(|t| ty_contains_typevar(t, name)),
-        Ty::Fn { params, ret } => params.iter().any(|p| ty_contains_typevar(p, name)) || ty_contains_typevar(ret, name),
-        Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| ty_contains_typevar(t, name)),
+        Ty::Named(n, args) => n == name && args.is_empty(),
         _ => false,
-    }
+    })
 }
 
 /// Extract the concrete type for a TypeVar by matching parameter type structure against argument type.
-/// e.g., param=List[T], arg=List[Dog] → T=Dog
-///       param=T, arg=Dog → T=Dog
-///       param=Map[String, T], arg=Map[String, Int] → T=Int
+/// Uses Ty::constructor_id() and type_args() for uniform container matching.
 fn extract_typevar_binding(param_ty: &Ty, arg_ty: &Ty, var_name: &str) -> Ty {
     match (param_ty, arg_ty) {
         (Ty::TypeVar(n), _) if n == var_name => arg_ty.clone(),
         (Ty::Named(n, _), _) if n == var_name => arg_ty.clone(),
-        (Ty::List(p_inner), Ty::List(a_inner)) => extract_typevar_binding(p_inner, a_inner, var_name),
-        (Ty::Option(p_inner), Ty::Option(a_inner)) => extract_typevar_binding(p_inner, a_inner, var_name),
-        (Ty::Result(po, pe), Ty::Result(ao, ae)) => {
-            let ok = extract_typevar_binding(po, ao, var_name);
-            if !matches!(ok, Ty::Unknown) { ok } else { extract_typevar_binding(pe, ae, var_name) }
-        }
-        (Ty::Map(pk, pv), Ty::Map(ak, av)) => {
-            let k = extract_typevar_binding(pk, ak, var_name);
-            if !matches!(k, Ty::Unknown) { k } else { extract_typevar_binding(pv, av, var_name) }
-        }
-        (Ty::Tuple(pts), Ty::Tuple(ats)) if pts.len() == ats.len() => {
-            for (p, a) in pts.iter().zip(ats.iter()) {
-                let r = extract_typevar_binding(p, a, var_name);
-                if !matches!(r, Ty::Unknown) { return r; }
+        _ => {
+            // If same constructor, recursively match type args
+            if param_ty.constructor_id() == arg_ty.constructor_id() {
+                let p_args = param_ty.type_args();
+                let a_args = arg_ty.type_args();
+                if p_args.len() == a_args.len() {
+                    for (p, a) in p_args.iter().zip(a_args.iter()) {
+                        let r = extract_typevar_binding(p, a, var_name);
+                        if !matches!(r, Ty::Unknown) { return r; }
+                    }
+                }
             }
-            Ty::Unknown
+            // Tuple: same logic via children()
+            if let (Ty::Tuple(pts), Ty::Tuple(ats)) = (param_ty, arg_ty) {
+                if pts.len() == ats.len() {
+                    for (p, a) in pts.iter().zip(ats.iter()) {
+                        let r = extract_typevar_binding(p, a, var_name);
+                        if !matches!(r, Ty::Unknown) { return r; }
+                    }
+                    return Ty::Unknown;
+                }
+            }
+            arg_ty.clone() // fallback
         }
-        _ => arg_ty.clone(), // fallback: use arg type directly
     }
 }

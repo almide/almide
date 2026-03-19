@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use crate::ir::*;
-use crate::types::Ty;
+use crate::types::{Ty, TypeConstructorId};
 use super::annotations::CodegenAnnotations;
 use super::pass::Target;
 use super::template::TemplateSet;
@@ -64,18 +64,21 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
         Ty::String => template_or(ctx, "type_string", &[], "String"),
         Ty::Bool => template_or(ctx, "type_bool", &[], "bool"),
         Ty::Unit => template_or(ctx, "type_unit", &[], "()"),
-        Ty::Option(inner) => {
+        Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => {
+            let inner = &args[0];
             let inner_s = render_type(ctx, inner);
             ctx.templates.render_with("type_option", None, &[], &[("inner", inner_s.as_str())])
                 .unwrap_or_else(|| format!("Option<{}>", render_type(ctx, inner)))
         }
-        Ty::Result(ok, err) => {
+        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => {
+            let (ok, err) = (&args[0], &args[1]);
             let ok_s = render_type(ctx, ok);
             let err_s = render_type(ctx, err);
             ctx.templates.render_with("type_result", None, &[], &[("ok", ok_s.as_str()), ("err", err_s.as_str())])
                 .unwrap_or_else(|| format!("Result<{}, {}>", render_type(ctx, ok), render_type(ctx, err)))
         }
-        Ty::List(inner) => {
+        Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
+            let inner = &args[0];
             let inner_s = render_type(ctx, inner);
             ctx.templates.render_with("type_list", None, &[], &[("inner", inner_s.as_str())])
                 .unwrap_or_else(|| format!("Vec<{}>", render_type(ctx, inner)))
@@ -117,11 +120,25 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
                 names.join("_")
             }
         }
-        Ty::Map(k, v) => {
+        Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => {
+            let (k, v) = (&args[0], &args[1]);
             let key_s = render_type(ctx, k);
             let value_s = render_type(ctx, v);
             ctx.templates.render_with("type_map", None, &[], &[("key", key_s.as_str()), ("value", value_s.as_str())])
                 .unwrap_or_else(|| format!("HashMap<{}, {}>", render_type(ctx, k), render_type(ctx, v)))
+        }
+        // Catch-all for other Applied types (e.g., user-defined type constructors)
+        Ty::Applied(id, args) => {
+            let name = match id {
+                TypeConstructorId::UserDefined(n) => n.as_str(),
+                _ => return format!("{:?}", id),
+            };
+            if args.is_empty() {
+                name.to_string()
+            } else {
+                let args_str = args.iter().map(|a| render_type(ctx, a)).collect::<Vec<_>>().join(", ");
+                format!("{}<{}>", name, args_str)
+            }
         }
         Ty::Fn { params, ret } => {
             let params_str = params.iter().map(|p| render_type(ctx, p)).collect::<Vec<_>>().join(", ");
@@ -239,8 +256,8 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 }
             }
             // Option<String> subjects → .as_deref() so Some("literal") patterns match
-            if let Ty::Option(inner) = &subject.ty {
-                if matches!(inner.as_ref(), Ty::String) {
+            if let Ty::Applied(TypeConstructorId::Option, args) = &subject.ty {
+                if args.len() == 1 && matches!(&args[0], Ty::String) {
                     let has_some_str_pat = arms.iter().any(|a| {
                         if let IrPattern::Some { inner } = &a.pattern {
                             matches!(inner.as_ref(), IrPattern::Literal { expr } if matches!(&expr.kind, IrExprKind::LitStr { .. }))
@@ -439,11 +456,12 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             // Empty list: use typed template (Rust needs Vec::<T>::new(), TS uses [])
             if elements.is_empty() {
                 let inner_ty = match &expr.ty {
-                    Ty::List(inner) => {
+                    Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
+                        let inner = &args[0];
                         let ty = if ty_has_named_typevar(inner) {
-                            erase_named_typevars(inner.as_ref().clone())
+                            erase_named_typevars(inner.clone())
                         } else {
-                            inner.as_ref().clone()
+                            inner.clone()
                         };
                         render_type(ctx, &ty)
                     }
@@ -543,9 +561,9 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
         IrExprKind::OptionNone => {
             // Typed None: pass inner type via bindings + attribute for template guard
-            if let Ty::Option(inner) = &expr.ty {
-                if !matches!(inner.as_ref(), Ty::Unknown | Ty::TypeVar(_)) {
-                    let type_hint_s = render_type(ctx, inner);
+            if let Ty::Applied(TypeConstructorId::Option, args) = &expr.ty {
+                if args.len() == 1 && !matches!(&args[0], Ty::Unknown | Ty::TypeVar(_)) {
+                    let type_hint_s = render_type(ctx, &args[0]);
                     return ctx.templates.render_with("none_expr", None, &["none_type_hint"], &[("type_hint", type_hint_s.as_str())])
                         .unwrap_or_else(|| "None".into());
                 }
@@ -647,7 +665,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::IndexAccess { object, index } => {
             let obj_str = render_expr(ctx, object);
             let idx = render_expr(ctx, index);
-            if matches!(&object.ty, Ty::Map(_, _)) {
+            if object.ty.is_map() {
                 ctx.templates.render_with("map_get", None, &[], &[("object", obj_str.as_str()), ("key", idx.as_str())])
                     .unwrap_or_else(|| "map_get(...)".into())
             } else {
@@ -757,7 +775,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             let rendered: Vec<String> = exprs.iter().map(|e| {
                 let mut body = render_expr(ctx, e);
                 // Strip trailing ? from body (fan closures return raw Result)
-                if matches!(&e.ty, Ty::Result(_, _)) && body.ends_with('?') {
+                if e.ty.is_result() && body.ends_with('?') {
                     body.pop();
                 }
                 body
@@ -769,9 +787,9 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             let spawns: Vec<String> = rendered.iter().enumerate()
                 .map(|(i, body)| format!("let {} = __s.spawn(move || {{ {} }});", handles[i], body))
                 .collect();
-            let any_result = exprs.iter().any(|e| matches!(&e.ty, Ty::Result(_, _)));
+            let any_result = exprs.iter().any(|e| e.ty.is_result());
             let joins: Vec<String> = exprs.iter().enumerate().map(|(i, e)| {
-                if matches!(&e.ty, Ty::Result(_, _)) {
+                if e.ty.is_result() {
                     if ctx.auto_unwrap {
                         format!("{}.join().unwrap()?", handles[i])
                     } else {
@@ -1001,7 +1019,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let idx_str = render_expr(ctx, index);
             let val_str = render_expr(ctx, value);
             let target_ty = &ctx.var_table.get(*target).ty;
-            if matches!(target_ty, Ty::Map(_, _)) {
+            if target_ty.is_map() {
                 ctx.templates.render_with("map_insert", None, &[], &[("target", target_str.as_str()), ("key", idx_str.as_str()), ("value", val_str.as_str())])
                     .unwrap_or_else(|| "map_set(...)".into())
             } else {
@@ -1446,16 +1464,13 @@ fn terminate_stmt(ctx: &RenderContext, rendered: String) -> String {
 // ── Rust-specific helpers ──
 
 /// Check if a type contains a reference to a named type (for recursive Box detection).
+/// Uses Ty::any_child_recursive for uniform traversal.
 pub fn ty_contains_name(ty: &Ty, name: &str) -> bool {
-    match ty {
-        Ty::Named(n, args) => n == name || args.iter().any(|a| ty_contains_name(a, name)),
+    ty.any_child_recursive(&|t| match t {
+        Ty::Named(n, _) => n == name,
         Ty::Variant { name: vn, .. } => vn == name,
-        Ty::List(inner) | Ty::Option(inner) => ty_contains_name(inner, name),
-        Ty::Result(a, b) | Ty::Map(a, b) => ty_contains_name(a, name) || ty_contains_name(b, name),
-        Ty::Tuple(elems) => elems.iter().any(|e| ty_contains_name(e, name)),
-        Ty::Fn { params, ret } => params.iter().any(|p| ty_contains_name(p, name)) || ty_contains_name(ret, name),
         _ => false,
-    }
+    })
 }
 
 /// Check if an expression tree contains break or continue (for IIFE avoidance)
@@ -1476,34 +1491,18 @@ fn contains_loop_control(expr: &IrExpr) -> bool {
     }
 }
 
-/// Check if a type tree contains any named TypeVars (non-? prefix)
+/// Check if a type tree contains any named TypeVars (non-? prefix).
+/// Uses Ty::any_child_recursive for uniform traversal.
 fn ty_has_named_typevar(ty: &Ty) -> bool {
-    match ty {
-        Ty::TypeVar(n) => !n.starts_with('?'),
-        Ty::List(inner) | Ty::Option(inner) => ty_has_named_typevar(inner),
-        Ty::Result(a, b) | Ty::Map(a, b) => ty_has_named_typevar(a) || ty_has_named_typevar(b),
-        Ty::Tuple(elems) => elems.iter().any(ty_has_named_typevar),
-        Ty::Named(_, args) => args.iter().any(ty_has_named_typevar),
-        Ty::Fn { params, ret } => params.iter().any(ty_has_named_typevar) || ty_has_named_typevar(ret),
-        _ => false,
-    }
+    ty.any_child_recursive(&|t| matches!(t, Ty::TypeVar(n) if !n.starts_with('?')))
 }
 
-/// Replace named TypeVars with Ty::Unknown (rendered as _)
+/// Replace named TypeVars with Ty::Unknown (rendered as _).
+/// Uses Ty::map_children for uniform recursive traversal.
 fn erase_named_typevars(ty: Ty) -> Ty {
-    match ty {
+    match &ty {
         Ty::TypeVar(n) if !n.starts_with('?') => Ty::Unknown,
-        Ty::List(inner) => Ty::List(Box::new(erase_named_typevars(*inner))),
-        Ty::Option(inner) => Ty::Option(Box::new(erase_named_typevars(*inner))),
-        Ty::Result(a, b) => Ty::Result(Box::new(erase_named_typevars(*a)), Box::new(erase_named_typevars(*b))),
-        Ty::Map(a, b) => Ty::Map(Box::new(erase_named_typevars(*a)), Box::new(erase_named_typevars(*b))),
-        Ty::Tuple(elems) => Ty::Tuple(elems.into_iter().map(erase_named_typevars).collect()),
-        Ty::Named(n, args) => Ty::Named(n, args.into_iter().map(erase_named_typevars).collect()),
-        Ty::Fn { params, ret } => Ty::Fn {
-            params: params.into_iter().map(erase_named_typevars).collect(),
-            ret: Box::new(erase_named_typevars(*ret)),
-        },
-        other => other,
+        _ => ty.map_children(&|child| erase_named_typevars(child.clone())),
     }
 }
 
@@ -1660,17 +1659,14 @@ fn collect_anon_from_stmt(stmt: &IrStmt, named: &HashSet<Vec<String>>, seen: &mu
 }
 
 fn collect_anon_from_ty(ty: &Ty, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
-    match ty {
-        Ty::Record { fields } | Ty::OpenRecord { fields } => {
-            let mut names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
-            names.sort();
-            if !named.contains(&names) { seen.insert(names); }
-            for (_, t) in fields { collect_anon_from_ty(t, named, seen); }
-        }
-        Ty::List(inner) | Ty::Option(inner) => collect_anon_from_ty(inner, named, seen),
-        Ty::Result(a, b) | Ty::Map(a, b) => { collect_anon_from_ty(a, named, seen); collect_anon_from_ty(b, named, seen); }
-        Ty::Tuple(elems) => { for e in elems { collect_anon_from_ty(e, named, seen); } }
-        Ty::Fn { params, ret } => { for p in params { collect_anon_from_ty(p, named, seen); } collect_anon_from_ty(ret, named, seen); }
-        _ => {}
+    // Record/OpenRecord: register anonymous record fields
+    if let Ty::Record { fields } | Ty::OpenRecord { fields } = ty {
+        let mut names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
+        names.sort();
+        if !named.contains(&names) { seen.insert(names); }
+    }
+    // Recurse into all children uniformly
+    for child in ty.children() {
+        collect_anon_from_ty(child, named, seen);
     }
 }

@@ -6,7 +6,7 @@
 //! Exception: match subjects are NOT wrapped (you match on Ok/Err, not unwrap).
 
 use crate::ir::*;
-use crate::types::Ty;
+use crate::types::{Ty, TypeConstructorId};
 use super::pass::{NanoPass, Target};
 
 #[derive(Debug)]
@@ -24,14 +24,14 @@ impl NanoPass for ResultPropagationPass {
             // Insert Try in effect fns, but NOT in test functions
             // Tests inspect Result values directly, so no auto-?
             if func.is_effect && !func.is_test {
-                let returns_result = matches!(&func.ret_ty, Ty::Result(_, _));
+                let returns_result = func.ret_ty.is_result();
                 func.body = insert_try_body(func.body.clone(), returns_result);
             }
         }
         for module in &mut program.modules {
             for func in &mut module.functions {
                 if func.is_effect && !func.is_test {
-                    let returns_result = matches!(&func.ret_ty, Ty::Result(_, _));
+                    let returns_result = func.ret_ty.is_result();
                     func.body = insert_try_body(func.body.clone(), returns_result);
                 }
             }
@@ -66,7 +66,7 @@ fn insert_try_body(expr: IrExpr, fn_returns_result: bool) -> IrExpr {
 fn strip_tail_try(expr: IrExpr) -> IrExpr {
     match expr.kind {
         // Direct Try on a Result-returning call — unwrap it
-        IrExprKind::Try { expr: inner } if matches!(&inner.ty, Ty::Result(_, _)) => {
+        IrExprKind::Try { expr: inner } if inner.ty.is_result() => {
             *inner
         }
         // Match: strip Try from each arm body
@@ -198,7 +198,7 @@ fn insert_try(expr: IrExpr, in_match_subject: bool) -> IrExpr {
     if should_wrap {
         // Unwrap the Result type for the Try expression
         let inner_ty = match &ty {
-            Ty::Result(ok, _) => ok.as_ref().clone(),
+            Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
             _ => ty,
         };
         result = IrExpr {
@@ -240,7 +240,7 @@ fn insert_try_stmt(stmt: IrStmt) -> IrStmt {
 
 /// Check if an expression is a Result-returning function call.
 fn is_result_call(expr: &IrExpr) -> bool {
-    if !matches!(&expr.ty, Ty::Result(_, _)) {
+    if !expr.ty.is_result() {
         return false;
     }
     matches!(&expr.kind,
