@@ -1,75 +1,56 @@
 # Test Coverage: Systematic Edge Case Tests per Grammar Construct
 
-**Goal**: Every grammar construct in SPEC.md has a dedicated test file with edge cases. Target: 2,500+ test blocks (currently 1,487).
+**Goal**: Every grammar construct in SPEC.md has a dedicated test file with edge cases. Target: 2,500+ test blocks.
 
-**Status**: 649 test blocks in `spec/lang/`, ~838 in exercises/stdlib/showcases.
+**Current**: 142 test files, 1,873 test blocks (75% of target).
 
-## Current Coverage
+## Completed — Phase 1 + 2
 
-### Well-covered (20+ tests, edge cases included)
-- [x] if/then/else — `control_flow_test.almd`
-- [x] match/patterns — `pattern_test.almd` + `control_flow_test.almd`
-- [x] let/var/scope — `variable_test.almd` + `scope_test.almd`
-- [x] functions — `function_test.almd`
-- [x] operators — `operator_test.almd`
-- [x] strings/interpolation — `string_test.almd` + `interpolation_edge_test.almd`
-- [x] error/Result/effect — `error_test.almd`
-- [x] type system — `type_system_test.almd`
-- [x] codec/derive — 8 dedicated test files
-- [x] fan concurrency — `fan_test.almd` + `fan_map_test.almd` + `fan_race_test.almd`
-- [x] top-level let — `top_let_test.almd`
-- [x] default/named args — `default_args_test.almd` + `named_args_test.almd`
-- [x] single-quote strings — `single_quote_test.almd`
+### Phase 1: Fill missing constructs (5 files, 47 tests)
+- [x] `trait_impl_test.almd` — 13 tests: convention methods, protocols, UFCS
+- [x] `newtype_test.almd` — 5 tests: type alias behavior
+- [x] `visibility_test.almd` — 6 tests: pub/local/mod, effect fn
+- [x] `import_test.almd` — 8 tests: stdlib imports, UFCS without import, math/json
+- [x] `while_test.almd` — 10 tests: basic, false, nested, break, accumulator
 
-### Thin coverage (< 10 dedicated tests, needs edge cases)
-- [ ] **while loops** — ~3 tests in control_flow_test. Needs: break, continue, nested while, while with mutation, while false (zero iterations), infinite loop guard
-- [ ] **map literals** — 11 tests. Needs: empty map typed, nested maps, map with complex keys, map iteration order, map spread
-- [ ] **tuple** — ~5 in data_types. Needs: tuple destructure, tuple index, nested tuples, tuple in match, tuple as return, single-element ambiguity
-- [ ] **range** — ~3 in expr_test. Needs: 0..0, negative range, range in for, range with variables, ..= inclusive, range of large numbers
-- [ ] **pipe** — ~3 in expr_test. Needs: multi-pipe chain, pipe with lambda, pipe with module fn, pipe into method, pipe Result propagation
-- [ ] **heredoc/raw strings** — ~3 in block_comment. Needs: heredoc indentation, heredoc interpolation, raw string with special chars, triple-quote edge cases
-- [ ] **lambda edge cases** — ~5 in function_test. Needs: lambda capture var, lambda in map/filter chain, lambda returning lambda, multi-line lambda body, lambda type annotation
-- [ ] **do/guard** — ~10 across files. Needs: guard with ok/err, guard else break, nested do, do as expression value, guard in while
-- [ ] **for...in** — ~10 in control_flow. Needs: for with break/continue, for tuple destructure, for over range, for over map, nested for, for with var mutation
-- [ ] **record/spread** — ~15 across files. Needs: spread with override, spread type inference, nested records, record update syntax, empty record
+### Phase 2: Deepen thin coverage (9 files, 77 tests)
+- [x] `tuple_test.almd` — 10 tests: creation, destructure, index, nested, match, for
+- [x] `range_test.almd` — 10 tests: basic, inclusive, zero, variables, nested
+- [x] `pipe_test.almd` — 6 tests: basic, chain, function, list, string
+- [x] `lambda_test.almd` — 10 tests: capture, map/filter, fold, block body, chaining
+- [x] `heredoc_test.almd` — 10 tests: heredoc, raw, single-quote, escapes, interpolation
+- [x] `do_guard_test.almd` — 9 tests: break, accumulator, nested, continue, while guard
+- [x] `for_test.almd` — 10 tests: list, range, tuple, map, nested, guard, empty
+- [x] `record_spread_test.almd` — 9 tests: creation, spread, equality, conditions
+- [x] `map_edge_test.almd` — 10 tests: empty, get, contains, keys, iteration, is_empty
 
-### Missing entirely (no dedicated test file)
-- [ ] **trait/impl** — No tests at all. Needs: trait declaration, impl for type, trait method call, multiple traits, trait with generics
-- [ ] **newtype** — No tests. Needs: newtype declaration, newtype wrapping/unwrapping, newtype in match
-- [ ] **unsafe** — No tests. Needs: unsafe block syntax, unsafe in effect fn
-- [ ] **import/module** — No spec tests (only tested via almide-grammar integration). Needs: import stdlib, import self, import alias, import submodule, unused import warning
-- [ ] **visibility (pub/mod/local)** — No tests. Needs: pub fn access, local fn restriction, mod fn access, default visibility
+### Phase 2b: Cross-cutting (8 files, 126 tests)
+- [x] `generics_test.almd` — 16 tests: generic fn, record, variant, multi-param
+- [x] `match_edge_test.almd` — 19 tests: int/string/option/result match, guards, nested
+- [x] `string_interp_test.almd` — 15 tests: math, field, call, conditional, multi
+- [x] `effect_fn_test.almd` — 15 tests: auto-?, guard, chain, loop, conditional
+- [x] `equality_test.almd` — 23 tests: deep == on all types, !=, nested
+- [x] `type_annotation_test.almd` — 14 tests: scalar, empty list/map, Option, Result, fn
 
-## Plan
+### Phase 2c: Stdlib module tests (10 files, ~130 tests)
+- [x] `math_test.almd` — 16 tests: abs, pow, fpow, pi, e, sqrt, sin, cos, log, sign, fmin/fmax
+- [x] `result_test.almd` — 13 tests: is_ok, is_err, unwrap_or, map, match, equality
+- [x] `regex_test.almd` — 15 tests: is_match, find, find_all, replace, split, captures
+- [x] `random_test.almd` — 14 tests: int range, float range, choice, shuffle
+- [x] `value_test.almd` — 10 tests: int, str, bool, float, null, array, object, stringify
+- [x] `error_test.almd` — 9 tests: effect fn error patterns, guard, chaining
+- [x] `option_extra_test.almd` — 15 tests: map, flat_map, unwrap_or, filter, zip, to_list
+- [x] `list_extra_test.almd` — 20 tests: take, drop, enumerate, zip, find, any, all, fold
+- [x] `string_extra_test.almd` — 17 tests: pad, trim, repeat, replace, chars, index_of
+- [x] `int_extra_test.almd` — 10 tests: parse, abs, min, max, clamp, to_hex, from_hex
+- [x] `float_extra_test.almd` — 10 tests: sign, parse, abs, clamp, to_string
+- [x] `json_test.almd` — 14 tests: from_string/int/float/bool, object, array, parse, stringify
 
-### Phase 1: Fill missing (0 → basic)
-Create dedicated test files for the 5 missing constructs:
-1. `trait_impl_test.almd`
-2. `newtype_test.almd`
-3. `unsafe_test.almd`
-4. `import_module_test.almd` (what's testable without multi-file)
-5. `visibility_test.almd` (what's testable in single file)
+## Remaining to reach 2,500
 
-### Phase 2: Deepen thin coverage
-Add edge case tests to existing files or create new files:
-6. `while_test.almd` — extract and expand from control_flow_test
-7. `tuple_test.almd` — extract and expand from data_types_test
-8. `range_test.almd` — extract and expand from expr_test
-9. `pipe_test.almd` — extract and expand from expr_test
-10. `map_edge_test.almd` — expand map_literal_test
-11. `heredoc_test.almd` — expand from block_comment_raw_string_test
-12. `lambda_test.almd` — extract and expand from function_test
-13. `do_guard_test.almd` — expand from do_block_pure_test
-14. `for_test.almd` — extract and expand from control_flow_test
-15. `record_spread_test.almd` — expand from edge_cases_test
-
-### Phase 3: Cross-cutting edge cases
-16. Interaction tests (e.g., match inside for inside do, pipe with fan, lambda capturing while var)
-17. Error message quality tests (verify hints are correct)
-18. Boundary values (Int max/min, empty string, empty list, deeply nested)
-
-## Target
-- Phase 1: +50 tests (5 files × 10 tests)
-- Phase 2: +150 tests (10 files × 15 tests)
-- Phase 3: +50 tests
-- **Total**: 649 + 250 = ~900 in spec/lang/, ~1,750 total (closer to 2,500 goal)
+~627 test blocks needed. Options:
+- More stdlib edge cases (datetime, process, fs — requires effect fn / I/O)
+- Deeper cross-cutting tests (match inside for inside do, pipe with fan)
+- Boundary value tests (Int max/min, deeply nested structures)
+- Error message quality tests
+- Cross-target tests (verify TS/JS output)
