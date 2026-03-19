@@ -371,37 +371,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                     ctx.templates.render_with("module_call", None, &[], &[("module", module.as_str()), ("func", func.as_str()), ("args", args_str.as_str())])
                         .unwrap_or_else(|| format!("__almd_{}.{}()", module, func))
                 }
-                _ => {
-                    let callee = match target {
-                        CallTarget::Named { name } => {
-                            // Qualify enum constructors (Red → Color::Red)
-                            if let Some(enum_name) = ctx.ann.ctor_to_enum.get(name.as_str()) {
-                                return render_enum_constructor(ctx, name, enum_name, args);
-                            }
-                            name.clone()
-                        }
-                        CallTarget::Method { object, method } => {
-                            // UFCS and module.func calls return the full expression
-                            if let Some(full) = render_method_call_full(ctx, object, method, args) {
-                                return full;
-                            }
-                            format!("{}.{}", render_expr(ctx, object), method)
-                        }
-                        CallTarget::Computed { callee } => {
-                            let s = render_expr(ctx, callee);
-                            // Lambdas need parens when immediately invoked
-                            if matches!(&callee.kind, IrExprKind::Lambda { .. }) {
-                                format!("({})", s)
-                            } else {
-                                s
-                            }
-                        }
-                        CallTarget::Module { .. } => unreachable!(),
-                    };
-                    let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
-                    ctx.templates.render_with("call_expr", None, &[], &[("callee", callee.as_str()), ("args", args_str.as_str())])
-                        .unwrap_or_else(|| format!("call(...)"))
-                }
+                _ => render_generic_call(ctx, target, args)
             }
         }
 
@@ -1280,6 +1250,32 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
     }
 
     parts.join("\n\n")
+}
+
+/// Render a generic call expression (Named, Method, or Computed target).
+fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr]) -> String {
+    let callee = match target {
+        CallTarget::Named { name } => {
+            if let Some(enum_name) = ctx.ann.ctor_to_enum.get(name.as_str()) {
+                return render_enum_constructor(ctx, name, enum_name, args);
+            }
+            name.clone()
+        }
+        CallTarget::Method { object, method } => {
+            if let Some(full) = render_method_call_full(ctx, object, method, args) {
+                return full;
+            }
+            format!("{}.{}", render_expr(ctx, object), method)
+        }
+        CallTarget::Computed { callee } => {
+            let s = render_expr(ctx, callee);
+            if matches!(&callee.kind, IrExprKind::Lambda { .. }) { format!("({})", s) } else { s }
+        }
+        CallTarget::Module { .. } => unreachable!(),
+    };
+    let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
+    ctx.templates.render_with("call_expr", None, &[], &[("callee", callee.as_str()), ("args", args_str.as_str())])
+        .unwrap_or_else(|| format!("call(...)"))
 }
 
 /// Render a method call as a full expression for UFCS and module.func patterns.
