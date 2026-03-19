@@ -73,7 +73,7 @@ test "stringify pretty" {
 }
 
 test "builder shortcuts" {
-  let v = json.object([("name", json.s("Alice")), ("age", json.i(30))]);
+  let v = json.object([("name", json.from_string("Alice")), ("age", json.from_int(30))]);
   assert_eq(json.get_string(v, "name"), some("Alice"));
   assert_eq(json.get_int(v, "age"), some(30))
 }

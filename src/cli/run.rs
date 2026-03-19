@@ -3,6 +3,14 @@ use crate::{try_compile, find_rustc};
 use super::{hash64, incremental_cache_dir};
 
 pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool) -> i32 {
+    cmd_run_inner_with_test_mode(file, program_args, no_check, false)
+}
+
+pub fn cmd_run_inner_test(file: &str, program_args: &[String], no_check: bool) -> i32 {
+    cmd_run_inner_with_test_mode(file, program_args, no_check, true)
+}
+
+fn cmd_run_inner_with_test_mode(file: &str, program_args: &[String], no_check: bool, force_test: bool) -> i32 {
     let rs_code = match try_compile(file, no_check) {
         Ok(code) => code,
         Err(_) => return 1,
@@ -18,8 +26,8 @@ pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool) -> i32
     let rs_path = tmp_dir.join(format!("{}.rs", file_stem));
     let bin_path = tmp_dir.join(&file_stem);
 
-    // Detect test-only files (no main function)
-    let is_test_only = !rs_code.contains("\nfn almide_main(") && !rs_code.contains("\nfn main(") && !rs_code.contains("\npub fn main(");
+    // Detect test-only files (no main function), or force test mode from cmd_test
+    let is_test_only = force_test || (!rs_code.contains("\nfn almide_main(") && !rs_code.contains("\nfn main(") && !rs_code.contains("\npub fn main("));
 
     // Incremental: hash generated Rust code + test mode, skip rustc if unchanged
     let hash_input = format!("{}:test={}", &rs_code, is_test_only);

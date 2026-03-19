@@ -466,8 +466,8 @@ impl Checker {
                     declared
                 } else {
                     let t = resolve_vars(&val_ty, &self.solutions);
-                    // Auto-unwrap Result in do blocks
-                    if self.env.in_effect {
+                    // Auto-unwrap Result in effect fns (but not in test blocks)
+                    if self.env.in_effect && !self.env.in_test {
                         match t { Ty::Result(ok, _) => *ok, other => other }
                     } else { t }
                 };
@@ -481,7 +481,7 @@ impl Checker {
                     declared
                 } else {
                     let t = resolve_vars(&val_ty, &self.solutions);
-                    if self.env.in_effect {
+                    if self.env.in_effect && !self.env.in_test {
                         match t { Ty::Result(ok, _) => *ok, other => other }
                     } else { t }
                 };

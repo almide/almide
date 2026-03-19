@@ -6,7 +6,7 @@ mod emit;
 mod check;
 mod commands;
 
-pub use run::{cmd_run, cmd_run_inner};
+pub use run::{cmd_run, cmd_run_inner_test};
 pub use build::cmd_build;
 pub use emit::cmd_emit;
 pub use check::{cmd_check, cmd_check_json};
@@ -31,7 +31,7 @@ fn collect_test_files(dir: &std::path::Path) -> Vec<String> {
     let mut files = Vec::new();
     // Skip hidden directories, target/, node_modules/, etc.
     let dir_name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    if dir_name.starts_with('.') || dir_name == "target" || dir_name == "node_modules" {
+    if dir_name.starts_with('.') || dir_name == "target" || dir_name == "node_modules" || dir_name == "research" {
         return files;
     }
     if let Ok(entries) = std::fs::read_dir(dir) {

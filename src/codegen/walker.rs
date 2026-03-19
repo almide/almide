@@ -425,7 +425,14 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             // Empty list: use typed template (Rust needs Vec::<T>::new(), TS uses [])
             if elements.is_empty() {
                 let inner_ty = match &expr.ty {
-                    Ty::List(inner) => render_type(ctx, inner),
+                    Ty::List(inner) => {
+                        let ty = if ty_has_named_typevar(inner) {
+                            erase_named_typevars(inner.as_ref().clone())
+                        } else {
+                            inner.as_ref().clone()
+                        };
+                        render_type(ctx, &ty)
+                    }
                     _ => "_".into(),
                 };
                 if let Some(rendered) = ctx.templates.render_with("empty_list", None, &[], &[("inner_type", inner_ty.as_str())]) {
@@ -1132,7 +1139,13 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     };
 
     // Sanitize function name: spaces/dots/hyphens → underscores
-    let mut safe_name = func.name.replace(' ', "_").replace('-', "_").replace('.', "_")
+    // Prefix test functions to avoid name collision with real functions
+    let raw_name = if func.is_test {
+        format!("__test_almd_{}", func.name)
+    } else {
+        func.name.clone()
+    };
+    let mut safe_name = raw_name.replace(' ', "_").replace('-', "_").replace('.', "_")
         .replace('+', "_plus_").replace('/', "_div_").replace('*', "_mul_")
         .replace('(', "").replace(')', "").replace(',', "_").replace(':', "_")
         .replace('=', "_eq_").replace('!', "_bang_").replace('?', "_q_")

@@ -490,8 +490,10 @@ impl Checker {
             ast::Decl::Test { body, .. } => {
                 self.env.push_scope();
                 let prev = self.env.in_effect; self.env.in_effect = true;
+                let prev_test = self.env.in_test; self.env.in_test = true;
                 self.infer_expr(body);
                 self.env.in_effect = prev;
+                self.env.in_test = prev_test;
                 self.env.pop_scope();
             }
             ast::Decl::TopLet { name, value, .. } => {
