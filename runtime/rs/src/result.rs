@@ -27,6 +27,22 @@ pub fn almide_rt_result_err<T, E: Clone>(r: &Result<T, E>) -> Option<E> {
     r.as_ref().err().cloned()
 }
 
+pub fn almide_rt_result_flat_map<T: Clone, U, E: Clone>(r: Result<T, E>, f: impl Fn(T) -> Result<U, E>) -> Result<U, E> {
+    r.and_then(f)
+}
+
+pub fn almide_rt_result_unwrap_or_else<T, E>(r: Result<T, E>, f: impl Fn(E) -> T) -> T {
+    r.unwrap_or_else(f)
+}
+
+pub fn almide_rt_result_to_option<T: Clone, E>(r: Result<T, E>) -> Option<T> {
+    r.ok()
+}
+
+pub fn almide_rt_result_to_err_option<T, E: Clone>(r: Result<T, E>) -> Option<E> {
+    r.err()
+}
+
 pub fn almide_rt_result_flatten<T, E>(r: Result<Result<T, E>, E>) -> Result<T, E> {
     match r { Ok(inner) => inner, Err(e) => Err(e) }
 }

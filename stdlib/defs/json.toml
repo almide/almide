@@ -91,7 +91,7 @@ description = "Create a Json null value."
 example = 'json.null()'
 params = []
 return = "Value"
-rust = "Value::Null"
+rust = "almide_rt_value_null()"
 ts = "__almd_json.null()"
 
 [array]

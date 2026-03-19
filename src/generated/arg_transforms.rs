@@ -164,7 +164,7 @@ pub fn lookup(module: &str, func: &str) -> Option<StdlibCallInfo> {
             ("json", "get_string") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef, ArgTransform::BorrowRef], effect: false, name: "almide_json_get_string", required: 2 }),
             ("json", "index") => Some(StdlibCallInfo { args: &[ArgTransform::Direct, ArgTransform::Direct], effect: false, name: "AlmideJsonPath::JpIndex", required: 2 }),
             ("json", "keys") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef], effect: false, name: "almide_json_keys", required: 1 }),
-            ("json", "null") => Some(StdlibCallInfo { args: &[], effect: false, name: "almide_rt_json_null", required: 0 }),
+            ("json", "null") => Some(StdlibCallInfo { args: &[], effect: false, name: "almide_rt_value_null", required: 0 }),
             ("json", "object") => Some(StdlibCallInfo { args: &[ArgTransform::Direct], effect: false, name: "Value::Object", required: 1 }),
             ("json", "parse") => Some(StdlibCallInfo { args: &[ArgTransform::Direct], effect: false, name: "almide_rt_json_parse", required: 1 }),
             ("json", "remove_path") => Some(StdlibCallInfo { args: &[ArgTransform::BorrowRef, ArgTransform::BorrowRef], effect: false, name: "almide_json_remove_path", required: 2 }),
