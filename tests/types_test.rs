@@ -515,3 +515,228 @@ fn variant_case_eq() {
     assert_eq!(c1, c2);
     assert_ne!(c1, c3);
 }
+
+// ---- HKT Foundation: Type Constructor Infrastructure ----
+
+use almide::types::{TypeConstructorId, TypeConstructorRegistry, Kind, AlgebraicLaw};
+
+#[test]
+fn constructor_id_primitives() {
+    assert_eq!(Ty::Int.constructor_id(), Some(TypeConstructorId::Int));
+    assert_eq!(Ty::String.constructor_id(), Some(TypeConstructorId::String));
+    assert_eq!(Ty::Bool.constructor_id(), Some(TypeConstructorId::Bool));
+    assert_eq!(Ty::Unit.constructor_id(), Some(TypeConstructorId::Unit));
+    assert_eq!(Ty::Float.constructor_id(), Some(TypeConstructorId::Float));
+}
+
+#[test]
+fn constructor_id_containers() {
+    assert_eq!(Ty::List(Box::new(Ty::Int)).constructor_id(), Some(TypeConstructorId::List));
+    assert_eq!(Ty::Option(Box::new(Ty::Int)).constructor_id(), Some(TypeConstructorId::Option));
+    assert_eq!(
+        Ty::Result(Box::new(Ty::Int), Box::new(Ty::String)).constructor_id(),
+        Some(TypeConstructorId::Result)
+    );
+    assert_eq!(
+        Ty::Map(Box::new(Ty::String), Box::new(Ty::Int)).constructor_id(),
+        Some(TypeConstructorId::Map)
+    );
+}
+
+#[test]
+fn constructor_id_user_defined() {
+    let ty = Ty::Named("Tree".into(), vec![Ty::Int]);
+    assert_eq!(ty.constructor_id(), Some(TypeConstructorId::UserDefined("Tree".into())));
+}
+
+#[test]
+fn constructor_id_none_for_special() {
+    assert_eq!(Ty::Unknown.constructor_id(), None);
+    assert_eq!(Ty::TypeVar("T".into()).constructor_id(), None);
+}
+
+#[test]
+fn type_args_containers() {
+    let list_int = Ty::List(Box::new(Ty::Int));
+    assert_eq!(list_int.type_args(), vec![&Ty::Int]);
+
+    let result_ty = Ty::Result(Box::new(Ty::Int), Box::new(Ty::String));
+    assert_eq!(result_ty.type_args(), vec![&Ty::Int, &Ty::String]);
+}
+
+#[test]
+fn type_args_empty_for_primitives() {
+    assert!(Ty::Int.type_args().is_empty());
+    assert!(Ty::Unknown.type_args().is_empty());
+}
+
+#[test]
+fn children_leaf_types() {
+    assert!(Ty::Int.children().is_empty());
+    assert!(Ty::String.children().is_empty());
+    assert!(Ty::Unknown.children().is_empty());
+    assert!(Ty::TypeVar("T".into()).children().is_empty());
+}
+
+#[test]
+fn children_containers() {
+    let list = Ty::List(Box::new(Ty::Int));
+    assert_eq!(list.children(), vec![&Ty::Int]);
+
+    let result = Ty::Result(Box::new(Ty::Int), Box::new(Ty::String));
+    assert_eq!(result.children(), vec![&Ty::Int, &Ty::String]);
+}
+
+#[test]
+fn children_record() {
+    let rec = Ty::Record { fields: vec![("x".into(), Ty::Int), ("y".into(), Ty::String)] };
+    assert_eq!(rec.children(), vec![&Ty::Int, &Ty::String]);
+}
+
+#[test]
+fn children_fn_type() {
+    let f = Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Bool) };
+    assert_eq!(f.children(), vec![&Ty::Int, &Ty::Bool]);
+}
+
+#[test]
+fn map_children_identity() {
+    let ty = Ty::List(Box::new(Ty::Int));
+    let mapped = ty.map_children(&|t| t.clone());
+    assert_eq!(mapped, ty);
+}
+
+#[test]
+fn map_children_transform() {
+    let ty = Ty::List(Box::new(Ty::TypeVar("T".into())));
+    let mapped = ty.map_children(&|t| {
+        if matches!(t, Ty::TypeVar(_)) { Ty::Int } else { t.clone() }
+    });
+    assert_eq!(mapped, Ty::List(Box::new(Ty::Int)));
+}
+
+#[test]
+fn map_children_result() {
+    let ty = Ty::Result(Box::new(Ty::TypeVar("A".into())), Box::new(Ty::TypeVar("B".into())));
+    let mapped = ty.map_children(&|t| match t {
+        Ty::TypeVar(n) if n == "A" => Ty::Int,
+        Ty::TypeVar(n) if n == "B" => Ty::String,
+        _ => t.clone(),
+    });
+    assert_eq!(mapped, Ty::Result(Box::new(Ty::Int), Box::new(Ty::String)));
+}
+
+#[test]
+fn any_child_recursive_finds_nested() {
+    let ty = Ty::List(Box::new(Ty::Option(Box::new(Ty::Unknown))));
+    assert!(ty.any_child_recursive(&|t| matches!(t, Ty::Unknown)));
+}
+
+#[test]
+fn any_child_recursive_not_found() {
+    let ty = Ty::List(Box::new(Ty::Option(Box::new(Ty::Int))));
+    assert!(!ty.any_child_recursive(&|t| matches!(t, Ty::Unknown)));
+}
+
+#[test]
+fn is_container() {
+    assert!(Ty::List(Box::new(Ty::Int)).is_container());
+    assert!(Ty::Option(Box::new(Ty::Int)).is_container());
+    assert!(Ty::Result(Box::new(Ty::Int), Box::new(Ty::String)).is_container());
+    assert!(Ty::Map(Box::new(Ty::String), Box::new(Ty::Int)).is_container());
+    assert!(!Ty::Int.is_container());
+    assert!(!Ty::Named("Foo".into(), vec![]).is_container());
+}
+
+#[test]
+fn constructor_name() {
+    assert_eq!(Ty::List(Box::new(Ty::Int)).constructor_name(), Some("List"));
+    assert_eq!(Ty::Int.constructor_name(), Some("Int"));
+    assert_eq!(Ty::Named("Dog".into(), vec![]).constructor_name(), Some("Dog"));
+    assert_eq!(Ty::Unknown.constructor_name(), None);
+    assert_eq!(Ty::TypeVar("T".into()).constructor_name(), None);
+}
+
+// ---- Kind ----
+
+#[test]
+fn kind_arity() {
+    assert_eq!(Kind::Star.arity(), 0);
+    assert_eq!(Kind::star_to_star().arity(), 1);
+    assert_eq!(Kind::star2_to_star().arity(), 2);
+}
+
+#[test]
+fn kind_display() {
+    assert_eq!(format!("{}", Kind::Star), "*");
+    assert_eq!(format!("{}", Kind::star_to_star()), "* -> *");
+    assert_eq!(format!("{}", Kind::star2_to_star()), "* -> * -> *");
+}
+
+// ---- TypeConstructorRegistry ----
+
+#[test]
+fn registry_builtins() {
+    let reg = TypeConstructorRegistry::new();
+    assert!(reg.lookup("List").is_some());
+    assert!(reg.lookup("Option").is_some());
+    assert!(reg.lookup("Result").is_some());
+    assert!(reg.lookup("Map").is_some());
+    assert!(reg.lookup("Int").is_some());
+    assert!(reg.lookup("NonExistent").is_none());
+}
+
+#[test]
+fn registry_kind() {
+    let reg = TypeConstructorRegistry::new();
+    assert_eq!(reg.kind_of("Int"), Some(&Kind::Star));
+    assert_eq!(reg.kind_of("List"), Some(&Kind::star_to_star()));
+    assert_eq!(reg.kind_of("Result"), Some(&Kind::star2_to_star()));
+}
+
+#[test]
+fn registry_laws() {
+    let reg = TypeConstructorRegistry::new();
+    assert!(reg.satisfies("List", AlgebraicLaw::FunctorComposition));
+    assert!(reg.satisfies("List", AlgebraicLaw::MapFoldFusion));
+    assert!(reg.satisfies("Option", AlgebraicLaw::MonadAssociativity));
+    assert!(!reg.satisfies("Map", AlgebraicLaw::FunctorComposition));
+    assert!(!reg.satisfies("Int", AlgebraicLaw::FunctorComposition));
+}
+
+#[test]
+fn registry_user_type() {
+    let mut reg = TypeConstructorRegistry::new();
+    reg.register_user_type("Tree", 1);
+    let info = reg.lookup("Tree").unwrap();
+    assert_eq!(info.kind, Kind::star_to_star());
+    assert_eq!(info.id, TypeConstructorId::UserDefined("Tree".into()));
+}
+
+#[test]
+fn registry_user_type_arity_2() {
+    let mut reg = TypeConstructorRegistry::new();
+    reg.register_user_type("Pair", 2);
+    let info = reg.lookup("Pair").unwrap();
+    assert_eq!(info.kind.arity(), 2);
+}
+
+// ---- Refactored functions still work ----
+
+#[test]
+fn contains_unknown_still_works() {
+    assert!(Ty::Unknown.contains_unknown());
+    assert!(Ty::List(Box::new(Ty::Unknown)).contains_unknown());
+    assert!(Ty::Result(Box::new(Ty::Int), Box::new(Ty::Unknown)).contains_unknown());
+    assert!(!Ty::Int.contains_unknown());
+    assert!(!Ty::List(Box::new(Ty::Int)).contains_unknown());
+}
+
+#[test]
+fn contains_unknown_nested() {
+    let ty = Ty::Map(
+        Box::new(Ty::String),
+        Box::new(Ty::List(Box::new(Ty::Option(Box::new(Ty::Unknown))))),
+    );
+    assert!(ty.contains_unknown());
+}

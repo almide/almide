@@ -234,45 +234,17 @@ impl TypeEnv {
         }
     }
 
-    /// Collect unique TypeVar names from a type in the order they first appear
+    /// Collect unique TypeVar names from a type in the order they first appear.
+    /// Uses Ty::children() for uniform traversal.
     pub fn collect_typevars(ty: &Ty, out: &mut Vec<std::string::String>) {
-        match ty {
-            Ty::TypeVar(name) => {
-                if !out.contains(name) {
-                    out.push(name.clone());
-                }
+        if let Ty::TypeVar(name) = ty {
+            if !out.contains(name) {
+                out.push(name.clone());
             }
-            Ty::List(inner) | Ty::Option(inner) => Self::collect_typevars(inner, out),
-            Ty::Result(a, b) | Ty::Map(a, b) => {
-                Self::collect_typevars(a, out);
-                Self::collect_typevars(b, out);
-            }
-            Ty::Record { fields } | Ty::OpenRecord { fields } => {
-                for (_, t) in fields {
-                    Self::collect_typevars(t, out);
-                }
-            }
-            Ty::Variant { cases, .. } => {
-                for c in cases {
-                    match &c.payload {
-                        VariantPayload::Tuple(tys) => {
-                            for t in tys { Self::collect_typevars(t, out); }
-                        }
-                        VariantPayload::Record(fs) => {
-                            for (_, t, _) in fs { Self::collect_typevars(t, out); }
-                        }
-                        VariantPayload::Unit => {}
-                    }
-                }
-            }
-            Ty::Fn { params, ret } => {
-                for p in params { Self::collect_typevars(p, out); }
-                Self::collect_typevars(ret, out);
-            }
-            Ty::Tuple(tys) => {
-                for t in tys { Self::collect_typevars(t, out); }
-            }
-            _ => {}
+            return;
+        }
+        for child in ty.children() {
+            Self::collect_typevars(child, out);
         }
     }
 }

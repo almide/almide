@@ -3,9 +3,11 @@
 
 mod env;
 mod unify;
+pub mod constructor;
 
 pub use env::TypeEnv;
 pub use unify::{unify, substitute, contains_typevar};
+pub use constructor::{TypeConstructorId, TypeConstructorRegistry, Kind, AlgebraicLaw};
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
@@ -134,23 +136,7 @@ impl Ty {
 
     /// Returns true if this type is or contains Ty::Unknown anywhere in its structure.
     pub fn contains_unknown(&self) -> bool {
-        match self {
-            Ty::Unknown => true,
-            Ty::List(inner) | Ty::Option(inner) => inner.contains_unknown(),
-            Ty::Result(ok, err) => ok.contains_unknown() || err.contains_unknown(),
-            Ty::Map(k, v) => k.contains_unknown() || v.contains_unknown(),
-            Ty::Tuple(tys) => tys.iter().any(|t| t.contains_unknown()),
-            Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| t.contains_unknown()),
-            Ty::Fn { params, ret } => params.iter().any(|t| t.contains_unknown()) || ret.contains_unknown(),
-            Ty::Named(_, args) => args.iter().any(|t| t.contains_unknown()),
-            Ty::Variant { cases, .. } => cases.iter().any(|c| match &c.payload {
-                VariantPayload::Unit => false,
-                VariantPayload::Tuple(tys) => tys.iter().any(|t| t.contains_unknown()),
-                VariantPayload::Record(fs) => fs.iter().any(|(_, t, _)| t.contains_unknown()),
-            }),
-            Ty::Union(members) => members.iter().any(|t| t.contains_unknown()),
-            Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit | Ty::TypeVar(_) => false,
-        }
+        self.any_child_recursive(&|t| matches!(t, Ty::Unknown))
     }
 
     /// Construct a normalized union type: flatten nested unions, deduplicate, sort.
@@ -234,6 +220,199 @@ impl Ty {
             (Ty::Union(members), other) => members.iter().any(|m| m.compatible(other)),
             (other, Ty::Union(members)) => members.iter().any(|m| other.compatible(m)),
             _ => false,
+        }
+    }
+
+    // --- HKT Foundation: Type Constructor Helpers ---
+
+    /// Returns the type constructor identifier for this type, if applicable.
+    ///
+    /// This provides a uniform way to identify what "kind" of container a type is,
+    /// without pattern-matching on each variant individually.
+    pub fn constructor_id(&self) -> Option<TypeConstructorId> {
+        match self {
+            Ty::Int => Some(TypeConstructorId::Int),
+            Ty::Float => Some(TypeConstructorId::Float),
+            Ty::String => Some(TypeConstructorId::String),
+            Ty::Bool => Some(TypeConstructorId::Bool),
+            Ty::Unit => Some(TypeConstructorId::Unit),
+            Ty::List(_) => Some(TypeConstructorId::List),
+            Ty::Option(_) => Some(TypeConstructorId::Option),
+            Ty::Result(_, _) => Some(TypeConstructorId::Result),
+            Ty::Map(_, _) => Some(TypeConstructorId::Map),
+            Ty::Tuple(_) => Some(TypeConstructorId::Tuple),
+            Ty::Named(name, _) => Some(TypeConstructorId::UserDefined(name.clone())),
+            _ => None,
+        }
+    }
+
+    /// Returns the type arguments of this type constructor application.
+    ///
+    /// ```text
+    /// List[Int]         → [Int]
+    /// Result[String, E] → [String, E]
+    /// Map[K, V]         → [K, V]
+    /// Tuple(A, B, C)    → [A, B, C]
+    /// Int               → []
+    /// ```
+    pub fn type_args(&self) -> Vec<&Ty> {
+        match self {
+            Ty::List(inner) | Ty::Option(inner) => vec![inner.as_ref()],
+            Ty::Result(ok, err) | Ty::Map(ok, err) => vec![ok.as_ref(), err.as_ref()],
+            Ty::Tuple(tys) => tys.iter().collect(),
+            Ty::Named(_, args) => args.iter().collect(),
+            _ => vec![],
+        }
+    }
+
+    /// Returns an iterator over all direct child types (for recursive traversal).
+    ///
+    /// This unifies the repeated pattern across contains_unknown, is_eq, is_hash,
+    /// occurs_in, contains_typevar, collect_typevars, etc.
+    pub fn children(&self) -> Vec<&Ty> {
+        match self {
+            // Leaf types — no children
+            Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit
+            | Ty::TypeVar(_) | Ty::Unknown => vec![],
+
+            // Single-param containers
+            Ty::List(inner) | Ty::Option(inner) => vec![inner.as_ref()],
+
+            // Dual-param containers
+            Ty::Result(a, b) | Ty::Map(a, b) => vec![a.as_ref(), b.as_ref()],
+
+            // Variable-arity
+            Ty::Tuple(tys) => tys.iter().collect(),
+            Ty::Named(_, args) => args.iter().collect(),
+            Ty::Union(members) => members.iter().collect(),
+
+            // Structural types
+            Ty::Record { fields } | Ty::OpenRecord { fields } => {
+                fields.iter().map(|(_, t)| t).collect()
+            }
+
+            // Function type
+            Ty::Fn { params, ret } => {
+                let mut children: Vec<&Ty> = params.iter().collect();
+                children.push(ret.as_ref());
+                children
+            }
+
+            // Variant — children are inside payloads
+            Ty::Variant { cases, .. } => {
+                let mut children = Vec::new();
+                for c in cases {
+                    match &c.payload {
+                        VariantPayload::Unit => {}
+                        VariantPayload::Tuple(tys) => children.extend(tys.iter()),
+                        VariantPayload::Record(fs) => children.extend(fs.iter().map(|(_, t, _)| t)),
+                    }
+                }
+                children
+            }
+        }
+    }
+
+    /// Apply a transformation to all direct child types, producing a new Ty.
+    ///
+    /// This is the "map" counterpart to `children()`. Together they enable
+    /// uniform recursive operations without repeating match arms.
+    pub fn map_children<F>(&self, f: &F) -> Ty
+    where
+        F: Fn(&Ty) -> Ty,
+    {
+        match self {
+            Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit
+            | Ty::TypeVar(_) | Ty::Unknown => self.clone(),
+
+            Ty::List(inner) => Ty::List(Box::new(f(inner))),
+            Ty::Option(inner) => Ty::Option(Box::new(f(inner))),
+            Ty::Result(ok, err) => Ty::Result(Box::new(f(ok)), Box::new(f(err))),
+            Ty::Map(k, v) => Ty::Map(Box::new(f(k)), Box::new(f(v))),
+
+            Ty::Tuple(tys) => Ty::Tuple(tys.iter().map(f).collect()),
+            Ty::Named(name, args) => Ty::Named(name.clone(), args.iter().map(f).collect()),
+            Ty::Union(members) => Ty::union(members.iter().map(f).collect()),
+
+            Ty::Record { fields } => Ty::Record {
+                fields: fields.iter().map(|(n, t)| (n.clone(), f(t))).collect(),
+            },
+            Ty::OpenRecord { fields } => Ty::OpenRecord {
+                fields: fields.iter().map(|(n, t)| (n.clone(), f(t))).collect(),
+            },
+
+            Ty::Fn { params, ret } => Ty::Fn {
+                params: params.iter().map(f).collect(),
+                ret: Box::new(f(ret)),
+            },
+
+            Ty::Variant { name, cases } => Ty::Variant {
+                name: name.clone(),
+                cases: cases.iter().map(|c| VariantCase {
+                    name: c.name.clone(),
+                    payload: match &c.payload {
+                        VariantPayload::Unit => VariantPayload::Unit,
+                        VariantPayload::Tuple(tys) => VariantPayload::Tuple(tys.iter().map(f).collect()),
+                        VariantPayload::Record(fs) => VariantPayload::Record(
+                            fs.iter().map(|(n, t, d)| (n.clone(), f(t), d.clone())).collect(),
+                        ),
+                    },
+                }).collect(),
+            },
+        }
+    }
+
+    /// Check if any child type (recursively) satisfies a predicate.
+    ///
+    /// Replaces the repeated pattern:
+    /// ```text
+    /// match ty {
+    ///     Ty::List(inner) | Ty::Option(inner) => pred(inner),
+    ///     Ty::Result(a, b) | Ty::Map(a, b) => pred(a) || pred(b),
+    ///     ...
+    /// }
+    /// ```
+    pub fn any_child_recursive<F>(&self, pred: &F) -> bool
+    where
+        F: Fn(&Ty) -> bool,
+    {
+        if pred(self) {
+            return true;
+        }
+        self.children().into_iter().any(|child| child.any_child_recursive(pred))
+    }
+
+    /// Check if all child types (recursively) satisfy a predicate.
+    pub fn all_children_recursive<F>(&self, pred: &F) -> bool
+    where
+        F: Fn(&Ty) -> bool,
+    {
+        if !pred(self) {
+            return false;
+        }
+        self.children().into_iter().all(|child| child.all_children_recursive(pred))
+    }
+
+    /// Returns true if this type is a parameterized container (List, Option, Result, Map).
+    pub fn is_container(&self) -> bool {
+        matches!(self, Ty::List(_) | Ty::Option(_) | Ty::Result(_, _) | Ty::Map(_, _))
+    }
+
+    /// Returns the constructor name for display/debug purposes.
+    pub fn constructor_name(&self) -> Option<&str> {
+        match self {
+            Ty::Int => Some("Int"),
+            Ty::Float => Some("Float"),
+            Ty::String => Some("String"),
+            Ty::Bool => Some("Bool"),
+            Ty::Unit => Some("Unit"),
+            Ty::List(_) => Some("List"),
+            Ty::Option(_) => Some("Option"),
+            Ty::Result(_, _) => Some("Result"),
+            Ty::Map(_, _) => Some("Map"),
+            Ty::Tuple(_) => Some("Tuple"),
+            Ty::Named(name, _) => Some(name.as_str()),
+            _ => None,
         }
     }
 }
