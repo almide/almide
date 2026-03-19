@@ -178,6 +178,16 @@ impl FuncCompiler<'_> {
                 self.emit_match(subject, arms, &expr.ty);
             }
 
+            // ── Record construction ──
+            IrExprKind::Record { fields, .. } => {
+                self.emit_record(fields, &expr.ty);
+            }
+
+            // ── Field access ──
+            IrExprKind::Member { object, field } => {
+                self.emit_member(object, field);
+            }
+
             // ── Codegen-specific nodes (pass-through or ignore) ──
             IrExprKind::Clone { expr: inner } | IrExprKind::Deref { expr: inner } => {
                 // In WASM, clone/deref are no-ops (no ownership system)
@@ -500,6 +510,110 @@ impl FuncCompiler<'_> {
             }
         }
     }
+    /// Emit a record construction: allocate memory, store each field.
+    fn emit_record(&mut self, fields: &[(String, IrExpr)], _result_ty: &Ty) {
+        // Compute field types and total size
+        let field_types: Vec<(String, Ty)> = fields.iter()
+            .map(|(name, expr)| (name.clone(), expr.ty.clone()))
+            .collect();
+        let total_size = values::record_size(&field_types);
+
+        // Allocate
+        self.func.instruction(&Instruction::I32Const(total_size as i32));
+        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+        // ptr is on stack — we need to store it, then write fields, then return it
+
+        // We'll use local.tee to keep ptr on stack while storing fields
+        // But we need a scratch local... Actually, we can store each field
+        // by computing ptr + offset for each. We need the ptr available.
+        // Use the match scratch i32 slot as a temporary.
+        let scratch = self.match_i32_base + self.match_depth;
+
+        self.func.instruction(&Instruction::LocalSet(scratch));
+
+        // Store each field
+        let mut offset = 0u32;
+        for (_, field_expr) in fields {
+            let field_size = values::byte_size(&field_expr.ty);
+            // Address = scratch + offset
+            self.func.instruction(&Instruction::LocalGet(scratch));
+            // Emit value
+            self.emit_expr(field_expr);
+            // Store based on type
+            match values::ty_to_valtype(&field_expr.ty) {
+                Some(ValType::I64) => {
+                    self.func.instruction(&Instruction::I64Store(MemArg {
+                        offset: offset as u64, align: 3, memory_index: 0,
+                    }));
+                }
+                Some(ValType::F64) => {
+                    self.func.instruction(&Instruction::F64Store(MemArg {
+                        offset: offset as u64, align: 3, memory_index: 0,
+                    }));
+                }
+                Some(ValType::I32) => {
+                    self.func.instruction(&Instruction::I32Store(MemArg {
+                        offset: offset as u64, align: 2, memory_index: 0,
+                    }));
+                }
+                _ => {} // Unit: nothing to store
+            }
+            offset += field_size;
+        }
+
+        // Return ptr
+        self.func.instruction(&Instruction::LocalGet(scratch));
+    }
+
+    /// Emit a field access: load from record pointer + field offset.
+    fn emit_member(&mut self, object: &IrExpr, field: &str) {
+        // Get the record's field list from the object's type
+        let fields = self.extract_record_fields(&object.ty);
+
+        self.emit_expr(object); // ptr on stack
+
+        if let Some((offset, field_ty)) = values::field_offset(&fields, field) {
+            match values::ty_to_valtype(&field_ty) {
+                Some(ValType::I64) => {
+                    self.func.instruction(&Instruction::I64Load(MemArg {
+                        offset: offset as u64, align: 3, memory_index: 0,
+                    }));
+                }
+                Some(ValType::F64) => {
+                    self.func.instruction(&Instruction::F64Load(MemArg {
+                        offset: offset as u64, align: 3, memory_index: 0,
+                    }));
+                }
+                Some(ValType::I32) => {
+                    self.func.instruction(&Instruction::I32Load(MemArg {
+                        offset: offset as u64, align: 2, memory_index: 0,
+                    }));
+                }
+                _ => {} // Unit
+            }
+        } else {
+            // Field not found — shouldn't happen with correct IR
+            self.func.instruction(&Instruction::Unreachable);
+        }
+    }
+
+    /// Extract field names and types from a record/named type.
+    fn extract_record_fields(&self, ty: &Ty) -> Vec<(String, Ty)> {
+        match ty {
+            Ty::Record { fields } => fields.clone(),
+            Ty::Named(name, _) => {
+                // Look up the named type in the type declarations
+                // For now, search the emitter's stored type info
+                if let Some(fields) = self.emitter.record_fields.get(name.as_str()) {
+                    fields.clone()
+                } else {
+                    vec![]
+                }
+            }
+            _ => vec![],
+        }
+    }
+
     /// Emit a for...in loop. Currently supports Range iterables only.
     fn emit_for_in(&mut self, var: crate::ir::VarId, iterable: &IrExpr, body: &[crate::ir::IrStmt]) {
         match &iterable.kind {

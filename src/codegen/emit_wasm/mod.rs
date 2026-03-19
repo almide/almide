@@ -83,6 +83,9 @@ pub struct WasmEmitter {
 
     // Globals
     pub heap_ptr_global: u32,
+
+    // Type info: record name → field list (for field offset computation)
+    pub record_fields: HashMap<String, Vec<(String, crate::types::Ty)>>,
 }
 
 impl WasmEmitter {
@@ -108,6 +111,7 @@ impl WasmEmitter {
                 concat_str: 0,
             },
             heap_ptr_global: 0,
+            record_fields: HashMap::new(),
         }
     }
 
@@ -183,6 +187,16 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
                 && r == &[ValType::I32]
         }).unwrap() as u32,
     });
+
+    // Register type declarations (record field layouts)
+    for td in &program.type_decls {
+        if let crate::ir::IrTypeDeclKind::Record { fields } = &td.kind {
+            let field_list: Vec<(String, crate::types::Ty)> = fields.iter()
+                .map(|f| (f.name.clone(), f.ty.clone()))
+                .collect();
+            emitter.record_fields.insert(td.name.clone(), field_list);
+        }
+    }
 
     // Register user function signatures
     let mut user_meta: Vec<u32> = Vec::new(); // type_idx per user function

@@ -59,59 +59,70 @@ impl FuncCompiler<'_> {
 /// Result of pre-scanning a function body for local variables.
 pub struct LocalScanResult {
     pub binds: Vec<(VarId, ValType)>,
-    /// Max nesting depth of match expressions (for scratch locals).
-    pub match_depth: usize,
+    /// Max scratch local depth needed (match subjects + record temporaries).
+    pub scratch_depth: usize,
 }
 
 /// Pre-scan a function body to collect all local variable bindings
-/// and count match nesting depth for scratch local allocation.
+/// and count scratch local depth.
 pub fn collect_locals(body: &IrExpr) -> LocalScanResult {
     let mut binds = Vec::new();
     scan_expr(body, &mut binds);
-    let match_depth = count_match_depth(body);
-    LocalScanResult { binds, match_depth }
+    let scratch_depth = count_scratch_depth(body);
+    LocalScanResult { binds, scratch_depth }
 }
 
-/// Count the maximum nesting depth of match expressions.
-fn count_match_depth(expr: &IrExpr) -> usize {
+/// Count the maximum scratch local depth needed.
+/// Match expressions and Record constructions each consume 1 level.
+fn count_scratch_depth(expr: &IrExpr) -> usize {
     match &expr.kind {
         IrExprKind::Match { subject, arms } => {
             let inner = arms.iter()
-                .map(|a| count_match_depth(&a.body))
+                .map(|a| count_scratch_depth(&a.body))
                 .max().unwrap_or(0);
-            let subj = count_match_depth(subject);
+            let subj = count_scratch_depth(subject);
             1 + inner.max(subj)
         }
+        IrExprKind::Record { fields, .. } => {
+            let inner = fields.iter()
+                .map(|(_, e)| count_scratch_depth(e))
+                .max().unwrap_or(0);
+            1.max(inner)
+        }
         IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
-            let s = stmts.iter().map(|s| count_match_depth_stmt(s)).max().unwrap_or(0);
-            let e = expr.as_ref().map(|e| count_match_depth(e)).unwrap_or(0);
+            let s = stmts.iter().map(|s| count_scratch_depth_stmt(s)).max().unwrap_or(0);
+            let e = expr.as_ref().map(|e| count_scratch_depth(e)).unwrap_or(0);
             s.max(e)
         }
         IrExprKind::If { cond, then, else_ } => {
-            count_match_depth(cond)
-                .max(count_match_depth(then))
-                .max(count_match_depth(else_))
+            count_scratch_depth(cond)
+                .max(count_scratch_depth(then))
+                .max(count_scratch_depth(else_))
         }
         IrExprKind::While { cond, body } => {
-            let b = body.iter().map(|s| count_match_depth_stmt(s)).max().unwrap_or(0);
-            count_match_depth(cond).max(b)
+            let b = body.iter().map(|s| count_scratch_depth_stmt(s)).max().unwrap_or(0);
+            count_scratch_depth(cond).max(b)
         }
         IrExprKind::BinOp { left, right, .. } => {
-            count_match_depth(left).max(count_match_depth(right))
+            count_scratch_depth(left).max(count_scratch_depth(right))
         }
-        IrExprKind::UnOp { operand, .. } => count_match_depth(operand),
+        IrExprKind::UnOp { operand, .. } => count_scratch_depth(operand),
         IrExprKind::Call { args, .. } => {
-            args.iter().map(|a| count_match_depth(a)).max().unwrap_or(0)
+            args.iter().map(|a| count_scratch_depth(a)).max().unwrap_or(0)
+        }
+        IrExprKind::ForIn { iterable, body, .. } => {
+            let b = body.iter().map(|s| count_scratch_depth_stmt(s)).max().unwrap_or(0);
+            count_scratch_depth(iterable).max(b)
         }
         _ => 0,
     }
 }
 
-fn count_match_depth_stmt(stmt: &IrStmt) -> usize {
+fn count_scratch_depth_stmt(stmt: &IrStmt) -> usize {
     match &stmt.kind {
-        IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => count_match_depth(value),
-        IrStmtKind::Expr { expr } => count_match_depth(expr),
-        IrStmtKind::Guard { cond, else_ } => count_match_depth(cond).max(count_match_depth(else_)),
+        IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => count_scratch_depth(value),
+        IrStmtKind::Expr { expr } => count_scratch_depth(expr),
+        IrStmtKind::Guard { cond, else_ } => count_scratch_depth(cond).max(count_scratch_depth(else_)),
         _ => 0,
     }
 }

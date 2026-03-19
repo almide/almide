@@ -36,11 +36,11 @@ pub fn compile_function(
 
     // Match scratch locals: one i64 + one i32 per nesting depth level
     let match_i64_base = param_count + local_decls.len() as u32;
-    for _ in 0..scan.match_depth {
+    for _ in 0..scan.scratch_depth {
         local_decls.push((1, ValType::I64));
     }
     let match_i32_base = param_count + local_decls.len() as u32;
-    for _ in 0..scan.match_depth {
+    for _ in 0..scan.scratch_depth {
         local_decls.push((1, ValType::I32));
     }
 
