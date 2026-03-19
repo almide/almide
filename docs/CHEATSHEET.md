@@ -119,7 +119,7 @@ for x in xs {
 }
 
 for (k, v) in config {
-  println(k ++ " = " ++ v)
+  println(k + " = " ++ v)
 }
 
 for key in m {
@@ -303,9 +303,9 @@ effect fn main(args: List[String]) -> Result[Unit, AppError] = {
 The runtime calls `main(args)` where `args` includes the program name at index 0.
 
 ## Operators (precedence high→low)
-`. ()` > `not -` > `* / % ^` > `+ - ++` > `== != < > <= >=` > `and` > `or` > `|>`
+`. ()` > `not -` > `* / % ^` > `+ -` > `== != < > <= >=` > `and` > `or` > `|>`
 
-`^` is XOR (integer), `++` is concatenation (list or string).
+`^` is XOR (integer), `+` is concatenation for strings and lists (overloaded with addition).
 
 ## UFCS
 `f(x, y)` ≡ `x.f(y)` — compiler resolves automatically.
@@ -385,7 +385,7 @@ The runtime calls `main(args)` where `args` includes the program name at index 0
 - `string.length(s)` → **WRONG**. Write `string.len(s)`. No synonyms
 - `println(x)` where x is Int → **WRONG**. Write `println(int.to_string(x))`. No implicit conversion
 - `1 :: 2 :: []` → **WRONG**. Write `[1, 2]`. There is no cons operator `::`
-- `fn foo[T](x: T)` → **WRONG**. User-defined generic functions are not supported. Use concrete types
+- `fn foo<T>(x: T)` → **WRONG**. Write `fn foo[T](x: T)`. Use `[]` for generics, not `<>`
 
 ## Complete example
 ```
