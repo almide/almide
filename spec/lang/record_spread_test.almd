@@ -9,8 +9,21 @@ test "record creation and field access" {
   assert_eq(c.debug, false)
 }
 
-// NOTE: record spread ({ ...base, field: value }) has a codegen gap.
-// Spread is parsed and type-checked but generates incorrect Rust code.
+test "record spread update single field" {
+  let base = Config { host: "localhost", port: 8080, debug: false }
+  let dev = Config { ...base, debug: true }
+  assert_eq(dev.host, "localhost")
+  assert_eq(dev.port, 8080)
+  assert_eq(dev.debug, true)
+}
+
+test "record spread update multiple fields" {
+  let base = Config { host: "localhost", port: 8080, debug: false }
+  let prod = Config { ...base, host: "prod.com", port: 443 }
+  assert_eq(prod.host, "prod.com")
+  assert_eq(prod.port, 443)
+  assert_eq(prod.debug, false)
+}
 
 test "record field in expression" {
   let c = Config { host: "localhost", port: 8080, debug: true }
@@ -47,9 +60,9 @@ test "record with computed fields" {
   assert_eq(p.second, 20)
 }
 
-test "record manual update" {
+test "record spread preserves original" {
   let base = Pair { first: 1, second: 2 }
-  let updated = Pair { first: 99, second: base.second }
+  let updated = Pair { ...base, first: 99 }
   assert_eq(base.first, 1)
   assert_eq(updated.first, 99)
   assert_eq(updated.second, 2)
