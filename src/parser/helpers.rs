@@ -286,6 +286,18 @@ impl Parser {
         }
     }
 
+    /// Skip newlines if the next non-newline token matches any of the given types.
+    /// Enables multiline expression continuation when a line starts with a binary operator.
+    pub(crate) fn skip_newlines_if_followed_by_any(&mut self, tts: &[TokenType]) {
+        let saved = self.pos;
+        while self.check(TokenType::Newline) || self.check(TokenType::Comment) {
+            self.advance();
+        }
+        if !tts.iter().any(|tt| self.check(tt.clone())) {
+            self.pos = saved;
+        }
+    }
+
     pub(crate) fn skip_newlines_into_stmts(&mut self, stmts: &mut Vec<Stmt>) {
         while self.check(TokenType::Newline) || self.check(TokenType::Comment) {
             if self.check(TokenType::Comment) {
