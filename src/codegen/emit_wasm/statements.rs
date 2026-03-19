@@ -108,9 +108,17 @@ fn count_scratch_depth(expr: &IrExpr) -> usize {
             count_scratch_depth(left).max(count_scratch_depth(right))
         }
         IrExprKind::UnOp { operand, .. } => count_scratch_depth(operand),
-        IrExprKind::Call { args, .. } => {
-            args.iter().map(|a| count_scratch_depth(a)).max().unwrap_or(0)
+        IrExprKind::Call { args, target, .. } => {
+            let base = match target {
+                crate::ir::CallTarget::Computed { .. } => 1,
+                _ => 0,
+            };
+            let inner = args.iter().map(|a| count_scratch_depth(a)).max().unwrap_or(0);
+            base.max(inner)
         }
+        // FnRef needs 1 scratch, Lambda with captures needs 2 (env + closure ptr)
+        IrExprKind::FnRef { .. } => 1,
+        IrExprKind::Lambda { .. } => 2,
         IrExprKind::ForIn { iterable, body, .. } => {
             let b = body.iter().map(|s| count_scratch_depth_stmt(s)).max().unwrap_or(0);
             // List for...in needs 2 scratch slots (list ptr + index counter)

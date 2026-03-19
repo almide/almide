@@ -40,18 +40,14 @@ impl FuncCompiler<'_> {
                 self.func.instruction(&Instruction::LocalGet(local_idx));
             }
 
-            // ── Function reference (used as value) ──
+            // ── Function reference (used as value) → closure [wrapper_table_idx, 0] ──
             IrExprKind::FnRef { name } => {
-                // Push table index of the named function
-                if let Some(&func_idx) = self.emitter.func_map.get(name.as_str()) {
-                    if let Some(&table_idx) = self.emitter.func_to_table_idx.get(&func_idx) {
-                        self.func.instruction(&Instruction::I32Const(table_idx as i32));
-                    } else {
-                        self.func.instruction(&Instruction::Unreachable);
-                    }
-                } else {
-                    self.func.instruction(&Instruction::Unreachable);
-                }
+                self.emit_fn_ref_closure(name);
+            }
+
+            // ── Lambda → closure [table_idx, env_ptr] ──
+            IrExprKind::Lambda { params, body } => {
+                self.emit_lambda_closure(params, body);
             }
 
             // ── Binary operators ──
@@ -489,20 +485,41 @@ impl FuncCompiler<'_> {
             }
 
             CallTarget::Computed { callee } => {
-                // Indirect call via function table
-                // call_indirect: args on stack, then table index, then call_indirect(type_idx)
+                // Closure call: callee is a closure ptr [table_idx: i32][env_ptr: i32]
+                // Stack order for call_indirect: [env_ptr, args..., table_idx]
+                let scratch = self.match_i32_base + self.match_depth;
+
+                // Evaluate callee → closure ptr
+                self.emit_expr(callee);
+                self.func.instruction(&Instruction::LocalSet(scratch));
+
+                // Push env_ptr (first hidden arg)
+                self.func.instruction(&Instruction::LocalGet(scratch));
+                self.func.instruction(&Instruction::I32Load(MemArg {
+                    offset: 4, align: 2, memory_index: 0,
+                }));
+
+                // Push declared args
                 for arg in args {
                     self.emit_expr(arg);
                 }
-                self.emit_expr(callee); // table index (i32) on top of stack
 
-                // Determine the function type from callee's Fn type
+                // Push table_idx (on top of stack for call_indirect)
+                self.func.instruction(&Instruction::LocalGet(scratch));
+                self.func.instruction(&Instruction::I32Load(MemArg {
+                    offset: 0, align: 2, memory_index: 0,
+                }));
+
+                // Closure calling convention type: (env: i32, params...) -> ret
                 if let Ty::Fn { params, ret } = &callee.ty {
-                    let param_types: Vec<ValType> = params.iter()
-                        .filter_map(|t| values::ty_to_valtype(t))
-                        .collect();
+                    let mut closure_params = vec![ValType::I32]; // env_ptr
+                    for p in params {
+                        if let Some(vt) = values::ty_to_valtype(p) {
+                            closure_params.push(vt);
+                        }
+                    }
                     let ret_types = values::ret_type(ret);
-                    let type_idx = self.emitter.register_type(param_types, ret_types);
+                    let type_idx = self.emitter.register_type(closure_params, ret_types);
                     self.func.instruction(&Instruction::CallIndirect {
                         type_index: type_idx,
                         table_index: 0,
@@ -511,6 +528,102 @@ impl FuncCompiler<'_> {
                     self.func.instruction(&Instruction::Unreachable);
                 }
             }
+        }
+    }
+
+    /// Emit a FnRef as a closure: allocate [wrapper_table_idx, 0] on heap.
+    fn emit_fn_ref_closure(&mut self, name: &str) {
+        if let Some(&wrapper_table_idx) = self.emitter.fn_ref_wrappers.get(name) {
+            // Allocate closure: [table_idx: i32][env_ptr: i32] = 8 bytes
+            self.func.instruction(&Instruction::I32Const(8));
+            self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+            let scratch = self.match_i32_base + self.match_depth;
+            self.func.instruction(&Instruction::LocalSet(scratch));
+
+            // Store table_idx
+            self.func.instruction(&Instruction::LocalGet(scratch));
+            self.func.instruction(&Instruction::I32Const(wrapper_table_idx as i32));
+            self.func.instruction(&Instruction::I32Store(MemArg { offset: 0, align: 2, memory_index: 0 }));
+
+            // Store env_ptr = 0
+            self.func.instruction(&Instruction::LocalGet(scratch));
+            self.func.instruction(&Instruction::I32Const(0));
+            self.func.instruction(&Instruction::I32Store(MemArg { offset: 4, align: 2, memory_index: 0 }));
+
+            // Return closure ptr
+            self.func.instruction(&Instruction::LocalGet(scratch));
+        } else {
+            eprintln!("WARNING: FnRef wrapper not found for '{}', using direct table entry", name);
+            self.func.instruction(&Instruction::Unreachable);
+        }
+    }
+
+    /// Emit a lambda as a closure: allocate env + closure on heap.
+    fn emit_lambda_closure(&mut self, _params: &[(crate::ir::VarId, Ty)], _body: &IrExpr) {
+        let lambda_idx = self.emitter.lambda_counter.get();
+        self.emitter.lambda_counter.set(lambda_idx + 1);
+
+        if lambda_idx >= self.emitter.lambdas.len() {
+            self.func.instruction(&Instruction::Unreachable);
+            return;
+        }
+
+        let table_idx = self.emitter.lambdas[lambda_idx].table_idx;
+        let captures = self.emitter.lambdas[lambda_idx].captures.clone();
+
+        let scratch = self.match_i32_base + self.match_depth;
+
+        if captures.is_empty() {
+            // No captures: allocate closure [table_idx, 0]
+            self.func.instruction(&Instruction::I32Const(8));
+            self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+            self.func.instruction(&Instruction::LocalSet(scratch));
+
+            self.func.instruction(&Instruction::LocalGet(scratch));
+            self.func.instruction(&Instruction::I32Const(table_idx as i32));
+            self.func.instruction(&Instruction::I32Store(MemArg { offset: 0, align: 2, memory_index: 0 }));
+
+            self.func.instruction(&Instruction::LocalGet(scratch));
+            self.func.instruction(&Instruction::I32Const(0));
+            self.func.instruction(&Instruction::I32Store(MemArg { offset: 4, align: 2, memory_index: 0 }));
+
+            self.func.instruction(&Instruction::LocalGet(scratch));
+        } else {
+            // Allocate env: each capture gets 8 bytes (padded for alignment)
+            let env_size = (captures.len() as u32) * 8;
+            self.func.instruction(&Instruction::I32Const(env_size as i32));
+            self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+            let env_scratch = scratch; // reuse for env_ptr
+            self.func.instruction(&Instruction::LocalSet(env_scratch));
+
+            // Store each captured variable into env
+            for (ci, (vid, ty)) in captures.iter().enumerate() {
+                let offset = (ci as u32) * 8;
+                self.func.instruction(&Instruction::LocalGet(env_scratch));
+                if let Some(&local_idx) = self.var_map.get(&vid.0) {
+                    self.func.instruction(&Instruction::LocalGet(local_idx));
+                } else {
+                    // Variable not in scope — shouldn't happen
+                    self.func.instruction(&Instruction::I32Const(0));
+                }
+                self.emit_store_at(ty, offset);
+            }
+
+            // Allocate closure: [table_idx, env_ptr]
+            self.func.instruction(&Instruction::I32Const(8));
+            self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+            let closure_scratch = scratch + 1; // second i32 scratch slot
+            self.func.instruction(&Instruction::LocalSet(closure_scratch));
+
+            self.func.instruction(&Instruction::LocalGet(closure_scratch));
+            self.func.instruction(&Instruction::I32Const(table_idx as i32));
+            self.func.instruction(&Instruction::I32Store(MemArg { offset: 0, align: 2, memory_index: 0 }));
+
+            self.func.instruction(&Instruction::LocalGet(closure_scratch));
+            self.func.instruction(&Instruction::LocalGet(env_scratch));
+            self.func.instruction(&Instruction::I32Store(MemArg { offset: 4, align: 2, memory_index: 0 }));
+
+            self.func.instruction(&Instruction::LocalGet(closure_scratch));
         }
     }
 

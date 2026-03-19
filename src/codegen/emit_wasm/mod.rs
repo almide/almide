@@ -93,6 +93,13 @@ pub struct WasmEmitter {
     pub record_fields: HashMap<String, Vec<(String, crate::types::Ty)>>,
     // Variant info: variant type name → list of (case_name, tag, fields)
     pub variant_info: HashMap<String, Vec<VariantCase>>,
+
+    // Lambda/closure info: sequential index → LambdaInfo
+    pub lambdas: Vec<LambdaInfo>,
+    // FnRef wrappers: original func name → wrapper table_idx
+    pub fn_ref_wrappers: HashMap<String, u32>,
+    // Lambda counter (for matching pre-scan order during emission)
+    pub lambda_counter: std::cell::Cell<usize>,
 }
 
 /// A single case of a variant type.
@@ -100,6 +107,13 @@ pub struct VariantCase {
     pub name: String,
     pub tag: u32,
     pub fields: Vec<(String, crate::types::Ty)>,
+}
+
+/// Pre-scanned lambda information.
+pub struct LambdaInfo {
+    pub table_idx: u32,
+    pub closure_type_idx: u32,
+    pub captures: Vec<(crate::ir::VarId, crate::types::Ty)>,
 }
 
 impl WasmEmitter {
@@ -129,6 +143,9 @@ impl WasmEmitter {
             func_to_table_idx: HashMap::new(),
             record_fields: HashMap::new(),
             variant_info: HashMap::new(),
+            lambdas: Vec::new(),
+            fn_ref_wrappers: HashMap::new(),
+            lambda_counter: std::cell::Cell::new(0),
         }
     }
 
@@ -269,9 +286,13 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         emitter.func_to_table_idx.insert(func_idx, table_idx);
     }
 
-    // Phase 2: Compile function bodies
+    // Pre-scan for lambdas and FnRefs, register them
+    pre_scan_closures(program, &mut emitter);
+
+    // Phase 2: Compile function bodies (order must match registration order)
     runtime::compile_runtime(&mut emitter);
 
+    // User functions (registered before lambdas/wrappers)
     let mut user_idx = 0;
     for func in &program.functions {
         if func.is_test {
@@ -282,6 +303,9 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         emitter.add_compiled(compiled);
         user_idx += 1;
     }
+
+    // Lambda bodies and FnRef wrappers (registered after user functions in pre_scan)
+    compile_lambda_bodies(program, &mut emitter);
 
     // Phase 3: Assemble
     assemble(&emitter)
@@ -393,6 +417,378 @@ fn assemble(emitter: &WasmEmitter) -> Vec<u8> {
     module.section(&data);
 
     module.finish()
+}
+
+// ── Lambda/Closure pre-scan and compilation ─────────────────────
+
+use crate::ir::{IrExpr, IrExprKind, IrStmt, IrStmtKind, VarId};
+use std::collections::HashSet;
+
+/// Walk all function bodies to find Lambda and FnRef nodes.
+/// Register lambda functions and FnRef wrappers in the emitter.
+fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) {
+    // Collect all lambdas (in tree-walk order)
+    let mut lambda_exprs: Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, HashSet<u32>)> = Vec::new();
+    let mut fn_ref_set: HashSet<String> = HashSet::new();
+    let mut fn_ref_names: Vec<String> = Vec::new(); // ordered, deduped
+
+    for func in &program.functions {
+        if func.is_test { continue; }
+        let mut scope_vars: HashSet<u32> = func.params.iter().map(|p| p.var.0).collect();
+        scan_closures_expr(&func.body, &mut scope_vars, &program.var_table,
+            &mut lambda_exprs, &mut fn_ref_set);
+    }
+    // Build ordered fn_ref list (sorted for determinism)
+    fn_ref_names = fn_ref_set.into_iter().collect();
+    fn_ref_names.sort();
+
+    // Register each lambda as a function
+    for (params, _body, captures) in &lambda_exprs {
+        // Closure calling convention: (env: i32, declared_params...) -> ret
+        let mut wasm_params = vec![ValType::I32]; // env_ptr
+        for (_, ty) in params {
+            if let Some(vt) = values::ty_to_valtype(ty) {
+                wasm_params.push(vt);
+            }
+        }
+        // Determine return type from body
+        let ret_types = values::ret_type(&_body.ty);
+        let closure_type_idx = emitter.register_type(wasm_params, ret_types);
+
+        let name = format!("__lambda_{}", emitter.lambdas.len());
+        let func_idx = emitter.register_func(&name, closure_type_idx);
+        let table_idx = emitter.func_table.len() as u32;
+        emitter.func_table.push(func_idx);
+        emitter.func_to_table_idx.insert(func_idx, table_idx);
+
+        let capture_vars: Vec<(VarId, crate::types::Ty)> = captures.iter()
+            .map(|&vid| {
+                let info = &program.var_table.get(VarId(vid));
+                (VarId(vid), info.ty.clone())
+            })
+            .collect();
+
+        emitter.lambdas.push(LambdaInfo {
+            table_idx,
+            closure_type_idx,
+            captures: capture_vars,
+        });
+    }
+
+    // Register FnRef wrappers
+    for fn_name in &fn_ref_names {
+        if emitter.fn_ref_wrappers.contains_key(fn_name.as_str()) { continue; }
+        if let Some(&orig_func_idx) = emitter.func_map.get(fn_name.as_str()) {
+            if let Some(&orig_type_idx) = emitter.func_type_indices.get(&orig_func_idx) {
+                // Get original params/results
+                let (orig_params, orig_results) = emitter.types[orig_type_idx as usize].clone();
+                // Wrapper type: (env: i32, original_params...) -> original_results
+                let mut wrapper_params = vec![ValType::I32];
+                wrapper_params.extend_from_slice(&orig_params);
+                let wrapper_type_idx = emitter.register_type(wrapper_params, orig_results);
+
+                let wrapper_name = format!("__wrap_{}", fn_name);
+                let wrapper_func_idx = emitter.register_func(&wrapper_name, wrapper_type_idx);
+                let table_idx = emitter.func_table.len() as u32;
+                emitter.func_table.push(wrapper_func_idx);
+                emitter.func_to_table_idx.insert(wrapper_func_idx, table_idx);
+
+                emitter.fn_ref_wrappers.insert(fn_name.clone(), table_idx);
+            }
+        }
+    }
+}
+
+/// Compile lambda bodies and FnRef wrappers.
+fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitter) {
+    // Re-scan to get lambda bodies (in same order as pre-scan)
+    let mut lambda_exprs: Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, HashSet<u32>)> = Vec::new();
+    let mut fn_ref_set: HashSet<String> = HashSet::new();
+
+    for func in &program.functions {
+        if func.is_test { continue; }
+        let mut scope_vars: HashSet<u32> = func.params.iter().map(|p| p.var.0).collect();
+        scan_closures_expr(&func.body, &mut scope_vars, &program.var_table,
+            &mut lambda_exprs, &mut fn_ref_set);
+    }
+    let mut fn_ref_names: Vec<String> = fn_ref_set.into_iter().collect();
+    fn_ref_names.sort();
+
+    // Compile each lambda
+    for (i, (params, body, captures)) in lambda_exprs.iter().enumerate() {
+        let info = &emitter.lambdas[i];
+        let type_idx = info.closure_type_idx;
+
+        // Build var_map: env_ptr is local 0, params start at 1
+        let mut var_map: HashMap<u32, u32> = HashMap::new();
+        let mut local_idx = 1u32; // 0 = env_ptr
+        for (vid, _) in params {
+            var_map.insert(vid.0, local_idx);
+            local_idx += 1;
+        }
+
+        // Captured vars are loaded from env in the body emission
+        // Map them to locals allocated after params
+        let capture_list: Vec<(VarId, crate::types::Ty)> = captures.iter()
+            .map(|&vid| {
+                let vi = program.var_table.get(VarId(vid));
+                (VarId(vid), vi.ty.clone())
+            })
+            .collect();
+
+        // Pre-scan body for additional locals
+        let scan = statements::collect_locals(body, &program.var_table);
+        let mut local_decls = Vec::new();
+
+        // Captured var locals
+        for (vid, ty) in &capture_list {
+            if let Some(vt) = values::ty_to_valtype(ty) {
+                var_map.insert(vid.0, local_idx);
+                local_decls.push((1u32, vt));
+                local_idx += 1;
+            }
+        }
+
+        // Body bind locals
+        for (vid, vt) in &scan.binds {
+            var_map.insert(vid.0, local_idx);
+            local_decls.push((1u32, *vt));
+            local_idx += 1;
+        }
+
+        // Scratch locals
+        let scratch_depth = scan.scratch_depth.max(1);
+        let match_i64_base = local_idx;
+        for _ in 0..scratch_depth {
+            local_decls.push((1, ValType::I64));
+            local_idx += 1;
+        }
+        let match_i32_base = local_idx;
+        for _ in 0..scratch_depth {
+            local_decls.push((1, ValType::I32));
+            local_idx += 1;
+        }
+
+        let mut wasm_func = Function::new(local_decls);
+
+        // Load captured vars from env
+        for (ci, (vid, ty)) in capture_list.iter().enumerate() {
+            if let Some(vt) = values::ty_to_valtype(ty) {
+                let cap_local = var_map[&vid.0];
+                let offset = ci as u32 * 8; // each capture slot is 8 bytes (padded)
+                wasm_func.instruction(&wasm_encoder::Instruction::LocalGet(0)); // env_ptr
+                match vt {
+                    ValType::I64 => {
+                        wasm_func.instruction(&wasm_encoder::Instruction::I64Load(
+                            wasm_encoder::MemArg { offset: offset as u64, align: 3, memory_index: 0 }
+                        ));
+                    }
+                    ValType::F64 => {
+                        wasm_func.instruction(&wasm_encoder::Instruction::F64Load(
+                            wasm_encoder::MemArg { offset: offset as u64, align: 3, memory_index: 0 }
+                        ));
+                    }
+                    _ => {
+                        wasm_func.instruction(&wasm_encoder::Instruction::I32Load(
+                            wasm_encoder::MemArg { offset: offset as u64, align: 2, memory_index: 0 }
+                        ));
+                    }
+                }
+                wasm_func.instruction(&wasm_encoder::Instruction::LocalSet(cap_local));
+            }
+        }
+
+        // Compile body
+        let compiled_func = {
+            let mut compiler = FuncCompiler {
+                emitter: &mut *emitter,
+                func: wasm_func,
+                var_map,
+                depth: 0,
+                loop_stack: Vec::new(),
+                match_i64_base,
+                match_i32_base,
+                match_depth: 0,
+                var_table: &program.var_table,
+            };
+            compiler.emit_expr(body);
+            compiler.func.instruction(&wasm_encoder::Instruction::End);
+            compiler.func
+        };
+
+        emitter.add_compiled(CompiledFunc { type_idx, func: compiled_func });
+    }
+
+    // Compile FnRef wrappers
+    fn_ref_names.sort(); // deterministic order
+    for fn_name in &fn_ref_names {
+        if let Some(&orig_func_idx) = emitter.func_map.get(fn_name.as_str()) {
+            if let Some(&orig_type_idx) = emitter.func_type_indices.get(&orig_func_idx) {
+                let (orig_params, orig_results) = emitter.types[orig_type_idx as usize].clone();
+                // Wrapper: (env: i32, params...) -> results  { call original(params...) }
+                let mut wrapper_params = vec![ValType::I32];
+                wrapper_params.extend_from_slice(&orig_params);
+                let wrapper_type_idx = emitter.register_type(wrapper_params, orig_results);
+
+                let mut f = Function::new([]);
+                // Skip env (local 0), pass remaining params to original
+                for i in 0..orig_params.len() {
+                    f.instruction(&wasm_encoder::Instruction::LocalGet((i + 1) as u32));
+                }
+                f.instruction(&wasm_encoder::Instruction::Call(orig_func_idx));
+                f.instruction(&wasm_encoder::Instruction::End);
+
+                emitter.add_compiled(CompiledFunc { type_idx: wrapper_type_idx, func: f });
+            }
+        }
+    }
+}
+
+/// Recursively scan an expression for Lambda and FnRef nodes.
+fn scan_closures_expr(
+    expr: &IrExpr,
+    scope_vars: &mut HashSet<u32>,
+    var_table: &crate::ir::VarTable,
+    lambdas: &mut Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, HashSet<u32>)>,
+    fn_refs: &mut HashSet<String>,
+) {
+    match &expr.kind {
+        IrExprKind::Lambda { params, body } => {
+            // Compute captures: vars referenced in body but not in params
+            let param_ids: HashSet<u32> = params.iter().map(|(vid, _)| vid.0).collect();
+            let mut body_vars = HashSet::new();
+            collect_var_refs(body, &mut body_vars);
+            let captures: HashSet<u32> = body_vars.difference(&param_ids)
+                .copied()
+                .filter(|vid| scope_vars.contains(vid))
+                .collect();
+
+            let param_list: Vec<(VarId, crate::types::Ty)> = params.iter()
+                .map(|(vid, ty)| (*vid, ty.clone()))
+                .collect();
+            lambdas.push((param_list, *body.clone(), captures));
+
+            // Also scan inside the lambda body for nested lambdas
+            let mut inner_scope = scope_vars.clone();
+            for (vid, _) in params {
+                inner_scope.insert(vid.0);
+            }
+            scan_closures_expr(body, &mut inner_scope, var_table, lambdas, fn_refs);
+        }
+        IrExprKind::FnRef { name } => {
+            fn_refs.insert(name.clone());
+        }
+        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+            for stmt in stmts {
+                scan_closures_stmt(stmt, scope_vars, var_table, lambdas, fn_refs);
+            }
+            if let Some(e) = expr { scan_closures_expr(e, scope_vars, var_table, lambdas, fn_refs); }
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            scan_closures_expr(cond, scope_vars, var_table, lambdas, fn_refs);
+            scan_closures_expr(then, scope_vars, var_table, lambdas, fn_refs);
+            scan_closures_expr(else_, scope_vars, var_table, lambdas, fn_refs);
+        }
+        IrExprKind::BinOp { left, right, .. } => {
+            scan_closures_expr(left, scope_vars, var_table, lambdas, fn_refs);
+            scan_closures_expr(right, scope_vars, var_table, lambdas, fn_refs);
+        }
+        IrExprKind::UnOp { operand, .. } => {
+            scan_closures_expr(operand, scope_vars, var_table, lambdas, fn_refs);
+        }
+        IrExprKind::Call { target, args, .. } => {
+            match target {
+                crate::ir::CallTarget::Method { object, .. } => scan_closures_expr(object, scope_vars, var_table, lambdas, fn_refs),
+                crate::ir::CallTarget::Computed { callee } => scan_closures_expr(callee, scope_vars, var_table, lambdas, fn_refs),
+                _ => {}
+            }
+            for arg in args { scan_closures_expr(arg, scope_vars, var_table, lambdas, fn_refs); }
+        }
+        IrExprKind::While { cond, body } => {
+            scan_closures_expr(cond, scope_vars, var_table, lambdas, fn_refs);
+            for stmt in body { scan_closures_stmt(stmt, scope_vars, var_table, lambdas, fn_refs); }
+        }
+        IrExprKind::ForIn { iterable, body, .. } => {
+            scan_closures_expr(iterable, scope_vars, var_table, lambdas, fn_refs);
+            for stmt in body { scan_closures_stmt(stmt, scope_vars, var_table, lambdas, fn_refs); }
+        }
+        IrExprKind::Match { subject, arms } => {
+            scan_closures_expr(subject, scope_vars, var_table, lambdas, fn_refs);
+            for arm in arms { scan_closures_expr(&arm.body, scope_vars, var_table, lambdas, fn_refs); }
+        }
+        IrExprKind::Record { fields, .. } => {
+            for (_, e) in fields { scan_closures_expr(e, scope_vars, var_table, lambdas, fn_refs); }
+        }
+        IrExprKind::Tuple { elements } | IrExprKind::List { elements } => {
+            for e in elements { scan_closures_expr(e, scope_vars, var_table, lambdas, fn_refs); }
+        }
+        IrExprKind::Member { object, .. } | IrExprKind::IndexAccess { object, .. } => {
+            scan_closures_expr(object, scope_vars, var_table, lambdas, fn_refs);
+        }
+        IrExprKind::StringInterp { parts } => {
+            for p in parts {
+                if let crate::ir::IrStringPart::Expr { expr } = p {
+                    scan_closures_expr(expr, scope_vars, var_table, lambdas, fn_refs);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn scan_closures_stmt(
+    stmt: &IrStmt,
+    scope_vars: &mut HashSet<u32>,
+    var_table: &crate::ir::VarTable,
+    lambdas: &mut Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, HashSet<u32>)>,
+    fn_refs: &mut HashSet<String>,
+) {
+    match &stmt.kind {
+        IrStmtKind::Bind { var, value, .. } => {
+            scan_closures_expr(value, scope_vars, var_table, lambdas, fn_refs);
+            scope_vars.insert(var.0);
+        }
+        IrStmtKind::Assign { value, .. } => {
+            scan_closures_expr(value, scope_vars, var_table, lambdas, fn_refs);
+        }
+        IrStmtKind::Expr { expr } => {
+            scan_closures_expr(expr, scope_vars, var_table, lambdas, fn_refs);
+        }
+        IrStmtKind::Guard { cond, else_ } => {
+            scan_closures_expr(cond, scope_vars, var_table, lambdas, fn_refs);
+            scan_closures_expr(else_, scope_vars, var_table, lambdas, fn_refs);
+        }
+        _ => {}
+    }
+}
+
+/// Collect all Var references in an expression.
+fn collect_var_refs(expr: &IrExpr, vars: &mut HashSet<u32>) {
+    match &expr.kind {
+        IrExprKind::Var { id } => { vars.insert(id.0); }
+        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+            for stmt in stmts {
+                match &stmt.kind {
+                    IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => collect_var_refs(value, vars),
+                    IrStmtKind::Expr { expr } => collect_var_refs(expr, vars),
+                    IrStmtKind::Guard { cond, else_ } => { collect_var_refs(cond, vars); collect_var_refs(else_, vars); }
+                    _ => {}
+                }
+            }
+            if let Some(e) = expr { collect_var_refs(e, vars); }
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            collect_var_refs(cond, vars); collect_var_refs(then, vars); collect_var_refs(else_, vars);
+        }
+        IrExprKind::BinOp { left, right, .. } => { collect_var_refs(left, vars); collect_var_refs(right, vars); }
+        IrExprKind::UnOp { operand, .. } => collect_var_refs(operand, vars),
+        IrExprKind::Call { args, target, .. } => {
+            if let crate::ir::CallTarget::Computed { callee } = target { collect_var_refs(callee, vars); }
+            if let crate::ir::CallTarget::Method { object, .. } = target { collect_var_refs(object, vars); }
+            for a in args { collect_var_refs(a, vars); }
+        }
+        _ => {}
+    }
 }
 
 #[cfg(test)]
