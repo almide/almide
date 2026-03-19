@@ -1,0 +1,73 @@
+// string extra tests — deeper coverage of string module
+
+test "string.pad_start with spaces" {
+  assert_eq(string.pad_start("hi", 6, " "), "    hi")
+}
+
+test "string.pad_start already exceeds width" {
+  assert_eq(string.pad_start("hello world", 5, " "), "hello world")
+}
+
+test "string.pad_end with dots" {
+  assert_eq(string.pad_end("hi", 6, "."), "hi....")
+}
+
+test "string.pad_end already exceeds width" {
+  assert_eq(string.pad_end("hello world", 5, " "), "hello world")
+}
+
+test "string.trim_start tabs" {
+  assert_eq(string.trim_start("\t\thello"), "hello")
+}
+
+test "string.trim_end mixed whitespace" {
+  assert_eq(string.trim_end("hello \t\n"), "hello")
+}
+
+test "string.repeat zero times" {
+  assert_eq(string.repeat("abc", 0), "")
+}
+
+test "string.replace all occurrences" {
+  assert_eq(string.replace("foo bar foo", "foo", "baz"), "baz bar baz")
+}
+
+test "string.chars empty string" {
+  assert_eq(string.chars(""), [])
+}
+
+test "string.is_empty true and false" {
+  assert(string.is_empty(""))
+  assert(not string.is_empty("x"))
+}
+
+test "string.starts_with match" {
+  assert(string.starts_with("hello world", "hello"))
+  assert(not string.starts_with("hello world", "world"))
+}
+
+test "string.ends_with match" {
+  assert(string.ends_with("hello world", "world"))
+  assert(not string.ends_with("hello world", "hello"))
+}
+
+test "string.index_of found and not found" {
+  assert_eq(string.index_of("hello", "ell"), some(1))
+  assert_eq(string.index_of("hello", "xyz"), none)
+}
+
+test "string.strip_prefix match" {
+  assert_eq(string.strip_prefix("hello world", "hello "), some("world"))
+}
+
+test "string.strip_prefix no match" {
+  assert_eq(string.strip_prefix("hello world", "xyz"), none)
+}
+
+test "string.strip_suffix match" {
+  assert_eq(string.strip_suffix("hello world", " world"), some("hello"))
+}
+
+test "string.strip_suffix no match" {
+  assert_eq(string.strip_suffix("hello world", "xyz"), none)
+}

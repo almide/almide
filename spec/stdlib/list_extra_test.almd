@@ -1,0 +1,90 @@
+// list extra tests — deeper coverage of list module
+
+test "list.take basic" {
+  assert_eq(list.take([1, 2, 3, 4, 5], 3), [1, 2, 3])
+}
+
+test "list.take more than length" {
+  assert_eq(list.take([1, 2], 10), [1, 2])
+}
+
+test "list.drop basic" {
+  assert_eq(list.drop([1, 2, 3, 4, 5], 2), [3, 4, 5])
+}
+
+test "list.drop more than length" {
+  assert_eq(list.drop([1, 2], 10), [])
+}
+
+test "list.enumerate preserves length" {
+  let result = list.enumerate(["a", "b", "c"])
+  assert_eq(list.len(result), 3)
+}
+
+test "list.enumerate empty list" {
+  let empty: List[Int] = []
+  let result = list.enumerate(empty)
+  assert_eq(list.len(result), 0)
+}
+
+test "list.zip basic" {
+  let result = list.zip([1, 2, 3], ["a", "b", "c"])
+  assert_eq(list.len(result), 3)
+}
+
+test "list.zip truncates to shorter" {
+  let result = list.zip([1, 2], ["a", "b", "c"])
+  assert_eq(list.len(result), 2)
+}
+
+test "list.find returns some on match" {
+  assert_eq(list.find([1, 2, 3, 4], (x) => x > 2), some(3))
+}
+
+test "list.find returns none on no match" {
+  assert_eq(list.find([1, 2, 3], (x) => x > 10), none)
+}
+
+test "list.any true case" {
+  assert(list.any([1, 2, 3], (x) => x == 2))
+}
+
+test "list.any false case" {
+  assert(not list.any([1, 2, 3], (x) => x > 10))
+}
+
+test "list.all true case" {
+  assert(list.all([2, 4, 6], (x) => x % 2 == 0))
+}
+
+test "list.all false case" {
+  assert(not list.all([2, 3, 6], (x) => x % 2 == 0))
+}
+
+test "list.fold sum" {
+  assert_eq(list.fold([1, 2, 3, 4], 0, (acc, x) => acc + x), 10)
+}
+
+test "list.reduce on non-empty" {
+  assert_eq(list.reduce([1, 2, 3], (a, b) => a + b), some(6))
+}
+
+test "list.first and last" {
+  assert_eq(list.first([10, 20, 30]), some(10))
+  assert_eq(list.last([10, 20, 30]), some(30))
+  let empty: List[Int] = []
+  assert_eq(list.first(empty), none)
+  assert_eq(list.last(empty), none)
+}
+
+test "list.unique removes duplicates" {
+  assert_eq(list.unique([1, 2, 2, 3, 1, 3]), [1, 2, 3])
+}
+
+test "list.chunk even split" {
+  assert_eq(list.chunk([1, 2, 3, 4, 5, 6], 2), [[1, 2], [3, 4], [5, 6]])
+}
+
+test "list.scan running sum" {
+  assert_eq(list.scan([1, 2, 3], 0, (acc, x) => acc + x), [1, 3, 6])
+}
