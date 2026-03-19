@@ -62,11 +62,32 @@ Discovered while writing 386+ new test blocks across 32 test files (v0.8.4).
 - `pub type Point = { ... }` rejected — `pub` only works on `fn`
 - Types are always module-public by default
 
+## Dead Keywords (reserved but no functionality)
+
+5 keywords are in the lexer and almide-grammar but have zero implementation:
+
+| Keyword | Lexer | Parser | Checker | Codegen | Action |
+|---|---|---|---|---|---|
+| `async` | TokenType::Async | consumed as modifier | no effect | ignored | Remove or repurpose for fan |
+| `await` | TokenType::Await | parsed as prefix expr | no type rule | generates invalid code | Remove (fan replaces) |
+| `try` | TokenType::Try | parsed as prefix expr | no type rule | generates invalid code | Remove or implement |
+| `deriving` | TokenType::Deriving | parsed in type decl | no derive logic | ignored | Remove or implement auto-derive |
+| `unsafe` | TokenType::Unsafe | NOT parsed as expr | — | — | Remove or implement |
+
+**Recommendation**: Remove `async`, `await`, `try`, `unsafe`, `deriving` from lexer keywords. Keep as identifiers or soft-keywords if needed later. This reduces the keyword count from 42 to 37 and eliminates dead code paths.
+
+Also update:
+- almide-grammar `keyword_groups()` — remove 5 keywords
+- vscode-almide tmLanguage — remove from scopes
+- tree-sitter-almide grammar.js — remove rules
+- docs/SPEC.md keyword list
+
 ## Priority
 
-1. **Record spread codegen** — High (commonly expected syntax)
-2. **result.is_ok/is_err UFCS** — High (common pattern)
-3. **Missing runtime functions** — Medium (7 functions)
-4. **math.pow sig mismatch** — Medium (easy fix)
-5. **value/error arg decoration** — Low (workarounds exist)
-6. **unsafe/newtype/trait-impl** — Low (language design decisions needed)
+1. **Dead keyword cleanup** — High (reduces confusion, aligns grammar with reality)
+2. **Record spread codegen** — High (commonly expected syntax)
+3. **result.is_ok/is_err UFCS** — High (common pattern)
+4. **Missing runtime functions** — Medium (7 functions)
+5. **math.pow sig mismatch** — Medium (easy fix)
+6. **value/error arg decoration** — Low (workarounds exist)
+7. **newtype/trait-impl** — Low (language design decisions needed)
