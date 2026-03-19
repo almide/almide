@@ -11,7 +11,7 @@
 
 - [x] **Phase 1: Ty ヘルパー + TypeConstructor 基盤** → [done/hkt-foundation-phase1.md](../done/hkt-foundation-phase1.md)
 - [x] **Phase 2: 代数法則テーブル** (6 法則)
-- [x] **Phase 3: Stream Fusion Nanopass** (map+map, filter+filter, map+fold)
+- [x] **Phase 3: Stream Fusion Nanopass** — 全 6 代数法則の IR rewrite 実装完了
 - [x] **Phase 4: Ty::Applied 統一** — List/Option/Result/Map 削除、Applied(TypeConstructorId, Vec<Ty>) に統一。23 ファイル、~200 match arms 移行。
 
 ---
@@ -31,14 +31,18 @@
 
 ---
 
-## Stream Fusion 拡張 (将来)
+## Stream Fusion — 全 6 法則 ✅
 
-| 法則 | 状態 |
+| 法則 | 変換 | 状態 |
+|------|------|------|
+| FunctorComposition | `map(map(x,f),g)` → `map(x, f>>g)` | ✅ |
+| FunctorIdentity | `map(x, id)` → `x` | ✅ |
+| FilterComposition | `filter(filter(x,p),q)` → `filter(x, p&&q)` | ✅ |
+| MapFoldFusion | `fold(map(x,f),i,g)` → `fold(x, i, g∘f)` | ✅ |
+| MapFilterFusion | `filter(map(x,f),p)` → `filter_map(x, ...)` | ✅ |
+| MonadAssociativity | `flat_map(flat_map(x,f),g)` → `flat_map(x, f>>=g)` | ✅ |
+
+### 将来の拡張
+| 項目 | 状態 |
 |------|------|
-| FunctorComposition (map+map) | ✅ 実装済み |
-| FilterComposition (filter+filter) | ✅ 実装済み |
-| MapFoldFusion (map+fold) | ✅ 実装済み |
-| MapFilterFusion (map+filter → filter_map) | 未実装 |
-| FunctorIdentity (map(id) 消去) | 未実装 |
-| MonadAssociativity (flat_map+flat_map) | 未実装 |
 | Let-binding chain rewrite | 検出のみ (書き換え未実装) |

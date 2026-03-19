@@ -44,7 +44,7 @@ Effect推論         自動capability推論 (IO/Net/Env/Time/Rand/Fan/Log) + alm
 エラー処理         Option + Result の 2 機構のみ (Swift の 3 機構の失敗を回避)
 Codec              auto-derive encode/decode, Value 型, JSON roundtrip
 IR                 Typed IR + constant folding, dead code elimination + 12 nanopass
-最適化             Stream Fusion (map+map, filter+filter, map+fold) — 代数法則ベースの中間alloc消滅
+最適化             Stream Fusion 全6法則 — map+map, filter+filter, map+fold, map+filter→filter_map, identity消去, flat_map+flat_map
 Borrow             use-count ベースの clone 挿入/削除
 診断               file:line + context + actionable hint + error recovery
 Codegen            v3: TOML templates, is_rust()=0, 106/106 cross-target
