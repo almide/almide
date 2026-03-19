@@ -246,29 +246,9 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
 
         IrExprKind::Match { subject, arms } => {
-            let mut subj = render_expr(ctx, subject);
-            // String subjects may need transformation for pattern matching (e.g., .as_str() in Rust)
-            if matches!(&subject.ty, Ty::String) {
-                let has_str_pat = arms.iter().any(|a| matches!(&a.pattern, IrPattern::Literal { expr } if matches!(&expr.kind, IrExprKind::LitStr { .. })));
-                if has_str_pat {
-                    subj = ctx.templates.render_with("string_match_subject", None, &[], &[("subject", subj.as_str())])
-                        .unwrap_or_else(|| subj.clone());
-                }
-            }
-            // Option<String> subjects → .as_deref() so Some("literal") patterns match
-            if let Ty::Applied(TypeConstructorId::Option, args) = &subject.ty {
-                if args.len() == 1 && matches!(&args[0], Ty::String) {
-                    let has_some_str_pat = arms.iter().any(|a| {
-                        if let IrPattern::Some { inner } = &a.pattern {
-                            matches!(inner.as_ref(), IrPattern::Literal { expr } if matches!(&expr.kind, IrExprKind::LitStr { .. }))
-                        } else { false }
-                    });
-                    if has_some_str_pat {
-                        subj = ctx.templates.render_with("option_string_match_subject", None, &[], &[("subject", subj.as_str())])
-                            .unwrap_or_else(|| format!("{}.as_deref()", subj));
-                    }
-                }
-            }
+            // Match subject transforms (.as_str(), .as_deref()) are handled by
+            // MatchSubjectPass nanopass — walker just renders what's in the IR.
+            let subj = render_expr(ctx, subject);
             let arms_str = arms.iter()
                 .map(|arm| render_match_arm(ctx, arm))
                 .collect::<Vec<_>>()
@@ -585,13 +565,14 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::IndexAccess { object, index } => {
             let obj_str = render_expr(ctx, object);
             let idx = render_expr(ctx, index);
-            if object.ty.is_map() {
-                ctx.templates.render_with("map_get", None, &[], &[("object", obj_str.as_str()), ("key", idx.as_str())])
-                    .unwrap_or_else(|| "map_get(...)".into())
-            } else {
-                ctx.templates.render_with("index_access", None, &[], &[("object", obj_str.as_str()), ("index", idx.as_str())])
-                    .unwrap_or_else(|| "idx[...]".into())
-            }
+            ctx.templates.render_with("index_access", None, &[], &[("object", obj_str.as_str()), ("index", idx.as_str())])
+                .unwrap_or_else(|| "idx[...]".into())
+        }
+        IrExprKind::MapAccess { object, key } => {
+            let obj_str = render_expr(ctx, object);
+            let key_str = render_expr(ctx, key);
+            ctx.templates.render_with("map_get", None, &[], &[("object", obj_str.as_str()), ("key", key_str.as_str())])
+                .unwrap_or_else(|| "map_get(...)".into())
         }
 
         // ── Map ──
@@ -754,12 +735,12 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
             ctx.templates.render_with("ne_expr", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("_ != _"))
         }
+        BinOp::PowInt => {
+            ctx.templates.render_with("power_expr", Some("Int"), &[], &[("left", l.as_str()), ("right", r.as_str())])
+                .unwrap_or_else(|| format!("pow(_, _)"))
+        }
         BinOp::PowFloat => {
-            let ty_tag = match &left.ty {
-                Ty::Int => "Int",
-                _ => "Float",
-            };
-            ctx.templates.render_with("power_expr", Some(ty_tag), &[], &[("left", l.as_str()), ("right", r.as_str())])
+            ctx.templates.render_with("power_expr", Some("Float"), &[], &[("left", l.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("pow(_, _)"))
         }
         _ => {
@@ -938,14 +919,15 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let target_str = ctx.var_name(*target).to_string();
             let idx_str = render_expr(ctx, index);
             let val_str = render_expr(ctx, value);
-            let target_ty = &ctx.var_table.get(*target).ty;
-            if target_ty.is_map() {
-                ctx.templates.render_with("map_insert", None, &[], &[("target", target_str.as_str()), ("key", idx_str.as_str()), ("value", val_str.as_str())])
-                    .unwrap_or_else(|| "map_set(...)".into())
-            } else {
-                ctx.templates.render_with("index_assign", None, &[], &[("target", target_str.as_str()), ("index", idx_str.as_str()), ("value", val_str.as_str())])
-                    .unwrap_or_else(|| "idx[...] = ...;".into())
-            }
+            ctx.templates.render_with("index_assign", None, &[], &[("target", target_str.as_str()), ("index", idx_str.as_str()), ("value", val_str.as_str())])
+                .unwrap_or_else(|| "idx[...] = ...;".into())
+        }
+        IrStmtKind::MapInsert { target, key, value } => {
+            let target_str = ctx.var_name(*target).to_string();
+            let key_str = render_expr(ctx, key);
+            let val_str = render_expr(ctx, value);
+            ctx.templates.render_with("map_insert", None, &[], &[("target", target_str.as_str()), ("key", key_str.as_str()), ("value", val_str.as_str())])
+                .unwrap_or_else(|| "map_set(...)".into())
         }
         IrStmtKind::FieldAssign { target, field, value } => {
             let target_str = ctx.var_name(*target).to_string();

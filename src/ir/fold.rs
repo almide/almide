@@ -63,6 +63,10 @@ fn fold_expr(expr: &mut IrExpr) {
             fold_expr(object);
             fold_expr(index);
         }
+        IrExprKind::MapAccess { object, key } => {
+            fold_expr(object);
+            fold_expr(key);
+        }
         IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => fold_expr(object),
         IrExprKind::MapLiteral { entries } => {
             for (k, v) in entries { fold_expr(k); fold_expr(v); }
@@ -136,6 +140,10 @@ fn fold_stmt(stmt: &mut IrStmt) {
         | IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => fold_expr(value),
         IrStmtKind::IndexAssign { index, value, .. } => {
             fold_expr(index);
+            fold_expr(value);
+        }
+        IrStmtKind::MapInsert { key, value, .. } => {
+            fold_expr(key);
             fold_expr(value);
         }
         IrStmtKind::Guard { cond, else_ } => {

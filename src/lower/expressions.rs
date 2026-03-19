@@ -111,7 +111,7 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                 ("*", Ty::Float, _) | ("*", _, Ty::Float) => BinOp::MulFloat, ("*", _, _) => BinOp::MulInt,
                 ("/", Ty::Float, _) | ("/", _, Ty::Float) => BinOp::DivFloat, ("/", _, _) => BinOp::DivInt,
                 ("%", Ty::Float, _) | ("%", _, Ty::Float) => BinOp::ModFloat, ("%", _, _) => BinOp::ModInt,
-                ("**", _, _) => BinOp::PowFloat,
+                ("**", Ty::Float, _) | ("**", _, Ty::Float) => BinOp::PowFloat, ("**", _, _) => BinOp::PowInt,
                 ("^", _, _) => BinOp::XorInt,
                 ("++", Ty::String, _) => BinOp::ConcatStr, // legacy
                 ("++", _, _) => BinOp::ConcatList,         // legacy
@@ -274,7 +274,11 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         ast::Expr::IndexAccess { object, index, .. } => {
             let obj = lower_expr(ctx, object);
             let idx = lower_expr(ctx, index);
-            ctx.mk(IrExprKind::IndexAccess { object: Box::new(obj), index: Box::new(idx) }, ty, span)
+            if obj.ty.is_map() {
+                ctx.mk(IrExprKind::MapAccess { object: Box::new(obj), key: Box::new(idx) }, ty, span)
+            } else {
+                ctx.mk(IrExprKind::IndexAccess { object: Box::new(obj), index: Box::new(idx) }, ty, span)
+            }
         }
 
         // ── String interpolation ──

@@ -92,6 +92,10 @@ fn count_uses_in_expr(expr: &IrExpr, table: &mut VarTable) {
             count_uses_in_expr(object, table);
             count_uses_in_expr(index, table);
         }
+        IrExprKind::MapAccess { object, key } => {
+            count_uses_in_expr(object, table);
+            count_uses_in_expr(key, table);
+        }
         IrExprKind::ForIn { iterable, body, .. } => {
             count_uses_in_expr(iterable, table);
             // Collect vars defined inside the loop body
@@ -147,6 +151,10 @@ fn count_uses_in_stmt(stmt: &IrStmt, table: &mut VarTable) {
         }
         IrStmtKind::IndexAssign { index, value, .. } => {
             count_uses_in_expr(index, table);
+            count_uses_in_expr(value, table);
+        }
+        IrStmtKind::MapInsert { key, value, .. } => {
+            count_uses_in_expr(key, table);
             count_uses_in_expr(value, table);
         }
         IrStmtKind::FieldAssign { value, .. } => {
@@ -234,6 +242,10 @@ fn bump_vars_in_expr(expr: &IrExpr, locals: &HashSet<u32>, table: &mut VarTable)
             bump_vars_in_expr(object, locals, table);
             bump_vars_in_expr(index, locals, table);
         }
+        IrExprKind::MapAccess { object, key } => {
+            bump_vars_in_expr(object, locals, table);
+            bump_vars_in_expr(key, locals, table);
+        }
         IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
             for e in elements { bump_vars_in_expr(e, locals, table); }
         }
@@ -250,6 +262,10 @@ fn bump_vars_in_stmt(stmt: &IrStmt, locals: &HashSet<u32>, table: &mut VarTable)
         | IrStmtKind::Assign { value, .. } => bump_vars_in_expr(value, locals, table),
         IrStmtKind::IndexAssign { index, value, .. } => {
             bump_vars_in_expr(index, locals, table);
+            bump_vars_in_expr(value, locals, table);
+        }
+        IrStmtKind::MapInsert { key, value, .. } => {
+            bump_vars_in_expr(key, locals, table);
             bump_vars_in_expr(value, locals, table);
         }
         IrStmtKind::FieldAssign { value, .. } => bump_vars_in_expr(value, locals, table),
@@ -315,6 +331,11 @@ fn collect_assigned_vars_stmt(stmt: &IrStmt, assigned: &mut HashSet<u32>) {
         IrStmtKind::IndexAssign { target, index, value } => {
             assigned.insert(target.0);
             collect_assigned_vars(index, assigned);
+            collect_assigned_vars(value, assigned);
+        }
+        IrStmtKind::MapInsert { target, key, value } => {
+            assigned.insert(target.0);
+            collect_assigned_vars(key, assigned);
             collect_assigned_vars(value, assigned);
         }
         IrStmtKind::FieldAssign { target, value, .. } => {

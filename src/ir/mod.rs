@@ -19,12 +19,16 @@ use crate::types::Ty;
 mod unknown;
 mod fold;
 mod use_count;
+mod verify;
+pub mod visit;
 pub mod result;
 
 pub use unknown::*;
 pub use fold::*;
 pub use use_count::*;
 pub use result::is_ir_result_expr;
+pub use verify::{verify_program, IrVerifyError};
+pub use visit::{IrVisitor, walk_expr, walk_stmt, walk_pattern};
 
 // ── Identifiers ─────────────────────────────────────────────────
 
@@ -42,7 +46,7 @@ pub enum BinOp {
     MulInt, MulFloat,
     DivInt, DivFloat,
     ModInt, ModFloat,
-    PowFloat,
+    PowInt, PowFloat,
     XorInt,
     ConcatStr, ConcatList,
     Eq, Neq,
@@ -224,6 +228,8 @@ pub enum IrExprKind {
     Member { object: Box<IrExpr>, field: String },
     TupleIndex { object: Box<IrExpr>, index: usize },
     IndexAccess { object: Box<IrExpr>, index: Box<IrExpr> },
+    /// Map key lookup: `map[key]` → returns Option<V>. Distinct from IndexAccess (list).
+    MapAccess { object: Box<IrExpr>, key: Box<IrExpr> },
 
     // ── Functions ──
     Lambda { params: Vec<(VarId, Ty)>, body: Box<IrExpr> },
@@ -279,6 +285,8 @@ pub enum IrStmtKind {
     BindDestructure { pattern: IrPattern, value: IrExpr },
     Assign { var: VarId, value: IrExpr },
     IndexAssign { target: VarId, index: IrExpr, value: IrExpr },
+    /// Map key insertion: `map[key] = value`. Distinct from IndexAssign (list).
+    MapInsert { target: VarId, key: IrExpr, value: IrExpr },
     FieldAssign { target: VarId, field: String, value: IrExpr },
     Guard { cond: IrExpr, else_: IrExpr },
     Expr { expr: IrExpr },

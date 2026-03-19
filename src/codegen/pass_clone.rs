@@ -156,6 +156,10 @@ fn insert_clones(expr: IrExpr, clone_ids: &HashSet<VarId>) -> IrExpr {
             object: Box::new(insert_clones(*object, clone_ids)),
             index: Box::new(insert_clones(*index, clone_ids)),
         },
+        IrExprKind::MapAccess { object, key } => IrExprKind::MapAccess {
+            object: Box::new(insert_clones(*object, clone_ids)),
+            key: Box::new(insert_clones(*key, clone_ids)),
+        },
         IrExprKind::Range { start, end, inclusive } => IrExprKind::Range {
             start: Box::new(insert_clones(*start, clone_ids)),
             end: Box::new(insert_clones(*end, clone_ids)),

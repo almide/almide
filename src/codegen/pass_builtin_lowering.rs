@@ -254,6 +254,10 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
             object: Box::new(rewrite_expr(*object)),
             index: Box::new(rewrite_expr(*index)),
         },
+        IrExprKind::MapAccess { object, key } => IrExprKind::MapAccess {
+            object: Box::new(rewrite_expr(*object)),
+            key: Box::new(rewrite_expr(*key)),
+        },
         IrExprKind::TupleIndex { object, index } => IrExprKind::TupleIndex {
             object: Box::new(rewrite_expr(*object)), index,
         },

@@ -43,7 +43,12 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
             let var = ctx.lookup_var(target).unwrap_or(VarId(0));
             let ir_idx = lower_expr(ctx, index);
             let ir_val = lower_expr(ctx, value);
-            IrStmtKind::IndexAssign { target: var, index: ir_idx, value: ir_val }
+            let var_ty = &ctx.var_table.get(var).ty;
+            if var_ty.is_map() {
+                IrStmtKind::MapInsert { target: var, key: ir_idx, value: ir_val }
+            } else {
+                IrStmtKind::IndexAssign { target: var, index: ir_idx, value: ir_val }
+            }
         }
         ast::Stmt::FieldAssign { target, field, value, .. } => {
             let var = ctx.lookup_var(target).unwrap_or(VarId(0));
