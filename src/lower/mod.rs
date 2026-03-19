@@ -157,36 +157,36 @@ impl<'a> LowerCtx<'a> {
                 "join" => Ty::String,
                 "len" | "count" => Ty::Int,
                 "any" | "all" | "contains" | "is_empty" => Ty::Bool,
-                "find" | "first" | "last" => Ty::Option(Box::new(Ty::Unknown)),
-                "find_index" | "index_of" => Ty::Option(Box::new(Ty::Int)),
+                "find" | "first" | "last" => Ty::option(Ty::Unknown),
+                "find_index" | "index_of" => Ty::option(Ty::Int),
                 "fold" | "reduce" | "sum" | "product" => Ty::Unknown,
-                _ => Ty::List(Box::new(Ty::Unknown)),
+                _ => Ty::list(Ty::Unknown),
             },
             "string" => match method {
                 "len" | "count" => Ty::Int,
                 "contains" | "starts_with" | "ends_with" | "is_empty"
                     | "is_digit" | "is_alpha" | "is_alphanumeric"
                     | "is_whitespace" | "is_upper" | "is_lower" => Ty::Bool,
-                "split" | "lines" | "chars" | "to_bytes" => Ty::List(Box::new(Ty::String)),
-                "index_of" | "last_index_of" => Ty::Option(Box::new(Ty::Int)),
+                "split" | "lines" | "chars" | "to_bytes" => Ty::list(Ty::String),
+                "index_of" | "last_index_of" => Ty::option(Ty::Int),
                 "codepoint" => Ty::Int,
                 _ => Ty::String,
             },
             "map" => match method {
                 "len" | "count" => Ty::Int,
                 "contains" | "is_empty" => Ty::Bool,
-                "keys" | "values" => Ty::List(Box::new(Ty::Unknown)),
-                "entries" => Ty::List(Box::new(Ty::Tuple(vec![Ty::Unknown, Ty::Unknown]))),
-                _ => Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)),
+                "keys" | "values" => Ty::list(Ty::Unknown),
+                "entries" => Ty::list(Ty::Tuple(vec![Ty::Unknown, Ty::Unknown])),
+                _ => Ty::map_of(Ty::Unknown, Ty::Unknown),
             },
             "option" => match method {
                 "is_some" | "is_none" => Ty::Bool,
-                "to_list" => Ty::List(Box::new(Ty::Unknown)),
-                _ => Ty::Option(Box::new(Ty::Unknown)),
+                "to_list" => Ty::list(Ty::Unknown),
+                _ => Ty::option(Ty::Unknown),
             },
             "result" => match method {
                 "is_ok" | "is_err" => Ty::Bool,
-                _ => Ty::Result(Box::new(Ty::Unknown), Box::new(Ty::Unknown)),
+                _ => Ty::result(Ty::Unknown, Ty::Unknown),
             },
             "int" => Ty::String, // to_string, to_hex
             "float" => match method {

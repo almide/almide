@@ -138,7 +138,7 @@ impl Checker {
                     Some(Ty::Result(_, e)) => e.as_ref().clone(),
                     _ => Ty::String,
                 };
-                Ty::Result(Box::new(ok_ty), Box::new(err_ty))
+                Ty::result(ok_ty, err_ty)
             }
             "err" => {
                 let err_ty = arg_tys.first().cloned().unwrap_or(Ty::String);
@@ -146,9 +146,9 @@ impl Checker {
                     Some(Ty::Result(o, _)) => o.as_ref().clone(),
                     _ => Ty::Unit,
                 };
-                Ty::Result(Box::new(ok_ty), Box::new(err_ty))
+                Ty::result(ok_ty, err_ty)
             }
-            "some" => Ty::Option(Box::new(arg_tys.first().cloned().unwrap_or_else(|| self.fresh_var()))),
+            "some" => Ty::option(arg_tys.first().cloned().unwrap_or_else(|| self.fresh_var())),
             "unwrap_or" if arg_tys.len() >= 2 => {
                 let concrete = resolve_vars(&arg_tys[0], &self.solutions);
                 match &concrete {
@@ -354,7 +354,7 @@ impl Checker {
                                 resolve_vars(&ret_var, &self.solutions)
                             }
                         };
-                        return Some(Ty::List(Box::new(result_elem)));
+                        return Some(Ty::list(result_elem));
                     }
                     "race" => {
                         // fan.race(thunks) -> T where thunks: List[Fn() -> T]
@@ -418,13 +418,13 @@ impl Checker {
                             Ty::List(inner) => match inner.as_ref() {
                                 Ty::Fn { ret, .. } => match ret.as_ref() {
                                     Ty::Result(ok, err) => Ty::Result(ok.clone(), err.clone()),
-                                    other => Ty::Result(Box::new(other.clone()), Box::new(Ty::String)),
+                                    other => Ty::result(other.clone(), Ty::String),
                                 },
                                 _ => Ty::Unknown,
                             },
                             _ => Ty::Unknown,
                         };
-                        return Some(Ty::List(Box::new(inner_result)));
+                        return Some(Ty::list(inner_result));
                     }
                     "timeout" => {
                         // fan.timeout(ms, thunk) -> T
@@ -444,7 +444,7 @@ impl Checker {
                             },
                             _ => Ty::Unknown,
                         };
-                        return Some(Ty::Result(Box::new(result_ty), Box::new(Ty::String)));
+                        return Some(Ty::result(result_ty, Ty::String));
                     }
                     _ => {
                         self.emit(super::err(
@@ -503,7 +503,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn builtin_module_list() { assert_eq!(builtin_module_for_type(&Ty::List(Box::new(Ty::Int))), Some("list")); }
+    fn builtin_module_list() { assert_eq!(builtin_module_for_type(&Ty::list(Ty::Int)), Some("list")); }
     #[test]
     fn builtin_module_string() { assert_eq!(builtin_module_for_type(&Ty::String), Some("string")); }
     #[test]
@@ -511,11 +511,11 @@ mod tests {
     #[test]
     fn builtin_module_float() { assert_eq!(builtin_module_for_type(&Ty::Float), Some("float")); }
     #[test]
-    fn builtin_module_map() { assert_eq!(builtin_module_for_type(&Ty::Map(Box::new(Ty::String), Box::new(Ty::Int))), Some("map")); }
+    fn builtin_module_map() { assert_eq!(builtin_module_for_type(&Ty::map_of(Ty::String, Ty::Int)), Some("map")); }
     #[test]
-    fn builtin_module_result() { assert_eq!(builtin_module_for_type(&Ty::Result(Box::new(Ty::Int), Box::new(Ty::String))), Some("result")); }
+    fn builtin_module_result() { assert_eq!(builtin_module_for_type(&Ty::result(Ty::Int, Ty::String)), Some("result")); }
     #[test]
-    fn builtin_module_option() { assert_eq!(builtin_module_for_type(&Ty::Option(Box::new(Ty::Int))), Some("option")); }
+    fn builtin_module_option() { assert_eq!(builtin_module_for_type(&Ty::option(Ty::Int)), Some("option")); }
     #[test]
     fn builtin_module_none() { assert_eq!(builtin_module_for_type(&Ty::Bool), None); }
 

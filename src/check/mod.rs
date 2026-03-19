@@ -346,7 +346,7 @@ impl Checker {
                     }
                     let decode_key = format!("{}.decode", type_name);
                     if !self.env.functions.contains_key(&decode_key) {
-                        self.env.functions.insert(decode_key, FnSig { params: vec![("v".into(), value_ty.clone())], ret: Ty::Result(Box::new(type_ty.clone()), Box::new(Ty::String)), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone() });
+                        self.env.functions.insert(decode_key, FnSig { params: vec![("v".into(), value_ty.clone())], ret: Ty::result(type_ty.clone(), Ty::String), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone() });
                     }
                 }
                 _ => {}
@@ -567,10 +567,10 @@ impl Checker {
             ast::TypeExpr::Generic { name, args } => {
                 let ra: Vec<Ty> = args.iter().map(|a| self.resolve_type_expr(a)).collect();
                 match name.as_str() {
-                    "List" => Ty::List(Box::new(ra.first().cloned().unwrap_or(Ty::Unknown))),
-                    "Option" => Ty::Option(Box::new(ra.first().cloned().unwrap_or(Ty::Unknown))),
-                    "Result" if ra.len() >= 2 => Ty::Result(Box::new(ra[0].clone()), Box::new(ra[1].clone())),
-                    "Map" if ra.len() >= 2 => Ty::Map(Box::new(ra[0].clone()), Box::new(ra[1].clone())),
+                    "List" => Ty::list(ra.first().cloned().unwrap_or(Ty::Unknown)),
+                    "Option" => Ty::option(ra.first().cloned().unwrap_or(Ty::Unknown)),
+                    "Result" if ra.len() >= 2 => Ty::result(ra[0].clone(), ra[1].clone()),
+                    "Map" if ra.len() >= 2 => Ty::map_of(ra[0].clone(), ra[1].clone()),
                     _ => Ty::Named(name.clone(), ra),
                 }
             },

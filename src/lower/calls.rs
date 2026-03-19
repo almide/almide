@@ -34,7 +34,7 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
                 let parsed = ctx.mk(IrExprKind::Try { expr: Box::new(ctx.mk(IrExprKind::Call {
                     target: CallTarget::Module { module: module.clone(), func: "parse".into() },
                     args: vec![ir_arg], type_args: vec![],
-                }, Ty::Result(Box::new(Ty::Named("Value".into(), vec![])), Box::new(Ty::String)), span)) },
+                }, Ty::result(Ty::Named("Value".into(), vec![]), Ty::String), span)) },
                 Ty::Named("Value".into(), vec![]), span);
                 let decode_fn = format!("{}.decode", type_name);
                 return ctx.mk(IrExprKind::Call {

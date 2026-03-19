@@ -33,7 +33,7 @@ impl Checker {
             ast::Expr::Bool { .. } => Ty::Bool,
             ast::Expr::Unit { .. } => Ty::Unit,
 
-            ast::Expr::None { .. } => Ty::Option(Box::new(self.fresh_var())),
+            ast::Expr::None { .. } => Ty::option(self.fresh_var()),
 
             ast::Expr::Ident { name, .. } => {
                 self.env.used_vars.insert(name.clone());
@@ -58,11 +58,11 @@ impl Checker {
             }
 
             ast::Expr::List { elements, .. } => {
-                if elements.is_empty() { Ty::List(Box::new(self.fresh_var())) }
+                if elements.is_empty() { Ty::list(self.fresh_var()) }
                 else {
                     let first = self.infer_expr(&mut elements[0]);
                     for elem in elements.iter_mut().skip(1) { let et = self.infer_expr(elem); self.constrain(first.clone(), et, "list element"); }
-                    Ty::List(Box::new(first))
+                    Ty::list(first)
                 }
             }
 
@@ -115,7 +115,7 @@ impl Checker {
                 let concrete = resolve_vars(&obj_ty, &self.solutions);
                 match &concrete {
                     Ty::List(inner) => inner.as_ref().clone(),
-                    Ty::Map(_, v) => Ty::Option(Box::new(v.as_ref().clone())),
+                    Ty::Map(_, v) => Ty::option(v.as_ref().clone()),
                     _ => Ty::Unknown,
                 }
             }
@@ -291,16 +291,16 @@ impl Checker {
                 Ty::Unit
             }
 
-            ast::Expr::Range { start, end, .. } => { let st = self.infer_expr(start); self.infer_expr(end); Ty::List(Box::new(st)) }
+            ast::Expr::Range { start, end, .. } => { let st = self.infer_expr(start); self.infer_expr(end); Ty::list(st) }
 
-            ast::Expr::Some { expr, .. } => { let inner = self.infer_expr(expr); Ty::Option(Box::new(inner)) }
+            ast::Expr::Some { expr, .. } => { let inner = self.infer_expr(expr); Ty::option(inner) }
             ast::Expr::Ok { expr, .. } => {
                 let ok_ty = self.infer_expr(expr);
                 let err_ty = match &self.env.current_ret {
                     Some(Ty::Result(_, e)) => e.as_ref().clone(),
                     _ => self.fresh_var(),
                 };
-                Ty::Result(Box::new(ok_ty), Box::new(err_ty))
+                Ty::result(ok_ty, err_ty)
             }
             ast::Expr::Err { expr, .. } => {
                 let err_ty = self.infer_expr(expr);
@@ -308,7 +308,7 @@ impl Checker {
                     Some(Ty::Result(o, _)) => o.as_ref().clone(),
                     _ => self.fresh_var(),
                 };
-                Ty::Result(Box::new(ok_ty), Box::new(err_ty))
+                Ty::result(ok_ty, err_ty)
             }
             ast::Expr::Try { expr, .. } => {
                 let ty = self.infer_expr(expr);
@@ -325,15 +325,15 @@ impl Checker {
             ast::Expr::Error { .. } | ast::Expr::Placeholder { .. } => Ty::Unknown,
 
             ast::Expr::MapLiteral { entries, .. } => {
-                if entries.is_empty() { Ty::Map(Box::new(self.fresh_var()), Box::new(self.fresh_var())) }
+                if entries.is_empty() { Ty::map_of(self.fresh_var(), self.fresh_var()) }
                 else {
                     let kt = self.infer_expr(&mut entries[0].0);
                     let vt = self.infer_expr(&mut entries[0].1);
                     for entry in entries.iter_mut().skip(1) { self.infer_expr(&mut entry.0); self.infer_expr(&mut entry.1); }
-                    Ty::Map(Box::new(kt), Box::new(vt))
+                    Ty::map_of(kt, vt)
                 }
             }
-            ast::Expr::EmptyMap { .. } => Ty::Map(Box::new(self.fresh_var()), Box::new(self.fresh_var())),
+            ast::Expr::EmptyMap { .. } => Ty::map_of(self.fresh_var(), self.fresh_var()),
         }
     }
 

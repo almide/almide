@@ -325,10 +325,10 @@ impl Ty {
             Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit
             | Ty::TypeVar(_) | Ty::Unknown => self.clone(),
 
-            Ty::List(inner) => Ty::List(Box::new(f(inner))),
-            Ty::Option(inner) => Ty::Option(Box::new(f(inner))),
-            Ty::Result(ok, err) => Ty::Result(Box::new(f(ok)), Box::new(f(err))),
-            Ty::Map(k, v) => Ty::Map(Box::new(f(k)), Box::new(f(v))),
+            Ty::List(inner) => Ty::list(f(inner)),
+            Ty::Option(inner) => Ty::option(f(inner)),
+            Ty::Result(ok, err) => Ty::result(f(ok), f(err)),
+            Ty::Map(k, v) => Ty::map_of(f(k), f(v)),
 
             Ty::Tuple(tys) => Ty::Tuple(tys.iter().map(f).collect()),
             Ty::Named(name, args) => Ty::Named(name.clone(), args.iter().map(f).collect()),
@@ -374,10 +374,10 @@ impl Ty {
             Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit
             | Ty::TypeVar(_) | Ty::Unknown => self.clone(),
 
-            Ty::List(inner) => Ty::List(Box::new(f(inner))),
-            Ty::Option(inner) => Ty::Option(Box::new(f(inner))),
-            Ty::Result(ok, err) => Ty::Result(Box::new(f(ok)), Box::new(f(err))),
-            Ty::Map(k, v) => Ty::Map(Box::new(f(k)), Box::new(f(v))),
+            Ty::List(inner) => Ty::list(f(inner)),
+            Ty::Option(inner) => Ty::option(f(inner)),
+            Ty::Result(ok, err) => Ty::result(f(ok), f(err)),
+            Ty::Map(k, v) => Ty::map_of(f(k), f(v)),
 
             Ty::Tuple(tys) => Ty::Tuple(tys.iter().map(|t| f(t)).collect()),
             Ty::Named(name, args) => Ty::Named(name.clone(), args.iter().map(|t| f(t)).collect()),
@@ -464,4 +464,54 @@ impl Ty {
             _ => None,
         }
     }
+
+    // ── Smart constructors (Phase 4: Ty unification prep) ──
+    // Use these instead of Ty::list(...) etc.
+    // When Ty is unified to Applied, only these functions need to change.
+
+    /// Construct List[T]
+    #[inline]
+    pub fn list(inner: Ty) -> Ty { Ty::List(Box::new(inner)) }
+
+    /// Construct Option[T]
+    #[inline]
+    pub fn option(inner: Ty) -> Ty { Ty::Option(Box::new(inner)) }
+
+    /// Construct Result[T, E]
+    #[inline]
+    pub fn result(ok: Ty, err: Ty) -> Ty { Ty::Result(Box::new(ok), Box::new(err)) }
+
+    /// Construct Map[K, V]
+    #[inline]
+    pub fn map_of(key: Ty, val: Ty) -> Ty { Ty::Map(Box::new(key), Box::new(val)) }
+
+    // ── Accessors (Phase 4: uniform access to container type args) ──
+
+    /// Get the inner type of a single-param container (List or Option).
+    /// Returns None for non-container types.
+    pub fn inner(&self) -> Option<&Ty> {
+        match self {
+            Ty::List(inner) | Ty::Option(inner) => Some(inner),
+            _ => None,
+        }
+    }
+
+    /// Get the two type args of a dual-param container (Result or Map).
+    pub fn inner2(&self) -> Option<(&Ty, &Ty)> {
+        match self {
+            Ty::Result(a, b) | Ty::Map(a, b) => Some((a, b)),
+            _ => None,
+        }
+    }
+
+    /// Check if this is a List type.
+    pub fn is_list(&self) -> bool { matches!(self, Ty::List(_)) }
+    /// Check if this is an Option type.
+    pub fn is_option(&self) -> bool { matches!(self, Ty::Option(_)) }
+    /// Check if this is a Result type.
+    pub fn is_result(&self) -> bool { matches!(self, Ty::Result(_, _)) }
+    /// Check if this is a Map type.
+    pub fn is_map(&self) -> bool { matches!(self, Ty::Map(_, _)) }
+    /// Check if this is a function type.
+    pub fn is_fn(&self) -> bool { matches!(self, Ty::Fn { .. }) }
 }

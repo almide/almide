@@ -66,8 +66,8 @@ fn resolve_inner(ty: &Ty, solutions: &HashMap<TyVarId, Ty>, seen: &mut HashSet<u
                 ty.clone()
             }
         }
-        Ty::List(inner) => Ty::List(Box::new(resolve_inner(inner, solutions, seen))),
-        Ty::Option(inner) => Ty::Option(Box::new(resolve_inner(inner, solutions, seen))),
+        Ty::List(inner) => Ty::list(resolve_inner(inner, solutions, seen)),
+        Ty::Option(inner) => Ty::option(resolve_inner(inner, solutions, seen)),
         Ty::Result(ok, err) => Ty::Result(
             Box::new(resolve_inner(ok, solutions, seen)),
             Box::new(resolve_inner(err, solutions, seen)),

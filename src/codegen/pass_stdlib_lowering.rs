@@ -80,7 +80,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
             while args.len() < total_params {
                 args.push(IrExpr {
                     kind: IrExprKind::OptionNone,
-                    ty: Ty::Option(Box::new(Ty::Unknown)),
+                    ty: Ty::option(Ty::Unknown),
                     span: None,
                 });
             }
@@ -548,7 +548,7 @@ fn decorate_arg(arg: IrExpr, transform: ArgTransform) -> IrExpr {
             } else {
                 IrExpr {
                     kind: IrExprKind::OptionSome { expr: Box::new(arg) },
-                    ty: Ty::Option(Box::new(ty)),
+                    ty: Ty::option(ty),
                     span,
                 }
             }
@@ -587,7 +587,7 @@ fn decorate_arg(arg: IrExpr, transform: ArgTransform) -> IrExpr {
                     let body_ty = body.ty.clone();
                     let ok_body = IrExpr {
                         kind: IrExprKind::ResultOk { expr: body },
-                        ty: Ty::Result(Box::new(body_ty.clone()), Box::new(Ty::String)),
+                        ty: Ty::result(body_ty.clone(), Ty::String),
                         span: None,
                     };
 
@@ -599,7 +599,7 @@ fn decorate_arg(arg: IrExpr, transform: ArgTransform) -> IrExpr {
                                 stmts: clone_stmts,
                                 expr: Some(Box::new(ok_body)),
                             },
-                            ty: Ty::Result(Box::new(body_ty), Box::new(Ty::String)),
+                            ty: Ty::result(body_ty, Ty::String),
                             span: None,
                         }
                     };
