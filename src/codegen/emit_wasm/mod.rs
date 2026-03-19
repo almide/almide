@@ -569,7 +569,7 @@ fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) {
     let mut fn_ref_names: Vec<String> = Vec::new(); // ordered, deduped
 
     for func in &program.functions {
-        if func.is_test { continue; }
+        // Include test functions in pre-scan/compile
         let mut scope_vars: HashSet<u32> = func.params.iter().map(|p| p.var.0).collect();
         scan_closures_expr(&func.body, &mut scope_vars, &program.var_table,
             &mut lambda_exprs, &mut fn_ref_set);
@@ -642,7 +642,7 @@ fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitter) {
     let mut fn_ref_set: HashSet<String> = HashSet::new();
 
     for func in &program.functions {
-        if func.is_test { continue; }
+        // Include test functions in pre-scan/compile
         let mut scope_vars: HashSet<u32> = func.params.iter().map(|p| p.var.0).collect();
         scan_closures_expr(&func.body, &mut scope_vars, &program.var_table,
             &mut lambda_exprs, &mut fn_ref_set);
