@@ -34,6 +34,17 @@ impl NanoPass for ResultErasurePass {
         for tl in &mut program.top_lets {
             tl.value = erase_expr(tl.value.clone());
         }
+        for module in &mut program.modules {
+            for func in &mut module.functions {
+                if func.is_effect {
+                    func.ret_ty = erase_result_ty(func.ret_ty.clone());
+                }
+                func.body = erase_expr(func.body.clone());
+            }
+            for tl in &mut module.top_lets {
+                tl.value = erase_expr(tl.value.clone());
+            }
+        }
     }
 }
 

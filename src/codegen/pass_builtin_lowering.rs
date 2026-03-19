@@ -30,6 +30,14 @@ impl NanoPass for BuiltinLoweringPass {
         for tl in &mut program.top_lets {
             tl.value = rewrite_expr(tl.value.clone());
         }
+        for module in &mut program.modules {
+            for func in &mut module.functions {
+                func.body = rewrite_expr(func.body.clone());
+            }
+            for tl in &mut module.top_lets {
+                tl.value = rewrite_expr(tl.value.clone());
+            }
+        }
     }
 }
 

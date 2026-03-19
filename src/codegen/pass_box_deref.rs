@@ -61,6 +61,33 @@ pub fn collect_deref_vars(program: &IrProgram) -> (HashSet<VarId>, HashSet<Strin
         }
     }
 
+    // Also check module type_decls for recursive enums
+    for module in &program.modules {
+        for td in &module.type_decls {
+            if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
+                for case in cases {
+                    match &case.kind {
+                        IrVariantKind::Tuple { fields } => {
+                            for f in fields {
+                                if ty_contains_name(f, &td.name) {
+                                    recursive_enums.insert(td.name.clone());
+                                }
+                            }
+                        }
+                        IrVariantKind::Record { fields } => {
+                            for f in fields {
+                                if ty_contains_name(&f.ty, &td.name) {
+                                    recursive_enums.insert(td.name.clone());
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
     // Step 2: Walk all match expressions and find Bind vars in recursive positions
     for func in &program.functions {
         collect_from_expr(&func.body, &recursive_enums, &program.type_decls, &name_to_var, &mut deref_vars);
@@ -76,6 +103,56 @@ pub fn insert_deref_nodes(program: &mut IrProgram, deref_ids: &HashSet<VarId>) {
         func.body = insert_derefs(func.body.clone(), deref_ids);
     }
     for tl in &mut program.top_lets {
+        tl.value = insert_derefs(tl.value.clone(), deref_ids);
+    }
+}
+
+/// Collect deref vars for a single module scope (separate VarId namespace).
+pub fn collect_module_deref_vars(module: &IrModule, all_type_decls: &[IrTypeDecl]) -> HashSet<VarId> {
+    let mut name_to_var: std::collections::HashMap<String, Vec<VarId>> = std::collections::HashMap::new();
+    for i in 0..module.var_table.len() {
+        let id = VarId(i as u32);
+        let info = module.var_table.get(id);
+        name_to_var.entry(info.name.clone()).or_default().push(id);
+    }
+    let mut deref_vars = HashSet::new();
+    let mut recursive_enums = HashSet::new();
+    for td in all_type_decls {
+        if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
+            for case in cases {
+                match &case.kind {
+                    IrVariantKind::Tuple { fields } => {
+                        for f in fields {
+                            if ty_contains_name(f, &td.name) {
+                                recursive_enums.insert(td.name.clone());
+                            }
+                        }
+                    }
+                    IrVariantKind::Record { fields } => {
+                        for f in fields {
+                            if ty_contains_name(&f.ty, &td.name) {
+                                recursive_enums.insert(td.name.clone());
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    for func in &module.functions {
+        collect_from_expr(&func.body, &recursive_enums, all_type_decls, &name_to_var, &mut deref_vars);
+    }
+    deref_vars
+}
+
+/// Insert Deref IR nodes for a single module's functions and top_lets.
+pub fn insert_module_deref_nodes(module: &mut IrModule, deref_ids: &HashSet<VarId>) {
+    if deref_ids.is_empty() { return; }
+    for func in &mut module.functions {
+        func.body = insert_derefs(func.body.clone(), deref_ids);
+    }
+    for tl in &mut module.top_lets {
         tl.value = insert_derefs(tl.value.clone(), deref_ids);
     }
 }

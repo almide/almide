@@ -387,7 +387,12 @@ impl Checker {
             }
         }
         let key = Self::prefixed_key(prefix, name);
-        self.env.types.insert(key.clone(), resolved);
+        self.env.types.insert(key.clone(), resolved.clone());
+        // Also register with unprefixed name so field resolution works
+        // (e.g., g.words where g: KeywordGroup from a module)
+        if prefix.is_some() {
+            self.env.types.insert(name.to_string(), resolved);
+        }
         if let Some(derives) = deriving {
             self.register_derive_sigs(derives, name);
         }

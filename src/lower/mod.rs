@@ -104,15 +104,97 @@ impl<'a> LowerCtx<'a> {
     }
 
     /// Get the type of an expression from the checker's expr_types.
-    /// This is the ONLY way to get types — no fallback inference.
+    /// Falls back to field resolution for Member expressions and UFCS call
+    /// return types that the checker couldn't determine (e.g., chained method
+    /// calls on lambda parameters before constraint solving).
     pub(super) fn expr_ty(&self, expr: &ast::Expr) -> Ty {
-        match self.expr_types.get(&expr.id()).cloned() {
-            Some(ty) => ty,
-            None => {
-                // Auto-generated expressions (codec derive, etc.) may lack types.
-                // Recover gracefully with Unknown — no user-visible impact.
-                Ty::Unknown
+        let ty = self.expr_types.get(&expr.id()).cloned().unwrap_or(Ty::Unknown);
+        if ty == Ty::Unknown {
+            // Resolve Member field types from the parent's known record type
+            if let ast::Expr::Member { object, field, .. } = expr {
+                let parent_ty = self.expr_ty(object);
+                let resolved = self.env.resolve_named(&parent_ty);
+                match &resolved {
+                    Ty::Record { fields } | Ty::OpenRecord { fields } =>
+                        return fields.iter().find(|(n, _)| n == field)
+                            .map(|(_, t)| t.clone())
+                            .unwrap_or(Ty::Unknown),
+                    _ => {}
+                }
             }
+        }
+        // Resolve UFCS call return types: obj.method(args) when receiver type is known.
+        // The checker may store Unknown or a bogus Fn type for chained method calls
+        // on lambda parameters (constraints solve the receiver as callable rather than
+        // as a collection method). Re-derive the type from the stdlib signature.
+        if ty == Ty::Unknown || matches!(&ty, Ty::Fn { .. }) {
+            if let ast::Expr::Call { callee, .. } = expr {
+                if let ast::Expr::Member { object, field, .. } = callee.as_ref() {
+                    let obj_ty = self.expr_ty(object);
+                    if let Some(module) = crate::check::calls::builtin_module_for_type(&obj_ty) {
+                        let key = format!("{}.{}", module, field);
+                        if let Some(sig) = self.env.functions.get(&key) {
+                            return sig.ret.clone();
+                        }
+                        // Stdlib functions may not be in env.functions (TOML-defined).
+                        // Infer a return type from the module so UFCS chaining works.
+                        if crate::stdlib::resolve_ufcs_candidates(field).contains(&module) {
+                            return Self::infer_stdlib_return_type(module, field);
+                        }
+                    }
+                }
+            }
+        }
+        ty
+    }
+
+    /// Infer the return type of a stdlib function by module and method name.
+    /// Used when the function signature isn't in env.functions (TOML-defined stdlib).
+    /// Returns a type with the correct "kind" for downstream UFCS resolution.
+    fn infer_stdlib_return_type(module: &str, method: &str) -> Ty {
+        match module {
+            "list" => match method {
+                "join" => Ty::String,
+                "len" | "count" => Ty::Int,
+                "any" | "all" | "contains" | "is_empty" => Ty::Bool,
+                "find" | "first" | "last" => Ty::Option(Box::new(Ty::Unknown)),
+                "find_index" | "index_of" => Ty::Option(Box::new(Ty::Int)),
+                "fold" | "reduce" | "sum" | "product" => Ty::Unknown,
+                _ => Ty::List(Box::new(Ty::Unknown)),
+            },
+            "string" => match method {
+                "len" | "count" => Ty::Int,
+                "contains" | "starts_with" | "ends_with" | "is_empty"
+                    | "is_digit" | "is_alpha" | "is_alphanumeric"
+                    | "is_whitespace" | "is_upper" | "is_lower" => Ty::Bool,
+                "split" | "lines" | "chars" | "to_bytes" => Ty::List(Box::new(Ty::String)),
+                "index_of" | "last_index_of" => Ty::Option(Box::new(Ty::Int)),
+                "codepoint" => Ty::Int,
+                _ => Ty::String,
+            },
+            "map" => match method {
+                "len" | "count" => Ty::Int,
+                "contains" | "is_empty" => Ty::Bool,
+                "keys" | "values" => Ty::List(Box::new(Ty::Unknown)),
+                "entries" => Ty::List(Box::new(Ty::Tuple(vec![Ty::Unknown, Ty::Unknown]))),
+                _ => Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)),
+            },
+            "option" => match method {
+                "is_some" | "is_none" => Ty::Bool,
+                "to_list" => Ty::List(Box::new(Ty::Unknown)),
+                _ => Ty::Option(Box::new(Ty::Unknown)),
+            },
+            "result" => match method {
+                "is_ok" | "is_err" => Ty::Bool,
+                _ => Ty::Result(Box::new(Ty::Unknown), Box::new(Ty::Unknown)),
+            },
+            "int" => Ty::String, // to_string, to_hex
+            "float" => match method {
+                "is_nan" | "is_infinite" => Ty::Bool,
+                "round" | "floor" | "ceil" => Ty::Int,
+                _ => Ty::Float,
+            },
+            _ => Ty::Unknown,
         }
     }
 

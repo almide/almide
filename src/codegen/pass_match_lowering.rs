@@ -34,6 +34,15 @@ impl NanoPass for MatchLoweringPass {
         for tl in &mut program.top_lets {
             tl.value = rewrite_expr(tl.value.clone(), &mut program.var_table);
         }
+        // Rewrite module functions and top_lets (each module has its own var_table)
+        for module in &mut program.modules {
+            for func in &mut module.functions {
+                func.body = rewrite_expr(func.body.clone(), &mut module.var_table);
+            }
+            for tl in &mut module.top_lets {
+                tl.value = rewrite_expr(tl.value.clone(), &mut module.var_table);
+            }
+        }
     }
 }
 
