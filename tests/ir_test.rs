@@ -332,7 +332,7 @@ fn ir_function_effect() {
     let f = IrFunction {
         name: "main".into(),
         params: vec![],
-        ret_ty: Ty::Result(Box::new(Ty::Unit), Box::new(Ty::String)),
+        ret_ty: Ty::result(Ty::Unit, Ty::String),
         body: IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None },
         is_effect: true,
         is_async: false,
@@ -410,7 +410,7 @@ fn ir_expr_list() {
             IrExpr { kind: IrExprKind::LitInt { value: 1 }, ty: Ty::Int, span: None },
             IrExpr { kind: IrExprKind::LitInt { value: 2 }, ty: Ty::Int, span: None },
         ]},
-        ty: Ty::List(Box::new(Ty::Int)),
+        ty: Ty::list(Ty::Int),
         span: None,
     };
     if let IrExprKind::List { elements } = &expr.kind {
@@ -441,7 +441,7 @@ fn ir_expr_range() {
             end: Box::new(IrExpr { kind: IrExprKind::LitInt { value: 10 }, ty: Ty::Int, span: None }),
             inclusive: false,
         },
-        ty: Ty::List(Box::new(Ty::Int)),
+        ty: Ty::list(Ty::Int),
         span: None,
     };
     assert!(matches!(expr.kind, IrExprKind::Range { inclusive: false, .. }));

@@ -15,18 +15,18 @@ fn display_primitives() {
 
 #[test]
 fn display_list() {
-    assert_eq!(Ty::List(Box::new(Ty::Int)).display(), "List[Int]");
+    assert_eq!(Ty::list(Ty::Int).display(), "List[Int]");
 }
 
 #[test]
 fn display_option() {
-    assert_eq!(Ty::Option(Box::new(Ty::String)).display(), "Option[String]");
+    assert_eq!(Ty::option(Ty::String).display(), "Option[String]");
 }
 
 #[test]
 fn display_result() {
     assert_eq!(
-        Ty::Result(Box::new(Ty::Int), Box::new(Ty::String)).display(),
+        Ty::result(Ty::Int, Ty::String).display(),
         "Result[Int, String]"
     );
 }
@@ -34,7 +34,7 @@ fn display_result() {
 #[test]
 fn display_map() {
     assert_eq!(
-        Ty::Map(Box::new(Ty::String), Box::new(Ty::Int)).display(),
+        Ty::map_of(Ty::String, Ty::Int).display(),
         "Map[String, Int]"
     );
 }
@@ -88,7 +88,7 @@ fn display_type_var() {
 
 #[test]
 fn display_nested() {
-    let ty = Ty::List(Box::new(Ty::Option(Box::new(Ty::Int))));
+    let ty = Ty::list(Ty::option(Ty::Int));
     assert_eq!(ty.display(), "List[Option[Int]]");
 }
 
@@ -125,30 +125,30 @@ fn compatible_typevar_matches_all() {
 
 #[test]
 fn compatible_list() {
-    assert!(Ty::List(Box::new(Ty::Int)).compatible(&Ty::List(Box::new(Ty::Int))));
-    assert!(!Ty::List(Box::new(Ty::Int)).compatible(&Ty::List(Box::new(Ty::String))));
+    assert!(Ty::list(Ty::Int).compatible(&Ty::list(Ty::Int)));
+    assert!(!Ty::list(Ty::Int).compatible(&Ty::list(Ty::String)));
 }
 
 #[test]
 fn compatible_option() {
-    assert!(Ty::Option(Box::new(Ty::Int)).compatible(&Ty::Option(Box::new(Ty::Int))));
-    assert!(!Ty::Option(Box::new(Ty::Int)).compatible(&Ty::Option(Box::new(Ty::String))));
+    assert!(Ty::option(Ty::Int).compatible(&Ty::option(Ty::Int)));
+    assert!(!Ty::option(Ty::Int).compatible(&Ty::option(Ty::String)));
 }
 
 #[test]
 fn compatible_result() {
-    let r1 = Ty::Result(Box::new(Ty::Int), Box::new(Ty::String));
-    let r2 = Ty::Result(Box::new(Ty::Int), Box::new(Ty::String));
-    let r3 = Ty::Result(Box::new(Ty::Bool), Box::new(Ty::String));
+    let r1 = Ty::result(Ty::Int, Ty::String);
+    let r2 = Ty::result(Ty::Int, Ty::String);
+    let r3 = Ty::result(Ty::Bool, Ty::String);
     assert!(r1.compatible(&r2));
     assert!(!r1.compatible(&r3));
 }
 
 #[test]
 fn compatible_map() {
-    let m1 = Ty::Map(Box::new(Ty::String), Box::new(Ty::Int));
-    let m2 = Ty::Map(Box::new(Ty::String), Box::new(Ty::Int));
-    let m3 = Ty::Map(Box::new(Ty::Int), Box::new(Ty::Int));
+    let m1 = Ty::map_of(Ty::String, Ty::Int);
+    let m2 = Ty::map_of(Ty::String, Ty::Int);
+    let m3 = Ty::map_of(Ty::Int, Ty::Int);
     assert!(m1.compatible(&m2));
     assert!(!m1.compatible(&m3));
 }
@@ -217,8 +217,8 @@ fn unify_typevar_consistent() {
 #[test]
 fn unify_list_with_typevar() {
     let mut bindings = HashMap::new();
-    let sig = Ty::List(Box::new(Ty::TypeVar("T".into())));
-    let actual = Ty::List(Box::new(Ty::Int));
+    let sig = Ty::list(Ty::TypeVar("T".into()));
+    let actual = Ty::list(Ty::Int);
     assert!(unify(&sig, &actual, &mut bindings));
     assert_eq!(bindings.get("T"), Some(&Ty::Int));
 }
@@ -226,8 +226,8 @@ fn unify_list_with_typevar() {
 #[test]
 fn unify_result_with_typevars() {
     let mut bindings = HashMap::new();
-    let sig = Ty::Result(Box::new(Ty::TypeVar("A".into())), Box::new(Ty::TypeVar("B".into())));
-    let actual = Ty::Result(Box::new(Ty::Int), Box::new(Ty::String));
+    let sig = Ty::result(Ty::TypeVar("A".into()), Ty::TypeVar("B".into()));
+    let actual = Ty::result(Ty::Int, Ty::String);
     assert!(unify(&sig, &actual, &mut bindings));
     assert_eq!(bindings.get("A"), Some(&Ty::Int));
     assert_eq!(bindings.get("B"), Some(&Ty::String));
@@ -276,8 +276,8 @@ fn unify_tuple() {
 #[test]
 fn unify_map_with_typevars() {
     let mut bindings = HashMap::new();
-    let sig = Ty::Map(Box::new(Ty::TypeVar("K".into())), Box::new(Ty::TypeVar("V".into())));
-    let actual = Ty::Map(Box::new(Ty::String), Box::new(Ty::Int));
+    let sig = Ty::map_of(Ty::TypeVar("K".into()), Ty::TypeVar("V".into()));
+    let actual = Ty::map_of(Ty::String, Ty::Int);
     assert!(unify(&sig, &actual, &mut bindings));
     assert_eq!(bindings.get("K"), Some(&Ty::String));
     assert_eq!(bindings.get("V"), Some(&Ty::Int));
@@ -305,8 +305,8 @@ fn substitute_unbound_typevar() {
 fn substitute_list() {
     let mut bindings = HashMap::new();
     bindings.insert("T".into(), Ty::Int);
-    let result = substitute(&Ty::List(Box::new(Ty::TypeVar("T".into()))), &bindings);
-    assert_eq!(result, Ty::List(Box::new(Ty::Int)));
+    let result = substitute(&Ty::list(Ty::TypeVar("T".into())), &bindings);
+    assert_eq!(result, Ty::list(Ty::Int));
 }
 
 #[test]
@@ -315,10 +315,10 @@ fn substitute_result() {
     bindings.insert("A".into(), Ty::Int);
     bindings.insert("B".into(), Ty::String);
     let result = substitute(
-        &Ty::Result(Box::new(Ty::TypeVar("A".into())), Box::new(Ty::TypeVar("B".into()))),
+        &Ty::result(Ty::TypeVar("A".into()), Ty::TypeVar("B".into())),
         &bindings,
     );
-    assert_eq!(result, Ty::Result(Box::new(Ty::Int), Box::new(Ty::String)));
+    assert_eq!(result, Ty::result(Ty::Int, Ty::String));
 }
 
 #[test]
@@ -364,8 +364,8 @@ fn substitute_record() {
 fn substitute_option() {
     let mut bindings = HashMap::new();
     bindings.insert("T".into(), Ty::Float);
-    let result = substitute(&Ty::Option(Box::new(Ty::TypeVar("T".into()))), &bindings);
-    assert_eq!(result, Ty::Option(Box::new(Ty::Float)));
+    let result = substitute(&Ty::option(Ty::TypeVar("T".into())), &bindings);
+    assert_eq!(result, Ty::option(Ty::Float));
 }
 
 #[test]
@@ -374,16 +374,16 @@ fn substitute_map() {
     bindings.insert("K".into(), Ty::String);
     bindings.insert("V".into(), Ty::Int);
     let result = substitute(
-        &Ty::Map(Box::new(Ty::TypeVar("K".into())), Box::new(Ty::TypeVar("V".into()))),
+        &Ty::map_of(Ty::TypeVar("K".into()), Ty::TypeVar("V".into())),
         &bindings,
     );
-    assert_eq!(result, Ty::Map(Box::new(Ty::String), Box::new(Ty::Int)));
+    assert_eq!(result, Ty::map_of(Ty::String, Ty::Int));
 }
 
 #[test]
 fn substitute_empty_bindings_returns_clone() {
     let bindings = HashMap::new();
-    let ty = Ty::List(Box::new(Ty::TypeVar("T".into())));
+    let ty = Ty::list(Ty::TypeVar("T".into()));
     let result = substitute(&ty, &bindings);
     // With empty bindings, should return clone unchanged
     assert_eq!(result, ty);
@@ -531,14 +531,14 @@ fn constructor_id_primitives() {
 
 #[test]
 fn constructor_id_containers() {
-    assert_eq!(Ty::List(Box::new(Ty::Int)).constructor_id(), Some(TypeConstructorId::List));
-    assert_eq!(Ty::Option(Box::new(Ty::Int)).constructor_id(), Some(TypeConstructorId::Option));
+    assert_eq!(Ty::list(Ty::Int).constructor_id(), Some(TypeConstructorId::List));
+    assert_eq!(Ty::option(Ty::Int).constructor_id(), Some(TypeConstructorId::Option));
     assert_eq!(
-        Ty::Result(Box::new(Ty::Int), Box::new(Ty::String)).constructor_id(),
+        Ty::result(Ty::Int, Ty::String).constructor_id(),
         Some(TypeConstructorId::Result)
     );
     assert_eq!(
-        Ty::Map(Box::new(Ty::String), Box::new(Ty::Int)).constructor_id(),
+        Ty::map_of(Ty::String, Ty::Int).constructor_id(),
         Some(TypeConstructorId::Map)
     );
 }
@@ -557,10 +557,10 @@ fn constructor_id_none_for_special() {
 
 #[test]
 fn type_args_containers() {
-    let list_int = Ty::List(Box::new(Ty::Int));
+    let list_int = Ty::list(Ty::Int);
     assert_eq!(list_int.type_args(), vec![&Ty::Int]);
 
-    let result_ty = Ty::Result(Box::new(Ty::Int), Box::new(Ty::String));
+    let result_ty = Ty::result(Ty::Int, Ty::String);
     assert_eq!(result_ty.type_args(), vec![&Ty::Int, &Ty::String]);
 }
 
@@ -580,10 +580,10 @@ fn children_leaf_types() {
 
 #[test]
 fn children_containers() {
-    let list = Ty::List(Box::new(Ty::Int));
+    let list = Ty::list(Ty::Int);
     assert_eq!(list.children(), vec![&Ty::Int]);
 
-    let result = Ty::Result(Box::new(Ty::Int), Box::new(Ty::String));
+    let result = Ty::result(Ty::Int, Ty::String);
     assert_eq!(result.children(), vec![&Ty::Int, &Ty::String]);
 }
 
@@ -601,56 +601,56 @@ fn children_fn_type() {
 
 #[test]
 fn map_children_identity() {
-    let ty = Ty::List(Box::new(Ty::Int));
+    let ty = Ty::list(Ty::Int);
     let mapped = ty.map_children(&|t| t.clone());
     assert_eq!(mapped, ty);
 }
 
 #[test]
 fn map_children_transform() {
-    let ty = Ty::List(Box::new(Ty::TypeVar("T".into())));
+    let ty = Ty::list(Ty::TypeVar("T".into()));
     let mapped = ty.map_children(&|t| {
         if matches!(t, Ty::TypeVar(_)) { Ty::Int } else { t.clone() }
     });
-    assert_eq!(mapped, Ty::List(Box::new(Ty::Int)));
+    assert_eq!(mapped, Ty::list(Ty::Int));
 }
 
 #[test]
 fn map_children_result() {
-    let ty = Ty::Result(Box::new(Ty::TypeVar("A".into())), Box::new(Ty::TypeVar("B".into())));
+    let ty = Ty::result(Ty::TypeVar("A".into()), Ty::TypeVar("B".into()));
     let mapped = ty.map_children(&|t| match t {
         Ty::TypeVar(n) if n == "A" => Ty::Int,
         Ty::TypeVar(n) if n == "B" => Ty::String,
         _ => t.clone(),
     });
-    assert_eq!(mapped, Ty::Result(Box::new(Ty::Int), Box::new(Ty::String)));
+    assert_eq!(mapped, Ty::result(Ty::Int, Ty::String));
 }
 
 #[test]
 fn any_child_recursive_finds_nested() {
-    let ty = Ty::List(Box::new(Ty::Option(Box::new(Ty::Unknown))));
+    let ty = Ty::list(Ty::option(Ty::Unknown));
     assert!(ty.any_child_recursive(&|t| matches!(t, Ty::Unknown)));
 }
 
 #[test]
 fn any_child_recursive_not_found() {
-    let ty = Ty::List(Box::new(Ty::Option(Box::new(Ty::Int))));
+    let ty = Ty::list(Ty::option(Ty::Int));
     assert!(!ty.any_child_recursive(&|t| matches!(t, Ty::Unknown)));
 }
 
 #[test]
 fn is_container() {
-    assert!(Ty::List(Box::new(Ty::Int)).is_container());
-    assert!(Ty::Option(Box::new(Ty::Int)).is_container());
-    assert!(Ty::Result(Box::new(Ty::Int), Box::new(Ty::String)).is_container());
-    assert!(Ty::Map(Box::new(Ty::String), Box::new(Ty::Int)).is_container());
+    assert!(Ty::list(Ty::Int).is_container());
+    assert!(Ty::option(Ty::Int).is_container());
+    assert!(Ty::result(Ty::Int, Ty::String).is_container());
+    assert!(Ty::map_of(Ty::String, Ty::Int).is_container());
     assert!(!Ty::Int.is_container());
     assert!(!Ty::Named("Foo".into(), vec![]).is_container());
 }
 
 #[test]
 fn constructor_name() {
-    assert_eq!(Ty::List(Box::new(Ty::Int)).constructor_name(), Some("List"));
+    assert_eq!(Ty::list(Ty::Int).constructor_name(), Some("List"));
     assert_eq!(Ty::Int.constructor_name(), Some("Int"));
     assert_eq!(Ty::Named("Dog".into(), vec![]).constructor_name(), Some("Dog"));
     assert_eq!(Ty::Unknown.constructor_name(), None);
@@ -726,17 +726,17 @@ fn registry_user_type_arity_2() {
 #[test]
 fn contains_unknown_still_works() {
     assert!(Ty::Unknown.contains_unknown());
-    assert!(Ty::List(Box::new(Ty::Unknown)).contains_unknown());
-    assert!(Ty::Result(Box::new(Ty::Int), Box::new(Ty::Unknown)).contains_unknown());
+    assert!(Ty::list(Ty::Unknown).contains_unknown());
+    assert!(Ty::result(Ty::Int, Ty::Unknown).contains_unknown());
     assert!(!Ty::Int.contains_unknown());
-    assert!(!Ty::List(Box::new(Ty::Int)).contains_unknown());
+    assert!(!Ty::list(Ty::Int).contains_unknown());
 }
 
 #[test]
 fn contains_unknown_nested() {
     let ty = Ty::Map(
         Box::new(Ty::String),
-        Box::new(Ty::List(Box::new(Ty::Option(Box::new(Ty::Unknown))))),
+        Box::new(Ty::list(Ty::option(Ty::Unknown))),
     );
     assert!(ty.contains_unknown());
 }
@@ -745,7 +745,7 @@ fn contains_unknown_nested() {
 
 #[test]
 fn map_children_mut_transform() {
-    let ty = Ty::Result(Box::new(Ty::TypeVar("A".into())), Box::new(Ty::TypeVar("B".into())));
+    let ty = Ty::result(Ty::TypeVar("A".into()), Ty::TypeVar("B".into()));
     let mut counter = 0;
     let mapped = ty.map_children_mut(&mut |t| {
         counter += 1;
@@ -755,7 +755,7 @@ fn map_children_mut_transform() {
             _ => t.clone(),
         }
     });
-    assert_eq!(mapped, Ty::Result(Box::new(Ty::Int), Box::new(Ty::String)));
+    assert_eq!(mapped, Ty::result(Ty::Int, Ty::String));
     assert_eq!(counter, 2); // Both children visited
 }
 
