@@ -1,0 +1,55 @@
+// import_test — stdlib imports and module calls
+
+import math
+import json
+
+// ── Module-qualified calls ──
+
+test "math module call" {
+  assert_eq(math.abs(-5), 5)
+  assert_eq(math.max(3, 7), 7)
+  assert_eq(math.min(3, 7), 3)
+}
+
+test "math.pi" {
+  let pi = math.pi()
+  assert_eq(pi > 3.14, true)
+  assert_eq(pi < 3.15, true)
+}
+
+test "math.sqrt" {
+  assert_eq(math.sqrt(9.0), 3.0)
+  assert_eq(math.sqrt(0.0), 0.0)
+}
+
+// ── UFCS without import (auto-imported modules) ──
+
+test "string UFCS no import needed" {
+  assert_eq("hello".len(), 5)
+  assert_eq("hello".to_upper(), "HELLO")
+}
+
+test "list UFCS no import needed" {
+  assert_eq([3, 1, 2].sort(), [1, 2, 3])
+  assert_eq([1, 2, 3].len(), 3)
+}
+
+test "int UFCS no import needed" {
+  assert_eq(int.to_string(42), "42")
+  assert_eq(42.to_string(), "42")
+}
+
+// ── Module-qualified with UFCS ──
+
+test "math via UFCS" {
+  let x = -7
+  assert_eq(math.abs(x), 7)
+}
+
+// ── json module (requires import) ──
+
+test "json stringify" {
+  let v = json.object([("name", json.from_string("Alice"))])
+  let s = json.stringify(v)
+  assert_eq(s.contains("Alice"), true)
+}
