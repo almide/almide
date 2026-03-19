@@ -195,11 +195,18 @@ fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::
             scan_expr(cond, locals, vt);
             for stmt in body { scan_stmt(stmt, locals, vt); }
         }
-        IrExprKind::ForIn { var, body, iterable, .. } => {
-            // Determine element type from VarTable
+        IrExprKind::ForIn { var, var_tuple, body, iterable } => {
             let var_info = vt.get(*var);
             let val_type = values::ty_to_valtype(&var_info.ty).unwrap_or(ValType::I64);
             locals.push((*var, val_type));
+            // Also register tuple destructure vars
+            if let Some(tuple_vars) = var_tuple {
+                for tv in tuple_vars {
+                    let tv_info = vt.get(*tv);
+                    let tv_type = values::ty_to_valtype(&tv_info.ty).unwrap_or(ValType::I64);
+                    locals.push((*tv, tv_type));
+                }
+            }
             scan_expr(iterable, locals, vt);
             for stmt in body { scan_stmt(stmt, locals, vt); }
         }

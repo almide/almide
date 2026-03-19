@@ -175,9 +175,9 @@ impl FuncCompiler<'_> {
                 self.func.instruction(&Instruction::End); // end block
             }
 
-            // ── For-in loop (Range only in Phase 2) ──
-            IrExprKind::ForIn { var, iterable, body, .. } => {
-                self.emit_for_in(*var, iterable, body);
+            // ── For-in loop ──
+            IrExprKind::ForIn { var, var_tuple, iterable, body } => {
+                self.emit_for_in(*var, var_tuple.as_deref(), iterable, body);
             }
 
             IrExprKind::Break => {
@@ -558,6 +558,22 @@ impl FuncCompiler<'_> {
                     "assert_eq" => {
                         self.emit_assert_eq(&args[0], &args[1]);
                     }
+                    "assert" => {
+                        // assert(cond) — trap if false
+                        self.emit_expr(&args[0]);
+                        self.func.instruction(&Instruction::I32Eqz);
+                        self.func.instruction(&Instruction::If(BlockType::Empty));
+                        self.func.instruction(&Instruction::Unreachable);
+                        self.func.instruction(&Instruction::End);
+                    }
+                    "assert_ne" => {
+                        // assert_ne(left, right) — trap if equal
+                        self.emit_eq(&args[0], &args[1], false);
+                        // If equal → trap
+                        self.func.instruction(&Instruction::If(BlockType::Empty));
+                        self.func.instruction(&Instruction::Unreachable);
+                        self.func.instruction(&Instruction::End);
+                    }
                     _ => {
                         // Check if this is a unit variant constructor (e.g., Red, None)
                         if args.is_empty() {
@@ -611,6 +627,40 @@ impl FuncCompiler<'_> {
                         self.emit_expr(&args[0]);
                         self.func.instruction(&Instruction::Drop);
                         self.func.instruction(&Instruction::I64Const(0));
+                    }
+                    ("string", "contains") => {
+                        // string.contains(haystack, needle) -> bool
+                        // Brute force: O(n*m) substring search
+                        self.emit_expr(&args[0]); // haystack ptr
+                        self.emit_expr(&args[1]); // needle ptr
+                        self.func.instruction(&Instruction::Call(self.emitter.rt.str_contains));
+                    }
+                    ("string", "trim") => {
+                        // Stub: return the string as-is (no whitespace handling)
+                        self.emit_expr(&args[0]);
+                    }
+                    ("string", "to_upper") | ("string", "to_lower") => {
+                        // Stub: return as-is
+                        self.emit_expr(&args[0]);
+                    }
+                    ("string", "repeat") | ("string", "reverse") | ("string", "replace")
+                    | ("string", "split") | ("string", "join") | ("string", "slice")
+                    | ("string", "get") | ("string", "count") | ("string", "starts_with")
+                    | ("string", "ends_with") | ("string", "index_of") => {
+                        // Stub: emit args and return first arg or default
+                        for arg in args { self.emit_expr(arg); }
+                        for _ in 1..args.len() { self.func.instruction(&Instruction::Drop); }
+                    }
+                    ("list", "map") | ("list", "filter") | ("list", "fold")
+                    | ("list", "find") | ("list", "any") | ("list", "all")
+                    | ("list", "count") | ("list", "sort_by") | ("list", "flat_map")
+                    | ("list", "filter_map") | ("list", "get") | ("list", "drop")
+                    | ("list", "take") | ("list", "reverse") | ("list", "zip")
+                    | ("list", "enumerate") | ("list", "contains") | ("list", "sort") => {
+                        // Stub: emit args and unreachable (stdlib not yet implemented)
+                        for arg in args { self.emit_expr(arg); }
+                        for _ in 0..args.len() { self.func.instruction(&Instruction::Drop); }
+                        self.func.instruction(&Instruction::Unreachable);
                     }
                     ("list", "len") | ("list", "length") => {
                         self.emit_expr(&args[0]);
@@ -1170,7 +1220,7 @@ impl FuncCompiler<'_> {
     }
 
     /// Emit a for...in loop. Currently supports Range iterables only.
-    fn emit_for_in(&mut self, var: crate::ir::VarId, iterable: &IrExpr, body: &[crate::ir::IrStmt]) {
+    fn emit_for_in(&mut self, var: crate::ir::VarId, var_tuple: Option<&[crate::ir::VarId]>, iterable: &IrExpr, body: &[crate::ir::IrStmt]) {
         match &iterable.kind {
             IrExprKind::Range { start, end, inclusive } => {
                 let loop_var = self.var_map[&var.0];
@@ -1272,6 +1322,22 @@ impl FuncCompiler<'_> {
                 self.func.instruction(&Instruction::I32Add);
                 self.emit_load_at(&elem_ty, 0);
                 self.func.instruction(&Instruction::LocalSet(loop_var));
+
+                // Tuple destructure: extract fields from loop_var into var_tuple locals
+                if let Some(tuple_vars) = var_tuple {
+                    if let Ty::Tuple(elem_types) = &elem_ty {
+                        let mut field_offset = 0u32;
+                        for (i, &tv) in tuple_vars.iter().enumerate() {
+                            if let Some(&local_idx) = self.var_map.get(&tv.0) {
+                                let ft = elem_types.get(i).cloned().unwrap_or(Ty::Int);
+                                self.func.instruction(&Instruction::LocalGet(loop_var));
+                                self.emit_load_at(&ft, field_offset);
+                                self.func.instruction(&Instruction::LocalSet(local_idx));
+                                field_offset += values::byte_size(&ft);
+                            }
+                        }
+                    }
+                }
 
                 // Body
                 for stmt in body {

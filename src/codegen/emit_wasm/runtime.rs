@@ -47,6 +47,10 @@ pub fn register_runtime(emitter: &mut WasmEmitter) {
     let str_eq_ty = emitter.register_type(vec![ValType::I32, ValType::I32], vec![ValType::I32]);
     emitter.rt.str_eq = emitter.register_func("__str_eq", str_eq_ty);
 
+    // __str_contains(haystack: i32, needle: i32) -> i32
+    let str_contains_ty = emitter.register_type(vec![ValType::I32, ValType::I32], vec![ValType::I32]);
+    emitter.rt.str_contains = emitter.register_func("__str_contains", str_contains_ty);
+
     // __mem_eq(a: i32, b: i32, size: i32) -> i32
     let mem_eq_ty = emitter.register_type(
         vec![ValType::I32, ValType::I32, ValType::I32], vec![ValType::I32],
@@ -77,6 +81,7 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     compile_println_int(emitter);
     compile_concat_str(emitter);
     compile_str_eq(emitter);
+    compile_str_contains(emitter);
     compile_mem_eq(emitter);
     compile_list_eq(emitter);
     compile_concat_list(emitter);
@@ -547,6 +552,94 @@ fn compile_str_eq(emitter: &mut WasmEmitter) {
     f.instruction(&Instruction::End); // end block
 
     // Fallback (shouldn't reach here)
+    f.instruction(&Instruction::I32Const(0));
+    f.instruction(&Instruction::End);
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
+
+/// __str_contains(haystack: i32, needle: i32) -> i32 (bool)
+/// O(n*m) substring search.
+fn compile_str_contains(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.str_contains];
+    // params: 0=$haystack, 1=$needle
+    // locals: 2=$h_len, 3=$n_len, 4=$i, 5=$j, 6=$match
+    let mut f = Function::new([
+        (1, ValType::I32), // 2: h_len
+        (1, ValType::I32), // 3: n_len
+        (1, ValType::I32), // 4: i
+        (1, ValType::I32), // 5: j
+        (1, ValType::I32), // 6: match flag
+    ]);
+
+    // h_len = haystack.len, n_len = needle.len
+    f.instruction(&Instruction::LocalGet(0));
+    f.instruction(&Instruction::I32Load(mem(0)));
+    f.instruction(&Instruction::LocalSet(2));
+    f.instruction(&Instruction::LocalGet(1));
+    f.instruction(&Instruction::I32Load(mem(0)));
+    f.instruction(&Instruction::LocalSet(3));
+
+    // Empty needle → always contains
+    f.instruction(&Instruction::LocalGet(3));
+    f.instruction(&Instruction::I32Eqz);
+    f.instruction(&Instruction::If(BlockType::Empty));
+    f.instruction(&Instruction::I32Const(1));
+    f.instruction(&Instruction::Return);
+    f.instruction(&Instruction::End);
+
+    // If needle longer than haystack → false
+    f.instruction(&Instruction::LocalGet(3));
+    f.instruction(&Instruction::LocalGet(2));
+    f.instruction(&Instruction::I32GtU);
+    f.instruction(&Instruction::If(BlockType::Empty));
+    f.instruction(&Instruction::I32Const(0));
+    f.instruction(&Instruction::Return);
+    f.instruction(&Instruction::End);
+
+    // Outer loop: i = 0; i <= h_len - n_len
+    f.instruction(&Instruction::I32Const(0));
+    f.instruction(&Instruction::LocalSet(4));
+    f.instruction(&Instruction::Block(BlockType::Empty));
+    f.instruction(&Instruction::Loop(BlockType::Empty));
+
+    // if i > h_len - n_len → not found
+    f.instruction(&Instruction::LocalGet(4));
+    f.instruction(&Instruction::LocalGet(2));
+    f.instruction(&Instruction::LocalGet(3));
+    f.instruction(&Instruction::I32Sub);
+    f.instruction(&Instruction::I32GtU);
+    f.instruction(&Instruction::If(BlockType::Empty));
+    f.instruction(&Instruction::I32Const(0));
+    f.instruction(&Instruction::Return);
+    f.instruction(&Instruction::End);
+
+    // Inner: compare needle bytes at position i
+    // Use mem_eq on haystack+4+i and needle+4, length n_len
+    f.instruction(&Instruction::LocalGet(0));
+    f.instruction(&Instruction::I32Const(4));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::LocalGet(4));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::LocalGet(1));
+    f.instruction(&Instruction::I32Const(4));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::LocalGet(3));
+    f.instruction(&Instruction::Call(emitter.rt.mem_eq));
+
+    f.instruction(&Instruction::If(BlockType::Empty));
+    f.instruction(&Instruction::I32Const(1));
+    f.instruction(&Instruction::Return);
+    f.instruction(&Instruction::End);
+
+    // i++
+    f.instruction(&Instruction::LocalGet(4));
+    f.instruction(&Instruction::I32Const(1));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::LocalSet(4));
+    f.instruction(&Instruction::Br(0));
+
+    f.instruction(&Instruction::End); // loop
+    f.instruction(&Instruction::End); // block
     f.instruction(&Instruction::I32Const(0));
     f.instruction(&Instruction::End);
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
