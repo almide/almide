@@ -68,6 +68,50 @@ pub fn cmd_check(file: &str, deny_warnings: bool) {
         std::process::exit(1);
     }
 
+    // Security Layer 2: check permissions if defined in almide.toml
+    if std::path::Path::new("almide.toml").exists() {
+        if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
+            if !proj.permissions.is_empty() {
+                let ir = almide::lower::lower_program(&program, &checker.expr_types, &checker.env);
+                let mut ir_mut = ir;
+                use almide::codegen::pass_effect_inference::{EffectInferencePass, Effect};
+                use almide::codegen::pass::NanoPass;
+                EffectInferencePass.run(&mut ir_mut, almide::codegen::pass::Target::Rust);
+
+                let allowed: std::collections::HashSet<Effect> = proj.permissions.iter()
+                    .filter_map(|s| match s.as_str() {
+                        "IO" => Some(Effect::IO),
+                        "Net" => Some(Effect::Net),
+                        "Env" => Some(Effect::Env),
+                        "Time" => Some(Effect::Time),
+                        "Rand" => Some(Effect::Rand),
+                        "Fan" => Some(Effect::Fan),
+                        "Log" => Some(Effect::Log),
+                        _ => None,
+                    })
+                    .collect();
+
+                let mut violations = 0;
+                for (name, fe) in &ir_mut.effect_map.functions {
+                    let forbidden: Vec<_> = fe.transitive.iter()
+                        .filter(|e| !allowed.contains(e))
+                        .collect();
+                    if !forbidden.is_empty() {
+                        eprintln!("error: capability violation in `{}`", name);
+                        for e in &forbidden {
+                            eprintln!("  {} is not in [permissions].allow", e);
+                        }
+                        violations += 1;
+                    }
+                }
+                if violations > 0 {
+                    eprintln!("\n{} capability violation(s)", violations);
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
+
     eprintln!("No errors found");
 }
 
