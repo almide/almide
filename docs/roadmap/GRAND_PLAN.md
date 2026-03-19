@@ -36,7 +36,8 @@
 
 Almideの独自性を確立する。**effect を capability に育てる。**
 
-- [ ] **Capability-aware effects** — fs/net/clock/random/camera/notify を権限・監査・配布境界に接続
+- [ ] **[HKT Foundation](active/hkt-foundation.md)** — Ty 統一、代数法則テーブル、Stream Fusion (中間 alloc 消滅で 2-5x)
+- [ ] **[Effect System](active/effect-system.md)** — 自動推論 capability、almide.toml で境界制限、Security Layer 2-3
 - [ ] **Typed host bindings** — IDL/schema-first, codegen-first, 手書きFFI不要
 - [ ] **Resource/task model** — task/scheduler, resource lifetime
 - [ ] **Persistence/sync primitives** — local-first, CRDT/merge, sync queue

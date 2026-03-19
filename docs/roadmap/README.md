@@ -4,7 +4,10 @@
 
 ## Active
 
-なし。1.0 リリース準備完了。
+| 項目 | 説明 | Grand Plan |
+|---|---|---|
+| [HKT Foundation](active/hkt-foundation.md) | 内部型コンストラクタ統一、代数法則、Stream Fusion | Phase 3 |
+| [Effect System](active/effect-system.md) | 自動推論 capability、パッケージ境界制限 | Phase 3 |
 
 ## 1.0 Remaining
 
