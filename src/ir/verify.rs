@@ -271,10 +271,19 @@ fn verify_expr(expr: &IrExpr, ctx: &mut VerifyCtx) {
             verify_expr(object, ctx);
         }
         IrExprKind::IndexAccess { object, index } => {
+            if !is_unresolved(&object.ty) && object.ty.is_map() {
+                ctx.err("IndexAccess used on Map type (should be MapAccess)".into(), expr.span);
+            }
             verify_expr(object, ctx);
             verify_expr(index, ctx);
         }
         IrExprKind::MapAccess { object, key } => {
+            if !is_unresolved(&object.ty) && !object.ty.is_map() {
+                ctx.err(
+                    format!("MapAccess used on non-Map type '{}'", object.ty.display()),
+                    expr.span,
+                );
+            }
             verify_expr(object, ctx);
             verify_expr(key, ctx);
         }
@@ -797,6 +806,58 @@ mod tests {
         let prog = make_program(vec![make_fn("main", body)], vt);
         let errors = verify_program(&prog);
         assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn detects_index_access_on_map() {
+        let vt = VarTable::new();
+        let map_ty = Ty::Applied(crate::types::TypeConstructorId::Map, vec![Ty::String, Ty::Int]);
+        let body = IrExpr {
+            kind: IrExprKind::IndexAccess {
+                object: Box::new(IrExpr { kind: IrExprKind::EmptyMap, ty: map_ty, span: None }),
+                index: Box::new(IrExpr { kind: IrExprKind::LitStr { value: "k".into() }, ty: Ty::String, span: None }),
+            },
+            ty: Ty::Int,
+            span: None,
+        };
+        let prog = make_program(vec![make_fn("main", body)], vt);
+        let errors = verify_program(&prog);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("IndexAccess used on Map"));
+    }
+
+    #[test]
+    fn detects_map_access_on_non_map() {
+        let vt = VarTable::new();
+        let list_ty = Ty::Applied(crate::types::TypeConstructorId::List, vec![Ty::Int]);
+        let body = IrExpr {
+            kind: IrExprKind::MapAccess {
+                object: Box::new(IrExpr { kind: IrExprKind::List { elements: vec![] }, ty: list_ty, span: None }),
+                key: Box::new(lit_int(0)),
+            },
+            ty: Ty::Int,
+            span: None,
+        };
+        let prog = make_program(vec![make_fn("main", body)], vt);
+        let errors = verify_program(&prog);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("MapAccess used on non-Map"));
+    }
+
+    #[test]
+    fn allows_map_access_on_map() {
+        let vt = VarTable::new();
+        let map_ty = Ty::Applied(crate::types::TypeConstructorId::Map, vec![Ty::String, Ty::Int]);
+        let body = IrExpr {
+            kind: IrExprKind::MapAccess {
+                object: Box::new(IrExpr { kind: IrExprKind::EmptyMap, ty: map_ty, span: None }),
+                key: Box::new(IrExpr { kind: IrExprKind::LitStr { value: "k".into() }, ty: Ty::String, span: None }),
+            },
+            ty: Ty::Int,
+            span: None,
+        };
+        let prog = make_program(vec![make_fn("main", body)], vt);
+        assert!(verify_program(&prog).is_empty());
     }
 
     #[test]
