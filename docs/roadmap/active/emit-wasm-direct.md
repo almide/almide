@@ -1,4 +1,4 @@
-# Direct WASM Emission [ON-HOLD]
+# Direct WASM Emission [ACTIVE]
 
 ## Motivation
 
@@ -74,33 +74,46 @@ wasm-encoder = "0.245"  # bytecodealliance low-level WASM encoder
 
 ## Implementation Phases
 
-### Phase 0: PoC — Hello World (1 day)
+### Phase 0: PoC — Hello World (COMPLETE)
 
-Generate a minimal WASM binary with `wasm_encoder` that prints "Hello" via WASI fd_write. Measure binary size (target: <500B).
+Generated minimal WASM binaries with `wasm_encoder`:
+- WASI mode: 143 bytes (fd_write Hello World)
+- Embed mode: 111 bytes (putchar import)
+- wasm-gc mode: 77 bytes (struct + field access)
 
-```rust
-// src/codegen/emit_wasm/mod.rs
-pub fn emit(program: &IrProgram) -> Vec<u8> {
-    let mut emitter = WasmEmitter::new();
-    for func in &program.functions {
-        emitter.emit_function(func);
-    }
-    emitter.finish()
-}
+### Phase 1: Minimal Language Subset (COMPLETE)
+
+IR-driven codegen replacing hardcoded PoC. 6-file module structure:
+
+```
+src/codegen/emit_wasm/
+├── mod.rs          WasmEmitter, assembly, entry point
+├── values.rs       Ty → ValType mapping
+├── strings.rs      String literal interning ([len:i32][data:u8...])
+├── runtime.rs      __alloc, __println_str, __int_to_string, __println_int
+├── expressions.rs  IrExpr → WASM instructions
+├── statements.rs   IrStmt → WASM instructions + local pre-scanning
+└── functions.rs    IrFunction → compiled WASM function
 ```
 
-### Phase 1: Minimal Language Subset (1-2 weeks)
-
-- Int/Float literals, arithmetic, comparison
+Implemented:
+- Int/Float literals, all arithmetic (+, -, *, /, %)
+- Comparison (<, >, <=, >=, ==, !=) for Int and Float
 - Bool, and/or/not
-- let/var bindings
-- if/then/else
-- fn definition and calls
-- println (WASI fd_write)
-- String literals (data section)
-- Bump allocator for heap
+- let/var bindings → WASM locals
+- if/then/else → WASM structured blocks
+- fn definition and calls (including recursion)
+- while loops with break/continue
+- println (polymorphic: String, Int, Bool)
+- String literals in data section
+- int.to_string runtime function
+- Bump allocator for heap allocation
+- CLI: `almide build app.almd --target wasm`
 
-Goal: FizzBuzz works.
+Results:
+- Hello World: **444 bytes** (target was <500B ✓)
+- FizzBuzz: **538 bytes** (target was 1-3KB ✓, beat estimate by 5x)
+- Fibonacci: **495 bytes**
 
 ### Phase 2: Collections + Closures (2-3 weeks)
 

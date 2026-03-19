@@ -4,10 +4,17 @@ use crate::{compile_with_ir, parse_file, find_rustc, check, diagnostic, resolve,
 pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release: bool, fast: bool, _unchecked_index: bool, no_check: bool) {
     let is_npm = matches!(target, Some("npm"));
     let is_wasm = matches!(target, Some("wasm" | "wasm32" | "wasi"));
+    let is_wasm_direct = matches!(target, Some("wasm"));
 
     if is_npm {
         let out_dir = output.unwrap_or("dist");
         cmd_build_npm(file, out_dir, no_check);
+        return;
+    }
+
+    // Direct WASM emit: .almd → IR → WASM binary (no rustc)
+    if is_wasm_direct {
+        cmd_build_wasm_direct(file, output, no_check);
         return;
     }
 
@@ -78,6 +85,65 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
     }
 
     eprintln!("Built {}", output);
+}
+
+/// Direct WASM emit: parse → check → lower → optimize → monomorphize → emit WASM binary.
+fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
+    let default_output = format!("{}.wasm", file.strip_suffix(".almd").unwrap_or("a.out"));
+    let output = output.unwrap_or(&default_output);
+
+    let (mut program, source_text, _parse_errors) = parse_file(file);
+
+    // Resolve dependencies
+    let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
+        if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
+            project_fetch::fetch_all_deps(&proj)
+                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); })
+                .into_iter()
+                .map(|fd| (fd.pkg_id, fd.source_dir))
+                .collect()
+        } else {
+            vec![]
+        }
+    } else {
+        vec![]
+    };
+
+    let resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
+        .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+
+    // Type check
+    let mut checker = check::Checker::new();
+    checker.set_source(file, &source_text);
+    for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
+        checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
+    }
+    let diagnostics = checker.check_program(&mut program);
+    if diagnostics.iter().any(|d| d.level == diagnostic::Level::Error) {
+        for d in &diagnostics {
+            eprintln!("{}", d.display_with_source(&source_text));
+        }
+        std::process::exit(1);
+    }
+
+    // Lower to IR
+    let mut ir_program = almide::lower::lower_program(&program, &checker.expr_types, &checker.env);
+
+    // Optimize
+    almide::optimize::optimize_program(&mut ir_program);
+
+    // Monomorphize
+    almide::mono::monomorphize(&mut ir_program);
+
+    // Emit WASM binary
+    let bytes = almide::codegen::emit_wasm_binary(&ir_program);
+
+    if let Err(e) = std::fs::write(output, &bytes) {
+        eprintln!("Failed to write {}: {}", output, e);
+        std::process::exit(1);
+    }
+
+    eprintln!("Built {} ({} bytes)", output, bytes.len());
 }
 
 fn cmd_build_npm(file: &str, out_dir: &str, _no_check: bool) {
