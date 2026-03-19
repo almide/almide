@@ -38,9 +38,10 @@ impl FuncCompiler<'_> {
             IrExprKind::Var { id } => {
                 if let Some(&local_idx) = self.var_map.get(&id.0) {
                     self.func.instruction(&Instruction::LocalGet(local_idx));
+                } else if let Some(&(global_idx, _)) = self.emitter.top_let_globals.get(&id.0) {
+                    self.func.instruction(&Instruction::GlobalGet(global_idx));
                 } else {
-                    // Variable not in scope (top-level let, unimplemented feature)
-                    // Push a zero value of the appropriate type
+                    // Variable not in scope — push zero
                     match values::ty_to_valtype(&expr.ty) {
                         Some(ValType::I64) => { self.func.instruction(&Instruction::I64Const(0)); }
                         Some(ValType::F64) => { self.func.instruction(&Instruction::F64Const(0.0)); }

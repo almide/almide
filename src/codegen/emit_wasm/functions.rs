@@ -44,6 +44,8 @@ pub fn compile_function(
         local_decls.push((1, ValType::I32));
     }
 
+    let init_globals_idx: Option<u32> = None; // disabled, using inline init instead
+
     // Create WASM function with declared locals
     let wasm_func = Function::new(local_decls);
 
@@ -59,6 +61,10 @@ pub fn compile_function(
         match_depth: 0,
         var_table: _var_table,
     };
+
+    if let Some(init_idx) = init_globals_idx {
+        compiler.func.instruction(&wasm_encoder::Instruction::Call(init_idx));
+    }
 
     compiler.emit_expr(&func.body);
     compiler.func.instruction(&wasm_encoder::Instruction::End);

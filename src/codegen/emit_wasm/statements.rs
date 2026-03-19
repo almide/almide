@@ -75,6 +75,11 @@ pub fn collect_locals(body: &IrExpr, var_table: &crate::ir::VarTable) -> LocalSc
 
 /// Count the maximum scratch local depth needed.
 /// Match expressions and Record constructions each consume 1 level.
+/// Public access to scratch depth counting (used by init_globals compilation).
+pub fn count_scratch_depth_public(expr: &IrExpr) -> usize {
+    count_scratch_depth(expr)
+}
+
 fn count_scratch_depth(expr: &IrExpr) -> usize {
     match &expr.kind {
         IrExprKind::Match { subject, arms } => {

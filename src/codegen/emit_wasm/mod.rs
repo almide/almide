@@ -87,6 +87,10 @@ pub struct WasmEmitter {
 
     // Globals
     pub heap_ptr_global: u32,
+    // Top-level let globals: VarId → (global index, ValType)
+    pub top_let_globals: HashMap<u32, (u32, ValType)>,
+    pub top_let_init: Vec<(u32, ValType, i64)>, // (global_idx, type, const_init_bits) in order
+    pub next_global: u32,
 
     // Function table: func_idx → table_idx (for call_indirect / FnRef)
     pub func_table: Vec<u32>, // list of func_idx in table order
@@ -145,6 +149,9 @@ impl WasmEmitter {
                 list_eq: 0,
             },
             heap_ptr_global: 0,
+            top_let_globals: HashMap::new(),
+            top_let_init: Vec::new(),
+            next_global: 1, // 0 = heap_ptr
             func_table: Vec::new(),
             func_to_table_idx: HashMap::new(),
             record_fields: HashMap::new(),
@@ -267,6 +274,22 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         }
     }
 
+    // Register top-level let bindings as globals
+    for tl in &program.top_lets {
+        let global_idx = emitter.next_global;
+        emitter.next_global += 1;
+        let vt = values::ty_to_valtype(&tl.ty).unwrap_or(ValType::I64);
+        // Extract const value for direct initialization (store as i64 bits)
+        let const_bits: i64 = match &tl.value.kind {
+            crate::ir::IrExprKind::LitInt { value } => *value,
+            crate::ir::IrExprKind::LitFloat { value } => value.to_bits() as i64,
+            crate::ir::IrExprKind::LitBool { value } => *value as i64,
+            _ => 0, // computed values default to 0
+        };
+        emitter.top_let_globals.insert(tl.var.0, (global_idx, vt));
+        emitter.top_let_init.push((global_idx, vt, const_bits));
+    }
+
     // Register ALL function signatures (including test functions)
     let mut user_meta: Vec<u32> = Vec::new();
     let mut user_func_indices: Vec<u32> = Vec::new();
@@ -286,6 +309,8 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
             test_func_indices.push((func_idx, func.name.clone()));
         }
     }
+
+    let init_globals_idx: Option<u32> = None; // globals are initialized inline
 
     // If no main but has tests, register a test runner as _start
     let test_runner_idx = if !has_main && !test_func_indices.is_empty() {
@@ -320,7 +345,7 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
 
     // Test runner (if needed)
     if let Some(_runner_idx) = test_runner_idx {
-        compile_test_runner(&mut emitter, &test_func_indices);
+        compile_test_runner(&mut emitter, &test_func_indices, init_globals_idx);
     }
 
     // Lambda bodies and FnRef wrappers
@@ -395,6 +420,19 @@ fn assemble(emitter: &WasmEmitter) -> Vec<u8> {
         },
         &wasm_encoder::ConstExpr::i32_const(heap_start_aligned as i32),
     );
+    // Top-level let globals
+    for &(_, vt, bits) in &emitter.top_let_init {
+        let init = match vt {
+            ValType::I64 => wasm_encoder::ConstExpr::i64_const(bits),
+            ValType::F64 => wasm_encoder::ConstExpr::f64_const(f64::from_bits(bits as u64)),
+            ValType::I32 => wasm_encoder::ConstExpr::i32_const(bits as i32),
+            _ => wasm_encoder::ConstExpr::i32_const(0),
+        };
+        globals.global(
+            GlobalType { val_type: vt, mutable: true, shared: false },
+            &init,
+        );
+    }
     module.section(&globals);
 
     // ── Export section ──
@@ -442,10 +480,61 @@ fn assemble(emitter: &WasmEmitter) -> Vec<u8> {
 
 // ── Test runner ─────────────────────────────────────────────────
 
+/// Compile the __init_globals function.
+fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
+    let void_type = emitter.register_type(vec![], vec![]);
+
+    // We need scratch locals for computing top_let values
+    let scan_depth = program.top_lets.iter()
+        .map(|tl| statements::count_scratch_depth_public(&tl.value))
+        .max().unwrap_or(0).max(1);
+
+    let mut local_decls = Vec::new();
+    let match_i64_base = local_decls.len() as u32;
+    for _ in 0..scan_depth {
+        local_decls.push((1, ValType::I64));
+    }
+    let match_i32_base = local_decls.len() as u32;
+    for _ in 0..scan_depth {
+        local_decls.push((1, ValType::I32));
+    }
+
+    let wasm_func = Function::new(local_decls);
+    let compiled_func = {
+        let mut compiler = FuncCompiler {
+            emitter: &mut *emitter,
+            func: wasm_func,
+            var_map: HashMap::new(),
+            depth: 0,
+            loop_stack: Vec::new(),
+            match_i64_base,
+            match_i32_base,
+            match_depth: 0,
+            var_table: &program.var_table,
+        };
+
+        for tl in &program.top_lets {
+            compiler.emit_expr(&tl.value);
+            if let Some(&(global_idx, _)) = compiler.emitter.top_let_globals.get(&tl.var.0) {
+                compiler.func.instruction(&wasm_encoder::Instruction::GlobalSet(global_idx));
+            }
+        }
+        compiler.func.instruction(&wasm_encoder::Instruction::End);
+        compiler.func
+    };
+
+    emitter.add_compiled(CompiledFunc { type_idx: void_type, func: compiled_func });
+}
+
 /// Compile a test runner function that calls each test, printing results.
-fn compile_test_runner(emitter: &mut WasmEmitter, tests: &[(u32, String)]) {
+fn compile_test_runner(emitter: &mut WasmEmitter, tests: &[(u32, String)], init_globals: Option<u32>) {
     let void_type = emitter.register_type(vec![], vec![]);
     let mut f = Function::new([]);
+
+    // Initialize globals if needed
+    if let Some(init_idx) = init_globals {
+        f.instruction(&wasm_encoder::Instruction::Call(init_idx));
+    }
 
     for (func_idx, test_name) in tests {
         // Print test name
