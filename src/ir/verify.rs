@@ -10,6 +10,7 @@
 //   4. Operator–type consistency — BinOp variant matches operand types
 
 use super::*;
+use super::visit::{IrVisitor, walk_expr, walk_stmt, walk_pattern};
 use crate::types::Ty;
 
 /// An internal compiler error detected by IR verification.
@@ -30,14 +31,14 @@ impl std::fmt::Display for IrVerifyError {
     }
 }
 
-struct VerifyCtx<'a> {
+struct Verifier<'a> {
     var_table: &'a VarTable,
     fn_name: String,
     in_loop: bool,
     errors: Vec<IrVerifyError>,
 }
 
-impl<'a> VerifyCtx<'a> {
+impl<'a> Verifier<'a> {
     fn err(&mut self, message: String, span: Option<Span>) {
         self.errors.push(IrVerifyError {
             message,
@@ -62,6 +63,126 @@ impl<'a> VerifyCtx<'a> {
     // after optimization would produce false positives.
 }
 
+impl<'a> IrVisitor for Verifier<'a> {
+    fn visit_expr(&mut self, expr: &IrExpr) {
+        match &expr.kind {
+            // ── Variables ──
+            IrExprKind::Var { id } => {
+                self.check_var_id(*id, expr.span);
+            }
+
+            // ── Operators: check type consistency ──
+            IrExprKind::BinOp { op, left, right } => {
+                verify_binop_types(*op, left, right, self, expr.span);
+            }
+            IrExprKind::UnOp { op, operand } => {
+                verify_unop_types(*op, operand, self, expr.span);
+            }
+
+            // ── Loop context ──
+            IrExprKind::Break | IrExprKind::Continue => {
+                if !self.in_loop {
+                    let kind = if matches!(expr.kind, IrExprKind::Break) { "break" } else { "continue" };
+                    self.err(format!("{} outside of loop", kind), expr.span);
+                }
+            }
+
+            // ── ForIn: check var ids, then walk with in_loop=true ──
+            IrExprKind::ForIn { var, var_tuple, .. } => {
+                self.check_var_id(*var, expr.span);
+                if let Some(tuple_vars) = var_tuple {
+                    for v in tuple_vars {
+                        self.check_var_id(*v, expr.span);
+                    }
+                }
+                let prev = self.in_loop;
+                self.in_loop = true;
+                walk_expr(self, expr);
+                self.in_loop = prev;
+                return; // already walked
+            }
+
+            // ── While: walk with in_loop=true ──
+            IrExprKind::While { .. } => {
+                let prev = self.in_loop;
+                self.in_loop = true;
+                walk_expr(self, expr);
+                self.in_loop = prev;
+                return;
+            }
+
+            // ── DoBlock with guards acts as a loop (break is valid) ──
+            IrExprKind::DoBlock { .. } => {
+                let prev = self.in_loop;
+                self.in_loop = true;
+                walk_expr(self, expr);
+                self.in_loop = prev;
+                return;
+            }
+
+            // ── Lambda: check param VarIds before walking body ──
+            IrExprKind::Lambda { params, .. } => {
+                for (var, _) in params {
+                    self.check_var_id(*var, expr.span);
+                }
+            }
+
+            // ── Access: type constraints ──
+            IrExprKind::IndexAccess { object, .. } => {
+                if !is_unresolved(&object.ty) && object.ty.is_map() {
+                    self.err("IndexAccess used on Map type (should be MapAccess)".into(), expr.span);
+                }
+            }
+            IrExprKind::MapAccess { object, .. } => {
+                if !is_unresolved(&object.ty) && !object.ty.is_map() {
+                    self.err(
+                        format!("MapAccess used on non-Map type '{}'", object.ty.display()),
+                        expr.span,
+                    );
+                }
+            }
+
+            _ => {}
+        }
+
+        walk_expr(self, expr);
+    }
+
+    fn visit_stmt(&mut self, stmt: &IrStmt) {
+        match &stmt.kind {
+            IrStmtKind::Bind { var, .. } => {
+                self.check_var_id(*var, stmt.span);
+            }
+            IrStmtKind::Assign { var, .. } => {
+                self.check_var_id(*var, stmt.span);
+            }
+            IrStmtKind::IndexAssign { target, .. } => {
+                self.check_var_id(*target, stmt.span);
+            }
+            IrStmtKind::MapInsert { target, .. } => {
+                self.check_var_id(*target, stmt.span);
+            }
+            IrStmtKind::FieldAssign { target, .. } => {
+                self.check_var_id(*target, stmt.span);
+            }
+            _ => {}
+        }
+
+        walk_stmt(self, stmt);
+    }
+
+    fn visit_pattern(&mut self, pat: &IrPattern) {
+        match pat {
+            IrPattern::Bind { var } => {
+                self.check_var_id(*var, None);
+            }
+            _ => {}
+        }
+
+        walk_pattern(self, pat);
+    }
+}
+
 /// Verify IR integrity for the main program. Returns errors found.
 /// Intended for debug builds — call after optimization, before monomorphization.
 pub fn verify_program(program: &IrProgram) -> Vec<IrVerifyError> {
@@ -75,15 +196,15 @@ pub fn verify_program(program: &IrProgram) -> Vec<IrVerifyError> {
         verify_function(f, &program.var_table, &f.name, &mut errors);
     }
     for tl in &program.top_lets {
-        let mut ctx = VerifyCtx {
+        let mut v = Verifier {
             var_table: &program.var_table,
             fn_name: "<top-level>".into(),
             in_loop: false,
             errors: Vec::new(),
         };
-        ctx.check_var_id(tl.var, None);
-        verify_expr(&tl.value, &mut ctx);
-        errors.append(&mut ctx.errors);
+        v.check_var_id(tl.var, None);
+        v.visit_expr(&tl.value);
+        errors.append(&mut v.errors);
     }
 
     // Verify imported modules
@@ -94,15 +215,15 @@ pub fn verify_program(program: &IrProgram) -> Vec<IrVerifyError> {
             verify_function(f, &m.var_table, &qual_name, &mut errors);
         }
         for tl in &m.top_lets {
-            let mut ctx = VerifyCtx {
+            let mut v = Verifier {
                 var_table: &m.var_table,
                 fn_name: format!("{}.<top-level>", m.name),
                 in_loop: false,
                 errors: Vec::new(),
             };
-            ctx.check_var_id(tl.var, None);
-            verify_expr(&tl.value, &mut ctx);
-            errors.append(&mut ctx.errors);
+            v.check_var_id(tl.var, None);
+            v.visit_expr(&tl.value);
+            errors.append(&mut v.errors);
         }
     }
 
@@ -110,7 +231,7 @@ pub fn verify_program(program: &IrProgram) -> Vec<IrVerifyError> {
 }
 
 fn verify_function(f: &IrFunction, var_table: &VarTable, name: &str, errors: &mut Vec<IrVerifyError>) {
-    let mut ctx = VerifyCtx {
+    let mut v = Verifier {
         var_table,
         fn_name: name.to_string(),
         in_loop: false,
@@ -120,14 +241,14 @@ fn verify_function(f: &IrFunction, var_table: &VarTable, name: &str, errors: &mu
     // Check parameter VarIds are valid and unique
     let mut seen_param_ids = std::collections::HashSet::new();
     for p in &f.params {
-        ctx.check_var_id(p.var, None);
+        v.check_var_id(p.var, None);
         if !seen_param_ids.insert(p.var.0) {
-            ctx.err(format!("duplicate parameter VarId({}) for '{}'", p.var.0, p.name), None);
+            v.err(format!("duplicate parameter VarId({}) for '{}'", p.var.0, p.name), None);
         }
     }
 
-    verify_expr(&f.body, &mut ctx);
-    errors.append(&mut ctx.errors);
+    v.visit_expr(&f.body);
+    errors.append(&mut v.errors);
 }
 
 fn verify_type_decls(decls: &[IrTypeDecl], module: &str, errors: &mut Vec<IrVerifyError>) {
@@ -163,221 +284,11 @@ fn verify_type_decls(decls: &[IrTypeDecl], module: &str, errors: &mut Vec<IrVeri
     }
 }
 
-fn verify_expr(expr: &IrExpr, ctx: &mut VerifyCtx) {
-    match &expr.kind {
-        // ── Variables ──
-        IrExprKind::Var { id } => {
-            ctx.check_var_id(*id, expr.span);
-        }
-
-        // ── Operators: check type consistency ──
-        IrExprKind::BinOp { op, left, right } => {
-            verify_binop_types(*op, left, right, ctx, expr.span);
-            verify_expr(left, ctx);
-            verify_expr(right, ctx);
-        }
-        IrExprKind::UnOp { op, operand } => {
-            verify_unop_types(*op, operand, ctx, expr.span);
-            verify_expr(operand, ctx);
-        }
-
-        // ── Loop context ──
-        IrExprKind::Break | IrExprKind::Continue => {
-            if !ctx.in_loop {
-                let kind = if matches!(expr.kind, IrExprKind::Break) { "break" } else { "continue" };
-                ctx.err(format!("{} outside of loop", kind), expr.span);
-            }
-        }
-        IrExprKind::ForIn { var, var_tuple, iterable, body } => {
-            ctx.check_var_id(*var, expr.span);
-            if let Some(tuple_vars) = var_tuple {
-                for v in tuple_vars {
-                    ctx.check_var_id(*v, expr.span);
-                }
-            }
-            verify_expr(iterable, ctx);
-            let prev = ctx.in_loop;
-            ctx.in_loop = true;
-            for s in body { verify_stmt(s, ctx); }
-            ctx.in_loop = prev;
-        }
-        IrExprKind::While { cond, body } => {
-            verify_expr(cond, ctx);
-            let prev = ctx.in_loop;
-            ctx.in_loop = true;
-            for s in body { verify_stmt(s, ctx); }
-            ctx.in_loop = prev;
-        }
-
-        // ── Recursive cases ──
-        IrExprKind::If { cond, then, else_ } => {
-            verify_expr(cond, ctx);
-            verify_expr(then, ctx);
-            verify_expr(else_, ctx);
-        }
-        IrExprKind::Block { stmts, expr: tail } => {
-            for s in stmts { verify_stmt(s, ctx); }
-            if let Some(t) = tail { verify_expr(t, ctx); }
-        }
-        // DoBlock with guards acts as a loop (break is valid for early exit)
-        IrExprKind::DoBlock { stmts, expr: tail } => {
-            let prev = ctx.in_loop;
-            ctx.in_loop = true;
-            for s in stmts { verify_stmt(s, ctx); }
-            if let Some(t) = tail { verify_expr(t, ctx); }
-            ctx.in_loop = prev;
-        }
-        IrExprKind::Match { subject, arms } => {
-            verify_expr(subject, ctx);
-            for arm in arms {
-                verify_pattern(&arm.pattern, ctx, expr.span);
-                if let Some(g) = &arm.guard { verify_expr(g, ctx); }
-                verify_expr(&arm.body, ctx);
-            }
-        }
-        IrExprKind::Call { target, args, .. } => {
-            match target {
-                CallTarget::Method { object, .. } => verify_expr(object, ctx),
-                CallTarget::Computed { callee } => verify_expr(callee, ctx),
-                _ => {}
-            }
-            for a in args { verify_expr(a, ctx); }
-        }
-        IrExprKind::Lambda { params, body } => {
-            for (var, _) in params {
-                ctx.check_var_id(*var, expr.span);
-            }
-            verify_expr(body, ctx);
-        }
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements }
-        | IrExprKind::Fan { exprs: elements } => {
-            for e in elements { verify_expr(e, ctx); }
-        }
-        IrExprKind::Record { fields, .. } => {
-            for (_, v) in fields { verify_expr(v, ctx); }
-        }
-        IrExprKind::SpreadRecord { base, fields } => {
-            verify_expr(base, ctx);
-            for (_, v) in fields { verify_expr(v, ctx); }
-        }
-        IrExprKind::MapLiteral { entries } => {
-            for (k, v) in entries { verify_expr(k, ctx); verify_expr(v, ctx); }
-        }
-        IrExprKind::Range { start, end, .. } => {
-            verify_expr(start, ctx);
-            verify_expr(end, ctx);
-        }
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
-            verify_expr(object, ctx);
-        }
-        IrExprKind::IndexAccess { object, index } => {
-            if !is_unresolved(&object.ty) && object.ty.is_map() {
-                ctx.err("IndexAccess used on Map type (should be MapAccess)".into(), expr.span);
-            }
-            verify_expr(object, ctx);
-            verify_expr(index, ctx);
-        }
-        IrExprKind::MapAccess { object, key } => {
-            if !is_unresolved(&object.ty) && !object.ty.is_map() {
-                ctx.err(
-                    format!("MapAccess used on non-Map type '{}'", object.ty.display()),
-                    expr.span,
-                );
-            }
-            verify_expr(object, ctx);
-            verify_expr(key, ctx);
-        }
-        IrExprKind::StringInterp { parts } => {
-            for p in parts {
-                if let IrStringPart::Expr { expr } = p { verify_expr(expr, ctx); }
-            }
-        }
-        IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
-        | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
-        | IrExprKind::Await { expr: e }
-        | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e }
-        | IrExprKind::Borrow { expr: e, .. } | IrExprKind::BoxNew { expr: e }
-        | IrExprKind::ToVec { expr: e } => {
-            verify_expr(e, ctx);
-        }
-        IrExprKind::RustMacro { args, .. } => {
-            for a in args { verify_expr(a, ctx); }
-        }
-
-        // Leaf nodes
-        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
-        | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::FnRef { .. }
-        | IrExprKind::EmptyMap | IrExprKind::OptionNone | IrExprKind::Hole
-        | IrExprKind::Todo { .. } | IrExprKind::RenderedCall { .. } => {}
-    }
-}
-
-fn verify_stmt(stmt: &IrStmt, ctx: &mut VerifyCtx) {
-    match &stmt.kind {
-        IrStmtKind::Bind { var, value, .. } => {
-            ctx.check_var_id(*var, stmt.span);
-            verify_expr(value, ctx);
-        }
-        IrStmtKind::BindDestructure { pattern, value } => {
-            verify_pattern(pattern, ctx, stmt.span);
-            verify_expr(value, ctx);
-        }
-        IrStmtKind::Assign { var, value } => {
-            ctx.check_var_id(*var, stmt.span);
-            verify_expr(value, ctx);
-        }
-        IrStmtKind::IndexAssign { target, index, value } => {
-            ctx.check_var_id(*target, stmt.span);
-            verify_expr(index, ctx);
-            verify_expr(value, ctx);
-        }
-        IrStmtKind::MapInsert { target, key, value } => {
-            ctx.check_var_id(*target, stmt.span);
-            verify_expr(key, ctx);
-            verify_expr(value, ctx);
-        }
-        IrStmtKind::FieldAssign { target, value, .. } => {
-            ctx.check_var_id(*target, stmt.span);
-            verify_expr(value, ctx);
-        }
-        IrStmtKind::Guard { cond, else_ } => {
-            verify_expr(cond, ctx);
-            verify_expr(else_, ctx);
-        }
-        IrStmtKind::Expr { expr } => {
-            verify_expr(expr, ctx);
-        }
-        IrStmtKind::Comment { .. } => {}
-    }
-}
-
-fn verify_pattern(pat: &IrPattern, ctx: &mut VerifyCtx, span: Option<Span>) {
-    match pat {
-        IrPattern::Bind { var } => ctx.check_var_id(*var, span),
-        IrPattern::Constructor { args, .. } => {
-            for a in args { verify_pattern(a, ctx, span); }
-        }
-        IrPattern::RecordPattern { fields, .. } => {
-            for f in fields {
-                if let Some(p) = &f.pattern { verify_pattern(p, ctx, span); }
-            }
-        }
-        IrPattern::Tuple { elements } => {
-            for e in elements { verify_pattern(e, ctx, span); }
-        }
-        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => {
-            verify_pattern(inner, ctx, span);
-        }
-        IrPattern::Literal { expr } => verify_expr(expr, ctx),
-        IrPattern::Wildcard | IrPattern::None => {}
-    }
-}
-
 // ── Operator–type consistency ─────────────────────────────────────
 
 /// Check that a BinOp variant is consistent with its operand types.
 /// Only flags clear contradictions (e.g., AddInt on String operands).
-fn verify_binop_types(op: BinOp, left: &IrExpr, right: &IrExpr, ctx: &mut VerifyCtx, span: Option<Span>) {
+fn verify_binop_types(op: BinOp, left: &IrExpr, right: &IrExpr, v: &mut Verifier, span: Option<Span>) {
     let lt = &left.ty;
     let rt = &right.ty;
 
@@ -396,7 +307,7 @@ fn verify_binop_types(op: BinOp, left: &IrExpr, right: &IrExpr, ctx: &mut Verify
 
     if let Some(expected_ty) = expected {
         if !ty_matches(lt, &expected_ty) || !ty_matches(rt, &expected_ty) {
-            ctx.err(
+            v.err(
                 format!(
                     "{:?} expects {} operands, got {} and {}",
                     op, expected_ty.display(), lt.display(), rt.display()
@@ -409,7 +320,7 @@ fn verify_binop_types(op: BinOp, left: &IrExpr, right: &IrExpr, ctx: &mut Verify
     // And/Or require Bool
     if matches!(op, BinOp::And | BinOp::Or) {
         if !ty_matches(lt, &Ty::Bool) || !ty_matches(rt, &Ty::Bool) {
-            ctx.err(
+            v.err(
                 format!(
                     "{:?} expects Bool operands, got {} and {}",
                     op, lt.display(), rt.display()
@@ -420,7 +331,7 @@ fn verify_binop_types(op: BinOp, left: &IrExpr, right: &IrExpr, ctx: &mut Verify
     }
 }
 
-fn verify_unop_types(op: UnOp, operand: &IrExpr, ctx: &mut VerifyCtx, span: Option<Span>) {
+fn verify_unop_types(op: UnOp, operand: &IrExpr, v: &mut Verifier, span: Option<Span>) {
     let t = &operand.ty;
     if is_unresolved(t) { return; }
 
@@ -432,7 +343,7 @@ fn verify_unop_types(op: UnOp, operand: &IrExpr, ctx: &mut VerifyCtx, span: Opti
 
     if let Some(expected_ty) = expected {
         if !ty_matches(t, &expected_ty) {
-            ctx.err(
+            v.err(
                 format!(
                     "{:?} expects {} operand, got {}",
                     op, expected_ty.display(), t.display()

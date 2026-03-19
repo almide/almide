@@ -20,6 +20,7 @@ mod unknown;
 mod fold;
 mod use_count;
 mod verify;
+pub mod visit;
 pub mod result;
 
 pub use unknown::*;
@@ -27,6 +28,7 @@ pub use fold::*;
 pub use use_count::*;
 pub use result::is_ir_result_expr;
 pub use verify::{verify_program, IrVerifyError};
+pub use visit::{IrVisitor, walk_expr, walk_stmt, walk_pattern};
 
 // ── Identifiers ─────────────────────────────────────────────────
 
