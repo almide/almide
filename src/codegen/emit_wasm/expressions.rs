@@ -1067,7 +1067,7 @@ impl FuncCompiler<'_> {
     }
 
     /// Emit a load instruction from base_ptr (on stack) + offset.
-    fn emit_load_at(&mut self, ty: &Ty, offset: u32) {
+    pub fn emit_load_at(&mut self, ty: &Ty, offset: u32) {
         match values::ty_to_valtype(ty) {
             Some(ValType::I64) => {
                 self.func.instruction(&Instruction::I64Load(MemArg {

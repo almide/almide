@@ -47,10 +47,39 @@ impl FuncCompiler<'_> {
                 // No-op in WASM
             }
 
-            IrStmtKind::BindDestructure { .. }
-            | IrStmtKind::IndexAssign { .. }
+            IrStmtKind::BindDestructure { pattern, value } => {
+                // Emit value (usually a tuple/record ptr)
+                self.emit_expr(value);
+                let scratch = self.match_i32_base + self.match_depth;
+                self.func.instruction(&Instruction::LocalSet(scratch));
+
+                // Destructure pattern
+                if let crate::ir::IrPattern::Tuple { elements } = pattern {
+                    let elem_types = if let crate::types::Ty::Tuple(tys) = &value.ty {
+                        tys.clone()
+                    } else { vec![] };
+
+                    let mut offset = 0u32;
+                    for (i, elem_pat) in elements.iter().enumerate() {
+                        if let crate::ir::IrPattern::Bind { var } = elem_pat {
+                            if let Some(&local_idx) = self.var_map.get(&var.0) {
+                                let elem_ty = elem_types.get(i).cloned().unwrap_or(crate::types::Ty::Int);
+                                self.func.instruction(&Instruction::LocalGet(scratch));
+                                self.emit_load_at(&elem_ty, offset);
+                                self.func.instruction(&Instruction::LocalSet(local_idx));
+                                offset += super::values::byte_size(&elem_ty);
+                            }
+                        } else if let crate::ir::IrPattern::Wildcard = elem_pat {
+                            let elem_ty = elem_types.get(i).cloned().unwrap_or(crate::types::Ty::Int);
+                            offset += super::values::byte_size(&elem_ty);
+                        }
+                    }
+                }
+            }
+
+            IrStmtKind::IndexAssign { .. }
             | IrStmtKind::FieldAssign { .. } => {
-                // Phase 2+: not needed for FizzBuzz
+                // Phase 3+
             }
         }
     }
@@ -203,11 +232,35 @@ fn scan_stmt(stmt: &IrStmt, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::
             }
             scan_expr(value, locals, vt);
         }
+        IrStmtKind::BindDestructure { pattern, value } => {
+            // Collect vars from destructure pattern
+            scan_destructure_pattern(pattern, &value.ty, locals, vt);
+            scan_expr(value, locals, vt);
+        }
         IrStmtKind::Assign { value, .. } => scan_expr(value, locals, vt),
         IrStmtKind::Expr { expr } => scan_expr(expr, locals, vt),
         IrStmtKind::Guard { cond, else_ } => {
             scan_expr(cond, locals, vt);
             scan_expr(else_, locals, vt);
+        }
+        _ => {}
+    }
+}
+
+/// Scan a destructuring pattern (let (a, b) = ...) for variable bindings.
+fn scan_destructure_pattern(pattern: &crate::ir::IrPattern, value_ty: &crate::types::Ty, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::VarTable) {
+    match pattern {
+        crate::ir::IrPattern::Tuple { elements } => {
+            let elem_types = if let crate::types::Ty::Tuple(tys) = value_ty { tys.clone() } else { vec![] };
+            for (i, elem) in elements.iter().enumerate() {
+                let elem_ty = elem_types.get(i).cloned().unwrap_or(crate::types::Ty::Int);
+                scan_destructure_pattern(elem, &elem_ty, locals, vt);
+            }
+        }
+        crate::ir::IrPattern::Bind { var } => {
+            if let Some(val_type) = values::ty_to_valtype(value_ty) {
+                locals.push((*var, val_type));
+            }
         }
         _ => {}
     }
