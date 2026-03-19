@@ -86,7 +86,7 @@ impl Parser {
             return self.parse_top_let(Visibility::Public);
         }
         if self.check(TokenType::Fn) || self.check(TokenType::Pub)
-            || self.check(TokenType::Effect) || self.check(TokenType::Async)
+            || self.check(TokenType::Effect)
             || self.check(TokenType::Local) || self.check(TokenType::Mod)
         {
             if self.check(TokenType::Pub)
@@ -241,8 +241,7 @@ impl Parser {
     }
 
     fn parse_trait_method(&mut self) -> Result<serde_json::Value, String> {
-        let mut async_ = false;
-        if self.check(TokenType::Async) { self.advance(); async_ = true; }
+        let async_ = false;
         let mut effect = false;
         if self.check(TokenType::Effect) { self.advance(); effect = true; }
         self.expect(TokenType::Fn)?;
@@ -301,8 +300,7 @@ impl Parser {
         let span = self.current_span();
         if self.check(TokenType::Pub) { self.advance(); }
         let visibility = self.parse_visibility();
-        let mut async_ = false;
-        if self.check(TokenType::Async) { self.advance(); async_ = true; }
+        let async_ = false;
         let mut effect = false;
         if self.check(TokenType::Effect) { self.advance(); effect = true; }
         self.expect(TokenType::Fn)?;

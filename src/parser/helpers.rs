@@ -67,8 +67,10 @@ impl Parser {
             && {
                 let mut j = i + 1;
                 while self.peek_at(j).map(|t| &t.token_type) == Some(&TokenType::Newline) { j += 1; }
-                self.peek_at(j).map(|t| &t.token_type) == Some(&TokenType::Ident)
-                    && self.peek_at(j + 1).map(|t| &t.token_type) == Some(&TokenType::Colon)
+                // { ident: ... } or { ...spread }
+                (self.peek_at(j).map(|t| &t.token_type) == Some(&TokenType::Ident)
+                    && self.peek_at(j + 1).map(|t| &t.token_type) == Some(&TokenType::Colon))
+                || self.peek_at(j).map(|t| &t.token_type) == Some(&TokenType::DotDotDot)
             }
     }
 

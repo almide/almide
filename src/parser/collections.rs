@@ -160,7 +160,7 @@ impl Parser {
     fn is_at_braceless_block_end(&self) -> bool {
         matches!(self.current().token_type,
             TokenType::EOF
-            | TokenType::Fn | TokenType::Effect | TokenType::Async
+            | TokenType::Fn | TokenType::Effect
             | TokenType::Pub | TokenType::Local | TokenType::Mod
             | TokenType::Type | TokenType::Trait | TokenType::Impl
             | TokenType::Test | TokenType::Strict | TokenType::At

@@ -39,10 +39,12 @@ stdlib             22 モジュール / 355 関数 / ランタイム 100%
 ターゲット          Rust, TypeScript, JavaScript, npm package, WASM
 Exercises          25 本 / 6 tiers
 並行処理           fan { }, fan.map, fan.race, fan.any, fan.settle, fan.timeout
-セキュリティ       Effect Isolation (Layer 1) — pure fn は effect fn を呼べない
+セキュリティ       Layer 1 (Effect Isolation) + Layer 2 (Capability Restriction via almide.toml [permissions])
+Effect推論         自動capability推論 (IO/Net/Env/Time/Rand/Fan/Log) + almide check --effects
 エラー処理         Option + Result の 2 機構のみ (Swift の 3 機構の失敗を回避)
 Codec              auto-derive encode/decode, Value 型, JSON roundtrip
-IR                 Typed IR + constant folding, dead code elimination + 9 nanopass
+IR                 Typed IR + constant folding, dead code elimination + 12 nanopass
+最適化             Stream Fusion 全6法則 — map+map, filter+filter, map+fold, map+filter→filter_map, identity消去, flat_map+flat_map
 Borrow             use-count ベースの clone 挿入/削除
 診断               file:line + context + actionable hint + error recovery
 Codegen            v3: TOML templates, is_rust()=0, 106/106 cross-target

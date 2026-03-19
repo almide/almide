@@ -1,0 +1,67 @@
+// heredoc_test — Heredoc strings, raw strings, single-quote strings
+
+test "heredoc basic" {
+  let s = """
+    hello
+    world
+  """
+  assert_eq(s.contains("hello"), true)
+  assert_eq(s.contains("world"), true)
+}
+
+test "heredoc with interpolation" {
+  let name = "Alice"
+  let s = """
+    Hello, ${name}!
+  """
+  assert_eq(s.contains("Alice"), true)
+}
+
+test "raw string no escapes" {
+  let s = r"hello\nworld"
+  assert_eq(s.contains("\\n"), true)
+  assert_eq(s.len() > 11, true)
+}
+
+test "raw string with backslash" {
+  let s = r"path\to\file"
+  assert_eq(s.contains("\\"), true)
+}
+
+test "single quote basic" {
+  let s = 'hello world'
+  assert_eq(s, "hello world")
+}
+
+test "single quote with double quotes inside" {
+  let s = 'say "hello"'
+  assert_eq(s.contains("hello"), true)
+}
+
+test "single quote preserves dollar sign" {
+  let s = '$100'
+  assert_eq(s.contains("$"), true)
+  assert_eq(s.len(), 4)
+}
+
+test "empty string variants" {
+  let a = ""
+  let b = ''
+  assert_eq(a, b)
+  assert_eq(a.len(), 0)
+}
+
+test "string with escape sequences" {
+  let s = "line1\nline2\ttab"
+  assert_eq(s.contains("\n"), true)
+  assert_eq(s.contains("\t"), true)
+}
+
+test "multiline string interpolation math" {
+  let x = 10
+  let y = 20
+  let s = """
+    ${x} + ${y} = ${x + y}
+  """
+  assert_eq(s.contains("30"), true)
+}

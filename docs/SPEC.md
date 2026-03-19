@@ -1,4 +1,4 @@
-# Almide Language Specification v0.5
+# Almide Language Specification v0.8
 
 **"Not a language for writing freely, but a language for converging correctly."**
 
@@ -14,9 +14,9 @@ The essence of language design for LLMs is not maximizing expressiveness, but **
 
 | Principle | Definition |
 |---|---|
-| **Predictable** | When generating the continuation of code, the "next valid syntax, API, and semantics" can be narrowed down tightly |
+| **Predictable** | The "next valid syntax, API, and semantics" can be narrowed down tightly at each generation step |
 | **Local** | The information needed to understand or modify a given location is as close as possible |
-| **Repairable** | When errors occur, the compiler, runtime, and type system can return near-unique fix candidates in few steps |
+| **Repairable** | When errors occur, the compiler returns near-unique fix candidates in few steps |
 | **Compact** | High semantic density with low syntactic noise. Strict yet concise |
 
 ### 7 Design Principles
@@ -26,17 +26,17 @@ The essence of language design for LLMs is not maximizing expressiveness, but **
 3. **Local Reasoning** -- The meaning of a function or expression should be largely understandable from nearby syntax alone
 4. **Incremental Completion** -- Incomplete code is legal; one can make progress by filling typed holes
 5. **Repair-First** -- The compiler should be a repair tool, not a rejection tool; diagnostics are structured
-6. **Vocabulary Economy** -- The standard library is small and has only a consistent vocabulary
-7. **No Magic** -- Mechanisms that change meaning at runtime, context-dependent DSLs, and implicit type conversions are prohibited in principle
+6. **Vocabulary Economy** -- The standard library has a consistent vocabulary with no synonyms
+7. **No Magic** -- Mechanisms that change meaning at runtime, context-dependent DSLs, and implicit type conversions are prohibited
 
 ### Trade-offs (Intentionally Sacrificed)
 
 - Writing freedom for experts
-- Cultural "language feel"
-- Ergonomic DSLs
-- Explosive metaprogramming power
-- Extreme type expressiveness
-- Abbreviation aesthetics for brevity
+- Cultural "language feel" and ergonomic DSLs
+- Metaprogramming power (no macros, no reflection)
+- Operator overloading and implicit conversions
+- Multiple return styles and lambda notations
+- Ad-hoc polymorphism via implicit instance resolution
 
 **Goal: High conciseness + Low freedom**
 
@@ -50,46 +50,80 @@ The essence of language design for LLMs is not maximizing expressiveness, but **
 Identifier ::= [a-z_][a-zA-Z0-9_]*
 ```
 
-A single trailing `?` is allowed:
+A single trailing `?` is allowed for predicates:
 
 ```
 Name ::= Identifier | Identifier "?"
 ```
 
-Semantic rules (enforced by static rule):
-- `name?` -- **Bool predicate only** (return type must be Bool)
+- `name?` -- **Bool predicate only** (return type must be `Bool`; compiler enforced)
 
 ### 1.2 Type Names
 
 ```
 TypeName ::= [A-Z][a-zA-Z0-9]*
-TypeConstructor ::= TypeName
 ```
 
 ### 1.3 Literals
 
 ```
-IntLiteral       ::= [0-9]+
-FloatLiteral     ::= [0-9]+ "." [0-9]+
-StringLiteral    ::= '"' ... '"'
-InterpolatedStr  ::= '"' ( char | "${" Expr "}" )* '"'
+IntLiteral       ::= [0-9]+ | "0x" [0-9a-fA-F]+     // decimal or hex
+FloatLiteral     ::= [0-9]+ "." [0-9]+ ([eE] [+-]? [0-9]+)?
+StringLiteral    ::= '"' (char | "\n" | "\t" | "\r" | "\\" | "\"" | "\$")* '"'
+InterpolatedStr  ::= '"' (char | "${" Expr "}")* '"'
+SingleQuoteStr   ::= "'" (char | "\'" | "\\")* "'"   // escapes, interpolation via ${expr}
+HeredocStr       ::= '"""' ... '"""'                   // multiline, indent-stripped
+RawHeredocStr    ::= 'r"""' ... '"""'                  // no escapes, no interpolation
+RawStr           ::= 'r"' ... '"'                      // no escapes, no interpolation
 BoolLiteral      ::= "true" | "false"
 ```
 
-There is **no** null literal for missing values. Absence is represented by `none` (a constructor of `Option[T]`).
+There is **no** null literal. Absence is represented by `none` (a constructor of `Option[T]`).
 
-### 1.4 Reserved Words
+Double-quote strings support interpolation via `${expr}` and backslash escapes. Single-quote strings also support interpolation and the escape sequences `\'`, `\\`, `\n`, `\t`, `\r`. Raw strings and raw heredocs support neither interpolation nor escapes.
+
+Heredoc strings strip leading whitespace based on minimum indent of non-empty lines. The first line (if blank after `"""`) and the last line (if whitespace-only before `"""`) are dropped.
+
+Numeric literals support `_` as a visual separator (e.g., `1_000_000`).
+
+### 1.4 Comments
 
 ```
-import type trait impl for fn let var while
-if then else match
-ok err some none
-try do
-todo unsafe effect deriving test
-async await guard newtype
+// line comment (to end of line)
+/* block comment (nestable) */
 ```
 
-Reserved for future use: `strict`, `where`
+Block comments nest: `/* outer /* inner */ still outer */` is valid.
+
+### 1.5 Keywords (42)
+
+```
+module  import  type    trait   impl    for     in      fn
+let     var     if      then    else    match   ok      err
+some    none    try     do      todo    unsafe  true    false
+not     and     or      strict  pub     effect  deriving test
+async   await   guard   break   continue while  local   mod
+newtype fan
+```
+
+### 1.6 Operators and Delimiters
+
+```
+Operators:   +  -  *  **  /  %  ^  ==  !=  <  <=  >  >=  |>  ..  ..=
+Unary:       -  not
+Logical:     and  or
+Assignment:  =
+Arrows:      ->  =>
+Delimiters:  (  )  {  }  [  ]  ,  .  :  ;  |  _  @  ...
+```
+
+- `^` is XOR (integer)
+- `+` is overloaded: addition for numbers, concatenation for strings and lists
+- `**` is exponentiation (right-associative)
+- `..` is exclusive range, `..=` is inclusive range
+- `...` is spread (in records)
+- `_` is wildcard (in match patterns) or placeholder (in pipe arguments)
+- `@` is used for extern annotations
 
 ---
 
@@ -100,24 +134,22 @@ Reserved for future use: `strict`, `where`
 ```
 let x = 1
 let y = 2
-let z = x + y    // newline as separator
-
-let a = 1; let b = 2   // semicolon for multiple statements on one line
+let a = 1; let b = 2
 ```
 
 ### 2.1 Line Continuation Rules
 
-In the following cases, a newline is ignored and the statement continues on the next line:
+A newline is ignored and the statement continues when:
 
-**When the line ends with one of the following tokens:**
-- Binary operators: `+`, `-`, `*`, `/`, `%`, `++`, `==`, `!=`, `<=`, `>=`, `<`, `>`, `and`, `or`, `|>`
+**The line ends with:**
+- Binary operators: `+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<=`, `>=`, `<`, `>`, `and`, `or`, `|>`
 - Delimiters: `,`, `.`, `:`
 - Opening brackets: `(`, `{`, `[`
 - Arrows: `->`, `=>`
 - Assignment: `=`
 - Keywords: `if`, `then`, `else`, `match`, `try`, `do`, `not`, `|`
 
-**When the next line starts with one of the following tokens:**
+**The next line starts with:**
 - `.` (method chaining)
 - `|>` (pipe)
 
@@ -125,7 +157,6 @@ In the following cases, a newline is ignored and the statement continues on the 
 let result = items
   .filter((x) => x > 0)
   .map((x) => x * 2)
-  .fold(0, (acc, x) => acc + x)
 
 text
   |> string.trim
@@ -139,34 +170,20 @@ text
 ```
 Program   ::= ImportDecl* TopDecl*
 
-TopDecl   ::= TypeDecl | TraitDecl | ImplDecl | FnDecl | TestDecl | TopLetDecl
+TopDecl   ::= TypeDecl | TraitDecl | ImplDecl | FnDecl
+            | TopLetDecl | StrictDecl | TestDecl
 
-TopLetDecl ::= "let" Name [":" Type] "=" Expr    (* module-scope constant *)
+Stmt      ::= LetStmt | VarStmt | AssignStmt | GuardStmt | Expr
 
-Stmt      ::= LetStmt | VarStmt | AssignStmt | Expr
-
-Expr      ::= Literal
-            | Name
-            | InterpolatedStr
-            | RecordExpr
-            | SpreadExpr
-            | ListExpr
-            | CallExpr
-            | MemberExpr
-            | IndexExpr
-            | PipeExpr
-            | IfExpr
-            | MatchExpr
-            | ForInExpr
-            | WhileExpr
-            | BlockExpr
-            | DoExpr
-            | LambdaExpr
-            | HoleExpr
-            | TodoExpr
-            | TryExpr
-            | BinaryExpr
-            | UnaryExpr
+Expr      ::= Literal | Name | InterpolatedStr
+            | RecordExpr | SpreadExpr | ListExpr | MapExpr
+            | CallExpr | MemberExpr | IndexExpr
+            | PipeExpr | BinaryExpr | UnaryExpr
+            | IfExpr | MatchExpr
+            | ForInExpr | WhileExpr | DoExpr | FanExpr
+            | BlockExpr | LambdaExpr
+            | HoleExpr | TodoExpr | TryExpr | AwaitExpr
+            | RangeExpr | TupleExpr | UnsafeExpr
             | "(" Expr ")"
 ```
 
@@ -174,49 +191,71 @@ Expr      ::= Literal
 
 ## 4. Modules and Imports
 
-> Full specification: **[specs/module-system.md](specs/module-system.md)**
-> (package structure, sub-namespaces, aliases, visibility, diamond dependency, resolution pipeline)
-
-Package identity is declared in `almide.toml` — no `module` declaration in source files.
+Package identity is declared in `almide.toml`. No `module` declaration in source files.
 
 ### 4.1 Import Declaration
 
 ```
-ImportDecl ::= "import" ImportPath
-             | "import" ImportPath "as" Ident
-             | "import" ImportPath "." "{" NameList "}"
+ImportDecl ::= "import" ModulePath
+             | "import" ModulePath "as" Ident
+             | "import" ModulePath "." "{" NameList "}"
 
-NameList ::= Name ( "," Name )*
+ModulePath ::= Ident ( "." Ident )*
 ```
 
 Examples:
 ```
-import fs                       -- stdlib module
-import mylib                    -- user package (loads all sub-namespaces)
-import mylib.parser             -- direct sub-module import
-import mylib as m               -- alias: m.hello(), m.parser.parse()
-import mylib.formatter as fmt   -- sub-module alias: fmt.format_upper()
+import fs                       // stdlib module
+import json                     // stdlib module (not auto-imported)
+import mylib                    // user package
+import mylib.parser             // sub-module import
+import mylib as m               // alias: m.hello()
+import self as app              // self-alias for the current package
+import mylib.{Parser, Lexer}    // selective import
 ```
 
 **Prohibited: wildcard imports.** `import fs.*` is a compile error.
 
-### 4.2 Visibility Modifiers
+### 4.2 Auto-Imported Modules (Prelude)
+
+The following modules are available without `import`:
 
 ```
-fn pub_fn() -> String = ...       -- public (default)
-mod fn internal() -> String = ... -- same project only
-local fn helper() -> String = ... -- same file only
+string  list  int  float  math  map  result  option  value  set
 ```
 
-### 4.3 Minimal Prelude
+All other stdlib modules require explicit `import`:
 
-Only truly fundamental types are implicitly imported:
-- `Int`, `Float`, `Bool`, `String`, `Unit`
-- `Option`, `Result`, `List`
-- `some`, `none`, `ok`, `err`
-- `true`, `false`
+```
+fs  env  io  process  json  random  regex  datetime  http
+log  testing  error  crypto  uuid
+```
 
-Functions like `map` and `filter` are provided only as methods on collection types and do not float as global functions.
+Bundled stdlib packages (pure Almide): `args`, `path`, `time`, `encoding`, `hash`, `url`, `csv`, `toml`, `compress`, `term`.
+
+### 4.3 Prelude Types
+
+Implicitly imported types and constructors:
+- Primitives: `Int`, `Float`, `Bool`, `String`, `Unit`, `Path`
+- Collections: `List[T]`, `Map[K, V]`, `Set[T]`
+- Error handling: `Option[T]`, `Result[T, E]`
+- Constructors: `some(x)`, `none`, `ok(x)`, `err(x)`
+- Booleans: `true`, `false`
+- Boundary: `Json`, `Value`
+
+### 4.4 Visibility Modifiers
+
+```
+fn pub_fn() -> String = ...       // public (default)
+mod fn internal() -> String = ... // same project only (pub(crate) in Rust)
+local fn helper() -> String = ... // same file only (private)
+```
+
+Visibility applies to `fn`, `type`, and `let` declarations:
+```
+local type Internal = { data: String }
+mod let THRESHOLD = 100
+```
 
 ---
 
@@ -228,29 +267,16 @@ Functions like `map` and `filter` are provided only as methods on collection typ
 
 ```
 GenericParams ::= "[" TypeParam ( "," TypeParam )* "]"
-TypeParam     ::= TypeName ( ":" TraitBound )?
-TraitBound    ::= TypeName ( "+" TypeName )*
+TypeParam     ::= TypeName
 ```
 
-Rationale: `<>` syntactically conflicts with comparison operators, requiring the parser to perform context-dependent ambiguity resolution. `[]` always means generics, with zero ambiguity. The `>>` splitting problem also does not arise.
-
 ```
-// No ambiguity
 Result[List[Map[String, Int]], Error]
-fn map[U](self, f: fn(T) -> U) -> List[U]
+fn map[U](xs: List[T], f: Fn(T) -> U) -> List[U]
 ```
 
 ### 5.2 Record Types
 
-```
-TypeDecl   ::= "type" TypeName GenericParams? "=" TypeExpr DerivingClause?
-
-RecordType ::= "{" FieldTypeList? "}"
-FieldTypeList ::= FieldType ( "," FieldType )*
-FieldType  ::= Identifier ":" TypeExpr
-```
-
-Examples:
 ```
 type User = {
   id: Int,
@@ -265,16 +291,8 @@ type Pair[A, B] = {
 
 ### 5.3 Variant Types
 
-```
-VariantType  ::= VariantCase ( "|" VariantCase )*
-VariantCase  ::= TypeConstructor
-               | TypeConstructor "(" TypeExprList ")"
-               | TypeConstructor "{" FieldTypeList "}"
+Three variant case forms: unit, tuple-style, and record-style.
 
-TypeExprList ::= TypeExpr ( "," TypeExpr )*
-```
-
-Examples:
 ```
 type Token =
   | Word(String)
@@ -287,15 +305,19 @@ type Shape =
   | Point
 ```
 
-Variants allow **three forms: zero-argument, tuple-style (positional arguments), and record-style (named fields)**.
+Inline variant (without leading `|`):
+
+```
+type Direction = North | South | East | West
+```
 
 ### 5.4 deriving
 
 ```
-DerivingClause ::= "deriving" TypeName ( "," TypeName )*
+DerivingClause ::= "deriving" TypeName
 ```
 
-Automatically derives `From` trait implementations for variant types. Mechanically generates `From[Type]` from cases of the form `Name(Type)`.
+Automatically derives `From` trait implementations for variant types:
 
 ```
 type ConfigError =
@@ -304,21 +326,13 @@ type ConfigError =
   | Decode(DecodeError)
   deriving From
 
-// The above is equivalent to:
+// Equivalent to:
 // impl From[IoError] for ConfigError { fn from(e: IoError) -> ConfigError = Io(e) }
 // impl From[ParseError] for ConfigError { fn from(e: ParseError) -> ConfigError = Parse(e) }
 // impl From[DecodeError] for ConfigError { fn from(e: DecodeError) -> ConfigError = Decode(e) }
 ```
 
-Rationale: Handwriting `impl From` is a breeding ground for copy-paste errors. Having an LLM accurately generate three subtly different blocks is needless risk.
-
 ### 5.5 newtype
-
-```
-TypeExpr ::= ... | "newtype" TypeExpr
-```
-
-Creates a new type that has the same structure but is distinct at the type level:
 
 ```
 type UserId = newtype Int
@@ -327,44 +341,48 @@ type Email = newtype String
 
 - `UserId` and `Int` are not implicitly convertible
 - Wrap: `UserId(42)` / Unwrap: `id.value`
-- Zero runtime cost (distinction exists only at compile time)
-- Prevents mix-ups of IDs and units at the type level
+- Zero runtime cost
 
 ### 5.6 Type Application
 
-```
-SimpleType ::= TypeName
-             | TypeName "[" TypeExprList "]"
-```
-
-Examples:
 ```
 List[String]
 Result[User, ParseError]
 Map[String, List[Int]]
 ```
 
+### 5.7 Tuple Types
+
+```
+(Int, String)              // tuple type
+(Int, String, Bool)        // 3-tuple
+```
+
+Access via `.0`, `.1`, etc.
+
+### 5.8 Function Types
+
+```
+Fn(Int) -> String
+Fn(Int, Int) -> Bool
+```
+
 ---
 
-## 6. Traits (Minimal Abstraction Mechanism)
+## 6. Traits and Implementations
 
-> **Status**: この trait/impl 構文は初期設計であり、将来的に row polymorphism と container protocols による代替が検討されている。詳細は [Type System Extensions](roadmap/active/type-system.md) を参照。現在実装済みの built-in protocols (Eq, Hash) は自動導出であり、trait 構文を使わない。
+### 6.1 trait
 
 ```
-TraitDecl ::= "trait" TypeName GenericParams? "{" TraitMethodList "}"
-TraitMethodList ::= ( TraitMethod )*
-TraitMethod ::= "effect"? "fn" Name GenericParams? "(" ParamList ")" "->" TypeExpr
+TraitDecl ::= "trait" TypeName GenericParams? "{" TraitMethod* "}"
+TraitMethod ::= "async"? "effect"? "fn" Name "(" ParamList ")" "->" TypeExpr
 ```
 
-Examples:
 ```
 trait Iterable[T] {
-  fn map[U](self, f: fn(T) -> U) -> Self[U]
-  fn filter(self, f: fn(T) -> Bool) -> Self[T]
-  fn fold[U](self, init: U, f: fn(U, T) -> U) -> U
-  fn any(self, f: fn(T) -> Bool) -> Bool
-  fn all(self, f: fn(T) -> Bool) -> Bool
-  fn len(self) -> Int
+  fn map[U](self, f: Fn(T) -> U) -> Self[U]
+  fn filter(self, f: Fn(T) -> Bool) -> Self[T]
+  fn fold[U](self, init: U, f: Fn(U, T) -> U) -> U
 }
 
 trait Storage[T] {
@@ -373,25 +391,23 @@ trait Storage[T] {
 }
 ```
 
-### impl
+### 6.2 impl
 
 ```
 ImplDecl ::= "impl" TypeName GenericParams? "for" TypeName "{" FnDecl* "}"
 ```
 
-Examples:
 ```
 impl Iterable[T] for List[T] {
-  fn map[U](self, f: fn(T) -> U) -> List[U] = _  // builtin
-  fn filter(self, f: fn(T) -> Bool) -> List[T] = _
+  fn map[U](self, f: Fn(T) -> U) -> List[U] = _
+  fn filter(self, f: Fn(T) -> Bool) -> List[T] = _
 }
 ```
 
-### Constraints
+### 6.3 Built-in Protocols
 
-- Traits contain only method signatures (no default implementations in v0.1)
-- No trait inheritance (in v0.1)
-- Orphan rule: `impl` can only be written within your own crate
+- **Eq** and **Hash** are compiler-derived automatically from type structure. No `deriving` needed.
+- `deriving From` is the only explicit deriving directive (for error type conversions).
 
 ---
 
@@ -400,88 +416,105 @@ impl Iterable[T] for List[T] {
 ### Primitives
 
 ```
-Int, Float, Bool, String, Bytes, Path, Unit
+Int  Float  Bool  String  Path  Unit
 ```
+
+`Bytes` is represented as `List[Int]`.
 
 ### Collections
 
 ```
-List[T], Map[K, V], Set[T]
+List[T]  Map[K, V]  Set[T]
 ```
 
-### Effect Representation
+### Error Handling
 
 ```
-Option[T], Result[T, E]
+Option[T]   -- some(x) | none
+Result[T, E] -- ok(x) | err(e)
 ```
 
 ### Boundary Types
 
 ```
-Json, Value
+Json  Value
 ```
 
-- May be used as receivers for external input
-- Requires `decode[T]` before bringing into domain logic
-- Using `Json` as a core domain type triggers a linter warning
-
-### Constructors
-
-```
-some(x)  : Option[T]
-none     : Option[T]    // type inferred from context
-ok(x)    : Result[T, E]
-err(x)   : Result[T, E]
-```
+Used as receivers for external input. Requires explicit conversion before use in domain logic.
 
 ---
 
 ## 8. Function Declarations
 
 ```
-FnDecl ::= "pub"? "async"? "effect"? "fn" Name GenericParams? "(" ParamList? ")" "->" TypeExpr "=" Expr
+FnDecl ::= Visibility? "async"? "effect"? "fn" Name GenericParams?
+            "(" ParamList? ")" "->" TypeExpr "=" Expr
 
-ParamList ::= Param ( "," Param )*
-Param     ::= Identifier ":" TypeExpr
+Visibility ::= "local" | "mod"        // default is public
+ParamList  ::= Param ( "," Param )*
+Param      ::= Identifier ":" TypeExpr ( "=" Expr )?   // default value optional
 ```
 
-Modifier order: `pub? async? effect? fn`
+Modifier order: `[local|mod]? async? effect? fn`
 
-Principles:
-- **Argument types are required**
-- **Return type is required**
-- The body is an expression
-- **Functions with side effects are declared with `effect fn`**
-- **Async functions are declared with `async fn` (implicitly includes `effect`)**
+### 8.1 Principles
 
-### 8.1 `effect fn` -- Explicit Side Effects
-
-When the `effect` keyword precedes a function declaration, it indicates that the function has side effects.
+- Argument types are required
+- Return type is required
+- The body is a single expression (after `=`)
+- `effect fn` marks functions with side effects
+- `fan { }` for concurrent execution (only inside `effect fn`)
 
 ```
-fn tracked?(index: Index, path: Path) -> Bool =
-  index.entries.any((entry) => entry.path == path)
+fn add(x: Int, y: Int) -> Int = x + y
 
-effect fn add(index: Index, file: Path) -> Result[Index, IoError] =
-  if tracked?(index, file) then ok(index)
-  else do {
-    let bytes = try read(file)
-    let id = hash(bytes)
-    ok(index.insert(file, id))
-  }
+effect fn greet(name: String) -> Result[Unit, String] = {
+  println("Hello, ${name}!")
+  ok(())
+}
 ```
 
-Rationale: The `!` suffix from v0.2 (`read_text!`) embedded meta-information in the function name, requiring management on both the declaration and call sides. By using `effect fn`:
-- Function names become pure identifiers (simplifying the lexer)
-- Side effects are expressed via a keyword in the declaration (close to type information)
-- Call sites simply call the function normally
-- The compiler only needs to detect calls from non-`effect fn` to `effect fn`
+### 8.2 Default Arguments
 
-### 8.2 Top-Level let -- Module-Scope Constants
+Parameters may have default values. All parameters after the first default must also have defaults.
 
 ```
-TopLetDecl ::= "let" Name (":" TypeExpr)? "=" Expr
+fn connect(host: String, port: Int = 8080, secure: Bool = false) -> Connection = _
 ```
+
+### 8.3 Named Arguments
+
+Arguments can be named at the call site:
+
+```
+connect("localhost")
+connect("localhost", port: 443, secure: true)
+connect(host: "localhost", secure: true)
+```
+
+Named arguments after positional ones are allowed. Positional arguments after named ones are not.
+
+### 8.4 Predicate Functions
+
+Functions ending in `?` must return `Bool`:
+
+```
+fn empty?(xs: List[Int]) -> Bool = list.len(xs) == 0
+fn tracked?(index: Index, path: Path) -> Bool = _
+```
+
+### 8.5 `effect fn` -- Explicit Side Effects
+
+Calling an `effect fn` from a non-`effect` function is a **compile error**, not a warning.
+
+```
+fn pure_fn() -> String =
+  fs.read_text("file.txt")    // Compile error: cannot call effect fn from non-effect fn
+```
+
+The `effect` system is a **search space reducer for code generation**: a pure function can only call other pure functions, shrinking the set of valid completions.
+
+### 8.6 Top-Level let -- Module-Scope Constants
 
 ```
 let PI = 3.14159265358979323846
@@ -489,11 +522,17 @@ let MAX_RETRIES = 3
 let GREETING = "Hello, world"
 ```
 
-Top-level `let` declares module-scope constants. They are evaluated at compile time when possible:
-- Numeric literals and simple expressions → Rust `const`
-- String and complex expressions → Rust `static LazyLock<T>`
+Evaluated at compile time when possible. Numeric and simple expressions become `const`; String and complex expressions use `LazyLock<T>` in Rust codegen.
 
-This replaces the previous pattern of using functions as constants (`fn PI() -> Float = 3.14`).
+### 8.7 Extern Annotations
+
+For FFI bindings to target-specific functions:
+
+```
+@extern(rust, "std::fs", "read_to_string")
+@extern(ts, "fs", "readFileSync")
+effect fn read_text(path: String) -> Result[String, String] = _
+```
 
 ---
 
@@ -502,76 +541,57 @@ This replaces the previous pattern of using functions as constants (`fn PI() -> 
 ### 9.1 let / var
 
 ```
-LetStmt ::= "let" Identifier TypeAnnotation? "=" Expr
-           | "let" "{" Identifier ("," Identifier)* "}" "=" Expr
-VarStmt ::= "var" Identifier TypeAnnotation? "=" Expr
-TypeAnnotation ::= ":" TypeExpr
+let x = 1                   // immutable
+let x: Int = 1              // with type annotation
+var y = 2                   // mutable
+y = y + 1                   // reassign (var only)
 ```
 
-- `let` is **immutable**
-- `var` is **mutable**
-- Local variables may omit type annotations. Public APIs, module boundaries, and fields require explicit types.
-
-#### Destructuring Bindings
-
-Extract fields from a record:
+### 9.2 Destructuring
 
 ```
-let { name, age } = user
+let { name, age } = user    // record destructure (one level only)
 ```
 
-Equivalent code:
-```
-let name = user.name
-let age = user.age
-```
+- Immutable bindings only (no `var` destructure)
+- Nested destructuring is not allowed
+- Renaming is not allowed
 
-- No `var` version is provided (immutable bindings only)
-- Nested destructuring is not allowed (one level only)
-- Renaming is not allowed (field names become variable names directly)
-
-### 9.2 guard
+### 9.3 guard
 
 ```
-GuardStmt ::= "guard" Expr "else" Expr
+guard cond else expr
 ```
 
-Precondition checking with early exit. When the condition is false, the expression in the else clause is returned.
+Precondition checking with early exit. When the condition is false, the else expression is returned.
 
 ```
-fn f(x: Int) -> Result[Int, Error] = {
+effect fn validate(x: Int) -> Result[Int, String] = {
   guard x > 0 else err("must be positive")
+  guard x < 1000 else err("too large")
   ok(x * 2)
 }
 ```
 
-- Can only be used within a block
-- The else clause typically returns early with `err(...)`
-- Flattens if-else nesting, allowing preconditions to be written first
-
-### 9.3 Reassignment
+In `do` loops, `guard cond else ok(())` acts as a break condition:
 
 ```
-AssignStmt ::= Identifier "=" Expr
-```
-
-Only allowed for identifiers bound with `var` (static rule).
-
-### 9.4 Blocks
-
-```
-BlockExpr ::= "{" StmtList "}"
-StmtList  ::= ( Stmt NEWLINE )* Stmt?
-```
-
-If the last statement is an expression, its value becomes the block value.
-
-```
-{
-  let x = 1
-  let y = 2
-  x + y
+do {
+  guard current != "NONE" else ok(())
+  let data = fs.read_text(current)
+  current = next
 }
+```
+
+### 9.4 Reassignment
+
+Only allowed for identifiers bound with `var`:
+
+```
+var count = 0
+count = count + 1
+xs[0] = "updated"           // index write (var only)
+m["key"] = value             // map write (var only)
 ```
 
 ---
@@ -581,168 +601,98 @@ If the last statement is an expression, its value becomes the block value.
 ### 10.1 if Expression
 
 ```
-IfExpr ::= "if" Expr "then" Expr "else" Expr
+if cond then expr else expr
 ```
 
-- **The condition must be `Bool`. Truthiness is prohibited.**
-
-```
-let msg = if x > 0 then "positive" else "non-positive"
-
-// Compile error:
-if x then ...         // Int is not Bool
-if list then ...      // List is not Bool
-```
+- `else` is **mandatory**. `if` without `else` is a syntax error.
+- The condition must be `Bool`. No truthiness.
+- Chaining: `if a then x else if b then y else z`
 
 ### 10.2 match Expression
 
 ```
-MatchExpr    ::= "match" Expr "{" MatchArmList "}"
-MatchArmList ::= MatchArm ( "," MatchArm )*
-MatchArm     ::= Pattern Guard? "=>" Expr
-Guard        ::= "if" Expr
-```
-
-**match must be exhaustive** (exhaustiveness checking is the typechecker's responsibility).
-
-Example with guards:
-```
-match value {
-  ok(n) if n > 100 => "big",
-  ok(n) => "small",
-  err(e) => e,
+match subject {
+  Pattern => expr,
+  Pattern if guard_cond => expr,
+  _ => expr,
 }
 ```
 
-Guards take a Bool expression after `if`. When the guard condition is false, the next arm is tried. This flattens nested if/match and keeps the structure of LLM-generated code simple.
+**match must be exhaustive** (enforced by the type checker).
+
+Guards take a `Bool` expression after `if`. When the guard is false, the next arm is tried.
 
 ### 10.3 Patterns
 
 ```
-Pattern ::= "_"
-          | Identifier
-          | Literal
-          | "some" "(" Pattern ")"
-          | "none"
-          | "ok" "(" Pattern ")"
-          | "err" "(" Pattern ")"
-          | TypeConstructor
-          | TypeConstructor "(" PatternList ")"
-          | TypeConstructor "{" FieldPatternList "}"
-
-PatternList      ::= Pattern ( "," Pattern )*
-FieldPatternList ::= FieldPattern ( "," FieldPattern )*
-FieldPattern     ::= Identifier ":" Pattern | Identifier
+Pattern ::= "_"                                      // wildcard
+           | Identifier                               // bind
+           | Literal                                  // int, float, string, bool
+           | "some" "(" Pattern ")"                   // Option
+           | "none"
+           | "ok" "(" Pattern ")"                     // Result
+           | "err" "(" Pattern ")"
+           | TypeName                                 // unit constructor
+           | TypeName "(" Pattern ("," Pattern)* ")"  // tuple constructor
+           | TypeName "{" FieldPattern* ".."? "}"     // record constructor
+           | "(" Pattern "," Pattern+ ")"             // tuple
 ```
 
-Examples:
+`FieldPattern ::= Ident (":" Pattern)?`
+
+Record patterns support `..` for partial matching:
+
 ```
 match shape {
   Circle(r) => 3.14 * r * r,
   Rect{ width, height } => width * height,
+  Rect{ width, .. } => width,
   Point => 0.0,
-}
-
-match result {
-  ok(value) => value,
-  err(e) => handle(e),
 }
 ```
 
 ### 10.4 Lambdas
 
 ```
-LambdaExpr ::= "fn" "(" LambdaParamList? ")" "=>" Expr
-```
-
-**Only one form. Shorthand notations are prohibited.**
-
-```
-(x) => x + 1
-(x: Int, y: Int) => x + y
+(x) => expr
+(x, y) => expr
+(x: Int) => x + 1
 items.map((x) => x * 2)
 ```
 
-### 10.5 Named Arguments
+One form only. Lambda parameters may optionally include type annotations.
+
+### 10.5 Block Expression
+
+The last expression in a block is its value:
 
 ```
-CallExpr ::= Expr "(" CallArgList ")"
-CallArg  ::= Expr | Identifier ":" Expr
+{
+  let x = 1
+  let y = 2
+  x + y
+}
 ```
 
-Arguments can be named at the call site. No changes to the declaration side are needed.
-
-```
-// Positional arguments (as before)
-create_user("alice", 30, true)
-
-// Named arguments (order-independent, self-documenting)
-create_user(name: "alice", age: 30, active: true)
-
-// Mixed OK (named arguments after positional ones)
-create_user("alice", age: 30, active: true)
-```
-
-Rationale: What LLMs get wrong most often is "when there are three or more arguments of the same type." A call like `f(true, false, true)` is meaningless without names. With names, even if the position is wrong, the names ensure correct correspondence.
-
-### 10.6 String Interpolation
-
-```
-let name = "world"
-let msg = "hello ${name}, 1+1=${1 + 1}"
-```
-
-Message construction is the most frequent thing LLMs write. Providing one canonical form eliminates drift between `+` concatenation and `format` functions.
-
-### 10.7 Record Expressions and Spread
-
-```
-RecordExpr ::= "{" FieldInitList "}"
-             | "{" "..." Expr "," FieldInitList "}"
-
-FieldInit ::= Identifier ":" Expr
-            | Identifier                 // shorthand: { name } is equivalent to { name: name }
-```
-
-Examples:
-```
-let alice = { name: "alice", age: 30 }
-let bob = { ...alice, name: "bob" }      // age is inherited from alice
-```
-
-### 10.8 List Expressions
-
-```
-ListExpr    ::= "[" ExprList? "]"
-IndexExpr   ::= Expr "[" Expr "]"
-```
-
-Index read: `xs[i]` returns `Option[T]` — `some(value)` if in bounds, `none` otherwise.
-Index write: `xs[i] = v` (var only) modifies the list in place.
-
-### 10.9 for...in Expression
-
-```
-ForInExpr ::= "for" Pattern "in" Expr "{" Stmt* "}"
-```
+### 10.6 for...in
 
 ```
 for item in items {
   println(item)
 }
 
-for (i, item) in list.enumerate(items) {
-  println(int.to_string(i) ++ ": " ++ item)
+for (k, v) in map.entries(config) {
+  println(k + " = " + v)
+}
+
+for i in 0..10 {
+  println(int.to_string(i))
 }
 ```
 
-Iterates over a list. The loop body is `Unit`-typed. Use `for...in` for simple list iteration.
+Iterates over a list. The loop body is `Unit`-typed. Use `for...in` for collection iteration.
 
-### 10.10 while Expression
-
-```
-WhileExpr ::= "while" Expr "{" Stmt* "}"
-```
+### 10.7 while
 
 ```
 var i = 0
@@ -752,188 +702,247 @@ while i < 10 {
 }
 ```
 
-Loops while the condition is true. The loop body is `Unit`-typed. Use `while` for condition-based loops, `do { guard ... }` when you need to return a value from the loop.
+Loops while the condition is true. The loop body is `Unit`-typed.
 
-### 10.11 Pipe
+### 10.8 do Block
 
-```
-PipeExpr ::= Expr "|>" Expr
-```
+Two roles: error propagation block and loop with structured break.
 
-Examples:
-```
-text
-  |> string.trim
-  |> string.split(",")
-  |> list.map((s) => string.trim(s))
-```
-
-Canonicalizes the problem of mixing method chaining and function calls using pipes. `x |> f` is equivalent to `f(x)`.
-
-#### Placeholder `_`
-
-When using multi-argument functions on the right side of a pipe, `_` specifies where the left-hand value is inserted:
+**Error propagation:**
 
 ```
-text |> split(_, ",")           // split(text, ",")
-xs |> filter(_, (x) => x > 0)  // filter(xs, (x) => x > 0)
-```
-
-- `_` functions as a placeholder only within call arguments
-- Multiple `_` in a single call is not allowed (compile error)
-- When there is no `_`, the conventional `x |> f` -> `f(x)` applies
-
-### 10.10 UFCS (Uniform Function Call Syntax)
-
-**`f(x, y)` and `x.f(y)` are equivalent.** The compiler resolves this automatically.
-
-```
-// The following are all the same
-string.trim(text)
-text.trim()
-
-// These are also the same
-string.split(text, ",")
-text.split(",")
-```
-
-#### Resolution Rules
-
-When `x.f(args...)` is called:
-
-1. If the type of `x` has a method `f`, call it
-2. Otherwise, look for a function `f(x, args...)` in scope
-3. If neither is found, it is a compile error
-
-#### Rationale
-
-One of the most frequent points of confusion for LLMs is "is this a method call or a function call?" With UFCS:
-- Both `string.trim(text)` and `text.trim()` are correct
-- The pipe `text |> string.trim` remains valid as well
-- It may appear that canonical form options increase, but since **all forms mean the same thing**, mistakes cease to exist
-- The boundary between trait methods and free functions disappears, so you can write without worrying about "where is this function defined?"
-
-### 10.11 do Block (Automatic try Propagation for Result/Option)
-
-```
-DoExpr ::= "do" BlockExpr
-```
-
-Inside a `do` block, `try` is automatically applied to expressions that return `Result[T, E]` or `Option[T]`.
-
-```
-effect fn load(path: Path) -> Result[Config, ConfigError] =
+effect fn load(path: String) -> Result[Config, AppError] =
   do {
-    let text = fs.read_text(path)        // auto try: Result[String, IoError]
-    let raw = json.parse(text)           // auto try: Result[Json, ParseError]
-    decode[Config](raw)                  // auto try: Result[Config, DecodeError]
+    let text = fs.read_text(path)     // auto try: Result unwrapped
+    let raw = json.parse(text)        // auto try: Result unwrapped
+    decode[Config](raw)
   }
 ```
 
-Type inference rules for `do`:
-- When the block's return type is `Result[T, E]`, if an expression in the block is `Result[U, E]`, it is automatically unwrapped and `U` is bound
-- If the error types differ, conversion via the `From` trait is attempted; if conversion is not possible, it is a compile error
+Inside a `do` block, expressions returning `Result[T, E]` are automatically unwrapped. If error types differ, conversion via `From` is attempted.
 
-This is **the solution to the Result verbosity problem**. It offers the choice of handwriting `try` or automating with `do`, yielding two canonical forms with clearly separated semantics:
-- `try`: unwrap just one expression
-- `do`: write an entire block in a Result context
-
-### 10.12 hole / todo / try
+**Loop with guard:**
 
 ```
-HoleExpr ::= "_"
-TodoExpr ::= "todo" "(" StringLiteral ")"
-TryExpr  ::= "try" Expr
+do {
+  guard current != "NONE" else ok(())   // break condition
+  let data = fs.read_text(path)
+  current = next
+}
 ```
 
-**These three are at the core of this language.**
+When a `do` block contains `guard`, it becomes a loop. `guard cond else expr` is the only way to exit.
+
+### 10.9 fan (Structured Concurrency)
+
+```
+fan { expr1; expr2; expr3 }
+```
+
+Runs expressions concurrently. Returns results as a tuple. Only valid inside `effect fn`.
+
+Rules:
+- If any expression returns `Err`, the entire `fan` fails and siblings are cancelled
+- No `let`/`var`/`for`/`while` inside `fan` blocks -- only expressions
+- No `var` capture from outer scope (prevents data races)
+
+Library forms:
+- `fan.map(xs, f)` -- parallel map over a collection
+- `fan.race(thunks)` -- first to complete wins, rest cancelled
+
+### 10.10 Pipe
+
+```
+text |> string.trim |> string.split(",")
+```
+
+`x |> f` is equivalent to `f(x)`.
+
+**Placeholder `_`** for multi-argument functions:
+
+```
+xs |> list.filter(_, (x) => x > 0)
+text |> string.split(_, ",")
+```
+
+`_` specifies where the piped value is inserted. Multiple `_` in a single call is a compile error.
+
+**Pipe into match:**
+
+```
+value |> match {
+  some(x) => x,
+  none => "default",
+}
+```
+
+### 10.11 UFCS (Uniform Function Call Syntax)
+
+`f(x, y)` and `x.f(y)` are equivalent. The compiler resolves automatically.
+
+```
+string.trim(text)       // canonical form
+text.trim()             // UFCS form -- equivalent
+
+string.split(text, ",")
+text.split(",")         // equivalent
+```
+
+Resolution: when `x.f(args...)` is called, the compiler looks for `f(x, args...)` in scope.
+
+### 10.12 Range
+
+```
+0..5            // [0, 1, 2, 3, 4]    exclusive end
+1..=5           // [1, 2, 3, 4, 5]    inclusive end
+for i in 0..n { ... }   // no list allocation (optimized)
+```
+
+### 10.13 Record and Spread
+
+```
+let alice = { name: "alice", age: 30 }
+let bob = { ...alice, name: "bob" }       // age inherited from alice
+{ name }                                   // shorthand: { name: name }
+```
+
+### 10.14 List
+
+```
+[1, 2, 3]
+[]                        // empty list (type inferred from context)
+xs[0]                     // index access
+xs[i] = value             // index write (var only)
+```
+
+### 10.15 Map
+
+```
+["a": 1, "b": 2]         // map literal
+[:]                       // empty map (requires type annotation)
+let m: Map[String, Int] = [:]
+m["key"]                  // index access (returns Option[V])
+m["key"] = value          // index write (var only)
+```
+
+### 10.16 Tuple
+
+```
+(1, "hello")              // tuple literal
+let pair = (1, "hello")
+pair.0                    // index access: 1
+pair.1                    // "hello"
+```
+
+### 10.17 String Interpolation
+
+```
+let name = "world"
+let msg = "hello ${name}, 1+1=${1 + 1}"
+```
+
+Works in double-quote strings, single-quote strings, and heredocs (but not raw strings).
+
+### 10.18 Hole / Todo / Try / Await
+
+```
+fn parse(text: String) -> Ast = _                     // hole (type-checked stub)
+fn optimize(ast: Ast) -> Ast = todo("implement later") // todo with message
+let text = try fs.read_text(path)                      // unwrap Result, propagate error
+let (a, b) = fan { task_a(); task_b() }               // concurrent execution
+```
+
+`_` (hole) and `todo(msg)` accept any expected type. The compiler reports the expected type, available variables, and suggestions.
+
+### 10.19 unsafe Block
+
+```
+fn technically_pure(x: Int) -> Int =
+  unsafe { fs.read_text(cache_path) }    // bypass effect boundary
+```
+
+`unsafe` surfaces "normal rules are being broken here."
 
 ---
 
 ## 11. Operators
 
-```
-UnaryOp  ::= "-" | "not"
-BinaryOp ::= "+" | "-" | "*" | "/" | "%" | "++"
-            | "==" | "!=" | "<" | "<=" | ">" | ">="
-            | "and" | "or"
-            | "|>"
-```
+### Precedence (lowest to highest)
 
-`++` is **exclusively for list/string concatenation**. String concatenation via `+` overloading confuses LLMs, so it is separated.
+| Level | Operators | Associativity |
+|-------|-----------|---------------|
+| 1 | `\|>` (pipe) | left |
+| 2 | `or` | left |
+| 3 | `and` | left |
+| 4 | `==` `!=` `<` `<=` `>` `>=` | left |
+| 5 | `..` `..=` (range) | none |
+| 6 | `+` `-` (additive) | left |
+| 7 | `*` `/` `%` `^` (multiplicative, XOR) | left |
+| 8 | `**` (power) | right |
+| 9 | `-` `not` (unary) | prefix |
+| 10 | `.` `()` `[]` (postfix) | left |
 
-### Precedence
+- Assignment (`=`) is a statement, not an operator
+- Operator overloading is prohibited -- built-in types only
+- `&&` and `||` are rejected with hints to use `and`/`or`
 
-1. unary (`-`, `not`)
-2. `*` `/` `%`
-3. `+` `-` `++`
-4. comparison (`==`, `!=`, `<`, `<=`, `>`, `>=`)
-5. `and`
-6. `or`
-7. `|>`
+### Operator Semantics
 
-- Assignment is a statement, not an operator
-- Operator overloading is prohibited in principle (built-in types only)
-- When in doubt, use parentheses
+| Operator | Meaning |
+|----------|---------|
+| `+` | Addition (Int, Float) or concatenation (String, List) |
+| `-` `*` `/` `%` | Arithmetic |
+| `**` | Exponentiation |
+| `^` | Bitwise XOR (Int) |
+| `==` `!=` | Deep equality (all types except Fn) |
+| `<` `<=` `>` `>=` | Comparison |
+| `and` `or` `not` | Boolean logic |
+| `\|>` | Pipe |
+| `..` `..=` | Range (exclusive / inclusive) |
+
+In Rust codegen, `==`/`!=` emit the `almide_eq!` macro for deep structural equality. In TS/JS codegen, they emit `__deep_eq()`.
 
 ---
 
 ## 12. Error Model
 
-### 12.1 Three-Layer Error Strategy
+### 12.1 Three-Layer Strategy
 
 | Layer | Mechanism | Use Case |
 |---|---|---|
 | **Normal failure** | `Result[T, E]` | parse, validate, I/O, lookup |
 | **Programmer error** | `panic` | unreachable, invariant violations |
-| **Testing** | `expect` | simple unwrap within tests |
+| **Testing** | `assert_eq`, `assert` | test assertions |
 
-Exceptions **do not exist**. There is no `throw` / `catch`.
+Exceptions **do not exist**. There is no `throw`/`catch`.
 
-### 12.2 Typing Rule for try
+### 12.2 try
 
-#### try on Result
-
-```
-Γ ⊢ e : Result[T, E]
-current_return_type = Result[R, E]
------------------------------------
-Γ ⊢ try e : T
-```
-
-#### try on Option
+`try` unwraps a `Result[T, E]` or `Option[T]`, propagating the error to the enclosing function:
 
 ```
-Γ ⊢ e : Option[T]
-current_return_type = Option[R]
------------------------------------
-Γ ⊢ try e : T
+// In a function returning Result[R, E]:
+let value = try some_result    // unwraps T, propagates E
+
+// In a function returning Option[R]:
+let value = try some_option    // unwraps T, propagates none
 ```
 
-#### No Mixing
-
-There is no automatic conversion for using `try` on an `Option` inside a function that returns `Result`. Write an explicit conversion:
+No automatic conversion between `Result` and `Option`. Use explicit conversion:
 
 ```
-let value = try opt.ok_or(MyError("missing"))
+let value = try opt.ok_or("missing")
 ```
 
-### 12.3 Error Conversion
-
-Error type conversion is done explicitly. However, it is made lightweight with `do` blocks + `From` trait + `deriving`:
+### 12.3 Error Conversion with deriving From
 
 ```
-trait From[T] {
-  fn from(value: T) -> Self
-}
-
 type AppError =
   | Io(IoError)
   | Parse(ParseError)
   deriving From
 
-// Inside a do block, when error types differ, automatic conversion via From if implemented
-effect fn load(path: Path) -> Result[Config, AppError] =
+effect fn load(path: String) -> Result[Config, AppError] =
   do {
     let text = fs.read_text(path)    // IoError -> AppError via From
     let raw = json.parse(text)       // ParseError -> AppError via From
@@ -945,569 +954,516 @@ effect fn load(path: Path) -> Result[Config, AppError] =
 
 ## 13. Holes and Incomplete Code
 
-**This is a core feature of the language.**
-
-### 13.1 Hole
+**Core feature of the language.** Allows incremental development.
 
 ```
 fn parse(text: String) -> Ast = _
-```
-
-### 13.2 todo
-
-```
 fn optimize(ast: Ast) -> Ast = todo("implement constant folding")
 ```
 
-### 13.3 Typing Rule
+### Compiler Obligation
 
-```
-expected_type = T
--------------------
-Γ ⊢ _ : T          // hole: passes type checking but errors in final artifacts
-
-expected_type = T
--------------------
-Γ ⊢ todo(msg) : T  // todo: same as above, but retains a message
-```
-
-### 13.4 Compiler Obligation
-
-When a hole is found, the compiler must return in a structured format:
-- Expected type T
+When a hole is found, the compiler returns:
+- Expected type `T`
 - Available variables in scope and their types
 - Function candidates that can return the expected type
-- Template candidate expressions
-
-```json
-{
-  "error": "hole",
-  "location": { "file": "main.lang", "line": 12, "col": 5 },
-  "expected_type": "Result[Commit, ParseError]",
-  "available_names": [
-    { "name": "text", "type": "String" },
-    { "name": "parse_header", "type": "(String) -> Result[Header, ParseError]" }
-  ],
-  "suggestions": [
-    "parse_header(text)",
-    "todo(\"return commit\")"
-  ]
-}
-```
+- Suggested expressions
 
 ---
 
-## 14. Effect Design
+## 14. Concurrency: `fan`
 
-### 14.1 `effect fn` -- Enforced via Compile Error
+### 14.1 fan Block
 
-Calling an `effect fn` from a non-`effect` function results in **an error, not a warning**.
-
-```
-fn pure_fn(x: Int) -> Int =
-  read(some_path)    // Compile error: cannot call effect fn from non-effect fn
-```
-
-Warnings get ignored, causing the effect boundary to become meaningless. By making it an error, the side-effect boundary is guaranteed at the language level.
-
-### 14.2 unsafe Block
-
-When you truly need to bypass the effect boundary, do so explicitly:
+`fan { }` runs expressions concurrently. Only valid inside `effect fn`.
 
 ```
-fn technically_pure(x: Int) -> Int =
-  unsafe { read(cache_path) }    // explicitly breaking safety
-```
-
-The presence of `unsafe` surfaces "here be danger."
-
-### 14.3 Standard Library Conventions
-
-```
-effect fn now() -> Timestamp
-effect fn getenv(key: String) -> Option[String]
-effect fn read_text(path: Path) -> Result[String, IoError]
-effect fn write(path: Path, data: String) -> Result[Unit, IoError]
-effect fn random_int(min: Int, max: Int) -> Int
-```
-
-I/O, clock, env, net, and randomness are all `effect fn`.
-
----
-
-## 15. Async/Await
-
-> **Status**: 基本設計 (`async fn`, `await`) は確定済み。構造化並行性の構文は `async let` / `await` ベースに移行中。`Async[T]` はユーザーに露出しない（内部型として存在）。最新設計は [Structured Concurrency](roadmap/active/structured-concurrency.md) および [DESIGN.md](DESIGN.md) の Async セクションを参照。
-
-### 15.1 async fn
-
-`async fn` declares an asynchronous function. **`async` implicitly includes `effect`** (since all async operations involve I/O).
-
-```
-async fn fetch(url: String) -> Result[String, HttpError] = _
-async fn fetch_json[T](url: String) -> Result[T, HttpError] = _
-```
-
-The return type of `async fn` is written as the inner type. The runtime wraps this internally, but `Async[T]` is not exposed in user-facing type annotations.
-
-### 15.2 await
-
-```
-AwaitExpr ::= "await" Expr
-```
-
-`await` resolves an async computation to extract `T`. It is a prefix operator similar to `try`, usable only within `async fn`.
-
-```
-async fn load(url: String) -> Result[Config, AppError] = {
-  let text = await fetch(url)
-  let config = try parse(text)
-  ok(config)
-}
-```
-
-### 15.3 Combining with do Blocks
-
-Combine `await` and implicit `try` inside a `do` block:
-
-```
-async fn load(url: String) -> Result[Config, AppError] =
-  do {
-    let text = await fetch(url)     // await resolves async, do auto-tries Result
-    let config = parse(text)        // do auto-tries Result
-    config
+effect fn main() -> Result[Unit, String] = {
+  let (a, b) = fan {
+    fetch_user(1)
+    fetch_posts(1)
   }
+  println("${a}, ${b}")
+  ok(())
+}
 ```
 
-**`await` is explicit, `try` is made implicit by `do`.** This separation is important:
-- Which lines are async is visible via `await` (local reasoning)
-- Error handling is handled in bulk by `do` (noise reduction)
+Results are returned as a tuple. If any expression returns `Err`, the entire `fan` fails and siblings are cancelled.
 
-### 15.4 Structured Concurrency
-
-Unstructured `spawn` / `join` are **prohibited**. Concurrent execution uses `async let` for scoped parallel tasks:
+### 14.2 fan.map / fan.race
 
 ```
-// Start a concurrent task (scoped to the enclosing block)
-async let result = fetch(url)
-
-// Await the result (consumes the handle — second await is a compile error)
-let value = await result
+let results = fan.map(urls, (url) => fetch(url))   // parallel map
+let first = fan.race([task_a, task_b])              // first to complete wins
 ```
 
-Stdlib combinators for common patterns:
+### 14.3 Rules
 
-```
-// Execute with a timeout
-async fn timeout[T](ms: Int, task: Async[T]) -> Result[T, TimeoutError]
-
-// Sleep
-async fn sleep(ms: Int) -> Unit
-```
-
-Inside `do` blocks, any task failure cancels all siblings, then propagates the error — the same fail-fast semantics as sequential `do`.
-
-### 15.5 Typing Rules
-
-```
-Γ ⊢ e : Async[T]
-current_fn is async
-----------------------------
-Γ ⊢ await e : T
-```
-
-Using `await` inside a non-`async fn` is a compile error. Calling an `async fn` from a non-`async fn` or non-`effect fn` is a compile error.
-
-### 15.6 Rationale
-
-- Since `async` includes `effect`, there are at most two modifier types (`async fn` or `effect fn`). The confusion of "should I write `async effect fn`?" is resolved by `async` including `effect`
-- Structured concurrency eliminates risks of resource leaks and deadlocks at the language level
-- The combination of `do` + `await` makes async error-handling code nearly identical in shape to synchronous code
+- `fan { }` only inside `effect fn` — pure functions cannot fork
+- No `var` capture — only `let` bindings from outer scope (prevents data races)
+- No unstructured `spawn` — all concurrency is scoped
+- Same fail-fast semantics as `do` — first error cancels all siblings
 
 ---
 
-## 16. Testing
+## 15. Testing
 
-### 16.1 test Declaration
-
-```
-TestDecl ::= "test" StringLiteral BlockExpr
-```
-
-Tests are written as **top-level declarations** in the same file as functions. There is no need to separate them into test-only files.
+### 15.1 test Declaration
 
 ```
-fn add(x: Int, y: Int) -> Int = x + y
-
-test "addition" {
+test "description" {
   assert_eq(add(1, 2), 3)
-  assert_eq(add(0, 0), 0)
-}
-
-test "negative addition" {
-  assert_eq(add(-1, 1), 0)
+  assert(x > 0)
+  assert_ne(a, b)
 }
 ```
 
-### 16.2 Assertion Functions
+Tests are top-level declarations in the same file as functions. No separate test files required (convention: `*_test.almd` for dedicated test files).
 
-Built-in functions available within test blocks:
+### 15.2 Assertion Functions
 
 ```
-assert(cond: Bool)                    // fails if cond is false
+assert(cond: Bool)                    // fails if false
 assert_eq(actual: T, expected: T)     // fails if actual != expected
 assert_ne(actual: T, expected: T)     // fails if actual == expected
 ```
 
-### 16.3 Rationale
+### 15.3 Running Tests
 
-- Test code is the most frequently generated output from LLMs. Having a single canonical way to write tests makes the generation distribution converge
-- Having tests next to functions makes it easier for LLMs to understand the function's intent (local reasoning)
-- `test "name" { ... }` has a simple structure that LLMs can easily learn as a template
+```bash
+almide test                      # all .almd with test blocks (recursive)
+almide test spec/lang/           # directory
+almide test spec/lang/expr_test.almd  # single file
+almide test --run "pattern"      # filter by name
+```
+
+---
+
+## 16. Strict Mode
+
+```
+strict types      // require all type annotations
+strict effects    // fully check effect propagation
+```
+
+Declared at the top of a file. Enables stricter compiler checking.
 
 ---
 
 ## 17. Naming Conventions
 
-### ? is for Bool Predicates Only
+### Predicates
 
-```
-fn empty?(xs: List[Int]) -> Bool = xs.len == 0
-fn tracked?(index: Index, path: Path) -> Bool = ...
-fn exists?(path: Path) -> Bool = ...
-```
+`?` suffix on function names: `is_empty?`, `exists?`, `contains?`. Return type must be `Bool`.
 
-A function with `?` whose return type is not `Bool` is a compile error.
+The `is_` prefix convention is used for predicates in the stdlib: `string.is_empty?(s)`, `string.is_digit?(s)`.
 
-### Destructive Updates
+### Stdlib Naming Rules
 
-| Non-destructive (returns a new value) | Destructive (in-place, `effect fn`) |
-|---|---|
-| `fn push(list, item) -> List[T]` | `effect fn push(list, item) -> Unit` |
-| `fn sort(list) -> List[T]` | `effect fn sort(list) -> Unit` |
+| Convention | Rule | Example |
+|---|---|---|
+| Module prefix | `module.function()` canonical form | `string.len(s)`, `list.get(xs, i)` |
+| Predicate suffix | `?` for boolean-returning functions | `string.is_empty?(s)`, `fs.exists?(path)` |
+| No synonyms | One name per operation | `len` not `length`/`size`/`count` |
+| Symmetric pairs | Matching names for inverses | `split`/`join`, `to_string`/`to_int` |
+| Return type consistency | Fallible lookups return `Option`, I/O returns `Result` | `list.get() -> Option[T]` |
 
 ---
 
 ## 18. Standard Library
 
-### 18.1 Collection API (Trait-Based, Fixed Naming, No Aliases)
+381 native functions across 22 native modules, plus 10 bundled modules (pure Almide). Runtime implementation: 100%.
 
-Unified across all collection types:
+### 18.1 Auto-Imported Modules
 
-| Operation | Signature | Description |
-|---|---|---|
-| `map` | `fn[U](self, fn(T) -> U) -> Self[U]` | Transform |
-| `filter` | `fn(self, fn(T) -> Bool) -> Self[T]` | Filter |
-| `fold` | `fn[U](self, U, fn(U, T) -> U) -> U` | Accumulate |
-| `any` | `fn(self, fn(T) -> Bool) -> Bool` | Any element satisfies condition |
-| `all` | `fn(self, fn(T) -> Bool) -> Bool` | All elements satisfy condition |
-| `len` | `fn(self) -> Int` | Length |
-| `contains` | `fn(self, T) -> Bool` | Existence check |
-| `find` | `fn(self, fn(T) -> Bool) -> Option[T]` | Search |
-| `get` | `fn(self, key) -> Option[T]` | Key lookup |
-| `first` | `fn(self) -> Option[T]` | First element |
-| `last` | `fn(self) -> Option[T]` | Last element |
+**string** (41 functions):
+`trim`, `trim_start`, `trim_end`, `split`, `join`, `len`, `lines`, `pad_left`, `pad_right`, `starts_with?`, `ends_with?`, `slice`, `to_bytes`, `from_bytes`, `contains`, `to_upper`, `to_lower`, `to_int`, `replace`, `char_at`, `chars`, `index_of`, `repeat`, `count`, `reverse`, `is_empty?`, `is_digit?`, `is_alpha?`, `is_alphanumeric?`, `is_whitespace?`, `strip_prefix`, `strip_suffix`, `capitalize`, `is_upper?`, `is_lower?`, `codepoint`, `from_codepoint`, `pad_end`, `replace_first`, `last_index_of`, `to_float`
 
-**`collect`, `select`, `inject`, `pluck`, etc. do not exist.**
+**list** (54 functions):
+`len`, `get`, `get_or`, `first`, `last`, `sort`, `sort_by`, `reverse`, `contains`, `index_of`, `any`, `all`, `each`, `map`, `flat_map`, `filter`, `find`, `fold`, `enumerate`, `zip`, `flatten`, `take`, `drop`, `chunk`, `unique`, `join`, `sum`, `product`, `min`, `max`, `is_empty?`, `push`, `pop`, `insert`, `remove`, `concat`, `slice`, `range`, `count`, `find_index`, `partition`, `scan`, `window`, `zip_with`, `unzip`, `group_by`, `frequencies`, `intersperse`, `reduce`, `take_while`, `drop_while`, `dedup`, `rotate`, `transpose`
 
-### 18.2 Result / Option Methods
+**map** (16 functions):
+`new`, `get`, `get_or`, `set`, `contains`, `remove`, `merge`, `keys`, `values`, `len`, `entries`, `from_list`, `is_empty?`, `map_values`, `filter`, `fold`
+
+**int** (21 functions):
+`to_string`, `to_hex`, `parse`, `parse_hex`, `abs`, `min`, `max`, `band`, `bor`, `bxor`, `bshl`, `bshr`, `bnot`, `wrap_add`, `wrap_mul`, `rotate_right`, `rotate_left`, `to_u32`, `to_u8`, `clamp`, `signum`
+
+**float** (16 functions):
+`to_string`, `to_int`, `from_int`, `round`, `floor`, `ceil`, `abs`, `sqrt`, `parse`, `min`, `max`, `clamp`, `is_nan?`, `is_infinite?`, `signum`, `truncate`
+
+**math** (21 functions):
+`min`, `max`, `abs`, `pow`, `pi`, `e`, `sin`, `cos`, `tan`, `log`, `exp`, `sqrt`, `asin`, `acos`, `atan`, `atan2`, `log2`, `log10`, `floor`, `ceil`, `round`
+
+**result** (9 functions):
+`map`, `map_err`, `and_then`, `unwrap_or`, `is_ok?`, `is_err?`, `ok`, `err`, `flatten`
+
+**option** (9 functions):
+`map`, `and_then`, `unwrap_or`, `ok_or`, `is_some?`, `is_none?`, `flatten`, `filter`, `zip`
+
+**value** (19 functions):
+Type-agnostic value operations for dynamic data handling.
+
+**set** (auto-imported):
+Set operations: `new`, `insert`, `contains`, `remove`, `union`, `intersection`, `difference`, `len`, `is_empty?`, `to_list`, `from_list`.
+
+### 18.2 Import-Required Modules
+
+**fs** (24 functions, all effect):
+`read_text`, `read_bytes`, `read_lines`, `write`, `write_bytes`, `append`, `mkdir_p`, `exists?`, `is_dir?`, `is_file?`, `remove`, `list_dir`, `copy`, `rename`, `remove_dir`, `metadata`, `glob`, `walk_dir`, `read_dir`, `create_dir`, `symlink`, `read_link`, `canonical`, `temp_dir`
+
+**env** (9 functions, effect):
+`unix_timestamp`, `millis`, `args`, `get`, `set`, `cwd`, `sleep_ms`, `home_dir`, `hostname`
+
+**io** (3 functions, effect):
+`read_line`, `print`, `read_all`
+
+**process** (6 functions, effect):
+`exec`, `exec_status`, `exit`, `stdin_lines`, `spawn`, `pid`
+
+**json** (36 functions):
+`parse`, `stringify`, `stringify_pretty`, `get`, `get_string`, `get_int`, `get_float`, `get_bool`, `get_array`, `keys`, `to_string`, `to_int`, `as_string`, `as_int`, `as_float`, `as_bool`, `as_array`, `object`, `s`, `i`, `f`, `b`, `null`, `array`, `from_string`, `from_int`, `from_float`, `from_bool`, `from_map`, `is_null?`, `is_string?`, `is_int?`, `is_array?`, `is_object?`, `len`, `merge`
+
+**random** (4 functions, effect):
+`int`, `float`, `choice`, `shuffle`
+
+**datetime** (21 functions):
+Date/time operations: `now`, `year`, `month`, `day`, `hour`, `minute`, `second`, `weekday`, `to_iso`, `from_parts`, etc.
+
+**crypto** (4 functions, effect):
+`random_bytes`, `random_hex`, `hmac_sha256`, `sha256`
+
+**uuid** (6 functions):
+UUID generation and formatting.
+
+**log** (8 functions, effect):
+`debug`, `info`, `warn`, `error`, `trace`, `set_level`, `with_context`, `flush`
+
+**testing** (7 functions):
+`assert`, `assert_eq`, `assert_ne`, `assert_ok`, `assert_err`, `assert_some`, `assert_none`
+
+**error** (3 functions):
+`message`, `chain`, `context`
+
+**regex** (8 functions):
+`match?`, `full_match?`, `find`, `find_all`, `replace`, `replace_first`, `split`, `captures`
+
+**http** (26 functions, effect):
+HTTP client operations.
+
+### 18.3 Bundled Modules (Pure Almide)
+
+| Module | Functions |
+|--------|-----------|
+| args | 6 |
+| path | 7 |
+| time | 20 |
+| encoding | 10 |
+| hash | 3 |
+| url | 21 |
+| csv | 9 |
+| toml | 14 |
+| compress | 4 |
+| term | 21 |
+
+### 18.4 Built-in Functions
+
+Available everywhere without import:
 
 ```
-// Result[T, E]
-fn map[U](self, fn(T) -> U) -> Result[U, E]
-fn map_err[F](self, fn(E) -> F) -> Result[T, F]
-fn and_then[U](self, fn(T) -> Result[U, E]) -> Result[U, E]
-fn unwrap_or(self, default: T) -> T
-fn is_ok?(self) -> Bool
-fn is_err?(self) -> Bool
-
-// Option[T]
-fn map[U](self, fn(T) -> U) -> Option[U]
-fn and_then[U](self, fn(T) -> Option[U]) -> Option[U]
-fn unwrap_or(self, default: T) -> T
-fn ok_or[E](self, err: E) -> Result[T, E]
-fn is_some?(self) -> Bool
-fn is_none?(self) -> Bool
+println(s: String)              // print line to stdout
+eprintln(s: String)             // print line to stderr
+assert_eq(a: T, b: T)          // assert equal
+assert_ne(a: T, b: T)          // assert not equal
+assert(cond: Bool)              // assert true
 ```
 
-### 18.3 String Operations
-
-```
-// string module
-fn trim(s: String) -> String
-fn split(s: String, sep: String) -> List[String]
-fn join(parts: List[String], sep: String) -> String
-fn starts_with?(s: String, prefix: String) -> Bool
-fn ends_with?(s: String, suffix: String) -> Bool
-fn contains?(s: String, sub: String) -> Bool
-fn replace(s: String, from: String, to: String) -> String
-fn len(s: String) -> Int
-fn to_int(s: String) -> Option[Int]
-fn to_float(s: String) -> Option[Float]
-```
-
-### 18.4 Core Modules
-
-| Module | Purpose |
-|---|---|
-| `string` | String operations |
-| `path` | Path operations |
-| `fs` | File I/O (all `effect fn`) |
-| `json` | JSON parsing and generation |
-| `http` | HTTP communication (all `effect fn`) |
-| `time` | Time (`now`, etc. are `effect fn`) |
-| `env` | Environment variables (all `effect fn`) |
+There is no `print` function (use `io.print` for no-newline output). `println` requires `String` -- no implicit conversion.
 
 ---
 
-## 19. Prohibitions
+## 19. Entry Point
+
+```
+effect fn main(args: List[String]) -> Result[Unit, AppError] = {
+  let cmd = list.get(args, 1)
+  match cmd {
+    some("run") => do_something(),
+    some(other) => err(UnknownCommand(other)),
+    none => err(NoCommand),
+  }
+}
+```
+
+`args[0]` is the program name, `args[1]` is the first argument. The runtime calls `main(args)`.
+
+---
+
+## 20. Codegen Architecture
+
+### 20.1 Multi-Target
+
+Almide compiles to multiple targets:
+
+| Target | Status | Approach |
+|--------|--------|----------|
+| **Rust** | Production | Full ownership analysis, borrow/clone passes |
+| **TypeScript** | Production | Result erasure (ok(x)->x, err(e)->throw) |
+| **JavaScript** | Production | Same as TypeScript, different module system |
+| **WASM** | Production | Via Rust target |
+| **Go** | Planned | Stub pipeline |
+| **Python** | Planned | Stub pipeline |
+
+### 20.2 Codegen v3 Pipeline
+
+Three-layer architecture: IR -> Nanopass -> Templates.
+
+```
+IrProgram (typed IR)
+    |
+Layer 1: Core IR normalization (target-agnostic)
+    |
+Layer 2: Semantic Rewrite (target-specific Nanopass pipeline)
+    |
+Layer 3: Template Renderer (TOML-driven syntax output)
+    |
+Target source code
+```
+
+**Rust pipeline passes:**
+1. TypeConcretization -- resolve generic types
+2. BorrowInsertion -- insert `&` references
+3. CloneInsertion -- insert `.clone()` calls
+4. StdlibLowering -- module calls to named calls with arg decoration
+5. ResultPropagation -- insert `?` for effect fn calls
+6. BuiltinLowering -- assert_eq, println, etc. to Rust macros
+7. FanLowering -- fan blocks to tokio::join!/spawn
+
+**TypeScript/JavaScript pipeline passes:**
+1. MatchLowering -- match expressions to if/else chains
+2. ResultErasure -- ok(x)->x, err(e)->throw, some(x)->x, none->null
+3. ShadowResolve -- re-declarations to reassignment
+4. FanLowering -- fan blocks to Promise.all
+
+Templates are defined in TOML files (`codegen/templates/*.toml`), separating syntax from semantics. Adding a new target requires implementing passes and templates, not modifying the core emitter.
+
+### 20.3 Cross-Target Semantics
+
+| Feature | Rust | TypeScript/JavaScript |
+|---------|------|---------------------|
+| `Result[T, E]` | `Result<T, String>` | erased: ok(x)->x, err(e)->throw |
+| `Option[T]` | `Option<T>` | erased: some(x)->x, none->null |
+| `effect fn` | returns `Result<T, String>`, auto `?` | normal function |
+| `==` / `!=` | `almide_eq!` macro (deep) | `__deep_eq()` (deep) |
+| `+` on String | `format!` / owned concat | `+` operator |
+| `+` on List | `[...a, ...b]` | `[...a, ...b]` |
+| `fan { }` | `tokio::join!` | `Promise.all` |
+
+---
+
+## 21. Prohibitions
 
 | # | Prohibited | Reason |
 |---|---|---|
 | 1 | Implicit type conversion | LLMs mix up types |
-| 2 | Truthiness | Conditions must be Bool only |
-| 3 | Monkey patching / open classes | Runtime semantic changes are invisible to LLMs |
-| 4 | Operator overloading | Operator meaning changing by type is unreadable |
-| 5 | Exceptions (throw/catch) | Control flow is invisible |
-| 6 | Multiple lambda notations | Generation distribution disperses |
-| 7 | Internal DSLs | Strong context dependence |
-| 8 | Wildcard imports | Source of names is unknown |
-| 9 | null | Unified under `Option[T]` |
-| 10 | API aliases | More vocabulary = more hallucinations |
-| 11 | `<>` generics | Ambiguous with comparison operators. Use `[]` |
+| 2 | Truthiness | Conditions must be `Bool` only |
+| 3 | Operator overloading | Operator meaning must not change by type |
+| 4 | Exceptions (`throw`/`catch`) | Control flow invisible |
+| 5 | Multiple lambda notations | Generation distribution disperses |
+| 6 | Internal DSLs | Strong context dependence |
+| 7 | Wildcard imports | Source of names unknown |
+| 8 | `null` | Unified under `Option[T]` |
+| 9 | API aliases | More vocabulary = more hallucinations |
+| 10 | `<>` generics | Ambiguous with comparison operators |
+| 11 | Monkey patching / open classes | Runtime semantic changes invisible |
+| 12 | Macros and reflection | Language surface must be fixed |
+| 13 | `return` keyword | Last expression is always the value |
+| 14 | `class` keyword | Use `type` for records and variants |
 
 ---
 
-## 20. Compiler Responsibilities
+## 22. Compiler Diagnostics
 
-### 20.1 One Error, One Root Cause
+### 22.1 One Error, One Root Cause
 
-Suppress cascading derived errors. Present a single root cause.
+Cascading derived errors are suppressed. A single root cause is presented.
 
-### 20.2 Structured Error Output
+### 22.2 Structured Error Output
 
 ```json
 {
   "kind": "type_mismatch",
-  "location": { "file": "main.lang", "line": 12, "col": 5 },
+  "location": { "file": "app.almd", "line": 12, "col": 5 },
   "expected": "Result[Config, IoError]",
   "actual": "String",
   "suggestions": ["ok(text)", "try parse_config(text)"]
 }
 ```
 
-### 20.3 Auto-Fix Candidates
+### 22.3 Rejected Syntax Hints
 
-- Suggest missing imports
+The compiler recognizes common syntax from other languages and provides actionable hints:
+
+```
+'!' is not valid in Almide at line 5:12
+  Hint: Use 'not x' for boolean negation, not '!x'.
+
+'return' is not valid in Almide at line 12:5
+  Hint: Use the last expression as the return value, or 'guard ... else' for early exit.
+
+'||' is not valid in Almide at line 8:10
+  Hint: Use 'or' for logical OR.
+
+'&&' is not valid in Almide at line 8:10
+  Hint: Use 'and' for logical AND.
+```
+
+### 22.4 Auto-Fix Candidates
+
+- Missing imports
 - Type conversion candidates
-- Auto-generate missing match arms
-- Point out missing `effect`
-- Suggest `do` blocks (when 3 or more `try` expressions appear consecutively)
+- Missing match arms
+- Missing `effect` modifier
+- Suggest `do` blocks when multiple `try` expressions appear
 
-### 20.4 Official Formatter (Built into the Language)
+### 22.5 Official Formatter
+
+```bash
+almide fmt app.almd
+```
 
 - One AST yields exactly one formatted output
-- Import order is fixed to alphabetical
-- Trailing commas are included
-- Line-breaking rules for long call chains / pipe chains are fixed
-
-This directly impacts LLM diff stability.
+- Alphabetical import order
+- Trailing commas included
+- Fixed line-breaking rules
 
 ---
 
-## 21. Linter
-
-Not a style police, but a **generation stabilization device**.
-
-| Rule | Description |
-|---|---|
-| effect-leak | Calling `effect fn` from non-`effect fn` (error) |
-| unused-result | Ignoring a `Result` |
-| unsafe-unwrap | Unsafely collapsing an `Option` |
-| long-chain | Chain exceeds 5 levels |
-| ambiguous-name | Single-character variables (except lambda arguments) |
-| missing-annotation | Type omission in public functions |
-| json-in-core | Using `Json` type in core domain |
-
----
-
-## 22. Gradual Strictness
-
-```
-strict types      // make all type annotations required
-strict effects    // fully check effect propagation
-```
-
-In project configuration:
-```
-[strictness]
-core = "all"      // fully strict
-app = "medium"    // types only strict
-script = "light"  // no strictness
-```
-
----
-
-## 23. Escape Hatch
-
-Dangerous features are isolated in `unsafe` blocks:
-
-```
-unsafe {
-  // effect rules can be ignored here
-  // some type checks can be skipped here
-}
-```
-
-The presence of `unsafe` surfaces "normal rules are being broken here."
-
----
-
-## 24. Typing Rules
+## 23. Typing Rules
 
 ### Variables
 
 ```
-Γ(x) = T
+G(x) = T
 -----------
-Γ ⊢ x : T
+G |- x : T
 ```
 
 ### let
 
 ```
-Γ ⊢ e : T
+G |- e : T
 --------------------
-Γ, x:T ⊢ let x = e
+G, x:T |- let x = e
 ```
 
 ### if
 
 ```
-Γ ⊢ c : Bool    Γ ⊢ t : T    Γ ⊢ e : T
------------------------------------------
-Γ ⊢ if c then t else e : T
+G |- c : Bool    G |- t : T    G |- e : T
+-------------------------------------------
+G |- if c then t else e : T
 ```
 
 ### Functions
 
 ```
-Γ, x1:T1, ..., xn:Tn ⊢ body : R
------------------------------------------
-Γ ⊢ fn f(x1:T1,...,xn:Tn) -> R = body
+G, x1:T1, ..., xn:Tn |- body : R
+------------------------------------------
+G |- fn f(x1:T1,...,xn:Tn) -> R = body
 ```
 
 ### Option / Result Constructors
 
 ```
-Γ ⊢ e : T                         Γ ⊢ e : T
--------------------                -------------------
-Γ ⊢ some(e) : Option[T]           Γ ⊢ ok(e) : Result[T, E]
+G |- e : T                          G |- e : T
+--------------------                --------------------
+G |- some(e) : Option[T]           G |- ok(e) : Result[T, E]
 
-Γ ⊢ e : E
--------------------
-Γ ⊢ err(e) : Result[T, E]
+G |- e : E
+--------------------
+G |- err(e) : Result[T, E]
 ```
 
 ### match
 
 ```
-Γ ⊢ e : T
-Γ,p1 ⊢ e1 : R  ...  Γ,pn ⊢ en : R
+G |- e : T
+G,p1 |- e1 : R  ...  G,pn |- en : R
 exhaustive(p1...pn, T)
---------------------------------------
-Γ ⊢ match e { p1=>e1, ..., pn=>en } : R
+---------------------------------------
+G |- match e { p1=>e1, ..., pn=>en } : R
 ```
 
-### try (Result)
+### try
 
 ```
-Γ ⊢ e : Result[T, E]
-return_type = Result[R, E]
-----------------------------
-Γ ⊢ try e : T
-```
-
-### try (Option)
-
-```
-Γ ⊢ e : Option[T]
-return_type = Option[R]
-----------------------------
-Γ ⊢ try e : T
+G |- e : Result[T, E]         G |- e : Option[T]
+return_type = Result[R, E]    return_type = Option[R]
+----------------------------   ----------------------------
+G |- try e : T                 G |- try e : T
 ```
 
 ### do Block
 
 ```
 return_type = Result[R, E]
-Γ ⊢ block : R   (with implicit try on Result[_, E] expressions)
+G |- block : R   (with implicit try on Result[_, E] expressions)
 ----------------------------
-Γ ⊢ do { block } : Result[R, E]
+G |- do { block } : Result[R, E]
 ```
 
-Inside a `do` block, expressions of type `Result[T, E]` are implicitly unwrapped and bound as `T`. If the error type `E` differs, conversion via the `From` trait is attempted; if conversion is not possible, it is a compile error.
+### pipe
+
+```
+G |- x : A    G |- f : A -> B
+-------------------------------
+G |- x |> f : B
+```
+
+### spread
+
+```
+G |- base : { f1:T1, ..., fn:Tn }
+G |- ei : Ti  (for overridden fields)
+---------------------------------------
+G |- { ...base, fi: ei, ... } : { f1:T1, ..., fn:Tn }
+```
+
+### fan
+
+```
+G |- e1 : Result[T1, E]    G |- e2 : Result[T2, E]    enclosing function is effect
+------------------------------------------------------------------------------------
+G |- fan { e1; e2 } : Result[(T1, T2), E]
+```
+
+### guard
+
+```
+G |- cond : Bool    G |- else_ : R
+return_type = R
+---------------------------------------
+G |- guard cond else else_
+```
 
 ### hole / todo
 
 ```
 expected_type = T               expected_type = T
 -------------------             -------------------
-Γ ⊢ _ : T                      Γ ⊢ todo(msg) : T
-```
-
-### pipe
-
-```
-Γ ⊢ x : A    Γ ⊢ f : A -> B
-------------------------------
-Γ ⊢ x |> f : B
-```
-
-### spread
-
-```
-Γ ⊢ base : { f1:T1, ..., fn:Tn }
-Γ ⊢ ei : Ti  (for overridden fields)
---------------------------------------
-Γ ⊢ { ...base, fi: ei, ... } : { f1:T1, ..., fn:Tn }
-```
-
-### await
-
-```
-Γ ⊢ e : Async[T]    enclosing function is async
--------------------------------------------------
-Γ ⊢ await e : T
-```
-
-### destructure
-
-```
-Γ ⊢ e : { f1:T1, ..., fn:Tn }
---------------------------------------
-Γ, f1:T1, ..., fn:Tn ⊢ let { f1, ..., fn } = e
-```
-
-### guard
-
-```
-Γ ⊢ cond : Bool    Γ ⊢ else_ : R
-return_type = R
---------------------------------------
-Γ ⊢ guard cond else else_
+G |- _ : T                      G |- todo(msg) : T
 ```
 
 ---
 
-## 25. Complete Example
+## 24. Complete Example
 
 ```
 import fs
 import json
 
 type Config = {
-  root: Path,
+  root: String,
   bare: Bool,
   description: String,
 }
@@ -1515,27 +1471,35 @@ type Config = {
 type ConfigError =
   | Io(IoError)
   | Parse(ParseError)
-  | Decode(DecodeError)
   deriving From
 
-fn exists?(path: Path) -> Bool =
-  fs.exists?(path)
-
-effect fn load(path: Path) -> Result[Config, ConfigError] =
-  do {
-    let text = fs.read_text(path)
-    let raw = json.parse(text)
-    decode[Config](raw)
-  }
+fn default_config(root: String) -> Config =
+  { root: root, bare: false, description: "" }
 
 fn with_description(config: Config, desc: String) -> Config =
   { ...config, description: desc }
 
-fn default_config(root: Path) -> Config =
-  { root: root, bare: false, description: "" }
-
 fn summary(config: Config) -> String =
   "root=${config.root}, bare=${config.bare}"
+
+effect fn load(path: String) -> Result[Config, ConfigError] =
+  do {
+    let text = fs.read_text(path)
+    let raw = json.parse(text)
+    json.get_string(raw, "root")
+      |> option.ok_or("missing root")
+      |> result.map((r) => { root: r, bare: false, description: "" })
+  }
+
+effect fn main(args: List[String]) -> Result[Unit, ConfigError] = {
+  let path = match list.get(args, 1) {
+    some(p) => p,
+    none => "config.json",
+  }
+  let config = load(path)
+  println(summary(config))
+  ok(())
+}
 
 test "default config" {
   let cfg = default_config("/repo")
@@ -1551,82 +1515,15 @@ test "with_description updates correctly" {
 }
 ```
 
-Properties exhibited here:
-- Failures use `Result`, no exceptions
-- Side effects are visible via `effect fn`, enforced by the compiler
-- `do` blocks minimize Result noise
-- `deriving From` achieves type-safe error conversion without boilerplate
-- `...` spread for immutable record updates
-- String interpolation for canonical message construction
-- `?` is for Bool predicates only, meaning is unambiguous
-- `[]` generics with zero syntactic ambiguity
-- Newline-separated for a natural appearance
-- All type boundaries are visible
-- Tests are right next to functions (local reasoning)
-- Match guards allow flat pattern matching
-- UFCS eliminates the method/function distinction
-
 ---
 
-## 26. Changelog
-
-### v0.5 -> v0.6
-
-| Change | Reason |
-|---|---|
-| Destructuring bindings (`let { name, age } = user`) | Concise extraction of record fields. Eliminates repetitive `user.name` |
-| `newtype` (`type UserId = newtype Int`) | Same structure but type-level distinction. Prevents mix-ups of IDs and units |
-| Pipe placeholder (`x \|> f(_, y)`) | Enables multi-argument functions in pipes. No lambda needed |
-| `guard` statement (`guard cond else expr`) | Flattens precondition checks. Reduces if-else nesting |
-
-### v0.4 -> v0.5
-
-| Change | Reason |
-|---|---|
-| Named arguments (`f(name: "alice")`) | Eliminates positional argument mix-ups. Self-documenting |
-| `async fn` / `await` | Introduces async processing in a form consistent with `effect fn` |
-| Structured concurrency (`parallel`, `race`, `timeout`) | Prohibits `spawn`/`join`, providing only safe concurrency patterns |
-
-### v0.3 -> v0.4
-
-| Change | Reason |
-|---|---|
-| Match guard (`pattern if cond => expr`) | Flattens nested if/match. Increases pattern matching expressiveness |
-| UFCS (`f(x, y)` = `x.f(y)`) | Eliminates the method vs. function decision. Both are correct |
-| `test "name" { ... }` syntax | Unifies test writing. Locality of writing tests next to functions |
-
-### v0.2 -> v0.3
-
-| Change | Reason |
-|---|---|
-| `<>` -> `[]` generics | Eliminates ambiguity with comparison operators. Eliminates the `>>` splitting problem |
-| `fn name!()` -> `effect fn name()` | Separates meta-information from function names. Simplifies lexer/parser |
-| Added `deriving` | Eliminates `impl From` boilerplate. Prevents copy-paste errors |
-| Codified line continuation rules | Formalized the implicit rules for lines starting with `.` `\|>` |
-
----
-
-## 27. Items Under Consideration for v0.7
-
-- Variance rules for generics
-- Default implementations for traits
-- Basic stream type
-- Variance rules for generics (already have `pub fn`, `mod fn`, `local fn`)
-
----
-
-## 28. Evaluation Metrics
+## 25. Evaluation Metrics
 
 | Metric | Definition |
 |---|---|
 | **Pass@1** | Rate of passing compilation + tests on the first generation |
 | **Repair Turns** | Number of fix iterations from first failure to final success |
 | **Token Cost** | Total input/output tokens until success |
-| **API Hallucination Rate** | Rate of nonexistent APIs or incorrect signatures appearing |
-| **Edit Breakage Rate** | Rate of breaking unrelated behavior when modifying existing code |
-| **Diagnostic Utilization Gain** | Performance difference in repair with/without structured diagnostics |
-
-Comparison targets:
-- Python / Ruby / TypeScript / Go baseline
-- Python strict profile / Ruby canonical profile / TypeScript reduced profile
-- This language
+| **API Hallucination Rate** | Rate of nonexistent APIs or incorrect signatures |
+| **Edit Breakage Rate** | Rate of breaking unrelated behavior when modifying code |
+| **Diagnostic Utilization Gain** | Performance difference with/without structured diagnostics |

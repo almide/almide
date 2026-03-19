@@ -91,16 +91,7 @@ impl Parser {
             self.expect_closing(TokenType::RParen, open.line, open.col, "todo()")?;
             return Ok(Expr::Todo { message: msg, id: self.next_id(), span, resolved_type: None });
         }
-        if self.check(TokenType::Try) {
-            self.advance();
-            let expr = self.parse_postfix()?;
-            return Ok(Expr::Try { expr: Box::new(expr), id: self.next_id(), span, resolved_type: None });
-        }
-        if self.check(TokenType::Await) {
-            self.advance();
-            let expr = self.parse_postfix()?;
-            return Ok(Expr::Await { expr: Box::new(expr), id: self.next_id(), span, resolved_type: None });
-        }
+        // try and await keywords removed (no implementation)
         if self.check(TokenType::If) {
             return self.parse_if_expr();
         }
@@ -216,12 +207,36 @@ impl Parser {
                 id: self.next_id(), span, resolved_type: None,
             });
         }
-        // Named record: Foo {x: 1, y: 2} or Foo {\n  x: 1, ...}
-        // Peek past optional newlines to check for { Ident : pattern
+        // Named record: Foo {x: 1, y: 2} or Foo { ...base, x: 1 }
+        // Peek past optional newlines to check for { Ident : or { ...spread
         if self.peek_named_record() {
             self.skip_newlines();
             let open_rec = self.current().clone();
-            self.advance();
+            self.advance(); // skip {
+            self.skip_newlines();
+            // Spread record: Foo { ...base, field: value }
+            if self.check(TokenType::DotDotDot) {
+                self.advance(); // skip ...
+                let base = self.parse_expr()?;
+                let mut fields = Vec::new();
+                while self.check(TokenType::Comma) {
+                    self.advance();
+                    self.skip_newlines();
+                    if self.check(TokenType::RBrace) { break; }
+                    let field_name = self.expect_ident()?;
+                    self.expect(TokenType::Colon)?;
+                    self.skip_newlines();
+                    let field_value = self.parse_expr()?;
+                    fields.push(FieldInit { name: field_name, value: field_value });
+                }
+                self.skip_newlines();
+                self.expect_closing(TokenType::RBrace, open_rec.line, open_rec.col, "spread record")?;
+                return Ok(Expr::SpreadRecord {
+                    base: Box::new(base), fields,
+                    id: self.next_id(), span, resolved_type: None,
+                });
+            }
+            // Regular named record: Foo { x: 1, y: 2 }
             let mut fields = Vec::new();
             while !self.check(TokenType::RBrace) {
                 self.skip_newlines();
