@@ -376,60 +376,14 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                         CallTarget::Named { name } => {
                             // Qualify enum constructors (Red → Color::Red)
                             if let Some(enum_name) = ctx.ann.ctor_to_enum.get(name.as_str()) {
-                                // Box-wrap args for recursive enum constructors
-                                let boxed_args: Vec<String> = args.iter().map(|a| {
-                                    let rendered = render_expr(ctx, a);
-                                    if ctx.ann.recursive_enums.contains(enum_name) && ty_contains_name(&a.ty, enum_name) {
-                                        format!("Box::new({})", rendered)
-                                    } else {
-                                        rendered
-                                    }
-                                }).collect();
-                                let args_str = boxed_args.join(", ");
-                                if args.is_empty() {
-                                    return ctx.templates.render_with("ctor_unit", None, &[], &[("enum_name", enum_name.as_str()), ("ctor_name", name.as_str()), ("args", args_str.as_str())])
-                                        .unwrap_or_else(|| format!("{}::{}", enum_name, name));
-                                } else {
-                                    return ctx.templates.render_with("ctor_call", None, &[], &[("enum_name", enum_name.as_str()), ("ctor_name", name.as_str()), ("args", args_str.as_str())])
-                                        .unwrap_or_else(|| format!("{}::{}({})", enum_name, name, args_str));
-                                }
+                                return render_enum_constructor(ctx, name, enum_name, args);
                             }
                             name.clone()
                         }
                         CallTarget::Method { object, method } => {
-                            // User-defined UFCS: plain method name (no dots) that isn't
-                            // a Rust intrinsic method → convert to func(object, args)
-                            let is_rust_intrinsic = matches!(method.as_str(),
-                                "clone" | "is_some" | "is_none" | "unwrap" | "unwrap_or"
-                                | "to_string" | "len" | "push" | "pop" | "insert" | "remove"
-                                | "contains" | "iter" | "into_iter" | "collect" | "map"
-                                | "filter" | "to_vec" | "join" | "split" | "trim"
-                                | "starts_with" | "ends_with" | "replace" | "chars"
-                                | "as_str" | "get" | "keys" | "values" | "abs" | "powi"
-                                | "is_empty" | "contains_key" | "entry" | "or_insert"
-                                | "expect" | "ok" | "err" | "and_then" | "map_err"
-                                | "unwrap_or_else" | "ok_or" | "flatten" | "as_ref"
-                            );
-                            if !method.contains('.') && !is_rust_intrinsic {
-                                // User-defined function: f(obj, args)
-                                let obj_str = render_expr(ctx, object);
-                                let mut all_args = vec![obj_str];
-                                all_args.extend(args.iter().map(|a| render_expr(ctx, a)));
-                                let all_args_str = all_args.join(", ");
-                                return format!("{}({})", method, all_args_str);
-                            }
-                            // Module.func UFCS: render via module_call template
-                            if method.contains('.') {
-                                let obj_str = render_expr(ctx, object);
-                                let mut all_args = vec![obj_str];
-                                all_args.extend(args.iter().map(|a| render_expr(ctx, a)));
-                                let all_args_str = all_args.join(", ");
-                                if let Some(dot_pos) = method.find('.') {
-                                    let module = &method[..dot_pos];
-                                    let func = &method[dot_pos+1..];
-                                    return ctx.templates.render_with("module_call", None, &[], &[("module", module), ("func", func), ("args", all_args_str.as_str())])
-                                        .unwrap_or_else(|| format!("{}.{}()", module, func));
-                                }
+                            // UFCS and module.func calls return the full expression
+                            if let Some(full) = render_method_call_full(ctx, object, method, args) {
+                                return full;
                             }
                             format!("{}.{}", render_expr(ctx, object), method)
                         }
@@ -1327,6 +1281,61 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
 
     parts.join("\n\n")
 }
+
+/// Render a method call as a full expression for UFCS and module.func patterns.
+/// Returns Some(full_expr) if the method call was handled, None for normal obj.method calls.
+fn render_method_call_full(ctx: &RenderContext, object: &IrExpr, method: &str, args: &[IrExpr]) -> Option<String> {
+    let is_rust_intrinsic = matches!(method,
+        "clone" | "is_some" | "is_none" | "unwrap" | "unwrap_or"
+        | "to_string" | "len" | "push" | "pop" | "insert" | "remove"
+        | "contains" | "iter" | "into_iter" | "collect" | "map"
+        | "filter" | "to_vec" | "join" | "split" | "trim"
+        | "starts_with" | "ends_with" | "replace" | "chars"
+        | "as_str" | "get" | "keys" | "values" | "abs" | "powi"
+        | "is_empty" | "contains_key" | "entry" | "or_insert"
+        | "expect" | "ok" | "err" | "and_then" | "map_err"
+        | "unwrap_or_else" | "ok_or" | "flatten" | "as_ref"
+    );
+    // User-defined UFCS: plain method name (no dots) → func(object, args)
+    if !method.contains('.') && !is_rust_intrinsic {
+        let obj_str = render_expr(ctx, object);
+        let mut all_args = vec![obj_str];
+        all_args.extend(args.iter().map(|a| render_expr(ctx, a)));
+        return Some(format!("{}({})", method, all_args.join(", ")));
+    }
+    // Module.func UFCS: render via module_call template
+    if let Some(dot_pos) = method.find('.') {
+        let obj_str = render_expr(ctx, object);
+        let mut all_args = vec![obj_str];
+        all_args.extend(args.iter().map(|a| render_expr(ctx, a)));
+        let module = &method[..dot_pos];
+        let func = &method[dot_pos+1..];
+        return Some(ctx.templates.render_with("module_call", None, &[], &[("module", module), ("func", func), ("args", all_args.join(", ").as_str())])
+            .unwrap_or_else(|| format!("{}.{}()", module, func)));
+    }
+    None
+}
+
+/// Render an enum constructor call with optional Box wrapping for recursive types.
+fn render_enum_constructor(ctx: &RenderContext, ctor_name: &str, enum_name: &str, args: &[IrExpr]) -> String {
+    let boxed_args: Vec<String> = args.iter().map(|a| {
+        let rendered = render_expr(ctx, a);
+        if ctx.ann.recursive_enums.contains(enum_name) && ty_contains_name(&a.ty, enum_name) {
+            format!("Box::new({})", rendered)
+        } else {
+            rendered
+        }
+    }).collect();
+    let args_str = boxed_args.join(", ");
+    if args.is_empty() {
+        ctx.templates.render_with("ctor_unit", None, &[], &[("enum_name", enum_name), ("ctor_name", ctor_name), ("args", args_str.as_str())])
+            .unwrap_or_else(|| format!("{}::{}", enum_name, ctor_name))
+    } else {
+        ctx.templates.render_with("ctor_call", None, &[], &[("enum_name", enum_name), ("ctor_name", ctor_name), ("args", args_str.as_str())])
+            .unwrap_or_else(|| format!("{}::{}({})", enum_name, ctor_name, args_str))
+    }
+}
+
 
 fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
     // Build generics string e.g. "<T>" or "<T, U>"
