@@ -187,3 +187,4 @@
 - [Checker InferTy/Ty統一](done/checker-type-unification.md) — InferTy 廃止、Ty に統一
 - [Lower 2パス分離](done/lower-two-pass.md) — 確認済み（既に分離されていた）
 - [Design Debt](done/design-debt.md) — gen_generated_call排除、emit_rust/emit_ts削除
+- [Test Infrastructure](done/test-infrastructure.md) — 110/110 全通過、__test_almd_ prefix、in_test checker、force_test mode、strip_tail_try
