@@ -1,0 +1,143 @@
+// Comprehensive random module tests
+// All random functions are effect, so we use top-level effect fn wrappers.
+
+import random
+
+// ── Helpers ──
+
+effect fn rand_int_in_range() -> Result[Bool, String] = {
+  let n = random.int(1, 10)
+  ok(n >= 1 and n <= 10)
+}
+
+effect fn rand_int_bounds_equal() -> Result[Int, String] = {
+  let n = random.int(5, 5)
+  ok(n)
+}
+
+effect fn rand_int_negative_range() -> Result[Bool, String] = {
+  let n = random.int(-10, -1)
+  ok(n >= -10 and n <= -1)
+}
+
+effect fn rand_int_large_range() -> Result[Bool, String] = {
+  let n = random.int(0, 1000000)
+  ok(n >= 0 and n <= 1000000)
+}
+
+effect fn rand_float_unit_range() -> Result[Bool, String] = {
+  let f = random.float()
+  ok(f >= 0.0 and f < 1.0)
+}
+
+effect fn rand_float_multiple() -> Result[Bool, String] = {
+  let a = random.float()
+  let b = random.float()
+  ok(a >= 0.0 and b >= 0.0)
+}
+
+effect fn rand_choice_from_list() -> Result[Bool, String] = {
+  let picked = random.choice(["a", "b", "c"])
+  ok(option.is_some(picked))
+}
+
+effect fn rand_choice_single() -> Result[Option[Int], String] = {
+  let picked = random.choice([42])
+  ok(picked)
+}
+
+effect fn rand_choice_empty() -> Result[Option[Int], String] = {
+  let xs: List[Int] = []
+  let picked = random.choice(xs)
+  ok(picked)
+}
+
+effect fn rand_shuffle_preserves_length() -> Result[Bool, String] = {
+  let xs = [1, 2, 3, 4, 5]
+  let shuffled = random.shuffle(xs)
+  ok(list.len(shuffled) == 5)
+}
+
+effect fn rand_shuffle_preserves_elements() -> Result[Bool, String] = {
+  let xs = [10, 20, 30]
+  let shuffled = random.shuffle(xs)
+  ok(list.sort(shuffled) == [10, 20, 30])
+}
+
+effect fn rand_shuffle_empty() -> Result[List[Int], String] = {
+  let xs: List[Int] = []
+  let shuffled = random.shuffle(xs)
+  ok(shuffled)
+}
+
+effect fn rand_shuffle_single() -> Result[List[String], String] = {
+  let shuffled = random.shuffle(["only"])
+  ok(shuffled)
+}
+
+effect fn rand_int_repeated_in_range() -> Result[Bool, String] = {
+  var all_in_range = true
+  for i in 0..20 {
+    let n = random.int(1, 5)
+    if n < 1 or n > 5 then all_in_range = false else ()
+  }
+  ok(all_in_range)
+}
+
+// ── Tests ──
+
+test "random.int in range" {
+  assert_eq(rand_int_in_range(), ok(true))
+}
+
+test "random.int equal bounds" {
+  assert_eq(rand_int_bounds_equal(), ok(5))
+}
+
+test "random.int negative range" {
+  assert_eq(rand_int_negative_range(), ok(true))
+}
+
+test "random.int large range" {
+  assert_eq(rand_int_large_range(), ok(true))
+}
+
+test "random.int repeated all in range" {
+  assert_eq(rand_int_repeated_in_range(), ok(true))
+}
+
+test "random.float in unit range" {
+  assert_eq(rand_float_unit_range(), ok(true))
+}
+
+test "random.float multiple calls succeed" {
+  assert_eq(rand_float_multiple(), ok(true))
+}
+
+test "random.choice from non-empty list" {
+  assert_eq(rand_choice_from_list(), ok(true))
+}
+
+test "random.choice from single element" {
+  assert_eq(rand_choice_single(), ok(some(42)))
+}
+
+test "random.choice from empty list" {
+  assert_eq(rand_choice_empty(), ok(none))
+}
+
+test "random.shuffle preserves length" {
+  assert_eq(rand_shuffle_preserves_length(), ok(true))
+}
+
+test "random.shuffle preserves elements" {
+  assert_eq(rand_shuffle_preserves_elements(), ok(true))
+}
+
+test "random.shuffle empty list" {
+  assert_eq(rand_shuffle_empty(), ok([]))
+}
+
+test "random.shuffle single element" {
+  assert_eq(rand_shuffle_single(), ok(["only"]))
+}
