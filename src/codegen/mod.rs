@@ -165,6 +165,11 @@ pub fn emit(program: &mut IrProgram, target: Target) -> String {
             output.push_str(&crate::emit_ts_runtime::full_runtime(false));
             output.push('\n');
         }
+        Target::JavaScript => {
+            // Embed the JS runtime (no type annotations)
+            output.push_str(&crate::emit_ts_runtime::full_runtime(true));
+            output.push('\n');
+        }
         _ => {}
     }
     output.push_str(&user_code);

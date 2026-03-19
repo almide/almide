@@ -57,7 +57,7 @@ fn build_pipeline(target: Target) -> Pipeline {
             // Shared passes
             .add(FanLoweringPass),
 
-        Target::TypeScript => Pipeline::new()
+        Target::TypeScript | Target::JavaScript => Pipeline::new()
             // Semantic lowering
             .add(MatchLoweringPass)
             // Result/Option erasure: ok(x)→x, err(e)→throw, some(x)→x, none→null
@@ -85,7 +85,7 @@ fn build_templates(target: Target) -> TemplateSet {
     match target {
         Target::Rust => super::template::rust_templates(),
         Target::TypeScript => super::template::typescript_templates(),
-        // TODO: load from TOML files once template loader is implemented
+        Target::JavaScript => super::template::javascript_templates(),
         Target::Go => TemplateSet::new("go"),
         Target::Python => TemplateSet::new("python"),
     }
