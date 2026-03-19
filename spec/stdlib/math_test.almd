@@ -19,10 +19,13 @@ test "math.min and max" {
 
 // ── pow ──
 
-// NOTE: math.pow has a sig/runtime mismatch (sig: Int, runtime: Float).
-// Use math.fpow for float exponentiation.
+test "math.pow int" {
+  assert_eq(math.pow(2, 10), 1024)
+  assert_eq(math.pow(5, 0), 1)
+  assert_eq(math.pow(3, 3), 27)
+}
 
-test "math.fpow" {
+test "math.fpow float" {
   assert_eq(math.fpow(2.0, 10.0), 1024.0)
   assert_eq(math.fpow(5.0, 0.0), 1.0)
   assert_eq(math.fpow(9.0, 0.5) > 2.99, true)

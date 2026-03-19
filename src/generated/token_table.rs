@@ -59,12 +59,31 @@ pub fn build_keyword_map_generated() -> HashMap<&'static str, TokenType> {
 pub const ALL_KEYWORDS: &[&str] = &["and", "break", "continue", "do", "effect", "else", "err", "false", "fan", "fn", "for", "guard", "if", "impl", "import", "in", "let", "local", "match", "mod", "module", "newtype", "none", "not", "ok", "or", "pub", "some", "strict", "test", "then", "todo", "trait", "true", "type", "var", "while"];
 
 /*
-── Keyword categories (37 keywords) ────────────────────────────────
-    // control: if then else match for in while do guard fan
-    // declaration: fn type trait impl let var test import module newtype
-    // modifier: pub local mod effect strict
-    // value: true false none some ok err todo not and or
-    // flow: break continue
+── Tree-sitter keyword list ──────────────────────────────────────────
+    // control
+    "if", "then", "else", "match", "for", "in", "while", "do", "guard", "fan",
+    // declaration
+    "fn", "type", "trait", "impl", "let", "var", "test", "import", "module", "newtype",
+    // flow
+    "break", "continue",
+    // modifier
+    "pub", "local", "mod", "effect", "strict",
+    // value
+    "true", "false", "none", "some", "ok", "err", "todo", "not", "and", "or",
+    // aliases
+    "Err", "None", "Ok", "Some",
+
+── TextMate grammar scopes ───────────────────────────────────────────
+    // scope: keyword.control.almide
+    // pattern: \\b(if|then|else|match|for|in|while|do|guard|fan)\\b
+    // scope: keyword.declaration.almide
+    // pattern: \\b(fn|type|trait|impl|let|var|test|import|module|newtype)\\b
+    // scope: keyword.control.flow.almide
+    // pattern: \\b(break|continue)\\b
+    // scope: storage.modifier.almide
+    // pattern: \\b(pub|local|mod|effect|strict)\\b
+    // scope: constant.language.almide
+    // pattern: \\b(true|false|none|some|ok|err|todo|not|and|or)\\b
 
 ── Operator precedence table ─────────────────────────────────────────
     // precedence 1: pipe (left) — "|>"
@@ -72,7 +91,7 @@ pub const ALL_KEYWORDS: &[&str] = &["and", "break", "continue", "do", "effect", 
     // precedence 3: and (left) — "and"
     // precedence 4: comparison (left) — "==", "!=", "<", ">", "<=", ">="
     // precedence 5: range (none) — "..", "..="
-    // precedence 6: additive (left) — "+", "-"
+    // precedence 6: additive (left) — "+", "-", "++"
     // precedence 7: multiplicative (left) — "*", "/", "%", "^"
     // precedence 8: unary (right) — "-", "not"
 */

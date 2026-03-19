@@ -14,7 +14,7 @@ pub fn almide_rt_math_log(x: f64) -> f64 { x.ln() }
 pub fn almide_rt_math_log2(x: f64) -> f64 { x.log2() }
 pub fn almide_rt_math_log10(x: f64) -> f64 { x.log10() }
 pub fn almide_rt_math_exp(x: f64) -> f64 { x.exp() }
-pub fn almide_rt_math_pow(base: f64, exp: f64) -> f64 { base.powf(exp) }
+pub fn almide_rt_math_pow(base: i64, exp: i64) -> i64 { base.pow(exp as u32) }
 
 // Rounding
 pub fn almide_rt_math_abs(x: i64) -> i64 { x.abs() }

@@ -1,5 +1,17 @@
 // result_test — Result type operations
 
+test "result.is_ok UFCS" {
+  let r: Result[Int, String] = ok(42)
+  assert_eq(r.is_ok(), true)
+  assert_eq(r.is_err(), false)
+}
+
+test "result.is_err UFCS" {
+  let r: Result[Int, String] = err("fail")
+  assert_eq(r.is_ok(), false)
+  assert_eq(r.is_err(), true)
+}
+
 test "ok construction and match" {
   let r: Result[Int, String] = ok(42)
   let v = match r {

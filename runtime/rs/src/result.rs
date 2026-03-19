@@ -16,8 +16,8 @@ pub fn almide_rt_result_unwrap_or<T: Clone, E>(r: Result<T, E>, default: T) -> T
     r.unwrap_or(default)
 }
 
-pub fn almide_rt_result_is_ok<T, E>(r: &Result<T, E>) -> bool { r.is_ok() }
-pub fn almide_rt_result_is_err<T, E>(r: &Result<T, E>) -> bool { r.is_err() }
+pub fn almide_rt_result_is_ok<T, E>(r: Result<T, E>) -> bool { r.is_ok() }
+pub fn almide_rt_result_is_err<T, E>(r: Result<T, E>) -> bool { r.is_err() }
 
 pub fn almide_rt_result_ok<T: Clone, E>(r: &Result<T, E>) -> Option<T> {
     r.as_ref().ok().cloned()
