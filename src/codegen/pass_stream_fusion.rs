@@ -32,13 +32,20 @@ impl NanoPass for StreamFusionPass {
         let registry = &program.type_registry;
         for func in &program.functions {
             let chains = detect_pipe_chains(&func.body, registry);
+            // Debug: log function analysis
+            if std::env::var("ALMIDE_DEBUG_FUSION").is_ok() {
+                eprintln!("[StreamFusion] analyzing {} — {} chain(s)", func.name, chains.len());
+            }
             for chain in &chains {
-                if chain.fusible_pairs > 0 {
+                {
                     // Phase 1: detection only. In Phase 2, we'll rewrite.
                     // For now, annotate the program with optimization opportunities.
                     eprintln!(
-                        "[StreamFusion] {}: {} ops, {} fusible pairs",
-                        func.name, chain.ops.len(), chain.fusible_pairs
+                        "[StreamFusion] {}: {} ({} fusible, container={:?})",
+                        func.name,
+                        chain.ops.iter().map(|o| format!("{:?}", o)).collect::<Vec<_>>().join(" → "),
+                        chain.fusible_pairs,
+                        chain.container_name
                     );
                 }
             }
@@ -67,6 +74,17 @@ pub enum PipeOp {
     Other(String),
 }
 
+/// Unwrap decorator IR nodes (Borrow, ToVec, Clone) to find the inner expression.
+/// StdlibLoweringPass wraps args in these; we need to see through them for chain detection.
+fn unwrap_decorators(expr: &IrExpr) -> &IrExpr {
+    match &expr.kind {
+        IrExprKind::Borrow { expr: inner, .. } => unwrap_decorators(inner),
+        IrExprKind::ToVec { expr: inner } => unwrap_decorators(inner),
+        IrExprKind::Clone { expr: inner } => unwrap_decorators(inner),
+        _ => expr,
+    }
+}
+
 /// Detect pipe chains in an expression tree.
 /// A pipe chain is a sequence of stdlib calls on a container type
 /// connected via pipes (`|>`) or method chaining.
@@ -84,24 +102,31 @@ fn detect_pipe_chains_inner(
     match &expr.kind {
         // Pipe chains appear as nested calls:
         // fold(filter(map(list, f), p), init, g)
-        // or as Named calls with the result of another Named call as first arg
-        IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+        // StdlibLoweringPass wraps args in Borrow/ToVec nodes, so we unwrap those.
+        IrExprKind::Call { target, args, .. } => {
+            let call_name = match target {
+                CallTarget::Named { name } => Some(name.as_str()),
+                CallTarget::Module { func, .. } => Some(func.as_str()),
+                _ => None,
+            };
+            if let Some(name) = call_name {
             if let Some(op) = classify_stdlib_op(name) {
-                // Check if the first argument is also a pipe-chain operation
                 let mut chain_ops = vec![op];
-                let mut current = args.first();
+                let mut current = args.first().map(|a| unwrap_decorators(a));
 
                 while let Some(arg) = current {
-                    if let IrExprKind::Call {
-                        target: CallTarget::Named { name: inner_name },
-                        args: inner_args,
-                        ..
-                    } = &arg.kind
-                    {
-                        if let Some(inner_op) = classify_stdlib_op(inner_name) {
-                            chain_ops.push(inner_op);
-                            current = inner_args.first();
-                            continue;
+                    let inner_name = match &arg.kind {
+                        IrExprKind::Call { target: CallTarget::Named { name }, .. } => Some(name.as_str()),
+                        IrExprKind::Call { target: CallTarget::Module { func, .. }, .. } => Some(func.as_str()),
+                        _ => None,
+                    };
+                    if let Some(iname) = inner_name {
+                        if let Some(inner_op) = classify_stdlib_op(iname) {
+                            if let IrExprKind::Call { args: inner_args, .. } = &arg.kind {
+                                chain_ops.push(inner_op);
+                                current = inner_args.first().map(|a| unwrap_decorators(a));
+                                continue;
+                            }
                         }
                     }
                     break;
@@ -109,15 +134,16 @@ fn detect_pipe_chains_inner(
 
                 if chain_ops.len() >= 2 {
                     chain_ops.reverse(); // From inner to outer
-                    let container_name = detect_container_type(&expr.ty);
+                    let container_name = detect_container_type_from_call(expr);
                     let fusible_pairs = count_fusible_pairs(&chain_ops, &container_name, registry);
                     chains.push(PipeChain {
                         ops: chain_ops,
                         fusible_pairs,
                         container_name,
                     });
-                    return; // Don't recurse into this chain's sub-expressions
+                    return;
                 }
+            }
             }
 
             // Recurse into args
@@ -157,24 +183,42 @@ fn detect_pipe_chains_inner(
     }
 }
 
-/// Classify a runtime function name as a pipe operation.
+/// Classify a runtime function name or stdlib func name as a pipe operation.
 fn classify_stdlib_op(name: &str) -> Option<PipeOp> {
-    if name.contains("_map") && !name.contains("flat_map") {
-        Some(PipeOp::Map)
-    } else if name.contains("_filter") {
-        Some(PipeOp::Filter)
-    } else if name.contains("_fold") || name.contains("_reduce") {
-        Some(PipeOp::Fold)
-    } else if name.contains("_flat_map") {
-        Some(PipeOp::FlatMap)
-    } else {
-        None
+    // Check multi-word ops first (before splitting by _)
+    if name.ends_with("flat_map") {
+        return Some(PipeOp::FlatMap);
+    }
+    if name.ends_with("filter_map") {
+        return None; // filter_map is already fused, not a chain candidate
+    }
+    // Handle both "almide_rt_list_map" and plain "map"
+    let func = name.rsplit('_').next().unwrap_or(name);
+    match func {
+        "map" => Some(PipeOp::Map),
+        "filter" => Some(PipeOp::Filter),
+        "fold" | "reduce" => Some(PipeOp::Fold),
+        _ => None,
     }
 }
 
-/// Detect the container type from the expression's type.
-fn detect_container_type(ty: &Ty) -> Option<String> {
-    ty.constructor_name().map(|s| s.to_string())
+/// Detect the container type from the expression or its first argument's type.
+/// For fold/reduce (which returns a scalar), we look at the input list type instead.
+fn detect_container_type_from_call(expr: &IrExpr) -> Option<String> {
+    // Try the first argument — for pipe chains, it's the container being operated on
+    if let IrExprKind::Call { args, .. } = &expr.kind {
+        if let Some(first_arg) = args.first() {
+            let unwrapped = unwrap_decorators(first_arg);
+            if let Some(name) = unwrapped.ty.constructor_name() {
+                if matches!(name, "List" | "Option" | "Result") {
+                    return Some(name.to_string());
+                }
+            }
+            // Recurse into nested call
+            return detect_container_type_from_call(unwrapped);
+        }
+    }
+    expr.ty.constructor_name().map(|s| s.to_string())
 }
 
 /// Count how many adjacent pairs in the chain can be fused,
