@@ -85,6 +85,7 @@ impl NanoPass for StreamFusionPass {
                 if totals.flatmap_flatmap > 0 { parts.push(format!("{} flat_map+flat_map", totals.flatmap_flatmap)); }
                 if totals.map_filter > 0 { parts.push(format!("{} map+filter", totals.map_filter)); }
                 if totals.filter_map_fold > 0 { parts.push(format!("{} filter_map+fold", totals.filter_map_fold)); }
+                if totals.range_fold > 0 { parts.push(format!("{} range+fold", totals.range_fold)); }
                 eprintln!("[StreamFusion] fused: {}", parts.join(", "));
             }
         }
@@ -376,7 +377,7 @@ fn inline_single_use_collection_lets(body: &mut IrExpr, var_table: &VarTable) {
                 // Only inline List module calls (not Result.map, Option.map, etc.)
                 let is_list_collection_op = matches!(&value.kind,
                     IrExprKind::Call { target: CallTarget::Module { module, func }, .. }
-                    if module == "list" && classify_stdlib_op(func).is_some()
+                    if module == "list" && (classify_stdlib_op(func).is_some() || func == "range")
                 );
                 if !is_list_collection_op || var_table.use_count(var) != 1 {
                     continue;
@@ -457,6 +458,9 @@ fn fuse_all(func: &mut IrFunction, var_table: &mut VarTable) -> FusionCounts {
     // FilterMapFoldFusion: fold(filter_map(x, fm), init, g) → fold(x, init, (acc, x) => match fm(x) { Some(v) => g(acc, v), None => acc })
     counts.filter_map_fold = fuse_filter_map_fold_pass(&mut func.body, var_table);
 
+    // RangeFoldFusion: fold(range(start, end), init, g) → for loop (eliminates Vec allocation)
+    counts.range_fold = fuse_range_fold_pass(&mut func.body, var_table);
+
     counts
 }
 
@@ -469,11 +473,12 @@ struct FusionCounts {
     flatmap_flatmap: usize,
     map_filter: usize,
     filter_map_fold: usize,
+    range_fold: usize,
 }
 
 impl FusionCounts {
     fn total(&self) -> usize {
-        self.map_map + self.filter_filter + self.map_fold + self.identity + self.flatmap_flatmap + self.map_filter + self.filter_map_fold
+        self.map_map + self.filter_filter + self.map_fold + self.identity + self.flatmap_flatmap + self.map_filter + self.filter_map_fold + self.range_fold
     }
 }
 
@@ -1046,7 +1051,61 @@ fn substitute_var_in_expr(expr: &IrExpr, var: VarId, replacement: &IrExpr) -> Ir
             ty: expr.ty.clone(),
             span: expr.span,
         },
-        // For other expression kinds, return as-is (conservative)
+        IrExprKind::OptionSome { expr: inner } => IrExpr {
+            kind: IrExprKind::OptionSome { expr: Box::new(substitute_var_in_expr(inner, var, replacement)) },
+            ty: expr.ty.clone(), span: expr.span,
+        },
+        IrExprKind::ResultOk { expr: inner } => IrExpr {
+            kind: IrExprKind::ResultOk { expr: Box::new(substitute_var_in_expr(inner, var, replacement)) },
+            ty: expr.ty.clone(), span: expr.span,
+        },
+        IrExprKind::ResultErr { expr: inner } => IrExpr {
+            kind: IrExprKind::ResultErr { expr: Box::new(substitute_var_in_expr(inner, var, replacement)) },
+            ty: expr.ty.clone(), span: expr.span,
+        },
+        IrExprKind::Match { subject, arms } => IrExpr {
+            kind: IrExprKind::Match {
+                subject: Box::new(substitute_var_in_expr(subject, var, replacement)),
+                arms: arms.iter().map(|arm| IrMatchArm {
+                    pattern: arm.pattern.clone(),
+                    guard: arm.guard.as_ref().map(|g| substitute_var_in_expr(g, var, replacement)),
+                    body: substitute_var_in_expr(&arm.body, var, replacement),
+                }).collect(),
+            },
+            ty: expr.ty.clone(), span: expr.span,
+        },
+        IrExprKind::Block { stmts, expr: tail } => IrExpr {
+            kind: IrExprKind::Block {
+                stmts: stmts.iter().map(|s| {
+                    let kind = match &s.kind {
+                        IrStmtKind::Bind { var: v, mutability, ty, value } => IrStmtKind::Bind {
+                            var: *v, mutability: *mutability, ty: ty.clone(),
+                            value: substitute_var_in_expr(value, var, replacement),
+                        },
+                        IrStmtKind::Expr { expr: e } => IrStmtKind::Expr { expr: substitute_var_in_expr(e, var, replacement) },
+                        other => other.clone(),
+                    };
+                    IrStmt { kind, span: s.span }
+                }).collect(),
+                expr: tail.as_ref().map(|e| Box::new(substitute_var_in_expr(e, var, replacement))),
+            },
+            ty: expr.ty.clone(), span: expr.span,
+        },
+        IrExprKind::Lambda { params, body } => {
+            // Don't substitute inside lambda if the var is shadowed by a param
+            if params.iter().any(|(p, _)| *p == var) {
+                expr.clone()
+            } else {
+                IrExpr {
+                    kind: IrExprKind::Lambda {
+                        params: params.clone(),
+                        body: Box::new(substitute_var_in_expr(body, var, replacement)),
+                    },
+                    ty: expr.ty.clone(), span: expr.span,
+                }
+            }
+        },
+        // Leaf nodes and unhandled cases: return as-is
         _ => expr.clone(),
     }
 }
@@ -1580,22 +1639,9 @@ fn compose_filter_map_into_fold(fm: &IrExpr, g: &IrExpr, vt: &mut VarTable) -> O
         let (g_acc_id, g_acc_ty) = &g_params[0];
         let (g_elem_id, _g_elem_ty) = &g_params[1];
 
-        // Build: (acc, x) => match fm(x) { Some(v) => g_body[g_elem := v], None => acc }
-        // We apply fm's body directly: substitute fm_param with x, then match the result.
-        // But fm is a full lambda — we call it: fm(x)
-        let fm_call = IrExpr {
-            kind: IrExprKind::Call {
-                target: CallTarget::Computed { callee: Box::new(fm.clone()) },
-                args: vec![IrExpr {
-                    kind: IrExprKind::Var { id: *fm_param_id },
-                    ty: fm_param_ty.clone(),
-                    span: None,
-                }],
-                type_args: vec![],
-            },
-            ty: Ty::Unknown, // Option<B>, approximate
-            span: None,
-        };
+        // Inline fm's body directly: fm_body already uses fm_param_id as its input variable.
+        // The fused reducer param will reuse fm_param_id, so fm_body works as-is.
+        let fm_call = *_fm_body.clone();
 
         // Match arms: Some(v) => g(acc, v), None => acc
         let v_var = vt.alloc("__fused_v".into(), g_acc_ty.clone(), Mutability::Let, None); // temporary — will be unique enough for codegen
@@ -1640,6 +1686,160 @@ fn compose_filter_map_into_fold(fm: &IrExpr, g: &IrExpr, vt: &mut VarTable) -> O
         });
     }
     None
+}
+
+// ── RangeFoldFusion: fold(range(start, end), init, g) → for loop ──
+
+fn is_range_call(target: &CallTarget) -> bool {
+    match target {
+        CallTarget::Module { module, func } => module == "list" && func == "range",
+        CallTarget::Named { name } => name.ends_with("_range"),
+        _ => false,
+    }
+}
+
+fn fuse_range_fold_pass(body: &mut IrExpr, vt: &mut VarTable) -> usize {
+    let mut count = 0;
+    *body = fuse_range_fold(body.clone(), &mut count, vt);
+    count
+}
+
+fn fuse_range_fold(expr: IrExpr, count: &mut usize, vt: &mut VarTable) -> IrExpr {
+    let ty = expr.ty.clone();
+    let span = expr.span;
+
+    match expr.kind {
+        IrExprKind::Call {
+            ref target, ref args, ref type_args,
+        } if is_fold_call(target) && args.len() >= 3 => {
+            let inner = &args[0];
+            if let IrExprKind::Call {
+                target: ref inner_target,
+                args: ref inner_args,
+                ..
+            } = inner.kind {
+                if is_range_call(inner_target) && inner_args.len() >= 2 {
+                    let start = &inner_args[0];
+                    let end = &inner_args[1];
+                    let init = &args[1];
+                    let g = &args[2]; // reducer: (acc, x) => acc'
+
+                    if let IrExprKind::Lambda { params: g_params, body: g_body } = &g.kind {
+                        if g_params.len() == 2 {
+                            let (g_acc_id, g_acc_ty) = &g_params[0];
+                            let (g_elem_id, g_elem_ty) = &g_params[1];
+
+                            // Allocate fresh VarIds for acc and loop var
+                            let acc_var = vt.alloc("__acc".into(), g_acc_ty.clone(), Mutability::Var, None);
+                            let loop_var = vt.alloc("__i".into(), g_elem_ty.clone(), Mutability::Let, None);
+
+                            // Build: { var acc = init; for i in start..end { acc = g_body[g_acc:=acc, g_elem:=i] }; acc }
+                            let acc_ref = IrExpr { kind: IrExprKind::Var { id: acc_var }, ty: g_acc_ty.clone(), span: None };
+                            let loop_ref = IrExpr { kind: IrExprKind::Var { id: loop_var }, ty: g_elem_ty.clone(), span: None };
+
+                            let body_subst = substitute_var_in_expr(
+                                &substitute_var_in_expr(g_body, *g_acc_id, &acc_ref),
+                                *g_elem_id,
+                                &loop_ref,
+                            );
+
+                            *count += 1;
+                            return IrExpr {
+                                kind: IrExprKind::Block {
+                                    stmts: vec![
+                                        // var acc = init
+                                        IrStmt {
+                                            kind: IrStmtKind::Bind {
+                                                var: acc_var,
+                                                mutability: Mutability::Var,
+                                                ty: g_acc_ty.clone(),
+                                                value: init.clone(),
+                                            },
+                                            span: None,
+                                        },
+                                        // for i in start..end { acc = body }
+                                        IrStmt {
+                                            kind: IrStmtKind::Expr {
+                                                expr: IrExpr {
+                                                    kind: IrExprKind::ForIn {
+                                                        var: loop_var,
+                                                        var_tuple: None,
+                                                        iterable: Box::new(IrExpr {
+                                                            kind: IrExprKind::Range {
+                                                                start: Box::new(start.clone()),
+                                                                end: Box::new(end.clone()),
+                                                                inclusive: false,
+                                                            },
+                                                            ty: Ty::Int,
+                                                            span: None,
+                                                        }),
+                                                        body: vec![IrStmt {
+                                                            kind: IrStmtKind::Assign {
+                                                                var: acc_var,
+                                                                value: body_subst,
+                                                            },
+                                                            span: None,
+                                                        }],
+                                                    },
+                                                    ty: Ty::Unit,
+                                                    span: None,
+                                                },
+                                            },
+                                            span: None,
+                                        },
+                                    ],
+                                    expr: Some(Box::new(acc_ref.clone())),
+                                },
+                                ty,
+                                span,
+                            };
+                        }
+                    }
+                }
+            }
+            let new_args: Vec<IrExpr> = args.iter().map(|a| fuse_range_fold(a.clone(), count, vt)).collect();
+            IrExpr {
+                kind: IrExprKind::Call { target: target.clone(), args: new_args, type_args: type_args.clone() },
+                ty, span,
+            }
+        }
+        IrExprKind::Call { ref target, ref args, ref type_args } => {
+            let new_args: Vec<IrExpr> = args.iter().map(|a| fuse_range_fold(a.clone(), count, vt)).collect();
+            IrExpr {
+                kind: IrExprKind::Call { target: target.clone(), args: new_args, type_args: type_args.clone() },
+                ty, span,
+            }
+        }
+        IrExprKind::Block { stmts, expr: body } => IrExpr {
+            kind: IrExprKind::Block {
+                stmts: stmts.into_iter().map(|s| {
+                    let kind = match s.kind {
+                        IrStmtKind::Bind { var, mutability, ty, value } => IrStmtKind::Bind {
+                            var, mutability, ty, value: fuse_range_fold(value, count, vt),
+                        },
+                        IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: fuse_range_fold(expr, count, vt) },
+                        other => other,
+                    };
+                    IrStmt { kind, span: s.span }
+                }).collect(),
+                expr: body.map(|e| Box::new(fuse_range_fold(*e, count, vt))),
+            },
+            ty, span,
+        },
+        IrExprKind::If { cond, then, else_ } => IrExpr {
+            kind: IrExprKind::If {
+                cond: Box::new(fuse_range_fold(*cond, count, vt)),
+                then: Box::new(fuse_range_fold(*then, count, vt)),
+                else_: Box::new(fuse_range_fold(*else_, count, vt)),
+            },
+            ty, span,
+        },
+        IrExprKind::Lambda { params, body } => IrExpr {
+            kind: IrExprKind::Lambda { params, body: Box::new(fuse_range_fold(*body, count, vt)) },
+            ty, span,
+        },
+        other => IrExpr { kind: other, ty, span },
+    }
 }
 
 fn dump_calls(expr: &IrExpr, ctx: &str) {
