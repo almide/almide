@@ -304,7 +304,11 @@ fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, l
             for arg in args { scan_pattern(arg, subject_ty, locals, vt); }
         }
         crate::ir::IrPattern::Tuple { elements } => {
-            for elem in elements { scan_pattern(elem, subject_ty, locals, vt); }
+            let elem_types = if let crate::types::Ty::Tuple(tys) = subject_ty { tys.clone() } else { vec![] };
+            for (i, elem) in elements.iter().enumerate() {
+                let et = elem_types.get(i).cloned().unwrap_or(subject_ty.clone());
+                scan_pattern(elem, &et, locals, vt);
+            }
         }
         crate::ir::IrPattern::Some { inner } | crate::ir::IrPattern::Ok { inner } | crate::ir::IrPattern::Err { inner } => {
             // Extract the inner type from Applied(Option/Result, [T, ...])

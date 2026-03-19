@@ -602,12 +602,13 @@ impl FuncCompiler<'_> {
                         self.emit_assert_eq(&args[0], &args[1]);
                     }
                     "assert" => {
-                        // assert(cond) — trap if false
+                        // assert(cond) or assert(cond, msg) — trap if false
                         self.emit_expr(&args[0]);
                         self.func.instruction(&Instruction::I32Eqz);
                         self.func.instruction(&Instruction::If(BlockType::Empty));
                         self.func.instruction(&Instruction::Unreachable);
                         self.func.instruction(&Instruction::End);
+                        // Drop message arg if present (evaluated but unused)
                     }
                     "assert_ne" => {
                         // assert_ne(left, right) — trap if equal
@@ -666,10 +667,21 @@ impl FuncCompiler<'_> {
                         self.func.instruction(&Instruction::I64ExtendI32U);
                     }
                     ("int", "parse") => {
-                        // Stub: return 0 for now
+                        // Stub: return ok(0) as Result[Int, String]
                         self.emit_expr(&args[0]);
                         self.func.instruction(&Instruction::Drop);
-                        self.func.instruction(&Instruction::I64Const(0));
+                        // Allocate Result: [tag=0 (ok), value=0 (i64)]
+                        self.func.instruction(&Instruction::I32Const(12)); // 4 tag + 8 i64
+                        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+                        let scratch = self.match_i32_base + self.match_depth;
+                        self.func.instruction(&Instruction::LocalSet(scratch));
+                        self.func.instruction(&Instruction::LocalGet(scratch));
+                        self.func.instruction(&Instruction::I32Const(0)); // tag = ok
+                        self.func.instruction(&Instruction::I32Store(MemArg { offset: 0, align: 2, memory_index: 0 }));
+                        self.func.instruction(&Instruction::LocalGet(scratch));
+                        self.func.instruction(&Instruction::I64Const(0)); // value = 0
+                        self.func.instruction(&Instruction::I64Store(MemArg { offset: 4, align: 3, memory_index: 0 }));
+                        self.func.instruction(&Instruction::LocalGet(scratch));
                     }
                     ("string", "contains") => {
                         // string.contains(haystack, needle) -> bool
@@ -689,10 +701,10 @@ impl FuncCompiler<'_> {
                     ("string", "repeat") | ("string", "reverse") | ("string", "replace")
                     | ("string", "split") | ("string", "join") | ("string", "slice")
                     | ("string", "get") | ("string", "count") | ("string", "starts_with")
-                    | ("string", "ends_with") | ("string", "index_of") => {
-                        // Stub: emit args and return first arg or default
-                        for arg in args { self.emit_expr(arg); }
-                        for _ in 1..args.len() { self.func.instruction(&Instruction::Drop); }
+                    | ("string", "ends_with") | ("string", "index_of")
+                    | ("string", "pad_start") | ("string", "pad_end")
+                    | ("string", "trim_start") | ("string", "trim_end") => {
+                        self.emit_stub_call(args);
                     }
                     ("list", "map") | ("list", "filter") | ("list", "fold")
                     | ("list", "find") | ("list", "any") | ("list", "all")
@@ -700,10 +712,7 @@ impl FuncCompiler<'_> {
                     | ("list", "filter_map") | ("list", "get") | ("list", "drop")
                     | ("list", "take") | ("list", "reverse") | ("list", "zip")
                     | ("list", "enumerate") | ("list", "contains") | ("list", "sort") => {
-                        // Stub: emit args and unreachable (stdlib not yet implemented)
-                        for arg in args { self.emit_expr(arg); }
-                        for _ in 0..args.len() { self.func.instruction(&Instruction::Drop); }
-                        self.func.instruction(&Instruction::Unreachable);
+                        self.emit_stub_call(args);
                     }
                     ("map", "len") | ("map", "length") | ("map", "size") => {
                         self.emit_expr(&args[0]);
@@ -716,11 +725,7 @@ impl FuncCompiler<'_> {
                         self.func.instruction(&Instruction::I64ExtendI32U);
                     }
                     _ => {
-                        // Unknown module call
-                        for arg in args {
-                            self.emit_expr(arg);
-                        }
-                        self.func.instruction(&Instruction::Unreachable);
+                        self.emit_stub_call(args);
                     }
                 }
             }
@@ -750,10 +755,10 @@ impl FuncCompiler<'_> {
                     }
                     _ => {
                         self.emit_expr(object);
-                        for arg in args {
-                            self.emit_expr(arg);
+                        if values::ty_to_valtype(&object.ty).is_some() {
+                            self.func.instruction(&Instruction::Drop);
                         }
-                        self.func.instruction(&Instruction::Unreachable);
+                        self.emit_stub_call(args);
                     }
                 }
             }
@@ -899,6 +904,18 @@ impl FuncCompiler<'_> {
 
             self.func.instruction(&Instruction::LocalGet(closure_scratch));
         }
+    }
+
+    /// Emit a stub for an unimplemented call: evaluate args (for side effects), drop values, unreachable.
+    fn emit_stub_call(&mut self, args: &[IrExpr]) {
+        for arg in args {
+            self.emit_expr(arg);
+            // Only drop if the arg produces a value
+            if values::ty_to_valtype(&arg.ty).is_some() {
+                self.func.instruction(&Instruction::Drop);
+            }
+        }
+        self.func.instruction(&Instruction::Unreachable);
     }
 
     /// Emit assert_eq(left, right): compare values, trap if not equal.
@@ -1671,6 +1688,84 @@ impl FuncCompiler<'_> {
                     // Not a variant — treat as plain record (always matches)
                     self.emit_expr(&arm.body);
                 }
+            }
+
+            // Ok(x) pattern (Result)
+            IrPattern::Ok { inner } => {
+                // Result ok = tag 0. Check tag, then bind value.
+                self.func.instruction(&Instruction::LocalGet(scratch));
+                self.func.instruction(&Instruction::I32Load(MemArg { offset: 0, align: 2, memory_index: 0 }));
+                self.func.instruction(&Instruction::I32Eqz); // tag == 0
+                let bt = values::block_type(result_ty);
+                self.func.instruction(&Instruction::If(bt));
+                self.depth += 1;
+                if let IrPattern::Bind { var } = inner.as_ref() {
+                    if let Some(&local_idx) = self.var_map.get(&var.0) {
+                        let inner_ty = self.var_table.get(*var).ty.clone();
+                        self.func.instruction(&Instruction::LocalGet(scratch));
+                        self.emit_load_at(&inner_ty, 4);
+                        self.func.instruction(&Instruction::LocalSet(local_idx));
+                    }
+                } else if let IrPattern::Wildcard = inner.as_ref() {
+                    // ok(_) — no binding needed
+                }
+                self.emit_expr(&arm.body);
+                self.func.instruction(&Instruction::Else);
+                if is_last { self.func.instruction(&Instruction::Unreachable); }
+                else { self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1); }
+                self.depth -= 1;
+                self.func.instruction(&Instruction::End);
+            }
+
+            // Err(e) pattern (Result)
+            IrPattern::Err { inner } => {
+                // Result err = tag 1. Check tag != 0.
+                self.func.instruction(&Instruction::LocalGet(scratch));
+                self.func.instruction(&Instruction::I32Load(MemArg { offset: 0, align: 2, memory_index: 0 }));
+                self.func.instruction(&Instruction::I32Const(0));
+                self.func.instruction(&Instruction::I32Ne); // tag != 0
+                let bt = values::block_type(result_ty);
+                self.func.instruction(&Instruction::If(bt));
+                self.depth += 1;
+                if let IrPattern::Bind { var } = inner.as_ref() {
+                    if let Some(&local_idx) = self.var_map.get(&var.0) {
+                        let inner_ty = self.var_table.get(*var).ty.clone();
+                        self.func.instruction(&Instruction::LocalGet(scratch));
+                        self.emit_load_at(&inner_ty, 4);
+                        self.func.instruction(&Instruction::LocalSet(local_idx));
+                    }
+                } else if let IrPattern::Wildcard = inner.as_ref() {
+                    // err(_) — no binding
+                }
+                self.emit_expr(&arm.body);
+                self.func.instruction(&Instruction::Else);
+                if is_last { self.func.instruction(&Instruction::Unreachable); }
+                else { self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1); }
+                self.depth -= 1;
+                self.func.instruction(&Instruction::End);
+            }
+
+            // Tuple pattern: (a, b) => ...
+            IrPattern::Tuple { elements } => {
+                // Tuple always matches (destructure only). Bind each element.
+                if let Ty::Tuple(elem_types) = subject_ty {
+                    let mut offset = 0u32;
+                    for (i, elem_pat) in elements.iter().enumerate() {
+                        if let IrPattern::Bind { var } = elem_pat {
+                            if let Some(&local_idx) = self.var_map.get(&var.0) {
+                                let ft = elem_types.get(i).cloned().unwrap_or(Ty::Int);
+                                self.func.instruction(&Instruction::LocalGet(scratch));
+                                self.emit_load_at(&ft, offset);
+                                self.func.instruction(&Instruction::LocalSet(local_idx));
+                                offset += values::byte_size(&ft);
+                            }
+                        } else if let IrPattern::Wildcard = elem_pat {
+                            let ft = elem_types.get(i).cloned().unwrap_or(Ty::Int);
+                            offset += values::byte_size(&ft);
+                        }
+                    }
+                }
+                self.emit_expr(&arm.body);
             }
 
             // Catch-all for unsupported patterns
