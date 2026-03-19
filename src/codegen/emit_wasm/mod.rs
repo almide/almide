@@ -45,6 +45,7 @@ pub struct RuntimeFuncs {
     pub println_str: u32,
     pub int_to_string: u32,
     pub println_int: u32,
+    pub concat_str: u32,
 }
 
 /// Import descriptor for WASM import section.
@@ -104,6 +105,7 @@ impl WasmEmitter {
                 println_str: 0,
                 int_to_string: 0,
                 println_int: 0,
+                concat_str: 0,
             },
             heap_ptr_global: 0,
         }

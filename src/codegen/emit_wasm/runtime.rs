@@ -39,6 +39,10 @@ pub fn register_runtime(emitter: &mut WasmEmitter) {
     let println_int_ty = emitter.register_type(vec![ValType::I64], vec![]);
     emitter.rt.println_int = emitter.register_func("__println_int", println_int_ty);
 
+    // __concat_str(left: i32, right: i32) -> i32
+    let concat_ty = emitter.register_type(vec![ValType::I32, ValType::I32], vec![ValType::I32]);
+    emitter.rt.concat_str = emitter.register_func("__concat_str", concat_ty);
+
     // Global: __heap_ptr (mutable i32, initialized at assembly time)
     emitter.heap_ptr_global = 0; // first and only global
 }
@@ -49,6 +53,7 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     compile_println_str(emitter);
     compile_int_to_string(emitter);
     compile_println_int(emitter);
+    compile_concat_str(emitter);
 }
 
 /// __alloc(size: i32) -> i32
@@ -311,6 +316,126 @@ fn compile_println_int(emitter: &mut WasmEmitter) {
     f.instruction(&Instruction::LocalGet(0)); // param $n
     f.instruction(&Instruction::Call(emitter.rt.int_to_string));
     f.instruction(&Instruction::Call(emitter.rt.println_str));
+    f.instruction(&Instruction::End);
+
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
+
+/// __concat_str(left: i32, right: i32) -> i32
+/// Concatenates two strings. Each is [len:i32][data:u8...].
+/// Returns a new heap-allocated string.
+fn compile_concat_str(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.concat_str];
+    // params: 0=$left, 1=$right
+    // locals: 2=$left_len, 3=$right_len, 4=$new_len, 5=$result, 6=$i
+    let mut f = Function::new([
+        (1, ValType::I32), // 2: $left_len
+        (1, ValType::I32), // 3: $right_len
+        (1, ValType::I32), // 4: $new_len
+        (1, ValType::I32), // 5: $result
+        (1, ValType::I32), // 6: $i
+    ]);
+
+    // $left_len = mem32[$left]
+    f.instruction(&Instruction::LocalGet(0));
+    f.instruction(&Instruction::I32Load(mem(0)));
+    f.instruction(&Instruction::LocalSet(2));
+
+    // $right_len = mem32[$right]
+    f.instruction(&Instruction::LocalGet(1));
+    f.instruction(&Instruction::I32Load(mem(0)));
+    f.instruction(&Instruction::LocalSet(3));
+
+    // $new_len = $left_len + $right_len
+    f.instruction(&Instruction::LocalGet(2));
+    f.instruction(&Instruction::LocalGet(3));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::LocalSet(4));
+
+    // $result = __alloc(4 + $new_len)
+    f.instruction(&Instruction::LocalGet(4));
+    f.instruction(&Instruction::I32Const(4));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::Call(emitter.rt.alloc));
+    f.instruction(&Instruction::LocalSet(5));
+
+    // mem32[$result] = $new_len
+    f.instruction(&Instruction::LocalGet(5));
+    f.instruction(&Instruction::LocalGet(4));
+    f.instruction(&Instruction::I32Store(mem(0)));
+
+    // Copy left data: memcpy($result+4, $left+4, $left_len)
+    f.instruction(&Instruction::I32Const(0));
+    f.instruction(&Instruction::LocalSet(6));
+    f.instruction(&Instruction::Block(BlockType::Empty));
+    f.instruction(&Instruction::Loop(BlockType::Empty));
+    {
+        f.instruction(&Instruction::LocalGet(6));
+        f.instruction(&Instruction::LocalGet(2));
+        f.instruction(&Instruction::I32GeU);
+        f.instruction(&Instruction::BrIf(1));
+
+        f.instruction(&Instruction::LocalGet(5));
+        f.instruction(&Instruction::I32Const(4));
+        f.instruction(&Instruction::I32Add);
+        f.instruction(&Instruction::LocalGet(6));
+        f.instruction(&Instruction::I32Add);
+
+        f.instruction(&Instruction::LocalGet(0));
+        f.instruction(&Instruction::I32Const(4));
+        f.instruction(&Instruction::I32Add);
+        f.instruction(&Instruction::LocalGet(6));
+        f.instruction(&Instruction::I32Add);
+        f.instruction(&Instruction::I32Load8U(mem8(0)));
+        f.instruction(&Instruction::I32Store8(mem8(0)));
+
+        f.instruction(&Instruction::LocalGet(6));
+        f.instruction(&Instruction::I32Const(1));
+        f.instruction(&Instruction::I32Add);
+        f.instruction(&Instruction::LocalSet(6));
+        f.instruction(&Instruction::Br(0));
+    }
+    f.instruction(&Instruction::End);
+    f.instruction(&Instruction::End);
+
+    // Copy right data: memcpy($result+4+$left_len, $right+4, $right_len)
+    f.instruction(&Instruction::I32Const(0));
+    f.instruction(&Instruction::LocalSet(6));
+    f.instruction(&Instruction::Block(BlockType::Empty));
+    f.instruction(&Instruction::Loop(BlockType::Empty));
+    {
+        f.instruction(&Instruction::LocalGet(6));
+        f.instruction(&Instruction::LocalGet(3));
+        f.instruction(&Instruction::I32GeU);
+        f.instruction(&Instruction::BrIf(1));
+
+        f.instruction(&Instruction::LocalGet(5));
+        f.instruction(&Instruction::I32Const(4));
+        f.instruction(&Instruction::I32Add);
+        f.instruction(&Instruction::LocalGet(2));
+        f.instruction(&Instruction::I32Add);
+        f.instruction(&Instruction::LocalGet(6));
+        f.instruction(&Instruction::I32Add);
+
+        f.instruction(&Instruction::LocalGet(1));
+        f.instruction(&Instruction::I32Const(4));
+        f.instruction(&Instruction::I32Add);
+        f.instruction(&Instruction::LocalGet(6));
+        f.instruction(&Instruction::I32Add);
+        f.instruction(&Instruction::I32Load8U(mem8(0)));
+        f.instruction(&Instruction::I32Store8(mem8(0)));
+
+        f.instruction(&Instruction::LocalGet(6));
+        f.instruction(&Instruction::I32Const(1));
+        f.instruction(&Instruction::I32Add);
+        f.instruction(&Instruction::LocalSet(6));
+        f.instruction(&Instruction::Br(0));
+    }
+    f.instruction(&Instruction::End);
+    f.instruction(&Instruction::End);
+
+    // return $result
+    f.instruction(&Instruction::LocalGet(5));
     f.instruction(&Instruction::End);
 
     emitter.add_compiled(CompiledFunc { type_idx, func: f });

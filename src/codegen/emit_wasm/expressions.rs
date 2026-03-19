@@ -429,25 +429,11 @@ impl FuncCompiler<'_> {
         }
     }
 
-    /// Concatenate two strings on the heap.
+    /// Concatenate two strings on the heap via __concat_str runtime.
     fn emit_concat_str(&mut self, left: &IrExpr, right: &IrExpr) {
-        // left_ptr, right_ptr on stack
-        // new_len = left.len + right.len
-        // result = alloc(4 + new_len)
-        // mem32[result] = new_len
-        // memcpy result+4, left+4, left.len
-        // memcpy result+4+left.len, right+4, right.len
-
-        // We need locals to hold intermediate values.
-        // For Phase 1, use a simplified approach: store ptrs in scratch area.
-        // Actually, we'll use the emitter's alloc and manual copy.
-        // This is complex; for now emit unreachable as a placeholder.
-        // TODO: implement string concatenation
         self.emit_expr(left);
-        self.func.instruction(&Instruction::Drop);
         self.emit_expr(right);
-        self.func.instruction(&Instruction::Drop);
-        self.func.instruction(&Instruction::Unreachable);
+        self.func.instruction(&Instruction::Call(self.emitter.rt.concat_str));
     }
 
     /// String interpolation: concatenate parts.
