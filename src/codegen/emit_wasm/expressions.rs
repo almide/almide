@@ -234,6 +234,23 @@ impl FuncCompiler<'_> {
                 self.emit_index_access(object, index, &expr.ty);
             }
 
+            // ── Option/Result ──
+            IrExprKind::OptionSome { expr: inner } => {
+                // Allocate space for the inner value, store it, return pointer
+                let inner_size = values::byte_size(&inner.ty);
+                self.func.instruction(&Instruction::I32Const(inner_size as i32));
+                self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+                let scratch = self.match_i32_base + self.match_depth;
+                self.func.instruction(&Instruction::LocalSet(scratch));
+                self.func.instruction(&Instruction::LocalGet(scratch));
+                self.emit_expr(inner);
+                self.emit_store_at(&inner.ty, 0);
+                self.func.instruction(&Instruction::LocalGet(scratch));
+            }
+            IrExprKind::OptionNone => {
+                self.func.instruction(&Instruction::I32Const(0));
+            }
+
             // ── Codegen-specific nodes (pass-through or ignore) ──
             IrExprKind::Clone { expr: inner } | IrExprKind::Deref { expr: inner } => {
                 // In WASM, clone/deref are no-ops (no ownership system)
@@ -1292,6 +1309,38 @@ impl FuncCompiler<'_> {
                 } else {
                     self.func.instruction(&Instruction::Unreachable);
                 }
+            }
+
+            // Some(x) pattern (Option)
+            IrPattern::Some { inner } => {
+                // some(x) is a non-null pointer. Check ptr != 0, then load value.
+                self.func.instruction(&Instruction::LocalGet(scratch));
+                self.func.instruction(&Instruction::I32Const(0));
+                self.func.instruction(&Instruction::I32Ne);
+                let bt = values::block_type(result_ty);
+                self.func.instruction(&Instruction::If(bt));
+                self.depth += 1;
+
+                // Bind the inner value
+                if let IrPattern::Bind { var } = inner.as_ref() {
+                    if let Some(&local_idx) = self.var_map.get(&var.0) {
+                        // Load value from the Some pointer
+                        let inner_ty = self.var_table.get(*var).ty.clone();
+                        self.func.instruction(&Instruction::LocalGet(scratch));
+                        self.emit_load_at(&inner_ty, 0);
+                        self.func.instruction(&Instruction::LocalSet(local_idx));
+                    }
+                }
+
+                self.emit_expr(&arm.body);
+                self.func.instruction(&Instruction::Else);
+                if is_last {
+                    self.func.instruction(&Instruction::Unreachable);
+                } else {
+                    self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1);
+                }
+                self.depth -= 1;
+                self.func.instruction(&Instruction::End);
             }
 
             // None pattern (Option)

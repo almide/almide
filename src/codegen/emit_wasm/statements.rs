@@ -228,7 +228,13 @@ fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, l
             for elem in elements { scan_pattern(elem, subject_ty, locals, vt); }
         }
         crate::ir::IrPattern::Some { inner } | crate::ir::IrPattern::Ok { inner } | crate::ir::IrPattern::Err { inner } => {
-            scan_pattern(inner, subject_ty, locals, vt);
+            // Extract the inner type from Applied(Option/Result, [T, ...])
+            let inner_ty = if let crate::types::Ty::Applied(_, args) = subject_ty {
+                args.first().cloned().unwrap_or(subject_ty.clone())
+            } else {
+                subject_ty.clone()
+            };
+            scan_pattern(inner, &inner_ty, locals, vt);
         }
         crate::ir::IrPattern::RecordPattern { name: _, fields, .. } => {
             // For pattern=None fields, the binding is implicit (field name = var name).
