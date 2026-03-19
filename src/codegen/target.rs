@@ -20,6 +20,7 @@ use super::pass_result_erasure::ResultErasurePass;
 use super::pass_result_propagation::ResultPropagationPass;
 use super::pass_shadow_resolve::ShadowResolvePass;
 use super::pass_stdlib_lowering::StdlibLoweringPass;
+use super::pass_effect_inference::EffectInferencePass;
 use super::pass_stream_fusion::StreamFusionPass;
 use super::template::TemplateSet;
 
@@ -48,7 +49,8 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(TypeConcretizationPass)
             .add(BorrowInsertionPass)
             .add(CloneInsertionPass)
-            // Optimization analysis (before lowering, while Module calls still visible)
+            // Analysis passes (before lowering, while Module calls still visible)
+            .add(EffectInferencePass)
             .add(StreamFusionPass)
             // Semantic lowering (order matters!)
             // 1. Stdlib first: Module calls → Named calls with arg decoration
@@ -61,7 +63,8 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(FanLoweringPass),
 
         Target::TypeScript | Target::JavaScript => Pipeline::new()
-            // Optimization analysis
+            // Analysis passes
+            .add(EffectInferencePass)
             .add(StreamFusionPass)
             // Semantic lowering
             .add(MatchLoweringPass)

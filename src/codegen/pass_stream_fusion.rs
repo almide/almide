@@ -17,7 +17,6 @@
 //! Reports fusible chains for debugging/optimization planning.
 
 use crate::ir::*;
-use crate::types::Ty;
 use crate::types::constructor::{TypeConstructorRegistry, AlgebraicLaw};
 use super::pass::{NanoPass, Target};
 

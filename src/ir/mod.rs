@@ -462,4 +462,8 @@ pub struct IrProgram {
     /// Populated during lowering with user-defined types.
     #[serde(skip)]
     pub type_registry: crate::types::TypeConstructorRegistry,
+    /// Effect inference results: per-function capability analysis.
+    /// Populated by EffectInferencePass during codegen pipeline.
+    #[serde(skip)]
+    pub effect_map: crate::codegen::pass_effect_inference::EffectMap,
 }

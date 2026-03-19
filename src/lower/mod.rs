@@ -295,7 +295,7 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprI
     let auto_derived = generate_auto_derives(&mut ctx, &type_decls, &functions);
     functions.extend(auto_derived);
 
-    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new() };
+    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_map: Default::default() };
 
     // Register user-defined types in the type constructor registry (HKT foundation)
     for td in &program.type_decls {
