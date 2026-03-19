@@ -392,11 +392,20 @@ pub fn collect_unused_var_warnings(program: &IrProgram, file: &str) -> Vec<crate
     warnings
 }
 
-/// Classify a top-level let value: simple literals are `Const`, everything else is `Lazy`.
+/// Classify a top-level let value: constant-evaluable expressions are `Const`, everything else is `Lazy`.
+/// Extends beyond simple literals to include arithmetic/logic on constants and references to other consts.
 pub fn classify_top_let_kind(expr: &IrExpr) -> TopLetKind {
+    if is_const_expr(expr) { TopLetKind::Const } else { TopLetKind::Lazy }
+}
+
+/// Check if an expression can be evaluated at compile time (Rust `const`).
+/// Recognizes: literals, unary/binary ops on const operands, references to other top-level consts.
+fn is_const_expr(expr: &IrExpr) -> bool {
     match &expr.kind {
         IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
-        | IrExprKind::LitBool { .. } | IrExprKind::Unit => TopLetKind::Const,
-        _ => TopLetKind::Lazy,
+        | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::LitStr { .. } => true,
+        IrExprKind::UnOp { operand, .. } => is_const_expr(operand),
+        IrExprKind::BinOp { left, right, .. } => is_const_expr(left) && is_const_expr(right),
+        _ => false,
     }
 }

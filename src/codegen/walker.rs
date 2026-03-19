@@ -345,11 +345,10 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::Call { target, args, .. } => {
             match target {
                 CallTarget::Module { module, func } => {
-                    // Module calls: use template (TS/other) or should have been
-                    // converted to RenderedCall by StdlibLoweringPass (Rust)
+                    // Module calls: use template (TS/JS) or runtime function (Rust)
                     let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
                     ctx.templates.render_with("module_call", None, &[], &[("module", module.as_str()), ("func", func.as_str()), ("args", args_str.as_str())])
-                        .unwrap_or_else(|| format!("__almd_{}.{}()", module, func))
+                        .unwrap_or_else(|| format!("almide_rt_{}_{}({})", module, func, args_str))
                 }
                 _ => render_generic_call(ctx, target, args)
             }
