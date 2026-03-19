@@ -7,10 +7,3 @@ codopsy-report.json
 tools/stdlib-crawler/data/
 __pycache__/
 *.pyc
-
-# Test compilation cache (almide test/run generates these)
-_tmp_*
-_dev_stdin-*/
-main-*/
-test_inc-*/
-*_almd-*/
