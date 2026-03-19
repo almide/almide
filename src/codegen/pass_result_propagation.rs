@@ -139,9 +139,11 @@ fn insert_try(expr: IrExpr, in_match_subject: bool) -> IrExpr {
             args: args.into_iter().map(|a| insert_try(a, false)).collect(),
             type_args,
         },
+        // Don't recurse into lambdas — they are independent scopes,
+        // not part of the effect fn's error propagation chain.
         IrExprKind::Lambda { params, body } => IrExprKind::Lambda {
             params,
-            body: Box::new(insert_try(*body, false)),
+            body,
         },
         IrExprKind::List { elements } => IrExprKind::List {
             elements: elements.into_iter().map(|e| insert_try(e, false)).collect(),
