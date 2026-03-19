@@ -1446,16 +1446,13 @@ fn terminate_stmt(ctx: &RenderContext, rendered: String) -> String {
 // ── Rust-specific helpers ──
 
 /// Check if a type contains a reference to a named type (for recursive Box detection).
+/// Uses Ty::any_child_recursive for uniform traversal.
 pub fn ty_contains_name(ty: &Ty, name: &str) -> bool {
-    match ty {
-        Ty::Named(n, args) => n == name || args.iter().any(|a| ty_contains_name(a, name)),
+    ty.any_child_recursive(&|t| match t {
+        Ty::Named(n, _) => n == name,
         Ty::Variant { name: vn, .. } => vn == name,
-        Ty::List(inner) | Ty::Option(inner) => ty_contains_name(inner, name),
-        Ty::Result(a, b) | Ty::Map(a, b) => ty_contains_name(a, name) || ty_contains_name(b, name),
-        Ty::Tuple(elems) => elems.iter().any(|e| ty_contains_name(e, name)),
-        Ty::Fn { params, ret } => params.iter().any(|p| ty_contains_name(p, name)) || ty_contains_name(ret, name),
         _ => false,
-    }
+    })
 }
 
 /// Check if an expression tree contains break or continue (for IIFE avoidance)
@@ -1476,34 +1473,18 @@ fn contains_loop_control(expr: &IrExpr) -> bool {
     }
 }
 
-/// Check if a type tree contains any named TypeVars (non-? prefix)
+/// Check if a type tree contains any named TypeVars (non-? prefix).
+/// Uses Ty::any_child_recursive for uniform traversal.
 fn ty_has_named_typevar(ty: &Ty) -> bool {
-    match ty {
-        Ty::TypeVar(n) => !n.starts_with('?'),
-        Ty::List(inner) | Ty::Option(inner) => ty_has_named_typevar(inner),
-        Ty::Result(a, b) | Ty::Map(a, b) => ty_has_named_typevar(a) || ty_has_named_typevar(b),
-        Ty::Tuple(elems) => elems.iter().any(ty_has_named_typevar),
-        Ty::Named(_, args) => args.iter().any(ty_has_named_typevar),
-        Ty::Fn { params, ret } => params.iter().any(ty_has_named_typevar) || ty_has_named_typevar(ret),
-        _ => false,
-    }
+    ty.any_child_recursive(&|t| matches!(t, Ty::TypeVar(n) if !n.starts_with('?')))
 }
 
-/// Replace named TypeVars with Ty::Unknown (rendered as _)
+/// Replace named TypeVars with Ty::Unknown (rendered as _).
+/// Uses Ty::map_children for uniform recursive traversal.
 fn erase_named_typevars(ty: Ty) -> Ty {
-    match ty {
+    match &ty {
         Ty::TypeVar(n) if !n.starts_with('?') => Ty::Unknown,
-        Ty::List(inner) => Ty::List(Box::new(erase_named_typevars(*inner))),
-        Ty::Option(inner) => Ty::Option(Box::new(erase_named_typevars(*inner))),
-        Ty::Result(a, b) => Ty::Result(Box::new(erase_named_typevars(*a)), Box::new(erase_named_typevars(*b))),
-        Ty::Map(a, b) => Ty::Map(Box::new(erase_named_typevars(*a)), Box::new(erase_named_typevars(*b))),
-        Ty::Tuple(elems) => Ty::Tuple(elems.into_iter().map(erase_named_typevars).collect()),
-        Ty::Named(n, args) => Ty::Named(n, args.into_iter().map(erase_named_typevars).collect()),
-        Ty::Fn { params, ret } => Ty::Fn {
-            params: params.into_iter().map(erase_named_typevars).collect(),
-            ret: Box::new(erase_named_typevars(*ret)),
-        },
-        other => other,
+        _ => ty.map_children(&|child| erase_named_typevars(child.clone())),
     }
 }
 
@@ -1660,17 +1641,14 @@ fn collect_anon_from_stmt(stmt: &IrStmt, named: &HashSet<Vec<String>>, seen: &mu
 }
 
 fn collect_anon_from_ty(ty: &Ty, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
-    match ty {
-        Ty::Record { fields } | Ty::OpenRecord { fields } => {
-            let mut names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
-            names.sort();
-            if !named.contains(&names) { seen.insert(names); }
-            for (_, t) in fields { collect_anon_from_ty(t, named, seen); }
-        }
-        Ty::List(inner) | Ty::Option(inner) => collect_anon_from_ty(inner, named, seen),
-        Ty::Result(a, b) | Ty::Map(a, b) => { collect_anon_from_ty(a, named, seen); collect_anon_from_ty(b, named, seen); }
-        Ty::Tuple(elems) => { for e in elems { collect_anon_from_ty(e, named, seen); } }
-        Ty::Fn { params, ret } => { for p in params { collect_anon_from_ty(p, named, seen); } collect_anon_from_ty(ret, named, seen); }
-        _ => {}
+    // Record/OpenRecord: register anonymous record fields
+    if let Ty::Record { fields } | Ty::OpenRecord { fields } = ty {
+        let mut names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
+        names.sort();
+        if !named.contains(&names) { seen.insert(names); }
+    }
+    // Recurse into all children uniformly
+    for child in ty.children() {
+        collect_anon_from_ty(child, named, seen);
     }
 }
