@@ -1,46 +1,56 @@
-# IR Verification Pass [ACTIVE]
+# IR Verification & Self-Describing IR [ACTIVE]
 
-Debug-only integrity checks on the typed IR. Runs after optimization, before monomorphization. Catches internal compiler errors before they reach codegen or rustc.
+Debug-only integrity checks + IR self-description improvements. Verification runs after optimization, before monomorphization. Self-describing IR ensures every node's meaning is unambiguous without type inspection.
 
-## Implemented (Phase 1)
+## Implemented
 
-### Structural integrity
-- [x] **VarId bounds** — every `Var { id }`, `Bind { var }`, parameter, and pattern binding references a valid VarTable entry
-- [x] **Parameter VarId uniqueness** — no two parameters in a function share the same VarId
-- [x] **Loop context** — `Break`/`Continue` only inside `ForIn`, `While`, or `DoBlock` (guard-loop)
-- [x] **Pattern variable validation** — all VarIds in match patterns are within VarTable bounds
+### IR Verification (19 tests)
 
-### Type consistency
-- [x] **BinOp type dispatch** — `AddInt` requires Int operands, `AddFloat` requires Float, etc. (all 20 variants)
-- [x] **UnOp type dispatch** — `NegInt` requires Int, `NegFloat` requires Float, `Not` requires Bool
-- [x] **Unknown/TypeVar tolerance** — unresolved types are skipped (error recovery / generics)
+- [x] **VarId bounds** — every variable reference maps to a valid VarTable entry
+- [x] **Parameter VarId uniqueness** — no two params in a function share the same VarId
+- [x] **Loop context** — Break/Continue only inside ForIn, While, or DoBlock
+- [x] **BinOp/UnOp type dispatch** — operator variant matches operand types (all 22 variants)
+- [x] **MapAccess/IndexAccess type constraints** — MapAccess only on Map, IndexAccess not on Map
+- [x] **Duplicate record fields** — no two fields share the same name
+- [x] **Duplicate variant cases** — no two cases share the same name
+- [x] **Module coverage** — all checks apply to imported user modules
 
-### Type declaration integrity
-- [x] **Duplicate record fields** — no two fields in a record type share the same name
-- [x] **Duplicate variant cases** — no two cases in a variant type share the same name
+### Self-Describing IR
 
-### Module coverage
-- [x] All checks apply to both main program and imported user modules
+- [x] **PowInt** — split from PowFloat. Lowerer dispatches `**` by operand type (like all other arithmetic ops)
+- [x] **MapAccess / MapInsert** — split from IndexAccess / IndexAssign. Map key lookup vs list index access are distinct IR nodes
+- [x] **MatchSubjectPass** — `.as_str()` / `.as_deref()` insertion moved from walker to nanopass. Walker no longer checks types for match subjects
+
+### Infrastructure
+
+- [x] **IrVisitor trait** (`src/ir/visit.rs`) — shared walker for read-only IR passes. verify.rs and unknown.rs migrated
+- [x] **ExprId** — already complete (HashMap<ExprId, Ty>, parser-allocated IDs)
 
 ## Planned (Phase 2)
 
 | Check | Purpose |
 |-------|---------|
-| **Use-count cross-check** | Independent variable reference count vs VarTable.use_count — catches bugs in loop bumping / lambda capture logic |
-| **CallTarget validity** | Named function calls reference functions that exist in the program or stdlib |
-| **Exhaustive IrExprKind walk** | Ensure new IR node variants added in the future don't bypass verification |
+| **Use-count cross-check** | Independent reference count vs VarTable.use_count |
+| **CallTarget validity** | Named function calls reference existing functions |
+| **Migrate use_count.rs to IrVisitor** | Reduce walker duplication further |
+| **Migrate remaining codegen type dispatches to nanopass** | ResultErr inner type, OptionNone type hint |
 
-## Design
+## Design Principles
 
-- **Debug-only**: `#[cfg(debug_assertions)]` — zero cost in release builds
-- **Pipeline position**: Lower → optimize → **verify** → mono → codegen
-- **Error type**: `IrVerifyError` with message, function name, and span — printed as `internal compiler error:`
-- **Pattern**: Same walk-based post-pass as `unknown.rs` and `use_count.rs`
+1. **IR self-description**: Every IR node's meaning is determined by its variant, not by runtime type inspection
+2. **Walker = pure renderer**: The template walker (Layer 3) reads IR and annotations, never checks types
+3. **Nanopass = semantic transform**: Type-dependent decisions happen in nanopass passes (Layer 2)
+4. **Verification = feedback loop**: Self-describing IR enables type constraint verification
 
 ## Affected files
 
 | File | Role |
 |------|------|
-| `src/ir/verify.rs` | Verification logic and tests (16 tests) |
-| `src/ir/mod.rs` | Module registration |
-| `src/main.rs` | Pipeline insertion point |
+| `src/ir/verify.rs` | Verification logic (19 tests) |
+| `src/ir/visit.rs` | IrVisitor trait + walk functions |
+| `src/ir/mod.rs` | PowInt, MapAccess, MapInsert, module registration |
+| `src/codegen/pass_match_subject.rs` | MatchSubject nanopass (Rust-only) |
+| `src/codegen/walker.rs` | Type dispatch removal |
+| `src/lower/expressions.rs` | PowInt/MapAccess lowering |
+| `src/lower/statements.rs` | MapInsert lowering |
+| `src/main.rs` | Verification pipeline insertion |
