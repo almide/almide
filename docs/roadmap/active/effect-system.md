@@ -3,6 +3,7 @@
 **優先度:** 1.x (情報表示) → 2.x (制限適用)
 **前提:** Effect Isolation Layer 1 完了済み
 **原則:** ユーザーは `fn` / `effect fn` だけ書く。コンパイラが capability を自動推論。
+**構文制約:** Effect の粒度はユーザー構文に一切にじませない。新キーワード追加なし。`effect fn` が唯一のマーカー。
 
 > 「書くコードは変わらない。コンパイラが賢くなるだけ。」
 
@@ -27,9 +28,11 @@ allow = ["Net"]  # IO は禁止
 
 依存パッケージの capability を消費者が制限。Security Layer 3。
 
-### Phase 4: 型レベル統合 (2.x)
+### Phase 4: 内部型レベル統合 (2.x, 構文変更なし)
 
-Effect set を型コンストラクタに昇格。HKT Foundation Phase 5 と合流。
+コンパイラ内部で Effect set を型情報に持たせる (FnType に EffectSet を付与)。
+ユーザー構文は一切変わらない — `effect fn` のまま。
+vibe-lang の `with {Async}` のような明示的 effect 構文は **導入しない**。
 
 ---
 
