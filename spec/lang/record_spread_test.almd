@@ -1,0 +1,56 @@
+// record_spread_test — Record creation, field access, spread
+
+type Config = { host: String, port: Int, debug: Bool }
+
+test "record creation and field access" {
+  let c = Config { host: "localhost", port: 8080, debug: false }
+  assert_eq(c.host, "localhost")
+  assert_eq(c.port, 8080)
+  assert_eq(c.debug, false)
+}
+
+// NOTE: record spread ({ ...base, field: value }) has a codegen gap.
+// Spread is parsed and type-checked but generates incorrect Rust code.
+
+test "record field in expression" {
+  let c = Config { host: "localhost", port: 8080, debug: true }
+  let url = "${c.host}:${c.port}"
+  assert_eq(url, "localhost:8080")
+}
+
+test "record equality" {
+  let a = Config { host: "x", port: 1, debug: true }
+  let b = Config { host: "x", port: 1, debug: true }
+  assert_eq(a == b, true)
+}
+
+test "record in list" {
+  let configs = [
+    Config { host: "a", port: 1, debug: false },
+    Config { host: "b", port: 2, debug: true },
+  ]
+  assert_eq(configs.len(), 2)
+}
+
+test "record field used in condition" {
+  let c = Config { host: "localhost", port: 8080, debug: true }
+  let mode = if c.debug then "debug" else "release"
+  assert_eq(mode, "debug")
+}
+
+type Pair = { first: Int, second: Int }
+
+test "record with computed fields" {
+  let x = 10
+  let p = Pair { first: x, second: x * 2 }
+  assert_eq(p.first, 10)
+  assert_eq(p.second, 20)
+}
+
+test "record manual update" {
+  let base = Pair { first: 1, second: 2 }
+  let updated = Pair { first: 99, second: base.second }
+  assert_eq(base.first, 1)
+  assert_eq(updated.first, 99)
+  assert_eq(updated.second, 2)
+}

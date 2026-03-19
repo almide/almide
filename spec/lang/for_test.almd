@@ -1,0 +1,87 @@
+// for_test — for...in loop edge cases
+
+test "for over list" {
+  var sum = 0
+  for x in [1, 2, 3, 4, 5] {
+    sum = sum + x
+  }
+  assert_eq(sum, 15)
+}
+
+test "for over empty list" {
+  var count = 0
+  let empty: List[Int] = []
+  for _ in empty {
+    count = count + 1
+  }
+  assert_eq(count, 0)
+}
+
+test "for over range" {
+  var sum = 0
+  for i in 0..5 {
+    sum = sum + i
+  }
+  assert_eq(sum, 10)
+}
+
+test "for with tuple destructure" {
+  let pairs = [(1, "a"), (2, "b"), (3, "c")]
+  var keys = 0
+  for (k, _) in pairs {
+    keys = keys + k
+  }
+  assert_eq(keys, 6)
+}
+
+test "for over map" {
+  let m = ["a": 1, "b": 2, "c": 3]
+  var sum = 0
+  for (_, v) in m {
+    sum = sum + v
+  }
+  assert_eq(sum, 6)
+}
+
+test "for building a list" {
+  var items: List[String] = []
+  for i in 0..3 {
+    items = items + ["item ${i}"]
+  }
+  assert_eq(items.len(), 3)
+}
+
+test "nested for loops" {
+  var count = 0
+  for _ in 0..4 {
+    for _ in 0..3 {
+      count = count + 1
+    }
+  }
+  assert_eq(count, 12)
+}
+
+test "for with var mutation" {
+  var max = 0
+  for x in [3, 7, 2, 9, 1] {
+    if x > max then { max = x }
+  }
+  assert_eq(max, 9)
+}
+
+test "for with guard continue" {
+  var evens: List[Int] = []
+  for i in 0..10 {
+    guard i % 2 == 0 else continue
+    evens = evens + [i]
+  }
+  assert_eq(evens, [0, 2, 4, 6, 8])
+}
+
+test "for single element" {
+  var ran = false
+  for _ in [42] {
+    ran = true
+  }
+  assert_eq(ran, true)
+}
