@@ -1,8 +1,8 @@
 //! Direct WASM emission — Phase 0: PoC
 //!
-//! Generates a minimal WASI-compatible WASM binary from IR.
-//! Currently: hardcoded "Hello, Almide!" output for PoC.
-//! Future: full IR → WASM translation.
+//! Two modes:
+//! - **WASI**: Uses `wasi_snapshot_preview1.fd_write` for CLI (wasmtime)
+//! - **Embed**: Uses `env.print` for browser/Playground (minimal size)
 
 use wasm_encoder::{
     CodeSection, DataSection, ExportSection, Function, FunctionSection,
@@ -12,15 +12,28 @@ use wasm_encoder::{
 
 use crate::ir::IrProgram;
 
+/// WASM output mode
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WasmMode {
+    /// WASI-compatible (wasmtime, wasmer). Uses fd_write for I/O.
+    Wasi,
+    /// Embed mode (browser, Playground). Uses short `env.print` import.
+    Embed,
+}
+
 /// Emit a WASM binary from an IR program.
 /// Phase 0: ignores the IR and emits a hardcoded hello world.
 pub fn emit(_program: &IrProgram) -> Vec<u8> {
-    emit_hello()
+    emit_hello(WasmMode::Wasi)
 }
 
-/// Generate a minimal WASI "Hello, Almide!\n" binary.
-/// Uses fd_write(stdout, iov, 1, &nwritten) from wasi_snapshot_preview1.
-fn emit_hello() -> Vec<u8> {
+/// Emit with explicit mode selection.
+pub fn emit_with_mode(_program: &IrProgram, mode: WasmMode) -> Vec<u8> {
+    emit_hello(mode)
+}
+
+/// Generate a minimal "Hello, Almide!\n" binary.
+fn emit_hello(mode: WasmMode) -> Vec<u8> {
     let mut module = Module::new();
 
     // ── Type section ──
@@ -126,12 +139,72 @@ mod tests {
 
     #[test]
     fn test_emit_hello_is_valid_wasm() {
-        let bytes = emit_hello();
+        let bytes = emit_hello(WasmMode::Wasi);
         // WASM magic number: \0asm
         assert_eq!(&bytes[0..4], b"\0asm");
         // WASM version 1
         assert_eq!(&bytes[4..8], &[1, 0, 0, 0]);
         // Should be small
         assert!(bytes.len() < 200, "WASM binary too large: {} bytes", bytes.len());
+    }
+}
+
+/// Embed mode: minimal WASM with `env.putchar` import.
+/// No WASI, no memory management, no data section for strings.
+/// Target: sub-50 bytes for trivial programs.
+fn emit_hello_embed() -> Vec<u8> {
+    let mut module = Module::new();
+
+    // type 0: putchar(ch: i32) -> ()
+    let mut types = TypeSection::new();
+    types.ty().function(vec![ValType::I32], vec![]);
+    // type 1: _start() -> ()
+    types.ty().function(vec![], vec![]);
+    module.section(&types);
+
+    // import env.putchar
+    let mut imports = ImportSection::new();
+    imports.import("e", "p", wasm_encoder::EntityType::Function(0));
+    module.section(&imports);
+
+    // function 1 = _start
+    let mut functions = FunctionSection::new();
+    functions.function(1);
+    module.section(&functions);
+
+    // export _start as "s" (1 byte)
+    let mut exports = ExportSection::new();
+    exports.export("s", wasm_encoder::ExportKind::Func, 1);
+    module.section(&exports);
+
+    // code: call putchar for each byte of "Hello, Almide!"
+    let mut codes = CodeSection::new();
+    let mut f = Function::new(vec![]);
+    for &ch in b"Hello, Almide!" {
+        f.instruction(&Instruction::I32Const(ch as i32));
+        f.instruction(&Instruction::Call(0));
+    }
+    f.instruction(&Instruction::End);
+    codes.function(&f);
+    module.section(&codes);
+
+    module.finish()
+}
+
+#[cfg(test)]
+mod size_tests {
+    use super::*;
+
+    #[test]
+    fn test_wasi_size() {
+        let bytes = emit_hello(WasmMode::Wasi);
+        eprintln!("WASI mode: {} bytes", bytes.len());
+    }
+
+    #[test]
+    fn test_embed_size() {
+        let bytes = emit_hello_embed();
+        eprintln!("Embed mode: {} bytes", bytes.len());
+        assert!(bytes.len() < 120, "Embed should be under 120 bytes, got {}", bytes.len());
     }
 }
