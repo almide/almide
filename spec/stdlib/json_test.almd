@@ -1,0 +1,129 @@
+// json_test — JSON module tests
+
+import json
+
+// ── json.from_string / json.stringify ──
+
+test "json from_string and stringify" {
+  let v = json.from_string("hello")
+  let s = json.stringify(v)
+  assert_eq(s.contains("hello"), true)
+}
+
+// ── json.from_int ──
+
+test "json from_int" {
+  let v = json.from_int(42)
+  let s = json.stringify(v)
+  assert_eq(s.contains("42"), true)
+}
+
+// ── json.from_float ──
+
+test "json from_float" {
+  let v = json.from_float(3.14)
+  let s = json.stringify(v)
+  assert_eq(s.contains("3.14"), true)
+}
+
+// ── json.from_bool ──
+
+test "json from_bool true" {
+  let v = json.from_bool(true)
+  assert_eq(json.stringify(v), "true")
+}
+
+test "json from_bool false" {
+  let v = json.from_bool(false)
+  assert_eq(json.stringify(v), "false")
+}
+
+// NOTE: json.null() has no runtime — skipped
+
+// ── json.object ──
+
+test "json object simple" {
+  let v = json.object([("name", json.from_string("Alice"))])
+  let s = json.stringify(v)
+  assert_eq(s.contains("name"), true)
+  assert_eq(s.contains("Alice"), true)
+}
+
+test "json object multiple fields" {
+  let v = json.object([
+    ("id", json.from_int(1)),
+    ("active", json.from_bool(true)),
+  ])
+  let s = json.stringify(v)
+  assert_eq(s.contains("id"), true)
+  assert_eq(s.contains("active"), true)
+}
+
+// ── json.array ──
+
+test "json array" {
+  let v = json.array([json.from_int(1), json.from_int(2), json.from_int(3)])
+  let s = json.stringify(v)
+  assert_eq(s.contains("1"), true)
+  assert_eq(s.contains("2"), true)
+  assert_eq(s.contains("3"), true)
+}
+
+test "json empty array" {
+  let v = json.array([])
+  assert_eq(json.stringify(v), "[]")
+}
+
+// ── json.parse ──
+
+test "json parse valid object" {
+  match json.parse(r"""{"name": "Bob"}""") {
+    ok(v) => {
+      let s = json.stringify(v)
+      assert_eq(s.contains("Bob"), true)
+    },
+    err(_) => assert(false, "should parse"),
+  }
+}
+
+test "json parse invalid" {
+  match json.parse("not valid json {{{") {
+    ok(_) => assert(false, "should fail"),
+    err(e) => assert(string.len(e) > 0),
+  }
+}
+
+// ── json.get via stringify check ──
+
+test "json object field accessible via stringify" {
+  let obj = json.object([("x", json.from_int(10))])
+  let s = json.stringify(obj)
+  assert_eq(s.contains("10"), true)
+  assert_eq(s.contains("x"), true)
+}
+
+// ── json.parse and roundtrip ──
+
+test "json roundtrip object" {
+  let original = json.object([
+    ("a", json.from_int(1)),
+    ("b", json.from_string("two")),
+  ])
+  let text = json.stringify(original)
+  match json.parse(text) {
+    ok(parsed) => {
+      let reparsed = json.stringify(parsed)
+      assert_eq(reparsed.contains("1"), true)
+      assert_eq(reparsed.contains("two"), true)
+    },
+    err(_) => assert(false, "roundtrip failed"),
+  }
+}
+
+test "json nested object" {
+  let inner = json.object([("value", json.from_int(42))])
+  let outer = json.object([("data", inner)])
+  let s = json.stringify(outer)
+  assert_eq(s.contains("data"), true)
+  assert_eq(s.contains("42"), true)
+}
