@@ -85,30 +85,13 @@ impl Checker {
     }
 
     fn instantiate_inner(&mut self, ty: &Ty, mapping: &mut std::collections::HashMap<u32, TyVarId>) -> Ty {
-        match ty {
-            Ty::TypeVar(name) if name.starts_with('?') => {
-                // Inference variables (?N) must NOT be freshened — they need to stay
-                // linked to the original constraint. Only user type params (T, A, B)
-                // get fresh vars for let-polymorphism.
-                ty.clone()
-            }
-            Ty::List(inner) => Ty::List(Box::new(self.instantiate_inner(inner, mapping))),
-            Ty::Option(inner) => Ty::Option(Box::new(self.instantiate_inner(inner, mapping))),
-            Ty::Result(ok, err) => Ty::Result(
-                Box::new(self.instantiate_inner(ok, mapping)),
-                Box::new(self.instantiate_inner(err, mapping)),
-            ),
-            Ty::Map(k, v) => Ty::Map(
-                Box::new(self.instantiate_inner(k, mapping)),
-                Box::new(self.instantiate_inner(v, mapping)),
-            ),
-            Ty::Tuple(elems) => Ty::Tuple(elems.iter().map(|e| self.instantiate_inner(e, mapping)).collect()),
-            Ty::Fn { params, ret } => Ty::Fn {
-                params: params.iter().map(|p| self.instantiate_inner(p, mapping)).collect(),
-                ret: Box::new(self.instantiate_inner(ret, mapping)),
-            },
-            other => other.clone(),
+        // Inference variables (?N) must NOT be freshened — they need to stay
+        // linked to the original constraint.
+        if matches!(ty, Ty::TypeVar(name) if name.starts_with('?')) {
+            return ty.clone();
         }
+        // Recursively instantiate all children
+        ty.map_children_mut(&mut |child| self.instantiate_inner(child, mapping))
     }
 
     pub(crate) fn constrain(&mut self, expected: Ty, actual: Ty, context: impl Into<String>) {

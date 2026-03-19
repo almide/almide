@@ -29,9 +29,9 @@ impl NanoPass for StreamFusionPass {
     fn targets(&self) -> Option<Vec<Target>> { None } // All targets
 
     fn run(&self, program: &mut IrProgram, _target: Target) {
-        let registry = TypeConstructorRegistry::new();
+        let registry = &program.type_registry;
         for func in &program.functions {
-            let chains = detect_pipe_chains(&func.body, &registry);
+            let chains = detect_pipe_chains(&func.body, registry);
             for chain in &chains {
                 if chain.fusible_pairs > 0 {
                     // Phase 1: detection only. In Phase 2, we'll rewrite.

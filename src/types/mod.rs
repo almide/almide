@@ -362,6 +362,55 @@ impl Ty {
         }
     }
 
+    /// Apply a mutable transformation to all direct child types, producing a new Ty.
+    ///
+    /// Like `map_children` but accepts `FnMut`, enabling use with closures
+    /// that capture `&mut self` (e.g., type checker's `instantiate_inner`).
+    pub fn map_children_mut<F>(&self, f: &mut F) -> Ty
+    where
+        F: FnMut(&Ty) -> Ty,
+    {
+        match self {
+            Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit
+            | Ty::TypeVar(_) | Ty::Unknown => self.clone(),
+
+            Ty::List(inner) => Ty::List(Box::new(f(inner))),
+            Ty::Option(inner) => Ty::Option(Box::new(f(inner))),
+            Ty::Result(ok, err) => Ty::Result(Box::new(f(ok)), Box::new(f(err))),
+            Ty::Map(k, v) => Ty::Map(Box::new(f(k)), Box::new(f(v))),
+
+            Ty::Tuple(tys) => Ty::Tuple(tys.iter().map(|t| f(t)).collect()),
+            Ty::Named(name, args) => Ty::Named(name.clone(), args.iter().map(|t| f(t)).collect()),
+            Ty::Union(members) => Ty::union(members.iter().map(|t| f(t)).collect()),
+
+            Ty::Record { fields } => Ty::Record {
+                fields: fields.iter().map(|(n, t)| (n.clone(), f(t))).collect(),
+            },
+            Ty::OpenRecord { fields } => Ty::OpenRecord {
+                fields: fields.iter().map(|(n, t)| (n.clone(), f(t))).collect(),
+            },
+
+            Ty::Fn { params, ret } => Ty::Fn {
+                params: params.iter().map(|t| f(t)).collect(),
+                ret: Box::new(f(ret)),
+            },
+
+            Ty::Variant { name, cases } => Ty::Variant {
+                name: name.clone(),
+                cases: cases.iter().map(|c| VariantCase {
+                    name: c.name.clone(),
+                    payload: match &c.payload {
+                        VariantPayload::Unit => VariantPayload::Unit,
+                        VariantPayload::Tuple(tys) => VariantPayload::Tuple(tys.iter().map(|t| f(t)).collect()),
+                        VariantPayload::Record(fs) => VariantPayload::Record(
+                            fs.iter().map(|(n, t, d)| (n.clone(), f(t), d.clone())).collect(),
+                        ),
+                    },
+                }).collect(),
+            },
+        }
+    }
+
     /// Check if any child type (recursively) satisfies a predicate.
     ///
     /// Replaces the repeated pattern:

@@ -110,6 +110,7 @@ fn make_test_program() -> IrProgram {
         type_decls: vec![],
         var_table,
         modules: vec![],
+        type_registry: Default::default(),
     }
 }
 

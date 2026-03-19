@@ -122,6 +122,7 @@ pub struct TypeConstructorInfo {
 }
 
 /// Registry of all known type constructors and their properties.
+#[derive(Debug, Clone)]
 pub struct TypeConstructorRegistry {
     constructors: Vec<TypeConstructorInfo>,
     by_name: std::collections::HashMap<std::string::String, usize>,
@@ -267,5 +268,11 @@ impl TypeConstructorRegistry {
     /// Check if a type constructor satisfies a specific algebraic law.
     pub fn satisfies(&self, name: &str, law: AlgebraicLaw) -> bool {
         self.laws_for(name).contains(&law)
+    }
+}
+
+impl Default for TypeConstructorRegistry {
+    fn default() -> Self {
+        Self::new()
     }
 }

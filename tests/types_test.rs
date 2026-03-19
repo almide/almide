@@ -740,3 +740,29 @@ fn contains_unknown_nested() {
     );
     assert!(ty.contains_unknown());
 }
+
+// ---- map_children_mut ----
+
+#[test]
+fn map_children_mut_transform() {
+    let ty = Ty::Result(Box::new(Ty::TypeVar("A".into())), Box::new(Ty::TypeVar("B".into())));
+    let mut counter = 0;
+    let mapped = ty.map_children_mut(&mut |t| {
+        counter += 1;
+        match t {
+            Ty::TypeVar(n) if n == "A" => Ty::Int,
+            Ty::TypeVar(n) if n == "B" => Ty::String,
+            _ => t.clone(),
+        }
+    });
+    assert_eq!(mapped, Ty::Result(Box::new(Ty::Int), Box::new(Ty::String)));
+    assert_eq!(counter, 2); // Both children visited
+}
+
+#[test]
+fn map_children_mut_leaf_unchanged() {
+    let mut counter = 0;
+    let mapped = Ty::Int.map_children_mut(&mut |_| { counter += 1; Ty::Unknown });
+    assert_eq!(mapped, Ty::Int); // Leaf types are not transformed
+    assert_eq!(counter, 0); // No children to visit
+}

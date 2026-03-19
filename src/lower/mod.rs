@@ -295,7 +295,14 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprI
     let auto_derived = generate_auto_derives(&mut ctx, &type_decls, &functions);
     functions.extend(auto_derived);
 
-    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, modules: Vec::new() };
+    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new() };
+
+    // Register user-defined types in the type constructor registry (HKT foundation)
+    for td in &program.type_decls {
+        let arity = td.generics.as_ref().map_or(0, |g| g.len());
+        program.type_registry.register_user_type(&td.name, arity);
+    }
+
     compute_use_counts(&mut program); // After auto-derive so derived functions get correct use_counts
     demote_unused_mut(&mut program);
     program
