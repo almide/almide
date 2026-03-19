@@ -438,6 +438,8 @@ impl Parser {
 
         let mut has_default = false;
         while !self.check(TokenType::RParen) {
+            self.skip_newlines();
+            if self.check(TokenType::RParen) { break; }
             let param_name = self.expect_any_param_name()?;
             self.expect(TokenType::Colon)?;
             let param_type = self.parse_type_expr()?;
@@ -452,8 +454,12 @@ impl Parser {
                 None
             };
             params.push(Param { name: param_name, ty: param_type, default });
-            if self.check(TokenType::Comma) { self.advance(); } else { break; }
+            if self.check(TokenType::Comma) {
+                self.advance();
+                self.skip_newlines();
+            } else { break; }
         }
+        self.skip_newlines();
         Ok(params)
     }
 }

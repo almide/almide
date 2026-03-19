@@ -281,6 +281,8 @@ fn try_compile_with_ir(file: &str, no_check: bool) -> Result<(String, Option<alm
     // Optimize IR: constant folding + dead code elimination
     if let Some(ref mut ir) = ir_program {
         almide::optimize::optimize_program(ir);
+        // Reclassify top-level lets after optimization (cross-reference const detection)
+        almide::ir::reclassify_top_lets(ir);
     }
 
     // Verify IR integrity (debug builds only)
