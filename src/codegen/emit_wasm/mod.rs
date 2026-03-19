@@ -47,6 +47,7 @@ pub struct RuntimeFuncs {
     pub int_to_string: u32,
     pub println_int: u32,
     pub concat_str: u32,
+    pub str_eq: u32,
 }
 
 /// Import descriptor for WASM import section.
@@ -137,6 +138,7 @@ impl WasmEmitter {
                 int_to_string: 0,
                 println_int: 0,
                 concat_str: 0,
+                str_eq: 0,
             },
             heap_ptr_global: 0,
             func_table: Vec::new(),
@@ -261,13 +263,13 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         }
     }
 
-    // Register user function signatures
-    let mut user_meta: Vec<u32> = Vec::new(); // type_idx per user function
+    // Register ALL function signatures (including test functions)
+    let mut user_meta: Vec<u32> = Vec::new();
     let mut user_func_indices: Vec<u32> = Vec::new();
+    let mut test_func_indices: Vec<(u32, String)> = Vec::new(); // (func_idx, test_name)
+    let has_main = program.functions.iter().any(|f| f.name == "main" && !f.is_test);
+
     for func in &program.functions {
-        if func.is_test {
-            continue;
-        }
         let params: Vec<ValType> = func.params.iter()
             .filter_map(|p| values::ty_to_valtype(&p.ty))
             .collect();
@@ -276,10 +278,21 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         let func_idx = emitter.register_func(&func.name, type_idx);
         user_meta.push(type_idx);
         user_func_indices.push(func_idx);
+        if func.is_test {
+            test_func_indices.push((func_idx, func.name.clone()));
+        }
     }
 
+    // If no main but has tests, register a test runner as _start
+    let test_runner_idx = if !has_main && !test_func_indices.is_empty() {
+        let void_ty = emitter.register_type(vec![], vec![]);
+        let idx = emitter.register_func("__test_runner", void_ty);
+        Some(idx)
+    } else {
+        None
+    };
+
     // Build function table (for call_indirect / FnRef)
-    // Include all user functions in the table
     for &func_idx in &user_func_indices {
         let table_idx = emitter.func_table.len() as u32;
         emitter.func_table.push(func_idx);
@@ -292,19 +305,21 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
     // Phase 2: Compile function bodies (order must match registration order)
     runtime::compile_runtime(&mut emitter);
 
-    // User functions (registered before lambdas/wrappers)
+    // User + test functions
     let mut user_idx = 0;
     for func in &program.functions {
-        if func.is_test {
-            continue;
-        }
         let type_idx = user_meta[user_idx];
         let compiled = functions::compile_function(&mut emitter, func, &program.var_table, type_idx);
         emitter.add_compiled(compiled);
         user_idx += 1;
     }
 
-    // Lambda bodies and FnRef wrappers (registered after user functions in pre_scan)
+    // Test runner (if needed)
+    if let Some(_runner_idx) = test_runner_idx {
+        compile_test_runner(&mut emitter, &test_func_indices);
+    }
+
+    // Lambda bodies and FnRef wrappers
     compile_lambda_bodies(program, &mut emitter);
 
     // Phase 3: Assemble
@@ -383,6 +398,8 @@ fn assemble(emitter: &WasmEmitter) -> Vec<u8> {
     exports.export("memory", wasm_encoder::ExportKind::Memory, 0);
     if let Some(&main_idx) = emitter.func_map.get("main") {
         exports.export("_start", wasm_encoder::ExportKind::Func, main_idx);
+    } else if let Some(&runner_idx) = emitter.func_map.get("__test_runner") {
+        exports.export("_start", wasm_encoder::ExportKind::Func, runner_idx);
     }
     module.section(&exports);
 
@@ -417,6 +434,32 @@ fn assemble(emitter: &WasmEmitter) -> Vec<u8> {
     module.section(&data);
 
     module.finish()
+}
+
+// ── Test runner ─────────────────────────────────────────────────
+
+/// Compile a test runner function that calls each test, printing results.
+fn compile_test_runner(emitter: &mut WasmEmitter, tests: &[(u32, String)]) {
+    let void_type = emitter.register_type(vec![], vec![]);
+    let mut f = Function::new([]);
+
+    for (func_idx, test_name) in tests {
+        // Print test name
+        let name_str = emitter.intern_string(&format!("test: {} ... ", test_name));
+        f.instruction(&wasm_encoder::Instruction::I32Const(name_str as i32));
+        f.instruction(&wasm_encoder::Instruction::Call(emitter.rt.println_str));
+
+        // Call the test function (it will trap on assert_eq failure)
+        f.instruction(&wasm_encoder::Instruction::Call(*func_idx));
+
+        // If we get here, test passed
+        let pass_str = emitter.intern_string("ok");
+        f.instruction(&wasm_encoder::Instruction::I32Const(pass_str as i32));
+        f.instruction(&wasm_encoder::Instruction::Call(emitter.rt.println_str));
+    }
+
+    f.instruction(&wasm_encoder::Instruction::End);
+    emitter.add_compiled(CompiledFunc { type_idx: void_type, func: f });
 }
 
 // ── Lambda/Closure pre-scan and compilation ─────────────────────

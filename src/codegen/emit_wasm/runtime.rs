@@ -43,6 +43,10 @@ pub fn register_runtime(emitter: &mut WasmEmitter) {
     let concat_ty = emitter.register_type(vec![ValType::I32, ValType::I32], vec![ValType::I32]);
     emitter.rt.concat_str = emitter.register_func("__concat_str", concat_ty);
 
+    // __str_eq(a: i32, b: i32) -> i32
+    let str_eq_ty = emitter.register_type(vec![ValType::I32, ValType::I32], vec![ValType::I32]);
+    emitter.rt.str_eq = emitter.register_func("__str_eq", str_eq_ty);
+
     // Global: __heap_ptr (mutable i32, initialized at assembly time)
     emitter.heap_ptr_global = 0; // first and only global
 }
@@ -54,6 +58,7 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     compile_int_to_string(emitter);
     compile_println_int(emitter);
     compile_concat_str(emitter);
+    compile_str_eq(emitter);
 }
 
 /// __alloc(size: i32) -> i32
@@ -438,5 +443,90 @@ fn compile_concat_str(emitter: &mut WasmEmitter) {
     f.instruction(&Instruction::LocalGet(5));
     f.instruction(&Instruction::End);
 
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
+
+/// __str_eq(a: i32, b: i32) -> i32
+/// Deep string equality: compare lengths then bytes. Returns 1 if equal.
+fn compile_str_eq(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.str_eq];
+    // params: 0=$a, 1=$b. locals: 2=$len_a, 3=$i
+    let mut f = Function::new([
+        (1, ValType::I32), // 2: $len_a
+        (1, ValType::I32), // 3: $i
+    ]);
+
+    // If same pointer, return 1
+    f.instruction(&Instruction::LocalGet(0));
+    f.instruction(&Instruction::LocalGet(1));
+    f.instruction(&Instruction::I32Eq);
+    f.instruction(&Instruction::If(BlockType::Empty));
+    f.instruction(&Instruction::I32Const(1));
+    f.instruction(&Instruction::Return);
+    f.instruction(&Instruction::End);
+
+    // Load a.len
+    f.instruction(&Instruction::LocalGet(0));
+    f.instruction(&Instruction::I32Load(mem(0)));
+    f.instruction(&Instruction::LocalSet(2));
+
+    // If lengths differ, return 0
+    f.instruction(&Instruction::LocalGet(2));
+    f.instruction(&Instruction::LocalGet(1));
+    f.instruction(&Instruction::I32Load(mem(0)));
+    f.instruction(&Instruction::I32Ne);
+    f.instruction(&Instruction::If(BlockType::Empty));
+    f.instruction(&Instruction::I32Const(0));
+    f.instruction(&Instruction::Return);
+    f.instruction(&Instruction::End);
+
+    // Compare bytes: for i = 0; i < len; i++
+    f.instruction(&Instruction::I32Const(0));
+    f.instruction(&Instruction::LocalSet(3));
+
+    f.instruction(&Instruction::Block(BlockType::Empty));
+    f.instruction(&Instruction::Loop(BlockType::Empty));
+
+    // if $i >= $len → all bytes matched, return 1
+    f.instruction(&Instruction::LocalGet(3));
+    f.instruction(&Instruction::LocalGet(2));
+    f.instruction(&Instruction::I32GeU);
+    f.instruction(&Instruction::If(BlockType::Empty));
+    f.instruction(&Instruction::I32Const(1));
+    f.instruction(&Instruction::Return);
+    f.instruction(&Instruction::End);
+
+    // if a[4+i] != b[4+i] → return 0
+    f.instruction(&Instruction::LocalGet(0));
+    f.instruction(&Instruction::I32Const(4));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::LocalGet(3));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::I32Load8U(mem8(0)));
+    f.instruction(&Instruction::LocalGet(1));
+    f.instruction(&Instruction::I32Const(4));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::LocalGet(3));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::I32Load8U(mem8(0)));
+    f.instruction(&Instruction::I32Ne);
+    f.instruction(&Instruction::If(BlockType::Empty));
+    f.instruction(&Instruction::I32Const(0));
+    f.instruction(&Instruction::Return);
+    f.instruction(&Instruction::End);
+
+    // $i += 1, continue loop
+    f.instruction(&Instruction::LocalGet(3));
+    f.instruction(&Instruction::I32Const(1));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::LocalSet(3));
+    f.instruction(&Instruction::Br(0));
+
+    f.instruction(&Instruction::End); // end loop
+    f.instruction(&Instruction::End); // end block
+
+    // Fallback (shouldn't reach here)
+    f.instruction(&Instruction::I32Const(0));
+    f.instruction(&Instruction::End);
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }

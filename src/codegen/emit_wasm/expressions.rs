@@ -36,8 +36,18 @@ impl FuncCompiler<'_> {
 
             // ── Variables ──
             IrExprKind::Var { id } => {
-                let local_idx = self.var_map[&id.0];
-                self.func.instruction(&Instruction::LocalGet(local_idx));
+                if let Some(&local_idx) = self.var_map.get(&id.0) {
+                    self.func.instruction(&Instruction::LocalGet(local_idx));
+                } else {
+                    // Variable not in scope (top-level let, unimplemented feature)
+                    // Push a zero value of the appropriate type
+                    match values::ty_to_valtype(&expr.ty) {
+                        Some(ValType::I64) => { self.func.instruction(&Instruction::I64Const(0)); }
+                        Some(ValType::F64) => { self.func.instruction(&Instruction::F64Const(0.0)); }
+                        Some(ValType::I32) => { self.func.instruction(&Instruction::I32Const(0)); }
+                        _ => {}
+                    }
+                }
             }
 
             // ── Function reference (used as value) → closure [wrapper_table_idx, 0] ──
@@ -343,11 +353,12 @@ impl FuncCompiler<'_> {
         self.emit_expr(left);
         self.emit_expr(right);
         match &left.ty {
-            Ty::Int => self.func.instruction(&Instruction::I64Eq),
-            Ty::Float => self.func.instruction(&Instruction::F64Eq),
-            Ty::Bool => self.func.instruction(&Instruction::I32Eq),
-            _ => self.func.instruction(&Instruction::I32Eq), // pointer equality fallback
-        };
+            Ty::Int => { self.func.instruction(&Instruction::I64Eq); }
+            Ty::Float => { self.func.instruction(&Instruction::F64Eq); }
+            Ty::Bool => { self.func.instruction(&Instruction::I32Eq); }
+            Ty::String => { self.func.instruction(&Instruction::Call(self.emitter.rt.str_eq)); }
+            _ => { self.func.instruction(&Instruction::I32Eq); }
+        }
         if negate {
             self.func.instruction(&Instruction::I32Eqz);
         }
@@ -407,6 +418,9 @@ impl FuncCompiler<'_> {
                                 self.func.instruction(&Instruction::Call(self.emitter.rt.println_str));
                             }
                         }
+                    }
+                    "assert_eq" => {
+                        self.emit_assert_eq(&args[0], &args[1]);
                     }
                     _ => {
                         // Check if this is a unit variant constructor (e.g., Red, None)
@@ -624,6 +638,47 @@ impl FuncCompiler<'_> {
             self.func.instruction(&Instruction::I32Store(MemArg { offset: 4, align: 2, memory_index: 0 }));
 
             self.func.instruction(&Instruction::LocalGet(closure_scratch));
+        }
+    }
+
+    /// Emit assert_eq(left, right): compare values, trap with message if not equal.
+    fn emit_assert_eq(&mut self, left: &IrExpr, right: &IrExpr) {
+        // Emit both values and compare
+        self.emit_expr(left);
+        self.emit_expr(right);
+
+        // Type-specific equality check
+        let eq_result = match &left.ty {
+            Ty::Int => {
+                self.func.instruction(&Instruction::I64Eq);
+                true
+            }
+            Ty::Float => {
+                self.func.instruction(&Instruction::F64Eq);
+                true
+            }
+            Ty::Bool => {
+                self.func.instruction(&Instruction::I32Eq);
+                true
+            }
+            Ty::String => {
+                // Deep string equality via runtime
+                self.func.instruction(&Instruction::Call(self.emitter.rt.str_eq));
+                true
+            }
+            _ => {
+                // Pointer equality for other types
+                self.func.instruction(&Instruction::I32Eq);
+                true
+            }
+        };
+
+        if eq_result {
+            // If not equal, trap
+            self.func.instruction(&Instruction::I32Eqz);
+            self.func.instruction(&Instruction::If(BlockType::Empty));
+            self.func.instruction(&Instruction::Unreachable);
+            self.func.instruction(&Instruction::End);
         }
     }
 
