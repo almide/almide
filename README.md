@@ -57,7 +57,7 @@ Verify the installation:
 
 ```bash
 almide --version
-# almide 0.8.3
+# almide 0.8.4
 ```
 
 ### Hello World
@@ -239,11 +239,22 @@ almide_grammar.precedence_table()  // 8 levels, pipe → unary
 
 The compiler itself uses `almide-grammar`'s TOML files (`tokens.toml`, `precedence.toml`) at build time to generate its lexer keyword table — ensuring the compiler and all tooling stay in sync.
 
-### Editor Support — [almide-editors](https://github.com/almide/almide-editors)
+### Editor Support
 
-VS Code extension with syntax highlighting, bracket matching, comment toggling, and code folding for `.almd` files. The TextMate grammar is generated from `almide-grammar`.
+- **VS Code** — [vscode-almide](https://github.com/almide/vscode-almide) — Syntax highlighting, bracket matching, comment toggling, code folding
+- **Tree-sitter** — [tree-sitter-almide](https://github.com/almide/tree-sitter-almide) — Tree-sitter grammar for editors that support it (Neovim, Helix, Zed)
 
-- **VS Code** — Download `.vsix` from [Releases](https://github.com/almide/almide-editors/releases), then `code --install-extension almide-lang-*.vsix`
+### Playground — [playground](https://github.com/almide/playground)
+
+Browser-based compiler and runner. The Almide compiler runs as WASM — no server, no installation. Try it at [almide.github.io/playground](https://almide.github.io/playground/).
+
+### Benchmark — [benchmark](https://github.com/almide/benchmark)
+
+MiniGit benchmark suite comparing Almide against 15 languages for LLM code generation speed and reliability.
+
+### MCP Server — [mcp-server](https://github.com/almide/mcp-server)
+
+Model Context Protocol server for Almide — enables AI assistants to compile, check, and run Almide code.
 
 ## Documentation
 
