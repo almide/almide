@@ -144,6 +144,11 @@ impl FuncCompiler<'_> {
                 self.func.instruction(&Instruction::End); // end block
             }
 
+            // ── For-in loop (Range only in Phase 2) ──
+            IrExprKind::ForIn { var, iterable, body, .. } => {
+                self.emit_for_in(*var, iterable, body);
+            }
+
             IrExprKind::Break => {
                 if let Some(labels) = self.loop_stack.last() {
                     let relative = self.depth - labels.break_depth - 1;
@@ -495,6 +500,65 @@ impl FuncCompiler<'_> {
             }
         }
     }
+    /// Emit a for...in loop. Currently supports Range iterables only.
+    fn emit_for_in(&mut self, var: crate::ir::VarId, iterable: &IrExpr, body: &[crate::ir::IrStmt]) {
+        match &iterable.kind {
+            IrExprKind::Range { start, end, inclusive } => {
+                let loop_var = self.var_map[&var.0];
+
+                // Initialize loop variable to start
+                self.emit_expr(start);
+                self.func.instruction(&Instruction::LocalSet(loop_var));
+
+                // block $break
+                let break_depth = self.depth;
+                self.func.instruction(&Instruction::Block(BlockType::Empty));
+                self.depth += 1;
+
+                // loop $continue
+                let continue_depth = self.depth;
+                self.func.instruction(&Instruction::Loop(BlockType::Empty));
+                self.depth += 1;
+
+                self.loop_stack.push(super::LoopLabels { break_depth, continue_depth });
+
+                // Break condition: if var >= end (exclusive) or var > end (inclusive)
+                self.func.instruction(&Instruction::LocalGet(loop_var));
+                self.emit_expr(end);
+                if *inclusive {
+                    self.func.instruction(&Instruction::I64GtS); // var > end → break
+                } else {
+                    self.func.instruction(&Instruction::I64GeS); // var >= end → break
+                }
+                self.func.instruction(&Instruction::BrIf(self.depth - break_depth - 1));
+
+                // Body
+                for stmt in body {
+                    self.emit_stmt(stmt);
+                }
+
+                // Increment: var += 1
+                self.func.instruction(&Instruction::LocalGet(loop_var));
+                self.func.instruction(&Instruction::I64Const(1));
+                self.func.instruction(&Instruction::I64Add);
+                self.func.instruction(&Instruction::LocalSet(loop_var));
+
+                // Continue
+                self.func.instruction(&Instruction::Br(self.depth - continue_depth - 1));
+
+                self.loop_stack.pop();
+                self.depth -= 1;
+                self.func.instruction(&Instruction::End); // end loop
+                self.depth -= 1;
+                self.func.instruction(&Instruction::End); // end block
+            }
+            _ => {
+                // Non-range iterables: Phase 2+ (List, etc.)
+                self.func.instruction(&Instruction::Unreachable);
+            }
+        }
+    }
+
     /// Emit a match expression as a chain of if-else checks.
     ///
     /// Strategy: store subject in a scratch local, then for each arm:

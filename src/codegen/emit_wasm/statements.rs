@@ -137,7 +137,9 @@ fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>) {
                 scan_stmt(stmt, locals);
             }
         }
-        IrExprKind::ForIn { body, iterable, .. } => {
+        IrExprKind::ForIn { var, body, iterable, .. } => {
+            // The loop variable needs a local (Int for Range iterables)
+            locals.push((*var, ValType::I64));
             scan_expr(iterable, locals);
             for stmt in body {
                 scan_stmt(stmt, locals);
