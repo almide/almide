@@ -17,6 +17,7 @@
 //! Reports fusible chains for debugging/optimization planning.
 
 use crate::ir::*;
+use crate::types::Ty;
 use crate::types::constructor::{TypeConstructorRegistry, AlgebraicLaw};
 use super::pass::{NanoPass, Target};
 
@@ -37,6 +38,7 @@ impl NanoPass for StreamFusionPass {
             totals.map_fold += c.map_fold;
             totals.identity += c.identity;
             totals.flatmap_flatmap += c.flatmap_flatmap;
+            totals.map_filter += c.map_filter;
         }
         let fused_count = totals.total();
 
@@ -64,6 +66,7 @@ impl NanoPass for StreamFusionPass {
                 if totals.filter_filter > 0 { parts.push(format!("{} filter+filter", totals.filter_filter)); }
                 if totals.map_fold > 0 { parts.push(format!("{} map+fold", totals.map_fold)); }
                 if totals.flatmap_flatmap > 0 { parts.push(format!("{} flat_map+flat_map", totals.flatmap_flatmap)); }
+                if totals.map_filter > 0 { parts.push(format!("{} map+filter", totals.map_filter)); }
                 eprintln!("[StreamFusion] fused: {}", parts.join(", "));
             }
         }
@@ -398,6 +401,9 @@ fn fuse_all(func: &mut IrFunction) -> FusionCounts {
     let fm_after = count_calls_by_name_total(&func.body, "flat_map");
     counts.flatmap_flatmap = if fm_before > fm_after { fm_before - fm_after } else { 0 };
 
+    // MapFilterFusion: filter(map(x, f), p) → filter_map(x, x => { let y = f(x); if p(y) { some(y) } else { none } })
+    counts.map_filter = fuse_map_filter_pass(&mut func.body);
+
     counts
 }
 
@@ -408,11 +414,12 @@ struct FusionCounts {
     map_fold: usize,
     identity: usize,
     flatmap_flatmap: usize,
+    map_filter: usize,
 }
 
 impl FusionCounts {
     fn total(&self) -> usize {
-        self.map_map + self.filter_filter + self.map_fold + self.identity + self.flatmap_flatmap
+        self.map_map + self.filter_filter + self.map_fold + self.identity + self.flatmap_flatmap + self.map_filter
     }
 }
 
@@ -1146,6 +1153,147 @@ fn compose_flatmaps(f: &IrExpr, g: &IrExpr, flat_map_target: &CallTarget, type_a
             kind: IrExprKind::Lambda {
                 params: vec![(*f_param_id, f_param_ty.clone())],
                 body: Box::new(inner_call),
+            },
+            ty: f.ty.clone(),
+            span: f.span,
+        });
+    }
+    None
+}
+
+// ── MapFilterFusion: filter(map(x, f), p) → filter_map(x, ...) ──
+
+/// Fuse filter(map(x, f), p) → filter_map(x, (x) => { let y = f(x); if p(y) { some(y) } else { none } })
+fn fuse_map_filter_pass(body: &mut IrExpr) -> usize {
+    let mut count = 0;
+    *body = fuse_map_filter(body.clone(), &mut count);
+    count
+}
+
+fn fuse_map_filter(expr: IrExpr, count: &mut usize) -> IrExpr {
+    let ty = expr.ty.clone();
+    let span = expr.span;
+
+    match expr.kind {
+        IrExprKind::Call {
+            ref target, ref args, ref type_args,
+        } if is_filter_call(target) && args.len() >= 2 => {
+            let inner = &args[0];
+            // Check if first arg is a map call
+            if let IrExprKind::Call {
+                target: ref inner_target, args: ref inner_args, ..
+            } = inner.kind {
+                if is_map_call(inner_target) && inner_args.len() >= 2 {
+                    let source = &inner_args[0];
+                    let f = &inner_args[1];  // map function
+                    let p = &args[1];         // filter predicate
+
+                    if let Some(filter_map_lambda) = compose_map_filter(f, p) {
+                        *count += 1;
+                        // Build filter_map call
+                        // Determine the filter_map target name
+                        let fm_target = match inner_target {
+                            CallTarget::Module { module, .. } => CallTarget::Module {
+                                module: module.clone(),
+                                func: "filter_map".to_string(),
+                            },
+                            CallTarget::Named { name } => {
+                                let base = name.rsplit("_map").next().map(|_| {
+                                    // almide_rt_list_map → almide_rt_list_filter_map
+                                    name.replace("_map", "_filter_map")
+                                }).unwrap_or_else(|| format!("{}_filter", name));
+                                CallTarget::Named { name: base }
+                            }
+                            other => other.clone(),
+                        };
+
+                        return IrExpr {
+                            kind: IrExprKind::Call {
+                                target: fm_target,
+                                args: vec![fuse_map_filter(source.clone(), count), filter_map_lambda],
+                                type_args: type_args.clone(),
+                            },
+                            ty, span,
+                        };
+                    }
+                }
+            }
+            let new_args: Vec<IrExpr> = args.iter().map(|a| fuse_map_filter(a.clone(), count)).collect();
+            IrExpr {
+                kind: IrExprKind::Call { target: target.clone(), args: new_args, type_args: type_args.clone() },
+                ty, span,
+            }
+        }
+        IrExprKind::Block { stmts, expr: body } => IrExpr {
+            kind: IrExprKind::Block {
+                stmts: stmts.into_iter().map(|s| {
+                    let kind = match s.kind {
+                        IrStmtKind::Bind { var, mutability, ty, value } => IrStmtKind::Bind { var, mutability, ty, value: fuse_map_filter(value, count) },
+                        IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: fuse_map_filter(expr, count) },
+                        other => other,
+                    };
+                    IrStmt { kind, span: s.span }
+                }).collect(),
+                expr: body.map(|e| Box::new(fuse_map_filter(*e, count))),
+            },
+            ty, span,
+        },
+        IrExprKind::If { cond, then, else_ } => IrExpr {
+            kind: IrExprKind::If {
+                cond: Box::new(fuse_map_filter(*cond, count)),
+                then: Box::new(fuse_map_filter(*then, count)),
+                else_: Box::new(fuse_map_filter(*else_, count)),
+            },
+            ty, span,
+        },
+        IrExprKind::Lambda { params, body } => IrExpr {
+            kind: IrExprKind::Lambda { params, body: Box::new(fuse_map_filter(*body, count)) },
+            ty, span,
+        },
+        other => IrExpr { kind: other, ty, span },
+    }
+}
+
+/// Compose map function f and filter predicate p into a filter_map lambda:
+/// (x) => { let y = f(x); if p(y) { some(y) } else { none } }
+fn compose_map_filter(f: &IrExpr, p: &IrExpr) -> Option<IrExpr> {
+    if let (
+        IrExprKind::Lambda { params: f_params, body: f_body },
+        IrExprKind::Lambda { params: p_params, body: p_body },
+    ) = (&f.kind, &p.kind) {
+        if f_params.len() != 1 || p_params.len() != 1 {
+            return None;
+        }
+        let (f_param_id, f_param_ty) = &f_params[0];
+        let (p_param_id, _) = &p_params[0];
+
+        // Substitute p's param with f_body in p_body (p applied to f(x))
+        let p_applied = substitute_var_in_expr(p_body, *p_param_id, f_body);
+
+        // Build: if p(f(x)) { Some(f(x)) } else { None }
+        let result_ty = f_body.ty.clone();
+        let composed_body = IrExpr {
+            kind: IrExprKind::If {
+                cond: Box::new(p_applied),
+                then: Box::new(IrExpr {
+                    kind: IrExprKind::OptionSome { expr: f_body.clone() },
+                    ty: Ty::option(result_ty.clone()),
+                    span: None,
+                }),
+                else_: Box::new(IrExpr {
+                    kind: IrExprKind::OptionNone,
+                    ty: Ty::option(result_ty),
+                    span: None,
+                }),
+            },
+            ty: f_body.ty.clone(), // approximate
+            span: None,
+        };
+
+        return Some(IrExpr {
+            kind: IrExprKind::Lambda {
+                params: vec![(*f_param_id, f_param_ty.clone())],
+                body: Box::new(composed_body),
             },
             ty: f.ty.clone(),
             span: f.span,
