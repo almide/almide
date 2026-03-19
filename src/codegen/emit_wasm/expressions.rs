@@ -436,12 +436,60 @@ impl FuncCompiler<'_> {
         self.func.instruction(&Instruction::Call(self.emitter.rt.concat_str));
     }
 
-    /// String interpolation: concatenate parts.
+    /// String interpolation: convert each part to string, then concat.
     fn emit_string_interp(&mut self, parts: &[crate::ir::IrStringPart]) {
-        // Phase 1: simplified — emit unreachable
-        // Phase 2: allocate buffer, write each part
-        let _ = parts;
-        self.func.instruction(&Instruction::Unreachable);
+        if parts.is_empty() {
+            let empty = self.emitter.intern_string("");
+            self.func.instruction(&Instruction::I32Const(empty as i32));
+            return;
+        }
+
+        // Emit first part as a string
+        self.emit_string_part(&parts[0]);
+
+        // For each subsequent part: emit it, then concat with accumulator
+        for part in &parts[1..] {
+            self.emit_string_part(part);
+            self.func.instruction(&Instruction::Call(self.emitter.rt.concat_str));
+        }
+    }
+
+    /// Emit a single string interpolation part as a string (i32 pointer).
+    fn emit_string_part(&mut self, part: &crate::ir::IrStringPart) {
+        match part {
+            crate::ir::IrStringPart::Lit { value } => {
+                let offset = self.emitter.intern_string(value);
+                self.func.instruction(&Instruction::I32Const(offset as i32));
+            }
+            crate::ir::IrStringPart::Expr { expr } => {
+                match &expr.ty {
+                    Ty::String => self.emit_expr(expr),
+                    Ty::Int => {
+                        self.emit_expr(expr);
+                        self.func.instruction(&Instruction::Call(self.emitter.rt.int_to_string));
+                    }
+                    Ty::Bool => {
+                        self.emit_expr(expr);
+                        let t = self.emitter.intern_string("true");
+                        let f = self.emitter.intern_string("false");
+                        self.func.instruction(&Instruction::If(wasm_encoder::BlockType::Result(wasm_encoder::ValType::I32)));
+                        self.func.instruction(&Instruction::I32Const(t as i32));
+                        self.func.instruction(&Instruction::Else);
+                        self.func.instruction(&Instruction::I32Const(f as i32));
+                        self.func.instruction(&Instruction::End);
+                    }
+                    Ty::Float => {
+                        self.emit_expr(expr);
+                        self.func.instruction(&Instruction::I64TruncF64S);
+                        self.func.instruction(&Instruction::Call(self.emitter.rt.int_to_string));
+                    }
+                    _ => {
+                        // Fallback: emit the expression (already a string pointer or unsupported)
+                        self.emit_expr(expr);
+                    }
+                }
+            }
+        }
     }
 }
 
