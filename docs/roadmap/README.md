@@ -44,6 +44,7 @@
 
 | 項目 | 説明 | 状態 |
 |---|---|---|
+| [Test Architecture Redesign](on-hold/test-architecture-redesign.md) | in_effect 分離、テスト名前空間 | 動くが複雑 |
 | [build.rs syn Scanner](on-hold/buildrs-syn-scanner.md) | runtime scanner堅牢化 | 壊れたらやる |
 | [Direct WASM Emission](on-hold/emit-wasm-direct.md) | rustc bypass | 実験的 |
 | [IR Interpreter](on-hold/ir-interpreter.md) | rustc不要で即実行 | 実験的 |
