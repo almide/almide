@@ -7,7 +7,7 @@
 | 項目 | 説明 | Grand Plan |
 |---|---|---|
 | [Effect System](active/effect-system.md) | Phase 3-4 残: Dependency制限, 内部型レベル統合 | Phase 3 |
-| [IR Verification](active/ir-verification.md) | Debug-only IR整合性検証 (VarId, 型一貫性, ループ文脈, 型宣言) | Compiler Internals |
+| [IR Verification & Self-Describing IR](active/ir-verification.md) | 検証19件, PowInt/MapAccess分離, IrVisitor, MatchSubject nanopass | Compiler Internals |
 
 ## 1.0 Remaining
 
