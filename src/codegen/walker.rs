@@ -423,18 +423,14 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .cloned()
                 .collect();
             for (_, field_name) in &default_keys {
-                if !explicit_names.contains(field_name.as_str()) {
-                    if let Some(default_expr) = ctx.ann.default_fields.get(&(ctor_name_str.to_string(), field_name.clone())) {
-                        let mut val_str = render_expr(ctx, default_expr);
-                        if let Some(cn) = name {
-                            if ctx.ann.boxed_fields.contains(&(cn.clone(), field_name.clone())) {
-                                val_str = format!("Box::new({})", val_str);
-                            }
-                        }
-                        field_strs.push(ctx.templates.render_with("record_field", None, &[], &[("name", field_name.as_str()), ("value", val_str.as_str())])
-                            .unwrap_or_else(|| format!("{}: {}", field_name, val_str)));
-                    }
-                }
+                if explicit_names.contains(field_name.as_str()) { continue; }
+                let Some(default_expr) = ctx.ann.default_fields.get(&(ctor_name_str.to_string(), field_name.clone())) else { continue; };
+                let mut val_str = render_expr(ctx, default_expr);
+                let needs_box = name.as_ref()
+                    .map_or(false, |cn| ctx.ann.boxed_fields.contains(&(cn.clone(), field_name.clone())));
+                if needs_box { val_str = format!("Box::new({})", val_str); }
+                field_strs.push(ctx.templates.render_with("record_field", None, &[], &[("name", field_name.as_str()), ("value", val_str.as_str())])
+                    .unwrap_or_else(|| format!("{}: {}", field_name, val_str)));
             }
             let fields_str = field_strs.join(", ");
             // Resolve type name: explicit name, or from expr.ty

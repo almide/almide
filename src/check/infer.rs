@@ -127,24 +127,7 @@ impl Checker {
                     "+" => {
                         let lc = resolve_vars(&lt, &self.solutions);
                         let rc = resolve_vars(&rt, &self.solutions);
-                        // + works for: String+String, List+List (concat), numeric+numeric (add)
-                        let l_concat = matches!(&lc, Ty::String | Ty::Applied(TypeConstructorId::List, _));
-                        let r_concat = matches!(&rc, Ty::String | Ty::Applied(TypeConstructorId::List, _));
-                        let l_unknown = matches!(&lc, Ty::Unknown | Ty::TypeVar(_));
-                        let r_unknown = matches!(&rc, Ty::Unknown | Ty::TypeVar(_));
-                        let is_concat = (l_concat && (r_concat || r_unknown))
-                            || (r_concat && l_unknown);
-                        if is_concat {
-                            lt // concat: return same type
-                        } else {
-                            let is_numeric = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_));
-                            if !is_numeric(&lc) || !is_numeric(&rc) {
-                                self.emit(super::err(
-                                    format!("operator '+' requires numeric, String, or List types but got {} and {}", lc.display(), rc.display()),
-                                    "Use + with numeric types, String, or List", format!("operator +")));
-                            }
-                            if lc == Ty::Float || rc == Ty::Float { Ty::Float } else { lt }
-                        }
+                        self.infer_plus_op(&lc, &rc, lt)
                     }
                     "-" | "*" | "/" | "%" => {
                         let lc = resolve_vars(&lt, &self.solutions);
@@ -537,6 +520,23 @@ impl Checker {
             ast::Pattern::Err { inner } => { let it = match ty { Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[1].clone(), _ => Ty::Unknown }; self.bind_pattern(inner, &it); }
             ast::Pattern::None | ast::Pattern::Literal { .. } => {}
         }
+    }
+
+    /// Infer the result type of the + operator (numeric add or string/list concat).
+    fn infer_plus_op(&mut self, lc: &Ty, rc: &Ty, lt: Ty) -> Ty {
+        let is_concat_ty = |t: &Ty| matches!(t, Ty::String | Ty::Applied(TypeConstructorId::List, _));
+        let is_unknown_ty = |t: &Ty| matches!(t, Ty::Unknown | Ty::TypeVar(_));
+        if (is_concat_ty(lc) && (is_concat_ty(rc) || is_unknown_ty(rc)))
+            || (is_concat_ty(rc) && is_unknown_ty(lc)) {
+            return lt; // concat: return same type
+        }
+        let is_numeric = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_));
+        if !is_numeric(lc) || !is_numeric(rc) {
+            self.emit(super::err(
+                format!("operator '+' requires numeric, String, or List types but got {} and {}", lc.display(), rc.display()),
+                "Use + with numeric types, String, or List", format!("operator +")));
+        }
+        if *lc == Ty::Float || *rc == Ty::Float { Ty::Float } else { lt }
     }
 
     /// Resolve a module.func Member expression to a qualified call key.

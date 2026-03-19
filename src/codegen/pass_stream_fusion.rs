@@ -135,12 +135,7 @@ fn detect_pipe_chains_inner(
                 let mut current = args.first().map(|a| unwrap_decorators(a));
 
                 while let Some(arg) = current {
-                    let inner_name = match &arg.kind {
-                        IrExprKind::Call { target: CallTarget::Named { name }, .. } => Some(name.as_str()),
-                        IrExprKind::Call { target: CallTarget::Module { func, .. }, .. } => Some(func.as_str()),
-                        _ => None,
-                    };
-                    if let Some(iname) = inner_name {
+                    if let Some(iname) = extract_call_name(arg) {
                         if let Some(inner_op) = classify_stdlib_op(iname) {
                             if let IrExprKind::Call { args: inner_args, .. } = &arg.kind {
                                 chain_ops.push(inner_op);
