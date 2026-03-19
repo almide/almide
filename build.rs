@@ -121,11 +121,11 @@ fn parse_type(s: &str, type_params: &[String]) -> String {
         "Unknown" => "Ty::Unknown".to_string(),
         other if other.starts_with("List[") => {
             let inner = &other[5..other.len() - 1];
-            format!("Ty::List(Box::new({}))", parse_type(inner, type_params))
+            format!("Ty::list({})", parse_type(inner, type_params))
         }
         other if other.starts_with("Option[") => {
             let inner = &other[7..other.len() - 1];
-            format!("Ty::Option(Box::new({}))", parse_type(inner, type_params))
+            format!("Ty::option({})", parse_type(inner, type_params))
         }
         other if other.starts_with("Result[") => {
             let inner = &other[7..other.len() - 1];
@@ -136,7 +136,7 @@ fn parse_type(s: &str, type_params: &[String]) -> String {
                 (inner, "String")
             };
             format!(
-                "Ty::Result(Box::new({}), Box::new({}))",
+                "Ty::result({}, {})",
                 parse_type(ok_ty, type_params),
                 parse_type(err_ty, type_params)
             )
@@ -150,7 +150,7 @@ fn parse_type(s: &str, type_params: &[String]) -> String {
             let split_pos = split_top_level_comma(inner).expect("Map type needs two type params");
             let key_ty = &inner[..split_pos];
             let val_ty = inner[split_pos + 2..].trim();
-            format!("Ty::Map(Box::new({}), Box::new({}))", parse_type(key_ty, type_params), parse_type(val_ty, type_params))
+            format!("Ty::map_of({}, {})", parse_type(key_ty, type_params), parse_type(val_ty, type_params))
         }
         other if other.starts_with("Fn[") && other.contains("] -> ") => {
             // Fn[A, B] -> C
