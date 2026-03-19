@@ -101,10 +101,8 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                             }, ty, span };
                         } else {
                             // Custom type: use generic encode/decode
-                            let func_ref = format!("{}_{}",
-                                type_name,
-                                if name.starts_with("__encode") { "encode" } else { "decode" }
-                            );
+                            let codec_op = if name.starts_with("__encode") { "encode" } else { "decode" };
+                            let func_ref = format!("{}_{}", type_name, codec_op);
                             let mut new_args = args;
                             new_args.push(IrExpr {
                                 kind: IrExprKind::FnRef { name: func_ref },

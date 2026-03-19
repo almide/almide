@@ -135,14 +135,15 @@ fn detect_pipe_chains_inner(
                 let mut current = args.first().map(|a| unwrap_decorators(a));
 
                 while let Some(arg) = current {
-                    if let Some(iname) = extract_call_name(arg) {
-                        if let Some(inner_op) = classify_stdlib_op(iname) {
-                            if let IrExprKind::Call { args: inner_args, .. } = &arg.kind {
-                                chain_ops.push(inner_op);
-                                current = inner_args.first().map(|a| unwrap_decorators(a));
-                                continue;
-                            }
-                        }
+                    let inner_op = extract_call_name(arg).and_then(classify_stdlib_op);
+                    let inner_args_opt = match &arg.kind {
+                        IrExprKind::Call { args, .. } => Some(args),
+                        _ => None,
+                    };
+                    if let (Some(op), Some(inner_args)) = (inner_op, inner_args_opt) {
+                        chain_ops.push(op);
+                        current = inner_args.first().map(|a| unwrap_decorators(a));
+                        continue;
                     }
                     break;
                 }

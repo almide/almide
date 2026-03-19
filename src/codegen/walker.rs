@@ -1368,13 +1368,10 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                             .unwrap_or_else(|| v.name.clone())
                     }
                     IrVariantKind::Tuple { fields } => {
+                        let is_recursive = ctx.ann.recursive_enums.contains(&td.name);
                         let types: Vec<String> = fields.iter().map(|t| {
                             let rendered = render_type(ctx, t);
-                            if ctx.ann.recursive_enums.contains(&td.name) && ty_contains_name(t, &td.name) {
-                                format!("Box<{}>", rendered)
-                            } else {
-                                rendered
-                            }
+                            if is_recursive && ty_contains_name(t, &td.name) { format!("Box<{}>", rendered) } else { rendered }
                         }).collect();
                         let fields_str = types.join(", ");
                         // Named params via fn_param template (respects JS/TS)

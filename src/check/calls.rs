@@ -108,18 +108,7 @@ impl Checker {
                     }
                 }
                 // Convention method: dog.repr() → Dog.repr(dog)
-                let type_name_opt = match &obj_concrete {
-                    Ty::Named(name, _) => Some(name.clone()),
-                    Ty::Record { .. } | Ty::Variant { .. } => {
-                        // Reverse lookup: find type name whose definition matches this structure
-                        self.env.types.iter().find_map(|(name, ty)| {
-                            if ty == &obj_concrete && name.chars().next().map_or(false, |c| c.is_uppercase()) {
-                                Some(name.clone())
-                            } else { None }
-                        })
-                    }
-                    _ => None,
-                };
+                let type_name_opt = self.resolve_type_name(&obj_concrete);
                 if let Some(type_name) = type_name_opt {
                     let convention_key = format!("{}.{}", type_name, field);
                     if self.env.functions.contains_key(&convention_key) {
@@ -144,6 +133,19 @@ impl Checker {
                 self.constrain(ct, Ty::Fn { params: arg_tys.to_vec(), ret: Box::new(ret.clone()) }, "function call");
                 ret
             }
+        }
+    }
+
+    /// Resolve a concrete type to its declared type name.
+    fn resolve_type_name(&self, ty: &Ty) -> Option<String> {
+        match ty {
+            Ty::Named(name, _) => Some(name.clone()),
+            Ty::Record { .. } | Ty::Variant { .. } => {
+                self.env.types.iter().find_map(|(name, def)| {
+                    (def == ty && name.starts_with(|c: char| c.is_uppercase())).then(|| name.clone())
+                })
+            }
+            _ => None,
         }
     }
 

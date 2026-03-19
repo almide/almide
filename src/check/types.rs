@@ -44,13 +44,10 @@ fn resolve_inner(ty: &Ty, solutions: &HashMap<TyVarId, Ty>, seen: &mut HashSet<u
                 let terminal = loop {
                     if !chain.insert(current.0) { break None; }
                     match solutions.get(&current) {
-                        Some(Ty::TypeVar(n)) if n.starts_with('?') => {
-                            if let Ok(next_id) = n[1..].parse::<u32>() {
-                                current = TyVarId(next_id);
-                            } else {
-                                break Some(Ty::TypeVar(n.clone()));
-                            }
-                        }
+                        Some(Ty::TypeVar(n)) if n.starts_with('?') => match n[1..].parse::<u32>() {
+                            Ok(next_id) => current = TyVarId(next_id),
+                            Err(_) => break Some(Ty::TypeVar(n.clone())),
+                        },
                         Some(other) => break Some(other.clone()),
                         None => break None,
                     }
