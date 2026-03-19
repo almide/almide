@@ -113,7 +113,12 @@ fn count_scratch_depth(expr: &IrExpr) -> usize {
         }
         IrExprKind::ForIn { iterable, body, .. } => {
             let b = body.iter().map(|s| count_scratch_depth_stmt(s)).max().unwrap_or(0);
-            count_scratch_depth(iterable).max(b)
+            // List for...in needs 2 scratch slots (list ptr + index counter)
+            let for_in_need = match &iterable.kind {
+                IrExprKind::Range { .. } => 0,
+                _ => 2,
+            };
+            count_scratch_depth(iterable).max(b).max(for_in_need)
         }
         _ => 0,
     }
@@ -144,7 +149,10 @@ fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::
             for stmt in body { scan_stmt(stmt, locals, vt); }
         }
         IrExprKind::ForIn { var, body, iterable, .. } => {
-            locals.push((*var, ValType::I64));
+            // Determine element type from VarTable
+            let var_info = vt.get(*var);
+            let val_type = values::ty_to_valtype(&var_info.ty).unwrap_or(ValType::I64);
+            locals.push((*var, val_type));
             scan_expr(iterable, locals, vt);
             for stmt in body { scan_stmt(stmt, locals, vt); }
         }

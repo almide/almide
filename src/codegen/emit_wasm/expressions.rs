@@ -198,6 +198,16 @@ impl FuncCompiler<'_> {
                 self.emit_tuple_index(object, *index, &expr.ty);
             }
 
+            // ── List construction ──
+            IrExprKind::List { elements } => {
+                self.emit_list(elements, &expr.ty);
+            }
+
+            // ── Index access (list[i]) ──
+            IrExprKind::IndexAccess { object, index } => {
+                self.emit_index_access(object, index, &expr.ty);
+            }
+
             // ── Codegen-specific nodes (pass-through or ignore) ──
             IrExprKind::Clone { expr: inner } | IrExprKind::Deref { expr: inner } => {
                 // In WASM, clone/deref are no-ops (no ownership system)
@@ -618,6 +628,63 @@ impl FuncCompiler<'_> {
         }
     }
 
+    /// Emit a list literal: allocate [len:i32][elem0][elem1]...
+    fn emit_list(&mut self, elements: &[IrExpr], _list_ty: &Ty) {
+        let elem_ty = if let Some(first) = elements.first() {
+            first.ty.clone()
+        } else {
+            Ty::Int // empty list fallback
+        };
+        let elem_size = values::byte_size(&elem_ty);
+        let n = elements.len() as u32;
+        let total = 4 + n * elem_size;
+
+        self.func.instruction(&Instruction::I32Const(total as i32));
+        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+
+        let scratch = self.match_i32_base + self.match_depth;
+        self.func.instruction(&Instruction::LocalSet(scratch));
+
+        // Store length
+        self.func.instruction(&Instruction::LocalGet(scratch));
+        self.func.instruction(&Instruction::I32Const(n as i32));
+        self.func.instruction(&Instruction::I32Store(MemArg {
+            offset: 0, align: 2, memory_index: 0,
+        }));
+
+        // Store each element
+        for (i, elem) in elements.iter().enumerate() {
+            let offset = 4 + (i as u32) * elem_size;
+            self.func.instruction(&Instruction::LocalGet(scratch));
+            self.emit_expr(elem);
+            self.emit_store_at(&elem.ty, offset);
+        }
+
+        self.func.instruction(&Instruction::LocalGet(scratch));
+    }
+
+    /// Emit index access: list_ptr + 4 + index * elem_size
+    fn emit_index_access(&mut self, object: &IrExpr, index: &IrExpr, result_ty: &Ty) {
+        let elem_size = values::byte_size(result_ty);
+
+        self.emit_expr(object); // list ptr
+        self.func.instruction(&Instruction::I32Const(4)); // skip len
+        self.func.instruction(&Instruction::I32Add);
+
+        // Add index * elem_size
+        self.emit_expr(index);
+        // Index might be i64 (Int), convert to i32
+        if matches!(&index.ty, Ty::Int) {
+            self.func.instruction(&Instruction::I32WrapI64);
+        }
+        self.func.instruction(&Instruction::I32Const(elem_size as i32));
+        self.func.instruction(&Instruction::I32Mul);
+        self.func.instruction(&Instruction::I32Add);
+
+        // Load element
+        self.emit_load_at(result_ty, 0);
+    }
+
     /// Emit a tuple construction: allocate memory, store each element sequentially.
     fn emit_tuple(&mut self, elements: &[IrExpr]) {
         let element_types: Vec<(String, Ty)> = elements.iter().enumerate()
@@ -778,8 +845,76 @@ impl FuncCompiler<'_> {
                 self.func.instruction(&Instruction::End); // end block
             }
             _ => {
-                // Non-range iterables: Phase 2+ (List, etc.)
-                self.func.instruction(&Instruction::Unreachable);
+                // List (or other collection) for...in
+                // scratch[0] = list ptr, scratch[1] = index counter
+                let list_scratch = self.match_i32_base + self.match_depth;
+                let idx_scratch = list_scratch + 1;
+                let loop_var = self.var_map[&var.0];
+
+                // Determine element type and size
+                let elem_ty = self.var_table.get(var).ty.clone();
+                let elem_size = values::byte_size(&elem_ty);
+
+                // Evaluate iterable and store list ptr
+                self.emit_expr(iterable);
+                self.func.instruction(&Instruction::LocalSet(list_scratch));
+
+                // Initialize index = 0
+                self.func.instruction(&Instruction::I32Const(0));
+                self.func.instruction(&Instruction::LocalSet(idx_scratch));
+
+                // block $break
+                let break_depth = self.depth;
+                self.func.instruction(&Instruction::Block(BlockType::Empty));
+                self.depth += 1;
+
+                // loop $continue
+                let continue_depth = self.depth;
+                self.func.instruction(&Instruction::Loop(BlockType::Empty));
+                self.depth += 1;
+
+                self.loop_stack.push(super::LoopLabels { break_depth, continue_depth });
+
+                // Break if index >= len
+                self.func.instruction(&Instruction::LocalGet(idx_scratch));
+                self.func.instruction(&Instruction::LocalGet(list_scratch));
+                self.func.instruction(&Instruction::I32Load(MemArg {
+                    offset: 0, align: 2, memory_index: 0,
+                })); // load len
+                self.func.instruction(&Instruction::I32GeU);
+                self.func.instruction(&Instruction::BrIf(self.depth - break_depth - 1));
+
+                // Load element: var = list[index]
+                // address = list_ptr + 4 + index * elem_size
+                self.func.instruction(&Instruction::LocalGet(list_scratch));
+                self.func.instruction(&Instruction::I32Const(4));
+                self.func.instruction(&Instruction::I32Add);
+                self.func.instruction(&Instruction::LocalGet(idx_scratch));
+                self.func.instruction(&Instruction::I32Const(elem_size as i32));
+                self.func.instruction(&Instruction::I32Mul);
+                self.func.instruction(&Instruction::I32Add);
+                self.emit_load_at(&elem_ty, 0);
+                self.func.instruction(&Instruction::LocalSet(loop_var));
+
+                // Body
+                for stmt in body {
+                    self.emit_stmt(stmt);
+                }
+
+                // Increment index
+                self.func.instruction(&Instruction::LocalGet(idx_scratch));
+                self.func.instruction(&Instruction::I32Const(1));
+                self.func.instruction(&Instruction::I32Add);
+                self.func.instruction(&Instruction::LocalSet(idx_scratch));
+
+                // Continue
+                self.func.instruction(&Instruction::Br(self.depth - continue_depth - 1));
+
+                self.loop_stack.pop();
+                self.depth -= 1;
+                self.func.instruction(&Instruction::End); // end loop
+                self.depth -= 1;
+                self.func.instruction(&Instruction::End); // end block
             }
         }
     }
