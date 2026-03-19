@@ -93,6 +93,9 @@ enum Commands {
         /// Explain an error code (e.g., --explain E001)
         #[arg(long)]
         explain: Option<String>,
+        /// Show effect/capability analysis for each function
+        #[arg(long)]
+        effects: bool,
     },
     /// Format source files
     Fmt {
@@ -380,13 +383,15 @@ fn dispatch(cli: Cli) {
                 cli::cmd_test(file_str, no_check, run.as_deref());
             }
         }
-        Commands::Check { file, deny_warnings, json, explain } => {
+        Commands::Check { file, deny_warnings, json, explain, effects } => {
             if let Some(code) = explain {
                 print_error_explanation(&code);
                 return;
             }
             let file = resolve_file(file);
-            if json {
+            if effects {
+                cli::cmd_check_effects(&file);
+            } else if json {
                 cli::cmd_check_json(&file);
             } else {
                 cli::cmd_check(&file, deny_warnings);
