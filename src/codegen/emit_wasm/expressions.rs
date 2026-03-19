@@ -110,27 +110,37 @@ impl FuncCompiler<'_> {
 
             // ── DoBlock (with guard → loop) ──
             IrExprKind::DoBlock { stmts, expr: tail } => {
-                // do block with guards compiles like a loop that runs once
-                // (guards break out early)
+                // do block with guards: block { loop { stmts; br 0 (continue) } }
+                // Guard breaks out of the outer block
                 let break_depth = self.depth;
-                self.func.instruction(&Instruction::Block(values::block_type(&expr.ty)));
+                self.func.instruction(&Instruction::Block(BlockType::Empty));
                 self.depth += 1;
 
-                self.loop_stack.push(super::LoopLabels {
-                    break_depth,
-                    continue_depth: break_depth, // no continue in do blocks
-                });
+                let continue_depth = self.depth;
+                self.func.instruction(&Instruction::Loop(BlockType::Empty));
+                self.depth += 1;
+
+                self.loop_stack.push(super::LoopLabels { break_depth, continue_depth });
 
                 for stmt in stmts {
                     self.emit_stmt(stmt);
                 }
                 if let Some(e) = tail {
                     self.emit_expr(e);
+                    // Drop tail value if non-Unit (do blocks in stmt position)
+                    if values::ty_to_valtype(&e.ty).is_some() {
+                        self.func.instruction(&Instruction::Drop);
+                    }
                 }
+
+                // Continue (loop back)
+                self.func.instruction(&Instruction::Br(self.depth - continue_depth - 1));
 
                 self.loop_stack.pop();
                 self.depth -= 1;
-                self.func.instruction(&Instruction::End);
+                self.func.instruction(&Instruction::End); // end loop
+                self.depth -= 1;
+                self.func.instruction(&Instruction::End); // end block
             }
 
             // ── While loop ──
@@ -249,6 +259,42 @@ impl FuncCompiler<'_> {
             }
             IrExprKind::OptionNone => {
                 self.func.instruction(&Instruction::I32Const(0));
+            }
+
+            // ── Result ok/err ──
+            IrExprKind::ResultOk { expr: inner } => {
+                // ok(x) = [tag:0, value]
+                let inner_size = values::byte_size(&inner.ty);
+                self.func.instruction(&Instruction::I32Const((4 + inner_size) as i32));
+                self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+                let scratch = self.match_i32_base + self.match_depth;
+                self.func.instruction(&Instruction::LocalSet(scratch));
+                // tag = 0
+                self.func.instruction(&Instruction::LocalGet(scratch));
+                self.func.instruction(&Instruction::I32Const(0));
+                self.func.instruction(&Instruction::I32Store(MemArg { offset: 0, align: 2, memory_index: 0 }));
+                // value
+                self.func.instruction(&Instruction::LocalGet(scratch));
+                self.emit_expr(inner);
+                self.emit_store_at(&inner.ty, 4);
+                self.func.instruction(&Instruction::LocalGet(scratch));
+            }
+            IrExprKind::ResultErr { expr: inner } => {
+                // err(e) = [tag:1, value]
+                let inner_size = values::byte_size(&inner.ty);
+                self.func.instruction(&Instruction::I32Const((4 + inner_size) as i32));
+                self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+                let scratch = self.match_i32_base + self.match_depth;
+                self.func.instruction(&Instruction::LocalSet(scratch));
+                // tag = 1
+                self.func.instruction(&Instruction::LocalGet(scratch));
+                self.func.instruction(&Instruction::I32Const(1));
+                self.func.instruction(&Instruction::I32Store(MemArg { offset: 0, align: 2, memory_index: 0 }));
+                // value
+                self.func.instruction(&Instruction::LocalGet(scratch));
+                self.emit_expr(inner);
+                self.emit_store_at(&inner.ty, 4);
+                self.func.instruction(&Instruction::LocalGet(scratch));
             }
 
             // ── Codegen-specific nodes (pass-through or ignore) ──
@@ -505,8 +551,18 @@ impl FuncCompiler<'_> {
                         self.func.instruction(&Instruction::I64TruncF64S);
                         self.func.instruction(&Instruction::Call(self.emitter.rt.int_to_string));
                     }
-                    ("string", "length") => {
-                        // Load length from string pointer
+                    ("string", "length") | ("string", "len") => {
+                        self.emit_expr(&args[0]);
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I64ExtendI32U);
+                    }
+                    ("int", "parse") => {
+                        // Stub: return 0 for now
+                        self.emit_expr(&args[0]);
+                        self.func.instruction(&Instruction::Drop);
+                        self.func.instruction(&Instruction::I64Const(0));
+                    }
+                    ("list", "len") | ("list", "length") => {
                         self.emit_expr(&args[0]);
                         self.func.instruction(&Instruction::I32Load(mem(0)));
                         self.func.instruction(&Instruction::I64ExtendI32U);
