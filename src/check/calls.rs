@@ -211,15 +211,13 @@ impl Checker {
                         return Ty::Named(type_name, generic_args);
                     }
                     if let Some(ty) = self.env.lookup_var(name).cloned() {
-                        return match &ty {
-                            Ty::Fn { params, ret } => {
-                                for (aty, pty) in arg_tys.iter().zip(params.iter()) {
-                                    self.constrain(pty.clone(), aty.clone(), format!("call to {}()", name));
-                                }
-                                ret.as_ref().clone()
-                            }
-                            _ => ty
-                        };
+                        if let Ty::Fn { params, ret } = &ty {
+                            arg_tys.iter().zip(params.iter()).for_each(|(aty, pty)| {
+                                self.constrain(pty.clone(), aty.clone(), format!("call to {}()", name));
+                            });
+                            return ret.as_ref().clone();
+                        }
+                        return ty;
                     }
                     self.emit(super::err(format!("undefined function '{}'", name), "Check the function name", format!("call to {}()", name)).with_code("E002"));
                     return Ty::Unknown;
@@ -376,23 +374,13 @@ impl Checker {
                         };
                         // Infer return type from f's return type
                         let fn_ty = resolve_vars(&arg_tys[1], &self.solutions);
-                        let result_elem = match &fn_ty {
-                            Ty::Fn { ret, .. } => {
-                                // Auto-unwrap Result
-                                match ret.as_ref() {
-                                    Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
-                                    other => other.clone(),
-                                }
-                            }
-                            _ => {
-                                // If fn type unknown, constrain it
-                                let ret_var = self.fresh_var();
-                                self.constrain(arg_tys[1].clone(),
-                                    Ty::Fn { params: vec![elem_ty], ret: Box::new(ret_var.clone()) },
-                                    "fan.map callback");
-                                resolve_vars(&ret_var, &self.solutions)
-                            }
-                        };
+                        let result_elem = unwrap_fn_return(&fn_ty).unwrap_or_else(|| {
+                            let ret_var = self.fresh_var();
+                            self.constrain(arg_tys[1].clone(),
+                                Ty::Fn { params: vec![elem_ty], ret: Box::new(ret_var.clone()) },
+                                "fan.map callback");
+                            resolve_vars(&ret_var, &self.solutions)
+                        });
                         return Some(Ty::list(result_elem));
                     }
                     "race" => {
