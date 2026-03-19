@@ -244,6 +244,49 @@ impl FuncCompiler<'_> {
                 self.emit_index_access(object, index, &expr.ty);
             }
 
+            // ── Map ──
+            IrExprKind::EmptyMap => {
+                // Empty map: just [len=0:i32]
+                self.func.instruction(&Instruction::I32Const(4));
+                self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+                let scratch = self.match_i32_base + self.match_depth;
+                self.func.instruction(&Instruction::LocalSet(scratch));
+                self.func.instruction(&Instruction::LocalGet(scratch));
+                self.func.instruction(&Instruction::I32Const(0));
+                self.func.instruction(&Instruction::I32Store(MemArg { offset: 0, align: 2, memory_index: 0 }));
+                self.func.instruction(&Instruction::LocalGet(scratch));
+            }
+            IrExprKind::MapLiteral { entries } => {
+                // Map literal: [len:i32][key0][val0][key1][val1]...
+                // For now, just allocate and store entries sequentially
+                let n = entries.len() as u32;
+                let entry_size = if let Some((k, v)) = entries.first() {
+                    values::byte_size(&k.ty) + values::byte_size(&v.ty)
+                } else { 8 };
+                let total = 4 + n * entry_size;
+                self.func.instruction(&Instruction::I32Const(total as i32));
+                self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+                let scratch = self.match_i32_base + self.match_depth;
+                self.func.instruction(&Instruction::LocalSet(scratch));
+                // Store length
+                self.func.instruction(&Instruction::LocalGet(scratch));
+                self.func.instruction(&Instruction::I32Const(n as i32));
+                self.func.instruction(&Instruction::I32Store(MemArg { offset: 0, align: 2, memory_index: 0 }));
+                // Store entries
+                let mut offset = 4u32;
+                for (key, val) in entries {
+                    self.func.instruction(&Instruction::LocalGet(scratch));
+                    self.emit_expr(key);
+                    self.emit_store_at(&key.ty, offset);
+                    offset += values::byte_size(&key.ty);
+                    self.func.instruction(&Instruction::LocalGet(scratch));
+                    self.emit_expr(val);
+                    self.emit_store_at(&val.ty, offset);
+                    offset += values::byte_size(&val.ty);
+                }
+                self.func.instruction(&Instruction::LocalGet(scratch));
+            }
+
             // ── Option/Result ──
             IrExprKind::OptionSome { expr: inner } => {
                 // Allocate space for the inner value, store it, return pointer
@@ -662,6 +705,11 @@ impl FuncCompiler<'_> {
                         for _ in 0..args.len() { self.func.instruction(&Instruction::Drop); }
                         self.func.instruction(&Instruction::Unreachable);
                     }
+                    ("map", "len") | ("map", "length") | ("map", "size") => {
+                        self.emit_expr(&args[0]);
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I64ExtendI32U);
+                    }
                     ("list", "len") | ("list", "length") => {
                         self.emit_expr(&args[0]);
                         self.func.instruction(&Instruction::I32Load(mem(0)));
@@ -683,6 +731,22 @@ impl FuncCompiler<'_> {
                     "to_string" if matches!(object.ty, Ty::Int) => {
                         self.emit_expr(object);
                         self.func.instruction(&Instruction::Call(self.emitter.rt.int_to_string));
+                    }
+                    "len" | "length" | "string.len" | "list.len" | "map.len" => {
+                        // .len() for String, List, Map — all store length at offset 0
+                        self.emit_expr(object);
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I64ExtendI32U);
+                    }
+                    "to_string" if matches!(object.ty, Ty::Float) => {
+                        self.emit_expr(object);
+                        self.func.instruction(&Instruction::I64TruncF64S);
+                        self.func.instruction(&Instruction::Call(self.emitter.rt.int_to_string));
+                    }
+                    "contains" if matches!(object.ty, Ty::String) => {
+                        self.emit_expr(object);
+                        self.emit_expr(&args[0]);
+                        self.func.instruction(&Instruction::Call(self.emitter.rt.str_contains));
                     }
                     _ => {
                         self.emit_expr(object);
