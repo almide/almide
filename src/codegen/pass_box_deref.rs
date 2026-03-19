@@ -36,54 +36,21 @@ pub fn collect_deref_vars(program: &IrProgram) -> (HashSet<VarId>, HashSet<Strin
     let mut deref_vars = HashSet::new();
     let mut recursive_enums = HashSet::new();
 
-    // Step 1: Find recursive enums
-    for td in &program.type_decls {
+    // Step 1: Find recursive enums (type declarations that reference themselves)
+    let all_type_decls = program.type_decls.iter()
+        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()));
+    for td in all_type_decls {
         if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
-            for case in cases {
+            let is_recursive = cases.iter().any(|case| {
+                let fields_contain_self = |tys: &[Ty]| tys.iter().any(|t| ty_contains_name(t, &td.name));
                 match &case.kind {
-                    IrVariantKind::Tuple { fields } => {
-                        for f in fields {
-                            if ty_contains_name(f, &td.name) {
-                                recursive_enums.insert(td.name.clone());
-                            }
-                        }
-                    }
-                    IrVariantKind::Record { fields } => {
-                        for f in fields {
-                            if ty_contains_name(&f.ty, &td.name) {
-                                recursive_enums.insert(td.name.clone());
-                            }
-                        }
-                    }
-                    _ => {}
+                    IrVariantKind::Tuple { fields } => fields_contain_self(fields),
+                    IrVariantKind::Record { fields } => fields.iter().any(|f| ty_contains_name(&f.ty, &td.name)),
+                    _ => false,
                 }
-            }
-        }
-    }
-
-    // Also check module type_decls for recursive enums
-    for module in &program.modules {
-        for td in &module.type_decls {
-            if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
-                for case in cases {
-                    match &case.kind {
-                        IrVariantKind::Tuple { fields } => {
-                            for f in fields {
-                                if ty_contains_name(f, &td.name) {
-                                    recursive_enums.insert(td.name.clone());
-                                }
-                            }
-                        }
-                        IrVariantKind::Record { fields } => {
-                            for f in fields {
-                                if ty_contains_name(&f.ty, &td.name) {
-                                    recursive_enums.insert(td.name.clone());
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                }
+            });
+            if is_recursive {
+                recursive_enums.insert(td.name.clone());
             }
         }
     }

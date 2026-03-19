@@ -231,17 +231,16 @@ impl Checker {
                         "fan block".to_string()).with_code("E007"));
                 }
                 // Check for mutable variable capture
-                for e in exprs.iter() {
+                let mutable_captures: Vec<String> = exprs.iter().flat_map(|e| {
                     let mut idents = Vec::new();
                     collect_idents(e, &mut idents);
-                    for name in &idents {
-                        if self.env.mutable_vars.contains(name) {
-                            self.emit(super::err(
-                                format!("cannot capture mutable variable '{}' inside fan block", name),
-                                "Use a `let` binding instead of `var` for values shared across fan expressions",
-                                "fan block".to_string()).with_code("E008"));
-                        }
-                    }
+                    idents.into_iter().filter(|name| self.env.mutable_vars.contains(name)).collect::<Vec<_>>()
+                }).collect();
+                for name in &mutable_captures {
+                    self.emit(super::err(
+                        format!("cannot capture mutable variable '{}' inside fan block", name),
+                        "Use a `let` binding instead of `var` for values shared across fan expressions",
+                        "fan block".to_string()).with_code("E008"));
                 }
                 let tys: Vec<Ty> = exprs.iter_mut().map(|e| {
                     let ty = self.infer_expr(e);
