@@ -585,13 +585,14 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::IndexAccess { object, index } => {
             let obj_str = render_expr(ctx, object);
             let idx = render_expr(ctx, index);
-            if object.ty.is_map() {
-                ctx.templates.render_with("map_get", None, &[], &[("object", obj_str.as_str()), ("key", idx.as_str())])
-                    .unwrap_or_else(|| "map_get(...)".into())
-            } else {
-                ctx.templates.render_with("index_access", None, &[], &[("object", obj_str.as_str()), ("index", idx.as_str())])
-                    .unwrap_or_else(|| "idx[...]".into())
-            }
+            ctx.templates.render_with("index_access", None, &[], &[("object", obj_str.as_str()), ("index", idx.as_str())])
+                .unwrap_or_else(|| "idx[...]".into())
+        }
+        IrExprKind::MapAccess { object, key } => {
+            let obj_str = render_expr(ctx, object);
+            let key_str = render_expr(ctx, key);
+            ctx.templates.render_with("map_get", None, &[], &[("object", obj_str.as_str()), ("key", key_str.as_str())])
+                .unwrap_or_else(|| "map_get(...)".into())
         }
 
         // ── Map ──
@@ -938,14 +939,15 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let target_str = ctx.var_name(*target).to_string();
             let idx_str = render_expr(ctx, index);
             let val_str = render_expr(ctx, value);
-            let target_ty = &ctx.var_table.get(*target).ty;
-            if target_ty.is_map() {
-                ctx.templates.render_with("map_insert", None, &[], &[("target", target_str.as_str()), ("key", idx_str.as_str()), ("value", val_str.as_str())])
-                    .unwrap_or_else(|| "map_set(...)".into())
-            } else {
-                ctx.templates.render_with("index_assign", None, &[], &[("target", target_str.as_str()), ("index", idx_str.as_str()), ("value", val_str.as_str())])
-                    .unwrap_or_else(|| "idx[...] = ...;".into())
-            }
+            ctx.templates.render_with("index_assign", None, &[], &[("target", target_str.as_str()), ("index", idx_str.as_str()), ("value", val_str.as_str())])
+                .unwrap_or_else(|| "idx[...] = ...;".into())
+        }
+        IrStmtKind::MapInsert { target, key, value } => {
+            let target_str = ctx.var_name(*target).to_string();
+            let key_str = render_expr(ctx, key);
+            let val_str = render_expr(ctx, value);
+            ctx.templates.render_with("map_insert", None, &[], &[("target", target_str.as_str()), ("key", key_str.as_str()), ("value", val_str.as_str())])
+                .unwrap_or_else(|| "map_set(...)".into())
         }
         IrStmtKind::FieldAssign { target, field, value } => {
             let target_str = ctx.var_name(*target).to_string();

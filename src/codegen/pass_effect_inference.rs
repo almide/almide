@@ -353,6 +353,11 @@ fn collect_effects_inner(expr: &IrExpr, effects: &mut HashSet<Effect>) {
             collect_effects_inner(index, effects);
         }
 
+        IrExprKind::MapAccess { object, key } => {
+            collect_effects_inner(object, effects);
+            collect_effects_inner(key, effects);
+        }
+
         // Leaf nodes — no effects
         _ => {}
     }

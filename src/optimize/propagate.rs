@@ -114,6 +114,10 @@ fn propagate_expr(expr: &mut IrExpr, constants: &HashMap<VarId, IrExpr>) {
             propagate_expr(object, constants);
             propagate_expr(index, constants);
         }
+        IrExprKind::MapAccess { object, key } => {
+            propagate_expr(object, constants);
+            propagate_expr(key, constants);
+        }
         IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
             propagate_expr(object, constants);
         }
@@ -143,6 +147,10 @@ fn propagate_stmt(stmt: &mut IrStmt, constants: &HashMap<VarId, IrExpr>) {
         | IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => propagate_expr(value, constants),
         IrStmtKind::IndexAssign { index, value, .. } => {
             propagate_expr(index, constants);
+            propagate_expr(value, constants);
+        }
+        IrStmtKind::MapInsert { key, value, .. } => {
+            propagate_expr(key, constants);
             propagate_expr(value, constants);
         }
         IrStmtKind::Guard { cond, else_ } => {

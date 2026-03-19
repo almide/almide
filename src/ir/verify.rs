@@ -274,6 +274,10 @@ fn verify_expr(expr: &IrExpr, ctx: &mut VerifyCtx) {
             verify_expr(object, ctx);
             verify_expr(index, ctx);
         }
+        IrExprKind::MapAccess { object, key } => {
+            verify_expr(object, ctx);
+            verify_expr(key, ctx);
+        }
         IrExprKind::StringInterp { parts } => {
             for p in parts {
                 if let IrStringPart::Expr { expr } = p { verify_expr(expr, ctx); }
@@ -316,6 +320,11 @@ fn verify_stmt(stmt: &IrStmt, ctx: &mut VerifyCtx) {
         IrStmtKind::IndexAssign { target, index, value } => {
             ctx.check_var_id(*target, stmt.span);
             verify_expr(index, ctx);
+            verify_expr(value, ctx);
+        }
+        IrStmtKind::MapInsert { target, key, value } => {
+            ctx.check_var_id(*target, stmt.span);
+            verify_expr(key, ctx);
             verify_expr(value, ctx);
         }
         IrStmtKind::FieldAssign { target, value, .. } => {

@@ -102,6 +102,10 @@ fn check_expr_for_unknown(expr: &IrExpr, fn_name: &str, warnings: &mut Vec<Unkno
             check_expr_for_unknown(object, fn_name, warnings);
             check_expr_for_unknown(index, fn_name, warnings);
         }
+        IrExprKind::MapAccess { object, key } => {
+            check_expr_for_unknown(object, fn_name, warnings);
+            check_expr_for_unknown(key, fn_name, warnings);
+        }
         IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
             check_expr_for_unknown(object, fn_name, warnings);
         }
@@ -180,6 +184,10 @@ fn check_stmt_for_unknown(stmt: &IrStmt, fn_name: &str, warnings: &mut Vec<Unkno
         }
         IrStmtKind::IndexAssign { index, value, .. } => {
             check_expr_for_unknown(index, fn_name, warnings);
+            check_expr_for_unknown(value, fn_name, warnings);
+        }
+        IrStmtKind::MapInsert { key, value, .. } => {
+            check_expr_for_unknown(key, fn_name, warnings);
             check_expr_for_unknown(value, fn_name, warnings);
         }
         IrStmtKind::FieldAssign { value, .. } => {
