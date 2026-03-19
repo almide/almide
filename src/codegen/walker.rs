@@ -754,12 +754,12 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
             ctx.templates.render_with("ne_expr", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("_ != _"))
         }
+        BinOp::PowInt => {
+            ctx.templates.render_with("power_expr", Some("Int"), &[], &[("left", l.as_str()), ("right", r.as_str())])
+                .unwrap_or_else(|| format!("pow(_, _)"))
+        }
         BinOp::PowFloat => {
-            let ty_tag = match &left.ty {
-                Ty::Int => "Int",
-                _ => "Float",
-            };
-            ctx.templates.render_with("power_expr", Some(ty_tag), &[], &[("left", l.as_str()), ("right", r.as_str())])
+            ctx.templates.render_with("power_expr", Some("Float"), &[], &[("left", l.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("pow(_, _)"))
         }
         _ => {

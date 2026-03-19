@@ -67,19 +67,12 @@ impl<'a> VerifyCtx<'a> {
 pub fn verify_program(program: &IrProgram) -> Vec<IrVerifyError> {
     let mut errors = Vec::new();
 
-    // Verify main module
+    // Verify type declarations
+    verify_type_decls(&program.type_decls, "", &mut errors);
+
+    // Verify main module functions
     for f in &program.functions {
-        let mut ctx = VerifyCtx {
-            var_table: &program.var_table,
-            fn_name: f.name.clone(),
-            in_loop: false,
-            errors: Vec::new(),
-        };
-        for p in &f.params {
-            ctx.check_var_id(p.var, None);
-        }
-        verify_expr(&f.body, &mut ctx);
-        errors.append(&mut ctx.errors);
+        verify_function(f, &program.var_table, &f.name, &mut errors);
     }
     for tl in &program.top_lets {
         let mut ctx = VerifyCtx {
@@ -95,18 +88,10 @@ pub fn verify_program(program: &IrProgram) -> Vec<IrVerifyError> {
 
     // Verify imported modules
     for m in &program.modules {
+        verify_type_decls(&m.type_decls, &m.name, &mut errors);
         for f in &m.functions {
-            let mut ctx = VerifyCtx {
-                var_table: &m.var_table,
-                fn_name: format!("{}.{}", m.name, f.name),
-                in_loop: false,
-                errors: Vec::new(),
-            };
-            for p in &f.params {
-                ctx.check_var_id(p.var, None);
-            }
-            verify_expr(&f.body, &mut ctx);
-            errors.append(&mut ctx.errors);
+            let qual_name = format!("{}.{}", m.name, f.name);
+            verify_function(f, &m.var_table, &qual_name, &mut errors);
         }
         for tl in &m.top_lets {
             let mut ctx = VerifyCtx {
@@ -122,6 +107,60 @@ pub fn verify_program(program: &IrProgram) -> Vec<IrVerifyError> {
     }
 
     errors
+}
+
+fn verify_function(f: &IrFunction, var_table: &VarTable, name: &str, errors: &mut Vec<IrVerifyError>) {
+    let mut ctx = VerifyCtx {
+        var_table,
+        fn_name: name.to_string(),
+        in_loop: false,
+        errors: Vec::new(),
+    };
+
+    // Check parameter VarIds are valid and unique
+    let mut seen_param_ids = std::collections::HashSet::new();
+    for p in &f.params {
+        ctx.check_var_id(p.var, None);
+        if !seen_param_ids.insert(p.var.0) {
+            ctx.err(format!("duplicate parameter VarId({}) for '{}'", p.var.0, p.name), None);
+        }
+    }
+
+    verify_expr(&f.body, &mut ctx);
+    errors.append(&mut ctx.errors);
+}
+
+fn verify_type_decls(decls: &[IrTypeDecl], module: &str, errors: &mut Vec<IrVerifyError>) {
+    for decl in decls {
+        let loc = if module.is_empty() { decl.name.clone() } else { format!("{}.{}", module, decl.name) };
+        match &decl.kind {
+            IrTypeDeclKind::Record { fields } => {
+                let mut seen = std::collections::HashSet::new();
+                for f in fields {
+                    if !seen.insert(&f.name) {
+                        errors.push(IrVerifyError {
+                            message: format!("duplicate field '{}' in record type", f.name),
+                            fn_name: loc.clone(),
+                            span: None,
+                        });
+                    }
+                }
+            }
+            IrTypeDeclKind::Variant { cases, .. } => {
+                let mut seen = std::collections::HashSet::new();
+                for c in cases {
+                    if !seen.insert(&c.name) {
+                        errors.push(IrVerifyError {
+                            message: format!("duplicate variant case '{}'", c.name),
+                            fn_name: loc.clone(),
+                            span: None,
+                        });
+                    }
+                }
+            }
+            IrTypeDeclKind::Alias { .. } => {}
+        }
+    }
 }
 
 fn verify_expr(expr: &IrExpr, ctx: &mut VerifyCtx) {
@@ -329,11 +368,10 @@ fn verify_binop_types(op: BinOp, left: &IrExpr, right: &IrExpr, ctx: &mut Verify
 
     let expected = match op {
         BinOp::AddInt | BinOp::SubInt | BinOp::MulInt
-        | BinOp::DivInt | BinOp::ModInt | BinOp::XorInt => Some(Ty::Int),
+        | BinOp::DivInt | BinOp::ModInt | BinOp::PowInt | BinOp::XorInt => Some(Ty::Int),
         BinOp::AddFloat | BinOp::SubFloat | BinOp::MulFloat
-        | BinOp::DivFloat => Some(Ty::Float),
+        | BinOp::DivFloat | BinOp::PowFloat => Some(Ty::Float),
         BinOp::ConcatStr => Some(Ty::String),
-        // PowFloat: used for both Int**Int and Float**Float (codegen handles conversion)
         // ConcatList, Eq, Neq, comparisons, And, Or — operand types vary
         _ => None,
     };
@@ -645,5 +683,143 @@ mod tests {
         let errors = verify_program(&prog);
         assert_eq!(errors.len(), 1);
         assert!(errors[0].message.contains("NegInt"));
+    }
+
+    #[test]
+    fn detects_duplicate_record_fields() {
+        let vt = VarTable::new();
+        let prog = IrProgram {
+            functions: vec![],
+            top_lets: vec![],
+            type_decls: vec![IrTypeDecl {
+                name: "Bad".into(),
+                kind: IrTypeDeclKind::Record {
+                    fields: vec![
+                        IrFieldDecl { name: "x".into(), ty: Ty::Int, default: None, alias: None },
+                        IrFieldDecl { name: "x".into(), ty: Ty::String, default: None, alias: None },
+                    ],
+                },
+                deriving: None,
+                generics: None,
+                visibility: IrVisibility::Public,
+            }],
+            var_table: vt,
+            modules: vec![],
+            type_registry: Default::default(),
+            effect_map: Default::default(),
+        };
+        let errors = verify_program(&prog);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("duplicate field 'x'"));
+    }
+
+    #[test]
+    fn detects_duplicate_variant_cases() {
+        let vt = VarTable::new();
+        let prog = IrProgram {
+            functions: vec![],
+            top_lets: vec![],
+            type_decls: vec![IrTypeDecl {
+                name: "Bad".into(),
+                kind: IrTypeDeclKind::Variant {
+                    cases: vec![
+                        IrVariantDecl { name: "A".into(), kind: IrVariantKind::Unit },
+                        IrVariantDecl { name: "A".into(), kind: IrVariantKind::Unit },
+                    ],
+                    is_generic: false,
+                    boxed_args: HashSet::new(),
+                    boxed_record_fields: HashSet::new(),
+                },
+                deriving: None,
+                generics: None,
+                visibility: IrVisibility::Public,
+            }],
+            var_table: vt,
+            modules: vec![],
+            type_registry: Default::default(),
+            effect_map: Default::default(),
+        };
+        let errors = verify_program(&prog);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("duplicate variant case 'A'"));
+    }
+
+    #[test]
+    fn detects_duplicate_param_var_ids() {
+        let mut vt = VarTable::new();
+        let x = vt.alloc("x".into(), Ty::Int, Mutability::Let, None);
+        let f = IrFunction {
+            name: "bad".into(),
+            params: vec![
+                IrParam { var: x, ty: Ty::Int, name: "a".into(), borrow: ParamBorrow::Own, open_record: None, default: None },
+                IrParam { var: x, ty: Ty::Int, name: "b".into(), borrow: ParamBorrow::Own, open_record: None, default: None },
+            ],
+            ret_ty: Ty::Int,
+            body: lit_int(0),
+            is_effect: false,
+            is_async: false,
+            is_test: false,
+            generics: None,
+            extern_attrs: vec![],
+            visibility: IrVisibility::Public,
+        };
+        let prog = make_program(vec![f], vt);
+        let errors = verify_program(&prog);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("duplicate parameter VarId"));
+    }
+
+    #[test]
+    fn allows_break_inside_do_block() {
+        let vt = VarTable::new();
+        let body = IrExpr {
+            kind: IrExprKind::DoBlock {
+                stmts: vec![IrStmt {
+                    kind: IrStmtKind::Expr {
+                        expr: IrExpr { kind: IrExprKind::Break, ty: Ty::Unit, span: None },
+                    },
+                    span: None,
+                }],
+                expr: None,
+            },
+            ty: Ty::Unit,
+            span: None,
+        };
+        let prog = make_program(vec![make_fn("main", body)], vt);
+        let errors = verify_program(&prog);
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn pow_int_type_consistency() {
+        let vt = VarTable::new();
+        // PowInt with Int operands — should pass
+        let body = IrExpr {
+            kind: IrExprKind::BinOp {
+                op: BinOp::PowInt,
+                left: Box::new(lit_int(2)),
+                right: Box::new(lit_int(3)),
+            },
+            ty: Ty::Int,
+            span: None,
+        };
+        let prog = make_program(vec![make_fn("main", body)], vt);
+        assert!(verify_program(&prog).is_empty());
+
+        // PowInt with Float operand — should fail
+        let vt2 = VarTable::new();
+        let body2 = IrExpr {
+            kind: IrExprKind::BinOp {
+                op: BinOp::PowInt,
+                left: Box::new(IrExpr { kind: IrExprKind::LitFloat { value: 2.0 }, ty: Ty::Float, span: None }),
+                right: Box::new(lit_int(3)),
+            },
+            ty: Ty::Int,
+            span: None,
+        };
+        let prog2 = make_program(vec![make_fn("main", body2)], vt2);
+        let errors = verify_program(&prog2);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("PowInt"));
     }
 }

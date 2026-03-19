@@ -44,7 +44,7 @@ pub enum BinOp {
     MulInt, MulFloat,
     DivInt, DivFloat,
     ModInt, ModFloat,
-    PowFloat,
+    PowInt, PowFloat,
     XorInt,
     ConcatStr, ConcatList,
     Eq, Neq,
