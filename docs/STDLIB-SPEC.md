@@ -1,7 +1,7 @@
 # Almide Standard Library Specification
 
-Auto-generated from `stdlib/defs/*.toml`. 362 native functions across 22 modules.
-Runtime implementation: 332/362 (91%).
+Auto-generated from `stdlib/defs/*.toml`. 381 native functions across 22 modules.
+Runtime implementation: 381/381 (100%).
 
 ## Module Index
 

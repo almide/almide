@@ -119,7 +119,7 @@ for x in xs {
 }
 
 for (k, v) in config {
-  println(k + " = " ++ v)
+  println(k + " = " + v)
 }
 
 for key in m {
