@@ -20,13 +20,13 @@ pub struct RenderContext<'a> {
     pub var_table: &'a VarTable,
     pub indent: usize,
     pub target: Target,
-    pub in_effect_fn: bool,
+    pub auto_unwrap: bool,
     pub ann: CodegenAnnotations,
 }
 
 impl<'a> RenderContext<'a> {
     pub fn new(templates: &'a TemplateSet, var_table: &'a VarTable) -> Self {
-        Self { templates, var_table, indent: 0, target: Target::Rust, in_effect_fn: false, ann: CodegenAnnotations::default() }
+        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, ann: CodegenAnnotations::default() }
     }
 
     pub fn with_target(mut self, target: Target) -> Self {
@@ -758,7 +758,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             let any_result = exprs.iter().any(|e| matches!(&e.ty, Ty::Result(_, _)));
             let joins: Vec<String> = exprs.iter().enumerate().map(|(i, e)| {
                 if matches!(&e.ty, Ty::Result(_, _)) {
-                    if ctx.in_effect_fn {
+                    if ctx.auto_unwrap {
                         format!("{}.join().unwrap()?", handles[i])
                     } else {
                         format!("{}.join().unwrap().unwrap()", handles[i])
@@ -771,7 +771,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 else { format!("({})", joins.join(", ")) };
             let spawns_s = spawns.join(" ");
             // Select template variant
-            let construct = if any_result && ctx.in_effect_fn { "fan_effect" } else { "fan_expr" };
+            let construct = if any_result && ctx.auto_unwrap { "fan_effect" } else { "fan_expr" };
             ctx.templates.render_with(construct, None, &[], &[("exprs", exprs_s.as_str()), ("count", count_s.as_str()), ("spawns", spawns_s.as_str()), ("join_expr", join_expr.as_str())])
                 .unwrap_or_else(|| format!("fan({})", rendered.join(", ")))
         }
@@ -1055,7 +1055,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         var_table: ctx.var_table,
         indent: ctx.indent,
         target: ctx.target,
-        in_effect_fn: func.is_effect && !func.is_test,
+        auto_unwrap: func.is_effect && !func.is_test,
         ann: ctx.ann.clone(),
     };
 
@@ -1185,7 +1185,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         var_table: ctx.var_table,
         indent: ctx.indent,
         target: ctx.target,
-        in_effect_fn: ctx.in_effect_fn,
+        auto_unwrap: ctx.auto_unwrap,
         ann: ctx.ann.clone(),
     };
     for td in &program.type_decls {
@@ -1273,7 +1273,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             var_table: &module.var_table,
             indent: ctx.indent,
             target: ctx.target,
-            in_effect_fn: false,
+            auto_unwrap: false,
             ann: ctx.ann.clone(),
         };
         // Module type decls

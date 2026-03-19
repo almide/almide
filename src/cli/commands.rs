@@ -83,7 +83,7 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
     let mut failed = 0;
     for test_file in &test_files {
         eprintln!("Running {}", test_file);
-        let code = super::cmd_run_inner_test(test_file, &program_args, no_check);
+        let code = super::cmd_run_inner(test_file, &program_args, no_check, true);
         if code != 0 {
             failed += 1;
         }
@@ -117,7 +117,7 @@ pub fn cmd_test_json(file: &str, run_filter: Option<&str>) {
     }
 
     for test_file in &test_files {
-        let code = super::cmd_run_inner_test(test_file, &program_args, false);
+        let code = super::cmd_run_inner(test_file, &program_args, false, true);
         // Emit JSON per file
         let status = if code == 0 { "pass" } else { "fail" };
         println!(

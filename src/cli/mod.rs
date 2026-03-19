@@ -6,7 +6,7 @@ mod emit;
 mod check;
 mod commands;
 
-pub use run::{cmd_run, cmd_run_inner_test};
+pub use run::{cmd_run, cmd_run_inner};
 pub use build::cmd_build;
 pub use emit::cmd_emit;
 pub use check::{cmd_check, cmd_check_json};

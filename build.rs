@@ -544,7 +544,7 @@ fn main() {
                 all_binds.extend(binds_min.iter().cloned());
                 all_binds.dedup();
                 rust_arms.push_str(&format!(
-                    "            (\"{module}\", \"{func}\") => {{\n{bindings}\n                if args_str.len() > {req} {{\n                    if in_effect && {expr_e}.contains(\"?\") {{ {expr_e} }} else {{ {expr} }}\n                }} else {{\n                    {expr_min}\n                }}\n            }},\n",
+                    "            (\"{module}\", \"{func}\") => {{\n{bindings}\n                if args_str.len() > {req} {{\n                    if auto_unwrap && {expr_e}.contains(\"?\") {{ {expr_e} }} else {{ {expr} }}\n                }} else {{\n                    {expr_min}\n                }}\n            }},\n",
                     module = module_name,
                     func = fn_name,
                     bindings = all_binds.join("\n"),
@@ -582,7 +582,7 @@ fn main() {
                     ));
                 }
             } else if has_effect_variant {
-                // Effect variant: check in_effect && body contains "?"
+                // Effect variant: check auto_unwrap && body contains "?"
                 let (binds, expr) = render_template_full(&def.rust, &def.params, false);
                 let (binds_e, expr_e) = render_template_full(def.rust_effect.as_ref().unwrap(), &def.params, true);
                 let mut all_binds = binds.clone();
@@ -596,7 +596,7 @@ fn main() {
                     "false".to_string()
                 };
                 rust_arms.push_str(&format!(
-                    "            (\"{module}\", \"{func}\") => {{\n{bindings}\n                if in_effect && {check} {{ {expr_e} }} else {{ {expr} }}\n            }},\n",
+                    "            (\"{module}\", \"{func}\") => {{\n{bindings}\n                if auto_unwrap && {check} {{ {expr_e} }} else {{ {expr} }}\n            }},\n",
                     module = module_name,
                     func = fn_name,
                     bindings = all_binds.join("\n"),
@@ -613,7 +613,7 @@ fn main() {
                 all_binds.dedup();
                 if all_binds.is_empty() {
                     rust_arms.push_str(&format!(
-                        "            (\"{module}\", \"{func}\") => if in_effect {{ {with_q} }} else {{ {no_q} }},\n",
+                        "            (\"{module}\", \"{func}\") => if auto_unwrap {{ {with_q} }} else {{ {no_q} }},\n",
                         module = module_name,
                         func = fn_name,
                         with_q = expr_with_q,
@@ -621,7 +621,7 @@ fn main() {
                     ));
                 } else {
                     rust_arms.push_str(&format!(
-                        "            (\"{module}\", \"{func}\") => {{\n{bindings}\n                if in_effect {{ {with_q} }} else {{ {no_q} }}\n            }},\n",
+                        "            (\"{module}\", \"{func}\") => {{\n{bindings}\n                if auto_unwrap {{ {with_q} }} else {{ {no_q} }}\n            }},\n",
                         module = module_name,
                         func = fn_name,
                         bindings = all_binds.join("\n"),
@@ -752,7 +752,7 @@ fn main() {
          \x20   module: &str,\n    \
          \x20   func: &str,\n    \
          \x20   args_str: &[String],\n    \
-         \x20   in_effect: bool,\n    \
+         \x20   auto_unwrap: bool,\n    \
          \x20   inline_lambda: &dyn Fn(usize, usize) -> (Vec<String>, String),\n\
          ) -> Option<String>"
     } else {
@@ -760,7 +760,7 @@ fn main() {
          \x20   module: &str,\n    \
          \x20   func: &str,\n    \
          \x20   args_str: &[String],\n    \
-         \x20   _in_effect: bool,\n    \
+         \x20   _auto_unwrap: bool,\n    \
          \x20   _inline_lambda: &dyn Fn(usize, usize) -> (Vec<String>, String),\n\
          ) -> Option<String>"
     };

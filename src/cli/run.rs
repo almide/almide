@@ -2,15 +2,7 @@ use std::process::Command;
 use crate::{try_compile, find_rustc};
 use super::{hash64, incremental_cache_dir};
 
-pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool) -> i32 {
-    cmd_run_inner_with_test_mode(file, program_args, no_check, false)
-}
-
-pub fn cmd_run_inner_test(file: &str, program_args: &[String], no_check: bool) -> i32 {
-    cmd_run_inner_with_test_mode(file, program_args, no_check, true)
-}
-
-fn cmd_run_inner_with_test_mode(file: &str, program_args: &[String], no_check: bool, force_test: bool) -> i32 {
+pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool, test_mode: bool) -> i32 {
     let rs_code = match try_compile(file, no_check) {
         Ok(code) => code,
         Err(_) => return 1,
@@ -26,11 +18,11 @@ fn cmd_run_inner_with_test_mode(file: &str, program_args: &[String], no_check: b
     let rs_path = tmp_dir.join(format!("{}.rs", file_stem));
     let bin_path = tmp_dir.join(&file_stem);
 
-    // Detect test-only files (no main function), or force test mode from cmd_test
-    let is_test_only = force_test || (!rs_code.contains("\nfn almide_main(") && !rs_code.contains("\nfn main(") && !rs_code.contains("\npub fn main("));
+    // test_mode: always use --test. Otherwise detect test-only files (no main function).
+    let use_test_harness = test_mode || (!rs_code.contains("\nfn almide_main(") && !rs_code.contains("\nfn main(") && !rs_code.contains("\npub fn main("));
 
     // Incremental: hash generated Rust code + test mode, skip rustc if unchanged
-    let hash_input = format!("{}:test={}", &rs_code, is_test_only);
+    let hash_input = format!("{}:test={}", &rs_code, use_test_harness);
     let code_hash = format!("{:016x}", hash64(hash_input.as_bytes()));
     let cache = incremental_cache_dir();
     let hash_file = cache.join(format!("{}.hash", file.replace('/', "_").replace('.', "_")));
@@ -53,7 +45,7 @@ fn cmd_run_inner_with_test_mode(file: &str, program_args: &[String], no_check: b
             .arg("-C").arg("opt-level=1")
             .arg("-C").arg("incremental=")
             .arg("--edition").arg("2021");
-        if is_test_only {
+        if use_test_harness {
             rustc_cmd.arg("--test");
         }
         let rustc = rustc_cmd.output()
@@ -80,5 +72,5 @@ fn cmd_run_inner_with_test_mode(file: &str, program_args: &[String], no_check: b
 }
 
 pub fn cmd_run(file: &str, program_args: &[String], no_check: bool) {
-    std::process::exit(cmd_run_inner(file, program_args, no_check));
+    std::process::exit(cmd_run_inner(file, program_args, no_check, false));
 }

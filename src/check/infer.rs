@@ -224,7 +224,7 @@ impl Checker {
             }
 
             ast::Expr::Fan { exprs, .. } => {
-                if !self.env.in_effect {
+                if !self.env.can_call_effect {
                     self.emit(super::err(
                         "fan block can only be used inside an effect fn".to_string(),
                         "Mark the enclosing function as `effect fn`",
@@ -467,7 +467,7 @@ impl Checker {
                 } else {
                     let t = resolve_vars(&val_ty, &self.solutions);
                     // Auto-unwrap Result in effect fns (but not in test blocks)
-                    if self.env.in_effect && !self.env.in_test {
+                    if self.env.auto_unwrap {
                         match t { Ty::Result(ok, _) => *ok, other => other }
                     } else { t }
                 };
@@ -481,7 +481,7 @@ impl Checker {
                     declared
                 } else {
                     let t = resolve_vars(&val_ty, &self.solutions);
-                    if self.env.in_effect && !self.env.in_test {
+                    if self.env.auto_unwrap {
                         match t { Ty::Result(ok, _) => *ok, other => other }
                     } else { t }
                 };
