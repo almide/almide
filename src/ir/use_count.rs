@@ -393,19 +393,44 @@ pub fn collect_unused_var_warnings(program: &IrProgram, file: &str) -> Vec<crate
 }
 
 /// Classify a top-level let value: constant-evaluable expressions are `Const`, everything else is `Lazy`.
-/// Extends beyond simple literals to include arithmetic/logic on constants and references to other consts.
 pub fn classify_top_let_kind(expr: &IrExpr) -> TopLetKind {
-    if is_const_expr(expr) { TopLetKind::Const } else { TopLetKind::Lazy }
+    if is_const_expr(expr, &std::collections::HashSet::new()) { TopLetKind::Const } else { TopLetKind::Lazy }
+}
+
+/// Reclassify top-level lets using a two-pass approach:
+/// Pass 1: classify without cross-references (already done during lowering).
+/// Pass 2: with known const VarIds, reclassify Lazy → Const for expressions
+///          that reference other const top-level lets (e.g., `4.0 * PI * PI`).
+pub fn reclassify_top_lets(program: &mut IrProgram) {
+    // Collect VarIds of top_lets already classified as Const
+    let mut const_vars: std::collections::HashSet<u32> = program.top_lets.iter()
+        .filter(|tl| matches!(tl.kind, TopLetKind::Const))
+        .map(|tl| tl.var.0)
+        .collect();
+
+    // Iterate until fixpoint (typically 1-2 rounds)
+    loop {
+        let mut changed = false;
+        for tl in &mut program.top_lets {
+            if matches!(tl.kind, TopLetKind::Lazy) && is_const_expr(&tl.value, &const_vars) {
+                tl.kind = TopLetKind::Const;
+                const_vars.insert(tl.var.0);
+                changed = true;
+            }
+        }
+        if !changed { break; }
+    }
 }
 
 /// Check if an expression can be evaluated at compile time (Rust `const`).
-/// Recognizes: literals, unary/binary ops on const operands, references to other top-level consts.
-fn is_const_expr(expr: &IrExpr) -> bool {
+/// Recognizes: literals, unary/binary ops on const operands, references to known const vars.
+fn is_const_expr(expr: &IrExpr, const_vars: &std::collections::HashSet<u32>) -> bool {
     match &expr.kind {
         IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
         | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::LitStr { .. } => true,
-        IrExprKind::UnOp { operand, .. } => is_const_expr(operand),
-        IrExprKind::BinOp { left, right, .. } => is_const_expr(left) && is_const_expr(right),
+        IrExprKind::UnOp { operand, .. } => is_const_expr(operand, const_vars),
+        IrExprKind::BinOp { left, right, .. } => is_const_expr(left, const_vars) && is_const_expr(right, const_vars),
+        IrExprKind::Var { id } => const_vars.contains(&id.0),
         _ => false,
     }
 }
