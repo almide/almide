@@ -91,16 +91,7 @@ impl Parser {
             self.expect_closing(TokenType::RParen, open.line, open.col, "todo()")?;
             return Ok(Expr::Todo { message: msg, id: self.next_id(), span, resolved_type: None });
         }
-        if self.check(TokenType::Try) {
-            self.advance();
-            let expr = self.parse_postfix()?;
-            return Ok(Expr::Try { expr: Box::new(expr), id: self.next_id(), span, resolved_type: None });
-        }
-        if self.check(TokenType::Await) {
-            self.advance();
-            let expr = self.parse_postfix()?;
-            return Ok(Expr::Await { expr: Box::new(expr), id: self.next_id(), span, resolved_type: None });
-        }
+        // try and await keywords removed (no implementation)
         if self.check(TokenType::If) {
             return self.parse_if_expr();
         }

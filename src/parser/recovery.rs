@@ -23,7 +23,7 @@ impl Parser {
                         | TokenType::Ident | TokenType::TypeName
                         | TokenType::RBrace | TokenType::EOF
                         // Declaration-level sync points
-                        | TokenType::Fn | TokenType::Effect | TokenType::Async
+                        | TokenType::Fn | TokenType::Effect
                         | TokenType::Type | TokenType::Test | TokenType::Pub
                         | TokenType::Trait | TokenType::Impl
                         | TokenType::Local | TokenType::Mod
@@ -42,7 +42,7 @@ impl Parser {
             let tt = &self.current().token_type;
             match tt {
                 TokenType::EOF => break,
-                TokenType::Fn | TokenType::Effect | TokenType::Async
+                TokenType::Fn | TokenType::Effect
                 | TokenType::Pub | TokenType::Local | TokenType::Mod
                 | TokenType::Type | TokenType::Trait | TokenType::Impl
                 | TokenType::Test | TokenType::Strict | TokenType::At => {
@@ -51,7 +51,7 @@ impl Parser {
                 TokenType::Newline => {
                     self.advance();
                     if matches!(self.current().token_type,
-                        TokenType::Fn | TokenType::Effect | TokenType::Async
+                        TokenType::Fn | TokenType::Effect
                         | TokenType::Pub | TokenType::Local | TokenType::Mod
                         | TokenType::Type | TokenType::Trait | TokenType::Impl
                         | TokenType::Test | TokenType::Strict | TokenType::At
