@@ -202,12 +202,24 @@ impl NanoPass for TypeConcretizationPass {
 
 // ── Default Pipeline ──
 
+#[derive(Debug)]
+pub struct StreamFusionPass;
+impl NanoPass for StreamFusionPass {
+    fn name(&self) -> &str { "StreamFusion" }
+    fn targets(&self) -> Option<Vec<Target>> { None }
+    fn run(&self, program: &mut IrProgram, _target: Target) {
+        super::pass_stream_fusion::StreamFusionPass.run(program, _target);
+    }
+}
+
 pub fn default_pipeline() -> Pipeline {
     Pipeline::new()
         // Global passes first (need whole-program analysis)
         .add(TypeConcretizationPass)
         .add(BorrowInsertionPass)
         .add(CloneInsertionPass)
+        // Optimization passes (analysis only in Phase 1)
+        .add(StreamFusionPass)
         // Local passes (scope-dependent)
         .add(OptionErasurePass)
         .add(ResultPropagationPass)

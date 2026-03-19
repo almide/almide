@@ -1,4 +1,4 @@
-use super::{Ty, VariantCase, VariantPayload, substitute};
+use super::{Ty, VariantCase, substitute};
 
 pub struct TypeEnv {
     /// User-defined type declarations: name -> Ty
@@ -87,25 +87,18 @@ impl TypeEnv {
 
     fn is_eq_inner(&self, ty: &Ty, seen: &mut std::collections::HashSet<std::string::String>) -> bool {
         match ty {
-            Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit => true,
-            Ty::List(inner) | Ty::Option(inner) => self.is_eq_inner(inner, seen),
-            Ty::Result(ok, err) => self.is_eq_inner(ok, seen) && self.is_eq_inner(err, seen),
-            Ty::Map(k, v) => self.is_eq_inner(k, seen) && self.is_eq_inner(v, seen),
-            Ty::Tuple(tys) => tys.iter().all(|t| self.is_eq_inner(t, seen)),
-            Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().all(|(_, t)| self.is_eq_inner(t, seen)),
-            Ty::Variant { name, cases, .. } => {
+            // Fn types are never Eq
+            Ty::Fn { .. } => false,
+            // Named/Variant need cycle detection via `seen`
+            Ty::Variant { name, .. } => {
                 if !seen.insert(name.clone()) {
                     return true; // Recursive type — assume Eq to break cycle
                 }
-                cases.iter().all(|c| match &c.payload {
-                    VariantPayload::Unit => true,
-                    VariantPayload::Tuple(tys) => tys.iter().all(|t| self.is_eq_inner(t, seen)),
-                    VariantPayload::Record(fs) => fs.iter().all(|(_, t, _)| self.is_eq_inner(t, seen)),
-                })
+                ty.children().iter().all(|child| self.is_eq_inner(child, seen))
             }
             Ty::Named(name, _) => {
                 if !seen.insert(name.clone()) {
-                    return true; // Recursive type
+                    return true;
                 }
                 if let Some(resolved) = self.types.get(name) {
                     self.is_eq_inner(resolved, seen)
@@ -113,10 +106,8 @@ impl TypeEnv {
                     true
                 }
             }
-            Ty::Union(members) => members.iter().all(|m| self.is_eq_inner(m, seen)),
-            Ty::Fn { .. } => false,
-            Ty::TypeVar(_) => true,
-            Ty::Unknown => true,
+            // All other types: Eq if all children are Eq
+            _ => ty.children().iter().all(|child| self.is_eq_inner(child, seen)),
         }
     }
 
@@ -129,22 +120,14 @@ impl TypeEnv {
 
     fn is_hash_inner(&self, ty: &Ty, seen: &mut std::collections::HashSet<std::string::String>) -> bool {
         match ty {
-            Ty::Int | Ty::String | Ty::Bool | Ty::Unit => true,
-            Ty::Float => false,
-            Ty::List(inner) | Ty::Option(inner) => self.is_hash_inner(inner, seen),
-            Ty::Result(ok, err) => self.is_hash_inner(ok, seen) && self.is_hash_inner(err, seen),
-            Ty::Map(_, _) => false, // Maps themselves are not hashable
-            Ty::Tuple(tys) => tys.iter().all(|t| self.is_hash_inner(t, seen)),
-            Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().all(|(_, t)| self.is_hash_inner(t, seen)),
-            Ty::Variant { name, cases, .. } => {
+            // Float, Fn, Map are never hashable
+            Ty::Float | Ty::Fn { .. } | Ty::Map(_, _) => false,
+            // Named/Variant need cycle detection via `seen`
+            Ty::Variant { name, .. } => {
                 if !seen.insert(name.clone()) {
                     return true;
                 }
-                cases.iter().all(|c| match &c.payload {
-                    VariantPayload::Unit => true,
-                    VariantPayload::Tuple(tys) => tys.iter().all(|t| self.is_hash_inner(t, seen)),
-                    VariantPayload::Record(fs) => fs.iter().all(|(_, t, _)| self.is_hash_inner(t, seen)),
-                })
+                ty.children().iter().all(|child| self.is_hash_inner(child, seen))
             }
             Ty::Named(name, _) => {
                 if !seen.insert(name.clone()) {
@@ -156,10 +139,8 @@ impl TypeEnv {
                     true
                 }
             }
-            Ty::Union(members) => members.iter().all(|m| self.is_hash_inner(m, seen)),
-            Ty::Fn { .. } => false,
-            Ty::TypeVar(_) => true,
-            Ty::Unknown => true,
+            // All other types: hashable if all children are hashable
+            _ => ty.children().iter().all(|child| self.is_hash_inner(child, seen)),
         }
     }
 
