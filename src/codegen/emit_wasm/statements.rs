@@ -56,12 +56,64 @@ impl FuncCompiler<'_> {
     }
 }
 
-/// Pre-scan a function body to collect all local variable bindings.
-/// WASM requires all locals declared upfront before the function body.
-pub fn collect_locals(body: &IrExpr) -> Vec<(VarId, ValType)> {
-    let mut locals = Vec::new();
-    scan_expr(body, &mut locals);
-    locals
+/// Result of pre-scanning a function body for local variables.
+pub struct LocalScanResult {
+    pub binds: Vec<(VarId, ValType)>,
+    /// Max nesting depth of match expressions (for scratch locals).
+    pub match_depth: usize,
+}
+
+/// Pre-scan a function body to collect all local variable bindings
+/// and count match nesting depth for scratch local allocation.
+pub fn collect_locals(body: &IrExpr) -> LocalScanResult {
+    let mut binds = Vec::new();
+    scan_expr(body, &mut binds);
+    let match_depth = count_match_depth(body);
+    LocalScanResult { binds, match_depth }
+}
+
+/// Count the maximum nesting depth of match expressions.
+fn count_match_depth(expr: &IrExpr) -> usize {
+    match &expr.kind {
+        IrExprKind::Match { subject, arms } => {
+            let inner = arms.iter()
+                .map(|a| count_match_depth(&a.body))
+                .max().unwrap_or(0);
+            let subj = count_match_depth(subject);
+            1 + inner.max(subj)
+        }
+        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+            let s = stmts.iter().map(|s| count_match_depth_stmt(s)).max().unwrap_or(0);
+            let e = expr.as_ref().map(|e| count_match_depth(e)).unwrap_or(0);
+            s.max(e)
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            count_match_depth(cond)
+                .max(count_match_depth(then))
+                .max(count_match_depth(else_))
+        }
+        IrExprKind::While { cond, body } => {
+            let b = body.iter().map(|s| count_match_depth_stmt(s)).max().unwrap_or(0);
+            count_match_depth(cond).max(b)
+        }
+        IrExprKind::BinOp { left, right, .. } => {
+            count_match_depth(left).max(count_match_depth(right))
+        }
+        IrExprKind::UnOp { operand, .. } => count_match_depth(operand),
+        IrExprKind::Call { args, .. } => {
+            args.iter().map(|a| count_match_depth(a)).max().unwrap_or(0)
+        }
+        _ => 0,
+    }
+}
+
+fn count_match_depth_stmt(stmt: &IrStmt) -> usize {
+    match &stmt.kind {
+        IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => count_match_depth(value),
+        IrStmtKind::Expr { expr } => count_match_depth(expr),
+        IrStmtKind::Guard { cond, else_ } => count_match_depth(cond).max(count_match_depth(else_)),
+        _ => 0,
+    }
 }
 
 fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>) {
@@ -112,6 +164,7 @@ fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>) {
         IrExprKind::Match { subject, arms } => {
             scan_expr(subject, locals);
             for arm in arms {
+                scan_pattern(&arm.pattern, &subject.ty, locals);
                 scan_expr(&arm.body, locals);
             }
         }
@@ -138,5 +191,37 @@ fn scan_stmt(stmt: &IrStmt, locals: &mut Vec<(VarId, ValType)>) {
             scan_expr(else_, locals);
         }
         _ => {}
+    }
+}
+
+/// Scan a match pattern for variable bindings.
+fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, locals: &mut Vec<(VarId, ValType)>) {
+    match pattern {
+        crate::ir::IrPattern::Bind { var } => {
+            if let Some(vt) = values::ty_to_valtype(subject_ty) {
+                locals.push((*var, vt));
+            }
+        }
+        crate::ir::IrPattern::Constructor { args, .. } => {
+            for arg in args {
+                scan_pattern(arg, subject_ty, locals);
+            }
+        }
+        crate::ir::IrPattern::Tuple { elements } => {
+            for elem in elements {
+                scan_pattern(elem, subject_ty, locals);
+            }
+        }
+        crate::ir::IrPattern::Some { inner } | crate::ir::IrPattern::Ok { inner } | crate::ir::IrPattern::Err { inner } => {
+            scan_pattern(inner, subject_ty, locals);
+        }
+        crate::ir::IrPattern::RecordPattern { fields, .. } => {
+            for field in fields {
+                if let Some(pat) = &field.pattern {
+                    scan_pattern(pat, subject_ty, locals);
+                }
+            }
+        }
+        _ => {} // Wildcard, Literal, None — no bindings
     }
 }

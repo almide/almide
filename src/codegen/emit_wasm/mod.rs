@@ -159,6 +159,10 @@ pub struct FuncCompiler<'a> {
     pub var_map: HashMap<u32, u32>,
     pub depth: u32,
     pub loop_stack: Vec<LoopLabels>,
+    // Match scratch locals (one i64 + one i32 per nesting depth)
+    pub match_i64_base: u32,
+    pub match_i32_base: u32,
+    pub match_depth: u32,
 }
 
 // ── Public API ──────────────────────────────────────────────────────

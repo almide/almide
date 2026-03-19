@@ -1,8 +1,8 @@
 //! IrExpr → WASM instruction emission.
 
-use crate::ir::{BinOp, CallTarget, IrExpr, IrExprKind, UnOp};
+use crate::ir::{BinOp, CallTarget, IrExpr, IrExprKind, IrMatchArm, IrPattern, UnOp};
 use crate::types::Ty;
-use wasm_encoder::{BlockType, Instruction, MemArg};
+use wasm_encoder::{BlockType, Instruction, MemArg, ValType};
 
 use super::FuncCompiler;
 use super::values;
@@ -168,15 +168,19 @@ impl FuncCompiler<'_> {
                 self.emit_string_interp(parts);
             }
 
+            // ── Match ──
+            IrExprKind::Match { subject, arms } => {
+                self.emit_match(subject, arms, &expr.ty);
+            }
+
             // ── Codegen-specific nodes (pass-through or ignore) ──
             IrExprKind::Clone { expr: inner } | IrExprKind::Deref { expr: inner } => {
                 // In WASM, clone/deref are no-ops (no ownership system)
                 self.emit_expr(inner);
             }
 
-            // ── Unsupported in Phase 1 ──
+            // ── Unsupported ──
             _ => {
-                // Emit unreachable for unimplemented features
                 self.func.instruction(&Instruction::Unreachable);
             }
         }
@@ -487,6 +491,137 @@ impl FuncCompiler<'_> {
                         // Fallback: emit the expression (already a string pointer or unsupported)
                         self.emit_expr(expr);
                     }
+                }
+            }
+        }
+    }
+    /// Emit a match expression as a chain of if-else checks.
+    ///
+    /// Strategy: store subject in a scratch local, then for each arm:
+    /// - Literal pattern: compare subject to literal, branch if equal
+    /// - Wildcard: unconditional (last arm)
+    /// - Bind: store subject in the bound variable's local, unconditional
+    fn emit_match(&mut self, subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty) {
+        // Determine scratch local for the subject
+        let scratch = match values::ty_to_valtype(&subject.ty) {
+            Some(ValType::I64) => self.match_i64_base + self.match_depth,
+            _ => self.match_i32_base + self.match_depth,
+        };
+        self.match_depth += 1;
+
+        // Evaluate subject and store in scratch
+        self.emit_expr(subject);
+        self.func.instruction(&Instruction::LocalSet(scratch));
+
+        // Emit arms as nested if-else
+        self.emit_match_arms(arms, scratch, &subject.ty, result_ty, 0);
+
+        self.match_depth -= 1;
+    }
+
+    fn emit_match_arms(
+        &mut self,
+        arms: &[IrMatchArm],
+        scratch: u32,
+        subject_ty: &Ty,
+        result_ty: &Ty,
+        idx: usize,
+    ) {
+        if idx >= arms.len() {
+            // No arms matched — should not happen with exhaustive match
+            self.func.instruction(&Instruction::Unreachable);
+            return;
+        }
+
+        let arm = &arms[idx];
+        let is_last = idx + 1 >= arms.len();
+
+        match &arm.pattern {
+            // Wildcard: always matches, emit body directly
+            IrPattern::Wildcard => {
+                self.emit_expr(&arm.body);
+            }
+
+            // Bind: store subject in variable, then emit body
+            IrPattern::Bind { var } => {
+                if let Some(&local_idx) = self.var_map.get(&var.0) {
+                    self.func.instruction(&Instruction::LocalGet(scratch));
+                    self.func.instruction(&Instruction::LocalSet(local_idx));
+                }
+                self.emit_expr(&arm.body);
+            }
+
+            // Literal: compare subject to literal, if-else
+            IrPattern::Literal { expr: lit_expr } => {
+                // Push subject
+                self.func.instruction(&Instruction::LocalGet(scratch));
+                // Push literal
+                self.emit_expr(lit_expr);
+                // Compare
+                match subject_ty {
+                    Ty::Int => { self.func.instruction(&Instruction::I64Eq); }
+                    Ty::Float => { self.func.instruction(&Instruction::F64Eq); }
+                    Ty::Bool => { self.func.instruction(&Instruction::I32Eq); }
+                    Ty::String => {
+                        // String equality: compare pointers (interned literals are deduped)
+                        self.func.instruction(&Instruction::I32Eq);
+                    }
+                    _ => { self.func.instruction(&Instruction::I32Eq); }
+                }
+
+                let bt = values::block_type(result_ty);
+                self.func.instruction(&Instruction::If(bt));
+                self.depth += 1;
+                self.emit_expr(&arm.body);
+                self.func.instruction(&Instruction::Else);
+
+                if is_last {
+                    self.func.instruction(&Instruction::Unreachable);
+                } else {
+                    self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1);
+                }
+
+                self.depth -= 1;
+                self.func.instruction(&Instruction::End);
+            }
+
+            // Constructor pattern (e.g., Some(x), None)
+            IrPattern::Constructor { name: _, args: _ } => {
+                // Phase 2+: needs variant memory layout
+                // For now, handle Option None/Some as special cases
+                if is_last {
+                    self.emit_expr(&arm.body);
+                } else {
+                    self.func.instruction(&Instruction::Unreachable);
+                }
+            }
+
+            // None pattern (Option)
+            IrPattern::None => {
+                // None is represented as i32 0
+                self.func.instruction(&Instruction::LocalGet(scratch));
+                self.func.instruction(&Instruction::I32Eqz);
+                let bt = values::block_type(result_ty);
+                self.func.instruction(&Instruction::If(bt));
+                self.depth += 1;
+                self.emit_expr(&arm.body);
+                self.func.instruction(&Instruction::Else);
+                if is_last {
+                    self.func.instruction(&Instruction::Unreachable);
+                } else {
+                    self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1);
+                }
+                self.depth -= 1;
+                self.func.instruction(&Instruction::End);
+            }
+
+            // Catch-all for unsupported patterns
+            _ => {
+                if is_last {
+                    // Treat as wildcard
+                    self.emit_expr(&arm.body);
+                } else {
+                    self.func.instruction(&Instruction::Unreachable);
                 }
             }
         }
