@@ -1293,47 +1293,54 @@ impl FuncCompiler<'_> {
                 self.emit_expr(start);
                 self.func.instruction(&Instruction::LocalSet(loop_var));
 
-                // block $break
+                // block $break { loop $loop { check; block $continue { body }; i++; br $loop } }
                 let break_depth = self.depth;
                 self.func.instruction(&Instruction::Block(BlockType::Empty));
                 self.depth += 1;
 
-                // loop $continue
-                let continue_depth = self.depth;
+                let loop_depth = self.depth;
                 self.func.instruction(&Instruction::Loop(BlockType::Empty));
                 self.depth += 1;
 
-                self.loop_stack.push(super::LoopLabels { break_depth, continue_depth });
-
-                // Break condition: if var >= end (exclusive) or var > end (inclusive)
+                // Break condition
                 self.func.instruction(&Instruction::LocalGet(loop_var));
                 self.emit_expr(end);
                 if *inclusive {
-                    self.func.instruction(&Instruction::I64GtS); // var > end → break
+                    self.func.instruction(&Instruction::I64GtS);
                 } else {
-                    self.func.instruction(&Instruction::I64GeS); // var >= end → break
+                    self.func.instruction(&Instruction::I64GeS);
                 }
                 self.func.instruction(&Instruction::BrIf(self.depth - break_depth - 1));
+
+                // Inner block for continue target
+                let continue_depth = self.depth;
+                self.func.instruction(&Instruction::Block(BlockType::Empty));
+                self.depth += 1;
+
+                self.loop_stack.push(super::LoopLabels { break_depth, continue_depth });
 
                 // Body
                 for stmt in body {
                     self.emit_stmt(stmt);
                 }
 
-                // Increment: var += 1
+                self.loop_stack.pop();
+                self.depth -= 1;
+                self.func.instruction(&Instruction::End); // end continue block
+
+                // Increment: var += 1 (always runs, even after continue)
                 self.func.instruction(&Instruction::LocalGet(loop_var));
                 self.func.instruction(&Instruction::I64Const(1));
                 self.func.instruction(&Instruction::I64Add);
                 self.func.instruction(&Instruction::LocalSet(loop_var));
 
-                // Continue
-                self.func.instruction(&Instruction::Br(self.depth - continue_depth - 1));
+                // Loop back
+                self.func.instruction(&Instruction::Br(self.depth - loop_depth - 1));
 
-                self.loop_stack.pop();
                 self.depth -= 1;
                 self.func.instruction(&Instruction::End); // end loop
                 self.depth -= 1;
-                self.func.instruction(&Instruction::End); // end block
+                self.func.instruction(&Instruction::End); // end break block
             }
             _ => {
                 // List (or other collection) for...in
@@ -1354,29 +1361,26 @@ impl FuncCompiler<'_> {
                 self.func.instruction(&Instruction::I32Const(0));
                 self.func.instruction(&Instruction::LocalSet(idx_scratch));
 
-                // block $break
+                // Structure: block $break { loop $loop { check; load; block $continue { body }; i++; br $loop } }
+                // continue → br to $continue end (skips rest of body, runs i++)
                 let break_depth = self.depth;
                 self.func.instruction(&Instruction::Block(BlockType::Empty));
                 self.depth += 1;
 
-                // loop $continue
-                let continue_depth = self.depth;
+                let loop_depth = self.depth;
                 self.func.instruction(&Instruction::Loop(BlockType::Empty));
                 self.depth += 1;
-
-                self.loop_stack.push(super::LoopLabels { break_depth, continue_depth });
 
                 // Break if index >= len
                 self.func.instruction(&Instruction::LocalGet(idx_scratch));
                 self.func.instruction(&Instruction::LocalGet(list_scratch));
                 self.func.instruction(&Instruction::I32Load(MemArg {
                     offset: 0, align: 2, memory_index: 0,
-                })); // load len
+                }));
                 self.func.instruction(&Instruction::I32GeU);
                 self.func.instruction(&Instruction::BrIf(self.depth - break_depth - 1));
 
-                // Load element: var = list[index]
-                // address = list_ptr + 4 + index * elem_size
+                // Load element
                 self.func.instruction(&Instruction::LocalGet(list_scratch));
                 self.func.instruction(&Instruction::I32Const(4));
                 self.func.instruction(&Instruction::I32Add);
@@ -1387,7 +1391,7 @@ impl FuncCompiler<'_> {
                 self.emit_load_at(&elem_ty, 0);
                 self.func.instruction(&Instruction::LocalSet(loop_var));
 
-                // Tuple destructure: extract fields from loop_var into var_tuple locals
+                // Tuple destructure
                 if let Some(tuple_vars) = var_tuple {
                     if let Ty::Tuple(elem_types) = &elem_ty {
                         let mut field_offset = 0u32;
@@ -1403,25 +1407,35 @@ impl FuncCompiler<'_> {
                     }
                 }
 
+                // Inner block for continue target
+                let continue_depth = self.depth;
+                self.func.instruction(&Instruction::Block(BlockType::Empty));
+                self.depth += 1;
+
+                self.loop_stack.push(super::LoopLabels { break_depth, continue_depth });
+
                 // Body
                 for stmt in body {
                     self.emit_stmt(stmt);
                 }
 
-                // Increment index
+                self.loop_stack.pop();
+                self.depth -= 1;
+                self.func.instruction(&Instruction::End); // end continue block
+
+                // Increment index (always runs, even after continue)
                 self.func.instruction(&Instruction::LocalGet(idx_scratch));
                 self.func.instruction(&Instruction::I32Const(1));
                 self.func.instruction(&Instruction::I32Add);
                 self.func.instruction(&Instruction::LocalSet(idx_scratch));
 
-                // Continue
-                self.func.instruction(&Instruction::Br(self.depth - continue_depth - 1));
+                // Loop back
+                self.func.instruction(&Instruction::Br(self.depth - loop_depth - 1));
 
-                self.loop_stack.pop();
                 self.depth -= 1;
                 self.func.instruction(&Instruction::End); // end loop
                 self.depth -= 1;
-                self.func.instruction(&Instruction::End); // end block
+                self.func.instruction(&Instruction::End); // end break block
             }
         }
     }

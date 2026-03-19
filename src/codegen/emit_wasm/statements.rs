@@ -34,23 +34,30 @@ impl FuncCompiler<'_> {
             }
 
             IrStmtKind::Guard { cond, else_ } => {
-                // Guard: if cond is false, evaluate else_ (for side effects), then break
+                // Guard: if cond is false, execute else_ action
                 self.emit_expr(cond);
                 self.func.instruction(&Instruction::I32Eqz);
                 self.func.instruction(&Instruction::If(wasm_encoder::BlockType::Empty));
                 self.depth += 1;
-                // Evaluate else_ and drop its value
-                if !matches!(else_.kind, crate::ir::IrExprKind::Break) {
-                    self.emit_expr(else_);
-                    if super::values::ty_to_valtype(&else_.ty).is_some() {
-                        self.func.instruction(&Instruction::Drop);
+
+                match &else_.kind {
+                    // Break/Continue: emit directly (they generate the right br)
+                    crate::ir::IrExprKind::Break | crate::ir::IrExprKind::Continue => {
+                        self.emit_expr(else_);
+                    }
+                    // Other expressions: evaluate, drop value, then break
+                    _ => {
+                        self.emit_expr(else_);
+                        if super::values::ty_to_valtype(&else_.ty).is_some() {
+                            self.func.instruction(&Instruction::Drop);
+                        }
+                        if let Some(labels) = self.loop_stack.last() {
+                            let relative = self.depth - labels.break_depth - 1;
+                            self.func.instruction(&Instruction::Br(relative));
+                        }
                     }
                 }
-                // Break out of the enclosing loop/do block
-                if let Some(labels) = self.loop_stack.last() {
-                    let relative = self.depth - labels.break_depth - 1;
-                    self.func.instruction(&Instruction::Br(relative));
-                }
+
                 self.depth -= 1;
                 self.func.instruction(&Instruction::End);
             }
