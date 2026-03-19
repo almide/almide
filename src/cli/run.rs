@@ -43,7 +43,7 @@ pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool, test_m
             .arg(&bin_path)
             .arg("-C").arg("overflow-checks=no")
             .arg("-C").arg("opt-level=1")
-            .arg("-C").arg("incremental=")
+            .arg("-C").arg(format!("incremental={}", incremental_cache_dir().join("incremental").display()))
             .arg("--edition").arg("2021");
         if use_test_harness {
             rustc_cmd.arg("--test");
