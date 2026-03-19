@@ -50,6 +50,7 @@ pub struct RuntimeFuncs {
     pub str_eq: u32,
     pub concat_list: u32,
     pub list_eq: u32,
+    pub mem_eq: u32, // __mem_eq(a, b, size) -> i32
 }
 
 /// Import descriptor for WASM import section.
@@ -147,6 +148,7 @@ impl WasmEmitter {
                 str_eq: 0,
                 concat_list: 0,
                 list_eq: 0,
+                mem_eq: 0,
             },
             heap_ptr_global: 0,
             top_let_globals: HashMap::new(),

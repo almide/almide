@@ -443,6 +443,38 @@ impl FuncCompiler<'_> {
                 self.func.instruction(&Instruction::I32Const(elem_size as i32));
                 self.func.instruction(&Instruction::Call(self.emitter.rt.list_eq));
             }
+            // Record: byte-compare the entire struct
+            Ty::Record { fields } => {
+                let size = values::record_size(fields);
+                self.func.instruction(&Instruction::I32Const(size as i32));
+                self.func.instruction(&Instruction::Call(self.emitter.rt.mem_eq));
+            }
+            // Named types (records/variants): compute size from registered fields
+            Ty::Named(name, _) => {
+                let fields = self.emitter.record_fields.get(name.as_str()).cloned().unwrap_or_default();
+                let tag_offset = if self.emitter.variant_info.contains_key(name.as_str()) { 4u32 } else { 0 };
+                let size = tag_offset + values::record_size(&fields);
+                if size > 0 {
+                    self.func.instruction(&Instruction::I32Const(size as i32));
+                    self.func.instruction(&Instruction::Call(self.emitter.rt.mem_eq));
+                } else {
+                    self.func.instruction(&Instruction::I32Eq);
+                }
+            }
+            // Option: both none (0==0) or both some → compare pointed values
+            Ty::Applied(crate::types::constructor::TypeConstructorId::Option, args) => {
+                let inner_size = args.first().map(|t| values::byte_size(t)).unwrap_or(8);
+                self.func.instruction(&Instruction::I32Const(inner_size as i32));
+                self.func.instruction(&Instruction::Call(self.emitter.rt.mem_eq));
+            }
+            // Result: compare tag + value bytes
+            Ty::Applied(crate::types::constructor::TypeConstructorId::Result, args) => {
+                let ok_size = args.first().map(|t| values::byte_size(t)).unwrap_or(8);
+                let err_size = args.get(1).map(|t| values::byte_size(t)).unwrap_or(4);
+                let total = 4 + ok_size.max(err_size);
+                self.func.instruction(&Instruction::I32Const(total as i32));
+                self.func.instruction(&Instruction::Call(self.emitter.rt.mem_eq));
+            }
             _ => { self.func.instruction(&Instruction::I32Eq); }
         }
         if negate {
