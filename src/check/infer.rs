@@ -127,24 +127,7 @@ impl Checker {
                     "+" => {
                         let lc = resolve_vars(&lt, &self.solutions);
                         let rc = resolve_vars(&rt, &self.solutions);
-                        // + works for: String+String, List+List (concat), numeric+numeric (add)
-                        let l_concat = matches!(&lc, Ty::String | Ty::Applied(TypeConstructorId::List, _));
-                        let r_concat = matches!(&rc, Ty::String | Ty::Applied(TypeConstructorId::List, _));
-                        let l_unknown = matches!(&lc, Ty::Unknown | Ty::TypeVar(_));
-                        let r_unknown = matches!(&rc, Ty::Unknown | Ty::TypeVar(_));
-                        let is_concat = (l_concat && (r_concat || r_unknown))
-                            || (r_concat && l_unknown);
-                        if is_concat {
-                            lt // concat: return same type
-                        } else {
-                            let is_numeric = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_));
-                            if !is_numeric(&lc) || !is_numeric(&rc) {
-                                self.emit(super::err(
-                                    format!("operator '+' requires numeric, String, or List types but got {} and {}", lc.display(), rc.display()),
-                                    "Use + with numeric types, String, or List", format!("operator +")));
-                            }
-                            if lc == Ty::Float || rc == Ty::Float { Ty::Float } else { lt }
-                        }
+                        self.infer_plus_op(&lc, &rc, lt)
                     }
                     "-" | "*" | "/" | "%" => {
                         let lc = resolve_vars(&lt, &self.solutions);
@@ -231,17 +214,16 @@ impl Checker {
                         "fan block".to_string()).with_code("E007"));
                 }
                 // Check for mutable variable capture
-                for e in exprs.iter() {
+                let mutable_captures: Vec<String> = exprs.iter().flat_map(|e| {
                     let mut idents = Vec::new();
                     collect_idents(e, &mut idents);
-                    for name in &idents {
-                        if self.env.mutable_vars.contains(name) {
-                            self.emit(super::err(
-                                format!("cannot capture mutable variable '{}' inside fan block", name),
-                                "Use a `let` binding instead of `var` for values shared across fan expressions",
-                                "fan block".to_string()).with_code("E008"));
-                        }
-                    }
+                    idents.into_iter().filter(|name| self.env.mutable_vars.contains(name)).collect::<Vec<_>>()
+                }).collect();
+                for name in &mutable_captures {
+                    self.emit(super::err(
+                        format!("cannot capture mutable variable '{}' inside fan block", name),
+                        "Use a `let` binding instead of `var` for values shared across fan expressions",
+                        "fan block".to_string()).with_code("E008"));
                 }
                 let tys: Vec<Ty> = exprs.iter_mut().map(|e| {
                     let ty = self.infer_expr(e);
@@ -367,15 +349,9 @@ impl Checker {
                 match callee.as_mut() {
                     ast::Expr::Ident { name, .. } => self.check_named_call(name, &all_arg_tys),
                     ast::Expr::Member { object, field, .. } => {
-                        if let ast::Expr::Ident { name: module, .. } = object.as_ref() {
-                            if crate::stdlib::is_stdlib_module(module) || self.env.user_modules.contains(module.as_str()) {
-                                let key = format!("{}.{}", module, field);
-                                return self.check_named_call(&key, &all_arg_tys);
-                            }
-                            if let Some(target) = self.env.module_aliases.get(module.as_str()).cloned() {
-                                let key = format!("{}.{}", target, field);
-                                return self.check_named_call(&key, &all_arg_tys);
-                            }
+                        let module_key = self.resolve_module_call(object, field);
+                        if let Some(key) = module_key {
+                            return self.check_named_call(&key, &all_arg_tys);
                         }
                         let ct = self.infer_expr(callee);
                         let ret = self.fresh_var();
@@ -398,15 +374,8 @@ impl Checker {
             // Pipe RHS is a module-qualified function (e.g. `5 |> int.abs`)
             ast::Expr::Member { object, field, .. } => {
                 let all_arg_tys = vec![left_ty];
-                if let ast::Expr::Ident { name: module, .. } = object.as_ref() {
-                    if crate::stdlib::is_stdlib_module(module) || self.env.user_modules.contains(module.as_str()) {
-                        let key = format!("{}.{}", module, field);
-                        return self.check_named_call(&key, &all_arg_tys);
-                    }
-                    if let Some(target) = self.env.module_aliases.get(module.as_str()).cloned() {
-                        let key = format!("{}.{}", target, field);
-                        return self.check_named_call(&key, &all_arg_tys);
-                    }
+                if let Some(key) = self.resolve_module_call(object, field) {
+                    return self.check_named_call(&key, &all_arg_tys);
                 }
                 let ct = self.infer_expr(right);
                 let ret = self.fresh_var();
@@ -551,6 +520,36 @@ impl Checker {
             ast::Pattern::Err { inner } => { let it = match ty { Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[1].clone(), _ => Ty::Unknown }; self.bind_pattern(inner, &it); }
             ast::Pattern::None | ast::Pattern::Literal { .. } => {}
         }
+    }
+
+    /// Infer the result type of the + operator (numeric add or string/list concat).
+    fn infer_plus_op(&mut self, lc: &Ty, rc: &Ty, lt: Ty) -> Ty {
+        let is_concat_ty = |t: &Ty| matches!(t, Ty::String | Ty::Applied(TypeConstructorId::List, _));
+        let is_unknown_ty = |t: &Ty| matches!(t, Ty::Unknown | Ty::TypeVar(_));
+        if (is_concat_ty(lc) && (is_concat_ty(rc) || is_unknown_ty(rc)))
+            || (is_concat_ty(rc) && is_unknown_ty(lc)) {
+            return lt; // concat: return same type
+        }
+        let is_numeric = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_));
+        if !is_numeric(lc) || !is_numeric(rc) {
+            self.emit(super::err(
+                format!("operator '+' requires numeric, String, or List types but got {} and {}", lc.display(), rc.display()),
+                "Use + with numeric types, String, or List", format!("operator +")));
+        }
+        if *lc == Ty::Float || *rc == Ty::Float { Ty::Float } else { lt }
+    }
+
+    /// Resolve a module.func Member expression to a qualified call key.
+    fn resolve_module_call(&self, object: &ast::Expr, field: &str) -> Option<String> {
+        if let ast::Expr::Ident { name: module, .. } = object {
+            if crate::stdlib::is_stdlib_module(module) || self.env.user_modules.contains(module.as_str()) {
+                return Some(format!("{}.{}", module, field));
+            }
+            if let Some(target) = self.env.module_aliases.get(module.as_str()) {
+                return Some(format!("{}.{}", target, field));
+            }
+        }
+        None
     }
 }
 

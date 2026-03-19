@@ -135,19 +135,15 @@ fn detect_pipe_chains_inner(
                 let mut current = args.first().map(|a| unwrap_decorators(a));
 
                 while let Some(arg) = current {
-                    let inner_name = match &arg.kind {
-                        IrExprKind::Call { target: CallTarget::Named { name }, .. } => Some(name.as_str()),
-                        IrExprKind::Call { target: CallTarget::Module { func, .. }, .. } => Some(func.as_str()),
+                    let inner_op = extract_call_name(arg).and_then(classify_stdlib_op);
+                    let inner_args_opt = match &arg.kind {
+                        IrExprKind::Call { args, .. } => Some(args),
                         _ => None,
                     };
-                    if let Some(iname) = inner_name {
-                        if let Some(inner_op) = classify_stdlib_op(iname) {
-                            if let IrExprKind::Call { args: inner_args, .. } = &arg.kind {
-                                chain_ops.push(inner_op);
-                                current = inner_args.first().map(|a| unwrap_decorators(a));
-                                continue;
-                            }
-                        }
+                    if let (Some(op), Some(inner_args)) = (inner_op, inner_args_opt) {
+                        chain_ops.push(op);
+                        current = inner_args.first().map(|a| unwrap_decorators(a));
+                        continue;
                     }
                     break;
                 }
@@ -173,87 +169,29 @@ fn detect_pipe_chains_inner(
         }
 
         // Detect let-binding chains: let a = map(x); let b = filter(a); fold(b)
-        // This is how |> desugars in Almide's IR
         IrExprKind::Block { stmts, expr: body } => {
-            // Collect sequential let bindings that are pipe operations
             let mut let_chain: Vec<(VarId, PipeOp, &IrExpr)> = Vec::new();
             for stmt in stmts {
-                match &stmt.kind {
-                    IrStmtKind::Bind { var, value, .. } => {
-                        let call_name = match &value.kind {
-                            IrExprKind::Call { target: CallTarget::Module { func, .. }, .. } => Some(func.as_str()),
-                            IrExprKind::Call { target: CallTarget::Named { name }, .. } => Some(name.as_str()),
-                            _ => None,
-                        };
-                        if let Some(name) = call_name {
-                            if let Some(op) = classify_stdlib_op(name) {
-                                // Check if first arg references the previous let binding
-                                let is_chained = if let Some((prev_var, _, _)) = let_chain.last() {
-                                    first_arg_is_var(value, *prev_var)
-                                } else {
-                                    true // First in chain
-                                };
-                                if is_chained {
-                                    let_chain.push((*var, op, value));
-                                    continue;
-                                }
-                            }
-                        }
-                        // Not a chain op — flush and reset
-                        flush_let_chain(&let_chain, registry, chains);
-                        let_chain.clear();
-                        detect_pipe_chains_inner(value, registry, chains);
-                    }
-                    IrStmtKind::Expr { expr } => {
-                        // Check if this expression continues the chain
-                        let call_name = match &expr.kind {
-                            IrExprKind::Call { target: CallTarget::Module { func, .. }, .. } => Some(func.as_str()),
-                            IrExprKind::Call { target: CallTarget::Named { name }, .. } => Some(name.as_str()),
-                            _ => None,
-                        };
-                        if let Some(name) = call_name {
-                            if let Some(op) = classify_stdlib_op(name) {
-                                if let Some((prev_var, _, _)) = let_chain.last() {
-                                    if first_arg_is_var(expr, *prev_var) {
-                                        let_chain.push((VarId(0), op, expr)); // VarId doesn't matter for last
-                                        continue;
-                                    }
-                                }
-                            }
-                        }
-                        flush_let_chain(&let_chain, registry, chains);
-                        let_chain.clear();
-                        detect_pipe_chains_inner(expr, registry, chains);
-                    }
-                    _ => {
-                        flush_let_chain(&let_chain, registry, chains);
-                        let_chain.clear();
+                let extended = match &stmt.kind {
+                    IrStmtKind::Bind { var, value, .. } => try_extend_chain(value, *var, &mut let_chain),
+                    IrStmtKind::Expr { expr } => try_extend_chain(expr, VarId(0), &mut let_chain),
+                    _ => false,
+                };
+                if !extended {
+                    flush_let_chain(&let_chain, registry, chains);
+                    let_chain.clear();
+                    match &stmt.kind {
+                        IrStmtKind::Bind { value, .. } => detect_pipe_chains_inner(value, registry, chains),
+                        IrStmtKind::Expr { expr } => detect_pipe_chains_inner(expr, registry, chains),
+                        _ => {}
                     }
                 }
             }
-            // Also check if body expr continues the chain
+            let body_appended = body.as_ref()
+                .map_or(false, |e| try_extend_chain(e, VarId(0), &mut let_chain));
+            flush_let_chain(&let_chain, registry, chains);
             if let Some(e) = body {
-                let call_name = match &e.kind {
-                    IrExprKind::Call { target: CallTarget::Module { func, .. }, .. } => Some(func.as_str()),
-                    IrExprKind::Call { target: CallTarget::Named { name }, .. } => Some(name.as_str()),
-                    _ => None,
-                };
-                let appended = if let Some(name) = call_name {
-                    if let Some(op) = classify_stdlib_op(name) {
-                        if let Some((prev_var, _, _)) = let_chain.last() {
-                            if first_arg_is_var(e, *prev_var) {
-                                let_chain.push((VarId(0), op, e));
-                                true
-                            } else { false }
-                        } else { false }
-                    } else { false }
-                } else { false };
-                flush_let_chain(&let_chain, registry, chains);
-                if !appended {
-                    detect_pipe_chains_inner(e, registry, chains);
-                }
-            } else {
-                flush_let_chain(&let_chain, registry, chains);
+                if !body_appended { detect_pipe_chains_inner(e, registry, chains); }
             }
         }
         IrExprKind::If { cond, then, else_ } => {
@@ -268,6 +206,34 @@ fn detect_pipe_chains_inner(
     }
 }
 
+
+
+/// Extract the function name from a call expression (Module or Named).
+fn extract_call_name(expr: &IrExpr) -> Option<&str> {
+    match &expr.kind {
+        IrExprKind::Call { target: CallTarget::Module { func, .. }, .. } => Some(func.as_str()),
+        IrExprKind::Call { target: CallTarget::Named { name }, .. } => Some(name.as_str()),
+        _ => None,
+    }
+}
+
+/// Try to extend a let-binding chain with an expression. Returns true if appended.
+fn try_extend_chain<'a>(
+    expr: &'a IrExpr,
+    var: VarId,
+    let_chain: &mut Vec<(VarId, PipeOp, &'a IrExpr)>,
+) -> bool {
+    let Some(name) = extract_call_name(expr) else { return false };
+    let Some(op) = classify_stdlib_op(name) else { return false };
+    let is_chained = let_chain.last()
+        .map_or(true, |(prev_var, _, _)| first_arg_is_var(expr, *prev_var));
+    if is_chained {
+        let_chain.push((var, op, expr));
+        true
+    } else {
+        false
+    }
+}
 
 /// Check if the first argument of a call expression is a variable reference.
 fn first_arg_is_var(expr: &IrExpr, var: VarId) -> bool {

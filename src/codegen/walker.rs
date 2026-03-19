@@ -371,83 +371,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                     ctx.templates.render_with("module_call", None, &[], &[("module", module.as_str()), ("func", func.as_str()), ("args", args_str.as_str())])
                         .unwrap_or_else(|| format!("__almd_{}.{}()", module, func))
                 }
-                _ => {
-                    let callee = match target {
-                        CallTarget::Named { name } => {
-                            // Qualify enum constructors (Red → Color::Red)
-                            if let Some(enum_name) = ctx.ann.ctor_to_enum.get(name.as_str()) {
-                                // Box-wrap args for recursive enum constructors
-                                let boxed_args: Vec<String> = args.iter().map(|a| {
-                                    let rendered = render_expr(ctx, a);
-                                    if ctx.ann.recursive_enums.contains(enum_name) && ty_contains_name(&a.ty, enum_name) {
-                                        format!("Box::new({})", rendered)
-                                    } else {
-                                        rendered
-                                    }
-                                }).collect();
-                                let args_str = boxed_args.join(", ");
-                                if args.is_empty() {
-                                    return ctx.templates.render_with("ctor_unit", None, &[], &[("enum_name", enum_name.as_str()), ("ctor_name", name.as_str()), ("args", args_str.as_str())])
-                                        .unwrap_or_else(|| format!("{}::{}", enum_name, name));
-                                } else {
-                                    return ctx.templates.render_with("ctor_call", None, &[], &[("enum_name", enum_name.as_str()), ("ctor_name", name.as_str()), ("args", args_str.as_str())])
-                                        .unwrap_or_else(|| format!("{}::{}({})", enum_name, name, args_str));
-                                }
-                            }
-                            name.clone()
-                        }
-                        CallTarget::Method { object, method } => {
-                            // User-defined UFCS: plain method name (no dots) that isn't
-                            // a Rust intrinsic method → convert to func(object, args)
-                            let is_rust_intrinsic = matches!(method.as_str(),
-                                "clone" | "is_some" | "is_none" | "unwrap" | "unwrap_or"
-                                | "to_string" | "len" | "push" | "pop" | "insert" | "remove"
-                                | "contains" | "iter" | "into_iter" | "collect" | "map"
-                                | "filter" | "to_vec" | "join" | "split" | "trim"
-                                | "starts_with" | "ends_with" | "replace" | "chars"
-                                | "as_str" | "get" | "keys" | "values" | "abs" | "powi"
-                                | "is_empty" | "contains_key" | "entry" | "or_insert"
-                                | "expect" | "ok" | "err" | "and_then" | "map_err"
-                                | "unwrap_or_else" | "ok_or" | "flatten" | "as_ref"
-                            );
-                            if !method.contains('.') && !is_rust_intrinsic {
-                                // User-defined function: f(obj, args)
-                                let obj_str = render_expr(ctx, object);
-                                let mut all_args = vec![obj_str];
-                                all_args.extend(args.iter().map(|a| render_expr(ctx, a)));
-                                let all_args_str = all_args.join(", ");
-                                return format!("{}({})", method, all_args_str);
-                            }
-                            // Module.func UFCS: render via module_call template
-                            if method.contains('.') {
-                                let obj_str = render_expr(ctx, object);
-                                let mut all_args = vec![obj_str];
-                                all_args.extend(args.iter().map(|a| render_expr(ctx, a)));
-                                let all_args_str = all_args.join(", ");
-                                if let Some(dot_pos) = method.find('.') {
-                                    let module = &method[..dot_pos];
-                                    let func = &method[dot_pos+1..];
-                                    return ctx.templates.render_with("module_call", None, &[], &[("module", module), ("func", func), ("args", all_args_str.as_str())])
-                                        .unwrap_or_else(|| format!("{}.{}()", module, func));
-                                }
-                            }
-                            format!("{}.{}", render_expr(ctx, object), method)
-                        }
-                        CallTarget::Computed { callee } => {
-                            let s = render_expr(ctx, callee);
-                            // Lambdas need parens when immediately invoked
-                            if matches!(&callee.kind, IrExprKind::Lambda { .. }) {
-                                format!("({})", s)
-                            } else {
-                                s
-                            }
-                        }
-                        CallTarget::Module { .. } => unreachable!(),
-                    };
-                    let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
-                    ctx.templates.render_with("call_expr", None, &[], &[("callee", callee.as_str()), ("args", args_str.as_str())])
-                        .unwrap_or_else(|| format!("call(...)"))
-                }
+                _ => render_generic_call(ctx, target, args)
             }
         }
 
@@ -499,18 +423,14 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .cloned()
                 .collect();
             for (_, field_name) in &default_keys {
-                if !explicit_names.contains(field_name.as_str()) {
-                    if let Some(default_expr) = ctx.ann.default_fields.get(&(ctor_name_str.to_string(), field_name.clone())) {
-                        let mut val_str = render_expr(ctx, default_expr);
-                        if let Some(cn) = name {
-                            if ctx.ann.boxed_fields.contains(&(cn.clone(), field_name.clone())) {
-                                val_str = format!("Box::new({})", val_str);
-                            }
-                        }
-                        field_strs.push(ctx.templates.render_with("record_field", None, &[], &[("name", field_name.as_str()), ("value", val_str.as_str())])
-                            .unwrap_or_else(|| format!("{}: {}", field_name, val_str)));
-                    }
-                }
+                if explicit_names.contains(field_name.as_str()) { continue; }
+                let Some(default_expr) = ctx.ann.default_fields.get(&(ctor_name_str.to_string(), field_name.clone())) else { continue; };
+                let mut val_str = render_expr(ctx, default_expr);
+                let needs_box = name.as_ref()
+                    .map_or(false, |cn| ctx.ann.boxed_fields.contains(&(cn.clone(), field_name.clone())));
+                if needs_box { val_str = format!("Box::new({})", val_str); }
+                field_strs.push(ctx.templates.render_with("record_field", None, &[], &[("name", field_name.as_str()), ("value", val_str.as_str())])
+                    .unwrap_or_else(|| format!("{}: {}", field_name, val_str)));
             }
             let fields_str = field_strs.join(", ");
             // Resolve type name: explicit name, or from expr.ty
@@ -1328,6 +1248,87 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
     parts.join("\n\n")
 }
 
+/// Render a generic call expression (Named, Method, or Computed target).
+fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr]) -> String {
+    let callee = match target {
+        CallTarget::Named { name } => {
+            if let Some(enum_name) = ctx.ann.ctor_to_enum.get(name.as_str()) {
+                return render_enum_constructor(ctx, name, enum_name, args);
+            }
+            name.clone()
+        }
+        CallTarget::Method { object, method } => {
+            if let Some(full) = render_method_call_full(ctx, object, method, args) {
+                return full;
+            }
+            format!("{}.{}", render_expr(ctx, object), method)
+        }
+        CallTarget::Computed { callee } => {
+            let s = render_expr(ctx, callee);
+            if matches!(&callee.kind, IrExprKind::Lambda { .. }) { format!("({})", s) } else { s }
+        }
+        CallTarget::Module { .. } => unreachable!(),
+    };
+    let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
+    ctx.templates.render_with("call_expr", None, &[], &[("callee", callee.as_str()), ("args", args_str.as_str())])
+        .unwrap_or_else(|| format!("call(...)"))
+}
+
+/// Render a method call as a full expression for UFCS and module.func patterns.
+/// Returns Some(full_expr) if the method call was handled, None for normal obj.method calls.
+fn render_method_call_full(ctx: &RenderContext, object: &IrExpr, method: &str, args: &[IrExpr]) -> Option<String> {
+    let is_rust_intrinsic = matches!(method,
+        "clone" | "is_some" | "is_none" | "unwrap" | "unwrap_or"
+        | "to_string" | "len" | "push" | "pop" | "insert" | "remove"
+        | "contains" | "iter" | "into_iter" | "collect" | "map"
+        | "filter" | "to_vec" | "join" | "split" | "trim"
+        | "starts_with" | "ends_with" | "replace" | "chars"
+        | "as_str" | "get" | "keys" | "values" | "abs" | "powi"
+        | "is_empty" | "contains_key" | "entry" | "or_insert"
+        | "expect" | "ok" | "err" | "and_then" | "map_err"
+        | "unwrap_or_else" | "ok_or" | "flatten" | "as_ref"
+    );
+    // User-defined UFCS: plain method name (no dots) → func(object, args)
+    if !method.contains('.') && !is_rust_intrinsic {
+        let obj_str = render_expr(ctx, object);
+        let mut all_args = vec![obj_str];
+        all_args.extend(args.iter().map(|a| render_expr(ctx, a)));
+        return Some(format!("{}({})", method, all_args.join(", ")));
+    }
+    // Module.func UFCS: render via module_call template
+    if let Some(dot_pos) = method.find('.') {
+        let obj_str = render_expr(ctx, object);
+        let mut all_args = vec![obj_str];
+        all_args.extend(args.iter().map(|a| render_expr(ctx, a)));
+        let module = &method[..dot_pos];
+        let func = &method[dot_pos+1..];
+        return Some(ctx.templates.render_with("module_call", None, &[], &[("module", module), ("func", func), ("args", all_args.join(", ").as_str())])
+            .unwrap_or_else(|| format!("{}.{}()", module, func)));
+    }
+    None
+}
+
+/// Render an enum constructor call with optional Box wrapping for recursive types.
+fn render_enum_constructor(ctx: &RenderContext, ctor_name: &str, enum_name: &str, args: &[IrExpr]) -> String {
+    let boxed_args: Vec<String> = args.iter().map(|a| {
+        let rendered = render_expr(ctx, a);
+        if ctx.ann.recursive_enums.contains(enum_name) && ty_contains_name(&a.ty, enum_name) {
+            format!("Box::new({})", rendered)
+        } else {
+            rendered
+        }
+    }).collect();
+    let args_str = boxed_args.join(", ");
+    if args.is_empty() {
+        ctx.templates.render_with("ctor_unit", None, &[], &[("enum_name", enum_name), ("ctor_name", ctor_name), ("args", args_str.as_str())])
+            .unwrap_or_else(|| format!("{}::{}", enum_name, ctor_name))
+    } else {
+        ctx.templates.render_with("ctor_call", None, &[], &[("enum_name", enum_name), ("ctor_name", ctor_name), ("args", args_str.as_str())])
+            .unwrap_or_else(|| format!("{}::{}({})", enum_name, ctor_name, args_str))
+    }
+}
+
+
 fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
     // Build generics string e.g. "<T>" or "<T, U>"
     let generics_str = if let Some(generics) = &td.generics {
@@ -1367,13 +1368,10 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                             .unwrap_or_else(|| v.name.clone())
                     }
                     IrVariantKind::Tuple { fields } => {
+                        let is_recursive = ctx.ann.recursive_enums.contains(&td.name);
                         let types: Vec<String> = fields.iter().map(|t| {
                             let rendered = render_type(ctx, t);
-                            if ctx.ann.recursive_enums.contains(&td.name) && ty_contains_name(t, &td.name) {
-                                format!("Box<{}>", rendered)
-                            } else {
-                                rendered
-                            }
+                            if is_recursive && ty_contains_name(t, &td.name) { format!("Box<{}>", rendered) } else { rendered }
                         }).collect();
                         let fields_str = types.join(", ");
                         // Named params via fn_param template (respects JS/TS)

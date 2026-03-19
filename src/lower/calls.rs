@@ -57,26 +57,24 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
             .unwrap_or_default();
         let defaults = ctx.fn_defaults.get(name).cloned();
         let positional_count = ir_args.len();
-        for i in positional_count..param_names.len() {
-            let param_name = &param_names[i];
-            if let Some((_, expr)) = named_args.iter().find(|(n, _)| n == param_name) {
-                ir_args.push(lower_expr(ctx, expr));
-            } else if let Some(ref defs) = defaults
-                && let Some(Some(default_expr)) = defs.get(i)
-            {
-                ir_args.push(lower_expr(ctx, default_expr));
-            }
-        }
+        ir_args.extend(param_names[positional_count..].iter().filter_map(|param_name| {
+            named_args.iter()
+                .find(|(n, _)| n == param_name)
+                .map(|(_, expr)| lower_expr(ctx, expr))
+                .or_else(|| defaults.as_ref()
+                    .and_then(|defs| defs.get(positional_count + param_names[positional_count..].iter().position(|p| p == param_name).unwrap_or(0)))
+                    .and_then(|d| d.as_ref())
+                    .map(|default_expr| lower_expr(ctx, default_expr)))
+        }));
     }
 
     // Default args: fill in remaining defaults (for calls without named args)
     if let (true, CallTarget::Named { name }) = (named_args.is_empty(), &target) {
         if let Some(defaults) = ctx.fn_defaults.get(name).cloned() {
-            for i in ir_args.len()..defaults.len() {
-                if let Some(Some(default_expr)) = defaults.get(i) {
-                    ir_args.push(lower_expr(ctx, &default_expr));
-                }
-            }
+            ir_args.extend(
+                defaults.iter().skip(ir_args.len())
+                    .filter_map(|d| d.as_ref().map(|expr| lower_expr(ctx, expr)))
+            );
         }
     }
 

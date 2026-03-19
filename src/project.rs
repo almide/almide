@@ -119,17 +119,13 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
                 }
             }
             "permissions" => {
-                if let Some((key, val)) = parse_kv(line) {
-                    if key == "allow" {
-                        // Parse array: allow = ["IO", "Net"]
-                        let val = val.trim_matches(|c| c == '[' || c == ']');
-                        for item in val.split(',') {
-                            let item = item.trim().trim_matches('"').trim_matches('\'');
-                            if !item.is_empty() {
-                                permissions.push(item.to_string());
-                            }
-                        }
-                    }
+                if let Some(("allow", val)) = parse_kv(line) {
+                    permissions.extend(
+                        val.trim_matches(|c| c == '[' || c == ']')
+                            .split(',')
+                            .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
+                            .filter(|s| !s.is_empty())
+                    );
                 }
             }
             _ => {}
