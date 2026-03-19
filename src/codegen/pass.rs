@@ -16,8 +16,8 @@ use crate::types::Ty;
 
 #[derive(Debug, Clone)]
 pub struct ScopeContext {
-    /// Are we inside an `effect fn`?
-    pub in_effect_fn: bool,
+    /// Does this function auto-unwrap Results (effect fn, not test)?
+    pub auto_unwrap: bool,
     /// Are we inside a loop body?
     pub in_loop: bool,
     /// Are we at the top level (module scope)?

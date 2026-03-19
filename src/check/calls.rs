@@ -187,7 +187,7 @@ impl Checker {
                 };
 
                 // Effect isolation: pure fn cannot call effect fn
-                if sig.is_effect && !self.env.in_effect {
+                if sig.is_effect && !self.env.can_call_effect {
                     self.emit(super::err(
                         format!("cannot call effect function '{}' from a pure function", name),
                         "Mark the calling function as `effect fn`",
@@ -314,7 +314,7 @@ impl Checker {
         if let Some(module) = module_name {
             // fan.map / fan.race — compiler-known concurrency primitives
             if module == "fan" {
-                if !self.env.in_effect {
+                if !self.env.can_call_effect {
                     self.emit(super::err(
                         format!("fan.{}() can only be used inside an effect fn", field),
                         "Mark the enclosing function as `effect fn`",

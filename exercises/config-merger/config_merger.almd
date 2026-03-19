@@ -56,17 +56,19 @@ fn parse_config(content: String) -> Result[List[List[String]], String] = {
 // Non-matching keys from both are preserved. Order: base keys first, then new overlay keys
 fn merge_configs(base: List[List[String]], overlay: List[List[String]]) -> List[List[String]] = {
   let overlay_keys = list.map(overlay, (p) => match list.get(p, 0) { some(v) => v, none => "" });
+  let overlay_for_find = overlay;
+  let overlay_for_filter = overlay_for_find;
   let merged_base = list.map(base, (pair) => {
     let key = match list.get(pair, 0) { some(v) => v, none => "" };
     if list.contains(overlay_keys, key) then {
-      match list.find(overlay, (op) => match list.get(op, 0) { some(v) => v == key, none => false }) {
+      match list.find(overlay_for_find, (op) => match list.get(op, 0) { some(v) => v == key, none => false }) {
         some(found) => found,
         none => pair
       }
     } else pair
   });
   let base_keys = list.map(base, (p) => match list.get(p, 0) { some(v) => v, none => "" });
-  let new_overlay = list.filter(overlay, (p) => {
+  let new_overlay = list.filter(overlay_for_filter, (p) => {
     let key = match list.get(p, 0) { some(v) => v, none => "" };
     not list.contains(base_keys, key)
   });
@@ -256,7 +258,7 @@ test "save config file" {
   let pairs = [["host", "localhost"], ["port", "8080"]]
   save_config(f, pairs)
   let content = fs.read_text(f)
-  assert_eq(content, "host=localhost\nport=8080")
+  assert_eq(content, ok("host=localhost\nport=8080"))
 }
 
 test "merge two files" {
@@ -300,7 +302,7 @@ test "merge and save full pipeline" {
   let result = merge_and_save([f1, f2], out)
   assert_eq(result, ok(3))
   let content = fs.read_text(out)
-  assert_eq(content, "host=localhost\nport=8080\ndebug=true")
+  assert_eq(content, ok("host=localhost\nport=8080\ndebug=true"))
 }
 
 test "merge and save error propagation" {

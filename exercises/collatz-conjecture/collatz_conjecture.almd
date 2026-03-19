@@ -10,10 +10,11 @@ fn steps(n: Int) -> Result[Int, String] = {
   var current = n;
   var count = 0;
   do {
-    guard current != 1 else ok(count);
+    guard current != 1 else break;
     if current % 2 == 0 then current = current / 2 else current = 3 * current + 1;
     count = count + 1
   }
+  ok(count)
 }
 
 test "zero steps for one" {

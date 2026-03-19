@@ -22,11 +22,73 @@ impl NanoPass for ResultPropagationPass {
     fn run(&self, program: &mut IrProgram, _target: Target) {
         for func in &mut program.functions {
             // Insert Try in effect fns, but NOT in test functions
-            // (Rust #[test] fn returns () which doesn't support ?)
+            // Tests inspect Result values directly, so no auto-?
             if func.is_effect && !func.is_test {
-                func.body = insert_try(func.body.clone(), false);
+                let returns_result = matches!(&func.ret_ty, Ty::Result(_, _));
+                func.body = insert_try_body(func.body.clone(), returns_result);
             }
         }
+    }
+}
+
+/// Insert Try in function body — skip final expression if fn returns Result.
+fn insert_try_body(expr: IrExpr, fn_returns_result: bool) -> IrExpr {
+    if fn_returns_result {
+        match expr.kind {
+            IrExprKind::Block { stmts, expr: Some(tail) } => {
+                let stmts = stmts.into_iter().map(insert_try_stmt).collect();
+                let tail = insert_try(*tail, false);
+                let tail = strip_tail_try(tail);
+                return IrExpr {
+                    kind: IrExprKind::Block { stmts, expr: Some(Box::new(tail)) },
+                    ty: expr.ty, span: expr.span,
+                };
+            }
+            _ => {
+                let result = insert_try(expr, false);
+                return strip_tail_try(result);
+            }
+        }
+    }
+    insert_try(expr, false)
+}
+
+/// Recursively strip Try from tail positions of a Result-returning expression.
+/// Handles: direct Try, Match arms, If branches, Block tails.
+fn strip_tail_try(expr: IrExpr) -> IrExpr {
+    match expr.kind {
+        // Direct Try on a Result-returning call — unwrap it
+        IrExprKind::Try { expr: inner } if matches!(&inner.ty, Ty::Result(_, _)) => {
+            *inner
+        }
+        // Match: strip Try from each arm body
+        IrExprKind::Match { subject, arms } => {
+            let arms = arms.into_iter().map(|arm| IrMatchArm {
+                pattern: arm.pattern,
+                guard: arm.guard,
+                body: strip_tail_try(arm.body),
+            }).collect();
+            IrExpr { kind: IrExprKind::Match { subject, arms }, ty: expr.ty, span: expr.span }
+        }
+        // If: strip Try from then/else branches
+        IrExprKind::If { cond, then, else_ } => {
+            IrExpr {
+                kind: IrExprKind::If {
+                    cond,
+                    then: Box::new(strip_tail_try(*then)),
+                    else_: Box::new(strip_tail_try(*else_)),
+                },
+                ty: expr.ty, span: expr.span,
+            }
+        }
+        // Block: strip Try from tail expression
+        IrExprKind::Block { stmts, expr: Some(tail) } => {
+            IrExpr {
+                kind: IrExprKind::Block { stmts, expr: Some(Box::new(strip_tail_try(*tail))) },
+                ty: expr.ty, span: expr.span,
+            }
+        }
+        _ => expr,
     }
 }
 

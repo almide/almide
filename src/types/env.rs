@@ -9,8 +9,10 @@ pub struct TypeEnv {
     pub scopes: Vec<std::collections::HashMap<std::string::String, Ty>>,
     /// Current function's return type
     pub current_ret: Option<Ty>,
-    /// Whether we're inside an effect function
-    pub in_effect: bool,
+    /// Whether auto-unwrapping of Result is enabled (effect fn bodies)
+    pub auto_unwrap: bool,
+    /// Whether effect functions may be called from this context
+    pub can_call_effect: bool,
     /// Set of effect function names
     pub effect_fns: std::collections::HashSet<std::string::String>,
     /// Variant constructor name -> (variant type name, case info)
@@ -19,8 +21,6 @@ pub struct TypeEnv {
     pub user_modules: std::collections::HashSet<std::string::String>,
     /// Whether we're inside a do block (for auto-unwrapping Result in let bindings)
     pub in_do_block: bool,
-    /// Whether we're inside a test block (skip auto-unwrap of Result)
-    pub in_test: bool,
     /// Track used variables (for unused variable warnings)
     pub used_vars: std::collections::HashSet<std::string::String>,
     /// Track used modules (for unused import warnings)
@@ -54,12 +54,12 @@ impl TypeEnv {
             functions: std::collections::HashMap::new(),
             scopes: vec![std::collections::HashMap::new()],
             current_ret: None,
-            in_effect: false,
+            auto_unwrap: false,
+            can_call_effect: false,
             effect_fns: std::collections::HashSet::new(),
             constructors: std::collections::HashMap::new(),
             user_modules: std::collections::HashSet::new(),
             in_do_block: false,
-            in_test: false,
             used_vars: std::collections::HashSet::new(),
             used_modules: std::collections::HashSet::new(),
             module_aliases: std::collections::HashMap::new(),

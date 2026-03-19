@@ -1,0 +1,88 @@
+// typed-api-client — Go-style typed API client using Codec
+//
+// With `type T: Codec`, encode()/decode() are auto-generated.
+// No manual from_json/to_json needed.
+
+// ── Domain types (Codec = auto encode/decode) ──
+
+type User: Codec = { id: Int, name: String, email: String }
+type CreateUserRequest: Codec = { name: String, email: String }
+type Post: Codec = { id: Int, title: String, body: String }
+
+// ── Typed endpoint methods ──
+
+// Error handling: match on Result directly to replace the error message.
+// (let binding would auto-unwrap and propagate the original error)
+effect fn get_user(base_url: String, id: Int) -> Result[User, String] = {
+  let response = http.get(base_url + "/users/" + int.to_string(id))
+  match json.parse(response) {
+    ok(data) => User.decode(data)
+    err(_) => err("invalid JSON from user API")
+  }
+}
+
+effect fn create_user(base_url: String, req: CreateUserRequest) -> Result[User, String] = {
+  let body = json.stringify(req.encode())
+  let response = http.post(base_url + "/users", body)
+  let data = json.parse(response)
+  User.decode(data)
+}
+
+effect fn get_post(base_url: String, id: Int) -> Result[Post, String] = {
+  let response = http.get(base_url + "/posts/" + int.to_string(id))
+  let data = json.parse(response)
+  Post.decode(data)
+}
+
+// ── Tests (pure, no HTTP) ──
+
+test "User codec roundtrip" {
+  let u = User { id: 1, name: "Alice", email: "alice@test.com" }
+  let v = u.encode()
+  match User.decode(v) {
+    ok(u2) => {
+      assert_eq(u2.id, 1)
+      assert_eq(u2.name, "Alice")
+      assert_eq(u2.email, "alice@test.com")
+    }
+    err(_) => assert(false)
+  }
+}
+
+test "User decode from json.object" {
+  let v = json.object([
+    ("id", json.from_int(1)),
+    ("name", json.from_string("Alice")),
+    ("email", json.from_string("alice@test.com"))
+  ])
+  match User.decode(v) {
+    ok(u) => assert_eq(u.name, "Alice")
+    err(_) => assert(false)
+  }
+}
+
+test "User decode missing field" {
+  let v = json.object([("id", json.from_int(1))])
+  match User.decode(v) {
+    ok(_) => assert(false)
+    err(_) => assert(true)
+  }
+}
+
+test "CreateUserRequest encode" {
+  let req = CreateUserRequest { name: "Bob", email: "bob@test.com" }
+  let s = json.stringify(req.encode())
+  assert(string.contains(s, "Bob"))
+  assert(string.contains(s, "bob@test.com"))
+}
+
+test "Post codec roundtrip" {
+  let p = Post { id: 42, title: "Hello", body: "World" }
+  match Post.decode(p.encode()) {
+    ok(p2) => {
+      assert_eq(p2.id, 42)
+      assert_eq(p2.title, "Hello")
+    }
+    err(_) => assert(false)
+  }
+}
