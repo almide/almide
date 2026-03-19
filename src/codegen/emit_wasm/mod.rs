@@ -48,6 +48,8 @@ pub struct RuntimeFuncs {
     pub println_int: u32,
     pub concat_str: u32,
     pub str_eq: u32,
+    pub concat_list: u32,
+    pub list_eq: u32,
 }
 
 /// Import descriptor for WASM import section.
@@ -139,6 +141,8 @@ impl WasmEmitter {
                 println_int: 0,
                 concat_str: 0,
                 str_eq: 0,
+                concat_list: 0,
+                list_eq: 0,
             },
             heap_ptr_global: 0,
             func_table: Vec::new(),

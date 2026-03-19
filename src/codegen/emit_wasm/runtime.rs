@@ -47,6 +47,18 @@ pub fn register_runtime(emitter: &mut WasmEmitter) {
     let str_eq_ty = emitter.register_type(vec![ValType::I32, ValType::I32], vec![ValType::I32]);
     emitter.rt.str_eq = emitter.register_func("__str_eq", str_eq_ty);
 
+    // __list_eq(a: i32, b: i32, elem_size: i32) -> i32
+    let list_eq_ty = emitter.register_type(
+        vec![ValType::I32, ValType::I32, ValType::I32], vec![ValType::I32],
+    );
+    emitter.rt.list_eq = emitter.register_func("__list_eq", list_eq_ty);
+
+    // __concat_list(a: i32, b: i32, elem_size: i32) -> i32
+    let concat_list_ty = emitter.register_type(
+        vec![ValType::I32, ValType::I32, ValType::I32], vec![ValType::I32],
+    );
+    emitter.rt.concat_list = emitter.register_func("__concat_list", concat_list_ty);
+
     // Global: __heap_ptr (mutable i32, initialized at assembly time)
     emitter.heap_ptr_global = 0; // first and only global
 }
@@ -59,6 +71,8 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     compile_println_int(emitter);
     compile_concat_str(emitter);
     compile_str_eq(emitter);
+    compile_list_eq(emitter);
+    compile_concat_list(emitter);
 }
 
 /// __alloc(size: i32) -> i32
@@ -527,6 +541,222 @@ fn compile_str_eq(emitter: &mut WasmEmitter) {
 
     // Fallback (shouldn't reach here)
     f.instruction(&Instruction::I32Const(0));
+    f.instruction(&Instruction::End);
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
+
+/// __list_eq(a: i32, b: i32, elem_size: i32) -> i32
+/// Compare two lists byte-by-byte. Returns 1 if equal.
+fn compile_list_eq(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.list_eq];
+    // params: 0=$a, 1=$b, 2=$elem_size. locals: 3=$len, 4=$total_bytes, 5=$i
+    let mut f = Function::new([
+        (1, ValType::I32), // 3: $len
+        (1, ValType::I32), // 4: $total_bytes
+        (1, ValType::I32), // 5: $i
+    ]);
+
+    // Same pointer → equal
+    f.instruction(&Instruction::LocalGet(0));
+    f.instruction(&Instruction::LocalGet(1));
+    f.instruction(&Instruction::I32Eq);
+    f.instruction(&Instruction::If(BlockType::Empty));
+    f.instruction(&Instruction::I32Const(1));
+    f.instruction(&Instruction::Return);
+    f.instruction(&Instruction::End);
+
+    // Compare lengths
+    f.instruction(&Instruction::LocalGet(0));
+    f.instruction(&Instruction::I32Load(mem(0)));
+    f.instruction(&Instruction::LocalSet(3));
+
+    f.instruction(&Instruction::LocalGet(3));
+    f.instruction(&Instruction::LocalGet(1));
+    f.instruction(&Instruction::I32Load(mem(0)));
+    f.instruction(&Instruction::I32Ne);
+    f.instruction(&Instruction::If(BlockType::Empty));
+    f.instruction(&Instruction::I32Const(0));
+    f.instruction(&Instruction::Return);
+    f.instruction(&Instruction::End);
+
+    // $total_bytes = $len * $elem_size
+    f.instruction(&Instruction::LocalGet(3));
+    f.instruction(&Instruction::LocalGet(2));
+    f.instruction(&Instruction::I32Mul);
+    f.instruction(&Instruction::LocalSet(4));
+
+    // Byte-by-byte comparison of data section
+    f.instruction(&Instruction::I32Const(0));
+    f.instruction(&Instruction::LocalSet(5));
+
+    f.instruction(&Instruction::Block(BlockType::Empty));
+    f.instruction(&Instruction::Loop(BlockType::Empty));
+
+    f.instruction(&Instruction::LocalGet(5));
+    f.instruction(&Instruction::LocalGet(4));
+    f.instruction(&Instruction::I32GeU);
+    f.instruction(&Instruction::If(BlockType::Empty));
+    f.instruction(&Instruction::I32Const(1));
+    f.instruction(&Instruction::Return);
+    f.instruction(&Instruction::End);
+
+    // Compare a[4+i] vs b[4+i]
+    f.instruction(&Instruction::LocalGet(0));
+    f.instruction(&Instruction::I32Const(4));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::LocalGet(5));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::I32Load8U(mem8(0)));
+    f.instruction(&Instruction::LocalGet(1));
+    f.instruction(&Instruction::I32Const(4));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::LocalGet(5));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::I32Load8U(mem8(0)));
+    f.instruction(&Instruction::I32Ne);
+    f.instruction(&Instruction::If(BlockType::Empty));
+    f.instruction(&Instruction::I32Const(0));
+    f.instruction(&Instruction::Return);
+    f.instruction(&Instruction::End);
+
+    f.instruction(&Instruction::LocalGet(5));
+    f.instruction(&Instruction::I32Const(1));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::LocalSet(5));
+    f.instruction(&Instruction::Br(0));
+
+    f.instruction(&Instruction::End); // loop
+    f.instruction(&Instruction::End); // block
+
+    f.instruction(&Instruction::I32Const(0));
+    f.instruction(&Instruction::End);
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
+
+/// __concat_list(a: i32, b: i32, elem_size: i32) -> i32
+/// Concatenate two lists. Layout: [len:i32][data...]. Generic over elem_size.
+fn compile_concat_list(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.concat_list];
+    // params: 0=$a, 1=$b, 2=$elem_size
+    // locals: 3=$len_a, 4=$len_b, 5=$new_len, 6=$result, 7=$bytes_a, 8=$bytes_b, 9=$i
+    let mut f = Function::new([
+        (1, ValType::I32), // 3: $len_a
+        (1, ValType::I32), // 4: $len_b
+        (1, ValType::I32), // 5: $new_len
+        (1, ValType::I32), // 6: $result
+        (1, ValType::I32), // 7: $bytes_a
+        (1, ValType::I32), // 8: $bytes_b
+        (1, ValType::I32), // 9: $i
+    ]);
+
+    // $len_a = mem32[$a]
+    f.instruction(&Instruction::LocalGet(0));
+    f.instruction(&Instruction::I32Load(mem(0)));
+    f.instruction(&Instruction::LocalSet(3));
+
+    // $len_b = mem32[$b]
+    f.instruction(&Instruction::LocalGet(1));
+    f.instruction(&Instruction::I32Load(mem(0)));
+    f.instruction(&Instruction::LocalSet(4));
+
+    // $new_len = $len_a + $len_b
+    f.instruction(&Instruction::LocalGet(3));
+    f.instruction(&Instruction::LocalGet(4));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::LocalSet(5));
+
+    // $bytes_a = $len_a * $elem_size
+    f.instruction(&Instruction::LocalGet(3));
+    f.instruction(&Instruction::LocalGet(2));
+    f.instruction(&Instruction::I32Mul);
+    f.instruction(&Instruction::LocalSet(7));
+
+    // $bytes_b = $len_b * $elem_size
+    f.instruction(&Instruction::LocalGet(4));
+    f.instruction(&Instruction::LocalGet(2));
+    f.instruction(&Instruction::I32Mul);
+    f.instruction(&Instruction::LocalSet(8));
+
+    // $result = alloc(4 + $bytes_a + $bytes_b)
+    f.instruction(&Instruction::I32Const(4));
+    f.instruction(&Instruction::LocalGet(7));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::LocalGet(8));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::Call(emitter.rt.alloc));
+    f.instruction(&Instruction::LocalSet(6));
+
+    // mem32[$result] = $new_len
+    f.instruction(&Instruction::LocalGet(6));
+    f.instruction(&Instruction::LocalGet(5));
+    f.instruction(&Instruction::I32Store(mem(0)));
+
+    // Copy a's data: byte-by-byte from $a+4 to $result+4, $bytes_a bytes
+    f.instruction(&Instruction::I32Const(0));
+    f.instruction(&Instruction::LocalSet(9));
+    f.instruction(&Instruction::Block(BlockType::Empty));
+    f.instruction(&Instruction::Loop(BlockType::Empty));
+    f.instruction(&Instruction::LocalGet(9));
+    f.instruction(&Instruction::LocalGet(7));
+    f.instruction(&Instruction::I32GeU);
+    f.instruction(&Instruction::BrIf(1));
+    // dst
+    f.instruction(&Instruction::LocalGet(6));
+    f.instruction(&Instruction::I32Const(4));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::LocalGet(9));
+    f.instruction(&Instruction::I32Add);
+    // src
+    f.instruction(&Instruction::LocalGet(0));
+    f.instruction(&Instruction::I32Const(4));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::LocalGet(9));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::I32Load8U(mem8(0)));
+    f.instruction(&Instruction::I32Store8(mem8(0)));
+    f.instruction(&Instruction::LocalGet(9));
+    f.instruction(&Instruction::I32Const(1));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::LocalSet(9));
+    f.instruction(&Instruction::Br(0));
+    f.instruction(&Instruction::End);
+    f.instruction(&Instruction::End);
+
+    // Copy b's data: from $b+4 to $result+4+$bytes_a, $bytes_b bytes
+    f.instruction(&Instruction::I32Const(0));
+    f.instruction(&Instruction::LocalSet(9));
+    f.instruction(&Instruction::Block(BlockType::Empty));
+    f.instruction(&Instruction::Loop(BlockType::Empty));
+    f.instruction(&Instruction::LocalGet(9));
+    f.instruction(&Instruction::LocalGet(8));
+    f.instruction(&Instruction::I32GeU);
+    f.instruction(&Instruction::BrIf(1));
+    // dst
+    f.instruction(&Instruction::LocalGet(6));
+    f.instruction(&Instruction::I32Const(4));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::LocalGet(7));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::LocalGet(9));
+    f.instruction(&Instruction::I32Add);
+    // src
+    f.instruction(&Instruction::LocalGet(1));
+    f.instruction(&Instruction::I32Const(4));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::LocalGet(9));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::I32Load8U(mem8(0)));
+    f.instruction(&Instruction::I32Store8(mem8(0)));
+    f.instruction(&Instruction::LocalGet(9));
+    f.instruction(&Instruction::I32Const(1));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::LocalSet(9));
+    f.instruction(&Instruction::Br(0));
+    f.instruction(&Instruction::End);
+    f.instruction(&Instruction::End);
+
+    // return $result
+    f.instruction(&Instruction::LocalGet(6));
     f.instruction(&Instruction::End);
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }

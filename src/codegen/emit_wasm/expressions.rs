@@ -342,8 +342,20 @@ impl FuncCompiler<'_> {
                 self.emit_concat_str(left, right);
             }
 
-            // ── Phase 2+ ──
-            BinOp::PowFloat | BinOp::XorInt | BinOp::ConcatList => {
+            // ── List concatenation ──
+            BinOp::ConcatList => {
+                self.emit_expr(left);
+                self.emit_expr(right);
+                // Determine element size from left's type
+                let elem_size = if let Ty::Applied(_, args) = &left.ty {
+                    args.first().map(|t| values::byte_size(t)).unwrap_or(8)
+                } else { 8 };
+                self.func.instruction(&Instruction::I32Const(elem_size as i32));
+                self.func.instruction(&Instruction::Call(self.emitter.rt.concat_list));
+            }
+
+            // ── Unimplemented ──
+            BinOp::PowFloat | BinOp::XorInt => {
                 self.func.instruction(&Instruction::Unreachable);
             }
         }
@@ -357,6 +369,11 @@ impl FuncCompiler<'_> {
             Ty::Float => { self.func.instruction(&Instruction::F64Eq); }
             Ty::Bool => { self.func.instruction(&Instruction::I32Eq); }
             Ty::String => { self.func.instruction(&Instruction::Call(self.emitter.rt.str_eq)); }
+            Ty::Applied(crate::types::constructor::TypeConstructorId::List, args) => {
+                let elem_size = args.first().map(|t| values::byte_size(t)).unwrap_or(8);
+                self.func.instruction(&Instruction::I32Const(elem_size as i32));
+                self.func.instruction(&Instruction::Call(self.emitter.rt.list_eq));
+            }
             _ => { self.func.instruction(&Instruction::I32Eq); }
         }
         if negate {
@@ -641,45 +658,15 @@ impl FuncCompiler<'_> {
         }
     }
 
-    /// Emit assert_eq(left, right): compare values, trap with message if not equal.
+    /// Emit assert_eq(left, right): compare values, trap if not equal.
     fn emit_assert_eq(&mut self, left: &IrExpr, right: &IrExpr) {
-        // Emit both values and compare
-        self.emit_expr(left);
-        self.emit_expr(right);
-
-        // Type-specific equality check
-        let eq_result = match &left.ty {
-            Ty::Int => {
-                self.func.instruction(&Instruction::I64Eq);
-                true
-            }
-            Ty::Float => {
-                self.func.instruction(&Instruction::F64Eq);
-                true
-            }
-            Ty::Bool => {
-                self.func.instruction(&Instruction::I32Eq);
-                true
-            }
-            Ty::String => {
-                // Deep string equality via runtime
-                self.func.instruction(&Instruction::Call(self.emitter.rt.str_eq));
-                true
-            }
-            _ => {
-                // Pointer equality for other types
-                self.func.instruction(&Instruction::I32Eq);
-                true
-            }
-        };
-
-        if eq_result {
-            // If not equal, trap
-            self.func.instruction(&Instruction::I32Eqz);
-            self.func.instruction(&Instruction::If(BlockType::Empty));
-            self.func.instruction(&Instruction::Unreachable);
-            self.func.instruction(&Instruction::End);
-        }
+        // Use the same equality logic as BinOp::Eq
+        self.emit_eq(left, right, false);
+        // If not equal (result == 0), trap
+        self.func.instruction(&Instruction::I32Eqz);
+        self.func.instruction(&Instruction::If(BlockType::Empty));
+        self.func.instruction(&Instruction::Unreachable);
+        self.func.instruction(&Instruction::End);
     }
 
     /// Concatenate two strings on the heap via __concat_str runtime.
