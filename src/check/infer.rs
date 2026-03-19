@@ -366,15 +366,9 @@ impl Checker {
                 match callee.as_mut() {
                     ast::Expr::Ident { name, .. } => self.check_named_call(name, &all_arg_tys),
                     ast::Expr::Member { object, field, .. } => {
-                        if let ast::Expr::Ident { name: module, .. } = object.as_ref() {
-                            if crate::stdlib::is_stdlib_module(module) || self.env.user_modules.contains(module.as_str()) {
-                                let key = format!("{}.{}", module, field);
-                                return self.check_named_call(&key, &all_arg_tys);
-                            }
-                            if let Some(target) = self.env.module_aliases.get(module.as_str()).cloned() {
-                                let key = format!("{}.{}", target, field);
-                                return self.check_named_call(&key, &all_arg_tys);
-                            }
+                        let module_key = self.resolve_module_call(object, field);
+                        if let Some(key) = module_key {
+                            return self.check_named_call(&key, &all_arg_tys);
                         }
                         let ct = self.infer_expr(callee);
                         let ret = self.fresh_var();
@@ -397,15 +391,8 @@ impl Checker {
             // Pipe RHS is a module-qualified function (e.g. `5 |> int.abs`)
             ast::Expr::Member { object, field, .. } => {
                 let all_arg_tys = vec![left_ty];
-                if let ast::Expr::Ident { name: module, .. } = object.as_ref() {
-                    if crate::stdlib::is_stdlib_module(module) || self.env.user_modules.contains(module.as_str()) {
-                        let key = format!("{}.{}", module, field);
-                        return self.check_named_call(&key, &all_arg_tys);
-                    }
-                    if let Some(target) = self.env.module_aliases.get(module.as_str()).cloned() {
-                        let key = format!("{}.{}", target, field);
-                        return self.check_named_call(&key, &all_arg_tys);
-                    }
+                if let Some(key) = self.resolve_module_call(object, field) {
+                    return self.check_named_call(&key, &all_arg_tys);
                 }
                 let ct = self.infer_expr(right);
                 let ret = self.fresh_var();
@@ -550,6 +537,19 @@ impl Checker {
             ast::Pattern::Err { inner } => { let it = match ty { Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[1].clone(), _ => Ty::Unknown }; self.bind_pattern(inner, &it); }
             ast::Pattern::None | ast::Pattern::Literal { .. } => {}
         }
+    }
+
+    /// Resolve a module.func Member expression to a qualified call key.
+    fn resolve_module_call(&self, object: &ast::Expr, field: &str) -> Option<String> {
+        if let ast::Expr::Ident { name: module, .. } = object {
+            if crate::stdlib::is_stdlib_module(module) || self.env.user_modules.contains(module.as_str()) {
+                return Some(format!("{}.{}", module, field));
+            }
+            if let Some(target) = self.env.module_aliases.get(module.as_str()) {
+                return Some(format!("{}.{}", target, field));
+            }
+        }
+        None
     }
 }
 

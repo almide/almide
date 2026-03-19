@@ -117,6 +117,25 @@ fn find_structurally_bounded_fns(functions: &[IrFunction], type_decls: &[IrTypeD
     result
 }
 
+
+/// Collect type variable bindings for a monomorphization call site.
+fn collect_mono_bindings(
+    bounded_params: &[BoundedParam],
+    args: &[IrExpr],
+    param_types: &[Ty],
+) -> HashMap<String, Ty> {
+    bounded_params.iter()
+        .filter(|bp| bp.param_idx < args.len())
+        .map(|bp| {
+            let arg_ty = &args[bp.param_idx].ty;
+            let binding = param_types.get(bp.param_idx)
+                .map(|pt| extract_typevar_binding(pt, arg_ty, &bp.type_var))
+                .unwrap_or_else(|| arg_ty.clone());
+            (bp.type_var.clone(), binding)
+        })
+        .collect()
+}
+
 /// Discover all concrete instantiations of structurally-bounded functions.
 fn discover_instances(
     program: &IrProgram,
@@ -151,18 +170,7 @@ fn discover_in_expr(
                         .map(|f| f.params.iter().map(|p| p.ty.clone()).collect())
                         .unwrap_or_default();
 
-                    let mut bindings: HashMap<String, Ty> = HashMap::new();
-                    for bp in bounded_params {
-                        if bp.param_idx < args.len() {
-                            let arg_ty = &args[bp.param_idx].ty;
-                            if let Some(param_ty) = param_types.get(bp.param_idx) {
-                                let extracted = extract_typevar_binding(param_ty, arg_ty, &bp.type_var);
-                                bindings.insert(bp.type_var.clone(), extracted);
-                            } else {
-                                bindings.insert(bp.type_var.clone(), arg_ty.clone());
-                            }
-                        }
-                    }
+                    let bindings = collect_mono_bindings(bounded_params, args, &param_types);
                     // Skip bindings with Unknown or unresolved inference vars
                     let all_concrete = !bindings.is_empty() && bindings.values().all(|ty|
                         !matches!(ty, Ty::Unknown) && !ty.contains_unknown()
@@ -508,17 +516,8 @@ fn rewrite_expr_calls(
             if let CallTarget::Named { name } = target {
                 if let Some(bounded_params) = bound_fns.get(name.as_str()) {
                     let param_types = fn_param_types.get(name.as_str());
-                    let mut bindings: HashMap<String, Ty> = HashMap::new();
-                    for bp in bounded_params {
-                        if bp.param_idx < args.len() {
-                            let arg_ty = &args[bp.param_idx].ty;
-                            if let Some(pt) = param_types.and_then(|pts| pts.get(bp.param_idx)) {
-                                bindings.insert(bp.type_var.clone(), extract_typevar_binding(pt, arg_ty, &bp.type_var));
-                            } else {
-                                bindings.insert(bp.type_var.clone(), arg_ty.clone());
-                            }
-                        }
-                    }
+                    let pt = param_types.map(|pts| pts.as_slice()).unwrap_or(&[]);
+                    let bindings = collect_mono_bindings(bounded_params, args, pt);
                     if !bindings.is_empty() {
                         let suffix = mangle_suffix(&bindings);
                         if instances.contains_key(&(name.clone(), suffix.clone())) {
