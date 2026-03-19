@@ -29,6 +29,23 @@ impl NanoPass for StreamFusionPass {
     fn targets(&self) -> Option<Vec<Target>> { None } // All targets
 
     fn run(&self, program: &mut IrProgram, _target: Target) {
+        // Pre-pass: inline single-use collection lets to expose nested call patterns
+        for func in &mut program.functions {
+            inline_single_use_collection_lets(&mut func.body, &program.var_table);
+        }
+        for module in &mut program.modules {
+            for func in &mut module.functions {
+                inline_single_use_collection_lets(&mut func.body, &module.var_table);
+            }
+        }
+
+        // Debug: dump IR after inlining
+        if std::env::var("ALMIDE_DEBUG_FUSION").is_ok() {
+            for func in &program.functions {
+                dump_calls(&func.body, &func.name);
+            }
+        }
+
         // Phase 2: fuse chains using algebraic laws
         let mut totals = FusionCounts::default();
         for func in &mut program.functions {
@@ -338,6 +355,72 @@ fn count_fusible_pairs(
     count
 }
 
+/// Inline single-use let bindings whose value is a collection operation (map/filter/fold/flat_map).
+/// Converts `let a = map(x, f); fold(a, ...)` → `fold(map(x, f), ...)`.
+/// This enables the nested-call fusion patterns to fire on pipe chains.
+fn inline_single_use_collection_lets(body: &mut IrExpr, var_table: &VarTable) {
+    if let IrExprKind::Block { stmts, expr } = &mut body.kind {
+        // Iteratively inline single-use collection bindings from top to bottom.
+        // Each round substitutes one variable into all subsequent stmts/expr,
+        // so chained references (a → b → c) are resolved in order.
+        let mut inlined_vars: std::collections::HashSet<VarId> = std::collections::HashSet::new();
+
+        loop {
+            let mut did_inline = false;
+            for i in 0..stmts.len() {
+                let (var, value) = match &stmts[i].kind {
+                    IrStmtKind::Bind { var, value, .. } if !inlined_vars.contains(var) => (*var, value.clone()),
+                    _ => continue,
+                };
+                // Only inline List module calls (not Result.map, Option.map, etc.)
+                let is_list_collection_op = matches!(&value.kind,
+                    IrExprKind::Call { target: CallTarget::Module { module, func }, .. }
+                    if module == "list" && classify_stdlib_op(func).is_some()
+                );
+                if !is_list_collection_op || var_table.use_count(var) != 1 {
+                    continue;
+                }
+
+                // Substitute this var into all subsequent stmts and tail expr
+                for j in (i + 1)..stmts.len() {
+                    let s = &mut stmts[j];
+                    match &mut s.kind {
+                        IrStmtKind::Bind { value: v, .. } => *v = substitute_var_in_expr(v, var, &value),
+                        IrStmtKind::Expr { expr: e } => *e = substitute_var_in_expr(e, var, &value),
+                        _ => {}
+                    }
+                }
+                if let Some(e) = expr.as_mut() {
+                    **e = substitute_var_in_expr(e, var, &value);
+                }
+                inlined_vars.insert(var);
+                did_inline = true;
+                break; // restart — substitution may have changed later stmts
+            }
+            if !did_inline { break; }
+        }
+
+        // Remove inlined bindings
+        stmts.retain(|s| {
+            if let IrStmtKind::Bind { var, .. } = &s.kind {
+                !inlined_vars.contains(var)
+            } else {
+                true
+            }
+        });
+
+        // Recurse into remaining stmts and expressions
+        for stmt in stmts.iter_mut() {
+            match &mut stmt.kind {
+                IrStmtKind::Bind { value, .. } => inline_single_use_collection_lets(value, var_table),
+                IrStmtKind::Expr { expr } => inline_single_use_collection_lets(expr, var_table),
+                _ => {}
+            }
+        }
+        if let Some(e) = expr { inline_single_use_collection_lets(e, var_table); }
+    }
+}
+
 /// Run all fusion passes on a function. Returns (map_map_count, filter_filter_count, map_fold_count).
 /// Fusion results: (map+map, filter+filter, map+fold, identity_map, flat_map+flat_map, map+filter)
 fn fuse_all(func: &mut IrFunction) -> FusionCounts {
@@ -504,6 +587,14 @@ fn fuse_filter_filter(expr: IrExpr) -> IrExpr {
             kind: IrExprKind::Lambda { params, body: Box::new(fuse_filter_filter(*body)) },
             ty, span,
         },
+        // Generic Call: recurse into args
+        IrExprKind::Call { ref target, ref args, ref type_args } => {
+            let new_args: Vec<IrExpr> = args.iter().map(|a| fuse_filter_filter(a.clone())).collect();
+            IrExpr {
+                kind: IrExprKind::Call { target: target.clone(), args: new_args, type_args: type_args.clone() },
+                ty, span,
+            }
+        }
         other => IrExpr { kind: other, ty, span },
     }
 }
@@ -643,6 +734,14 @@ fn fuse_map_fold(expr: IrExpr, count: &mut usize) -> IrExpr {
             kind: IrExprKind::Lambda { params, body: Box::new(fuse_map_fold(*body, count)) },
             ty, span,
         },
+        // Generic Call: recurse into args
+        IrExprKind::Call { ref target, ref args, ref type_args } => {
+            let new_args: Vec<IrExpr> = args.iter().map(|a| fuse_map_fold(a.clone(), count)).collect();
+            IrExpr {
+                kind: IrExprKind::Call { target: target.clone(), args: new_args, type_args: type_args.clone() },
+                ty, span,
+            }
+        }
         other => IrExpr { kind: other, ty, span },
     }
 }
@@ -817,6 +916,14 @@ fn fuse_map_map(expr: IrExpr) -> IrExpr {
             },
             ty, span,
         },
+        // Generic Call: recurse into args
+        IrExprKind::Call { ref target, ref args, ref type_args } => {
+            let new_args: Vec<IrExpr> = args.iter().map(|a| fuse_map_map(a.clone())).collect();
+            IrExpr {
+                kind: IrExprKind::Call { target: target.clone(), args: new_args, type_args: type_args.clone() },
+                ty, span,
+            }
+        }
         // All other expressions: pass through
         other => IrExpr { kind: other, ty, span },
     }
@@ -1001,6 +1108,14 @@ fn elim_identity(expr: IrExpr, count: &mut usize) -> IrExpr {
             kind: IrExprKind::Lambda { params, body: Box::new(elim_identity(*body, count)) },
             ty, span,
         },
+        // Generic Call: recurse into args
+        IrExprKind::Call { ref target, ref args, ref type_args } => {
+            let new_args: Vec<IrExpr> = args.iter().map(|a| elim_identity(a.clone(), count)).collect();
+            IrExpr {
+                kind: IrExprKind::Call { target: target.clone(), args: new_args, type_args: type_args.clone() },
+                ty, span,
+            }
+        }
         other => IrExpr { kind: other, ty, span },
     }
 }
@@ -1092,6 +1207,14 @@ fn fuse_flatmap_flatmap(expr: IrExpr) -> IrExpr {
             kind: IrExprKind::Lambda { params, body: Box::new(fuse_flatmap_flatmap(*body)) },
             ty, span,
         },
+        // Generic Call: recurse into args
+        IrExprKind::Call { ref target, ref args, ref type_args } => {
+            let new_args: Vec<IrExpr> = args.iter().map(|a| fuse_flatmap_flatmap(a.clone())).collect();
+            IrExpr {
+                kind: IrExprKind::Call { target: target.clone(), args: new_args, type_args: type_args.clone() },
+                ty, span,
+            }
+        }
         other => IrExpr { kind: other, ty, span },
     }
 }
@@ -1156,18 +1279,13 @@ fn fuse_map_filter(expr: IrExpr, count: &mut usize) -> IrExpr {
 
                     if let Some(filter_map_lambda) = compose_map_filter(f, p) {
                         *count += 1;
-                        // Build filter_map call
-                        // Determine the filter_map target name
                         let fm_target = match inner_target {
                             CallTarget::Module { module, .. } => CallTarget::Module {
                                 module: module.clone(),
                                 func: "filter_map".to_string(),
                             },
                             CallTarget::Named { name } => {
-                                let base = name.rsplit("_map").next().map(|_| {
-                                    // almide_rt_list_map → almide_rt_list_filter_map
-                                    name.replace("_map", "_filter_map")
-                                }).unwrap_or_else(|| format!("{}_filter", name));
+                                let base = name.replace("_map", "_filter_map");
                                 CallTarget::Named { name: base }
                             }
                             other => other.clone(),
@@ -1184,6 +1302,14 @@ fn fuse_map_filter(expr: IrExpr, count: &mut usize) -> IrExpr {
                     }
                 }
             }
+            let new_args: Vec<IrExpr> = args.iter().map(|a| fuse_map_filter(a.clone(), count)).collect();
+            IrExpr {
+                kind: IrExprKind::Call { target: target.clone(), args: new_args, type_args: type_args.clone() },
+                ty, span,
+            }
+        }
+        // Generic Call: recurse into args (so fusion fires inside println(list.filter(list.map(...))))
+        IrExprKind::Call { ref target, ref args, ref type_args } => {
             let new_args: Vec<IrExpr> = args.iter().map(|a| fuse_map_filter(a.clone(), count)).collect();
             IrExpr {
                 kind: IrExprKind::Call { target: target.clone(), args: new_args, type_args: type_args.clone() },
@@ -1332,5 +1458,33 @@ mod tests {
         let registry = TypeConstructorRegistry::new();
         let ops = vec![PipeOp::FlatMap, PipeOp::FlatMap];
         assert_eq!(count_fusible_pairs(&ops, &Some("Option".into()), &registry), 1);
+    }
+}
+
+fn dump_calls(expr: &IrExpr, ctx: &str) {
+    match &expr.kind {
+        IrExprKind::Call { target, args, .. } => {
+            let name = match target {
+                CallTarget::Module { module, func } => format!("Module({}.{})", module, func),
+                CallTarget::Named { name } => format!("Named({})", name),
+                _ => "Other".to_string(),
+            };
+            eprintln!("[Fusion-IR] {}: {} with {} args", ctx, name, args.len());
+            for a in args { dump_calls(a, ctx); }
+        }
+        IrExprKind::Block { stmts, expr } => {
+            for s in stmts {
+                match &s.kind {
+                    IrStmtKind::Bind { var, value, .. } => {
+                        eprintln!("[Fusion-IR] {}: Bind var={}", ctx, var.0);
+                        dump_calls(value, ctx);
+                    }
+                    IrStmtKind::Expr { expr } => dump_calls(expr, ctx),
+                    _ => {}
+                }
+            }
+            if let Some(e) = expr { dump_calls(e, ctx); }
+        }
+        _ => {}
     }
 }
