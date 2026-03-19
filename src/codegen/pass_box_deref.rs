@@ -23,6 +23,24 @@ impl NanoPass for BoxDerefPass {
     }
 }
 
+/// Find recursive enums from a set of type declarations.
+fn find_recursive_enums<'a>(type_decls: impl Iterator<Item = &'a IrTypeDecl>) -> HashSet<String> {
+    let mut recursive = HashSet::new();
+    for td in type_decls {
+        if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
+            let is_recursive = cases.iter().any(|case| match &case.kind {
+                IrVariantKind::Tuple { fields } => fields.iter().any(|f| ty_contains_name(f, &td.name)),
+                IrVariantKind::Record { fields } => fields.iter().any(|f| ty_contains_name(&f.ty, &td.name)),
+                _ => false,
+            });
+            if is_recursive {
+                recursive.insert(td.name.clone());
+            }
+        }
+    }
+    recursive
+}
+
 /// Find which enums have recursive variants and collect
 /// VarIds that are bound from Box'd fields in match patterns.
 pub fn collect_deref_vars(program: &IrProgram) -> (HashSet<VarId>, HashSet<String>) {
@@ -34,26 +52,11 @@ pub fn collect_deref_vars(program: &IrProgram) -> (HashSet<VarId>, HashSet<Strin
         name_to_var.entry(info.name.clone()).or_default().push(id);
     }
     let mut deref_vars = HashSet::new();
-    let mut recursive_enums = HashSet::new();
 
     // Step 1: Find recursive enums (type declarations that reference themselves)
-    let all_type_decls = program.type_decls.iter()
-        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()));
-    for td in all_type_decls {
-        if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
-            let is_recursive = cases.iter().any(|case| {
-                let fields_contain_self = |tys: &[Ty]| tys.iter().any(|t| ty_contains_name(t, &td.name));
-                match &case.kind {
-                    IrVariantKind::Tuple { fields } => fields_contain_self(fields),
-                    IrVariantKind::Record { fields } => fields.iter().any(|f| ty_contains_name(&f.ty, &td.name)),
-                    _ => false,
-                }
-            });
-            if is_recursive {
-                recursive_enums.insert(td.name.clone());
-            }
-        }
-    }
+    let recursive_enums = find_recursive_enums(
+        program.type_decls.iter().chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
+    );
 
     // Step 2: Walk all match expressions and find Bind vars in recursive positions
     for func in &program.functions {
@@ -83,30 +86,7 @@ pub fn collect_module_deref_vars(module: &IrModule, all_type_decls: &[IrTypeDecl
         name_to_var.entry(info.name.clone()).or_default().push(id);
     }
     let mut deref_vars = HashSet::new();
-    let mut recursive_enums = HashSet::new();
-    for td in all_type_decls {
-        if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
-            for case in cases {
-                match &case.kind {
-                    IrVariantKind::Tuple { fields } => {
-                        for f in fields {
-                            if ty_contains_name(f, &td.name) {
-                                recursive_enums.insert(td.name.clone());
-                            }
-                        }
-                    }
-                    IrVariantKind::Record { fields } => {
-                        for f in fields {
-                            if ty_contains_name(&f.ty, &td.name) {
-                                recursive_enums.insert(td.name.clone());
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
+    let recursive_enums = find_recursive_enums(all_type_decls.iter());
     for func in &module.functions {
         collect_from_expr(&func.body, &recursive_enums, all_type_decls, &name_to_var, &mut deref_vars);
     }
