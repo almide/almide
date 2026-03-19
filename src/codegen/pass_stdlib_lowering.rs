@@ -6,7 +6,7 @@
 //! NO string rendering. All decisions are structural IR transformations.
 
 use crate::ir::*;
-use crate::types::Ty;
+use crate::types::{Ty, TypeConstructorId};
 use crate::generated::arg_transforms::{self, ArgTransform};
 use super::pass::{NanoPass, Target};
 
@@ -259,13 +259,13 @@ fn resolve_module_from_ty(ty: &Ty, method: &str) -> Option<&'static str> {
     let candidates = crate::stdlib::resolve_ufcs_candidates(method);
     if candidates.is_empty() { return None; }
     let module = match ty {
-        Ty::List(_) => Some("list"),
-        Ty::Map(_, _) => Some("map"),
+        Ty::Applied(TypeConstructorId::List, _) => Some("list"),
+        Ty::Applied(TypeConstructorId::Map, _) => Some("map"),
         Ty::String => Some("string"),
         Ty::Int => Some("int"),
         Ty::Float => Some("float"),
-        Ty::Option(_) => Some("option"),
-        Ty::Result(_, _) => Some("result"),
+        Ty::Applied(TypeConstructorId::Option, _) => Some("option"),
+        Ty::Applied(TypeConstructorId::Result, _) => Some("result"),
         _ => None,
     };
     if let Some(m) = module {

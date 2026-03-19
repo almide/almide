@@ -6,7 +6,7 @@
 //! Exception: match subjects are NOT wrapped (you match on Ok/Err, not unwrap).
 
 use crate::ir::*;
-use crate::types::Ty;
+use crate::types::{Ty, TypeConstructorId};
 use super::pass::{NanoPass, Target};
 
 #[derive(Debug)]
@@ -198,7 +198,7 @@ fn insert_try(expr: IrExpr, in_match_subject: bool) -> IrExpr {
     if should_wrap {
         // Unwrap the Result type for the Try expression
         let inner_ty = match &ty {
-            Ty::Result(ok, _) => ok.as_ref().clone(),
+            Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
             _ => ty,
         };
         result = IrExpr {

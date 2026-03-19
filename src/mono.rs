@@ -305,7 +305,14 @@ fn mangle_ty(ty: &Ty) -> String {
         Ty::Float => "Float".into(),
         Ty::String => "String".into(),
         Ty::Bool => "Bool".into(),
-        Ty::List(inner) => format!("List_{}", mangle_ty(inner)),
+        Ty::Applied(crate::types::TypeConstructorId::List, args) if args.len() == 1 => format!("List_{}", mangle_ty(&args[0])),
+        Ty::Applied(id, args) => {
+            let name = format!("{:?}", id);
+            if args.is_empty() { name } else {
+                let arg_strs: Vec<String> = args.iter().map(mangle_ty).collect();
+                format!("{}_{}", name, arg_strs.join("_"))
+            }
+        }
         _ => "Unknown".into(),
     }
 }

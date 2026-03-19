@@ -2,7 +2,7 @@
 /// Walks the AST, assigns Ty to each expression, collects constraints.
 
 use crate::ast;
-use crate::types::{Ty, VariantPayload};
+use crate::types::{Ty, TypeConstructorId, VariantPayload};
 use super::types::resolve_vars;
 use super::Checker;
 
@@ -114,8 +114,8 @@ impl Checker {
                 self.infer_expr(index);
                 let concrete = resolve_vars(&obj_ty, &self.solutions);
                 match &concrete {
-                    Ty::List(inner) => inner.as_ref().clone(),
-                    Ty::Map(_, v) => Ty::option(v.as_ref().clone()),
+                    Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => args[0].clone(),
+                    Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => Ty::option(args[1].clone()),
                     _ => Ty::Unknown,
                 }
             }
@@ -128,8 +128,8 @@ impl Checker {
                         let lc = resolve_vars(&lt, &self.solutions);
                         let rc = resolve_vars(&rt, &self.solutions);
                         // + works for: String+String, List+List (concat), numeric+numeric (add)
-                        let l_concat = matches!(&lc, Ty::String | Ty::List(_));
-                        let r_concat = matches!(&rc, Ty::String | Ty::List(_));
+                        let l_concat = matches!(&lc, Ty::String | Ty::Applied(TypeConstructorId::List, _));
+                        let r_concat = matches!(&rc, Ty::String | Ty::Applied(TypeConstructorId::List, _));
                         let l_unknown = matches!(&lc, Ty::Unknown | Ty::TypeVar(_));
                         let r_unknown = matches!(&rc, Ty::Unknown | Ty::TypeVar(_));
                         let is_concat = (l_concat && (r_concat || r_unknown))
@@ -248,7 +248,7 @@ impl Checker {
                     // Auto-unwrap Result: fan unwraps Result<T, E> to T
                     let concrete = resolve_vars(&ty, &self.solutions);
                     match &concrete {
-                        Ty::Result(ok, _) => ok.as_ref().clone(),
+                        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
                         _ => ty,
                     }
                 }).collect();
@@ -297,7 +297,7 @@ impl Checker {
             ast::Expr::Ok { expr, .. } => {
                 let ok_ty = self.infer_expr(expr);
                 let err_ty = match &self.env.current_ret {
-                    Some(Ty::Result(_, e)) => e.as_ref().clone(),
+                    Some(Ty::Applied(TypeConstructorId::Result, args)) if args.len() == 2 => args[1].clone(),
                     _ => self.fresh_var(),
                 };
                 Ty::result(ok_ty, err_ty)
@@ -305,7 +305,7 @@ impl Checker {
             ast::Expr::Err { expr, .. } => {
                 let err_ty = self.infer_expr(expr);
                 let ok_ty = match &self.env.current_ret {
-                    Some(Ty::Result(o, _)) => o.as_ref().clone(),
+                    Some(Ty::Applied(TypeConstructorId::Result, args)) if args.len() == 2 => args[0].clone(),
                     _ => self.fresh_var(),
                 };
                 Ty::result(ok_ty, err_ty)
@@ -313,7 +313,7 @@ impl Checker {
             ast::Expr::Try { expr, .. } => {
                 let ty = self.infer_expr(expr);
                 match &ty {
-                    Ty::Result(ok, _) => ok.as_ref().clone(),
+                    Ty::Applied(TypeConstructorId::Result, args) if args.len() >= 1 => args[0].clone(),
                     _ => ty,
                 }
             }
@@ -433,8 +433,8 @@ impl Checker {
         self.env.push_scope();
         let iter_resolved = resolve_vars(&iter_ty, &self.solutions);
         let elem_ty = match &iter_resolved {
-            Ty::List(inner) => inner.as_ref().clone(),
-            Ty::Map(k, v) => Ty::Tuple(vec![k.as_ref().clone(), v.as_ref().clone()]),
+            Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => args[0].clone(),
+            Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => Ty::Tuple(vec![args[0].clone(), args[1].clone()]),
             _ => Ty::Unknown,
         };
         if let Some(names) = var_tuple {
@@ -468,7 +468,10 @@ impl Checker {
                     let t = resolve_vars(&val_ty, &self.solutions);
                     // Auto-unwrap Result in effect fns (but not in test blocks)
                     if self.env.auto_unwrap {
-                        match t { Ty::Result(ok, _) => *ok, other => other }
+                        match t {
+                            Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args.into_iter().next().unwrap(),
+                            other => other,
+                        }
                     } else { t }
                 };
                 self.env.define_var(name, final_ty);
@@ -482,7 +485,10 @@ impl Checker {
                 } else {
                     let t = resolve_vars(&val_ty, &self.solutions);
                     if self.env.auto_unwrap {
-                        match t { Ty::Result(ok, _) => *ok, other => other }
+                        match t {
+                            Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args.into_iter().next().unwrap(),
+                            other => other,
+                        }
                     } else { t }
                 };
                 self.env.define_var(name, final_ty);
@@ -540,9 +546,9 @@ impl Checker {
             ast::Pattern::Tuple { elements } => {
                 if let Ty::Tuple(tys) = ty { for (i, e) in elements.iter().enumerate() { self.bind_pattern(e, tys.get(i).unwrap_or(&Ty::Unknown)); } }
             }
-            ast::Pattern::Some { inner } => { let it = match ty { Ty::Option(t) => *t.clone(), _ => Ty::Unknown }; self.bind_pattern(inner, &it); }
-            ast::Pattern::Ok { inner } => { let it = match ty { Ty::Result(t, _) => *t.clone(), _ => Ty::Unknown }; self.bind_pattern(inner, &it); }
-            ast::Pattern::Err { inner } => { let it = match ty { Ty::Result(_, e) => *e.clone(), _ => Ty::Unknown }; self.bind_pattern(inner, &it); }
+            ast::Pattern::Some { inner } => { let it = match ty { Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args[0].clone(), _ => Ty::Unknown }; self.bind_pattern(inner, &it); }
+            ast::Pattern::Ok { inner } => { let it = match ty { Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(), _ => Ty::Unknown }; self.bind_pattern(inner, &it); }
+            ast::Pattern::Err { inner } => { let it = match ty { Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[1].clone(), _ => Ty::Unknown }; self.bind_pattern(inner, &it); }
             ast::Pattern::None | ast::Pattern::Literal { .. } => {}
         }
     }

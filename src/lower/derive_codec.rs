@@ -1,7 +1,7 @@
 // ── Auto-derive Codec ───────────────────────────────────────────
 
 use crate::ir::*;
-use crate::types::Ty;
+use crate::types::{Ty, TypeConstructorId};
 
 /// Auto-derive Codec encode: `fn T.encode(t: T) -> Value`
 /// Generates: `value.object([("field1", value.str(t.field1)), ("field2", value.int(t.field2)), ...])`
@@ -60,10 +60,8 @@ fn encode_field_value(field_expr: &IrExpr, field_ty: &Ty, value_ty: &Ty) -> IrEx
         Ty::Int => ("value", "int"),
         Ty::Float => ("value", "float"),
         Ty::Bool => ("value", "bool"),
-        Ty::Option(inner) => {
-            // Option[T] → encode inner if Some, Null if None
-            // Use runtime helper: value_option_encode(field, |v| encode_inner(v))
-            // Simplified: generate a Call to value_option_encode with the appropriate encoder
+        Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => {
+            let inner = &args[0];
             return IrExpr {
                 kind: IrExprKind::Call {
                     target: CallTarget::Named { name: format!("__encode_option_{}", decode_func_suffix(inner)) },
@@ -73,9 +71,9 @@ fn encode_field_value(field_expr: &IrExpr, field_ty: &Ty, value_ty: &Ty) -> IrEx
                 ty: value_ty.clone(), span: None,
             };
         }
-        Ty::List(inner) => {
-            // List[T] → __encode_list_T(field) for primitives, or value_encode_list(field, T.encode) for Named
-            let func_name = if let Ty::Named(name, _) = inner.as_ref() {
+        Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
+            let inner = &args[0];
+            let func_name = if let Ty::Named(name, _) = inner {
                 format!("__encode_list_{}", name)
             } else {
                 format!("__encode_list_{}", decode_func_suffix(inner))
@@ -244,9 +242,9 @@ fn decode_field_value(get_field_expr: IrExpr, field_ty: &Ty, _value_ty: &Ty) -> 
         Ty::Int => ("value", "as_int"),
         Ty::Float => ("value", "as_float"),
         Ty::Bool => ("value", "as_bool"),
-        Ty::List(inner) => {
-            // List[T] → __decode_list_T(value)?
-            let func_name = if let Ty::Named(name, _) = inner.as_ref() {
+        Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
+            let inner = &args[0];
+            let func_name = if let Ty::Named(name, _) = inner {
                 format!("__decode_list_{}", name)
             } else {
                 format!("__decode_list_{}", decode_func_suffix(inner))

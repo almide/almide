@@ -214,10 +214,9 @@ impl Checker {
             return true;
         }
         match (a, b) {
-            (Ty::List(a), Ty::List(b)) => self.unify_infer(a, b),
-            (Ty::Option(a), Ty::Option(b)) => self.unify_infer(a, b),
-            (Ty::Result(ao, ae), Ty::Result(bo, be)) => self.unify_infer(ao, bo) && self.unify_infer(ae, be),
-            (Ty::Map(ak, av), Ty::Map(bk, bv)) => self.unify_infer(ak, bk) && self.unify_infer(av, bv),
+            (Ty::Applied(id1, args1), Ty::Applied(id2, args2)) if id1 == id2 && args1.len() == args2.len() => {
+                args1.iter().zip(args2.iter()).all(|(x, y)| self.unify_infer(x, y))
+            }
             (Ty::Tuple(a), Ty::Tuple(b)) if a.len() == b.len() => a.iter().zip(b.iter()).all(|(x, y)| self.unify_infer(x, y)),
             (Ty::Fn { params: ap, ret: ar }, Ty::Fn { params: bp, ret: br }) if ap.len() == bp.len() =>
                 ap.iter().zip(bp.iter()).all(|(x, y)| self.unify_infer(x, y)) && self.unify_infer(ar, br),
@@ -263,8 +262,7 @@ impl Checker {
                     id == var.0 || self.solutions.get(&TyVarId(id)).map_or(false, |s| self.occurs(var, s))
                 } else { false }
             }
-            Ty::List(inner) | Ty::Option(inner) => self.occurs(var, inner),
-            Ty::Result(a, b) | Ty::Map(a, b) => self.occurs(var, a) || self.occurs(var, b),
+            Ty::Applied(_, args) => args.iter().any(|a| self.occurs(var, a)),
             Ty::Tuple(elems) => elems.iter().any(|e| self.occurs(var, e)),
             Ty::Fn { params, ret } => params.iter().any(|p| self.occurs(var, p)) || self.occurs(var, ret),
             _ => false,
@@ -424,13 +422,16 @@ impl Checker {
     fn constrain_effect_body(&mut self, name: &str, ret_ty: &Ty, body_ty: Ty) {
         let body_resolved = resolve_vars(&body_ty, &self.solutions);
         if body_resolved == Ty::Unit { return; } // do blocks, while loops, guard patterns return via control flow
-        if let Ty::Result(ok, _) = ret_ty {
-            if body_resolved.is_result() {
-                self.constrain(ret_ty.clone(), body_ty, format!("fn '{}'", name));
-            } else {
-                self.constrain(ok.as_ref().clone(), body_ty, format!("fn '{}'", name));
+        if let Ty::Applied(crate::types::TypeConstructorId::Result, args) = ret_ty {
+            if args.len() >= 1 {
+                let ok = &args[0];
+                if body_resolved.is_result() {
+                    self.constrain(ret_ty.clone(), body_ty, format!("fn '{}'", name));
+                } else {
+                    self.constrain(ok.clone(), body_ty, format!("fn '{}'", name));
+                }
+                return;
             }
-            return;
         }
         self.constrain(ret_ty.clone(), body_ty, format!("fn '{}'", name));
     }
@@ -526,8 +527,8 @@ impl Checker {
         let resolved = self.env.resolve_named(subject_ty);
         let required: Vec<String> = match &resolved {
             Ty::Variant { cases, .. } => cases.iter().map(|c| c.name.clone()).collect(),
-            Ty::Option(_) => vec!["some".into(), "none".into()],
-            Ty::Result(_, _) => vec!["ok".into(), "err".into()],
+            Ty::Applied(crate::types::TypeConstructorId::Option, _) => vec!["some".into(), "none".into()],
+            Ty::Applied(crate::types::TypeConstructorId::Result, _) => vec!["ok".into(), "err".into()],
             Ty::Bool => vec!["true".into(), "false".into()],
             _ => return,
         };

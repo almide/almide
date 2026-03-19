@@ -15,7 +15,7 @@
 ///
 /// Built-in constructors have dedicated variants for fast matching.
 /// User-defined types use `UserDefined(name)`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum TypeConstructorId {
     // kind: *
     Int,

@@ -53,9 +53,9 @@ fn collect_clone_ids(vt: &VarTable) -> HashSet<VarId> {
 
 fn needs_clone(ty: &Ty) -> bool {
     matches!(ty,
-        Ty::String | Ty::List(_) | Ty::Map(_, _) |
+        Ty::String | Ty::Applied(_, _) |
         Ty::Record { .. } | Ty::OpenRecord { .. } |
-        Ty::Named(_, _) | Ty::Option(_) | Ty::Result(_, _) |
+        Ty::Named(_, _) |
         Ty::Variant { .. } | Ty::Fn { .. }
     )
 }

@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use crate::ir::*;
-use crate::types::Ty;
+use crate::types::{Ty, TypeConstructorId};
 use super::annotations::CodegenAnnotations;
 use super::pass::Target;
 use super::template::TemplateSet;
@@ -64,18 +64,21 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
         Ty::String => template_or(ctx, "type_string", &[], "String"),
         Ty::Bool => template_or(ctx, "type_bool", &[], "bool"),
         Ty::Unit => template_or(ctx, "type_unit", &[], "()"),
-        Ty::Option(inner) => {
+        Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => {
+            let inner = &args[0];
             let inner_s = render_type(ctx, inner);
             ctx.templates.render_with("type_option", None, &[], &[("inner", inner_s.as_str())])
                 .unwrap_or_else(|| format!("Option<{}>", render_type(ctx, inner)))
         }
-        Ty::Result(ok, err) => {
+        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => {
+            let (ok, err) = (&args[0], &args[1]);
             let ok_s = render_type(ctx, ok);
             let err_s = render_type(ctx, err);
             ctx.templates.render_with("type_result", None, &[], &[("ok", ok_s.as_str()), ("err", err_s.as_str())])
                 .unwrap_or_else(|| format!("Result<{}, {}>", render_type(ctx, ok), render_type(ctx, err)))
         }
-        Ty::List(inner) => {
+        Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
+            let inner = &args[0];
             let inner_s = render_type(ctx, inner);
             ctx.templates.render_with("type_list", None, &[], &[("inner", inner_s.as_str())])
                 .unwrap_or_else(|| format!("Vec<{}>", render_type(ctx, inner)))
@@ -117,11 +120,25 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
                 names.join("_")
             }
         }
-        Ty::Map(k, v) => {
+        Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => {
+            let (k, v) = (&args[0], &args[1]);
             let key_s = render_type(ctx, k);
             let value_s = render_type(ctx, v);
             ctx.templates.render_with("type_map", None, &[], &[("key", key_s.as_str()), ("value", value_s.as_str())])
                 .unwrap_or_else(|| format!("HashMap<{}, {}>", render_type(ctx, k), render_type(ctx, v)))
+        }
+        // Catch-all for other Applied types (e.g., user-defined type constructors)
+        Ty::Applied(id, args) => {
+            let name = match id {
+                TypeConstructorId::UserDefined(n) => n.as_str(),
+                _ => return format!("{:?}", id),
+            };
+            if args.is_empty() {
+                name.to_string()
+            } else {
+                let args_str = args.iter().map(|a| render_type(ctx, a)).collect::<Vec<_>>().join(", ");
+                format!("{}<{}>", name, args_str)
+            }
         }
         Ty::Fn { params, ret } => {
             let params_str = params.iter().map(|p| render_type(ctx, p)).collect::<Vec<_>>().join(", ");
@@ -239,8 +256,8 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 }
             }
             // Option<String> subjects → .as_deref() so Some("literal") patterns match
-            if let Ty::Option(inner) = &subject.ty {
-                if matches!(inner.as_ref(), Ty::String) {
+            if let Ty::Applied(TypeConstructorId::Option, args) = &subject.ty {
+                if args.len() == 1 && matches!(&args[0], Ty::String) {
                     let has_some_str_pat = arms.iter().any(|a| {
                         if let IrPattern::Some { inner } = &a.pattern {
                             matches!(inner.as_ref(), IrPattern::Literal { expr } if matches!(&expr.kind, IrExprKind::LitStr { .. }))
@@ -439,11 +456,12 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             // Empty list: use typed template (Rust needs Vec::<T>::new(), TS uses [])
             if elements.is_empty() {
                 let inner_ty = match &expr.ty {
-                    Ty::List(inner) => {
+                    Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
+                        let inner = &args[0];
                         let ty = if ty_has_named_typevar(inner) {
-                            erase_named_typevars(inner.as_ref().clone())
+                            erase_named_typevars(inner.clone())
                         } else {
-                            inner.as_ref().clone()
+                            inner.clone()
                         };
                         render_type(ctx, &ty)
                     }
@@ -543,9 +561,9 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
         IrExprKind::OptionNone => {
             // Typed None: pass inner type via bindings + attribute for template guard
-            if let Ty::Option(inner) = &expr.ty {
-                if !matches!(inner.as_ref(), Ty::Unknown | Ty::TypeVar(_)) {
-                    let type_hint_s = render_type(ctx, inner);
+            if let Ty::Applied(TypeConstructorId::Option, args) = &expr.ty {
+                if args.len() == 1 && !matches!(&args[0], Ty::Unknown | Ty::TypeVar(_)) {
+                    let type_hint_s = render_type(ctx, &args[0]);
                     return ctx.templates.render_with("none_expr", None, &["none_type_hint"], &[("type_hint", type_hint_s.as_str())])
                         .unwrap_or_else(|| "None".into());
                 }

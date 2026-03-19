@@ -734,10 +734,7 @@ fn contains_unknown_still_works() {
 
 #[test]
 fn contains_unknown_nested() {
-    let ty = Ty::Map(
-        Box::new(Ty::String),
-        Box::new(Ty::list(Ty::option(Ty::Unknown))),
-    );
+    let ty = Ty::map_of(Ty::String, Ty::list(Ty::option(Ty::Unknown)));
     assert!(ty.contains_unknown());
 }
 

@@ -2,20 +2,20 @@
 
 use std::collections::HashMap;
 use crate::ast;
-use crate::types::Ty;
+use crate::types::{Ty, TypeConstructorId};
 use super::types::resolve_vars;
 use super::Checker;
 
 /// Map a built-in type to its stdlib UFCS module name.
 pub(crate) fn builtin_module_for_type(ty: &Ty) -> Option<&'static str> {
     match ty {
-        Ty::List(_) => Some("list"),
-        Ty::Map(_, _) => Some("map"),
+        Ty::Applied(TypeConstructorId::List, _) => Some("list"),
+        Ty::Applied(TypeConstructorId::Map, _) => Some("map"),
         Ty::String => Some("string"),
         Ty::Int => Some("int"),
         Ty::Float => Some("float"),
-        Ty::Result(_, _) => Some("result"),
-        Ty::Option(_) => Some("option"),
+        Ty::Applied(TypeConstructorId::Result, _) => Some("result"),
+        Ty::Applied(TypeConstructorId::Option, _) => Some("option"),
         _ => None,
     }
 }
@@ -135,7 +135,7 @@ impl Checker {
             "ok" => {
                 let ok_ty = arg_tys.first().cloned().unwrap_or(Ty::Unit);
                 let err_ty = match &self.env.current_ret {
-                    Some(Ty::Result(_, e)) => e.as_ref().clone(),
+                    Some(Ty::Applied(TypeConstructorId::Result, args)) if args.len() == 2 => args[1].clone(),
                     _ => Ty::String,
                 };
                 Ty::result(ok_ty, err_ty)
@@ -143,7 +143,7 @@ impl Checker {
             "err" => {
                 let err_ty = arg_tys.first().cloned().unwrap_or(Ty::String);
                 let ok_ty = match &self.env.current_ret {
-                    Some(Ty::Result(o, _)) => o.as_ref().clone(),
+                    Some(Ty::Applied(TypeConstructorId::Result, args)) if args.len() == 2 => args[0].clone(),
                     _ => Ty::Unit,
                 };
                 Ty::result(ok_ty, err_ty)
@@ -152,8 +152,8 @@ impl Checker {
             "unwrap_or" if arg_tys.len() >= 2 => {
                 let concrete = resolve_vars(&arg_tys[0], &self.solutions);
                 match &concrete {
-                    Ty::Option(inner) => inner.as_ref().clone(),
-                    Ty::Result(ok, _) => ok.as_ref().clone(),
+                    Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args[0].clone(),
+                    Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
                     _ => arg_tys[1].clone(),
                 }
             }
@@ -332,7 +332,7 @@ impl Checker {
                         }
                         let list_ty = resolve_vars(&arg_tys[0], &self.solutions);
                         let elem_ty = match &list_ty {
-                            Ty::List(inner) => *inner.clone(),
+                            Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => args[0].clone(),
                             _ => Ty::Unknown,
                         };
                         // Infer return type from f's return type
@@ -341,7 +341,7 @@ impl Checker {
                             Ty::Fn { ret, .. } => {
                                 // Auto-unwrap Result
                                 match ret.as_ref() {
-                                    Ty::Result(ok, _) => *ok.clone(),
+                                    Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
                                     other => other.clone(),
                                 }
                             }
@@ -367,11 +367,11 @@ impl Checker {
                         }
                         let list_ty = resolve_vars(&arg_tys[0], &self.solutions);
                         let result_ty = match &list_ty {
-                            Ty::List(inner) => {
-                                match inner.as_ref() {
+                            Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
+                                match &args[0] {
                                     Ty::Fn { ret, .. } => {
                                         match ret.as_ref() {
-                                            Ty::Result(ok, _) => *ok.clone(),
+                                            Ty::Applied(TypeConstructorId::Result, rargs) if rargs.len() == 2 => rargs[0].clone(),
                                             other => other.clone(),
                                         }
                                     }
@@ -393,9 +393,9 @@ impl Checker {
                         }
                         let list_ty = resolve_vars(&arg_tys[0], &self.solutions);
                         let result_ty = match &list_ty {
-                            Ty::List(inner) => match inner.as_ref() {
+                            Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => match &args[0] {
                                 Ty::Fn { ret, .. } => match ret.as_ref() {
-                                    Ty::Result(ok, _) => *ok.clone(),
+                                    Ty::Applied(TypeConstructorId::Result, rargs) if rargs.len() == 2 => rargs[0].clone(),
                                     other => other.clone(),
                                 },
                                 _ => Ty::Unknown,
@@ -415,9 +415,9 @@ impl Checker {
                         }
                         let list_ty = resolve_vars(&arg_tys[0], &self.solutions);
                         let inner_result = match &list_ty {
-                            Ty::List(inner) => match inner.as_ref() {
+                            Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => match &args[0] {
                                 Ty::Fn { ret, .. } => match ret.as_ref() {
-                                    Ty::Result(ok, err) => Ty::Result(ok.clone(), err.clone()),
+                                    Ty::Applied(TypeConstructorId::Result, rargs) if rargs.len() == 2 => Ty::result(rargs[0].clone(), rargs[1].clone()),
                                     other => Ty::result(other.clone(), Ty::String),
                                 },
                                 _ => Ty::Unknown,
@@ -439,7 +439,7 @@ impl Checker {
                         let fn_ty = resolve_vars(&arg_tys[1], &self.solutions);
                         let result_ty = match &fn_ty {
                             Ty::Fn { ret, .. } => match ret.as_ref() {
-                                Ty::Result(ok, _) => *ok.clone(),
+                                Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
                                 other => other.clone(),
                             },
                             _ => Ty::Unknown,

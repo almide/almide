@@ -66,16 +66,7 @@ fn resolve_inner(ty: &Ty, solutions: &HashMap<TyVarId, Ty>, seen: &mut HashSet<u
                 ty.clone()
             }
         }
-        Ty::List(inner) => Ty::list(resolve_inner(inner, solutions, seen)),
-        Ty::Option(inner) => Ty::option(resolve_inner(inner, solutions, seen)),
-        Ty::Result(ok, err) => Ty::Result(
-            Box::new(resolve_inner(ok, solutions, seen)),
-            Box::new(resolve_inner(err, solutions, seen)),
-        ),
-        Ty::Map(k, v) => Ty::Map(
-            Box::new(resolve_inner(k, solutions, seen)),
-            Box::new(resolve_inner(v, solutions, seen)),
-        ),
+        Ty::Applied(id, args) => Ty::Applied(id.clone(), args.iter().map(|a| resolve_inner(a, solutions, seen)).collect()),
         Ty::Tuple(elems) => Ty::Tuple(elems.iter().map(|e| resolve_inner(e, solutions, seen)).collect()),
         Ty::Fn { params, ret } => Ty::Fn {
             params: params.iter().map(|p| resolve_inner(p, solutions, seen)).collect(),

@@ -38,10 +38,9 @@ pub fn unify(sig_ty: &Ty, actual_ty: &Ty, bindings: &mut std::collections::HashM
         return true;
     }
     match (sig_ty, actual_ty) {
-        (Ty::List(a), Ty::List(b)) => unify(a, b, bindings),
-        (Ty::Option(a), Ty::Option(b)) => unify(a, b, bindings),
-        (Ty::Result(a1, a2), Ty::Result(b1, b2)) => unify(a1, b1, bindings) && unify(a2, b2, bindings),
-        (Ty::Map(k1, v1), Ty::Map(k2, v2)) => unify(k1, k2, bindings) && unify(v1, v2, bindings),
+        (Ty::Applied(id1, args1), Ty::Applied(id2, args2)) if id1 == id2 && args1.len() == args2.len() => {
+            args1.iter().zip(args2.iter()).all(|(a, b)| unify(a, b, bindings))
+        }
         (Ty::Fn { params: p1, ret: r1 }, Ty::Fn { params: p2, ret: r2 }) => {
             if p1.len() != p2.len() { return false; }
             p1.iter().zip(p2.iter()).all(|(a, b)| unify(a, b, bindings)) && unify(r1, r2, bindings)

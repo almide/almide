@@ -12,7 +12,7 @@
 //! - wildcard / bind  → else { body }
 
 use crate::ir::*;
-use crate::types::Ty;
+use crate::types::{Ty, TypeConstructorId};
 use super::pass::{NanoPass, Target};
 
 #[derive(Debug)]
@@ -615,14 +615,14 @@ fn build_pattern_bind(value: &IrExpr, pattern: &IrPattern, body: &IrExpr, result
 
 fn unwrap_result_ok(ty: &Ty) -> Ty {
     match ty {
-        Ty::Result(ok, _) => ok.as_ref().clone(),
+        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
         _ => Ty::Unknown,
     }
 }
 
 fn unwrap_result_err(ty: &Ty) -> Ty {
     match ty {
-        Ty::Result(_, err) => err.as_ref().clone(),
+        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[1].clone(),
         _ => Ty::Unknown,
     }
 }

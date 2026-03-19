@@ -121,7 +121,8 @@ impl TypeEnv {
     fn is_hash_inner(&self, ty: &Ty, seen: &mut std::collections::HashSet<std::string::String>) -> bool {
         match ty {
             // Float, Fn, Map are never hashable
-            Ty::Float | Ty::Fn { .. } | Ty::Map(_, _) => false,
+            Ty::Float | Ty::Fn { .. } => false,
+            Ty::Applied(super::TypeConstructorId::Map, _) => false,
             // Named/Variant need cycle detection via `seen`
             Ty::Variant { name, .. } => {
                 if !seen.insert(name.clone()) {

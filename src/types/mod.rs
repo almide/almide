@@ -17,10 +17,9 @@ pub enum Ty {
     String,
     Bool,
     Unit,
-    List(Box<Ty>),
-    Option(Box<Ty>),
-    Result(Box<Ty>, Box<Ty>),
-    Map(Box<Ty>, Box<Ty>),
+    /// Parameterized type constructor: List[T], Option[T], Result[T,E], Map[K,V], Set[T], etc.
+    /// Phase 4 of HKT Foundation — unifies all container types.
+    Applied(constructor::TypeConstructorId, Vec<Ty>),
     Record { fields: Vec<(std::string::String, Ty)> },
     OpenRecord { fields: Vec<(std::string::String, Ty)> },
     Variant { name: std::string::String, cases: Vec<VariantCase> },
@@ -96,10 +95,23 @@ impl Ty {
             Ty::String => "String".into(),
             Ty::Bool => "Bool".into(),
             Ty::Unit => "Unit".into(),
-            Ty::List(t) => format!("List[{}]", t.display()),
-            Ty::Option(t) => format!("Option[{}]", t.display()),
-            Ty::Result(t, e) => format!("Result[{}, {}]", t.display(), e.display()),
-            Ty::Map(k, v) => format!("Map[{}, {}]", k.display(), v.display()),
+            Ty::Applied(id, args) => {
+                let name = match id {
+                    TypeConstructorId::List => "List",
+                    TypeConstructorId::Option => "Option",
+                    TypeConstructorId::Result => "Result",
+                    TypeConstructorId::Map => "Map",
+                    TypeConstructorId::Tuple => "Tuple",
+                    TypeConstructorId::UserDefined(n) => n.as_str(),
+                    _ => return format!("{:?}", id),
+                };
+                if args.is_empty() {
+                    name.to_string()
+                } else {
+                    let ts: Vec<_> = args.iter().map(|t| t.display()).collect();
+                    format!("{}[{}]", name, ts.join(", "))
+                }
+            }
             Ty::Record { fields } => {
                 let fs: Vec<_> = fields.iter().map(|(n, t)| format!("{}: {}", n, t.display())).collect();
                 format!("{{ {} }}", fs.join(", "))
@@ -183,10 +195,9 @@ impl Ty {
             (Ty::String, Ty::String) => true,
             (Ty::Bool, Ty::Bool) => true,
             (Ty::Unit, Ty::Unit) => true,
-            (Ty::List(a), Ty::List(b)) => a.compatible(b),
-            (Ty::Option(a), Ty::Option(b)) => a.compatible(b),
-            (Ty::Result(a1, a2), Ty::Result(b1, b2)) => a1.compatible(b1) && a2.compatible(b2),
-            (Ty::Map(k1, v1), Ty::Map(k2, v2)) => k1.compatible(k2) && v1.compatible(v2),
+            (Ty::Applied(id1, args1), Ty::Applied(id2, args2)) if id1 == id2 && args1.len() == args2.len() => {
+                args1.iter().zip(args2.iter()).all(|(a, b)| a.compatible(b))
+            }
             (Ty::Named(a, _), Ty::Named(b, _)) => a == b,
             (Ty::Variant { name: a, .. }, Ty::Variant { name: b, .. }) => a == b,
             (Ty::Named(a, _), Ty::Variant { name: b, .. }) => a == b,
@@ -236,10 +247,7 @@ impl Ty {
             Ty::String => Some(TypeConstructorId::String),
             Ty::Bool => Some(TypeConstructorId::Bool),
             Ty::Unit => Some(TypeConstructorId::Unit),
-            Ty::List(_) => Some(TypeConstructorId::List),
-            Ty::Option(_) => Some(TypeConstructorId::Option),
-            Ty::Result(_, _) => Some(TypeConstructorId::Result),
-            Ty::Map(_, _) => Some(TypeConstructorId::Map),
+            Ty::Applied(id, _) => Some(id.clone()),
             Ty::Tuple(_) => Some(TypeConstructorId::Tuple),
             Ty::Named(name, _) => Some(TypeConstructorId::UserDefined(name.clone())),
             _ => None,
@@ -257,8 +265,7 @@ impl Ty {
     /// ```
     pub fn type_args(&self) -> Vec<&Ty> {
         match self {
-            Ty::List(inner) | Ty::Option(inner) => vec![inner.as_ref()],
-            Ty::Result(ok, err) | Ty::Map(ok, err) => vec![ok.as_ref(), err.as_ref()],
+            Ty::Applied(_, args) => args.iter().collect(),
             Ty::Tuple(tys) => tys.iter().collect(),
             Ty::Named(_, args) => args.iter().collect(),
             _ => vec![],
@@ -275,11 +282,8 @@ impl Ty {
             Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit
             | Ty::TypeVar(_) | Ty::Unknown => vec![],
 
-            // Single-param containers
-            Ty::List(inner) | Ty::Option(inner) => vec![inner.as_ref()],
-
-            // Dual-param containers
-            Ty::Result(a, b) | Ty::Map(a, b) => vec![a.as_ref(), b.as_ref()],
+            // Parameterized types (List, Option, Result, Map, user-defined)
+            Ty::Applied(_, args) => args.iter().collect(),
 
             // Variable-arity
             Ty::Tuple(tys) => tys.iter().collect(),
@@ -325,10 +329,7 @@ impl Ty {
             Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit
             | Ty::TypeVar(_) | Ty::Unknown => self.clone(),
 
-            Ty::List(inner) => Ty::list(f(inner)),
-            Ty::Option(inner) => Ty::option(f(inner)),
-            Ty::Result(ok, err) => Ty::result(f(ok), f(err)),
-            Ty::Map(k, v) => Ty::map_of(f(k), f(v)),
+            Ty::Applied(id, args) => Ty::Applied(id.clone(), args.iter().map(|a| f(a)).collect()),
 
             Ty::Tuple(tys) => Ty::Tuple(tys.iter().map(f).collect()),
             Ty::Named(name, args) => Ty::Named(name.clone(), args.iter().map(f).collect()),
@@ -374,10 +375,7 @@ impl Ty {
             Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit
             | Ty::TypeVar(_) | Ty::Unknown => self.clone(),
 
-            Ty::List(inner) => Ty::list(f(inner)),
-            Ty::Option(inner) => Ty::option(f(inner)),
-            Ty::Result(ok, err) => Ty::result(f(ok), f(err)),
-            Ty::Map(k, v) => Ty::map_of(f(k), f(v)),
+            Ty::Applied(id, args) => Ty::Applied(id.clone(), args.iter().map(|a| f(a)).collect()),
 
             Ty::Tuple(tys) => Ty::Tuple(tys.iter().map(|t| f(t)).collect()),
             Ty::Named(name, args) => Ty::Named(name.clone(), args.iter().map(|t| f(t)).collect()),
@@ -444,7 +442,7 @@ impl Ty {
 
     /// Returns true if this type is a parameterized container (List, Option, Result, Map).
     pub fn is_container(&self) -> bool {
-        matches!(self, Ty::List(_) | Ty::Option(_) | Ty::Result(_, _) | Ty::Map(_, _))
+        matches!(self, Ty::Applied(TypeConstructorId::List | TypeConstructorId::Option | TypeConstructorId::Result | TypeConstructorId::Map, _))
     }
 
     /// Returns the constructor name for display/debug purposes.
@@ -455,10 +453,19 @@ impl Ty {
             Ty::String => Some("String"),
             Ty::Bool => Some("Bool"),
             Ty::Unit => Some("Unit"),
-            Ty::List(_) => Some("List"),
-            Ty::Option(_) => Some("Option"),
-            Ty::Result(_, _) => Some("Result"),
-            Ty::Map(_, _) => Some("Map"),
+            Ty::Applied(id, _) => Some(match id {
+                TypeConstructorId::List => "List",
+                TypeConstructorId::Option => "Option",
+                TypeConstructorId::Result => "Result",
+                TypeConstructorId::Map => "Map",
+                TypeConstructorId::Tuple => "Tuple",
+                TypeConstructorId::Int => "Int",
+                TypeConstructorId::Float => "Float",
+                TypeConstructorId::String => "String",
+                TypeConstructorId::Bool => "Bool",
+                TypeConstructorId::Unit => "Unit",
+                TypeConstructorId::UserDefined(n) => return Some(n.as_str()),
+            }),
             Ty::Tuple(_) => Some("Tuple"),
             Ty::Named(name, _) => Some(name.as_str()),
             _ => None,
@@ -471,19 +478,19 @@ impl Ty {
 
     /// Construct List[T]
     #[inline]
-    pub fn list(inner: Ty) -> Ty { Ty::List(Box::new(inner)) }
+    pub fn list(inner: Ty) -> Ty { Ty::Applied(TypeConstructorId::List, vec![inner]) }
 
     /// Construct Option[T]
     #[inline]
-    pub fn option(inner: Ty) -> Ty { Ty::Option(Box::new(inner)) }
+    pub fn option(inner: Ty) -> Ty { Ty::Applied(TypeConstructorId::Option, vec![inner]) }
 
     /// Construct Result[T, E]
     #[inline]
-    pub fn result(ok: Ty, err: Ty) -> Ty { Ty::Result(Box::new(ok), Box::new(err)) }
+    pub fn result(ok: Ty, err: Ty) -> Ty { Ty::Applied(TypeConstructorId::Result, vec![ok, err]) }
 
     /// Construct Map[K, V]
     #[inline]
-    pub fn map_of(key: Ty, val: Ty) -> Ty { Ty::Map(Box::new(key), Box::new(val)) }
+    pub fn map_of(key: Ty, val: Ty) -> Ty { Ty::Applied(TypeConstructorId::Map, vec![key, val]) }
 
     // ── Accessors (Phase 4: uniform access to container type args) ──
 
@@ -491,7 +498,7 @@ impl Ty {
     /// Returns None for non-container types.
     pub fn inner(&self) -> Option<&Ty> {
         match self {
-            Ty::List(inner) | Ty::Option(inner) => Some(inner),
+            Ty::Applied(TypeConstructorId::List, args) | Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => Some(&args[0]),
             _ => None,
         }
     }
@@ -499,19 +506,19 @@ impl Ty {
     /// Get the two type args of a dual-param container (Result or Map).
     pub fn inner2(&self) -> Option<(&Ty, &Ty)> {
         match self {
-            Ty::Result(a, b) | Ty::Map(a, b) => Some((a, b)),
+            Ty::Applied(TypeConstructorId::Result, args) | Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => Some((&args[0], &args[1])),
             _ => None,
         }
     }
 
     /// Check if this is a List type.
-    pub fn is_list(&self) -> bool { matches!(self, Ty::List(_)) }
+    pub fn is_list(&self) -> bool { matches!(self, Ty::Applied(TypeConstructorId::List, _)) }
     /// Check if this is an Option type.
-    pub fn is_option(&self) -> bool { matches!(self, Ty::Option(_)) }
+    pub fn is_option(&self) -> bool { matches!(self, Ty::Applied(TypeConstructorId::Option, _)) }
     /// Check if this is a Result type.
-    pub fn is_result(&self) -> bool { matches!(self, Ty::Result(_, _)) }
+    pub fn is_result(&self) -> bool { matches!(self, Ty::Applied(TypeConstructorId::Result, _)) }
     /// Check if this is a Map type.
-    pub fn is_map(&self) -> bool { matches!(self, Ty::Map(_, _)) }
+    pub fn is_map(&self) -> bool { matches!(self, Ty::Applied(TypeConstructorId::Map, _)) }
     /// Check if this is a function type.
     pub fn is_fn(&self) -> bool { matches!(self, Ty::Fn { .. }) }
 }

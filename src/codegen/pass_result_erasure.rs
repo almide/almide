@@ -12,7 +12,7 @@
 //! while this pass strips Result/Option wrappers entirely.
 
 use crate::ir::*;
-use crate::types::Ty;
+use crate::types::{Ty, TypeConstructorId};
 use super::pass::{NanoPass, Target};
 
 #[derive(Debug)]
@@ -51,8 +51,8 @@ impl NanoPass for ResultErasurePass {
 /// Erase Result<T, E> → T, Option<T> → T
 fn erase_result_ty(ty: Ty) -> Ty {
     match ty {
-        Ty::Result(ok, _) => *ok,
-        Ty::Option(inner) => *inner,
+        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args.into_iter().next().unwrap(),
+        Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args.into_iter().next().unwrap(),
         other => other,
     }
 }
