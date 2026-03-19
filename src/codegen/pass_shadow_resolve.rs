@@ -23,6 +23,12 @@ impl NanoPass for ShadowResolvePass {
             let mut seen: HashMap<String, VarId> = HashMap::new();
             resolve_stmts_block(&mut func.body, &program.var_table, &mut seen);
         }
+        for module in &mut program.modules {
+            for func in &mut module.functions {
+                let mut seen: HashMap<String, VarId> = HashMap::new();
+                resolve_stmts_block(&mut func.body, &module.var_table, &mut seen);
+            }
+        }
     }
 }
 

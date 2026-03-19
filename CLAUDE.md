@@ -35,40 +35,11 @@ lefthook install
 
 ## Project Overview
 
-Almide is a programming language (.almd files) compiled via a pure-Rust compiler with multi-target codegen.
+Almide is a programming language (.almd files) compiled via a pure-Rust compiler with multi-target codegen (Rust, TypeScript, JavaScript, WASM).
 
-See [ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the full compiler pipeline and module map.
-
-### Module Structure
-
-```
-src/
-├── main.rs              CLI dispatch, compile pipeline
-├── lib.rs               Library crate root (re-exports for tests)
-├── cli.rs               Commands: run, build, test, check, fmt, clean, init
-├── ast.rs               AST types (Program, Decl, Expr, Stmt, TypeExpr)
-├── lexer.rs             Tokenizer
-├── parser/              Recursive descent parser (8 files + hints/)
-│   └── hints/           Context-aware error recovery hints (7 files)
-├── resolve.rs           Import resolution
-├── check/               Type checker (5 files)
-├── types.rs             Internal type system (Ty, TypeEnv, FnSig)
-├── ir.rs                Typed IR (IrProgram, IrModule, IrFunction, IrTypeDecl)
-├── lower.rs             AST → IR lowering with use-count analysis
-├── diagnostic.rs        Error reporting with file/line and hints
-├── stdlib.rs            UFCS resolution, module registry
-├── generated/           Auto-generated from stdlib/defs/*.toml + grammar/*.toml (DO NOT EDIT)
-├── emit_common.rs       Shared codegen utilities
-├── emit_rust/           Rust code generation (5 .rs files + 7 runtime .txt files)
-│   └── borrow.rs        Borrow analysis, clone insertion, single-use optimization
-├── emit_ts/             TypeScript code generation (4 files)
-├── emit_ts_runtime.rs   Embedded JS/TS runtime
-├── fmt.rs               Code formatter (AST → source)
-└── project.rs           almide.toml, dependency management
-stdlib/defs/             TOML stdlib definitions (15 modules, 282 functions)
-```
-
-`build.rs` reads `stdlib/defs/*.toml` at compile time and generates type signatures + codegen dispatch into `src/generated/`. See [stdlib/README.md](./stdlib/README.md) for the full spec.
+- **Architecture**: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — compiler pipeline, module map
+- **Language reference**: [docs/CHEATSHEET.md](./docs/CHEATSHEET.md) — syntax, stdlib, idioms (for AI code generation)
+- **Stdlib spec**: [docs/STDLIB-SPEC.md](./docs/STDLIB-SPEC.md) — 381 functions across 22 modules
 
 ## Building & Usage
 
@@ -87,6 +58,7 @@ almide fmt app.almd              # Format source
 almide clean                     # Clear dependency cache
 almide app.almd --target rust    # Emit Rust source
 almide app.almd --target ts      # Emit TypeScript source
+almide app.almd --target js      # Emit JavaScript source
 almide app.almd --emit-ast       # Emit AST as JSON
 ```
 
@@ -122,9 +94,9 @@ almide test
 
 When adding or modifying stdlib functions:
 - Add/edit the definition in `stdlib/defs/<module>.toml` (type sig + codegen templates)
-- Implement the runtime in `src/emit_rust/core_runtime.txt` (and/or `src/emit_ts_runtime.rs`)
-- Add UFCS mapping to `stdlib.rs` `resolve_ufcs_candidates` (if method-callable)
-- `cargo build` auto-generates all codegen — no manual `stdlib.rs` or `calls.rs` edits needed
+- Implement the Rust runtime in `runtime/rust/<module>.rs`
+- Implement the TS/JS runtime in `runtime/ts/<module>.ts` and `runtime/js/<module>.js`
+- `cargo build` auto-generates all codegen dispatch — no manual edits needed
 - Write a test in `spec/stdlib/` (as `*_test.almd` or inline `test` block)
 
 When modifying codegen:
@@ -134,10 +106,11 @@ When modifying codegen:
 
 ## Key Design Decisions
 
-- **Multi-target**: Same AST emits to Rust or TypeScript via `--target rust|ts`
-- **Result erasure (TS)**: `ok(x)` → `x`, `err(e)` → `throw new Error(e)`
+- **Multi-target**: Same IR emits to Rust, TypeScript, or JavaScript via `--target rust|ts|js`
+- **Codegen v3**: Nanopass pipeline (semantic rewrites) + TOML template renderer (syntax)
+- **Result erasure (TS/JS)**: `ok(x)` → `x`, `err(e)` → `throw new Error(e)`
 - **Effect fn (Rust)**: `effect fn` → `Result<T, String>`, auto `?` propagation
-- **`==`/`!=`**: Deep equality in TS (`__deep_eq`), `almide_eq!` macro in Rust
-- **`++`**: Concatenation for both strings and lists
+- **`==`/`!=`**: Deep equality in TS/JS (`__deep_eq`), `almide_eq!` macro in Rust
+- **`+`**: Concatenation for strings and lists (overloaded with addition)
 - **`do` block**: With guard → loop. Without guard → auto error propagation block.
 - **Diagnostics**: Every error includes file:line, context, and actionable hint

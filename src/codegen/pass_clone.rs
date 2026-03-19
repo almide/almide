@@ -27,6 +27,16 @@ impl NanoPass for CloneInsertionPass {
         for tl in &mut program.top_lets {
             tl.value = insert_clones(tl.value.clone(), &clone_ids);
         }
+        // Process module functions (each module has its own var_table)
+        for module in &mut program.modules {
+            let module_clone_ids = collect_clone_ids(&module.var_table);
+            for func in &mut module.functions {
+                func.body = insert_clones(func.body.clone(), &module_clone_ids);
+            }
+            for tl in &mut module.top_lets {
+                tl.value = insert_clones(tl.value.clone(), &module_clone_ids);
+            }
+        }
     }
 }
 

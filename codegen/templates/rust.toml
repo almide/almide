@@ -323,6 +323,9 @@ template = "{type_name} {{ {fields}, ..{base} }}"
 [string_match_subject]
 template = "{subject}.as_str()"
 
+[option_string_match_subject]
+template = "{subject}.as_deref()"
+
 [guard_negate]
 template = "!({cond})"
 

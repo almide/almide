@@ -28,6 +28,14 @@ impl NanoPass for ResultPropagationPass {
                 func.body = insert_try_body(func.body.clone(), returns_result);
             }
         }
+        for module in &mut program.modules {
+            for func in &mut module.functions {
+                if func.is_effect && !func.is_test {
+                    let returns_result = matches!(&func.ret_ty, Ty::Result(_, _));
+                    func.body = insert_try_body(func.body.clone(), returns_result);
+                }
+            }
+        }
     }
 }
 

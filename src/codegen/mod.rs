@@ -73,6 +73,14 @@ pub fn emit(program: &mut IrProgram, target: Target) -> String {
     if target == Target::Rust {
         let (deref_ids, recursive) = pass_box_deref::collect_deref_vars(program);
         pass_box_deref::insert_deref_nodes(program, &deref_ids);
+        // Process module-level box deref (separate VarId namespace per module)
+        let all_type_decls: Vec<_> = program.type_decls.iter()
+            .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
+            .cloned().collect();
+        for module in &mut program.modules {
+            let mod_deref_ids = pass_box_deref::collect_module_deref_vars(module, &all_type_decls);
+            pass_box_deref::insert_module_deref_nodes(module, &mod_deref_ids);
+        }
         ann.recursive_enums = recursive.clone();
         // Build boxed_fields: for each recursive enum, find which variant fields reference the enum
         for td in &program.type_decls {

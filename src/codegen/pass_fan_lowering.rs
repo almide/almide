@@ -12,6 +12,11 @@ pub fn strip_fan_auto_try(program: &mut IrProgram) {
     for func in &mut program.functions {
         func.body = rewrite_expr(func.body.clone(), false);
     }
+    for module in &mut program.modules {
+        for func in &mut module.functions {
+            func.body = rewrite_expr(func.body.clone(), false);
+        }
+    }
 }
 
 // Note: fan.map/race/any come through as CallTarget::Module { module: "fan" }.

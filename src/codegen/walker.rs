@@ -238,6 +238,20 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                         .unwrap_or_else(|| subj.clone());
                 }
             }
+            // Option<String> subjects → .as_deref() so Some("literal") patterns match
+            if let Ty::Option(inner) = &subject.ty {
+                if matches!(inner.as_ref(), Ty::String) {
+                    let has_some_str_pat = arms.iter().any(|a| {
+                        if let IrPattern::Some { inner } = &a.pattern {
+                            matches!(inner.as_ref(), IrPattern::Literal { expr } if matches!(&expr.kind, IrExprKind::LitStr { .. }))
+                        } else { false }
+                    });
+                    if has_some_str_pat {
+                        subj = ctx.templates.render_with("option_string_match_subject", None, &[], &[("subject", subj.as_str())])
+                            .unwrap_or_else(|| format!("{}.as_deref()", subj));
+                    }
+                }
+            }
             let arms_str = arms.iter()
                 .map(|arm| render_match_arm(ctx, arm))
                 .collect::<Vec<_>>()
@@ -1507,6 +1521,16 @@ fn collect_named_records(program: &IrProgram) -> HashMap<Vec<String>, String> {
             map.insert(names, td.name.clone());
         }
     }
+    // Also collect from module type declarations
+    for module in &program.modules {
+        for td in &module.type_decls {
+            if let IrTypeDeclKind::Record { fields } = &td.kind {
+                let mut names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+                names.sort();
+                map.insert(names, td.name.clone());
+            }
+        }
+    }
     map
 }
 
@@ -1523,6 +1547,18 @@ fn collect_anon_records(program: &IrProgram, named: &HashMap<Vec<String>, String
     for tl in &program.top_lets {
         collect_anon_from_ty(&tl.ty, &named_set, &mut seen);
         collect_anon_from_expr(&tl.value, &named_set, &mut seen);
+    }
+    // Also collect from module functions and top_lets
+    for module in &program.modules {
+        for func in &module.functions {
+            for p in &func.params { collect_anon_from_ty(&p.ty, &named_set, &mut seen); }
+            collect_anon_from_ty(&func.ret_ty, &named_set, &mut seen);
+            collect_anon_from_expr(&func.body, &named_set, &mut seen);
+        }
+        for tl in &module.top_lets {
+            collect_anon_from_ty(&tl.ty, &named_set, &mut seen);
+            collect_anon_from_expr(&tl.value, &named_set, &mut seen);
+        }
     }
 
     let mut map = HashMap::new();
