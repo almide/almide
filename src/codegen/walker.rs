@@ -246,29 +246,9 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
 
         IrExprKind::Match { subject, arms } => {
-            let mut subj = render_expr(ctx, subject);
-            // String subjects may need transformation for pattern matching (e.g., .as_str() in Rust)
-            if matches!(&subject.ty, Ty::String) {
-                let has_str_pat = arms.iter().any(|a| matches!(&a.pattern, IrPattern::Literal { expr } if matches!(&expr.kind, IrExprKind::LitStr { .. })));
-                if has_str_pat {
-                    subj = ctx.templates.render_with("string_match_subject", None, &[], &[("subject", subj.as_str())])
-                        .unwrap_or_else(|| subj.clone());
-                }
-            }
-            // Option<String> subjects → .as_deref() so Some("literal") patterns match
-            if let Ty::Applied(TypeConstructorId::Option, args) = &subject.ty {
-                if args.len() == 1 && matches!(&args[0], Ty::String) {
-                    let has_some_str_pat = arms.iter().any(|a| {
-                        if let IrPattern::Some { inner } = &a.pattern {
-                            matches!(inner.as_ref(), IrPattern::Literal { expr } if matches!(&expr.kind, IrExprKind::LitStr { .. }))
-                        } else { false }
-                    });
-                    if has_some_str_pat {
-                        subj = ctx.templates.render_with("option_string_match_subject", None, &[], &[("subject", subj.as_str())])
-                            .unwrap_or_else(|| format!("{}.as_deref()", subj));
-                    }
-                }
-            }
+            // Match subject transforms (.as_str(), .as_deref()) are handled by
+            // MatchSubjectPass nanopass — walker just renders what's in the IR.
+            let subj = render_expr(ctx, subject);
             let arms_str = arms.iter()
                 .map(|arm| render_match_arm(ctx, arm))
                 .collect::<Vec<_>>()
