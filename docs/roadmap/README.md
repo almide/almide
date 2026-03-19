@@ -8,6 +8,7 @@
 |---|---|---|
 | [Effect System](active/effect-system.md) | Phase 3-4 残: Dependency制限, 内部型レベル統合 | Phase 3 |
 | [IR Verification & Self-Describing IR](active/ir-verification.md) | 検証19件, PowInt/MapAccess分離, IrVisitor, MatchSubject nanopass | Compiler Internals |
+| [Performance Research](active/performance-research.md) | 世界最高性能への研究ロードマップ: Phase 0-4, LLVM直接出力, 意味論的最適化 | Research |
 
 ## 1.0 Remaining
 
