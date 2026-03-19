@@ -183,9 +183,19 @@ impl FuncCompiler<'_> {
                 self.emit_record(name.as_deref(), fields, &expr.ty);
             }
 
+            // ── Tuple construction ──
+            IrExprKind::Tuple { elements } => {
+                self.emit_tuple(elements);
+            }
+
             // ── Field access ──
             IrExprKind::Member { object, field } => {
                 self.emit_member(object, field);
+            }
+
+            // ── Tuple index access ──
+            IrExprKind::TupleIndex { object, index } => {
+                self.emit_tuple_index(object, *index, &expr.ty);
             }
 
             // ── Codegen-specific nodes (pass-through or ignore) ──
@@ -606,6 +616,44 @@ impl FuncCompiler<'_> {
             }
             _ => {}
         }
+    }
+
+    /// Emit a tuple construction: allocate memory, store each element sequentially.
+    fn emit_tuple(&mut self, elements: &[IrExpr]) {
+        let element_types: Vec<(String, Ty)> = elements.iter().enumerate()
+            .map(|(i, e)| (format!("_{}", i), e.ty.clone()))
+            .collect();
+        let total_size = values::record_size(&element_types);
+
+        self.func.instruction(&Instruction::I32Const(total_size as i32));
+        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+
+        let scratch = self.match_i32_base + self.match_depth;
+        self.func.instruction(&Instruction::LocalSet(scratch));
+
+        let mut offset = 0u32;
+        for elem in elements {
+            let size = values::byte_size(&elem.ty);
+            self.func.instruction(&Instruction::LocalGet(scratch));
+            self.emit_expr(elem);
+            self.emit_store_at(&elem.ty, offset);
+            offset += size;
+        }
+
+        self.func.instruction(&Instruction::LocalGet(scratch));
+    }
+
+    /// Emit a tuple index access: load from tuple pointer + element offset.
+    fn emit_tuple_index(&mut self, object: &IrExpr, index: usize, result_ty: &Ty) {
+        // Compute offset by summing sizes of elements before `index`
+        let offset = if let Ty::Tuple(elem_types) = &object.ty {
+            elem_types.iter().take(index).map(|t| values::byte_size(t)).sum::<u32>()
+        } else {
+            0
+        };
+
+        self.emit_expr(object);
+        self.emit_load_at(result_ty, offset);
     }
 
     /// Emit a field access: load from record/variant pointer + field offset.
