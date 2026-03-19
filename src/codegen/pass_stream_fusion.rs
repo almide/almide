@@ -29,16 +29,16 @@ impl NanoPass for StreamFusionPass {
 
     fn run(&self, program: &mut IrProgram, _target: Target) {
         // Phase 2: fuse chains using algebraic laws
-        let mut fused_map_map = 0;
-        let mut fused_filter_filter = 0;
-        let mut fused_map_fold = 0;
+        let mut totals = FusionCounts::default();
         for func in &mut program.functions {
-            let (mm, ff, mf) = fuse_all(func);
-            fused_map_map += mm;
-            fused_filter_filter += ff;
-            fused_map_fold += mf;
+            let c = fuse_all(func);
+            totals.map_map += c.map_map;
+            totals.filter_filter += c.filter_filter;
+            totals.map_fold += c.map_fold;
+            totals.identity += c.identity;
+            totals.flatmap_flatmap += c.flatmap_flatmap;
         }
-        let fused_count = fused_map_map + fused_filter_filter + fused_map_fold;
+        let fused_count = totals.total();
 
         // Debug output
         if std::env::var("ALMIDE_DEBUG_FUSION").is_ok() {
@@ -59,9 +59,11 @@ impl NanoPass for StreamFusionPass {
             }
             if fused_count > 0 {
                 let mut parts = Vec::new();
-                if fused_map_map > 0 { parts.push(format!("{} map+map", fused_map_map)); }
-                if fused_filter_filter > 0 { parts.push(format!("{} filter+filter", fused_filter_filter)); }
-                if fused_map_fold > 0 { parts.push(format!("{} map+fold", fused_map_fold)); }
+                if totals.identity > 0 { parts.push(format!("{} identity-map", totals.identity)); }
+                if totals.map_map > 0 { parts.push(format!("{} map+map", totals.map_map)); }
+                if totals.filter_filter > 0 { parts.push(format!("{} filter+filter", totals.filter_filter)); }
+                if totals.map_fold > 0 { parts.push(format!("{} map+fold", totals.map_fold)); }
+                if totals.flatmap_flatmap > 0 { parts.push(format!("{} flat_map+flat_map", totals.flatmap_flatmap)); }
                 eprintln!("[StreamFusion] fused: {}", parts.join(", "));
             }
         }
@@ -368,23 +370,50 @@ fn count_fusible_pairs(
 }
 
 /// Run all fusion passes on a function. Returns (map_map_count, filter_filter_count, map_fold_count).
-fn fuse_all(func: &mut IrFunction) -> (usize, usize, usize) {
-    // map-map fusion
+/// Fusion results: (map+map, filter+filter, map+fold, identity_map, flat_map+flat_map, map+filter)
+fn fuse_all(func: &mut IrFunction) -> FusionCounts {
+    let mut counts = FusionCounts::default();
+
+    // FunctorIdentity: map(x, id) → x  (must run BEFORE map+map fusion)
+    counts.identity = eliminate_identity_maps(&mut func.body);
+
+    // FunctorComposition: map(map(x, f), g) → map(x, f >> g)
     let mm_before = count_map_calls(&func.body);
     func.body = fuse_map_map(func.body.clone());
     let mm_after = count_map_calls(&func.body);
-    let mm = if mm_before > mm_after { mm_before - mm_after } else { 0 };
+    counts.map_map = if mm_before > mm_after { mm_before - mm_after } else { 0 };
 
-    // filter-filter fusion
+    // FilterComposition: filter(filter(x, p), q) → filter(x, p && q)
     let ff_before = count_filter_calls(&func.body);
     func.body = fuse_filter_filter(func.body.clone());
     let ff_after = count_filter_calls(&func.body);
-    let ff = if ff_before > ff_after { ff_before - ff_after } else { 0 };
+    counts.filter_filter = if ff_before > ff_after { ff_before - ff_after } else { 0 };
 
-    // map-fold fusion (map before fold → fold with composed body)
-    let mf = fuse_map_fold_pass(&mut func.body);
+    // MapFoldFusion: fold(map(x, f), init, g) → fold(x, init, (acc, x) => g(acc, f(x)))
+    counts.map_fold = fuse_map_fold_pass(&mut func.body);
 
-    (mm, ff, mf)
+    // MonadAssociativity: flat_map(flat_map(x, f), g) → flat_map(x, x => flat_map(f(x), g))
+    let fm_before = count_calls_by_name_total(&func.body, "flat_map");
+    func.body = fuse_flatmap_flatmap(func.body.clone());
+    let fm_after = count_calls_by_name_total(&func.body, "flat_map");
+    counts.flatmap_flatmap = if fm_before > fm_after { fm_before - fm_after } else { 0 };
+
+    counts
+}
+
+#[derive(Default)]
+struct FusionCounts {
+    map_map: usize,
+    filter_filter: usize,
+    map_fold: usize,
+    identity: usize,
+    flatmap_flatmap: usize,
+}
+
+impl FusionCounts {
+    fn total(&self) -> usize {
+        self.map_map + self.filter_filter + self.map_fold + self.identity + self.flatmap_flatmap
+    }
 }
 
 fn count_filter_calls(expr: &IrExpr) -> usize {
@@ -937,6 +966,193 @@ fn substitute_var_in_expr(expr: &IrExpr, var: VarId, replacement: &IrExpr) -> Ir
     }
 }
 
+
+fn count_calls_by_name_total(expr: &IrExpr, name: &str) -> usize {
+    let mut count = 0;
+    count_calls_by_name(expr, name, &mut count);
+    count
+}
+
+// ── FunctorIdentity: map(x, (x) => x) → x ──
+
+/// Eliminate identity map calls: map(x, (x) => x) → x
+/// Returns count of eliminations.
+fn eliminate_identity_maps(body: &mut IrExpr) -> usize {
+    let mut count = 0;
+    *body = elim_identity(body.clone(), &mut count);
+    count
+}
+
+fn elim_identity(expr: IrExpr, count: &mut usize) -> IrExpr {
+    let ty = expr.ty.clone();
+    let span = expr.span;
+
+    match expr.kind {
+        IrExprKind::Call { ref target, ref args, .. }
+            if is_map_call(target) && args.len() >= 2 =>
+        {
+            if is_identity_lambda(&args[1]) {
+                *count += 1;
+                // map(x, id) → x
+                return elim_identity(args[0].clone(), count);
+            }
+            let new_args: Vec<IrExpr> = args.iter().map(|a| elim_identity(a.clone(), count)).collect();
+            IrExpr {
+                kind: IrExprKind::Call { target: target.clone(), args: new_args, type_args: match &expr.kind { IrExprKind::Call { type_args, .. } => type_args.clone(), _ => vec![] } },
+                ty, span,
+            }
+        }
+        IrExprKind::Block { stmts, expr: body } => IrExpr {
+            kind: IrExprKind::Block {
+                stmts: stmts.into_iter().map(|s| {
+                    let kind = match s.kind {
+                        IrStmtKind::Bind { var, mutability, ty, value } => IrStmtKind::Bind { var, mutability, ty, value: elim_identity(value, count) },
+                        IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: elim_identity(expr, count) },
+                        other => other,
+                    };
+                    IrStmt { kind, span: s.span }
+                }).collect(),
+                expr: body.map(|e| Box::new(elim_identity(*e, count))),
+            },
+            ty, span,
+        },
+        IrExprKind::If { cond, then, else_ } => IrExpr {
+            kind: IrExprKind::If {
+                cond: Box::new(elim_identity(*cond, count)),
+                then: Box::new(elim_identity(*then, count)),
+                else_: Box::new(elim_identity(*else_, count)),
+            },
+            ty, span,
+        },
+        IrExprKind::Lambda { params, body } => IrExpr {
+            kind: IrExprKind::Lambda { params, body: Box::new(elim_identity(*body, count)) },
+            ty, span,
+        },
+        other => IrExpr { kind: other, ty, span },
+    }
+}
+
+/// Check if a lambda is the identity function: (x) => x
+fn is_identity_lambda(expr: &IrExpr) -> bool {
+    if let IrExprKind::Lambda { params, body } = &expr.kind {
+        if params.len() == 1 {
+            let (param_id, _) = &params[0];
+            if let IrExprKind::Var { id } = &body.kind {
+                return id == param_id;
+            }
+        }
+    }
+    false
+}
+
+// ── MonadAssociativity: flat_map(flat_map(x, f), g) → flat_map(x, x => flat_map(f(x), g)) ──
+
+fn is_flatmap_call(target: &CallTarget) -> bool {
+    match target {
+        CallTarget::Module { func, .. } => func == "flat_map",
+        CallTarget::Named { name } => name.ends_with("_flat_map"),
+        _ => false,
+    }
+}
+
+/// Fuse flat_map(flat_map(x, f), g) → flat_map(x, x => { let inner = f(x); flat_map(inner, g) })
+fn fuse_flatmap_flatmap(expr: IrExpr) -> IrExpr {
+    let ty = expr.ty.clone();
+    let span = expr.span;
+
+    match expr.kind {
+        IrExprKind::Call {
+            ref target, ref args, ref type_args,
+        } if is_flatmap_call(target) && args.len() >= 2 => {
+            let inner = &args[0];
+            if let IrExprKind::Call {
+                target: ref inner_target, args: ref inner_args, ..
+            } = inner.kind {
+                if is_flatmap_call(inner_target) && inner_args.len() >= 2 {
+                    let source = &inner_args[0];
+                    let f = &inner_args[1];
+                    let g = &args[1];
+
+                    // Compose: (x) => flat_map(f(x), g)
+                    if let Some(composed) = compose_flatmaps(f, g, target, type_args) {
+                        let fused = IrExpr {
+                            kind: IrExprKind::Call {
+                                target: target.clone(),
+                                args: vec![fuse_flatmap_flatmap(source.clone()), composed],
+                                type_args: type_args.clone(),
+                            },
+                            ty, span,
+                        };
+                        return fuse_flatmap_flatmap(fused);
+                    }
+                }
+            }
+            let new_args: Vec<IrExpr> = args.iter().map(|a| fuse_flatmap_flatmap(a.clone())).collect();
+            IrExpr {
+                kind: IrExprKind::Call { target: target.clone(), args: new_args, type_args: type_args.clone() },
+                ty, span,
+            }
+        }
+        IrExprKind::Block { stmts, expr: body } => IrExpr {
+            kind: IrExprKind::Block {
+                stmts: stmts.into_iter().map(|s| {
+                    let kind = match s.kind {
+                        IrStmtKind::Bind { var, mutability, ty, value } => IrStmtKind::Bind { var, mutability, ty, value: fuse_flatmap_flatmap(value) },
+                        IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: fuse_flatmap_flatmap(expr) },
+                        other => other,
+                    };
+                    IrStmt { kind, span: s.span }
+                }).collect(),
+                expr: body.map(|e| Box::new(fuse_flatmap_flatmap(*e))),
+            },
+            ty, span,
+        },
+        IrExprKind::If { cond, then, else_ } => IrExpr {
+            kind: IrExprKind::If {
+                cond: Box::new(fuse_flatmap_flatmap(*cond)),
+                then: Box::new(fuse_flatmap_flatmap(*then)),
+                else_: Box::new(fuse_flatmap_flatmap(*else_)),
+            },
+            ty, span,
+        },
+        IrExprKind::Lambda { params, body } => IrExpr {
+            kind: IrExprKind::Lambda { params, body: Box::new(fuse_flatmap_flatmap(*body)) },
+            ty, span,
+        },
+        other => IrExpr { kind: other, ty, span },
+    }
+}
+
+/// Compose two flat_map functions: f and g → (x) => flat_map(f(x), g)
+fn compose_flatmaps(f: &IrExpr, g: &IrExpr, flat_map_target: &CallTarget, type_args: &[crate::types::Ty]) -> Option<IrExpr> {
+    if let IrExprKind::Lambda { params: f_params, body: f_body } = &f.kind {
+        if f_params.len() != 1 {
+            return None;
+        }
+        let (f_param_id, f_param_ty) = &f_params[0];
+
+        // (x) => flat_map(f_body, g)
+        let inner_call = IrExpr {
+            kind: IrExprKind::Call {
+                target: flat_map_target.clone(),
+                args: vec![*f_body.clone(), g.clone()],
+                type_args: type_args.to_vec(),
+            },
+            ty: f.ty.clone(), // approximate
+            span: f.span,
+        };
+
+        return Some(IrExpr {
+            kind: IrExprKind::Lambda {
+                params: vec![(*f_param_id, f_param_ty.clone())],
+                body: Box::new(inner_call),
+            },
+            ty: f.ty.clone(),
+            span: f.span,
+        });
+    }
+    None
+}
 
 #[cfg(test)]
 mod tests {
