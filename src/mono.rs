@@ -85,19 +85,15 @@ fn find_structurally_bounded_fns(functions: &[IrFunction], type_decls: &[IrTypeD
         let mut bounded = Vec::new();
         // パターン A: generic + structural bound (fn f[T: { name: String, .. }](x: T))
         if let Some(ref generics) = func.generics {
-            for g in generics {
-                if g.structural_bound.is_some() {
-                    for (i, param) in func.params.iter().enumerate() {
-                        let is_match = ty_contains_typevar(&param.ty, &g.name);
-                        if is_match {
-                            bounded.push(BoundedParam {
-                                param_idx: i,
-                                type_var: g.name.clone(),
-                            });
-                        }
-                    }
-                }
-            }
+            bounded.extend(
+                generics.iter()
+                    .filter(|g| g.structural_bound.is_some())
+                    .flat_map(|g| {
+                        func.params.iter().enumerate()
+                            .filter(|(_, param)| ty_contains_typevar(&param.ty, &g.name))
+                            .map(|(i, _)| BoundedParam { param_idx: i, type_var: g.name.clone() })
+                    })
+            );
         }
         // パターン B: 直接 OpenRecord パラメータ、または OpenRecord エイリアス
         for (i, param) in func.params.iter().enumerate() {

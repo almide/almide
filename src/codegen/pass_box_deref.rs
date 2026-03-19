@@ -282,51 +282,38 @@ fn collect_from_stmt(stmt: &IrStmt, recursive_enums: &HashSet<String>, type_decl
 }
 
 /// Given a pattern matching a recursive enum, find Bind vars in recursive positions.
+/// Look up a variant case from a type decl by constructor name.
+fn find_variant_case<'a>(td: Option<&'a IrTypeDecl>, ctor_name: &str) -> Option<&'a IrVariantKind> {
+    let td = td?;
+    let cases = match &td.kind {
+        IrTypeDeclKind::Variant { cases, .. } => cases,
+        _ => return None,
+    };
+    cases.iter().find(|c| c.name == ctor_name).map(|c| &c.kind)
+}
+
 fn collect_deref_from_pattern(pattern: &IrPattern, enum_name: &str, td: Option<&IrTypeDecl>, name_to_var: &std::collections::HashMap<String, Vec<VarId>>, deref_vars: &mut HashSet<VarId>) {
     match pattern {
         IrPattern::Constructor { name, args } => {
-            // Find the variant in the type decl
-            if let Some(td) = td {
-                if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
-                    if let Some(case) = cases.iter().find(|c| &c.name == name) {
-                        if let IrVariantKind::Tuple { fields } = &case.kind {
-                            for (i, arg) in args.iter().enumerate() {
-                                if let Some(field_ty) = fields.get(i) {
-                                    if ty_contains_name(field_ty, enum_name) {
-                                        // This field is Box'd — any Bind in this pattern position needs deref
-                                        collect_bind_vars(arg, deref_vars);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            let Some(IrVariantKind::Tuple { fields }) = find_variant_case(td, name) else { return };
+            args.iter().enumerate()
+                .filter(|(i, _)| fields.get(*i).map_or(false, |ft| ty_contains_name(ft, enum_name)))
+                .for_each(|(_, arg)| collect_bind_vars(arg, deref_vars));
         }
         IrPattern::RecordPattern { name, fields, .. } => {
-            if let Some(td) = td {
-                if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
-                    if let Some(case) = cases.iter().find(|c| &c.name == name) {
-                        if let IrVariantKind::Record { fields: case_fields } = &case.kind {
-                            for field_pat in fields {
-                                if let Some(case_field) = case_fields.iter().find(|f| f.name == field_pat.name) {
-                                    if ty_contains_name(&case_field.ty, enum_name) {
-                                        if let Some(ref p) = field_pat.pattern {
-                                            collect_bind_vars(p, deref_vars);
-                                        } else {
-                                            // Shorthand: lookup VarId by name, but only if unambiguous
-                                            if let Some(var_ids) = name_to_var.get(&field_pat.name) {
-                                                if var_ids.len() == 1 {
-                                                    deref_vars.insert(var_ids[0]);
-                                                }
-                                                // If ambiguous (multiple vars with same name), skip —
-                                                // we can't tell which one is the pattern binding
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+            let Some(IrVariantKind::Record { fields: case_fields }) = find_variant_case(td, name) else { return };
+            for field_pat in fields {
+                let is_recursive = case_fields.iter()
+                    .find(|f| f.name == field_pat.name)
+                    .map_or(false, |f| ty_contains_name(&f.ty, enum_name));
+                if !is_recursive { continue; }
+
+                if let Some(ref p) = field_pat.pattern {
+                    collect_bind_vars(p, deref_vars);
+                } else if let Some(var_ids) = name_to_var.get(&field_pat.name) {
+                    // Shorthand: lookup VarId by name, only if unambiguous
+                    if var_ids.len() == 1 {
+                        deref_vars.insert(var_ids[0]);
                     }
                 }
             }
