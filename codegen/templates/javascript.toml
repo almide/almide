@@ -1,0 +1,397 @@
+# JavaScript target syntax templates
+# Identical to TypeScript but with all type annotations removed.
+
+# ── Expressions ──
+
+[if_expr]
+template = "(({cond}) ? ({then}) : ({else}))"
+
+[call_expr]
+template = "{callee}({args})"
+
+# ── Stdlib module calls ──
+
+[module_call]
+template = "__almd_{module}.{func}({args})"
+
+[binary_op]
+template = "({left} {op} {right})"
+
+[field_access]
+template = "{expr}.{field}"
+
+[index_access]
+template = "{object}[{index}]"
+
+[pipe_call]
+template = "{callee}({pipe_arg}, {args})"
+
+# ── Concat ──
+
+[[concat_expr]]
+when_type = "String"
+template = "{left} + {right}"
+
+[[concat_expr]]
+when_type = "List"
+template = "[...{left}, ...{right}]"
+
+# ── Equality ──
+
+[eq_expr]
+template = "__deep_eq({left}, {right})"
+
+[ne_expr]
+template = "!__deep_eq({left}, {right})"
+
+# ── Power ──
+
+[power_expr]
+template = "{left} ** {right}"
+
+# ── Option / Result ──
+
+[some_expr]
+template = "{inner}"
+
+[none_expr]
+template = "null"
+
+[ok_expr]
+template = "{{ ok: true, value: {inner} }}"
+
+[err_expr]
+template = "{{ ok: false, error: {inner} }}"
+
+[unwrap_or_expr]
+template = "__almd_unwrap_or({expr}, {default})"
+
+# ── Match ──
+
+[match_expr]
+template = "(() => {{ {arms} }})()"
+
+[match_arm]
+template = "if ({condition}) {{ return {body}; }}"
+
+[match_arm_default]
+template = "return {body};"
+
+[pattern_some]
+template = "({binding} !== null)"
+
+[pattern_none]
+template = "({subject} === null)"
+
+[pattern_ok]
+template = "({subject}.ok === true)"
+
+[pattern_err]
+template = "({subject}.ok === false)"
+
+[pattern_wildcard]
+template = "true"
+
+[pattern_literal]
+template = "(__deep_eq({subject}, {value}))"
+
+# ── Literals ──
+
+[int_literal]
+template = "{value}"
+
+[float_literal]
+template = "{value}"
+
+[string_literal]
+template = "\"{value}\""
+
+[bool_literal_true]
+template = "true"
+
+[bool_literal_false]
+template = "false"
+
+[list_literal]
+template = "[{elements}]"
+
+[record_literal]
+template = "{{ {fields} }}"
+
+[record_field]
+template = "{name}: {value}"
+
+# ── String Interpolation ──
+
+[string_interp]
+template = "`{template_str}`"
+
+# ── Statements (no type annotations) ──
+
+[let_binding]
+template = "let {name} = {value};"
+
+[var_binding]
+template = "let {name} = {value};"
+
+[assignment]
+template = "{target} = {value};"
+
+[return_expr]
+template = "{value}"
+
+# ── Declarations (no type annotations) ──
+
+[fn_decl]
+template = "function {name}({params}) {{ {body} }}"
+
+[effect_fn_decl]
+template = "function {name}({params}) {{ {body} }}"
+
+[fn_param]
+template = "{name}"
+
+# ── Type annotations (not emitted, but walker may query them) ──
+
+[type_int]
+template = ""
+
+[type_float]
+template = ""
+
+[type_string]
+template = ""
+
+[type_bool]
+template = ""
+
+[type_unit]
+template = ""
+
+[type_list]
+template = ""
+
+[type_option]
+template = ""
+
+[type_result]
+template = ""
+
+[type_map]
+template = ""
+
+[type_set]
+template = ""
+
+[type_fn]
+template = ""
+
+# ── Loops ──
+
+[for_loop]
+template = "for (const {var} of {iter}) {{ {body} }}"
+
+[while_loop]
+template = "while ({cond}) {{ {body} }}"
+
+[break_stmt]
+template = "break;"
+
+[continue_stmt]
+template = "continue;"
+
+# ── Lambda ──
+
+[lambda]
+template = "({params}) => {{ {body} }}"
+
+[lambda_single]
+template = "({params}) => {body}"
+
+# ── Type declarations (JS: no interface/type, just constructors) ──
+
+[type_alias]
+template = ""
+
+[struct_decl]
+template = ""
+
+[struct_field]
+template = "{name};"
+
+[enum_decl]
+template = "// type {name} = variant union\n{variants}"
+
+[enum_variant]
+template = "function {name}({params}) {{ return {{ tag: \"{name}\", value: [{param_names}] }}; }}"
+
+[enum_variant_unit]
+template = "const {name} = {{ tag: \"{name}\" }};"
+
+[type_tuple]
+template = ""
+
+[tuple_literal]
+template = "[{elements}]"
+
+[tuple_index]
+template = "{object}[{index}]"
+
+[enum_variant_sep]
+template = "\n"
+
+[enum_variant_record]
+template = "function {name}({fields}) {{ return {{ tag: \"{name}\", {field_names} }}; }}"
+
+[interface_decl]
+template = ""
+
+[interface_field]
+template = "{name};"
+
+# ── Imports ──
+
+[import]
+template = "import {{ {names} }} from \"{module}\";"
+
+# ── Test ──
+
+[unit_literal]
+template = "undefined"
+
+[deref_lazy]
+template = "{name}"
+
+[deref_var]
+template = "{name}"
+
+[clone_expr]
+template = "{expr}"
+
+[range_expr]
+template = "Array.from({{ length: ({end}) - ({start}) }}, (_, i) => ({start}) + i)"
+
+[range_inclusive]
+template = "Array.from({{ length: ({end}) - ({start}) + 1 }}, (_, i) => ({start}) + i)"
+
+[for_tuple_destructure]
+template = "[{vars}]"
+
+[ctor_unit]
+template = "{ctor_name}"
+
+[ctor_call]
+template = "{ctor_name}({args})"
+
+[ctor_qualify]
+template = "{ctor_name}"
+
+[ctor_record]
+template = "{{ tag: \"{ctor_name}\", {fields} }}"
+
+[destructure_pattern]
+template = "{{ {fields} }}"
+
+[bind_destructure]
+template = "const {pattern} = {value};"
+
+[block_expr]
+template = "(() => {{\n{body}\n}})()"
+
+[block_result_expr]
+template = "return {expr};"
+
+[test_module]
+template = "{tests}"
+
+[test_block]
+template = "// test: {name}\n(function() {{ {body} }})();"
+
+[assert_eq]
+template = "if (!__deep_eq({left}, {right})) throw new Error(`assertion failed`);"
+
+# ── Target-agnostic constructs ──
+
+[typevar_infer]
+template = ""
+
+[unknown_type]
+template = ""
+
+[empty_map]
+template = "new Map()"
+
+[try_expr]
+template = "{inner}"
+
+[await_expr]
+template = "await {inner}"
+
+[keyword_escape]
+template = "_{name}"
+
+[map_literal]
+template = "new Map([{entries}])"
+
+[map_entry]
+template = "[{key}, {value}]"
+
+[map_get]
+template = "{object}.get({key})"
+
+[map_insert]
+template = "{target}.set({key}, {value});"
+
+[index_assign]
+template = "{target}[{index}] = {value};"
+
+[stmt_terminator]
+template = ";"
+
+[spread_record]
+template = "{{ ...{base}, {fields} }}"
+
+[string_match_subject]
+template = "{subject}"
+
+[guard_negate]
+template = "(!({cond}))"
+
+[empty_list]
+template = "[]"
+
+[fan_expr]
+template = "await Promise.all([{exprs}])"
+
+[fan_effect]
+template = "await Promise.all([{exprs}])"
+
+[extern_fn]
+template = "// extern: {module}.{function} as {name}"
+
+[loop_block]
+template = "(() => {{ while (true) {{\n{body}\n}} }})()"
+
+[err_inner_string]
+template = "(() => {{ throw new Error({inner}) }})()"
+
+[err_inner_other]
+template = "(() => {{ throw new Error(String({inner})) }})()"
+
+[record_pattern_rest]
+template = "{name}"
+
+[record_pattern_rest_empty]
+template = "{name}"
+
+[top_let_const]
+template = "const {name} = {value};"
+
+[top_let_lazy]
+template = "const {name} = {value};"
+
+[generic_bound]
+template = "{name}"
+
+[generic_bound_full]
+template = "{name}"

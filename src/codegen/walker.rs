@@ -1063,7 +1063,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     if !func.extern_attrs.is_empty() {
         let target_str = match ctx.target {
             Target::Rust => "rs",
-            Target::TypeScript => "ts",
+            Target::TypeScript | Target::JavaScript => "ts",
             _ => "",
         };
         for attr in &func.extern_attrs {
@@ -1344,9 +1344,13 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                             }
                         }).collect();
                         let fields_str = types.join(", ");
-                        // Named params for TS: v0: type0, v1: type1
+                        // Named params via fn_param template (respects JS/TS)
                         let params_str = types.iter().enumerate()
-                            .map(|(i, t)| format!("v{}: {}", i, t))
+                            .map(|(i, t)| {
+                                let name = format!("v{}", i);
+                                ctx.templates.render_with("fn_param", None, &[], &[("name", name.as_str()), ("type", t.as_str())])
+                                    .unwrap_or(name)
+                            })
                             .collect::<Vec<_>>().join(", ");
                         let param_names = (0..types.len()).map(|i| format!("v{}", i))
                             .collect::<Vec<_>>().join(", ");
@@ -1363,7 +1367,8 @@ fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                                 } else {
                                     rendered
                                 };
-                                format!("{}: {}", f.name, boxed)
+                                ctx.templates.render_with("fn_param", None, &[], &[("name", f.name.as_str()), ("type", boxed.as_str())])
+                                    .unwrap_or_else(|| format!("{}: {}", f.name, boxed))
                             })
                             .collect::<Vec<_>>()
                             .join(", ");
