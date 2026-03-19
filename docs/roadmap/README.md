@@ -6,8 +6,7 @@
 
 | 項目 | 説明 | Grand Plan |
 |---|---|---|
-| [HKT Foundation](active/hkt-foundation.md) | Phase 4-6 残: Ty統一リファクタ, Effect型統合, Trait統合 | Phase 3 |
-| [Effect System](active/effect-system.md) | Phase 3-4 残: Dependency制限, 型レベル統合 | Phase 3 |
+| [Effect System](active/effect-system.md) | Phase 3-4 残: Dependency制限, 内部型レベル統合 | Phase 3 |
 
 ## 1.0 Remaining
 
@@ -25,7 +24,9 @@
 | [Package Registry](on-hold/package-registry.md) | 公開パッケージ配布 | Phase 3 |
 | [Go Target](on-hold/go-target.md) | TOML + 2-3 pass | Phase 3 |
 | [Platform Architecture](on-hold/platform-architecture.md) | 5層 app runtime ビジョン | Phase 3-5 |
-| [Security Model](on-hold/security-model.md) | Layer 2-5, capability | Phase 3 |
+| [Security Model](on-hold/security-model.md) | Layer 3-5, capability | Phase 3 |
+| [Effect Type Integration](on-hold/effect-type-integration.md) | FnType に EffectSet を持たせる (構文変更なし) | Phase 3 |
+| [Trait System](on-hold/trait-system.md) | HKT 基盤上の Protocol/Interface | Phase 3 |
 | [Secure by Design](on-hold/secure-by-design.md) | | Phase 3 |
 | [Async Backend](on-hold/async-backend.md) | tokio opt-in runtime | Phase 3 |
 | [Supervision & Actors](on-hold/supervision-and-actors.md) | | Phase 3 |
@@ -192,5 +193,5 @@
 - [Design Debt](done/design-debt.md) — gen_generated_call排除、emit_rust/emit_ts削除
 - [Test Infrastructure](done/test-infrastructure.md) — 110/110 全通過、__test_almd_ prefix、strip_tail_try
 - [Test Architecture Redesign](done/test-architecture-redesign.md) — in_effect → can_call_effect + auto_unwrap 分離、in_test 除去
-- [HKT Foundation Phase 1-3](done/hkt-foundation-phase1.md) — TypeConstructor/Kind/AlgebraicLaw, Ty helpers, Stream Fusion (map+map, filter+filter, map+fold)
+- [HKT Foundation](done/hkt-foundation-phase1.md) — Phase 1-4 完了。Ty::Applied 統一、Stream Fusion 全6法則、TypeConstructor/Kind/AlgebraicLaw
 - [Effect System Phase 1-2](done/effect-system-phase1-2.md) — Effect推論, almide check --effects, Security Layer 2 ([permissions])
