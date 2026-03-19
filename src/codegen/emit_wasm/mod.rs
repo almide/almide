@@ -21,9 +21,10 @@ mod functions;
 
 use std::collections::HashMap;
 use wasm_encoder::{
-    CodeSection, DataSection, ExportSection, Function, FunctionSection,
-    GlobalSection, GlobalType, ImportSection, MemorySection,
-    MemoryType, Module, TypeSection, ValType,
+    CodeSection, DataSection, ElementSection, Elements, ExportSection,
+    Function, FunctionSection, GlobalSection, GlobalType, ImportSection,
+    MemorySection, MemoryType, Module, RefType, TableSection, TableType,
+    TypeSection, ValType,
 };
 
 use crate::ir::IrProgram;
@@ -84,6 +85,10 @@ pub struct WasmEmitter {
     // Globals
     pub heap_ptr_global: u32,
 
+    // Function table: func_idx → table_idx (for call_indirect / FnRef)
+    pub func_table: Vec<u32>, // list of func_idx in table order
+    pub func_to_table_idx: HashMap<u32, u32>, // func_idx → table index
+
     // Type info: record/variant name → field list (for field offset computation)
     pub record_fields: HashMap<String, Vec<(String, crate::types::Ty)>>,
     // Variant info: variant type name → list of (case_name, tag, fields)
@@ -120,6 +125,8 @@ impl WasmEmitter {
                 concat_str: 0,
             },
             heap_ptr_global: 0,
+            func_table: Vec::new(),
+            func_to_table_idx: HashMap::new(),
             record_fields: HashMap::new(),
             variant_info: HashMap::new(),
         }
@@ -239,17 +246,27 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
 
     // Register user function signatures
     let mut user_meta: Vec<u32> = Vec::new(); // type_idx per user function
+    let mut user_func_indices: Vec<u32> = Vec::new();
     for func in &program.functions {
         if func.is_test {
-            continue; // Skip test functions for WASM build
+            continue;
         }
         let params: Vec<ValType> = func.params.iter()
             .filter_map(|p| values::ty_to_valtype(&p.ty))
             .collect();
         let results = values::ret_type(&func.ret_ty);
         let type_idx = emitter.register_type(params, results);
-        let _func_idx = emitter.register_func(&func.name, type_idx);
+        let func_idx = emitter.register_func(&func.name, type_idx);
         user_meta.push(type_idx);
+        user_func_indices.push(func_idx);
+    }
+
+    // Build function table (for call_indirect / FnRef)
+    // Include all user functions in the table
+    for &func_idx in &user_func_indices {
+        let table_idx = emitter.func_table.len() as u32;
+        emitter.func_table.push(func_idx);
+        emitter.func_to_table_idx.insert(func_idx, table_idx);
     }
 
     // Phase 2: Compile function bodies
@@ -299,6 +316,19 @@ fn assemble(emitter: &WasmEmitter) -> Vec<u8> {
     }
     module.section(&functions);
 
+    // ── Table section (for call_indirect / FnRef) ──
+    if !emitter.func_table.is_empty() {
+        let mut tables = TableSection::new();
+        tables.table(TableType {
+            element_type: RefType::FUNCREF,
+            minimum: emitter.func_table.len() as u64,
+            maximum: Some(emitter.func_table.len() as u64),
+            table64: false,
+            shared: false,
+        });
+        module.section(&tables);
+    }
+
     // ── Memory section ──
     let mut memory = MemorySection::new();
     memory.memory(MemoryType {
@@ -327,12 +357,21 @@ fn assemble(emitter: &WasmEmitter) -> Vec<u8> {
     // ── Export section ──
     let mut exports = ExportSection::new();
     exports.export("memory", wasm_encoder::ExportKind::Memory, 0);
-
-    // Export _start (maps to "main" function)
     if let Some(&main_idx) = emitter.func_map.get("main") {
         exports.export("_start", wasm_encoder::ExportKind::Func, main_idx);
     }
     module.section(&exports);
+
+    // ── Element section (populate function table, must come before Code) ──
+    if !emitter.func_table.is_empty() {
+        let mut elements = ElementSection::new();
+        elements.active(
+            Some(0),
+            &wasm_encoder::ConstExpr::i32_const(0),
+            Elements::Functions(std::borrow::Cow::Borrowed(&emitter.func_table)),
+        );
+        module.section(&elements);
+    }
 
     // ── Code section ──
     let mut codes = CodeSection::new();

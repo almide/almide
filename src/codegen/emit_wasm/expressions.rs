@@ -40,6 +40,20 @@ impl FuncCompiler<'_> {
                 self.func.instruction(&Instruction::LocalGet(local_idx));
             }
 
+            // ── Function reference (used as value) ──
+            IrExprKind::FnRef { name } => {
+                // Push table index of the named function
+                if let Some(&func_idx) = self.emitter.func_map.get(name.as_str()) {
+                    if let Some(&table_idx) = self.emitter.func_to_table_idx.get(&func_idx) {
+                        self.func.instruction(&Instruction::I32Const(table_idx as i32));
+                    } else {
+                        self.func.instruction(&Instruction::Unreachable);
+                    }
+                } else {
+                    self.func.instruction(&Instruction::Unreachable);
+                }
+            }
+
             // ── Binary operators ──
             IrExprKind::BinOp { op, left, right } => {
                 self.emit_binop(*op, left, right);
@@ -475,12 +489,27 @@ impl FuncCompiler<'_> {
             }
 
             CallTarget::Computed { callee } => {
-                // Phase 2+: indirect calls via funcref
-                self.emit_expr(callee);
+                // Indirect call via function table
+                // call_indirect: args on stack, then table index, then call_indirect(type_idx)
                 for arg in args {
                     self.emit_expr(arg);
                 }
-                self.func.instruction(&Instruction::Unreachable);
+                self.emit_expr(callee); // table index (i32) on top of stack
+
+                // Determine the function type from callee's Fn type
+                if let Ty::Fn { params, ret } = &callee.ty {
+                    let param_types: Vec<ValType> = params.iter()
+                        .filter_map(|t| values::ty_to_valtype(t))
+                        .collect();
+                    let ret_types = values::ret_type(ret);
+                    let type_idx = self.emitter.register_type(param_types, ret_types);
+                    self.func.instruction(&Instruction::CallIndirect {
+                        type_index: type_idx,
+                        table_index: 0,
+                    });
+                } else {
+                    self.func.instruction(&Instruction::Unreachable);
+                }
             }
         }
     }
