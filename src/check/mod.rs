@@ -425,7 +425,7 @@ impl Checker {
         let body_resolved = resolve_vars(&body_ty, &self.solutions);
         if body_resolved == Ty::Unit { return; } // do blocks, while loops, guard patterns return via control flow
         if let Ty::Result(ok, _) = ret_ty {
-            if matches!(&body_resolved, Ty::Result(_, _)) {
+            if body_resolved.is_result() {
                 self.constrain(ret_ty.clone(), body_ty, format!("fn '{}'", name));
             } else {
                 self.constrain(ok.as_ref().clone(), body_ty, format!("fn '{}'", name));

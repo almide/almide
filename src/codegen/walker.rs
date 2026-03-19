@@ -647,7 +647,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::IndexAccess { object, index } => {
             let obj_str = render_expr(ctx, object);
             let idx = render_expr(ctx, index);
-            if matches!(&object.ty, Ty::Map(_, _)) {
+            if object.ty.is_map() {
                 ctx.templates.render_with("map_get", None, &[], &[("object", obj_str.as_str()), ("key", idx.as_str())])
                     .unwrap_or_else(|| "map_get(...)".into())
             } else {
@@ -757,7 +757,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             let rendered: Vec<String> = exprs.iter().map(|e| {
                 let mut body = render_expr(ctx, e);
                 // Strip trailing ? from body (fan closures return raw Result)
-                if matches!(&e.ty, Ty::Result(_, _)) && body.ends_with('?') {
+                if e.ty.is_result() && body.ends_with('?') {
                     body.pop();
                 }
                 body
@@ -769,9 +769,9 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             let spawns: Vec<String> = rendered.iter().enumerate()
                 .map(|(i, body)| format!("let {} = __s.spawn(move || {{ {} }});", handles[i], body))
                 .collect();
-            let any_result = exprs.iter().any(|e| matches!(&e.ty, Ty::Result(_, _)));
+            let any_result = exprs.iter().any(|e| e.ty.is_result());
             let joins: Vec<String> = exprs.iter().enumerate().map(|(i, e)| {
-                if matches!(&e.ty, Ty::Result(_, _)) {
+                if e.ty.is_result() {
                     if ctx.auto_unwrap {
                         format!("{}.join().unwrap()?", handles[i])
                     } else {
@@ -1001,7 +1001,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let idx_str = render_expr(ctx, index);
             let val_str = render_expr(ctx, value);
             let target_ty = &ctx.var_table.get(*target).ty;
-            if matches!(target_ty, Ty::Map(_, _)) {
+            if target_ty.is_map() {
                 ctx.templates.render_with("map_insert", None, &[], &[("target", target_str.as_str()), ("key", idx_str.as_str()), ("value", val_str.as_str())])
                     .unwrap_or_else(|| "map_set(...)".into())
             } else {

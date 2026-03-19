@@ -126,9 +126,9 @@ pub(super) fn auto_derive_decode(vt: &mut VarTable, type_name: &str, type_ty: &T
     let key_name = |f: &IrFieldDecl| f.alias.clone().unwrap_or_else(|| f.name.clone());
 
     for f in fields {
-        let is_option = matches!(&f.ty, Ty::Option(_));
+        let is_option = f.ty.is_option();
         let has_default = f.default.is_some();
-        let inner_ty = match &f.ty { Ty::Option(inner) => *inner.clone(), _ => f.ty.clone() };
+        let inner_ty = f.ty.inner().cloned().unwrap_or_else(|| f.ty.clone());
         let field_var = vt.alloc(format!("_{}", f.name), f.ty.clone(), Mutability::Let, None);
 
         // value.field(_v, "key") — returns Result[Value, String]
