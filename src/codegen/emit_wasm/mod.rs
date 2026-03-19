@@ -5,8 +5,9 @@
 //! - **Embed**: Uses `env.print` for browser/Playground (minimal size)
 
 use wasm_encoder::{
-    CodeSection, DataSection, ExportSection, Function, FunctionSection,
-    ImportSection, Instruction, MemorySection, MemoryType, Module,
+    CodeSection, CompositeInnerType, CompositeType, DataSection, ExportSection,
+    FieldType, Function, FunctionSection, ImportSection, Instruction,
+    MemorySection, MemoryType, Module, StorageType, StructType, SubType,
     TypeSection, ValType,
 };
 
@@ -30,6 +31,11 @@ pub fn emit(_program: &IrProgram) -> Vec<u8> {
 /// Emit with explicit mode selection.
 pub fn emit_with_mode(_program: &IrProgram, mode: WasmMode) -> Vec<u8> {
     emit_hello(mode)
+}
+
+/// Emit wasm-gc binary (no linear memory, host GC manages everything).
+pub fn emit_gc(_program: &IrProgram) -> Vec<u8> {
+    emit_gc_poc()
 }
 
 /// Generate a minimal "Hello, Almide!\n" binary.
@@ -191,6 +197,98 @@ fn emit_hello_embed() -> Vec<u8> {
     module.finish()
 }
 
+/// wasm-gc mode: uses struct/array GC types.
+/// No linear memory, no allocator — the host GC manages everything.
+/// This is the MoonBit-equivalent strategy.
+fn emit_gc_poc() -> Vec<u8> {
+    let mut module = Module::new();
+
+    let mut types = TypeSection::new();
+
+    // type 0: struct Point { x: i64, y: i64 }
+    types.ty().subtype(&SubType {
+        is_final: true,
+        supertype_idx: None,
+        composite_type: CompositeType {
+            shared: false,
+            inner: CompositeInnerType::Struct(StructType {
+                fields: Box::new([
+                    FieldType { element_type: StorageType::Val(ValType::I64), mutable: false },
+                    FieldType { element_type: StorageType::Val(ValType::I64), mutable: false },
+                ]),
+            }),
+        },
+    });
+
+    // type 1: print_i64(n: i64) -> ()
+    types.ty().function(vec![ValType::I64], vec![]);
+
+    // type 2: _start() -> ()
+    types.ty().function(vec![], vec![]);
+
+    module.section(&types);
+
+    // import env.print_i64
+    let mut imports = ImportSection::new();
+    imports.import("e", "p", wasm_encoder::EntityType::Function(1));
+    module.section(&imports);
+
+    // function 1 = _start (type 2)
+    let mut functions = FunctionSection::new();
+    functions.function(2);
+    module.section(&functions);
+
+    // export
+    let mut exports = ExportSection::new();
+    exports.export("s", wasm_encoder::ExportKind::Func, 1);
+    module.section(&exports);
+
+    // code: create Point { x: 3, y: 4 }, print x + y
+    let mut codes = CodeSection::new();
+    let mut f = Function::new(vec![]);
+
+    // Push x=3, y=4 on stack, then struct.new $Point
+    f.instruction(&Instruction::I64Const(3));
+    f.instruction(&Instruction::I64Const(4));
+    f.instruction(&Instruction::StructNew(0)); // type 0 = Point
+
+    // Duplicate: get x and y from the struct
+    // We need local to store the struct ref
+    // Actually, we need a local. Let's change approach.
+    f.instruction(&Instruction::End);
+    codes.function(&f);
+
+    // Rewrite: use a local for the struct ref
+    let mut codes = CodeSection::new();
+    let point_ref = ValType::Ref(wasm_encoder::RefType {
+        nullable: false,
+        heap_type: wasm_encoder::HeapType::Concrete(0),
+    });
+    let mut f = Function::new(vec![(1, point_ref)]); // 1 local of type (ref $Point)
+
+    // Create Point { x: 3, y: 4 }
+    f.instruction(&Instruction::I64Const(3));
+    f.instruction(&Instruction::I64Const(4));
+    f.instruction(&Instruction::StructNew(0));
+    f.instruction(&Instruction::LocalSet(0)); // store in local 0
+
+    // Get x + y
+    f.instruction(&Instruction::LocalGet(0));
+    f.instruction(&Instruction::StructGet { struct_type_index: 0, field_index: 0 }); // .x
+    f.instruction(&Instruction::LocalGet(0));
+    f.instruction(&Instruction::StructGet { struct_type_index: 0, field_index: 1 }); // .y
+    f.instruction(&Instruction::I64Add);
+
+    // Call print_i64(x + y)
+    f.instruction(&Instruction::Call(0)); // import index 0
+
+    f.instruction(&Instruction::End);
+    codes.function(&f);
+    module.section(&codes);
+
+    module.finish()
+}
+
 #[cfg(test)]
 mod size_tests {
     use super::*;
@@ -206,5 +304,12 @@ mod size_tests {
         let bytes = emit_hello_embed();
         eprintln!("Embed mode: {} bytes", bytes.len());
         assert!(bytes.len() < 120, "Embed should be under 120 bytes, got {}", bytes.len());
+    }
+
+    #[test]
+    fn test_gc_poc_size() {
+        let bytes = emit_gc_poc();
+        assert_eq!(&bytes[0..4], b"\0asm");
+        eprintln!("GC mode (Point struct + add): {} bytes", bytes.len());
     }
 }
