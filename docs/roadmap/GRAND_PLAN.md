@@ -36,8 +36,10 @@
 
 Almideの独自性を確立する。**effect を capability に育てる。**
 
-- [ ] **[HKT Foundation](active/hkt-foundation.md)** — Ty 統一、代数法則テーブル、Stream Fusion (中間 alloc 消滅で 2-5x)
-- [ ] **[Effect System](active/effect-system.md)** — 自動推論 capability、almide.toml で境界制限、Security Layer 2-3
+- [x] **[HKT Foundation Phase 1-3](done/hkt-foundation-phase1.md)** — TypeConstructor/Kind/代数法則, Stream Fusion (map+map, filter+filter, map+fold 融合)
+- [ ] **[HKT Foundation Phase 4-6](active/hkt-foundation.md)** — Ty統一リファクタ, Effect型統合, Trait統合
+- [x] **[Effect System Phase 1-2](done/effect-system-phase1-2.md)** — 自動推論 capability (7カテゴリ, 推移的), almide check --effects, Security Layer 2
+- [ ] **[Effect System Phase 3-4](active/effect-system.md)** — Dependency制限, 型レベル統合
 - [ ] **Typed host bindings** — IDL/schema-first, codegen-first, 手書きFFI不要
 - [ ] **Resource/task model** — task/scheduler, resource lifetime
 - [ ] **Persistence/sync primitives** — local-first, CRDT/merge, sync queue

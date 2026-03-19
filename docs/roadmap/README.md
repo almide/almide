@@ -6,8 +6,8 @@
 
 | 項目 | 説明 | Grand Plan |
 |---|---|---|
-| [HKT Foundation](active/hkt-foundation.md) | 内部型コンストラクタ統一、代数法則、Stream Fusion | Phase 3 |
-| [Effect System](active/effect-system.md) | 自動推論 capability、パッケージ境界制限 | Phase 3 |
+| [HKT Foundation](active/hkt-foundation.md) | Phase 4-6 残: Ty統一リファクタ, Effect型統合, Trait統合 | Phase 3 |
+| [Effect System](active/effect-system.md) | Phase 3-4 残: Dependency制限, 型レベル統合 | Phase 3 |
 
 ## 1.0 Remaining
 
@@ -192,3 +192,5 @@
 - [Design Debt](done/design-debt.md) — gen_generated_call排除、emit_rust/emit_ts削除
 - [Test Infrastructure](done/test-infrastructure.md) — 110/110 全通過、__test_almd_ prefix、strip_tail_try
 - [Test Architecture Redesign](done/test-architecture-redesign.md) — in_effect → can_call_effect + auto_unwrap 分離、in_test 除去
+- [HKT Foundation Phase 1-3](done/hkt-foundation-phase1.md) — TypeConstructor/Kind/AlgebraicLaw, Ty helpers, Stream Fusion (map+map, filter+filter, map+fold)
+- [Effect System Phase 1-2](done/effect-system-phase1-2.md) — Effect推論, almide check --effects, Security Layer 2 ([permissions])
