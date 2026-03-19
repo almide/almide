@@ -121,6 +121,11 @@ fn count_scratch_depth(expr: &IrExpr) -> usize {
             let inner = args.iter().map(|a| count_scratch_depth(a)).max().unwrap_or(0);
             base.max(inner)
         }
+        // SpreadRecord needs 2 i32 scratch (result + base ptrs)
+        IrExprKind::SpreadRecord { base, fields, .. } => {
+            let inner = fields.iter().map(|(_, e)| count_scratch_depth(e)).max().unwrap_or(0);
+            2.max(count_scratch_depth(base).max(inner))
+        }
         // FnRef needs 1 scratch, Lambda with captures needs 2 (env + closure ptr)
         IrExprKind::FnRef { .. } => 1,
         IrExprKind::Lambda { .. } => 2,

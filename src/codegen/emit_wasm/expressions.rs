@@ -204,6 +204,11 @@ impl FuncCompiler<'_> {
                 self.emit_record(name.as_deref(), fields, &expr.ty);
             }
 
+            // ── Spread record ──
+            IrExprKind::SpreadRecord { base, fields } => {
+                self.emit_spread_record(base, fields, &expr.ty);
+            }
+
             // ── Tuple construction ──
             IrExprKind::Tuple { elements } => {
                 self.emit_tuple(elements);
@@ -811,6 +816,70 @@ impl FuncCompiler<'_> {
             }
             _ => {}
         }
+    }
+
+    /// Emit spread record: copy base, then overwrite specified fields.
+    fn emit_spread_record(&mut self, base: &IrExpr, overrides: &[(String, IrExpr)], result_ty: &Ty) {
+        let all_fields = self.extract_record_fields(result_ty);
+        let tag_offset = self.variant_tag_offset(result_ty);
+        let total_size = tag_offset + values::record_size(&all_fields);
+
+        // Allocate new record
+        self.func.instruction(&Instruction::I32Const(total_size as i32));
+        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+        let result_scratch = self.match_i32_base + self.match_depth;
+        self.func.instruction(&Instruction::LocalSet(result_scratch));
+
+        // Evaluate base and store ptr
+        self.emit_expr(base);
+        let base_scratch = result_scratch + 1;
+        self.func.instruction(&Instruction::LocalSet(base_scratch));
+
+        // Copy all bytes from base to result (including tag if variant)
+        // Byte-by-byte copy loop
+        // Use i64 scratch as counter
+        let counter = self.match_i64_base + self.match_depth;
+        self.func.instruction(&Instruction::I64Const(0));
+        self.func.instruction(&Instruction::LocalSet(counter));
+        self.func.instruction(&Instruction::Block(BlockType::Empty));
+        self.func.instruction(&Instruction::Loop(BlockType::Empty));
+        // break if counter >= total_size
+        self.func.instruction(&Instruction::LocalGet(counter));
+        self.func.instruction(&Instruction::I64Const(total_size as i64));
+        self.func.instruction(&Instruction::I64GeU);
+        self.func.instruction(&Instruction::BrIf(1));
+        // dst[i] = src[i]
+        self.func.instruction(&Instruction::LocalGet(result_scratch));
+        self.func.instruction(&Instruction::LocalGet(counter));
+        self.func.instruction(&Instruction::I32WrapI64);
+        self.func.instruction(&Instruction::I32Add);
+        self.func.instruction(&Instruction::LocalGet(base_scratch));
+        self.func.instruction(&Instruction::LocalGet(counter));
+        self.func.instruction(&Instruction::I32WrapI64);
+        self.func.instruction(&Instruction::I32Add);
+        self.func.instruction(&Instruction::I32Load8U(MemArg { offset: 0, align: 0, memory_index: 0 }));
+        self.func.instruction(&Instruction::I32Store8(MemArg { offset: 0, align: 0, memory_index: 0 }));
+        // counter++
+        self.func.instruction(&Instruction::LocalGet(counter));
+        self.func.instruction(&Instruction::I64Const(1));
+        self.func.instruction(&Instruction::I64Add);
+        self.func.instruction(&Instruction::LocalSet(counter));
+        self.func.instruction(&Instruction::Br(0));
+        self.func.instruction(&Instruction::End);
+        self.func.instruction(&Instruction::End);
+
+        // Overwrite specified fields
+        for (field_name, field_expr) in overrides {
+            if let Some((offset, _)) = values::field_offset(&all_fields, field_name) {
+                let total_offset = tag_offset + offset;
+                self.func.instruction(&Instruction::LocalGet(result_scratch));
+                self.emit_expr(field_expr);
+                self.emit_store_at(&field_expr.ty, total_offset);
+            }
+        }
+
+        // Return result ptr
+        self.func.instruction(&Instruction::LocalGet(result_scratch));
     }
 
     /// Emit a list literal: allocate [len:i32][elem0][elem1]...
