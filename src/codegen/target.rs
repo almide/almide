@@ -48,13 +48,14 @@ fn build_pipeline(target: Target) -> Pipeline {
         Target::Rust => Pipeline::new()
             // Global passes
             .add(TypeConcretizationPass)
+            // Stream fusion BEFORE borrow/clone (decorators break pattern matching)
+            .add(StreamFusionPass)
             .add(BorrowInsertionPass)
             .add(CloneInsertionPass)
             // Match subject transforms: String → .as_str(), Option<String> → .as_deref()
             .add(MatchSubjectPass)
             // Analysis passes (before lowering, while Module calls still visible)
             .add(EffectInferencePass)
-            .add(StreamFusionPass)
             // Semantic lowering (order matters!)
             // 1. Stdlib first: Module calls → Named calls with arg decoration
             .add(StdlibLoweringPass)

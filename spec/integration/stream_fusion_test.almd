@@ -1,0 +1,87 @@
+// ── Stream fusion robustness tests ──
+
+test "fusion: map+map" {
+  let result = [1, 2, 3, 4, 5]
+    |> list.map((x) => x * 2)
+    |> list.map((x) => x + 1)
+  assert_eq(result, [3, 5, 7, 9, 11])
+}
+
+test "fusion: filter+filter" {
+  let result = [1, 2, 3, 4, 5, 6, 7, 8]
+    |> list.filter((x) => x > 3)
+    |> list.filter((x) => x < 7)
+  assert_eq(result, [4, 5, 6])
+}
+
+test "fusion: map+fold" {
+  let result = [1, 2, 3]
+    |> list.map((x) => x * 10)
+    |> list.fold(0, (acc, x) => acc + x)
+  assert_eq(result, 60)
+}
+
+test "fusion: map+filter+fold" {
+  let result = [1, 2, 3, 4, 5]
+    |> list.map((x) => x * 2)
+    |> list.filter((x) => x > 4)
+    |> list.fold(0, (acc, x) => acc + x)
+  assert_eq(result, 24)
+}
+
+test "fusion: range+fold" {
+  let result = list.range(1, 6)
+    |> list.fold(0, (acc, x) => acc + x)
+  assert_eq(result, 15)
+}
+
+test "fusion: range+map+filter+fold" {
+  let result = list.range(0, 10)
+    |> list.map((x) => x * 3 + 1)
+    |> list.filter((x) => x % 2 == 0)
+    |> list.fold(0, (acc, x) => acc + x)
+  assert_eq(result, 80)
+}
+
+test "fusion: empty list" {
+  let result = list.range(0, 0)
+    |> list.map((x) => x * 2)
+    |> list.filter((x) => x > 0)
+    |> list.fold(0, (acc, x) => acc + x)
+  assert_eq(result, 0)
+}
+
+test "fusion: pipe result used later" {
+  let doubled = [1, 2, 3] |> list.map((x) => x * 2)
+  let sum = list.fold(doubled, 0, (acc, x) => acc + x)
+  assert_eq(sum, 12)
+}
+
+test "fusion: independent chains" {
+  let a = [1, 2, 3] |> list.map((x) => x + 1) |> list.fold(0, (acc, x) => acc + x)
+  let b = [10, 20] |> list.map((x) => x * 2) |> list.fold(0, (acc, x) => acc + x)
+  assert_eq(a + b, 69)
+}
+
+test "fusion: string ops in map" {
+  let result = ["hello", "world"]
+    |> list.map((s) => string.len(s))
+    |> list.fold(0, (acc, n) => acc + n)
+  assert_eq(result, 10)
+}
+
+test "fusion: single element" {
+  let result = [42]
+    |> list.map((x) => x * 2)
+    |> list.filter((x) => x > 0)
+    |> list.fold(0, (acc, x) => acc + x)
+  assert_eq(result, 84)
+}
+
+test "fusion: all filtered out" {
+  let result = [1, 2, 3]
+    |> list.map((x) => x * 2)
+    |> list.filter((x) => x > 100)
+    |> list.fold(0, (acc, x) => acc + x)
+  assert_eq(result, 0)
+}
