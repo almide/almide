@@ -21,7 +21,7 @@
 
 ## What is Almide?
 
-Almide is a statically-typed language optimized for AI-generated code. It compiles to Rust, TypeScript, and WebAssembly.
+Almide is a statically-typed language optimized for AI-generated code. It compiles to Rust, TypeScript, JavaScript, and WebAssembly.
 
 The core metric is **modification survival rate** — how often code still compiles and passes tests after a series of AI-driven modifications. The language achieves this through unambiguous syntax, actionable compiler diagnostics, and a standard library that covers common patterns out of the box.
 
@@ -33,7 +33,7 @@ The flywheel: LLMs write Almide reliably → more code is produced → training 
 
 ### Prerequisites
 
-- [Rust](https://rustup.rs/) (stable, 1.85+)
+- [Rust](https://rustup.rs/) (stable, 1.89+)
 
 ### Install from source
 
@@ -74,16 +74,19 @@ almide run hello.almd
 
 ## Features
 
-- **Multi-target** — Same source compiles to Rust (native binary), TypeScript, or WebAssembly
-- **Generics** — Functions, records, variant types, recursive variants with auto Box wrapping
+- **Multi-target** — Same source compiles to Rust (native binary), TypeScript, JavaScript, or WebAssembly
+- **Generics** — Functions (`fn id[T](x: T) -> T`), records, variant types, recursive variants with auto Box wrapping
 - **Pattern matching** — Exhaustive match with variant destructuring
 - **Effect functions** — `effect fn` for explicit error propagation (`Result` auto-wrapping)
 - **Bidirectional type inference** — Type annotations flow into expressions (`let xs: List[Int] = []`)
+- **Codec system** — `Type.decode(value)` / `Type.encode(value)` convention with auto-derive
 - **Map literals** — `["key": value]` syntax with `m[key]` access and `for (k, v) in m` iteration
+- **Fan concurrency** — `fan { a(); b() }`, `fan.map`, `fan.race`, `fan.any`, `fan.settle`
 - **Top-level constants** — `let PI = 3.14` at module scope, compile-time evaluated
 - **Pipeline operator** — `data |> transform |> output`
 - **Module system** — Packages, sub-namespaces, visibility control, diamond dependency resolution
-- **Built-in testing** — `test "name" { assert_eq(a, b) }` with `almide test` (1,700+ language tests)
+- **Standard library** — 381 functions across 22 modules (string, list, map, json, http, fs, etc.)
+- **Built-in testing** — `test "name" { assert_eq(a, b) }` with `almide test`
 - **Actionable diagnostics** — Every error includes file:line, context, and a concrete fix suggestion
 
 ## Why Almide?
@@ -137,25 +140,38 @@ test "greet succeeds" {
 
 ## How It Works
 
-Almide source (`.almd`) is compiled by a pure-Rust compiler to Rust, TypeScript, or WebAssembly.
+Almide source (`.almd`) is compiled by a pure-Rust compiler through a three-layer codegen architecture:
 
 ```
-.almd → Lexer → Parser → AST → Type Checker → Lowering → IR → CodeGen → .rs / .ts / .wasm
+.almd → Lexer → Parser → AST → Type Checker → Lowering → IR
+                                                            ↓
+                                              Nanopass Pipeline (semantic rewrites)
+                                                            ↓
+                                              Template Renderer (TOML-driven)
+                                                            ↓
+                                                    .rs / .ts / .js / .wasm
 ```
 
-Codegen operates solely on the typed IR — it never references the AST.
+The Nanopass pipeline applies target-specific transformations: `ResultPropagation` (Rust `?`), `ResultErasure` (TS/JS `throw`), `MatchLowering` (TS/JS if-else chains), `CloneInsertion` (Rust borrow analysis). The Template Renderer is purely syntactic — all semantic decisions are already encoded in the IR.
 
 ```bash
-almide run app.almd              # Compile + execute
+almide run app.almd              # Compile + execute (Rust target)
 almide run app.almd -- arg1      # With arguments
 almide build app.almd -o app     # Build standalone binary
 almide build app.almd --target wasm  # Build WebAssembly (WASI)
+almide build app.almd --target npm   # Build npm package (JS)
 almide test                      # Find and run all test blocks (recursive)
-almide check app.almd            # Type check only (no compilation)
+almide test spec/lang/           # Run tests in a directory
+almide test --run "pattern"      # Filter tests by name
+almide check app.almd            # Type check only
+almide check app.almd --json     # Type check with JSON output
 almide fmt app.almd              # Format source code
 almide clean                     # Clear dependency cache
 almide app.almd --target rust    # Emit Rust source
 almide app.almd --target ts      # Emit TypeScript source
+almide app.almd --target js      # Emit JavaScript source
+almide app.almd --emit-ast       # Emit AST as JSON
+almide app.almd --emit-ir        # Emit typed IR as JSON
 ```
 
 ## Benchmark
@@ -188,6 +204,18 @@ Almide compiles to Rust, which then compiles to native machine code. No runtime,
 | Runtime (100 ops) | 1.6s |
 | Dependencies | 0 (single static binary) |
 | WASM target | `almide build app.almd --target wasm` |
+
+## Project Status
+
+| Category | Status |
+|----------|--------|
+| Compiler | Pure Rust, single binary, 0 ICE |
+| Targets | Rust, TypeScript, JavaScript, WASM |
+| Codegen | v3 — Nanopass + TOML templates, fully target-agnostic walker |
+| Stdlib | 381 functions across 22 modules |
+| Tests | 110 test files, 25 exercises, 5 showcases |
+| Cross-target | 91/91 spec+exercise tests pass on both Rust and TS |
+| Playground | [Live](https://almide.github.io/playground/) — compiler runs as WASM in browser |
 
 ## Ecosystem
 
@@ -224,6 +252,7 @@ VS Code extension with syntax highlighting, bracket matching, comment toggling, 
 - [docs/GRAMMAR.md](./docs/GRAMMAR.md) — EBNF grammar + stdlib reference
 - [docs/CHEATSHEET.md](./docs/CHEATSHEET.md) — Quick reference for AI code generation
 - [docs/DESIGN.md](./docs/DESIGN.md) — Design philosophy and trade-offs
+- [docs/STDLIB-SPEC.md](./docs/STDLIB-SPEC.md) — Standard library specification (381 functions)
 - [docs/roadmap/](./docs/roadmap/README.md) — Language evolution plans
 
 ## Contributing
