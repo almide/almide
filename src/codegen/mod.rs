@@ -36,6 +36,7 @@ pub mod pass_stream_fusion;
 pub mod template;
 pub mod target;
 pub mod walker;
+pub mod emit_wasm;
 
 use crate::ir::{IrProgram, IrTypeDeclKind, IrVariantKind};
 use pass::Target;
@@ -174,4 +175,9 @@ pub fn emit(program: &mut IrProgram, target: Target) -> String {
     }
     output.push_str(&user_code);
     output
+}
+
+/// Emit WASM binary directly from IR (no rustc intermediary).
+pub fn emit_wasm_binary(program: &IrProgram) -> Vec<u8> {
+    emit_wasm::emit(program)
 }

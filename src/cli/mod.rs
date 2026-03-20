@@ -10,7 +10,7 @@ pub use run::{cmd_run, cmd_run_inner};
 pub use build::cmd_build;
 pub use emit::cmd_emit;
 pub use check::{cmd_check, cmd_check_json, cmd_check_effects};
-pub use commands::{cmd_init, cmd_test, cmd_test_json, cmd_fmt, cmd_clean};
+pub use commands::{cmd_init, cmd_test, cmd_test_json, cmd_test_wasm, cmd_fmt, cmd_clean};
 
 use std::hash::{Hash, Hasher};
 
