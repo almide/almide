@@ -752,228 +752,211 @@ impl FuncCompiler<'_> {
                         self.func.instruction(&Instruction::I32Const(4));
                         self.func.instruction(&Instruction::I32Load(mem(0)));
                     }
-                    ("list", "sort") if false => { // disabled: validation issues
-                        // Sort list (Int only, insertion sort on a copy)
-                        let elem_ty = if let Ty::Applied(_, a) = &args[0].ty {
-                            a.first().cloned().unwrap_or(Ty::Int)
-                        } else { Ty::Int };
-                        let elem_size = values::byte_size(&elem_ty);
-                        let s = self.match_i32_base + self.match_depth;
-                        let len_local = s;
-                        let i_local = s + 1;
+                    ("list", "sort") => {
+                        // Bubble sort on a copy. Int(i64) only.
                         let mem = super::expressions::mem;
 
-                        // mem[0]=src
+                        // mem[0]=src, alloc copy → mem[4], len → local s, i → local s+1
+                        let s = self.match_i32_base + self.match_depth;
+
                         self.func.instruction(&Instruction::I32Const(0));
                         self.emit_expr(&args[0]);
                         self.func.instruction(&Instruction::I32Store(mem(0)));
 
-                        // len
+                        // len → local s
                         self.func.instruction(&Instruction::I32Const(0));
                         self.func.instruction(&Instruction::I32Load(mem(0)));
                         self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::LocalSet(len_local));
+                        self.func.instruction(&Instruction::LocalSet(s));
 
-                        // Copy src to dst (alloc + byte copy) → mem[4]
-                        let total_bytes_expr = |this: &mut Self| {
-                            this.func.instruction(&Instruction::I32Const(4));
-                            this.func.instruction(&Instruction::LocalGet(len_local));
-                            this.func.instruction(&Instruction::I32Const(elem_size as i32));
-                            this.func.instruction(&Instruction::I32Mul);
-                            this.func.instruction(&Instruction::I32Add);
-                        };
+                        // total_bytes = 4 + len * 8
+                        // alloc → mem[4]
                         self.func.instruction(&Instruction::I32Const(4));
-                        total_bytes_expr(self);
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::LocalGet(s));
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Mul);
+                        self.func.instruction(&Instruction::I32Add);
                         self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
                         self.func.instruction(&Instruction::I32Store(mem(0)));
 
-                        // Copy all bytes from src to dst
+                        // Store total_bytes → mem[8]
+                        self.func.instruction(&Instruction::I32Const(8));
                         self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Load(mem(0))); // dst
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::I32Load(mem(0))); // src
-                        total_bytes_expr(self);
-                        // Use byte copy loop
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::LocalSet(i_local));
-                        // stack: [dst, src, total]
-                        // Store to mem[8]=dst, mem[12]=src, mem[16]=total
-                        self.func.instruction(&Instruction::I32Const(16));
-                        self.func.instruction(&Instruction::I32Store(mem(0))); // total→mem[16]
-                        self.func.instruction(&Instruction::I32Const(12));
-                        self.func.instruction(&Instruction::I32Store(mem(0))); // src→mem[12]
-                        // dst already in mem[4]
+                        self.func.instruction(&Instruction::LocalGet(s));
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Mul);
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::I32Store(mem(0))); // mem[8] = total
 
+                        // Byte copy loop: i=0..total
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::LocalSet(s + 1)); // i=0
                         self.func.instruction(&Instruction::Block(BlockType::Empty));
                         self.func.instruction(&Instruction::Loop(BlockType::Empty));
-                        let saved = self.depth; self.depth += 2;
-                        self.func.instruction(&Instruction::LocalGet(i_local));
-                        self.func.instruction(&Instruction::I32Const(16));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.depth += 2;
+                        self.func.instruction(&Instruction::LocalGet(s + 1));
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Load(mem(0))); // total
                         self.func.instruction(&Instruction::I32GeU);
                         self.func.instruction(&Instruction::BrIf(1));
-                        // dst[i] = src[i]
+                        // dst[i] = src[i] (src=mem[0], dst=mem[4])
                         self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::LocalGet(i_local));
+                        self.func.instruction(&Instruction::I32Load(mem(0))); // dst
+                        self.func.instruction(&Instruction::LocalGet(s + 1));
                         self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::I32Const(12));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::LocalGet(i_local));
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::I32Load(mem(0))); // src
+                        self.func.instruction(&Instruction::LocalGet(s + 1));
                         self.func.instruction(&Instruction::I32Add);
                         self.func.instruction(&Instruction::I32Load8U(MemArg { offset: 0, align: 0, memory_index: 0 }));
                         self.func.instruction(&Instruction::I32Store8(MemArg { offset: 0, align: 0, memory_index: 0 }));
-                        self.func.instruction(&Instruction::LocalGet(i_local));
+                        self.func.instruction(&Instruction::LocalGet(s + 1));
                         self.func.instruction(&Instruction::I32Const(1));
                         self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::LocalSet(i_local));
+                        self.func.instruction(&Instruction::LocalSet(s + 1));
                         self.func.instruction(&Instruction::Br(0));
-                        self.depth = saved;
+                        self.depth -= 2;
                         self.func.instruction(&Instruction::End);
                         self.func.instruction(&Instruction::End);
 
-                        // Now sort dst in-place using insertion sort (Int/i64 only)
-                        // for i = 1; i < len; i++:
-                        //   key = dst[i]; j = i-1
-                        //   while j >= 0 && dst[j] > key: dst[j+1] = dst[j]; j--
-                        //   dst[j+1] = key
-                        if matches!(&elem_ty, Ty::Int) {
-                            let j_local = self.match_i64_base + self.match_depth; // borrow i64 for j
-                            // Can't use i64 for i32 index. Use mem scratch instead.
-                            // Actually for sort we need: i, j, key. Use mem[8]=j, mem[12]=key(i64→8bytes at mem[12..20])
-                            // This is getting complex. Use a simple bubble sort instead:
-                            // for i in 0..len-1: for j in 0..len-1-i: if dst[j] > dst[j+1]: swap
-                            self.func.instruction(&Instruction::I32Const(0));
-                            self.func.instruction(&Instruction::LocalSet(i_local)); // i=0 (outer)
-                            self.func.instruction(&Instruction::Block(BlockType::Empty));
-                            self.func.instruction(&Instruction::Loop(BlockType::Empty));
-                            let s2 = self.depth; self.depth += 2;
-                            // if i >= len-1 break
-                            self.func.instruction(&Instruction::LocalGet(i_local));
-                            self.func.instruction(&Instruction::LocalGet(len_local));
-                            self.func.instruction(&Instruction::I32Const(1));
-                            self.func.instruction(&Instruction::I32Sub);
-                            self.func.instruction(&Instruction::I32GeU);
-                            self.func.instruction(&Instruction::BrIf(1));
-                            // inner loop: j from 0 to len-1-i
-                            self.func.instruction(&Instruction::I32Const(8)); // mem[8] = j = 0
-                            self.func.instruction(&Instruction::I32Const(0));
-                            self.func.instruction(&Instruction::I32Store(mem(0)));
-                            self.func.instruction(&Instruction::Block(BlockType::Empty));
-                            self.func.instruction(&Instruction::Loop(BlockType::Empty));
-                            self.depth += 2;
-                            // if j >= len-1-i break
-                            self.func.instruction(&Instruction::I32Const(8));
-                            self.func.instruction(&Instruction::I32Load(mem(0))); // j
-                            self.func.instruction(&Instruction::LocalGet(len_local));
-                            self.func.instruction(&Instruction::I32Const(1));
-                            self.func.instruction(&Instruction::I32Sub);
-                            self.func.instruction(&Instruction::LocalGet(i_local));
-                            self.func.instruction(&Instruction::I32Sub);
-                            self.func.instruction(&Instruction::I32GeU);
-                            self.func.instruction(&Instruction::BrIf(1));
-                            // if dst[4+j*8] > dst[4+(j+1)*8]: swap
-                            // Load dst[j]
-                            self.func.instruction(&Instruction::I32Const(4));
-                            self.func.instruction(&Instruction::I32Load(mem(0))); // dst
-                            self.func.instruction(&Instruction::I32Const(4));
-                            self.func.instruction(&Instruction::I32Add);
-                            self.func.instruction(&Instruction::I32Const(8));
-                            self.func.instruction(&Instruction::I32Load(mem(0))); // j
-                            self.func.instruction(&Instruction::I32Const(8));
-                            self.func.instruction(&Instruction::I32Mul);
-                            self.func.instruction(&Instruction::I32Add);
-                            self.func.instruction(&Instruction::I64Load(MemArg { offset: 0, align: 3, memory_index: 0 }));
-                            // Load dst[j+1]
-                            self.func.instruction(&Instruction::I32Const(4));
-                            self.func.instruction(&Instruction::I32Load(mem(0)));
-                            self.func.instruction(&Instruction::I32Const(4));
-                            self.func.instruction(&Instruction::I32Add);
-                            self.func.instruction(&Instruction::I32Const(8));
-                            self.func.instruction(&Instruction::I32Load(mem(0)));
-                            self.func.instruction(&Instruction::I32Const(1));
-                            self.func.instruction(&Instruction::I32Add);
-                            self.func.instruction(&Instruction::I32Const(8));
-                            self.func.instruction(&Instruction::I32Mul);
-                            self.func.instruction(&Instruction::I32Add);
-                            self.func.instruction(&Instruction::I64Load(MemArg { offset: 0, align: 3, memory_index: 0 }));
-                            // if dst[j] > dst[j+1]
-                            self.func.instruction(&Instruction::I64GtS);
-                            self.func.instruction(&Instruction::If(BlockType::Empty));
-                            // Swap: store dst[j] to mem[12..20], dst[j+1]→dst[j], mem[12]→dst[j+1]
-                            // Save dst[j] to mem[12]
-                            self.func.instruction(&Instruction::I32Const(12));
-                            self.func.instruction(&Instruction::I32Const(4));
-                            self.func.instruction(&Instruction::I32Load(mem(0)));
-                            self.func.instruction(&Instruction::I32Const(4));
-                            self.func.instruction(&Instruction::I32Add);
-                            self.func.instruction(&Instruction::I32Const(8));
-                            self.func.instruction(&Instruction::I32Load(mem(0)));
-                            self.func.instruction(&Instruction::I32Const(8));
-                            self.func.instruction(&Instruction::I32Mul);
-                            self.func.instruction(&Instruction::I32Add);
-                            self.func.instruction(&Instruction::I64Load(MemArg { offset: 0, align: 3, memory_index: 0 }));
-                            self.func.instruction(&Instruction::I64Store(MemArg { offset: 0, align: 3, memory_index: 0 }));
-                            // dst[j] = dst[j+1]
-                            self.func.instruction(&Instruction::I32Const(4));
-                            self.func.instruction(&Instruction::I32Load(mem(0)));
-                            self.func.instruction(&Instruction::I32Const(4));
-                            self.func.instruction(&Instruction::I32Add);
-                            self.func.instruction(&Instruction::I32Const(8));
-                            self.func.instruction(&Instruction::I32Load(mem(0)));
-                            self.func.instruction(&Instruction::I32Const(8));
-                            self.func.instruction(&Instruction::I32Mul);
-                            self.func.instruction(&Instruction::I32Add);
-                            self.func.instruction(&Instruction::I32Const(4));
-                            self.func.instruction(&Instruction::I32Load(mem(0)));
-                            self.func.instruction(&Instruction::I32Const(4));
-                            self.func.instruction(&Instruction::I32Add);
-                            self.func.instruction(&Instruction::I32Const(8));
-                            self.func.instruction(&Instruction::I32Load(mem(0)));
-                            self.func.instruction(&Instruction::I32Const(1));
-                            self.func.instruction(&Instruction::I32Add);
-                            self.func.instruction(&Instruction::I32Const(8));
-                            self.func.instruction(&Instruction::I32Mul);
-                            self.func.instruction(&Instruction::I32Add);
-                            self.func.instruction(&Instruction::I64Load(MemArg { offset: 0, align: 3, memory_index: 0 }));
-                            self.func.instruction(&Instruction::I64Store(MemArg { offset: 0, align: 3, memory_index: 0 }));
-                            // dst[j+1] = mem[12]
-                            self.func.instruction(&Instruction::I32Const(4));
-                            self.func.instruction(&Instruction::I32Load(mem(0)));
-                            self.func.instruction(&Instruction::I32Const(4));
-                            self.func.instruction(&Instruction::I32Add);
-                            self.func.instruction(&Instruction::I32Const(8));
-                            self.func.instruction(&Instruction::I32Load(mem(0)));
-                            self.func.instruction(&Instruction::I32Const(1));
-                            self.func.instruction(&Instruction::I32Add);
-                            self.func.instruction(&Instruction::I32Const(8));
-                            self.func.instruction(&Instruction::I32Mul);
-                            self.func.instruction(&Instruction::I32Add);
-                            self.func.instruction(&Instruction::I32Const(12));
-                            self.func.instruction(&Instruction::I64Load(MemArg { offset: 0, align: 3, memory_index: 0 }));
-                            self.func.instruction(&Instruction::I64Store(MemArg { offset: 0, align: 3, memory_index: 0 }));
-                            self.func.instruction(&Instruction::End); // end if swap
-                            // j++
-                            self.func.instruction(&Instruction::I32Const(8));
-                            self.func.instruction(&Instruction::I32Const(8));
-                            self.func.instruction(&Instruction::I32Load(mem(0)));
-                            self.func.instruction(&Instruction::I32Const(1));
-                            self.func.instruction(&Instruction::I32Add);
-                            self.func.instruction(&Instruction::I32Store(mem(0)));
-                            self.func.instruction(&Instruction::Br(0));
-                            self.depth -= 2;
-                            self.func.instruction(&Instruction::End);
-                            self.func.instruction(&Instruction::End);
-                            // i++
-                            self.func.instruction(&Instruction::LocalGet(i_local));
-                            self.func.instruction(&Instruction::I32Const(1));
-                            self.func.instruction(&Instruction::I32Add);
-                            self.func.instruction(&Instruction::LocalSet(i_local));
-                            self.func.instruction(&Instruction::Br(0));
-                            self.depth = s2;
-                            self.func.instruction(&Instruction::End);
-                            self.func.instruction(&Instruction::End);
-                        }
+                        // Bubble sort: outer i=0..len-1, inner j=0..len-1-i
+                        // mem[8]=j (reuse), mem[12]=tmp(i64)
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::LocalSet(s + 1)); // i=0
+                        self.func.instruction(&Instruction::Block(BlockType::Empty));
+                        self.func.instruction(&Instruction::Loop(BlockType::Empty));
+                        self.depth += 2;
+                        self.func.instruction(&Instruction::LocalGet(s + 1));
+                        self.func.instruction(&Instruction::LocalGet(s));
+                        self.func.instruction(&Instruction::I32Const(1));
+                        self.func.instruction(&Instruction::I32Sub);
+                        self.func.instruction(&Instruction::I32GeU);
+                        self.func.instruction(&Instruction::BrIf(1));
+
+                        // Inner: j=0
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::I32Store(mem(0)));
+                        self.func.instruction(&Instruction::Block(BlockType::Empty));
+                        self.func.instruction(&Instruction::Loop(BlockType::Empty));
+                        self.depth += 2;
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Load(mem(0))); // j
+                        self.func.instruction(&Instruction::LocalGet(s));
+                        self.func.instruction(&Instruction::I32Const(1));
+                        self.func.instruction(&Instruction::I32Sub);
+                        self.func.instruction(&Instruction::LocalGet(s + 1));
+                        self.func.instruction(&Instruction::I32Sub);
+                        self.func.instruction(&Instruction::I32GeU);
+                        self.func.instruction(&Instruction::BrIf(1));
+
+                        // Compare dst[j] > dst[j+1]
+                        // addr_j = dst + 4 + j*8
+                        // addr_j1 = dst + 4 + (j+1)*8
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Mul);
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::I64Load(MemArg { offset: 0, align: 3, memory_index: 0 }));
+                        // dst[j+1]
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(1));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Mul);
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::I64Load(MemArg { offset: 0, align: 3, memory_index: 0 }));
+                        self.func.instruction(&Instruction::I64GtS);
+                        self.func.instruction(&Instruction::If(BlockType::Empty));
+
+                        // Swap: tmp=dst[j], dst[j]=dst[j+1], dst[j+1]=tmp
+                        // tmp → mem[12..20]
+                        self.func.instruction(&Instruction::I32Const(12));
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Mul);
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::I64Load(MemArg { offset: 0, align: 3, memory_index: 0 }));
+                        self.func.instruction(&Instruction::I64Store(MemArg { offset: 0, align: 3, memory_index: 0 }));
+                        // dst[j] = dst[j+1]
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Mul);
+                        self.func.instruction(&Instruction::I32Add);
+                        // value = dst[j+1]
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(1));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Mul);
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::I64Load(MemArg { offset: 0, align: 3, memory_index: 0 }));
+                        self.func.instruction(&Instruction::I64Store(MemArg { offset: 0, align: 3, memory_index: 0 }));
+                        // dst[j+1] = tmp(mem[12])
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(1));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Mul);
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::I32Const(12));
+                        self.func.instruction(&Instruction::I64Load(MemArg { offset: 0, align: 3, memory_index: 0 }));
+                        self.func.instruction(&Instruction::I64Store(MemArg { offset: 0, align: 3, memory_index: 0 }));
+
+                        self.func.instruction(&Instruction::End); // end if swap
+
+                        // j++
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(1));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::I32Store(mem(0)));
+                        self.func.instruction(&Instruction::Br(0));
+                        self.depth -= 2;
+                        self.func.instruction(&Instruction::End); // end inner loop
+                        self.func.instruction(&Instruction::End); // end inner block
+
+                        // i++
+                        self.func.instruction(&Instruction::LocalGet(s + 1));
+                        self.func.instruction(&Instruction::I32Const(1));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::LocalSet(s + 1));
+                        self.func.instruction(&Instruction::Br(0));
+                        self.depth -= 2;
+                        self.func.instruction(&Instruction::End); // end outer loop
+                        self.func.instruction(&Instruction::End); // end outer block
 
                         // Return dst
                         self.func.instruction(&Instruction::I32Const(4));
@@ -1092,7 +1075,7 @@ impl FuncCompiler<'_> {
             CallTarget::Method { object, method } => {
                 // UFCS method calls: obj.method(args)
                 match method.as_str() {
-                    "to_string" if matches!(object.ty, Ty::Int) => {
+                    "to_string" | "int.to_string" if matches!(object.ty, Ty::Int) => {
                         self.emit_expr(object);
                         self.func.instruction(&Instruction::Call(self.emitter.rt.int_to_string));
                     }
@@ -1102,7 +1085,7 @@ impl FuncCompiler<'_> {
                         self.func.instruction(&Instruction::I32Load(super::expressions::mem(0)));
                         self.func.instruction(&Instruction::I64ExtendI32U);
                     }
-                    "to_string" if matches!(object.ty, Ty::Float) => {
+                    "to_string" | "float.to_string" if matches!(object.ty, Ty::Float) => {
                         self.emit_expr(object);
                         self.func.instruction(&Instruction::I64TruncF64S);
                         self.func.instruction(&Instruction::Call(self.emitter.rt.int_to_string));
