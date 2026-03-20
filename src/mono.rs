@@ -1028,11 +1028,43 @@ fn extract_typevar_binding(param_ty: &Ty, arg_ty: &Ty, var_name: &str) -> Ty {
 fn propagate_concrete_types(program: &mut IrProgram) {
     for func in &mut program.functions {
         propagate_expr(&mut func.body, &mut program.var_table);
+        // If function body is a match (or block ending in match) and its type is wrong,
+        // override with function's ret_ty (which mono has correctly substituted)
+        fix_body_match_ty(&mut func.body, &func.ret_ty);
     }
     for tl in &mut program.top_lets {
         propagate_expr(&mut tl.value, &mut program.var_table);
     }
 }
+
+/// If the body expression is a Match whose .ty disagrees with ret_ty, fix it.
+/// Also recurse into Block tails.
+fn fix_body_match_ty(body: &mut IrExpr, ret_ty: &Ty) {
+    match &mut body.kind {
+        IrExprKind::Match { arms, .. } => {
+            if crate::codegen::emit_wasm::values::ty_to_valtype(&body.ty) != crate::codegen::emit_wasm::values::ty_to_valtype(ret_ty)
+                && !matches!(ret_ty, Ty::Unit | Ty::Unknown)
+            {
+                body.ty = ret_ty.clone();
+                // Also fix arm body types
+                for arm in arms.iter_mut() {
+                    if crate::codegen::emit_wasm::values::ty_to_valtype(&arm.body.ty) != crate::codegen::emit_wasm::values::ty_to_valtype(ret_ty) {
+                        fix_body_match_ty(&mut arm.body, ret_ty);
+                    }
+                }
+            }
+        }
+        IrExprKind::Block { expr: Some(tail), .. } | IrExprKind::DoBlock { expr: Some(tail), .. } => {
+            fix_body_match_ty(tail, ret_ty);
+            if crate::codegen::emit_wasm::values::ty_to_valtype(&body.ty) != crate::codegen::emit_wasm::values::ty_to_valtype(ret_ty)
+                && !matches!(ret_ty, Ty::Unit | Ty::Unknown) {
+                body.ty = ret_ty.clone();
+            }
+        }
+        _ => {}
+    }
+}
+
 
 fn has_typevar(ty: &Ty) -> bool {
     ty.any_child_recursive(&|t| {

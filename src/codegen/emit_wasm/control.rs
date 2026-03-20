@@ -191,6 +191,28 @@ impl FuncCompiler<'_> {
     /// - Bind: store subject in the bound variable's local, unconditional
     pub(super) fn emit_match(&mut self, subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty) {
         let subject_ty = self.resolve_subject_type(subject, arms);
+
+        // Resolve result_ty: trust arm body types over expr.ty when they disagree.
+        // Checker's Union-Find can contaminate match result vars (e.g., binding to Int
+        // when the actual result is Either[String, Int] = i32 pointer).
+        let resolved_result = if !arms.is_empty() {
+            let arm_vts: Vec<Option<ValType>> = arms.iter().map(|a| values::ty_to_valtype(&a.body.ty)).collect();
+            let result_vt = values::ty_to_valtype(result_ty);
+            // If all arm bodies agree on a WASM type and it differs from result_ty, use arm type
+            if let Some(first_vt) = arm_vts[0] {
+                if arm_vts.iter().all(|vt| *vt == Some(first_vt)) && result_vt != Some(first_vt) {
+                    arms[0].body.ty.clone()
+                } else {
+                    result_ty.clone()
+                }
+            } else {
+                result_ty.clone()
+            }
+        } else {
+            result_ty.clone()
+        };
+        let result_ty = &resolved_result;
+
         self.emit_expr(subject);
 
         let scratch = match values::ty_to_valtype(&subject_ty) {

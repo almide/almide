@@ -185,17 +185,26 @@ impl Checker {
                 let subject_ty = self.infer_expr(subject);
                 let sc = resolve_ty(&subject_ty, &self.uf);
                 self.check_match_exhaustiveness(&sc, arms);
-                let result = self.fresh_var();
+                let mut arm_types = Vec::new();
                 for arm in arms.iter_mut() {
                     self.env.push_scope();
                     let sub_c = resolve_ty(&subject_ty, &self.uf);
                     self.bind_pattern(&arm.pattern, &sub_c);
                     if let Some(ref mut guard) = arm.guard { self.infer_expr(guard); }
                     let arm_ty = self.infer_expr(&mut arm.body);
-                    self.constrain(result.clone(), arm_ty, "match arm");
+                    arm_types.push(arm_ty);
                     self.env.pop_scope();
                 }
-                result
+                // Unify all arm types with each other (not with a shared result var
+                // that can be contaminated by external constraints)
+                if let Some(first) = arm_types.first().cloned() {
+                    for aty in &arm_types[1..] {
+                        self.constrain(first.clone(), aty.clone(), "match arm");
+                    }
+                    first
+                } else {
+                    Ty::Unit
+                }
             }
 
             ast::Expr::Block { stmts, expr, .. } | ast::Expr::DoBlock { stmts, expr, .. } => {
