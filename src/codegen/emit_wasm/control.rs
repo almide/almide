@@ -333,7 +333,21 @@ impl FuncCompiler<'_> {
                         }
                     }
 
-                    self.emit_expr(&arm.body);
+                    // Handle guard on constructor
+                    if let Some(guard) = &arm.guard {
+                        self.emit_expr(guard);
+                        let bt2 = values::block_type(result_ty);
+                        self.func.instruction(&Instruction::If(bt2));
+                        self.depth += 1;
+                        self.emit_expr(&arm.body);
+                        self.func.instruction(&Instruction::Else);
+                        if is_last { self.func.instruction(&Instruction::Unreachable); }
+                        else { self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1); }
+                        self.depth -= 1;
+                        self.func.instruction(&Instruction::End);
+                    } else {
+                        self.emit_expr(&arm.body);
+                    }
                     self.func.instruction(&Instruction::Else);
                     if is_last {
                         self.func.instruction(&Instruction::Unreachable);
@@ -359,7 +373,7 @@ impl FuncCompiler<'_> {
                 self.func.instruction(&Instruction::If(bt));
                 self.depth += 1;
 
-                // Bind the inner value (type from subject, not VarTable — may be Unknown)
+                // Bind the inner value
                 if let IrPattern::Bind { var } = inner.as_ref() {
                     if let Some(&local_idx) = self.var_map.get(&var.0) {
                         let inner_ty = if let Ty::Applied(_, args) = subject_ty {
@@ -371,7 +385,25 @@ impl FuncCompiler<'_> {
                     }
                 }
 
-                self.emit_expr(&arm.body);
+                // Handle guard
+                if let Some(guard) = &arm.guard {
+                    self.emit_expr(guard);
+                    let bt2 = values::block_type(result_ty);
+                    self.func.instruction(&Instruction::If(bt2));
+                    self.depth += 1;
+                    self.emit_expr(&arm.body);
+                    self.func.instruction(&Instruction::Else);
+                    if is_last {
+                        self.func.instruction(&Instruction::Unreachable);
+                    } else {
+                        self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1);
+                    }
+                    self.depth -= 1;
+                    self.func.instruction(&Instruction::End);
+                } else {
+                    self.emit_expr(&arm.body);
+                }
+
                 self.func.instruction(&Instruction::Else);
                 if is_last {
                     self.func.instruction(&Instruction::Unreachable);
@@ -473,7 +505,6 @@ impl FuncCompiler<'_> {
                 self.depth += 1;
                 if let IrPattern::Bind { var } = inner.as_ref() {
                     if let Some(&local_idx) = self.var_map.get(&var.0) {
-                        // Ok inner type = args[0] of Result[T, E]
                         let inner_ty = if let Ty::Applied(_, args) = subject_ty {
                             args.first().cloned().unwrap_or(Ty::Int)
                         } else { Ty::Int };
@@ -482,7 +513,20 @@ impl FuncCompiler<'_> {
                         self.func.instruction(&Instruction::LocalSet(local_idx));
                     }
                 }
-                self.emit_expr(&arm.body);
+                if let Some(guard) = &arm.guard {
+                    self.emit_expr(guard);
+                    let bt2 = values::block_type(result_ty);
+                    self.func.instruction(&Instruction::If(bt2));
+                    self.depth += 1;
+                    self.emit_expr(&arm.body);
+                    self.func.instruction(&Instruction::Else);
+                    if is_last { self.func.instruction(&Instruction::Unreachable); }
+                    else { self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1); }
+                    self.depth -= 1;
+                    self.func.instruction(&Instruction::End);
+                } else {
+                    self.emit_expr(&arm.body);
+                }
                 self.func.instruction(&Instruction::Else);
                 if is_last { self.func.instruction(&Instruction::Unreachable); }
                 else { self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1); }
@@ -501,7 +545,6 @@ impl FuncCompiler<'_> {
                 self.depth += 1;
                 if let IrPattern::Bind { var } = inner.as_ref() {
                     if let Some(&local_idx) = self.var_map.get(&var.0) {
-                        // Err inner type = args[1] of Result[T, E]
                         let inner_ty = if let Ty::Applied(_, args) = subject_ty {
                             args.get(1).cloned().unwrap_or(Ty::String)
                         } else { Ty::String };
@@ -510,7 +553,20 @@ impl FuncCompiler<'_> {
                         self.func.instruction(&Instruction::LocalSet(local_idx));
                     }
                 }
-                self.emit_expr(&arm.body);
+                if let Some(guard) = &arm.guard {
+                    self.emit_expr(guard);
+                    let bt2 = values::block_type(result_ty);
+                    self.func.instruction(&Instruction::If(bt2));
+                    self.depth += 1;
+                    self.emit_expr(&arm.body);
+                    self.func.instruction(&Instruction::Else);
+                    if is_last { self.func.instruction(&Instruction::Unreachable); }
+                    else { self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1); }
+                    self.depth -= 1;
+                    self.func.instruction(&Instruction::End);
+                } else {
+                    self.emit_expr(&arm.body);
+                }
                 self.func.instruction(&Instruction::Else);
                 if is_last { self.func.instruction(&Instruction::Unreachable); }
                 else { self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1); }
