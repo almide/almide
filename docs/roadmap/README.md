@@ -8,7 +8,6 @@
 |---|---|---|
 | [Test Coverage](active/test-coverage.md) | 2,042 .almd blocks + 639 Rust = 2,681 ✅ 目標達成 | Phase 1 |
 | [User Generics & Protocol](active/user-generics-and-traits.md) | Protocol System 実装中 (Phase 1完了, Phase 2-3進行中) | Phase 3 |
-| [Effect Result Preservation](active/effect-result-preservation.md) | effect fn 内で Result を保持してエラーハンドリング可能にする | Phase 1 |
 | [Effect System](active/effect-system.md) | Phase 3-4 残: Dependency制限, 内部型レベル統合 | Phase 3 |
 | [IR Verification](active/ir-verification.md) | 検証25件, CallTarget検証, Constructor型伝搬修正 | Compiler Internals |
 | [Performance Research](active/performance-research.md) | Rust との差 2.9%, Phase 0-4 | Research |
