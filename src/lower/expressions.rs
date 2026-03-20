@@ -142,9 +142,26 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         }
         ast::Expr::Match { subject, arms, .. } => {
             let s = lower_expr(ctx, subject);
+            // Resolve subject type: if the expression type disagrees with VarTable
+            // (e.g., expr_types says Int but VarTable says Result[Int, String]),
+            // prefer VarTable for container types needed by Ok/Err/Some/None patterns.
+            let subject_ty = if let IrExprKind::Var { id } = &s.kind {
+                let vt_ty = &ctx.var_table.get(*id).ty;
+                if matches!(vt_ty, Ty::Applied(_, _)) && !matches!(&s.ty, Ty::Applied(_, _)) {
+                    vt_ty.clone()
+                } else {
+                    s.ty.clone()
+                }
+            } else {
+                s.ty.clone()
+            };
+            // Fix subject Var's type if it was wrong
+            let s = if subject_ty != s.ty {
+                IrExpr { ty: subject_ty.clone(), ..s }
+            } else { s };
             let ir_arms = arms.iter().map(|arm| {
                 ctx.push_scope();
-                let pat = lower_pattern(ctx, &arm.pattern, &s.ty);
+                let pat = lower_pattern(ctx, &arm.pattern, &subject_ty);
                 let guard = arm.guard.as_ref().map(|g| lower_expr(ctx, g));
                 let body = lower_expr(ctx, &arm.body);
                 ctx.pop_scope();
