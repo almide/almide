@@ -247,7 +247,24 @@ impl FuncCompiler<'_> {
                         self.func.instruction(&Instruction::LocalSet(local_idx));
                     }
                 }
-                self.emit_expr(&arm.body);
+                // Handle guard condition
+                if let Some(guard) = &arm.guard {
+                    self.emit_expr(guard);
+                    let bt = values::block_type(result_ty);
+                    self.func.instruction(&Instruction::If(bt));
+                    self.depth += 1;
+                    self.emit_expr(&arm.body);
+                    self.func.instruction(&Instruction::Else);
+                    if is_last {
+                        self.func.instruction(&Instruction::Unreachable);
+                    } else {
+                        self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1);
+                    }
+                    self.depth -= 1;
+                    self.func.instruction(&Instruction::End);
+                } else {
+                    self.emit_expr(&arm.body);
+                }
             }
 
             // Literal: compare subject to literal, if-else
