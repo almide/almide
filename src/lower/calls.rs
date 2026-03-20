@@ -159,6 +159,21 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
                     return CallTarget::Method { object: Box::new(ir_obj), method: convention_key };
                 }
             }
+            // Protocol method on TypeVar: item.show() where item: T, T: Showable
+            // Lower as "T.show" convention key — monomorphizer will substitute T → ConcreteType
+            if let Ty::TypeVar(tv) = &obj_ty {
+                if let Some(proto_names) = ctx.protocol_bounds.get(tv).cloned() {
+                    for proto_name in &proto_names {
+                        if let Some(proto_def) = ctx.env.protocols.get(proto_name) {
+                            if proto_def.methods.iter().any(|m| m.name == *field) {
+                                let ir_obj = lower_expr(ctx, object);
+                                let convention_key = format!("{}.{}", tv, field);
+                                return CallTarget::Method { object: Box::new(ir_obj), method: convention_key };
+                            }
+                        }
+                    }
+                }
+            }
             // Generic method call: obj.method(args) → UFCS
             let ir_obj = lower_expr(ctx, object);
             CallTarget::Method { object: Box::new(ir_obj), method: field.clone() }

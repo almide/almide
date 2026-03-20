@@ -19,7 +19,7 @@ pub enum TokenType {
     // Identifiers
     Ident, TypeName, IdentQ,
     // Keywords
-    Module, Import, Type, Trait, Impl, For, In, Fn, Let, Var,
+    Module, Import, Type, Protocol, Impl, For, In, Fn, Let, Var,
     If, Then, Else, Match, Ok, Err, Some, None, Do, Todo,
     True, False, Not, And, Or,
     Strict, Pub, Effect, Test,
@@ -442,7 +442,7 @@ fn lex_ident(chars: &[char], start: usize, line: usize, col: usize) -> (Token, u
 fn keyword(s: &str) -> Option<TokenType> {
     match s {
         "module" => Some(TokenType::Module), "import" => Some(TokenType::Import),
-        "type" => Some(TokenType::Type), "trait" => Some(TokenType::Trait),
+        "type" => Some(TokenType::Type), "protocol" => Some(TokenType::Protocol),
         "impl" => Some(TokenType::Impl), "for" => Some(TokenType::For),
         "in" => Some(TokenType::In), "fn" => Some(TokenType::Fn),
         "let" => Some(TokenType::Let), "var" => Some(TokenType::Var),

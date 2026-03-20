@@ -4,20 +4,24 @@
 
 ---
 
-## Phase 1: 1.0 Completion ← **NOW**
+## Phase 1: 1.0 Completion ← **READY**
 
 言語として信用を取る。機能を増やさず、完成の定義を固定する。
 
-- [x] 言語仕様の凍結 (構文・演算子・キーワード確定)
+- [x] 言語仕様の凍結 (構文・演算子・キーワード確定, protocol 追加)
 - [x] コンパイラ挙動の安定化 (ICE=0, warning=0, cross-target 106/106)
-- [x] stdlib 境界の確定 (22モジュール 381関数, verb reform完了, uuid/crypto/toml/compress/term 除外)
+- [x] stdlib 境界の確定 (22モジュール 390関数, set追加, uuid/crypto/toml/compress/term 除外)
 - [x] エラーメッセージ品質 (E001-E010, --json, hint system)
 - [x] 破壊的変更ポリシー (edition, FROZEN_API, REJECTED_PATTERNS)
 - [x] showcases (CLI/API/Data/DevTool/Script 5本)
-- [ ] examples / cookbook / migration story
-- [ ] LLM計測 (MSR, 初回正答率)
+- [x] テスト 2,500+ (2,681 達成)
+- [x] Protocol System (ユーザー定義 convention, generic bounds)
 
-**ゴール: "この言語はもう信用して使っていい" という状態**
+1.0 後の継続改善:
+- examples / cookbook / migration story
+- LLM計測 (MSR, 初回正答率) — ブロックしない
+
+**ゴール達成: "この言語はもう信用して使っていい" 状態に到達**
 
 ## Phase 2: Production Language
 

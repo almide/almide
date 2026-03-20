@@ -138,7 +138,24 @@ fn fmt_decl(out: &mut String, decl: &Decl, depth: usize) {
             if let Some(b) = body { out.push_str(" = "); fmt_expr(out, b, depth); }
         }
         Decl::Test { name, body, .. } => { w!(out, "{i}test \"{name}\" "); fmt_expr(out, body, depth); }
-        Decl::Trait { name, .. } => w!(out, "{i}trait {name}"),
+        Decl::Protocol { name, methods, .. } => {
+            wln!(out, "{i}protocol {name} {{");
+            let inner = "  ".repeat(depth + 1);
+            for m in methods {
+                let effect = if m.effect { "effect " } else { "" };
+                let mut params_str = String::new();
+                for (j, p) in m.params.iter().enumerate() {
+                    if j > 0 { params_str.push_str(", "); }
+                    params_str.push_str(&p.name);
+                    params_str.push_str(": ");
+                    fmt_type(&mut params_str, &p.ty, 0);
+                }
+                let mut ret_str = String::new();
+                fmt_type(&mut ret_str, &m.return_type, 0);
+                wln!(out, "{inner}{effect}fn {name}({params_str}) -> {ret_str}", name = m.name);
+            }
+            w!(out, "{i}}}");
+        }
         Decl::Impl { trait_, for_, methods, .. } => {
             wln!(out, "{i}impl {trait_} for {for_} {{");
             for m in methods { fmt_decl(out, m, depth + 1); out.push('\n'); }

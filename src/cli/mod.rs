@@ -31,7 +31,7 @@ fn collect_test_files(dir: &std::path::Path) -> Vec<String> {
     let mut files = Vec::new();
     // Skip hidden directories, target/, node_modules/, etc.
     let dir_name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    if dir_name.starts_with('.') || dir_name == "target" || dir_name == "node_modules" || dir_name == "research" {
+    if dir_name.starts_with('.') || dir_name == "target" || dir_name == "node_modules" {
         return files;
     }
     if let Ok(entries) = std::fs::read_dir(dir) {

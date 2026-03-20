@@ -1236,7 +1236,12 @@ fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr]
             if let Some(enum_name) = ctx.ann.ctor_to_enum.get(name.as_str()) {
                 return render_enum_constructor(ctx, name, enum_name, args);
             }
-            name.clone()
+            // Convention methods: "Type.method" → "Type_method" (free functions in all targets)
+            if name.contains('.') {
+                name.replace('.', "_")
+            } else {
+                name.clone()
+            }
         }
         CallTarget::Method { object, method } => {
             if let Some(full) = render_method_call_full(ctx, object, method, args) {
@@ -1276,13 +1281,19 @@ fn render_method_call_full(ctx: &RenderContext, object: &IrExpr, method: &str, a
         all_args.extend(args.iter().map(|a| render_expr(ctx, a)));
         return Some(format!("{}({})", method, all_args.join(", ")));
     }
-    // Module.func UFCS: render via module_call template
+    // Module.func or Convention method UFCS
     if let Some(dot_pos) = method.find('.') {
         let obj_str = render_expr(ctx, object);
         let mut all_args = vec![obj_str];
         all_args.extend(args.iter().map(|a| render_expr(ctx, a)));
         let module = &method[..dot_pos];
         let func = &method[dot_pos+1..];
+        // Convention methods (Type.method): first char uppercase → emit as Type_method(args)
+        let is_convention = module.chars().next().map_or(false, |c| c.is_uppercase());
+        if is_convention {
+            let callee = format!("{}_{}", module, func);
+            return Some(format!("{}({})", callee, all_args.join(", ")));
+        }
         return Some(ctx.templates.render_with("module_call", None, &[], &[("module", module), ("func", func), ("args", all_args.join(", ").as_str())])
             .unwrap_or_else(|| format!("{}.{}()", module, func)));
     }

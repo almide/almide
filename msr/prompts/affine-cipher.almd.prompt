@@ -1,0 +1,26 @@
+// Affine cipher: E(x) = (ax + b) mod m, D(x) = a^-1 * (x - b) mod m
+
+fn gcd(a: Int, b: Int) -> Int = todo
+
+fn mod_inverse(a: Int, m: Int) -> Int = todo
+
+fn char_to_num(c: String) -> Int = todo
+
+fn num_to_char(n: Int) -> String = todo
+
+effect fn encode(a: Int, b: Int, text: String) -> Result[String, String] = todo
+
+effect fn decode(a: Int, b: Int, text: String) -> Result[String, String] = todo
+
+test "encode yes" { assert_eq(encode(5, 7, "yes"), ok("xbt")) }
+test "encode no" { assert_eq(encode(15, 18, "no"), ok("fu")) }
+test "encode OMG" { assert_eq(encode(21, 3, "OMG"), ok("lvz")) }
+test "encode mindblowingly" { assert_eq(encode(21, 3, "mindblowingly"), ok("vpqoy alxpq zan")) }
+test "encode numbers" { assert_eq(encode(3, 4, "Testing,1 2 3, testing."), ok("jqgjc rw123 jqgjc rw")) }
+test "encode deep thought" { assert_eq(encode(5, 17, "Truth"), ok("iynia")) }
+test "encode not coprime" { assert_eq(encode(6, 17, "test"), err("a and m must be coprime")) }
+
+test "decode exercism" { assert_eq(decode(3, 7, "tytgn fjr"), ok("exercism")) }
+test "decode sentence" { assert_eq(decode(19, 16, "qdber jeppp ewbn plqce"), ok("anrylbypppyortpxacy")) }
+test "decode numbers" { assert_eq(decode(25, 7, "odpoz ub123 , "), ok("testing123,")) }
+test "decode not coprime" { assert_eq(decode(13, 11, "test"), err("a and m must be coprime")) }

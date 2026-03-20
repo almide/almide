@@ -189,7 +189,7 @@ fn keyword_typo_enum() {
 fn keyword_typo_interface() {
     let got = tok(TokenType::Ident, "interface");
     let ctx = HintContext { expected: None, got: &got, prev: None, next: None, scope: HintScope::TopLevel };
-    assert_hint_match(&ctx, "trait");
+    assert_hint_match(&ctx, "protocol");
 }
 
 #[test]

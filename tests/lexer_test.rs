@@ -95,7 +95,7 @@ fn lex_all_keywords() {
         ("import", TokenType::Import),
         ("module", TokenType::Module),
         ("type", TokenType::Type),
-        ("trait", TokenType::Trait),
+        ("protocol", TokenType::Protocol),
         ("impl", TokenType::Impl),
         ("true", TokenType::True),
         ("false", TokenType::False),

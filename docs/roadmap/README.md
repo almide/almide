@@ -6,10 +6,10 @@
 
 | 項目 | 説明 | Grand Plan |
 |---|---|---|
-| [Test Coverage](active/test-coverage.md) | 1,564 .almd blocks + 636 Rust = 2,200 / 目標 2,500 | Phase 1 |
-| [User Generics & Traits](active/user-generics-and-traits.md) | Phase 2: Trait Bounds (Eq, Ord, Hash, Repr) | Phase 3 |
+| [Test Coverage](active/test-coverage.md) | 2,042 .almd blocks + 639 Rust = 2,681 ✅ 目標達成 | Phase 1 |
+| [User Generics & Protocol](active/user-generics-and-traits.md) | Protocol System 実装中 (Phase 1完了, Phase 2-3進行中) | Phase 3 |
 | [Effect System](active/effect-system.md) | Phase 3-4 残: Dependency制限, 内部型レベル統合 | Phase 3 |
-| [IR Verification](active/ir-verification.md) | 検証19件, PowInt/MapAccess分離, IrVisitor | Compiler Internals |
+| [IR Verification](active/ir-verification.md) | 検証25件, CallTarget検証, Constructor型伝搬修正 | Compiler Internals |
 | [Performance Research](active/performance-research.md) | Rust との差 2.9%, Phase 0-4 | Research |
 | [Self-Contained Compiler](active/self-contained-compiler.md) | rustc 不要化: Stage 1 (LLVM直接出力) → Stage 2 (セルフホスティング) | Architecture |
 | [Direct WASM Emission](active/emit-wasm-direct.md) | wasm-gc PoC完了 (77 bytes), Phase 1以降 | Architecture |
@@ -32,7 +32,7 @@
 | [Platform Architecture](on-hold/platform-architecture.md) | 5層 app runtime ビジョン | Phase 3-5 |
 | [Security Model](on-hold/security-model.md) | Layer 3-5, capability | Phase 3 |
 | [Effect Type Integration](on-hold/effect-type-integration.md) | FnType に EffectSet を持たせる (構文変更なし) | Phase 3 |
-| [Trait System](on-hold/trait-system.md) | HKT 基盤上の Protocol/Interface | Phase 3 |
+| ~~Trait System~~ | → Protocol System (active) に統合 | — |
 | [Secure by Design](on-hold/secure-by-design.md) | | Phase 3 |
 | [Async Backend](on-hold/async-backend.md) | tokio opt-in runtime | Phase 3 |
 | [Supervision & Actors](on-hold/supervision-and-actors.md) | | Phase 3 |

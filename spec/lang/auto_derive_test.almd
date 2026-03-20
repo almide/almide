@@ -1,20 +1,302 @@
 module auto_derive_test
 
+// ── Eq derive on records ──
+
 type Point: Eq, Repr = { x: Int, y: Int }
 
-// No custom Point.eq or Point.repr defined — auto-derived
-
-test "auto-derive eq" {
+test "derive Eq: equal records" {
   let a = Point { x: 1, y: 2 }
   let b = Point { x: 1, y: 2 }
   assert(a == b)
-
-  let c = Point { x: 3, y: 4 }
-  let d = Point { x: 3, y: 4 }
-  assert(c != d == false)
 }
 
-test "auto-derive repr in string interpolation" {
+test "derive Eq: unequal records" {
+  let a = Point { x: 1, y: 2 }
+  let b = Point { x: 1, y: 3 }
+  assert(a != b)
+}
+
+test "derive Repr: record in interpolation" {
   let p = Point { x: 10, y: 20 }
   assert_eq("${p}", "Point { x: 10, y: 20 }")
+}
+
+// ── Multiple fields ──
+
+type Person: Eq, Repr = { name: String, age: Int, active: Bool }
+
+test "derive Eq: multi-field equal" {
+  let a = Person { name: "Alice", age: 30, active: true }
+  let b = Person { name: "Alice", age: 30, active: true }
+  assert(a == b)
+}
+
+test "derive Eq: multi-field differ by one field" {
+  let a = Person { name: "Alice", age: 30, active: true }
+  let b = Person { name: "Alice", age: 31, active: true }
+  assert(a != b)
+}
+
+test "derive Eq: multi-field differ by bool" {
+  let a = Person { name: "Bob", age: 25, active: true }
+  let b = Person { name: "Bob", age: 25, active: false }
+  assert(a != b)
+}
+
+test "derive Repr: multi-field record" {
+  let p = Person { name: "Eve", age: 28, active: true }
+  let s = "${p}"
+  assert(string.contains(s, "Person"))
+  assert(string.contains(s, "Eve"))
+  assert(string.contains(s, "28"))
+  assert(string.contains(s, "true"))
+}
+
+// ── Single field ──
+
+type Wrapper: Eq, Repr = { value: Int }
+
+test "derive Eq: single field equal" {
+  assert(Wrapper { value: 42 } == Wrapper { value: 42 })
+}
+
+test "derive Eq: single field unequal" {
+  assert(Wrapper { value: 1 } != Wrapper { value: 2 })
+}
+
+test "derive Repr: single field" {
+  let w = Wrapper { value: 99 }
+  assert_eq("${w}", "Wrapper { value: 99 }")
+}
+
+// ── String fields ──
+
+type Label: Eq, Repr = { text: String, priority: Int }
+
+test "derive Eq: string field equal" {
+  let a = Label { text: "urgent", priority: 1 }
+  let b = Label { text: "urgent", priority: 1 }
+  assert(a == b)
+}
+
+test "derive Eq: string field differ" {
+  let a = Label { text: "urgent", priority: 1 }
+  let b = Label { text: "normal", priority: 1 }
+  assert(a != b)
+}
+
+test "derive Repr: string field" {
+  let l = Label { text: "hello", priority: 5 }
+  let s = "${l}"
+  assert(string.contains(s, "hello"))
+  assert(string.contains(s, "5"))
+}
+
+// ── Codec derive on records ──
+
+type Config: Codec = { host: String, port: Int }
+
+test "derive Codec: record encode-decode" {
+  let c = Config { host: "localhost", port: 8080 }
+  let v = c.encode()
+  match Config.decode(v) {
+    ok(c2) => {
+      assert_eq(c2.host, "localhost")
+      assert_eq(c2.port, 8080)
+    }
+    err(_) => assert(false, "decode failed")
+  }
+}
+
+test "derive Codec: roundtrip via JSON string" {
+  let c = Config { host: "example.com", port: 443 }
+  let text = json.stringify(c.encode())
+  match json.parse(text) {
+    ok(v) => match Config.decode(v) {
+      ok(c2) => {
+        assert_eq(c2.host, "example.com")
+        assert_eq(c2.port, 443)
+      }
+      err(_) => assert(false, "decode failed")
+    }
+    err(_) => assert(false, "parse failed")
+  }
+}
+
+// ── Codec on variant ──
+
+type Direction: Codec = North | South | East | West
+
+test "derive Codec: unit variant roundtrip" {
+  let d: Direction = North
+  let v = d.encode()
+  let text = json.stringify(v)
+  assert(string.contains(text, "North"))
+}
+
+type Shape: Codec = Circle(Float) | Square(Float)
+
+test "derive Codec: tuple variant encode" {
+  let s: Shape = Circle(3.14)
+  let text = json.stringify(s.encode())
+  assert(string.contains(text, "Circle"))
+}
+
+type Status: Codec = Active | Inactive | Pending(String)
+
+test "derive Codec: mixed variant encode unit" {
+  let s: Status = Active
+  let text = json.stringify(s.encode())
+  assert(string.contains(text, "Active"))
+}
+
+test "derive Codec: mixed variant encode with payload" {
+  let s: Status = Pending("review")
+  let text = json.stringify(s.encode())
+  assert(string.contains(text, "Pending"))
+}
+
+// ── Multiple derives: Eq, Repr, Codec together ──
+
+type Entry: Eq, Repr, Codec = { key: String, val: Int }
+
+test "derive Eq+Repr+Codec: equality" {
+  let a = Entry { key: "a", val: 1 }
+  let b = Entry { key: "a", val: 1 }
+  assert(a == b)
+}
+
+test "derive Eq+Repr+Codec: repr" {
+  let e = Entry { key: "test", val: 42 }
+  let s = "${e}"
+  assert(string.contains(s, "Entry"))
+  assert(string.contains(s, "test"))
+}
+
+test "derive Eq+Repr+Codec: codec roundtrip" {
+  let e = Entry { key: "data", val: 99 }
+  match Entry.decode(e.encode()) {
+    ok(e2) => {
+      assert_eq(e2.key, "data")
+      assert_eq(e2.val, 99)
+    }
+    err(_) => assert(false, "decode failed")
+  }
+}
+
+// ── Nested Codec ──
+
+type Inner: Codec = { a: Int, b: String }
+type Outer: Codec = { label: String, inner: Inner }
+
+test "derive Codec: nested record roundtrip" {
+  let o = Outer { label: "test", inner: Inner { a: 10, b: "hello" } }
+  let text = json.stringify(o.encode())
+  match json.parse(text) {
+    ok(v) => match Outer.decode(v) {
+      ok(o2) => {
+        assert_eq(o2.label, "test")
+        assert_eq(o2.inner.a, 10)
+        assert_eq(o2.inner.b, "hello")
+      }
+      err(_) => assert(false, "decode failed")
+    }
+    err(_) => assert(false, "parse failed")
+  }
+}
+
+// ── Repr on various field types ──
+
+type MixedFields: Repr = { name: String, score: Float, active: Bool }
+
+test "derive Repr: mixed field types" {
+  let m = MixedFields { name: "test", score: 9.5, active: false }
+  let s = "${m}"
+  assert(string.contains(s, "MixedFields"))
+  assert(string.contains(s, "test"))
+  assert(string.contains(s, "false"))
+}
+
+// ── Eq with float fields ──
+
+type Coord: Eq = { lat: Float, lon: Float }
+
+test "derive Eq: float fields equal" {
+  let a = Coord { lat: 35.69, lon: 139.69 }
+  let b = Coord { lat: 35.69, lon: 139.69 }
+  assert(a == b)
+}
+
+test "derive Eq: float fields unequal" {
+  let a = Coord { lat: 35.69, lon: 139.69 }
+  let b = Coord { lat: 35.69, lon: 140.00 }
+  assert(a != b)
+}
+
+// ── Codec with optional fields ──
+
+type OptRecord: Codec = { id: Int, nickname: Option[String] }
+
+test "derive Codec: optional field present" {
+  let r = OptRecord { id: 1, nickname: some("neo") }
+  match OptRecord.decode(r.encode()) {
+    ok(r2) => {
+      assert_eq(r2.id, 1)
+      assert_eq(r2.nickname, some("neo"))
+    }
+    err(_) => assert(false, "decode failed")
+  }
+}
+
+test "derive Codec: optional field none" {
+  let r = OptRecord { id: 2, nickname: none }
+  match OptRecord.decode(r.encode()) {
+    ok(r2) => {
+      assert_eq(r2.id, 2)
+      assert_eq(r2.nickname, none)
+    }
+    err(_) => assert(false, "decode failed")
+  }
+}
+
+// ── Codec with list fields ──
+
+type WithList: Codec = { items: List[Int], label: String }
+
+test "derive Codec: list field roundtrip" {
+  let w = WithList { items: [1, 2, 3], label: "nums" }
+  match WithList.decode(w.encode()) {
+    ok(w2) => {
+      assert_eq(w2.items, [1, 2, 3])
+      assert_eq(w2.label, "nums")
+    }
+    err(_) => assert(false, "decode failed")
+  }
+}
+
+test "derive Codec: empty list field" {
+  let w = WithList { items: [], label: "empty" }
+  match WithList.decode(w.encode()) {
+    ok(w2) => {
+      assert_eq(w2.items, [])
+      assert_eq(w2.label, "empty")
+    }
+    err(_) => assert(false, "decode failed")
+  }
+}
+
+// ── Codec with default fields ──
+
+type WithDefaults: Codec = { id: Int, name: String = "anon", active: Bool = true }
+
+test "derive Codec: default fields present" {
+  let w = WithDefaults { id: 1, name: "Alice", active: false }
+  match WithDefaults.decode(w.encode()) {
+    ok(w2) => {
+      assert_eq(w2.id, 1)
+      assert_eq(w2.name, "Alice")
+      assert_eq(w2.active, false)
+    }
+    err(_) => assert(false, "decode failed")
+  }
 }

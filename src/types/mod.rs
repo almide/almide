@@ -61,6 +61,25 @@ impl PartialEq for VariantPayload {
     }
 }
 
+/// A protocol definition (user-defined or built-in convention).
+/// Protocols declare a set of methods that conforming types must implement.
+#[derive(Debug, Clone)]
+pub struct ProtocolDef {
+    pub name: std::string::String,
+    pub generics: Vec<std::string::String>,
+    pub methods: Vec<ProtocolMethodSig>,
+}
+
+/// A single method signature within a protocol definition.
+/// `Self` in parameters/return type is represented as `Ty::TypeVar("Self")`.
+#[derive(Debug, Clone)]
+pub struct ProtocolMethodSig {
+    pub name: std::string::String,
+    pub params: Vec<(std::string::String, Ty)>,
+    pub ret: Ty,
+    pub is_effect: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct FnSig {
     pub params: Vec<(std::string::String, Ty)>,
@@ -70,13 +89,15 @@ pub struct FnSig {
     pub generics: Vec<std::string::String>,
     /// Structural bounds for generics: TypeVar name → OpenRecord constraint type
     pub structural_bounds: std::collections::HashMap<std::string::String, Ty>,
+    /// Protocol bounds for generics: TypeVar name → list of protocol names
+    pub protocol_bounds: std::collections::HashMap<std::string::String, Vec<std::string::String>>,
 }
 
 /// Convenience macro for creating FnSig without generics (stdlib functions)
 #[macro_export]
 macro_rules! fn_sig {
     (params: $params:expr, ret: $ret:expr, is_effect: $eff:expr) => {
-        FnSig { params: $params, ret: $ret, is_effect: $eff, generics: vec![], structural_bounds: std::collections::HashMap::new() }
+        FnSig { params: $params, ret: $ret, is_effect: $eff, generics: vec![], structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() }
     };
 }
 

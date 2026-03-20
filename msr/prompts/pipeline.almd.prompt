@@ -1,0 +1,34 @@
+effect fn parse_pairs(input: String) -> Result[List[(String, String)], String] = todo
+
+effect fn validate_keys(pairs: List[(String, String)]) -> Result[List[(String, String)], String] = todo
+
+fn transform(pairs: List[(String, String)]) -> List[(String, String)] = todo
+
+fn format_output(pairs: List[(String, String)]) -> String = todo
+
+effect fn run_pipeline(input: String) -> Result[String, String] = todo
+
+test "simple pipeline" {
+  match run_pipeline("name=Alice\nage=30") {
+    ok(r) => {
+      assert_eq(string.contains(r, "NAME: Alice"), true)
+      assert_eq(string.contains(r, "AGE: 30"), true)
+    }
+    err(_) => assert(false)
+  }
+}
+test "pipeline with spaces" {
+  assert_eq(run_pipeline("key= value "), ok("KEY: value"))
+}
+test "empty key error" {
+  assert_eq(run_pipeline("=value"), err("empty key found"))
+}
+test "single pair" {
+  assert_eq(run_pipeline("host=localhost"), ok("HOST: localhost"))
+}
+test "invalid line" {
+  match run_pipeline("no-equals") {
+    ok(_) => assert(false)
+    err(e) => assert_eq(string.contains(e, "invalid line"), true)
+  }
+}

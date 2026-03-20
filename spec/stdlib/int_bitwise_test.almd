@@ -1,0 +1,99 @@
+// int bitwise and wrapping operations tests
+
+test "int.band basic" {
+  assert_eq(int.band(12, 10), 8)
+}
+
+test "int.band with zero" {
+  assert_eq(int.band(255, 0), 0)
+}
+
+test "int.band identity" {
+  assert_eq(int.band(42, 42), 42)
+}
+
+test "int.bor basic" {
+  assert_eq(int.bor(12, 10), 14)
+}
+
+test "int.bor with zero" {
+  assert_eq(int.bor(42, 0), 42)
+}
+
+test "int.bxor basic" {
+  assert_eq(int.bxor(12, 10), 6)
+}
+
+test "int.bxor self is zero" {
+  assert_eq(int.bxor(42, 42), 0)
+}
+
+test "int.bshl basic" {
+  assert_eq(int.bshl(1, 3), 8)
+}
+
+test "int.bshl by zero" {
+  assert_eq(int.bshl(42, 0), 42)
+}
+
+test "int.bshr basic" {
+  assert_eq(int.bshr(8, 2), 2)
+}
+
+test "int.bshr by zero" {
+  assert_eq(int.bshr(42, 0), 42)
+}
+
+test "int.bnot zero" {
+  assert_eq(int.bnot(0), -1)
+}
+
+test "int.bnot minus one" {
+  assert_eq(int.bnot(-1), 0)
+}
+
+test "int.to_float roundtrip" {
+  let f = int.to_float(100)
+  assert_eq(float.to_int(f), 100)
+}
+
+test "int.to_float basic" {
+  assert_eq(int.to_float(42), 42.0)
+}
+
+test "int.to_float zero" {
+  assert_eq(int.to_float(0), 0.0)
+}
+
+test "int.to_float negative" {
+  assert_eq(int.to_float(-5), -5.0)
+}
+
+test "int.abs zero" {
+  assert_eq(int.abs(0), 0)
+}
+
+test "int.abs positive" {
+  assert_eq(int.abs(5), 5)
+}
+
+test "int.abs negative" {
+  assert_eq(int.abs(-5), 5)
+}
+
+test "int.min equal" {
+  assert_eq(int.min(5, 5), 5)
+}
+
+test "int.max equal" {
+  assert_eq(int.max(5, 5), 5)
+}
+
+test "int.clamp within range" {
+  assert_eq(int.clamp(5, 0, 10), 5)
+}
+
+test "int.clamp at boundaries" {
+  assert_eq(int.clamp(0, 0, 10), 0)
+  assert_eq(int.clamp(10, 0, 10), 10)
+}
