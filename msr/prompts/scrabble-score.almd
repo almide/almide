@@ -1,0 +1,15 @@
+fn score(word: String) -> Int = todo
+
+fn letter_score(c: String) -> Int = todo
+
+test "lowercase letter" { assert_eq(score("a"), 1) }
+test "uppercase letter" { assert_eq(score("A"), 1) }
+test "valuable letter" { assert_eq(score("f"), 4) }
+test "short word" { assert_eq(score("at"), 2) }
+test "short valuable word" { assert_eq(score("zoo"), 12) }
+test "medium word" { assert_eq(score("street"), 6) }
+test "medium valuable word" { assert_eq(score("quirky"), 22) }
+test "long mixed-case word" { assert_eq(score("OxyphenButaworzone"), 47) }
+test "english-like word" { assert_eq(score("pinball"), 11) }
+test "empty input" { assert_eq(score(""), 0) }
+test "entire alphabet" { assert_eq(score("abcdefghijklmnopqrstuvwxyz"), 87) }
