@@ -47,6 +47,14 @@ pub fn register_runtime(emitter: &mut WasmEmitter) {
     let str_eq_ty = emitter.register_type(vec![ValType::I32, ValType::I32], vec![ValType::I32]);
     emitter.rt.str_eq = emitter.register_func("__str_eq", str_eq_ty);
 
+    // __option_eq_i64(a: i32, b: i32) -> i32
+    let opt_eq_i64_ty = emitter.register_type(vec![ValType::I32, ValType::I32], vec![ValType::I32]);
+    emitter.rt.option_eq_i64 = emitter.register_func("__option_eq_i64", opt_eq_i64_ty);
+    // __option_eq_str(a: i32, b: i32) -> i32
+    emitter.rt.option_eq_str = emitter.register_func("__option_eq_str", opt_eq_i64_ty);
+    // __result_eq_i64_str(a: i32, b: i32) -> i32
+    emitter.rt.result_eq_i64_str = emitter.register_func("__result_eq_i64_str", opt_eq_i64_ty);
+
     // __str_contains(haystack: i32, needle: i32) -> i32
     let str_contains_ty = emitter.register_type(vec![ValType::I32, ValType::I32], vec![ValType::I32]);
     emitter.rt.str_contains = emitter.register_func("__str_contains", str_contains_ty);
@@ -81,6 +89,9 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     compile_println_int(emitter);
     compile_concat_str(emitter);
     compile_str_eq(emitter);
+    compile_option_eq_i64(emitter);
+    compile_option_eq_str(emitter);
+    compile_result_eq_i64_str(emitter);
     compile_str_contains(emitter);
     compile_mem_eq(emitter);
     compile_list_eq(emitter);
@@ -553,6 +564,110 @@ fn compile_str_eq(emitter: &mut WasmEmitter) {
 
     // Fallback (shouldn't reach here)
     f.instruction(&Instruction::I32Const(0));
+    f.instruction(&Instruction::End);
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
+
+/// __option_eq_i64(a: i32, b: i32) -> i32
+/// Option[Int] equality: none=0, some=ptr to i64.
+fn compile_option_eq_i64(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.option_eq_i64];
+    let mut f = Function::new([]);
+    // Both none → 1
+    f.instruction(&Instruction::LocalGet(0));
+    f.instruction(&Instruction::I32Eqz);
+    f.instruction(&Instruction::LocalGet(1));
+    f.instruction(&Instruction::I32Eqz);
+    f.instruction(&Instruction::I32And);
+    f.instruction(&Instruction::If(BlockType::Empty));
+    f.instruction(&Instruction::I32Const(1));
+    f.instruction(&Instruction::Return);
+    f.instruction(&Instruction::End);
+    // One none → 0
+    f.instruction(&Instruction::LocalGet(0));
+    f.instruction(&Instruction::I32Eqz);
+    f.instruction(&Instruction::LocalGet(1));
+    f.instruction(&Instruction::I32Eqz);
+    f.instruction(&Instruction::I32Or);
+    f.instruction(&Instruction::If(BlockType::Empty));
+    f.instruction(&Instruction::I32Const(0));
+    f.instruction(&Instruction::Return);
+    f.instruction(&Instruction::End);
+    // Both some: compare i64 values
+    f.instruction(&Instruction::LocalGet(0));
+    f.instruction(&Instruction::I64Load(MemArg { offset: 0, align: 3, memory_index: 0 }));
+    f.instruction(&Instruction::LocalGet(1));
+    f.instruction(&Instruction::I64Load(MemArg { offset: 0, align: 3, memory_index: 0 }));
+    f.instruction(&Instruction::I64Eq);
+    f.instruction(&Instruction::End);
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
+
+/// __option_eq_str(a: i32, b: i32) -> i32
+fn compile_option_eq_str(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.option_eq_str];
+    let mut f = Function::new([]);
+    f.instruction(&Instruction::LocalGet(0));
+    f.instruction(&Instruction::I32Eqz);
+    f.instruction(&Instruction::LocalGet(1));
+    f.instruction(&Instruction::I32Eqz);
+    f.instruction(&Instruction::I32And);
+    f.instruction(&Instruction::If(BlockType::Empty));
+    f.instruction(&Instruction::I32Const(1));
+    f.instruction(&Instruction::Return);
+    f.instruction(&Instruction::End);
+    f.instruction(&Instruction::LocalGet(0));
+    f.instruction(&Instruction::I32Eqz);
+    f.instruction(&Instruction::LocalGet(1));
+    f.instruction(&Instruction::I32Eqz);
+    f.instruction(&Instruction::I32Or);
+    f.instruction(&Instruction::If(BlockType::Empty));
+    f.instruction(&Instruction::I32Const(0));
+    f.instruction(&Instruction::Return);
+    f.instruction(&Instruction::End);
+    // Both some: load string ptrs and call str_eq
+    f.instruction(&Instruction::LocalGet(0));
+    f.instruction(&Instruction::I32Load(mem(0))); // load string ptr from some
+    f.instruction(&Instruction::LocalGet(1));
+    f.instruction(&Instruction::I32Load(mem(0)));
+    f.instruction(&Instruction::Call(emitter.rt.str_eq));
+    f.instruction(&Instruction::End);
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
+
+/// __result_eq_i64_str(a: i32, b: i32) -> i32
+/// Result[Int, String] equality: compare tags, then ok(i64) or err(str).
+fn compile_result_eq_i64_str(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.result_eq_i64_str];
+    let mut f = Function::new([]);
+    // Compare tags
+    f.instruction(&Instruction::LocalGet(0));
+    f.instruction(&Instruction::I32Load(mem(0))); // a.tag
+    f.instruction(&Instruction::LocalGet(1));
+    f.instruction(&Instruction::I32Load(mem(0))); // b.tag
+    f.instruction(&Instruction::I32Ne);
+    f.instruction(&Instruction::If(BlockType::Empty));
+    f.instruction(&Instruction::I32Const(0));
+    f.instruction(&Instruction::Return);
+    f.instruction(&Instruction::End);
+    // Same tag. If tag == 0 (ok): compare i64 at offset 4
+    f.instruction(&Instruction::LocalGet(0));
+    f.instruction(&Instruction::I32Load(mem(0))); // tag
+    f.instruction(&Instruction::I32Eqz);
+    f.instruction(&Instruction::If(BlockType::Empty));
+    f.instruction(&Instruction::LocalGet(0));
+    f.instruction(&Instruction::I64Load(MemArg { offset: 4, align: 3, memory_index: 0 }));
+    f.instruction(&Instruction::LocalGet(1));
+    f.instruction(&Instruction::I64Load(MemArg { offset: 4, align: 3, memory_index: 0 }));
+    f.instruction(&Instruction::I64Eq);
+    f.instruction(&Instruction::Return);
+    f.instruction(&Instruction::End);
+    // tag == 1 (err): compare strings at offset 4
+    f.instruction(&Instruction::LocalGet(0));
+    f.instruction(&Instruction::I32Load(MemArg { offset: 4, align: 2, memory_index: 0 })); // err string ptr
+    f.instruction(&Instruction::LocalGet(1));
+    f.instruction(&Instruction::I32Load(MemArg { offset: 4, align: 2, memory_index: 0 }));
+    f.instruction(&Instruction::Call(emitter.rt.str_eq));
     f.instruction(&Instruction::End);
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }

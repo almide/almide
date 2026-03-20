@@ -55,6 +55,9 @@ pub struct RuntimeFuncs {
     pub list_eq: u32,
     pub mem_eq: u32,
     pub str_contains: u32,
+    pub option_eq_i64: u32,   // __option_eq_i64(a, b) → i32
+    pub option_eq_str: u32,   // __option_eq_str(a, b) → i32
+    pub result_eq_i64_str: u32, // __result_eq_i64_str(a, b) → i32 (ok=i64, err=str)
 }
 
 /// Import descriptor for WASM import section.
@@ -154,6 +157,9 @@ impl WasmEmitter {
                 list_eq: 0,
                 mem_eq: 0,
                 str_contains: 0,
+                option_eq_i64: 0,
+                option_eq_str: 0,
+                result_eq_i64_str: 0,
             },
             heap_ptr_global: 0,
             top_let_globals: HashMap::new(),

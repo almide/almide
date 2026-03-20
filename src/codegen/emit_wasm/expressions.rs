@@ -561,19 +561,16 @@ impl FuncCompiler<'_> {
                 self.func.instruction(&Instruction::I32Const(size as i32));
                 self.func.instruction(&Instruction::Call(self.emitter.rt.mem_eq));
             }
-            // Option: both none (0==0) or both some → compare pointed values
+            // Option: deep equality via runtime
             Ty::Applied(crate::types::constructor::TypeConstructorId::Option, args) => {
-                let inner_size = args.first().map(|t| values::byte_size(t)).unwrap_or(8);
-                self.func.instruction(&Instruction::I32Const(inner_size as i32));
-                self.func.instruction(&Instruction::Call(self.emitter.rt.mem_eq));
+                match args.first() {
+                    Some(Ty::String) => self.func.instruction(&Instruction::Call(self.emitter.rt.option_eq_str)),
+                    _ => self.func.instruction(&Instruction::Call(self.emitter.rt.option_eq_i64)),
+                };
             }
-            // Result: compare tag + value bytes
-            Ty::Applied(crate::types::constructor::TypeConstructorId::Result, args) => {
-                let ok_size = args.first().map(|t| values::byte_size(t)).unwrap_or(8);
-                let err_size = args.get(1).map(|t| values::byte_size(t)).unwrap_or(4);
-                let total = 4 + ok_size.max(err_size);
-                self.func.instruction(&Instruction::I32Const(total as i32));
-                self.func.instruction(&Instruction::Call(self.emitter.rt.mem_eq));
+            // Result: deep equality via runtime
+            Ty::Applied(crate::types::constructor::TypeConstructorId::Result, _) => {
+                self.func.instruction(&Instruction::Call(self.emitter.rt.result_eq_i64_str));
             }
             _ => { self.func.instruction(&Instruction::I32Eq); }
         }
