@@ -27,6 +27,30 @@ pub fn is_inference_var(ty: &Ty) -> Option<TyVarId> {
     None
 }
 
+/// Replace any remaining inference variables (?N) with a concrete default (Int).
+/// Called after resolve_vars to ensure no TypeVars leak into the IR.
+pub fn default_unresolved_vars(ty: &Ty) -> Ty {
+    match ty {
+        Ty::TypeVar(name) if name.starts_with('?') => Ty::Int,
+        Ty::Applied(id, args) => Ty::Applied(id.clone(), args.iter().map(default_unresolved_vars).collect()),
+        Ty::Tuple(elems) => Ty::Tuple(elems.iter().map(default_unresolved_vars).collect()),
+        Ty::Fn { params, ret } => Ty::Fn {
+            params: params.iter().map(default_unresolved_vars).collect(),
+            ret: Box::new(default_unresolved_vars(ret)),
+        },
+        Ty::Named(name, args) if !args.is_empty() => {
+            Ty::Named(name.clone(), args.iter().map(default_unresolved_vars).collect())
+        }
+        Ty::Record { fields } => Ty::Record {
+            fields: fields.iter().map(|(n, t)| (n.clone(), default_unresolved_vars(t))).collect(),
+        },
+        Ty::OpenRecord { fields } => Ty::OpenRecord {
+            fields: fields.iter().map(|(n, t)| (n.clone(), default_unresolved_vars(t))).collect(),
+        },
+        _ => ty.clone(),
+    }
+}
+
 /// Resolve inference variables (?N) in a Ty using the solutions map.
 /// Uses a `seen` set to break cycles (e.g. ?0 -> ?1 -> TypeVar("?0")).
 pub fn resolve_vars(ty: &Ty, solutions: &HashMap<TyVarId, Ty>) -> Ty {

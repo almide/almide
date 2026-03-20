@@ -301,16 +301,53 @@ impl Checker {
     }
 
     fn unify_infer(&mut self, a: &Ty, b: &Ty) -> bool {
-        // Handle inference variables
+        // Handle inference variables.
+        // Key invariant: when overwriting a solution, propagate the old solution
+        // to the new value so transitive chains are resolved.
+        // Example: solutions[?1]=Int, then unify(?1,?2) → overwrite ?1=?2, but also
+        // propagate unify(Int,?2) → solutions[?2]=Int. Chain: ?1→?2→Int.
         if let Some(id_a) = is_inference_var(a) {
             if let Some(id_b) = is_inference_var(b) {
                 if id_a == id_b { return true; }
             }
-            if !self.occurs(id_a, b) { self.solutions.insert(id_a, b.clone()); }
+            if !self.occurs(id_a, b) {
+                if let Some(existing) = self.solutions.get(&id_a).cloned() {
+                    // When a concrete solution is overwritten by a TypeVar,
+                    // propagate the concrete value to the new TypeVar.
+                    if is_inference_var(&existing).is_none() {
+                        if let Some(id_b) = is_inference_var(b) {
+                            // Only propagate if the target has no concrete solution yet
+                            let should_propagate = match self.solutions.get(&id_b) {
+                                None => true,
+                                Some(existing_b) => is_inference_var(existing_b).is_some(),
+                            };
+                            if should_propagate {
+                                self.solutions.insert(id_b, existing.clone());
+                            }
+                        }
+                    }
+                }
+                self.solutions.insert(id_a, b.clone());
+            }
             return true;
         }
         if let Some(id_b) = is_inference_var(b) {
-            if !self.occurs(id_b, a) { self.solutions.insert(id_b, a.clone()); }
+            if !self.occurs(id_b, a) {
+                if let Some(existing) = self.solutions.get(&id_b).cloned() {
+                    if is_inference_var(&existing).is_none() {
+                        if let Some(id_a) = is_inference_var(a) {
+                            let should_propagate = match self.solutions.get(&id_a) {
+                                None => true,
+                                Some(existing_a) => is_inference_var(existing_a).is_some(),
+                            };
+                            if should_propagate {
+                                self.solutions.insert(id_a, existing.clone());
+                            }
+                        }
+                    }
+                }
+                self.solutions.insert(id_b, a.clone());
+            }
             return true;
         }
         match (a, b) {
