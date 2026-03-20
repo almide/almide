@@ -159,23 +159,8 @@ impl FuncCompiler<'_> {
                         });
                     }
                     ("int", "parse") => {
-                        // Stub: return ok(0) as Result[Int, String]
                         self.emit_expr(&args[0]);
-                        let scratch = self.match_i32_base + self.match_depth;
-                        wasm!(self.func, {
-                            drop;
-                            // Allocate Result: [tag=0 (ok), value=0 (i64)]
-                            i32_const(12); // 4 tag + 8 i64
-                            call(self.emitter.rt.alloc);
-                            local_set(scratch);
-                            local_get(scratch);
-                            i32_const(0); // tag = ok
-                            i32_store(0);
-                            local_get(scratch);
-                            i64_const(0); // value = 0
-                            i64_store(4);
-                            local_get(scratch);
-                        });
+                        wasm!(self.func, { call(self.emitter.rt.int_parse); });
                     }
                     ("string", "contains") => {
                         // string.contains(haystack, needle) -> bool

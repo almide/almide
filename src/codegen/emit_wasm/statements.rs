@@ -204,8 +204,14 @@ fn count_scratch_depth(expr: &IrExpr) -> usize {
             let b = body.iter().map(|s| count_scratch_depth_stmt(s)).max().unwrap_or(0);
             count_scratch_depth(cond).max(b)
         }
-        IrExprKind::BinOp { left, right, .. } => {
-            count_scratch_depth(left).max(count_scratch_depth(right))
+        IrExprKind::BinOp { op, left, right } => {
+            let inner = count_scratch_depth(left).max(count_scratch_depth(right));
+            // PowInt/PowFloat use 2 i64 + 1 i32 scratch
+            if matches!(op, crate::ir::BinOp::PowInt | crate::ir::BinOp::PowFloat) {
+                2 + inner
+            } else {
+                inner
+            }
         }
         IrExprKind::UnOp { operand, .. } => count_scratch_depth(operand),
         IrExprKind::Call { args, target, .. } => {
