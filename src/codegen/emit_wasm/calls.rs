@@ -160,12 +160,142 @@ impl FuncCompiler<'_> {
                     ("list", "map") => {
                         self.emit_list_map(&args[0], &args[1], _ret_ty);
                     }
+                    ("list", "enumerate") => {
+                        // enumerate(list) → list of (index, element) tuples
+                        // Each tuple is heap-allocated: [Int(i64), element]
+                        let elem_ty = if let Ty::Applied(_, a) = &args[0].ty {
+                            a.first().cloned().unwrap_or(Ty::Int)
+                        } else { Ty::Int };
+                        let elem_size = values::byte_size(&elem_ty);
+                        let tuple_size = 8 + elem_size; // Int(8) + elem
+
+                        let s = self.match_i32_base + self.match_depth;
+                        let len_local = s;
+                        let idx_local = s + 1;
+                        let mem = super::expressions::mem;
+
+                        // Store src → mem[0]
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.emit_expr(&args[0]);
+                        self.func.instruction(&Instruction::I32Store(mem(0)));
+
+                        // len
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::LocalSet(len_local));
+
+                        // Alloc dst: [len] + len * ptr_size(4)
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::LocalGet(len_local));
+                        self.func.instruction(&Instruction::I32Const(4)); // each entry is a tuple ptr (i32)
+                        self.func.instruction(&Instruction::I32Mul);
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+                        self.func.instruction(&Instruction::I32Store(mem(0)));
+                        // dst = mem[8]
+
+                        // Store len in dst
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::LocalGet(len_local));
+                        self.func.instruction(&Instruction::I32Store(mem(0)));
+
+                        // Loop: create tuples
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::LocalSet(idx_local));
+
+                        self.func.instruction(&Instruction::Block(BlockType::Empty));
+                        self.func.instruction(&Instruction::Loop(BlockType::Empty));
+                        let saved = self.depth;
+                        self.depth += 2;
+
+                        self.func.instruction(&Instruction::LocalGet(idx_local));
+                        self.func.instruction(&Instruction::LocalGet(len_local));
+                        self.func.instruction(&Instruction::I32GeU);
+                        self.func.instruction(&Instruction::BrIf(1));
+
+                        // Alloc tuple: [index:i64][element]
+                        self.func.instruction(&Instruction::I32Const(tuple_size as i32));
+                        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+                        // tuple_ptr on stack. Store index.
+                        let tuple_scratch = self.match_i64_base + self.match_depth;
+                        // Can't use i64 local for i32... use mem[12] as temp
+                        self.func.instruction(&Instruction::I32Const(12));
+                        // swap: stack is [tuple_ptr, 12]. Need [12, tuple_ptr].
+                        // Use local
+                        self.func.instruction(&Instruction::Drop); // drop 12
+                        // Store tuple_ptr to idx_local temporarily... no, it's in use.
+                        // Use a different approach: store tuple to mem[12]
+                        self.func.instruction(&Instruction::I32Const(12));
+                        // Stack: [tuple_ptr, 12]... still wrong order.
+                        // Just drop and re-approach: alloc then immediately store to mem[12]
+                        self.func.instruction(&Instruction::Drop); // clean
+                        self.func.instruction(&Instruction::Drop); // clean
+
+                        // Re-alloc tuple
+                        self.func.instruction(&Instruction::I32Const(12));
+                        self.func.instruction(&Instruction::I32Const(tuple_size as i32));
+                        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+                        self.func.instruction(&Instruction::I32Store(mem(0))); // mem[12] = tuple_ptr
+
+                        // tuple.index = idx (as i64)
+                        self.func.instruction(&Instruction::I32Const(12));
+                        self.func.instruction(&Instruction::I32Load(mem(0))); // tuple_ptr
+                        self.func.instruction(&Instruction::LocalGet(idx_local));
+                        self.func.instruction(&Instruction::I64ExtendI32U);
+                        self.func.instruction(&Instruction::I64Store(MemArg { offset: 0, align: 3, memory_index: 0 }));
+
+                        // tuple.element = src[idx]
+                        self.func.instruction(&Instruction::I32Const(12));
+                        self.func.instruction(&Instruction::I32Load(mem(0))); // tuple_ptr
+                        // Load src element
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::I32Load(mem(0))); // src_ptr
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::LocalGet(idx_local));
+                        self.func.instruction(&Instruction::I32Const(elem_size as i32));
+                        self.func.instruction(&Instruction::I32Mul);
+                        self.func.instruction(&Instruction::I32Add);
+                        self.emit_load_at(&elem_ty, 0);
+                        self.emit_store_at(&elem_ty, 8); // store at tuple offset 8
+
+                        // dst[idx] = tuple_ptr
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Load(mem(0))); // dst_ptr
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::LocalGet(idx_local));
+                        self.func.instruction(&Instruction::I32Const(4)); // tuple ptrs are i32
+                        self.func.instruction(&Instruction::I32Mul);
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::I32Const(12));
+                        self.func.instruction(&Instruction::I32Load(mem(0))); // tuple_ptr
+                        self.func.instruction(&Instruction::I32Store(mem(0)));
+
+                        // idx++
+                        self.func.instruction(&Instruction::LocalGet(idx_local));
+                        self.func.instruction(&Instruction::I32Const(1));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::LocalSet(idx_local));
+                        self.func.instruction(&Instruction::Br(0));
+
+                        self.depth = saved;
+                        self.func.instruction(&Instruction::End);
+                        self.func.instruction(&Instruction::End);
+
+                        // Return dst
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                    }
                     ("list", "filter") | ("list", "fold")
                     | ("list", "reverse") | ("list", "find") | ("list", "any") | ("list", "all")
                     | ("list", "count") | ("list", "sort_by") | ("list", "flat_map")
                     | ("list", "filter_map") | ("list", "get") | ("list", "drop")
                     | ("list", "take") | ("list", "zip")
-                    | ("list", "enumerate") | ("list", "contains") | ("list", "sort") => {
+                    | ("list", "contains") | ("list", "sort") => {
                         self.emit_stub_call(args);
                     }
                     ("map", "len") | ("map", "length") | ("map", "size") => {
