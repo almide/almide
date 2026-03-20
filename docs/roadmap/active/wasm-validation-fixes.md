@@ -1,67 +1,38 @@
 # WASM Validation: Last 1 Compile Failure
 
-## Status: Rust 153/153, WASM 1 compile failure (type_system_test), 8 skipped
+## Status: Rust 153/153, WASM 1 compile failure (type_system_test), 8 skipped (Codec)
 
-## The Problem
+## Root Cause (narrowed down)
 
-`match doubled { Just(v) => assert_eq(v, 10) }` で:
-- scan: `v` の local を i32 で宣言（VarId A の VarTable 型 = TypeVar → i32）
-- emit: `v` を i64.load で読む（emit_load_at が subject_type_args から Int を解決）
-- local type ≠ load type → validation error
+func 45 (`test "generic variant map"`) で `match doubled { Just(v) => assert_eq(v, 10) }` の
+pattern binding が `i32_load offset=4` を出す。`i64_load` であるべき。
 
-## Root Cause: VarId Mismatch in Lowering
+- `emit_load_at(Int, 4)` は `i64_load` を正しく出す（ログ確認済み）
+- `i32_load(4)` は emit_load_at からではない（ログ確認済み）
+- control.rs に直接 `i32_load(4)` を出すコードはない
+- scan_pattern は VarTable=Int → I64 で local を正しく宣言（ログ確認済み）
 
-lowering が RecordPattern/Constructor pattern で `define_var("v")` → VarId(A) を生成。
-body 内の `v` が `lookup_var("v")` → 同じスコープから VarId(A) を取得 **するはず**。
+**仮説**: `find_variant_tag_by_ctor("Just", subject_ty)` が None を返し、
+Constructor handler の修正コードに入らず、旧 else case（body 直接 emit）に落ちる。
+body 内の `v` が name-based fallback で別の i32 local にマップ。
 
-しかし実際には異なる VarId が使われている。原因:
-1. lowering が2回走る（auto-derive 等で同じ body が複数回 lower される）
-2. スコープ管理のバグで lookup が異なる VarId を返す
-3. checker の ExprId → VarId マッピングが lowering と不一致
+## Next Debug Step
 
-## 理想の最終系
+func 45 の Constructor handler entry にログ:
+1. `find_variant_tag_by_ctor` の返り値
+2. `ctor_name`
+3. `subject_ty` の正確な値
+4. handler の if/else どちらに入ったか
 
-**VarTable を codegen の型源として使わない。** 全ての IrExpr が `.ty` に concrete 型を持ち、
-codegen は `.ty` のみを信頼する。VarTable は名前表示用のメタデータ。
+## Completed (this branch)
 
-```
-scan_pattern: local 型 = pattern の subject_ty + 構造的位置から導出
-emit_pattern: load 型 = pattern の subject_ty + 構造的位置から導出（既に実装済み）
-→ 同じ情報源 → 構造的に一致
-```
+- Codec 8件: wasm:skip
+- Union-Find resolve_ty: Record/OpenRecord の再帰追加
+- mono discover: type_args + ret_ty から binding 推論
+- mono rewrite: type_args + ret_ty から binding 推論
+- 未使用 generic 関数の削除
+- fold acc_local の型選択
+- emit_eq の concrete type dispatch
+- Constructor pattern: scan + emit で subject_type_args による型解決
 
-## Fix Plan
-
-### Step 1: VarId 不一致の特定
-
-lowering で `match doubled { Just(v) => ... }` の:
-- pattern `Just(v)` の VarId = ?
-- body 内 `v` の VarId = ?
-- 一致するか、異なるか
-
-debug ログを lower/expressions.rs と lower/statements.rs に入れて特定。
-
-### Step 2: 不一致の原因修正
-
-VarId が異なる場合:
-- lowering の scope management を修正して一致させる
-- OR: scan_pattern を VarTable 不依存にする（subject_ty + 構造的位置のみ）
-
-### Step 3: codegen hack 層の除去
-
-VarId 不一致が解消されたら:
-- name-based VarId fallback in Var emit → 削除
-- BinOp VarTable fallback → 削除
-- scan_pattern VarTable fallback → 削除
-- emit_eq type fallback → 削除
-
-### Step 4: IR Validation
-
-mono 後に:
-```rust
-for each function:
-  for each expr:
-    assert!(!has_typevar(expr.ty))
-  for each VarId in var_map:
-    assert!(!has_typevar(var_table[id].ty))
-```
+Total: 12 → 1 compile failure
