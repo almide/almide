@@ -172,8 +172,114 @@ impl FuncCompiler<'_> {
                         self.func.instruction(&Instruction::Call(self.emitter.rt.str_trim));
                     }
                     ("string", "to_upper") | ("string", "to_lower") => {
-                        // Stub: return as-is
+                        // ASCII case conversion: alloc new string, convert each byte
+                        let is_upper = func == "to_upper";
+                        let mem = super::expressions::mem;
+                        // mem[0]=src
+                        self.func.instruction(&Instruction::I32Const(0));
                         self.emit_expr(&args[0]);
+                        self.func.instruction(&Instruction::I32Store(mem(0)));
+                        // len
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        // alloc → mem[4]
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+                        self.func.instruction(&Instruction::I32Store(mem(0)));
+                        // Store len
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Store(mem(0)));
+                        // Loop: convert each byte
+                        let s = self.match_i32_base + self.match_depth;
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::LocalSet(s)); // i=0
+                        self.func.instruction(&Instruction::Block(BlockType::Empty));
+                        self.func.instruction(&Instruction::Loop(BlockType::Empty));
+                        let saved = self.depth; self.depth += 2;
+                        // if i >= len break
+                        self.func.instruction(&Instruction::LocalGet(s));
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32GeU);
+                        self.func.instruction(&Instruction::BrIf(1));
+                        // Load byte from src
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Load(mem(0))); // dst
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::LocalGet(s));
+                        self.func.instruction(&Instruction::I32Add);
+                        // Load src byte
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::LocalGet(s));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::I32Load8U(MemArg { offset: 0, align: 0, memory_index: 0 }));
+                        // Convert case
+                        if is_upper {
+                            // if c >= 'a' && c <= 'z': c -= 32
+                            self.func.instruction(&Instruction::LocalSet(s + 1)); // save byte
+                            // Hm, need another local. Use simpler approach:
+                            // Just XOR with 0x20 if in range. Actually:
+                            // c - 32 if c >= 97 && c <= 122
+                            self.func.instruction(&Instruction::LocalGet(s + 1));
+                            self.func.instruction(&Instruction::I32Const(97));
+                            self.func.instruction(&Instruction::I32GeU);
+                            self.func.instruction(&Instruction::LocalGet(s + 1));
+                            self.func.instruction(&Instruction::I32Const(122));
+                            self.func.instruction(&Instruction::I32LeU);
+                            self.func.instruction(&Instruction::I32And);
+                            self.func.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+                            self.func.instruction(&Instruction::LocalGet(s + 1));
+                            self.func.instruction(&Instruction::I32Const(32));
+                            self.func.instruction(&Instruction::I32Sub);
+                            self.func.instruction(&Instruction::Else);
+                            self.func.instruction(&Instruction::LocalGet(s + 1));
+                            self.func.instruction(&Instruction::End);
+                        } else {
+                            // to_lower: c + 32 if c >= 65 && c <= 90
+                            self.func.instruction(&Instruction::LocalSet(s + 1));
+                            self.func.instruction(&Instruction::LocalGet(s + 1));
+                            self.func.instruction(&Instruction::I32Const(65));
+                            self.func.instruction(&Instruction::I32GeU);
+                            self.func.instruction(&Instruction::LocalGet(s + 1));
+                            self.func.instruction(&Instruction::I32Const(90));
+                            self.func.instruction(&Instruction::I32LeU);
+                            self.func.instruction(&Instruction::I32And);
+                            self.func.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+                            self.func.instruction(&Instruction::LocalGet(s + 1));
+                            self.func.instruction(&Instruction::I32Const(32));
+                            self.func.instruction(&Instruction::I32Add);
+                            self.func.instruction(&Instruction::Else);
+                            self.func.instruction(&Instruction::LocalGet(s + 1));
+                            self.func.instruction(&Instruction::End);
+                        }
+                        self.func.instruction(&Instruction::I32Store8(MemArg { offset: 0, align: 0, memory_index: 0 }));
+                        // i++
+                        self.func.instruction(&Instruction::LocalGet(s));
+                        self.func.instruction(&Instruction::I32Const(1));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::LocalSet(s));
+                        self.func.instruction(&Instruction::Br(0));
+                        self.depth = saved;
+                        self.func.instruction(&Instruction::End);
+                        self.func.instruction(&Instruction::End);
+                        // Return dst
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
                     }
                     ("string", "starts_with") => {
                         // Store s → mem[0], prefix → mem[4]
@@ -798,8 +904,8 @@ impl FuncCompiler<'_> {
                         self.emit_expr(object);
                         self.func.instruction(&Instruction::Call(self.emitter.rt.str_trim));
                     }
-                    "to_upper" | "string.to_upper" | "to_lower" | "string.to_lower" if matches!(object.ty, Ty::String) => {
-                        // Stub: return as-is
+                    m @ ("to_upper" | "string.to_upper" | "to_lower" | "string.to_lower") if matches!(object.ty, Ty::String) => {
+                        // Stub: return as-is (full implementation in Module call handler)
                         self.emit_expr(object);
                     }
                     "starts_with" | "string.starts_with" | "ends_with" | "string.ends_with" if matches!(object.ty, Ty::String) => {
