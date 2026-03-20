@@ -26,7 +26,6 @@ impl FuncCompiler<'_> {
         self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
 
         let scratch = self.match_i32_base + self.match_depth;
-        self.match_depth += 1; // protect scratch from nested emit_expr
         self.func.instruction(&Instruction::LocalSet(scratch));
 
         // Write tag if variant
@@ -48,7 +47,6 @@ impl FuncCompiler<'_> {
             offset += field_size;
         }
 
-        self.match_depth -= 1;
         // Return ptr
         self.func.instruction(&Instruction::LocalGet(scratch));
     }
@@ -147,7 +145,6 @@ impl FuncCompiler<'_> {
         self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
 
         let scratch = self.match_i32_base + self.match_depth;
-        self.match_depth += 1; // protect scratch from nested emit_expr
         self.func.instruction(&Instruction::LocalSet(scratch));
 
         // Store length
@@ -164,8 +161,6 @@ impl FuncCompiler<'_> {
             self.emit_expr(elem);
             self.emit_store_at(&elem.ty, offset);
         }
-
-        self.match_depth -= 1;
 
         self.func.instruction(&Instruction::LocalGet(scratch));
     }
@@ -203,7 +198,6 @@ impl FuncCompiler<'_> {
         self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
 
         let scratch = self.match_i32_base + self.match_depth;
-        self.match_depth += 1;
         self.func.instruction(&Instruction::LocalSet(scratch));
 
         let mut offset = 0u32;
@@ -215,7 +209,6 @@ impl FuncCompiler<'_> {
             offset += size;
         }
 
-        self.match_depth -= 1;
         self.func.instruction(&Instruction::LocalGet(scratch));
     }
 
