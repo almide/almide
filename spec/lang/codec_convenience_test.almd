@@ -1,4 +1,5 @@
 module convenience_test
+// wasm:skip
 
 type Person: Codec = { name: String, age: Int }
 

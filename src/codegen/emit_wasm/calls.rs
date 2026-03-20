@@ -592,7 +592,11 @@ impl FuncCompiler<'_> {
                         let s = self.match_i32_base + self.match_depth;
                         let len_local = s;
                         let idx_local = s + 1;
-                        let acc_local = self.match_i64_base + self.match_depth;
+                        // Accumulator local: use i64 for Int/Float, i32 for everything else
+                        let acc_local = match values::ty_to_valtype(&args[1].ty) {
+                            Some(ValType::I64) | Some(ValType::F64) => self.match_i64_base + self.match_depth,
+                            _ => self.match_i32_base + self.match_depth + 2, // after len + idx
+                        };
 
                         // mem[0]=list, mem[4]=fn
                         wasm!(self.func, { i32_const(0); });

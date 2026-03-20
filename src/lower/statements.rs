@@ -78,7 +78,7 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
         ast::Pattern::Wildcard => IrPattern::Wildcard,
         ast::Pattern::Ident { name } => {
             let var = ctx.define_var(name, ty.clone(), Mutability::Let, None);
-            IrPattern::Bind { var }
+            IrPattern::Bind { var, ty: ty.clone() }
         }
         ast::Pattern::Literal { value } => {
             // Pattern literals may not have expr_types entries (they're patterns,
@@ -103,7 +103,11 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
             let payload_tys = get_constructor_payload_tys_from_subject(ctx, name, ty);
             let ir_args = args.iter().enumerate().map(|(i, a)| {
                 let arg_ty = payload_tys.get(i).cloned().unwrap_or(Ty::Unknown);
-                lower_pattern(ctx, a, &arg_ty)
+                let p = lower_pattern(ctx, a, &arg_ty);
+                if let IrPattern::Bind { var, .. } = &p {
+                    eprintln!("[LOWER CTOR] {}[{}] var={:?} '{}' ty={:?} pat_ty={:?}", name, i, var, ctx.var_table.get(*var).name, ctx.var_table.get(*var).ty, arg_ty);
+                }
+                p
             }).collect();
             IrPattern::Constructor { name: name.clone(), args: ir_args }
         }

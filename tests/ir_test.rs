@@ -185,15 +185,15 @@ fn ir_pattern_wildcard() {
 
 #[test]
 fn ir_pattern_bind() {
-    let p = IrPattern::Bind { var: VarId(0) };
-    assert!(matches!(p, IrPattern::Bind { var: VarId(0) }));
+    let p = IrPattern::Bind { var: VarId(0), ty: Ty::Unknown };
+    assert!(matches!(p, IrPattern::Bind { var: VarId(0), ty: Ty::Unknown }));
 }
 
 #[test]
 fn ir_pattern_constructor() {
     let p = IrPattern::Constructor {
         name: "Some".into(),
-        args: vec![IrPattern::Bind { var: VarId(1) }],
+        args: vec![IrPattern::Bind { var: VarId(1), ty: Ty::Unknown }],
     };
     if let IrPattern::Constructor { name, args } = &p {
         assert_eq!(name, "Some");
@@ -207,8 +207,8 @@ fn ir_pattern_constructor() {
 fn ir_pattern_tuple() {
     let p = IrPattern::Tuple {
         elements: vec![
-            IrPattern::Bind { var: VarId(0) },
-            IrPattern::Bind { var: VarId(1) },
+            IrPattern::Bind { var: VarId(0), ty: Ty::Unknown },
+            IrPattern::Bind { var: VarId(1), ty: Ty::Unknown },
         ],
     };
     if let IrPattern::Tuple { elements } = &p {
@@ -220,7 +220,7 @@ fn ir_pattern_tuple() {
 
 #[test]
 fn ir_pattern_some_none() {
-    let some = IrPattern::Some { inner: Box::new(IrPattern::Bind { var: VarId(0) }) };
+    let some = IrPattern::Some { inner: Box::new(IrPattern::Bind { var: VarId(0), ty: Ty::Unknown }) };
     assert!(matches!(some, IrPattern::Some { .. }));
     let none = IrPattern::None;
     assert!(matches!(none, IrPattern::None));
@@ -228,9 +228,9 @@ fn ir_pattern_some_none() {
 
 #[test]
 fn ir_pattern_ok_err() {
-    let ok = IrPattern::Ok { inner: Box::new(IrPattern::Bind { var: VarId(0) }) };
+    let ok = IrPattern::Ok { inner: Box::new(IrPattern::Bind { var: VarId(0), ty: Ty::Unknown }) };
     assert!(matches!(ok, IrPattern::Ok { .. }));
-    let err = IrPattern::Err { inner: Box::new(IrPattern::Bind { var: VarId(1) }) };
+    let err = IrPattern::Err { inner: Box::new(IrPattern::Bind { var: VarId(1), ty: Ty::Unknown }) };
     assert!(matches!(err, IrPattern::Err { .. }));
 }
 
@@ -394,7 +394,7 @@ fn ir_match_arm() {
 #[test]
 fn ir_match_arm_with_guard() {
     let arm = IrMatchArm {
-        pattern: IrPattern::Bind { var: VarId(0) },
+        pattern: IrPattern::Bind { var: VarId(0), ty: Ty::Unknown },
         guard: Some(IrExpr { kind: IrExprKind::LitBool { value: true }, ty: Ty::Bool, span: None }),
         body: IrExpr { kind: IrExprKind::LitInt { value: 1 }, ty: Ty::Int, span: None },
     };

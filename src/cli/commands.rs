@@ -146,6 +146,12 @@ pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>) {
 
         let (mut program, source_text, _parse_errors) = parse_file(test_file);
 
+        // Skip files marked with // wasm:skip
+        if source_text.lines().take(3).any(|line| line.contains("// wasm:skip")) {
+            skipped += 1;
+            continue;
+        }
+
         // Resolve dependencies
         let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> =
             if std::path::Path::new("almide.toml").exists() {

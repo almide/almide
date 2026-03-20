@@ -784,7 +784,7 @@ fn render_match_arm(ctx: &RenderContext, arm: &IrMatchArm) -> String {
 fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {
     match pat {
         IrPattern::Wildcard => template_or(ctx, "pattern_wildcard", &[], "_"),
-        IrPattern::Bind { var } => ctx.var_name(*var).to_string(),
+        IrPattern::Bind { var, .. } => ctx.var_name(*var).to_string(),
         IrPattern::Literal { expr } => {
             // In patterns, literals must be bare (no .to_string(), no i64 suffix for match)
             match &expr.kind {

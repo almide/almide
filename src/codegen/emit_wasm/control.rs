@@ -8,6 +8,13 @@ use super::FuncCompiler;
 use super::values;
 use super::wasm_macro::wasm;
 
+fn has_typevar_in_ty(ty: &Ty) -> bool {
+    ty.any_child_recursive(&|t| {
+        matches!(t, Ty::TypeVar(_))
+            || matches!(t, Ty::Named(n, args) if args.is_empty() && n.len() <= 2 && n.chars().next().map_or(false, |c| c.is_uppercase()))
+    })
+}
+
 impl FuncCompiler<'_> {
     /// Emit a for...in loop. Currently supports Range iterables only.
     pub(super) fn emit_for_in(&mut self, var: crate::ir::VarId, var_tuple: Option<&[crate::ir::VarId]>, iterable: &IrExpr, body: &[IrStmt]) {
@@ -183,10 +190,29 @@ impl FuncCompiler<'_> {
     /// - Wildcard: unconditional (last arm)
     /// - Bind: store subject in the bound variable's local, unconditional
     pub(super) fn emit_match(&mut self, subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty) {
-        // Resolve subject type — IR may have wrong type on Var nodes (type inference gap)
         let subject_ty = self.resolve_subject_type(subject, arms);
 
-        // Evaluate subject BEFORE incrementing depth (subject may use scratch too)
+        // Resolve result_ty: trust arm body types over expr.ty when they disagree.
+        // Checker's Union-Find can contaminate match result vars (e.g., binding to Int
+        // when the actual result is Either[String, Int] = i32 pointer).
+        let resolved_result = if !arms.is_empty() {
+            let arm_vts: Vec<Option<ValType>> = arms.iter().map(|a| values::ty_to_valtype(&a.body.ty)).collect();
+            let result_vt = values::ty_to_valtype(result_ty);
+            // If all arm bodies agree on a WASM type and it differs from result_ty, use arm type
+            if let Some(first_vt) = arm_vts[0] {
+                if arm_vts.iter().all(|vt| *vt == Some(first_vt)) && result_vt != Some(first_vt) {
+                    arms[0].body.ty.clone()
+                } else {
+                    result_ty.clone()
+                }
+            } else {
+                result_ty.clone()
+            }
+        } else {
+            result_ty.clone()
+        };
+        let result_ty = &resolved_result;
+
         self.emit_expr(subject);
 
         let scratch = match values::ty_to_valtype(&subject_ty) {
@@ -240,6 +266,7 @@ impl FuncCompiler<'_> {
         let arm = &arms[idx];
         let is_last = idx + 1 >= arms.len();
 
+        eprintln!("[EMIT ARM] fn idx={} pattern={:?} subject_ty={:?} result_ty={:?}", idx, std::mem::discriminant(&arm.pattern), subject_ty, result_ty);
         match &arm.pattern {
             // Wildcard: always matches, emit body directly
             IrPattern::Wildcard => {
@@ -247,7 +274,7 @@ impl FuncCompiler<'_> {
             }
 
             // Bind: store subject in variable, then emit body
-            IrPattern::Bind { var } => {
+            IrPattern::Bind { var, .. } => {
                 if let Some(&local_idx) = self.var_map.get(&var.0) {
                     let var_ty = &self.var_table.get(*var).ty;
                     let var_vt = values::ty_to_valtype(var_ty);
@@ -316,7 +343,9 @@ impl FuncCompiler<'_> {
 
             // Constructor pattern (e.g., Circle(r), Red)
             IrPattern::Constructor { name: ctor_name, args } => {
-                if let Some(tag_val) = self.find_variant_tag_by_ctor(ctor_name, subject_ty) {
+                let tag_result = self.find_variant_tag_by_ctor(ctor_name, subject_ty);
+                eprintln!("[CTOR HANDLER] ctor='{}' tag={:?} subject_ty={:?} idx={} result_ty={:?}", ctor_name, tag_result, subject_ty, idx, result_ty);
+                if let Some(tag_val) = tag_result {
                     wasm!(self.func, {
                         local_get(scratch);
                         i32_load(0);
@@ -328,22 +357,59 @@ impl FuncCompiler<'_> {
                     self.func.instruction(&Instruction::If(bt));
                     self.depth += 1;
 
+                    // Resolve constructor field types from variant info + subject type_args
+                    let ctor_fields = self.emitter.record_fields.get(ctor_name).cloned().unwrap_or_default();
+                    let subject_type_args: &[Ty] = match subject_ty {
+                        Ty::Named(_, args) if !args.is_empty() => args,
+                        Ty::Applied(_, args) if !args.is_empty() => args,
+                        _ => &[],
+                    };
+                    // Collect generic param names from ALL constructors of this variant type
+                    // (not just the current ctor) to ensure correct index mapping with type_args.
+                    // E.g., Either[A,B]: Left(A), Right(B) — gnames must be ["A","B"] not just ["B"].
+                    let all_gnames: Vec<String> = if !subject_type_args.is_empty() {
+                        let type_name = match subject_ty {
+                            Ty::Named(n, _) => Some(n.as_str()),
+                            _ => None,
+                        };
+                        let mut gn: Vec<&str> = Vec::new();
+                        if let Some(tn) = type_name {
+                            if let Some(cases) = self.emitter.variant_info.get(tn) {
+                                for case in cases {
+                                    for (_, fty) in &case.fields {
+                                        super::expressions::collect_type_param_names(fty, &mut gn);
+                                    }
+                                }
+                            }
+                        }
+                        gn.iter().map(|s| s.to_string()).collect()
+                    } else { vec![] };
+                    let gnames_refs: Vec<&str> = all_gnames.iter().map(|s| s.as_str()).collect();
+
                     // Bind constructor args (tuple payload fields)
                     let mut field_offset = 4u32; // skip tag
-                    for arg_pat in args {
-                        if let IrPattern::Bind { var } = arg_pat {
+                    for (arg_idx, arg_pat) in args.iter().enumerate() {
+                        let field_ty = ctor_fields.get(arg_idx)
+                            .map(|(_, fty)| {
+                                if !subject_type_args.is_empty() && !gnames_refs.is_empty() {
+                                    super::expressions::substitute_type_params(fty, &gnames_refs, subject_type_args)
+                                } else { fty.clone() }
+                            })
+                            .unwrap_or_else(|| Ty::Int);
+
+                        if let IrPattern::Bind { var, ty: pat_ty } = arg_pat {
                             if let Some(&local_idx) = self.var_map.get(&var.0) {
-                                let var_ty = self.var_table.get(*var).ty.clone();
+                                // Use pattern's own type (set by lowering, resolved by mono)
+                                // Fall back to field_ty from variant info only if pattern type is Unknown
+                                let load_ty = if matches!(pat_ty, Ty::Unknown | Ty::TypeVar(_))
+                                    || matches!(pat_ty, Ty::Named(n, a) if a.is_empty() && n.len() <= 2)
+                                { &field_ty } else { pat_ty };
                                 wasm!(self.func, { local_get(scratch); });
-                                self.emit_load_at(&var_ty, field_offset);
+                                self.emit_load_at(load_ty, field_offset);
                                 wasm!(self.func, { local_set(local_idx); });
-                                field_offset += values::byte_size(&var_ty);
                             }
-                        } else if let IrPattern::Wildcard = arg_pat {
-                            // Skip wildcard — still advance offset
-                            // Need to know the type... use i64 (8 bytes) as default
-                            field_offset += 8;
                         }
+                        field_offset += values::byte_size(&field_ty);
                     }
 
                     // Handle guard on constructor
@@ -369,10 +435,13 @@ impl FuncCompiler<'_> {
                     }
                     self.depth -= 1;
                     wasm!(self.func, { end; });
-                } else if is_last {
-                    self.emit_expr(&arm.body);
                 } else {
-                    wasm!(self.func, { unreachable; });
+                    eprintln!("[CTOR ELSE] ctor='{}' is_last={} — tag not found, falling through", ctor_name, is_last);
+                    if is_last {
+                        self.emit_expr(&arm.body);
+                    } else {
+                        wasm!(self.func, { unreachable; });
+                    }
                 }
             }
 
@@ -389,7 +458,7 @@ impl FuncCompiler<'_> {
                 self.depth += 1;
 
                 // Bind the inner value
-                if let IrPattern::Bind { var } = inner.as_ref() {
+                if let IrPattern::Bind { var, .. } = inner.as_ref() {
                     if let Some(&local_idx) = self.var_map.get(&var.0) {
                         let inner_ty = if let Ty::Applied(_, args) = subject_ty {
                             args.first().cloned().unwrap_or(Ty::Int)
@@ -510,7 +579,7 @@ impl FuncCompiler<'_> {
                 let bt = values::block_type(result_ty);
                 self.func.instruction(&Instruction::If(bt));
                 self.depth += 1;
-                if let IrPattern::Bind { var } = inner.as_ref() {
+                if let IrPattern::Bind { var, .. } = inner.as_ref() {
                     if let Some(&local_idx) = self.var_map.get(&var.0) {
                         let inner_ty = if let Ty::Applied(_, args) = subject_ty {
                             args.first().cloned().unwrap_or(Ty::Int)
@@ -552,7 +621,7 @@ impl FuncCompiler<'_> {
                 let bt = values::block_type(result_ty);
                 self.func.instruction(&Instruction::If(bt));
                 self.depth += 1;
-                if let IrPattern::Bind { var } = inner.as_ref() {
+                if let IrPattern::Bind { var, .. } = inner.as_ref() {
                     if let Some(&local_idx) = self.var_map.get(&var.0) {
                         let inner_ty = if let Ty::Applied(_, args) = subject_ty {
                             args.get(1).cloned().unwrap_or(Ty::String)
@@ -589,7 +658,7 @@ impl FuncCompiler<'_> {
                 if let Ty::Tuple(elem_types) = subject_ty {
                     let mut offset = 0u32;
                     for (i, elem_pat) in elements.iter().enumerate() {
-                        if let IrPattern::Bind { var } = elem_pat {
+                        if let IrPattern::Bind { var, .. } = elem_pat {
                             if let Some(&local_idx) = self.var_map.get(&var.0) {
                                 let ft = elem_types.get(i).cloned().unwrap_or(Ty::Int);
                                 wasm!(self.func, { local_get(scratch); });

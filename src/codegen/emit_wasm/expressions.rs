@@ -54,11 +54,15 @@ impl FuncCompiler<'_> {
                     // (handles VarId mismatch between lowering passes)
                     let name = if (id.0 as usize) < self.var_table.len() { &self.var_table.get(*id).name } else { "" };
                     let found = if !name.is_empty() {
-                        self.var_map.iter().find_map(|(&vid, &lidx)| {
-                            if (vid as usize) < self.var_table.len() && self.var_table.get(crate::ir::VarId(vid)).name == name {
-                                Some(lidx)
-                            } else { None }
-                        })
+                        let target_vt = values::ty_to_valtype(&expr.ty);
+                        // Find var_map entry with matching name, prefer matching WASM type
+                        self.var_map.iter()
+                            .filter(|(vid, _)| (**vid as usize) < self.var_table.len() && self.var_table.get(crate::ir::VarId(**vid)).name == name)
+                            .max_by_key(|(vid, _)| {
+                                let vid_vt = values::ty_to_valtype(&self.var_table.get(crate::ir::VarId(**vid)).ty);
+                                if vid_vt == target_vt { 1u8 } else { 0u8 }
+                            })
+                            .map(|(_, lidx)| *lidx)
                     } else { None };
                     if let Some(local_idx) = found {
                         wasm!(self.func, { local_get(local_idx); });
@@ -635,7 +639,9 @@ impl FuncCompiler<'_> {
     pub(super) fn emit_eq(&mut self, left: &IrExpr, right: &IrExpr, negate: bool) {
         self.emit_expr(left);
         self.emit_expr(right);
-        match &left.ty {
+        // Use the more concrete type for comparison dispatch
+        let cmp_ty = if matches!(&left.ty, Ty::Unknown | Ty::TypeVar(_)) { &right.ty } else { &left.ty };
+        match cmp_ty {
             Ty::Int => { wasm!(self.func, { i64_eq; }); }
             Ty::Float => { wasm!(self.func, { f64_eq; }); }
             Ty::Bool => { wasm!(self.func, { i32_eq; }); }
@@ -739,6 +745,9 @@ impl FuncCompiler<'_> {
 
     /// Emit a load instruction from base_ptr (on stack) + offset.
     pub fn emit_load_at(&mut self, ty: &Ty, offset: u32) {
+        if offset == 4 {
+            eprintln!("[LOAD_AT] ty={:?} valtype={:?} offset={}", ty, values::ty_to_valtype(ty), offset);
+        }
         match values::ty_to_valtype(ty) {
             Some(ValType::I64) => {
                 wasm!(self.func, { i64_load(offset); });
@@ -747,6 +756,11 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { f64_load(offset); });
             }
             Some(ValType::I32) => {
+                if offset == 4 {
+                    let bt = std::backtrace::Backtrace::force_capture();
+                    let frames: String = format!("{}", bt).lines().filter(|l| l.contains("emit_wasm")).take(3).collect::<Vec<_>>().join(" | ");
+                    eprintln!("[I32_LOAD_4] ty={:?} from {}", ty, frames);
+                }
                 wasm!(self.func, { i32_load(offset); });
             }
             _ => {}
@@ -777,9 +791,23 @@ impl FuncCompiler<'_> {
                     if type_args.is_empty() {
                         fields.clone()
                     } else {
-                        // Substitute type parameters: T → type_args[0], U → type_args[1], etc.
-                        // Generic params are typically single-letter names (T, U, A, B)
-                        let generic_names = ["T", "U", "A", "B", "K", "V"];
+                        // Collect generic param names from ALL constructors of the variant type
+                        // (not just this ctor) for correct index mapping.
+                        // E.g., Either[A,B]: Left(A), Right(B) → gnames = ["A","B"], not just ["B"]
+                        let mut generic_names: Vec<&str> = Vec::new();
+                        if let Some(cases) = self.emitter.variant_info.get(name.as_str()) {
+                            for case in cases {
+                                for (_, fty) in &case.fields {
+                                    collect_type_param_names(fty, &mut generic_names);
+                                }
+                            }
+                        }
+                        if generic_names.is_empty() {
+                            // Fallback: collect from this ctor's fields only (non-variant records)
+                            for (_, fty) in fields {
+                                collect_type_param_names(fty, &mut generic_names);
+                            }
+                        }
                         fields.iter().map(|(fname, fty)| {
                             let resolved = substitute_type_params(fty, &generic_names, type_args);
                             (fname.clone(), resolved)
@@ -809,8 +837,31 @@ impl FuncCompiler<'_> {
 
 }
 
+/// Collect type parameter names from a type (Named("X", []) where X is a single-letter or TypeVar).
+pub(super) fn collect_type_param_names<'a>(ty: &'a Ty, names: &mut Vec<&'a str>) {
+    match ty {
+        Ty::Named(name, args) if args.is_empty() && name.len() <= 2 && name.chars().next().map_or(false, |c| c.is_uppercase()) => {
+            if !names.contains(&name.as_str()) {
+                names.push(name.as_str());
+            }
+        }
+        Ty::TypeVar(name) => {
+            if !names.contains(&name.as_str()) {
+                names.push(name.as_str());
+            }
+        }
+        Ty::Applied(_, args) => { for a in args { collect_type_param_names(a, names); } }
+        Ty::Tuple(elems) => { for e in elems { collect_type_param_names(e, names); } }
+        Ty::Fn { params, ret } => {
+            for p in params { collect_type_param_names(p, names); }
+            collect_type_param_names(ret, names);
+        }
+        _ => {}
+    }
+}
+
 /// Substitute type parameters in a type. Named("T", []) → type_args[index of "T"].
-fn substitute_type_params(ty: &Ty, generic_names: &[&str], type_args: &[Ty]) -> Ty {
+pub(super) fn substitute_type_params(ty: &Ty, generic_names: &[&str], type_args: &[Ty]) -> Ty {
     match ty {
         Ty::Named(name, args) if args.is_empty() => {
             // Check if this is a type parameter name
@@ -830,7 +881,8 @@ fn substitute_type_params(ty: &Ty, generic_names: &[&str], type_args: &[Ty]) -> 
             }
             ty.clone()
         }
-        _ => ty.clone(),
+        // Recursively substitute in all other type constructors
+        _ => ty.map_children(&|child| substitute_type_params(child, generic_names, type_args)),
     }
 }
 
@@ -864,9 +916,21 @@ impl FuncCompiler<'_> {
         let type_name = match subject_ty {
             Ty::Named(name, _) => name.as_str(),
             Ty::Variant { name, .. } => name.as_str(),
-            _ => return None,
+            _ => {
+                // Fallback: search all variant_info for the constructor
+                for cases in self.emitter.variant_info.values() {
+                    if let Some(c) = cases.iter().find(|c| c.name == ctor_name) {
+                        return Some(c.tag);
+                    }
+                }
+                return None;
+            }
         };
-        let cases = self.emitter.variant_info.get(type_name)?;
+        let cases = self.emitter.variant_info.get(type_name);
+        if cases.is_none() && ctor_name == "Just" {
+            eprintln!("[TAG MISS] ctor='{}' type='{}' variant_info_keys={:?}", ctor_name, type_name, self.emitter.variant_info.keys().collect::<Vec<_>>());
+        }
+        let cases = cases?;
         cases.iter().find(|c| c.name == ctor_name).map(|c| c.tag)
     }
 }

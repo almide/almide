@@ -206,7 +206,7 @@ impl<'a> IrVisitor for Verifier<'a> {
 
     fn visit_pattern(&mut self, pat: &IrPattern) {
         match pat {
-            IrPattern::Bind { var } => {
+            IrPattern::Bind { var, .. } => {
                 self.check_var_id(*var, None);
             }
             _ => {}
@@ -613,7 +613,7 @@ mod tests {
             kind: IrExprKind::Match {
                 subject: Box::new(lit_int(1)),
                 arms: vec![IrMatchArm {
-                    pattern: IrPattern::Bind { var: VarId(99) },
+                    pattern: IrPattern::Bind { var: VarId(99), ty: Ty::Int },
                     guard: None,
                     body: lit_int(2),
                 }],

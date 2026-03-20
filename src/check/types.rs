@@ -142,6 +142,12 @@ pub fn resolve_ty(ty: &Ty, uf: &UnionFind) -> Ty {
         Ty::Named(name, args) if !args.is_empty() => {
             Ty::Named(name.clone(), args.iter().map(|a| resolve_ty(a, uf)).collect())
         }
+        Ty::Record { fields } => Ty::Record {
+            fields: fields.iter().map(|(n, t)| (n.clone(), resolve_ty(t, uf))).collect(),
+        },
+        Ty::OpenRecord { fields } => Ty::OpenRecord {
+            fields: fields.iter().map(|(n, t)| (n.clone(), resolve_ty(t, uf))).collect(),
+        },
         _ => ty.clone(),
     }
 }

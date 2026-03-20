@@ -126,7 +126,7 @@ pub enum IrStringPart {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum IrPattern {
     Wildcard,
-    Bind { var: VarId },
+    Bind { var: VarId, ty: Ty },
     Literal { expr: IrExpr },
     Constructor { name: String, args: Vec<IrPattern> },
     RecordPattern { name: String, fields: Vec<IrFieldPattern>, rest: bool },

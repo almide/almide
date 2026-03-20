@@ -223,7 +223,7 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                 arm.body.clone()
             }
         }
-        IrPattern::Bind { var } => {
+        IrPattern::Bind { var, .. } => {
             // let var = subject; body (with optional guard)
             let bind_stmt = IrStmt {
                 kind: IrStmtKind::Bind {
@@ -447,7 +447,7 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
             // Bind tuple args from subject.value array
             let mut bind_stmts = Vec::new();
             for (i, arg) in args.iter().enumerate() {
-                if let IrPattern::Bind { var } = arg {
+                if let IrPattern::Bind { var, .. } = arg {
                     let val_expr = IrExpr {
                         kind: IrExprKind::IndexAccess {
                             object: Box::new(IrExpr {
@@ -538,7 +538,7 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                         },
                         span: None,
                     });
-                } else if let Some(IrPattern::Bind { var }) = &fp.pattern {
+                } else if let Some(IrPattern::Bind { var, .. }) = &fp.pattern {
                     let val_expr = IrExpr {
                         kind: IrExprKind::Member {
                             object: Box::new(subject.clone()),
@@ -590,7 +590,7 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
 /// Bind pattern variable to a value, then evaluate body.
 fn build_pattern_bind(value: &IrExpr, pattern: &IrPattern, body: &IrExpr, result_ty: &Ty) -> IrExpr {
     match pattern {
-        IrPattern::Bind { var } => {
+        IrPattern::Bind { var, .. } => {
             IrExpr {
                 kind: IrExprKind::Block {
                     stmts: vec![IrStmt {

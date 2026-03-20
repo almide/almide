@@ -186,7 +186,7 @@ fn collect_bound_vars(stmts: &[IrStmt]) -> HashSet<u32> {
 
 fn collect_pattern_vars(pat: &IrPattern, vars: &mut HashSet<u32>) {
     match pat {
-        IrPattern::Bind { var } => { vars.insert(var.0); }
+        IrPattern::Bind { var, .. } => { vars.insert(var.0); }
         IrPattern::Constructor { args, .. } => { for a in args { collect_pattern_vars(a, vars); } }
         IrPattern::Tuple { elements } => { for e in elements { collect_pattern_vars(e, vars); } }
         IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => collect_pattern_vars(inner, vars),

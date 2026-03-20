@@ -311,7 +311,7 @@ pub(super) fn auto_derive_variant_encode(vt: &mut VarTable, type_name: &str, typ
                 let mut encode_elems = vec![];
                 for (i, field_ty) in fields.iter().enumerate() {
                     let pv = vt.alloc(format!("_f{}", i), field_ty.clone(), Mutability::Let, None);
-                    pat_vars.push(IrPattern::Bind { var: pv });
+                    pat_vars.push(IrPattern::Bind { var: pv, ty: field_ty.clone() });
                     let field_expr = IrExpr { kind: IrExprKind::Var { id: pv }, ty: field_ty.clone(), span: None };
                     encode_elems.push(encode_field_value(&field_expr, field_ty, &value_ty));
                 }
@@ -323,7 +323,7 @@ pub(super) fn auto_derive_variant_encode(vt: &mut VarTable, type_name: &str, typ
                 let mut encode_pairs = vec![];
                 for f in fields {
                     let pv = vt.alloc(format!("_{}", f.name), f.ty.clone(), Mutability::Let, None);
-                    pat_fields.push(IrFieldPattern { name: f.name.clone(), pattern: Some(IrPattern::Bind { var: pv }) });
+                    pat_fields.push(IrFieldPattern { name: f.name.clone(), pattern: Some(IrPattern::Bind { var: pv, ty: f.ty.clone() }) });
                     let field_expr = IrExpr { kind: IrExprKind::Var { id: pv }, ty: f.ty.clone(), span: None };
                     let val = encode_field_value(&field_expr, &f.ty, &value_ty);
                     encode_pairs.push(IrExpr { kind: IrExprKind::Tuple { elements: vec![
@@ -378,7 +378,7 @@ pub(super) fn auto_derive_variant_decode(vt: &mut VarTable, type_name: &str, typ
 
     let extract = IrStmt {
         kind: IrStmtKind::BindDestructure {
-            pattern: IrPattern::Tuple { elements: vec![IrPattern::Bind { var: var_tag }, IrPattern::Bind { var: var_payload }] },
+            pattern: IrPattern::Tuple { elements: vec![IrPattern::Bind { var: var_tag, ty: Ty::String }, IrPattern::Bind { var: var_payload, ty: Ty::String }] },
             value: IrExpr {
                 kind: IrExprKind::Try { expr: Box::new(IrExpr {
                     kind: IrExprKind::Call {

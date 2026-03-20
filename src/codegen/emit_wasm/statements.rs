@@ -97,7 +97,7 @@ impl FuncCompiler<'_> {
 
                     let mut offset = 0u32;
                     for (i, elem_pat) in elements.iter().enumerate() {
-                        if let crate::ir::IrPattern::Bind { var } = elem_pat {
+                        if let crate::ir::IrPattern::Bind { var, .. } = elem_pat {
                             if let Some(&local_idx) = self.var_map.get(&var.0) {
                                 let elem_ty = elem_types.get(i).cloned().unwrap_or(crate::types::Ty::Int);
                                 wasm!(self.func, { local_get(scratch); });
@@ -304,8 +304,14 @@ fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::
             for stmt in body { scan_stmt(stmt, locals, vt); }
         }
         IrExprKind::ForIn { var, var_tuple, body, iterable } => {
-            let var_info = vt.get(*var);
-            let val_type = values::ty_to_valtype(&var_info.ty).unwrap_or(ValType::I64);
+            // Determine loop variable type from iterable's element type (more reliable than VarTable)
+            let elem_ty = match &iterable.ty {
+                crate::types::Ty::Applied(crate::types::TypeConstructorId::List, args) if args.len() == 1 => args[0].clone(),
+                crate::types::Ty::Applied(crate::types::TypeConstructorId::Map, args) if args.len() == 2 =>
+                    crate::types::Ty::Tuple(vec![args[0].clone(), args[1].clone()]),
+                _ => vt.get(*var).ty.clone(),
+            };
+            let val_type = values::ty_to_valtype(&elem_ty).unwrap_or(ValType::I64);
             locals.push((*var, val_type));
             // Also register tuple destructure vars
             if let Some(tuple_vars) = var_tuple {
@@ -330,8 +336,12 @@ fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::
         }
         IrExprKind::Match { subject, arms } => {
             scan_expr(subject, locals, vt);
-            // Resolve subject type (IR may have wrong type for pattern-matched vars)
             let resolved_ty = resolve_scan_subject_ty(subject, arms, vt);
+            // Log: find the match with Right/Left constructors
+            let has_either = arms.iter().any(|a| matches!(&a.pattern, crate::ir::IrPattern::Constructor { name, .. } if name == "Right" || name == "Left"));
+            if has_either {
+                eprintln!("[SCAN MATCH EITHER] subject.ty={:?} resolved_ty={:?}", subject.ty, resolved_ty);
+            }
             for arm in arms {
                 scan_pattern(&arm.pattern, &resolved_ty, locals, vt);
                 scan_expr(&arm.body, locals, vt);
@@ -370,15 +380,10 @@ fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::
 fn scan_stmt(stmt: &IrStmt, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::VarTable) {
     match &stmt.kind {
         IrStmtKind::Bind { var, ty, value, .. } => {
-            // Prefer value.ty when it differs from declared ty (IR type inference gaps)
-            let effective_ty = if values::ty_to_valtype(ty) != values::ty_to_valtype(&value.ty)
-                && values::ty_to_valtype(&value.ty).is_some() {
-                &value.ty
-            } else {
-                ty
-            };
-            if let Some(val_type) = values::ty_to_valtype(effective_ty) {
-                locals.push((*var, val_type));
+            let val_type = values::ty_to_valtype(&value.ty)
+                .or_else(|| values::ty_to_valtype(ty));
+            if let Some(vt_wasm) = val_type {
+                locals.push((*var, vt_wasm));
             }
             scan_expr(value, locals, vt);
         }
@@ -425,7 +430,7 @@ fn scan_destructure_pattern(pattern: &crate::ir::IrPattern, value_ty: &crate::ty
                 scan_destructure_pattern(elem, &elem_ty, locals, vt);
             }
         }
-        crate::ir::IrPattern::Bind { var } => {
+        crate::ir::IrPattern::Bind { var, .. } => {
             if let Some(val_type) = values::ty_to_valtype(value_ty) {
                 locals.push((*var, val_type));
             }
@@ -437,18 +442,48 @@ fn scan_destructure_pattern(pattern: &crate::ir::IrPattern, value_ty: &crate::ty
 /// Scan a match pattern for variable bindings.
 fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::VarTable) {
     match pattern {
-        crate::ir::IrPattern::Bind { var } => {
-            if let Some(val_type) = values::ty_to_valtype(subject_ty) {
+        crate::ir::IrPattern::Bind { var, ty } => {
+            // Use pattern's own type (set by lowering, updated by mono) — no VarTable dependency
+            let effective_ty = if matches!(ty, crate::types::Ty::Unknown) { subject_ty } else { ty };
+            if let Some(val_type) = values::ty_to_valtype(effective_ty) {
                 locals.push((*var, val_type));
             }
         }
-        crate::ir::IrPattern::Constructor { args, .. } => {
-            // Constructor args need their own types (from VarTable), not the subject Variant type
-            for arg in args {
-                if let crate::ir::IrPattern::Bind { var } = arg {
-                    let var_ty = &vt.get(*var).ty;
-                    let ty = if matches!(var_ty, crate::types::Ty::Unknown) { subject_ty } else { var_ty };
-                    if let Some(val_type) = values::ty_to_valtype(ty) {
+        crate::ir::IrPattern::Constructor { name: ctor_name, args } => {
+            // Resolve field types from subject_ty's type_args for generic variants
+            let subject_type_args: Vec<crate::types::Ty> = match subject_ty {
+                crate::types::Ty::Named(_, args) if !args.is_empty() => args.clone(),
+                crate::types::Ty::Applied(_, args) if !args.is_empty() => args.clone(),
+                crate::types::Ty::Variant { .. } => {
+                    // For inline Variant types, use VarTable (updated by mono propagate)
+                    // as the source of truth for field types.
+                    for arg in args.iter() {
+                        if let crate::ir::IrPattern::Bind { var, .. } = arg {
+                            let vt_ty = &vt.get(*var).ty;
+                            if let Some(val_type) = values::ty_to_valtype(vt_ty) {
+                                locals.push((*var, val_type));
+                            }
+                        }
+                    }
+                    return;
+                }
+                _ => vec![],
+            };
+            for (i, arg) in args.iter().enumerate() {
+                if let crate::ir::IrPattern::Bind { var, .. } = arg {
+                    let var_ty = vt.get(*var).ty.clone();
+                    if var.0 == 107 || (ctor_name == "Right" && vt.get(*var).name == "v") {
+                        eprintln!("[SCAN RIGHT] {}[{}] var={:?} '{}' vt_ty={:?} subject={:?} type_args={:?}",
+                            ctor_name, i, var, vt.get(*var).name, var_ty, subject_ty, subject_type_args);
+                    }
+                    let resolved = if !subject_type_args.is_empty() {
+                        let mut gnames = Vec::new();
+                        super::expressions::collect_type_param_names(&var_ty, &mut gnames);
+                        if gnames.is_empty() { var_ty } else {
+                            super::expressions::substitute_type_params(&var_ty, &gnames, &subject_type_args)
+                        }
+                    } else { var_ty };
+                    if let Some(val_type) = values::ty_to_valtype(&resolved) {
                         locals.push((*var, val_type));
                     }
                 } else {
@@ -466,14 +501,28 @@ fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, l
         crate::ir::IrPattern::Some { inner } | crate::ir::IrPattern::Ok { inner } => {
             let inner_ty = if let crate::types::Ty::Applied(_, args) = subject_ty {
                 args.first().cloned().unwrap_or(subject_ty.clone())
-            } else { subject_ty.clone() };
+            } else {
+                // subject_ty is not Applied — try VarTable for inner binding
+                if let crate::ir::IrPattern::Bind { var, .. } = inner.as_ref() {
+                    let vt_ty = &vt.get(*var).ty;
+                    if !matches!(vt_ty, crate::types::Ty::Unknown | crate::types::Ty::TypeVar(_)) {
+                        vt_ty.clone()
+                    } else { subject_ty.clone() }
+                } else { subject_ty.clone() }
+            };
             scan_pattern(inner, &inner_ty, locals, vt);
         }
         crate::ir::IrPattern::Err { inner } => {
-            // Err inner type is the second type arg: E in Result[T, E]
             let inner_ty = if let crate::types::Ty::Applied(_, args) = subject_ty {
                 args.get(1).cloned().unwrap_or(subject_ty.clone())
-            } else { subject_ty.clone() };
+            } else {
+                if let crate::ir::IrPattern::Bind { var, .. } = inner.as_ref() {
+                    let vt_ty = &vt.get(*var).ty;
+                    if !matches!(vt_ty, crate::types::Ty::Unknown | crate::types::Ty::TypeVar(_)) {
+                        vt_ty.clone()
+                    } else { subject_ty.clone() }
+                } else { subject_ty.clone() }
+            };
             scan_pattern(inner, &inner_ty, locals, vt);
         }
         crate::ir::IrPattern::RecordPattern { name: _, fields, .. } => {
