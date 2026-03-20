@@ -262,7 +262,25 @@ impl Checker {
     // ── Constraint solving ──
 
     fn solve_constraints(&mut self) {
-        for c in std::mem::take(&mut self.constraints) {
+        let constraints = std::mem::take(&mut self.constraints);
+        self.solve_until_stable(&constraints);
+        self.emit_type_errors(&constraints);
+    }
+
+    /// Fixed-point: apply constraints until solutions stabilize.
+    /// Each round may resolve TypeVars that were overwritten in previous rounds.
+    fn solve_until_stable(&mut self, constraints: &[Constraint]) {
+        let prev = self.solutions.clone();
+        for c in constraints {
+            self.unify_infer(&c.expected, &c.actual);
+        }
+        if self.solutions != prev {
+            self.solve_until_stable(constraints);
+        }
+    }
+
+    fn emit_type_errors(&mut self, constraints: &[Constraint]) {
+        for c in constraints {
             if !self.unify_infer(&c.expected, &c.actual) {
                 let exp = resolve_vars(&c.expected, &self.solutions);
                 let act = resolve_vars(&c.actual, &self.solutions);
@@ -273,7 +291,7 @@ impl Checker {
                     );
                     self.emit(err(
                         format!("type mismatch in {}: expected {} but got {}", c.context, exp.display(), act.display()),
-                        hint, c.context).with_code("E001"));
+                        hint, c.context.clone()).with_code("E001"));
                 }
             }
         }
@@ -302,27 +320,19 @@ impl Checker {
 
     fn unify_infer(&mut self, a: &Ty, b: &Ty) -> bool {
         // Handle inference variables.
-        // Key invariant: when overwriting a solution, propagate the old solution
-        // to the new value so transitive chains are resolved.
-        // Example: solutions[?1]=Int, then unify(?1,?2) → overwrite ?1=?2, but also
-        // propagate unify(Int,?2) → solutions[?2]=Int. Chain: ?1→?2→Int.
+        // When overwriting a concrete solution with a TypeVar, propagate the concrete
+        // value directly to the new TypeVar. This prevents information loss within a
+        // single constraint-solving round.
         if let Some(id_a) = is_inference_var(a) {
             if let Some(id_b) = is_inference_var(b) {
                 if id_a == id_b { return true; }
             }
             if !self.occurs(id_a, b) {
                 if let Some(existing) = self.solutions.get(&id_a).cloned() {
-                    // When a concrete solution is overwritten by a TypeVar,
-                    // propagate the concrete value to the new TypeVar.
                     if is_inference_var(&existing).is_none() {
                         if let Some(id_b) = is_inference_var(b) {
-                            // Only propagate if the target has no concrete solution yet
-                            let should_propagate = match self.solutions.get(&id_b) {
-                                None => true,
-                                Some(existing_b) => is_inference_var(existing_b).is_some(),
-                            };
-                            if should_propagate {
-                                self.solutions.insert(id_b, existing.clone());
+                            if self.solutions.get(&id_b).map_or(true, |s| is_inference_var(s).is_some()) {
+                                self.solutions.insert(id_b, existing);
                             }
                         }
                     }
@@ -336,12 +346,8 @@ impl Checker {
                 if let Some(existing) = self.solutions.get(&id_b).cloned() {
                     if is_inference_var(&existing).is_none() {
                         if let Some(id_a) = is_inference_var(a) {
-                            let should_propagate = match self.solutions.get(&id_a) {
-                                None => true,
-                                Some(existing_a) => is_inference_var(existing_a).is_some(),
-                            };
-                            if should_propagate {
-                                self.solutions.insert(id_a, existing.clone());
+                            if self.solutions.get(&id_a).map_or(true, |s| is_inference_var(s).is_some()) {
+                                self.solutions.insert(id_a, existing);
                             }
                         }
                     }
