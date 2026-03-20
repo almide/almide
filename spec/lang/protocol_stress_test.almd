@@ -1,0 +1,252 @@
+// protocol_stress_test — Aggressive protocol edge cases
+
+// ── Protocol method in pipe chain ──
+
+protocol Transformable {
+  fn double(a: Self) -> Self
+  fn negate(a: Self) -> Self
+}
+
+type Val: Transformable = { n: Int }
+fn Val.double(v: Val) -> Val = Val { n: v.n * 2 }
+fn Val.negate(v: Val) -> Val = Val { n: 0 - v.n }
+
+test "protocol methods chained via pipe" {
+  let result = Val { n: 3 }
+    |> Val.double()
+    |> Val.double()
+    |> Val.negate()
+  assert_eq(result.n, -12)
+}
+
+// ── Protocol method in lambda / closure capture ──
+
+protocol Nameable {
+  fn get_name(a: Self) -> String
+}
+
+type Animal: Nameable = { species: String }
+fn Animal.get_name(a: Animal) -> String = a.species
+
+test "protocol method in lambda" {
+  let animals = [Animal { species: "cat" }, Animal { species: "dog" }, Animal { species: "bird" }]
+  let names = list.map(animals, (a) => Animal.get_name(a))
+  assert_eq(names, ["cat", "dog", "bird"])
+}
+
+// NOTE: Type.method(arg) inside lambda generates incorrect Rust (Type.method instead of Type::method)
+// This is a pre-existing codegen bug, not protocol-specific. Tracked separately.
+// UFCS (a.get_name()) also doesn't work in lambda due to type inference limitations.
+// test "protocol method in filter lambda" { ... }
+
+// ── Protocol method used in string interpolation ──
+
+protocol Displayable {
+  fn display(a: Self) -> String
+}
+
+type Coord: Displayable = { x: Int, y: Int }
+fn Coord.display(c: Coord) -> String = "(" + int.to_string(c.x) + ", " + int.to_string(c.y) + ")"
+
+test "protocol method in string interpolation" {
+  let c = Coord { x: 3, y: 7 }
+  let s = "Point: ${c.display()}"
+  assert_eq(s, "Point: (3, 7)")
+}
+
+// ── Protocol method calling itself recursively ──
+
+protocol Collapsible {
+  fn collapse(a: Self) -> String
+}
+
+type Tree: Collapsible =
+  | Leaf(String)
+  | Branch(Tree, Tree)
+
+fn Tree.collapse(t: Tree) -> String =
+  match t {
+    Leaf(s) => s
+    Branch(l, r) => Tree.collapse(l) + "+" + Tree.collapse(r)
+  }
+
+test "recursive protocol method on tree" {
+  let tree = Branch(Branch(Leaf("a"), Leaf("b")), Leaf("c"))
+  assert_eq(Tree.collapse(tree), "a+b+c")
+}
+
+test "deeply nested recursive protocol" {
+  let deep = Branch(Branch(Branch(Leaf("1"), Leaf("2")), Leaf("3")), Branch(Leaf("4"), Leaf("5")))
+  assert_eq(Tree.collapse(deep), "1+2+3+4+5")
+}
+
+// ── Protocol with many methods (5+) ──
+
+protocol FullEntity {
+  fn entity_id(a: Self) -> Int
+  fn entity_name(a: Self) -> String
+  fn entity_active(a: Self) -> Bool
+  fn entity_score(a: Self) -> Int
+  fn entity_summary(a: Self) -> String
+}
+
+type Account: FullEntity = { id: Int, username: String, active: Bool, karma: Int }
+fn Account.entity_id(a: Account) -> Int = a.id
+fn Account.entity_name(a: Account) -> String = a.username
+fn Account.entity_active(a: Account) -> Bool = a.active
+fn Account.entity_score(a: Account) -> Int = a.karma
+fn Account.entity_summary(a: Account) -> String =
+  a.username + " (karma: " + int.to_string(a.karma) + ")"
+
+test "protocol with 5 methods" {
+  let acc = Account { id: 1, username: "alice", active: true, karma: 42 }
+  assert_eq(acc.entity_id(), 1)
+  assert_eq(acc.entity_name(), "alice")
+  assert_eq(acc.entity_active(), true)
+  assert_eq(acc.entity_score(), 42)
+  assert_eq(acc.entity_summary(), "alice (karma: 42)")
+}
+
+// ── Protocol method in match arm ──
+
+protocol Classifiable {
+  fn classify(a: Self) -> String
+}
+
+type Temp: Classifiable = { celsius: Int }
+fn Temp.classify(t: Temp) -> String =
+  match t.celsius {
+    c if c < 0 => "freezing"
+    c if c < 20 => "cold"
+    c if c < 30 => "warm"
+    _ => "hot"
+  }
+
+test "protocol method with match + guards" {
+  assert_eq(Temp.classify(Temp { celsius: -5 }), "freezing")
+  assert_eq(Temp.classify(Temp { celsius: 15 }), "cold")
+  assert_eq(Temp.classify(Temp { celsius: 25 }), "warm")
+  assert_eq(Temp.classify(Temp { celsius: 35 }), "hot")
+}
+
+// ── Protocol method in for loop ──
+
+protocol Countable {
+  fn count(a: Self) -> Int
+}
+
+type Bucket: Countable = { items: List[Int] }
+fn Bucket.count(b: Bucket) -> Int = list.len(b.items)
+
+test "protocol method in for loop accumulation" {
+  let buckets = [
+    Bucket { items: [1, 2] },
+    Bucket { items: [3, 4, 5] },
+    Bucket { items: [6] }
+  ]
+  let total = list.fold(buckets, 0, (acc, b) => acc + Bucket.count(b))
+  assert_eq(total, 6)
+}
+
+// ── Protocol immutable update pattern ──
+
+protocol Updatable {
+  fn increment(a: Self) -> Self
+  fn reset(a: Self) -> Self
+}
+
+type Counter: Updatable = { value: Int }
+fn Counter.increment(c: Counter) -> Counter = Counter { value: c.value + 1 }
+fn Counter.reset(c: Counter) -> Counter = Counter { value: 0 }
+
+test "immutable update chain via protocol" {
+  let c = Counter { value: 0 }
+  let c2 = Counter.increment(Counter.increment(Counter.increment(c)))
+  assert_eq(c2.value, 3)
+  assert_eq(c.value, 0)
+  let c3 = Counter.reset(c2)
+  assert_eq(c3.value, 0)
+}
+
+test "protocol update in fold" {
+  let c = Counter { value: 0 }
+  let result = list.fold([1, 2, 3, 4, 5], c, (acc, _) => Counter.increment(acc))
+  assert_eq(result.value, 5)
+}
+
+// ── Protocol method that returns List ──
+
+protocol Expandable {
+  fn expand(a: Self) -> List[String]
+}
+
+type Csv: Expandable = { raw: String }
+fn Csv.expand(c: Csv) -> List[String] = string.split(c.raw, ",")
+
+test "protocol method returning List" {
+  let c = Csv { raw: "a,b,c,d" }
+  let parts = c.expand()
+  assert_eq(list.len(parts), 4)
+  assert_eq(list.get(parts, 0), some("a"))
+  assert_eq(list.get(parts, 3), some("d"))
+}
+
+// ── Protocol method that returns tuple ──
+
+protocol Decomposable {
+  fn decompose(a: Self) -> (String, Int)
+}
+
+type Entry: Decomposable = { key: String, value: Int }
+fn Entry.decompose(e: Entry) -> (String, Int) = (e.key, e.value)
+
+test "protocol method returning tuple" {
+  let e = Entry { key: "score", value: 100 }
+  let (k, v) = e.decompose()
+  assert_eq(k, "score")
+  assert_eq(v, 100)
+}
+
+// ── Protocol + Eq + Repr coexistence (3 conventions) ──
+
+protocol Rankable {
+  fn rank(a: Self) -> Int
+}
+
+type Student: Eq, Repr, Rankable = { name: String, gpa: Float }
+fn Student.eq(a: Student, b: Student) -> Bool = a.name == b.name
+fn Student.repr(s: Student) -> String = s.name
+fn Student.rank(s: Student) -> Int =
+  if s.gpa > 3.5 then 1
+  else if s.gpa > 3.0 then 2
+  else 3
+
+test "three conventions: Eq + Repr + user protocol" {
+  let a = Student { name: "Alice", gpa: 3.8 }
+  let b = Student { name: "Alice", gpa: 3.2 }
+  assert_eq(a == b, true)
+  assert_eq(a.repr(), "Alice")
+  assert_eq(a.rank(), 1)
+  assert_eq(b.rank(), 2)
+}
+
+// ── Protocol methods with Bool logic ──
+
+protocol Filterable {
+  fn matches(a: Self, query: String) -> Bool
+  fn is_active(a: Self) -> Bool
+}
+
+type Task: Filterable = { title: String, done: Bool }
+fn Task.matches(t: Task, query: String) -> Bool = string.contains(t.title, query)
+fn Task.is_active(t: Task) -> Bool = not t.done
+
+test "protocol predicates combined with and/or" {
+  let t = Task { title: "fix bug #42", done: false }
+  assert_eq(t.matches("bug") and t.is_active(), true)
+  assert_eq(t.matches("feature") or t.is_active(), true)
+  assert_eq(t.matches("feature") and not t.is_active(), false)
+}
+
+// NOTE: Same codegen bug as above — Type.method() inside lambda emits Rust dot syntax instead of ::
+// test "protocol predicates in list filter" { ... }
