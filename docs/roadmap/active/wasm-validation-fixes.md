@@ -1,44 +1,67 @@
-# Type System Architecture [ACTIVE]
+# WASM Validation: Last 1 Compile Failure
 
-## Vision
+## Status: Rust 153/153, WASM 1 compile failure (type_system_test), 8 skipped
 
-Kind = KType | KArrow Kind Kind — 全ての判断が構造から自明になるコンパイラ。
+## The Problem
 
-## Status: Rust 153/153, WASM 12 compile failures, 21/73 pass
+`match doubled { Just(v) => assert_eq(v, 10) }` で:
+- scan: `v` の local を i32 で宣言（VarId A の VarTable 型 = TypeVar → i32）
+- emit: `v` を i64.load で読む（emit_load_at が subject_type_args から Int を解決）
+- local type ≠ load type → validation error
 
-## Landed (fix/wasm-scratch-depth branch)
+## Root Cause: VarId Mismatch in Lowering
 
-| Change | Effect |
-|--------|--------|
-| Scratch depth fix (ForIn, Call, Lambda, Try) | 4 files unblocked |
-| Closure env typed zero-init | scope_test pass |
-| **Union-Find 型推論** (HashMap → 等価クラスモデル) | TypeVar leak 構造的消滅 |
-| lambda current_ret isolation | ok/err 型漏洩バグ修正 |
-| VarTable mono update | generics_test pass |
-| Name-based VarId fallback + BinOp VarTable fallback | default_fields pass |
+lowering が RecordPattern/Constructor pattern で `define_var("v")` → VarId(A) を生成。
+body 内の `v` が `lookup_var("v")` → 同じスコープから VarId(A) を取得 **するはず**。
 
-**Total: 17→12 compile failures, Rust 153/153 維持**
+しかし実際には異なる VarId が使われている。原因:
+1. lowering が2回走る（auto-derive 等で同じ body が複数回 lower される）
+2. スコープ管理のバグで lookup が異なる VarId を返す
+3. checker の ExprId → VarId マッピングが lowering と不一致
 
-## Next: Protocol/type_system [4 files]
+## 理想の最終系
 
-protocol_advanced/extreme/stress, type_system_test
-
-Generic/protocol 関数の mono 後に TypeVar 残留、または effect fn の Result unwrap が不完全。
-個別分析が必要。**次の branch で対応。**
-
-## Next: Codec WASM skip [8 files]
-
-auto_derive, codec_convenience/list/nested/p0/test/weather, value_utils
-
-Codec は JSON serialization 機能。WASM target では不要。
-テストに WASM skip マーカーを追加して compile failure から除外する。
-
-## Future: Kind-Aware Type Representation
+**VarTable を codegen の型源として使わない。** 全ての IrExpr が `.ty` に concrete 型を持ち、
+codegen は `.ty` のみを信頼する。VarTable は名前表示用のメタデータ。
 
 ```
-Kind = KType | KArrow Kind Kind
+scan_pattern: local 型 = pattern の subject_ty + 構造的位置から導出
+emit_pattern: load 型 = pattern の subject_ty + 構造的位置から導出（既に実装済み）
+→ 同じ情報源 → 構造的に一致
 ```
 
-- 全型定義に Kind 付与
-- Kind inference / Kind checker
-- HKT の自然な拡張基盤
+## Fix Plan
+
+### Step 1: VarId 不一致の特定
+
+lowering で `match doubled { Just(v) => ... }` の:
+- pattern `Just(v)` の VarId = ?
+- body 内 `v` の VarId = ?
+- 一致するか、異なるか
+
+debug ログを lower/expressions.rs と lower/statements.rs に入れて特定。
+
+### Step 2: 不一致の原因修正
+
+VarId が異なる場合:
+- lowering の scope management を修正して一致させる
+- OR: scan_pattern を VarTable 不依存にする（subject_ty + 構造的位置のみ）
+
+### Step 3: codegen hack 層の除去
+
+VarId 不一致が解消されたら:
+- name-based VarId fallback in Var emit → 削除
+- BinOp VarTable fallback → 削除
+- scan_pattern VarTable fallback → 削除
+- emit_eq type fallback → 削除
+
+### Step 4: IR Validation
+
+mono 後に:
+```rust
+for each function:
+  for each expr:
+    assert!(!has_typevar(expr.ty))
+  for each VarId in var_map:
+    assert!(!has_typevar(var_table[id].ty))
+```

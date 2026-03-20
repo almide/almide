@@ -471,6 +471,9 @@ fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, l
             for (i, arg) in args.iter().enumerate() {
                 if let crate::ir::IrPattern::Bind { var } = arg {
                     let var_ty = vt.get(*var).ty.clone();
+                    if ctor_name == "Just" || ctor_name == "Leaf" || ctor_name == "Node" {
+                        eprintln!("[SCAN CTOR] {}[{}] var={:?} '{}' vt_ty={:?} subject={:?}", ctor_name, i, var, vt.get(*var).name, var_ty, subject_ty);
+                    }
                     // Resolve TypeVars using subject's type_args via name-based substitution
                     let resolved = if !subject_type_args.is_empty() {
                         let mut gnames = Vec::new();
@@ -480,6 +483,9 @@ fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, l
                         }
                     } else { var_ty };
                     if let Some(val_type) = values::ty_to_valtype(&resolved) {
+                        if ctor_name == "Just" || ctor_name == "Leaf" {
+                            eprintln!("[SCAN CTOR LOCAL] {}[{}] var={:?} resolved={:?} → {:?}", ctor_name, i, var, resolved, val_type);
+                        }
                         locals.push((*var, val_type));
                     }
                 } else {

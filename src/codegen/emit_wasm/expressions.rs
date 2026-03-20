@@ -741,6 +741,9 @@ impl FuncCompiler<'_> {
 
     /// Emit a load instruction from base_ptr (on stack) + offset.
     pub fn emit_load_at(&mut self, ty: &Ty, offset: u32) {
+        if offset == 4 {
+            eprintln!("[LOAD_AT] ty={:?} valtype={:?} offset={}", ty, values::ty_to_valtype(ty), offset);
+        }
         match values::ty_to_valtype(ty) {
             Some(ValType::I64) => {
                 wasm!(self.func, { i64_load(offset); });
@@ -749,6 +752,11 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { f64_load(offset); });
             }
             Some(ValType::I32) => {
+                if offset == 4 {
+                    let bt = std::backtrace::Backtrace::force_capture();
+                    let frames: String = format!("{}", bt).lines().filter(|l| l.contains("emit_wasm")).take(3).collect::<Vec<_>>().join(" | ");
+                    eprintln!("[I32_LOAD_4] ty={:?} from {}", ty, frames);
+                }
                 wasm!(self.func, { i32_load(offset); });
             }
             _ => {}
