@@ -310,6 +310,32 @@ fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::
                 scan_expr(&arm.body, locals, vt);
             }
         }
+        IrExprKind::StringInterp { parts } => {
+            for part in parts {
+                if let crate::ir::IrStringPart::Expr { expr } = part {
+                    scan_expr(expr, locals, vt);
+                }
+            }
+        }
+        IrExprKind::OptionSome { expr } | IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
+        | IrExprKind::Clone { expr } | IrExprKind::Deref { expr } | IrExprKind::Try { expr } => {
+            scan_expr(expr, locals, vt);
+        }
+        IrExprKind::Record { fields, .. } | IrExprKind::SpreadRecord { fields, .. } => {
+            for (_, e) in fields { scan_expr(e, locals, vt); }
+        }
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } | IrExprKind::Fan { exprs: elements } => {
+            for e in elements { scan_expr(e, locals, vt); }
+        }
+        IrExprKind::Member { object, .. } | IrExprKind::IndexAccess { object, .. } => {
+            scan_expr(object, locals, vt);
+        }
+        IrExprKind::Lambda { body, .. } => {
+            scan_expr(body, locals, vt);
+        }
+        IrExprKind::MapLiteral { entries } => {
+            for (k, v) in entries { scan_expr(k, locals, vt); scan_expr(v, locals, vt); }
+        }
         _ => {}
     }
 }
