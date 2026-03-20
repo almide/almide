@@ -1,5 +1,6 @@
 use std::process::Command;
 use crate::{compile_with_ir, parse_file, find_rustc, check, diagnostic, resolve, project, project_fetch};
+use almide::codegen::pass::NanoPass;
 
 pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release: bool, fast: bool, _unchecked_index: bool, no_check: bool) {
     let is_npm = matches!(target, Some("npm"));
@@ -134,6 +135,10 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
 
     // Monomorphize
     almide::mono::monomorphize(&mut ir_program);
+
+    // Result propagation (auto-unwrap in effect fn) — inserts Try nodes
+    almide::codegen::pass_result_propagation::ResultPropagationPass
+        .run(&mut ir_program, almide::codegen::pass::Target::Rust);
 
     // Emit WASM binary
     let bytes = almide::codegen::emit_wasm_binary(&ir_program);

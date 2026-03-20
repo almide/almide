@@ -348,9 +348,34 @@ impl FuncCompiler<'_> {
                 self.func.instruction(&Instruction::LocalGet(scratch));
             }
 
+            // ── Try (auto-unwrap Result in effect fn) ──
+            IrExprKind::Try { expr: inner } => {
+                // Evaluate inner (returns Result ptr: [tag:i32][value])
+                // If tag == 0 (ok): unwrap → push value
+                // If tag != 0 (err): return the Result as-is
+                self.emit_expr(inner);
+                let scratch = self.match_i32_base + self.match_depth;
+                self.func.instruction(&Instruction::LocalSet(scratch));
+
+                // Check tag
+                self.func.instruction(&Instruction::LocalGet(scratch));
+                self.func.instruction(&Instruction::I32Load(MemArg { offset: 0, align: 2, memory_index: 0 }));
+                self.func.instruction(&Instruction::I32Const(0));
+                self.func.instruction(&Instruction::I32Ne); // tag != 0 = err
+
+                self.func.instruction(&Instruction::If(BlockType::Empty));
+                // Err: return the Result ptr
+                self.func.instruction(&Instruction::LocalGet(scratch));
+                self.func.instruction(&Instruction::Return);
+                self.func.instruction(&Instruction::End);
+
+                // Ok: load the unwrapped value
+                self.func.instruction(&Instruction::LocalGet(scratch));
+                self.emit_load_at(&expr.ty, 4);
+            }
+
             // ── Codegen-specific nodes (pass-through or ignore) ──
             IrExprKind::Clone { expr: inner } | IrExprKind::Deref { expr: inner } => {
-                // In WASM, clone/deref are no-ops (no ownership system)
                 self.emit_expr(inner);
             }
 
