@@ -75,6 +75,7 @@ impl FuncCompiler<'_> {
                 // scratch[0] = list ptr, scratch[1] = index counter
                 let list_scratch = self.match_i32_base + self.match_depth;
                 let idx_scratch = list_scratch + 1;
+                self.match_depth += 2; // Reserve 2 scratch locals for list ptr + index
                 let loop_var = self.var_map[&var.0];
 
                 // Determine element type and size
@@ -170,6 +171,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { end; }); // end loop
                 self.depth -= 1;
                 wasm!(self.func, { end; }); // end break block
+                self.match_depth -= 2; // Release for..in scratch locals
             }
         }
     }

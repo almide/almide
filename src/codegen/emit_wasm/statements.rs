@@ -251,14 +251,16 @@ fn count_scratch_depth(expr: &IrExpr) -> usize {
         // FnRef needs 1 scratch, Lambda with captures needs 2 (env + closure ptr)
         IrExprKind::FnRef { .. } => 1,
         IrExprKind::Lambda { .. } => 2,
+        IrExprKind::Try { expr } => 1 + count_scratch_depth(expr),
         IrExprKind::ForIn { iterable, body, .. } => {
             let b = body.iter().map(|s| count_scratch_depth_stmt(s)).max().unwrap_or(0);
-            // List for...in needs 2 scratch slots (list ptr + index counter)
+            // List for...in reserves 2 scratch slots (list ptr + index counter)
+            // Body scratch is ADDED to the for_in base (match_depth += 2 before body)
             let for_in_need = match &iterable.kind {
                 IrExprKind::Range { .. } => 0,
                 _ => 2,
             };
-            count_scratch_depth(iterable).max(b).max(for_in_need)
+            count_scratch_depth(iterable).max(for_in_need + b)
         }
         _ => 0,
     }
