@@ -87,7 +87,11 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         ast::Expr::Binary { op, left, right, .. } => {
             let l = lower_expr(ctx, left);
             let r = lower_expr(ctx, right);
-            let left_ty = &l.ty;
+            // Resolve operand types: if expr.ty is Unknown, try VarTable lookup
+            let left_ty = if l.ty == Ty::Unknown {
+                if let IrExprKind::Var { id } = &l.kind { ctx.var_table.get(*id).ty.clone() } else { l.ty.clone() }
+            } else { l.ty.clone() };
+            let left_ty = &left_ty;
             // Operator protocol: dispatch == / != to convention methods if available
             if op == "==" || op == "!=" {
                 if let Some(eq_fn) = ctx.find_convention_fn(left_ty, "eq") {
@@ -101,7 +105,10 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                     return call;
                 }
             }
-            let right_ty = &r.ty;
+            let right_ty = if r.ty == Ty::Unknown {
+                if let IrExprKind::Var { id } = &r.kind { ctx.var_table.get(*id).ty.clone() } else { r.ty.clone() }
+            } else { r.ty.clone() };
+            let right_ty = &right_ty;
             let bin_op = match (op.as_str(), left_ty, right_ty) {
                 ("+", Ty::String, _) | ("+", _, Ty::String) => BinOp::ConcatStr,
                 ("+", Ty::Applied(TypeConstructorId::List, _), _) | ("+", _, Ty::Applied(TypeConstructorId::List, _)) => BinOp::ConcatList,
