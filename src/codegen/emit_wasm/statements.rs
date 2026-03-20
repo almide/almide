@@ -147,7 +147,7 @@ fn count_scratch_depth(expr: &IrExpr) -> usize {
             let inner = fields.iter()
                 .map(|(_, e)| count_scratch_depth(e))
                 .max().unwrap_or(0);
-            1.max(inner)
+            1 + inner
         }
         IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
             let s = stmts.iter().map(|s| count_scratch_depth_stmt(s)).max().unwrap_or(0);
@@ -188,16 +188,15 @@ fn count_scratch_depth(expr: &IrExpr) -> usize {
             let inner = entries.iter()
                 .flat_map(|(k, v)| [count_scratch_depth(k), count_scratch_depth(v)])
                 .max().unwrap_or(0);
-            1.max(inner)
+            1 + inner
         }
-        // List literal uses 1 scratch
         IrExprKind::List { elements } => {
             let inner = elements.iter().map(|e| count_scratch_depth(e)).max().unwrap_or(0);
-            1.max(inner)
+            1 + inner
         }
         IrExprKind::Tuple { elements } => {
             let inner = elements.iter().map(|e| count_scratch_depth(e)).max().unwrap_or(0);
-            1.max(inner)
+            1 + inner
         }
         // FnRef needs 1 scratch, Lambda with captures needs 2 (env + closure ptr)
         IrExprKind::FnRef { .. } => 1,
