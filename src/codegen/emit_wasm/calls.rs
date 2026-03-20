@@ -178,6 +178,80 @@ impl FuncCompiler<'_> {
                         self.func.instruction(&Instruction::I32Load(super::expressions::mem(0)));
                         self.func.instruction(&Instruction::I64ExtendI32U);
                     }
+                    ("math", "abs") => {
+                        self.emit_expr(&args[0]);
+                        match &args[0].ty {
+                            Ty::Int => {
+                                // abs(x) = if x < 0 then -x else x
+                                let s = self.match_i64_base + self.match_depth;
+                                self.func.instruction(&Instruction::LocalSet(s));
+                                self.func.instruction(&Instruction::LocalGet(s));
+                                self.func.instruction(&Instruction::I64Const(0));
+                                self.func.instruction(&Instruction::I64LtS);
+                                self.func.instruction(&Instruction::If(BlockType::Result(ValType::I64)));
+                                self.func.instruction(&Instruction::I64Const(0));
+                                self.func.instruction(&Instruction::LocalGet(s));
+                                self.func.instruction(&Instruction::I64Sub);
+                                self.func.instruction(&Instruction::Else);
+                                self.func.instruction(&Instruction::LocalGet(s));
+                                self.func.instruction(&Instruction::End);
+                            }
+                            Ty::Float => {
+                                self.func.instruction(&Instruction::F64Abs);
+                            }
+                            _ => {}
+                        }
+                    }
+                    ("math", "max") | ("math", "min") => {
+                        self.emit_expr(&args[0]);
+                        self.emit_expr(&args[1]);
+                        match (func.as_str(), &args[0].ty) {
+                            ("max", Ty::Int) => {
+                                let s = self.match_i64_base + self.match_depth;
+                                // a b on stack. if a > b then a else b
+                                self.func.instruction(&Instruction::LocalSet(s));
+                                let s2 = s + 1; // need second i64
+                                self.func.instruction(&Instruction::LocalSet(s2));
+                                self.func.instruction(&Instruction::LocalGet(s2));
+                                self.func.instruction(&Instruction::LocalGet(s));
+                                self.func.instruction(&Instruction::I64GtS);
+                                self.func.instruction(&Instruction::If(BlockType::Result(ValType::I64)));
+                                self.func.instruction(&Instruction::LocalGet(s2));
+                                self.func.instruction(&Instruction::Else);
+                                self.func.instruction(&Instruction::LocalGet(s));
+                                self.func.instruction(&Instruction::End);
+                            }
+                            ("min", Ty::Int) => {
+                                let s = self.match_i64_base + self.match_depth;
+                                self.func.instruction(&Instruction::LocalSet(s));
+                                let s2 = s + 1;
+                                self.func.instruction(&Instruction::LocalSet(s2));
+                                self.func.instruction(&Instruction::LocalGet(s2));
+                                self.func.instruction(&Instruction::LocalGet(s));
+                                self.func.instruction(&Instruction::I64LtS);
+                                self.func.instruction(&Instruction::If(BlockType::Result(ValType::I64)));
+                                self.func.instruction(&Instruction::LocalGet(s2));
+                                self.func.instruction(&Instruction::Else);
+                                self.func.instruction(&Instruction::LocalGet(s));
+                                self.func.instruction(&Instruction::End);
+                            }
+                            ("max", _) => { self.func.instruction(&Instruction::F64Max); }
+                            ("min", _) => { self.func.instruction(&Instruction::F64Min); }
+                            _ => {}
+                        }
+                    }
+                    ("float", "round") => {
+                        self.emit_expr(&args[0]);
+                        self.func.instruction(&Instruction::F64Nearest);
+                    }
+                    ("float", "floor") => {
+                        self.emit_expr(&args[0]);
+                        self.func.instruction(&Instruction::F64Floor);
+                    }
+                    ("float", "ceil") => {
+                        self.emit_expr(&args[0]);
+                        self.func.instruction(&Instruction::F64Ceil);
+                    }
                     _ => {
                         self.emit_stub_call(args);
                     }
@@ -201,6 +275,10 @@ impl FuncCompiler<'_> {
                         self.emit_expr(object);
                         self.func.instruction(&Instruction::I64TruncF64S);
                         self.func.instruction(&Instruction::Call(self.emitter.rt.int_to_string));
+                    }
+                    "map" | "list.map" if matches!(&object.ty, Ty::Applied(_, _)) => {
+                        // .map(fn) → list.map(self, fn)
+                        self.emit_list_map(object, &args[0], _ret_ty);
                     }
                     "contains" if matches!(object.ty, Ty::String) => {
                         self.emit_expr(object);
