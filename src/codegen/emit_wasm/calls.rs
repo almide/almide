@@ -393,7 +393,12 @@ impl FuncCompiler<'_> {
                         self.func.instruction(&Instruction::I32Const(8));
                         self.func.instruction(&Instruction::I32Load(mem(0)));
                     }
-                    ("list", "filter") | ("list", "fold")
+                    ("list", "filter") => {
+                        // filter is complex (need dynamic output size). Use stub for now.
+                        // But emit args safely so it at least doesn't cause validation errors.
+                        self.emit_stub_call(args);
+                    }
+                    ("list", "fold")
                     | ("list", "reverse") | ("list", "find") | ("list", "any") | ("list", "all")
                     | ("list", "count") | ("list", "sort_by") | ("list", "flat_map")
                     | ("list", "filter_map") | ("list", "get") | ("list", "drop")
@@ -513,7 +518,7 @@ impl FuncCompiler<'_> {
                         // .map(fn) → list.map(self, fn)
                         self.emit_list_map(object, &args[0], _ret_ty);
                     }
-                    "contains" if matches!(object.ty, Ty::String) => {
+                    "contains" | "string.contains" if matches!(object.ty, Ty::String) => {
                         self.emit_expr(object);
                         self.emit_expr(&args[0]);
                         self.func.instruction(&Instruction::Call(self.emitter.rt.str_contains));

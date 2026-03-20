@@ -348,6 +348,16 @@ impl FuncCompiler<'_> {
                 self.func.instruction(&Instruction::LocalGet(scratch));
             }
 
+            // ── Fan block (sequential fallback — no parallelism in WASM) ──
+            IrExprKind::Fan { exprs } => {
+                if exprs.len() == 1 {
+                    self.emit_expr(&exprs[0]);
+                } else {
+                    // Fan with multiple exprs → Tuple of results
+                    self.emit_tuple(exprs);
+                }
+            }
+
             // ── Try (auto-unwrap Result in effect fn) ──
             IrExprKind::Try { expr: inner } => {
                 // Evaluate inner (returns Result ptr: [tag:i32][value])
