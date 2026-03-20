@@ -885,6 +885,16 @@ impl FuncCompiler<'_> {
                         let target = CallTarget::Module { module: "list".into(), func: "reverse".into() };
                         self.emit_call(&target, &fake, _ret_ty);
                     }
+                    "filter" | "list.filter" if matches!(&object.ty, Ty::Applied(_, _)) => {
+                        let fake = [(**object).clone(), args[0].clone()];
+                        let target = CallTarget::Module { module: "list".into(), func: "filter".into() };
+                        self.emit_call(&target, &fake, _ret_ty);
+                    }
+                    "fold" | "list.fold" if matches!(&object.ty, Ty::Applied(_, _)) => {
+                        let fake = [(**object).clone(), args[0].clone(), args[1].clone()];
+                        let target = CallTarget::Module { module: "list".into(), func: "fold".into() };
+                        self.emit_call(&target, &fake, _ret_ty);
+                    }
                     "map" | "list.map" if matches!(&object.ty, Ty::Applied(_, _)) => {
                         // .map(fn) → list.map(self, fn)
                         self.emit_list_map(object, &args[0], _ret_ty);
