@@ -293,9 +293,9 @@ fn discover_in_stmt(
 
 /// Generate a mangled suffix from type variable bindings.
 fn mangle_suffix(bindings: &HashMap<String, Ty>) -> String {
-    let mut parts: Vec<String> = bindings.iter().map(|(_, ty)| mangle_ty(ty)).collect();
-    parts.sort();
-    parts.join("_")
+    let mut entries: Vec<(&String, &Ty)> = bindings.iter().collect();
+    entries.sort_by_key(|(k, _)| (*k).clone());
+    entries.iter().map(|(_, ty)| mangle_ty(ty)).collect::<Vec<_>>().join("_")
 }
 
 fn mangle_ty(ty: &Ty) -> String {
@@ -666,6 +666,8 @@ fn extract_typevar_binding(param_ty: &Ty, arg_ty: &Ty, var_name: &str) -> Ty {
     match (param_ty, arg_ty) {
         (Ty::TypeVar(n), _) if n == var_name => arg_ty.clone(),
         (Ty::Named(n, _), _) if n == var_name => arg_ty.clone(),
+        // OpenRecord param maps directly to the concrete arg type
+        (Ty::OpenRecord { .. }, _) if var_name.starts_with("__open_") => arg_ty.clone(),
         _ => {
             // If same constructor, recursively match type args
             if param_ty.constructor_id() == arg_ty.constructor_id() {
@@ -688,7 +690,7 @@ fn extract_typevar_binding(param_ty: &Ty, arg_ty: &Ty, var_name: &str) -> Ty {
                     return Ty::Unknown;
                 }
             }
-            arg_ty.clone() // fallback
+            Ty::Unknown // no match for this var_name in this branch
         }
     }
 }
