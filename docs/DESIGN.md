@@ -120,7 +120,7 @@ These are intentional trade-offs — things we gave up to make LLM generation re
 | Raw expressiveness | Each concept has one idiomatic way to write it. Almide provides the right abstraction (e.g., `map`, `for...in`) but not multiple ways to achieve the same thing. |
 | Operator overloading | Operators have fixed built-in meanings only. No user-defined overloading, no implicit coercion. |
 | Metaprogramming | No macros, no reflection, no code generation. The language surface is fixed. |
-| Ad-hoc polymorphism | Traits exist for interface contracts (`trait Hashable { fn hash... }`), but no implicit instance resolution — all implementations are explicit `impl Trait for Type`. Built-in protocols (Eq, Hash) are automatic. Parametric generics exist, but constraints are structural (`T: { field: Type, .. }`), not resolved through global instances. Future direction: row polymorphism and container protocols — see [Type System Extensions](roadmap/active/type-system.md). |
+| Ad-hoc polymorphism | `protocol` defines required convention methods. Types declare satisfaction explicitly (`type Dog: Eq, Serializable`). Implementation via flat convention methods (`fn Dog.serialize(...)`), no `impl` blocks. Built-in conventions (Eq, Repr, Ord, Hash, Codec) are protocols. Generic bounds: `fn f[T: Protocol](x: T)` — monomorphized, no dynamic dispatch. No implicit instance resolution, no orphan rules. |
 | Named/default arguments | Default arguments supported (`fn f(x: Int, y: Int = 0)`); named arguments for clarity (`f(x: 1, y: 2)`). No variadic arguments. |
 | Multiple return styles | No `return` keyword. The last expression is always the value. No exceptions. |
 | Syntax sugar variety | One way to write each construct. No shorthand forms, no alternative spellings. |
