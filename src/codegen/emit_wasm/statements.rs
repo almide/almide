@@ -50,15 +50,19 @@ impl FuncCompiler<'_> {
                         self.emit_expr(else_);
                         self.func.instruction(&Instruction::Return);
                     }
-                    // Other expressions: evaluate, drop value, then break
+                    // Other expressions
                     _ => {
                         self.emit_expr(else_);
-                        if super::values::ty_to_valtype(&else_.ty).is_some() {
-                            self.func.instruction(&Instruction::Drop);
-                        }
                         if let Some(labels) = self.loop_stack.last() {
+                            // Inside a loop/do block: drop value and break
+                            if super::values::ty_to_valtype(&else_.ty).is_some() {
+                                self.func.instruction(&Instruction::Drop);
+                            }
                             let relative = self.depth - labels.break_depth - 1;
                             self.func.instruction(&Instruction::Br(relative));
+                        } else {
+                            // Outside any loop: return the value from function
+                            self.func.instruction(&Instruction::Return);
                         }
                     }
                 }
