@@ -251,10 +251,9 @@ impl FuncCompiler<'_> {
     /// Emit a field access: load from record/variant pointer + field offset.
     pub(super) fn emit_member(&mut self, object: &IrExpr, field: &str) {
         let fields = self.extract_record_fields(&object.ty);
-        // If the object is a variant type, fields start after the tag (offset +4)
         let tag_offset = self.variant_tag_offset(&object.ty);
 
-        self.emit_expr(object); // ptr on stack
+        self.emit_expr(object);
 
         if let Some((field_offset, field_ty)) = values::field_offset(&fields, field) {
             let total_offset = tag_offset + field_offset;

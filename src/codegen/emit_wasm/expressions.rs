@@ -779,9 +779,11 @@ impl FuncCompiler<'_> {
                     if type_args.is_empty() {
                         fields.clone()
                     } else {
-                        // Substitute type parameters: T → type_args[0], U → type_args[1], etc.
-                        // Generic params are typically single-letter names (T, U, A, B)
-                        let generic_names = ["T", "U", "A", "B", "K", "V"];
+                        // Extract generic param names from field types (in order of first appearance)
+                        let mut generic_names: Vec<&str> = Vec::new();
+                        for (_, fty) in fields {
+                            collect_type_param_names(fty, &mut generic_names);
+                        }
                         fields.iter().map(|(fname, fty)| {
                             let resolved = substitute_type_params(fty, &generic_names, type_args);
                             (fname.clone(), resolved)
@@ -809,6 +811,29 @@ impl FuncCompiler<'_> {
         None
     }
 
+}
+
+/// Collect type parameter names from a type (Named("X", []) where X is a single-letter or TypeVar).
+fn collect_type_param_names<'a>(ty: &'a Ty, names: &mut Vec<&'a str>) {
+    match ty {
+        Ty::Named(name, args) if args.is_empty() && name.len() <= 2 && name.chars().next().map_or(false, |c| c.is_uppercase()) => {
+            if !names.contains(&name.as_str()) {
+                names.push(name.as_str());
+            }
+        }
+        Ty::TypeVar(name) => {
+            if !names.contains(&name.as_str()) {
+                names.push(name.as_str());
+            }
+        }
+        Ty::Applied(_, args) => { for a in args { collect_type_param_names(a, names); } }
+        Ty::Tuple(elems) => { for e in elems { collect_type_param_names(e, names); } }
+        Ty::Fn { params, ret } => {
+            for p in params { collect_type_param_names(p, names); }
+            collect_type_param_names(ret, names);
+        }
+        _ => {}
+    }
 }
 
 /// Substitute type parameters in a type. Named("T", []) → type_args[index of "T"].

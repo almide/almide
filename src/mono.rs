@@ -47,7 +47,7 @@ pub fn monomorphize(program: &mut IrProgram) {
         // Clone and specialize new functions
         let mut new_functions = Vec::new();
         for ((fn_name, suffix), bindings) in &new {
-            if let Some(orig) = program.functions.iter().find(|f| f.name == *fn_name) {
+                if let Some(orig) = program.functions.iter().find(|f| f.name == *fn_name) {
                 let specialized = specialize_function(orig, suffix, bindings);
                 new_functions.push(specialized);
             }
@@ -72,9 +72,13 @@ pub fn monomorphize(program: &mut IrProgram) {
     }
 
     // 元の generic/open-record 関数を削除（specialized 版が代わりに使われる）
-    // instance が見つかった関数のみ削除
     let mono_fn_names: std::collections::HashSet<String> = all_instances.keys().map(|(name, _)| name.clone()).collect();
     program.functions.retain(|f| !mono_fn_names.contains(&f.name));
+
+    // Propagate concrete types: after rewrite, some expressions still have TypeVar
+    // types (e.g., `let x = mono_fn(...)` where x.ty was set before mono).
+    // Walk every function and fix: Bind.ty ← value.ty, Var.ty ← VarTable, Match.ty ← arm bodies.
+    propagate_concrete_types(program);
 }
 
 /// Info about a structurally-bounded type parameter in a function.
@@ -667,6 +671,8 @@ fn rewrite_expr_calls(
                         let suffix = mangle_suffix(&bindings);
                         if instances.contains_key(&(name.clone(), suffix.clone())) {
                             *name = format!("{}__{}", name, suffix);
+                            // Also update the call expression's type with concrete bindings
+                            expr.ty = substitute_ty(&expr.ty, &bindings);
                         }
                     }
                 }
@@ -811,6 +817,14 @@ fn extract_typevar_binding(param_ty: &Ty, arg_ty: &Ty, var_name: &str) -> Ty {
         // OpenRecord param (or its Named alias) maps directly to the concrete arg type
         (Ty::OpenRecord { .. }, _) if var_name.starts_with("__open_") => arg_ty.clone(),
         (Ty::Named(_, _), _) if var_name.starts_with("__open_") => arg_ty.clone(),
+        // Fn types: match params and return type
+        (Ty::Fn { params: p_params, ret: p_ret }, Ty::Fn { params: a_params, ret: a_ret }) if p_params.len() == a_params.len() => {
+            for (p, a) in p_params.iter().zip(a_params.iter()) {
+                let r = extract_typevar_binding(p, a, var_name);
+                if !matches!(r, Ty::Unknown) { return r; }
+            }
+            extract_typevar_binding(p_ret, a_ret, var_name)
+        }
         _ => {
             // If same constructor, recursively match type args
             if param_ty.constructor_id() == arg_ty.constructor_id() {
@@ -835,5 +849,229 @@ fn extract_typevar_binding(param_ty: &Ty, arg_ty: &Ty, var_name: &str) -> Ty {
             }
             Ty::Unknown // no match for this var_name in this branch
         }
+    }
+}
+
+// ── Post-mono type propagation ──────────────────────────────────────
+//
+// After monomorphization rewrites call names, some expressions in caller
+// functions still carry generic types (e.g., `let x = maybe_map(...)` where
+// x.ty = Maybe[TypeVar("B")]). This pass walks the entire IR bottom-up and
+// propagates concrete types from values to bindings and from VarTable to Var
+// expressions, eliminating residual TypeVars.
+
+fn propagate_concrete_types(program: &mut IrProgram) {
+    for func in &mut program.functions {
+        propagate_expr(&mut func.body, &mut program.var_table);
+    }
+    for tl in &mut program.top_lets {
+        propagate_expr(&mut tl.value, &mut program.var_table);
+    }
+}
+
+fn has_typevar(ty: &Ty) -> bool {
+    ty.any_child_recursive(&|t| {
+        matches!(t, Ty::TypeVar(_))
+            || matches!(t, Ty::Named(n, args) if args.is_empty() && n.len() <= 2 && n.chars().next().map_or(false, |c| c.is_uppercase()))
+    })
+}
+
+fn propagate_expr(expr: &mut IrExpr, vt: &mut VarTable) {
+    match &mut expr.kind {
+        IrExprKind::Block { stmts, expr: tail } | IrExprKind::DoBlock { stmts, expr: tail } => {
+            for s in stmts.iter_mut() { propagate_stmt(s, vt); }
+            if let Some(e) = tail { propagate_expr(e, vt); }
+            // Block type = tail type
+            if let Some(e) = tail {
+                if has_typevar(&expr.ty) && !has_typevar(&e.ty) {
+                    expr.ty = e.ty.clone();
+                }
+            }
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            propagate_expr(cond, vt);
+            propagate_expr(then, vt);
+            propagate_expr(else_, vt);
+            if has_typevar(&expr.ty) && !has_typevar(&then.ty) { expr.ty = then.ty.clone(); }
+        }
+        IrExprKind::Match { subject, arms } => {
+            propagate_expr(subject, vt);
+            // Propagate concrete types into pattern bindings
+            let subj_ty = subject.ty.clone();
+            for arm in arms.iter_mut() {
+                propagate_pattern_types(&arm.pattern, &subj_ty, vt);
+                if let Some(g) = &mut arm.guard { propagate_expr(g, vt); }
+                propagate_expr(&mut arm.body, vt);
+            }
+            // Match type = first concrete arm body type
+            if has_typevar(&expr.ty) {
+                for arm in arms.iter() {
+                    if !has_typevar(&arm.body.ty) {
+                        expr.ty = arm.body.ty.clone();
+                        break;
+                    }
+                }
+            }
+        }
+        IrExprKind::Call { target, args, .. } => {
+            match target {
+                CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } => propagate_expr(object, vt),
+                _ => {}
+            }
+            for a in args.iter_mut() { propagate_expr(a, vt); }
+        }
+        IrExprKind::Var { id } => {
+            // Sync Var type with VarTable
+            let vt_ty = &vt.get(*id).ty;
+            if has_typevar(&expr.ty) && !has_typevar(vt_ty) {
+                expr.ty = vt_ty.clone();
+            }
+        }
+        IrExprKind::ForIn { iterable, body, .. } => {
+            propagate_expr(iterable, vt);
+            for s in body.iter_mut() { propagate_stmt(s, vt); }
+        }
+        IrExprKind::While { cond, body } => {
+            propagate_expr(cond, vt);
+            for s in body.iter_mut() { propagate_stmt(s, vt); }
+        }
+        IrExprKind::BinOp { left, right, .. } => { propagate_expr(left, vt); propagate_expr(right, vt); }
+        IrExprKind::UnOp { operand, .. } => propagate_expr(operand, vt),
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
+            for e in elements.iter_mut() { propagate_expr(e, vt); }
+        }
+        IrExprKind::Record { fields, .. } | IrExprKind::SpreadRecord { fields, .. } => {
+            for (_, e) in fields.iter_mut() { propagate_expr(e, vt); }
+        }
+        IrExprKind::Lambda { body, .. } => propagate_expr(body, vt),
+        IrExprKind::OptionSome { expr: inner } | IrExprKind::ResultOk { expr: inner }
+        | IrExprKind::ResultErr { expr: inner } | IrExprKind::Try { expr: inner }
+        | IrExprKind::Await { expr: inner } | IrExprKind::Clone { expr: inner }
+        | IrExprKind::Deref { expr: inner } => propagate_expr(inner, vt),
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
+        | IrExprKind::IndexAccess { object, .. } => propagate_expr(object, vt),
+        IrExprKind::MapLiteral { entries } => {
+            for (k, v) in entries.iter_mut() { propagate_expr(k, vt); propagate_expr(v, vt); }
+        }
+        IrExprKind::StringInterp { parts } => {
+            for p in parts.iter_mut() {
+                if let IrStringPart::Expr { expr: e } = p { propagate_expr(e, vt); }
+            }
+        }
+        IrExprKind::Range { start, end, .. } => { propagate_expr(start, vt); propagate_expr(end, vt); }
+        IrExprKind::MapAccess { object, key } => { propagate_expr(object, vt); propagate_expr(key, vt); }
+        _ => {}
+    }
+}
+
+/// Propagate concrete types from match subject into pattern-bound variables.
+/// When subject_ty is concrete (e.g., Maybe[Int]), update VarTable for Bind vars
+/// inside Constructor/Some/Ok/Err patterns so they get the concrete payload type.
+fn propagate_pattern_types(pattern: &IrPattern, subject_ty: &Ty, vt: &mut VarTable) {
+    match pattern {
+        IrPattern::Constructor { args, .. } => {
+            // Constructor payload: for each bound arg, if VarTable has TypeVar,
+            // try to resolve from the subject_ty's variant fields
+            for arg in args {
+                if let IrPattern::Bind { var } = arg {
+                    let cur = &vt.get(*var).ty;
+                    if has_typevar(cur) {
+                        // Look up the variant's field types from type registry
+                        // For now: if subject is Named with type_args, substitute
+                        // the var's type using those args as generic bindings
+                        if let Ty::Named(_, type_args) = subject_ty {
+                            if !type_args.is_empty() {
+                                let old = cur.clone();
+                                let mut generic_names: Vec<&str> = Vec::new();
+                                collect_type_param_names_from_ty(&old, &mut generic_names);
+                                let new = substitute_named_type_params(&old, &generic_names, type_args);
+                                if new != old {
+                                    vt.entries[var.0 as usize].ty = new;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        IrPattern::Some { inner } | IrPattern::Ok { inner } => {
+            if let IrPattern::Bind { var } = inner.as_ref() {
+                let inner_ty = match subject_ty {
+                    Ty::Applied(_, args) if !args.is_empty() => Some(args[0].clone()),
+                    _ => None,
+                };
+                if let Some(ty) = inner_ty {
+                    if has_typevar(&vt.get(*var).ty) && !has_typevar(&ty) {
+                        vt.entries[var.0 as usize].ty = ty;
+                    }
+                }
+            }
+        }
+        IrPattern::Err { inner } => {
+            if let IrPattern::Bind { var } = inner.as_ref() {
+                let inner_ty = match subject_ty {
+                    Ty::Applied(_, args) if args.len() >= 2 => Some(args[1].clone()),
+                    _ => None,
+                };
+                if let Some(ty) = inner_ty {
+                    if has_typevar(&vt.get(*var).ty) && !has_typevar(&ty) {
+                        vt.entries[var.0 as usize].ty = ty;
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_type_param_names_from_ty<'a>(ty: &'a Ty, names: &mut Vec<&'a str>) {
+    match ty {
+        Ty::Named(n, args) if args.is_empty() && n.len() <= 2 && n.chars().next().map_or(false, |c| c.is_uppercase()) => {
+            if !names.contains(&n.as_str()) { names.push(n.as_str()); }
+        }
+        Ty::TypeVar(n) => { if !names.contains(&n.as_str()) { names.push(n.as_str()); } }
+        Ty::Applied(_, args) | Ty::Named(_, args) => { for a in args { collect_type_param_names_from_ty(a, names); } }
+        Ty::Tuple(elems) => { for e in elems { collect_type_param_names_from_ty(e, names); } }
+        Ty::Fn { params, ret } => { for p in params { collect_type_param_names_from_ty(p, names); } collect_type_param_names_from_ty(ret, names); }
+        _ => {}
+    }
+}
+
+fn substitute_named_type_params(ty: &Ty, generic_names: &[&str], type_args: &[Ty]) -> Ty {
+    match ty {
+        Ty::Named(n, args) if args.is_empty() => {
+            if let Some(idx) = generic_names.iter().position(|&g| g == n.as_str()) {
+                if let Some(concrete) = type_args.get(idx) { return concrete.clone(); }
+            }
+            ty.clone()
+        }
+        Ty::TypeVar(n) => {
+            if let Some(idx) = generic_names.iter().position(|&g| g == n.as_str()) {
+                if let Some(concrete) = type_args.get(idx) { return concrete.clone(); }
+            }
+            ty.clone()
+        }
+        _ => ty.map_children(&|child| substitute_named_type_params(child, generic_names, type_args)),
+    }
+}
+
+fn propagate_stmt(stmt: &mut IrStmt, vt: &mut VarTable) {
+    match &mut stmt.kind {
+        IrStmtKind::Bind { var, ty, value, .. } => {
+            propagate_expr(value, vt);
+            // Sync Bind type and VarTable with value's concrete type
+            if has_typevar(ty) && !has_typevar(&value.ty) {
+                *ty = value.ty.clone();
+                vt.entries[var.0 as usize].ty = value.ty.clone();
+            }
+        }
+        IrStmtKind::BindDestructure { value, .. } => propagate_expr(value, vt),
+        IrStmtKind::Assign { value, .. } => propagate_expr(value, vt),
+        IrStmtKind::IndexAssign { index, value, .. } => { propagate_expr(index, vt); propagate_expr(value, vt); }
+        IrStmtKind::MapInsert { key, value, .. } => { propagate_expr(key, vt); propagate_expr(value, vt); }
+        IrStmtKind::FieldAssign { value, .. } => propagate_expr(value, vt),
+        IrStmtKind::Expr { expr } => propagate_expr(expr, vt),
+        IrStmtKind::Guard { cond, else_ } => { propagate_expr(cond, vt); propagate_expr(else_, vt); }
+        IrStmtKind::Comment { .. } => {}
     }
 }
