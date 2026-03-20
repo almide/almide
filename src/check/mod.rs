@@ -25,7 +25,7 @@ use crate::ast;
 use crate::ast::ExprId;
 use crate::diagnostic::Diagnostic;
 use crate::types::{Ty, TypeEnv, FnSig, VariantCase, VariantPayload, ProtocolDef, ProtocolMethodSig};
-use types::{TyVarId, Constraint, is_inference_var, resolve_vars};
+use types::{TyVarId, Constraint, is_inference_var, UnionFind, resolve_ty};
 
 pub(crate) fn err(msg: impl Into<String>, hint: impl Into<String>, ctx: impl Into<String>) -> Diagnostic {
     Diagnostic::error(msg, hint, ctx)
@@ -40,10 +40,9 @@ pub struct Checker {
     /// Current expression span — set by infer_expr, used to annotate diagnostics
     pub(crate) current_span: Option<crate::ast::Span>,
     // Inference state
-    next_tyvar: u32,
     pub(crate) infer_types: HashMap<ExprId, Ty>,
     pub(crate) constraints: Vec<Constraint>,
-    pub(crate) solutions: HashMap<TyVarId, Ty>,
+    pub(crate) uf: UnionFind,
 }
 
 impl Checker {
@@ -52,8 +51,8 @@ impl Checker {
             env: TypeEnv::new(), diagnostics: Vec::new(),
             source_file: None, source_text: None,
             expr_types: HashMap::new(), current_span: None,
-            next_tyvar: 0, infer_types: HashMap::new(),
-            constraints: Vec::new(), solutions: HashMap::new(),
+            infer_types: HashMap::new(),
+            constraints: Vec::new(), uf: UnionFind::new(),
         };
         checker.register_builtin_protocols();
         checker
@@ -172,8 +171,7 @@ impl Checker {
     }
 
     pub(crate) fn fresh_var(&mut self) -> Ty {
-        let id = self.next_tyvar;
-        self.next_tyvar += 1;
+        let id = self.uf.fresh();
         Ty::TypeVar(format!("?{}", id))
     }
 
@@ -219,8 +217,7 @@ impl Checker {
         for decl in program.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
         for (id, ity) in &self.infer_types {
-            let ty = resolve_vars(ity, &self.solutions);
-            self.expr_types.insert(*id, resolve_vars(&ty, &self.solutions));
+            self.expr_types.insert(*id, resolve_ty(ity, &self.uf));
         }
         // Unused import warnings
         for imp in &program.imports {
@@ -247,15 +244,14 @@ impl Checker {
 
     pub fn check_module_bodies(&mut self, prog: &mut ast::Program) -> HashMap<ExprId, Ty> {
         let saved = (std::mem::take(&mut self.expr_types), std::mem::take(&mut self.infer_types),
-            std::mem::take(&mut self.constraints), std::mem::take(&mut self.solutions));
+            std::mem::take(&mut self.constraints), std::mem::replace(&mut self.uf, UnionFind::new()));
         for decl in prog.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
         for (id, ity) in &self.infer_types {
-            let ty = resolve_vars(ity, &self.solutions);
-            self.expr_types.insert(*id, resolve_vars(&ty, &self.solutions));
+            self.expr_types.insert(*id, resolve_ty(ity, &self.uf));
         }
         let module_types = std::mem::take(&mut self.expr_types);
-        self.expr_types = saved.0; self.infer_types = saved.1; self.constraints = saved.2; self.solutions = saved.3;
+        self.expr_types = saved.0; self.infer_types = saved.1; self.constraints = saved.2; self.uf = saved.3;
         module_types
     }
 
@@ -263,27 +259,16 @@ impl Checker {
 
     fn solve_constraints(&mut self) {
         let constraints = std::mem::take(&mut self.constraints);
-        self.solve_until_stable(&constraints);
-        self.emit_type_errors(&constraints);
-    }
-
-    /// Fixed-point: apply constraints until solutions stabilize.
-    /// Each round may resolve TypeVars that were overwritten in previous rounds.
-    fn solve_until_stable(&mut self, constraints: &[Constraint]) {
-        let prev = self.solutions.clone();
-        for c in constraints {
+        // Union-Find makes constraint solving order-independent.
+        // A single pass suffices; re-processing is a harmless no-op.
+        for c in &constraints {
             self.unify_infer(&c.expected, &c.actual);
         }
-        if self.solutions != prev {
-            self.solve_until_stable(constraints);
-        }
-    }
-
-    fn emit_type_errors(&mut self, constraints: &[Constraint]) {
-        for c in constraints {
+        // Emit diagnostics for unresolvable mismatches
+        for c in &constraints {
             if !self.unify_infer(&c.expected, &c.actual) {
-                let exp = resolve_vars(&c.expected, &self.solutions);
-                let act = resolve_vars(&c.actual, &self.solutions);
+                let exp = resolve_ty(&c.expected, &self.uf);
+                let act = resolve_ty(&c.actual, &self.uf);
                 if exp != Ty::Unknown && act != Ty::Unknown {
                     let hint = Self::hint_with_conversion(
                         "Fix the expression type or change the expected type",
@@ -319,96 +304,72 @@ impl Checker {
     }
 
     fn unify_infer(&mut self, a: &Ty, b: &Ty) -> bool {
-        // Handle inference variables.
-        // When overwriting a concrete solution with a TypeVar, propagate the concrete
-        // value directly to the new TypeVar. This prevents information loss within a
-        // single constraint-solving round.
-        if let Some(id_a) = is_inference_var(a) {
-            if let Some(id_b) = is_inference_var(b) {
-                if id_a == id_b { return true; }
+        // Inference vars: union/bind immediately, always succeeds.
+        // Conflicting concrete bindings are unified structurally when possible,
+        // but the inference var case never returns false — matching HashMap semantics.
+        match (is_inference_var(a), is_inference_var(b)) {
+            (Some(ia), Some(ib)) => {
+                self.uf.union(ia.0, ib.0);
+                true
             }
-            if !self.occurs(id_a, b) {
-                if let Some(existing) = self.solutions.get(&id_a).cloned() {
-                    if is_inference_var(&existing).is_none() {
-                        if let Some(id_b) = is_inference_var(b) {
-                            if self.solutions.get(&id_b).map_or(true, |s| is_inference_var(s).is_some()) {
-                                self.solutions.insert(id_b, existing);
-                            }
-                        }
+            (Some(ia), None) => {
+                let b_resolved = resolve_ty(b, &self.uf);
+                if !self.uf.occurs(ia.0, &b_resolved) {
+                    if let Some(existing) = self.uf.bind(ia.0, b_resolved.clone()) {
+                        // Existing binding — try structural unify but don't fail
+                        self.unify_infer(&existing, &b_resolved);
                     }
                 }
-                self.solutions.insert(id_a, b.clone());
+                true
             }
-            return true;
-        }
-        if let Some(id_b) = is_inference_var(b) {
-            if !self.occurs(id_b, a) {
-                if let Some(existing) = self.solutions.get(&id_b).cloned() {
-                    if is_inference_var(&existing).is_none() {
-                        if let Some(id_a) = is_inference_var(a) {
-                            if self.solutions.get(&id_a).map_or(true, |s| is_inference_var(s).is_some()) {
-                                self.solutions.insert(id_a, existing);
-                            }
-                        }
+            (None, Some(ib)) => {
+                let a_resolved = resolve_ty(a, &self.uf);
+                if !self.uf.occurs(ib.0, &a_resolved) {
+                    if let Some(existing) = self.uf.bind(ib.0, a_resolved.clone()) {
+                        self.unify_infer(&a_resolved, &existing);
                     }
                 }
-                self.solutions.insert(id_b, a.clone());
+                true
             }
-            return true;
-        }
-        match (a, b) {
-            (Ty::Applied(id1, args1), Ty::Applied(id2, args2)) if id1 == id2 && args1.len() == args2.len() => {
-                args1.iter().zip(args2.iter()).all(|(x, y)| self.unify_infer(x, y))
-            }
-            (Ty::Tuple(a), Ty::Tuple(b)) if a.len() == b.len() => a.iter().zip(b.iter()).all(|(x, y)| self.unify_infer(x, y)),
-            (Ty::Fn { params: ap, ret: ar }, Ty::Fn { params: bp, ret: br }) if ap.len() == bp.len() =>
-                ap.iter().zip(bp.iter()).all(|(x, y)| self.unify_infer(x, y)) && self.unify_infer(ar, br),
-            _ => {
-                if *a == Ty::Unknown || *b == Ty::Unknown { return true; }
-                // Record structural unification: match fields by name
-                match (a, b) {
-                    (Ty::Record { fields: fa }, Ty::Record { fields: fb }) => {
-                        fa.len() == fb.len() && fa.iter().all(|(n, t)| fb.iter().any(|(n2, t2)| n == n2 && self.unify_infer(t, t2)))
-                    }
-                    (Ty::OpenRecord { fields: req, .. }, Ty::Record { fields: actual })
-                    | (Ty::OpenRecord { fields: req, .. }, Ty::OpenRecord { fields: actual, .. }) => {
-                        req.iter().all(|(n, t)| actual.iter().any(|(n2, t2)| n == n2 && self.unify_infer(t, t2)))
-                    }
-                    (Ty::Named(na, args_a), Ty::Named(nb, args_b)) if na == nb => {
-                        // HM: structurally unify type constructor arguments
-                        args_a.len() == args_b.len()
-                            && args_a.iter().zip(args_b.iter()).all(|(ta, tb)|
-                                self.unify_infer(ta, tb))
-                            || (args_a.is_empty() || args_b.is_empty()) // backward compat: empty args = no constraint
-                    }
-                    // Resolve Named types for structural comparison
-                    (Ty::Named(_, _), _) => {
-                        let resolved = self.env.resolve_named(a);
-                        if resolved != *a { self.unify_infer(&resolved, b) }
-                        else { a.compatible(b) }
-                    }
-                    (_, Ty::Named(_, _)) => {
-                        let resolved = self.env.resolve_named(b);
-                        if resolved != *b { self.unify_infer(a, &resolved) }
-                        else { a.compatible(b) }
-                    }
-                    _ => a.compatible(b),
-                }
+            (None, None) => {
+                let a_resolved = resolve_ty(a, &self.uf);
+                let b_resolved = resolve_ty(b, &self.uf);
+                self.unify_structural(&a_resolved, &b_resolved)
             }
         }
     }
 
-    fn occurs(&self, var: TyVarId, ty: &Ty) -> bool {
-        match ty {
-            Ty::TypeVar(name) if name.starts_with('?') => {
-                if let Ok(id) = name[1..].parse::<u32>() {
-                    id == var.0 || self.solutions.get(&TyVarId(id)).map_or(false, |s| self.occurs(var, s))
-                } else { false }
+    fn unify_structural(&mut self, a: &Ty, b: &Ty) -> bool {
+        if *a == Ty::Unknown || *b == Ty::Unknown { return true; }
+        match (a, b) {
+            (Ty::Applied(id1, args1), Ty::Applied(id2, args2)) if id1 == id2 && args1.len() == args2.len() => {
+                args1.iter().zip(args2.iter()).all(|(x, y)| self.unify_infer(x, y))
             }
-            Ty::Applied(_, args) => args.iter().any(|a| self.occurs(var, a)),
-            Ty::Tuple(elems) => elems.iter().any(|e| self.occurs(var, e)),
-            Ty::Fn { params, ret } => params.iter().any(|p| self.occurs(var, p)) || self.occurs(var, ret),
-            _ => false,
+            (Ty::Tuple(a), Ty::Tuple(b)) if a.len() == b.len() =>
+                a.iter().zip(b.iter()).all(|(x, y)| self.unify_infer(x, y)),
+            (Ty::Fn { params: ap, ret: ar }, Ty::Fn { params: bp, ret: br }) if ap.len() == bp.len() =>
+                ap.iter().zip(bp.iter()).all(|(x, y)| self.unify_infer(x, y)) && self.unify_infer(ar, br),
+            (Ty::Record { fields: fa }, Ty::Record { fields: fb }) => {
+                fa.len() == fb.len() && fa.iter().all(|(n, t)| fb.iter().any(|(n2, t2)| n == n2 && self.unify_infer(t, t2)))
+            }
+            (Ty::OpenRecord { fields: req, .. }, Ty::Record { fields: actual })
+            | (Ty::OpenRecord { fields: req, .. }, Ty::OpenRecord { fields: actual, .. }) => {
+                req.iter().all(|(n, t)| actual.iter().any(|(n2, t2)| n == n2 && self.unify_infer(t, t2)))
+            }
+            (Ty::Named(na, args_a), Ty::Named(nb, args_b)) if na == nb => {
+                args_a.len() == args_b.len()
+                    && args_a.iter().zip(args_b.iter()).all(|(ta, tb)| self.unify_infer(ta, tb))
+                    || (args_a.is_empty() || args_b.is_empty())
+            }
+            (Ty::Named(_, _), _) => {
+                let resolved = self.env.resolve_named(a);
+                if resolved != *a { self.unify_infer(&resolved, b) } else { a.compatible(b) }
+            }
+            (_, Ty::Named(_, _)) => {
+                let resolved = self.env.resolve_named(b);
+                if resolved != *b { self.unify_infer(a, &resolved) } else { a.compatible(b) }
+            }
+            _ => a.compatible(b),
         }
     }
 
@@ -698,7 +659,7 @@ impl Checker {
     /// Constrain an effect fn body against its return type signature.
     /// Effect fns accept: Unit body (control-flow returns), unwrapped T, or full Result[T, E].
     fn constrain_effect_body(&mut self, name: &str, ret_ty: &Ty, body_ty: Ty) {
-        let body_resolved = resolve_vars(&body_ty, &self.solutions);
+        let body_resolved = resolve_ty(&body_ty, &self.uf);
         if body_resolved == Ty::Unit { return; } // do blocks, while loops, guard patterns return via control flow
         if let Ty::Applied(crate::types::TypeConstructorId::Result, args) = ret_ty {
             if args.len() >= 1 {
@@ -765,7 +726,7 @@ impl Checker {
             }
             ast::Decl::TopLet { name, value, .. } => {
                 let ity = self.infer_expr(value);
-                let resolved = resolve_vars(&ity, &self.solutions);
+                let resolved = resolve_ty(&ity, &self.uf);
                 // Update env.top_lets with the fully inferred type
                 if matches!(self.env.top_lets.get(name.as_str()), Some(Ty::Unknown) | None) {
                     self.env.top_lets.insert(name.clone(), resolved);
