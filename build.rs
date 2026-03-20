@@ -451,7 +451,7 @@ fn main() {
                 format!("vec![{}]", gs.join(", "))
             };
             sig_arms.push_str(&format!(
-                "        (\"{module}\", \"{func}\") => FnSig {{ generics: {generics}, params: vec![{params}], ret: {ret}, is_effect: {effect}, structural_bounds: std::collections::HashMap::new() }},\n",
+                "        (\"{module}\", \"{func}\") => FnSig {{ generics: {generics}, params: vec![{params}], ret: {ret}, is_effect: {effect}, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() }},\n",
                 module = module_name,
                 func = fn_name,
                 generics = generics_str,
@@ -638,7 +638,7 @@ fn main() {
             // Generate alias arms
             for alias in &def.aliases {
                 sig_arms.push_str(&format!(
-                    "        (\"{module}\", \"{alias}\") => FnSig {{ generics: {generics}, params: vec![{params}], ret: {ret}, is_effect: {effect}, structural_bounds: std::collections::HashMap::new() }},\n",
+                    "        (\"{module}\", \"{alias}\") => FnSig {{ generics: {generics}, params: vec![{params}], ret: {ret}, is_effect: {effect}, structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() }},\n",
                     module = module_name,
                     generics = generics_str,
                     params = all_params_str.join(", "),

@@ -43,6 +43,8 @@ pub struct TypeEnv {
     pub eq_types: std::collections::HashSet<std::string::String>,
     /// Structural bounds for generic type parameters: TypeVar name → OpenRecord constraint
     pub structural_bounds: std::collections::HashMap<std::string::String, Ty>,
+    /// Protocol bounds for generic type parameters in scope: TypeVar name → list of protocol names
+    pub generic_protocol_bounds: std::collections::HashMap<std::string::String, Vec<std::string::String>>,
     /// Minimum required arguments for functions with default params: fn key -> min count
     pub fn_min_params: std::collections::HashMap<std::string::String, usize>,
     /// Protocol definitions: protocol name → ProtocolDef
@@ -75,6 +77,7 @@ impl TypeEnv {
             top_lets: std::collections::HashMap::new(),
             eq_types: std::collections::HashSet::new(),
             structural_bounds: std::collections::HashMap::new(),
+            generic_protocol_bounds: std::collections::HashMap::new(),
             fn_min_params: std::collections::HashMap::new(),
             protocols: std::collections::HashMap::new(),
             type_protocols: std::collections::HashMap::new(),

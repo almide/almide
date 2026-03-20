@@ -89,13 +89,15 @@ pub struct FnSig {
     pub generics: Vec<std::string::String>,
     /// Structural bounds for generics: TypeVar name → OpenRecord constraint type
     pub structural_bounds: std::collections::HashMap<std::string::String, Ty>,
+    /// Protocol bounds for generics: TypeVar name → list of protocol names
+    pub protocol_bounds: std::collections::HashMap<std::string::String, Vec<std::string::String>>,
 }
 
 /// Convenience macro for creating FnSig without generics (stdlib functions)
 #[macro_export]
 macro_rules! fn_sig {
     (params: $params:expr, ret: $ret:expr, is_effect: $eff:expr) => {
-        FnSig { params: $params, ret: $ret, is_effect: $eff, generics: vec![], structural_bounds: std::collections::HashMap::new() }
+        FnSig { params: $params, ret: $ret, is_effect: $eff, generics: vec![], structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new() }
     };
 }
 

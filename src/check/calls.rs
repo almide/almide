@@ -117,6 +117,20 @@ impl Checker {
                         return self.check_named_call(&convention_key, &all_args);
                     }
                 }
+                // Protocol method on TypeVar: item.show() where item: T, T: Showable
+                if let Ty::TypeVar(tv) = &obj_concrete {
+                    if let Some(proto_names) = self.env.generic_protocol_bounds.get(tv).cloned() {
+                        for proto_name in &proto_names {
+                            if let Some(proto_def) = self.env.protocols.get(proto_name).cloned() {
+                                if let Some(method_sig) = proto_def.methods.iter().find(|m| m.name == *field) {
+                                    // Resolve method return type: substitute Self → T (the TypeVar)
+                                    let ret = self.substitute_self_in_ty(&method_sig.ret, &obj_concrete);
+                                    return ret;
+                                }
+                            }
+                        }
+                    }
+                }
                 // UFCS: user-defined function obj.func(args) → func(obj, args)
                 if self.env.functions.contains_key(field) {
                     let mut all_args = vec![obj_ty];
@@ -145,6 +159,23 @@ impl Checker {
                     (def == ty && name.starts_with(|c: char| c.is_uppercase())).then(|| name.clone())
                 })
             }
+            _ => None,
+        }
+    }
+
+    /// Resolve a type to its name for protocol checking purposes.
+    /// Handles Named types, Records/Variants (by looking up type definitions),
+    /// and TypeVars (which are not concrete — returns None to skip checking).
+    fn resolve_type_name_for_protocol(&self, ty: &Ty) -> Option<String> {
+        match ty {
+            Ty::Named(name, _) => Some(name.clone()),
+            Ty::Record { .. } | Ty::Variant { .. } => {
+                self.env.types.iter().find_map(|(name, def)| {
+                    (def == ty && name.starts_with(|c: char| c.is_uppercase())).then(|| name.clone())
+                })
+            }
+            // TypeVars and inference vars are not concrete — skip protocol checking
+            Ty::TypeVar(_) | Ty::Unknown => None,
             _ => None,
         }
     }
@@ -253,6 +284,25 @@ impl Checker {
                 let concrete_args: Vec<Ty> = arg_tys.iter().map(|a| resolve_vars(a, &self.solutions)).collect();
                 for ((pname, pty), aty) in sig.params.iter().zip(concrete_args.iter()) {
                     self.unify_call_arg(name, pname, pty, aty, &sig.structural_bounds, &mut bindings);
+                }
+                // Verify protocol bounds on generic type parameters
+                for (tv_name, proto_names) in &sig.protocol_bounds {
+                    if let Some(concrete_ty) = bindings.get(tv_name) {
+                        let type_name = self.resolve_type_name_for_protocol(concrete_ty);
+                        if let Some(type_name) = type_name {
+                            for proto in proto_names {
+                                let has_proto = self.env.type_protocols
+                                    .get(&type_name)
+                                    .map_or(false, |ps| ps.contains(proto));
+                                if !has_proto {
+                                    self.emit(super::err(
+                                        format!("type '{}' does not implement protocol '{}'", type_name, proto),
+                                        format!("Add `: {}` to the type declaration: type {}: {} = ...", proto, type_name, proto),
+                                        format!("call to {}()", name)));
+                                }
+                            }
+                        }
+                    }
                 }
                 // Propagate resolved types back to inference variables
                 for ((_, pty), aty) in sig.params.iter().zip(arg_tys.iter()) {
@@ -480,6 +530,14 @@ impl Checker {
         }
 
         None
+    }
+
+    /// Substitute Ty::TypeVar("Self") with a concrete type in a protocol method return type.
+    fn substitute_self_in_ty(&self, ty: &Ty, replacement: &Ty) -> Ty {
+        match ty {
+            Ty::TypeVar(name) if name == "Self" => replacement.clone(),
+            _ => ty.map_children(&|child| self.substitute_self_in_ty(child, replacement)),
+        }
     }
 
     /// Check if a type has a Codec encode function registered.

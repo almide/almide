@@ -388,10 +388,25 @@ impl Checker {
         prefix.map(|p| format!("{}.{}", p, name)).unwrap_or_else(|| name.to_string())
     }
 
+    /// Collect protocol bounds from generic params: TypeVar name → list of protocol names.
+    fn collect_protocol_bounds(&self, generics: &Option<Vec<ast::GenericParam>>) -> HashMap<String, Vec<String>> {
+        let mut pb = HashMap::new();
+        let gs = match generics { Some(gs) => gs, None => return pb };
+        for g in gs {
+            if let Some(bounds) = &g.bounds {
+                if !bounds.is_empty() {
+                    pb.insert(g.name.clone(), bounds.clone());
+                }
+            }
+        }
+        pb
+    }
+
     fn register_fn_sig(&mut self, name: &str, params: &[ast::Param], return_type: &ast::TypeExpr,
                         effect: &Option<bool>, r#async: &Option<bool>, generics: &Option<Vec<ast::GenericParam>>, prefix: Option<&str>) {
         let gnames: Vec<String> = generics.as_ref().map(|gs| gs.iter().map(|g| g.name.clone()).collect()).unwrap_or_default();
         let sb = self.collect_structural_bounds(generics);
+        let pb = self.collect_protocol_bounds(generics);
         for gn in &gnames { self.env.types.insert(gn.clone(), Ty::TypeVar(gn.clone())); }
         let ptys: Vec<(String, Ty)> = params.iter().map(|p| (p.name.clone(), self.resolve_type_expr(&p.ty))).collect();
         let ret = self.resolve_type_expr(return_type);
@@ -400,7 +415,7 @@ impl Checker {
         let key = Self::prefixed_key(prefix, name);
         if prefix.is_none() && is_effect { self.env.effect_fns.insert(name.to_string()); }
         let min_p = params.iter().take_while(|p| p.default.is_none()).count();
-        self.env.functions.insert(key.clone(), FnSig { params: ptys, ret, is_effect, generics: gnames, structural_bounds: sb });
+        self.env.functions.insert(key.clone(), FnSig { params: ptys, ret, is_effect, generics: gnames, structural_bounds: sb, protocol_bounds: pb });
         if min_p < params.len() {
             self.env.fn_min_params.insert(key, min_p);
         }
@@ -425,28 +440,29 @@ impl Checker {
         let type_ty = Ty::Named(type_name.to_string(), vec![]);
         let value_ty = Ty::Named("Value".to_string(), vec![]);
         let empty_sb = std::collections::HashMap::new();
+        let empty_pb = std::collections::HashMap::new();
         for d in derives {
             match d.as_str() {
                 "Eq" => {
                     let fn_key = format!("{}.eq", type_name);
                     if !self.env.functions.contains_key(&fn_key) {
-                        self.env.functions.insert(fn_key, FnSig { params: vec![("a".into(), type_ty.clone()), ("b".into(), type_ty.clone())], ret: Ty::Bool, is_effect: false, generics: vec![], structural_bounds: empty_sb.clone() });
+                        self.env.functions.insert(fn_key, FnSig { params: vec![("a".into(), type_ty.clone()), ("b".into(), type_ty.clone())], ret: Ty::Bool, is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone() });
                     }
                 }
                 "Repr" => {
                     let fn_key = format!("{}.repr", type_name);
                     if !self.env.functions.contains_key(&fn_key) {
-                        self.env.functions.insert(fn_key, FnSig { params: vec![("v".into(), type_ty.clone())], ret: Ty::String, is_effect: false, generics: vec![], structural_bounds: empty_sb.clone() });
+                        self.env.functions.insert(fn_key, FnSig { params: vec![("v".into(), type_ty.clone())], ret: Ty::String, is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone() });
                     }
                 }
                 "Codec" => {
                     let encode_key = format!("{}.encode", type_name);
                     if !self.env.functions.contains_key(&encode_key) {
-                        self.env.functions.insert(encode_key, FnSig { params: vec![("v".into(), type_ty.clone())], ret: value_ty.clone(), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone() });
+                        self.env.functions.insert(encode_key, FnSig { params: vec![("v".into(), type_ty.clone())], ret: value_ty.clone(), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone() });
                     }
                     let decode_key = format!("{}.decode", type_name);
                     if !self.env.functions.contains_key(&decode_key) {
-                        self.env.functions.insert(decode_key, FnSig { params: vec![("v".into(), value_ty.clone())], ret: Ty::result(type_ty.clone(), Ty::String), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone() });
+                        self.env.functions.insert(decode_key, FnSig { params: vec![("v".into(), value_ty.clone())], ret: Ty::result(type_ty.clone(), Ty::String), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone() });
                     }
                 }
                 _ => {}
@@ -609,21 +625,31 @@ impl Checker {
 
     // ── Declaration checking ──
 
-    /// Push generic type vars and structural bounds into the environment.
+    /// Push generic type vars, structural bounds, and protocol bounds into the environment.
     fn enter_generics(&mut self, generics: &Option<Vec<ast::GenericParam>>) {
         let gs = match generics { Some(gs) => gs, None => return };
         for g in gs.iter() {
             self.env.types.insert(g.name.clone(), Ty::TypeVar(g.name.clone()));
-            let bte = match &g.structural_bound { Some(bte) => bte, None => continue };
-            let bt = self.resolve_type_expr(bte);
-            self.env.structural_bounds.insert(g.name.clone(), match bt { Ty::Record { fields } => Ty::OpenRecord { fields }, o => o });
+            if let Some(bte) = &g.structural_bound {
+                let bt = self.resolve_type_expr(bte);
+                self.env.structural_bounds.insert(g.name.clone(), match bt { Ty::Record { fields } => Ty::OpenRecord { fields }, o => o });
+            }
+            if let Some(bounds) = &g.bounds {
+                if !bounds.is_empty() {
+                    self.env.generic_protocol_bounds.insert(g.name.clone(), bounds.clone());
+                }
+            }
         }
     }
 
-    /// Remove generic type vars and structural bounds from the environment.
+    /// Remove generic type vars, structural bounds, and protocol bounds from the environment.
     fn exit_generics(&mut self, generics: &Option<Vec<ast::GenericParam>>) {
         let gs = match generics { Some(gs) => gs, None => return };
-        for g in gs.iter() { self.env.types.remove(&g.name); self.env.structural_bounds.remove(&g.name); }
+        for g in gs.iter() {
+            self.env.types.remove(&g.name);
+            self.env.structural_bounds.remove(&g.name);
+            self.env.generic_protocol_bounds.remove(&g.name);
+        }
     }
 
     /// Constrain an effect fn body against its return type signature.

@@ -473,6 +473,7 @@ fn fn_sig_format_params() {
         is_effect: false,
         generics: vec![],
         structural_bounds: std::collections::HashMap::new(),
+        protocol_bounds: std::collections::HashMap::new(),
     };
     assert_eq!(sig.format_params(), "a: Int, b: String");
 }
@@ -485,6 +486,7 @@ fn fn_sig_format_params_empty() {
         is_effect: false,
         generics: vec![],
         structural_bounds: std::collections::HashMap::new(),
+        protocol_bounds: std::collections::HashMap::new(),
     };
     assert_eq!(sig.format_params(), "");
 }
