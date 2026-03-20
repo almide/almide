@@ -76,24 +76,40 @@ struct BoundedParam {
     type_var: String,
 }
 
-/// Find functions that have structural bounds on generic type parameters,
+/// Find functions that have structural bounds, protocol bounds, on generic type parameters,
 /// OR direct OpenRecord parameters.
 /// Returns function_name → list of bounded params.
 fn find_structurally_bounded_fns(functions: &[IrFunction], type_decls: &[IrTypeDecl]) -> HashMap<String, Vec<BoundedParam>> {
     let mut result = HashMap::new();
     for func in functions {
         let mut bounded = Vec::new();
+        let mut seen_tvars = std::collections::HashSet::new();
         // パターン A: generic + structural bound (fn f[T: { name: String, .. }](x: T))
         if let Some(ref generics) = func.generics {
             bounded.extend(
                 generics.iter()
                     .filter(|g| g.structural_bound.is_some())
                     .flat_map(|g| {
+                        seen_tvars.insert(g.name.clone());
                         func.params.iter().enumerate()
                             .filter(|(_, param)| ty_contains_typevar(&param.ty, &g.name))
                             .map(|(i, _)| BoundedParam { param_idx: i, type_var: g.name.clone() })
                     })
             );
+        }
+        // パターン A2: generic + protocol bound (fn f[T: Showable](x: T))
+        if let Some(ref generics) = func.generics {
+            for g in generics.iter() {
+                if let Some(ref bounds) = g.bounds {
+                    if !bounds.is_empty() && !seen_tvars.contains(&g.name) {
+                        for (i, param) in func.params.iter().enumerate() {
+                            if ty_contains_typevar(&param.ty, &g.name) {
+                                bounded.push(BoundedParam { param_idx: i, type_var: g.name.clone() });
+                            }
+                        }
+                    }
+                }
+            }
         }
         // パターン B: 直接 OpenRecord パラメータ、または OpenRecord エイリアス
         for (i, param) in func.params.iter().enumerate() {
@@ -409,7 +425,20 @@ fn substitute_expr_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
         }
         IrExprKind::Call { target, args, .. } => {
             match target {
-                CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } => {
+                CallTarget::Method { object, method } => {
+                    substitute_expr_types(object, bindings);
+                    // Rewrite protocol method calls: T.show → Dog.show when T → Dog
+                    if let Some(dot_pos) = method.find('.') {
+                        let tv_name = &method[..dot_pos];
+                        if let Some(concrete_ty) = bindings.get(tv_name) {
+                            if let Some(concrete_name) = ty_to_name(concrete_ty) {
+                                let method_name = &method[dot_pos+1..];
+                                *method = format!("{}.{}", concrete_name, method_name);
+                            }
+                        }
+                    }
+                }
+                CallTarget::Computed { callee: object } => {
                     substitute_expr_types(object, bindings);
                 }
                 _ => {}
@@ -648,6 +677,18 @@ fn rewrite_stmt_calls(
             rewrite_expr_calls(else_, bound_fns, instances, fn_param_types);
         }
         IrStmtKind::Comment { .. } => {}
+    }
+}
+
+/// Extract the concrete type name from a Ty for protocol method rewriting.
+fn ty_to_name(ty: &Ty) -> Option<String> {
+    match ty {
+        Ty::Named(name, _) => Some(name.clone()),
+        Ty::Int => Some("Int".into()),
+        Ty::Float => Some("Float".into()),
+        Ty::String => Some("String".into()),
+        Ty::Bool => Some("Bool".into()),
+        _ => None,
     }
 }
 

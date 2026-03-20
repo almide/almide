@@ -43,6 +43,9 @@ pub struct LowerCtx<'a> {
     fn_defaults: HashMap<String, Vec<Option<ast::Expr>>>,
     /// Type names that derive each convention: convention_name → set of type names
     type_conventions: HashMap<String, std::collections::HashSet<String>>,
+    /// Protocol bounds for generic type parameters in scope: TypeVar name → list of protocol names
+    /// Set during function lowering for protocol-bounded generics.
+    protocol_bounds: HashMap<String, Vec<String>>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -54,6 +57,7 @@ impl<'a> LowerCtx<'a> {
             env,
             fn_defaults: HashMap::new(),
             type_conventions: HashMap::new(),
+            protocol_bounds: HashMap::new(),
         }
     }
 
@@ -336,6 +340,19 @@ fn lower_fn(
     visibility: &ast::Visibility, _module_prefix: Option<&str>,
 ) -> IrFunction {
     ctx.push_scope();
+
+    // Set up protocol bounds for this function's generics
+    let saved_pb = std::mem::take(&mut ctx.protocol_bounds);
+    if let Some(gs) = generics {
+        for g in gs {
+            if let Some(bounds) = &g.bounds {
+                if !bounds.is_empty() {
+                    ctx.protocol_bounds.insert(g.name.clone(), bounds.clone());
+                }
+            }
+        }
+    }
+
     let mut ir_params = Vec::new();
     for p in params {
         let ty = resolve_type_expr(&p.ty);
@@ -354,6 +371,7 @@ fn lower_fn(
     };
 
     let ir_body = lower_expr(ctx, body);
+    ctx.protocol_bounds = saved_pb;
     ctx.pop_scope();
 
     let is_effect = effect.unwrap_or(false);

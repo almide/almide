@@ -1,0 +1,71 @@
+// protocol_generics_test — Generic functions with protocol bounds
+
+// ── Basic protocol generic function ──
+
+protocol Showable {
+  fn show(a: Self) -> String
+}
+
+type Dog: Showable = { name: String }
+fn Dog.show(d: Dog) -> String = d.name
+
+type Cat: Showable = { name: String }
+fn Cat.show(c: Cat) -> String = "cat:" + c.name
+
+fn display[T: Showable](item: T) -> String = item.show()
+
+test "generic function with protocol bound" {
+  assert_eq(display(Dog { name: "Rex" }), "Rex")
+  assert_eq(display(Cat { name: "Mimi" }), "cat:Mimi")
+}
+
+// ── Protocol with multiple methods ──
+
+protocol Describable {
+  fn label(a: Self) -> String
+  fn detail(a: Self) -> String
+}
+
+type Book: Describable = { title: String, author: String }
+fn Book.label(b: Book) -> String = b.title
+fn Book.detail(b: Book) -> String = b.title + " by " + b.author
+
+fn summarize[T: Describable](item: T) -> String = item.label() + " - " + item.detail()
+
+test "generic function calling multiple protocol methods" {
+  let b = Book { title: "1984", author: "Orwell" }
+  assert_eq(summarize(b), "1984 - 1984 by Orwell")
+}
+
+// ── Multiple protocol bounds (comma-separated) ──
+
+protocol Nameable {
+  fn get_name(a: Self) -> String
+}
+
+type Widget: Showable, Nameable = { id: Int, name: String }
+fn Widget.show(w: Widget) -> String = "Widget#" + int.to_string(w.id)
+fn Widget.get_name(w: Widget) -> String = w.name
+
+fn show_named[T: Showable + Nameable](item: T) -> String = item.get_name() + ": " + item.show()
+
+test "multiple protocol bounds" {
+  let w = Widget { id: 1, name: "Button" }
+  assert_eq(show_named(w), "Button: Widget#1")
+}
+
+// ── Protocol bound with built-in convention ──
+
+protocol Printable {
+  fn to_label(a: Self) -> String
+}
+
+type Color: Printable = { r: Int, g: Int, b: Int }
+fn Color.to_label(c: Color) -> String = int.to_string(c.r) + "," + int.to_string(c.g) + "," + int.to_string(c.b)
+
+fn print_label[T: Printable](item: T) -> String = "label:" + item.to_label()
+
+test "protocol generic with custom method name" {
+  let c = Color { r: 255, g: 0, b: 128 }
+  assert_eq(print_label(c), "label:255,0,128")
+}
