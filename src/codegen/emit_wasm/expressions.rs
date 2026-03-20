@@ -688,6 +688,18 @@ impl FuncCompiler<'_> {
         None
     }
 
+    /// Find variant constructor tag. Returns (tag, is_unit).
+    pub(super) fn find_variant_ctor_tag(&self, name: &str) -> Option<(u32, bool)> {
+        for cases in self.emitter.variant_info.values() {
+            for case in cases {
+                if case.name == name {
+                    return Some((case.tag, case.fields.is_empty()));
+                }
+            }
+        }
+        None
+    }
+
     /// Find the variant tag for a constructor name, searching variant_info by subject type.
     pub(super) fn find_variant_tag_by_ctor(&self, ctor_name: &str, subject_ty: &Ty) -> Option<u32> {
         let type_name = match subject_ty {

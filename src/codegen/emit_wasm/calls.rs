@@ -70,10 +70,10 @@ impl FuncCompiler<'_> {
                         self.func.instruction(&Instruction::End);
                     }
                     _ => {
-                        // Check if this is a unit variant constructor (e.g., Red, None)
-                        if args.is_empty() {
-                            if let Some(tag) = self.find_unit_variant_tag(name) {
-                                // Allocate [tag:i32]
+                        // Check if this is a variant constructor
+                        if let Some((tag, is_unit)) = self.find_variant_ctor_tag(name) {
+                            if is_unit && args.is_empty() {
+                                // Unit variant: allocate [tag:i32]
                                 self.func.instruction(&Instruction::I32Const(4));
                                 self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
                                 let scratch = self.match_i32_base + self.match_depth;
@@ -83,6 +83,32 @@ impl FuncCompiler<'_> {
                                 self.func.instruction(&Instruction::I32Store(MemArg {
                                     offset: 0, align: 2, memory_index: 0,
                                 }));
+                                self.func.instruction(&Instruction::LocalGet(scratch));
+                                return;
+                            } else if !is_unit {
+                                // Tuple payload variant: [tag:i32][arg0][arg1]...
+                                let mut total_size = 4u32; // tag
+                                for arg in args { total_size += values::byte_size(&arg.ty); }
+                                self.func.instruction(&Instruction::I32Const(total_size as i32));
+                                self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+                                let scratch = self.match_i32_base + self.match_depth;
+                                self.match_depth += 1;
+                                self.func.instruction(&Instruction::LocalSet(scratch));
+                                // Write tag
+                                self.func.instruction(&Instruction::LocalGet(scratch));
+                                self.func.instruction(&Instruction::I32Const(tag as i32));
+                                self.func.instruction(&Instruction::I32Store(MemArg {
+                                    offset: 0, align: 2, memory_index: 0,
+                                }));
+                                // Write args
+                                let mut offset = 4u32;
+                                for arg in args {
+                                    self.func.instruction(&Instruction::LocalGet(scratch));
+                                    self.emit_expr(arg);
+                                    self.emit_store_at(&arg.ty, offset);
+                                    offset += values::byte_size(&arg.ty);
+                                }
+                                self.match_depth -= 1;
                                 self.func.instruction(&Instruction::LocalGet(scratch));
                                 return;
                             }

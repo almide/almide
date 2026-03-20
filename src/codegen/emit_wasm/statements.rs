@@ -168,12 +168,9 @@ fn count_scratch_depth(expr: &IrExpr) -> usize {
         }
         IrExprKind::UnOp { operand, .. } => count_scratch_depth(operand),
         IrExprKind::Call { args, target, .. } => {
-            let base = match target {
-                crate::ir::CallTarget::Computed { .. } => 1,
-                _ => 0,
-            };
+            // All calls may use scratch (variant constructors, computed calls, stdlib)
             let inner = args.iter().map(|a| count_scratch_depth(a)).max().unwrap_or(0);
-            base.max(inner)
+            1 + inner
         }
         // SpreadRecord needs 2 i32 scratch (result + base ptrs)
         IrExprKind::SpreadRecord { base, fields, .. } => {
