@@ -45,6 +45,11 @@ impl FuncCompiler<'_> {
                     crate::ir::IrExprKind::Break | crate::ir::IrExprKind::Continue => {
                         self.emit_expr(else_);
                     }
+                    // ResultOk/ResultErr in guard: return from function (effect fn early return)
+                    crate::ir::IrExprKind::ResultOk { .. } | crate::ir::IrExprKind::ResultErr { .. } => {
+                        self.emit_expr(else_);
+                        self.func.instruction(&Instruction::Return);
+                    }
                     // Other expressions: evaluate, drop value, then break
                     _ => {
                         self.emit_expr(else_);
