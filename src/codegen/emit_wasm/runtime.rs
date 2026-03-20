@@ -73,6 +73,10 @@ pub fn register_runtime(emitter: &mut WasmEmitter) {
     );
     emitter.rt.concat_list = emitter.register_func("__concat_list", concat_list_ty);
 
+    // __int_parse(s: i32) -> i32 (Result[Int, String])
+    let int_parse_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
+    emitter.rt.int_parse = emitter.register_func("__int_parse", int_parse_ty);
+
     // Global: __heap_ptr (mutable i32, initialized at assembly time)
     emitter.heap_ptr_global = 0; // first and only global
 }
@@ -93,6 +97,7 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     compile_mem_eq(emitter);
     compile_list_eq(emitter);
     compile_concat_list(emitter);
+    compile_int_parse(emitter);
 }
 
 /// __alloc(size: i32) -> i32
@@ -1131,5 +1136,190 @@ fn compile_concat_list(emitter: &mut WasmEmitter) {
     });
 
     wasm!(f, { local_get(6); end; });
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
+
+/// __int_parse(s: i32) -> i32 (Result[Int, String])
+/// Parse string to i64. Returns Result: [tag:i32][value:i64] on heap.
+/// tag=0 ok, tag=1 err.
+fn compile_int_parse(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.int_parse];
+    // params: 0=$s
+    // locals: 1=$len, 2=$i, 3=$result(i64), 4=$is_neg, 5=$byte, 6=$alloc_ptr
+    let mut f = Function::new([
+        (1, ValType::I32),  // 1: len
+        (1, ValType::I32),  // 2: i
+        (1, ValType::I64),  // 3: result
+        (1, ValType::I32),  // 4: is_neg
+        (1, ValType::I32),  // 5: byte
+        (1, ValType::I32),  // 6: alloc_ptr
+    ]);
+
+    // len = s.len
+    wasm!(f, {
+        local_get(0);
+        i32_load(0);
+        local_set(1);
+    });
+
+    // Empty string → err
+    wasm!(f, {
+        local_get(1);
+        i32_eqz;
+        if_empty;
+    });
+    // Return err("empty string")
+    let err_str = emitter.intern_string("invalid number");
+    wasm!(f, {
+        i32_const(12);
+        call(emitter.rt.alloc);
+        local_set(6);
+        local_get(6);
+        i32_const(1);
+        i32_store(0);
+        local_get(6);
+        i32_const(err_str as i32);
+        i32_store(4);
+        local_get(6);
+        return_;
+        end;
+    });
+
+    // i = 0, result = 0, is_neg = 0
+    wasm!(f, {
+        i32_const(0);
+        local_set(2);
+        i64_const(0);
+        local_set(3);
+        i32_const(0);
+        local_set(4);
+    });
+
+    // Check leading '-'
+    wasm!(f, {
+        local_get(0);
+        i32_load8_u(4);
+        i32_const(45);
+        i32_eq;
+        if_empty;
+        i32_const(1);
+        local_set(4);
+        i32_const(1);
+        local_set(2);
+        end;
+    });
+
+    // Check leading '+'
+    wasm!(f, {
+        local_get(0);
+        i32_load8_u(4);
+        i32_const(43);
+        i32_eq;
+        local_get(4);
+        i32_eqz;
+        i32_and;
+        if_empty;
+        i32_const(1);
+        local_set(2);
+        end;
+    });
+
+    // Loop: while i < len
+    wasm!(f, {
+        block_empty;
+        loop_empty;
+        local_get(2);
+        local_get(1);
+        i32_ge_u;
+        br_if(1);
+    });
+
+    // byte = s[4+i]
+    wasm!(f, {
+        local_get(0);
+        i32_const(4);
+        i32_add;
+        local_get(2);
+        i32_add;
+        i32_load8_u(0);
+        local_set(5);
+    });
+
+    // if byte < '0' || byte > '9' → err
+    wasm!(f, {
+        local_get(5);
+        i32_const(48);
+        i32_lt_u;
+        local_get(5);
+        i32_const(57);
+        i32_gt_u;
+        i32_or;
+        if_empty;
+    });
+    wasm!(f, {
+        i32_const(12);
+        call(emitter.rt.alloc);
+        local_set(6);
+        local_get(6);
+        i32_const(1);
+        i32_store(0);
+        local_get(6);
+        i32_const(err_str as i32);
+        i32_store(4);
+        local_get(6);
+        return_;
+        end;
+    });
+
+    // result = result * 10 + (byte - '0')
+    wasm!(f, {
+        local_get(3);
+        i64_const(10);
+        i64_mul;
+        local_get(5);
+        i32_const(48);
+        i32_sub;
+        i64_extend_i32_u;
+        i64_add;
+        local_set(3);
+    });
+
+    // i++
+    wasm!(f, {
+        local_get(2);
+        i32_const(1);
+        i32_add;
+        local_set(2);
+        br(0);
+        end;
+        end;
+    });
+
+    // if is_neg: result = -result
+    wasm!(f, {
+        local_get(4);
+        if_empty;
+        i64_const(0);
+        local_get(3);
+        i64_sub;
+        local_set(3);
+        end;
+    });
+
+    // Return ok(result): alloc [tag=0, value=result]
+    wasm!(f, {
+        i32_const(12);
+        call(emitter.rt.alloc);
+        local_set(6);
+        local_get(6);
+        i32_const(0);
+        i32_store(0);
+        local_get(6);
+        local_get(3);
+        i64_store(4);
+        local_get(6);
+        end;
+    });
+
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }

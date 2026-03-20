@@ -16,16 +16,18 @@ impl NanoPass for ResultPropagationPass {
     fn name(&self) -> &str { "ResultPropagation" }
 
     fn targets(&self) -> Option<Vec<Target>> {
-        Some(vec![Target::Rust])
+        None // Run for all targets
     }
 
     fn run(&self, program: &mut IrProgram, _target: Target) {
         for func in &mut program.functions {
-            // Insert Try in effect fns, but NOT in test functions
-            // Tests inspect Result values directly, so no auto-?
             if func.is_effect && !func.is_test {
+                // Effect fns: insert Try around Result-returning calls
                 let returns_result = func.ret_ty.is_result();
                 func.body = insert_try_body(func.body.clone(), returns_result);
+            } else if func.is_test {
+                // Test fns: insert Try only inside fan blocks (fan auto-unwraps Results)
+                func.body = insert_try_in_fan(func.body.clone());
             }
         }
         for module in &mut program.modules {
@@ -188,6 +190,33 @@ fn insert_try(expr: IrExpr, in_match_subject: bool) -> IrExpr {
                 other => other,
             }).collect(),
         },
+        IrExprKind::Fan { exprs } => IrExprKind::Fan {
+            exprs: exprs.into_iter().map(|e| insert_try(e, false)).collect(),
+        },
+        IrExprKind::Tuple { elements } => IrExprKind::Tuple {
+            elements: elements.into_iter().map(|e| insert_try(e, false)).collect(),
+        },
+        IrExprKind::SpreadRecord { base, fields } => IrExprKind::SpreadRecord {
+            base: Box::new(insert_try(*base, false)),
+            fields: fields.into_iter().map(|(k, v)| (k, insert_try(v, false))).collect(),
+        },
+        IrExprKind::IndexAccess { object, index } => IrExprKind::IndexAccess {
+            object: Box::new(insert_try(*object, false)),
+            index: Box::new(insert_try(*index, false)),
+        },
+        IrExprKind::TupleIndex { object, index } => IrExprKind::TupleIndex {
+            object: Box::new(insert_try(*object, false)),
+            index,
+        },
+        IrExprKind::Clone { expr } => IrExprKind::Clone {
+            expr: Box::new(insert_try(*expr, false)),
+        },
+        IrExprKind::Deref { expr } => IrExprKind::Deref {
+            expr: Box::new(insert_try(*expr, false)),
+        },
+        IrExprKind::MapLiteral { entries } => IrExprKind::MapLiteral {
+            entries: entries.into_iter().map(|(k, v)| (insert_try(k, false), insert_try(v, false))).collect(),
+        },
         // Leaf nodes — return as-is
         other => other,
     };
@@ -246,4 +275,78 @@ fn is_result_call(expr: &IrExpr) -> bool {
     matches!(&expr.kind,
         IrExprKind::Call { .. }
     )
+}
+
+/// Insert Try only inside Fan blocks in test functions.
+/// Fan auto-unwraps Results (type checker already adjusted types),
+/// so WASM needs Try nodes to actually perform the unwrap.
+fn insert_try_in_fan(expr: IrExpr) -> IrExpr {
+    let ty = expr.ty.clone();
+    let span = expr.span;
+    let kind = match expr.kind {
+        IrExprKind::Fan { exprs } => {
+            // Inside fan: insert Try around Result-returning calls
+            IrExprKind::Fan {
+                exprs: exprs.into_iter().map(|e| insert_try(e, false)).collect(),
+            }
+        }
+        // Recurse into structural nodes to find nested fan blocks
+        IrExprKind::Block { stmts, expr: e } => IrExprKind::Block {
+            stmts: stmts.into_iter().map(insert_try_in_fan_stmt).collect(),
+            expr: e.map(|e| Box::new(insert_try_in_fan(*e))),
+        },
+        IrExprKind::If { cond, then, else_ } => IrExprKind::If {
+            cond: Box::new(insert_try_in_fan(*cond)),
+            then: Box::new(insert_try_in_fan(*then)),
+            else_: Box::new(insert_try_in_fan(*else_)),
+        },
+        IrExprKind::Match { subject, arms } => IrExprKind::Match {
+            subject: Box::new(insert_try_in_fan(*subject)),
+            arms: arms.into_iter().map(|arm| IrMatchArm {
+                pattern: arm.pattern,
+                guard: arm.guard.map(|g| insert_try_in_fan(g)),
+                body: insert_try_in_fan(arm.body),
+            }).collect(),
+        },
+        IrExprKind::ForIn { var, var_tuple, iterable, body } => IrExprKind::ForIn {
+            var, var_tuple,
+            iterable: Box::new(insert_try_in_fan(*iterable)),
+            body: body.into_iter().map(insert_try_in_fan_stmt).collect(),
+        },
+        IrExprKind::While { cond, body } => IrExprKind::While {
+            cond: Box::new(insert_try_in_fan(*cond)),
+            body: body.into_iter().map(insert_try_in_fan_stmt).collect(),
+        },
+        IrExprKind::DoBlock { stmts, expr: e } => IrExprKind::DoBlock {
+            stmts: stmts.into_iter().map(insert_try_in_fan_stmt).collect(),
+            expr: e.map(|e| Box::new(insert_try_in_fan(*e))),
+        },
+        other => other,
+    };
+    IrExpr { kind, ty, span }
+}
+
+fn insert_try_in_fan_stmt(stmt: IrStmt) -> IrStmt {
+    let kind = match stmt.kind {
+        IrStmtKind::Bind { var, mutability, ty, value } => {
+            let new_value = insert_try_in_fan(value);
+            let new_ty = if matches!(&new_value.kind, IrExprKind::Fan { .. }) {
+                // Fan was processed: if inner expressions got Try'd, update binding type
+                new_value.ty.clone()
+            } else {
+                ty
+            };
+            IrStmtKind::Bind { var, mutability, ty: new_ty, value: new_value }
+        }
+        IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: insert_try_in_fan(expr) },
+        IrStmtKind::Guard { cond, else_ } => IrStmtKind::Guard {
+            cond: insert_try_in_fan(cond),
+            else_: insert_try_in_fan(else_),
+        },
+        IrStmtKind::Assign { var, value } => IrStmtKind::Assign {
+            var, value: insert_try_in_fan(value),
+        },
+        other => other,
+    };
+    IrStmt { kind, span: stmt.span }
 }

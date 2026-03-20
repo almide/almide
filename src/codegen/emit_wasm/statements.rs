@@ -12,11 +12,17 @@ impl FuncCompiler<'_> {
         match &stmt.kind {
             IrStmtKind::Bind { var, ty, value, .. } => {
                 self.emit_expr(value);
-                if let Some(_vt) = values::ty_to_valtype(ty) {
+                // Use value.ty when it produces a value, even if declared ty differs
+                let effective_ty = if values::ty_to_valtype(ty) != values::ty_to_valtype(&value.ty)
+                    && values::ty_to_valtype(&value.ty).is_some() {
+                    &value.ty
+                } else {
+                    ty
+                };
+                if let Some(_vt) = values::ty_to_valtype(effective_ty) {
                     let local_idx = self.var_map[&var.0];
                     wasm!(self.func, { local_set(local_idx); });
                 }
-                // Unit bindings: value produces nothing, nothing to store
             }
 
             IrStmtKind::Assign { var, value } => {
@@ -204,14 +210,20 @@ fn count_scratch_depth(expr: &IrExpr) -> usize {
             let b = body.iter().map(|s| count_scratch_depth_stmt(s)).max().unwrap_or(0);
             count_scratch_depth(cond).max(b)
         }
-        IrExprKind::BinOp { left, right, .. } => {
-            count_scratch_depth(left).max(count_scratch_depth(right))
+        IrExprKind::BinOp { op, left, right } => {
+            let inner = count_scratch_depth(left).max(count_scratch_depth(right));
+            // PowInt/PowFloat use 2 i64 + 1 i32 scratch
+            if matches!(op, crate::ir::BinOp::PowInt | crate::ir::BinOp::PowFloat) {
+                2 + inner
+            } else {
+                inner
+            }
         }
         IrExprKind::UnOp { operand, .. } => count_scratch_depth(operand),
         IrExprKind::Call { args, target, .. } => {
-            // All calls may use scratch (variant constructors, computed calls, stdlib)
+            // Calls may use scratch: variant constructors (1), stdlib like list.filter/fold (2), computed calls (1)
             let inner = args.iter().map(|a| count_scratch_depth(a)).max().unwrap_or(0);
-            1 + inner
+            2 + inner
         }
         // SpreadRecord needs 2 i32 scratch (result + base ptrs)
         IrExprKind::SpreadRecord { base, fields, .. } => {
@@ -239,14 +251,16 @@ fn count_scratch_depth(expr: &IrExpr) -> usize {
         // FnRef needs 1 scratch, Lambda with captures needs 2 (env + closure ptr)
         IrExprKind::FnRef { .. } => 1,
         IrExprKind::Lambda { .. } => 2,
+        IrExprKind::Try { expr } => 1 + count_scratch_depth(expr),
         IrExprKind::ForIn { iterable, body, .. } => {
             let b = body.iter().map(|s| count_scratch_depth_stmt(s)).max().unwrap_or(0);
-            // List for...in needs 2 scratch slots (list ptr + index counter)
+            // List for...in reserves 2 scratch slots (list ptr + index counter)
+            // Body scratch is ADDED to the for_in base (match_depth += 2 before body)
             let for_in_need = match &iterable.kind {
                 IrExprKind::Range { .. } => 0,
                 _ => 2,
             };
-            count_scratch_depth(iterable).max(b).max(for_in_need)
+            count_scratch_depth(iterable).max(for_in_need + b)
         }
         _ => 0,
     }
@@ -310,6 +324,32 @@ fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::
                 scan_expr(&arm.body, locals, vt);
             }
         }
+        IrExprKind::StringInterp { parts } => {
+            for part in parts {
+                if let crate::ir::IrStringPart::Expr { expr } = part {
+                    scan_expr(expr, locals, vt);
+                }
+            }
+        }
+        IrExprKind::OptionSome { expr } | IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
+        | IrExprKind::Clone { expr } | IrExprKind::Deref { expr } | IrExprKind::Try { expr } => {
+            scan_expr(expr, locals, vt);
+        }
+        IrExprKind::Record { fields, .. } | IrExprKind::SpreadRecord { fields, .. } => {
+            for (_, e) in fields { scan_expr(e, locals, vt); }
+        }
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } | IrExprKind::Fan { exprs: elements } => {
+            for e in elements { scan_expr(e, locals, vt); }
+        }
+        IrExprKind::Member { object, .. } | IrExprKind::IndexAccess { object, .. } => {
+            scan_expr(object, locals, vt);
+        }
+        IrExprKind::Lambda { body, .. } => {
+            scan_expr(body, locals, vt);
+        }
+        IrExprKind::MapLiteral { entries } => {
+            for (k, v) in entries { scan_expr(k, locals, vt); scan_expr(v, locals, vt); }
+        }
         _ => {}
     }
 }
@@ -317,7 +357,14 @@ fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::
 fn scan_stmt(stmt: &IrStmt, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::VarTable) {
     match &stmt.kind {
         IrStmtKind::Bind { var, ty, value, .. } => {
-            if let Some(val_type) = values::ty_to_valtype(ty) {
+            // Prefer value.ty when it differs from declared ty (IR type inference gaps)
+            let effective_ty = if values::ty_to_valtype(ty) != values::ty_to_valtype(&value.ty)
+                && values::ty_to_valtype(&value.ty).is_some() {
+                &value.ty
+            } else {
+                ty
+            };
+            if let Some(val_type) = values::ty_to_valtype(effective_ty) {
                 locals.push((*var, val_type));
             }
             scan_expr(value, locals, vt);
@@ -419,15 +466,17 @@ fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, l
         crate::ir::IrPattern::RecordPattern { name: _, fields, .. } => {
             // For pattern=None fields, the binding is implicit (field name = var name).
             // The lowerer has already allocated VarIds for these in the VarTable.
-            // We find them by searching VarTable for entries matching the field names.
+            // Search from the END of VarTable to find the most recent (correct scope) VarId,
+            // and skip VarIds already registered in locals to avoid duplicates.
+            let existing_ids: std::collections::HashSet<u32> = locals.iter().map(|(v, _)| v.0).collect();
             for field in fields {
                 if let Some(pat) = &field.pattern {
                     scan_pattern(pat, subject_ty, locals, vt);
                 } else {
-                    // Implicit bind: find VarId by field name in VarTable
-                    for i in 0..vt.len() {
+                    // Implicit bind: find VarId by field name, searching from end (most recent scope)
+                    for i in (0..vt.len()).rev() {
                         let info = vt.get(crate::ir::VarId(i as u32));
-                        if info.name == field.name {
+                        if info.name == field.name && !existing_ids.contains(&(i as u32)) {
                             if let Some(val_type) = values::ty_to_valtype(&info.ty) {
                                 locals.push((crate::ir::VarId(i as u32), val_type));
                             }

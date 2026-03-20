@@ -525,12 +525,90 @@ impl FuncCompiler<'_> {
                 });
             }
 
-            BinOp::PowInt | BinOp::PowFloat => {
+            BinOp::PowInt => {
+                // Integer power: base^exp via mem scratch (no locals needed)
+                // mem[0]=base, mem[8]=result, counter on stack via block/loop
                 self.emit_expr(left);
                 self.emit_expr(right);
-                // Quick hack: use a loop (right is usually small int)
-                // For now, just multiply — only works for x^2 case
-                wasm!(self.func, { unreachable; });
+                // Use i32 scratch for counter, i64 scratch for result/base
+                let base_s = self.match_i64_base + self.match_depth;
+                let result_s = base_s + 1;
+                let counter_s = self.match_i32_base + self.match_depth;
+                wasm!(self.func, {
+                    i32_wrap_i64;
+                    local_set(counter_s);
+                    local_set(base_s);
+                    i64_const(1);
+                    local_set(result_s);
+                    block_empty;
+                    loop_empty;
+                    local_get(counter_s);
+                    i32_eqz;
+                    br_if(1);
+                    local_get(result_s);
+                    local_get(base_s);
+                    i64_mul;
+                    local_set(result_s);
+                    local_get(counter_s);
+                    i32_const(1);
+                    i32_sub;
+                    local_set(counter_s);
+                    br(0);
+                    end;
+                    end;
+                    local_get(result_s);
+                });
+            }
+            BinOp::PowFloat => {
+                // Float power: check if exp == 0.5 → sqrt, else integer loop
+                let base_s = self.match_i64_base + self.match_depth;
+                let result_s = base_s + 1;
+                let counter_s = self.match_i32_base + self.match_depth;
+                self.emit_expr(left);
+                wasm!(self.func, { i64_reinterpret_f64; local_set(base_s); });
+                self.emit_expr(right);
+                // Check if exp == 0.5
+                wasm!(self.func, {
+                    f64_const(0.5);
+                    f64_eq;
+                    if_f64;
+                    local_get(base_s);
+                    f64_reinterpret_i64;
+                    f64_sqrt;
+                    else_;
+                });
+                // Integer loop for non-0.5 exponent
+                self.emit_expr(right);
+                wasm!(self.func, {
+                    i64_trunc_f64_s;
+                    i32_wrap_i64;
+                    local_set(counter_s);
+                    f64_const(1.0);
+                    i64_reinterpret_f64;
+                    local_set(result_s);
+                    block_empty;
+                    loop_empty;
+                    local_get(counter_s);
+                    i32_eqz;
+                    br_if(1);
+                    local_get(result_s);
+                    f64_reinterpret_i64;
+                    local_get(base_s);
+                    f64_reinterpret_i64;
+                    f64_mul;
+                    i64_reinterpret_f64;
+                    local_set(result_s);
+                    local_get(counter_s);
+                    i32_const(1);
+                    i32_sub;
+                    local_set(counter_s);
+                    br(0);
+                    end;
+                    end;
+                    local_get(result_s);
+                    f64_reinterpret_i64;
+                    end;
+                });
             }
             BinOp::XorInt => {
                 self.emit_expr(left);
