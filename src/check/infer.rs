@@ -250,6 +250,8 @@ impl Checker {
 
             ast::Expr::Lambda { params, body, .. } => {
                 self.env.push_scope();
+                // Lambda has its own return context — don't leak outer function's current_ret
+                let saved_ret = self.env.current_ret.take();
                 let param_tys: Vec<Ty> = params.iter().map(|p| {
                     let ty = p.ty.as_ref().map(|te| self.resolve_type_expr(te)).unwrap_or_else(|| self.fresh_var());
                     let concrete = resolve_ty(&ty, &self.uf);
@@ -257,6 +259,7 @@ impl Checker {
                     ty
                 }).collect();
                 let ret_ty = self.infer_expr(body);
+                self.env.current_ret = saved_ret;
                 self.env.pop_scope();
                 Ty::Fn { params: param_tys, ret: Box::new(ret_ty) }
             }
@@ -530,49 +533,10 @@ impl Checker {
             ast::Pattern::Tuple { elements } => {
                 if let Ty::Tuple(tys) = ty { for (i, e) in elements.iter().enumerate() { self.bind_pattern(e, tys.get(i).unwrap_or(&Ty::Unknown)); } }
             }
-            ast::Pattern::Some { inner } => {
-                let it = match ty {
-                    Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args[0].clone(),
-                    _ => {
-                        // Constrain subject to Option[?fresh] when type is unknown
-                        let fresh = self.fresh_var();
-                        self.constrain(Ty::option(fresh.clone()), ty.clone(), "match some pattern");
-                        fresh
-                    }
-                };
-                self.bind_pattern(inner, &it);
-            }
-            ast::Pattern::Ok { inner } => {
-                let it = match ty {
-                    Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
-                    _ => {
-                        let ok_ty = self.fresh_var();
-                        let err_ty = self.fresh_var();
-                        self.constrain(Ty::result(ok_ty.clone(), err_ty), ty.clone(), "match ok pattern");
-                        ok_ty
-                    }
-                };
-                self.bind_pattern(inner, &it);
-            }
-            ast::Pattern::Err { inner } => {
-                let it = match ty {
-                    Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[1].clone(),
-                    _ => {
-                        let ok_ty = self.fresh_var();
-                        let err_ty = self.fresh_var();
-                        self.constrain(Ty::result(ok_ty, err_ty.clone()), ty.clone(), "match err pattern");
-                        err_ty
-                    }
-                };
-                self.bind_pattern(inner, &it);
-            }
-            ast::Pattern::None => {
-                if !matches!(ty, Ty::Applied(TypeConstructorId::Option, _)) {
-                    let fresh = self.fresh_var();
-                    self.constrain(Ty::option(fresh), ty.clone(), "match none pattern");
-                }
-            }
-            ast::Pattern::Literal { .. } => {}
+            ast::Pattern::Some { inner } => { let it = match ty { Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args[0].clone(), _ => Ty::Unknown }; self.bind_pattern(inner, &it); }
+            ast::Pattern::Ok { inner } => { let it = match ty { Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(), _ => Ty::Unknown }; self.bind_pattern(inner, &it); }
+            ast::Pattern::Err { inner } => { let it = match ty { Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[1].clone(), _ => Ty::Unknown }; self.bind_pattern(inner, &it); }
+            ast::Pattern::None | ast::Pattern::Literal { .. } => {}
         }
     }
 
@@ -582,9 +546,6 @@ impl Checker {
         let is_unknown_ty = |t: &Ty| matches!(t, Ty::Unknown | Ty::TypeVar(_));
         if (is_concat_ty(lc) && (is_concat_ty(rc) || is_unknown_ty(rc)))
             || (is_concat_ty(rc) && is_unknown_ty(lc)) {
-            // Constrain unknown side to match the known concat type
-            if is_unknown_ty(lc) && is_concat_ty(rc) { self.constrain(rc.clone(), lt.clone(), "plus concat"); }
-            if is_unknown_ty(rc) && is_concat_ty(lc) { self.constrain(lc.clone(), rc.clone(), "plus concat"); }
             return lt; // concat: return same type
         }
         let is_numeric = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_));
