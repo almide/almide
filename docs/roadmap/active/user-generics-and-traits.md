@@ -1,7 +1,8 @@
-# User Generics & Trait System
+# User Generics & Protocol System
 
 **優先度:** 1.x
 **前提:** Generics Phase 1 完了済み
+**ブランチ:** `feature/protocol`
 
 ## 現状
 
@@ -21,71 +22,62 @@ type Tree[T] = | Leaf(T) | Node(Tree[T], Tree[T])
 ### 既知の問題
 
 1. **テスト名と関数名の衝突** — test "identity" + fn identity で名前衝突。テスト関数名のsanitizeが不十分
-2. **Trait bounds なし** — `fn sort[T](xs: List[T])` は T に制約がないので Rust では `T: PartialOrd` が必要だが自動付与されない
-3. **Trait/Impl なし** — ユーザー定義の型クラス/インターフェースがない
 
-## Phase 2: Trait Bounds (1.x)
+## Protocol System — 設計確定・実装中
 
-```almide
-// 将来構文
-fn sort[T: Ord](xs: List[T]) -> List[T] = ...
-fn show[T: Repr](x: T) -> String = ...
-```
+**キーワード: `protocol`** (Swift/Python の語彙)
 
-### 設計判断
+Convention system をユーザー定義に開放する。組み込み convention (Eq, Repr, Codec 等) も protocol の特殊ケースとして統一。
 
-| 選択肢 | メリット | デメリット |
-|--------|---------|-----------|
-| A. Structural bounds (現在) | `[T: { name: String }]` で十分 | 複雑な制約が書けない |
-| B. Built-in bounds のみ | `Eq`, `Ord`, `Repr`, `Hash` だけ | ユーザー拡張不可 |
-| C. User-defined traits | 完全な抽象化 | 複雑性爆発、LLM精度低下 |
-
-**推奨: B (Built-in bounds のみ)** — Almide の設計原則 "No user-defined traits" を維持。Go が interface なしで 12 年繁栄した教訓。
-
-### Built-in Bounds 候補
-
-| Bound | 意味 | 自動判定 |
-|-------|------|---------|
-| `Eq` | `==` / `!=` 可能 | ✅ 既存 (Float除く) |
-| `Ord` | `<` / `>` / `<=` / `>=` 可能 | 型構造から自動 |
-| `Hash` | Map key 可能 | ✅ 既存 (Float, Fn除く) |
-| `Repr` | `show()` 可能 | 型構造から自動 (Fn除く) |
-
-## Phase 3: Trait/Impl (2.x, 慎重に)
-
-**現状の設計原則: "No user-defined traits"**
-
-理由:
-- 抽象化の深さが増す → LLM精度低下
-- orphan rules, associated types, trait objects → 複雑性爆発
-- Almide は "write it the obvious way" が理念
-
-### もし導入するなら
+### 構文
 
 ```almide
-// 最小限の trait
-trait Stringify {
-  fn to_str(self) -> String
+// protocol 定義
+protocol Action {
+  fn name(a: Self) -> String
+  fn execute(a: Self, ctx: Context) -> Result[String, String]
 }
 
-impl Stringify for Color {
-  fn to_str(self) -> String = match self {
-    Red => "red"
-    Green => "green"
-    Blue => "blue"
-  }
-}
+// 型が protocol を満たすことを宣言（既存の convention 構文と同じ）
+type GreetAction: Action = { greeting: String }
+
+// convention methods で実装（既存の仕組み、変更なし）
+fn GreetAction.name(a: GreetAction) -> String = "greet"
+fn GreetAction.execute(a: GreetAction, ctx: Context) -> Result[String, String] =
+  ok(a.greeting)
+
+// generic bounds で使用
+fn run_action[T: Action](action: T, ctx: Context) -> Result[String, String] =
+  action.execute(ctx)
+
+// derive との共存
+type User: Codec = { name: String, age: Int } derive(Codec)
 ```
 
-**制約:**
-- No associated types
-- No default methods
-- No trait objects / dynamic dispatch
-- No orphan rules (same module only)
-- deriving で自動実装可能なものは deriving
+### 設計方針
 
-## TODO
+- `Self` は実装型のプレースホルダー（型、キーワードではない）
+- 満足は **明示的** — `type Foo: Protocol` の宣言が必要
+- `impl` ブロック不要 — convention methods がフラットにトップレベル
+- モノモーフィゼーションで解決 — 動的ディスパッチなし
+- 組み込み convention は protocol として登録（後方互換維持）
 
-- [ ] テスト名/関数名衝突の修正 (sanitize改善)
-- [ ] Built-in bounds (Ord, Repr) の実装
-- [ ] Trait system の設計判断 (B vs C)
+### 実装進捗
+
+| Phase | 内容 | 状態 |
+|-------|------|------|
+| Phase 1 | AST + Parser (protocol キーワード, ProtocolMethod 強型化) | ✅ 完了 |
+| Phase 2 | 型システムインフラ (ProtocolDef, TypeEnv 拡張) | 🔄 実装中 |
+| Phase 3 | チェッカー (protocol 登録, 満足検証, 組み込み convention 統合) | 🔄 実装中 |
+| Phase 4 | Generic bounds (`fn f[T: Action](x: T)`) | 未着手 |
+| Phase 5 | Lowerer (generic protocol メソッド呼び出し解決) | 未着手 |
+| Phase 6 | 後方互換性 (既存 derive/convention との統合) | 未着手 |
+| Phase 7 | ドキュメント + テスト | 未着手 |
+
+### NOT in scope
+
+- default methods
+- associated types
+- dynamic dispatch / protocol objects
+- orphan rules
+- `derive(UserProtocol)` — 組み込み convention のみ auto-derive 可能

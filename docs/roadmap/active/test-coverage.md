@@ -2,7 +2,7 @@
 
 **Goal**: Every grammar construct in SPEC.md has a dedicated test file with edge cases. Target: 2,500+ test blocks.
 
-**Current**: 111 test files, 1,564 .almd test blocks + 636 Rust unit tests = 2,200 total (88% of target).
+**Current**: 111 test files, 1,574 .almd test blocks + 639 Rust unit tests = 2,213 total (89% of target).
 
 ## Completed — Phase 1 + 2
 
@@ -48,7 +48,7 @@
 
 ## Remaining to reach 2,500
 
-~300 tests needed to reach 2,500. Options:
+~287 tests needed to reach 2,500. Options:
 - More stdlib edge cases (datetime, process, fs — requires effect fn / I/O)
 - Deeper cross-cutting tests (match inside for inside do, pipe with fan)
 - Boundary value tests (Int max/min, deeply nested structures)

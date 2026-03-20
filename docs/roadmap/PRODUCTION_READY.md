@@ -35,7 +35,7 @@ Almide が**既に回避した**他言語の失敗:
 コンパイラ          84 ファイル / 19,536 行
                     生成コードは外部 crate 不要（stdlib ランタイムを自己内包）
 stdlib             22 モジュール / 381 関数 / ランタイム 100%
-テスト             111 .almd テストファイル (1,564 blocks) + 636 Rust unit tests = 2,200 total
+テスト             111 .almd テストファイル (1,574 blocks) + 639 Rust unit tests = 2,213 total
 ターゲット          Rust, TypeScript, JavaScript, npm package, WASM
 Exercises          25 本 / 6 tiers
 並行処理           fan { }, fan.map, fan.race, fan.any, fan.settle, fan.timeout
@@ -131,7 +131,7 @@ Almide 1.0 = ALL of:
   ■ Tier 3 (WASM): smoke test pass (fibonacci + fizzbuzz + list.map, 305KB)
 
 テスト
-  □ テスト 2,500+                        (2,200 — あと 300)
+  □ テスト 2,500+                        (2,213 — あと 287)
   □ 5 showcase プログラムが Tier 1 + Tier 2 で動作
 
 パッケージ管理
