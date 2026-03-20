@@ -1,4 +1,4 @@
-# Stdlib Scope Reduction
+# Stdlib Scope Reduction — 完了
 
 **優先度:** 1.0前 — 凍結前に外に出すものを決める
 **リサーチ:** [stdlib-module-matrix.md](../../research/stdlib-module-matrix.md)
@@ -22,10 +22,12 @@
 3. **凍結リスク** — API が成熟してないまま凍結すると Go の log 問題になる
 4. **代替手段** — stdlib 内の他モジュールで代替可能か
 
-## TODO
+## 完了
 
-- [ ] uuid 削除 → `crypto.random_hex(16)` で十分
-- [ ] crypto 削除 → security-sensitive なAPIは成熟してから再導入
-- [ ] toml, compress, term を stdlib/ から packages/ に移動
-- [ ] STDLIB_MODULES, PRELUDE_MODULES から除外
-- [ ] FROZEN_API.md を更新
+- [x] uuid 削除 — TOML定義、ランタイム (Rust/TS/JS) 全て除去済み
+- [x] crypto 削除 — TOML定義、ランタイム (Rust/TS/JS) 全て除去済み
+- [x] toml, compress, term を bundled stdlib から除去済み
+- [x] STDLIB_MODULES, PRELUDE_MODULES から除外済み（uuid/crypto は含まれていない）
+- [x] FROZEN_API.md 更新済み
+- [x] SPEC.md 更新済み（モジュール一覧からuuid/crypto/toml/compress/term除去）
+- [x] STDLIB-SPEC.md 更新済み（crypto/uuid セクション削除、モジュールインデックス更新）

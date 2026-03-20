@@ -161,6 +161,10 @@ fn erase_expr(expr: IrExpr) -> IrExpr {
             object: Box::new(erase_expr(*object)),
             index: Box::new(erase_expr(*index)),
         },
+        IrExprKind::MapAccess { object, key } => IrExprKind::MapAccess {
+            object: Box::new(erase_expr(*object)),
+            key: Box::new(erase_expr(*key)),
+        },
         IrExprKind::Range { start, end, inclusive } => IrExprKind::Range {
             start: Box::new(erase_expr(*start)),
             end: Box::new(erase_expr(*end)),

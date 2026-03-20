@@ -1,7 +1,7 @@
 # Almide Standard Library Specification
 
-Auto-generated from `stdlib/defs/*.toml`. 381 native functions across 22 modules.
-Runtime implementation: 381/381 (100%).
+Auto-generated from `stdlib/defs/*.toml`. 371 native functions across 22 modules.
+Runtime implementation: 371/371 (100%).
 
 ## Module Index
 
@@ -9,7 +9,6 @@ Runtime implementation: 381/381 (100%).
 
 | Module | Layer | Functions | Implemented | Status |
 |--------|-------|-----------|-------------|--------|
-| crypto | platform | 4 | 4/4 | Ready |
 | datetime | platform | 21 | 21/21 | Ready |
 | env | platform | 9 | 9/9 | Ready |
 | error | core | 3 | 3/3 | Ready |
@@ -29,7 +28,6 @@ Runtime implementation: 381/381 (100%).
 | result | core | 9 | 9/9 | Ready |
 | string | core | 41 | 41/41 | Ready |
 | testing | core | 7 | 7/7 | Ready |
-| uuid | platform | 6 | 6/6 | Ready |
 | value | core | 19 | 19/19 | Ready |
 
 ### Bundled Modules (pure Almide)
@@ -37,62 +35,15 @@ Runtime implementation: 381/381 (100%).
 | Module | Functions |
 |--------|-----------|
 | args | 6 |
-| compress | 4 |
 | csv | 9 |
 | encoding | 10 |
 | hash | 3 |
 | path | 7 |
-| term | 21 |
 | time | 20 |
-| toml | 14 |
 | url | 21 |
 | value | 17 |
 
 ---
-
-## crypto
-
-Layer: **platform** | 4 functions | 4/4 implemented
-
-### `crypto.random_bytes`
-
-Generate n cryptographically secure random bytes.
-
-```
-effect random_bytes(n: Int) -> Result[List[Int], String]
-```
-
-Example: `crypto.random_bytes(16) // => ok([42, 17, ...])`
-
-### `crypto.random_hex`
-
-Generate a random hex string of n bytes (2n hex chars).
-
-```
-effect random_hex(n: Int) -> Result[String, String]
-```
-
-Example: `crypto.random_hex(8) // => ok("a1b2c3d4e5f6a7b8")`
-
-### `crypto.hmac_sha256`
-
-Compute HMAC-SHA256 of data with a key, returning hex digest.
-
-```
-effect hmac_sha256(key: String, data: String) -> Result[String, String]
-```
-
-Example: `crypto.hmac_sha256("secret", "message") // => ok("...")`
-
-### `crypto.hmac_verify`
-
-Verify an HMAC-SHA256 signature.
-
-```
-effect hmac_verify(key: String, data: String, signature: String) -> Result[Bool, String]
-```
-
-Example: `crypto.hmac_verify("secret", "message", sig) // => ok(true)`
 
 ## datetime
 
@@ -3499,70 +3450,6 @@ assert_ok(result: Result[String, String]) -> Unit
 ```
 
 Example: `testing.assert_ok(ok("success"))`
-
-## uuid
-
-Layer: **platform** | 6 functions | 6/6 implemented
-
-### `uuid.v4`
-
-Generate a random UUID v4.
-
-```
-effect v4() -> Result[String, String]
-```
-
-Example: `uuid.v4() // => ok("550e8400-e29b-41d4-a716-446655440000")`
-
-### `uuid.v5`
-
-Generate a deterministic UUID v5 from namespace and name.
-
-```
-effect v5(namespace: String, name: String) -> Result[String, String]
-```
-
-Example: `uuid.v5("dns", "example.com")`
-
-### `uuid.parse`
-
-Parse and validate a UUID string.
-
-```
-parse(s: String) -> Result[String, String]
-```
-
-Example: `uuid.parse("550e8400-e29b-41d4-a716-446655440000") // => ok("...")`
-
-### `uuid.is_valid`
-
-Check if a string is a valid UUID.
-
-```
-is_valid(s: String) -> Bool
-```
-
-Example: `uuid.is_valid("550e8400-e29b-41d4-a716-446655440000") // => true`
-
-### `uuid.nil`
-
-Return the nil UUID (all zeros).
-
-```
-nil() -> String
-```
-
-Example: `uuid.nil() // => "00000000-0000-0000-0000-000000000000"`
-
-### `uuid.version`
-
-Extract the version number from a UUID string.
-
-```
-version(s: String) -> Result[Int, String]
-```
-
-Example: `uuid.version("550e8400-e29b-41d4-a716-446655440000") // => ok(4)`
 
 ## value
 

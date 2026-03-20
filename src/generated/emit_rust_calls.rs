@@ -341,27 +341,27 @@ pub fn gen_generated_call(
                 format!("almide_rt_map_update({}, {}, |{}| {{{{ {}{} }}}})", args_str[0], args_str[1], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
             },
             ("map", "values") => format!("almide_rt_map_values(&{})", args_str[0]),
-            ("math", "abs") => format!("almide_rt_math_abs({})", args_str[0]),
+            ("math", "abs") => format!("({}).abs()", args_str[0]),
             ("math", "choose") => format!("almide_rt_math_choose({}, {})", args_str[0], args_str[1]),
-            ("math", "cos") => format!("almide_rt_math_cos({})", args_str[0]),
-            ("math", "e") => "almide_rt_math_e()".to_string(),
-            ("math", "exp") => format!("almide_rt_math_exp({})", args_str[0]),
+            ("math", "cos") => format!("({} as f64).cos()", args_str[0]),
+            ("math", "e") => "std::f64::consts::E".to_string(),
+            ("math", "exp") => format!("({} as f64).exp()", args_str[0]),
             ("math", "factorial") => format!("almide_rt_math_factorial({})", args_str[0]),
-            ("math", "fmax") => format!("almide_rt_math_fmax({}, {})", args_str[0], args_str[1]),
-            ("math", "fmin") => format!("almide_rt_math_fmin({}, {})", args_str[0], args_str[1]),
-            ("math", "fpow") => format!("almide_rt_math_fpow({}, {})", args_str[0], args_str[1]),
-            ("math", "log") => format!("almide_rt_math_log({})", args_str[0]),
-            ("math", "log10") => format!("almide_rt_math_log10({})", args_str[0]),
-            ("math", "log2") => format!("almide_rt_math_log2({})", args_str[0]),
+            ("math", "fmax") => format!("({} as f64).max({} as f64)", args_str[0], args_str[1]),
+            ("math", "fmin") => format!("({} as f64).min({} as f64)", args_str[0], args_str[1]),
+            ("math", "fpow") => format!("({} as f64).powf({} as f64)", args_str[0], args_str[1]),
+            ("math", "log") => format!("({} as f64).ln()", args_str[0]),
+            ("math", "log10") => format!("({} as f64).log10()", args_str[0]),
+            ("math", "log2") => format!("({} as f64).log2()", args_str[0]),
             ("math", "log_gamma") => format!("almide_rt_math_log_gamma({})", args_str[0]),
-            ("math", "max") => format!("almide_rt_math_max({}, {})", args_str[0], args_str[1]),
-            ("math", "min") => format!("almide_rt_math_min({}, {})", args_str[0], args_str[1]),
-            ("math", "pi") => "almide_rt_math_pi()".to_string(),
-            ("math", "pow") => format!("almide_rt_math_pow({}, {})", args_str[0], args_str[1]),
-            ("math", "sign") => format!("almide_rt_math_sign({})", args_str[0]),
-            ("math", "sin") => format!("almide_rt_math_sin({})", args_str[0]),
-            ("math", "sqrt") => format!("almide_rt_math_sqrt({})", args_str[0]),
-            ("math", "tan") => format!("almide_rt_math_tan({})", args_str[0]),
+            ("math", "max") => format!("std::cmp::max({}, {})", args_str[0], args_str[1]),
+            ("math", "min") => format!("std::cmp::min({}, {})", args_str[0], args_str[1]),
+            ("math", "pi") => "std::f64::consts::PI".to_string(),
+            ("math", "pow") => format!("({}).pow({} as u32)", args_str[0], args_str[1]),
+            ("math", "sign") => format!("({}).signum()", args_str[0]),
+            ("math", "sin") => format!("({} as f64).sin()", args_str[0]),
+            ("math", "sqrt") => format!("({} as f64).sqrt()", args_str[0]),
+            ("math", "tan") => format!("({} as f64).tan()", args_str[0]),
             ("option", "filter") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
                 format!("almide_rt_option_filter({}, |{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body)
@@ -428,15 +428,42 @@ pub fn gen_generated_call(
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
                 format!("({}).unwrap_or_else(|{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body)
             },
+            ("set", "all") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
+                format!("almide_rt_set_all(&{}, |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
+            },
+            ("set", "any") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
+                format!("almide_rt_set_any(&{}, |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
+            },
             ("set", "contains") => format!("almide_rt_set_contains(&{}, &{})", args_str[0], args_str[1]),
             ("set", "difference") => format!("almide_rt_set_difference(&{}, &{})", args_str[0], args_str[1]),
+            ("set", "each") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
+                format!("almide_rt_set_each(&{}, |{}| {{{{ {}{} ; }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
+            },
+            ("set", "filter") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
+                format!("almide_rt_set_filter(&{}, |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
+            },
+            ("set", "fold") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(2, 2);
+                format!("almide_rt_set_fold({}, {}, |{}| {{{{ {}{} }}}})", args_str[0], args_str[1], __cl_f_names.join(", "), __cl_f_names.iter().map(|n| format!("let {} = {}.clone(); ", n, n)).collect::<Vec<_>>().join(""), __cl_f_body)
+            },
             ("set", "from_list") => format!("almide_rt_set_from_list({})", args_str[0]),
             ("set", "insert") => format!("almide_rt_set_insert({}, {})", args_str[0], args_str[1]),
             ("set", "intersection") => format!("almide_rt_set_intersection(&{}, &{})", args_str[0], args_str[1]),
+            ("set", "is_disjoint") => format!("almide_rt_set_is_disjoint(&{}, &{})", args_str[0], args_str[1]),
             ("set", "is_empty") => format!("almide_rt_set_is_empty(&{})", args_str[0]),
+            ("set", "is_subset") => format!("almide_rt_set_is_subset(&{}, &{})", args_str[0], args_str[1]),
             ("set", "len") => format!("almide_rt_set_len(&{})", args_str[0]),
+            ("set", "map") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
+                format!("almide_rt_set_map({}, |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
+            },
             ("set", "new") => "almide_rt_set_new()".to_string(),
             ("set", "remove") => format!("almide_rt_set_remove({}, &{})", args_str[0], args_str[1]),
+            ("set", "symmetric_difference") => format!("almide_rt_set_symmetric_difference(&{}, &{})", args_str[0], args_str[1]),
             ("set", "to_list") => format!("almide_rt_set_to_list({})", args_str[0]),
             ("set", "union") => format!("almide_rt_set_union(&{}, &{})", args_str[0], args_str[1]),
             ("string", "capitalize") => format!("almide_rt_string_capitalize(&*{})", args_str[0]),

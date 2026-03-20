@@ -26,6 +26,7 @@ pub mod pass_builtin_lowering;
 pub mod pass_clone;
 pub mod pass_fan_lowering;
 pub mod pass_match_lowering;
+pub mod pass_match_subject;
 pub mod pass_result_erasure;
 pub mod pass_result_propagation;
 pub mod pass_shadow_resolve;
@@ -86,58 +87,47 @@ pub fn emit(program: &mut IrProgram, target: Target) -> String {
         }
         ann.recursive_enums = recursive.clone();
         // Build boxed_fields: for each recursive enum, find which variant fields reference the enum
-        for td in &program.type_decls {
-            if recursive.contains(&td.name) {
-                if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
-                    for c in cases {
-                        if let IrVariantKind::Record { fields } = &c.kind {
-                            for f in fields {
-                                if walker::ty_contains_name(&f.ty, &td.name) {
-                                    ann.boxed_fields.insert((c.name.clone(), f.name.clone()));
-                                }
-                            }
-                        }
-                        if let IrVariantKind::Tuple { fields } = &c.kind {
-                            for (i, t) in fields.iter().enumerate() {
-                                if walker::ty_contains_name(t, &td.name) {
-                                    ann.boxed_fields.insert((c.name.clone(), format!("{}", i)));
-                                }
-                            }
-                        }
+        ann.boxed_fields = program.type_decls.iter()
+            .filter(|td| recursive.contains(&td.name))
+            .filter_map(|td| match &td.kind {
+                IrTypeDeclKind::Variant { cases, .. } => Some((td, cases)),
+                _ => None,
+            })
+            .flat_map(|(td, cases)| {
+                cases.iter().flat_map(move |c| {
+                    let name = &td.name;
+                    match &c.kind {
+                        IrVariantKind::Record { fields } => fields.iter()
+                            .filter(|f| walker::ty_contains_name(&f.ty, name))
+                            .map(|f| (c.name.clone(), f.name.clone()))
+                            .collect::<Vec<_>>(),
+                        IrVariantKind::Tuple { fields } => fields.iter().enumerate()
+                            .filter(|(_, t)| walker::ty_contains_name(t, name))
+                            .map(|(i, _)| (c.name.clone(), format!("{}", i)))
+                            .collect::<Vec<_>>(),
+                        _ => vec![],
                     }
-                }
-            }
-        }
+                })
+            })
+            .collect();
         // Build default_fields: for each variant/record constructor with default field values
-        for td in &program.type_decls {
-            match &td.kind {
-                IrTypeDeclKind::Variant { cases, .. } => {
-                    for c in cases {
-                        if let IrVariantKind::Record { fields } = &c.kind {
-                            for f in fields {
-                                if let Some(ref def) = f.default {
-                                    ann.default_fields.insert(
-                                        (c.name.clone(), f.name.clone()),
-                                        def.clone(),
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
-                IrTypeDeclKind::Record { fields } => {
-                    for f in fields {
-                        if let Some(ref def) = f.default {
-                            ann.default_fields.insert(
-                                (td.name.clone(), f.name.clone()),
-                                def.clone(),
-                            );
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
+        ann.default_fields = program.type_decls.iter()
+            .flat_map(|td| match &td.kind {
+                IrTypeDeclKind::Variant { cases, .. } => cases.iter()
+                    .filter_map(|c| match &c.kind {
+                        IrVariantKind::Record { fields } => Some(fields.iter()
+                            .filter_map(|f| f.default.as_ref().map(|def| ((c.name.clone(), f.name.clone()), def.clone())))
+                            .collect::<Vec<_>>()),
+                        _ => None,
+                    })
+                    .flatten()
+                    .collect::<Vec<_>>(),
+                IrTypeDeclKind::Record { fields } => fields.iter()
+                    .filter_map(|f| f.default.as_ref().map(|def| ((td.name.clone(), f.name.clone()), def.clone())))
+                    .collect(),
+                _ => vec![],
+            })
+            .collect();
     }
 
     // Layer 2: Run Nanopass pipeline (semantic rewrites — modifies IR)

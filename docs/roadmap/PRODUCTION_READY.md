@@ -34,8 +34,8 @@ Almide が**既に回避した**他言語の失敗:
 ```
 コンパイラ          84 ファイル / 19,536 行
                     生成コードは外部 crate 不要（stdlib ランタイムを自己内包）
-stdlib             22 モジュール / 355 関数 / ランタイム 100%
-テスト             110/110 .almd テストファイル全通過 + 714 Rust unit tests
+stdlib             22 モジュール / 381 関数 / ランタイム 100%
+テスト             111 .almd テストファイル (1,564 blocks) + 636 Rust unit tests = 2,200 total
 ターゲット          Rust, TypeScript, JavaScript, npm package, WASM
 Exercises          25 本 / 6 tiers
 並行処理           fan { }, fan.map, fan.race, fan.any, fan.settle, fan.timeout
@@ -65,7 +65,7 @@ Codegen            v3: TOML templates, is_rust()=0, 106/106 cross-target
 | パターンマッチ | 基本 | 網羅性チェック、ネスト、ガード |
 | 診断 | 行番号のみ | file:line + context + hint + error recovery |
 | テスト | 0 | 2,033+ |
-| stdlib | 数関数 | 22 モジュール / 355 関数 |
+| stdlib | 数関数 | 22 モジュール / 381 関数 |
 | ツール | `almide run` のみ | run, build, test, check, fmt, clean, init |
 
 ---
@@ -79,7 +79,7 @@ Codegen            v3: TOML templates, is_rust()=0, 106/106 cross-target
 ### Almide 1.0 が約束すること
 
 1. **構文凍結**: `effect fn`, `fan`, `do`, `guard`, `match`, `for...in` — 現在の構文は永続
-2. **コア stdlib API 凍結**: 22 モジュール / 355 関数のシグネチャは不変。関数の追加はするが、既存の変更はしない
+2. **コア stdlib API 凍結**: 22 モジュール / 381 関数のシグネチャは不変。関数の追加はするが、既存の変更はしない
 3. **クロスターゲット一致**: 同じ `.almd` が Rust と TS で同じ出力を生む
 4. **edition フィールド**: `almide.toml` に `edition = "2026"` を追加。将来の破壊的変更は新 edition で吸収 (Rust editions の教訓)
 5. **永続互換性**: 今日コンパイルできる `.almd` は永遠にコンパイルできる (Go 1 compatibility promise)
@@ -94,7 +94,7 @@ Codegen            v3: TOML templates, is_rust()=0, 106/106 cross-target
 | Go / Python ターゲット | Rust + TS で 90% カバー | Kotlin MP: JVM 優先、他は後 | 2.x |
 | Security Layer 2-5 | Layer 1 だけで十分な差別化 | — | 2.x |
 | Self-Hosting | ユーザー価値薄い | Zig: 自前 backend は罠 | 2.x+ |
-| 700+ 関数 | 355 で実用的。Gleam は 19 モジュールで 1.0 | 全言語 | 1.x |
+| 700+ 関数 | 381 で実用的。Gleam は 19 モジュールで 1.0 | 全言語 | 1.x |
 | Algebraic effects | `effect fn` は I/O マーカーに留める | Gleam: 効果系なしで成功 | 検討しない |
 | User-defined generics | 型宣言の generics は動く。関数は後 | Go: 12 年後 | 1.x |
 
@@ -114,7 +114,7 @@ Almide 1.0 = ALL of:
 
 安定性契約
   ■ 構文凍結: 全キーワード・構文の最終確認 (verb reform 完了)
-  ■ stdlib API 凍結: FROZEN_API.md で 22 モジュール / 355 関数を文書化
+  ■ stdlib API 凍結: FROZEN_API.md で 22 モジュール / 381 関数を文書化
   ■ edition フィールド: almide.toml に edition = "2026" 実装済み
   ■ 破壊的変更ポリシー: BREAKING_CHANGE_POLICY.md
   ■ Rejected Patterns リスト: REJECTED_PATTERNS.md (20+ 項目)
@@ -131,7 +131,7 @@ Almide 1.0 = ALL of:
   ■ Tier 3 (WASM): smoke test pass (fibonacci + fizzbuzz + list.map, 305KB)
 
 テスト
-  □ テスト 2,500+                        (2,033 — あと 467)
+  □ テスト 2,500+                        (2,200 — あと 300)
   □ 5 showcase プログラムが Tier 1 + Tier 2 で動作
 
 パッケージ管理

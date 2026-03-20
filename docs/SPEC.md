@@ -228,10 +228,10 @@ All other stdlib modules require explicit `import`:
 
 ```
 fs  env  io  process  json  random  regex  datetime  http
-log  testing  error  crypto  uuid
+log  testing  error
 ```
 
-Bundled stdlib packages (pure Almide): `args`, `path`, `time`, `encoding`, `hash`, `url`, `csv`, `toml`, `compress`, `term`.
+Bundled stdlib packages (pure Almide): `args`, `path`, `time`, `encoding`, `hash`, `url`, `csv`.
 
 ### 4.3 Prelude Types
 
@@ -1129,12 +1129,6 @@ Set operations: `new`, `insert`, `contains`, `remove`, `union`, `intersection`, 
 **datetime** (21 functions):
 Date/time operations: `now`, `year`, `month`, `day`, `hour`, `minute`, `second`, `weekday`, `to_iso`, `from_parts`, etc.
 
-**crypto** (4 functions, effect):
-`random_bytes`, `random_hex`, `hmac_sha256`, `sha256`
-
-**uuid** (6 functions):
-UUID generation and formatting.
-
 **log** (8 functions, effect):
 `debug`, `info`, `warn`, `error`, `trace`, `set_level`, `with_context`, `flush`
 
@@ -1161,9 +1155,6 @@ HTTP client operations.
 | hash | 3 |
 | url | 21 |
 | csv | 9 |
-| toml | 14 |
-| compress | 4 |
-| term | 21 |
 
 ### 18.4 Built-in Functions
 

@@ -85,19 +85,15 @@ fn find_structurally_bounded_fns(functions: &[IrFunction], type_decls: &[IrTypeD
         let mut bounded = Vec::new();
         // パターン A: generic + structural bound (fn f[T: { name: String, .. }](x: T))
         if let Some(ref generics) = func.generics {
-            for g in generics {
-                if g.structural_bound.is_some() {
-                    for (i, param) in func.params.iter().enumerate() {
-                        let is_match = ty_contains_typevar(&param.ty, &g.name);
-                        if is_match {
-                            bounded.push(BoundedParam {
-                                param_idx: i,
-                                type_var: g.name.clone(),
-                            });
-                        }
-                    }
-                }
-            }
+            bounded.extend(
+                generics.iter()
+                    .filter(|g| g.structural_bound.is_some())
+                    .flat_map(|g| {
+                        func.params.iter().enumerate()
+                            .filter(|(_, param)| ty_contains_typevar(&param.ty, &g.name))
+                            .map(|(i, _)| BoundedParam { param_idx: i, type_var: g.name.clone() })
+                    })
+            );
         }
         // パターン B: 直接 OpenRecord パラメータ、または OpenRecord エイリアス
         for (i, param) in func.params.iter().enumerate() {
@@ -119,6 +115,25 @@ fn find_structurally_bounded_fns(functions: &[IrFunction], type_decls: &[IrTypeD
         }
     }
     result
+}
+
+
+/// Collect type variable bindings for a monomorphization call site.
+fn collect_mono_bindings(
+    bounded_params: &[BoundedParam],
+    args: &[IrExpr],
+    param_types: &[Ty],
+) -> HashMap<String, Ty> {
+    bounded_params.iter()
+        .filter(|bp| bp.param_idx < args.len())
+        .map(|bp| {
+            let arg_ty = &args[bp.param_idx].ty;
+            let binding = param_types.get(bp.param_idx)
+                .map(|pt| extract_typevar_binding(pt, arg_ty, &bp.type_var))
+                .unwrap_or_else(|| arg_ty.clone());
+            (bp.type_var.clone(), binding)
+        })
+        .collect()
 }
 
 /// Discover all concrete instantiations of structurally-bounded functions.
@@ -155,18 +170,7 @@ fn discover_in_expr(
                         .map(|f| f.params.iter().map(|p| p.ty.clone()).collect())
                         .unwrap_or_default();
 
-                    let mut bindings: HashMap<String, Ty> = HashMap::new();
-                    for bp in bounded_params {
-                        if bp.param_idx < args.len() {
-                            let arg_ty = &args[bp.param_idx].ty;
-                            if let Some(param_ty) = param_types.get(bp.param_idx) {
-                                let extracted = extract_typevar_binding(param_ty, arg_ty, &bp.type_var);
-                                bindings.insert(bp.type_var.clone(), extracted);
-                            } else {
-                                bindings.insert(bp.type_var.clone(), arg_ty.clone());
-                            }
-                        }
-                    }
+                    let bindings = collect_mono_bindings(bounded_params, args, &param_types);
                     // Skip bindings with Unknown or unresolved inference vars
                     let all_concrete = !bindings.is_empty() && bindings.values().all(|ty|
                         !matches!(ty, Ty::Unknown) && !ty.contains_unknown()
@@ -242,6 +246,10 @@ fn discover_in_expr(
             discover_in_expr(object, bound_fns, program_functions, instances);
             discover_in_expr(index, bound_fns, program_functions, instances);
         }
+        IrExprKind::MapAccess { object, key } => {
+            discover_in_expr(object, bound_fns, program_functions, instances);
+            discover_in_expr(key, bound_fns, program_functions, instances);
+        }
         IrExprKind::Lambda { body, .. } => discover_in_expr(body, bound_fns, program_functions, instances),
         IrExprKind::StringInterp { parts } => {
             for part in parts {
@@ -268,6 +276,10 @@ fn discover_in_stmt(
         | IrStmtKind::Assign { value, .. } => discover_in_expr(value, bound_fns, program_functions, instances),
         IrStmtKind::IndexAssign { index, value, .. } => {
             discover_in_expr(index, bound_fns, program_functions, instances);
+            discover_in_expr(value, bound_fns, program_functions, instances);
+        }
+        IrStmtKind::MapInsert { key, value, .. } => {
+            discover_in_expr(key, bound_fns, program_functions, instances);
             discover_in_expr(value, bound_fns, program_functions, instances);
         }
         IrStmtKind::FieldAssign { value, .. } => discover_in_expr(value, bound_fns, program_functions, instances),
@@ -431,6 +443,10 @@ fn substitute_expr_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
             substitute_expr_types(object, bindings);
             substitute_expr_types(index, bindings);
         }
+        IrExprKind::MapAccess { object, key } => {
+            substitute_expr_types(object, bindings);
+            substitute_expr_types(key, bindings);
+        }
         IrExprKind::ForIn { iterable, body, .. } => {
             substitute_expr_types(iterable, bindings);
             for s in body { substitute_stmt_types(s, bindings); }
@@ -468,6 +484,10 @@ fn substitute_stmt_types(stmt: &mut IrStmt, bindings: &HashMap<String, Ty>) {
         }
         IrStmtKind::IndexAssign { index, value, .. } => {
             substitute_expr_types(index, bindings);
+            substitute_expr_types(value, bindings);
+        }
+        IrStmtKind::MapInsert { key, value, .. } => {
+            substitute_expr_types(key, bindings);
             substitute_expr_types(value, bindings);
         }
         IrStmtKind::FieldAssign { value, .. } => substitute_expr_types(value, bindings),
@@ -512,17 +532,8 @@ fn rewrite_expr_calls(
             if let CallTarget::Named { name } = target {
                 if let Some(bounded_params) = bound_fns.get(name.as_str()) {
                     let param_types = fn_param_types.get(name.as_str());
-                    let mut bindings: HashMap<String, Ty> = HashMap::new();
-                    for bp in bounded_params {
-                        if bp.param_idx < args.len() {
-                            let arg_ty = &args[bp.param_idx].ty;
-                            if let Some(pt) = param_types.and_then(|pts| pts.get(bp.param_idx)) {
-                                bindings.insert(bp.type_var.clone(), extract_typevar_binding(pt, arg_ty, &bp.type_var));
-                            } else {
-                                bindings.insert(bp.type_var.clone(), arg_ty.clone());
-                            }
-                        }
-                    }
+                    let pt = param_types.map(|pts| pts.as_slice()).unwrap_or(&[]);
+                    let bindings = collect_mono_bindings(bounded_params, args, pt);
                     if !bindings.is_empty() {
                         let suffix = mangle_suffix(&bindings);
                         if instances.contains_key(&(name.clone(), suffix.clone())) {
@@ -594,6 +605,10 @@ fn rewrite_expr_calls(
             rewrite_expr_calls(object, bound_fns, instances, fn_param_types);
             rewrite_expr_calls(index, bound_fns, instances, fn_param_types);
         }
+        IrExprKind::MapAccess { object, key } => {
+            rewrite_expr_calls(object, bound_fns, instances, fn_param_types);
+            rewrite_expr_calls(key, bound_fns, instances, fn_param_types);
+        }
         IrExprKind::Lambda { body, .. } => rewrite_expr_calls(body, bound_fns, instances, fn_param_types),
         IrExprKind::StringInterp { parts } => {
             for part in parts {
@@ -620,6 +635,10 @@ fn rewrite_stmt_calls(
         | IrStmtKind::Assign { value, .. } => rewrite_expr_calls(value, bound_fns, instances, fn_param_types),
         IrStmtKind::IndexAssign { index, value, .. } => {
             rewrite_expr_calls(index, bound_fns, instances, fn_param_types);
+            rewrite_expr_calls(value, bound_fns, instances, fn_param_types);
+        }
+        IrStmtKind::MapInsert { key, value, .. } => {
+            rewrite_expr_calls(key, bound_fns, instances, fn_param_types);
             rewrite_expr_calls(value, bound_fns, instances, fn_param_types);
         }
         IrStmtKind::FieldAssign { value, .. } => rewrite_expr_calls(value, bound_fns, instances, fn_param_types),

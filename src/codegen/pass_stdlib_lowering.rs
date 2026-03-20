@@ -133,29 +133,26 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                     // UFCS: "module.func" method → convert to Module call and process
                     // Only if the module.func exists in stdlib (arg_transforms table)
                     if method.contains('.') && !method.ends_with(".encode") && !method.ends_with(".decode") {
-                        if let Some(dot_pos) = method.find('.') {
-                            let mod_name = &method[..dot_pos];
-                            let func_name = &method[dot_pos+1..];
-                            // Check if this is a real stdlib function
-                            if arg_transforms::lookup(mod_name, func_name).is_none() {
+                        let dot_pos = method.find('.').unwrap();
+                        let (mod_name, func_name) = (&method[..dot_pos], &method[dot_pos+1..]);
+                        // Check if this is a real stdlib function
+                        if arg_transforms::lookup(mod_name, func_name).is_none() {
                                 // Not a stdlib function — leave as Method call for BuiltinLoweringPass
                                 return IrExpr { kind: IrExprKind::Call {
                                     target: CallTarget::Method { object, method },
                                     args, type_args,
                                 }, ty, span };
                             }
-                            let mut call_args = vec![*object];
-                            call_args.extend(args);
-                            // Recursively process as Module call
-                            let module_call = IrExpr {
-                                kind: IrExprKind::Call {
-                                    target: CallTarget::Module { module: mod_name.to_string(), func: func_name.to_string() },
-                                    args: call_args, type_args,
-                                },
-                                ty: ty.clone(), span,
-                            };
-                            return rewrite_expr(module_call);
-                        }
+                        let mut call_args = vec![*object];
+                        call_args.extend(args);
+                        let module_call = IrExpr {
+                            kind: IrExprKind::Call {
+                                target: CallTarget::Module { module: mod_name.to_string(), func: func_name.to_string() },
+                                args: call_args, type_args,
+                            },
+                            ty: ty.clone(), span,
+                        };
+                        return rewrite_expr(module_call);
                     }
                     CallTarget::Method { object, method }
                 }
@@ -242,6 +239,10 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
         IrExprKind::IndexAccess { object, index } => IrExprKind::IndexAccess {
             object: Box::new(rewrite_expr(*object)),
             index: Box::new(rewrite_expr(*index)),
+        },
+        IrExprKind::MapAccess { object, key } => IrExprKind::MapAccess {
+            object: Box::new(rewrite_expr(*object)),
+            key: Box::new(rewrite_expr(*key)),
         },
         IrExprKind::Fan { exprs } => IrExprKind::Fan {
             // FanLoweringPass will strip auto-try from these later

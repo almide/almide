@@ -70,7 +70,7 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
             .arg("-C").arg("lto=thin")
             .arg("-C").arg("codegen-units=1");
     } else if release {
-        rustc_cmd.arg("-C").arg("opt-level=2");
+        rustc_cmd.arg("-C").arg("opt-level=3");
     }
 
     let rustc = rustc_cmd.output()

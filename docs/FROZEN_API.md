@@ -145,8 +145,8 @@
 ## 凍結対象外
 
 以下のモジュールは 1.x で追加・変更される可能性がある:
-- effect モジュール: fs, http, io, process, env, log, random, crypto, datetime, uuid
-- データモジュール: json, regex, value
-- 将来追加: csv, toml, url, html, set, sorted
+- effect モジュール: fs, http, io, process, env, log, random, datetime
+- データモジュール: json, regex, value, set
+- 将来追加: csv, url, html, sorted
 
 これらは「安定だが凍結はしない」— シグネチャ変更は deprecation cycle に従う。

@@ -196,17 +196,11 @@ impl TypeEnv {
                         // Extract generic param names from the resolved type's TypeVars
                         let mut param_names = Vec::new();
                         Self::collect_typevars(resolved, &mut param_names);
-                        let mut bindings = std::collections::HashMap::new();
-                        for (i, arg) in args.iter().enumerate() {
-                            if let Some(name) = param_names.get(i) {
-                                bindings.insert(name.clone(), arg.clone());
-                            }
-                        }
-                        if bindings.is_empty() {
-                            resolved.clone()
-                        } else {
-                            substitute(resolved, &bindings)
-                        }
+                        let bindings: std::collections::HashMap<_, _> = param_names.iter()
+                            .zip(args.iter())
+                            .map(|(name, arg)| (name.clone(), arg.clone()))
+                            .collect();
+                        if bindings.is_empty() { resolved.clone() } else { substitute(resolved, &bindings) }
                     }
                 } else {
                     ty.clone()

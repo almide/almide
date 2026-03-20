@@ -20,6 +20,7 @@ use super::pass_result_erasure::ResultErasurePass;
 use super::pass_result_propagation::ResultPropagationPass;
 use super::pass_shadow_resolve::ShadowResolvePass;
 use super::pass_stdlib_lowering::StdlibLoweringPass;
+use super::pass_match_subject::MatchSubjectPass;
 use super::pass_effect_inference::EffectInferencePass;
 use super::pass_stream_fusion::StreamFusionPass;
 use super::template::TemplateSet;
@@ -47,11 +48,14 @@ fn build_pipeline(target: Target) -> Pipeline {
         Target::Rust => Pipeline::new()
             // Global passes
             .add(TypeConcretizationPass)
+            // Stream fusion BEFORE borrow/clone (decorators break pattern matching)
+            .add(StreamFusionPass)
             .add(BorrowInsertionPass)
             .add(CloneInsertionPass)
+            // Match subject transforms: String → .as_str(), Option<String> → .as_deref()
+            .add(MatchSubjectPass)
             // Analysis passes (before lowering, while Module calls still visible)
             .add(EffectInferencePass)
-            .add(StreamFusionPass)
             // Semantic lowering (order matters!)
             // 1. Stdlib first: Module calls → Named calls with arg decoration
             .add(StdlibLoweringPass)

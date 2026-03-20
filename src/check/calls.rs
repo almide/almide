@@ -2,6 +2,45 @@
 
 use std::collections::HashMap;
 use crate::ast;
+/// Extract the effective return type from a function type, auto-unwrapping Result.
+fn unwrap_fn_return(fn_ty: &Ty) -> Option<Ty> {
+    if let Ty::Fn { ret, .. } = fn_ty {
+        Some(match ret.as_ref() {
+            Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
+            other => other.clone(),
+        })
+    } else {
+        None
+    }
+}
+
+/// Extract the Result type from List[Fn() -> Result[T, E]] → Result[T, E]
+fn unwrap_list_fn_result_ty(list_ty: &Ty) -> Ty {
+    match list_ty {
+        Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
+            match &args[0] {
+                Ty::Fn { ret, .. } => match ret.as_ref() {
+                    r @ Ty::Applied(TypeConstructorId::Result, _) => r.clone(),
+                    other => Ty::result(other.clone(), Ty::String),
+                },
+                _ => Ty::Unknown,
+            }
+        }
+        _ => Ty::Unknown,
+    }
+}
+
+/// Extract the element's effective return type from List[Fn() -> Result[T, E]] → T
+fn unwrap_list_fn_return(list_ty: &Ty) -> Ty {
+    match list_ty {
+        Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
+            unwrap_fn_return(&args[0]).unwrap_or(Ty::Unknown)
+        }
+        _ => Ty::Unknown,
+    }
+}
+
+
 use crate::types::{Ty, TypeConstructorId};
 use super::types::resolve_vars;
 use super::Checker;
@@ -69,18 +108,7 @@ impl Checker {
                     }
                 }
                 // Convention method: dog.repr() → Dog.repr(dog)
-                let type_name_opt = match &obj_concrete {
-                    Ty::Named(name, _) => Some(name.clone()),
-                    Ty::Record { .. } | Ty::Variant { .. } => {
-                        // Reverse lookup: find type name whose definition matches this structure
-                        self.env.types.iter().find_map(|(name, ty)| {
-                            if ty == &obj_concrete && name.chars().next().map_or(false, |c| c.is_uppercase()) {
-                                Some(name.clone())
-                            } else { None }
-                        })
-                    }
-                    _ => None,
-                };
+                let type_name_opt = self.resolve_type_name(&obj_concrete);
                 if let Some(type_name) = type_name_opt {
                     let convention_key = format!("{}.{}", type_name, field);
                     if self.env.functions.contains_key(&convention_key) {
@@ -105,6 +133,19 @@ impl Checker {
                 self.constrain(ct, Ty::Fn { params: arg_tys.to_vec(), ret: Box::new(ret.clone()) }, "function call");
                 ret
             }
+        }
+    }
+
+    /// Resolve a concrete type to its declared type name.
+    fn resolve_type_name(&self, ty: &Ty) -> Option<String> {
+        match ty {
+            Ty::Named(name, _) => Some(name.clone()),
+            Ty::Record { .. } | Ty::Variant { .. } => {
+                self.env.types.iter().find_map(|(name, def)| {
+                    (def == ty && name.starts_with(|c: char| c.is_uppercase())).then(|| name.clone())
+                })
+            }
+            _ => None,
         }
     }
 
@@ -172,15 +213,13 @@ impl Checker {
                         return Ty::Named(type_name, generic_args);
                     }
                     if let Some(ty) = self.env.lookup_var(name).cloned() {
-                        return match &ty {
-                            Ty::Fn { params, ret } => {
-                                for (aty, pty) in arg_tys.iter().zip(params.iter()) {
-                                    self.constrain(pty.clone(), aty.clone(), format!("call to {}()", name));
-                                }
-                                ret.as_ref().clone()
-                            }
-                            _ => ty
-                        };
+                        if let Ty::Fn { params, ret } = &ty {
+                            arg_tys.iter().zip(params.iter()).for_each(|(aty, pty)| {
+                                self.constrain(pty.clone(), aty.clone(), format!("call to {}()", name));
+                            });
+                            return ret.as_ref().clone();
+                        }
+                        return ty;
                     }
                     self.emit(super::err(format!("undefined function '{}'", name), "Check the function name", format!("call to {}()", name)).with_code("E002"));
                     return Ty::Unknown;
@@ -337,23 +376,13 @@ impl Checker {
                         };
                         // Infer return type from f's return type
                         let fn_ty = resolve_vars(&arg_tys[1], &self.solutions);
-                        let result_elem = match &fn_ty {
-                            Ty::Fn { ret, .. } => {
-                                // Auto-unwrap Result
-                                match ret.as_ref() {
-                                    Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
-                                    other => other.clone(),
-                                }
-                            }
-                            _ => {
-                                // If fn type unknown, constrain it
-                                let ret_var = self.fresh_var();
-                                self.constrain(arg_tys[1].clone(),
-                                    Ty::Fn { params: vec![elem_ty], ret: Box::new(ret_var.clone()) },
-                                    "fan.map callback");
-                                resolve_vars(&ret_var, &self.solutions)
-                            }
-                        };
+                        let result_elem = unwrap_fn_return(&fn_ty).unwrap_or_else(|| {
+                            let ret_var = self.fresh_var();
+                            self.constrain(arg_tys[1].clone(),
+                                Ty::Fn { params: vec![elem_ty], ret: Box::new(ret_var.clone()) },
+                                "fan.map callback");
+                            resolve_vars(&ret_var, &self.solutions)
+                        });
                         return Some(Ty::list(result_elem));
                     }
                     "race" => {
@@ -366,21 +395,7 @@ impl Checker {
                             return Some(Ty::Unknown);
                         }
                         let list_ty = resolve_vars(&arg_tys[0], &self.solutions);
-                        let result_ty = match &list_ty {
-                            Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
-                                match &args[0] {
-                                    Ty::Fn { ret, .. } => {
-                                        match ret.as_ref() {
-                                            Ty::Applied(TypeConstructorId::Result, rargs) if rargs.len() == 2 => rargs[0].clone(),
-                                            other => other.clone(),
-                                        }
-                                    }
-                                    _ => Ty::Unknown,
-                                }
-                            }
-                            _ => Ty::Unknown,
-                        };
-                        return Some(result_ty);
+                        return Some(unwrap_list_fn_return(&list_ty));
                     }
                     "any" => {
                         // fan.any(thunks) -> T — first success, all fail = error
@@ -392,17 +407,7 @@ impl Checker {
                             return Some(Ty::Unknown);
                         }
                         let list_ty = resolve_vars(&arg_tys[0], &self.solutions);
-                        let result_ty = match &list_ty {
-                            Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => match &args[0] {
-                                Ty::Fn { ret, .. } => match ret.as_ref() {
-                                    Ty::Applied(TypeConstructorId::Result, rargs) if rargs.len() == 2 => rargs[0].clone(),
-                                    other => other.clone(),
-                                },
-                                _ => Ty::Unknown,
-                            },
-                            _ => Ty::Unknown,
-                        };
-                        return Some(result_ty);
+                        return Some(unwrap_list_fn_return(&list_ty));
                     }
                     "settle" => {
                         // fan.settle(thunks) -> List[Result[T, String]]
@@ -414,16 +419,7 @@ impl Checker {
                             return Some(Ty::Unknown);
                         }
                         let list_ty = resolve_vars(&arg_tys[0], &self.solutions);
-                        let inner_result = match &list_ty {
-                            Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => match &args[0] {
-                                Ty::Fn { ret, .. } => match ret.as_ref() {
-                                    Ty::Applied(TypeConstructorId::Result, rargs) if rargs.len() == 2 => Ty::result(rargs[0].clone(), rargs[1].clone()),
-                                    other => Ty::result(other.clone(), Ty::String),
-                                },
-                                _ => Ty::Unknown,
-                            },
-                            _ => Ty::Unknown,
-                        };
+                        let inner_result = unwrap_list_fn_result_ty(&list_ty);
                         return Some(Ty::list(inner_result));
                     }
                     "timeout" => {

@@ -281,6 +281,20 @@ fn try_compile_with_ir(file: &str, no_check: bool) -> Result<(String, Option<alm
     // Optimize IR: constant folding + dead code elimination
     if let Some(ref mut ir) = ir_program {
         almide::optimize::optimize_program(ir);
+        // Reclassify top-level lets after optimization (cross-reference const detection)
+        almide::ir::reclassify_top_lets(ir);
+    }
+
+    // Verify IR integrity (debug builds only)
+    #[cfg(debug_assertions)]
+    if let Some(ref ir) = ir_program {
+        let verify_errors = almide::ir::verify_program(ir);
+        if !verify_errors.is_empty() {
+            for e in &verify_errors {
+                eprintln!("internal compiler error: {}", e);
+            }
+            return Err(format!("{} IR verification error(s)", verify_errors.len()));
+        }
     }
 
     // Monomorphize row-polymorphic functions (Rust target only)
