@@ -376,15 +376,10 @@ fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::
 fn scan_stmt(stmt: &IrStmt, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::VarTable) {
     match &stmt.kind {
         IrStmtKind::Bind { var, ty, value, .. } => {
-            // Prefer value.ty when it differs from declared ty (IR type inference gaps)
-            let effective_ty = if values::ty_to_valtype(ty) != values::ty_to_valtype(&value.ty)
-                && values::ty_to_valtype(&value.ty).is_some() {
-                &value.ty
-            } else {
-                ty
-            };
-            if let Some(val_type) = values::ty_to_valtype(effective_ty) {
-                locals.push((*var, val_type));
+            let val_type = values::ty_to_valtype(&value.ty)
+                .or_else(|| values::ty_to_valtype(ty));
+            if let Some(vt_wasm) = val_type {
+                locals.push((*var, vt_wasm));
             }
             scan_expr(value, locals, vt);
         }
@@ -472,14 +467,28 @@ fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, l
         crate::ir::IrPattern::Some { inner } | crate::ir::IrPattern::Ok { inner } => {
             let inner_ty = if let crate::types::Ty::Applied(_, args) = subject_ty {
                 args.first().cloned().unwrap_or(subject_ty.clone())
-            } else { subject_ty.clone() };
+            } else {
+                // subject_ty is not Applied — try VarTable for inner binding
+                if let crate::ir::IrPattern::Bind { var } = inner.as_ref() {
+                    let vt_ty = &vt.get(*var).ty;
+                    if !matches!(vt_ty, crate::types::Ty::Unknown | crate::types::Ty::TypeVar(_)) {
+                        vt_ty.clone()
+                    } else { subject_ty.clone() }
+                } else { subject_ty.clone() }
+            };
             scan_pattern(inner, &inner_ty, locals, vt);
         }
         crate::ir::IrPattern::Err { inner } => {
-            // Err inner type is the second type arg: E in Result[T, E]
             let inner_ty = if let crate::types::Ty::Applied(_, args) = subject_ty {
                 args.get(1).cloned().unwrap_or(subject_ty.clone())
-            } else { subject_ty.clone() };
+            } else {
+                if let crate::ir::IrPattern::Bind { var } = inner.as_ref() {
+                    let vt_ty = &vt.get(*var).ty;
+                    if !matches!(vt_ty, crate::types::Ty::Unknown | crate::types::Ty::TypeVar(_)) {
+                        vt_ty.clone()
+                    } else { subject_ty.clone() }
+                } else { subject_ty.clone() }
+            };
             scan_pattern(inner, &inner_ty, locals, vt);
         }
         crate::ir::IrPattern::RecordPattern { name: _, fields, .. } => {
