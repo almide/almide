@@ -101,10 +101,41 @@ impl FuncCompiler<'_> {
                 }
             }
 
-            IrStmtKind::IndexAssign { .. }
-            | IrStmtKind::FieldAssign { .. }
-            | IrStmtKind::MapInsert { .. } => {
-                // Phase 3+
+            IrStmtKind::IndexAssign { target, index, value } => {
+                // xs[i] = v → store value at list_ptr + 4 + i * elem_size
+                let elem_size = super::values::byte_size(&value.ty);
+                // Compute address: target + 4 + index * elem_size
+                if let Some(&local_idx) = self.var_map.get(&target.0) {
+                    self.func.instruction(&Instruction::LocalGet(local_idx)); // list ptr
+                    self.func.instruction(&Instruction::I32Const(4));
+                    self.func.instruction(&Instruction::I32Add);
+                    self.emit_expr(index);
+                    if matches!(&index.ty, crate::types::Ty::Int) {
+                        self.func.instruction(&Instruction::I32WrapI64);
+                    }
+                    self.func.instruction(&Instruction::I32Const(elem_size as i32));
+                    self.func.instruction(&Instruction::I32Mul);
+                    self.func.instruction(&Instruction::I32Add);
+                    // Value
+                    self.emit_expr(value);
+                    self.emit_store_at(&value.ty, 0);
+                }
+            }
+            IrStmtKind::FieldAssign { target, field, value } => {
+                // record.field = value
+                if let Some(&local_idx) = self.var_map.get(&target.0) {
+                    let var_ty = &self.var_table.get(*target).ty;
+                    let fields = self.extract_record_fields(var_ty);
+                    let tag_offset = self.variant_tag_offset(var_ty);
+                    if let Some((offset, _)) = super::values::field_offset(&fields, field) {
+                        let total_offset = tag_offset + offset;
+                        self.func.instruction(&Instruction::LocalGet(local_idx));
+                        self.emit_expr(value);
+                        self.emit_store_at(&value.ty, total_offset);
+                    }
+                }
+            }
+            IrStmtKind::MapInsert { .. } => {
             }
         }
     }
