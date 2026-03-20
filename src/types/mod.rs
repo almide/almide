@@ -61,6 +61,25 @@ impl PartialEq for VariantPayload {
     }
 }
 
+/// A protocol definition (user-defined or built-in convention).
+/// Protocols declare a set of methods that conforming types must implement.
+#[derive(Debug, Clone)]
+pub struct ProtocolDef {
+    pub name: std::string::String,
+    pub generics: Vec<std::string::String>,
+    pub methods: Vec<ProtocolMethodSig>,
+}
+
+/// A single method signature within a protocol definition.
+/// `Self` in parameters/return type is represented as `Ty::TypeVar("Self")`.
+#[derive(Debug, Clone)]
+pub struct ProtocolMethodSig {
+    pub name: std::string::String,
+    pub params: Vec<(std::string::String, Ty)>,
+    pub ret: Ty,
+    pub is_effect: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct FnSig {
     pub params: Vec<(std::string::String, Ty)>,

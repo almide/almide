@@ -162,7 +162,7 @@ impl Parser {
             TokenType::EOF
             | TokenType::Fn | TokenType::Effect
             | TokenType::Pub | TokenType::Local | TokenType::Mod
-            | TokenType::Type | TokenType::Trait | TokenType::Impl
+            | TokenType::Type | TokenType::Protocol | TokenType::Impl
             | TokenType::Test | TokenType::Strict | TokenType::At
             | TokenType::RBrace
         )

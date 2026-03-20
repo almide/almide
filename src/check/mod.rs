@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use crate::ast;
 use crate::ast::ExprId;
 use crate::diagnostic::Diagnostic;
-use crate::types::{Ty, TypeEnv, FnSig, VariantCase, VariantPayload};
+use crate::types::{Ty, TypeEnv, FnSig, VariantCase, VariantPayload, ProtocolDef, ProtocolMethodSig};
 use types::{TyVarId, Constraint, is_inference_var, resolve_vars};
 
 pub(crate) fn err(msg: impl Into<String>, hint: impl Into<String>, ctx: impl Into<String>) -> Diagnostic {
@@ -48,13 +48,113 @@ pub struct Checker {
 
 impl Checker {
     pub fn new() -> Self {
-        Checker {
+        let mut checker = Checker {
             env: TypeEnv::new(), diagnostics: Vec::new(),
             source_file: None, source_text: None,
             expr_types: HashMap::new(), current_span: None,
             next_tyvar: 0, infer_types: HashMap::new(),
             constraints: Vec::new(), solutions: HashMap::new(),
-        }
+        };
+        checker.register_builtin_protocols();
+        checker
+    }
+
+    /// Register built-in conventions (Eq, Repr, Ord, Hash, Codec, Encode, Decode) as protocols.
+    fn register_builtin_protocols(&mut self) {
+        let self_ty = Ty::TypeVar("Self".to_string());
+        let value_ty = Ty::Named("Value".to_string(), vec![]);
+
+        // Eq: fn eq(a: Self, b: Self) -> Bool
+        self.env.protocols.insert("Eq".into(), ProtocolDef {
+            name: "Eq".into(),
+            generics: vec![],
+            methods: vec![ProtocolMethodSig {
+                name: "eq".into(),
+                params: vec![("a".into(), self_ty.clone()), ("b".into(), self_ty.clone())],
+                ret: Ty::Bool,
+                is_effect: false,
+            }],
+        });
+
+        // Repr: fn repr(v: Self) -> String
+        self.env.protocols.insert("Repr".into(), ProtocolDef {
+            name: "Repr".into(),
+            generics: vec![],
+            methods: vec![ProtocolMethodSig {
+                name: "repr".into(),
+                params: vec![("v".into(), self_ty.clone())],
+                ret: Ty::String,
+                is_effect: false,
+            }],
+        });
+
+        // Ord: fn cmp(a: Self, b: Self) -> Int
+        self.env.protocols.insert("Ord".into(), ProtocolDef {
+            name: "Ord".into(),
+            generics: vec![],
+            methods: vec![ProtocolMethodSig {
+                name: "cmp".into(),
+                params: vec![("a".into(), self_ty.clone()), ("b".into(), self_ty.clone())],
+                ret: Ty::Int,
+                is_effect: false,
+            }],
+        });
+
+        // Hash: fn hash(v: Self) -> Int
+        self.env.protocols.insert("Hash".into(), ProtocolDef {
+            name: "Hash".into(),
+            generics: vec![],
+            methods: vec![ProtocolMethodSig {
+                name: "hash".into(),
+                params: vec![("v".into(), self_ty.clone())],
+                ret: Ty::Int,
+                is_effect: false,
+            }],
+        });
+
+        // Codec: fn encode(v: Self) -> Value, fn decode(v: Value) -> Result[Self, String]
+        self.env.protocols.insert("Codec".into(), ProtocolDef {
+            name: "Codec".into(),
+            generics: vec![],
+            methods: vec![
+                ProtocolMethodSig {
+                    name: "encode".into(),
+                    params: vec![("v".into(), self_ty.clone())],
+                    ret: value_ty.clone(),
+                    is_effect: false,
+                },
+                ProtocolMethodSig {
+                    name: "decode".into(),
+                    params: vec![("v".into(), value_ty.clone())],
+                    ret: Ty::result(self_ty.clone(), Ty::String),
+                    is_effect: false,
+                },
+            ],
+        });
+
+        // Encode: fn encode(v: Self) -> Value
+        self.env.protocols.insert("Encode".into(), ProtocolDef {
+            name: "Encode".into(),
+            generics: vec![],
+            methods: vec![ProtocolMethodSig {
+                name: "encode".into(),
+                params: vec![("v".into(), self_ty.clone())],
+                ret: value_ty.clone(),
+                is_effect: false,
+            }],
+        });
+
+        // Decode: fn decode(v: Value) -> Result[Self, String]
+        self.env.protocols.insert("Decode".into(), ProtocolDef {
+            name: "Decode".into(),
+            generics: vec![],
+            methods: vec![ProtocolMethodSig {
+                name: "decode".into(),
+                params: vec![("v".into(), value_ty.clone())],
+                ret: Ty::result(self_ty.clone(), Ty::String),
+                is_effect: false,
+            }],
+        });
     }
 
     /// Push a diagnostic, automatically attaching the current expression's span.
@@ -306,13 +406,15 @@ impl Checker {
         }
     }
 
-    fn validate_derives(&mut self, derives: &[String], type_name: &str) {
-        let valid = ["Eq", "Repr", "Ord", "Hash", "Codec", "Encode", "Decode"];
+    fn validate_protocols(&mut self, derives: &[String], type_name: &str) {
         for d in derives {
-            if !valid.contains(&d.as_str()) {
+            if !self.env.protocols.contains_key(d.as_str()) {
+                let valid: Vec<&str> = self.env.protocols.keys().map(|s| s.as_str()).collect();
                 self.emit(err(
-                    format!("unknown derive convention '{}' on type '{}'", d, type_name),
-                    format!("Valid conventions: {}", valid.join(", ")),
+                    format!("unknown protocol '{}' on type '{}'", d, type_name),
+                    format!("Known protocols: {}", {
+                        let mut sorted = valid; sorted.sort(); sorted.join(", ")
+                    }),
                     format!("type {}", type_name),
                 ));
             }
@@ -352,10 +454,103 @@ impl Checker {
         }
     }
 
+    /// Register a user-defined protocol declaration into env.protocols.
+    fn register_protocol_decl(&mut self, name: &str, generics: &Option<Vec<ast::GenericParam>>, methods: &[ast::ProtocolMethod]) {
+        let gnames: Vec<String> = generics.as_ref()
+            .map(|gs| gs.iter().map(|g| g.name.clone()).collect())
+            .unwrap_or_default();
+
+        // Temporarily register `Self` as a TypeVar so resolve_type_expr handles it
+        self.env.types.insert("Self".to_string(), Ty::TypeVar("Self".to_string()));
+        for gn in &gnames {
+            self.env.types.insert(gn.clone(), Ty::TypeVar(gn.clone()));
+        }
+
+        let method_sigs: Vec<ProtocolMethodSig> = methods.iter().map(|m| {
+            let params: Vec<(String, Ty)> = m.params.iter()
+                .map(|p| (p.name.clone(), self.resolve_type_expr(&p.ty)))
+                .collect();
+            let ret = self.resolve_type_expr(&m.return_type);
+            ProtocolMethodSig {
+                name: m.name.clone(),
+                params,
+                ret,
+                is_effect: m.effect,
+            }
+        }).collect();
+
+        self.env.types.remove("Self");
+        for gn in &gnames {
+            self.env.types.remove(gn);
+        }
+
+        self.env.protocols.insert(name.to_string(), ProtocolDef {
+            name: name.to_string(),
+            generics: gnames,
+            methods: method_sigs,
+        });
+    }
+
+    /// Validate that types declaring `: ProtocolName` have all required convention methods.
+    /// Called after all declarations are registered so all `Type.method` functions are available.
+    fn validate_protocol_impls(&mut self) {
+        // Snapshot type_protocols to avoid borrow conflict
+        let type_protocols: Vec<(String, Vec<String>)> = self.env.type_protocols.iter()
+            .map(|(ty, protos)| (ty.clone(), protos.iter().cloned().collect()))
+            .collect();
+
+        for (type_name, protocol_names) in &type_protocols {
+            for proto_name in protocol_names {
+                let proto_def = match self.env.protocols.get(proto_name) {
+                    Some(p) => p.clone(),
+                    None => continue, // Unknown protocol — already reported by validate_protocols
+                };
+
+                for method_sig in &proto_def.methods {
+                    let fn_key = format!("{}.{}", type_name, method_sig.name);
+                    if !self.env.functions.contains_key(&fn_key) {
+                        // Only emit error for user-defined protocols (not built-in ones
+                        // which may be auto-derived)
+                        let is_builtin = matches!(proto_name.as_str(),
+                            "Eq" | "Repr" | "Ord" | "Hash" | "Codec" | "Encode" | "Decode");
+                        if !is_builtin {
+                            self.emit(err(
+                                format!("type '{}' declares protocol '{}' but missing method '{}'",
+                                    type_name, proto_name, method_sig.name),
+                                format!("Add: fn {}.{}({}) -> {}",
+                                    type_name, method_sig.name,
+                                    method_sig.params.iter()
+                                        .map(|(n, t)| {
+                                            let display_ty = if *t == Ty::TypeVar("Self".to_string()) {
+                                                type_name.clone()
+                                            } else {
+                                                t.display()
+                                            };
+                                            format!("{}: {}", n, display_ty)
+                                        })
+                                        .collect::<Vec<_>>()
+                                        .join(", "),
+                                    {
+                                        let ret = &method_sig.ret;
+                                        if *ret == Ty::TypeVar("Self".to_string()) {
+                                            type_name.clone()
+                                        } else {
+                                            ret.display()
+                                        }
+                                    }),
+                                format!("type {} : {}", type_name, proto_name),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn register_type_decl(&mut self, name: &str, ty: &ast::TypeExpr, deriving: &Option<Vec<String>>,
                            generics: &Option<Vec<ast::GenericParam>>, prefix: Option<&str>) {
         if let Some(derives) = deriving {
-            self.validate_derives(derives, name);
+            self.validate_protocols(derives, name);
         }
         let gnames: Vec<String> = generics.as_ref().map(|gs| gs.iter().map(|g| g.name.clone()).collect()).unwrap_or_default();
         for gn in &gnames { self.env.types.insert(gn.clone(), Ty::TypeVar(gn.clone())); }
@@ -387,6 +582,18 @@ impl Checker {
                 }
                 ast::Decl::Type { name, ty, deriving, generics, .. } => {
                     self.register_type_decl(name, ty, deriving, generics, prefix);
+                    // Track protocol conformances declared via `: ProtocolName`
+                    if let Some(derives) = deriving {
+                        for d in derives {
+                            self.env.type_protocols
+                                .entry(name.clone())
+                                .or_insert_with(std::collections::HashSet::new)
+                                .insert(d.clone());
+                        }
+                    }
+                }
+                ast::Decl::Protocol { name, generics, methods, .. } => {
+                    self.register_protocol_decl(name, generics, methods);
                 }
                 ast::Decl::TopLet { name, ty, value, .. } => {
                     let rt = ty.as_ref().map(|te| self.resolve_type_expr(te)).unwrap_or_else(|| self.infer_literal_type(value));
@@ -396,6 +603,8 @@ impl Checker {
                 _ => {}
             }
         }
+        // After all decls are registered, validate protocol implementations
+        self.validate_protocol_impls();
     }
 
     // ── Declaration checking ──

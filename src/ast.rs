@@ -80,6 +80,15 @@ pub struct FieldType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProtocolMethod {
+    pub name: String,
+    pub params: Vec<Param>,
+    pub return_type: TypeExpr,
+    #[serde(default)]
+    pub effect: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenericParam {
     pub name: String,
     pub bounds: Option<Vec<String>>,
@@ -356,7 +365,7 @@ pub enum Decl {
         #[serde(skip)] span: Option<Span>,
     },
     TopLet { name: String, #[serde(rename = "type")] ty: Option<TypeExpr>, value: Expr, #[serde(default)] visibility: Visibility, #[serde(skip)] span: Option<Span> },
-    Trait { name: String, #[serde(default)] generics: Option<Vec<GenericParam>>, methods: Vec<serde_json::Value>, #[serde(skip)] span: Option<Span> },
+    Protocol { name: String, #[serde(default)] generics: Option<Vec<GenericParam>>, methods: Vec<ProtocolMethod>, #[serde(skip)] span: Option<Span> },
     Impl { trait_: String, for_: String, #[serde(default)] generics: Option<Vec<GenericParam>>, methods: Vec<Decl>, #[serde(skip)] span: Option<Span> },
     Strict { mode: String, #[serde(skip)] span: Option<Span> },
     Test { name: String, body: Expr, #[serde(skip)] span: Option<Span> },

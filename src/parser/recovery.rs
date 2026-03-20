@@ -25,7 +25,7 @@ impl Parser {
                         // Declaration-level sync points
                         | TokenType::Fn | TokenType::Effect
                         | TokenType::Type | TokenType::Test | TokenType::Pub
-                        | TokenType::Trait | TokenType::Impl
+                        | TokenType::Protocol | TokenType::Impl
                         | TokenType::Local | TokenType::Mod
                         | TokenType::Strict | TokenType::At
                     ) {
@@ -44,7 +44,7 @@ impl Parser {
                 TokenType::EOF => break,
                 TokenType::Fn | TokenType::Effect
                 | TokenType::Pub | TokenType::Local | TokenType::Mod
-                | TokenType::Type | TokenType::Trait | TokenType::Impl
+                | TokenType::Type | TokenType::Protocol | TokenType::Impl
                 | TokenType::Test | TokenType::Strict | TokenType::At => {
                     break;
                 }
@@ -53,7 +53,7 @@ impl Parser {
                     if matches!(self.current().token_type,
                         TokenType::Fn | TokenType::Effect
                         | TokenType::Pub | TokenType::Local | TokenType::Mod
-                        | TokenType::Type | TokenType::Trait | TokenType::Impl
+                        | TokenType::Type | TokenType::Protocol | TokenType::Impl
                         | TokenType::Test | TokenType::Strict | TokenType::At
                         | TokenType::EOF
                     ) {

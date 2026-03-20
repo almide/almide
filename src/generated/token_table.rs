@@ -43,7 +43,7 @@ pub fn build_keyword_map_generated() -> HashMap<&'static str, TokenType> {
         m.insert("test", TokenType::Test);
         m.insert("then", TokenType::Then);
         m.insert("todo", TokenType::Todo);
-        m.insert("trait", TokenType::Trait);
+        m.insert("protocol", TokenType::Protocol);
         m.insert("true", TokenType::True);
         m.insert("type", TokenType::Type);
         m.insert("var", TokenType::Var);
@@ -56,14 +56,14 @@ pub fn build_keyword_map_generated() -> HashMap<&'static str, TokenType> {
 }
 
 /// All keywords as a flat list (for validation, tree-sitter, TextMate generation)
-pub const ALL_KEYWORDS: &[&str] = &["and", "break", "continue", "do", "effect", "else", "err", "false", "fan", "fn", "for", "guard", "if", "impl", "import", "in", "let", "local", "match", "mod", "module", "newtype", "none", "not", "ok", "or", "pub", "some", "strict", "test", "then", "todo", "trait", "true", "type", "var", "while"];
+pub const ALL_KEYWORDS: &[&str] = &["and", "break", "continue", "do", "effect", "else", "err", "false", "fan", "fn", "for", "guard", "if", "impl", "import", "in", "let", "local", "match", "mod", "module", "newtype", "none", "not", "ok", "or", "pub", "some", "strict", "test", "then", "todo", "protocol", "true", "type", "var", "while"];
 
 /*
 ── Tree-sitter keyword list ──────────────────────────────────────────
     // control
     "if", "then", "else", "match", "for", "in", "while", "do", "guard", "fan",
     // declaration
-    "fn", "type", "trait", "impl", "let", "var", "test", "import", "module", "newtype",
+    "fn", "type", "protocol", "impl", "let", "var", "test", "import", "module", "newtype",
     // flow
     "break", "continue",
     // modifier

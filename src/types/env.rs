@@ -1,4 +1,4 @@
-use super::{Ty, VariantCase, substitute};
+use super::{Ty, VariantCase, substitute, ProtocolDef};
 
 pub struct TypeEnv {
     /// User-defined type declarations: name -> Ty
@@ -45,6 +45,10 @@ pub struct TypeEnv {
     pub structural_bounds: std::collections::HashMap<std::string::String, Ty>,
     /// Minimum required arguments for functions with default params: fn key -> min count
     pub fn_min_params: std::collections::HashMap<std::string::String, usize>,
+    /// Protocol definitions: protocol name → ProtocolDef
+    pub protocols: std::collections::HashMap<std::string::String, ProtocolDef>,
+    /// Types' declared protocol conformances: type name → set of protocol names
+    pub type_protocols: std::collections::HashMap<std::string::String, std::collections::HashSet<std::string::String>>,
 }
 
 impl TypeEnv {
@@ -72,6 +76,8 @@ impl TypeEnv {
             eq_types: std::collections::HashSet::new(),
             structural_bounds: std::collections::HashMap::new(),
             fn_min_params: std::collections::HashMap::new(),
+            protocols: std::collections::HashMap::new(),
+            type_protocols: std::collections::HashMap::new(),
         }
     }
 

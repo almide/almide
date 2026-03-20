@@ -138,7 +138,7 @@ fn fmt_decl(out: &mut String, decl: &Decl, depth: usize) {
             if let Some(b) = body { out.push_str(" = "); fmt_expr(out, b, depth); }
         }
         Decl::Test { name, body, .. } => { w!(out, "{i}test \"{name}\" "); fmt_expr(out, body, depth); }
-        Decl::Trait { name, .. } => w!(out, "{i}trait {name}"),
+        Decl::Protocol { name, .. } => w!(out, "{i}protocol {name} {{ ... }}"),
         Decl::Impl { trait_, for_, methods, .. } => {
             wln!(out, "{i}impl {trait_} for {for_} {{");
             for m in methods { fmt_decl(out, m, depth + 1); out.push('\n'); }
