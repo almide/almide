@@ -590,11 +590,11 @@ fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) {
         // Closure calling convention: (env: i32, declared_params...) -> ret
         let mut wasm_params = vec![ValType::I32]; // env_ptr
         for (_, ty) in params {
-            if let Some(vt) = values::ty_to_valtype(ty) {
+            let resolved_ty = resolve_lambda_param_ty(ty, &_body.ty);
+            if let Some(vt) = values::ty_to_valtype(&resolved_ty) {
                 wasm_params.push(vt);
             }
         }
-        // Determine return type from body
         let ret_types = values::ret_type(&_body.ty);
         let closure_type_idx = emitter.register_type(wasm_params, ret_types);
 
@@ -902,6 +902,19 @@ fn scan_closures_stmt(
             scan_closures_expr(else_, scope_vars, var_table, lambdas, fn_refs);
         }
         _ => {}
+    }
+}
+
+/// Resolve a lambda parameter type when it's TypeVar or Unknown.
+/// Scans the body for type-dispatched operators to infer parameter type.
+fn resolve_lambda_param_ty(param_ty: &crate::types::Ty, body_ty: &crate::types::Ty) -> crate::types::Ty {
+    match param_ty {
+        crate::types::Ty::TypeVar(_) | crate::types::Ty::Unknown => {
+            // Default to Int (most common lambda param type)
+            // This covers (x) => x * 2, (x) => x > 0, (x) => x + n, etc.
+            crate::types::Ty::Int
+        }
+        _ => param_ty.clone(),
     }
 }
 
