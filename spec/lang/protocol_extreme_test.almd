@@ -1,0 +1,273 @@
+// protocol_extreme_test — Pushing protocol system to its limits
+
+// ── Protocol method in nested match ──
+
+protocol Classifiable {
+  fn classify(a: Self) -> String
+}
+
+type HttpStatus: Classifiable = { code: Int }
+fn HttpStatus.classify(s: HttpStatus) -> String =
+  match s.code {
+    200 => "ok"
+    201 => "created"
+    c if c >= 300 and c < 400 => "redirect"
+    404 => "not found"
+    c if c >= 500 => "server error"
+    _ => "unknown"
+  }
+
+test "protocol with complex match guards" {
+  assert_eq(HttpStatus.classify(HttpStatus { code: 200 }), "ok")
+  assert_eq(HttpStatus.classify(HttpStatus { code: 301 }), "redirect")
+  assert_eq(HttpStatus.classify(HttpStatus { code: 404 }), "not found")
+  assert_eq(HttpStatus.classify(HttpStatus { code: 503 }), "server error")
+  assert_eq(HttpStatus.classify(HttpStatus { code: 100 }), "unknown")
+}
+
+// ── Two protocols, same type, methods calling cross-protocol ──
+
+protocol Encodable {
+  fn encode_val(a: Self) -> String
+}
+
+protocol Decodable {
+  fn decode_val(raw: String) -> Self
+}
+
+type Token: Encodable, Decodable = { kind: String, value: String }
+fn Token.encode_val(t: Token) -> String = t.kind + ":" + t.value
+fn Token.decode_val(raw: String) -> Token = {
+  let parts = string.split(raw, ":")
+  Token {
+    kind: list.get_or(parts, 0, ""),
+    value: list.get_or(parts, 1, "")
+  }
+}
+
+test "encode then decode roundtrip" {
+  let t = Token { kind: "ident", value: "foo" }
+  let encoded = Token.encode_val(t)
+  assert_eq(encoded, "ident:foo")
+  let decoded = Token.decode_val(encoded)
+  assert_eq(decoded.kind, "ident")
+  assert_eq(decoded.value, "foo")
+}
+
+// ── Protocol method in string interpolation chain ──
+
+protocol Describable {
+  fn short(a: Self) -> String
+  fn long(a: Self) -> String
+}
+
+type Error: Describable = { code: Int, msg: String }
+fn Error.short(e: Error) -> String = "E" + int.to_string(e.code)
+fn Error.long(e: Error) -> String = "Error ${int.to_string(e.code)}: ${e.msg}"
+
+test "protocol methods in interpolation" {
+  let e = Error { code: 404, msg: "not found" }
+  let report = "Short: ${e.short()}, Long: ${e.long()}"
+  assert_eq(report, "Short: E404, Long: Error 404: not found")
+}
+
+// ── Protocol on deeply nested record ──
+
+protocol Summarizable {
+  fn summarize(a: Self) -> String
+}
+
+type Address = { city: String, country: String }
+type Company: Summarizable = { name: String, hq: Address, employees: Int }
+fn Company.summarize(c: Company) -> String =
+  c.name + " (" + c.hq.city + ", " + c.hq.country + ") - " + int.to_string(c.employees) + " employees"
+
+test "protocol on type with nested record field" {
+  let co = Company {
+    name: "Acme",
+    hq: Address { city: "Tokyo", country: "Japan" },
+    employees: 500
+  }
+  assert_eq(co.summarize(), "Acme (Tokyo, Japan) - 500 employees")
+}
+
+// ── Protocol method that returns Option[Self] ──
+
+protocol Parseable {
+  fn try_parse(raw: String) -> Option[Self]
+}
+
+type Color: Parseable = | Red | Green | Blue
+fn Color.try_parse(raw: String) -> Option[Color] =
+  match raw {
+    "red" => some(Red)
+    "green" => some(Green)
+    "blue" => some(Blue)
+    _ => none
+  }
+
+test "protocol method returning Option[Self]" {
+  assert_eq(Color.try_parse("red"), some(Red))
+  assert_eq(Color.try_parse("green"), some(Green))
+  assert_eq(Color.try_parse("xyz"), none)
+}
+
+// ── Protocol method with multiple Self in different positions ──
+
+protocol Mergeable {
+  fn merge(a: Self, b: Self) -> Self
+  fn empty() -> Self
+}
+
+type Counter: Mergeable = { total: Int, count: Int }
+fn Counter.merge(a: Counter, b: Counter) -> Counter =
+  Counter { total: a.total + b.total, count: a.count + b.count }
+fn Counter.empty() -> Counter = Counter { total: 0, count: 0 }
+
+test "merge multiple values via fold" {
+  let counters = [
+    Counter { total: 10, count: 2 },
+    Counter { total: 20, count: 3 },
+    Counter { total: 5, count: 1 }
+  ]
+  let merged = list.fold(counters, Counter.empty(), (acc, c) => Counter.merge(acc, c))
+  assert_eq(merged.total, 35)
+  assert_eq(merged.count, 6)
+}
+
+// ── Protocol method with early return pattern ──
+
+protocol Validator {
+  fn validate(a: Self) -> Result[Self, String]
+}
+
+type Form: Validator = { name: String, email: String }
+fn Form.validate(f: Form) -> Result[Form, String] =
+  if string.is_empty(f.name) then err("name required")
+  else if not string.contains(f.email, "@") then err("invalid email")
+  else ok(f)
+
+test "validation protocol with early return" {
+  let good = Form { name: "Alice", email: "a@b.com" }
+  let no_name = Form { name: "", email: "a@b.com" }
+  let bad_email = Form { name: "Bob", email: "nope" }
+  assert_eq(result.is_ok(Form.validate(good)), true)
+  assert_eq(Form.validate(no_name), err("name required"))
+  assert_eq(Form.validate(bad_email), err("invalid email"))
+}
+
+// ── Protocol with zero-arg method (factory/static-like) ──
+
+protocol HasDefault {
+  fn default_value() -> Self
+}
+
+type Config: HasDefault = { debug: Bool, port: Int }
+fn Config.default_value() -> Config = Config { debug: false, port: 8080 }
+
+test "protocol with zero-arg factory method" {
+  let c = Config.default_value()
+  assert_eq(c.debug, false)
+  assert_eq(c.port, 8080)
+}
+
+// ── Long chain: protocol method → stdlib → protocol method ──
+
+protocol Tokenizable {
+  fn tokenize(a: Self) -> List[String]
+  fn token_count(a: Self) -> Int
+}
+
+type Sentence: Tokenizable = { text: String }
+fn Sentence.tokenize(s: Sentence) -> List[String] = string.split(s.text, " ")
+fn Sentence.token_count(s: Sentence) -> Int = list.len(Sentence.tokenize(s))
+
+test "protocol method calling another protocol method via stdlib" {
+  let s = Sentence { text: "the quick brown fox" }
+  assert_eq(s.tokenize(), ["the", "quick", "brown", "fox"])
+  assert_eq(s.token_count(), 4)
+}
+
+test "protocol in list.map chain" {
+  let sentences = [
+    Sentence { text: "hello world" },
+    Sentence { text: "one two three four" },
+    Sentence { text: "hi" }
+  ]
+  let counts = list.map(sentences, (s) => Sentence.token_count(s))
+  assert_eq(counts, [2, 4, 1])
+}
+
+// ── Protocol method with tuple destructuring ──
+
+protocol Decomposable {
+  fn parts(a: Self) -> (String, String, Int)
+}
+
+type LogEntry: Decomposable = { level: String, message: String, timestamp: Int }
+fn LogEntry.parts(e: LogEntry) -> (String, String, Int) = (e.level, e.message, e.timestamp)
+
+test "protocol method with tuple destructuring" {
+  let entry = LogEntry { level: "error", message: "disk full", timestamp: 1000 }
+  let (lvl, msg, ts) = entry.parts()
+  assert_eq(lvl, "error")
+  assert_eq(msg, "disk full")
+  assert_eq(ts, 1000)
+}
+
+// ── Protocol method in if-then-else branches ──
+
+protocol Prioritizable {
+  fn priority(a: Self) -> Int
+}
+
+type Alert: Prioritizable = { severity: String }
+fn Alert.priority(a: Alert) -> Int =
+  match a.severity {
+    "critical" => 1
+    "warning" => 2
+    _ => 3
+  }
+
+fn should_page(a: Alert) -> Bool = Alert.priority(a) == 1
+
+fn alert_action(a: Alert) -> String =
+  if should_page(a) then "PAGE ONCALL"
+  else if Alert.priority(a) == 2 then "send email"
+  else "log only"
+
+test "protocol method in conditional logic" {
+  let crit = Alert { severity: "critical" }
+  let warn = Alert { severity: "warning" }
+  let info = Alert { severity: "info" }
+  assert_eq(alert_action(crit), "PAGE ONCALL")
+  assert_eq(alert_action(warn), "send email")
+  assert_eq(alert_action(info), "log only")
+}
+
+// ── Protocol on variant with record payloads ──
+
+protocol Renderable {
+  fn render(a: Self) -> String
+}
+
+type Shape: Renderable =
+  | Circle(Int)
+  | Rect(Int, Int)
+
+fn Shape.render(s: Shape) -> String =
+  match s {
+    Circle(r) => "circle(r=" + int.to_string(r) + ")"
+    Rect(w, h) => "rect(" + int.to_string(w) + "x" + int.to_string(h) + ")"
+  }
+
+test "protocol on variant with different payloads" {
+  assert_eq(Shape.render(Circle(5)), "circle(r=5)")
+  assert_eq(Shape.render(Rect(10, 20)), "rect(10x20)")
+}
+
+test "protocol on variants in list.map" {
+  let shapes = [Circle(1), Rect(2, 3), Circle(4)]
+  let rendered = list.map(shapes, (s) => Shape.render(s))
+  assert_eq(rendered, ["circle(r=1)", "rect(2x3)", "circle(r=4)"])
+}
