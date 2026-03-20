@@ -157,7 +157,10 @@ impl FuncCompiler<'_> {
                     | ("string", "trim_start") | ("string", "trim_end") => {
                         self.emit_stub_call(args);
                     }
-                    ("list", "map") | ("list", "filter") | ("list", "fold")
+                    ("list", "map") => {
+                        self.emit_list_map(&args[0], &args[1], _ret_ty);
+                    }
+                    ("list", "filter") | ("list", "fold")
                     | ("list", "reverse") | ("list", "find") | ("list", "any") | ("list", "all")
                     | ("list", "count") | ("list", "sort_by") | ("list", "flat_map")
                     | ("list", "filter_map") | ("list", "get") | ("list", "drop")
@@ -441,5 +444,138 @@ impl FuncCompiler<'_> {
                 }
             }
         }
+    }
+
+    /// Emit list.map(list, fn) → new list.
+    /// Uses memory scratch [0..12] for src_ptr/fn_ptr/dst_ptr.
+    /// Key insight: compute dst address BEFORE call_indirect so result goes
+    /// directly onto the stack in the right position for store.
+    fn emit_list_map(&mut self, list_arg: &IrExpr, fn_arg: &IrExpr, ret_ty: &Ty) {
+        let in_elem_ty = if let Ty::Applied(_, args) = &list_arg.ty {
+            args.first().cloned().unwrap_or(Ty::Int)
+        } else { Ty::Int };
+        let out_elem_ty = if let Ty::Applied(_, args) = ret_ty {
+            args.first().cloned().unwrap_or(Ty::Int)
+        } else { Ty::Int };
+        let in_size = values::byte_size(&in_elem_ty);
+        let out_size = values::byte_size(&out_elem_ty);
+
+        let s = self.match_i32_base + self.match_depth;
+        let len_local = s;
+        let idx_local = s + 1;
+        let mem = super::expressions::mem;
+
+        // Store src_ptr → mem[0], fn_closure → mem[4]
+        self.func.instruction(&Instruction::I32Const(0));
+        self.emit_expr(list_arg);
+        self.func.instruction(&Instruction::I32Store(mem(0)));
+        self.func.instruction(&Instruction::I32Const(4));
+        self.emit_expr(fn_arg);
+        self.func.instruction(&Instruction::I32Store(mem(0)));
+
+        // len = mem[0].len (load src_ptr, load len)
+        self.func.instruction(&Instruction::I32Const(0));
+        self.func.instruction(&Instruction::I32Load(mem(0)));
+        self.func.instruction(&Instruction::I32Load(mem(0)));
+        self.func.instruction(&Instruction::LocalSet(len_local));
+
+        // Alloc dst: 4 + len * out_size → store to mem[8]
+        self.func.instruction(&Instruction::I32Const(8));
+        self.func.instruction(&Instruction::I32Const(4));
+        self.func.instruction(&Instruction::LocalGet(len_local));
+        self.func.instruction(&Instruction::I32Const(out_size as i32));
+        self.func.instruction(&Instruction::I32Mul);
+        self.func.instruction(&Instruction::I32Add);
+        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+        self.func.instruction(&Instruction::I32Store(mem(0)));
+
+        // dst.len = len
+        self.func.instruction(&Instruction::I32Const(8));
+        self.func.instruction(&Instruction::I32Load(mem(0)));
+        self.func.instruction(&Instruction::LocalGet(len_local));
+        self.func.instruction(&Instruction::I32Store(mem(0)));
+
+        // idx = 0
+        self.func.instruction(&Instruction::I32Const(0));
+        self.func.instruction(&Instruction::LocalSet(idx_local));
+
+        // Loop
+        self.func.instruction(&Instruction::Block(BlockType::Empty));
+        self.func.instruction(&Instruction::Loop(BlockType::Empty));
+        let saved = self.depth;
+        self.depth += 2;
+
+        // break if idx >= len
+        self.func.instruction(&Instruction::LocalGet(idx_local));
+        self.func.instruction(&Instruction::LocalGet(len_local));
+        self.func.instruction(&Instruction::I32GeU);
+        self.func.instruction(&Instruction::BrIf(1));
+
+        // ── Compute dst addr FIRST (stays on stack under call result) ──
+        // dst_ptr + 4 + idx * out_size
+        self.func.instruction(&Instruction::I32Const(8));
+        self.func.instruction(&Instruction::I32Load(mem(0))); // dst
+        self.func.instruction(&Instruction::I32Const(4));
+        self.func.instruction(&Instruction::I32Add);
+        self.func.instruction(&Instruction::LocalGet(idx_local));
+        self.func.instruction(&Instruction::I32Const(out_size as i32));
+        self.func.instruction(&Instruction::I32Mul);
+        self.func.instruction(&Instruction::I32Add);
+        // Stack: [dst_elem_addr]
+
+        // ── Call fn(element) ──
+        // Load closure from mem[4]
+        self.func.instruction(&Instruction::I32Const(4));
+        self.func.instruction(&Instruction::I32Load(mem(0)));
+        // env_ptr = closure[4]
+        self.func.instruction(&Instruction::I32Load(MemArg { offset: 4, align: 2, memory_index: 0 }));
+        // Stack: [dst_elem_addr, env_ptr]
+
+        // Load src element: src_ptr + 4 + idx * in_size
+        self.func.instruction(&Instruction::I32Const(0));
+        self.func.instruction(&Instruction::I32Load(mem(0))); // src
+        self.func.instruction(&Instruction::I32Const(4));
+        self.func.instruction(&Instruction::I32Add);
+        self.func.instruction(&Instruction::LocalGet(idx_local));
+        self.func.instruction(&Instruction::I32Const(in_size as i32));
+        self.func.instruction(&Instruction::I32Mul);
+        self.func.instruction(&Instruction::I32Add);
+        self.emit_load_at(&in_elem_ty, 0);
+        // Stack: [dst_elem_addr, env_ptr, element]
+
+        // table_idx = closure[0]
+        self.func.instruction(&Instruction::I32Const(4));
+        self.func.instruction(&Instruction::I32Load(mem(0))); // closure
+        self.func.instruction(&Instruction::I32Load(mem(0))); // table_idx
+        // Stack: [dst_elem_addr, env_ptr, element, table_idx]
+
+        // call_indirect (env, element) → result
+        if let Ty::Fn { params, ret } = &fn_arg.ty {
+            let mut ct = vec![ValType::I32]; // env
+            for p in params { if let Some(vt) = values::ty_to_valtype(p) { ct.push(vt); } }
+            let rt = values::ret_type(ret);
+            let ti = self.emitter.register_type(ct, rt);
+            self.func.instruction(&Instruction::CallIndirect { type_index: ti, table_index: 0 });
+        }
+        // Stack: [dst_elem_addr, result]
+
+        // ── Store result at dst addr ──
+        self.emit_store_at(&out_elem_ty, 0);
+        // Stack: []
+
+        // idx++
+        self.func.instruction(&Instruction::LocalGet(idx_local));
+        self.func.instruction(&Instruction::I32Const(1));
+        self.func.instruction(&Instruction::I32Add);
+        self.func.instruction(&Instruction::LocalSet(idx_local));
+        self.func.instruction(&Instruction::Br(0));
+
+        self.depth = saved;
+        self.func.instruction(&Instruction::End);
+        self.func.instruction(&Instruction::End);
+
+        // Return dst_ptr from mem[8]
+        self.func.instruction(&Instruction::I32Const(8));
+        self.func.instruction(&Instruction::I32Load(mem(0)));
     }
 }
