@@ -52,9 +52,9 @@ effect fn main() -> Result[Unit, String] = do {
 
   let system_prompt = "You are writing Almide code (.almd files). Here is the language reference:\n\n" + cheatsheet + "\n\nIMPORTANT RULES:\n- Write ONLY the Almide code. No markdown, no explanation, no code fences.\n- Replace `todo` with working implementations.\n- Keep all test blocks exactly as they are.\n- Keep all type declarations exactly as they are.\n- Lambda syntax: (x) => expr, NOT fn(x) => expr\n- if requires then: if cond then a else b\n- String concat uses +\n- effect fn returns Result, auto-unwraps with ?"
 
-  let all_prompts = fs.glob(prompt_dir + "/*.almd")
+  let all_prompts = fs.glob(prompt_dir + "/*.almd.prompt")
   let prompts = match exercise_filter {
-    some(name) => list.filter(all_prompts, (p) => string.contains(p, "/" + name + ".almd"))
+    some(name) => list.filter(all_prompts, (p) => string.contains(p, "/" + name + ".almd.prompt"))
     none => all_prompts
   }
 
@@ -69,7 +69,7 @@ effect fn main() -> Result[Unit, String] = do {
 
   for prompt_path in prompts {
     let parts = string.split(prompt_path, "/")
-    let filename = list.get_or(parts, list.len(parts) - 1, "unknown.almd")
+    let filename = list.get_or(parts, list.len(parts) - 1, "unknown.almd.prompt")
     let name = string.replace(filename, ".almd", "")
 
     if name == "wasm-smoke" then {

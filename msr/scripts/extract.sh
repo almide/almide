@@ -17,7 +17,7 @@ mkdir -p "$PROMPT_DIR"
 count=0
 for ex_dir in exercises/*/; do
   name=$(basename "$ex_dir")
-  src=$(find "$ex_dir" -name '*.almd' | head -1)
+  src=$(find "$ex_dir" -name '*.almd.prompt' | head -1)
   [ -z "$src" ] && continue
 
   outfile="$PROMPT_DIR/${name}.almd"

@@ -64,8 +64,18 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
             vec![file.to_string()]
         }
     } else {
-        // Default: recursively find all .almd files with test blocks in current directory
-        let mut files = collect_test_files(std::path::Path::new("."));
+        // Default: recursively find test files in spec/ and exercises/ (standard test directories)
+        let mut files = Vec::new();
+        for dir in &["spec", "exercises"] {
+            let path = std::path::Path::new(dir);
+            if path.exists() {
+                files.extend(collect_test_files(path));
+            }
+        }
+        // Fallback: search current directory if no standard dirs found
+        if files.is_empty() {
+            files = collect_test_files(std::path::Path::new("."));
+        }
         files.sort();
         if files.is_empty() {
             eprintln!("No .almd files with test blocks found.");
