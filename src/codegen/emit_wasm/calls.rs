@@ -393,9 +393,59 @@ impl FuncCompiler<'_> {
                         self.func.instruction(&Instruction::I32Const(8));
                         self.func.instruction(&Instruction::I32Load(mem(0)));
                     }
+                    ("list", "get") => {
+                        // list.get(list, index) → Option[T]
+                        let elem_ty = if let Ty::Applied(_, a) = &args[0].ty {
+                            a.first().cloned().unwrap_or(Ty::Int)
+                        } else { Ty::Int };
+                        let elem_size = values::byte_size(&elem_ty);
+                        let mem = super::expressions::mem;
+
+                        // mem[0]=list, mem[4]=idx(i32)
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.emit_expr(&args[0]);
+                        self.func.instruction(&Instruction::I32Store(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.emit_expr(&args[1]);
+                        if matches!(&args[1].ty, Ty::Int) {
+                            self.func.instruction(&Instruction::I32WrapI64);
+                        }
+                        self.func.instruction(&Instruction::I32Store(mem(0)));
+
+                        // bounds: idx >= len → none(0)
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Load(mem(0))); // idx
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::I32Load(mem(0))); // list
+                        self.func.instruction(&Instruction::I32Load(mem(0))); // len
+                        self.func.instruction(&Instruction::I32GeU);
+                        self.func.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+                        self.func.instruction(&Instruction::I32Const(0)); // none
+                        self.func.instruction(&Instruction::Else);
+                        // alloc → mem[8]
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Const(elem_size as i32));
+                        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+                        self.func.instruction(&Instruction::I32Store(mem(0)));
+                        // dst=mem[8], src=list+4+idx*elem_size
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Load(mem(0))); // dst
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::I32Load(mem(0))); // list
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Load(mem(0))); // idx
+                        self.func.instruction(&Instruction::I32Const(elem_size as i32));
+                        self.func.instruction(&Instruction::I32Mul);
+                        self.func.instruction(&Instruction::I32Add);
+                        self.emit_load_at(&elem_ty, 0); // load elem
+                        self.emit_store_at(&elem_ty, 0); // store at dst
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Load(mem(0))); // return ptr
+                        self.func.instruction(&Instruction::End);
+                    }
                     ("list", "filter") => {
-                        // filter is complex (need dynamic output size). Use stub for now.
-                        // But emit args safely so it at least doesn't cause validation errors.
                         self.emit_stub_call(args);
                     }
                     ("list", "fold")
