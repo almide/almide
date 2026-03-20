@@ -25,11 +25,11 @@ pub fn check(ctx: &HintContext) -> Option<HintResult> {
         });
     }
 
-    // Trait keyword typos
-    if matches!(value, "interface" | "protocol" | "abstract") {
+    // Protocol keyword typos
+    if matches!(value, "interface" | "trait" | "abstract") {
         return Some(HintResult {
             message: Some(format!("'{}' is not a keyword in Almide", value)),
-            hint: "Use 'trait Name { ... }' for traits.".into(),
+            hint: "Use 'protocol Name { ... }' for protocols.".into(),
         });
     }
 
