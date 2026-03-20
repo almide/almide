@@ -36,6 +36,10 @@ struct Verifier<'a> {
     fn_name: String,
     in_loop: bool,
     errors: Vec<IrVerifyError>,
+    /// Known function names for CallTarget::Named validation
+    known_functions: &'a std::collections::HashSet<String>,
+    /// Known module→function mappings for CallTarget::Module validation
+    known_module_functions: &'a std::collections::HashMap<String, std::collections::HashSet<String>>,
 }
 
 impl<'a> Verifier<'a> {
@@ -127,6 +131,35 @@ impl<'a> IrVisitor for Verifier<'a> {
                 }
             }
 
+            // ── Call target validation ──
+            IrExprKind::Call { target, .. } => {
+                match target {
+                    CallTarget::Named { name } => {
+                        // Named calls include stdlib functions, builtins (println, assert_eq),
+                        // constructors, and user functions. Only validate user-defined functions
+                        // — skip constructors (uppercase) and anything not in known_functions
+                        // (may be stdlib/builtin resolved at codegen time).
+                        // This is intentionally lenient to avoid false positives.
+                        let is_constructor = name.chars().next().map_or(false, |c| c.is_uppercase());
+                        if !is_constructor && self.known_functions.contains(name) {
+                            // Valid: known user function — no error
+                        }
+                        // else: could be stdlib, builtin, or test function — skip
+                    }
+                    CallTarget::Module { module, func } => {
+                        // Only validate user modules (present in known_module_functions).
+                        // Stdlib modules are not in known_module_functions and are handled by codegen.
+                        if let Some(funcs) = self.known_module_functions.get(module) {
+                            if !funcs.contains(func) {
+                                self.err(format!("call to unknown function '{}.{}'", module, func), expr.span);
+                            }
+                        }
+                    }
+                    // Method and Computed targets are validated structurally (object/callee are walked)
+                    _ => {}
+                }
+            }
+
             // ── Access: type constraints ──
             IrExprKind::IndexAccess { object, .. } => {
                 if !is_unresolved(&object.ty) && object.ty.is_map() {
@@ -188,12 +221,29 @@ impl<'a> IrVisitor for Verifier<'a> {
 pub fn verify_program(program: &IrProgram) -> Vec<IrVerifyError> {
     let mut errors = Vec::new();
 
+    // Build known function sets for CallTarget validation
+    let mut known_functions = std::collections::HashSet::new();
+    for f in &program.functions {
+        known_functions.insert(f.name.clone());
+    }
+    for m in &program.modules {
+        for f in &m.functions {
+            known_functions.insert(f.name.clone());
+        }
+    }
+
+    let mut known_module_functions: std::collections::HashMap<String, std::collections::HashSet<String>> = std::collections::HashMap::new();
+    for m in &program.modules {
+        let funcs: std::collections::HashSet<String> = m.functions.iter().map(|f| f.name.clone()).collect();
+        known_module_functions.insert(m.name.clone(), funcs);
+    }
+
     // Verify type declarations
     verify_type_decls(&program.type_decls, "", &mut errors);
 
     // Verify main module functions
     for f in &program.functions {
-        verify_function(f, &program.var_table, &f.name, &mut errors);
+        verify_function(f, &program.var_table, &f.name, &known_functions, &known_module_functions, &mut errors);
     }
     for tl in &program.top_lets {
         let mut v = Verifier {
@@ -201,6 +251,8 @@ pub fn verify_program(program: &IrProgram) -> Vec<IrVerifyError> {
             fn_name: "<top-level>".into(),
             in_loop: false,
             errors: Vec::new(),
+            known_functions: &known_functions,
+            known_module_functions: &known_module_functions,
         };
         v.check_var_id(tl.var, None);
         v.visit_expr(&tl.value);
@@ -212,7 +264,7 @@ pub fn verify_program(program: &IrProgram) -> Vec<IrVerifyError> {
         verify_type_decls(&m.type_decls, &m.name, &mut errors);
         for f in &m.functions {
             let qual_name = format!("{}.{}", m.name, f.name);
-            verify_function(f, &m.var_table, &qual_name, &mut errors);
+            verify_function(f, &m.var_table, &qual_name, &known_functions, &known_module_functions, &mut errors);
         }
         for tl in &m.top_lets {
             let mut v = Verifier {
@@ -220,6 +272,8 @@ pub fn verify_program(program: &IrProgram) -> Vec<IrVerifyError> {
                 fn_name: format!("{}.<top-level>", m.name),
                 in_loop: false,
                 errors: Vec::new(),
+                known_functions: &known_functions,
+                known_module_functions: &known_module_functions,
             };
             v.check_var_id(tl.var, None);
             v.visit_expr(&tl.value);
@@ -230,12 +284,21 @@ pub fn verify_program(program: &IrProgram) -> Vec<IrVerifyError> {
     errors
 }
 
-fn verify_function(f: &IrFunction, var_table: &VarTable, name: &str, errors: &mut Vec<IrVerifyError>) {
+fn verify_function(
+    f: &IrFunction,
+    var_table: &VarTable,
+    name: &str,
+    known_functions: &std::collections::HashSet<String>,
+    known_module_functions: &std::collections::HashMap<String, std::collections::HashSet<String>>,
+    errors: &mut Vec<IrVerifyError>,
+) {
     let mut v = Verifier {
         var_table,
         fn_name: name.to_string(),
         in_loop: false,
         errors: Vec::new(),
+        known_functions,
+        known_module_functions,
     };
 
     // Check parameter VarIds are valid and unique
@@ -802,5 +865,89 @@ mod tests {
         let errors = verify_program(&prog2);
         assert_eq!(errors.len(), 1);
         assert!(errors[0].message.contains("PowInt"));
+    }
+
+    #[test]
+    fn detects_call_to_unknown_module_function() {
+        let vt = VarTable::new();
+        let body = IrExpr {
+            kind: IrExprKind::Call {
+                target: CallTarget::Module { module: "mymod".into(), func: "nonexistent".into() },
+                args: vec![],
+                type_args: vec![],
+            },
+            ty: Ty::Unit,
+            span: None,
+        };
+        // Create program with a module that has a "helper" function but not "nonexistent"
+        let mod_fn = make_fn("helper", lit_int(0));
+        let prog = IrProgram {
+            functions: vec![make_fn("main", body)],
+            top_lets: vec![],
+            type_decls: vec![],
+            var_table: vt,
+            modules: vec![IrModule {
+                name: "mymod".into(),
+                versioned_name: None,
+                type_decls: vec![],
+                functions: vec![mod_fn],
+                top_lets: vec![],
+                var_table: VarTable::new(),
+            }],
+            type_registry: Default::default(),
+            effect_map: Default::default(),
+        };
+        let errors = verify_program(&prog);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("unknown function 'mymod.nonexistent'"));
+    }
+
+    #[test]
+    fn allows_call_to_known_module_function() {
+        let vt = VarTable::new();
+        let body = IrExpr {
+            kind: IrExprKind::Call {
+                target: CallTarget::Module { module: "mymod".into(), func: "helper".into() },
+                args: vec![],
+                type_args: vec![],
+            },
+            ty: Ty::Int,
+            span: None,
+        };
+        let mod_fn = make_fn("helper", lit_int(42));
+        let prog = IrProgram {
+            functions: vec![make_fn("main", body)],
+            top_lets: vec![],
+            type_decls: vec![],
+            var_table: vt,
+            modules: vec![IrModule {
+                name: "mymod".into(),
+                versioned_name: None,
+                type_decls: vec![],
+                functions: vec![mod_fn],
+                top_lets: vec![],
+                var_table: VarTable::new(),
+            }],
+            type_registry: Default::default(),
+            effect_map: Default::default(),
+        };
+        assert!(verify_program(&prog).is_empty());
+    }
+
+    #[test]
+    fn allows_call_to_stdlib_module() {
+        // stdlib modules (like "string") are not in known_module_functions — should not error
+        let vt = VarTable::new();
+        let body = IrExpr {
+            kind: IrExprKind::Call {
+                target: CallTarget::Module { module: "string".into(), func: "len".into() },
+                args: vec![IrExpr { kind: IrExprKind::LitStr { value: "hi".into() }, ty: Ty::String, span: None }],
+                type_args: vec![],
+            },
+            ty: Ty::Int,
+            span: None,
+        };
+        let prog = make_program(vec![make_fn("main", body)], vt);
+        assert!(verify_program(&prog).is_empty());
     }
 }
