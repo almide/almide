@@ -241,8 +241,10 @@ fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::
         }
         IrExprKind::Match { subject, arms } => {
             scan_expr(subject, locals, vt);
+            // Resolve subject type (IR may have wrong type for pattern-matched vars)
+            let resolved_ty = resolve_scan_subject_ty(subject, arms, vt);
             for arm in arms {
-                scan_pattern(&arm.pattern, &subject.ty, locals, vt);
+                scan_pattern(&arm.pattern, &resolved_ty, locals, vt);
                 scan_expr(&arm.body, locals, vt);
             }
         }
@@ -271,6 +273,24 @@ fn scan_stmt(stmt: &IrStmt, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::
         }
         _ => {}
     }
+}
+
+/// Resolve match subject type, fixing IR type inference gaps.
+fn resolve_scan_subject_ty(subject: &IrExpr, arms: &[crate::ir::IrMatchArm], vt: &crate::ir::VarTable) -> crate::types::Ty {
+    let has_container = arms.iter().any(|a| matches!(
+        &a.pattern,
+        crate::ir::IrPattern::Ok { .. } | crate::ir::IrPattern::Err { .. }
+        | crate::ir::IrPattern::Some { .. } | crate::ir::IrPattern::None
+    ));
+    if has_container && !matches!(&subject.ty, crate::types::Ty::Applied(_, _)) {
+        if let IrExprKind::Var { id } = &subject.kind {
+            let info = vt.get(*id);
+            if matches!(&info.ty, crate::types::Ty::Applied(_, _)) {
+                return info.ty.clone();
+            }
+        }
+    }
+    subject.ty.clone()
 }
 
 /// Scan a destructuring pattern (let (a, b) = ...) for variable bindings.

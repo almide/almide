@@ -1528,10 +1528,11 @@ impl FuncCompiler<'_> {
             // Bind: store subject in variable, then emit body
             IrPattern::Bind { var } => {
                 if let Some(&local_idx) = self.var_map.get(&var.0) {
-                    // Only bind if types are compatible (IR may have wrong types for _ patterns)
-                    let var_vt = values::ty_to_valtype(&self.var_table.get(*var).ty);
+                    let var_ty = &self.var_table.get(*var).ty;
+                    let var_vt = values::ty_to_valtype(var_ty);
                     let subj_vt = values::ty_to_valtype(subject_ty);
-                    if var_vt == subj_vt {
+                    // Only bind if types match, or var type is Unknown (trust subject)
+                    if var_vt == subj_vt || matches!(var_ty, Ty::Unknown) {
                         self.func.instruction(&Instruction::LocalGet(scratch));
                         self.func.instruction(&Instruction::LocalSet(local_idx));
                     }
