@@ -892,9 +892,21 @@ impl FuncCompiler<'_> {
         let type_name = match subject_ty {
             Ty::Named(name, _) => name.as_str(),
             Ty::Variant { name, .. } => name.as_str(),
-            _ => return None,
+            _ => {
+                // Fallback: search all variant_info for the constructor
+                for cases in self.emitter.variant_info.values() {
+                    if let Some(c) = cases.iter().find(|c| c.name == ctor_name) {
+                        return Some(c.tag);
+                    }
+                }
+                return None;
+            }
         };
-        let cases = self.emitter.variant_info.get(type_name)?;
+        let cases = self.emitter.variant_info.get(type_name);
+        if cases.is_none() && ctor_name == "Just" {
+            eprintln!("[TAG MISS] ctor='{}' type='{}' variant_info_keys={:?}", ctor_name, type_name, self.emitter.variant_info.keys().collect::<Vec<_>>());
+        }
+        let cases = cases?;
         cases.iter().find(|c| c.name == ctor_name).map(|c| c.tag)
     }
 }

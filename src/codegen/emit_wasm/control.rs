@@ -246,6 +246,7 @@ impl FuncCompiler<'_> {
         let arm = &arms[idx];
         let is_last = idx + 1 >= arms.len();
 
+        eprintln!("[EMIT ARM] fn idx={} pattern={:?} subject_ty={:?} result_ty={:?}", idx, std::mem::discriminant(&arm.pattern), subject_ty, result_ty);
         match &arm.pattern {
             // Wildcard: always matches, emit body directly
             IrPattern::Wildcard => {
@@ -336,6 +337,7 @@ impl FuncCompiler<'_> {
 
                     // Resolve constructor field types from variant info + subject type_args
                     let ctor_fields = self.emitter.record_fields.get(ctor_name).cloned().unwrap_or_default();
+                    eprintln!("[CTOR] '{}' fields={:?} subject_args={:?}", ctor_name, ctor_fields, subject_ty);
                     let subject_type_args: &[Ty] = match subject_ty {
                         Ty::Named(_, args) if !args.is_empty() => args,
                         Ty::Applied(_, args) if !args.is_empty() => args,
@@ -358,6 +360,7 @@ impl FuncCompiler<'_> {
 
                         if let IrPattern::Bind { var } = arg_pat {
                             if let Some(&local_idx) = self.var_map.get(&var.0) {
+                                eprintln!("[CTOR BIND FINAL] field_ty={:?} valtype={:?} offset={}", field_ty, values::ty_to_valtype(&field_ty), field_offset);
                                 wasm!(self.func, { local_get(scratch); });
                                 self.emit_load_at(&field_ty, field_offset);
                                 wasm!(self.func, { local_set(local_idx); });

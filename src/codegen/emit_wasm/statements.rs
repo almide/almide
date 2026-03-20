@@ -443,13 +443,43 @@ fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, l
                 locals.push((*var, val_type));
             }
         }
-        crate::ir::IrPattern::Constructor { args, .. } => {
-            // Constructor args need their own types (from VarTable), not the subject Variant type
-            for arg in args {
+        crate::ir::IrPattern::Constructor { name: ctor_name, args } => {
+            // Resolve field types from subject_ty's type_args for generic variants
+            let subject_type_args: Vec<crate::types::Ty> = match subject_ty {
+                crate::types::Ty::Named(_, args) if !args.is_empty() => args.clone(),
+                crate::types::Ty::Applied(_, args) if !args.is_empty() => args.clone(),
+                crate::types::Ty::Variant { cases, .. } => {
+                    // Get field types from inline variant info
+                    if let Some(case) = cases.iter().find(|c| c.name == *ctor_name) {
+                        match &case.payload {
+                            crate::types::VariantPayload::Tuple(tys) => {
+                                for (i, (arg, field_ty)) in args.iter().zip(tys.iter()).enumerate() {
+                                    if let crate::ir::IrPattern::Bind { var } = arg {
+                                        if let Some(val_type) = values::ty_to_valtype(field_ty) {
+                                            locals.push((*var, val_type));
+                                        }
+                                    }
+                                }
+                                return; // handled inline
+                            }
+                            _ => vec![],
+                        }
+                    } else { vec![] }
+                }
+                _ => vec![],
+            };
+            for (i, arg) in args.iter().enumerate() {
                 if let crate::ir::IrPattern::Bind { var } = arg {
-                    let var_ty = &vt.get(*var).ty;
-                    let ty = if matches!(var_ty, crate::types::Ty::Unknown) { subject_ty } else { var_ty };
-                    if let Some(val_type) = values::ty_to_valtype(ty) {
+                    let var_ty = vt.get(*var).ty.clone();
+                    // Resolve TypeVars using subject's type_args via name-based substitution
+                    let resolved = if !subject_type_args.is_empty() {
+                        let mut gnames = Vec::new();
+                        super::expressions::collect_type_param_names(&var_ty, &mut gnames);
+                        if gnames.is_empty() { var_ty } else {
+                            super::expressions::substitute_type_params(&var_ty, &gnames, &subject_type_args)
+                        }
+                    } else { var_ty };
+                    if let Some(val_type) = values::ty_to_valtype(&resolved) {
                         locals.push((*var, val_type));
                     }
                 } else {
