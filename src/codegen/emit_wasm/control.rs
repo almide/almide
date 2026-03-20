@@ -284,11 +284,9 @@ impl FuncCompiler<'_> {
                 self.func.instruction(&Instruction::End);
             }
 
-            // Constructor pattern (e.g., Red, Some(x), None)
-            IrPattern::Constructor { name: ctor_name, args: _ } => {
-                // Look up tag for this constructor
+            // Constructor pattern (e.g., Circle(r), Red)
+            IrPattern::Constructor { name: ctor_name, args } => {
                 if let Some(tag_val) = self.find_variant_tag_by_ctor(ctor_name, subject_ty) {
-                    // Load tag from subject and compare
                     self.func.instruction(&Instruction::LocalGet(scratch));
                     self.func.instruction(&Instruction::I32Load(MemArg {
                         offset: 0, align: 2, memory_index: 0,
@@ -299,6 +297,25 @@ impl FuncCompiler<'_> {
                     let bt = values::block_type(result_ty);
                     self.func.instruction(&Instruction::If(bt));
                     self.depth += 1;
+
+                    // Bind constructor args (tuple payload fields)
+                    let mut field_offset = 4u32; // skip tag
+                    for arg_pat in args {
+                        if let IrPattern::Bind { var } = arg_pat {
+                            if let Some(&local_idx) = self.var_map.get(&var.0) {
+                                let var_ty = self.var_table.get(*var).ty.clone();
+                                self.func.instruction(&Instruction::LocalGet(scratch));
+                                self.emit_load_at(&var_ty, field_offset);
+                                self.func.instruction(&Instruction::LocalSet(local_idx));
+                                field_offset += values::byte_size(&var_ty);
+                            }
+                        } else if let IrPattern::Wildcard = arg_pat {
+                            // Skip wildcard — still advance offset
+                            // Need to know the type... use i64 (8 bytes) as default
+                            field_offset += 8;
+                        }
+                    }
+
                     self.emit_expr(&arm.body);
                     self.func.instruction(&Instruction::Else);
                     if is_last {

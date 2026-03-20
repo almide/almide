@@ -341,7 +341,18 @@ fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, l
             }
         }
         crate::ir::IrPattern::Constructor { args, .. } => {
-            for arg in args { scan_pattern(arg, subject_ty, locals, vt); }
+            // Constructor args need their own types (from VarTable), not the subject Variant type
+            for arg in args {
+                if let crate::ir::IrPattern::Bind { var } = arg {
+                    let var_ty = &vt.get(*var).ty;
+                    let ty = if matches!(var_ty, crate::types::Ty::Unknown) { subject_ty } else { var_ty };
+                    if let Some(val_type) = values::ty_to_valtype(ty) {
+                        locals.push((*var, val_type));
+                    }
+                } else {
+                    scan_pattern(arg, subject_ty, locals, vt);
+                }
+            }
         }
         crate::ir::IrPattern::Tuple { elements } => {
             let elem_types = if let crate::types::Ty::Tuple(tys) = subject_ty { tys.clone() } else { vec![] };
