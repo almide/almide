@@ -464,15 +464,17 @@ fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, l
         crate::ir::IrPattern::RecordPattern { name: _, fields, .. } => {
             // For pattern=None fields, the binding is implicit (field name = var name).
             // The lowerer has already allocated VarIds for these in the VarTable.
-            // We find them by searching VarTable for entries matching the field names.
+            // Search from the END of VarTable to find the most recent (correct scope) VarId,
+            // and skip VarIds already registered in locals to avoid duplicates.
+            let existing_ids: std::collections::HashSet<u32> = locals.iter().map(|(v, _)| v.0).collect();
             for field in fields {
                 if let Some(pat) = &field.pattern {
                     scan_pattern(pat, subject_ty, locals, vt);
                 } else {
-                    // Implicit bind: find VarId by field name in VarTable
-                    for i in 0..vt.len() {
+                    // Implicit bind: find VarId by field name, searching from end (most recent scope)
+                    for i in (0..vt.len()).rev() {
                         let info = vt.get(crate::ir::VarId(i as u32));
-                        if info.name == field.name {
+                        if info.name == field.name && !existing_ids.contains(&(i as u32)) {
                             if let Some(val_type) = values::ty_to_valtype(&info.ty) {
                                 locals.push((crate::ir::VarId(i as u32), val_type));
                             }
