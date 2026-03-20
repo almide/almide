@@ -6,7 +6,7 @@
 
 | 項目 | 説明 | Grand Plan |
 |---|---|---|
-| [Test Coverage](active/test-coverage.md) | 1,653 .almd blocks + 639 Rust = 2,292 / 目標 2,500 (92%) | Phase 1 |
+| [Test Coverage](active/test-coverage.md) | 2,042 .almd blocks + 639 Rust = 2,681 ✅ 目標達成 | Phase 1 |
 | [User Generics & Protocol](active/user-generics-and-traits.md) | Protocol System 実装中 (Phase 1完了, Phase 2-3進行中) | Phase 3 |
 | [Effect System](active/effect-system.md) | Phase 3-4 残: Dependency制限, 内部型レベル統合 | Phase 3 |
 | [IR Verification](active/ir-verification.md) | 検証25件, CallTarget検証, Constructor型伝搬修正 | Compiler Internals |
