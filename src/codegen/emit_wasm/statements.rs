@@ -97,7 +97,8 @@ impl FuncCompiler<'_> {
             }
 
             IrStmtKind::IndexAssign { .. }
-            | IrStmtKind::FieldAssign { .. } => {
+            | IrStmtKind::FieldAssign { .. }
+            | IrStmtKind::MapInsert { .. } => {
                 // Phase 3+
             }
         }

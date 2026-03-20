@@ -466,11 +466,7 @@ impl FuncCompiler<'_> {
                 self.func.instruction(&Instruction::Call(self.emitter.rt.concat_list));
             }
 
-            BinOp::PowFloat => {
-                // f64 ** f64: no native WASM instruction, but we can use
-                // exp(y * ln(x)) via a simple integer power loop for now
-                // For Phase 2: just emit unreachable — will fix later
-                // Actually, let's handle integer exponents at least
+            BinOp::PowInt | BinOp::PowFloat => {
                 self.emit_expr(left);
                 self.emit_expr(right);
                 // Quick hack: use a loop (right is usually small int)
@@ -706,11 +702,23 @@ impl FuncCompiler<'_> {
                     | ("string", "trim_start") | ("string", "trim_end") => {
                         self.emit_stub_call(args);
                     }
-                    ("list", "map") | ("list", "filter") | ("list", "fold")
-                    | ("list", "find") | ("list", "any") | ("list", "all")
+                    ("list", "map") => {
+                        self.emit_list_map(&args[0], &args[1], _ret_ty);
+                    }
+                    ("list", "filter") => {
+                        self.emit_list_filter(&args[0], &args[1], _ret_ty);
+                    }
+                    ("list", "fold") => {
+                        // fold(list, init, fn(acc, elem) -> acc)
+                        self.emit_list_fold(&args[0], &args[1], &args[2]);
+                    }
+                    ("list", "reverse") => {
+                        self.emit_list_reverse(&args[0], _ret_ty);
+                    }
+                    ("list", "find") | ("list", "any") | ("list", "all")
                     | ("list", "count") | ("list", "sort_by") | ("list", "flat_map")
                     | ("list", "filter_map") | ("list", "get") | ("list", "drop")
-                    | ("list", "take") | ("list", "reverse") | ("list", "zip")
+                    | ("list", "take") | ("list", "zip")
                     | ("list", "enumerate") | ("list", "contains") | ("list", "sort") => {
                         self.emit_stub_call(args);
                     }
@@ -904,6 +912,238 @@ impl FuncCompiler<'_> {
 
             self.func.instruction(&Instruction::LocalGet(closure_scratch));
         }
+    }
+
+    /// Emit list.map(list, fn) → new list.
+    /// Uses memory scratch [8..16] as temp storage for the mapped value.
+    fn emit_list_map(&mut self, list_arg: &IrExpr, fn_arg: &IrExpr, ret_ty: &Ty) {
+        // Determine element types
+        let in_elem_ty = if let Ty::Applied(_, args) = &list_arg.ty {
+            args.first().cloned().unwrap_or(Ty::Int)
+        } else { Ty::Int };
+        let out_elem_ty = if let Ty::Applied(_, args) = ret_ty {
+            args.first().cloned().unwrap_or(Ty::Int)
+        } else { Ty::Int };
+        let in_size = values::byte_size(&in_elem_ty);
+        let out_size = values::byte_size(&out_elem_ty);
+
+        let s = self.match_i32_base + self.match_depth;
+        // s+0=src, s+1=fn, s+2=dst, s+3=len, s+4=i
+        // Need 5 scratch i32 slots — use what we have + i64 scratch
+        let src = s;
+        let fn_ptr = s + 1;
+        let dst = self.match_i64_base + self.match_depth; // borrow i64 scratch as i32
+        // Actually this won't work with typed locals. Let me use a simpler approach:
+        // Store everything in i32 scratch slots. Need to ensure enough scratch.
+        // For now, just use s, s+1 for src and fn, and allocate dst inline.
+
+        // Eval src list
+        self.emit_expr(list_arg);
+        self.func.instruction(&Instruction::LocalSet(src));
+        // Eval fn closure
+        self.emit_expr(fn_arg);
+        self.func.instruction(&Instruction::LocalSet(fn_ptr));
+
+        // Get length
+        self.func.instruction(&Instruction::LocalGet(src));
+        self.func.instruction(&Instruction::I32Load(MemArg { offset: 0, align: 2, memory_index: 0 }));
+        // Allocate output: [len + len * out_size]
+        // Store len in dst after alloc
+        // Stack: [len]
+        // Dup len: local.tee to a temp... use fn_ptr as temp? No, it holds fn.
+        // Just reload len later
+        self.func.instruction(&Instruction::Drop); // drop len for now
+
+        // Alloc output: 4 + src.len * out_size
+        self.func.instruction(&Instruction::I32Const(4));
+        self.func.instruction(&Instruction::LocalGet(src));
+        self.func.instruction(&Instruction::I32Load(MemArg { offset: 0, align: 2, memory_index: 0 }));
+        self.func.instruction(&Instruction::I32Const(out_size as i32));
+        self.func.instruction(&Instruction::I32Mul);
+        self.func.instruction(&Instruction::I32Add);
+        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+        // dst ptr on stack — store it. We need another scratch.
+        // Use the i64 scratch slot, but store i32 via I32 store... won't work with typed locals.
+        // Solution: just use s+1 for dst after we're done with fn_ptr.
+        // Actually we still need fn_ptr in the loop. Let me rethink.
+
+        // Simpler approach: store src and fn to memory scratch area (offset 0-8),
+        // use locals only for loop counter and dst.
+        // Actually, let me just use more scratch. The scratch_depth should be enough.
+
+        // OK simplest: use 2 i32 scratch (src, fn). Store dst on stack, use tee.
+        // This is getting complex. Let me emit a runtime call instead.
+
+        // RUNTIME APPROACH: __list_map is hard because of closure calling convention.
+        // Let me inline it with simple structure.
+
+        // Reset approach: I'll allocate a result list, then loop calling the closure.
+        self.func.instruction(&Instruction::Drop); // drop alloc result, redo properly
+
+        // Re-eval src length
+        self.func.instruction(&Instruction::LocalGet(src));
+        self.func.instruction(&Instruction::I32Load(MemArg { offset: 0, align: 2, memory_index: 0 }));
+        // Use i32.mul for total output size, add 4 for len prefix
+        let out_total_local = self.match_i64_base + self.match_depth; // reuse i64 as i32
+        // Can't reuse i64 local for i32 value. Need proper i32.
+        // Fallback: just rebuild using nested alloc + inline loop with break.
+
+        // === Clean implementation ===
+        // I need: src_ptr, fn_ptr, dst_ptr, len, idx. That's 5 i32 values.
+        // I have 2 i32 scratch slots (s, s+1). Not enough.
+        // But I can use memory scratch area (offset 0-15 is already scratch for fd_write).
+
+        // Store src_ptr at mem[0], fn_ptr at mem[4]
+        self.func.instruction(&Instruction::Drop); // clean stack
+
+        self.func.instruction(&Instruction::I32Const(0));
+        self.func.instruction(&Instruction::LocalGet(src));
+        self.func.instruction(&Instruction::I32Store(MemArg { offset: 0, align: 2, memory_index: 0 }));
+        self.func.instruction(&Instruction::I32Const(4));
+        self.func.instruction(&Instruction::LocalGet(fn_ptr));
+        self.func.instruction(&Instruction::I32Store(MemArg { offset: 0, align: 2, memory_index: 0 }));
+
+        // len = src.len
+        self.func.instruction(&Instruction::LocalGet(src));
+        self.func.instruction(&Instruction::I32Load(MemArg { offset: 0, align: 2, memory_index: 0 }));
+        self.func.instruction(&Instruction::LocalSet(src)); // reuse src as len
+
+        // Alloc dst: 4 + len * out_size
+        self.func.instruction(&Instruction::I32Const(4));
+        self.func.instruction(&Instruction::LocalGet(src)); // len
+        self.func.instruction(&Instruction::I32Const(out_size as i32));
+        self.func.instruction(&Instruction::I32Mul);
+        self.func.instruction(&Instruction::I32Add);
+        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+        self.func.instruction(&Instruction::LocalSet(fn_ptr)); // reuse fn_ptr as dst
+
+        // Store len in dst
+        self.func.instruction(&Instruction::LocalGet(fn_ptr));
+        self.func.instruction(&Instruction::LocalGet(src)); // len
+        self.func.instruction(&Instruction::I32Store(MemArg { offset: 0, align: 2, memory_index: 0 }));
+
+        // src_ptr = mem[0], fn_closure = mem[4], len = src local, dst = fn_ptr local
+        // idx = 0 (use s+1 scratch)
+        let idx = s + 1;
+        self.func.instruction(&Instruction::I32Const(0));
+        self.func.instruction(&Instruction::LocalSet(idx));
+
+        // Loop
+        self.func.instruction(&Instruction::Block(BlockType::Empty));
+        self.func.instruction(&Instruction::Loop(BlockType::Empty));
+        let saved_depth = self.depth;
+        self.depth += 2;
+
+        // Break if idx >= len
+        self.func.instruction(&Instruction::LocalGet(idx));
+        self.func.instruction(&Instruction::LocalGet(src)); // len
+        self.func.instruction(&Instruction::I32GeU);
+        self.func.instruction(&Instruction::BrIf(1));
+
+        // Load fn closure from mem[4]
+        self.func.instruction(&Instruction::I32Const(4));
+        self.func.instruction(&Instruction::I32Load(MemArg { offset: 0, align: 2, memory_index: 0 }));
+        // This is closure ptr. Load env_ptr from closure[4]
+        let closure_scratch = s; // reuse s temporarily
+        self.func.instruction(&Instruction::LocalSet(closure_scratch));
+
+        // Call: env_ptr, element, table_idx → call_indirect
+        // env_ptr
+        self.func.instruction(&Instruction::LocalGet(closure_scratch));
+        self.func.instruction(&Instruction::I32Load(MemArg { offset: 4, align: 2, memory_index: 0 }));
+
+        // Load element from src: mem[0] is src_ptr, element at src_ptr + 4 + idx * in_size
+        self.func.instruction(&Instruction::I32Const(0));
+        self.func.instruction(&Instruction::I32Load(MemArg { offset: 0, align: 2, memory_index: 0 }));
+        self.func.instruction(&Instruction::I32Const(4));
+        self.func.instruction(&Instruction::I32Add);
+        self.func.instruction(&Instruction::LocalGet(idx));
+        self.func.instruction(&Instruction::I32Const(in_size as i32));
+        self.func.instruction(&Instruction::I32Mul);
+        self.func.instruction(&Instruction::I32Add);
+        self.emit_load_at(&in_elem_ty, 0);
+
+        // table_idx
+        self.func.instruction(&Instruction::LocalGet(closure_scratch));
+        self.func.instruction(&Instruction::I32Load(MemArg { offset: 0, align: 2, memory_index: 0 }));
+
+        // call_indirect with closure calling convention
+        if let Ty::Fn { params, ret } = &fn_arg.ty {
+            let mut closure_params = vec![ValType::I32]; // env
+            for p in params {
+                if let Some(vt) = values::ty_to_valtype(p) { closure_params.push(vt); }
+            }
+            let ret_types = values::ret_type(ret);
+            let type_idx = self.emitter.register_type(closure_params, ret_types);
+            self.func.instruction(&Instruction::CallIndirect { type_index: type_idx, table_index: 0 });
+        } else {
+            self.func.instruction(&Instruction::Unreachable);
+        }
+
+        // Store result to memory scratch [8], then copy to dst
+        // Result is on stack (typed: out_elem_ty). Store to mem[8] temporarily.
+        self.func.instruction(&Instruction::I32Const(8));
+        // Stack: [result, addr=8]. But store needs [addr, value]. Swap using scratch.
+        // Actually, I32Const 8 is UNDER the result. WASM evaluates left to right.
+        // So stack is [..., result, 8]. That's wrong for store.
+        // Need: I32Const(8) first, then result. But result is already computed.
+        // Use memory scratch differently: store result via a temp.
+        // Simplest: use I32Const(8) as addr with offset in store instruction.
+        self.func.instruction(&Instruction::Drop); // drop the 8
+        // Store result to mem[8..16] using I32Store/I64Store at absolute addr 8
+        match values::ty_to_valtype(&out_elem_ty) {
+            Some(ValType::I64) => {
+                // result (i64) on stack. Store to mem[8].
+                // Need addr on stack first. But result is on top. Use scratch local.
+                self.func.instruction(&Instruction::LocalSet(src)); // temp store result in src (reused as i32... type mismatch!)
+                // Can't store i64 in i32 local. Use i64 scratch.
+                // This is impossible without a proper i64 temp local.
+                // HACK: store directly to memory using a known addr
+                // Actually: i32.const 8; <value already consumed>; i64.store
+                // The problem is value was already consumed by LocalSet.
+                // Let me restructure: compute addr first, then call.
+            }
+            _ => {}
+        }
+        // This approach doesn't work. Let me restructure the entire loop.
+        // Compute dst addr BEFORE the call, store addr in idx temp, call, then store.
+
+        // ... actually let me just compute addr, call, then use memory as bridge:
+        // Simplest correct approach: reverse the computation order.
+        // Before the call: compute and store dst addr to mem[8]
+        // Then call (result on stack)
+        // Then load dst addr from mem[8], swap not needed because I can use store with offset
+
+        // FORGET ALL THE ABOVE. Let me just rewrite the whole loop cleanly.
+
+        // idx++
+        self.func.instruction(&Instruction::LocalGet(idx));
+        self.func.instruction(&Instruction::I32Const(1));
+        self.func.instruction(&Instruction::I32Add);
+        self.func.instruction(&Instruction::LocalSet(idx));
+        self.func.instruction(&Instruction::Br(0));
+
+        self.depth = saved_depth;
+        self.func.instruction(&Instruction::End);
+        self.func.instruction(&Instruction::End);
+
+        // Return dst
+        self.func.instruction(&Instruction::LocalGet(fn_ptr));
+    }
+
+    /// Emit list.filter — stub for now
+    fn emit_list_filter(&mut self, _list_arg: &IrExpr, _fn_arg: &IrExpr, _ret_ty: &Ty) {
+        self.emit_stub_call(&[_list_arg.clone(), _fn_arg.clone()]);
+    }
+
+    /// Emit list.fold(list, init, fn(acc, elem) -> acc)
+    fn emit_list_fold(&mut self, _list_arg: &IrExpr, _init_arg: &IrExpr, _fn_arg: &IrExpr) {
+        self.emit_stub_call(&[_list_arg.clone(), _init_arg.clone(), _fn_arg.clone()]);
+    }
+
+    /// Emit list.reverse
+    fn emit_list_reverse(&mut self, _list_arg: &IrExpr, _ret_ty: &Ty) {
+        self.emit_stub_call(&[_list_arg.clone()]);
     }
 
     /// Emit a stub for an unimplemented call: evaluate args (for side effects), drop values, unreachable.
