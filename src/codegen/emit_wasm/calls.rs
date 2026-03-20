@@ -149,10 +149,87 @@ impl FuncCompiler<'_> {
                         // Stub: return as-is
                         self.emit_expr(&args[0]);
                     }
+                    ("string", "starts_with") => {
+                        // Store s → mem[0], prefix → mem[4]
+                        let mem = super::expressions::mem;
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.emit_expr(&args[0]);
+                        self.func.instruction(&Instruction::I32Store(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.emit_expr(&args[1]);
+                        self.func.instruction(&Instruction::I32Store(mem(0)));
+                        // if s.len < prefix.len → false
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Load(mem(0))); // prefix
+                        self.func.instruction(&Instruction::I32Load(mem(0))); // prefix.len
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::I32Load(mem(0))); // s
+                        self.func.instruction(&Instruction::I32Load(mem(0))); // s.len
+                        self.func.instruction(&Instruction::I32GtU); // prefix.len > s.len
+                        self.func.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::Else);
+                        // mem_eq(s+4, prefix+4, prefix.len)
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Add); // s+4
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Add); // prefix+4
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Load(mem(0))); // prefix.len
+                        self.func.instruction(&Instruction::Call(self.emitter.rt.mem_eq));
+                        self.func.instruction(&Instruction::End);
+                    }
+                    ("string", "ends_with") => {
+                        let mem = super::expressions::mem;
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.emit_expr(&args[0]);
+                        self.func.instruction(&Instruction::I32Store(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.emit_expr(&args[1]);
+                        self.func.instruction(&Instruction::I32Store(mem(0)));
+                        // if s.len < suffix.len → false
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32GtU);
+                        self.func.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::Else);
+                        // mem_eq(s+4+(s.len-suffix.len), suffix+4, suffix.len)
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Load(mem(0))); // s.len
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Load(mem(0))); // suffix.len
+                        self.func.instruction(&Instruction::I32Sub); // s+4+s.len-suffix.len
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Add); // suffix+4
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Load(mem(0))); // suffix.len
+                        self.func.instruction(&Instruction::Call(self.emitter.rt.mem_eq));
+                        self.func.instruction(&Instruction::End);
+                    }
                     ("string", "repeat") | ("string", "reverse") | ("string", "replace")
                     | ("string", "split") | ("string", "join") | ("string", "slice")
-                    | ("string", "get") | ("string", "count") | ("string", "starts_with")
-                    | ("string", "ends_with") | ("string", "index_of")
+                    | ("string", "get") | ("string", "count")
+                    | ("string", "index_of")
                     | ("string", "pad_start") | ("string", "pad_end")
                     | ("string", "trim_start") | ("string", "trim_end") => {
                         self.emit_stub_call(args);
