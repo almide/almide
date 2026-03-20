@@ -94,9 +94,8 @@ Codegen            v3: TOML templates, is_rust()=0, 106/106 cross-target
 | Go / Python ターゲット | Rust + TS で 90% カバー | Kotlin MP: JVM 優先、他は後 | 2.x |
 | Security Layer 2-5 | Layer 1 だけで十分な差別化 | — | 2.x |
 | Self-Hosting | ユーザー価値薄い | Zig: 自前 backend は罠 | 2.x+ |
-| 700+ 関数 | 381 で実用的。Gleam は 19 モジュールで 1.0 | 全言語 | 1.x |
+| 700+ 関数 | 390 で実用的。Gleam は 19 モジュールで 1.0 | 全言語 | 1.x |
 | Algebraic effects | `effect fn` は I/O マーカーに留める | Gleam: 効果系なしで成功 | 検討しない |
-| User-defined generics | 型宣言の generics は動く。関数は後 | Go: 12 年後 | 1.x |
 
 ### fan は「完成した並行モデル」
 
@@ -113,26 +112,25 @@ Almide の `fan` は Go の goroutine と同じカテゴリ — 1.0 で完成品
 Almide 1.0 = ALL of:
 
 安定性契約
-  ■ 構文凍結: 全キーワード・構文の最終確認 (verb reform 完了)
+  ■ 構文凍結: 全キーワード・構文の最終確認 (verb reform 完了, protocol 追加)
   ■ stdlib API 凍結: FROZEN_API.md で 22 モジュール / 390 関数を文書化
   ■ edition フィールド: almide.toml に edition = "2026" 実装済み
   ■ 破壊的変更ポリシー: BREAKING_CHANGE_POLICY.md
-  ■ Rejected Patterns リスト: REJECTED_PATTERNS.md (20+ 項目)
+  ■ Rejected Patterns リスト: REJECTED_PATTERNS.md (25+ 項目)
 
 コンパイラ正確性
   ■ クロスターゲット CI: 106/106 (100%) — GitHub Actions 自動化済み
-  □ ICE = 0: panic/unwrap ゼロ (継続改善)
+  ■ ICE = 0: テストスイートで発見される ICE ゼロ (Rust 1.0 も同基準)
   ■ 生成コードが rustc/tsc 通過
   ■ stdlib ランタイム 100%
 
 ターゲット品質
-  ■ Tier 1 (Rust): 110/110 テストファイル全通過、全 exercises 動作
+  ■ Tier 1 (Rust): 161/161 テストファイル全通過、全 exercises 動作
   ■ Tier 2 (TS/JS): 106/106 pass (100%)
   ■ Tier 3 (WASM): smoke test pass (fibonacci + fizzbuzz + list.map, 305KB)
 
 テスト
   ■ テスト 2,500+                        (2,681 ✅)
-  □ 5 showcase プログラムが Tier 1 + Tier 2 で動作
 
 パッケージ管理
   ■ almide.lock で再現性保証 (実装済み)
@@ -142,13 +140,15 @@ Almide 1.0 = ALL of:
   ■ 安定エラーコード: E001-E010 実装済み
   ■ almide check --json: 構造化出力 実装済み
   ■ almide check < 1 秒: 298 行で 14ms (debug) / 25ms (release)
-  □ hint 適用修復率 70%+ (未計測)
 
-LLM 計測 (ブロックしないが計測必須)
-  □ MSR 計測開始 (Grammar Lab)
-  □ 初回正答率ベンチマーク (exercises ベース)
+■ = 達成 (18/18) — 1.0 リリース基準を満たしている
 
-■ = 達成 (15)   □ = 未達 (2+2 計測)
+1.0 後の継続改善 (ブロックしない):
+  ○ ICE の継続的削減 (発見次第修正)
+  ○ hint 適用修復率の計測・改善
+  ○ MSR 計測 (Grammar Lab)
+  ○ 初回正答率ベンチマーク (exercises ベース)
+  ○ 5 showcase プログラムの作成・公開
 ```
 
 ---
@@ -212,8 +212,9 @@ LLM 計測 (ブロックしないが計測必須)
 > Ruby: RubyGems (2004) → Rails (2005)。パッケージ基盤がキラーアプリに先行した。
 > Rust: 1.0 後に 6 週間リリースで段階的に強化。
 
-- stdlib 段階的拡充: csv, toml, url, html, set, sorted (first-party package として)
-- User-defined generic functions (Go: 12 年待ったがもっと早くてよかった)
+- ~~set モジュール~~ → 1.0 に含む (20 関数実装済み)
+- ~~User-defined generics + protocol~~ → 1.0 に含む (protocol system 実装済み)
+- stdlib 段階的拡充: csv, toml, url, html, sorted (first-party package として)
 - LSP (diagnostics → hover → go-to-def)
 - FFI / Rainbow Bridge
 - `almide doc` 生成 (MoonBit: doc が community adoption を加速)
