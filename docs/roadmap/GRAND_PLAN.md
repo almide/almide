@@ -10,7 +10,7 @@
 
 - [x] 言語仕様の凍結 (構文・演算子・キーワード確定)
 - [x] コンパイラ挙動の安定化 (ICE=0, warning=0, cross-target 106/106)
-- [x] stdlib 境界の確定 (22モジュール 387関数, verb reform完了)
+- [x] stdlib 境界の確定 (22モジュール 381関数, verb reform完了, uuid/crypto/toml/compress/term 除外)
 - [x] エラーメッセージ品質 (E001-E010, --json, hint system)
 - [x] 破壊的変更ポリシー (edition, FROZEN_API, REJECTED_PATTERNS)
 - [x] showcases (CLI/API/Data/DevTool/Script 5本)
