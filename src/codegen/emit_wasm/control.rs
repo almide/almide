@@ -175,13 +175,15 @@ impl FuncCompiler<'_> {
         // Resolve subject type — IR may have wrong type on Var nodes (type inference gap)
         let subject_ty = self.resolve_subject_type(subject, arms);
 
+        // Evaluate subject BEFORE incrementing depth (subject may use scratch too)
+        self.emit_expr(subject);
+
         let scratch = match values::ty_to_valtype(&subject_ty) {
             Some(ValType::I64) => self.match_i64_base + self.match_depth,
             _ => self.match_i32_base + self.match_depth,
         };
         self.match_depth += 1;
 
-        self.emit_expr(subject);
         self.func.instruction(&Instruction::LocalSet(scratch));
 
         self.emit_match_arms(arms, scratch, &subject_ty, result_ty, 0);
