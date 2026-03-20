@@ -452,29 +452,18 @@ fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, l
             let subject_type_args: Vec<crate::types::Ty> = match subject_ty {
                 crate::types::Ty::Named(_, args) if !args.is_empty() => args.clone(),
                 crate::types::Ty::Applied(_, args) if !args.is_empty() => args.clone(),
-                crate::types::Ty::Variant { cases, .. } => {
-                    if let Some(case) = cases.iter().find(|c| c.name == *ctor_name) {
-                        match &case.payload {
-                            crate::types::VariantPayload::Tuple(tys) => {
-                                for (arg, field_ty) in args.iter().zip(tys.iter()) {
-                                    if let crate::ir::IrPattern::Bind { var } = arg {
-                                        // Prefer VarTable when field_ty is TypeVar (mono may have updated VarTable)
-                                        let effective_ty = if matches!(field_ty, crate::types::Ty::TypeVar(_))
-                                            || matches!(field_ty, crate::types::Ty::Named(n, a) if a.is_empty() && n.len() <= 2 && n.chars().next().map_or(false, |c| c.is_uppercase()))
-                                        {
-                                            let vt_ty = &vt.get(*var).ty;
-                                            if !matches!(vt_ty, crate::types::Ty::TypeVar(_) | crate::types::Ty::Unknown) { vt_ty } else { field_ty }
-                                        } else { field_ty };
-                                        if let Some(val_type) = values::ty_to_valtype(effective_ty) {
-                                            locals.push((*var, val_type));
-                                        }
-                                    }
-                                }
-                                return;
+                crate::types::Ty::Variant { .. } => {
+                    // For inline Variant types, use VarTable (updated by mono propagate)
+                    // as the source of truth for field types.
+                    for arg in args.iter() {
+                        if let crate::ir::IrPattern::Bind { var } = arg {
+                            let vt_ty = &vt.get(*var).ty;
+                            if let Some(val_type) = values::ty_to_valtype(vt_ty) {
+                                locals.push((*var, val_type));
                             }
-                            _ => vec![],
                         }
-                    } else { vec![] }
+                    }
+                    return;
                 }
                 _ => vec![],
             };

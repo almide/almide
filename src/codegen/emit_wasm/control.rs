@@ -337,31 +337,52 @@ impl FuncCompiler<'_> {
 
                     // Resolve constructor field types from variant info + subject type_args
                     let ctor_fields = self.emitter.record_fields.get(ctor_name).cloned().unwrap_or_default();
-                    eprintln!("[CTOR] '{}' fields={:?} subject_args={:?}", ctor_name, ctor_fields, subject_ty);
                     let subject_type_args: &[Ty] = match subject_ty {
                         Ty::Named(_, args) if !args.is_empty() => args,
                         Ty::Applied(_, args) if !args.is_empty() => args,
                         _ => &[],
                     };
+                    // Collect generic param names from ALL constructors of this variant type
+                    // (not just the current ctor) to ensure correct index mapping with type_args.
+                    // E.g., Either[A,B]: Left(A), Right(B) — gnames must be ["A","B"] not just ["B"].
+                    let all_gnames: Vec<String> = if !subject_type_args.is_empty() {
+                        let type_name = match subject_ty {
+                            Ty::Named(n, _) => Some(n.as_str()),
+                            _ => None,
+                        };
+                        let mut gn: Vec<&str> = Vec::new();
+                        if let Some(tn) = type_name {
+                            if let Some(cases) = self.emitter.variant_info.get(tn) {
+                                for case in cases {
+                                    for (_, fty) in &case.fields {
+                                        super::expressions::collect_type_param_names(fty, &mut gn);
+                                    }
+                                }
+                            }
+                        }
+                        gn.iter().map(|s| s.to_string()).collect()
+                    } else { vec![] };
+                    let gnames_refs: Vec<&str> = all_gnames.iter().map(|s| s.as_str()).collect();
 
                     // Bind constructor args (tuple payload fields)
                     let mut field_offset = 4u32; // skip tag
                     for (arg_idx, arg_pat) in args.iter().enumerate() {
-                        // Determine field type: use variant info with generic substitution
                         let field_ty = ctor_fields.get(arg_idx)
                             .map(|(_, fty)| {
-                                if !subject_type_args.is_empty() {
-                                    let mut gnames = Vec::new();
-                                    super::expressions::collect_type_param_names(fty, &mut gnames);
-                                    super::expressions::substitute_type_params(fty, &gnames, subject_type_args)
+                                if !subject_type_args.is_empty() && !gnames_refs.is_empty() {
+                                    super::expressions::substitute_type_params(fty, &gnames_refs, subject_type_args)
                                 } else { fty.clone() }
                             })
-                            .unwrap_or_else(|| Ty::Int); // fallback
+                            .unwrap_or_else(|| Ty::Int);
 
                         if let IrPattern::Bind { var } = arg_pat {
                             if let Some(&local_idx) = self.var_map.get(&var.0) {
                                 eprintln!("[CTOR BIND FINAL] field_ty={:?} valtype={:?} offset={}", field_ty, values::ty_to_valtype(&field_ty), field_offset);
                                 wasm!(self.func, { local_get(scratch); });
+                                let vt = values::ty_to_valtype(&field_ty);
+                                if vt == Some(ValType::I32) && field_offset == 4 && matches!(values::ty_to_valtype(result_ty), Some(ValType::I64)) {
+                                    eprintln!("[BUG?] Constructor {} loading i32 at offset 4 but result expects i64. field_ty={:?} subject={:?}", ctor_name, field_ty, subject_ty);
+                                }
                                 self.emit_load_at(&field_ty, field_offset);
                                 wasm!(self.func, { local_set(local_idx); });
                             }

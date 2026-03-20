@@ -54,11 +54,15 @@ impl FuncCompiler<'_> {
                     // (handles VarId mismatch between lowering passes)
                     let name = if (id.0 as usize) < self.var_table.len() { &self.var_table.get(*id).name } else { "" };
                     let found = if !name.is_empty() {
-                        self.var_map.iter().find_map(|(&vid, &lidx)| {
-                            if (vid as usize) < self.var_table.len() && self.var_table.get(crate::ir::VarId(vid)).name == name {
-                                Some(lidx)
-                            } else { None }
-                        })
+                        let target_vt = values::ty_to_valtype(&expr.ty);
+                        // Find var_map entry with matching name, prefer matching WASM type
+                        self.var_map.iter()
+                            .filter(|(vid, _)| (**vid as usize) < self.var_table.len() && self.var_table.get(crate::ir::VarId(**vid)).name == name)
+                            .max_by_key(|(vid, _)| {
+                                let vid_vt = values::ty_to_valtype(&self.var_table.get(crate::ir::VarId(**vid)).ty);
+                                if vid_vt == target_vt { 1u8 } else { 0u8 }
+                            })
+                            .map(|(_, lidx)| *lidx)
                     } else { None };
                     if let Some(local_idx) = found {
                         wasm!(self.func, { local_get(local_idx); });
