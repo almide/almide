@@ -100,7 +100,7 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
             IrPattern::Literal { expr: ir_expr }
         }
         ast::Pattern::Constructor { name, args } => {
-            let payload_tys = get_constructor_payload_tys(ctx, name);
+            let payload_tys = get_constructor_payload_tys_from_subject(ctx, name, ty);
             let ir_args = args.iter().enumerate().map(|(i, a)| {
                 let arg_ty = payload_tys.get(i).cloned().unwrap_or(Ty::Unknown);
                 lower_pattern(ctx, a, &arg_ty)
@@ -150,7 +150,21 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
     }
 }
 
-fn get_constructor_payload_tys(ctx: &LowerCtx, ctor_name: &str) -> Vec<Ty> {
+/// Extract constructor payload types from the subject type first (instantiated types),
+/// falling back to the constructor registry (template types) if the subject type doesn't match.
+fn get_constructor_payload_tys_from_subject(ctx: &LowerCtx, ctor_name: &str, subject_ty: &Ty) -> Vec<Ty> {
+    // Try to extract from the subject type (has instantiated generics)
+    let resolved = ctx.env.resolve_named(subject_ty);
+    if let Ty::Variant { cases, .. } = &resolved {
+        if let Some(case) = cases.iter().find(|c| c.name == ctor_name) {
+            return match &case.payload {
+                crate::types::VariantPayload::Tuple(tys) => tys.clone(),
+                crate::types::VariantPayload::Record(fs) => fs.iter().map(|(_, t, _)| t.clone()).collect(),
+                crate::types::VariantPayload::Unit => vec![],
+            };
+        }
+    }
+    // Fallback: constructor registry (may have uninstantiated generic types)
     if let Some((_, case)) = ctx.env.constructors.get(ctor_name) {
         match &case.payload {
             crate::types::VariantPayload::Tuple(tys) => tys.clone(),

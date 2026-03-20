@@ -495,7 +495,22 @@ impl Checker {
         match pattern {
             ast::Pattern::Wildcard => {}
             ast::Pattern::Ident { name } => { self.env.define_var(name, ty.clone()); }
-            ast::Pattern::Constructor { args, .. } => { for arg in args { self.bind_pattern(arg, &Ty::Unknown); } }
+            ast::Pattern::Constructor { name, args } => {
+                let resolved = self.env.resolve_named(ty);
+                let payload_tys: Vec<Ty> = match &resolved {
+                    Ty::Variant { cases, .. } => cases.iter()
+                        .find(|c| c.name == *name)
+                        .map(|c| match &c.payload {
+                            VariantPayload::Tuple(tys) => tys.clone(),
+                            _ => vec![],
+                        })
+                        .unwrap_or_default(),
+                    _ => vec![],
+                };
+                for (i, arg) in args.iter().enumerate() {
+                    self.bind_pattern(arg, payload_tys.get(i).unwrap_or(&Ty::Unknown));
+                }
+            }
             ast::Pattern::RecordPattern { fields, .. } => {
                 let resolved = self.env.resolve_named(ty);
                 let field_tys: Vec<(String, Ty)> = match &resolved {
