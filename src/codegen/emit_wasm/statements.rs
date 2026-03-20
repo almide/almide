@@ -12,11 +12,17 @@ impl FuncCompiler<'_> {
         match &stmt.kind {
             IrStmtKind::Bind { var, ty, value, .. } => {
                 self.emit_expr(value);
-                if let Some(_vt) = values::ty_to_valtype(ty) {
+                // Use value.ty when it produces a value, even if declared ty differs
+                let effective_ty = if values::ty_to_valtype(ty) != values::ty_to_valtype(&value.ty)
+                    && values::ty_to_valtype(&value.ty).is_some() {
+                    &value.ty
+                } else {
+                    ty
+                };
+                if let Some(_vt) = values::ty_to_valtype(effective_ty) {
                     let local_idx = self.var_map[&var.0];
                     wasm!(self.func, { local_set(local_idx); });
                 }
-                // Unit bindings: value produces nothing, nothing to store
             }
 
             IrStmtKind::Assign { var, value } => {
@@ -349,7 +355,14 @@ fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::
 fn scan_stmt(stmt: &IrStmt, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::VarTable) {
     match &stmt.kind {
         IrStmtKind::Bind { var, ty, value, .. } => {
-            if let Some(val_type) = values::ty_to_valtype(ty) {
+            // Prefer value.ty when it differs from declared ty (IR type inference gaps)
+            let effective_ty = if values::ty_to_valtype(ty) != values::ty_to_valtype(&value.ty)
+                && values::ty_to_valtype(&value.ty).is_some() {
+                &value.ty
+            } else {
+                ty
+            };
+            if let Some(val_type) = values::ty_to_valtype(effective_ty) {
                 locals.push((*var, val_type));
             }
             scan_expr(value, locals, vt);

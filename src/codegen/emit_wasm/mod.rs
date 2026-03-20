@@ -120,6 +120,8 @@ pub struct WasmEmitter {
     pub fn_ref_wrappers: HashMap<String, u32>,
     // Lambda counter (for matching pre-scan order during emission)
     pub lambda_counter: std::cell::Cell<usize>,
+    // Effect functions: their call returns Result but IR may expect unwrapped type
+    pub effect_fns: HashSet<String>,
 }
 
 /// A single case of a variant type.
@@ -179,6 +181,7 @@ impl WasmEmitter {
             lambdas: Vec::new(),
             fn_ref_wrappers: HashMap::new(),
             lambda_counter: std::cell::Cell::new(0),
+            effect_fns: HashSet::new(),
         }
     }
 
@@ -327,6 +330,9 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
         user_func_indices.push(func_idx);
         if func.is_test {
             test_func_indices.push((func_idx, func.name.clone()));
+        }
+        if func.is_effect {
+            emitter.effect_fns.insert(func.name.clone());
         }
     }
 
