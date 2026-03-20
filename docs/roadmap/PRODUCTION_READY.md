@@ -34,7 +34,7 @@ Almide が**既に回避した**他言語の失敗:
 ```
 コンパイラ          84 ファイル / 19,536 行
                     生成コードは外部 crate 不要（stdlib ランタイムを自己内包）
-stdlib             22 モジュール / 381 関数 / ランタイム 100%
+stdlib             22 モジュール / 390 関数 / ランタイム 100%
 テスト             111 .almd テストファイル (1,574 blocks) + 639 Rust unit tests = 2,213 total
 ターゲット          Rust, TypeScript, JavaScript, npm package, WASM
 Exercises          25 本 / 6 tiers
@@ -65,7 +65,7 @@ Codegen            v3: TOML templates, is_rust()=0, 106/106 cross-target
 | パターンマッチ | 基本 | 網羅性チェック、ネスト、ガード |
 | 診断 | 行番号のみ | file:line + context + hint + error recovery |
 | テスト | 0 | 2,033+ |
-| stdlib | 数関数 | 22 モジュール / 381 関数 |
+| stdlib | 数関数 | 22 モジュール / 390 関数 |
 | ツール | `almide run` のみ | run, build, test, check, fmt, clean, init |
 
 ---
@@ -79,7 +79,7 @@ Codegen            v3: TOML templates, is_rust()=0, 106/106 cross-target
 ### Almide 1.0 が約束すること
 
 1. **構文凍結**: `effect fn`, `fan`, `do`, `guard`, `match`, `for...in` — 現在の構文は永続
-2. **コア stdlib API 凍結**: 22 モジュール / 381 関数のシグネチャは不変。関数の追加はするが、既存の変更はしない
+2. **コア stdlib API 凍結**: 22 モジュール / 390 関数のシグネチャは不変。関数の追加はするが、既存の変更はしない
 3. **クロスターゲット一致**: 同じ `.almd` が Rust と TS で同じ出力を生む
 4. **edition フィールド**: `almide.toml` に `edition = "2026"` を追加。将来の破壊的変更は新 edition で吸収 (Rust editions の教訓)
 5. **永続互換性**: 今日コンパイルできる `.almd` は永遠にコンパイルできる (Go 1 compatibility promise)
@@ -114,7 +114,7 @@ Almide 1.0 = ALL of:
 
 安定性契約
   ■ 構文凍結: 全キーワード・構文の最終確認 (verb reform 完了)
-  ■ stdlib API 凍結: FROZEN_API.md で 22 モジュール / 381 関数を文書化
+  ■ stdlib API 凍結: FROZEN_API.md で 22 モジュール / 390 関数を文書化
   ■ edition フィールド: almide.toml に edition = "2026" 実装済み
   ■ 破壊的変更ポリシー: BREAKING_CHANGE_POLICY.md
   ■ Rejected Patterns リスト: REJECTED_PATTERNS.md (20+ 項目)

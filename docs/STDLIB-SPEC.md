@@ -1,7 +1,7 @@
 # Almide Standard Library Specification
 
-Auto-generated from `stdlib/defs/*.toml`. 371 native functions across 22 modules.
-Runtime implementation: 371/371 (100%).
+Auto-generated from `stdlib/defs/*.toml`. 390 native functions across 22 modules.
+Runtime implementation: 390/390 (100%).
 
 ## Module Index
 
@@ -26,6 +26,7 @@ Runtime implementation: 371/371 (100%).
 | random | platform | 4 | 4/4 | Ready |
 | regex | core | 8 | 0/8 | TOML only |
 | result | core | 9 | 9/9 | Ready |
+| set | core | 20 | 20/20 | Ready |
 | string | core | 41 | 41/41 | Ready |
 | testing | core | 7 | 7/7 | Ready |
 | value | core | 19 | 19/19 | Ready |
@@ -2868,6 +2869,210 @@ captures(pat: String, s: String) -> Option[List[String]]
 ```
 
 Example: `regex.captures("(\\w+)@(\\w+)", "user@host") // => some(["user@host", "user", "host"])`
+
+## set
+
+Layer: **core** | 20 functions | 20/20 implemented
+
+### `set.new`
+
+Create an empty set.
+
+```
+new[A]() -> Set[A]
+```
+
+Example: `let s: Set[Int] = set.new()`
+
+### `set.from_list`
+
+Create a set from a list of values.
+
+```
+from_list[A](xs: List[A]) -> Set[A]
+```
+
+Example: `set.from_list([1, 2, 3])`
+
+### `set.insert`
+
+Add a value to the set. Returns a new set.
+
+```
+insert[A](s: Set[A], value: A) -> Set[A]
+```
+
+Example: `set.insert(s, 42)`
+
+### `set.remove`
+
+Remove a value from the set. Returns a new set.
+
+```
+remove[A](s: Set[A], value: A) -> Set[A]
+```
+
+Example: `set.remove(s, 42)`
+
+### `set.contains`
+
+Check if a value is in the set.
+
+```
+contains[A](s: Set[A], value: A) -> Bool
+```
+
+Example: `set.contains(s, 42)`
+
+### `set.len`
+
+Return the number of elements.
+
+```
+len[A](s: Set[A]) -> Int
+```
+
+Example: `set.len(s)`
+
+### `set.is_empty`
+
+Check if the set has no elements.
+
+```
+is_empty[A](s: Set[A]) -> Bool
+```
+
+Example: `set.is_empty(s)`
+
+### `set.to_list`
+
+Convert a set to a list.
+
+```
+to_list[A](s: Set[A]) -> List[A]
+```
+
+Example: `set.to_list(s)`
+
+### `set.union`
+
+Return the union of two sets.
+
+```
+union[A](a: Set[A], b: Set[A]) -> Set[A]
+```
+
+Example: `set.union(a, b)`
+
+### `set.intersection`
+
+Return the intersection of two sets.
+
+```
+intersection[A](a: Set[A], b: Set[A]) -> Set[A]
+```
+
+Example: `set.intersection(a, b)`
+
+### `set.difference`
+
+Return elements in a that are not in b.
+
+```
+difference[A](a: Set[A], b: Set[A]) -> Set[A]
+```
+
+Example: `set.difference(a, b)`
+
+### `set.symmetric_difference`
+
+Return elements in either set but not both.
+
+```
+symmetric_difference[A](a: Set[A], b: Set[A]) -> Set[A]
+```
+
+Example: `set.symmetric_difference(a, b)`
+
+### `set.is_subset`
+
+Check if all elements of a are in b.
+
+```
+is_subset[A](a: Set[A], b: Set[A]) -> Bool
+```
+
+Example: `set.is_subset(a, b)`
+
+### `set.is_disjoint`
+
+Check if two sets have no elements in common.
+
+```
+is_disjoint[A](a: Set[A], b: Set[A]) -> Bool
+```
+
+Example: `set.is_disjoint(a, b)`
+
+### `set.filter`
+
+Keep elements that satisfy a predicate.
+
+```
+filter[A](s: Set[A], f: Fn[A] -> Bool) -> Set[A]
+```
+
+Example: `set.filter(s, (x) => x > 2)`
+
+### `set.map`
+
+Apply a function to each element, returning a new set.
+
+```
+map[A, B](s: Set[A], f: Fn[A] -> B) -> Set[B]
+```
+
+Example: `set.map(s, (x) => x * 2)`
+
+### `set.fold`
+
+Reduce a set with an initial accumulator.
+
+```
+fold[A, B](s: Set[A], init: B, f: Fn[B, A] -> B) -> B
+```
+
+Example: `set.fold(s, 0, (acc, x) => acc + x)`
+
+### `set.each`
+
+Execute a function for each element (side effects only).
+
+```
+each[A](s: Set[A], f: Fn[A] -> Unit) -> Unit
+```
+
+Example: `set.each(s, (x) => println(int.to_string(x)))`
+
+### `set.any`
+
+Check if any element satisfies a predicate.
+
+```
+any[A](s: Set[A], f: Fn[A] -> Bool) -> Bool
+```
+
+Example: `set.any(s, (x) => x > 2)`
+
+### `set.all`
+
+Check if all elements satisfy a predicate.
+
+```
+all[A](s: Set[A], f: Fn[A] -> Bool) -> Bool
+```
+
+Example: `set.all(s, (x) => x > 0)`
 
 ## result
 
