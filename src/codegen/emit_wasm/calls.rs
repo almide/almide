@@ -446,10 +446,223 @@ impl FuncCompiler<'_> {
                         self.func.instruction(&Instruction::End);
                     }
                     ("list", "filter") => {
-                        self.emit_stub_call(args);
+                        // filter(list, fn) → new list with matching elements
+                        // Alloc max size, fill matching, update len at end
+                        let elem_ty = if let Ty::Applied(_, a) = &args[0].ty {
+                            a.first().cloned().unwrap_or(Ty::Int)
+                        } else { Ty::Int };
+                        let elem_size = values::byte_size(&elem_ty);
+                        let s = self.match_i32_base + self.match_depth;
+                        let len_local = s;
+                        let idx_local = s + 1;
+                        let mem = super::expressions::mem;
+
+                        // mem[0]=src, mem[4]=fn, mem[8]=dst, mem[12]=out_idx
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.emit_expr(&args[0]);
+                        self.func.instruction(&Instruction::I32Store(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.emit_expr(&args[1]);
+                        self.func.instruction(&Instruction::I32Store(mem(0)));
+
+                        // len
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::LocalSet(len_local));
+
+                        // alloc dst (max size = 4 + len * elem_size) → mem[8]
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::LocalGet(len_local));
+                        self.func.instruction(&Instruction::I32Const(elem_size as i32));
+                        self.func.instruction(&Instruction::I32Mul);
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+                        self.func.instruction(&Instruction::I32Store(mem(0)));
+
+                        // out_idx = 0 → mem[12]
+                        self.func.instruction(&Instruction::I32Const(12));
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::I32Store(mem(0)));
+
+                        // idx = 0
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::LocalSet(idx_local));
+
+                        // Loop
+                        self.func.instruction(&Instruction::Block(BlockType::Empty));
+                        self.func.instruction(&Instruction::Loop(BlockType::Empty));
+                        let saved = self.depth; self.depth += 2;
+
+                        self.func.instruction(&Instruction::LocalGet(idx_local));
+                        self.func.instruction(&Instruction::LocalGet(len_local));
+                        self.func.instruction(&Instruction::I32GeU);
+                        self.func.instruction(&Instruction::BrIf(1));
+
+                        // Call predicate: fn(element) → bool (i32)
+                        // Load closure
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Load(MemArg { offset: 4, align: 2, memory_index: 0 }));
+                        // Load element
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::LocalGet(idx_local));
+                        self.func.instruction(&Instruction::I32Const(elem_size as i32));
+                        self.func.instruction(&Instruction::I32Mul);
+                        self.func.instruction(&Instruction::I32Add);
+                        self.emit_load_at(&elem_ty, 0);
+                        // table_idx
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        // call_indirect
+                        if let Ty::Fn { params, ret } = &args[1].ty {
+                            let mut ct = vec![ValType::I32];
+                            for p in params { if let Some(vt) = values::ty_to_valtype(p) { ct.push(vt); } }
+                            let rt = values::ret_type(ret);
+                            let ti = self.emitter.register_type(ct, rt);
+                            self.func.instruction(&Instruction::CallIndirect { type_index: ti, table_index: 0 });
+                        }
+                        // If true, copy element to dst
+                        self.func.instruction(&Instruction::If(BlockType::Empty));
+                        // dst[out_idx] = src[idx]
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::I32Const(12));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(elem_size as i32));
+                        self.func.instruction(&Instruction::I32Mul);
+                        self.func.instruction(&Instruction::I32Add);
+                        // load src element
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::LocalGet(idx_local));
+                        self.func.instruction(&Instruction::I32Const(elem_size as i32));
+                        self.func.instruction(&Instruction::I32Mul);
+                        self.func.instruction(&Instruction::I32Add);
+                        self.emit_load_at(&elem_ty, 0);
+                        self.emit_store_at(&elem_ty, 0);
+                        // out_idx++
+                        self.func.instruction(&Instruction::I32Const(12));
+                        self.func.instruction(&Instruction::I32Const(12));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(1));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::I32Store(mem(0)));
+                        self.func.instruction(&Instruction::End); // end if
+
+                        // idx++
+                        self.func.instruction(&Instruction::LocalGet(idx_local));
+                        self.func.instruction(&Instruction::I32Const(1));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::LocalSet(idx_local));
+                        self.func.instruction(&Instruction::Br(0));
+
+                        self.depth = saved;
+                        self.func.instruction(&Instruction::End);
+                        self.func.instruction(&Instruction::End);
+
+                        // Set dst.len = out_idx
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(12));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Store(mem(0)));
+
+                        // Return dst
+                        self.func.instruction(&Instruction::I32Const(8));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
                     }
-                    ("list", "fold")
-                    | ("list", "reverse") | ("list", "find") | ("list", "any") | ("list", "all")
+                    ("list", "fold") => {
+                        // fold(list, init, fn(acc, elem) → acc)
+                        let elem_ty = if let Ty::Applied(_, a) = &args[0].ty {
+                            a.first().cloned().unwrap_or(Ty::Int)
+                        } else { Ty::Int };
+                        let elem_size = values::byte_size(&elem_ty);
+                        let s = self.match_i32_base + self.match_depth;
+                        let len_local = s;
+                        let idx_local = s + 1;
+                        let acc_local = self.match_i64_base + self.match_depth;
+                        let mem = super::expressions::mem;
+
+                        // mem[0]=list, mem[4]=fn
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.emit_expr(&args[0]);
+                        self.func.instruction(&Instruction::I32Store(mem(0)));
+                        // acc = init
+                        self.emit_expr(&args[1]);
+                        self.func.instruction(&Instruction::LocalSet(acc_local));
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.emit_expr(&args[2]);
+                        self.func.instruction(&Instruction::I32Store(mem(0)));
+
+                        // len
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::LocalSet(len_local));
+
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::LocalSet(idx_local));
+
+                        self.func.instruction(&Instruction::Block(BlockType::Empty));
+                        self.func.instruction(&Instruction::Loop(BlockType::Empty));
+                        let saved = self.depth; self.depth += 2;
+
+                        self.func.instruction(&Instruction::LocalGet(idx_local));
+                        self.func.instruction(&Instruction::LocalGet(len_local));
+                        self.func.instruction(&Instruction::I32GeU);
+                        self.func.instruction(&Instruction::BrIf(1));
+
+                        // acc = fn(acc, elem)
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Load(MemArg { offset: 4, align: 2, memory_index: 0 }));
+                        self.func.instruction(&Instruction::LocalGet(acc_local));
+                        // load elem
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::LocalGet(idx_local));
+                        self.func.instruction(&Instruction::I32Const(elem_size as i32));
+                        self.func.instruction(&Instruction::I32Mul);
+                        self.func.instruction(&Instruction::I32Add);
+                        self.emit_load_at(&elem_ty, 0);
+                        // table_idx
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        if let Ty::Fn { params, ret } = &args[2].ty {
+                            let mut ct = vec![ValType::I32];
+                            for p in params { if let Some(vt) = values::ty_to_valtype(p) { ct.push(vt); } }
+                            let rt = values::ret_type(ret);
+                            let ti = self.emitter.register_type(ct, rt);
+                            self.func.instruction(&Instruction::CallIndirect { type_index: ti, table_index: 0 });
+                        }
+                        self.func.instruction(&Instruction::LocalSet(acc_local));
+
+                        self.func.instruction(&Instruction::LocalGet(idx_local));
+                        self.func.instruction(&Instruction::I32Const(1));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::LocalSet(idx_local));
+                        self.func.instruction(&Instruction::Br(0));
+
+                        self.depth = saved;
+                        self.func.instruction(&Instruction::End);
+                        self.func.instruction(&Instruction::End);
+
+                        self.func.instruction(&Instruction::LocalGet(acc_local));
+                    }
+                    ("list", "reverse") | ("list", "find") | ("list", "any") | ("list", "all")
                     | ("list", "count") | ("list", "sort_by") | ("list", "flat_map")
                     | ("list", "filter_map") | ("list", "get") | ("list", "drop")
                     | ("list", "take") | ("list", "zip")
