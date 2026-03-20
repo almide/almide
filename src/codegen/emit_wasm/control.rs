@@ -191,8 +191,6 @@ impl FuncCompiler<'_> {
     /// - Bind: store subject in the bound variable's local, unconditional
     pub(super) fn emit_match(&mut self, subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty) {
         let subject_ty = self.resolve_subject_type(subject, arms);
-        // Debug: check if match has pattern that extracts i64 but result expects i32
-        // Evaluate subject BEFORE incrementing depth (subject may use scratch too)
         self.emit_expr(subject);
 
         let scratch = match values::ty_to_valtype(&subject_ty) {
@@ -323,7 +321,9 @@ impl FuncCompiler<'_> {
 
             // Constructor pattern (e.g., Circle(r), Red)
             IrPattern::Constructor { name: ctor_name, args } => {
-                if let Some(tag_val) = self.find_variant_tag_by_ctor(ctor_name, subject_ty) {
+                let tag_result = self.find_variant_tag_by_ctor(ctor_name, subject_ty);
+                eprintln!("[CTOR HANDLER] ctor='{}' tag={:?} subject_ty={:?} idx={} result_ty={:?}", ctor_name, tag_result, subject_ty, idx, result_ty);
+                if let Some(tag_val) = tag_result {
                     wasm!(self.func, {
                         local_get(scratch);
                         i32_load(0);
@@ -392,10 +392,13 @@ impl FuncCompiler<'_> {
                     }
                     self.depth -= 1;
                     wasm!(self.func, { end; });
-                } else if is_last {
-                    self.emit_expr(&arm.body);
                 } else {
-                    wasm!(self.func, { unreachable; });
+                    eprintln!("[CTOR ELSE] ctor='{}' is_last={} — tag not found, falling through", ctor_name, is_last);
+                    if is_last {
+                        self.emit_expr(&arm.body);
+                    } else {
+                        wasm!(self.func, { unreachable; });
+                    }
                 }
             }
 

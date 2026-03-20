@@ -336,8 +336,12 @@ fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::
         }
         IrExprKind::Match { subject, arms } => {
             scan_expr(subject, locals, vt);
-            // Resolve subject type (IR may have wrong type for pattern-matched vars)
             let resolved_ty = resolve_scan_subject_ty(subject, arms, vt);
+            // Log: find the match with Right/Left constructors
+            let has_either = arms.iter().any(|a| matches!(&a.pattern, crate::ir::IrPattern::Constructor { name, .. } if name == "Right" || name == "Left"));
+            if has_either {
+                eprintln!("[SCAN MATCH EITHER] subject.ty={:?} resolved_ty={:?}", subject.ty, resolved_ty);
+            }
             for arm in arms {
                 scan_pattern(&arm.pattern, &resolved_ty, locals, vt);
                 scan_expr(&arm.body, locals, vt);
@@ -449,18 +453,24 @@ fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, l
                 crate::types::Ty::Named(_, args) if !args.is_empty() => args.clone(),
                 crate::types::Ty::Applied(_, args) if !args.is_empty() => args.clone(),
                 crate::types::Ty::Variant { cases, .. } => {
-                    // Get field types from inline variant info
                     if let Some(case) = cases.iter().find(|c| c.name == *ctor_name) {
                         match &case.payload {
                             crate::types::VariantPayload::Tuple(tys) => {
-                                for (i, (arg, field_ty)) in args.iter().zip(tys.iter()).enumerate() {
+                                for (arg, field_ty) in args.iter().zip(tys.iter()) {
                                     if let crate::ir::IrPattern::Bind { var } = arg {
-                                        if let Some(val_type) = values::ty_to_valtype(field_ty) {
+                                        // Prefer VarTable when field_ty is TypeVar (mono may have updated VarTable)
+                                        let effective_ty = if matches!(field_ty, crate::types::Ty::TypeVar(_))
+                                            || matches!(field_ty, crate::types::Ty::Named(n, a) if a.is_empty() && n.len() <= 2 && n.chars().next().map_or(false, |c| c.is_uppercase()))
+                                        {
+                                            let vt_ty = &vt.get(*var).ty;
+                                            if !matches!(vt_ty, crate::types::Ty::TypeVar(_) | crate::types::Ty::Unknown) { vt_ty } else { field_ty }
+                                        } else { field_ty };
+                                        if let Some(val_type) = values::ty_to_valtype(effective_ty) {
                                             locals.push((*var, val_type));
                                         }
                                     }
                                 }
-                                return; // handled inline
+                                return;
                             }
                             _ => vec![],
                         }
@@ -471,10 +481,10 @@ fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, l
             for (i, arg) in args.iter().enumerate() {
                 if let crate::ir::IrPattern::Bind { var } = arg {
                     let var_ty = vt.get(*var).ty.clone();
-                    if ctor_name == "Just" || ctor_name == "Leaf" || ctor_name == "Node" {
-                        eprintln!("[SCAN CTOR] {}[{}] var={:?} '{}' vt_ty={:?} subject={:?}", ctor_name, i, var, vt.get(*var).name, var_ty, subject_ty);
+                    if var.0 == 107 || (ctor_name == "Right" && vt.get(*var).name == "v") {
+                        eprintln!("[SCAN RIGHT] {}[{}] var={:?} '{}' vt_ty={:?} subject={:?} type_args={:?}",
+                            ctor_name, i, var, vt.get(*var).name, var_ty, subject_ty, subject_type_args);
                     }
-                    // Resolve TypeVars using subject's type_args via name-based substitution
                     let resolved = if !subject_type_args.is_empty() {
                         let mut gnames = Vec::new();
                         super::expressions::collect_type_param_names(&var_ty, &mut gnames);
@@ -483,9 +493,6 @@ fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, l
                         }
                     } else { var_ty };
                     if let Some(val_type) = values::ty_to_valtype(&resolved) {
-                        if ctor_name == "Just" || ctor_name == "Leaf" {
-                            eprintln!("[SCAN CTOR LOCAL] {}[{}] var={:?} resolved={:?} → {:?}", ctor_name, i, var, resolved, val_type);
-                        }
                         locals.push((*var, val_type));
                     }
                 } else {
