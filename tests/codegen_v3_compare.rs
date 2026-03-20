@@ -59,7 +59,7 @@ fn make_test_program() -> IrProgram {
             subject: Box::new(find_call),
             arms: vec![
                 IrMatchArm {
-                    pattern: IrPattern::Some { inner: Box::new(IrPattern::Bind { var: v_x }) },
+                    pattern: IrPattern::Some { inner: Box::new(IrPattern::Bind { var: v_x, ty: Ty::Unknown }) },
                     guard: None,
                     body: IrExpr { kind: IrExprKind::Var { id: v_x }, ty: Ty::Int, span: None },
                 },
