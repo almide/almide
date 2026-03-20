@@ -30,22 +30,29 @@ effect fn main() -> Result[Unit, String] = do {
 
 **型注釈が「私は Result を保持したい」という意図の表明。** ユーザーが `let res: Result[...] = ...` と書いたら auto-unwrap しない。
 
-## 実装案
+## 試行した実装案と結果
 
-IR の `IrStmtKind::Bind` に `preserve_result: bool` を追加:
+### 案1: チェッカーの infer_types を上書き ❌
+- auto-unwrap 時に `infer_types[expr_id]` を unwrapped 型に変更
+- 問題: nanopass の `is_result_call()` が `expr.ty.is_result()` で判定するため、Try 挿入自体が行われなくなる
 
-1. **チェッカー → AST**: `Stmt::Let` に型注釈ありフラグを保持（既に `ty: Option<TypeExpr>` がある）
-2. **lowerer**: 型注釈ありの let で、注釈型が Result の場合 → `preserve_result = true`
-3. **nanopass `ResultPropagationPass`**: `preserve_result = true` の Bind → Try を挿入しない
-4. **codegen walker**: `preserve_result = true` の Bind → auto_unwrap を一時無効化
+### 案2: lowerer で型注釈から Bind ty を設定 ❌
+- 型注釈ありなら `resolve_type_expr(annotation)` を Bind ty に使う
+- 問題: 型注釈なしでも `ir_val.ty` = `Result`（expr_types の値）なので区別できない
+- nanopass で Bind ty が Result かどうかで判定しても、全 Bind ty が Result
+
+### 案3 (確定): Bind に型注釈有無フラグを追加
+- `IrStmtKind::Bind` に `#[serde(default)] annotated_result: bool` を追加
+- lowerer: `Stmt::Let { ty: Some(te), .. }` で `resolve_type_expr(te).is_result()` なら `true`
+- nanopass: `annotated_result = true` なら Try を挿入しない
+- 25 ファイルの Bind パターンマッチは `..` でフィールド無視可能（既存パスは影響なし）
 
 ## 影響範囲
 
-- `src/ir/mod.rs` — Bind に `preserve_result` フィールド追加
-- `src/lower/statements.rs` — 型注釈から `preserve_result` を設定
-- `src/codegen/pass_result_propagation.rs` — `preserve_result` チェック
-- `src/codegen/walker.rs` — Result Bind の auto_unwrap スキップ
-- 全 nanopass の Bind パターンマッチ更新（フィールド追加のため）
+- `src/ir/mod.rs` — Bind に `annotated_result: bool` 追加
+- `src/lower/statements.rs` — 型注釈判定
+- `src/codegen/pass_result_propagation.rs` — `annotated_result` チェック
+- 他の Bind パターンマッチ — `..` で無視（変更不要）
 
 ## テスト
 
