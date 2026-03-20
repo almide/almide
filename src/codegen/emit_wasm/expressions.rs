@@ -545,14 +545,23 @@ impl FuncCompiler<'_> {
             }
             // Named types (records/variants): compute size from registered fields
             Ty::Named(name, _) => {
-                let fields = self.emitter.record_fields.get(name.as_str()).cloned().unwrap_or_default();
-                let tag_offset = if self.emitter.variant_info.contains_key(name.as_str()) { 4u32 } else { 0 };
-                let size = tag_offset + values::record_size(&fields);
-                if size > 0 {
+                if let Some(cases) = self.emitter.variant_info.get(name.as_str()) {
+                    // Variant: tag(4) + max payload size across all constructors
+                    let max_payload = cases.iter()
+                        .map(|c| values::record_size(&c.fields))
+                        .max().unwrap_or(0);
+                    let size = 4 + max_payload;
                     self.func.instruction(&Instruction::I32Const(size as i32));
                     self.func.instruction(&Instruction::Call(self.emitter.rt.mem_eq));
                 } else {
-                    self.func.instruction(&Instruction::I32Eq);
+                    let fields = self.emitter.record_fields.get(name.as_str()).cloned().unwrap_or_default();
+                    let size = values::record_size(&fields);
+                    if size > 0 {
+                        self.func.instruction(&Instruction::I32Const(size as i32));
+                        self.func.instruction(&Instruction::Call(self.emitter.rt.mem_eq));
+                    } else {
+                        self.func.instruction(&Instruction::I32Eq);
+                    }
                 }
             }
             // Tuple: byte-compare all elements
