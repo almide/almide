@@ -2,7 +2,7 @@
 
 use crate::ir::IrExpr;
 use crate::types::Ty;
-use wasm_encoder::{BlockType, Instruction, MemArg};
+use wasm_encoder::MemArg;
 
 use super::FuncCompiler;
 use super::values;
@@ -22,34 +22,36 @@ impl FuncCompiler<'_> {
         let total_size = tag_size + values::record_size(&field_types);
 
         // Allocate
-        self.func.instruction(&Instruction::I32Const(total_size as i32));
-        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+        wasm!(self.func, {
+            i32_const(total_size as i32);
+            call(self.emitter.rt.alloc);
+        });
 
         let scratch = self.match_i32_base + self.match_depth;
         self.match_depth += 1;
-        self.func.instruction(&Instruction::LocalSet(scratch));
+        wasm!(self.func, { local_set(scratch); });
 
         // Write tag if variant
         if let Some(tag_val) = tag {
-            self.func.instruction(&Instruction::LocalGet(scratch));
-            self.func.instruction(&Instruction::I32Const(tag_val as i32));
-            self.func.instruction(&Instruction::I32Store(MemArg {
-                offset: 0, align: 2, memory_index: 0,
-            }));
+            wasm!(self.func, {
+                local_get(scratch);
+                i32_const(tag_val as i32);
+                i32_store(0);
+            });
         }
 
         // Store each field (offset starts after tag)
         let mut offset = tag_size;
         for (_, field_expr) in fields {
             let field_size = values::byte_size(&field_expr.ty);
-            self.func.instruction(&Instruction::LocalGet(scratch));
+            wasm!(self.func, { local_get(scratch); });
             self.emit_expr(field_expr);
             self.emit_store_at(&field_expr.ty, offset);
             offset += field_size;
         }
 
         self.match_depth -= 1;
-        self.func.instruction(&Instruction::LocalGet(scratch));
+        wasm!(self.func, { local_get(scratch); });
     }
 
     /// Look up variant tag for a constructor name within a variant type.
@@ -74,61 +76,69 @@ impl FuncCompiler<'_> {
         let total_size = tag_offset + values::record_size(&all_fields);
 
         // Allocate new record
-        self.func.instruction(&Instruction::I32Const(total_size as i32));
-        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+        wasm!(self.func, {
+            i32_const(total_size as i32);
+            call(self.emitter.rt.alloc);
+        });
         let result_scratch = self.match_i32_base + self.match_depth;
-        self.func.instruction(&Instruction::LocalSet(result_scratch));
+        wasm!(self.func, { local_set(result_scratch); });
 
         // Evaluate base and store ptr
         self.emit_expr(base);
         let base_scratch = result_scratch + 1;
-        self.func.instruction(&Instruction::LocalSet(base_scratch));
+        wasm!(self.func, { local_set(base_scratch); });
 
         // Copy all bytes from base to result (including tag if variant)
-        // Byte-by-byte copy loop
-        // Use i64 scratch as counter
         let counter = self.match_i64_base + self.match_depth;
-        self.func.instruction(&Instruction::I64Const(0));
-        self.func.instruction(&Instruction::LocalSet(counter));
-        self.func.instruction(&Instruction::Block(BlockType::Empty));
-        self.func.instruction(&Instruction::Loop(BlockType::Empty));
+        wasm!(self.func, {
+            i64_const(0);
+            local_set(counter);
+            block_empty;
+            loop_empty;
+        });
         // break if counter >= total_size
-        self.func.instruction(&Instruction::LocalGet(counter));
-        self.func.instruction(&Instruction::I64Const(total_size as i64));
-        self.func.instruction(&Instruction::I64GeU);
-        self.func.instruction(&Instruction::BrIf(1));
+        wasm!(self.func, {
+            local_get(counter);
+            i64_const(total_size as i64);
+            i64_ge_u;
+            br_if(1);
+        });
         // dst[i] = src[i]
-        self.func.instruction(&Instruction::LocalGet(result_scratch));
-        self.func.instruction(&Instruction::LocalGet(counter));
-        self.func.instruction(&Instruction::I32WrapI64);
-        self.func.instruction(&Instruction::I32Add);
-        self.func.instruction(&Instruction::LocalGet(base_scratch));
-        self.func.instruction(&Instruction::LocalGet(counter));
-        self.func.instruction(&Instruction::I32WrapI64);
-        self.func.instruction(&Instruction::I32Add);
-        self.func.instruction(&Instruction::I32Load8U(MemArg { offset: 0, align: 0, memory_index: 0 }));
-        self.func.instruction(&Instruction::I32Store8(MemArg { offset: 0, align: 0, memory_index: 0 }));
+        wasm!(self.func, {
+            local_get(result_scratch);
+            local_get(counter);
+            i32_wrap_i64;
+            i32_add;
+            local_get(base_scratch);
+            local_get(counter);
+            i32_wrap_i64;
+            i32_add;
+            i32_load8_u(0);
+            i32_store8(0);
+        });
         // counter++
-        self.func.instruction(&Instruction::LocalGet(counter));
-        self.func.instruction(&Instruction::I64Const(1));
-        self.func.instruction(&Instruction::I64Add);
-        self.func.instruction(&Instruction::LocalSet(counter));
-        self.func.instruction(&Instruction::Br(0));
-        self.func.instruction(&Instruction::End);
-        self.func.instruction(&Instruction::End);
+        wasm!(self.func, {
+            local_get(counter);
+            i64_const(1);
+            i64_add;
+            local_set(counter);
+            br(0);
+            end;
+            end;
+        });
 
         // Overwrite specified fields
         for (field_name, field_expr) in overrides {
             if let Some((offset, _)) = values::field_offset(&all_fields, field_name) {
                 let total_offset = tag_offset + offset;
-                self.func.instruction(&Instruction::LocalGet(result_scratch));
+                wasm!(self.func, { local_get(result_scratch); });
                 self.emit_expr(field_expr);
                 self.emit_store_at(&field_expr.ty, total_offset);
             }
         }
 
         // Return result ptr
-        self.func.instruction(&Instruction::LocalGet(result_scratch));
+        wasm!(self.func, { local_get(result_scratch); });
     }
 
     /// Emit a list literal: allocate [len:i32][elem0][elem1]...
@@ -142,30 +152,32 @@ impl FuncCompiler<'_> {
         let n = elements.len() as u32;
         let total = 4 + n * elem_size;
 
-        self.func.instruction(&Instruction::I32Const(total as i32));
-        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+        wasm!(self.func, {
+            i32_const(total as i32);
+            call(self.emitter.rt.alloc);
+        });
 
         let scratch = self.match_i32_base + self.match_depth;
         self.match_depth += 1;
-        self.func.instruction(&Instruction::LocalSet(scratch));
+        wasm!(self.func, { local_set(scratch); });
 
         // Store length
-        self.func.instruction(&Instruction::LocalGet(scratch));
-        self.func.instruction(&Instruction::I32Const(n as i32));
-        self.func.instruction(&Instruction::I32Store(MemArg {
-            offset: 0, align: 2, memory_index: 0,
-        }));
+        wasm!(self.func, {
+            local_get(scratch);
+            i32_const(n as i32);
+            i32_store(0);
+        });
 
         // Store each element
         for (i, elem) in elements.iter().enumerate() {
             let offset = 4 + (i as u32) * elem_size;
-            self.func.instruction(&Instruction::LocalGet(scratch));
+            wasm!(self.func, { local_get(scratch); });
             self.emit_expr(elem);
             self.emit_store_at(&elem.ty, offset);
         }
 
         self.match_depth -= 1;
-        self.func.instruction(&Instruction::LocalGet(scratch));
+        wasm!(self.func, { local_get(scratch); });
     }
 
     /// Emit index access: list_ptr + 4 + index * elem_size
@@ -173,18 +185,22 @@ impl FuncCompiler<'_> {
         let elem_size = values::byte_size(result_ty);
 
         self.emit_expr(object); // list ptr
-        self.func.instruction(&Instruction::I32Const(4)); // skip len
-        self.func.instruction(&Instruction::I32Add);
+        wasm!(self.func, {
+            i32_const(4);
+            i32_add;
+        });
 
         // Add index * elem_size
         self.emit_expr(index);
         // Index might be i64 (Int), convert to i32
         if matches!(&index.ty, Ty::Int) {
-            self.func.instruction(&Instruction::I32WrapI64);
+            wasm!(self.func, { i32_wrap_i64; });
         }
-        self.func.instruction(&Instruction::I32Const(elem_size as i32));
-        self.func.instruction(&Instruction::I32Mul);
-        self.func.instruction(&Instruction::I32Add);
+        wasm!(self.func, {
+            i32_const(elem_size as i32);
+            i32_mul;
+            i32_add;
+        });
 
         // Load element
         self.emit_load_at(result_ty, 0);
@@ -197,24 +213,26 @@ impl FuncCompiler<'_> {
             .collect();
         let total_size = values::record_size(&element_types);
 
-        self.func.instruction(&Instruction::I32Const(total_size as i32));
-        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+        wasm!(self.func, {
+            i32_const(total_size as i32);
+            call(self.emitter.rt.alloc);
+        });
 
         let scratch = self.match_i32_base + self.match_depth;
         self.match_depth += 1;
-        self.func.instruction(&Instruction::LocalSet(scratch));
+        wasm!(self.func, { local_set(scratch); });
 
         let mut offset = 0u32;
         for elem in elements {
             let size = values::byte_size(&elem.ty);
-            self.func.instruction(&Instruction::LocalGet(scratch));
+            wasm!(self.func, { local_get(scratch); });
             self.emit_expr(elem);
             self.emit_store_at(&elem.ty, offset);
             offset += size;
         }
 
         self.match_depth -= 1;
-        self.func.instruction(&Instruction::LocalGet(scratch));
+        wasm!(self.func, { local_get(scratch); });
     }
 
     /// Emit a tuple index access: load from tuple pointer + element offset.
@@ -242,7 +260,7 @@ impl FuncCompiler<'_> {
             let total_offset = tag_offset + field_offset;
             self.emit_load_at(&field_ty, total_offset);
         } else {
-            self.func.instruction(&Instruction::Unreachable);
+            wasm!(self.func, { unreachable; });
         }
     }
 }

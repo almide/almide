@@ -4,15 +4,7 @@
 //! Only fd_write is imported from WASI.
 
 use super::{CompiledFunc, WasmEmitter, SCRATCH_ITOA, NEWLINE_OFFSET};
-use wasm_encoder::{BlockType, Function, Instruction, MemArg, ValType};
-
-fn mem(offset: u64) -> MemArg {
-    MemArg { offset, align: 2, memory_index: 0 }
-}
-
-fn mem8(offset: u64) -> MemArg {
-    MemArg { offset, align: 0, memory_index: 0 }
-}
+use wasm_encoder::{Function, ValType};
 
 /// Register WASI imports and runtime function signatures.
 pub fn register_runtime(emitter: &mut WasmEmitter) {
@@ -109,19 +101,16 @@ fn compile_alloc(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.alloc];
     let mut f = Function::new([(1, ValType::I32)]); // local 1: $ptr
 
-    // $ptr = global.__heap_ptr
-    f.instruction(&Instruction::GlobalGet(emitter.heap_ptr_global));
-    f.instruction(&Instruction::LocalSet(1));
-
-    // global.__heap_ptr += size
-    f.instruction(&Instruction::GlobalGet(emitter.heap_ptr_global));
-    f.instruction(&Instruction::LocalGet(0)); // param $size
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::GlobalSet(emitter.heap_ptr_global));
-
-    // return $ptr
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::End);
+    wasm!(f, {
+        global_get(emitter.heap_ptr_global);
+        local_set(1);
+        global_get(emitter.heap_ptr_global);
+        local_get(0);
+        i32_add;
+        global_set(emitter.heap_ptr_global);
+        local_get(1);
+        end;
+    });
 
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }
@@ -134,46 +123,47 @@ fn compile_println_str(emitter: &mut WasmEmitter) {
 
     // --- Write the string ---
     // iov[0].buf = ptr + 4  (skip length prefix)
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::LocalGet(0)); // param $ptr
-    f.instruction(&Instruction::I32Const(4));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::I32Store(mem(0)));
-
+    wasm!(f, {
+        i32_const(0);
+        local_get(0);
+        i32_const(4);
+        i32_add;
+        i32_store(0);
+    });
     // iov[0].len = *ptr  (load length)
-    f.instruction(&Instruction::I32Const(4));
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::I32Load(mem(0)));
-    f.instruction(&Instruction::I32Store(mem(0)));
-
+    wasm!(f, {
+        i32_const(4);
+        local_get(0);
+        i32_load(0);
+        i32_store(0);
+    });
     // fd_write(stdout=1, iovs=0, iovs_len=1, nwritten=8)
-    f.instruction(&Instruction::I32Const(1));
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::I32Const(1));
-    f.instruction(&Instruction::I32Const(8));
-    f.instruction(&Instruction::Call(emitter.rt.fd_write));
-    f.instruction(&Instruction::Drop);
+    wasm!(f, {
+        i32_const(1);
+        i32_const(0);
+        i32_const(1);
+        i32_const(8);
+        call(emitter.rt.fd_write);
+        drop;
+    });
 
     // --- Write newline ---
-    // iov[0].buf = NEWLINE_OFFSET
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::I32Const(NEWLINE_OFFSET as i32));
-    f.instruction(&Instruction::I32Store(mem(0)));
+    wasm!(f, {
+        i32_const(0);
+        i32_const(NEWLINE_OFFSET as i32);
+        i32_store(0);
+        i32_const(4);
+        i32_const(1);
+        i32_store(0);
+        i32_const(1);
+        i32_const(0);
+        i32_const(1);
+        i32_const(8);
+        call(emitter.rt.fd_write);
+        drop;
+        end;
+    });
 
-    // iov[0].len = 1
-    f.instruction(&Instruction::I32Const(4));
-    f.instruction(&Instruction::I32Const(1));
-    f.instruction(&Instruction::I32Store(mem(0)));
-
-    // fd_write(stdout=1, iovs=0, iovs_len=1, nwritten=8)
-    f.instruction(&Instruction::I32Const(1));
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::I32Const(1));
-    f.instruction(&Instruction::I32Const(8));
-    f.instruction(&Instruction::Call(emitter.rt.fd_write));
-    f.instruction(&Instruction::Drop);
-
-    f.instruction(&Instruction::End);
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }
 
@@ -196,160 +186,162 @@ fn compile_int_to_string(emitter: &mut WasmEmitter) {
     let scratch_end = SCRATCH_ITOA + 31;
 
     // $pos = scratch_end (write backwards from end of scratch buffer)
-    f.instruction(&Instruction::I32Const(scratch_end as i32));
-    f.instruction(&Instruction::LocalSet(1));
+    wasm!(f, {
+        i32_const(scratch_end as i32);
+        local_set(1);
+    });
 
     // $is_neg = $n < 0
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::I64Const(0));
-    f.instruction(&Instruction::I64LtS);
-    f.instruction(&Instruction::LocalSet(2));
+    f.instruction(&wasm_encoder::Instruction::LocalGet(0));
+    f.instruction(&wasm_encoder::Instruction::I64Const(0));
+    f.instruction(&wasm_encoder::Instruction::I64LtS);
+    wasm!(f, { local_set(2); });
 
     // $abs_n = if $is_neg then -$n else $n
-    f.instruction(&Instruction::LocalGet(2));
-    f.instruction(&Instruction::If(BlockType::Result(ValType::I64)));
-    f.instruction(&Instruction::I64Const(0));
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::I64Sub);
-    f.instruction(&Instruction::Else);
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::End);
-    f.instruction(&Instruction::LocalSet(3));
+    wasm!(f, {
+        local_get(2);
+        if_i64;
+        i64_const(0);
+        local_get(0);
+        i64_sub;
+        else_;
+        local_get(0);
+        end;
+        local_set(3);
+    });
 
     // if $abs_n == 0: write '0'
-    f.instruction(&Instruction::LocalGet(3));
-    f.instruction(&Instruction::I64Eqz);
-    f.instruction(&Instruction::If(BlockType::Empty));
-    {
-        f.instruction(&Instruction::LocalGet(1));
-        f.instruction(&Instruction::I32Const(48)); // '0'
-        f.instruction(&Instruction::I32Store8(mem8(0)));
-        // $pos -= 1
-        f.instruction(&Instruction::LocalGet(1));
-        f.instruction(&Instruction::I32Const(1));
-        f.instruction(&Instruction::I32Sub);
-        f.instruction(&Instruction::LocalSet(1));
-    }
-    f.instruction(&Instruction::Else);
-    {
-        // while $abs_n > 0: write digits backwards
-        f.instruction(&Instruction::Block(BlockType::Empty));
-        f.instruction(&Instruction::Loop(BlockType::Empty));
-        {
-            // break if $abs_n == 0
-            f.instruction(&Instruction::LocalGet(3));
-            f.instruction(&Instruction::I64Eqz);
-            f.instruction(&Instruction::BrIf(1)); // break outer block
-
-            // mem[$pos] = ($abs_n % 10) + '0'
-            f.instruction(&Instruction::LocalGet(1));
-            f.instruction(&Instruction::LocalGet(3));
-            f.instruction(&Instruction::I64Const(10));
-            f.instruction(&Instruction::I64RemS);
-            f.instruction(&Instruction::I32WrapI64);
-            f.instruction(&Instruction::I32Const(48));
-            f.instruction(&Instruction::I32Add);
-            f.instruction(&Instruction::I32Store8(mem8(0)));
-
-            // $pos -= 1
-            f.instruction(&Instruction::LocalGet(1));
-            f.instruction(&Instruction::I32Const(1));
-            f.instruction(&Instruction::I32Sub);
-            f.instruction(&Instruction::LocalSet(1));
-
-            // $abs_n /= 10
-            f.instruction(&Instruction::LocalGet(3));
-            f.instruction(&Instruction::I64Const(10));
-            f.instruction(&Instruction::I64DivS);
-            f.instruction(&Instruction::LocalSet(3));
-
-            f.instruction(&Instruction::Br(0)); // continue loop
-        }
-        f.instruction(&Instruction::End); // end loop
-        f.instruction(&Instruction::End); // end block
-    }
-    f.instruction(&Instruction::End); // end if/else
+    wasm!(f, {
+        local_get(3);
+        i64_eqz;
+        if_empty;
+        local_get(1);
+        i32_const(48);
+        i32_store8(0);
+        local_get(1);
+        i32_const(1);
+        i32_sub;
+        local_set(1);
+        else_;
+    });
+    // while $abs_n > 0: write digits backwards
+    wasm!(f, {
+        block_empty;
+        loop_empty;
+        local_get(3);
+        i64_eqz;
+        br_if(1);
+    });
+    // mem[$pos] = ($abs_n % 10) + '0'
+    wasm!(f, { local_get(1); });
+    f.instruction(&wasm_encoder::Instruction::LocalGet(3));
+    f.instruction(&wasm_encoder::Instruction::I64Const(10));
+    f.instruction(&wasm_encoder::Instruction::I64RemS);
+    wasm!(f, {
+        i32_wrap_i64;
+        i32_const(48);
+        i32_add;
+        i32_store8(0);
+    });
+    // $pos -= 1
+    wasm!(f, {
+        local_get(1);
+        i32_const(1);
+        i32_sub;
+        local_set(1);
+    });
+    // $abs_n /= 10
+    wasm!(f, {
+        local_get(3);
+        i64_const(10);
+        i64_div_s;
+        local_set(3);
+        br(0);
+        end;
+        end;
+        end;
+    });
 
     // if $is_neg: write '-'
-    f.instruction(&Instruction::LocalGet(2));
-    f.instruction(&Instruction::If(BlockType::Empty));
-    {
-        f.instruction(&Instruction::LocalGet(1));
-        f.instruction(&Instruction::I32Const(45)); // '-'
-        f.instruction(&Instruction::I32Store8(mem8(0)));
-        f.instruction(&Instruction::LocalGet(1));
-        f.instruction(&Instruction::I32Const(1));
-        f.instruction(&Instruction::I32Sub);
-        f.instruction(&Instruction::LocalSet(1));
-    }
-    f.instruction(&Instruction::End);
+    wasm!(f, {
+        local_get(2);
+        if_empty;
+        local_get(1);
+        i32_const(45);
+        i32_store8(0);
+        local_get(1);
+        i32_const(1);
+        i32_sub;
+        local_set(1);
+        end;
+    });
 
     // $start = $pos + 1
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::I32Const(1));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalSet(4));
+    wasm!(f, {
+        local_get(1);
+        i32_const(1);
+        i32_add;
+        local_set(4);
+    });
 
     // $len = scratch_end - $pos
-    f.instruction(&Instruction::I32Const(scratch_end as i32));
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::I32Sub);
-    f.instruction(&Instruction::LocalSet(5));
+    wasm!(f, {
+        i32_const(scratch_end as i32);
+        local_get(1);
+        i32_sub;
+        local_set(5);
+    });
 
     // $result = __alloc(4 + $len)
-    f.instruction(&Instruction::LocalGet(5));
-    f.instruction(&Instruction::I32Const(4));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::Call(emitter.rt.alloc));
-    f.instruction(&Instruction::LocalSet(6));
+    wasm!(f, {
+        local_get(5);
+        i32_const(4);
+        i32_add;
+        call(emitter.rt.alloc);
+        local_set(6);
+    });
 
     // mem32[$result] = $len
-    f.instruction(&Instruction::LocalGet(6));
-    f.instruction(&Instruction::LocalGet(5));
-    f.instruction(&Instruction::I32Store(mem(0)));
+    wasm!(f, {
+        local_get(6);
+        local_get(5);
+        i32_store(0);
+    });
 
     // memcpy: copy $len bytes from $start to $result+4
-    // Using a byte-by-byte copy loop ($i = 0; while $i < $len)
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::LocalSet(7));
-
-    f.instruction(&Instruction::Block(BlockType::Empty));
-    f.instruction(&Instruction::Loop(BlockType::Empty));
-    {
-        // break if $i >= $len
-        f.instruction(&Instruction::LocalGet(7));
-        f.instruction(&Instruction::LocalGet(5));
-        f.instruction(&Instruction::I32GeU);
-        f.instruction(&Instruction::BrIf(1));
-
-        // mem[$result + 4 + $i] = mem[$start + $i]
-        f.instruction(&Instruction::LocalGet(6));
-        f.instruction(&Instruction::I32Const(4));
-        f.instruction(&Instruction::I32Add);
-        f.instruction(&Instruction::LocalGet(7));
-        f.instruction(&Instruction::I32Add);
-
-        f.instruction(&Instruction::LocalGet(4));
-        f.instruction(&Instruction::LocalGet(7));
-        f.instruction(&Instruction::I32Add);
-        f.instruction(&Instruction::I32Load8U(mem8(0)));
-
-        f.instruction(&Instruction::I32Store8(mem8(0)));
-
-        // $i += 1
-        f.instruction(&Instruction::LocalGet(7));
-        f.instruction(&Instruction::I32Const(1));
-        f.instruction(&Instruction::I32Add);
-        f.instruction(&Instruction::LocalSet(7));
-
-        f.instruction(&Instruction::Br(0)); // continue
-    }
-    f.instruction(&Instruction::End); // end loop
-    f.instruction(&Instruction::End); // end block
+    wasm!(f, {
+        i32_const(0);
+        local_set(7);
+        block_empty;
+        loop_empty;
+        local_get(7);
+        local_get(5);
+        i32_ge_u;
+        br_if(1);
+    });
+    // mem[$result + 4 + $i] = mem[$start + $i]
+    wasm!(f, {
+        local_get(6);
+        i32_const(4);
+        i32_add;
+        local_get(7);
+        i32_add;
+        local_get(4);
+        local_get(7);
+        i32_add;
+        i32_load8_u(0);
+        i32_store8(0);
+        local_get(7);
+        i32_const(1);
+        i32_add;
+        local_set(7);
+        br(0);
+        end;
+        end;
+    });
 
     // return $result
-    f.instruction(&Instruction::LocalGet(6));
-    f.instruction(&Instruction::End);
+    wasm!(f, { local_get(6); end; });
 
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }
@@ -360,17 +352,18 @@ fn compile_println_int(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.println_int];
     let mut f = Function::new([]);
 
-    f.instruction(&Instruction::LocalGet(0)); // param $n
-    f.instruction(&Instruction::Call(emitter.rt.int_to_string));
-    f.instruction(&Instruction::Call(emitter.rt.println_str));
-    f.instruction(&Instruction::End);
+    wasm!(f, {
+        local_get(0);
+        call(emitter.rt.int_to_string);
+        call(emitter.rt.println_str);
+        end;
+    });
 
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }
 
 /// __concat_str(left: i32, right: i32) -> i32
 /// Concatenates two strings. Each is [len:i32][data:u8...].
-/// Returns a new heap-allocated string.
 fn compile_concat_str(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.concat_str];
     // params: 0=$left, 1=$right
@@ -383,109 +376,99 @@ fn compile_concat_str(emitter: &mut WasmEmitter) {
         (1, ValType::I32), // 6: $i
     ]);
 
-    // $left_len = mem32[$left]
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::I32Load(mem(0)));
-    f.instruction(&Instruction::LocalSet(2));
+    wasm!(f, {
+        local_get(0);
+        i32_load(0);
+        local_set(2);
+        local_get(1);
+        i32_load(0);
+        local_set(3);
+        local_get(2);
+        local_get(3);
+        i32_add;
+        local_set(4);
+        local_get(4);
+        i32_const(4);
+        i32_add;
+        call(emitter.rt.alloc);
+        local_set(5);
+        local_get(5);
+        local_get(4);
+        i32_store(0);
+    });
 
-    // $right_len = mem32[$right]
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::I32Load(mem(0)));
-    f.instruction(&Instruction::LocalSet(3));
+    // Copy left data
+    emit_memcpy_loop(&mut f, 5, 0, 2, 6, 4, 4);
 
-    // $new_len = $left_len + $right_len
-    f.instruction(&Instruction::LocalGet(2));
-    f.instruction(&Instruction::LocalGet(3));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalSet(4));
+    // Copy right data: dst=$result+4+$left_len, src=$right+4
+    wasm!(f, {
+        i32_const(0);
+        local_set(6);
+        block_empty;
+        loop_empty;
+        local_get(6);
+        local_get(3);
+        i32_ge_u;
+        br_if(1);
+        local_get(5);
+        i32_const(4);
+        i32_add;
+        local_get(2);
+        i32_add;
+        local_get(6);
+        i32_add;
+        local_get(1);
+        i32_const(4);
+        i32_add;
+        local_get(6);
+        i32_add;
+        i32_load8_u(0);
+        i32_store8(0);
+        local_get(6);
+        i32_const(1);
+        i32_add;
+        local_set(6);
+        br(0);
+        end;
+        end;
+    });
 
-    // $result = __alloc(4 + $new_len)
-    f.instruction(&Instruction::LocalGet(4));
-    f.instruction(&Instruction::I32Const(4));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::Call(emitter.rt.alloc));
-    f.instruction(&Instruction::LocalSet(5));
-
-    // mem32[$result] = $new_len
-    f.instruction(&Instruction::LocalGet(5));
-    f.instruction(&Instruction::LocalGet(4));
-    f.instruction(&Instruction::I32Store(mem(0)));
-
-    // Copy left data: memcpy($result+4, $left+4, $left_len)
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::LocalSet(6));
-    f.instruction(&Instruction::Block(BlockType::Empty));
-    f.instruction(&Instruction::Loop(BlockType::Empty));
-    {
-        f.instruction(&Instruction::LocalGet(6));
-        f.instruction(&Instruction::LocalGet(2));
-        f.instruction(&Instruction::I32GeU);
-        f.instruction(&Instruction::BrIf(1));
-
-        f.instruction(&Instruction::LocalGet(5));
-        f.instruction(&Instruction::I32Const(4));
-        f.instruction(&Instruction::I32Add);
-        f.instruction(&Instruction::LocalGet(6));
-        f.instruction(&Instruction::I32Add);
-
-        f.instruction(&Instruction::LocalGet(0));
-        f.instruction(&Instruction::I32Const(4));
-        f.instruction(&Instruction::I32Add);
-        f.instruction(&Instruction::LocalGet(6));
-        f.instruction(&Instruction::I32Add);
-        f.instruction(&Instruction::I32Load8U(mem8(0)));
-        f.instruction(&Instruction::I32Store8(mem8(0)));
-
-        f.instruction(&Instruction::LocalGet(6));
-        f.instruction(&Instruction::I32Const(1));
-        f.instruction(&Instruction::I32Add);
-        f.instruction(&Instruction::LocalSet(6));
-        f.instruction(&Instruction::Br(0));
-    }
-    f.instruction(&Instruction::End);
-    f.instruction(&Instruction::End);
-
-    // Copy right data: memcpy($result+4+$left_len, $right+4, $right_len)
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::LocalSet(6));
-    f.instruction(&Instruction::Block(BlockType::Empty));
-    f.instruction(&Instruction::Loop(BlockType::Empty));
-    {
-        f.instruction(&Instruction::LocalGet(6));
-        f.instruction(&Instruction::LocalGet(3));
-        f.instruction(&Instruction::I32GeU);
-        f.instruction(&Instruction::BrIf(1));
-
-        f.instruction(&Instruction::LocalGet(5));
-        f.instruction(&Instruction::I32Const(4));
-        f.instruction(&Instruction::I32Add);
-        f.instruction(&Instruction::LocalGet(2));
-        f.instruction(&Instruction::I32Add);
-        f.instruction(&Instruction::LocalGet(6));
-        f.instruction(&Instruction::I32Add);
-
-        f.instruction(&Instruction::LocalGet(1));
-        f.instruction(&Instruction::I32Const(4));
-        f.instruction(&Instruction::I32Add);
-        f.instruction(&Instruction::LocalGet(6));
-        f.instruction(&Instruction::I32Add);
-        f.instruction(&Instruction::I32Load8U(mem8(0)));
-        f.instruction(&Instruction::I32Store8(mem8(0)));
-
-        f.instruction(&Instruction::LocalGet(6));
-        f.instruction(&Instruction::I32Const(1));
-        f.instruction(&Instruction::I32Add);
-        f.instruction(&Instruction::LocalSet(6));
-        f.instruction(&Instruction::Br(0));
-    }
-    f.instruction(&Instruction::End);
-    f.instruction(&Instruction::End);
-
-    // return $result
-    f.instruction(&Instruction::LocalGet(5));
-    f.instruction(&Instruction::End);
-
+    wasm!(f, { local_get(5); end; });
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
+
+/// Emit a byte-by-byte copy loop: dst[dst_off+i] = src[src_off+i], 0..len
+/// Uses local `counter` as loop variable.
+fn emit_memcpy_loop(f: &mut Function, dst: u32, src: u32, len: u32, counter: u32, dst_off: u32, src_off: u32) {
+    wasm!(f, {
+        i32_const(0);
+        local_set(counter);
+        block_empty;
+        loop_empty;
+        local_get(counter);
+        local_get(len);
+        i32_ge_u;
+        br_if(1);
+        local_get(dst);
+        i32_const(dst_off as i32);
+        i32_add;
+        local_get(counter);
+        i32_add;
+        local_get(src);
+        i32_const(src_off as i32);
+        i32_add;
+        local_get(counter);
+        i32_add;
+        i32_load8_u(0);
+        i32_store8(0);
+        local_get(counter);
+        i32_const(1);
+        i32_add;
+        local_set(counter);
+        br(0);
+        end;
+        end;
+    });
 }
 
 /// __str_eq(a: i32, b: i32) -> i32
@@ -499,77 +482,74 @@ fn compile_str_eq(emitter: &mut WasmEmitter) {
     ]);
 
     // If same pointer, return 1
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::I32Eq);
-    f.instruction(&Instruction::If(BlockType::Empty));
-    f.instruction(&Instruction::I32Const(1));
-    f.instruction(&Instruction::Return);
-    f.instruction(&Instruction::End);
+    wasm!(f, {
+        local_get(0);
+        local_get(1);
+        i32_eq;
+        if_empty;
+        i32_const(1);
+        return_;
+        end;
+    });
 
-    // Load a.len
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::I32Load(mem(0)));
-    f.instruction(&Instruction::LocalSet(2));
+    // Load a.len; if lengths differ return 0
+    wasm!(f, {
+        local_get(0);
+        i32_load(0);
+        local_set(2);
+        local_get(2);
+        local_get(1);
+        i32_load(0);
+        i32_ne;
+        if_empty;
+        i32_const(0);
+        return_;
+        end;
+    });
 
-    // If lengths differ, return 0
-    f.instruction(&Instruction::LocalGet(2));
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::I32Load(mem(0)));
-    f.instruction(&Instruction::I32Ne);
-    f.instruction(&Instruction::If(BlockType::Empty));
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::Return);
-    f.instruction(&Instruction::End);
-
-    // Compare bytes: for i = 0; i < len; i++
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::LocalSet(3));
-
-    f.instruction(&Instruction::Block(BlockType::Empty));
-    f.instruction(&Instruction::Loop(BlockType::Empty));
-
-    // if $i >= $len → all bytes matched, return 1
-    f.instruction(&Instruction::LocalGet(3));
-    f.instruction(&Instruction::LocalGet(2));
-    f.instruction(&Instruction::I32GeU);
-    f.instruction(&Instruction::If(BlockType::Empty));
-    f.instruction(&Instruction::I32Const(1));
-    f.instruction(&Instruction::Return);
-    f.instruction(&Instruction::End);
-
+    // Compare bytes
+    wasm!(f, {
+        i32_const(0);
+        local_set(3);
+        block_empty;
+        loop_empty;
+        local_get(3);
+        local_get(2);
+        i32_ge_u;
+        if_empty;
+        i32_const(1);
+        return_;
+        end;
+    });
     // if a[4+i] != b[4+i] → return 0
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::I32Const(4));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalGet(3));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::I32Load8U(mem8(0)));
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::I32Const(4));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalGet(3));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::I32Load8U(mem8(0)));
-    f.instruction(&Instruction::I32Ne);
-    f.instruction(&Instruction::If(BlockType::Empty));
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::Return);
-    f.instruction(&Instruction::End);
+    wasm!(f, {
+        local_get(0);
+        i32_const(4);
+        i32_add;
+        local_get(3);
+        i32_add;
+        i32_load8_u(0);
+        local_get(1);
+        i32_const(4);
+        i32_add;
+        local_get(3);
+        i32_add;
+        i32_load8_u(0);
+        i32_ne;
+        if_empty;
+        i32_const(0);
+        return_;
+        end;
+        local_get(3);
+        i32_const(1);
+        i32_add;
+        local_set(3);
+        br(0);
+        end;
+        end;
+    });
 
-    // $i += 1, continue loop
-    f.instruction(&Instruction::LocalGet(3));
-    f.instruction(&Instruction::I32Const(1));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalSet(3));
-    f.instruction(&Instruction::Br(0));
-
-    f.instruction(&Instruction::End); // end loop
-    f.instruction(&Instruction::End); // end block
-
-    // Fallback (shouldn't reach here)
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::End);
+    wasm!(f, { i32_const(0); end; });
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }
 
@@ -584,173 +564,131 @@ fn compile_str_trim(emitter: &mut WasmEmitter) {
         (1, ValType::I32), // 3: end
     ]);
 
-    // len = s.len
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::I32Load(mem(0)));
-    f.instruction(&Instruction::LocalSet(1));
+    wasm!(f, {
+        local_get(0);
+        i32_load(0);
+        local_set(1);
+        i32_const(0);
+        local_set(2);
+    });
 
-    // start = 0
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::LocalSet(2));
-
-    // Skip leading whitespace: while start < len && is_ws(s[4+start])
-    f.instruction(&Instruction::Block(BlockType::Empty));
-    f.instruction(&Instruction::Loop(BlockType::Empty));
-    f.instruction(&Instruction::LocalGet(2));
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::I32GeU);
-    f.instruction(&Instruction::BrIf(1));
-    // Load byte
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::I32Const(4));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalGet(2));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::I32Load8U(mem8(0)));
-    // Check whitespace: 0x20, 0x09, 0x0A, 0x0D
-    f.instruction(&Instruction::I32Const(0x20));
-    f.instruction(&Instruction::I32Eq);
-    // Simplification: just check == 0x20 (space) for now. Full ws check:
-    // (c == 32 || c == 9 || c == 10 || c == 13) → c <= 32 && c != 0 works for ASCII ws
-    // Actually: all ws chars are <= 32. Check c <= 32.
-    f.instruction(&Instruction::Drop); // drop the eq result
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::I32Const(4));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalGet(2));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::I32Load8U(mem8(0)));
-    f.instruction(&Instruction::I32Const(33)); // > 32 means not whitespace
-    f.instruction(&Instruction::I32LtU); // byte < 33 = whitespace
-    f.instruction(&Instruction::I32Eqz); // NOT whitespace → break
-    f.instruction(&Instruction::BrIf(1));
-    // start++
-    f.instruction(&Instruction::LocalGet(2));
-    f.instruction(&Instruction::I32Const(1));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalSet(2));
-    f.instruction(&Instruction::Br(0));
-    f.instruction(&Instruction::End);
-    f.instruction(&Instruction::End);
+    // Skip leading whitespace: while start < len && byte < 33
+    wasm!(f, {
+        block_empty;
+        loop_empty;
+        local_get(2);
+        local_get(1);
+        i32_ge_u;
+        br_if(1);
+        local_get(0);
+        i32_const(4);
+        i32_add;
+        local_get(2);
+        i32_add;
+        i32_load8_u(0);
+        i32_const(33);
+        i32_lt_u;
+        i32_eqz;
+        br_if(1);
+        local_get(2);
+        i32_const(1);
+        i32_add;
+        local_set(2);
+        br(0);
+        end;
+        end;
+    });
 
     // end = len
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::LocalSet(3));
+    wasm!(f, {
+        local_get(1);
+        local_set(3);
+    });
 
-    // Skip trailing whitespace: while end > start && is_ws(s[4+end-1])
-    f.instruction(&Instruction::Block(BlockType::Empty));
-    f.instruction(&Instruction::Loop(BlockType::Empty));
-    f.instruction(&Instruction::LocalGet(3));
-    f.instruction(&Instruction::LocalGet(2));
-    f.instruction(&Instruction::I32LeU);
-    f.instruction(&Instruction::BrIf(1));
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::I32Const(4));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalGet(3));
-    f.instruction(&Instruction::I32Const(1));
-    f.instruction(&Instruction::I32Sub);
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::I32Load8U(mem8(0)));
-    f.instruction(&Instruction::I32Const(33));
-    f.instruction(&Instruction::I32LtU);
-    f.instruction(&Instruction::I32Eqz);
-    f.instruction(&Instruction::BrIf(1));
-    f.instruction(&Instruction::LocalGet(3));
-    f.instruction(&Instruction::I32Const(1));
-    f.instruction(&Instruction::I32Sub);
-    f.instruction(&Instruction::LocalSet(3));
-    f.instruction(&Instruction::Br(0));
-    f.instruction(&Instruction::End);
-    f.instruction(&Instruction::End);
+    // Skip trailing whitespace
+    wasm!(f, {
+        block_empty;
+        loop_empty;
+        local_get(3);
+        local_get(2);
+        i32_le_u;
+        br_if(1);
+        local_get(0);
+        i32_const(4);
+        i32_add;
+        local_get(3);
+        i32_const(1);
+        i32_sub;
+        i32_add;
+        i32_load8_u(0);
+        i32_const(33);
+        i32_lt_u;
+        i32_eqz;
+        br_if(1);
+        local_get(3);
+        i32_const(1);
+        i32_sub;
+        local_set(3);
+        br(0);
+        end;
+        end;
+    });
 
-    // new_len = end - start
-    // Allocate new string [new_len:i32][data]
-    f.instruction(&Instruction::LocalGet(3));
-    f.instruction(&Instruction::LocalGet(2));
-    f.instruction(&Instruction::I32Sub); // new_len on stack
-    f.instruction(&Instruction::I32Const(4));
-    f.instruction(&Instruction::I32Add); // alloc size = 4 + new_len
-    f.instruction(&Instruction::Call(emitter.rt.alloc));
-    // result ptr on stack. Store new_len at result[0]
-    // Need to save result ptr. Use mem[0] as temp.
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::I32Store(mem(0))); // swap - wrong order
-    // Redo: alloc returns ptr. I need to store it.
-    // Stack: [ptr]. I32Const(0) → [ptr, 0]. I32Store → stores 0 at addr ptr. Wrong!
-    // Use different approach:
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::I32Load(mem(0))); // load back... no, we stored wrong value
-    // This is broken. Let me use the simpler approach: store alloc result to mem[0]
-    // Redo from alloc:
-    f.instruction(&Instruction::Drop); // drop bad load
-    // Re-alloc
-    f.instruction(&Instruction::LocalGet(3));
-    f.instruction(&Instruction::LocalGet(2));
-    f.instruction(&Instruction::I32Sub);
-    f.instruction(&Instruction::I32Const(4));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::Call(emitter.rt.alloc));
-    // Store alloc ptr to local... but we don't have a free local.
-    // Use mem[0] properly: I32Const(0) first, then alloc, then I32Store.
-    // But alloc is already on stack. Can't insert I32Const before it.
-    // Solution: use a local. We have locals 1,2,3. Reuse local 1 (len, no longer needed).
-    f.instruction(&Instruction::LocalSet(1)); // reuse len as result_ptr
+    // new_len = end - start. Allocate and copy.
+    wasm!(f, {
+        local_get(3);
+        local_get(2);
+        i32_sub;
+        i32_const(4);
+        i32_add;
+        call(emitter.rt.alloc);
+        local_set(1);
+    });
 
     // Store new_len at result[0]
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::LocalGet(3));
-    f.instruction(&Instruction::LocalGet(2));
-    f.instruction(&Instruction::I32Sub);
-    f.instruction(&Instruction::I32Store(mem(0)));
+    wasm!(f, {
+        local_get(1);
+        local_get(3);
+        local_get(2);
+        i32_sub;
+        i32_store(0);
+    });
 
-    // Copy bytes from s+4+start to result+4, length = end-start
-    // Use mem_eq pattern: byte-by-byte copy loop
-    // Reuse local 3 as counter (end no longer needed separately, we have len stored)
-    let new_len_val = 3; // local 3 = end. After sub it's not end anymore. Let me use a different approach.
-    // Actually: the new_len = end - start. Let me store it.
-    // I already stored result ptr in local 1. start is local 2. end is local 3.
-    // new_len = local 3 - local 2.
-    // Copy loop: i = 0; while i < new_len: result[4+i] = s[4+start+i]
+    // Copy bytes: i=0; while i < new_len
+    wasm!(f, {
+        i32_const(0);
+        local_set(3);
+        block_empty;
+        loop_empty;
+        local_get(3);
+        local_get(1);
+        i32_load(0);
+        i32_ge_u;
+        br_if(1);
+        local_get(1);
+        i32_const(4);
+        i32_add;
+        local_get(3);
+        i32_add;
+        local_get(0);
+        i32_const(4);
+        i32_add;
+        local_get(2);
+        i32_add;
+        local_get(3);
+        i32_add;
+        i32_load8_u(0);
+        i32_store8(0);
+        local_get(3);
+        i32_const(1);
+        i32_add;
+        local_set(3);
+        br(0);
+        end;
+        end;
+    });
 
-    // Store 0 to local 3 (reuse as i)
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::LocalSet(3));
-
-    f.instruction(&Instruction::Block(BlockType::Empty));
-    f.instruction(&Instruction::Loop(BlockType::Empty));
-    // We need new_len. Compute: load result[0] for new_len.
-    f.instruction(&Instruction::LocalGet(3)); // i
-    f.instruction(&Instruction::LocalGet(1)); // result ptr
-    f.instruction(&Instruction::I32Load(mem(0))); // new_len
-    f.instruction(&Instruction::I32GeU);
-    f.instruction(&Instruction::BrIf(1));
-    // dst[4+i] = src[4+start+i]
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::I32Const(4));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalGet(3));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::I32Const(4));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalGet(2));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalGet(3));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::I32Load8U(mem8(0)));
-    f.instruction(&Instruction::I32Store8(mem8(0)));
-    f.instruction(&Instruction::LocalGet(3));
-    f.instruction(&Instruction::I32Const(1));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalSet(3));
-    f.instruction(&Instruction::Br(0));
-    f.instruction(&Instruction::End);
-    f.instruction(&Instruction::End);
-
-    // Return result ptr
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::End);
+    wasm!(f, { local_get(1); end; });
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }
 
@@ -759,33 +697,41 @@ fn compile_str_trim(emitter: &mut WasmEmitter) {
 fn compile_option_eq_i64(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.option_eq_i64];
     let mut f = Function::new([]);
+
     // Both none → 1
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::I32Eqz);
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::I32Eqz);
-    f.instruction(&Instruction::I32And);
-    f.instruction(&Instruction::If(BlockType::Empty));
-    f.instruction(&Instruction::I32Const(1));
-    f.instruction(&Instruction::Return);
-    f.instruction(&Instruction::End);
+    wasm!(f, {
+        local_get(0);
+        i32_eqz;
+        local_get(1);
+        i32_eqz;
+        i32_and;
+        if_empty;
+        i32_const(1);
+        return_;
+        end;
+    });
     // One none → 0
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::I32Eqz);
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::I32Eqz);
-    f.instruction(&Instruction::I32Or);
-    f.instruction(&Instruction::If(BlockType::Empty));
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::Return);
-    f.instruction(&Instruction::End);
+    wasm!(f, {
+        local_get(0);
+        i32_eqz;
+        local_get(1);
+        i32_eqz;
+        i32_or;
+        if_empty;
+        i32_const(0);
+        return_;
+        end;
+    });
     // Both some: compare i64 values
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::I64Load(MemArg { offset: 0, align: 3, memory_index: 0 }));
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::I64Load(MemArg { offset: 0, align: 3, memory_index: 0 }));
-    f.instruction(&Instruction::I64Eq);
-    f.instruction(&Instruction::End);
+    wasm!(f, {
+        local_get(0);
+        i64_load(0);
+        local_get(1);
+        i64_load(0);
+        i64_eq;
+        end;
+    });
+
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }
 
@@ -793,31 +739,37 @@ fn compile_option_eq_i64(emitter: &mut WasmEmitter) {
 fn compile_option_eq_str(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.option_eq_str];
     let mut f = Function::new([]);
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::I32Eqz);
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::I32Eqz);
-    f.instruction(&Instruction::I32And);
-    f.instruction(&Instruction::If(BlockType::Empty));
-    f.instruction(&Instruction::I32Const(1));
-    f.instruction(&Instruction::Return);
-    f.instruction(&Instruction::End);
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::I32Eqz);
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::I32Eqz);
-    f.instruction(&Instruction::I32Or);
-    f.instruction(&Instruction::If(BlockType::Empty));
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::Return);
-    f.instruction(&Instruction::End);
+
+    wasm!(f, {
+        local_get(0);
+        i32_eqz;
+        local_get(1);
+        i32_eqz;
+        i32_and;
+        if_empty;
+        i32_const(1);
+        return_;
+        end;
+        local_get(0);
+        i32_eqz;
+        local_get(1);
+        i32_eqz;
+        i32_or;
+        if_empty;
+        i32_const(0);
+        return_;
+        end;
+    });
     // Both some: load string ptrs and call str_eq
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::I32Load(mem(0))); // load string ptr from some
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::I32Load(mem(0)));
-    f.instruction(&Instruction::Call(emitter.rt.str_eq));
-    f.instruction(&Instruction::End);
+    wasm!(f, {
+        local_get(0);
+        i32_load(0);
+        local_get(1);
+        i32_load(0);
+        call(emitter.rt.str_eq);
+        end;
+    });
+
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }
 
@@ -826,35 +778,43 @@ fn compile_option_eq_str(emitter: &mut WasmEmitter) {
 fn compile_result_eq_i64_str(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.result_eq_i64_str];
     let mut f = Function::new([]);
+
     // Compare tags
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::I32Load(mem(0))); // a.tag
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::I32Load(mem(0))); // b.tag
-    f.instruction(&Instruction::I32Ne);
-    f.instruction(&Instruction::If(BlockType::Empty));
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::Return);
-    f.instruction(&Instruction::End);
+    wasm!(f, {
+        local_get(0);
+        i32_load(0);
+        local_get(1);
+        i32_load(0);
+        i32_ne;
+        if_empty;
+        i32_const(0);
+        return_;
+        end;
+    });
     // Same tag. If tag == 0 (ok): compare i64 at offset 4
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::I32Load(mem(0))); // tag
-    f.instruction(&Instruction::I32Eqz);
-    f.instruction(&Instruction::If(BlockType::Empty));
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::I64Load(MemArg { offset: 4, align: 3, memory_index: 0 }));
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::I64Load(MemArg { offset: 4, align: 3, memory_index: 0 }));
-    f.instruction(&Instruction::I64Eq);
-    f.instruction(&Instruction::Return);
-    f.instruction(&Instruction::End);
+    wasm!(f, {
+        local_get(0);
+        i32_load(0);
+        i32_eqz;
+        if_empty;
+        local_get(0);
+        i64_load(4);
+        local_get(1);
+        i64_load(4);
+        i64_eq;
+        return_;
+        end;
+    });
     // tag == 1 (err): compare strings at offset 4
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::I32Load(MemArg { offset: 4, align: 2, memory_index: 0 })); // err string ptr
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::I32Load(MemArg { offset: 4, align: 2, memory_index: 0 }));
-    f.instruction(&Instruction::Call(emitter.rt.str_eq));
-    f.instruction(&Instruction::End);
+    wasm!(f, {
+        local_get(0);
+        i32_load(4);
+        local_get(1);
+        i32_load(4);
+        call(emitter.rt.str_eq);
+        end;
+    });
+
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }
 
@@ -862,8 +822,6 @@ fn compile_result_eq_i64_str(emitter: &mut WasmEmitter) {
 /// O(n*m) substring search.
 fn compile_str_contains(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.str_contains];
-    // params: 0=$haystack, 1=$needle
-    // locals: 2=$h_len, 3=$n_len, 4=$i, 5=$j, 6=$match
     let mut f = Function::new([
         (1, ValType::I32), // 2: h_len
         (1, ValType::I32), // 3: n_len
@@ -872,77 +830,79 @@ fn compile_str_contains(emitter: &mut WasmEmitter) {
         (1, ValType::I32), // 6: match flag
     ]);
 
-    // h_len = haystack.len, n_len = needle.len
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::I32Load(mem(0)));
-    f.instruction(&Instruction::LocalSet(2));
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::I32Load(mem(0)));
-    f.instruction(&Instruction::LocalSet(3));
+    wasm!(f, {
+        local_get(0);
+        i32_load(0);
+        local_set(2);
+        local_get(1);
+        i32_load(0);
+        local_set(3);
+    });
 
     // Empty needle → always contains
-    f.instruction(&Instruction::LocalGet(3));
-    f.instruction(&Instruction::I32Eqz);
-    f.instruction(&Instruction::If(BlockType::Empty));
-    f.instruction(&Instruction::I32Const(1));
-    f.instruction(&Instruction::Return);
-    f.instruction(&Instruction::End);
+    wasm!(f, {
+        local_get(3);
+        i32_eqz;
+        if_empty;
+        i32_const(1);
+        return_;
+        end;
+    });
 
     // If needle longer than haystack → false
-    f.instruction(&Instruction::LocalGet(3));
-    f.instruction(&Instruction::LocalGet(2));
-    f.instruction(&Instruction::I32GtU);
-    f.instruction(&Instruction::If(BlockType::Empty));
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::Return);
-    f.instruction(&Instruction::End);
+    wasm!(f, {
+        local_get(3);
+        local_get(2);
+        i32_gt_u;
+        if_empty;
+        i32_const(0);
+        return_;
+        end;
+    });
 
-    // Outer loop: i = 0; i <= h_len - n_len
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::LocalSet(4));
-    f.instruction(&Instruction::Block(BlockType::Empty));
-    f.instruction(&Instruction::Loop(BlockType::Empty));
+    // Outer loop
+    wasm!(f, {
+        i32_const(0);
+        local_set(4);
+        block_empty;
+        loop_empty;
+        local_get(4);
+        local_get(2);
+        local_get(3);
+        i32_sub;
+        i32_gt_u;
+        if_empty;
+        i32_const(0);
+        return_;
+        end;
+    });
 
-    // if i > h_len - n_len → not found
-    f.instruction(&Instruction::LocalGet(4));
-    f.instruction(&Instruction::LocalGet(2));
-    f.instruction(&Instruction::LocalGet(3));
-    f.instruction(&Instruction::I32Sub);
-    f.instruction(&Instruction::I32GtU);
-    f.instruction(&Instruction::If(BlockType::Empty));
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::Return);
-    f.instruction(&Instruction::End);
+    // Compare at position i using mem_eq
+    wasm!(f, {
+        local_get(0);
+        i32_const(4);
+        i32_add;
+        local_get(4);
+        i32_add;
+        local_get(1);
+        i32_const(4);
+        i32_add;
+        local_get(3);
+        call(emitter.rt.mem_eq);
+        if_empty;
+        i32_const(1);
+        return_;
+        end;
+        local_get(4);
+        i32_const(1);
+        i32_add;
+        local_set(4);
+        br(0);
+        end;
+        end;
+    });
 
-    // Inner: compare needle bytes at position i
-    // Use mem_eq on haystack+4+i and needle+4, length n_len
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::I32Const(4));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalGet(4));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::I32Const(4));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalGet(3));
-    f.instruction(&Instruction::Call(emitter.rt.mem_eq));
-
-    f.instruction(&Instruction::If(BlockType::Empty));
-    f.instruction(&Instruction::I32Const(1));
-    f.instruction(&Instruction::Return);
-    f.instruction(&Instruction::End);
-
-    // i++
-    f.instruction(&Instruction::LocalGet(4));
-    f.instruction(&Instruction::I32Const(1));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalSet(4));
-    f.instruction(&Instruction::Br(0));
-
-    f.instruction(&Instruction::End); // loop
-    f.instruction(&Instruction::End); // block
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::End);
+    wasm!(f, { i32_const(0); end; });
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }
 
@@ -950,56 +910,55 @@ fn compile_str_contains(emitter: &mut WasmEmitter) {
 /// Byte-by-byte comparison of two memory regions.
 fn compile_mem_eq(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.mem_eq];
-    // params: 0=$a, 1=$b, 2=$size. locals: 3=$i
-    let mut f = Function::new([(1, ValType::I32)]);
+    let mut f = Function::new([(1, ValType::I32)]); // 3: $i
 
     // Same pointer → equal
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::I32Eq);
-    f.instruction(&Instruction::If(BlockType::Empty));
-    f.instruction(&Instruction::I32Const(1));
-    f.instruction(&Instruction::Return);
-    f.instruction(&Instruction::End);
+    wasm!(f, {
+        local_get(0);
+        local_get(1);
+        i32_eq;
+        if_empty;
+        i32_const(1);
+        return_;
+        end;
+    });
 
     // Compare bytes
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::LocalSet(3));
-    f.instruction(&Instruction::Block(BlockType::Empty));
-    f.instruction(&Instruction::Loop(BlockType::Empty));
+    wasm!(f, {
+        i32_const(0);
+        local_set(3);
+        block_empty;
+        loop_empty;
+        local_get(3);
+        local_get(2);
+        i32_ge_u;
+        if_empty;
+        i32_const(1);
+        return_;
+        end;
+        local_get(0);
+        local_get(3);
+        i32_add;
+        i32_load8_u(0);
+        local_get(1);
+        local_get(3);
+        i32_add;
+        i32_load8_u(0);
+        i32_ne;
+        if_empty;
+        i32_const(0);
+        return_;
+        end;
+        local_get(3);
+        i32_const(1);
+        i32_add;
+        local_set(3);
+        br(0);
+        end;
+        end;
+    });
 
-    f.instruction(&Instruction::LocalGet(3));
-    f.instruction(&Instruction::LocalGet(2));
-    f.instruction(&Instruction::I32GeU);
-    f.instruction(&Instruction::If(BlockType::Empty));
-    f.instruction(&Instruction::I32Const(1));
-    f.instruction(&Instruction::Return);
-    f.instruction(&Instruction::End);
-
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::LocalGet(3));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::I32Load8U(mem8(0)));
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::LocalGet(3));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::I32Load8U(mem8(0)));
-    f.instruction(&Instruction::I32Ne);
-    f.instruction(&Instruction::If(BlockType::Empty));
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::Return);
-    f.instruction(&Instruction::End);
-
-    f.instruction(&Instruction::LocalGet(3));
-    f.instruction(&Instruction::I32Const(1));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalSet(3));
-    f.instruction(&Instruction::Br(0));
-
-    f.instruction(&Instruction::End); // loop
-    f.instruction(&Instruction::End); // block
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::End);
+    wasm!(f, { i32_const(0); end; });
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }
 
@@ -1007,7 +966,6 @@ fn compile_mem_eq(emitter: &mut WasmEmitter) {
 /// Compare two lists byte-by-byte. Returns 1 if equal.
 fn compile_list_eq(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.list_eq];
-    // params: 0=$a, 1=$b, 2=$elem_size. locals: 3=$len, 4=$total_bytes, 5=$i
     let mut f = Function::new([
         (1, ValType::I32), // 3: $len
         (1, ValType::I32), // 4: $total_bytes
@@ -1015,79 +973,79 @@ fn compile_list_eq(emitter: &mut WasmEmitter) {
     ]);
 
     // Same pointer → equal
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::I32Eq);
-    f.instruction(&Instruction::If(BlockType::Empty));
-    f.instruction(&Instruction::I32Const(1));
-    f.instruction(&Instruction::Return);
-    f.instruction(&Instruction::End);
+    wasm!(f, {
+        local_get(0);
+        local_get(1);
+        i32_eq;
+        if_empty;
+        i32_const(1);
+        return_;
+        end;
+    });
 
     // Compare lengths
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::I32Load(mem(0)));
-    f.instruction(&Instruction::LocalSet(3));
-
-    f.instruction(&Instruction::LocalGet(3));
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::I32Load(mem(0)));
-    f.instruction(&Instruction::I32Ne);
-    f.instruction(&Instruction::If(BlockType::Empty));
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::Return);
-    f.instruction(&Instruction::End);
+    wasm!(f, {
+        local_get(0);
+        i32_load(0);
+        local_set(3);
+        local_get(3);
+        local_get(1);
+        i32_load(0);
+        i32_ne;
+        if_empty;
+        i32_const(0);
+        return_;
+        end;
+    });
 
     // $total_bytes = $len * $elem_size
-    f.instruction(&Instruction::LocalGet(3));
-    f.instruction(&Instruction::LocalGet(2));
-    f.instruction(&Instruction::I32Mul);
-    f.instruction(&Instruction::LocalSet(4));
+    wasm!(f, {
+        local_get(3);
+        local_get(2);
+        i32_mul;
+        local_set(4);
+    });
 
-    // Byte-by-byte comparison of data section
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::LocalSet(5));
+    // Compare data bytes
+    wasm!(f, {
+        i32_const(0);
+        local_set(5);
+        block_empty;
+        loop_empty;
+        local_get(5);
+        local_get(4);
+        i32_ge_u;
+        if_empty;
+        i32_const(1);
+        return_;
+        end;
+        local_get(0);
+        i32_const(4);
+        i32_add;
+        local_get(5);
+        i32_add;
+        i32_load8_u(0);
+        local_get(1);
+        i32_const(4);
+        i32_add;
+        local_get(5);
+        i32_add;
+        i32_load8_u(0);
+        i32_ne;
+        if_empty;
+        i32_const(0);
+        return_;
+        end;
+        local_get(5);
+        i32_const(1);
+        i32_add;
+        local_set(5);
+        br(0);
+        end;
+        end;
+    });
 
-    f.instruction(&Instruction::Block(BlockType::Empty));
-    f.instruction(&Instruction::Loop(BlockType::Empty));
-
-    f.instruction(&Instruction::LocalGet(5));
-    f.instruction(&Instruction::LocalGet(4));
-    f.instruction(&Instruction::I32GeU);
-    f.instruction(&Instruction::If(BlockType::Empty));
-    f.instruction(&Instruction::I32Const(1));
-    f.instruction(&Instruction::Return);
-    f.instruction(&Instruction::End);
-
-    // Compare a[4+i] vs b[4+i]
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::I32Const(4));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalGet(5));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::I32Load8U(mem8(0)));
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::I32Const(4));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalGet(5));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::I32Load8U(mem8(0)));
-    f.instruction(&Instruction::I32Ne);
-    f.instruction(&Instruction::If(BlockType::Empty));
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::Return);
-    f.instruction(&Instruction::End);
-
-    f.instruction(&Instruction::LocalGet(5));
-    f.instruction(&Instruction::I32Const(1));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalSet(5));
-    f.instruction(&Instruction::Br(0));
-
-    f.instruction(&Instruction::End); // loop
-    f.instruction(&Instruction::End); // block
-
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::End);
+    wasm!(f, { i32_const(0); end; });
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }
 
@@ -1095,8 +1053,6 @@ fn compile_list_eq(emitter: &mut WasmEmitter) {
 /// Concatenate two lists. Layout: [len:i32][data...]. Generic over elem_size.
 fn compile_concat_list(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.concat_list];
-    // params: 0=$a, 1=$b, 2=$elem_size
-    // locals: 3=$len_a, 4=$len_b, 5=$new_len, 6=$result, 7=$bytes_a, 8=$bytes_b, 9=$i
     let mut f = Function::new([
         (1, ValType::I32), // 3: $len_a
         (1, ValType::I32), // 4: $len_b
@@ -1107,114 +1063,73 @@ fn compile_concat_list(emitter: &mut WasmEmitter) {
         (1, ValType::I32), // 9: $i
     ]);
 
-    // $len_a = mem32[$a]
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::I32Load(mem(0)));
-    f.instruction(&Instruction::LocalSet(3));
+    wasm!(f, {
+        local_get(0);
+        i32_load(0);
+        local_set(3);
+        local_get(1);
+        i32_load(0);
+        local_set(4);
+        local_get(3);
+        local_get(4);
+        i32_add;
+        local_set(5);
+        local_get(3);
+        local_get(2);
+        i32_mul;
+        local_set(7);
+        local_get(4);
+        local_get(2);
+        i32_mul;
+        local_set(8);
+        i32_const(4);
+        local_get(7);
+        i32_add;
+        local_get(8);
+        i32_add;
+        call(emitter.rt.alloc);
+        local_set(6);
+        local_get(6);
+        local_get(5);
+        i32_store(0);
+    });
 
-    // $len_b = mem32[$b]
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::I32Load(mem(0)));
-    f.instruction(&Instruction::LocalSet(4));
+    // Copy a's data
+    emit_memcpy_loop(&mut f, 6, 0, 7, 9, 4, 4);
 
-    // $new_len = $len_a + $len_b
-    f.instruction(&Instruction::LocalGet(3));
-    f.instruction(&Instruction::LocalGet(4));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalSet(5));
+    // Copy b's data: dst=$result+4+$bytes_a, src=$b+4
+    wasm!(f, {
+        i32_const(0);
+        local_set(9);
+        block_empty;
+        loop_empty;
+        local_get(9);
+        local_get(8);
+        i32_ge_u;
+        br_if(1);
+        local_get(6);
+        i32_const(4);
+        i32_add;
+        local_get(7);
+        i32_add;
+        local_get(9);
+        i32_add;
+        local_get(1);
+        i32_const(4);
+        i32_add;
+        local_get(9);
+        i32_add;
+        i32_load8_u(0);
+        i32_store8(0);
+        local_get(9);
+        i32_const(1);
+        i32_add;
+        local_set(9);
+        br(0);
+        end;
+        end;
+    });
 
-    // $bytes_a = $len_a * $elem_size
-    f.instruction(&Instruction::LocalGet(3));
-    f.instruction(&Instruction::LocalGet(2));
-    f.instruction(&Instruction::I32Mul);
-    f.instruction(&Instruction::LocalSet(7));
-
-    // $bytes_b = $len_b * $elem_size
-    f.instruction(&Instruction::LocalGet(4));
-    f.instruction(&Instruction::LocalGet(2));
-    f.instruction(&Instruction::I32Mul);
-    f.instruction(&Instruction::LocalSet(8));
-
-    // $result = alloc(4 + $bytes_a + $bytes_b)
-    f.instruction(&Instruction::I32Const(4));
-    f.instruction(&Instruction::LocalGet(7));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalGet(8));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::Call(emitter.rt.alloc));
-    f.instruction(&Instruction::LocalSet(6));
-
-    // mem32[$result] = $new_len
-    f.instruction(&Instruction::LocalGet(6));
-    f.instruction(&Instruction::LocalGet(5));
-    f.instruction(&Instruction::I32Store(mem(0)));
-
-    // Copy a's data: byte-by-byte from $a+4 to $result+4, $bytes_a bytes
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::LocalSet(9));
-    f.instruction(&Instruction::Block(BlockType::Empty));
-    f.instruction(&Instruction::Loop(BlockType::Empty));
-    f.instruction(&Instruction::LocalGet(9));
-    f.instruction(&Instruction::LocalGet(7));
-    f.instruction(&Instruction::I32GeU);
-    f.instruction(&Instruction::BrIf(1));
-    // dst
-    f.instruction(&Instruction::LocalGet(6));
-    f.instruction(&Instruction::I32Const(4));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalGet(9));
-    f.instruction(&Instruction::I32Add);
-    // src
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::I32Const(4));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalGet(9));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::I32Load8U(mem8(0)));
-    f.instruction(&Instruction::I32Store8(mem8(0)));
-    f.instruction(&Instruction::LocalGet(9));
-    f.instruction(&Instruction::I32Const(1));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalSet(9));
-    f.instruction(&Instruction::Br(0));
-    f.instruction(&Instruction::End);
-    f.instruction(&Instruction::End);
-
-    // Copy b's data: from $b+4 to $result+4+$bytes_a, $bytes_b bytes
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::LocalSet(9));
-    f.instruction(&Instruction::Block(BlockType::Empty));
-    f.instruction(&Instruction::Loop(BlockType::Empty));
-    f.instruction(&Instruction::LocalGet(9));
-    f.instruction(&Instruction::LocalGet(8));
-    f.instruction(&Instruction::I32GeU);
-    f.instruction(&Instruction::BrIf(1));
-    // dst
-    f.instruction(&Instruction::LocalGet(6));
-    f.instruction(&Instruction::I32Const(4));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalGet(7));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalGet(9));
-    f.instruction(&Instruction::I32Add);
-    // src
-    f.instruction(&Instruction::LocalGet(1));
-    f.instruction(&Instruction::I32Const(4));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalGet(9));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::I32Load8U(mem8(0)));
-    f.instruction(&Instruction::I32Store8(mem8(0)));
-    f.instruction(&Instruction::LocalGet(9));
-    f.instruction(&Instruction::I32Const(1));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::LocalSet(9));
-    f.instruction(&Instruction::Br(0));
-    f.instruction(&Instruction::End);
-    f.instruction(&Instruction::End);
-
-    // return $result
-    f.instruction(&Instruction::LocalGet(6));
-    f.instruction(&Instruction::End);
+    wasm!(f, { local_get(6); end; });
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }

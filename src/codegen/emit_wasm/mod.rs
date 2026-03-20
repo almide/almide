@@ -12,6 +12,9 @@
 //!   [49..N)     String literal data ([len:i32][data:u8...] per string)
 //!   [N..)       Heap (bump allocator, grows upward)
 
+#[macro_use]
+mod wasm_macro;
+
 pub mod values;
 mod strings;
 mod runtime;

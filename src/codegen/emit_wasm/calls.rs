@@ -2,10 +2,11 @@
 
 use crate::ir::{CallTarget, IrExpr, IrStringPart};
 use crate::types::Ty;
-use wasm_encoder::{BlockType, Instruction, MemArg, ValType};
+use wasm_encoder::{Instruction, ValType};
 
 use super::FuncCompiler;
 use super::values;
+use super::wasm_macro::wasm;
 
 impl FuncCompiler<'_> {
     pub(super) fn emit_call(&mut self, target: &CallTarget, args: &[IrExpr], _ret_ty: &Ty) {
@@ -17,35 +18,41 @@ impl FuncCompiler<'_> {
                         match &arg.ty {
                             Ty::String => {
                                 self.emit_expr(arg);
-                                self.func.instruction(&Instruction::Call(self.emitter.rt.println_str));
+                                wasm!(self.func, { call(self.emitter.rt.println_str); });
                             }
                             Ty::Int => {
                                 self.emit_expr(arg);
-                                self.func.instruction(&Instruction::Call(self.emitter.rt.println_int));
+                                wasm!(self.func, { call(self.emitter.rt.println_int); });
                             }
                             Ty::Bool => {
                                 // Convert bool to "true"/"false"
                                 self.emit_expr(arg);
                                 let true_str = self.emitter.intern_string("true");
                                 let false_str = self.emitter.intern_string("false");
-                                self.func.instruction(&Instruction::If(BlockType::Result(wasm_encoder::ValType::I32)));
-                                self.func.instruction(&Instruction::I32Const(true_str as i32));
-                                self.func.instruction(&Instruction::Else);
-                                self.func.instruction(&Instruction::I32Const(false_str as i32));
-                                self.func.instruction(&Instruction::End);
-                                self.func.instruction(&Instruction::Call(self.emitter.rt.println_str));
+                                wasm!(self.func, {
+                                    if_i32;
+                                    i32_const(true_str as i32);
+                                    else_;
+                                    i32_const(false_str as i32);
+                                    end;
+                                    call(self.emitter.rt.println_str);
+                                });
                             }
                             Ty::Float => {
                                 // Phase 1: print float as int (truncated)
                                 self.emit_expr(arg);
-                                self.func.instruction(&Instruction::I64TruncF64S);
-                                self.func.instruction(&Instruction::Call(self.emitter.rt.println_int));
+                                wasm!(self.func, {
+                                    i64_trunc_f64_s;
+                                    call(self.emitter.rt.println_int);
+                                });
                             }
                             _ => {
                                 // Unsupported type: skip arg and print "<unsupported>"
                                 let s = self.emitter.intern_string("<unsupported>");
-                                self.func.instruction(&Instruction::I32Const(s as i32));
-                                self.func.instruction(&Instruction::Call(self.emitter.rt.println_str));
+                                wasm!(self.func, {
+                                    i32_const(s as i32);
+                                    call(self.emitter.rt.println_str);
+                                });
                             }
                         }
                     }
@@ -55,61 +62,65 @@ impl FuncCompiler<'_> {
                     "assert" => {
                         // assert(cond) or assert(cond, msg) — trap if false
                         self.emit_expr(&args[0]);
-                        self.func.instruction(&Instruction::I32Eqz);
-                        self.func.instruction(&Instruction::If(BlockType::Empty));
-                        self.func.instruction(&Instruction::Unreachable);
-                        self.func.instruction(&Instruction::End);
+                        wasm!(self.func, {
+                            i32_eqz;
+                            if_empty;
+                            unreachable;
+                            end;
+                        });
                         // Drop message arg if present (evaluated but unused)
                     }
                     "assert_ne" => {
                         // assert_ne(left, right) — trap if equal
                         self.emit_eq(&args[0], &args[1], false);
                         // If equal → trap
-                        self.func.instruction(&Instruction::If(BlockType::Empty));
-                        self.func.instruction(&Instruction::Unreachable);
-                        self.func.instruction(&Instruction::End);
+                        wasm!(self.func, {
+                            if_empty;
+                            unreachable;
+                            end;
+                        });
                     }
                     _ => {
                         // Check if this is a variant constructor
                         if let Some((tag, is_unit)) = self.find_variant_ctor_tag(name) {
                             if is_unit && args.is_empty() {
                                 // Unit variant: allocate [tag:i32]
-                                self.func.instruction(&Instruction::I32Const(4));
-                                self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
                                 let scratch = self.match_i32_base + self.match_depth;
-                                self.func.instruction(&Instruction::LocalSet(scratch));
-                                self.func.instruction(&Instruction::LocalGet(scratch));
-                                self.func.instruction(&Instruction::I32Const(tag as i32));
-                                self.func.instruction(&Instruction::I32Store(MemArg {
-                                    offset: 0, align: 2, memory_index: 0,
-                                }));
-                                self.func.instruction(&Instruction::LocalGet(scratch));
+                                wasm!(self.func, {
+                                    i32_const(4);
+                                    call(self.emitter.rt.alloc);
+                                    local_set(scratch);
+                                    local_get(scratch);
+                                    i32_const(tag as i32);
+                                    i32_store(0);
+                                    local_get(scratch);
+                                });
                                 return;
                             } else if !is_unit {
                                 // Tuple payload variant: [tag:i32][arg0][arg1]...
                                 let mut total_size = 4u32; // tag
                                 for arg in args { total_size += values::byte_size(&arg.ty); }
-                                self.func.instruction(&Instruction::I32Const(total_size as i32));
-                                self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
                                 let scratch = self.match_i32_base + self.match_depth;
                                 self.match_depth += 1;
-                                self.func.instruction(&Instruction::LocalSet(scratch));
-                                // Write tag
-                                self.func.instruction(&Instruction::LocalGet(scratch));
-                                self.func.instruction(&Instruction::I32Const(tag as i32));
-                                self.func.instruction(&Instruction::I32Store(MemArg {
-                                    offset: 0, align: 2, memory_index: 0,
-                                }));
+                                wasm!(self.func, {
+                                    i32_const(total_size as i32);
+                                    call(self.emitter.rt.alloc);
+                                    local_set(scratch);
+                                    // Write tag
+                                    local_get(scratch);
+                                    i32_const(tag as i32);
+                                    i32_store(0);
+                                });
                                 // Write args
                                 let mut offset = 4u32;
                                 for arg in args {
-                                    self.func.instruction(&Instruction::LocalGet(scratch));
+                                    wasm!(self.func, { local_get(scratch); });
                                     self.emit_expr(arg);
                                     self.emit_store_at(&arg.ty, offset);
                                     offset += values::byte_size(&arg.ty);
                                 }
                                 self.match_depth -= 1;
-                                self.func.instruction(&Instruction::LocalGet(scratch));
+                                wasm!(self.func, { local_get(scratch); });
                                 return;
                             }
                         }
@@ -118,9 +129,9 @@ impl FuncCompiler<'_> {
                             self.emit_expr(arg);
                         }
                         if let Some(&func_idx) = self.emitter.func_map.get(name.as_str()) {
-                            self.func.instruction(&Instruction::Call(func_idx));
+                            wasm!(self.func, { call(func_idx); });
                         } else {
-                            self.func.instruction(&Instruction::Unreachable);
+                            wasm!(self.func, { unreachable; });
                         }
                     }
                 }
@@ -130,46 +141,51 @@ impl FuncCompiler<'_> {
                 match (module.as_str(), func.as_str()) {
                     ("int", "to_string") => {
                         self.emit_expr(&args[0]);
-                        self.func.instruction(&Instruction::Call(self.emitter.rt.int_to_string));
+                        wasm!(self.func, { call(self.emitter.rt.int_to_string); });
                     }
                     ("float", "to_string") => {
                         // Phase 1: truncate to int, then int_to_string
                         self.emit_expr(&args[0]);
-                        self.func.instruction(&Instruction::I64TruncF64S);
-                        self.func.instruction(&Instruction::Call(self.emitter.rt.int_to_string));
+                        wasm!(self.func, {
+                            i64_trunc_f64_s;
+                            call(self.emitter.rt.int_to_string);
+                        });
                     }
                     ("string", "length") | ("string", "len") => {
                         self.emit_expr(&args[0]);
-                        self.func.instruction(&Instruction::I32Load(super::expressions::mem(0)));
-                        self.func.instruction(&Instruction::I64ExtendI32U);
+                        wasm!(self.func, {
+                            i32_load(0);
+                            i64_extend_i32_u;
+                        });
                     }
                     ("int", "parse") => {
                         // Stub: return ok(0) as Result[Int, String]
                         self.emit_expr(&args[0]);
-                        self.func.instruction(&Instruction::Drop);
-                        // Allocate Result: [tag=0 (ok), value=0 (i64)]
-                        self.func.instruction(&Instruction::I32Const(12)); // 4 tag + 8 i64
-                        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
                         let scratch = self.match_i32_base + self.match_depth;
-                        self.func.instruction(&Instruction::LocalSet(scratch));
-                        self.func.instruction(&Instruction::LocalGet(scratch));
-                        self.func.instruction(&Instruction::I32Const(0)); // tag = ok
-                        self.func.instruction(&Instruction::I32Store(MemArg { offset: 0, align: 2, memory_index: 0 }));
-                        self.func.instruction(&Instruction::LocalGet(scratch));
-                        self.func.instruction(&Instruction::I64Const(0)); // value = 0
-                        self.func.instruction(&Instruction::I64Store(MemArg { offset: 4, align: 3, memory_index: 0 }));
-                        self.func.instruction(&Instruction::LocalGet(scratch));
+                        wasm!(self.func, {
+                            drop;
+                            // Allocate Result: [tag=0 (ok), value=0 (i64)]
+                            i32_const(12); // 4 tag + 8 i64
+                            call(self.emitter.rt.alloc);
+                            local_set(scratch);
+                            local_get(scratch);
+                            i32_const(0); // tag = ok
+                            i32_store(0);
+                            local_get(scratch);
+                            i64_const(0); // value = 0
+                            i64_store(4);
+                            local_get(scratch);
+                        });
                     }
                     ("string", "contains") => {
                         // string.contains(haystack, needle) -> bool
-                        // Brute force: O(n*m) substring search
                         self.emit_expr(&args[0]); // haystack ptr
                         self.emit_expr(&args[1]); // needle ptr
-                        self.func.instruction(&Instruction::Call(self.emitter.rt.str_contains));
+                        wasm!(self.func, { call(self.emitter.rt.str_contains); });
                     }
                     ("string", "trim") => {
                         self.emit_expr(&args[0]);
-                        self.func.instruction(&Instruction::Call(self.emitter.rt.str_trim));
+                        wasm!(self.func, { call(self.emitter.rt.str_trim); });
                     }
                     ("string", "to_upper") | ("string", "to_lower") => {
                         let is_upper = func == "to_upper";
@@ -178,80 +194,86 @@ impl FuncCompiler<'_> {
                     }
                     ("string", "starts_with") => {
                         // Store s → mem[0], prefix → mem[4]
-                        let mem = super::expressions::mem;
-                        self.func.instruction(&Instruction::I32Const(0));
+                        wasm!(self.func, { i32_const(0); });
                         self.emit_expr(&args[0]);
-                        self.func.instruction(&Instruction::I32Store(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(4));
+                        wasm!(self.func, {
+                            i32_store(0);
+                            i32_const(4);
+                        });
                         self.emit_expr(&args[1]);
-                        self.func.instruction(&Instruction::I32Store(mem(0)));
-                        // if s.len < prefix.len → false
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Load(mem(0))); // prefix
-                        self.func.instruction(&Instruction::I32Load(mem(0))); // prefix.len
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::I32Load(mem(0))); // s
-                        self.func.instruction(&Instruction::I32Load(mem(0))); // s.len
-                        self.func.instruction(&Instruction::I32GtU); // prefix.len > s.len
-                        self.func.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::Else);
-                        // mem_eq(s+4, prefix+4, prefix.len)
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Add); // s+4
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Add); // prefix+4
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Load(mem(0))); // prefix.len
-                        self.func.instruction(&Instruction::Call(self.emitter.rt.mem_eq));
-                        self.func.instruction(&Instruction::End);
+                        wasm!(self.func, {
+                            i32_store(0);
+                            // if s.len < prefix.len → false
+                            i32_const(4);
+                            i32_load(0); // prefix
+                            i32_load(0); // prefix.len
+                            i32_const(0);
+                            i32_load(0); // s
+                            i32_load(0); // s.len
+                            i32_gt_u; // prefix.len > s.len
+                            if_i32;
+                            i32_const(0);
+                            else_;
+                            // mem_eq(s+4, prefix+4, prefix.len)
+                            i32_const(0);
+                            i32_load(0);
+                            i32_const(4);
+                            i32_add; // s+4
+                            i32_const(4);
+                            i32_load(0);
+                            i32_const(4);
+                            i32_add; // prefix+4
+                            i32_const(4);
+                            i32_load(0);
+                            i32_load(0); // prefix.len
+                            call(self.emitter.rt.mem_eq);
+                            end;
+                        });
                     }
                     ("string", "ends_with") => {
-                        let mem = super::expressions::mem;
-                        self.func.instruction(&Instruction::I32Const(0));
+                        wasm!(self.func, { i32_const(0); });
                         self.emit_expr(&args[0]);
-                        self.func.instruction(&Instruction::I32Store(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(4));
+                        wasm!(self.func, {
+                            i32_store(0);
+                            i32_const(4);
+                        });
                         self.emit_expr(&args[1]);
-                        self.func.instruction(&Instruction::I32Store(mem(0)));
-                        // if s.len < suffix.len → false
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32GtU);
-                        self.func.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::Else);
-                        // mem_eq(s+4+(s.len-suffix.len), suffix+4, suffix.len)
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Load(mem(0))); // s.len
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Load(mem(0))); // suffix.len
-                        self.func.instruction(&Instruction::I32Sub); // s+4+s.len-suffix.len
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Add); // suffix+4
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Load(mem(0))); // suffix.len
-                        self.func.instruction(&Instruction::Call(self.emitter.rt.mem_eq));
-                        self.func.instruction(&Instruction::End);
+                        wasm!(self.func, {
+                            i32_store(0);
+                            // if s.len < suffix.len → false
+                            i32_const(4);
+                            i32_load(0);
+                            i32_load(0);
+                            i32_const(0);
+                            i32_load(0);
+                            i32_load(0);
+                            i32_gt_u;
+                            if_i32;
+                            i32_const(0);
+                            else_;
+                            // mem_eq(s+4+(s.len-suffix.len), suffix+4, suffix.len)
+                            i32_const(0);
+                            i32_load(0);
+                            i32_const(4);
+                            i32_add;
+                            i32_const(0);
+                            i32_load(0);
+                            i32_load(0); // s.len
+                            i32_add;
+                            i32_const(4);
+                            i32_load(0);
+                            i32_load(0); // suffix.len
+                            i32_sub; // s+4+s.len-suffix.len
+                            i32_const(4);
+                            i32_load(0);
+                            i32_const(4);
+                            i32_add; // suffix+4
+                            i32_const(4);
+                            i32_load(0);
+                            i32_load(0); // suffix.len
+                            call(self.emitter.rt.mem_eq);
+                            end;
+                        });
                     }
                     ("string", "repeat") | ("string", "reverse") | ("string", "replace")
                     | ("string", "split") | ("string", "join") | ("string", "slice")
@@ -276,123 +298,108 @@ impl FuncCompiler<'_> {
                         let s = self.match_i32_base + self.match_depth;
                         let len_local = s;
                         let idx_local = s + 1;
-                        let mem = super::expressions::mem;
 
                         // Store src → mem[0]
-                        self.func.instruction(&Instruction::I32Const(0));
+                        wasm!(self.func, { i32_const(0); });
                         self.emit_expr(&args[0]);
-                        self.func.instruction(&Instruction::I32Store(mem(0)));
-
-                        // len
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::LocalSet(len_local));
-
-                        // Alloc dst: [len] + len * ptr_size(4)
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::LocalGet(len_local));
-                        self.func.instruction(&Instruction::I32Const(4)); // each entry is a tuple ptr (i32)
-                        self.func.instruction(&Instruction::I32Mul);
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
-                        self.func.instruction(&Instruction::I32Store(mem(0)));
-                        // dst = mem[8]
-
-                        // Store len in dst
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::LocalGet(len_local));
-                        self.func.instruction(&Instruction::I32Store(mem(0)));
-
-                        // Loop: create tuples
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::LocalSet(idx_local));
-
-                        self.func.instruction(&Instruction::Block(BlockType::Empty));
-                        self.func.instruction(&Instruction::Loop(BlockType::Empty));
+                        wasm!(self.func, {
+                            i32_store(0);
+                            // len
+                            i32_const(0);
+                            i32_load(0);
+                            i32_load(0);
+                            local_set(len_local);
+                            // Alloc dst: [len] + len * ptr_size(4)
+                            i32_const(8);
+                            i32_const(4);
+                            local_get(len_local);
+                            i32_const(4); // each entry is a tuple ptr (i32)
+                            i32_mul;
+                            i32_add;
+                            call(self.emitter.rt.alloc);
+                            i32_store(0);
+                            // dst = mem[8]
+                            // Store len in dst
+                            i32_const(8);
+                            i32_load(0);
+                            local_get(len_local);
+                            i32_store(0);
+                            // Loop: create tuples
+                            i32_const(0);
+                            local_set(idx_local);
+                            block_empty;
+                            loop_empty;
+                        });
                         let saved = self.depth;
                         self.depth += 2;
 
-                        self.func.instruction(&Instruction::LocalGet(idx_local));
-                        self.func.instruction(&Instruction::LocalGet(len_local));
-                        self.func.instruction(&Instruction::I32GeU);
-                        self.func.instruction(&Instruction::BrIf(1));
-
-                        // Alloc tuple: [index:i64][element]
-                        self.func.instruction(&Instruction::I32Const(tuple_size as i32));
-                        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
-                        // tuple_ptr on stack. Store index.
-                        let tuple_scratch = self.match_i64_base + self.match_depth;
-                        // Can't use i64 local for i32... use mem[12] as temp
-                        self.func.instruction(&Instruction::I32Const(12));
-                        // swap: stack is [tuple_ptr, 12]. Need [12, tuple_ptr].
-                        // Use local
-                        self.func.instruction(&Instruction::Drop); // drop 12
-                        // Store tuple_ptr to idx_local temporarily... no, it's in use.
-                        // Use a different approach: store tuple to mem[12]
-                        self.func.instruction(&Instruction::I32Const(12));
-                        // Stack: [tuple_ptr, 12]... still wrong order.
-                        // Just drop and re-approach: alloc then immediately store to mem[12]
-                        self.func.instruction(&Instruction::Drop); // clean
-                        self.func.instruction(&Instruction::Drop); // clean
-
-                        // Re-alloc tuple
-                        self.func.instruction(&Instruction::I32Const(12));
-                        self.func.instruction(&Instruction::I32Const(tuple_size as i32));
-                        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
-                        self.func.instruction(&Instruction::I32Store(mem(0))); // mem[12] = tuple_ptr
-
-                        // tuple.index = idx (as i64)
-                        self.func.instruction(&Instruction::I32Const(12));
-                        self.func.instruction(&Instruction::I32Load(mem(0))); // tuple_ptr
-                        self.func.instruction(&Instruction::LocalGet(idx_local));
-                        self.func.instruction(&Instruction::I64ExtendI32U);
-                        self.func.instruction(&Instruction::I64Store(MemArg { offset: 0, align: 3, memory_index: 0 }));
-
-                        // tuple.element = src[idx]
-                        self.func.instruction(&Instruction::I32Const(12));
-                        self.func.instruction(&Instruction::I32Load(mem(0))); // tuple_ptr
-                        // Load src element
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::I32Load(mem(0))); // src_ptr
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::LocalGet(idx_local));
-                        self.func.instruction(&Instruction::I32Const(elem_size as i32));
-                        self.func.instruction(&Instruction::I32Mul);
-                        self.func.instruction(&Instruction::I32Add);
+                        wasm!(self.func, {
+                            local_get(idx_local);
+                            local_get(len_local);
+                            i32_ge_u;
+                            br_if(1);
+                            // Alloc tuple: [index:i64][element]
+                            i32_const(tuple_size as i32);
+                            call(self.emitter.rt.alloc);
+                            // tuple_ptr on stack. Store to mem[12]
+                            // (original code had some stack manipulation; the final approach: drop and re-alloc)
+                            drop;
+                            // Re-alloc tuple
+                            i32_const(12);
+                            i32_const(tuple_size as i32);
+                            call(self.emitter.rt.alloc);
+                            i32_store(0); // mem[12] = tuple_ptr
+                            // tuple.index = idx (as i64)
+                            i32_const(12);
+                            i32_load(0); // tuple_ptr
+                            local_get(idx_local);
+                            i64_extend_i32_u;
+                            i64_store(0);
+                            // tuple.element = src[idx]
+                            i32_const(12);
+                            i32_load(0); // tuple_ptr
+                            // Load src element
+                            i32_const(0);
+                            i32_load(0); // src_ptr
+                            i32_const(4);
+                            i32_add;
+                            local_get(idx_local);
+                            i32_const(elem_size as i32);
+                            i32_mul;
+                            i32_add;
+                        });
                         self.emit_load_at(&elem_ty, 0);
                         self.emit_store_at(&elem_ty, 8); // store at tuple offset 8
 
-                        // dst[idx] = tuple_ptr
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Load(mem(0))); // dst_ptr
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::LocalGet(idx_local));
-                        self.func.instruction(&Instruction::I32Const(4)); // tuple ptrs are i32
-                        self.func.instruction(&Instruction::I32Mul);
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::I32Const(12));
-                        self.func.instruction(&Instruction::I32Load(mem(0))); // tuple_ptr
-                        self.func.instruction(&Instruction::I32Store(mem(0)));
-
-                        // idx++
-                        self.func.instruction(&Instruction::LocalGet(idx_local));
-                        self.func.instruction(&Instruction::I32Const(1));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::LocalSet(idx_local));
-                        self.func.instruction(&Instruction::Br(0));
+                        wasm!(self.func, {
+                            // dst[idx] = tuple_ptr
+                            i32_const(8);
+                            i32_load(0); // dst_ptr
+                            i32_const(4);
+                            i32_add;
+                            local_get(idx_local);
+                            i32_const(4); // tuple ptrs are i32
+                            i32_mul;
+                            i32_add;
+                            i32_const(12);
+                            i32_load(0); // tuple_ptr
+                            i32_store(0);
+                            // idx++
+                            local_get(idx_local);
+                            i32_const(1);
+                            i32_add;
+                            local_set(idx_local);
+                            br(0);
+                        });
 
                         self.depth = saved;
-                        self.func.instruction(&Instruction::End);
-                        self.func.instruction(&Instruction::End);
-
-                        // Return dst
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        wasm!(self.func, {
+                            end;
+                            end;
+                            // Return dst
+                            i32_const(8);
+                            i32_load(0);
+                        });
                     }
                     ("list", "get") => {
                         // list.get(list, index) → Option[T]
@@ -400,55 +407,58 @@ impl FuncCompiler<'_> {
                             a.first().cloned().unwrap_or(Ty::Int)
                         } else { Ty::Int };
                         let elem_size = values::byte_size(&elem_ty);
-                        let mem = super::expressions::mem;
 
                         // mem[0]=list, mem[4]=idx(i32)
-                        self.func.instruction(&Instruction::I32Const(0));
+                        wasm!(self.func, { i32_const(0); });
                         self.emit_expr(&args[0]);
-                        self.func.instruction(&Instruction::I32Store(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(4));
+                        wasm!(self.func, {
+                            i32_store(0);
+                            i32_const(4);
+                        });
                         self.emit_expr(&args[1]);
                         if matches!(&args[1].ty, Ty::Int) {
-                            self.func.instruction(&Instruction::I32WrapI64);
+                            wasm!(self.func, { i32_wrap_i64; });
                         }
-                        self.func.instruction(&Instruction::I32Store(mem(0)));
-
-                        // bounds: idx >= len → none(0)
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Load(mem(0))); // idx
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::I32Load(mem(0))); // list
-                        self.func.instruction(&Instruction::I32Load(mem(0))); // len
-                        self.func.instruction(&Instruction::I32GeU);
-                        self.func.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
-                        self.func.instruction(&Instruction::I32Const(0)); // none
-                        self.func.instruction(&Instruction::Else);
-                        // alloc → mem[8]
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Const(elem_size as i32));
-                        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
-                        self.func.instruction(&Instruction::I32Store(mem(0)));
-                        // dst=mem[8], src=list+4+idx*elem_size
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Load(mem(0))); // dst
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::I32Load(mem(0))); // list
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Load(mem(0))); // idx
-                        self.func.instruction(&Instruction::I32Const(elem_size as i32));
-                        self.func.instruction(&Instruction::I32Mul);
-                        self.func.instruction(&Instruction::I32Add);
+                        wasm!(self.func, {
+                            i32_store(0);
+                            // bounds: idx >= len → none(0)
+                            i32_const(4);
+                            i32_load(0); // idx
+                            i32_const(0);
+                            i32_load(0); // list
+                            i32_load(0); // len
+                            i32_ge_u;
+                            if_i32;
+                            i32_const(0); // none
+                            else_;
+                            // alloc → mem[8]
+                            i32_const(8);
+                            i32_const(elem_size as i32);
+                            call(self.emitter.rt.alloc);
+                            i32_store(0);
+                            // dst=mem[8], src=list+4+idx*elem_size
+                            i32_const(8);
+                            i32_load(0); // dst
+                            i32_const(0);
+                            i32_load(0); // list
+                            i32_const(4);
+                            i32_add;
+                            i32_const(4);
+                            i32_load(0); // idx
+                            i32_const(elem_size as i32);
+                            i32_mul;
+                            i32_add;
+                        });
                         self.emit_load_at(&elem_ty, 0); // load elem
                         self.emit_store_at(&elem_ty, 0); // store at dst
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Load(mem(0))); // return ptr
-                        self.func.instruction(&Instruction::End);
+                        wasm!(self.func, {
+                            i32_const(8);
+                            i32_load(0); // return ptr
+                            end;
+                        });
                     }
                     ("list", "filter") => {
                         // filter(list, fn) → new list with matching elements
-                        // Alloc max size, fill matching, update len at end
                         let elem_ty = if let Ty::Applied(_, a) = &args[0].ty {
                             a.first().cloned().unwrap_or(Ty::Int)
                         } else { Ty::Int };
@@ -456,131 +466,137 @@ impl FuncCompiler<'_> {
                         let s = self.match_i32_base + self.match_depth;
                         let len_local = s;
                         let idx_local = s + 1;
-                        let mem = super::expressions::mem;
 
                         // mem[0]=src, mem[4]=fn, mem[8]=dst, mem[12]=out_idx
-                        self.func.instruction(&Instruction::I32Const(0));
+                        wasm!(self.func, { i32_const(0); });
                         self.emit_expr(&args[0]);
-                        self.func.instruction(&Instruction::I32Store(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(4));
+                        wasm!(self.func, {
+                            i32_store(0);
+                            i32_const(4);
+                        });
                         self.emit_expr(&args[1]);
-                        self.func.instruction(&Instruction::I32Store(mem(0)));
-
-                        // len
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::LocalSet(len_local));
-
-                        // alloc dst (max size = 4 + len * elem_size) → mem[8]
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::LocalGet(len_local));
-                        self.func.instruction(&Instruction::I32Const(elem_size as i32));
-                        self.func.instruction(&Instruction::I32Mul);
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
-                        self.func.instruction(&Instruction::I32Store(mem(0)));
-
-                        // out_idx = 0 → mem[12]
-                        self.func.instruction(&Instruction::I32Const(12));
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::I32Store(mem(0)));
-
-                        // idx = 0
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::LocalSet(idx_local));
-
-                        // Loop
-                        self.func.instruction(&Instruction::Block(BlockType::Empty));
-                        self.func.instruction(&Instruction::Loop(BlockType::Empty));
+                        wasm!(self.func, {
+                            i32_store(0);
+                            // len
+                            i32_const(0);
+                            i32_load(0);
+                            i32_load(0);
+                            local_set(len_local);
+                            // alloc dst (max size = 4 + len * elem_size) → mem[8]
+                            i32_const(8);
+                            i32_const(4);
+                            local_get(len_local);
+                            i32_const(elem_size as i32);
+                            i32_mul;
+                            i32_add;
+                            call(self.emitter.rt.alloc);
+                            i32_store(0);
+                            // out_idx = 0 → mem[12]
+                            i32_const(12);
+                            i32_const(0);
+                            i32_store(0);
+                            // idx = 0
+                            i32_const(0);
+                            local_set(idx_local);
+                            // Loop
+                            block_empty;
+                            loop_empty;
+                        });
                         let saved = self.depth; self.depth += 2;
 
-                        self.func.instruction(&Instruction::LocalGet(idx_local));
-                        self.func.instruction(&Instruction::LocalGet(len_local));
-                        self.func.instruction(&Instruction::I32GeU);
-                        self.func.instruction(&Instruction::BrIf(1));
-
-                        // Call predicate: fn(element) → bool (i32)
-                        // Load closure
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Load(MemArg { offset: 4, align: 2, memory_index: 0 }));
-                        // Load element
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::LocalGet(idx_local));
-                        self.func.instruction(&Instruction::I32Const(elem_size as i32));
-                        self.func.instruction(&Instruction::I32Mul);
-                        self.func.instruction(&Instruction::I32Add);
+                        wasm!(self.func, {
+                            local_get(idx_local);
+                            local_get(len_local);
+                            i32_ge_u;
+                            br_if(1);
+                            // Call predicate: fn(element) → bool (i32)
+                            // Load closure
+                            i32_const(4);
+                            i32_load(0);
+                        });
+                        wasm!(self.func, {
+                            i32_load(4);
+                            // Load element
+                            i32_const(0);
+                            i32_load(0);
+                            i32_const(4);
+                            i32_add;
+                            local_get(idx_local);
+                            i32_const(elem_size as i32);
+                            i32_mul;
+                            i32_add;
+                        });
                         self.emit_load_at(&elem_ty, 0);
                         // table_idx
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        wasm!(self.func, {
+                            i32_const(4);
+                            i32_load(0);
+                            i32_load(0);
+                        });
                         // call_indirect
                         if let Ty::Fn { params, ret } = &args[1].ty {
                             let mut ct = vec![ValType::I32];
                             for p in params { if let Some(vt) = values::ty_to_valtype(p) { ct.push(vt); } }
                             let rt = values::ret_type(ret);
                             let ti = self.emitter.register_type(ct, rt);
-                            self.func.instruction(&Instruction::CallIndirect { type_index: ti, table_index: 0 });
+                            wasm!(self.func, { call_indirect(ti, 0); });
                         }
                         // If true, copy element to dst
-                        self.func.instruction(&Instruction::If(BlockType::Empty));
-                        // dst[out_idx] = src[idx]
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::I32Const(12));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(elem_size as i32));
-                        self.func.instruction(&Instruction::I32Mul);
-                        self.func.instruction(&Instruction::I32Add);
-                        // load src element
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::LocalGet(idx_local));
-                        self.func.instruction(&Instruction::I32Const(elem_size as i32));
-                        self.func.instruction(&Instruction::I32Mul);
-                        self.func.instruction(&Instruction::I32Add);
+                        wasm!(self.func, {
+                            if_empty;
+                            // dst[out_idx] = src[idx]
+                            i32_const(8);
+                            i32_load(0);
+                            i32_const(4);
+                            i32_add;
+                            i32_const(12);
+                            i32_load(0);
+                            i32_const(elem_size as i32);
+                            i32_mul;
+                            i32_add;
+                            // load src element
+                            i32_const(0);
+                            i32_load(0);
+                            i32_const(4);
+                            i32_add;
+                            local_get(idx_local);
+                            i32_const(elem_size as i32);
+                            i32_mul;
+                            i32_add;
+                        });
                         self.emit_load_at(&elem_ty, 0);
                         self.emit_store_at(&elem_ty, 0);
-                        // out_idx++
-                        self.func.instruction(&Instruction::I32Const(12));
-                        self.func.instruction(&Instruction::I32Const(12));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(1));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::I32Store(mem(0)));
-                        self.func.instruction(&Instruction::End); // end if
-
-                        // idx++
-                        self.func.instruction(&Instruction::LocalGet(idx_local));
-                        self.func.instruction(&Instruction::I32Const(1));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::LocalSet(idx_local));
-                        self.func.instruction(&Instruction::Br(0));
+                        wasm!(self.func, {
+                            // out_idx++
+                            i32_const(12);
+                            i32_const(12);
+                            i32_load(0);
+                            i32_const(1);
+                            i32_add;
+                            i32_store(0);
+                            end; // end if
+                            // idx++
+                            local_get(idx_local);
+                            i32_const(1);
+                            i32_add;
+                            local_set(idx_local);
+                            br(0);
+                        });
 
                         self.depth = saved;
-                        self.func.instruction(&Instruction::End);
-                        self.func.instruction(&Instruction::End);
-
-                        // Set dst.len = out_idx
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(12));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Store(mem(0)));
-
-                        // Return dst
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        wasm!(self.func, {
+                            end;
+                            end;
+                            // Set dst.len = out_idx
+                            i32_const(8);
+                            i32_load(0);
+                            i32_const(12);
+                            i32_load(0);
+                            i32_store(0);
+                            // Return dst
+                            i32_const(8);
+                            i32_load(0);
+                        });
                     }
                     ("list", "fold") => {
                         // fold(list, init, fn(acc, elem) → acc)
@@ -592,76 +608,83 @@ impl FuncCompiler<'_> {
                         let len_local = s;
                         let idx_local = s + 1;
                         let acc_local = self.match_i64_base + self.match_depth;
-                        let mem = super::expressions::mem;
 
                         // mem[0]=list, mem[4]=fn
-                        self.func.instruction(&Instruction::I32Const(0));
+                        wasm!(self.func, { i32_const(0); });
                         self.emit_expr(&args[0]);
-                        self.func.instruction(&Instruction::I32Store(mem(0)));
+                        wasm!(self.func, { i32_store(0); });
                         // acc = init
                         self.emit_expr(&args[1]);
-                        self.func.instruction(&Instruction::LocalSet(acc_local));
-                        self.func.instruction(&Instruction::I32Const(4));
+                        wasm!(self.func, {
+                            local_set(acc_local);
+                            i32_const(4);
+                        });
                         self.emit_expr(&args[2]);
-                        self.func.instruction(&Instruction::I32Store(mem(0)));
-
-                        // len
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::LocalSet(len_local));
-
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::LocalSet(idx_local));
-
-                        self.func.instruction(&Instruction::Block(BlockType::Empty));
-                        self.func.instruction(&Instruction::Loop(BlockType::Empty));
+                        wasm!(self.func, {
+                            i32_store(0);
+                            // len
+                            i32_const(0);
+                            i32_load(0);
+                            i32_load(0);
+                            local_set(len_local);
+                            i32_const(0);
+                            local_set(idx_local);
+                            block_empty;
+                            loop_empty;
+                        });
                         let saved = self.depth; self.depth += 2;
 
-                        self.func.instruction(&Instruction::LocalGet(idx_local));
-                        self.func.instruction(&Instruction::LocalGet(len_local));
-                        self.func.instruction(&Instruction::I32GeU);
-                        self.func.instruction(&Instruction::BrIf(1));
-
-                        // acc = fn(acc, elem)
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Load(MemArg { offset: 4, align: 2, memory_index: 0 }));
-                        self.func.instruction(&Instruction::LocalGet(acc_local));
-                        // load elem
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::LocalGet(idx_local));
-                        self.func.instruction(&Instruction::I32Const(elem_size as i32));
-                        self.func.instruction(&Instruction::I32Mul);
-                        self.func.instruction(&Instruction::I32Add);
+                        wasm!(self.func, {
+                            local_get(idx_local);
+                            local_get(len_local);
+                            i32_ge_u;
+                            br_if(1);
+                            // acc = fn(acc, elem)
+                            i32_const(4);
+                            i32_load(0);
+                        });
+                        wasm!(self.func, {
+                            i32_load(4);
+                            local_get(acc_local);
+                            // load elem
+                            i32_const(0);
+                            i32_load(0);
+                            i32_const(4);
+                            i32_add;
+                            local_get(idx_local);
+                            i32_const(elem_size as i32);
+                            i32_mul;
+                            i32_add;
+                        });
                         self.emit_load_at(&elem_ty, 0);
                         // table_idx
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        wasm!(self.func, {
+                            i32_const(4);
+                            i32_load(0);
+                            i32_load(0);
+                        });
                         if let Ty::Fn { params, ret } = &args[2].ty {
                             let mut ct = vec![ValType::I32];
                             for p in params { if let Some(vt) = values::ty_to_valtype(p) { ct.push(vt); } }
                             let rt = values::ret_type(ret);
                             let ti = self.emitter.register_type(ct, rt);
-                            self.func.instruction(&Instruction::CallIndirect { type_index: ti, table_index: 0 });
+                            wasm!(self.func, { call_indirect(ti, 0); });
                         }
-                        self.func.instruction(&Instruction::LocalSet(acc_local));
-
-                        self.func.instruction(&Instruction::LocalGet(idx_local));
-                        self.func.instruction(&Instruction::I32Const(1));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::LocalSet(idx_local));
-                        self.func.instruction(&Instruction::Br(0));
+                        wasm!(self.func, {
+                            local_set(acc_local);
+                            local_get(idx_local);
+                            i32_const(1);
+                            i32_add;
+                            local_set(idx_local);
+                            br(0);
+                        });
 
                         self.depth = saved;
-                        self.func.instruction(&Instruction::End);
-                        self.func.instruction(&Instruction::End);
-
-                        self.func.instruction(&Instruction::LocalGet(acc_local));
+                        wasm!(self.func, {
+                            end;
+                            end;
+                            local_get(acc_local);
+                        });
                     }
                     ("list", "reverse") => {
                         // reverse(list) → new list with elements in reverse order
@@ -672,295 +695,294 @@ impl FuncCompiler<'_> {
                         let s = self.match_i32_base + self.match_depth;
                         let len_local = s;
                         let idx_local = s + 1;
-                        let mem = super::expressions::mem;
 
                         // mem[0]=src
-                        self.func.instruction(&Instruction::I32Const(0));
+                        wasm!(self.func, { i32_const(0); });
                         self.emit_expr(&args[0]);
-                        self.func.instruction(&Instruction::I32Store(mem(0)));
-
-                        // len
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::LocalSet(len_local));
-
-                        // alloc dst → mem[4]
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::LocalGet(len_local));
-                        self.func.instruction(&Instruction::I32Const(elem_size as i32));
-                        self.func.instruction(&Instruction::I32Mul);
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
-                        self.func.instruction(&Instruction::I32Store(mem(0)));
-
-                        // dst.len = len
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::LocalGet(len_local));
-                        self.func.instruction(&Instruction::I32Store(mem(0)));
-
-                        // Loop: dst[len-1-i] = src[i]
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::LocalSet(idx_local));
-                        self.func.instruction(&Instruction::Block(BlockType::Empty));
-                        self.func.instruction(&Instruction::Loop(BlockType::Empty));
+                        wasm!(self.func, {
+                            i32_store(0);
+                            // len
+                            i32_const(0);
+                            i32_load(0);
+                            i32_load(0);
+                            local_set(len_local);
+                            // alloc dst → mem[4]
+                            i32_const(4);
+                            i32_const(4);
+                            local_get(len_local);
+                            i32_const(elem_size as i32);
+                            i32_mul;
+                            i32_add;
+                            call(self.emitter.rt.alloc);
+                            i32_store(0);
+                            // dst.len = len
+                            i32_const(4);
+                            i32_load(0);
+                            local_get(len_local);
+                            i32_store(0);
+                            // Loop: dst[len-1-i] = src[i]
+                            i32_const(0);
+                            local_set(idx_local);
+                            block_empty;
+                            loop_empty;
+                        });
                         let saved = self.depth; self.depth += 2;
 
-                        self.func.instruction(&Instruction::LocalGet(idx_local));
-                        self.func.instruction(&Instruction::LocalGet(len_local));
-                        self.func.instruction(&Instruction::I32GeU);
-                        self.func.instruction(&Instruction::BrIf(1));
-
-                        // dst addr: dst + 4 + (len-1-i) * elem_size
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::LocalGet(len_local));
-                        self.func.instruction(&Instruction::I32Const(1));
-                        self.func.instruction(&Instruction::I32Sub);
-                        self.func.instruction(&Instruction::LocalGet(idx_local));
-                        self.func.instruction(&Instruction::I32Sub);
-                        self.func.instruction(&Instruction::I32Const(elem_size as i32));
-                        self.func.instruction(&Instruction::I32Mul);
-                        self.func.instruction(&Instruction::I32Add);
-
-                        // src elem: src + 4 + i * elem_size
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::LocalGet(idx_local));
-                        self.func.instruction(&Instruction::I32Const(elem_size as i32));
-                        self.func.instruction(&Instruction::I32Mul);
-                        self.func.instruction(&Instruction::I32Add);
+                        wasm!(self.func, {
+                            local_get(idx_local);
+                            local_get(len_local);
+                            i32_ge_u;
+                            br_if(1);
+                            // dst addr: dst + 4 + (len-1-i) * elem_size
+                            i32_const(4);
+                            i32_load(0);
+                            i32_const(4);
+                            i32_add;
+                            local_get(len_local);
+                            i32_const(1);
+                            i32_sub;
+                            local_get(idx_local);
+                            i32_sub;
+                            i32_const(elem_size as i32);
+                            i32_mul;
+                            i32_add;
+                            // src elem: src + 4 + i * elem_size
+                            i32_const(0);
+                            i32_load(0);
+                            i32_const(4);
+                            i32_add;
+                            local_get(idx_local);
+                            i32_const(elem_size as i32);
+                            i32_mul;
+                            i32_add;
+                        });
                         self.emit_load_at(&elem_ty, 0);
                         self.emit_store_at(&elem_ty, 0);
 
-                        self.func.instruction(&Instruction::LocalGet(idx_local));
-                        self.func.instruction(&Instruction::I32Const(1));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::LocalSet(idx_local));
-                        self.func.instruction(&Instruction::Br(0));
+                        wasm!(self.func, {
+                            local_get(idx_local);
+                            i32_const(1);
+                            i32_add;
+                            local_set(idx_local);
+                            br(0);
+                        });
 
                         self.depth = saved;
-                        self.func.instruction(&Instruction::End);
-                        self.func.instruction(&Instruction::End);
-
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        wasm!(self.func, {
+                            end;
+                            end;
+                            i32_const(4);
+                            i32_load(0);
+                        });
                     }
                     ("list", "sort") => {
                         // Bubble sort on a copy. Int(i64) only.
-                        let mem = super::expressions::mem;
-
                         // mem[0]=src, alloc copy → mem[4], len → local s, i → local s+1
                         let s = self.match_i32_base + self.match_depth;
 
-                        self.func.instruction(&Instruction::I32Const(0));
+                        wasm!(self.func, { i32_const(0); });
                         self.emit_expr(&args[0]);
-                        self.func.instruction(&Instruction::I32Store(mem(0)));
-
-                        // len → local s
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::LocalSet(s));
-
-                        // total_bytes = 4 + len * 8
-                        // alloc → mem[4]
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::LocalGet(s));
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Mul);
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
-                        self.func.instruction(&Instruction::I32Store(mem(0)));
-
-                        // Store total_bytes → mem[8]
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::LocalGet(s));
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Mul);
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::I32Store(mem(0))); // mem[8] = total
-
-                        // Byte copy loop: i=0..total
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::LocalSet(s + 1)); // i=0
-                        self.func.instruction(&Instruction::Block(BlockType::Empty));
-                        self.func.instruction(&Instruction::Loop(BlockType::Empty));
+                        wasm!(self.func, {
+                            i32_store(0);
+                            // len → local s
+                            i32_const(0);
+                            i32_load(0);
+                            i32_load(0);
+                            local_set(s);
+                            // total_bytes = 4 + len * 8
+                            // alloc → mem[4]
+                            i32_const(4);
+                            i32_const(4);
+                            local_get(s);
+                            i32_const(8);
+                            i32_mul;
+                            i32_add;
+                            call(self.emitter.rt.alloc);
+                            i32_store(0);
+                            // Store total_bytes → mem[8]
+                            i32_const(8);
+                            i32_const(4);
+                            local_get(s);
+                            i32_const(8);
+                            i32_mul;
+                            i32_add;
+                            i32_store(0); // mem[8] = total
+                            // Byte copy loop: i=0..total
+                            i32_const(0);
+                            local_set(s + 1); // i=0
+                            block_empty;
+                            loop_empty;
+                        });
                         self.depth += 2;
-                        self.func.instruction(&Instruction::LocalGet(s + 1));
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Load(mem(0))); // total
-                        self.func.instruction(&Instruction::I32GeU);
-                        self.func.instruction(&Instruction::BrIf(1));
-                        // dst[i] = src[i] (src=mem[0], dst=mem[4])
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Load(mem(0))); // dst
-                        self.func.instruction(&Instruction::LocalGet(s + 1));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::I32Load(mem(0))); // src
-                        self.func.instruction(&Instruction::LocalGet(s + 1));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::I32Load8U(MemArg { offset: 0, align: 0, memory_index: 0 }));
-                        self.func.instruction(&Instruction::I32Store8(MemArg { offset: 0, align: 0, memory_index: 0 }));
-                        self.func.instruction(&Instruction::LocalGet(s + 1));
-                        self.func.instruction(&Instruction::I32Const(1));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::LocalSet(s + 1));
-                        self.func.instruction(&Instruction::Br(0));
+                        wasm!(self.func, {
+                            local_get(s + 1);
+                            i32_const(8);
+                            i32_load(0); // total
+                            i32_ge_u;
+                            br_if(1);
+                            // dst[i] = src[i] (src=mem[0], dst=mem[4])
+                            i32_const(4);
+                            i32_load(0); // dst
+                            local_get(s + 1);
+                            i32_add;
+                            i32_const(0);
+                            i32_load(0); // src
+                            local_get(s + 1);
+                            i32_add;
+                            i32_load8_u(0);
+                            i32_store8(0);
+                            local_get(s + 1);
+                            i32_const(1);
+                            i32_add;
+                            local_set(s + 1);
+                            br(0);
+                        });
                         self.depth -= 2;
-                        self.func.instruction(&Instruction::End);
-                        self.func.instruction(&Instruction::End);
-
-                        // Bubble sort: outer i=0..len-1, inner j=0..len-1-i
-                        // mem[8]=j (reuse), mem[12]=tmp(i64)
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::LocalSet(s + 1)); // i=0
-                        self.func.instruction(&Instruction::Block(BlockType::Empty));
-                        self.func.instruction(&Instruction::Loop(BlockType::Empty));
+                        wasm!(self.func, {
+                            end;
+                            end;
+                            // Bubble sort: outer i=0..len-1, inner j=0..len-1-i
+                            // mem[8]=j (reuse), mem[12]=tmp(i64)
+                            i32_const(0);
+                            local_set(s + 1); // i=0
+                            block_empty;
+                            loop_empty;
+                        });
                         self.depth += 2;
-                        self.func.instruction(&Instruction::LocalGet(s + 1));
-                        self.func.instruction(&Instruction::LocalGet(s));
-                        self.func.instruction(&Instruction::I32Const(1));
-                        self.func.instruction(&Instruction::I32Sub);
-                        self.func.instruction(&Instruction::I32GeU);
-                        self.func.instruction(&Instruction::BrIf(1));
-
-                        // Inner: j=0
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Const(0));
-                        self.func.instruction(&Instruction::I32Store(mem(0)));
-                        self.func.instruction(&Instruction::Block(BlockType::Empty));
-                        self.func.instruction(&Instruction::Loop(BlockType::Empty));
+                        wasm!(self.func, {
+                            local_get(s + 1);
+                            local_get(s);
+                            i32_const(1);
+                            i32_sub;
+                            i32_ge_u;
+                            br_if(1);
+                            // Inner: j=0
+                            i32_const(8);
+                            i32_const(0);
+                            i32_store(0);
+                            block_empty;
+                            loop_empty;
+                        });
                         self.depth += 2;
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Load(mem(0))); // j
-                        self.func.instruction(&Instruction::LocalGet(s));
-                        self.func.instruction(&Instruction::I32Const(1));
-                        self.func.instruction(&Instruction::I32Sub);
-                        self.func.instruction(&Instruction::LocalGet(s + 1));
-                        self.func.instruction(&Instruction::I32Sub);
-                        self.func.instruction(&Instruction::I32GeU);
-                        self.func.instruction(&Instruction::BrIf(1));
-
-                        // Compare dst[j] > dst[j+1]
-                        // addr_j = dst + 4 + j*8
-                        // addr_j1 = dst + 4 + (j+1)*8
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Mul);
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::I64Load(MemArg { offset: 0, align: 3, memory_index: 0 }));
-                        // dst[j+1]
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(1));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Mul);
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::I64Load(MemArg { offset: 0, align: 3, memory_index: 0 }));
-                        self.func.instruction(&Instruction::I64GtS);
-                        self.func.instruction(&Instruction::If(BlockType::Empty));
-
-                        // Swap: tmp=dst[j], dst[j]=dst[j+1], dst[j+1]=tmp
-                        // tmp → mem[12..20]
-                        self.func.instruction(&Instruction::I32Const(12));
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Mul);
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::I64Load(MemArg { offset: 0, align: 3, memory_index: 0 }));
-                        self.func.instruction(&Instruction::I64Store(MemArg { offset: 0, align: 3, memory_index: 0 }));
-                        // dst[j] = dst[j+1]
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Mul);
-                        self.func.instruction(&Instruction::I32Add);
-                        // value = dst[j+1]
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(1));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Mul);
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::I64Load(MemArg { offset: 0, align: 3, memory_index: 0 }));
-                        self.func.instruction(&Instruction::I64Store(MemArg { offset: 0, align: 3, memory_index: 0 }));
-                        // dst[j+1] = tmp(mem[12])
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(1));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Mul);
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::I32Const(12));
-                        self.func.instruction(&Instruction::I64Load(MemArg { offset: 0, align: 3, memory_index: 0 }));
-                        self.func.instruction(&Instruction::I64Store(MemArg { offset: 0, align: 3, memory_index: 0 }));
-
-                        self.func.instruction(&Instruction::End); // end if swap
-
-                        // j++
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Const(8));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
-                        self.func.instruction(&Instruction::I32Const(1));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::I32Store(mem(0)));
-                        self.func.instruction(&Instruction::Br(0));
+                        wasm!(self.func, {
+                            i32_const(8);
+                            i32_load(0); // j
+                            local_get(s);
+                            i32_const(1);
+                            i32_sub;
+                            local_get(s + 1);
+                            i32_sub;
+                            i32_ge_u;
+                            br_if(1);
+                            // Compare dst[j] > dst[j+1]
+                            // addr_j = dst + 4 + j*8
+                            i32_const(4);
+                            i32_load(0);
+                            i32_const(4);
+                            i32_add;
+                            i32_const(8);
+                            i32_load(0);
+                            i32_const(8);
+                            i32_mul;
+                            i32_add;
+                            i64_load(0);
+                            // dst[j+1]
+                            i32_const(4);
+                            i32_load(0);
+                            i32_const(4);
+                            i32_add;
+                            i32_const(8);
+                            i32_load(0);
+                            i32_const(1);
+                            i32_add;
+                            i32_const(8);
+                            i32_mul;
+                            i32_add;
+                            i64_load(0);
+                            i64_gt_s;
+                            if_empty;
+                            // Swap: tmp=dst[j], dst[j]=dst[j+1], dst[j+1]=tmp
+                            // tmp → mem[12..20]
+                            i32_const(12);
+                            i32_const(4);
+                            i32_load(0);
+                            i32_const(4);
+                            i32_add;
+                            i32_const(8);
+                            i32_load(0);
+                            i32_const(8);
+                            i32_mul;
+                            i32_add;
+                            i64_load(0);
+                            i64_store(0);
+                            // dst[j] = dst[j+1]
+                            i32_const(4);
+                            i32_load(0);
+                            i32_const(4);
+                            i32_add;
+                            i32_const(8);
+                            i32_load(0);
+                            i32_const(8);
+                            i32_mul;
+                            i32_add;
+                            // value = dst[j+1]
+                            i32_const(4);
+                            i32_load(0);
+                            i32_const(4);
+                            i32_add;
+                            i32_const(8);
+                            i32_load(0);
+                            i32_const(1);
+                            i32_add;
+                            i32_const(8);
+                            i32_mul;
+                            i32_add;
+                            i64_load(0);
+                            i64_store(0);
+                            // dst[j+1] = tmp(mem[12])
+                            i32_const(4);
+                            i32_load(0);
+                            i32_const(4);
+                            i32_add;
+                            i32_const(8);
+                            i32_load(0);
+                            i32_const(1);
+                            i32_add;
+                            i32_const(8);
+                            i32_mul;
+                            i32_add;
+                            i32_const(12);
+                            i64_load(0);
+                            i64_store(0);
+                            end; // end if swap
+                            // j++
+                            i32_const(8);
+                            i32_const(8);
+                            i32_load(0);
+                            i32_const(1);
+                            i32_add;
+                            i32_store(0);
+                            br(0);
+                        });
                         self.depth -= 2;
-                        self.func.instruction(&Instruction::End); // end inner loop
-                        self.func.instruction(&Instruction::End); // end inner block
-
-                        // i++
-                        self.func.instruction(&Instruction::LocalGet(s + 1));
-                        self.func.instruction(&Instruction::I32Const(1));
-                        self.func.instruction(&Instruction::I32Add);
-                        self.func.instruction(&Instruction::LocalSet(s + 1));
-                        self.func.instruction(&Instruction::Br(0));
+                        wasm!(self.func, {
+                            end; // end inner loop
+                            end; // end inner block
+                            // i++
+                            local_get(s + 1);
+                            i32_const(1);
+                            i32_add;
+                            local_set(s + 1);
+                            br(0);
+                        });
                         self.depth -= 2;
-                        self.func.instruction(&Instruction::End); // end outer loop
-                        self.func.instruction(&Instruction::End); // end outer block
-
-                        // Return dst
-                        self.func.instruction(&Instruction::I32Const(4));
-                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        wasm!(self.func, {
+                            end; // end outer loop
+                            end; // end outer block
+                            // Return dst
+                            i32_const(4);
+                            i32_load(0);
+                        });
                     }
                     ("list", "find") | ("list", "any") | ("list", "all")
                     | ("list", "count") | ("list", "sort_by") | ("list", "flat_map")
@@ -971,26 +993,30 @@ impl FuncCompiler<'_> {
                     }
                     ("map", "len") | ("map", "length") | ("map", "size") => {
                         self.emit_expr(&args[0]);
-                        self.func.instruction(&Instruction::I32Load(super::expressions::mem(0)));
-                        self.func.instruction(&Instruction::I64ExtendI32U);
+                        wasm!(self.func, {
+                            i32_load(0);
+                            i64_extend_i32_u;
+                        });
                     }
                     ("list", "len") | ("list", "length") => {
                         self.emit_expr(&args[0]);
-                        self.func.instruction(&Instruction::I32Load(super::expressions::mem(0)));
-                        self.func.instruction(&Instruction::I64ExtendI32U);
+                        wasm!(self.func, {
+                            i32_load(0);
+                            i64_extend_i32_u;
+                        });
                     }
                     ("math", "pi") => {
-                        self.func.instruction(&Instruction::F64Const(std::f64::consts::PI));
+                        wasm!(self.func, { f64_const(std::f64::consts::PI); });
                     }
                     ("math", "e") => {
-                        self.func.instruction(&Instruction::F64Const(std::f64::consts::E));
+                        wasm!(self.func, { f64_const(std::f64::consts::E); });
                     }
                     ("math", "sqrt") => {
                         self.emit_expr(&args[0]);
                         if matches!(&args[0].ty, Ty::Int) {
-                            self.func.instruction(&Instruction::F64ConvertI64S);
+                            wasm!(self.func, { f64_convert_i64_s; });
                         }
-                        self.func.instruction(&Instruction::F64Sqrt);
+                        wasm!(self.func, { f64_sqrt; });
                     }
                     ("math", "abs") => {
                         self.emit_expr(&args[0]);
@@ -998,20 +1024,22 @@ impl FuncCompiler<'_> {
                             Ty::Int => {
                                 // abs(x) = if x < 0 then -x else x
                                 let s = self.match_i64_base + self.match_depth;
-                                self.func.instruction(&Instruction::LocalSet(s));
-                                self.func.instruction(&Instruction::LocalGet(s));
-                                self.func.instruction(&Instruction::I64Const(0));
-                                self.func.instruction(&Instruction::I64LtS);
-                                self.func.instruction(&Instruction::If(BlockType::Result(ValType::I64)));
-                                self.func.instruction(&Instruction::I64Const(0));
-                                self.func.instruction(&Instruction::LocalGet(s));
-                                self.func.instruction(&Instruction::I64Sub);
-                                self.func.instruction(&Instruction::Else);
-                                self.func.instruction(&Instruction::LocalGet(s));
-                                self.func.instruction(&Instruction::End);
+                                wasm!(self.func, {
+                                    local_set(s);
+                                    local_get(s);
+                                    i64_const(0);
+                                    i64_lt_s;
+                                    if_i64;
+                                    i64_const(0);
+                                    local_get(s);
+                                    i64_sub;
+                                    else_;
+                                    local_get(s);
+                                    end;
+                                });
                             }
                             Ty::Float => {
-                                self.func.instruction(&Instruction::F64Abs);
+                                wasm!(self.func, { f64_abs; });
                             }
                             _ => {}
                         }
@@ -1022,32 +1050,35 @@ impl FuncCompiler<'_> {
                         match (func.as_str(), &args[0].ty) {
                             ("max", Ty::Int) => {
                                 let s = self.match_i64_base + self.match_depth;
-                                // a b on stack. if a > b then a else b
-                                self.func.instruction(&Instruction::LocalSet(s));
-                                let s2 = s + 1; // need second i64
-                                self.func.instruction(&Instruction::LocalSet(s2));
-                                self.func.instruction(&Instruction::LocalGet(s2));
-                                self.func.instruction(&Instruction::LocalGet(s));
-                                self.func.instruction(&Instruction::I64GtS);
-                                self.func.instruction(&Instruction::If(BlockType::Result(ValType::I64)));
-                                self.func.instruction(&Instruction::LocalGet(s2));
-                                self.func.instruction(&Instruction::Else);
-                                self.func.instruction(&Instruction::LocalGet(s));
-                                self.func.instruction(&Instruction::End);
+                                let s2 = s + 1;
+                                wasm!(self.func, {
+                                    local_set(s);
+                                    local_set(s2);
+                                    local_get(s2);
+                                    local_get(s);
+                                    i64_gt_s;
+                                    if_i64;
+                                    local_get(s2);
+                                    else_;
+                                    local_get(s);
+                                    end;
+                                });
                             }
                             ("min", Ty::Int) => {
                                 let s = self.match_i64_base + self.match_depth;
-                                self.func.instruction(&Instruction::LocalSet(s));
                                 let s2 = s + 1;
-                                self.func.instruction(&Instruction::LocalSet(s2));
-                                self.func.instruction(&Instruction::LocalGet(s2));
-                                self.func.instruction(&Instruction::LocalGet(s));
-                                self.func.instruction(&Instruction::I64LtS);
-                                self.func.instruction(&Instruction::If(BlockType::Result(ValType::I64)));
-                                self.func.instruction(&Instruction::LocalGet(s2));
-                                self.func.instruction(&Instruction::Else);
-                                self.func.instruction(&Instruction::LocalGet(s));
-                                self.func.instruction(&Instruction::End);
+                                wasm!(self.func, {
+                                    local_set(s);
+                                    local_set(s2);
+                                    local_get(s2);
+                                    local_get(s);
+                                    i64_lt_s;
+                                    if_i64;
+                                    local_get(s2);
+                                    else_;
+                                    local_get(s);
+                                    end;
+                                });
                             }
                             ("max", _) => { self.func.instruction(&Instruction::F64Max); }
                             ("min", _) => { self.func.instruction(&Instruction::F64Min); }
@@ -1056,15 +1087,15 @@ impl FuncCompiler<'_> {
                     }
                     ("float", "round") => {
                         self.emit_expr(&args[0]);
-                        self.func.instruction(&Instruction::F64Nearest);
+                        wasm!(self.func, { f64_nearest; });
                     }
                     ("float", "floor") => {
                         self.emit_expr(&args[0]);
-                        self.func.instruction(&Instruction::F64Floor);
+                        wasm!(self.func, { f64_floor; });
                     }
                     ("float", "ceil") => {
                         self.emit_expr(&args[0]);
-                        self.func.instruction(&Instruction::F64Ceil);
+                        wasm!(self.func, { f64_ceil; });
                     }
                     _ => {
                         self.emit_stub_call(args);
@@ -1077,18 +1108,22 @@ impl FuncCompiler<'_> {
                 match method.as_str() {
                     "to_string" | "int.to_string" if matches!(object.ty, Ty::Int) => {
                         self.emit_expr(object);
-                        self.func.instruction(&Instruction::Call(self.emitter.rt.int_to_string));
+                        wasm!(self.func, { call(self.emitter.rt.int_to_string); });
                     }
                     "len" | "length" | "string.len" | "list.len" | "map.len" => {
                         // .len() for String, List, Map — all store length at offset 0
                         self.emit_expr(object);
-                        self.func.instruction(&Instruction::I32Load(super::expressions::mem(0)));
-                        self.func.instruction(&Instruction::I64ExtendI32U);
+                        wasm!(self.func, {
+                            i32_load(0);
+                            i64_extend_i32_u;
+                        });
                     }
                     "to_string" | "float.to_string" if matches!(object.ty, Ty::Float) => {
                         self.emit_expr(object);
-                        self.func.instruction(&Instruction::I64TruncF64S);
-                        self.func.instruction(&Instruction::Call(self.emitter.rt.int_to_string));
+                        wasm!(self.func, {
+                            i64_trunc_f64_s;
+                            call(self.emitter.rt.int_to_string);
+                        });
                     }
                     "sort" | "list.sort" if matches!(&object.ty, Ty::Applied(_, _)) => {
                         let fake = [(**object).clone()];
@@ -1116,7 +1151,7 @@ impl FuncCompiler<'_> {
                     }
                     "trim" | "string.trim" if matches!(object.ty, Ty::String) => {
                         self.emit_expr(object);
-                        self.func.instruction(&Instruction::Call(self.emitter.rt.str_trim));
+                        wasm!(self.func, { call(self.emitter.rt.str_trim); });
                     }
                     "to_upper" | "string.to_upper" if matches!(object.ty, Ty::String) => {
                         self.emit_expr(object);
@@ -1130,17 +1165,17 @@ impl FuncCompiler<'_> {
                         // Delegate to Module call handler
                         self.emit_expr(object);
                         for arg in args { self.emit_expr(arg); }
-                        self.func.instruction(&Instruction::Unreachable); // TODO: wire up properly
+                        wasm!(self.func, { unreachable; }); // TODO: wire up properly
                     }
                     "contains" | "string.contains" if matches!(object.ty, Ty::String) => {
                         self.emit_expr(object);
                         self.emit_expr(&args[0]);
-                        self.func.instruction(&Instruction::Call(self.emitter.rt.str_contains));
+                        wasm!(self.func, { call(self.emitter.rt.str_contains); });
                     }
                     _ => {
                         self.emit_expr(object);
                         if values::ty_to_valtype(&object.ty).is_some() {
-                            self.func.instruction(&Instruction::Drop);
+                            wasm!(self.func, { drop; });
                         }
                         self.emit_stub_call(args);
                     }
@@ -1149,18 +1184,17 @@ impl FuncCompiler<'_> {
 
             CallTarget::Computed { callee } => {
                 // Closure call: callee is a closure ptr [table_idx: i32][env_ptr: i32]
-                // Stack order for call_indirect: [env_ptr, args..., table_idx]
                 let scratch = self.match_i32_base + self.match_depth;
 
                 // Evaluate callee → closure ptr
                 self.emit_expr(callee);
-                self.func.instruction(&Instruction::LocalSet(scratch));
+                wasm!(self.func, { local_set(scratch); });
 
                 // Push env_ptr (first hidden arg)
-                self.func.instruction(&Instruction::LocalGet(scratch));
-                self.func.instruction(&Instruction::I32Load(MemArg {
-                    offset: 4, align: 2, memory_index: 0,
-                }));
+                wasm!(self.func, {
+                    local_get(scratch);
+                    i32_load(4);
+                });
 
                 // Push declared args
                 for arg in args {
@@ -1168,10 +1202,10 @@ impl FuncCompiler<'_> {
                 }
 
                 // Push table_idx (on top of stack for call_indirect)
-                self.func.instruction(&Instruction::LocalGet(scratch));
-                self.func.instruction(&Instruction::I32Load(MemArg {
-                    offset: 0, align: 2, memory_index: 0,
-                }));
+                wasm!(self.func, {
+                    local_get(scratch);
+                    i32_load(0);
+                });
 
                 // Closure calling convention type: (env: i32, params...) -> ret
                 if let Ty::Fn { params, ret } = &callee.ty {
@@ -1183,12 +1217,9 @@ impl FuncCompiler<'_> {
                     }
                     let ret_types = values::ret_type(ret);
                     let type_idx = self.emitter.register_type(closure_params, ret_types);
-                    self.func.instruction(&Instruction::CallIndirect {
-                        type_index: type_idx,
-                        table_index: 0,
-                    });
+                    wasm!(self.func, { call_indirect(type_idx, 0); });
                 } else {
-                    self.func.instruction(&Instruction::Unreachable);
+                    wasm!(self.func, { unreachable; });
                 }
             }
         }
@@ -1198,26 +1229,25 @@ impl FuncCompiler<'_> {
     pub(super) fn emit_fn_ref_closure(&mut self, name: &str) {
         if let Some(&wrapper_table_idx) = self.emitter.fn_ref_wrappers.get(name) {
             // Allocate closure: [table_idx: i32][env_ptr: i32] = 8 bytes
-            self.func.instruction(&Instruction::I32Const(8));
-            self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
             let scratch = self.match_i32_base + self.match_depth;
-            self.func.instruction(&Instruction::LocalSet(scratch));
-
-            // Store table_idx
-            self.func.instruction(&Instruction::LocalGet(scratch));
-            self.func.instruction(&Instruction::I32Const(wrapper_table_idx as i32));
-            self.func.instruction(&Instruction::I32Store(MemArg { offset: 0, align: 2, memory_index: 0 }));
-
-            // Store env_ptr = 0
-            self.func.instruction(&Instruction::LocalGet(scratch));
-            self.func.instruction(&Instruction::I32Const(0));
-            self.func.instruction(&Instruction::I32Store(MemArg { offset: 4, align: 2, memory_index: 0 }));
-
-            // Return closure ptr
-            self.func.instruction(&Instruction::LocalGet(scratch));
+            wasm!(self.func, {
+                i32_const(8);
+                call(self.emitter.rt.alloc);
+                local_set(scratch);
+                // Store table_idx
+                local_get(scratch);
+                i32_const(wrapper_table_idx as i32);
+                i32_store(0);
+                // Store env_ptr = 0
+                local_get(scratch);
+                i32_const(0);
+                i32_store(4);
+                // Return closure ptr
+                local_get(scratch);
+            });
         } else {
             eprintln!("WARNING: FnRef wrapper not found for '{}', using direct table entry", name);
-            self.func.instruction(&Instruction::Unreachable);
+            wasm!(self.func, { unreachable; });
         }
     }
 
@@ -1227,7 +1257,7 @@ impl FuncCompiler<'_> {
         self.emitter.lambda_counter.set(lambda_idx + 1);
 
         if lambda_idx >= self.emitter.lambdas.len() {
-            self.func.instruction(&Instruction::Unreachable);
+            wasm!(self.func, { unreachable; });
             return;
         }
 
@@ -1238,156 +1268,169 @@ impl FuncCompiler<'_> {
 
         if captures.is_empty() {
             // No captures: allocate closure [table_idx, 0]
-            self.func.instruction(&Instruction::I32Const(8));
-            self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
-            self.func.instruction(&Instruction::LocalSet(scratch));
-
-            self.func.instruction(&Instruction::LocalGet(scratch));
-            self.func.instruction(&Instruction::I32Const(table_idx as i32));
-            self.func.instruction(&Instruction::I32Store(MemArg { offset: 0, align: 2, memory_index: 0 }));
-
-            self.func.instruction(&Instruction::LocalGet(scratch));
-            self.func.instruction(&Instruction::I32Const(0));
-            self.func.instruction(&Instruction::I32Store(MemArg { offset: 4, align: 2, memory_index: 0 }));
-
-            self.func.instruction(&Instruction::LocalGet(scratch));
+            wasm!(self.func, {
+                i32_const(8);
+                call(self.emitter.rt.alloc);
+                local_set(scratch);
+                local_get(scratch);
+                i32_const(table_idx as i32);
+                i32_store(0);
+                local_get(scratch);
+                i32_const(0);
+                i32_store(4);
+                local_get(scratch);
+            });
         } else {
             // Allocate env: each capture gets 8 bytes (padded for alignment)
             let env_size = (captures.len() as u32) * 8;
-            self.func.instruction(&Instruction::I32Const(env_size as i32));
-            self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
             let env_scratch = scratch; // reuse for env_ptr
-            self.func.instruction(&Instruction::LocalSet(env_scratch));
+            wasm!(self.func, {
+                i32_const(env_size as i32);
+                call(self.emitter.rt.alloc);
+                local_set(env_scratch);
+            });
 
             // Store each captured variable into env
             for (ci, (vid, ty)) in captures.iter().enumerate() {
                 let offset = (ci as u32) * 8;
-                self.func.instruction(&Instruction::LocalGet(env_scratch));
+                wasm!(self.func, { local_get(env_scratch); });
                 if let Some(&local_idx) = self.var_map.get(&vid.0) {
-                    self.func.instruction(&Instruction::LocalGet(local_idx));
+                    wasm!(self.func, { local_get(local_idx); });
                 } else {
                     // Variable not in scope — shouldn't happen
-                    self.func.instruction(&Instruction::I32Const(0));
+                    wasm!(self.func, { i32_const(0); });
                 }
                 self.emit_store_at(ty, offset);
             }
 
             // Allocate closure: [table_idx, env_ptr]
-            self.func.instruction(&Instruction::I32Const(8));
-            self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
             let closure_scratch = scratch + 1; // second i32 scratch slot
-            self.func.instruction(&Instruction::LocalSet(closure_scratch));
-
-            self.func.instruction(&Instruction::LocalGet(closure_scratch));
-            self.func.instruction(&Instruction::I32Const(table_idx as i32));
-            self.func.instruction(&Instruction::I32Store(MemArg { offset: 0, align: 2, memory_index: 0 }));
-
-            self.func.instruction(&Instruction::LocalGet(closure_scratch));
-            self.func.instruction(&Instruction::LocalGet(env_scratch));
-            self.func.instruction(&Instruction::I32Store(MemArg { offset: 4, align: 2, memory_index: 0 }));
-
-            self.func.instruction(&Instruction::LocalGet(closure_scratch));
+            wasm!(self.func, {
+                i32_const(8);
+                call(self.emitter.rt.alloc);
+                local_set(closure_scratch);
+                local_get(closure_scratch);
+                i32_const(table_idx as i32);
+                i32_store(0);
+                local_get(closure_scratch);
+                local_get(env_scratch);
+                i32_store(4);
+                local_get(closure_scratch);
+            });
         }
     }
 
     /// ASCII case conversion. Expects string ptr on stack. Returns new string ptr.
     fn emit_str_case_convert(&mut self, is_upper: bool) {
-        let mem = super::expressions::mem;
         // String ptr is on stack. Store to mem[0] via scratch.
         let scratch = self.match_i32_base + self.match_depth;
-        self.func.instruction(&Instruction::LocalSet(scratch));
-        self.func.instruction(&Instruction::I32Const(0));
-        self.func.instruction(&Instruction::LocalGet(scratch));
-        self.func.instruction(&Instruction::I32Store(mem(0)));
-        // Alloc dst with same len → mem[4]
-        self.func.instruction(&Instruction::I32Const(4));
-        self.func.instruction(&Instruction::I32Const(4));
-        self.func.instruction(&Instruction::I32Const(0));
-        self.func.instruction(&Instruction::I32Load(mem(0)));
-        self.func.instruction(&Instruction::I32Load(mem(0)));
-        self.func.instruction(&Instruction::I32Add);
-        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
-        self.func.instruction(&Instruction::I32Store(mem(0)));
-        // Store len in dst
-        self.func.instruction(&Instruction::I32Const(4));
-        self.func.instruction(&Instruction::I32Load(mem(0)));
-        self.func.instruction(&Instruction::I32Const(0));
-        self.func.instruction(&Instruction::I32Load(mem(0)));
-        self.func.instruction(&Instruction::I32Load(mem(0)));
-        self.func.instruction(&Instruction::I32Store(mem(0)));
+        wasm!(self.func, {
+            local_set(scratch);
+            i32_const(0);
+            local_get(scratch);
+            i32_store(0);
+            // Alloc dst with same len → mem[4]
+            i32_const(4);
+            i32_const(4);
+            i32_const(0);
+            i32_load(0);
+            i32_load(0);
+            i32_add;
+            call(self.emitter.rt.alloc);
+            i32_store(0);
+            // Store len in dst
+            i32_const(4);
+            i32_load(0);
+            i32_const(0);
+            i32_load(0);
+            i32_load(0);
+            i32_store(0);
+        });
         // Loop: convert each byte
         let s = self.match_i32_base + self.match_depth;
-        self.func.instruction(&Instruction::I32Const(0));
-        self.func.instruction(&Instruction::LocalSet(s));
-        self.func.instruction(&Instruction::Block(BlockType::Empty));
-        self.func.instruction(&Instruction::Loop(BlockType::Empty));
+        wasm!(self.func, {
+            i32_const(0);
+            local_set(s);
+            block_empty;
+            loop_empty;
+        });
         let saved = self.depth; self.depth += 2;
-        self.func.instruction(&Instruction::LocalGet(s));
-        self.func.instruction(&Instruction::I32Const(0));
-        self.func.instruction(&Instruction::I32Load(mem(0)));
-        self.func.instruction(&Instruction::I32Load(mem(0)));
-        self.func.instruction(&Instruction::I32GeU);
-        self.func.instruction(&Instruction::BrIf(1));
-        // dst addr
-        self.func.instruction(&Instruction::I32Const(4));
-        self.func.instruction(&Instruction::I32Load(mem(0)));
-        self.func.instruction(&Instruction::I32Const(4));
-        self.func.instruction(&Instruction::I32Add);
-        self.func.instruction(&Instruction::LocalGet(s));
-        self.func.instruction(&Instruction::I32Add);
-        // src byte
-        self.func.instruction(&Instruction::I32Const(0));
-        self.func.instruction(&Instruction::I32Load(mem(0)));
-        self.func.instruction(&Instruction::I32Const(4));
-        self.func.instruction(&Instruction::I32Add);
-        self.func.instruction(&Instruction::LocalGet(s));
-        self.func.instruction(&Instruction::I32Add);
-        self.func.instruction(&Instruction::I32Load8U(MemArg { offset: 0, align: 0, memory_index: 0 }));
-        // Convert
-        self.func.instruction(&Instruction::LocalSet(s + 1));
+        wasm!(self.func, {
+            local_get(s);
+            i32_const(0);
+            i32_load(0);
+            i32_load(0);
+            i32_ge_u;
+            br_if(1);
+            // dst addr
+            i32_const(4);
+            i32_load(0);
+            i32_const(4);
+            i32_add;
+            local_get(s);
+            i32_add;
+            // src byte
+            i32_const(0);
+            i32_load(0);
+            i32_const(4);
+            i32_add;
+            local_get(s);
+            i32_add;
+            i32_load8_u(0);
+            // Convert
+            local_set(s + 1);
+        });
         if is_upper {
-            self.func.instruction(&Instruction::LocalGet(s + 1));
-            self.func.instruction(&Instruction::I32Const(97));
-            self.func.instruction(&Instruction::I32GeU);
-            self.func.instruction(&Instruction::LocalGet(s + 1));
-            self.func.instruction(&Instruction::I32Const(122));
-            self.func.instruction(&Instruction::I32LeU);
-            self.func.instruction(&Instruction::I32And);
-            self.func.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
-            self.func.instruction(&Instruction::LocalGet(s + 1));
-            self.func.instruction(&Instruction::I32Const(32));
-            self.func.instruction(&Instruction::I32Sub);
-            self.func.instruction(&Instruction::Else);
-            self.func.instruction(&Instruction::LocalGet(s + 1));
-            self.func.instruction(&Instruction::End);
+            wasm!(self.func, {
+                local_get(s + 1);
+                i32_const(97);
+                i32_ge_u;
+                local_get(s + 1);
+                i32_const(122);
+                i32_le_u;
+                i32_and;
+                if_i32;
+                local_get(s + 1);
+                i32_const(32);
+                i32_sub;
+                else_;
+                local_get(s + 1);
+                end;
+            });
         } else {
-            self.func.instruction(&Instruction::LocalGet(s + 1));
-            self.func.instruction(&Instruction::I32Const(65));
-            self.func.instruction(&Instruction::I32GeU);
-            self.func.instruction(&Instruction::LocalGet(s + 1));
-            self.func.instruction(&Instruction::I32Const(90));
-            self.func.instruction(&Instruction::I32LeU);
-            self.func.instruction(&Instruction::I32And);
-            self.func.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
-            self.func.instruction(&Instruction::LocalGet(s + 1));
-            self.func.instruction(&Instruction::I32Const(32));
-            self.func.instruction(&Instruction::I32Add);
-            self.func.instruction(&Instruction::Else);
-            self.func.instruction(&Instruction::LocalGet(s + 1));
-            self.func.instruction(&Instruction::End);
+            wasm!(self.func, {
+                local_get(s + 1);
+                i32_const(65);
+                i32_ge_u;
+                local_get(s + 1);
+                i32_const(90);
+                i32_le_u;
+                i32_and;
+                if_i32;
+                local_get(s + 1);
+                i32_const(32);
+                i32_add;
+                else_;
+                local_get(s + 1);
+                end;
+            });
         }
-        self.func.instruction(&Instruction::I32Store8(MemArg { offset: 0, align: 0, memory_index: 0 }));
-        self.func.instruction(&Instruction::LocalGet(s));
-        self.func.instruction(&Instruction::I32Const(1));
-        self.func.instruction(&Instruction::I32Add);
-        self.func.instruction(&Instruction::LocalSet(s));
-        self.func.instruction(&Instruction::Br(0));
+        wasm!(self.func, {
+            i32_store8(0);
+            local_get(s);
+            i32_const(1);
+            i32_add;
+            local_set(s);
+            br(0);
+        });
         self.depth = saved;
-        self.func.instruction(&Instruction::End);
-        self.func.instruction(&Instruction::End);
-        // Return dst
-        self.func.instruction(&Instruction::I32Const(4));
-        self.func.instruction(&Instruction::I32Load(mem(0)));
+        wasm!(self.func, {
+            end;
+            end;
+            // Return dst
+            i32_const(4);
+            i32_load(0);
+        });
     }
 
     /// Emit a stub for an unimplemented call: evaluate args (for side effects), drop values, unreachable.
@@ -1396,10 +1439,10 @@ impl FuncCompiler<'_> {
             self.emit_expr(arg);
             // Only drop if the arg produces a value
             if values::ty_to_valtype(&arg.ty).is_some() {
-                self.func.instruction(&Instruction::Drop);
+                wasm!(self.func, { drop; });
             }
         }
-        self.func.instruction(&Instruction::Unreachable);
+        wasm!(self.func, { unreachable; });
     }
 
     /// Emit assert_eq(left, right): compare values, trap if not equal.
@@ -1407,24 +1450,26 @@ impl FuncCompiler<'_> {
         // Use the same equality logic as BinOp::Eq
         self.emit_eq(left, right, false);
         // If not equal (result == 0), trap
-        self.func.instruction(&Instruction::I32Eqz);
-        self.func.instruction(&Instruction::If(BlockType::Empty));
-        self.func.instruction(&Instruction::Unreachable);
-        self.func.instruction(&Instruction::End);
+        wasm!(self.func, {
+            i32_eqz;
+            if_empty;
+            unreachable;
+            end;
+        });
     }
 
     /// Concatenate two strings on the heap via __concat_str runtime.
     pub(super) fn emit_concat_str(&mut self, left: &IrExpr, right: &IrExpr) {
         self.emit_expr(left);
         self.emit_expr(right);
-        self.func.instruction(&Instruction::Call(self.emitter.rt.concat_str));
+        wasm!(self.func, { call(self.emitter.rt.concat_str); });
     }
 
     /// String interpolation: convert each part to string, then concat.
     pub(super) fn emit_string_interp(&mut self, parts: &[IrStringPart]) {
         if parts.is_empty() {
             let empty = self.emitter.intern_string("");
-            self.func.instruction(&Instruction::I32Const(empty as i32));
+            wasm!(self.func, { i32_const(empty as i32); });
             return;
         }
 
@@ -1434,7 +1479,7 @@ impl FuncCompiler<'_> {
         // For each subsequent part: emit it, then concat with accumulator
         for part in &parts[1..] {
             self.emit_string_part(part);
-            self.func.instruction(&Instruction::Call(self.emitter.rt.concat_str));
+            wasm!(self.func, { call(self.emitter.rt.concat_str); });
         }
     }
 
@@ -1443,29 +1488,33 @@ impl FuncCompiler<'_> {
         match part {
             IrStringPart::Lit { value } => {
                 let offset = self.emitter.intern_string(value);
-                self.func.instruction(&Instruction::I32Const(offset as i32));
+                wasm!(self.func, { i32_const(offset as i32); });
             }
             IrStringPart::Expr { expr } => {
                 match &expr.ty {
                     Ty::String => self.emit_expr(expr),
                     Ty::Int => {
                         self.emit_expr(expr);
-                        self.func.instruction(&Instruction::Call(self.emitter.rt.int_to_string));
+                        wasm!(self.func, { call(self.emitter.rt.int_to_string); });
                     }
                     Ty::Bool => {
                         self.emit_expr(expr);
                         let t = self.emitter.intern_string("true");
                         let f = self.emitter.intern_string("false");
-                        self.func.instruction(&Instruction::If(wasm_encoder::BlockType::Result(wasm_encoder::ValType::I32)));
-                        self.func.instruction(&Instruction::I32Const(t as i32));
-                        self.func.instruction(&Instruction::Else);
-                        self.func.instruction(&Instruction::I32Const(f as i32));
-                        self.func.instruction(&Instruction::End);
+                        wasm!(self.func, {
+                            if_i32;
+                            i32_const(t as i32);
+                            else_;
+                            i32_const(f as i32);
+                            end;
+                        });
                     }
                     Ty::Float => {
                         self.emit_expr(expr);
-                        self.func.instruction(&Instruction::I64TruncF64S);
-                        self.func.instruction(&Instruction::Call(self.emitter.rt.int_to_string));
+                        wasm!(self.func, {
+                            i64_trunc_f64_s;
+                            call(self.emitter.rt.int_to_string);
+                        });
                     }
                     _ => {
                         // Fallback: emit the expression (already a string pointer or unsupported)
@@ -1493,90 +1542,92 @@ impl FuncCompiler<'_> {
         let s = self.match_i32_base + self.match_depth;
         let len_local = s;
         let idx_local = s + 1;
-        let mem = super::expressions::mem;
 
         // Store src_ptr → mem[0], fn_closure → mem[4]
-        self.func.instruction(&Instruction::I32Const(0));
+        wasm!(self.func, { i32_const(0); });
         self.emit_expr(list_arg);
-        self.func.instruction(&Instruction::I32Store(mem(0)));
-        self.func.instruction(&Instruction::I32Const(4));
+        wasm!(self.func, {
+            i32_store(0);
+            i32_const(4);
+        });
         self.emit_expr(fn_arg);
-        self.func.instruction(&Instruction::I32Store(mem(0)));
-
-        // len = mem[0].len (load src_ptr, load len)
-        self.func.instruction(&Instruction::I32Const(0));
-        self.func.instruction(&Instruction::I32Load(mem(0)));
-        self.func.instruction(&Instruction::I32Load(mem(0)));
-        self.func.instruction(&Instruction::LocalSet(len_local));
-
-        // Alloc dst: 4 + len * out_size → store to mem[8]
-        self.func.instruction(&Instruction::I32Const(8));
-        self.func.instruction(&Instruction::I32Const(4));
-        self.func.instruction(&Instruction::LocalGet(len_local));
-        self.func.instruction(&Instruction::I32Const(out_size as i32));
-        self.func.instruction(&Instruction::I32Mul);
-        self.func.instruction(&Instruction::I32Add);
-        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
-        self.func.instruction(&Instruction::I32Store(mem(0)));
-
-        // dst.len = len
-        self.func.instruction(&Instruction::I32Const(8));
-        self.func.instruction(&Instruction::I32Load(mem(0)));
-        self.func.instruction(&Instruction::LocalGet(len_local));
-        self.func.instruction(&Instruction::I32Store(mem(0)));
-
-        // idx = 0
-        self.func.instruction(&Instruction::I32Const(0));
-        self.func.instruction(&Instruction::LocalSet(idx_local));
-
-        // Loop
-        self.func.instruction(&Instruction::Block(BlockType::Empty));
-        self.func.instruction(&Instruction::Loop(BlockType::Empty));
+        wasm!(self.func, {
+            i32_store(0);
+            // len = mem[0].len (load src_ptr, load len)
+            i32_const(0);
+            i32_load(0);
+            i32_load(0);
+            local_set(len_local);
+            // Alloc dst: 4 + len * out_size → store to mem[8]
+            i32_const(8);
+            i32_const(4);
+            local_get(len_local);
+            i32_const(out_size as i32);
+            i32_mul;
+            i32_add;
+            call(self.emitter.rt.alloc);
+            i32_store(0);
+            // dst.len = len
+            i32_const(8);
+            i32_load(0);
+            local_get(len_local);
+            i32_store(0);
+            // idx = 0
+            i32_const(0);
+            local_set(idx_local);
+            // Loop
+            block_empty;
+            loop_empty;
+        });
         let saved = self.depth;
         self.depth += 2;
 
-        // break if idx >= len
-        self.func.instruction(&Instruction::LocalGet(idx_local));
-        self.func.instruction(&Instruction::LocalGet(len_local));
-        self.func.instruction(&Instruction::I32GeU);
-        self.func.instruction(&Instruction::BrIf(1));
-
-        // ── Compute dst addr FIRST (stays on stack under call result) ──
-        // dst_ptr + 4 + idx * out_size
-        self.func.instruction(&Instruction::I32Const(8));
-        self.func.instruction(&Instruction::I32Load(mem(0))); // dst
-        self.func.instruction(&Instruction::I32Const(4));
-        self.func.instruction(&Instruction::I32Add);
-        self.func.instruction(&Instruction::LocalGet(idx_local));
-        self.func.instruction(&Instruction::I32Const(out_size as i32));
-        self.func.instruction(&Instruction::I32Mul);
-        self.func.instruction(&Instruction::I32Add);
-        // Stack: [dst_elem_addr]
-
-        // ── Call fn(element) ──
-        // Load closure from mem[4]
-        self.func.instruction(&Instruction::I32Const(4));
-        self.func.instruction(&Instruction::I32Load(mem(0)));
+        wasm!(self.func, {
+            // break if idx >= len
+            local_get(idx_local);
+            local_get(len_local);
+            i32_ge_u;
+            br_if(1);
+            // ── Compute dst addr FIRST (stays on stack under call result) ──
+            // dst_ptr + 4 + idx * out_size
+            i32_const(8);
+            i32_load(0); // dst
+            i32_const(4);
+            i32_add;
+            local_get(idx_local);
+            i32_const(out_size as i32);
+            i32_mul;
+            i32_add;
+            // Stack: [dst_elem_addr]
+            // ── Call fn(element) ──
+            // Load closure from mem[4]
+            i32_const(4);
+            i32_load(0);
+        });
         // env_ptr = closure[4]
-        self.func.instruction(&Instruction::I32Load(MemArg { offset: 4, align: 2, memory_index: 0 }));
+        wasm!(self.func, { i32_load(4); });
         // Stack: [dst_elem_addr, env_ptr]
 
         // Load src element: src_ptr + 4 + idx * in_size
-        self.func.instruction(&Instruction::I32Const(0));
-        self.func.instruction(&Instruction::I32Load(mem(0))); // src
-        self.func.instruction(&Instruction::I32Const(4));
-        self.func.instruction(&Instruction::I32Add);
-        self.func.instruction(&Instruction::LocalGet(idx_local));
-        self.func.instruction(&Instruction::I32Const(in_size as i32));
-        self.func.instruction(&Instruction::I32Mul);
-        self.func.instruction(&Instruction::I32Add);
+        wasm!(self.func, {
+            i32_const(0);
+            i32_load(0); // src
+            i32_const(4);
+            i32_add;
+            local_get(idx_local);
+            i32_const(in_size as i32);
+            i32_mul;
+            i32_add;
+        });
         self.emit_load_at(&in_elem_ty, 0);
         // Stack: [dst_elem_addr, env_ptr, element]
 
         // table_idx = closure[0]
-        self.func.instruction(&Instruction::I32Const(4));
-        self.func.instruction(&Instruction::I32Load(mem(0))); // closure
-        self.func.instruction(&Instruction::I32Load(mem(0))); // table_idx
+        wasm!(self.func, {
+            i32_const(4);
+            i32_load(0); // closure
+            i32_load(0); // table_idx
+        });
         // Stack: [dst_elem_addr, env_ptr, element, table_idx]
 
         // call_indirect (env, element) → result
@@ -1585,7 +1636,7 @@ impl FuncCompiler<'_> {
             for p in params { if let Some(vt) = values::ty_to_valtype(p) { ct.push(vt); } }
             let rt = values::ret_type(ret);
             let ti = self.emitter.register_type(ct, rt);
-            self.func.instruction(&Instruction::CallIndirect { type_index: ti, table_index: 0 });
+            wasm!(self.func, { call_indirect(ti, 0); });
         }
         // Stack: [dst_elem_addr, result]
 
@@ -1594,18 +1645,21 @@ impl FuncCompiler<'_> {
         // Stack: []
 
         // idx++
-        self.func.instruction(&Instruction::LocalGet(idx_local));
-        self.func.instruction(&Instruction::I32Const(1));
-        self.func.instruction(&Instruction::I32Add);
-        self.func.instruction(&Instruction::LocalSet(idx_local));
-        self.func.instruction(&Instruction::Br(0));
+        wasm!(self.func, {
+            local_get(idx_local);
+            i32_const(1);
+            i32_add;
+            local_set(idx_local);
+            br(0);
+        });
 
         self.depth = saved;
-        self.func.instruction(&Instruction::End);
-        self.func.instruction(&Instruction::End);
-
-        // Return dst_ptr from mem[8]
-        self.func.instruction(&Instruction::I32Const(8));
-        self.func.instruction(&Instruction::I32Load(mem(0)));
+        wasm!(self.func, {
+            end;
+            end;
+            // Return dst_ptr from mem[8]
+            i32_const(8);
+            i32_load(0);
+        });
     }
 }

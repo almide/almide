@@ -2,10 +2,11 @@
 
 use crate::ir::{BinOp, IrExpr, IrExprKind, UnOp};
 use crate::types::Ty;
-use wasm_encoder::{BlockType, Instruction, MemArg, ValType};
+use wasm_encoder::{Instruction, MemArg, ValType};
 
 use super::FuncCompiler;
 use super::values;
+use super::wasm_macro::wasm;
 
 pub(super) fn mem(offset: u64) -> MemArg {
     MemArg { offset, align: 2, memory_index: 0 }
@@ -26,17 +27,17 @@ impl FuncCompiler<'_> {
         match &expr.kind {
             // ── Literals ──
             IrExprKind::LitInt { value } => {
-                self.func.instruction(&Instruction::I64Const(*value));
+                wasm!(self.func, { i64_const(*value); });
             }
             IrExprKind::LitFloat { value } => {
-                self.func.instruction(&Instruction::F64Const(*value));
+                wasm!(self.func, { f64_const(*value); });
             }
             IrExprKind::LitBool { value } => {
-                self.func.instruction(&Instruction::I32Const(*value as i32));
+                wasm!(self.func, { i32_const(*value as i32); });
             }
             IrExprKind::LitStr { value } => {
                 let offset = self.emitter.intern_string(value);
-                self.func.instruction(&Instruction::I32Const(offset as i32));
+                wasm!(self.func, { i32_const(offset as i32); });
             }
             IrExprKind::Unit => {
                 // Unit produces no value on the stack
@@ -45,15 +46,15 @@ impl FuncCompiler<'_> {
             // ── Variables ──
             IrExprKind::Var { id } => {
                 if let Some(&local_idx) = self.var_map.get(&id.0) {
-                    self.func.instruction(&Instruction::LocalGet(local_idx));
+                    wasm!(self.func, { local_get(local_idx); });
                 } else if let Some(&(global_idx, _)) = self.emitter.top_let_globals.get(&id.0) {
-                    self.func.instruction(&Instruction::GlobalGet(global_idx));
+                    wasm!(self.func, { global_get(global_idx); });
                 } else {
                     // Variable not in scope — push zero
                     match values::ty_to_valtype(&expr.ty) {
-                        Some(ValType::I64) => { self.func.instruction(&Instruction::I64Const(0)); }
-                        Some(ValType::F64) => { self.func.instruction(&Instruction::F64Const(0.0)); }
-                        Some(ValType::I32) => { self.func.instruction(&Instruction::I32Const(0)); }
+                        Some(ValType::I64) => { wasm!(self.func, { i64_const(0); }); }
+                        Some(ValType::F64) => { wasm!(self.func, { f64_const(0.0); }); }
+                        Some(ValType::I32) => { wasm!(self.func, { i32_const(0); }); }
                         _ => {}
                     }
                 }
@@ -78,17 +79,17 @@ impl FuncCompiler<'_> {
             IrExprKind::UnOp { op, operand } => {
                 match op {
                     UnOp::NegInt => {
-                        self.func.instruction(&Instruction::I64Const(0));
+                        wasm!(self.func, { i64_const(0); });
                         self.emit_expr(operand);
-                        self.func.instruction(&Instruction::I64Sub);
+                        wasm!(self.func, { i64_sub; });
                     }
                     UnOp::NegFloat => {
                         self.emit_expr(operand);
-                        self.func.instruction(&Instruction::F64Neg);
+                        wasm!(self.func, { f64_neg; });
                     }
                     UnOp::Not => {
                         self.emit_expr(operand);
-                        self.func.instruction(&Instruction::I32Eqz);
+                        wasm!(self.func, { i32_eqz; });
                     }
                 }
             }
@@ -100,10 +101,10 @@ impl FuncCompiler<'_> {
                 self.func.instruction(&Instruction::If(bt));
                 self.depth += 1;
                 self.emit_expr(then);
-                self.func.instruction(&Instruction::Else);
+                wasm!(self.func, { else_; });
                 self.emit_expr(else_);
                 self.depth -= 1;
-                self.func.instruction(&Instruction::End);
+                wasm!(self.func, { end; });
             }
 
             // ── Block ──
@@ -121,11 +122,11 @@ impl FuncCompiler<'_> {
                 // do block with guards: block { loop { stmts; br 0 (continue) } }
                 // Guard breaks out of the outer block
                 let break_depth = self.depth;
-                self.func.instruction(&Instruction::Block(BlockType::Empty));
+                wasm!(self.func, { block_empty; });
                 self.depth += 1;
 
                 let continue_depth = self.depth;
-                self.func.instruction(&Instruction::Loop(BlockType::Empty));
+                wasm!(self.func, { loop_empty; });
                 self.depth += 1;
 
                 self.loop_stack.push(super::LoopLabels { break_depth, continue_depth });
@@ -137,36 +138,38 @@ impl FuncCompiler<'_> {
                     self.emit_expr(e);
                     // Drop tail value if non-Unit (do blocks in stmt position)
                     if values::ty_to_valtype(&e.ty).is_some() {
-                        self.func.instruction(&Instruction::Drop);
+                        wasm!(self.func, { drop; });
                     }
                 }
 
                 // Continue (loop back)
-                self.func.instruction(&Instruction::Br(self.depth - continue_depth - 1));
+                wasm!(self.func, { br(self.depth - continue_depth - 1); });
 
                 self.loop_stack.pop();
                 self.depth -= 1;
-                self.func.instruction(&Instruction::End); // end loop
+                wasm!(self.func, { end; }); // end loop
                 self.depth -= 1;
-                self.func.instruction(&Instruction::End); // end block
+                wasm!(self.func, { end; }); // end block
             }
 
             // ── While loop ──
             IrExprKind::While { cond, body } => {
                 let break_depth = self.depth;
-                self.func.instruction(&Instruction::Block(BlockType::Empty));
+                wasm!(self.func, { block_empty; });
                 self.depth += 1;
 
                 let continue_depth = self.depth;
-                self.func.instruction(&Instruction::Loop(BlockType::Empty));
+                wasm!(self.func, { loop_empty; });
                 self.depth += 1;
 
                 self.loop_stack.push(super::LoopLabels { break_depth, continue_depth });
 
                 // if !cond, break
                 self.emit_expr(cond);
-                self.func.instruction(&Instruction::I32Eqz);
-                self.func.instruction(&Instruction::BrIf(self.depth - break_depth - 1));
+                wasm!(self.func, {
+                    i32_eqz;
+                    br_if(self.depth - break_depth - 1);
+                });
 
                 // body
                 for stmt in body {
@@ -174,13 +177,13 @@ impl FuncCompiler<'_> {
                 }
 
                 // continue (jump to loop start)
-                self.func.instruction(&Instruction::Br(self.depth - continue_depth - 1));
+                wasm!(self.func, { br(self.depth - continue_depth - 1); });
 
                 self.loop_stack.pop();
                 self.depth -= 1;
-                self.func.instruction(&Instruction::End); // end loop
+                wasm!(self.func, { end; }); // end loop
                 self.depth -= 1;
-                self.func.instruction(&Instruction::End); // end block
+                wasm!(self.func, { end; }); // end block
             }
 
             // ── For-in loop ──
@@ -191,14 +194,14 @@ impl FuncCompiler<'_> {
             IrExprKind::Break => {
                 if let Some(labels) = self.loop_stack.last() {
                     let relative = self.depth - labels.break_depth - 1;
-                    self.func.instruction(&Instruction::Br(relative));
+                    wasm!(self.func, { br(relative); });
                 }
             }
 
             IrExprKind::Continue => {
                 if let Some(labels) = self.loop_stack.last() {
                     let relative = self.depth - labels.continue_depth - 1;
-                    self.func.instruction(&Instruction::Br(relative));
+                    wasm!(self.func, { br(relative); });
                 }
             }
 
@@ -255,14 +258,16 @@ impl FuncCompiler<'_> {
             // ── Map ──
             IrExprKind::EmptyMap => {
                 // Empty map: just [len=0:i32]
-                self.func.instruction(&Instruction::I32Const(4));
-                self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
                 let scratch = self.match_i32_base + self.match_depth;
-                self.func.instruction(&Instruction::LocalSet(scratch));
-                self.func.instruction(&Instruction::LocalGet(scratch));
-                self.func.instruction(&Instruction::I32Const(0));
-                self.func.instruction(&Instruction::I32Store(MemArg { offset: 0, align: 2, memory_index: 0 }));
-                self.func.instruction(&Instruction::LocalGet(scratch));
+                wasm!(self.func, {
+                    i32_const(4);
+                    call(self.emitter.rt.alloc);
+                    local_set(scratch);
+                    local_get(scratch);
+                    i32_const(0);
+                    i32_store(0);
+                    local_get(scratch);
+                });
             }
             IrExprKind::MapLiteral { entries } => {
                 // Map literal: [len:i32][key0][val0][key1][val1]...
@@ -272,80 +277,88 @@ impl FuncCompiler<'_> {
                     values::byte_size(&k.ty) + values::byte_size(&v.ty)
                 } else { 8 };
                 let total = 4 + n * entry_size;
-                self.func.instruction(&Instruction::I32Const(total as i32));
-                self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
                 let scratch = self.match_i32_base + self.match_depth;
-                self.func.instruction(&Instruction::LocalSet(scratch));
-                // Store length
-                self.func.instruction(&Instruction::LocalGet(scratch));
-                self.func.instruction(&Instruction::I32Const(n as i32));
-                self.func.instruction(&Instruction::I32Store(MemArg { offset: 0, align: 2, memory_index: 0 }));
+                wasm!(self.func, {
+                    i32_const(total as i32);
+                    call(self.emitter.rt.alloc);
+                    local_set(scratch);
+                    // Store length
+                    local_get(scratch);
+                    i32_const(n as i32);
+                    i32_store(0);
+                });
                 // Store entries
                 let mut offset = 4u32;
                 for (key, val) in entries {
-                    self.func.instruction(&Instruction::LocalGet(scratch));
+                    wasm!(self.func, { local_get(scratch); });
                     self.emit_expr(key);
                     self.emit_store_at(&key.ty, offset);
                     offset += values::byte_size(&key.ty);
-                    self.func.instruction(&Instruction::LocalGet(scratch));
+                    wasm!(self.func, { local_get(scratch); });
                     self.emit_expr(val);
                     self.emit_store_at(&val.ty, offset);
                     offset += values::byte_size(&val.ty);
                 }
-                self.func.instruction(&Instruction::LocalGet(scratch));
+                wasm!(self.func, { local_get(scratch); });
             }
 
             // ── Option/Result ──
             IrExprKind::OptionSome { expr: inner } => {
                 // Allocate space for the inner value, store it, return pointer
                 let inner_size = values::byte_size(&inner.ty);
-                self.func.instruction(&Instruction::I32Const(inner_size as i32));
-                self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
                 let scratch = self.match_i32_base + self.match_depth;
-                self.func.instruction(&Instruction::LocalSet(scratch));
-                self.func.instruction(&Instruction::LocalGet(scratch));
+                wasm!(self.func, {
+                    i32_const(inner_size as i32);
+                    call(self.emitter.rt.alloc);
+                    local_set(scratch);
+                    local_get(scratch);
+                });
                 self.emit_expr(inner);
                 self.emit_store_at(&inner.ty, 0);
-                self.func.instruction(&Instruction::LocalGet(scratch));
+                wasm!(self.func, { local_get(scratch); });
             }
             IrExprKind::OptionNone => {
-                self.func.instruction(&Instruction::I32Const(0));
+                wasm!(self.func, { i32_const(0); });
             }
 
             // ── Result ok/err ──
             IrExprKind::ResultOk { expr: inner } => {
                 // ok(x) = [tag:0, value]
                 let inner_size = values::byte_size(&inner.ty);
-                self.func.instruction(&Instruction::I32Const((4 + inner_size) as i32));
-                self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
                 let scratch = self.match_i32_base + self.match_depth;
-                self.func.instruction(&Instruction::LocalSet(scratch));
-                // tag = 0
-                self.func.instruction(&Instruction::LocalGet(scratch));
-                self.func.instruction(&Instruction::I32Const(0));
-                self.func.instruction(&Instruction::I32Store(MemArg { offset: 0, align: 2, memory_index: 0 }));
-                // value
-                self.func.instruction(&Instruction::LocalGet(scratch));
+                wasm!(self.func, {
+                    i32_const((4 + inner_size) as i32);
+                    call(self.emitter.rt.alloc);
+                    local_set(scratch);
+                    // tag = 0
+                    local_get(scratch);
+                    i32_const(0);
+                    i32_store(0);
+                    // value
+                    local_get(scratch);
+                });
                 self.emit_expr(inner);
                 self.emit_store_at(&inner.ty, 4);
-                self.func.instruction(&Instruction::LocalGet(scratch));
+                wasm!(self.func, { local_get(scratch); });
             }
             IrExprKind::ResultErr { expr: inner } => {
                 // err(e) = [tag:1, value]
                 let inner_size = values::byte_size(&inner.ty);
-                self.func.instruction(&Instruction::I32Const((4 + inner_size) as i32));
-                self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
                 let scratch = self.match_i32_base + self.match_depth;
-                self.func.instruction(&Instruction::LocalSet(scratch));
-                // tag = 1
-                self.func.instruction(&Instruction::LocalGet(scratch));
-                self.func.instruction(&Instruction::I32Const(1));
-                self.func.instruction(&Instruction::I32Store(MemArg { offset: 0, align: 2, memory_index: 0 }));
-                // value
-                self.func.instruction(&Instruction::LocalGet(scratch));
+                wasm!(self.func, {
+                    i32_const((4 + inner_size) as i32);
+                    call(self.emitter.rt.alloc);
+                    local_set(scratch);
+                    // tag = 1
+                    local_get(scratch);
+                    i32_const(1);
+                    i32_store(0);
+                    // value
+                    local_get(scratch);
+                });
                 self.emit_expr(inner);
                 self.emit_store_at(&inner.ty, 4);
-                self.func.instruction(&Instruction::LocalGet(scratch));
+                wasm!(self.func, { local_get(scratch); });
             }
 
             // ── Fan block (sequential fallback — no parallelism in WASM) ──
@@ -365,22 +378,21 @@ impl FuncCompiler<'_> {
                 // If tag != 0 (err): return the Result as-is
                 self.emit_expr(inner);
                 let scratch = self.match_i32_base + self.match_depth;
-                self.func.instruction(&Instruction::LocalSet(scratch));
-
-                // Check tag
-                self.func.instruction(&Instruction::LocalGet(scratch));
-                self.func.instruction(&Instruction::I32Load(MemArg { offset: 0, align: 2, memory_index: 0 }));
-                self.func.instruction(&Instruction::I32Const(0));
-                self.func.instruction(&Instruction::I32Ne); // tag != 0 = err
-
-                self.func.instruction(&Instruction::If(BlockType::Empty));
-                // Err: return the Result ptr
-                self.func.instruction(&Instruction::LocalGet(scratch));
-                self.func.instruction(&Instruction::Return);
-                self.func.instruction(&Instruction::End);
-
-                // Ok: load the unwrapped value
-                self.func.instruction(&Instruction::LocalGet(scratch));
+                wasm!(self.func, {
+                    local_set(scratch);
+                    // Check tag
+                    local_get(scratch);
+                    i32_load(0);
+                    i32_const(0);
+                    i32_ne;
+                    if_empty;
+                    // Err: return the Result ptr
+                    local_get(scratch);
+                    return_;
+                    end;
+                    // Ok: load the unwrapped value
+                    local_get(scratch);
+                });
                 self.emit_load_at(&expr.ty, 4);
             }
 
@@ -391,7 +403,7 @@ impl FuncCompiler<'_> {
 
             // ── Unsupported ──
             _ => {
-                self.func.instruction(&Instruction::Unreachable);
+                wasm!(self.func, { unreachable; });
             }
         }
     }
@@ -402,58 +414,60 @@ impl FuncCompiler<'_> {
             BinOp::AddInt => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                self.func.instruction(&Instruction::I64Add);
+                wasm!(self.func, { i64_add; });
             }
             BinOp::SubInt => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                self.func.instruction(&Instruction::I64Sub);
+                wasm!(self.func, { i64_sub; });
             }
             BinOp::MulInt => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                self.func.instruction(&Instruction::I64Mul);
+                wasm!(self.func, { i64_mul; });
             }
             BinOp::DivInt => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                self.func.instruction(&Instruction::I64DivS);
+                wasm!(self.func, { i64_div_s; });
             }
             BinOp::ModInt => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                self.func.instruction(&Instruction::I64RemS);
+                wasm!(self.func, { i64_rem_s; });
             }
             BinOp::AddFloat => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                self.func.instruction(&Instruction::F64Add);
+                wasm!(self.func, { f64_add; });
             }
             BinOp::SubFloat => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                self.func.instruction(&Instruction::F64Sub);
+                wasm!(self.func, { f64_sub; });
             }
             BinOp::MulFloat => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                self.func.instruction(&Instruction::F64Mul);
+                wasm!(self.func, { f64_mul; });
             }
             BinOp::DivFloat => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                self.func.instruction(&Instruction::F64Div);
+                wasm!(self.func, { f64_div; });
             }
             BinOp::ModFloat => {
                 // WASM has no f64.rem; compute via: a - trunc(a/b) * b
                 self.emit_expr(left);
                 self.emit_expr(left);
                 self.emit_expr(right);
-                self.func.instruction(&Instruction::F64Div);
+                wasm!(self.func, { f64_div; });
                 self.func.instruction(&Instruction::F64Trunc);
                 self.emit_expr(right);
-                self.func.instruction(&Instruction::F64Mul);
-                self.func.instruction(&Instruction::F64Sub);
+                wasm!(self.func, {
+                    f64_mul;
+                    f64_sub;
+                });
             }
 
             // ── Comparison (type-dispatched via operand type) ──
@@ -484,12 +498,12 @@ impl FuncCompiler<'_> {
             BinOp::And => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                self.func.instruction(&Instruction::I32And);
+                wasm!(self.func, { i32_and; });
             }
             BinOp::Or => {
                 self.emit_expr(left);
                 self.emit_expr(right);
-                self.func.instruction(&Instruction::I32Or);
+                wasm!(self.func, { i32_or; });
             }
 
             // ── String concatenation ──
@@ -505,8 +519,10 @@ impl FuncCompiler<'_> {
                 let elem_size = if let Ty::Applied(_, args) = &left.ty {
                     args.first().map(|t| values::byte_size(t)).unwrap_or(8)
                 } else { 8 };
-                self.func.instruction(&Instruction::I32Const(elem_size as i32));
-                self.func.instruction(&Instruction::Call(self.emitter.rt.concat_list));
+                wasm!(self.func, {
+                    i32_const(elem_size as i32);
+                    call(self.emitter.rt.concat_list);
+                });
             }
 
             BinOp::PowInt | BinOp::PowFloat => {
@@ -514,7 +530,7 @@ impl FuncCompiler<'_> {
                 self.emit_expr(right);
                 // Quick hack: use a loop (right is usually small int)
                 // For now, just multiply — only works for x^2 case
-                self.func.instruction(&Instruction::Unreachable);
+                wasm!(self.func, { unreachable; });
             }
             BinOp::XorInt => {
                 self.emit_expr(left);
@@ -528,20 +544,24 @@ impl FuncCompiler<'_> {
         self.emit_expr(left);
         self.emit_expr(right);
         match &left.ty {
-            Ty::Int => { self.func.instruction(&Instruction::I64Eq); }
-            Ty::Float => { self.func.instruction(&Instruction::F64Eq); }
-            Ty::Bool => { self.func.instruction(&Instruction::I32Eq); }
-            Ty::String => { self.func.instruction(&Instruction::Call(self.emitter.rt.str_eq)); }
+            Ty::Int => { wasm!(self.func, { i64_eq; }); }
+            Ty::Float => { wasm!(self.func, { f64_eq; }); }
+            Ty::Bool => { wasm!(self.func, { i32_eq; }); }
+            Ty::String => { wasm!(self.func, { call(self.emitter.rt.str_eq); }); }
             Ty::Applied(crate::types::constructor::TypeConstructorId::List, args) => {
                 let elem_size = args.first().map(|t| values::byte_size(t)).unwrap_or(8);
-                self.func.instruction(&Instruction::I32Const(elem_size as i32));
-                self.func.instruction(&Instruction::Call(self.emitter.rt.list_eq));
+                wasm!(self.func, {
+                    i32_const(elem_size as i32);
+                    call(self.emitter.rt.list_eq);
+                });
             }
             // Record: byte-compare the entire struct
             Ty::Record { fields } => {
                 let size = values::record_size(fields);
-                self.func.instruction(&Instruction::I32Const(size as i32));
-                self.func.instruction(&Instruction::Call(self.emitter.rt.mem_eq));
+                wasm!(self.func, {
+                    i32_const(size as i32);
+                    call(self.emitter.rt.mem_eq);
+                });
             }
             // Named types (records/variants): compute size from registered fields
             Ty::Named(name, _) => {
@@ -551,54 +571,60 @@ impl FuncCompiler<'_> {
                         .map(|c| values::record_size(&c.fields))
                         .max().unwrap_or(0);
                     let size = 4 + max_payload;
-                    self.func.instruction(&Instruction::I32Const(size as i32));
-                    self.func.instruction(&Instruction::Call(self.emitter.rt.mem_eq));
+                    wasm!(self.func, {
+                        i32_const(size as i32);
+                        call(self.emitter.rt.mem_eq);
+                    });
                 } else {
                     let fields = self.emitter.record_fields.get(name.as_str()).cloned().unwrap_or_default();
                     let size = values::record_size(&fields);
                     if size > 0 {
-                        self.func.instruction(&Instruction::I32Const(size as i32));
-                        self.func.instruction(&Instruction::Call(self.emitter.rt.mem_eq));
+                        wasm!(self.func, {
+                            i32_const(size as i32);
+                            call(self.emitter.rt.mem_eq);
+                        });
                     } else {
-                        self.func.instruction(&Instruction::I32Eq);
+                        wasm!(self.func, { i32_eq; });
                     }
                 }
             }
             // Tuple: byte-compare all elements
             Ty::Tuple(elems) => {
                 let size: u32 = elems.iter().map(|t| values::byte_size(t)).sum();
-                self.func.instruction(&Instruction::I32Const(size as i32));
-                self.func.instruction(&Instruction::Call(self.emitter.rt.mem_eq));
+                wasm!(self.func, {
+                    i32_const(size as i32);
+                    call(self.emitter.rt.mem_eq);
+                });
             }
             // Option: deep equality via runtime
             Ty::Applied(crate::types::constructor::TypeConstructorId::Option, args) => {
                 match args.first() {
-                    Some(Ty::String) => self.func.instruction(&Instruction::Call(self.emitter.rt.option_eq_str)),
-                    _ => self.func.instruction(&Instruction::Call(self.emitter.rt.option_eq_i64)),
-                };
+                    Some(Ty::String) => { wasm!(self.func, { call(self.emitter.rt.option_eq_str); }); }
+                    _ => { wasm!(self.func, { call(self.emitter.rt.option_eq_i64); }); }
+                }
             }
             // Result: deep equality via runtime
             Ty::Applied(crate::types::constructor::TypeConstructorId::Result, _) => {
-                self.func.instruction(&Instruction::Call(self.emitter.rt.result_eq_i64_str));
+                wasm!(self.func, { call(self.emitter.rt.result_eq_i64_str); });
             }
-            _ => { self.func.instruction(&Instruction::I32Eq); }
+            _ => { wasm!(self.func, { i32_eq; }); }
         }
         if negate {
-            self.func.instruction(&Instruction::I32Eqz);
+            wasm!(self.func, { i32_eqz; });
         }
     }
 
     pub(super) fn emit_cmp_instruction(&mut self, ty: &Ty, kind: CmpKind) {
         match (ty, kind) {
-            (Ty::Int, CmpKind::Lt) => { self.func.instruction(&Instruction::I64LtS); }
-            (Ty::Int, CmpKind::Gt) => { self.func.instruction(&Instruction::I64GtS); }
-            (Ty::Int, CmpKind::Lte) => { self.func.instruction(&Instruction::I64LeS); }
-            (Ty::Int, CmpKind::Gte) => { self.func.instruction(&Instruction::I64GeS); }
-            (Ty::Float, CmpKind::Lt) => { self.func.instruction(&Instruction::F64Lt); }
-            (Ty::Float, CmpKind::Gt) => { self.func.instruction(&Instruction::F64Gt); }
-            (Ty::Float, CmpKind::Lte) => { self.func.instruction(&Instruction::F64Le); }
-            (Ty::Float, CmpKind::Gte) => { self.func.instruction(&Instruction::F64Ge); }
-            _ => { self.func.instruction(&Instruction::Unreachable); }
+            (Ty::Int, CmpKind::Lt) => { wasm!(self.func, { i64_lt_s; }); }
+            (Ty::Int, CmpKind::Gt) => { wasm!(self.func, { i64_gt_s; }); }
+            (Ty::Int, CmpKind::Lte) => { wasm!(self.func, { i64_le_s; }); }
+            (Ty::Int, CmpKind::Gte) => { wasm!(self.func, { i64_ge_s; }); }
+            (Ty::Float, CmpKind::Lt) => { wasm!(self.func, { f64_lt; }); }
+            (Ty::Float, CmpKind::Gt) => { wasm!(self.func, { f64_gt; }); }
+            (Ty::Float, CmpKind::Lte) => { wasm!(self.func, { f64_le; }); }
+            (Ty::Float, CmpKind::Gte) => { wasm!(self.func, { f64_ge; }); }
+            _ => { wasm!(self.func, { unreachable; }); }
         }
     }
 
@@ -607,19 +633,13 @@ impl FuncCompiler<'_> {
     pub fn emit_store_at(&mut self, ty: &Ty, offset: u32) {
         match values::ty_to_valtype(ty) {
             Some(ValType::I64) => {
-                self.func.instruction(&Instruction::I64Store(MemArg {
-                    offset: offset as u64, align: 3, memory_index: 0,
-                }));
+                wasm!(self.func, { i64_store(offset); });
             }
             Some(ValType::F64) => {
-                self.func.instruction(&Instruction::F64Store(MemArg {
-                    offset: offset as u64, align: 3, memory_index: 0,
-                }));
+                wasm!(self.func, { f64_store(offset); });
             }
             Some(ValType::I32) => {
-                self.func.instruction(&Instruction::I32Store(MemArg {
-                    offset: offset as u64, align: 2, memory_index: 0,
-                }));
+                wasm!(self.func, { i32_store(offset); });
             }
             _ => {}
         }
@@ -629,19 +649,13 @@ impl FuncCompiler<'_> {
     pub fn emit_load_at(&mut self, ty: &Ty, offset: u32) {
         match values::ty_to_valtype(ty) {
             Some(ValType::I64) => {
-                self.func.instruction(&Instruction::I64Load(MemArg {
-                    offset: offset as u64, align: 3, memory_index: 0,
-                }));
+                wasm!(self.func, { i64_load(offset); });
             }
             Some(ValType::F64) => {
-                self.func.instruction(&Instruction::F64Load(MemArg {
-                    offset: offset as u64, align: 3, memory_index: 0,
-                }));
+                wasm!(self.func, { f64_load(offset); });
             }
             Some(ValType::I32) => {
-                self.func.instruction(&Instruction::I32Load(MemArg {
-                    offset: offset as u64, align: 2, memory_index: 0,
-                }));
+                wasm!(self.func, { i32_load(offset); });
             }
             _ => {}
         }

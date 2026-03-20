@@ -1,7 +1,7 @@
 //! IrStmt → WASM instruction emission + local variable pre-scanning.
 
 use crate::ir::{IrExpr, IrExprKind, IrStmt, IrStmtKind, VarId};
-use wasm_encoder::{Instruction, ValType};
+use wasm_encoder::ValType;
 
 use super::FuncCompiler;
 use super::values;
@@ -14,7 +14,7 @@ impl FuncCompiler<'_> {
                 self.emit_expr(value);
                 if let Some(_vt) = values::ty_to_valtype(ty) {
                     let local_idx = self.var_map[&var.0];
-                    self.func.instruction(&Instruction::LocalSet(local_idx));
+                    wasm!(self.func, { local_set(local_idx); });
                 }
                 // Unit bindings: value produces nothing, nothing to store
             }
@@ -22,22 +22,24 @@ impl FuncCompiler<'_> {
             IrStmtKind::Assign { var, value } => {
                 self.emit_expr(value);
                 let local_idx = self.var_map[&var.0];
-                self.func.instruction(&Instruction::LocalSet(local_idx));
+                wasm!(self.func, { local_set(local_idx); });
             }
 
             IrStmtKind::Expr { expr } => {
                 self.emit_expr(expr);
                 // Drop the value if the expression produces one
                 if values::ty_to_valtype(&expr.ty).is_some() {
-                    self.func.instruction(&Instruction::Drop);
+                    wasm!(self.func, { drop; });
                 }
             }
 
             IrStmtKind::Guard { cond, else_ } => {
                 // Guard: if cond is false, execute else_ action
                 self.emit_expr(cond);
-                self.func.instruction(&Instruction::I32Eqz);
-                self.func.instruction(&Instruction::If(wasm_encoder::BlockType::Empty));
+                wasm!(self.func, {
+                    i32_eqz;
+                    if_empty;
+                });
                 self.depth += 1;
 
                 match &else_.kind {
@@ -48,7 +50,7 @@ impl FuncCompiler<'_> {
                     // ResultOk/ResultErr in guard: return from function (effect fn early return)
                     crate::ir::IrExprKind::ResultOk { .. } | crate::ir::IrExprKind::ResultErr { .. } => {
                         self.emit_expr(else_);
-                        self.func.instruction(&Instruction::Return);
+                        wasm!(self.func, { return_; });
                     }
                     // Other expressions
                     _ => {
@@ -56,19 +58,19 @@ impl FuncCompiler<'_> {
                         if let Some(labels) = self.loop_stack.last() {
                             // Inside a loop/do block: drop value and break
                             if super::values::ty_to_valtype(&else_.ty).is_some() {
-                                self.func.instruction(&Instruction::Drop);
+                                wasm!(self.func, { drop; });
                             }
                             let relative = self.depth - labels.break_depth - 1;
-                            self.func.instruction(&Instruction::Br(relative));
+                            wasm!(self.func, { br(relative); });
                         } else {
                             // Outside any loop: return the value from function
-                            self.func.instruction(&Instruction::Return);
+                            wasm!(self.func, { return_; });
                         }
                     }
                 }
 
                 self.depth -= 1;
-                self.func.instruction(&Instruction::End);
+                wasm!(self.func, { end; });
             }
 
             IrStmtKind::Comment { .. } => {
@@ -79,7 +81,7 @@ impl FuncCompiler<'_> {
                 // Emit value (usually a tuple/record ptr)
                 self.emit_expr(value);
                 let scratch = self.match_i32_base + self.match_depth;
-                self.func.instruction(&Instruction::LocalSet(scratch));
+                wasm!(self.func, { local_set(scratch); });
 
                 // Destructure pattern
                 if let crate::ir::IrPattern::Tuple { elements } = pattern {
@@ -92,9 +94,9 @@ impl FuncCompiler<'_> {
                         if let crate::ir::IrPattern::Bind { var } = elem_pat {
                             if let Some(&local_idx) = self.var_map.get(&var.0) {
                                 let elem_ty = elem_types.get(i).cloned().unwrap_or(crate::types::Ty::Int);
-                                self.func.instruction(&Instruction::LocalGet(scratch));
+                                wasm!(self.func, { local_get(scratch); });
                                 self.emit_load_at(&elem_ty, offset);
-                                self.func.instruction(&Instruction::LocalSet(local_idx));
+                                wasm!(self.func, { local_set(local_idx); });
                                 offset += super::values::byte_size(&elem_ty);
                             }
                         } else if let crate::ir::IrPattern::Wildcard = elem_pat {
@@ -110,16 +112,20 @@ impl FuncCompiler<'_> {
                 let elem_size = super::values::byte_size(&value.ty);
                 // Compute address: target + 4 + index * elem_size
                 if let Some(&local_idx) = self.var_map.get(&target.0) {
-                    self.func.instruction(&Instruction::LocalGet(local_idx)); // list ptr
-                    self.func.instruction(&Instruction::I32Const(4));
-                    self.func.instruction(&Instruction::I32Add);
+                    wasm!(self.func, {
+                        local_get(local_idx); // list ptr
+                        i32_const(4);
+                        i32_add;
+                    });
                     self.emit_expr(index);
                     if matches!(&index.ty, crate::types::Ty::Int) {
-                        self.func.instruction(&Instruction::I32WrapI64);
+                        wasm!(self.func, { i32_wrap_i64; });
                     }
-                    self.func.instruction(&Instruction::I32Const(elem_size as i32));
-                    self.func.instruction(&Instruction::I32Mul);
-                    self.func.instruction(&Instruction::I32Add);
+                    wasm!(self.func, {
+                        i32_const(elem_size as i32);
+                        i32_mul;
+                        i32_add;
+                    });
                     // Value
                     self.emit_expr(value);
                     self.emit_store_at(&value.ty, 0);
@@ -133,7 +139,7 @@ impl FuncCompiler<'_> {
                     let tag_offset = self.variant_tag_offset(var_ty);
                     if let Some((offset, _)) = super::values::field_offset(&fields, field) {
                         let total_offset = tag_offset + offset;
-                        self.func.instruction(&Instruction::LocalGet(local_idx));
+                        wasm!(self.func, { local_get(local_idx); });
                         self.emit_expr(value);
                         self.emit_store_at(&value.ty, total_offset);
                     }

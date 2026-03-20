@@ -2,10 +2,11 @@
 
 use crate::ir::{IrExpr, IrExprKind, IrMatchArm, IrPattern, IrStmt};
 use crate::types::Ty;
-use wasm_encoder::{BlockType, Instruction, MemArg, ValType};
+use wasm_encoder::{Instruction, ValType};
 
 use super::FuncCompiler;
 use super::values;
+use super::wasm_macro::wasm;
 
 impl FuncCompiler<'_> {
     /// Emit a for...in loop. Currently supports Range iterables only.
@@ -16,30 +17,30 @@ impl FuncCompiler<'_> {
 
                 // Initialize loop variable to start
                 self.emit_expr(start);
-                self.func.instruction(&Instruction::LocalSet(loop_var));
+                wasm!(self.func, { local_set(loop_var); });
 
                 // block $break { loop $loop { check; block $continue { body }; i++; br $loop } }
                 let break_depth = self.depth;
-                self.func.instruction(&Instruction::Block(BlockType::Empty));
+                wasm!(self.func, { block_empty; });
                 self.depth += 1;
 
                 let loop_depth = self.depth;
-                self.func.instruction(&Instruction::Loop(BlockType::Empty));
+                wasm!(self.func, { loop_empty; });
                 self.depth += 1;
 
                 // Break condition
-                self.func.instruction(&Instruction::LocalGet(loop_var));
+                wasm!(self.func, { local_get(loop_var); });
                 self.emit_expr(end);
                 if *inclusive {
-                    self.func.instruction(&Instruction::I64GtS);
+                    wasm!(self.func, { i64_gt_s; });
                 } else {
-                    self.func.instruction(&Instruction::I64GeS);
+                    wasm!(self.func, { i64_ge_s; });
                 }
-                self.func.instruction(&Instruction::BrIf(self.depth - break_depth - 1));
+                wasm!(self.func, { br_if(self.depth - break_depth - 1); });
 
                 // Inner block for continue target
                 let continue_depth = self.depth;
-                self.func.instruction(&Instruction::Block(BlockType::Empty));
+                wasm!(self.func, { block_empty; });
                 self.depth += 1;
 
                 self.loop_stack.push(super::LoopLabels { break_depth, continue_depth });
@@ -51,21 +52,23 @@ impl FuncCompiler<'_> {
 
                 self.loop_stack.pop();
                 self.depth -= 1;
-                self.func.instruction(&Instruction::End); // end continue block
+                wasm!(self.func, { end; }); // end continue block
 
                 // Increment: var += 1 (always runs, even after continue)
-                self.func.instruction(&Instruction::LocalGet(loop_var));
-                self.func.instruction(&Instruction::I64Const(1));
-                self.func.instruction(&Instruction::I64Add);
-                self.func.instruction(&Instruction::LocalSet(loop_var));
+                wasm!(self.func, {
+                    local_get(loop_var);
+                    i64_const(1);
+                    i64_add;
+                    local_set(loop_var);
+                });
 
                 // Loop back
-                self.func.instruction(&Instruction::Br(self.depth - loop_depth - 1));
+                wasm!(self.func, { br(self.depth - loop_depth - 1); });
 
                 self.depth -= 1;
-                self.func.instruction(&Instruction::End); // end loop
+                wasm!(self.func, { end; }); // end loop
                 self.depth -= 1;
-                self.func.instruction(&Instruction::End); // end break block
+                wasm!(self.func, { end; }); // end break block
             }
             _ => {
                 // List (or other collection) for...in
@@ -80,41 +83,45 @@ impl FuncCompiler<'_> {
 
                 // Evaluate iterable and store list ptr
                 self.emit_expr(iterable);
-                self.func.instruction(&Instruction::LocalSet(list_scratch));
+                wasm!(self.func, { local_set(list_scratch); });
 
                 // Initialize index = 0
-                self.func.instruction(&Instruction::I32Const(0));
-                self.func.instruction(&Instruction::LocalSet(idx_scratch));
+                wasm!(self.func, {
+                    i32_const(0);
+                    local_set(idx_scratch);
+                });
 
                 // Structure: block $break { loop $loop { check; load; block $continue { body }; i++; br $loop } }
                 // continue → br to $continue end (skips rest of body, runs i++)
                 let break_depth = self.depth;
-                self.func.instruction(&Instruction::Block(BlockType::Empty));
+                wasm!(self.func, { block_empty; });
                 self.depth += 1;
 
                 let loop_depth = self.depth;
-                self.func.instruction(&Instruction::Loop(BlockType::Empty));
+                wasm!(self.func, { loop_empty; });
                 self.depth += 1;
 
                 // Break if index >= len
-                self.func.instruction(&Instruction::LocalGet(idx_scratch));
-                self.func.instruction(&Instruction::LocalGet(list_scratch));
-                self.func.instruction(&Instruction::I32Load(MemArg {
-                    offset: 0, align: 2, memory_index: 0,
-                }));
-                self.func.instruction(&Instruction::I32GeU);
-                self.func.instruction(&Instruction::BrIf(self.depth - break_depth - 1));
+                wasm!(self.func, {
+                    local_get(idx_scratch);
+                    local_get(list_scratch);
+                    i32_load(0);
+                    i32_ge_u;
+                    br_if(self.depth - break_depth - 1);
+                });
 
                 // Load element
-                self.func.instruction(&Instruction::LocalGet(list_scratch));
-                self.func.instruction(&Instruction::I32Const(4));
-                self.func.instruction(&Instruction::I32Add);
-                self.func.instruction(&Instruction::LocalGet(idx_scratch));
-                self.func.instruction(&Instruction::I32Const(elem_size as i32));
-                self.func.instruction(&Instruction::I32Mul);
-                self.func.instruction(&Instruction::I32Add);
+                wasm!(self.func, {
+                    local_get(list_scratch);
+                    i32_const(4);
+                    i32_add;
+                    local_get(idx_scratch);
+                    i32_const(elem_size as i32);
+                    i32_mul;
+                    i32_add;
+                });
                 self.emit_load_at(&elem_ty, 0);
-                self.func.instruction(&Instruction::LocalSet(loop_var));
+                wasm!(self.func, { local_set(loop_var); });
 
                 // Tuple destructure
                 if let Some(tuple_vars) = var_tuple {
@@ -123,9 +130,9 @@ impl FuncCompiler<'_> {
                         for (i, &tv) in tuple_vars.iter().enumerate() {
                             if let Some(&local_idx) = self.var_map.get(&tv.0) {
                                 let ft = elem_types.get(i).cloned().unwrap_or(Ty::Int);
-                                self.func.instruction(&Instruction::LocalGet(loop_var));
+                                wasm!(self.func, { local_get(loop_var); });
                                 self.emit_load_at(&ft, field_offset);
-                                self.func.instruction(&Instruction::LocalSet(local_idx));
+                                wasm!(self.func, { local_set(local_idx); });
                                 field_offset += values::byte_size(&ft);
                             }
                         }
@@ -134,7 +141,7 @@ impl FuncCompiler<'_> {
 
                 // Inner block for continue target
                 let continue_depth = self.depth;
-                self.func.instruction(&Instruction::Block(BlockType::Empty));
+                wasm!(self.func, { block_empty; });
                 self.depth += 1;
 
                 self.loop_stack.push(super::LoopLabels { break_depth, continue_depth });
@@ -146,21 +153,23 @@ impl FuncCompiler<'_> {
 
                 self.loop_stack.pop();
                 self.depth -= 1;
-                self.func.instruction(&Instruction::End); // end continue block
+                wasm!(self.func, { end; }); // end continue block
 
                 // Increment index (always runs, even after continue)
-                self.func.instruction(&Instruction::LocalGet(idx_scratch));
-                self.func.instruction(&Instruction::I32Const(1));
-                self.func.instruction(&Instruction::I32Add);
-                self.func.instruction(&Instruction::LocalSet(idx_scratch));
+                wasm!(self.func, {
+                    local_get(idx_scratch);
+                    i32_const(1);
+                    i32_add;
+                    local_set(idx_scratch);
+                });
 
                 // Loop back
-                self.func.instruction(&Instruction::Br(self.depth - loop_depth - 1));
+                wasm!(self.func, { br(self.depth - loop_depth - 1); });
 
                 self.depth -= 1;
-                self.func.instruction(&Instruction::End); // end loop
+                wasm!(self.func, { end; }); // end loop
                 self.depth -= 1;
-                self.func.instruction(&Instruction::End); // end break block
+                wasm!(self.func, { end; }); // end break block
             }
         }
     }
@@ -184,7 +193,7 @@ impl FuncCompiler<'_> {
         };
         self.match_depth += 1;
 
-        self.func.instruction(&Instruction::LocalSet(scratch));
+        wasm!(self.func, { local_set(scratch); });
 
         self.emit_match_arms(arms, scratch, &subject_ty, result_ty, 0);
 
@@ -222,7 +231,7 @@ impl FuncCompiler<'_> {
     ) {
         if idx >= arms.len() {
             // No arms matched — should not happen with exhaustive match
-            self.func.instruction(&Instruction::Unreachable);
+            wasm!(self.func, { unreachable; });
             return;
         }
 
@@ -243,8 +252,10 @@ impl FuncCompiler<'_> {
                     let subj_vt = values::ty_to_valtype(subject_ty);
                     // Only bind if types match, or var type is Unknown (trust subject)
                     if var_vt == subj_vt || matches!(var_ty, Ty::Unknown) {
-                        self.func.instruction(&Instruction::LocalGet(scratch));
-                        self.func.instruction(&Instruction::LocalSet(local_idx));
+                        wasm!(self.func, {
+                            local_get(scratch);
+                            local_set(local_idx);
+                        });
                     }
                 }
                 // Handle guard condition
@@ -254,14 +265,14 @@ impl FuncCompiler<'_> {
                     self.func.instruction(&Instruction::If(bt));
                     self.depth += 1;
                     self.emit_expr(&arm.body);
-                    self.func.instruction(&Instruction::Else);
+                    wasm!(self.func, { else_; });
                     if is_last {
-                        self.func.instruction(&Instruction::Unreachable);
+                        wasm!(self.func, { unreachable; });
                     } else {
                         self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1);
                     }
                     self.depth -= 1;
-                    self.func.instruction(&Instruction::End);
+                    wasm!(self.func, { end; });
                 } else {
                     self.emit_expr(&arm.body);
                 }
@@ -270,46 +281,46 @@ impl FuncCompiler<'_> {
             // Literal: compare subject to literal, if-else
             IrPattern::Literal { expr: lit_expr } => {
                 // Push subject
-                self.func.instruction(&Instruction::LocalGet(scratch));
+                wasm!(self.func, { local_get(scratch); });
                 // Push literal
                 self.emit_expr(lit_expr);
                 // Compare
                 match subject_ty {
-                    Ty::Int => { self.func.instruction(&Instruction::I64Eq); }
-                    Ty::Float => { self.func.instruction(&Instruction::F64Eq); }
-                    Ty::Bool => { self.func.instruction(&Instruction::I32Eq); }
+                    Ty::Int => { wasm!(self.func, { i64_eq; }); }
+                    Ty::Float => { wasm!(self.func, { f64_eq; }); }
+                    Ty::Bool => { wasm!(self.func, { i32_eq; }); }
                     Ty::String => {
                         // String equality: compare pointers (interned literals are deduped)
-                        self.func.instruction(&Instruction::I32Eq);
+                        wasm!(self.func, { i32_eq; });
                     }
-                    _ => { self.func.instruction(&Instruction::I32Eq); }
+                    _ => { wasm!(self.func, { i32_eq; }); }
                 }
 
                 let bt = values::block_type(result_ty);
                 self.func.instruction(&Instruction::If(bt));
                 self.depth += 1;
                 self.emit_expr(&arm.body);
-                self.func.instruction(&Instruction::Else);
+                wasm!(self.func, { else_; });
 
                 if is_last {
-                    self.func.instruction(&Instruction::Unreachable);
+                    wasm!(self.func, { unreachable; });
                 } else {
                     self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1);
                 }
 
                 self.depth -= 1;
-                self.func.instruction(&Instruction::End);
+                wasm!(self.func, { end; });
             }
 
             // Constructor pattern (e.g., Circle(r), Red)
             IrPattern::Constructor { name: ctor_name, args } => {
                 if let Some(tag_val) = self.find_variant_tag_by_ctor(ctor_name, subject_ty) {
-                    self.func.instruction(&Instruction::LocalGet(scratch));
-                    self.func.instruction(&Instruction::I32Load(MemArg {
-                        offset: 0, align: 2, memory_index: 0,
-                    }));
-                    self.func.instruction(&Instruction::I32Const(tag_val as i32));
-                    self.func.instruction(&Instruction::I32Eq);
+                    wasm!(self.func, {
+                        local_get(scratch);
+                        i32_load(0);
+                        i32_const(tag_val as i32);
+                        i32_eq;
+                    });
 
                     let bt = values::block_type(result_ty);
                     self.func.instruction(&Instruction::If(bt));
@@ -321,9 +332,9 @@ impl FuncCompiler<'_> {
                         if let IrPattern::Bind { var } = arg_pat {
                             if let Some(&local_idx) = self.var_map.get(&var.0) {
                                 let var_ty = self.var_table.get(*var).ty.clone();
-                                self.func.instruction(&Instruction::LocalGet(scratch));
+                                wasm!(self.func, { local_get(scratch); });
                                 self.emit_load_at(&var_ty, field_offset);
-                                self.func.instruction(&Instruction::LocalSet(local_idx));
+                                wasm!(self.func, { local_set(local_idx); });
                                 field_offset += values::byte_size(&var_ty);
                             }
                         } else if let IrPattern::Wildcard = arg_pat {
@@ -340,35 +351,37 @@ impl FuncCompiler<'_> {
                         self.func.instruction(&Instruction::If(bt2));
                         self.depth += 1;
                         self.emit_expr(&arm.body);
-                        self.func.instruction(&Instruction::Else);
-                        if is_last { self.func.instruction(&Instruction::Unreachable); }
+                        wasm!(self.func, { else_; });
+                        if is_last { wasm!(self.func, { unreachable; }); }
                         else { self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1); }
                         self.depth -= 1;
-                        self.func.instruction(&Instruction::End);
+                        wasm!(self.func, { end; });
                     } else {
                         self.emit_expr(&arm.body);
                     }
-                    self.func.instruction(&Instruction::Else);
+                    wasm!(self.func, { else_; });
                     if is_last {
-                        self.func.instruction(&Instruction::Unreachable);
+                        wasm!(self.func, { unreachable; });
                     } else {
                         self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1);
                     }
                     self.depth -= 1;
-                    self.func.instruction(&Instruction::End);
+                    wasm!(self.func, { end; });
                 } else if is_last {
                     self.emit_expr(&arm.body);
                 } else {
-                    self.func.instruction(&Instruction::Unreachable);
+                    wasm!(self.func, { unreachable; });
                 }
             }
 
             // Some(x) pattern (Option)
             IrPattern::Some { inner } => {
                 // some(x) is a non-null pointer. Check ptr != 0, then load value.
-                self.func.instruction(&Instruction::LocalGet(scratch));
-                self.func.instruction(&Instruction::I32Const(0));
-                self.func.instruction(&Instruction::I32Ne);
+                wasm!(self.func, {
+                    local_get(scratch);
+                    i32_const(0);
+                    i32_ne;
+                });
                 let bt = values::block_type(result_ty);
                 self.func.instruction(&Instruction::If(bt));
                 self.depth += 1;
@@ -379,9 +392,9 @@ impl FuncCompiler<'_> {
                         let inner_ty = if let Ty::Applied(_, args) = subject_ty {
                             args.first().cloned().unwrap_or(Ty::Int)
                         } else { Ty::Int };
-                        self.func.instruction(&Instruction::LocalGet(scratch));
+                        wasm!(self.func, { local_get(scratch); });
                         self.emit_load_at(&inner_ty, 0);
-                        self.func.instruction(&Instruction::LocalSet(local_idx));
+                        wasm!(self.func, { local_set(local_idx); });
                     }
                 }
 
@@ -392,45 +405,47 @@ impl FuncCompiler<'_> {
                     self.func.instruction(&Instruction::If(bt2));
                     self.depth += 1;
                     self.emit_expr(&arm.body);
-                    self.func.instruction(&Instruction::Else);
+                    wasm!(self.func, { else_; });
                     if is_last {
-                        self.func.instruction(&Instruction::Unreachable);
+                        wasm!(self.func, { unreachable; });
                     } else {
                         self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1);
                     }
                     self.depth -= 1;
-                    self.func.instruction(&Instruction::End);
+                    wasm!(self.func, { end; });
                 } else {
                     self.emit_expr(&arm.body);
                 }
 
-                self.func.instruction(&Instruction::Else);
+                wasm!(self.func, { else_; });
                 if is_last {
-                    self.func.instruction(&Instruction::Unreachable);
+                    wasm!(self.func, { unreachable; });
                 } else {
                     self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1);
                 }
                 self.depth -= 1;
-                self.func.instruction(&Instruction::End);
+                wasm!(self.func, { end; });
             }
 
             // None pattern (Option)
             IrPattern::None => {
                 // None is represented as i32 0
-                self.func.instruction(&Instruction::LocalGet(scratch));
-                self.func.instruction(&Instruction::I32Eqz);
+                wasm!(self.func, {
+                    local_get(scratch);
+                    i32_eqz;
+                });
                 let bt = values::block_type(result_ty);
                 self.func.instruction(&Instruction::If(bt));
                 self.depth += 1;
                 self.emit_expr(&arm.body);
-                self.func.instruction(&Instruction::Else);
+                wasm!(self.func, { else_; });
                 if is_last {
-                    self.func.instruction(&Instruction::Unreachable);
+                    wasm!(self.func, { unreachable; });
                 } else {
                     self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1);
                 }
                 self.depth -= 1;
-                self.func.instruction(&Instruction::End);
+                wasm!(self.func, { end; });
             }
 
             // RecordPattern: variant constructor match (e.g., Circle { radius })
@@ -440,12 +455,12 @@ impl FuncCompiler<'_> {
 
                 if let Some(tag_val) = tag {
                     // Load tag from subject pointer
-                    self.func.instruction(&Instruction::LocalGet(scratch));
-                    self.func.instruction(&Instruction::I32Load(MemArg {
-                        offset: 0, align: 2, memory_index: 0,
-                    }));
-                    self.func.instruction(&Instruction::I32Const(tag_val as i32));
-                    self.func.instruction(&Instruction::I32Eq);
+                    wasm!(self.func, {
+                        local_get(scratch);
+                        i32_load(0);
+                        i32_const(tag_val as i32);
+                        i32_eq;
+                    });
 
                     let bt = values::block_type(result_ty);
                     self.func.instruction(&Instruction::If(bt));
@@ -457,37 +472,25 @@ impl FuncCompiler<'_> {
                         // Find the field in the case's fields
                         if let Some((foff, fty)) = values::field_offset(&case_fields, &pf.name) {
                             let total_offset = 4 + foff; // 4 = tag size
-                            // Look up VarId for this field name in var_map
-                            // The pattern binds to a var with the same name
-                            // We need to find the VarId — it should be in var_map
-                            // The IR guarantees pattern fields create bindings in var_table
-                            // with the field name. We search by checking all var_map entries.
-                            // Actually, the var_table is indexed by VarId and has names.
-                            // We need to find the VarId that was allocated for this field name.
-                            // The scan_pattern in statements.rs should have registered it.
-                            // For now, find the local by searching var_map for the right VarId.
-
-                            // Simple approach: find the VarId from var_map whose name matches
-                            // This is set up by scan_pattern which registers field bindings
                             if let Some(&local_idx) = self.find_var_by_field(&pf.name, &case_fields) {
-                                self.func.instruction(&Instruction::LocalGet(scratch));
+                                wasm!(self.func, { local_get(scratch); });
                                 self.emit_load_at(&fty, total_offset);
-                                self.func.instruction(&Instruction::LocalSet(local_idx));
+                                wasm!(self.func, { local_set(local_idx); });
                             }
                         }
                     }
 
                     self.emit_expr(&arm.body);
-                    self.func.instruction(&Instruction::Else);
+                    wasm!(self.func, { else_; });
 
                     if is_last {
-                        self.func.instruction(&Instruction::Unreachable);
+                        wasm!(self.func, { unreachable; });
                     } else {
                         self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1);
                     }
 
                     self.depth -= 1;
-                    self.func.instruction(&Instruction::End);
+                    wasm!(self.func, { end; });
                 } else {
                     // Not a variant — treat as plain record (always matches)
                     self.emit_expr(&arm.body);
@@ -497,9 +500,11 @@ impl FuncCompiler<'_> {
             // Ok(x) pattern (Result)
             IrPattern::Ok { inner } => {
                 // Result ok = tag 0. Check tag, then bind value.
-                self.func.instruction(&Instruction::LocalGet(scratch));
-                self.func.instruction(&Instruction::I32Load(MemArg { offset: 0, align: 2, memory_index: 0 }));
-                self.func.instruction(&Instruction::I32Eqz); // tag == 0
+                wasm!(self.func, {
+                    local_get(scratch);
+                    i32_load(0);
+                    i32_eqz;
+                });
                 let bt = values::block_type(result_ty);
                 self.func.instruction(&Instruction::If(bt));
                 self.depth += 1;
@@ -508,9 +513,9 @@ impl FuncCompiler<'_> {
                         let inner_ty = if let Ty::Applied(_, args) = subject_ty {
                             args.first().cloned().unwrap_or(Ty::Int)
                         } else { Ty::Int };
-                        self.func.instruction(&Instruction::LocalGet(scratch));
+                        wasm!(self.func, { local_get(scratch); });
                         self.emit_load_at(&inner_ty, 4);
-                        self.func.instruction(&Instruction::LocalSet(local_idx));
+                        wasm!(self.func, { local_set(local_idx); });
                     }
                 }
                 if let Some(guard) = &arm.guard {
@@ -519,27 +524,29 @@ impl FuncCompiler<'_> {
                     self.func.instruction(&Instruction::If(bt2));
                     self.depth += 1;
                     self.emit_expr(&arm.body);
-                    self.func.instruction(&Instruction::Else);
-                    if is_last { self.func.instruction(&Instruction::Unreachable); }
+                    wasm!(self.func, { else_; });
+                    if is_last { wasm!(self.func, { unreachable; }); }
                     else { self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1); }
                     self.depth -= 1;
-                    self.func.instruction(&Instruction::End);
+                    wasm!(self.func, { end; });
                 } else {
                     self.emit_expr(&arm.body);
                 }
-                self.func.instruction(&Instruction::Else);
-                if is_last { self.func.instruction(&Instruction::Unreachable); }
+                wasm!(self.func, { else_; });
+                if is_last { wasm!(self.func, { unreachable; }); }
                 else { self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1); }
                 self.depth -= 1;
-                self.func.instruction(&Instruction::End);
+                wasm!(self.func, { end; });
             }
 
             // Err(e) pattern (Result)
             IrPattern::Err { inner } => {
-                self.func.instruction(&Instruction::LocalGet(scratch));
-                self.func.instruction(&Instruction::I32Load(MemArg { offset: 0, align: 2, memory_index: 0 }));
-                self.func.instruction(&Instruction::I32Const(0));
-                self.func.instruction(&Instruction::I32Ne);
+                wasm!(self.func, {
+                    local_get(scratch);
+                    i32_load(0);
+                    i32_const(0);
+                    i32_ne;
+                });
                 let bt = values::block_type(result_ty);
                 self.func.instruction(&Instruction::If(bt));
                 self.depth += 1;
@@ -548,9 +555,9 @@ impl FuncCompiler<'_> {
                         let inner_ty = if let Ty::Applied(_, args) = subject_ty {
                             args.get(1).cloned().unwrap_or(Ty::String)
                         } else { Ty::String };
-                        self.func.instruction(&Instruction::LocalGet(scratch));
+                        wasm!(self.func, { local_get(scratch); });
                         self.emit_load_at(&inner_ty, 4);
-                        self.func.instruction(&Instruction::LocalSet(local_idx));
+                        wasm!(self.func, { local_set(local_idx); });
                     }
                 }
                 if let Some(guard) = &arm.guard {
@@ -559,19 +566,19 @@ impl FuncCompiler<'_> {
                     self.func.instruction(&Instruction::If(bt2));
                     self.depth += 1;
                     self.emit_expr(&arm.body);
-                    self.func.instruction(&Instruction::Else);
-                    if is_last { self.func.instruction(&Instruction::Unreachable); }
+                    wasm!(self.func, { else_; });
+                    if is_last { wasm!(self.func, { unreachable; }); }
                     else { self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1); }
                     self.depth -= 1;
-                    self.func.instruction(&Instruction::End);
+                    wasm!(self.func, { end; });
                 } else {
                     self.emit_expr(&arm.body);
                 }
-                self.func.instruction(&Instruction::Else);
-                if is_last { self.func.instruction(&Instruction::Unreachable); }
+                wasm!(self.func, { else_; });
+                if is_last { wasm!(self.func, { unreachable; }); }
                 else { self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1); }
                 self.depth -= 1;
-                self.func.instruction(&Instruction::End);
+                wasm!(self.func, { end; });
             }
 
             // Tuple pattern: (a, b) => ...
@@ -583,9 +590,9 @@ impl FuncCompiler<'_> {
                         if let IrPattern::Bind { var } = elem_pat {
                             if let Some(&local_idx) = self.var_map.get(&var.0) {
                                 let ft = elem_types.get(i).cloned().unwrap_or(Ty::Int);
-                                self.func.instruction(&Instruction::LocalGet(scratch));
+                                wasm!(self.func, { local_get(scratch); });
                                 self.emit_load_at(&ft, offset);
-                                self.func.instruction(&Instruction::LocalSet(local_idx));
+                                wasm!(self.func, { local_set(local_idx); });
                                 offset += values::byte_size(&ft);
                             }
                         } else if let IrPattern::Wildcard = elem_pat {
@@ -602,7 +609,7 @@ impl FuncCompiler<'_> {
                 if is_last {
                     self.emit_expr(&arm.body);
                 } else {
-                    self.func.instruction(&Instruction::Unreachable);
+                    wasm!(self.func, { unreachable; });
                 }
             }
         }
