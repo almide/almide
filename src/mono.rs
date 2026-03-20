@@ -666,8 +666,9 @@ fn extract_typevar_binding(param_ty: &Ty, arg_ty: &Ty, var_name: &str) -> Ty {
     match (param_ty, arg_ty) {
         (Ty::TypeVar(n), _) if n == var_name => arg_ty.clone(),
         (Ty::Named(n, _), _) if n == var_name => arg_ty.clone(),
-        // OpenRecord param maps directly to the concrete arg type
+        // OpenRecord param (or its Named alias) maps directly to the concrete arg type
         (Ty::OpenRecord { .. }, _) if var_name.starts_with("__open_") => arg_ty.clone(),
+        (Ty::Named(_, _), _) if var_name.starts_with("__open_") => arg_ty.clone(),
         _ => {
             // If same constructor, recursively match type args
             if param_ty.constructor_id() == arg_ty.constructor_id() {
