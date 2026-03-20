@@ -168,8 +168,8 @@ impl FuncCompiler<'_> {
                         self.func.instruction(&Instruction::Call(self.emitter.rt.str_contains));
                     }
                     ("string", "trim") => {
-                        // Stub: return the string as-is (no whitespace handling)
                         self.emit_expr(&args[0]);
+                        self.func.instruction(&Instruction::Call(self.emitter.rt.str_trim));
                     }
                     ("string", "to_upper") | ("string", "to_lower") => {
                         // Stub: return as-is
@@ -679,6 +679,19 @@ impl FuncCompiler<'_> {
                         self.func.instruction(&Instruction::I32Load(super::expressions::mem(0)));
                         self.func.instruction(&Instruction::I64ExtendI32U);
                     }
+                    ("math", "pi") => {
+                        self.func.instruction(&Instruction::F64Const(std::f64::consts::PI));
+                    }
+                    ("math", "e") => {
+                        self.func.instruction(&Instruction::F64Const(std::f64::consts::E));
+                    }
+                    ("math", "sqrt") => {
+                        self.emit_expr(&args[0]);
+                        if matches!(&args[0].ty, Ty::Int) {
+                            self.func.instruction(&Instruction::F64ConvertI64S);
+                        }
+                        self.func.instruction(&Instruction::F64Sqrt);
+                    }
                     ("math", "abs") => {
                         self.emit_expr(&args[0]);
                         match &args[0].ty {
@@ -780,6 +793,20 @@ impl FuncCompiler<'_> {
                     "map" | "list.map" if matches!(&object.ty, Ty::Applied(_, _)) => {
                         // .map(fn) → list.map(self, fn)
                         self.emit_list_map(object, &args[0], _ret_ty);
+                    }
+                    "trim" | "string.trim" if matches!(object.ty, Ty::String) => {
+                        self.emit_expr(object);
+                        self.func.instruction(&Instruction::Call(self.emitter.rt.str_trim));
+                    }
+                    "to_upper" | "string.to_upper" | "to_lower" | "string.to_lower" if matches!(object.ty, Ty::String) => {
+                        // Stub: return as-is
+                        self.emit_expr(object);
+                    }
+                    "starts_with" | "string.starts_with" | "ends_with" | "string.ends_with" if matches!(object.ty, Ty::String) => {
+                        // Delegate to Module call handler
+                        self.emit_expr(object);
+                        for arg in args { self.emit_expr(arg); }
+                        self.func.instruction(&Instruction::Unreachable); // TODO: wire up properly
                     }
                     "contains" | "string.contains" if matches!(object.ty, Ty::String) => {
                         self.emit_expr(object);
