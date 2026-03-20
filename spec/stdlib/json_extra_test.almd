@@ -1,0 +1,230 @@
+// json extra tests — get, get_string, get_int, get_bool, get_float, get_array, keys, as_*, null, stringify_pretty, path API
+
+test "json.get existing key" {
+  let obj = json.object([("name", json.from_string("Alice"))])
+  let v = json.get(obj, "name")
+  assert_eq(option.is_some(v), true)
+}
+
+test "json.get missing key" {
+  let obj = json.object([("name", json.from_string("Alice"))])
+  let v = json.get(obj, "age")
+  assert_eq(option.is_none(v), true)
+}
+
+test "json.get_string existing" {
+  let obj = json.object([("name", json.from_string("Bob"))])
+  assert_eq(json.get_string(obj, "name"), some("Bob"))
+}
+
+test "json.get_string missing" {
+  let obj = json.object([("x", json.from_int(1))])
+  assert_eq(json.get_string(obj, "y"), none)
+}
+
+test "json.get_string wrong type" {
+  let obj = json.object([("val", json.from_int(42))])
+  assert_eq(json.get_string(obj, "val"), none)
+}
+
+test "json.get_int existing" {
+  let obj = json.object([("age", json.from_int(25))])
+  assert_eq(json.get_int(obj, "age"), some(25))
+}
+
+test "json.get_int missing" {
+  let obj = json.object([("name", json.from_string("A"))])
+  assert_eq(json.get_int(obj, "age"), none)
+}
+
+test "json.get_int wrong type" {
+  let obj = json.object([("age", json.from_string("25"))])
+  assert_eq(json.get_int(obj, "age"), none)
+}
+
+test "json.get_bool existing true" {
+  let obj = json.object([("active", json.from_bool(true))])
+  assert_eq(json.get_bool(obj, "active"), some(true))
+}
+
+test "json.get_bool existing false" {
+  let obj = json.object([("active", json.from_bool(false))])
+  assert_eq(json.get_bool(obj, "active"), some(false))
+}
+
+test "json.get_bool missing" {
+  let obj = json.object([("x", json.from_int(1))])
+  assert_eq(json.get_bool(obj, "active"), none)
+}
+
+test "json.get_float existing" {
+  let obj = json.object([("score", json.from_float(9.5))])
+  let r = json.get_float(obj, "score")
+  assert_eq(option.is_some(r), true)
+}
+
+test "json.get_float missing" {
+  let obj = json.object([("x", json.from_int(1))])
+  assert_eq(json.get_float(obj, "score"), none)
+}
+
+test "json.get_array existing" {
+  let arr = json.array([json.from_int(1), json.from_int(2)])
+  let obj = json.object([("items", arr)])
+  let r = json.get_array(obj, "items")
+  assert_eq(option.is_some(r), true)
+}
+
+test "json.get_array missing" {
+  let obj = json.object([("x", json.from_int(1))])
+  assert_eq(json.get_array(obj, "items"), none)
+}
+
+test "json.keys of object" {
+  let obj = json.object([("a", json.from_int(1)), ("b", json.from_int(2))])
+  let ks = json.keys(obj)
+  assert_eq(list.len(ks), 2)
+  assert_eq(list.contains(ks, "a"), true)
+  assert_eq(list.contains(ks, "b"), true)
+}
+
+test "json.keys of empty object" {
+  let obj = json.object([])
+  let ks = json.keys(obj)
+  assert_eq(list.len(ks), 0)
+}
+
+test "json.as_string on string value" {
+  let v = json.from_string("hello")
+  assert_eq(json.as_string(v), some("hello"))
+}
+
+test "json.as_string on non-string" {
+  let v = json.from_int(42)
+  assert_eq(json.as_string(v), none)
+}
+
+test "json.as_int on int value" {
+  let v = json.from_int(99)
+  assert_eq(json.as_int(v), some(99))
+}
+
+test "json.as_int on non-int" {
+  let v = json.from_string("99")
+  assert_eq(json.as_int(v), none)
+}
+
+test "json.as_bool on bool value" {
+  let v = json.from_bool(true)
+  assert_eq(json.as_bool(v), some(true))
+}
+
+test "json.as_bool on non-bool" {
+  let v = json.from_int(1)
+  assert_eq(json.as_bool(v), none)
+}
+
+test "json.as_float on float value" {
+  let v = json.from_float(2.71)
+  let r = json.as_float(v)
+  assert_eq(option.is_some(r), true)
+}
+
+test "json.as_float on non-float" {
+  let v = json.from_string("2.71")
+  assert_eq(json.as_float(v), none)
+}
+
+test "json.as_array on array value" {
+  let v = json.array([json.from_int(1), json.from_int(2)])
+  let r = json.as_array(v)
+  assert_eq(option.is_some(r), true)
+}
+
+test "json.as_array on non-array" {
+  let v = json.from_int(42)
+  assert_eq(json.as_array(v), none)
+}
+
+test "json.null creates null value" {
+  let v = json.null()
+  assert_eq(json.stringify(v), "null")
+}
+
+test "json.stringify_pretty formats" {
+  let obj = json.object([("key", json.from_int(1))])
+  let s = json.stringify_pretty(obj)
+  assert_eq(string.contains(s, "key"), true)
+  assert_eq(string.contains(s, "1"), true)
+}
+
+test "json.object empty" {
+  let obj = json.object([])
+  assert_eq(json.stringify(obj), "{}")
+}
+
+test "json.parse roundtrip array" {
+  let arr = json.array([json.from_string("a"), json.from_string("b")])
+  let text = json.stringify(arr)
+  match json.parse(text) {
+    ok(v) => {
+      let items = json.as_array(v)
+      assert_eq(option.is_some(items), true)
+    }
+    err(_) => assert(false, "roundtrip failed")
+  }
+}
+
+test "json.get_array then iterate" {
+  let arr = json.array([json.from_int(10), json.from_int(20)])
+  let obj = json.object([("nums", arr)])
+  match json.get_array(obj, "nums") {
+    some(items) => assert_eq(list.len(items), 2),
+    none => assert(false, "should find array"),
+  }
+}
+
+test "json.parse nested object" {
+  match json.parse(r"""{"user": {"name": "Alice", "age": 30}}""") {
+    ok(v) => {
+      let user = json.get(v, "user")
+      assert_eq(option.is_some(user), true)
+    }
+    err(_) => assert(false, "should parse")
+  }
+}
+
+test "json.parse array of objects" {
+  match json.parse(r"""[{"id": 1}, {"id": 2}]""") {
+    ok(v) => {
+      let items = json.as_array(v)
+      assert_eq(option.is_some(items), true)
+    }
+    err(_) => assert(false, "should parse")
+  }
+}
+
+test "json.stringify_pretty on nested" {
+  let inner = json.object([("x", json.from_int(1))])
+  let outer = json.object([("data", inner)])
+  let s = json.stringify_pretty(outer)
+  assert_eq(string.contains(s, "data"), true)
+  assert_eq(string.contains(s, "x"), true)
+}
+
+test "json.from_string empty" {
+  let v = json.from_string("")
+  let s = json.stringify(v)
+  assert_eq(s, "\"\"")
+}
+
+test "json.from_int zero" {
+  let v = json.from_int(0)
+  assert_eq(json.stringify(v), "0")
+}
+
+test "json.from_int negative" {
+  let v = json.from_int(-42)
+  let s = json.stringify(v)
+  assert_eq(string.contains(s, "-42"), true)
+}
