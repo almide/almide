@@ -272,7 +272,7 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
             crate::ir::IrTypeDeclKind::Variant { cases, .. } => {
                 let mut variant_cases = Vec::new();
                 for (tag, case) in cases.iter().enumerate() {
-                    let fields = match &case.kind {
+                    let fields: Vec<(String, crate::types::Ty)> = match &case.kind {
                         crate::ir::IrVariantKind::Record { fields } => {
                             fields.iter().map(|f| (f.name.clone(), f.ty.clone())).collect()
                         }
@@ -947,6 +947,9 @@ fn collect_var_refs(expr: &IrExpr, vars: &mut HashSet<u32>) {
                     IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => collect_var_refs(value, vars),
                     IrStmtKind::Expr { expr } => collect_var_refs(expr, vars),
                     IrStmtKind::Guard { cond, else_ } => { collect_var_refs(cond, vars); collect_var_refs(else_, vars); }
+                    IrStmtKind::IndexAssign { index, value, .. } => { collect_var_refs(index, vars); collect_var_refs(value, vars); }
+                    IrStmtKind::FieldAssign { value, .. } => collect_var_refs(value, vars),
+                    IrStmtKind::BindDestructure { value, .. } => collect_var_refs(value, vars),
                     _ => {}
                 }
             }
@@ -961,6 +964,58 @@ fn collect_var_refs(expr: &IrExpr, vars: &mut HashSet<u32>) {
             if let crate::ir::CallTarget::Computed { callee } = target { collect_var_refs(callee, vars); }
             if let crate::ir::CallTarget::Method { object, .. } = target { collect_var_refs(object, vars); }
             for a in args { collect_var_refs(a, vars); }
+        }
+        // Recurse into nested lambdas to find transitive captures
+        IrExprKind::Lambda { body, .. } => collect_var_refs(body, vars),
+        IrExprKind::Match { subject, arms } => {
+            collect_var_refs(subject, vars);
+            for arm in arms { collect_var_refs(&arm.body, vars); }
+        }
+        IrExprKind::While { cond, body } => {
+            collect_var_refs(cond, vars);
+            for stmt in body {
+                match &stmt.kind {
+                    IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => collect_var_refs(value, vars),
+                    IrStmtKind::Expr { expr } => collect_var_refs(expr, vars),
+                    IrStmtKind::Guard { cond, else_ } => { collect_var_refs(cond, vars); collect_var_refs(else_, vars); }
+                    _ => {}
+                }
+            }
+        }
+        IrExprKind::ForIn { iterable, body, .. } => {
+            collect_var_refs(iterable, vars);
+            for stmt in body {
+                match &stmt.kind {
+                    IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => collect_var_refs(value, vars),
+                    IrStmtKind::Expr { expr } => collect_var_refs(expr, vars),
+                    IrStmtKind::Guard { cond, else_ } => { collect_var_refs(cond, vars); collect_var_refs(else_, vars); }
+                    _ => {}
+                }
+            }
+        }
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } | IrExprKind::Fan { exprs: elements } => {
+            for e in elements { collect_var_refs(e, vars); }
+        }
+        IrExprKind::Record { fields, .. } | IrExprKind::SpreadRecord { fields, .. } => {
+            for (_, e) in fields { collect_var_refs(e, vars); }
+        }
+        IrExprKind::OptionSome { expr } | IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
+        | IrExprKind::Clone { expr } | IrExprKind::Deref { expr } | IrExprKind::Try { expr } => {
+            collect_var_refs(expr, vars);
+        }
+        IrExprKind::Member { object, .. } | IrExprKind::IndexAccess { object, .. }
+        | IrExprKind::TupleIndex { object, .. } => {
+            collect_var_refs(object, vars);
+        }
+        IrExprKind::StringInterp { parts } => {
+            for part in parts {
+                if let crate::ir::IrStringPart::Expr { expr } = part {
+                    collect_var_refs(expr, vars);
+                }
+            }
+        }
+        IrExprKind::MapLiteral { entries } => {
+            for (k, v) in entries { collect_var_refs(k, vars); collect_var_refs(v, vars); }
         }
         _ => {}
     }

@@ -225,14 +225,14 @@ fn count_scratch_depth(expr: &IrExpr) -> usize {
             let inner = args.iter().map(|a| count_scratch_depth(a)).max().unwrap_or(0);
             2 + inner
         }
-        // SpreadRecord needs 2 i32 scratch (result + base ptrs)
+        // SpreadRecord needs 2 i32 scratch (result + base ptrs) + 1 i64 scratch (copy counter)
         IrExprKind::SpreadRecord { base, fields, .. } => {
             let inner = fields.iter().map(|(_, e)| count_scratch_depth(e)).max().unwrap_or(0);
-            2.max(count_scratch_depth(base).max(inner))
+            2 + count_scratch_depth(base).max(inner)
         }
-        // Option/Result/Map construction uses 1 scratch slot
-        IrExprKind::OptionSome { expr } => 1.max(count_scratch_depth(expr)),
-        IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr } => 1.max(count_scratch_depth(expr)),
+        // Option/Result construction: 1 scratch + inner (scratch held while emitting inner expr)
+        IrExprKind::OptionSome { expr } => 1 + count_scratch_depth(expr),
+        IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr } => 1 + count_scratch_depth(expr),
         IrExprKind::EmptyMap => 1,
         IrExprKind::MapLiteral { entries } => {
             let inner = entries.iter()
@@ -255,13 +255,23 @@ fn count_scratch_depth(expr: &IrExpr) -> usize {
         IrExprKind::ForIn { iterable, body, .. } => {
             let b = body.iter().map(|s| count_scratch_depth_stmt(s)).max().unwrap_or(0);
             // List for...in reserves 2 scratch slots (list ptr + index counter)
-            // Body scratch is ADDED to the for_in base (match_depth += 2 before body)
+            // via match_depth += 2 BEFORE emitting iterable and body,
+            // so both iterable and body scratch are additive to the 2 reserved slots.
             let for_in_need = match &iterable.kind {
                 IrExprKind::Range { .. } => 0,
                 _ => 2,
             };
-            count_scratch_depth(iterable).max(for_in_need + b)
+            for_in_need + count_scratch_depth(iterable).max(b)
         }
+        IrExprKind::StringInterp { parts } => {
+            parts.iter().map(|p| match p {
+                crate::ir::IrStringPart::Expr { expr } => count_scratch_depth(expr),
+                _ => 0,
+            }).max().unwrap_or(0)
+        }
+        IrExprKind::Clone { expr } | IrExprKind::Deref { expr } => count_scratch_depth(expr),
+        IrExprKind::Member { object, .. } | IrExprKind::IndexAccess { object, .. }
+        | IrExprKind::TupleIndex { object, .. } => count_scratch_depth(object),
         _ => 0,
     }
 }
@@ -269,8 +279,11 @@ fn count_scratch_depth(expr: &IrExpr) -> usize {
 fn count_scratch_depth_stmt(stmt: &IrStmt) -> usize {
     match &stmt.kind {
         IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => count_scratch_depth(value),
+        IrStmtKind::BindDestructure { value, .. } => 1 + count_scratch_depth(value),
         IrStmtKind::Expr { expr } => count_scratch_depth(expr),
         IrStmtKind::Guard { cond, else_ } => count_scratch_depth(cond).max(count_scratch_depth(else_)),
+        IrStmtKind::IndexAssign { index, value, .. } => count_scratch_depth(index).max(count_scratch_depth(value)),
+        IrStmtKind::FieldAssign { value, .. } => count_scratch_depth(value),
         _ => 0,
     }
 }

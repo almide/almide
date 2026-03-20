@@ -42,7 +42,7 @@ fn unwrap_list_fn_return(list_ty: &Ty) -> Ty {
 
 
 use crate::types::{Ty, TypeConstructorId};
-use super::types::resolve_vars;
+use super::types::resolve_ty;
 use super::Checker;
 
 /// Map a built-in type to its stdlib UFCS module name.
@@ -94,7 +94,7 @@ impl Checker {
                 }
                 // UFCS method: obj.method(args) → module.method(obj, args)
                 let obj_ty = self.infer_expr(object);
-                let obj_concrete = resolve_vars(&obj_ty, &self.solutions);
+                let obj_concrete = resolve_ty(&obj_ty, &self.uf);
                 // Built-in generic types → stdlib module UFCS
                 let builtin_module = builtin_module_for_type(&obj_concrete);
                 if let Some(module) = builtin_module {
@@ -222,7 +222,7 @@ impl Checker {
             }
             "some" => Ty::option(arg_tys.first().cloned().unwrap_or_else(|| self.fresh_var())),
             "unwrap_or" if arg_tys.len() >= 2 => {
-                let concrete = resolve_vars(&arg_tys[0], &self.solutions);
+                let concrete = resolve_ty(&arg_tys[0], &self.uf);
                 match &concrete {
                     Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args[0].clone(),
                     Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
@@ -281,7 +281,7 @@ impl Checker {
                         bindings.insert(gname.clone(), gty.clone());
                     }
                 }
-                let concrete_args: Vec<Ty> = arg_tys.iter().map(|a| resolve_vars(a, &self.solutions)).collect();
+                let concrete_args: Vec<Ty> = arg_tys.iter().map(|a| resolve_ty(a, &self.uf)).collect();
                 for ((pname, pty), aty) in sig.params.iter().zip(concrete_args.iter()) {
                     self.unify_call_arg(name, pname, pty, aty, &sig.structural_bounds, &mut bindings);
                 }
@@ -346,7 +346,7 @@ impl Checker {
                     "Check the number of arguments", format!("constructor {}()", name)));
             }
             for (i, (aty, ety)) in arg_tys.iter().zip(expected_tys.iter()).enumerate() {
-                let concrete_arg = resolve_vars(aty, &self.solutions);
+                let concrete_arg = resolve_ty(aty, &self.uf);
                 if concrete_arg != Ty::Unknown && !ety.compatible(&concrete_arg) {
                     self.emit(super::err(
                         format!("{}() argument {} expects {} but got {}", name, i + 1, ety.display(), concrete_arg.display()),
@@ -419,19 +419,19 @@ impl Checker {
                                 "call to fan.map()".to_string()));
                             return Some(Ty::Unknown);
                         }
-                        let list_ty = resolve_vars(&arg_tys[0], &self.solutions);
+                        let list_ty = resolve_ty(&arg_tys[0], &self.uf);
                         let elem_ty = match &list_ty {
                             Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => args[0].clone(),
                             _ => Ty::Unknown,
                         };
                         // Infer return type from f's return type
-                        let fn_ty = resolve_vars(&arg_tys[1], &self.solutions);
+                        let fn_ty = resolve_ty(&arg_tys[1], &self.uf);
                         let result_elem = unwrap_fn_return(&fn_ty).unwrap_or_else(|| {
                             let ret_var = self.fresh_var();
                             self.constrain(arg_tys[1].clone(),
                                 Ty::Fn { params: vec![elem_ty], ret: Box::new(ret_var.clone()) },
                                 "fan.map callback");
-                            resolve_vars(&ret_var, &self.solutions)
+                            resolve_ty(&ret_var, &self.uf)
                         });
                         return Some(Ty::list(result_elem));
                     }
@@ -444,7 +444,7 @@ impl Checker {
                                 "call to fan.race()".to_string()));
                             return Some(Ty::Unknown);
                         }
-                        let list_ty = resolve_vars(&arg_tys[0], &self.solutions);
+                        let list_ty = resolve_ty(&arg_tys[0], &self.uf);
                         return Some(unwrap_list_fn_return(&list_ty));
                     }
                     "any" => {
@@ -456,7 +456,7 @@ impl Checker {
                                 "call to fan.any()".to_string()));
                             return Some(Ty::Unknown);
                         }
-                        let list_ty = resolve_vars(&arg_tys[0], &self.solutions);
+                        let list_ty = resolve_ty(&arg_tys[0], &self.uf);
                         return Some(unwrap_list_fn_return(&list_ty));
                     }
                     "settle" => {
@@ -468,7 +468,7 @@ impl Checker {
                                 "call to fan.settle()".to_string()));
                             return Some(Ty::Unknown);
                         }
-                        let list_ty = resolve_vars(&arg_tys[0], &self.solutions);
+                        let list_ty = resolve_ty(&arg_tys[0], &self.uf);
                         let inner_result = unwrap_list_fn_result_ty(&list_ty);
                         return Some(Ty::list(inner_result));
                     }
@@ -482,7 +482,7 @@ impl Checker {
                             return Some(Ty::Unknown);
                         }
                         self.constrain(Ty::Int, arg_tys[0].clone(), "fan.timeout ms");
-                        let fn_ty = resolve_vars(&arg_tys[1], &self.solutions);
+                        let fn_ty = resolve_ty(&arg_tys[1], &self.uf);
                         let result_ty = match &fn_ty {
                             Ty::Fn { ret, .. } => match ret.as_ref() {
                                 Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
@@ -504,7 +504,7 @@ impl Checker {
 
             // Codec convenience: json.encode(t) → String when t has T.encode
             if field == "encode" && arg_tys.len() == 1 {
-                let arg_concrete = resolve_vars(&arg_tys[0], &self.solutions);
+                let arg_concrete = resolve_ty(&arg_tys[0], &self.uf);
                 if self.has_codec_encode(&arg_concrete) {
                     return Some(Ty::String);
                 }

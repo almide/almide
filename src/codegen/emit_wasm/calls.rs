@@ -1282,8 +1282,12 @@ impl FuncCompiler<'_> {
                 if let Some(&local_idx) = self.var_map.get(&vid.0) {
                     wasm!(self.func, { local_get(local_idx); });
                 } else {
-                    // Variable not in scope — shouldn't happen
-                    wasm!(self.func, { i32_const(0); });
+                    // Variable not in scope — emit typed zero
+                    match values::ty_to_valtype(ty) {
+                        Some(ValType::I64) => { wasm!(self.func, { i64_const(0); }); }
+                        Some(ValType::F64) => { wasm!(self.func, { f64_const(0.0); }); }
+                        _ => { wasm!(self.func, { i32_const(0); }); }
+                    }
                 }
                 self.emit_store_at(ty, offset);
             }
@@ -1616,10 +1620,11 @@ impl FuncCompiler<'_> {
         // Stack: [dst_elem_addr, env_ptr, element, table_idx]
 
         // call_indirect (env, element) → result
-        if let Ty::Fn { params, ret } = &fn_arg.ty {
+        // Use concrete element types (not fn_arg.ty which may contain unresolved TypeVars)
+        {
             let mut ct = vec![ValType::I32]; // env
-            for p in params { if let Some(vt) = values::ty_to_valtype(p) { ct.push(vt); } }
-            let rt = values::ret_type(ret);
+            if let Some(vt) = values::ty_to_valtype(&in_elem_ty) { ct.push(vt); }
+            let rt = values::ret_type(&out_elem_ty);
             let ti = self.emitter.register_type(ct, rt);
             wasm!(self.func, { call_indirect(ti, 0); });
         }

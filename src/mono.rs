@@ -22,9 +22,8 @@ use crate::types::Ty;
 type MonoKey = (String, String);
 
 /// Run the monomorphization pass on an IR program.
-/// Only affects functions with structurally-bounded type parameters.
+/// Specialize generic functions for concrete type arguments at each call site.
 pub fn monomorphize(program: &mut IrProgram) {
-    // Step 1: Identify functions with structural bounds on generics
     let bound_fns = find_structurally_bounded_fns(&program.functions, &program.type_decls);
     if bound_fns.is_empty() {
         return;
@@ -51,6 +50,16 @@ pub fn monomorphize(program: &mut IrProgram) {
             if let Some(orig) = program.functions.iter().find(|f| f.name == *fn_name) {
                 let specialized = specialize_function(orig, suffix, bindings);
                 new_functions.push(specialized);
+            }
+        }
+
+        // Update VarTable types for specialized functions
+        for (func, ((_, _), bindings)) in new_functions.iter().zip(new.iter()) {
+            update_var_table_types(&func.body, bindings, &mut program.var_table);
+            for param in &func.params {
+                let old = &program.var_table.get(param.var).ty;
+                let new_ty = substitute_ty(old, bindings);
+                program.var_table.entries[param.var.0 as usize].ty = new_ty;
             }
         }
 
@@ -395,6 +404,98 @@ fn substitute_ty(ty: &Ty, bindings: &HashMap<String, Ty>) -> Ty {
         }
         // All other types: recursively substitute children
         _ => ty.map_children(&|child| substitute_ty(child, bindings)),
+    }
+}
+
+/// Update VarTable types for all variables referenced in an expression tree.
+fn update_var_table_types(expr: &IrExpr, bindings: &HashMap<String, Ty>, vt: &mut VarTable) {
+    if let IrExprKind::Var { id } = &expr.kind {
+        let old = &vt.get(*id).ty;
+        let new = substitute_ty(old, bindings);
+        if new != *old {
+            vt.entries[id.0 as usize].ty = new;
+        }
+    }
+    // Recurse using the same structure as substitute_expr_types
+    match &expr.kind {
+        IrExprKind::BinOp { left, right, .. } => { update_var_table_types(left, bindings, vt); update_var_table_types(right, bindings, vt); }
+        IrExprKind::UnOp { operand, .. } => update_var_table_types(operand, bindings, vt),
+        IrExprKind::If { cond, then, else_ } => { update_var_table_types(cond, bindings, vt); update_var_table_types(then, bindings, vt); update_var_table_types(else_, bindings, vt); }
+        IrExprKind::Match { subject, arms } => {
+            update_var_table_types(subject, bindings, vt);
+            for arm in arms {
+                update_pattern_var_types(&arm.pattern, bindings, vt);
+                if let Some(g) = &arm.guard { update_var_table_types(g, bindings, vt); }
+                update_var_table_types(&arm.body, bindings, vt);
+            }
+        }
+        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+            for s in stmts { update_stmt_var_types(s, bindings, vt); }
+            if let Some(e) = expr { update_var_table_types(e, bindings, vt); }
+        }
+        IrExprKind::Call { target, args, .. } => {
+            match target {
+                CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } => update_var_table_types(object, bindings, vt),
+                _ => {}
+            }
+            for a in args { update_var_table_types(a, bindings, vt); }
+        }
+        IrExprKind::ForIn { var, var_tuple, iterable, body } => {
+            // Update loop variable types
+            let new = substitute_ty(&vt.get(*var).ty, bindings);
+            vt.entries[var.0 as usize].ty = new;
+            if let Some(tvs) = var_tuple { for tv in tvs { vt.entries[tv.0 as usize].ty = substitute_ty(&vt.get(*tv).ty, bindings); } }
+            update_var_table_types(iterable, bindings, vt);
+            for s in body { update_stmt_var_types(s, bindings, vt); }
+        }
+        IrExprKind::While { cond, body } => {
+            update_var_table_types(cond, bindings, vt);
+            for s in body { update_stmt_var_types(s, bindings, vt); }
+        }
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => { for e in elements { update_var_table_types(e, bindings, vt); } }
+        IrExprKind::Record { fields, .. } | IrExprKind::SpreadRecord { fields, .. } => { for (_, e) in fields { update_var_table_types(e, bindings, vt); } }
+        IrExprKind::Lambda { body, .. } => update_var_table_types(body, bindings, vt),
+        IrExprKind::OptionSome { expr } | IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
+        | IrExprKind::Try { expr } | IrExprKind::Await { expr } | IrExprKind::Clone { expr } | IrExprKind::Deref { expr } => {
+            update_var_table_types(expr, bindings, vt);
+        }
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } | IrExprKind::IndexAccess { object, .. } => {
+            update_var_table_types(object, bindings, vt);
+        }
+        IrExprKind::MapLiteral { entries } => { for (k, v) in entries { update_var_table_types(k, bindings, vt); update_var_table_types(v, bindings, vt); } }
+        IrExprKind::StringInterp { parts } => { for p in parts { if let IrStringPart::Expr { expr } = p { update_var_table_types(expr, bindings, vt); } } }
+        _ => {}
+    }
+}
+
+fn update_pattern_var_types(pattern: &IrPattern, bindings: &HashMap<String, Ty>, vt: &mut VarTable) {
+    match pattern {
+        IrPattern::Bind { var } => { vt.entries[var.0 as usize].ty = substitute_ty(&vt.get(*var).ty, bindings); }
+        IrPattern::Constructor { args, .. } => { for a in args { update_pattern_var_types(a, bindings, vt); } }
+        IrPattern::Tuple { elements } => { for e in elements { update_pattern_var_types(e, bindings, vt); } }
+        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => { update_pattern_var_types(inner, bindings, vt); }
+        IrPattern::RecordPattern { fields, .. } => { for f in fields { if let Some(p) = &f.pattern { update_pattern_var_types(p, bindings, vt); } } }
+        _ => {}
+    }
+}
+
+fn update_stmt_var_types(stmt: &IrStmt, bindings: &HashMap<String, Ty>, vt: &mut VarTable) {
+    match &stmt.kind {
+        IrStmtKind::Bind { var, value, .. } => {
+            vt.entries[var.0 as usize].ty = substitute_ty(&vt.get(*var).ty, bindings);
+            update_var_table_types(value, bindings, vt);
+        }
+        IrStmtKind::BindDestructure { value, pattern, .. } => {
+            update_pattern_var_types(pattern, bindings, vt);
+            update_var_table_types(value, bindings, vt);
+        }
+        IrStmtKind::Assign { value, .. } => update_var_table_types(value, bindings, vt),
+        IrStmtKind::IndexAssign { index, value, .. } => { update_var_table_types(index, bindings, vt); update_var_table_types(value, bindings, vt); }
+        IrStmtKind::MapInsert { key, value, .. } => { update_var_table_types(key, bindings, vt); update_var_table_types(value, bindings, vt); }
+        IrStmtKind::FieldAssign { value, .. } => update_var_table_types(value, bindings, vt),
+        IrStmtKind::Expr { expr } => update_var_table_types(expr, bindings, vt),
+        IrStmtKind::Guard { cond, else_ } => { update_var_table_types(cond, bindings, vt); update_var_table_types(else_, bindings, vt); }
+        IrStmtKind::Comment { .. } => {}
     }
 }
 
