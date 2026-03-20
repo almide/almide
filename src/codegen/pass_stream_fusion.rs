@@ -797,7 +797,7 @@ fn compose_filter_map_into_fold(fm: &IrExpr, g: &IrExpr, vt: &mut VarTable) -> O
         let fm_call = *fm_body.clone();
         let v_var = vt.alloc("__fused_v".into(), g_acc_ty.clone(), Mutability::Let, None);
         let some_arm = IrMatchArm {
-            pattern: IrPattern::Some { inner: Box::new(IrPattern::Bind { var: v_var }) },
+            pattern: IrPattern::Some { inner: Box::new(IrPattern::Bind { var: v_var, ty: g_acc_ty.clone() }) },
             guard: None,
             body: substitute_var_in_expr(g_body, *g_elem_id, &IrExpr {
                 kind: IrExprKind::Var { id: v_var }, ty: g_acc_ty.clone(), span: None,

@@ -97,7 +97,7 @@ impl FuncCompiler<'_> {
 
                     let mut offset = 0u32;
                     for (i, elem_pat) in elements.iter().enumerate() {
-                        if let crate::ir::IrPattern::Bind { var } = elem_pat {
+                        if let crate::ir::IrPattern::Bind { var, .. } = elem_pat {
                             if let Some(&local_idx) = self.var_map.get(&var.0) {
                                 let elem_ty = elem_types.get(i).cloned().unwrap_or(crate::types::Ty::Int);
                                 wasm!(self.func, { local_get(scratch); });
@@ -430,7 +430,7 @@ fn scan_destructure_pattern(pattern: &crate::ir::IrPattern, value_ty: &crate::ty
                 scan_destructure_pattern(elem, &elem_ty, locals, vt);
             }
         }
-        crate::ir::IrPattern::Bind { var } => {
+        crate::ir::IrPattern::Bind { var, .. } => {
             if let Some(val_type) = values::ty_to_valtype(value_ty) {
                 locals.push((*var, val_type));
             }
@@ -442,8 +442,10 @@ fn scan_destructure_pattern(pattern: &crate::ir::IrPattern, value_ty: &crate::ty
 /// Scan a match pattern for variable bindings.
 fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::VarTable) {
     match pattern {
-        crate::ir::IrPattern::Bind { var } => {
-            if let Some(val_type) = values::ty_to_valtype(subject_ty) {
+        crate::ir::IrPattern::Bind { var, ty } => {
+            // Use pattern's own type (set by lowering, updated by mono) — no VarTable dependency
+            let effective_ty = if matches!(ty, crate::types::Ty::Unknown) { subject_ty } else { ty };
+            if let Some(val_type) = values::ty_to_valtype(effective_ty) {
                 locals.push((*var, val_type));
             }
         }
@@ -456,7 +458,7 @@ fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, l
                     // For inline Variant types, use VarTable (updated by mono propagate)
                     // as the source of truth for field types.
                     for arg in args.iter() {
-                        if let crate::ir::IrPattern::Bind { var } = arg {
+                        if let crate::ir::IrPattern::Bind { var, .. } = arg {
                             let vt_ty = &vt.get(*var).ty;
                             if let Some(val_type) = values::ty_to_valtype(vt_ty) {
                                 locals.push((*var, val_type));
@@ -468,7 +470,7 @@ fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, l
                 _ => vec![],
             };
             for (i, arg) in args.iter().enumerate() {
-                if let crate::ir::IrPattern::Bind { var } = arg {
+                if let crate::ir::IrPattern::Bind { var, .. } = arg {
                     let var_ty = vt.get(*var).ty.clone();
                     if var.0 == 107 || (ctor_name == "Right" && vt.get(*var).name == "v") {
                         eprintln!("[SCAN RIGHT] {}[{}] var={:?} '{}' vt_ty={:?} subject={:?} type_args={:?}",
@@ -501,7 +503,7 @@ fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, l
                 args.first().cloned().unwrap_or(subject_ty.clone())
             } else {
                 // subject_ty is not Applied — try VarTable for inner binding
-                if let crate::ir::IrPattern::Bind { var } = inner.as_ref() {
+                if let crate::ir::IrPattern::Bind { var, .. } = inner.as_ref() {
                     let vt_ty = &vt.get(*var).ty;
                     if !matches!(vt_ty, crate::types::Ty::Unknown | crate::types::Ty::TypeVar(_)) {
                         vt_ty.clone()
@@ -514,7 +516,7 @@ fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, l
             let inner_ty = if let crate::types::Ty::Applied(_, args) = subject_ty {
                 args.get(1).cloned().unwrap_or(subject_ty.clone())
             } else {
-                if let crate::ir::IrPattern::Bind { var } = inner.as_ref() {
+                if let crate::ir::IrPattern::Bind { var, .. } = inner.as_ref() {
                     let vt_ty = &vt.get(*var).ty;
                     if !matches!(vt_ty, crate::types::Ty::Unknown | crate::types::Ty::TypeVar(_)) {
                         vt_ty.clone()

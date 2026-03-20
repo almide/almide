@@ -791,10 +791,22 @@ impl FuncCompiler<'_> {
                     if type_args.is_empty() {
                         fields.clone()
                     } else {
-                        // Extract generic param names from field types (in order of first appearance)
+                        // Collect generic param names from ALL constructors of the variant type
+                        // (not just this ctor) for correct index mapping.
+                        // E.g., Either[A,B]: Left(A), Right(B) → gnames = ["A","B"], not just ["B"]
                         let mut generic_names: Vec<&str> = Vec::new();
-                        for (_, fty) in fields {
-                            collect_type_param_names(fty, &mut generic_names);
+                        if let Some(cases) = self.emitter.variant_info.get(name.as_str()) {
+                            for case in cases {
+                                for (_, fty) in &case.fields {
+                                    collect_type_param_names(fty, &mut generic_names);
+                                }
+                            }
+                        }
+                        if generic_names.is_empty() {
+                            // Fallback: collect from this ctor's fields only (non-variant records)
+                            for (_, fty) in fields {
+                                collect_type_param_names(fty, &mut generic_names);
+                            }
                         }
                         fields.iter().map(|(fname, fty)| {
                             let resolved = substitute_type_params(fty, &generic_names, type_args);

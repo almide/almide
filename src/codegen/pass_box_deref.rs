@@ -304,7 +304,7 @@ fn collect_deref_from_pattern(pattern: &IrPattern, enum_name: &str, td: Option<&
 
 fn collect_bind_vars(pattern: &IrPattern, deref_vars: &mut HashSet<VarId>) {
     match pattern {
-        IrPattern::Bind { var } => { deref_vars.insert(*var); }
+        IrPattern::Bind { var, .. } => { deref_vars.insert(*var); }
         IrPattern::Constructor { args, .. } => {
             for a in args { collect_bind_vars(a, deref_vars); }
         }

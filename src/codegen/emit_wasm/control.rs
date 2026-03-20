@@ -252,7 +252,7 @@ impl FuncCompiler<'_> {
             }
 
             // Bind: store subject in variable, then emit body
-            IrPattern::Bind { var } => {
+            IrPattern::Bind { var, .. } => {
                 if let Some(&local_idx) = self.var_map.get(&var.0) {
                     let var_ty = &self.var_table.get(*var).ty;
                     let var_vt = values::ty_to_valtype(var_ty);
@@ -375,15 +375,15 @@ impl FuncCompiler<'_> {
                             })
                             .unwrap_or_else(|| Ty::Int);
 
-                        if let IrPattern::Bind { var } = arg_pat {
+                        if let IrPattern::Bind { var, ty: pat_ty } = arg_pat {
                             if let Some(&local_idx) = self.var_map.get(&var.0) {
-                                eprintln!("[CTOR BIND FINAL] field_ty={:?} valtype={:?} offset={}", field_ty, values::ty_to_valtype(&field_ty), field_offset);
+                                // Use pattern's own type (set by lowering, resolved by mono)
+                                // Fall back to field_ty from variant info only if pattern type is Unknown
+                                let load_ty = if matches!(pat_ty, Ty::Unknown | Ty::TypeVar(_))
+                                    || matches!(pat_ty, Ty::Named(n, a) if a.is_empty() && n.len() <= 2)
+                                { &field_ty } else { pat_ty };
                                 wasm!(self.func, { local_get(scratch); });
-                                let vt = values::ty_to_valtype(&field_ty);
-                                if vt == Some(ValType::I32) && field_offset == 4 && matches!(values::ty_to_valtype(result_ty), Some(ValType::I64)) {
-                                    eprintln!("[BUG?] Constructor {} loading i32 at offset 4 but result expects i64. field_ty={:?} subject={:?}", ctor_name, field_ty, subject_ty);
-                                }
-                                self.emit_load_at(&field_ty, field_offset);
+                                self.emit_load_at(load_ty, field_offset);
                                 wasm!(self.func, { local_set(local_idx); });
                             }
                         }
@@ -436,7 +436,7 @@ impl FuncCompiler<'_> {
                 self.depth += 1;
 
                 // Bind the inner value
-                if let IrPattern::Bind { var } = inner.as_ref() {
+                if let IrPattern::Bind { var, .. } = inner.as_ref() {
                     if let Some(&local_idx) = self.var_map.get(&var.0) {
                         let inner_ty = if let Ty::Applied(_, args) = subject_ty {
                             args.first().cloned().unwrap_or(Ty::Int)
@@ -557,7 +557,7 @@ impl FuncCompiler<'_> {
                 let bt = values::block_type(result_ty);
                 self.func.instruction(&Instruction::If(bt));
                 self.depth += 1;
-                if let IrPattern::Bind { var } = inner.as_ref() {
+                if let IrPattern::Bind { var, .. } = inner.as_ref() {
                     if let Some(&local_idx) = self.var_map.get(&var.0) {
                         let inner_ty = if let Ty::Applied(_, args) = subject_ty {
                             args.first().cloned().unwrap_or(Ty::Int)
@@ -599,7 +599,7 @@ impl FuncCompiler<'_> {
                 let bt = values::block_type(result_ty);
                 self.func.instruction(&Instruction::If(bt));
                 self.depth += 1;
-                if let IrPattern::Bind { var } = inner.as_ref() {
+                if let IrPattern::Bind { var, .. } = inner.as_ref() {
                     if let Some(&local_idx) = self.var_map.get(&var.0) {
                         let inner_ty = if let Ty::Applied(_, args) = subject_ty {
                             args.get(1).cloned().unwrap_or(Ty::String)
@@ -636,7 +636,7 @@ impl FuncCompiler<'_> {
                 if let Ty::Tuple(elem_types) = subject_ty {
                     let mut offset = 0u32;
                     for (i, elem_pat) in elements.iter().enumerate() {
-                        if let IrPattern::Bind { var } = elem_pat {
+                        if let IrPattern::Bind { var, .. } = elem_pat {
                             if let Some(&local_idx) = self.var_map.get(&var.0) {
                                 let ft = elem_types.get(i).cloned().unwrap_or(Ty::Int);
                                 wasm!(self.func, { local_get(scratch); });

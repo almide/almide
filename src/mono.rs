@@ -589,7 +589,7 @@ fn update_var_table_types(expr: &IrExpr, bindings: &HashMap<String, Ty>, vt: &mu
 
 fn update_pattern_var_types(pattern: &IrPattern, bindings: &HashMap<String, Ty>, vt: &mut VarTable) {
     match pattern {
-        IrPattern::Bind { var } => { vt.entries[var.0 as usize].ty = substitute_ty(&vt.get(*var).ty, bindings); }
+        IrPattern::Bind { var, .. } => { vt.entries[var.0 as usize].ty = substitute_ty(&vt.get(*var).ty, bindings); }
         IrPattern::Constructor { args, .. } => { for a in args { update_pattern_var_types(a, bindings, vt); } }
         IrPattern::Tuple { elements } => { for e in elements { update_pattern_var_types(e, bindings, vt); } }
         IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => { update_pattern_var_types(inner, bindings, vt); }
@@ -634,6 +634,7 @@ fn substitute_expr_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
         IrExprKind::Match { subject, arms } => {
             substitute_expr_types(subject, bindings);
             for arm in arms {
+                substitute_pattern_types(&mut arm.pattern, bindings);
                 if let Some(g) = &mut arm.guard { substitute_expr_types(g, bindings); }
                 substitute_expr_types(&mut arm.body, bindings);
             }
@@ -717,6 +718,17 @@ fn substitute_expr_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
         IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
         | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
         | IrExprKind::Await { expr } => substitute_expr_types(expr, bindings),
+        _ => {}
+    }
+}
+
+fn substitute_pattern_types(pattern: &mut IrPattern, bindings: &HashMap<String, Ty>) {
+    match pattern {
+        IrPattern::Bind { ty, .. } => { *ty = substitute_ty(ty, bindings); }
+        IrPattern::Constructor { args, .. } => { for a in args { substitute_pattern_types(a, bindings); } }
+        IrPattern::Tuple { elements } => { for e in elements { substitute_pattern_types(e, bindings); } }
+        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => { substitute_pattern_types(inner, bindings); }
+        IrPattern::RecordPattern { fields, .. } => { for f in fields { if let Some(p) = &mut f.pattern { substitute_pattern_types(p, bindings); } } }
         _ => {}
     }
 }
@@ -1052,7 +1064,7 @@ fn propagate_expr(expr: &mut IrExpr, vt: &mut VarTable) {
             // Propagate concrete types into pattern bindings
             let subj_ty = subject.ty.clone();
             for arm in arms.iter_mut() {
-                propagate_pattern_types(&arm.pattern, &subj_ty, vt);
+                propagate_pattern_types_mut(&mut arm.pattern, &subj_ty, vt);
                 if let Some(g) = &mut arm.guard { propagate_expr(g, vt); }
                 propagate_expr(&mut arm.body, vt);
             }
@@ -1117,6 +1129,31 @@ fn propagate_expr(expr: &mut IrExpr, vt: &mut VarTable) {
     }
 }
 
+fn propagate_pattern_types_mut(pattern: &mut IrPattern, subject_ty: &Ty, vt: &mut VarTable) {
+    match pattern {
+        IrPattern::Bind { var, ty } => {
+            // Update pattern.ty from VarTable (which mono/propagate has made concrete)
+            let vt_ty = &vt.get(*var).ty;
+            if has_typevar(ty) && !has_typevar(vt_ty) {
+                *ty = vt_ty.clone();
+            }
+        }
+        IrPattern::Constructor { args, .. } => {
+            for a in args { propagate_pattern_types_mut(a, subject_ty, vt); }
+        }
+        IrPattern::Tuple { elements } => {
+            for e in elements { propagate_pattern_types_mut(e, subject_ty, vt); }
+        }
+        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => {
+            propagate_pattern_types_mut(inner, subject_ty, vt);
+        }
+        IrPattern::RecordPattern { fields, .. } => {
+            for f in fields { if let Some(p) = &mut f.pattern { propagate_pattern_types_mut(p, subject_ty, vt); } }
+        }
+        _ => {}
+    }
+}
+
 fn propagate_pattern_types(pattern: &IrPattern, subject_ty: &Ty, vt: &mut VarTable) {
     let type_args: &[Ty] = match subject_ty {
         Ty::Named(_, args) if !args.is_empty() => args,
@@ -1126,7 +1163,7 @@ fn propagate_pattern_types(pattern: &IrPattern, subject_ty: &Ty, vt: &mut VarTab
     match pattern {
         IrPattern::Constructor { args, .. } => {
             for arg in args {
-                if let IrPattern::Bind { var } = arg {
+                if let IrPattern::Bind { var, .. } = arg {
                     let cur = &vt.get(*var).ty;
                     if has_typevar(cur) && !type_args.is_empty() {
                         let old = cur.clone();
@@ -1139,7 +1176,7 @@ fn propagate_pattern_types(pattern: &IrPattern, subject_ty: &Ty, vt: &mut VarTab
             }
         }
         IrPattern::Some { inner } | IrPattern::Ok { inner } => {
-            if let IrPattern::Bind { var } = inner.as_ref() {
+            if let IrPattern::Bind { var, .. } = inner.as_ref() {
                 let inner_ty = match subject_ty {
                     Ty::Applied(_, args) if !args.is_empty() => Some(args[0].clone()),
                     _ => None,
@@ -1152,7 +1189,7 @@ fn propagate_pattern_types(pattern: &IrPattern, subject_ty: &Ty, vt: &mut VarTab
             }
         }
         IrPattern::Err { inner } => {
-            if let IrPattern::Bind { var } = inner.as_ref() {
+            if let IrPattern::Bind { var, .. } = inner.as_ref() {
                 let inner_ty = match subject_ty {
                     Ty::Applied(_, args) if args.len() >= 2 => Some(args[1].clone()),
                     _ => None,
