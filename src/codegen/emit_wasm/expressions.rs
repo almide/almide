@@ -50,12 +50,26 @@ impl FuncCompiler<'_> {
                 } else if let Some(&(global_idx, _)) = self.emitter.top_let_globals.get(&id.0) {
                     wasm!(self.func, { global_get(global_idx); });
                 } else {
-                    // Variable not in scope — push zero
-                    match values::ty_to_valtype(&expr.ty) {
-                        Some(ValType::I64) => { wasm!(self.func, { i64_const(0); }); }
-                        Some(ValType::F64) => { wasm!(self.func, { f64_const(0.0); }); }
-                        Some(ValType::I32) => { wasm!(self.func, { i32_const(0); }); }
-                        _ => {}
+                    // VarId not in var_map — try name-based lookup as fallback
+                    // (handles VarId mismatch between lowering passes)
+                    let name = if (id.0 as usize) < self.var_table.len() { &self.var_table.get(*id).name } else { "" };
+                    let found = if !name.is_empty() {
+                        self.var_map.iter().find_map(|(&vid, &lidx)| {
+                            if (vid as usize) < self.var_table.len() && self.var_table.get(crate::ir::VarId(vid)).name == name {
+                                Some(lidx)
+                            } else { None }
+                        })
+                    } else { None };
+                    if let Some(local_idx) = found {
+                        wasm!(self.func, { local_get(local_idx); });
+                    } else {
+                        // Truly not in scope — push typed zero
+                        match values::ty_to_valtype(&expr.ty) {
+                            Some(ValType::I64) => { wasm!(self.func, { i64_const(0); }); }
+                            Some(ValType::F64) => { wasm!(self.func, { f64_const(0.0); }); }
+                            Some(ValType::I32) => { wasm!(self.func, { i32_const(0); }); }
+                            _ => {}
+                        }
                     }
                 }
             }
