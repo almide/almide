@@ -26,14 +26,20 @@ Debug-only integrity checks + IR self-description improvements. Verification run
 - [x] **IrVisitor trait** (`src/ir/visit.rs`) — shared walker for read-only IR passes. verify.rs and unknown.rs migrated
 - [x] **ExprId** — already complete (HashMap<ExprId, Ty>, parser-allocated IDs)
 
-## Planned (Phase 2)
+## Phase 2 — Done
 
-| Check | Purpose |
-|-------|---------|
-| **Use-count cross-check** | Independent reference count vs VarTable.use_count |
-| **CallTarget validity** | Named function calls reference existing functions |
-| **Migrate use_count.rs to IrVisitor** | Reduce walker duplication further |
-| **Migrate remaining codegen type dispatches to nanopass** | ResultErr inner type, OptionNone type hint |
+| Check | Status |
+|-------|--------|
+| **CallTarget validity** | ✅ Module function calls validated against known functions (22→25 tests) |
+| **Constructor pattern type propagation** | ✅ Checker + Lowerer: payload types extracted from subject type instead of Unknown |
+
+## Phase 2 — Deferred
+
+| Check | Reason |
+|-------|--------|
+| **Use-count cross-check** | Low priority. Existing use_count works; errors surface as rustc compile failures |
+| **Migrate use_count.rs to IrVisitor** | Special loop/lambda bump semantics don't fit IrVisitor cleanly. Risk/reward ratio too high |
+| **Migrate ResultErr/OptionNone to nanopass** | Walker type checks are minimal (2 sites), nanopass would add IR complexity without benefit |
 
 ## Design Principles
 
