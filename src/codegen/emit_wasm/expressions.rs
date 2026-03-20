@@ -646,14 +646,23 @@ impl FuncCompiler<'_> {
     }
 
     /// Extract field names and types from a record/named type.
+    /// For generic types like Box[Int], substitutes type parameters.
     pub(super) fn extract_record_fields(&self, ty: &Ty) -> Vec<(String, Ty)> {
         match ty {
             Ty::Record { fields } => fields.clone(),
-            Ty::Named(name, _) => {
-                // Look up the named type in the type declarations
-                // For now, search the emitter's stored type info
+            Ty::Named(name, type_args) => {
                 if let Some(fields) = self.emitter.record_fields.get(name.as_str()) {
-                    fields.clone()
+                    if type_args.is_empty() {
+                        fields.clone()
+                    } else {
+                        // Substitute type parameters: T → type_args[0], U → type_args[1], etc.
+                        // Generic params are typically single-letter names (T, U, A, B)
+                        let generic_names = ["T", "U", "A", "B", "K", "V"];
+                        fields.iter().map(|(fname, fty)| {
+                            let resolved = substitute_type_params(fty, &generic_names, type_args);
+                            (fname.clone(), resolved)
+                        }).collect()
+                    }
                 } else {
                     vec![]
                 }
@@ -676,6 +685,34 @@ impl FuncCompiler<'_> {
         None
     }
 
+}
+
+/// Substitute type parameters in a type. Named("T", []) → type_args[index of "T"].
+fn substitute_type_params(ty: &Ty, generic_names: &[&str], type_args: &[Ty]) -> Ty {
+    match ty {
+        Ty::Named(name, args) if args.is_empty() => {
+            // Check if this is a type parameter name
+            if let Some(idx) = generic_names.iter().position(|&g| g == name.as_str()) {
+                if let Some(concrete) = type_args.get(idx) {
+                    return concrete.clone();
+                }
+            }
+            // Also check TypeVar style
+            ty.clone()
+        }
+        Ty::TypeVar(name) => {
+            if let Some(idx) = generic_names.iter().position(|&g| g == name.as_str()) {
+                if let Some(concrete) = type_args.get(idx) {
+                    return concrete.clone();
+                }
+            }
+            ty.clone()
+        }
+        _ => ty.clone(),
+    }
+}
+
+impl FuncCompiler<'_> {
     /// Find variant tag for a unit constructor called as a function (e.g., `Red`).
     pub(super) fn find_unit_variant_tag(&self, name: &str) -> Option<u32> {
         for cases in self.emitter.variant_info.values() {
