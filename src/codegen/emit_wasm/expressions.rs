@@ -561,19 +561,131 @@ impl FuncCompiler<'_> {
                 self.func.instruction(&Instruction::I32Const(size as i32));
                 self.func.instruction(&Instruction::Call(self.emitter.rt.mem_eq));
             }
-            // Option: both none (0==0) or both some → compare pointed values
+            // Option: none==none, some==some with deep inner comparison
             Ty::Applied(crate::types::constructor::TypeConstructorId::Option, args) => {
-                let inner_size = args.first().map(|t| values::byte_size(t)).unwrap_or(8);
-                self.func.instruction(&Instruction::I32Const(inner_size as i32));
-                self.func.instruction(&Instruction::Call(self.emitter.rt.mem_eq));
+                let inner_ty = args.first().cloned().unwrap_or(Ty::Int);
+                let mem = super::expressions::mem;
+                // Store a → mem[0], b → mem[4]
+                self.func.instruction(&Instruction::I32Const(4));
+                self.func.instruction(&Instruction::I32Store(mem(0))); // b
+                self.func.instruction(&Instruction::I32Const(0));
+                self.func.instruction(&Instruction::I32Store(mem(0))); // a (was under b on stack)
+                // Oops, stack order: emit_eq pushes left then right.
+                // Stack before this code: [left, right]. We consumed right first.
+                // Actually emit_eq does: emit_expr(left); emit_expr(right); then match.
+                // So stack is [left_val, right_val]. We need to store both.
+                // But I32Store consumes [addr, val] = last two. Let me redo.
+                // After the match block entry, stack has [left, right].
+                // I need to store right to mem[4], left to mem[0].
+                // But the code above stores right to mem[4] first... wait.
+                // I32Const(4); I32Store → consumes [4, right]? No!
+                // Stack is [left, right]. I32Const(4) → [left, right, 4].
+                // I32Store(mem(0)) → stores right at address 4? No, I32Store takes [addr, val].
+                // Stack [left, right, 4]. I32Store → addr=right, val=4?? That's wrong!
+                //
+                // This approach doesn't work inline. Need to restructure.
+                // Actually emit_eq already consumed both values by calling emit_expr on both.
+                // Let me restructure: DON'T call emit_expr in emit_eq, handle here.
+                // But emit_eq has already emitted both... can't undo.
+                //
+                // Simplest: for Option, just use pointer equality for none/none,
+                // and inner size mem_eq for some/some. But strings won't match...
+                //
+                // OK different approach: check if both are none (both 0), if both some
+                // compare inner values with appropriate eq. Use if/else chain.
+                //
+                // Actually the values are already on stack. Use locals to save them.
+                // Rewrite: store in scratch locals instead of memory.
+
+                // Values on stack: [left_ptr, right_ptr]
+                // Both i32. Store to scratch.
+                // But we're inside emit_eq which already consumed both via emit_expr.
+                // The values are on the WASM stack. Use i32 scratch locals.
+                let s = self.match_i32_base + self.match_depth;
+                self.func.instruction(&Instruction::LocalSet(s + 1)); // right
+                self.func.instruction(&Instruction::LocalSet(s)); // left
+                // Both none → equal
+                self.func.instruction(&Instruction::LocalGet(s));
+                self.func.instruction(&Instruction::I32Eqz);
+                self.func.instruction(&Instruction::LocalGet(s + 1));
+                self.func.instruction(&Instruction::I32Eqz);
+                self.func.instruction(&Instruction::I32And); // both zero?
+                self.func.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+                self.func.instruction(&Instruction::I32Const(1)); // both none = equal
+                self.func.instruction(&Instruction::Else);
+                // If one is none and other isn't → not equal
+                self.func.instruction(&Instruction::LocalGet(s));
+                self.func.instruction(&Instruction::I32Eqz);
+                self.func.instruction(&Instruction::LocalGet(s + 1));
+                self.func.instruction(&Instruction::I32Eqz);
+                self.func.instruction(&Instruction::I32Or); // one is zero?
+                self.func.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+                self.func.instruction(&Instruction::I32Const(0)); // one none, one some
+                self.func.instruction(&Instruction::Else);
+                // Both some: load inner values and compare
+                self.func.instruction(&Instruction::LocalGet(s));
+                self.emit_load_at(&inner_ty, 0);
+                self.func.instruction(&Instruction::LocalGet(s + 1));
+                self.emit_load_at(&inner_ty, 0);
+                match &inner_ty {
+                    Ty::String => { self.func.instruction(&Instruction::Call(self.emitter.rt.str_eq)); }
+                    Ty::Int => { self.func.instruction(&Instruction::I64Eq); }
+                    Ty::Float => { self.func.instruction(&Instruction::F64Eq); }
+                    Ty::Bool => { self.func.instruction(&Instruction::I32Eq); }
+                    _ => { self.func.instruction(&Instruction::I32Eq); }
+                }
+                self.func.instruction(&Instruction::End);
+                self.func.instruction(&Instruction::End);
             }
-            // Result: compare tag + value bytes
+            // Result: compare tag, then inner value deeply
             Ty::Applied(crate::types::constructor::TypeConstructorId::Result, args) => {
-                let ok_size = args.first().map(|t| values::byte_size(t)).unwrap_or(8);
-                let err_size = args.get(1).map(|t| values::byte_size(t)).unwrap_or(4);
-                let total = 4 + ok_size.max(err_size);
-                self.func.instruction(&Instruction::I32Const(total as i32));
-                self.func.instruction(&Instruction::Call(self.emitter.rt.mem_eq));
+                let ok_ty = args.first().cloned().unwrap_or(Ty::Int);
+                let err_ty = args.get(1).cloned().unwrap_or(Ty::String);
+                let s = self.match_i32_base + self.match_depth;
+                self.func.instruction(&Instruction::LocalSet(s + 1)); // right
+                self.func.instruction(&Instruction::LocalSet(s)); // left
+                // Compare tags
+                self.func.instruction(&Instruction::LocalGet(s));
+                self.func.instruction(&Instruction::I32Load(super::expressions::mem(0))); // left.tag
+                self.func.instruction(&Instruction::LocalGet(s + 1));
+                self.func.instruction(&Instruction::I32Load(super::expressions::mem(0))); // right.tag
+                self.func.instruction(&Instruction::I32Ne);
+                self.func.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+                self.func.instruction(&Instruction::I32Const(0)); // different tags
+                self.func.instruction(&Instruction::Else);
+                // Same tag: compare inner values
+                // If tag == 0 (ok): compare ok values at offset 4
+                self.func.instruction(&Instruction::LocalGet(s));
+                self.func.instruction(&Instruction::I32Load(super::expressions::mem(0))); // tag
+                self.func.instruction(&Instruction::I32Eqz); // tag == 0?
+                self.func.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+                // Ok values: load from offset 4
+                self.func.instruction(&Instruction::LocalGet(s));
+                self.emit_load_at(&ok_ty, 4);
+                self.func.instruction(&Instruction::LocalGet(s + 1));
+                self.emit_load_at(&ok_ty, 4);
+                match &ok_ty {
+                    Ty::String => { self.func.instruction(&Instruction::Call(self.emitter.rt.str_eq)); }
+                    Ty::Int => { self.func.instruction(&Instruction::I64Eq); }
+                    Ty::Float => { self.func.instruction(&Instruction::F64Eq); }
+                    Ty::Bool => { self.func.instruction(&Instruction::I32Eq); }
+                    _ => { self.func.instruction(&Instruction::I32Eq); }
+                }
+                self.func.instruction(&Instruction::Else);
+                // Err values: load from offset 4
+                self.func.instruction(&Instruction::LocalGet(s));
+                self.emit_load_at(&err_ty, 4);
+                self.func.instruction(&Instruction::LocalGet(s + 1));
+                self.emit_load_at(&err_ty, 4);
+                match &err_ty {
+                    Ty::String => { self.func.instruction(&Instruction::Call(self.emitter.rt.str_eq)); }
+                    Ty::Int => { self.func.instruction(&Instruction::I64Eq); }
+                    Ty::Float => { self.func.instruction(&Instruction::F64Eq); }
+                    Ty::Bool => { self.func.instruction(&Instruction::I32Eq); }
+                    _ => { self.func.instruction(&Instruction::I32Eq); }
+                }
+                self.func.instruction(&Instruction::End);
+                self.func.instruction(&Instruction::End);
             }
             _ => { self.func.instruction(&Instruction::I32Eq); }
         }

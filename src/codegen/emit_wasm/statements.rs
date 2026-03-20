@@ -154,7 +154,7 @@ pub fn collect_locals(body: &IrExpr, var_table: &crate::ir::VarTable) -> LocalSc
     let mut binds = Vec::new();
     scan_expr(body, &mut binds, var_table);
     // Always at least 1 scratch level (used by record/variant construction)
-    let scratch_depth = count_scratch_depth(body).max(1);
+    let scratch_depth = count_scratch_depth(body).max(2); // min 2 for Option/Result equality
     LocalScanResult { binds, scratch_depth }
 }
 
