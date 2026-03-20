@@ -96,3 +96,105 @@ params = [{ name = "a", type = "Set[A]" }, { name = "b", type = "Set[A]" }]
 return = "Set[A]"
 rust = "almide_rt_set_difference(&{a}, &{b})"
 ts = "__almd_set.difference({a}, {b})"
+
+[symmetric_difference]
+description = "Return elements in either set but not both."
+example = "set.symmetric_difference(a, b)"
+type_params = ["A"]
+params = [{ name = "a", type = "Set[A]" }, { name = "b", type = "Set[A]" }]
+return = "Set[A]"
+rust = "almide_rt_set_symmetric_difference(&{a}, &{b})"
+ts = "__almd_set.symmetric_difference({a}, {b})"
+
+[is_subset]
+description = "Check if all elements of a are in b."
+example = "set.is_subset(a, b)"
+type_params = ["A"]
+params = [{ name = "a", type = "Set[A]" }, { name = "b", type = "Set[A]" }]
+return = "Bool"
+rust = "almide_rt_set_is_subset(&{a}, &{b})"
+ts = "__almd_set.is_subset({a}, {b})"
+
+[is_disjoint]
+description = "Check if two sets have no elements in common."
+example = "set.is_disjoint(a, b)"
+type_params = ["A"]
+params = [{ name = "a", type = "Set[A]" }, { name = "b", type = "Set[A]" }]
+return = "Bool"
+rust = "almide_rt_set_is_disjoint(&{a}, &{b})"
+ts = "__almd_set.is_disjoint({a}, {b})"
+
+# ── Higher-order operations ──
+
+[filter]
+description = "Keep elements that satisfy a predicate."
+example = "set.filter(s, fn(x) => x > 2)"
+type_params = ["A"]
+params = [
+    { name = "s", type = "Set[A]" },
+    { name = "f", type = "Fn[A] -> Bool" },
+]
+return = "Set[A]"
+rust = "almide_rt_set_filter(&{s}, |{f.args}| {{ {f.clone_bindings}{f.body} }})"
+ts = "__almd_set.filter({s}, {f.args} => {f.body})"
+
+[map]
+description = "Apply a function to each element, returning a new set."
+example = "set.map(s, fn(x) => x * 2)"
+type_params = ["A", "B"]
+params = [
+    { name = "s", type = "Set[A]" },
+    { name = "f", type = "Fn[A] -> B" },
+]
+return = "Set[B]"
+rust = "almide_rt_set_map({s}, |{f.args}| {{ {f.clone_bindings}{f.body} }})"
+ts = "__almd_set.map({s}, {f.args} => {f.body})"
+
+[fold]
+description = "Reduce a set with an initial accumulator."
+example = "set.fold(s, 0, fn(acc, x) => acc + x)"
+type_params = ["A", "B"]
+params = [
+    { name = "s", type = "Set[A]" },
+    { name = "init", type = "B" },
+    { name = "f", type = "Fn[B, A] -> B" },
+]
+return = "B"
+rust = "almide_rt_set_fold({s}, {init}, |{f.args}| {{ {f.clone_bindings}{f.body} }})"
+ts = "__almd_set.fold({s}, {init}, ({f.args}) => {f.body})"
+
+[each]
+description = "Execute a function for each element (side effects only)."
+example = "set.each(s, fn(x) => println(int.to_string(x)))"
+type_params = ["A"]
+params = [
+    { name = "s", type = "Set[A]" },
+    { name = "f", type = "Fn[A] -> Unit" },
+]
+return = "Unit"
+rust = "almide_rt_set_each(&{s}, |{f.args}| {{ {f.clone_bindings}{f.body} ; }})"
+ts = "__almd_set.each({s}, {f.args} => {f.body})"
+
+[any]
+description = "Check if any element satisfies a predicate."
+example = "set.any(s, fn(x) => x > 2)"
+type_params = ["A"]
+params = [
+    { name = "s", type = "Set[A]" },
+    { name = "f", type = "Fn[A] -> Bool" },
+]
+return = "Bool"
+rust = "almide_rt_set_any(&{s}, |{f.args}| {{ {f.clone_bindings}{f.body} }})"
+ts = "__almd_set.any({s}, {f.args} => {f.body})"
+
+[all]
+description = "Check if all elements satisfy a predicate."
+example = "set.all(s, fn(x) => x > 0)"
+type_params = ["A"]
+params = [
+    { name = "s", type = "Set[A]" },
+    { name = "f", type = "Fn[A] -> Bool" },
+]
+return = "Bool"
+rust = "almide_rt_set_all(&{s}, |{f.args}| {{ {f.clone_bindings}{f.body} }})"
+ts = "__almd_set.all({s}, {f.args} => {f.body})"

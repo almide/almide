@@ -8,7 +8,6 @@
 |---|---|---|
 | [Test Coverage](active/test-coverage.md) | 1,564 .almd blocks + 636 Rust = 2,200 / 目標 2,500 | Phase 1 |
 | [User Generics & Traits](active/user-generics-and-traits.md) | Phase 2: Trait Bounds (Eq, Ord, Hash, Repr) | Phase 3 |
-| [Stdlib Additions](active/stdlib-additions.md) | set モジュール候補 | 1.x |
 | [Effect System](active/effect-system.md) | Phase 3-4 残: Dependency制限, 内部型レベル統合 | Phase 3 |
 | [IR Verification](active/ir-verification.md) | 検証19件, PowInt/MapAccess分離, IrVisitor | Compiler Internals |
 | [Performance Research](active/performance-research.md) | Rust との差 2.9%, Phase 0-4 | Research |
@@ -204,3 +203,4 @@
 - [Effect System Phase 1-2](done/effect-system-phase1-2.md) — Effect推論, almide check --effects, Security Layer 2 ([permissions])
 - [Compiler Bugs v0.8.4](done/compiler-bugs.md) — 12バグ全修正、400+ テスト追加
 - [Stdlib Scope Reduction](done/stdlib-scope-reduction.md) — uuid/crypto削除、toml/compress/term除外、22モジュール381関数に確定
+- [Stdlib Additions](done/stdlib-additions.md) — set モジュール 11→20関数 (symmetric_difference, is_subset, is_disjoint, filter, map, fold, each, any, all)

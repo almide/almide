@@ -428,15 +428,42 @@ pub fn gen_generated_call(
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
                 format!("({}).unwrap_or_else(|{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body)
             },
+            ("set", "all") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
+                format!("almide_rt_set_all(&{}, |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
+            },
+            ("set", "any") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
+                format!("almide_rt_set_any(&{}, |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
+            },
             ("set", "contains") => format!("almide_rt_set_contains(&{}, &{})", args_str[0], args_str[1]),
             ("set", "difference") => format!("almide_rt_set_difference(&{}, &{})", args_str[0], args_str[1]),
+            ("set", "each") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
+                format!("almide_rt_set_each(&{}, |{}| {{{{ {}{} ; }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
+            },
+            ("set", "filter") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
+                format!("almide_rt_set_filter(&{}, |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
+            },
+            ("set", "fold") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(2, 2);
+                format!("almide_rt_set_fold({}, {}, |{}| {{{{ {}{} }}}})", args_str[0], args_str[1], __cl_f_names.join(", "), __cl_f_names.iter().map(|n| format!("let {} = {}.clone(); ", n, n)).collect::<Vec<_>>().join(""), __cl_f_body)
+            },
             ("set", "from_list") => format!("almide_rt_set_from_list({})", args_str[0]),
             ("set", "insert") => format!("almide_rt_set_insert({}, {})", args_str[0], args_str[1]),
             ("set", "intersection") => format!("almide_rt_set_intersection(&{}, &{})", args_str[0], args_str[1]),
+            ("set", "is_disjoint") => format!("almide_rt_set_is_disjoint(&{}, &{})", args_str[0], args_str[1]),
             ("set", "is_empty") => format!("almide_rt_set_is_empty(&{})", args_str[0]),
+            ("set", "is_subset") => format!("almide_rt_set_is_subset(&{}, &{})", args_str[0], args_str[1]),
             ("set", "len") => format!("almide_rt_set_len(&{})", args_str[0]),
+            ("set", "map") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
+                format!("almide_rt_set_map({}, |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
+            },
             ("set", "new") => "almide_rt_set_new()".to_string(),
             ("set", "remove") => format!("almide_rt_set_remove({}, &{})", args_str[0], args_str[1]),
+            ("set", "symmetric_difference") => format!("almide_rt_set_symmetric_difference(&{}, &{})", args_str[0], args_str[1]),
             ("set", "to_list") => format!("almide_rt_set_to_list({})", args_str[0]),
             ("set", "union") => format!("almide_rt_set_union(&{}, &{})", args_str[0], args_str[1]),
             ("string", "capitalize") => format!("almide_rt_string_capitalize(&*{})", args_str[0]),
