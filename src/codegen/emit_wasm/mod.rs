@@ -272,7 +272,7 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
             crate::ir::IrTypeDeclKind::Variant { cases, .. } => {
                 let mut variant_cases = Vec::new();
                 for (tag, case) in cases.iter().enumerate() {
-                    let fields = match &case.kind {
+                    let fields: Vec<(String, crate::types::Ty)> = match &case.kind {
                         crate::ir::IrVariantKind::Record { fields } => {
                             fields.iter().map(|f| (f.name.clone(), f.ty.clone())).collect()
                         }
