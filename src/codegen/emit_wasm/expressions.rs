@@ -1464,21 +1464,42 @@ impl FuncCompiler<'_> {
     /// - Wildcard: unconditional (last arm)
     /// - Bind: store subject in the bound variable's local, unconditional
     fn emit_match(&mut self, subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty) {
-        // Determine scratch local for the subject
-        let scratch = match values::ty_to_valtype(&subject.ty) {
+        // Resolve subject type — IR may have wrong type on Var nodes (type inference gap)
+        let subject_ty = self.resolve_subject_type(subject, arms);
+
+        let scratch = match values::ty_to_valtype(&subject_ty) {
             Some(ValType::I64) => self.match_i64_base + self.match_depth,
             _ => self.match_i32_base + self.match_depth,
         };
         self.match_depth += 1;
 
-        // Evaluate subject and store in scratch
         self.emit_expr(subject);
         self.func.instruction(&Instruction::LocalSet(scratch));
 
-        // Emit arms as nested if-else
-        self.emit_match_arms(arms, scratch, &subject.ty, result_ty, 0);
+        self.emit_match_arms(arms, scratch, &subject_ty, result_ty, 0);
 
         self.match_depth -= 1;
+    }
+
+    /// Resolve the actual subject type, fixing IR type inference gaps.
+    /// If the subject Var has the wrong type but patterns indicate a container type, fix it.
+    fn resolve_subject_type(&self, subject: &IrExpr, arms: &[IrMatchArm]) -> Ty {
+        let ty = &subject.ty;
+        // If patterns are Ok/Err/Some/None but subject type isn't a container, look up VarTable
+        let has_container_pattern = arms.iter().any(|a| matches!(
+            &a.pattern,
+            IrPattern::Ok { .. } | IrPattern::Err { .. } | IrPattern::Some { .. } | IrPattern::None
+        ));
+        if has_container_pattern && !matches!(ty, Ty::Applied(_, _)) {
+            // Try to get the real type from VarTable
+            if let IrExprKind::Var { id } = &subject.kind {
+                let info = self.var_table.get(*id);
+                if matches!(&info.ty, Ty::Applied(_, _)) {
+                    return info.ty.clone();
+                }
+            }
+        }
+        ty.clone()
     }
 
     fn emit_match_arms(
@@ -1507,8 +1528,13 @@ impl FuncCompiler<'_> {
             // Bind: store subject in variable, then emit body
             IrPattern::Bind { var } => {
                 if let Some(&local_idx) = self.var_map.get(&var.0) {
-                    self.func.instruction(&Instruction::LocalGet(scratch));
-                    self.func.instruction(&Instruction::LocalSet(local_idx));
+                    // Only bind if types are compatible (IR may have wrong types for _ patterns)
+                    let var_vt = values::ty_to_valtype(&self.var_table.get(*var).ty);
+                    let subj_vt = values::ty_to_valtype(subject_ty);
+                    if var_vt == subj_vt {
+                        self.func.instruction(&Instruction::LocalGet(scratch));
+                        self.func.instruction(&Instruction::LocalSet(local_idx));
+                    }
                 }
                 self.emit_expr(&arm.body);
             }
@@ -1588,11 +1614,12 @@ impl FuncCompiler<'_> {
                 self.func.instruction(&Instruction::If(bt));
                 self.depth += 1;
 
-                // Bind the inner value
+                // Bind the inner value (type from subject, not VarTable — may be Unknown)
                 if let IrPattern::Bind { var } = inner.as_ref() {
                     if let Some(&local_idx) = self.var_map.get(&var.0) {
-                        // Load value from the Some pointer
-                        let inner_ty = self.var_table.get(*var).ty.clone();
+                        let inner_ty = if let Ty::Applied(_, args) = subject_ty {
+                            args.first().cloned().unwrap_or(Ty::Int)
+                        } else { Ty::Int };
                         self.func.instruction(&Instruction::LocalGet(scratch));
                         self.emit_load_at(&inner_ty, 0);
                         self.func.instruction(&Instruction::LocalSet(local_idx));
@@ -1701,13 +1728,14 @@ impl FuncCompiler<'_> {
                 self.depth += 1;
                 if let IrPattern::Bind { var } = inner.as_ref() {
                     if let Some(&local_idx) = self.var_map.get(&var.0) {
-                        let inner_ty = self.var_table.get(*var).ty.clone();
+                        // Ok inner type = args[0] of Result[T, E]
+                        let inner_ty = if let Ty::Applied(_, args) = subject_ty {
+                            args.first().cloned().unwrap_or(Ty::Int)
+                        } else { Ty::Int };
                         self.func.instruction(&Instruction::LocalGet(scratch));
                         self.emit_load_at(&inner_ty, 4);
                         self.func.instruction(&Instruction::LocalSet(local_idx));
                     }
-                } else if let IrPattern::Wildcard = inner.as_ref() {
-                    // ok(_) — no binding needed
                 }
                 self.emit_expr(&arm.body);
                 self.func.instruction(&Instruction::Else);
@@ -1719,23 +1747,23 @@ impl FuncCompiler<'_> {
 
             // Err(e) pattern (Result)
             IrPattern::Err { inner } => {
-                // Result err = tag 1. Check tag != 0.
                 self.func.instruction(&Instruction::LocalGet(scratch));
                 self.func.instruction(&Instruction::I32Load(MemArg { offset: 0, align: 2, memory_index: 0 }));
                 self.func.instruction(&Instruction::I32Const(0));
-                self.func.instruction(&Instruction::I32Ne); // tag != 0
+                self.func.instruction(&Instruction::I32Ne);
                 let bt = values::block_type(result_ty);
                 self.func.instruction(&Instruction::If(bt));
                 self.depth += 1;
                 if let IrPattern::Bind { var } = inner.as_ref() {
                     if let Some(&local_idx) = self.var_map.get(&var.0) {
-                        let inner_ty = self.var_table.get(*var).ty.clone();
+                        // Err inner type = args[1] of Result[T, E]
+                        let inner_ty = if let Ty::Applied(_, args) = subject_ty {
+                            args.get(1).cloned().unwrap_or(Ty::String)
+                        } else { Ty::String };
                         self.func.instruction(&Instruction::LocalGet(scratch));
                         self.emit_load_at(&inner_ty, 4);
                         self.func.instruction(&Instruction::LocalSet(local_idx));
                     }
-                } else if let IrPattern::Wildcard = inner.as_ref() {
-                    // err(_) — no binding
                 }
                 self.emit_expr(&arm.body);
                 self.func.instruction(&Instruction::Else);

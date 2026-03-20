@@ -310,13 +310,17 @@ fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, l
                 scan_pattern(elem, &et, locals, vt);
             }
         }
-        crate::ir::IrPattern::Some { inner } | crate::ir::IrPattern::Ok { inner } | crate::ir::IrPattern::Err { inner } => {
-            // Extract the inner type from Applied(Option/Result, [T, ...])
+        crate::ir::IrPattern::Some { inner } | crate::ir::IrPattern::Ok { inner } => {
             let inner_ty = if let crate::types::Ty::Applied(_, args) = subject_ty {
                 args.first().cloned().unwrap_or(subject_ty.clone())
-            } else {
-                subject_ty.clone()
-            };
+            } else { subject_ty.clone() };
+            scan_pattern(inner, &inner_ty, locals, vt);
+        }
+        crate::ir::IrPattern::Err { inner } => {
+            // Err inner type is the second type arg: E in Result[T, E]
+            let inner_ty = if let crate::types::Ty::Applied(_, args) = subject_ty {
+                args.get(1).cloned().unwrap_or(subject_ty.clone())
+            } else { subject_ty.clone() };
             scan_pattern(inner, &inner_ty, locals, vt);
         }
         crate::ir::IrPattern::RecordPattern { name: _, fields, .. } => {
