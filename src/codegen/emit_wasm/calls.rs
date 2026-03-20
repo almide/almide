@@ -663,7 +663,96 @@ impl FuncCompiler<'_> {
 
                         self.func.instruction(&Instruction::LocalGet(acc_local));
                     }
-                    ("list", "reverse") | ("list", "find") | ("list", "any") | ("list", "all")
+                    ("list", "reverse") => {
+                        // reverse(list) → new list with elements in reverse order
+                        let elem_ty = if let Ty::Applied(_, a) = &args[0].ty {
+                            a.first().cloned().unwrap_or(Ty::Int)
+                        } else { Ty::Int };
+                        let elem_size = values::byte_size(&elem_ty);
+                        let s = self.match_i32_base + self.match_depth;
+                        let len_local = s;
+                        let idx_local = s + 1;
+                        let mem = super::expressions::mem;
+
+                        // mem[0]=src
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.emit_expr(&args[0]);
+                        self.func.instruction(&Instruction::I32Store(mem(0)));
+
+                        // len
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::LocalSet(len_local));
+
+                        // alloc dst → mem[4]
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::LocalGet(len_local));
+                        self.func.instruction(&Instruction::I32Const(elem_size as i32));
+                        self.func.instruction(&Instruction::I32Mul);
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::Call(self.emitter.rt.alloc));
+                        self.func.instruction(&Instruction::I32Store(mem(0)));
+
+                        // dst.len = len
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::LocalGet(len_local));
+                        self.func.instruction(&Instruction::I32Store(mem(0)));
+
+                        // Loop: dst[len-1-i] = src[i]
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::LocalSet(idx_local));
+                        self.func.instruction(&Instruction::Block(BlockType::Empty));
+                        self.func.instruction(&Instruction::Loop(BlockType::Empty));
+                        let saved = self.depth; self.depth += 2;
+
+                        self.func.instruction(&Instruction::LocalGet(idx_local));
+                        self.func.instruction(&Instruction::LocalGet(len_local));
+                        self.func.instruction(&Instruction::I32GeU);
+                        self.func.instruction(&Instruction::BrIf(1));
+
+                        // dst addr: dst + 4 + (len-1-i) * elem_size
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::LocalGet(len_local));
+                        self.func.instruction(&Instruction::I32Const(1));
+                        self.func.instruction(&Instruction::I32Sub);
+                        self.func.instruction(&Instruction::LocalGet(idx_local));
+                        self.func.instruction(&Instruction::I32Sub);
+                        self.func.instruction(&Instruction::I32Const(elem_size as i32));
+                        self.func.instruction(&Instruction::I32Mul);
+                        self.func.instruction(&Instruction::I32Add);
+
+                        // src elem: src + 4 + i * elem_size
+                        self.func.instruction(&Instruction::I32Const(0));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::LocalGet(idx_local));
+                        self.func.instruction(&Instruction::I32Const(elem_size as i32));
+                        self.func.instruction(&Instruction::I32Mul);
+                        self.func.instruction(&Instruction::I32Add);
+                        self.emit_load_at(&elem_ty, 0);
+                        self.emit_store_at(&elem_ty, 0);
+
+                        self.func.instruction(&Instruction::LocalGet(idx_local));
+                        self.func.instruction(&Instruction::I32Const(1));
+                        self.func.instruction(&Instruction::I32Add);
+                        self.func.instruction(&Instruction::LocalSet(idx_local));
+                        self.func.instruction(&Instruction::Br(0));
+
+                        self.depth = saved;
+                        self.func.instruction(&Instruction::End);
+                        self.func.instruction(&Instruction::End);
+
+                        self.func.instruction(&Instruction::I32Const(4));
+                        self.func.instruction(&Instruction::I32Load(mem(0)));
+                    }
+                    ("list", "find") | ("list", "any") | ("list", "all")
                     | ("list", "count") | ("list", "sort_by") | ("list", "flat_map")
                     | ("list", "filter_map") | ("list", "get") | ("list", "drop")
                     | ("list", "take") | ("list", "zip")
@@ -790,6 +879,11 @@ impl FuncCompiler<'_> {
                         self.emit_expr(object);
                         self.func.instruction(&Instruction::I64TruncF64S);
                         self.func.instruction(&Instruction::Call(self.emitter.rt.int_to_string));
+                    }
+                    "reverse" | "list.reverse" if matches!(&object.ty, Ty::Applied(_, _)) => {
+                        let fake = [(**object).clone()];
+                        let target = CallTarget::Module { module: "list".into(), func: "reverse".into() };
+                        self.emit_call(&target, &fake, _ret_ty);
                     }
                     "map" | "list.map" if matches!(&object.ty, Ty::Applied(_, _)) => {
                         // .map(fn) → list.map(self, fn)
