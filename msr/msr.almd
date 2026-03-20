@@ -1,48 +1,25 @@
 // msr.almd — MSR (Modification Survival Rate) measurement tool
 //
 // Usage:
-//   almide run msr/msr.almd                                    # default: haiku, all exercises
-//   almide run msr/msr.almd -- --model sonnet                  # use sonnet
-//   almide run msr/msr.almd -- --exercise bob                  # single exercise
+//   almide run msr/msr.almd                          # default: haiku
+//   almide run msr/msr.almd -- --model sonnet         # use sonnet
+//   almide run msr/msr.almd -- --exercise bob         # single exercise
 
-import args
 import fs
 import process
 
-fn run_exercise(name: String, prompt_path: String, output_dir: String, model: String, system_prompt: String) -> Bool = {
-  let output_path = output_dir + "/" + name + ".almd"
-  let prompt_content = result.unwrap_or(fs.read_text(prompt_path), "")
-  let full_prompt = prompt_content + "\n\nImplement the functions above. Output ONLY the complete .almd file."
-
-  // Call claude CLI
-  let solution = process.exec("claude", ["--model", model, "--print", "-s", system_prompt, full_prompt])
-
-  if result.is_err(solution) then false
-  else {
-    let code = result.unwrap_or(solution, "")
-
-    // Strip code fences
-    let cleaned = code
-      |> string.split("\n")
-      |> list.filter((line) => not string.starts_with(string.trim(line), "```"))
-      |> string.join("\n")
-
-    let _ = fs.write(output_path, cleaned)
-
-    // Verify: type check
-    let check = process.exec("almide", ["check", output_path])
-    if result.is_err(check) then false
-    else {
-      // Verify: run tests
-      let test_r = process.exec("almide", ["test", output_path])
-      result.is_ok(test_r)
-    }
+fn find_arg(raw_args: List[String], name: String, fallback: String) -> String = {
+  let flag = "--" + name
+  match list.index_of(raw_args, flag) {
+    some(i) => list.get_or(raw_args, i + 1, fallback)
+    none => fallback
   }
 }
 
 effect fn main() -> Result[Unit, String] = do {
-  let model = args.option_or("model", "haiku")
-  let exercise_filter = args.option("exercise")
+  let raw_args = env.args()
+  let model = find_arg(raw_args, "model", "haiku")
+  let exercise_raw = find_arg(raw_args, "exercise", "")
   let prompt_dir = "msr/prompts"
   let output_dir = "msr/outputs/" + model
 
@@ -52,11 +29,12 @@ effect fn main() -> Result[Unit, String] = do {
 
   let system_prompt = "You are writing Almide code (.almd files). Here is the language reference:\n\n" + cheatsheet + "\n\nIMPORTANT RULES:\n- Write ONLY the Almide code. No markdown, no explanation, no code fences.\n- Replace `todo` with working implementations.\n- Keep all test blocks exactly as they are.\n- Keep all type declarations exactly as they are.\n- Lambda syntax: (x) => expr, NOT fn(x) => expr\n- if requires then: if cond then a else b\n- String concat uses +\n- effect fn returns Result, auto-unwraps with ?"
 
-  let all_prompts = fs.glob(prompt_dir + "/*.almd.prompt")
-  let prompts = match exercise_filter {
-    some(name) => list.filter(all_prompts, (p) => string.contains(p, "/" + name + ".almd.prompt"))
-    none => all_prompts
-  }
+  let all_files = fs.list_dir(prompt_dir)
+  let all_prompts = list.filter(all_files, (f) => string.ends_with(f, ".almd.prompt"))
+    |> list.map((f) => prompt_dir + "/" + f)
+  let prompts = if string.len(exercise_raw) > 0
+    then list.filter(all_prompts, (p) => string.contains(p, "/" + exercise_raw + ".almd.prompt"))
+    else all_prompts
 
   println("")
   println("MSR Measurement — " + model)
@@ -69,23 +47,56 @@ effect fn main() -> Result[Unit, String] = do {
 
   for prompt_path in prompts {
     let parts = string.split(prompt_path, "/")
-    let filename = list.get_or(parts, list.len(parts) - 1, "unknown.almd.prompt")
-    let name = string.replace(filename, ".almd", "")
+    let filename = list.get_or(parts, list.len(parts) - 1, "unknown")
+    let name = string.replace(filename, ".almd.prompt", "")
 
     if name == "wasm-smoke" then {
       println("SKIP " + name)
     } else {
       total = total + 1
+      let output_path = output_dir + "/" + name + ".almd"
+
+      let prompt_content = fs.read_text(prompt_path)
+      let full_prompt = prompt_content + "\n\nImplement the functions above. Output ONLY the complete .almd file."
+
       println("RUN  " + name)
 
-      let passed = run_exercise(name, prompt_path, output_dir, model, system_prompt)
+      // Call claude CLI — match on Result for error handling
+      match process.exec("claude", ["--model", model, "--print", "--system-prompt", system_prompt, full_prompt]) {
+        ok(solution) => {
+          // Strip markdown code fences if present
+          let cleaned = solution
+            |> string.split("\n")
+            |> list.filter((line) => not string.starts_with(string.trim(line), "```"))
+            |> string.join("\n")
 
-      if passed then {
-        println("  OK " + name)
-        pass = pass + 1
-      } else {
-        println("  NG " + name)
-        fail = fail + 1
+          let _ = fs.write(output_path, cleaned)
+
+          // Verify: type check
+          match process.exec("almide", ["check", output_path]) {
+            ok(_) => {
+              // Verify: run tests
+              match process.exec("almide", ["test", output_path]) {
+                ok(_) => {
+                  println("  OK " + name)
+                  pass = pass + 1
+                }
+                err(_) => {
+                  println("  NG " + name + " (test)")
+                  fail = fail + 1
+                }
+              }
+            }
+            err(_) => {
+              println("  NG " + name + " (check)")
+              fail = fail + 1
+            }
+          }
+        }
+        err(e) => {
+          println("  NG " + name + " (cli: " + e + ")")
+          fail = fail + 1
+        }
       }
     }
   }
