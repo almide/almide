@@ -332,7 +332,37 @@ type ConfigError =
 // impl From[DecodeError] for ConfigError { fn from(e: DecodeError) -> ConfigError = Decode(e) }
 ```
 
-### 5.5 newtype
+### 5.5 Protocols
+
+```
+ProtocolDecl ::= "protocol" TypeName "{" ProtocolMethod* "}"
+ProtocolMethod ::= ["effect"] "fn" Ident "(" Params ")" "->" TypeExpr
+```
+
+Protocols define sets of required convention methods. Types declare satisfaction with `: ProtocolName`.
+
+```
+protocol Serializable {
+  fn serialize(a: Self) -> String
+  fn deserialize(raw: String) -> Result[Self, String]
+}
+
+type Config: Serializable = { key: String, value: String }
+fn Config.serialize(c: Config) -> String = c.key + "=" + c.value
+fn Config.deserialize(raw: String) -> Result[Config, String] = ...
+```
+
+`Self` is a placeholder for the implementing type. Built-in conventions (Eq, Repr, Ord, Hash, Codec) are protocols.
+
+Protocols can be used as generic bounds:
+
+```
+fn show[T: Serializable](item: T) -> String = item.serialize()
+```
+
+No dynamic dispatch — all protocol-bounded generics are monomorphized at compile time.
+
+### 5.6 newtype
 
 ```
 type UserId = newtype Int
@@ -343,7 +373,7 @@ type Email = newtype String
 - Wrap: `UserId(42)` / Unwrap: `id.value`
 - Zero runtime cost
 
-### 5.6 Type Application
+### 5.7 Type Application
 
 ```
 List[String]
@@ -351,7 +381,7 @@ Result[User, ParseError]
 Map[String, List[Int]]
 ```
 
-### 5.7 Tuple Types
+### 5.8 Tuple Types
 
 ```
 (Int, String)              // tuple type
@@ -360,7 +390,7 @@ Map[String, List[Int]]
 
 Access via `.0`, `.1`, etc.
 
-### 5.8 Function Types
+### 5.9 Function Types
 
 ```
 Fn(Int) -> String

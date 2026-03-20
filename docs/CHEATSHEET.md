@@ -63,8 +63,25 @@ let same = color_a == color_b  // just works
 // From: opt-in for error conversions
 type AppError = | Io(IoError) | Parse(ParseError) deriving From
 ```
-<!-- Note: trait/impl syntax exists in the parser but is being superseded by
-     row polymorphism and container protocols. See docs/roadmap/active/type-system.md -->
+### Protocols (user-defined conventions)
+```
+// Define a protocol
+protocol Action {
+  fn name(a: Self) -> String
+  fn execute(a: Self, ctx: Context) -> Result[String, String]
+}
+
+// Satisfy via convention methods
+type GreetAction: Action = { greeting: String }
+fn GreetAction.name(a: GreetAction) -> String = "greet"
+fn GreetAction.execute(a: GreetAction, ctx: Context) -> Result[String, String] =
+  ok(a.greeting)
+
+// Use as generic bound
+fn run_action[T: Action](action: T, ctx: Context) -> Result[String, String] =
+  action.execute(ctx)
+```
+Built-in conventions (Eq, Repr, Ord, Hash, Codec) are protocols too.
 
 ## Expressions
 

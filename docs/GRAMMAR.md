@@ -3,7 +3,9 @@
 ```ebnf
 program     = import* decl*
 import      = "import" path ("as" IDENT)?                (* import json, import self as app *)
-decl        = type_decl | fn_decl | top_let | strict_decl | test_decl
+decl        = type_decl | fn_decl | protocol_decl | top_let | strict_decl | test_decl
+protocol_decl = "protocol" IDENT "{" protocol_method* "}"
+protocol_method = "effect"? "fn" IDENT "(" params ")" "->" type
 type_decl   = "type" IDENT type_params? "=" type_body ("deriving" "From")?
 type_body   = record_body | variant_body | "newtype" type
 record_body = "{" field ("," field)* "}"
