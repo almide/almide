@@ -964,32 +964,23 @@ fn propagate_expr(expr: &mut IrExpr, vt: &mut VarTable) {
     }
 }
 
-/// Propagate concrete types from match subject into pattern-bound variables.
-/// When subject_ty is concrete (e.g., Maybe[Int]), update VarTable for Bind vars
-/// inside Constructor/Some/Ok/Err patterns so they get the concrete payload type.
 fn propagate_pattern_types(pattern: &IrPattern, subject_ty: &Ty, vt: &mut VarTable) {
+    let type_args: &[Ty] = match subject_ty {
+        Ty::Named(_, args) if !args.is_empty() => args,
+        Ty::Applied(_, args) if !args.is_empty() => args,
+        _ => &[],
+    };
     match pattern {
         IrPattern::Constructor { args, .. } => {
-            // Constructor payload: for each bound arg, if VarTable has TypeVar,
-            // try to resolve from the subject_ty's variant fields
             for arg in args {
                 if let IrPattern::Bind { var } = arg {
                     let cur = &vt.get(*var).ty;
-                    if has_typevar(cur) {
-                        // Look up the variant's field types from type registry
-                        // For now: if subject is Named with type_args, substitute
-                        // the var's type using those args as generic bindings
-                        if let Ty::Named(_, type_args) = subject_ty {
-                            if !type_args.is_empty() {
-                                let old = cur.clone();
-                                let mut generic_names: Vec<&str> = Vec::new();
-                                collect_type_param_names_from_ty(&old, &mut generic_names);
-                                let new = substitute_named_type_params(&old, &generic_names, type_args);
-                                if new != old {
-                                    vt.entries[var.0 as usize].ty = new;
-                                }
-                            }
-                        }
+                    if has_typevar(cur) && !type_args.is_empty() {
+                        let old = cur.clone();
+                        let mut generic_names: Vec<&str> = Vec::new();
+                        collect_type_param_names_from_ty(&old, &mut generic_names);
+                        let new = substitute_named_type_params(&old, &generic_names, type_args);
+                        vt.entries[var.0 as usize].ty = new;
                     }
                 }
             }

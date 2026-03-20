@@ -334,22 +334,36 @@ impl FuncCompiler<'_> {
                     self.func.instruction(&Instruction::If(bt));
                     self.depth += 1;
 
+                    // Resolve constructor field types from variant info + subject type_args
+                    let ctor_fields = self.emitter.record_fields.get(ctor_name).cloned().unwrap_or_default();
+                    let subject_type_args: &[Ty] = match subject_ty {
+                        Ty::Named(_, args) if !args.is_empty() => args,
+                        Ty::Applied(_, args) if !args.is_empty() => args,
+                        _ => &[],
+                    };
+
                     // Bind constructor args (tuple payload fields)
                     let mut field_offset = 4u32; // skip tag
-                    for arg_pat in args {
+                    for (arg_idx, arg_pat) in args.iter().enumerate() {
+                        // Determine field type: use variant info with generic substitution
+                        let field_ty = ctor_fields.get(arg_idx)
+                            .map(|(_, fty)| {
+                                if !subject_type_args.is_empty() {
+                                    let mut gnames = Vec::new();
+                                    super::expressions::collect_type_param_names(fty, &mut gnames);
+                                    super::expressions::substitute_type_params(fty, &gnames, subject_type_args)
+                                } else { fty.clone() }
+                            })
+                            .unwrap_or_else(|| Ty::Int); // fallback
+
                         if let IrPattern::Bind { var } = arg_pat {
                             if let Some(&local_idx) = self.var_map.get(&var.0) {
-                                let var_ty = self.var_table.get(*var).ty.clone();
                                 wasm!(self.func, { local_get(scratch); });
-                                self.emit_load_at(&var_ty, field_offset);
+                                self.emit_load_at(&field_ty, field_offset);
                                 wasm!(self.func, { local_set(local_idx); });
-                                field_offset += values::byte_size(&var_ty);
                             }
-                        } else if let IrPattern::Wildcard = arg_pat {
-                            // Skip wildcard — still advance offset
-                            // Need to know the type... use i64 (8 bytes) as default
-                            field_offset += 8;
                         }
+                        field_offset += values::byte_size(&field_ty);
                     }
 
                     // Handle guard on constructor

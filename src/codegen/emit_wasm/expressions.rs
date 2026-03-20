@@ -814,7 +814,7 @@ impl FuncCompiler<'_> {
 }
 
 /// Collect type parameter names from a type (Named("X", []) where X is a single-letter or TypeVar).
-fn collect_type_param_names<'a>(ty: &'a Ty, names: &mut Vec<&'a str>) {
+pub(super) fn collect_type_param_names<'a>(ty: &'a Ty, names: &mut Vec<&'a str>) {
     match ty {
         Ty::Named(name, args) if args.is_empty() && name.len() <= 2 && name.chars().next().map_or(false, |c| c.is_uppercase()) => {
             if !names.contains(&name.as_str()) {
@@ -837,7 +837,7 @@ fn collect_type_param_names<'a>(ty: &'a Ty, names: &mut Vec<&'a str>) {
 }
 
 /// Substitute type parameters in a type. Named("T", []) → type_args[index of "T"].
-fn substitute_type_params(ty: &Ty, generic_names: &[&str], type_args: &[Ty]) -> Ty {
+pub(super) fn substitute_type_params(ty: &Ty, generic_names: &[&str], type_args: &[Ty]) -> Ty {
     match ty {
         Ty::Named(name, args) if args.is_empty() => {
             // Check if this is a type parameter name
@@ -857,7 +857,8 @@ fn substitute_type_params(ty: &Ty, generic_names: &[&str], type_args: &[Ty]) -> 
             }
             ty.clone()
         }
-        _ => ty.clone(),
+        // Recursively substitute in all other type constructors
+        _ => ty.map_children(&|child| substitute_type_params(child, generic_names, type_args)),
     }
 }
 
