@@ -1,74 +1,105 @@
 # Direct WASM Emission [ACTIVE]
 
-## Status: 15/66 lang tests pass (23%)
+## Status: Phase 1 complete, WASM test runner needed
 
 ## Current Architecture
 
 ```
 src/codegen/emit_wasm/
-├── mod.rs          WasmEmitter, assembly, lambda pre-scan, closures (956 lines)
-├── values.rs       Ty → ValType mapping, byte_size, field_offset (55 lines)
+├── mod.rs          WasmEmitter, assembly, lambda pre-scan, closures (980 lines)
+├── wasm_macro.rs   wasm! DSL macro for instruction emission (372 lines)
+├── values.rs       Ty → ValType mapping, byte_size, field_offset (61 lines)
 ├── strings.rs      String literal interning (35 lines)
-├── runtime.rs      12 runtime functions (700 lines)
-├── expressions.rs  emit_expr + operators + helpers (720 lines)
-├── calls.rs        emit_call + stdlib + closures + list.map/get (580 lines)
-├── collections.rs  Record/Tuple/List/Map construction (245 lines)
-├── control.rs      for-in/match/do-block (520 lines)
-├── statements.rs   emit_stmt + local scan + scratch depth (400 lines)
-└── functions.rs    IrFunction → WASM function (80 lines)
+├── runtime.rs      14 runtime functions via wasm! macro (1135 lines)
+├── expressions.rs  emit_expr + operators + helpers (780 lines)
+├── calls.rs        emit_call + stdlib + closures + list.map/filter/fold (1665 lines)
+├── collections.rs  Record/Tuple/List/Map construction (266 lines)
+├── control.rs      for-in/match/do-block (617 lines)
+├── statements.rs   emit_stmt + local scan + scratch depth (442 lines)
+└── functions.rs    IrFunction → WASM function (85 lines)
 ```
 
-## Remaining Work: 51 files to pass
+Total: 6,438 lines
 
-### Tier 1: Validation Errors (14 files)
+## Implemented
 
-Must fix WASM validation errors — the entire module is rejected if any function is invalid.
+- Literals (Int, Float, Bool, String, Unit)
+- Variables (local, global, top-level let)
+- Binary/Unary operators (arithmetic, comparison, logical, string concat, list concat)
+- Control flow (if/else, while, for..in Range, for..in List, break, continue)
+- Match expressions (wildcard, bind, literal, constructor, record pattern, tuple, Some/None, Ok/Err, guards)
+- Functions (user-defined, recursion, closures, FnRef, call_indirect)
+- Records (construction, spread, field access, variant tag)
+- Tuples (construction, index, destructure)
+- Lists (construction, index access, list.map/filter/fold/reverse/sort/get/enumerate)
+- Option/Result (construction, pattern matching, deep equality)
+- String interpolation
+- Effect fn (auto-unwrap via ResultPropagation pass + Try node)
+- Do blocks (with guard → loop structure)
+- Fan blocks (sequential fallback)
+- wasm! macro DSL (96% of instruction emission migrated)
 
-| Category | Files | Root Cause | Fix |
-|----------|-------|-----------|-----|
-| Codec/JSON (7) | codec_*, value_utils | Auto-generated codec functions use unimplemented stdlib | Implement json.stringify/parse or skip codec functions |
-| Lambda type inference (3) | edge_cases, function_test, scope_test | Lambda params have TypeVar/Unknown type when passed to HOFs | Improve lambda param type resolution in pre_scan |
-| Generic TypeVar in body (2) | generics, type_system | Monomorphized functions still have TypeVar in body expressions | Fix mono.rs type substitution for body expressions |
-| Record default fields (1) | default_fields | RecordPattern with default field values | Handle default fields in match |
-| Fan in effect fn (1) | fan_test | Fan block inside effect fn with auto-unwrap | ResultPropagation + Fan interaction |
+## Remaining: WASM stdlib
 
-### Tier 2: stdlib Implementation (20+ files)
+Functions that need WASM-native implementation (currently stub or missing):
 
-Tests that trap on unimplemented stdlib calls. Each stdlib function unblocks 1-3 files.
+### String
 
-| Priority | Function | Files Unblocked | Complexity |
-|----------|----------|-----------------|------------|
-| **High** | `list.filter` | data_types, lambda_test, operator_test | Medium (dynamic output size) |
-| **High** | `string.trim` | string_test, pipe_test | Medium (whitespace strip runtime) |
-| **High** | `map.get` | map_edge, map_literal | Medium (key lookup) |
-| **High** | `list.fold` | eq_protocol, operator_test | Easy (accumulator loop) |
-| **Medium** | `math.pi` (constant) | import_test | Easy |
-| **Medium** | `PowFloat/PowInt` | expr_test | Medium (loop or intrinsic) |
-| **Medium** | `for over Map` | for_test, for_tuple_test | Medium (Map iteration) |
-| **Medium** | `list.zip` | control_flow_test | Medium |
-| **Low** | `fan.any/map/race` | fan_ext/map/race | Hard (needs sequential simulation) |
-| **Low** | `json.stringify/encode/decode` | codec_*, prelude | Very Hard (JSON parser) |
-| **Low** | `hash` protocol | hash_protocol_test | Medium |
+| Function | Priority | Notes |
+|----------|----------|-------|
+| `string.split` | High | Needs delimiter search + list construction |
+| `string.join` | High | List of strings → single string |
+| `string.slice` | Medium | Substring extraction |
+| `string.replace` | Medium | Search and replace |
+| `string.repeat` | Medium | String repetition |
+| `string.reverse` | Medium | Byte reversal (ASCII) |
+| `string.index_of` | Low | First occurrence search |
+| `string.pad_start/pad_end` | Low | Padding |
+| `string.trim_start/trim_end` | Low | One-sided trim |
+| `string.get` | Low | Character at index |
+| `string.count` | Low | Substring count |
 
-### Tier 3: Language Feature Gaps (10+ files)
+### Float
 
-| Feature | Files | Description |
-|---------|-------|-------------|
-| Match guard expressions | match_edge_test | `match x { n if n > 0 => ... }` |
-| IndexAssign (`xs[i] = v`) | variable_test | Mutable list element assignment |
-| Result deep equality | effect_fn, error_test, equality_test | Compare ok/err with deep inner comparison |
-| Variant deep equality | equality_test, eq_protocol | Compare variant constructors recursively |
-| Nested open record | open_record_test | Open record with nested fields |
-| Guard in braceless body | do_block_pure_test | `fn f(x) = do { guard ... }` without braces |
-| Convention methods (UFCS) | trait_impl, derive_conventions | `x.method()` → convention method dispatch |
-| Nested variant record | variant_record_test | Variant with record payload, nested matching |
+| Function | Priority | Notes |
+|----------|----------|-------|
+| `float.to_string` (proper) | High | Currently truncates to int; needs decimal output |
 
-### Tier 4: Optimization (post-correctness)
+### List
 
-- Dead code elimination (remove unused runtime functions)
-- Constant folding in WASM
-- Function inlining
-- Memory compaction
+| Function | Priority | Notes |
+|----------|----------|-------|
+| `list.find` | Medium | First matching element |
+| `list.any/all` | Medium | Predicate checks |
+| `list.take/drop` | Medium | Sublist operations |
+| `list.zip` | Medium | Pair two lists |
+| `list.flat_map` | Medium | Map + flatten |
+| `list.contains` | Low | Element search |
+| `list.sort_by` | Low | Custom comparator sort |
+| `list.count` | Low | Predicate count |
+| `list.filter_map` | Low | Filter + map combined |
+
+### Map
+
+| Function | Priority | Notes |
+|----------|----------|-------|
+| `map.get` | High | Key lookup → Option |
+| `map.set` | High | Key insert/update |
+| `map.keys/values` | Medium | Iteration |
+| `map.contains_key` | Medium | Key existence check |
+
+### JSON/Codec
+
+| Function | Priority | Notes |
+|----------|----------|-------|
+| `json.stringify` | Low | Value → JSON string |
+| `json.parse` | Low | JSON string → Value |
+
+### Math
+
+| Function | Priority | Notes |
+|----------|----------|-------|
+| `math.pow` (Int/Float) | Medium | Exponentiation loop |
 
 ## Binary Size
 
@@ -81,3 +112,9 @@ Tests that trap on unimplemented stdlib calls. Each stdlib function unblocks 1-3
 | Variant | 1,392 B | 13,423 B | 9.6x |
 
 After DCE, Hello World should return to ~600B.
+
+## Next Steps
+
+1. WASM test runner (`almide test --target wasm`)
+2. High-priority stdlib (string.split/join, float.to_string, map.get/set)
+3. Dead code elimination for unused runtime functions

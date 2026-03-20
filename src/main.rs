@@ -79,6 +79,9 @@ enum Commands {
         /// Output test results as JSON (one per line)
         #[arg(long)]
         json: bool,
+        /// Target: wasm to run tests via direct WASM emit + wasmtime
+        #[arg(long)]
+        target: Option<String>,
     },
     /// Type check only
     Check {
@@ -389,9 +392,11 @@ fn dispatch(cli: Cli) {
             let file = resolve_file(file);
             cli::cmd_build(&file, o.as_deref(), target.as_deref(), release || fast, fast, unchecked_index, no_check);
         }
-        Commands::Test { file, run, no_check, json } => {
+        Commands::Test { file, run, no_check, json, target } => {
             let file_str = file.as_deref().unwrap_or("");
-            if json {
+            if target.as_deref() == Some("wasm") {
+                cli::cmd_test_wasm(file_str, run.as_deref());
+            } else if json {
                 cli::cmd_test_json(file_str, run.as_deref());
             } else {
                 cli::cmd_test(file_str, no_check, run.as_deref());
