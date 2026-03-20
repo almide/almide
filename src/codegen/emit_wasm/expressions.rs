@@ -635,7 +635,9 @@ impl FuncCompiler<'_> {
     pub(super) fn emit_eq(&mut self, left: &IrExpr, right: &IrExpr, negate: bool) {
         self.emit_expr(left);
         self.emit_expr(right);
-        match &left.ty {
+        // Use the more concrete type for comparison dispatch
+        let cmp_ty = if matches!(&left.ty, Ty::Unknown | Ty::TypeVar(_)) { &right.ty } else { &left.ty };
+        match cmp_ty {
             Ty::Int => { wasm!(self.func, { i64_eq; }); }
             Ty::Float => { wasm!(self.func, { f64_eq; }); }
             Ty::Bool => { wasm!(self.func, { i32_eq; }); }
