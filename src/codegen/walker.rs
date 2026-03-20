@@ -1236,7 +1236,12 @@ fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr]
             if let Some(enum_name) = ctx.ann.ctor_to_enum.get(name.as_str()) {
                 return render_enum_constructor(ctx, name, enum_name, args);
             }
-            name.clone()
+            // Convention methods: "Type.method" → "Type_method" for Rust target (free functions)
+            if ctx.target == Target::Rust && name.contains('.') {
+                name.replace('.', "_")
+            } else {
+                name.clone()
+            }
         }
         CallTarget::Method { object, method } => {
             if let Some(full) = render_method_call_full(ctx, object, method, args) {

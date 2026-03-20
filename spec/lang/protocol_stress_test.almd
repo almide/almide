@@ -34,10 +34,11 @@ test "protocol method in lambda" {
   assert_eq(names, ["cat", "dog", "bird"])
 }
 
-// NOTE: Type.method(arg) inside lambda generates incorrect Rust (Type.method instead of Type::method)
-// This is a pre-existing codegen bug, not protocol-specific. Tracked separately.
-// UFCS (a.get_name()) also doesn't work in lambda due to type inference limitations.
-// test "protocol method in filter lambda" { ... }
+test "protocol method in filter lambda" {
+  let animals = [Animal { species: "cat" }, Animal { species: "dog" }, Animal { species: "catfish" }]
+  let cats = list.filter(animals, (a) => string.starts_with(Animal.get_name(a), "cat"))
+  assert_eq(list.len(cats), 2)
+}
 
 // ── Protocol method used in string interpolation ──
 
@@ -248,5 +249,12 @@ test "protocol predicates combined with and/or" {
   assert_eq(t.matches("feature") and not t.is_active(), false)
 }
 
-// NOTE: Same codegen bug as above — Type.method() inside lambda emits Rust dot syntax instead of ::
-// test "protocol predicates in list filter" { ... }
+test "protocol predicates in list filter" {
+  let tasks = [
+    Task { title: "fix bug", done: false },
+    Task { title: "add feature", done: true },
+    Task { title: "fix typo", done: false }
+  ]
+  let active_fixes = list.filter(tasks, (t) => Task.matches(t, "fix") and Task.is_active(t))
+  assert_eq(list.len(active_fixes), 2)
+}
