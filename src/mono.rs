@@ -83,11 +83,10 @@ fn find_structurally_bounded_fns(functions: &[IrFunction], type_decls: &[IrTypeD
     let mut result = HashMap::new();
     for func in functions {
         let mut bounded = Vec::new();
-        // パターン A: generic + structural bound (fn f[T: { name: String, .. }](x: T))
+        // パターン A: generic functions (with or without structural bounds)
         if let Some(ref generics) = func.generics {
             bounded.extend(
                 generics.iter()
-                    .filter(|g| g.structural_bound.is_some())
                     .flat_map(|g| {
                         func.params.iter().enumerate()
                             .filter(|(_, param)| ty_contains_typevar(&param.ty, &g.name))
