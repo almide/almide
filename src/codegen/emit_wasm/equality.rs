@@ -342,6 +342,18 @@ impl FuncCompiler<'_> {
             (Ty::Float, CmpKind::Gt) => { wasm!(self.func, { f64_gt; }); }
             (Ty::Float, CmpKind::Lte) => { wasm!(self.func, { f64_le; }); }
             (Ty::Float, CmpKind::Gte) => { wasm!(self.func, { f64_ge; }); }
+            (Ty::String, CmpKind::Lt) => {
+                wasm!(self.func, { call(self.emitter.rt.string.cmp); i32_const(0); i32_lt_s; });
+            }
+            (Ty::String, CmpKind::Gt) => {
+                wasm!(self.func, { call(self.emitter.rt.string.cmp); i32_const(0); i32_gt_s; });
+            }
+            (Ty::String, CmpKind::Lte) => {
+                wasm!(self.func, { call(self.emitter.rt.string.cmp); i32_const(0); i32_le_s; });
+            }
+            (Ty::String, CmpKind::Gte) => {
+                wasm!(self.func, { call(self.emitter.rt.string.cmp); i32_const(0); i32_ge_s; });
+            }
             _ => { wasm!(self.func, { unreachable; }); }
         }
     }

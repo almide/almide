@@ -20,8 +20,9 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { i64_trunc_f64_s; });
             }
             "round" => {
+                // floor(x + 0.5) — standard rounding (half-up), not banker's rounding
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { f64_nearest; });
+                wasm!(self.func, { f64_const(0.5); f64_add; f64_floor; });
             }
             "floor" => {
                 self.emit_expr(&args[0]);
@@ -97,14 +98,15 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { f64_abs; f64_const(f64::INFINITY); f64_eq; });
             }
             "parse" => {
-                // float.parse → Result[Float, String]. Needs runtime. Stub for now.
-                self.emit_stub_call(args);
-                return true;
+                // float.parse(s: String) → Result[Float, String]
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { call(self.emitter.rt.float_parse); });
             }
             "to_fixed" => {
-                // float.to_fixed → String. Needs runtime. Stub for now.
-                self.emit_stub_call(args);
-                return true;
+                // float.to_fixed(n: Float, decimals: Int) → String
+                self.emit_expr(&args[0]);
+                self.emit_expr(&args[1]);
+                wasm!(self.func, { call(self.emitter.rt.float_to_fixed); });
             }
             _ => return false,
         }
@@ -303,7 +305,11 @@ impl FuncCompiler<'_> {
                     end;
                 });
             }
-            "from_hex" | "rotate_right" | "rotate_left" => {
+            "from_hex" => {
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { call(self.emitter.rt.int_from_hex); });
+            }
+            "rotate_right" | "rotate_left" => {
                 self.emit_stub_call(args);
                 return true;
             }
@@ -374,13 +380,63 @@ impl FuncCompiler<'_> {
                 self.func.instruction(&Instruction::F64Max);
             }
             "sin" => {
-                // WASM has no native sin. Stub — needs runtime or JS import.
-                self.emit_stub_call(args);
-                return true;
+                self.emit_expr(&args[0]);
+                if matches!(&args[0].ty, Ty::Int) {
+                    wasm!(self.func, { f64_convert_i64_s; });
+                }
+                wasm!(self.func, { call(self.emitter.rt.math_sin); });
             }
-            "cos" | "tan" | "log" | "exp" | "log10" | "log2" => {
-                self.emit_stub_call(args);
-                return true;
+            "cos" => {
+                self.emit_expr(&args[0]);
+                if matches!(&args[0].ty, Ty::Int) {
+                    wasm!(self.func, { f64_convert_i64_s; });
+                }
+                wasm!(self.func, { call(self.emitter.rt.math_cos); });
+            }
+            "tan" => {
+                self.emit_expr(&args[0]);
+                if matches!(&args[0].ty, Ty::Int) {
+                    wasm!(self.func, { f64_convert_i64_s; });
+                }
+                wasm!(self.func, { call(self.emitter.rt.math_tan); });
+            }
+            "log" => {
+                self.emit_expr(&args[0]);
+                if matches!(&args[0].ty, Ty::Int) {
+                    wasm!(self.func, { f64_convert_i64_s; });
+                }
+                wasm!(self.func, { call(self.emitter.rt.math_log); });
+            }
+            "exp" => {
+                self.emit_expr(&args[0]);
+                if matches!(&args[0].ty, Ty::Int) {
+                    wasm!(self.func, { f64_convert_i64_s; });
+                }
+                wasm!(self.func, { call(self.emitter.rt.math_exp); });
+            }
+            "log10" => {
+                // log10(x) = ln(x) / ln(10)
+                self.emit_expr(&args[0]);
+                if matches!(&args[0].ty, Ty::Int) {
+                    wasm!(self.func, { f64_convert_i64_s; });
+                }
+                wasm!(self.func, {
+                    call(self.emitter.rt.math_log);
+                    f64_const(std::f64::consts::LN_10);
+                    f64_div;
+                });
+            }
+            "log2" => {
+                // log2(x) = ln(x) / ln(2)
+                self.emit_expr(&args[0]);
+                if matches!(&args[0].ty, Ty::Int) {
+                    wasm!(self.func, { f64_convert_i64_s; });
+                }
+                wasm!(self.func, {
+                    call(self.emitter.rt.math_log);
+                    f64_const(std::f64::consts::LN_2);
+                    f64_div;
+                });
             }
             "sign" => {
                 // math.sign(n: Int) → Int (-1, 0, 1)
@@ -422,10 +478,9 @@ impl FuncCompiler<'_> {
             }
             "fpow" => {
                 // fpow(base: Float, exp: Float) → Float
-                // WASM has no native pow. Approximate via exp(exp * log(base))
-                // For now, stub — common enough to need a proper implementation later.
-                self.emit_stub_call(args);
-                return true;
+                self.emit_expr(&args[0]);
+                self.emit_expr(&args[1]);
+                wasm!(self.func, { call(self.emitter.rt.float_pow); });
             }
             "factorial" => {
                 // factorial(n) → Int, loop

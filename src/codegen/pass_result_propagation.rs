@@ -5,6 +5,7 @@
 //!
 //! Exception: match subjects are NOT wrapped (you match on Ok/Err, not unwrap).
 
+use std::collections::HashMap;
 use crate::ir::*;
 use crate::types::{Ty, TypeConstructorId};
 use super::pass::{NanoPass, Target};
@@ -20,11 +21,19 @@ impl NanoPass for ResultPropagationPass {
     }
 
     fn run(&self, program: &mut IrProgram, _target: Target) {
+        let mut retyped_vars: HashMap<u32, Ty> = HashMap::new();
         for func in &mut program.functions {
             if func.is_effect && !func.is_test {
                 // Effect fns: insert Try around Result-returning calls
                 let returns_result = func.ret_ty.is_result();
                 func.body = insert_try_body(func.body.clone(), returns_result);
+                // Collect VarId→unwrapped type mappings from Try-wrapped bindings
+                collect_retyped_vars(&func.body, &mut retyped_vars);
+                // Fix Var reference types throughout the function body
+                if !retyped_vars.is_empty() {
+                    func.body = fix_var_types(func.body.clone(), &retyped_vars);
+                    retyped_vars.clear();
+                }
             } else if func.is_test {
                 // Test fns: insert Try only inside fan blocks (fan auto-unwraps Results)
                 func.body = insert_try_in_fan(func.body.clone());
@@ -35,6 +44,11 @@ impl NanoPass for ResultPropagationPass {
                 if func.is_effect && !func.is_test {
                     let returns_result = func.ret_ty.is_result();
                     func.body = insert_try_body(func.body.clone(), returns_result);
+                    collect_retyped_vars(&func.body, &mut retyped_vars);
+                    if !retyped_vars.is_empty() {
+                        func.body = fix_var_types(func.body.clone(), &retyped_vars);
+                        retyped_vars.clear();
+                    }
                 }
             }
         }
@@ -243,7 +257,21 @@ fn insert_try(expr: IrExpr, in_match_subject: bool) -> IrExpr {
 fn insert_try_stmt(stmt: IrStmt) -> IrStmt {
     let kind = match stmt.kind {
         IrStmtKind::Bind { var, mutability, ty, value } => {
-            let new_value = insert_try(value, false);
+            let mut new_value = insert_try(value, false);
+            // If the value wasn't already wrapped by insert_try (e.g. ok()/err() which
+            // are not Call nodes), wrap it here at the binding site.
+            if !matches!(&new_value.kind, IrExprKind::Try { .. }) && is_result_value(&new_value) {
+                let inner_ty = match &new_value.ty {
+                    Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
+                    _ => new_value.ty.clone(),
+                };
+                let span = new_value.span;
+                new_value = IrExpr {
+                    kind: IrExprKind::Try { expr: Box::new(new_value) },
+                    ty: inner_ty,
+                    span,
+                };
+            }
             // If the value was wrapped in Try, update the binding type
             let new_ty = if matches!(&new_value.kind, IrExprKind::Try { .. }) {
                 new_value.ty.clone()
@@ -275,6 +303,214 @@ fn is_result_call(expr: &IrExpr) -> bool {
     matches!(&expr.kind,
         IrExprKind::Call { .. }
     )
+}
+
+/// Check if an expression is a Result-producing value (call, ok(), err()) that should be
+/// auto-unwrapped when used as a let binding value in an effect fn.
+fn is_result_value(expr: &IrExpr) -> bool {
+    if !expr.ty.is_result() {
+        return false;
+    }
+    matches!(&expr.kind,
+        IrExprKind::Call { .. }
+        | IrExprKind::ResultOk { .. }
+        | IrExprKind::ResultErr { .. }
+    )
+}
+
+/// Collect VarId→unwrapped type mappings from bindings whose values are Try-wrapped.
+fn collect_retyped_vars(expr: &IrExpr, map: &mut HashMap<u32, Ty>) {
+    match &expr.kind {
+        IrExprKind::Block { stmts, expr: tail } | IrExprKind::DoBlock { stmts, expr: tail } => {
+            for s in stmts { collect_retyped_vars_stmt(s, map); }
+            if let Some(e) = tail { collect_retyped_vars(e, map); }
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            collect_retyped_vars(cond, map);
+            collect_retyped_vars(then, map);
+            collect_retyped_vars(else_, map);
+        }
+        IrExprKind::Match { subject, arms } => {
+            collect_retyped_vars(subject, map);
+            for arm in arms { collect_retyped_vars(&arm.body, map); }
+        }
+        IrExprKind::ForIn { iterable, body, .. } => {
+            collect_retyped_vars(iterable, map);
+            for s in body { collect_retyped_vars_stmt(s, map); }
+        }
+        IrExprKind::While { cond, body } => {
+            collect_retyped_vars(cond, map);
+            for s in body { collect_retyped_vars_stmt(s, map); }
+        }
+        _ => {}
+    }
+}
+
+fn collect_retyped_vars_stmt(stmt: &IrStmt, map: &mut HashMap<u32, Ty>) {
+    match &stmt.kind {
+        IrStmtKind::Bind { var, value, .. } => {
+            if matches!(&value.kind, IrExprKind::Try { .. }) {
+                // The binding value is Try-wrapped; record unwrapped type
+                map.insert(var.0, value.ty.clone());
+            }
+            collect_retyped_vars(value, map);
+        }
+        IrStmtKind::Expr { expr } => collect_retyped_vars(expr, map),
+        IrStmtKind::Guard { cond, else_ } => {
+            collect_retyped_vars(cond, map);
+            collect_retyped_vars(else_, map);
+        }
+        _ => {}
+    }
+}
+
+/// Walk the IR tree, updating Var reference types for VarIds in the retyped map.
+fn fix_var_types(expr: IrExpr, map: &HashMap<u32, Ty>) -> IrExpr {
+    let ty = expr.ty;
+    let span = expr.span;
+    let kind = match expr.kind {
+        IrExprKind::Var { id } => {
+            if let Some(new_ty) = map.get(&id.0) {
+                return IrExpr { kind: IrExprKind::Var { id }, ty: new_ty.clone(), span };
+            }
+            IrExprKind::Var { id }
+        }
+        IrExprKind::Block { stmts, expr: e } => IrExprKind::Block {
+            stmts: stmts.into_iter().map(|s| fix_var_types_stmt(s, map)).collect(),
+            expr: e.map(|e| Box::new(fix_var_types(*e, map))),
+        },
+        IrExprKind::DoBlock { stmts, expr: e } => IrExprKind::DoBlock {
+            stmts: stmts.into_iter().map(|s| fix_var_types_stmt(s, map)).collect(),
+            expr: e.map(|e| Box::new(fix_var_types(*e, map))),
+        },
+        IrExprKind::If { cond, then, else_ } => IrExprKind::If {
+            cond: Box::new(fix_var_types(*cond, map)),
+            then: Box::new(fix_var_types(*then, map)),
+            else_: Box::new(fix_var_types(*else_, map)),
+        },
+        IrExprKind::Match { subject, arms } => IrExprKind::Match {
+            subject: Box::new(fix_var_types(*subject, map)),
+            arms: arms.into_iter().map(|arm| IrMatchArm {
+                pattern: arm.pattern,
+                guard: arm.guard.map(|g| fix_var_types(g, map)),
+                body: fix_var_types(arm.body, map),
+            }).collect(),
+        },
+        IrExprKind::BinOp { op, left, right } => IrExprKind::BinOp {
+            op,
+            left: Box::new(fix_var_types(*left, map)),
+            right: Box::new(fix_var_types(*right, map)),
+        },
+        IrExprKind::UnOp { op, operand } => IrExprKind::UnOp {
+            op,
+            operand: Box::new(fix_var_types(*operand, map)),
+        },
+        IrExprKind::Call { target, args, type_args } => {
+            let target = match target {
+                CallTarget::Method { object, method } =>
+                    CallTarget::Method { object: Box::new(fix_var_types(*object, map)), method },
+                CallTarget::Computed { callee } =>
+                    CallTarget::Computed { callee: Box::new(fix_var_types(*callee, map)) },
+                other => other,
+            };
+            IrExprKind::Call {
+                target,
+                args: args.into_iter().map(|a| fix_var_types(a, map)).collect(),
+                type_args,
+            }
+        }
+        IrExprKind::ForIn { var, var_tuple, iterable, body } => IrExprKind::ForIn {
+            var, var_tuple,
+            iterable: Box::new(fix_var_types(*iterable, map)),
+            body: body.into_iter().map(|s| fix_var_types_stmt(s, map)).collect(),
+        },
+        IrExprKind::While { cond, body } => IrExprKind::While {
+            cond: Box::new(fix_var_types(*cond, map)),
+            body: body.into_iter().map(|s| fix_var_types_stmt(s, map)).collect(),
+        },
+        IrExprKind::ResultOk { expr: inner } => IrExprKind::ResultOk {
+            expr: Box::new(fix_var_types(*inner, map)),
+        },
+        IrExprKind::ResultErr { expr: inner } => IrExprKind::ResultErr {
+            expr: Box::new(fix_var_types(*inner, map)),
+        },
+        IrExprKind::OptionSome { expr: inner } => IrExprKind::OptionSome {
+            expr: Box::new(fix_var_types(*inner, map)),
+        },
+        IrExprKind::Try { expr: inner } => IrExprKind::Try {
+            expr: Box::new(fix_var_types(*inner, map)),
+        },
+        IrExprKind::StringInterp { parts } => IrExprKind::StringInterp {
+            parts: parts.into_iter().map(|p| match p {
+                IrStringPart::Expr { expr } => IrStringPart::Expr { expr: fix_var_types(expr, map) },
+                other => other,
+            }).collect(),
+        },
+        IrExprKind::List { elements } => IrExprKind::List {
+            elements: elements.into_iter().map(|e| fix_var_types(e, map)).collect(),
+        },
+        IrExprKind::Tuple { elements } => IrExprKind::Tuple {
+            elements: elements.into_iter().map(|e| fix_var_types(e, map)).collect(),
+        },
+        IrExprKind::Record { name, fields } => IrExprKind::Record {
+            name,
+            fields: fields.into_iter().map(|(k, v)| (k, fix_var_types(v, map))).collect(),
+        },
+        IrExprKind::SpreadRecord { base, fields } => IrExprKind::SpreadRecord {
+            base: Box::new(fix_var_types(*base, map)),
+            fields: fields.into_iter().map(|(k, v)| (k, fix_var_types(v, map))).collect(),
+        },
+        IrExprKind::Member { object, field } => IrExprKind::Member {
+            object: Box::new(fix_var_types(*object, map)),
+            field,
+        },
+        IrExprKind::IndexAccess { object, index } => IrExprKind::IndexAccess {
+            object: Box::new(fix_var_types(*object, map)),
+            index: Box::new(fix_var_types(*index, map)),
+        },
+        IrExprKind::TupleIndex { object, index } => IrExprKind::TupleIndex {
+            object: Box::new(fix_var_types(*object, map)),
+            index,
+        },
+        IrExprKind::MapLiteral { entries } => IrExprKind::MapLiteral {
+            entries: entries.into_iter().map(|(k, v)| (fix_var_types(k, map), fix_var_types(v, map))).collect(),
+        },
+        IrExprKind::MapAccess { object, key } => IrExprKind::MapAccess {
+            object: Box::new(fix_var_types(*object, map)),
+            key: Box::new(fix_var_types(*key, map)),
+        },
+        IrExprKind::Clone { expr } => IrExprKind::Clone {
+            expr: Box::new(fix_var_types(*expr, map)),
+        },
+        IrExprKind::Deref { expr } => IrExprKind::Deref {
+            expr: Box::new(fix_var_types(*expr, map)),
+        },
+        IrExprKind::Fan { exprs } => IrExprKind::Fan {
+            exprs: exprs.into_iter().map(|e| fix_var_types(e, map)).collect(),
+        },
+        // Leaf nodes — return as-is
+        other => other,
+    };
+    IrExpr { kind, ty, span }
+}
+
+fn fix_var_types_stmt(stmt: IrStmt, map: &HashMap<u32, Ty>) -> IrStmt {
+    let kind = match stmt.kind {
+        IrStmtKind::Bind { var, mutability, ty, value } =>
+            IrStmtKind::Bind { var, mutability, ty, value: fix_var_types(value, map) },
+        IrStmtKind::Assign { var, value } =>
+            IrStmtKind::Assign { var, value: fix_var_types(value, map) },
+        IrStmtKind::Expr { expr } =>
+            IrStmtKind::Expr { expr: fix_var_types(expr, map) },
+        IrStmtKind::Guard { cond, else_ } =>
+            IrStmtKind::Guard { cond: fix_var_types(cond, map), else_: fix_var_types(else_, map) },
+        IrStmtKind::IndexAssign { target, index, value } =>
+            IrStmtKind::IndexAssign { target, index: fix_var_types(index, map), value: fix_var_types(value, map) },
+        IrStmtKind::FieldAssign { target, field, value } =>
+            IrStmtKind::FieldAssign { target, field, value: fix_var_types(value, map) },
+        other => other,
+    };
+    IrStmt { kind, span: stmt.span }
 }
 
 /// Insert Try only inside Fan blocks in test functions.

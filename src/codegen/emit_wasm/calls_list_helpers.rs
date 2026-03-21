@@ -109,13 +109,18 @@ impl FuncCompiler<'_> {
         // This is a placeholder; slice uses the same pattern as take/drop
     }
 
-    /// Emit list.sort (insertion sort for List[Int]).
+    /// Emit list.sort (insertion sort for List[Int] and List[String]).
     pub(super) fn emit_list_sort(&mut self, args: &[IrExpr]) {
         let elem_ty = self.list_elem_ty(&args[0].ty);
-        if !matches!(&elem_ty, Ty::Int) {
-            self.emit_stub_call(args);
-            return;
+        match &elem_ty {
+            Ty::Int => self.emit_list_sort_int(args),
+            Ty::String => self.emit_list_sort_string(args),
+            _ => self.emit_stub_call(args),
         }
+    }
+
+    /// Insertion sort for List[Int] (elements are i64, 8 bytes each).
+    fn emit_list_sort_int(&mut self, args: &[IrExpr]) {
         let s = self.match_i32_base + self.match_depth;
         let s64 = self.match_i64_base + self.match_depth;
         // Copy list first
@@ -173,6 +178,79 @@ impl FuncCompiler<'_> {
               local_get(s + 1); i32_const(4); i32_add;
               local_get(s + 3); i32_const(1); i32_add; i32_const(8); i32_mul; i32_add;
               local_get(s64); i64_store(0);
+              local_get(s + 2); i32_const(1); i32_add; local_set(s + 2);
+              br(0);
+            end; end;
+            local_get(s + 1);
+        });
+    }
+
+    /// Insertion sort for List[String] (elements are i32 pointers, 4 bytes each).
+    /// Comparison uses __str_cmp which returns negative/0/positive.
+    fn emit_list_sort_string(&mut self, args: &[IrExpr]) {
+        let s = self.match_i32_base + self.match_depth;
+        // s: len, s+1: dst, s+2: i (outer), s+3: j (inner), s+4: key (i32 str ptr)
+        // Copy list first
+        wasm!(self.func, { i32_const(0); });
+        self.emit_expr(&args[0]);
+        wasm!(self.func, {
+            i32_store(0);
+            i32_const(0); i32_load(0); i32_load(0); local_set(s); // len
+            i32_const(4); local_get(s); i32_const(4); i32_mul; i32_add;
+            call(self.emitter.rt.alloc); local_set(s + 1); // dst
+            local_get(s + 1); local_get(s); i32_store(0);
+        });
+        // Copy all elements (i32 pointers)
+        wasm!(self.func, {
+            i32_const(0); local_set(s + 2);
+            block_empty; loop_empty;
+              local_get(s + 2); local_get(s); i32_ge_u; br_if(1);
+              local_get(s + 1); i32_const(4); i32_add;
+              local_get(s + 2); i32_const(4); i32_mul; i32_add;
+              i32_const(0); i32_load(0); i32_const(4); i32_add;
+              local_get(s + 2); i32_const(4); i32_mul; i32_add;
+              i32_load(0); i32_store(0);
+              local_get(s + 2); i32_const(1); i32_add; local_set(s + 2);
+              br(0);
+            end; end;
+        });
+        // Insertion sort outer loop
+        wasm!(self.func, {
+            i32_const(1); local_set(s + 2); // i = 1
+            block_empty; loop_empty;
+              local_get(s + 2); local_get(s); i32_ge_u; br_if(1);
+              // key = dst[4 + i*4]
+              local_get(s + 1); i32_const(4); i32_add;
+              local_get(s + 2); i32_const(4); i32_mul; i32_add;
+              i32_load(0); local_set(s + 4); // key
+              local_get(s + 2); i32_const(1); i32_sub; local_set(s + 3); // j = i - 1
+        });
+        // Inner loop: shift elements right while dst[j] > key
+        wasm!(self.func, {
+              block_empty; loop_empty;
+                local_get(s + 3); i32_const(0); i32_lt_s; br_if(1);
+                // Compare: str_cmp(dst[j], key) <= 0 means stop
+                local_get(s + 1); i32_const(4); i32_add;
+                local_get(s + 3); i32_const(4); i32_mul; i32_add;
+                i32_load(0); // dst[j]
+                local_get(s + 4); // key
+                call(self.emitter.rt.string.cmp);
+                i32_const(0); i32_le_s; br_if(1); // if dst[j] <= key, stop
+                // Shift: dst[j+1] = dst[j]
+                local_get(s + 1); i32_const(4); i32_add;
+                local_get(s + 3); i32_const(1); i32_add; i32_const(4); i32_mul; i32_add;
+                local_get(s + 1); i32_const(4); i32_add;
+                local_get(s + 3); i32_const(4); i32_mul; i32_add;
+                i32_load(0); i32_store(0);
+                local_get(s + 3); i32_const(1); i32_sub; local_set(s + 3);
+                br(0);
+              end; end;
+        });
+        // Place key at dst[j+1]
+        wasm!(self.func, {
+              local_get(s + 1); i32_const(4); i32_add;
+              local_get(s + 3); i32_const(1); i32_add; i32_const(4); i32_mul; i32_add;
+              local_get(s + 4); i32_store(0);
               local_get(s + 2); i32_const(1); i32_add; local_set(s + 2);
               br(0);
             end; end;

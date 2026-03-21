@@ -21,6 +21,7 @@ mod runtime;
 mod runtime_eq;
 mod rt_string;
 mod rt_string_extra;
+mod rt_numeric;
 mod expressions;
 mod calls;
 mod calls_string;
@@ -95,6 +96,7 @@ pub struct StringRuntime {
     pub is_whitespace: u32,
     pub is_upper: u32,
     pub is_lower: u32,
+    pub cmp: u32,
 }
 
 /// Indices of built-in runtime functions.
@@ -112,7 +114,16 @@ pub struct RuntimeFuncs {
     pub option_eq_str: u32,
     pub result_eq_i64_str: u32,
     pub int_parse: u32,
+    pub int_from_hex: u32,
     pub float_to_string: u32,
+    pub float_parse: u32,
+    pub float_to_fixed: u32,
+    pub float_pow: u32,
+    pub math_sin: u32,
+    pub math_cos: u32,
+    pub math_tan: u32,
+    pub math_log: u32,
+    pub math_exp: u32,
     pub string: StringRuntime,
 }
 
@@ -212,10 +223,13 @@ impl WasmEmitter {
                 fd_write: 0, alloc: 0,
                 println_str: 0, println_int: 0,
                 int_to_string: 0, float_to_string: 0,
+                float_parse: 0, float_to_fixed: 0, float_pow: 0,
+                math_sin: 0, math_cos: 0, math_tan: 0,
+                math_log: 0, math_exp: 0,
                 concat_str: 0, concat_list: 0,
                 list_eq: 0, mem_eq: 0,
                 option_eq_i64: 0, option_eq_str: 0,
-                result_eq_i64_str: 0, int_parse: 0,
+                result_eq_i64_str: 0, int_parse: 0, int_from_hex: 0,
                 string: StringRuntime {
                     eq: 0, contains: 0, trim: 0,
                     slice: 0, reverse: 0, repeat: 0, index_of: 0,
@@ -229,6 +243,7 @@ impl WasmEmitter {
                     strip_prefix: 0, strip_suffix: 0,
                     is_digit: 0, is_alpha: 0, is_alnum: 0,
                     is_whitespace: 0, is_upper: 0, is_lower: 0,
+                    cmp: 0,
                 },
             },
             heap_ptr_global: 0,

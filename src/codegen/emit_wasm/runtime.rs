@@ -69,6 +69,34 @@ pub fn register_runtime(emitter: &mut WasmEmitter) {
     let int_parse_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
     emitter.rt.int_parse = emitter.register_func("__int_parse", int_parse_ty);
 
+    // __int_from_hex(s: i32) -> i32 (Result[Int, String])
+    let int_from_hex_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
+    emitter.rt.int_from_hex = emitter.register_func("__int_from_hex", int_from_hex_ty);
+
+    // __float_parse(s: i32) -> i32 (Result[Float, String]: [tag:i32][f64 or str_ptr:i32] = 12 bytes)
+    let float_parse_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
+    emitter.rt.float_parse = emitter.register_func("__float_parse", float_parse_ty);
+
+    // __float_to_fixed(f: f64, decimals: i64) -> i32 (String ptr)
+    let float_to_fixed_ty = emitter.register_type(vec![ValType::F64, ValType::I64], vec![ValType::I32]);
+    emitter.rt.float_to_fixed = emitter.register_func("__float_to_fixed", float_to_fixed_ty);
+
+    // __float_pow(base: f64, exp: f64) -> f64
+    let float_pow_ty = emitter.register_type(vec![ValType::F64, ValType::F64], vec![ValType::F64]);
+    emitter.rt.float_pow = emitter.register_func("__float_pow", float_pow_ty);
+
+    // __math_sin(x: f64) -> f64
+    let f64_f64_ty = emitter.register_type(vec![ValType::F64], vec![ValType::F64]);
+    emitter.rt.math_sin = emitter.register_func("__math_sin", f64_f64_ty);
+    // __math_cos(x: f64) -> f64
+    emitter.rt.math_cos = emitter.register_func("__math_cos", f64_f64_ty);
+    // __math_tan(x: f64) -> f64
+    emitter.rt.math_tan = emitter.register_func("__math_tan", f64_f64_ty);
+    // __math_log(x: f64) -> f64  (natural logarithm)
+    emitter.rt.math_log = emitter.register_func("__math_log", f64_f64_ty);
+    // __math_exp(x: f64) -> f64  (e^x)
+    emitter.rt.math_exp = emitter.register_func("__math_exp", f64_f64_ty);
+
     // String stdlib runtime (delegated to rt_string module)
     super::rt_string::register(emitter);
 
@@ -91,6 +119,15 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     super::runtime_eq::compile_list_eq(emitter);
     super::runtime_eq::compile_concat_list(emitter);
     super::runtime_eq::compile_int_parse(emitter);
+    super::rt_numeric::compile_int_from_hex(emitter);
+    super::rt_numeric::compile_float_parse(emitter);
+    super::rt_numeric::compile_float_to_fixed(emitter);
+    super::rt_numeric::compile_float_pow(emitter);
+    super::rt_numeric::compile_math_sin(emitter);
+    super::rt_numeric::compile_math_cos(emitter);
+    super::rt_numeric::compile_math_tan(emitter);
+    super::rt_numeric::compile_math_log(emitter);
+    super::rt_numeric::compile_math_exp(emitter);
     // String stdlib runtime (delegated)
     super::rt_string::compile(emitter);
 }

@@ -164,6 +164,15 @@ macro_rules! wasm {
     (@emit $f:expr, i32_lt_s; $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::I32LtS); wasm!(@emit $f, $($rest)*)
     };
+    (@emit $f:expr, i32_gt_s; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I32GtS); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, i32_le_s; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I32LeS); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, i32_ge_s; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I32GeS); wasm!(@emit $f, $($rest)*)
+    };
     (@emit $f:expr, i32_lt_u; $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::I32LtU); wasm!(@emit $f, $($rest)*)
     };

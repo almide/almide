@@ -305,3 +305,52 @@ fn compile_case_predicate(emitter: &mut WasmEmitter, func_idx: u32, lo: i32, hi:
     });
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }
+
+/// __str_cmp(a: i32, b: i32) -> i32
+/// Lexicographic comparison: negative if a<b, 0 if equal, positive if a>b.
+pub(super) fn compile_cmp(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.string.cmp];
+    let mut f = Function::new([
+        (1, ValType::I32), (1, ValType::I32),
+        (1, ValType::I32), (1, ValType::I32),
+    ]);
+    use wasm_encoder::Instruction::*;
+    let mem0 = wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 };
+    let mem0_byte = wasm_encoder::MemArg { offset: 0, align: 0, memory_index: 0 };
+    // min_len = min(a.len, b.len)
+    f.instruction(&LocalGet(0)).instruction(&I32Load(mem0));
+    f.instruction(&LocalGet(1)).instruction(&I32Load(mem0));
+    f.instruction(&I32LeU);
+    f.instruction(&If(wasm_encoder::BlockType::Result(ValType::I32)));
+    f.instruction(&LocalGet(0)).instruction(&I32Load(mem0));
+    f.instruction(&Else);
+    f.instruction(&LocalGet(1)).instruction(&I32Load(mem0));
+    f.instruction(&End);
+    f.instruction(&LocalSet(2));
+    f.instruction(&I32Const(0)).instruction(&LocalSet(3));
+    f.instruction(&Block(wasm_encoder::BlockType::Empty));
+    f.instruction(&Loop(wasm_encoder::BlockType::Empty));
+    f.instruction(&LocalGet(3)).instruction(&LocalGet(2)).instruction(&I32GeU);
+    f.instruction(&BrIf(1));
+    f.instruction(&LocalGet(0)).instruction(&I32Const(4)).instruction(&I32Add);
+    f.instruction(&LocalGet(3)).instruction(&I32Add);
+    f.instruction(&I32Load8U(mem0_byte));
+    f.instruction(&LocalSet(4));
+    f.instruction(&LocalGet(1)).instruction(&I32Const(4)).instruction(&I32Add);
+    f.instruction(&LocalGet(3)).instruction(&I32Add);
+    f.instruction(&I32Load8U(mem0_byte));
+    f.instruction(&LocalSet(5));
+    f.instruction(&LocalGet(4)).instruction(&LocalGet(5)).instruction(&I32Ne);
+    f.instruction(&If(wasm_encoder::BlockType::Empty));
+    f.instruction(&LocalGet(4)).instruction(&LocalGet(5)).instruction(&I32Sub);
+    f.instruction(&Return);
+    f.instruction(&End);
+    f.instruction(&LocalGet(3)).instruction(&I32Const(1)).instruction(&I32Add).instruction(&LocalSet(3));
+    f.instruction(&Br(0));
+    f.instruction(&End).instruction(&End);
+    f.instruction(&LocalGet(0)).instruction(&I32Load(mem0));
+    f.instruction(&LocalGet(1)).instruction(&I32Load(mem0));
+    f.instruction(&I32Sub);
+    f.instruction(&End);
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
