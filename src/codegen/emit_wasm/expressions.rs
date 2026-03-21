@@ -639,76 +639,257 @@ impl FuncCompiler<'_> {
     pub(super) fn emit_eq(&mut self, left: &IrExpr, right: &IrExpr, negate: bool) {
         self.emit_expr(left);
         self.emit_expr(right);
-        // Use the more concrete type for comparison dispatch
         let cmp_ty = if matches!(&left.ty, Ty::Unknown | Ty::TypeVar(_)) { &right.ty } else { &left.ty };
-        match cmp_ty {
+        self.emit_eq_typed(cmp_ty);
+        if negate {
+            wasm!(self.func, { i32_eqz; });
+        }
+    }
+
+    /// Emit type-aware equality for two values on stack. Consumes [a, b], produces i32.
+    /// Recursive: handles nested containers correctly.
+    pub(super) fn emit_eq_typed(&mut self, ty: &Ty) {
+        use crate::types::constructor::TypeConstructorId;
+        match ty {
             Ty::Int => { wasm!(self.func, { i64_eq; }); }
             Ty::Float => { wasm!(self.func, { f64_eq; }); }
             Ty::Bool => { wasm!(self.func, { i32_eq; }); }
             Ty::String => { wasm!(self.func, { call(self.emitter.rt.string.eq); }); }
-            Ty::Applied(crate::types::constructor::TypeConstructorId::List, args) => {
-                let elem_size = args.first().map(|t| values::byte_size(t)).unwrap_or(8);
-                wasm!(self.func, {
-                    i32_const(elem_size as i32);
-                    call(self.emitter.rt.list_eq);
-                });
+
+            Ty::Applied(TypeConstructorId::List, args) => {
+                let elem_ty = args.first().cloned().unwrap_or(Ty::Int);
+                // If elem is a value type (no pointers), use byte comparison
+                if self.is_value_type(&elem_ty) {
+                    let elem_size = values::byte_size(&elem_ty);
+                    wasm!(self.func, {
+                        i32_const(elem_size as i32);
+                        call(self.emitter.rt.list_eq);
+                    });
+                } else {
+                    // Deep list equality: compare element by element
+                    self.emit_list_eq_deep(&elem_ty);
+                }
             }
-            // Record: byte-compare the entire struct
+
+            Ty::Applied(TypeConstructorId::Option, args) => {
+                let inner_ty = args.first().cloned().unwrap_or(Ty::Int);
+                self.emit_option_eq_deep(&inner_ty);
+            }
+
+            Ty::Applied(TypeConstructorId::Result, args) => {
+                let ok_ty = args.first().cloned().unwrap_or(Ty::Int);
+                let err_ty = args.get(1).cloned().unwrap_or(Ty::String);
+                self.emit_result_eq_deep(&ok_ty, &err_ty);
+            }
+
+            Ty::Tuple(elems) => {
+                if elems.iter().all(|t| self.is_value_type(t)) {
+                    let size: u32 = elems.iter().map(|t| values::byte_size(t)).sum();
+                    wasm!(self.func, { i32_const(size as i32); call(self.emitter.rt.mem_eq); });
+                } else {
+                    self.emit_tuple_eq_deep(elems);
+                }
+            }
+
             Ty::Record { fields } => {
-                let size = values::record_size(fields);
-                wasm!(self.func, {
-                    i32_const(size as i32);
-                    call(self.emitter.rt.mem_eq);
-                });
+                if fields.iter().all(|(_, t)| self.is_value_type(t)) {
+                    let size = values::record_size(fields);
+                    wasm!(self.func, { i32_const(size as i32); call(self.emitter.rt.mem_eq); });
+                } else {
+                    // Field-by-field deep equality
+                    self.emit_record_eq_deep(fields);
+                }
             }
-            // Named types (records/variants): compute size from registered fields
+
             Ty::Named(name, _) => {
                 if let Some(cases) = self.emitter.variant_info.get(name.as_str()) {
-                    // Variant: tag(4) + max payload size across all constructors
                     let max_payload = cases.iter()
                         .map(|c| values::record_size(&c.fields))
                         .max().unwrap_or(0);
                     let size = 4 + max_payload;
-                    wasm!(self.func, {
-                        i32_const(size as i32);
-                        call(self.emitter.rt.mem_eq);
-                    });
+                    wasm!(self.func, { i32_const(size as i32); call(self.emitter.rt.mem_eq); });
                 } else {
                     let fields = self.emitter.record_fields.get(name.as_str()).cloned().unwrap_or_default();
                     let size = values::record_size(&fields);
                     if size > 0 {
-                        wasm!(self.func, {
-                            i32_const(size as i32);
-                            call(self.emitter.rt.mem_eq);
-                        });
+                        wasm!(self.func, { i32_const(size as i32); call(self.emitter.rt.mem_eq); });
                     } else {
                         wasm!(self.func, { i32_eq; });
                     }
                 }
             }
-            // Tuple: byte-compare all elements
-            Ty::Tuple(elems) => {
-                let size: u32 = elems.iter().map(|t| values::byte_size(t)).sum();
-                wasm!(self.func, {
-                    i32_const(size as i32);
-                    call(self.emitter.rt.mem_eq);
-                });
-            }
-            // Option: deep equality via runtime
-            Ty::Applied(crate::types::constructor::TypeConstructorId::Option, args) => {
-                match args.first() {
-                    Some(Ty::String) => { wasm!(self.func, { call(self.emitter.rt.option_eq_str); }); }
-                    _ => { wasm!(self.func, { call(self.emitter.rt.option_eq_i64); }); }
-                }
-            }
-            // Result: deep equality via runtime
-            Ty::Applied(crate::types::constructor::TypeConstructorId::Result, _) => {
-                wasm!(self.func, { call(self.emitter.rt.result_eq_i64_str); });
-            }
+
             _ => { wasm!(self.func, { i32_eq; }); }
         }
-        if negate {
-            wasm!(self.func, { i32_eqz; });
+    }
+
+    /// True if type is stored inline (no heap pointers that need deep comparison).
+    fn is_value_type(&self, ty: &Ty) -> bool {
+        matches!(ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit)
+    }
+
+    /// Deep list equality: [a_ptr, b_ptr] → i32
+    fn emit_list_eq_deep(&mut self, elem_ty: &Ty) {
+        let s = self.match_i32_base + self.match_depth;
+        let elem_size = values::byte_size(elem_ty);
+        wasm!(self.func, {
+            local_set(s + 1); // b
+            local_set(s);     // a
+            // Same pointer → true
+            local_get(s); local_get(s + 1); i32_eq;
+            if_i32; i32_const(1);
+            else_;
+              // Different lengths → false
+              local_get(s); i32_load(0);
+              local_get(s + 1); i32_load(0);
+              i32_ne;
+              if_i32; i32_const(0);
+              else_;
+                // Compare element by element
+                i32_const(0); local_set(s + 2); // i
+                block_empty; loop_empty;
+                  local_get(s + 2); local_get(s); i32_load(0); i32_ge_u; br_if(1);
+                  // Load a[i]
+                  local_get(s); i32_const(4); i32_add;
+                  local_get(s + 2); i32_const(elem_size as i32); i32_mul; i32_add;
+        });
+        self.emit_load_at(elem_ty, 0);
+        // Load b[i]
+        wasm!(self.func, {
+                  local_get(s + 1); i32_const(4); i32_add;
+                  local_get(s + 2); i32_const(elem_size as i32); i32_mul; i32_add;
+        });
+        self.emit_load_at(elem_ty, 0);
+        // Compare elements (recursive)
+        let elem_ty_clone = elem_ty.clone();
+        self.emit_eq_typed(&elem_ty_clone);
+        wasm!(self.func, {
+                  i32_eqz; // not equal?
+                  if_empty;
+                    i32_const(0); return_;
+                  end;
+                  local_get(s + 2); i32_const(1); i32_add; local_set(s + 2);
+                  br(0);
+                end; end;
+                // All elements matched
+                i32_const(1);
+              end;
+            end;
+        });
+    }
+
+    /// Deep option equality: [a_ptr, b_ptr] → i32
+    fn emit_option_eq_deep(&mut self, inner_ty: &Ty) {
+        let s = self.match_i32_base + self.match_depth;
+        wasm!(self.func, {
+            local_set(s + 1); // b
+            local_set(s);     // a
+            // Both none → true
+            local_get(s); i32_eqz; local_get(s + 1); i32_eqz; i32_and;
+            if_i32; i32_const(1);
+            else_;
+              // One none → false
+              local_get(s); i32_eqz; local_get(s + 1); i32_eqz; i32_or;
+              if_i32; i32_const(0);
+              else_;
+                // Both some: compare inner values
+                local_get(s);
+        });
+        self.emit_load_at(inner_ty, 0);
+        wasm!(self.func, { local_get(s + 1); });
+        self.emit_load_at(inner_ty, 0);
+        let inner_clone = inner_ty.clone();
+        self.emit_eq_typed(&inner_clone);
+        wasm!(self.func, {
+              end;
+            end;
+        });
+    }
+
+    /// Deep result equality: [a_ptr, b_ptr] → i32
+    fn emit_result_eq_deep(&mut self, ok_ty: &Ty, err_ty: &Ty) {
+        let s = self.match_i32_base + self.match_depth;
+        wasm!(self.func, {
+            local_set(s + 1); // b
+            local_set(s);     // a
+            // Tags must match
+            local_get(s); i32_load(0);
+            local_get(s + 1); i32_load(0);
+            i32_ne;
+            if_i32; i32_const(0);
+            else_;
+              // Same tag. If tag==0 (ok): compare ok values
+              local_get(s); i32_load(0); i32_eqz;
+              if_i32;
+                local_get(s);
+        });
+        self.emit_load_at(ok_ty, 4);
+        wasm!(self.func, { local_get(s + 1); });
+        self.emit_load_at(ok_ty, 4);
+        let ok_clone = ok_ty.clone();
+        self.emit_eq_typed(&ok_clone);
+        wasm!(self.func, {
+              else_;
+                // tag==1 (err): compare err values
+                local_get(s);
+        });
+        self.emit_load_at(err_ty, 4);
+        wasm!(self.func, { local_get(s + 1); });
+        self.emit_load_at(err_ty, 4);
+        let err_clone = err_ty.clone();
+        self.emit_eq_typed(&err_clone);
+        wasm!(self.func, {
+              end;
+            end;
+        });
+    }
+
+    /// Deep tuple equality: [a_ptr, b_ptr] → i32
+    fn emit_tuple_eq_deep(&mut self, elems: &[Ty]) {
+        let s = self.match_i32_base + self.match_depth;
+        wasm!(self.func, {
+            local_set(s + 1); // b
+            local_set(s);     // a
+        });
+        // Compare each field, short-circuit on mismatch
+        let mut offset: u32 = 0;
+        for (i, elem_ty) in elems.iter().enumerate() {
+            let elem_size = values::byte_size(elem_ty);
+            wasm!(self.func, { local_get(s); });
+            self.emit_load_at(elem_ty, offset);
+            wasm!(self.func, { local_get(s + 1); });
+            self.emit_load_at(elem_ty, offset);
+            let elem_clone = elem_ty.clone();
+            self.emit_eq_typed(&elem_clone);
+            if i < elems.len() - 1 {
+                // Short-circuit: if not equal, return 0
+                wasm!(self.func, { i32_eqz; if_empty; i32_const(0); return_; end; });
+            }
+            offset += elem_size;
+        }
+        // If we reach here, all fields matched. Last comparison result is on stack.
+    }
+
+    /// Deep record equality: [a_ptr, b_ptr] → i32
+    fn emit_record_eq_deep(&mut self, fields: &[(std::string::String, Ty)]) {
+        let s = self.match_i32_base + self.match_depth;
+        wasm!(self.func, {
+            local_set(s + 1);
+            local_set(s);
+        });
+        let mut offset: u32 = 0;
+        for (i, (_, field_ty)) in fields.iter().enumerate() {
+            let field_size = values::byte_size(field_ty);
+            wasm!(self.func, { local_get(s); });
+            self.emit_load_at(field_ty, offset);
+            wasm!(self.func, { local_get(s + 1); });
+            self.emit_load_at(field_ty, offset);
+            let field_clone = field_ty.clone();
+            self.emit_eq_typed(&field_clone);
+            if i < fields.len() - 1 {
+                wasm!(self.func, { i32_eqz; if_empty; i32_const(0); return_; end; });
+            }
+            offset += field_size;
         }
     }
 

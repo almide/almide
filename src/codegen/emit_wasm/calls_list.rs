@@ -642,6 +642,65 @@ impl FuncCompiler<'_> {
                     end;
                 });
             }
+            "zip" => {
+                // zip(xs, ys) → List[(A, B)]
+                // Each tuple is heap-allocated: [a_value, b_value]
+                let a_ty = self.list_elem_ty(&args[0].ty);
+                let b_ty = self.list_elem_ty(&args[1].ty);
+                let a_size = values::byte_size(&a_ty);
+                let b_size = values::byte_size(&b_ty);
+                let tuple_size = a_size + b_size;
+                let s = self.match_i32_base + self.match_depth;
+                // mem[0]=xs, mem[4]=ys
+                wasm!(self.func, { i32_const(0); });
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { i32_store(0); i32_const(4); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, {
+                    i32_store(0);
+                    // len = min(xs.len, ys.len)
+                    i32_const(0); i32_load(0); i32_load(0);
+                    i32_const(4); i32_load(0); i32_load(0);
+                    i32_lt_u;
+                    if_i32;
+                      i32_const(0); i32_load(0); i32_load(0);
+                    else_;
+                      i32_const(4); i32_load(0); i32_load(0);
+                    end;
+                    local_set(s); // len
+                    // Alloc result: list of ptrs to tuples
+                    i32_const(4); local_get(s); i32_const(4); i32_mul; i32_add;
+                    call(self.emitter.rt.alloc); local_set(s + 1);
+                    local_get(s + 1); local_get(s); i32_store(0);
+                    i32_const(0); local_set(s + 2); // i
+                    block_empty; loop_empty;
+                      local_get(s + 2); local_get(s); i32_ge_u; br_if(1);
+                      // Alloc tuple
+                      i32_const(tuple_size as i32); call(self.emitter.rt.alloc); local_set(s + 3);
+                      // Copy a: tuple[0] = xs[i]
+                      local_get(s + 3);
+                      i32_const(0); i32_load(0); i32_const(4); i32_add;
+                      local_get(s + 2); i32_const(a_size as i32); i32_mul; i32_add;
+                });
+                self.emit_elem_copy(&a_ty);
+                // Copy b: tuple[a_size] = ys[i]
+                wasm!(self.func, {
+                      local_get(s + 3); i32_const(a_size as i32); i32_add;
+                      i32_const(4); i32_load(0); i32_const(4); i32_add;
+                      local_get(s + 2); i32_const(b_size as i32); i32_mul; i32_add;
+                });
+                self.emit_elem_copy(&b_ty);
+                wasm!(self.func, {
+                      // result[i] = tuple_ptr
+                      local_get(s + 1); i32_const(4); i32_add;
+                      local_get(s + 2); i32_const(4); i32_mul; i32_add;
+                      local_get(s + 3); i32_store(0);
+                      local_get(s + 2); i32_const(1); i32_add; local_set(s + 2);
+                      br(0);
+                    end; end;
+                    local_get(s + 1);
+                });
+            }
             _ => return false,
         }
         true
