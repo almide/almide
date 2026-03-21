@@ -523,14 +523,20 @@ impl Checker {
                     self.bind_pattern(arg, payload_tys.get(i).unwrap_or(&Ty::Unknown));
                 }
             }
-            ast::Pattern::RecordPattern { fields, .. } => {
+            ast::Pattern::RecordPattern { name, fields, .. } => {
                 let resolved = self.env.resolve_named(ty);
                 let field_tys: Vec<(String, Ty)> = match &resolved {
                     Ty::Record { fields } | Ty::OpenRecord { fields } => fields.clone(),
-                    Ty::Variant { cases, .. } => cases.iter().find_map(|c| match &c.payload {
-                        VariantPayload::Record(fs) => Some(fs.iter().map(|(n, t, _)| (n.clone(), t.clone())).collect()),
-                        _ => None,
-                    }).unwrap_or_default(),
+                    Ty::Variant { cases, .. } => {
+                        // Find the specific case matching the pattern name
+                        cases.iter()
+                            .find(|c| c.name == *name)
+                            .and_then(|c| match &c.payload {
+                                VariantPayload::Record(fs) => Some(fs.iter().map(|(n, t, _)| (n.clone(), t.clone())).collect()),
+                                _ => None,
+                            })
+                            .unwrap_or_default()
+                    }
                     _ => vec![],
                 };
                 for f in fields {
