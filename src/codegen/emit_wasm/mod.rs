@@ -659,6 +659,24 @@ fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) {
         scan_closures_expr(&func.body, &mut scope_vars, &program.var_table,
             &mut lambda_exprs, &mut fn_ref_set);
     }
+    // BFS: scan lambda bodies for nested lambdas (repeat until no new lambdas found)
+    let mut scan_start = 0;
+    loop {
+        let current_len = lambda_exprs.len();
+        if scan_start >= current_len { break; }
+        for i in scan_start..current_len {
+            let body = lambda_exprs[i].1.clone();
+            let params = &lambda_exprs[i].0;
+            let captures = &lambda_exprs[i].2;
+            // Scope includes lambda params + captured vars (so nested lambdas see them as in-scope)
+            let mut inner_scope: HashSet<u32> = params.iter().map(|(vid, _)| vid.0).collect();
+            for &vid in captures { inner_scope.insert(vid); }
+            scan_closures_expr(&body, &mut inner_scope, &program.var_table,
+                &mut lambda_exprs, &mut fn_ref_set);
+        }
+        scan_start = current_len;
+    }
+
     // Build ordered fn_ref list (sorted for determinism)
     fn_ref_names = fn_ref_set.into_iter().collect();
     fn_ref_names.sort();
@@ -727,10 +745,25 @@ fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitter) {
     let mut fn_ref_set: HashSet<String> = HashSet::new();
 
     for func in &program.functions {
-        // Include test functions in pre-scan/compile
         let mut scope_vars: HashSet<u32> = func.params.iter().map(|p| p.var.0).collect();
         scan_closures_expr(&func.body, &mut scope_vars, &program.var_table,
             &mut lambda_exprs, &mut fn_ref_set);
+    }
+    // BFS: scan lambda bodies for nested lambdas
+    let mut scan_start = 0;
+    loop {
+        let current_len = lambda_exprs.len();
+        if scan_start >= current_len { break; }
+        for i in scan_start..current_len {
+            let body = lambda_exprs[i].1.clone();
+            let params = &lambda_exprs[i].0;
+            let captures = &lambda_exprs[i].2;
+            let mut inner_scope: HashSet<u32> = params.iter().map(|(vid, _)| vid.0).collect();
+            for &vid in captures { inner_scope.insert(vid); }
+            scan_closures_expr(&body, &mut inner_scope, &program.var_table,
+                &mut lambda_exprs, &mut fn_ref_set);
+        }
+        scan_start = current_len;
     }
     let mut fn_ref_names: Vec<String> = fn_ref_set.into_iter().collect();
     fn_ref_names.sort();
@@ -889,13 +922,9 @@ fn scan_closures_expr(
                 .map(|(vid, ty)| (*vid, ty.clone()))
                 .collect();
             lambdas.push((param_list, *body.clone(), captures));
-
-            // Also scan inside the lambda body for nested lambdas
-            let mut inner_scope = scope_vars.clone();
-            for (vid, _) in params {
-                inner_scope.insert(vid.0);
-            }
-            scan_closures_expr(body, &mut inner_scope, var_table, lambdas, fn_refs);
+            // NOTE: Do NOT recurse into lambda body here.
+            // Nested lambdas will be scanned in a second pass (BFS order)
+            // to match emit order (user fn bodies first, then lambda bodies).
         }
         IrExprKind::FnRef { name } => {
             fn_refs.insert(name.clone());
