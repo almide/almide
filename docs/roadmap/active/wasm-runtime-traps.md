@@ -31,13 +31,17 @@ List iteration は実装済み。Map iteration は Map runtime に依存。
 
 **Fix**: Map runtime 後に実装。
 
-### Fan/async [4 files]
+### Fan (sequential fallback) [4 files]
 fan basic, fan.map, fan.race, fan.any
 
-**Root**: fan (並行実行) は WASM の single-thread model と根本的に非互換。
-WASM には thread/coroutine がない。
+**Root**: fan (並行実行) の WASM codegen が未実装。
+WASM は single-thread だが、fan の semantics は「複数の式を実行して結果を集める」。
+sequential に実行すれば同じ結果が得られる。
 
-**Fix**: skip (wasm:skip マーカー)。WASM target では fan は使えない。
+**Fix**: fan を sequential fallback で実装。
+- `fan { a, b, c }` → `(a(), b(), c())`
+- `fan.map(list, fn)` → `list.map(list, fn)`
+- `fan.race(list, fn)` → 先頭要素を返す
 
 ### Deep equality [3 files]
 nested list equality, deep equality on nested structures, recursive variant types
@@ -92,7 +96,7 @@ structured error, string keys, tco deep recursion, variant roundtrip
 
 | Priority | Category | Files | Impact | Effort |
 |----------|----------|-------|--------|--------|
-| 1 | Fan skip | 4 | -4 traps | 5 min |
+| 1 | Fan sequential fallback | 4 | -4 traps | Low |
 | 2 | Protocol dispatch | 8 | -8 traps, 大量のテスト unblock | Medium |
 | 3 | Record/Variant features | 3 | -3 traps | Medium |
 | 4 | Type features | 5 | -5 traps | Medium (個別) |
@@ -108,7 +112,7 @@ structured error, string keys, tco deep recursion, variant roundtrip
 | After step | Pass | Traps |
 |------------|------|-------|
 | 現状 | 21 | 44 |
-| 1 (fan skip) | 21 | 40 |
+| 1 (fan) | 25 | 40 |
 | 2 (protocol) | 29+ | 32 |
 | 3-5 (features) | 41+ | 20 |
 | 6-8 (equality/string/codec) | 50+ | 11 |
