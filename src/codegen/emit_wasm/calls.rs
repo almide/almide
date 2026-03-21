@@ -928,81 +928,68 @@ impl FuncCompiler<'_> {
                     }
                     ("list", "contains") => {
                         // list.contains(list, elem) -> Bool (i32)
-                        // Linear scan: compare each element
+                        // Uses only scratch locals — no mem[] to avoid nested call conflicts
                         let elem_ty = if let Ty::Applied(_, a) = &args[0].ty {
                             a.first().cloned().unwrap_or(Ty::Int)
                         } else { Ty::Int };
                         let elem_size = values::byte_size(&elem_ty);
                         let s = self.match_i32_base + self.match_depth;
-                        let len_local = s;
-                        let idx_local = s + 1;
-
-                        // Store list → mem[0], elem → mem[4]
-                        wasm!(self.func, { i32_const(0); });
+                        // s=list_ptr, s+1=idx, s+2=result
                         self.emit_expr(&args[0]);
-                        wasm!(self.func, {
-                            i32_store(0);
-                            i32_const(0);
-                            i32_load(0);
-                            i32_load(0); // len
-                            local_set(len_local);
-                            i32_const(0);
-                            local_set(idx_local);
-                        });
-                        // Save target elem
-                        wasm!(self.func, { i32_const(8); });
-                        self.emit_expr(&args[1]);
-                        self.emit_store_at(&elem_ty, 0);
-
-                        let saved = self.depth;
-                        wasm!(self.func, {
-                            // Loop: check each element
-                            block_empty;
-                            loop_empty;
-                        });
-                        self.depth += 2;
-                        wasm!(self.func, {
-                            local_get(idx_local);
-                            local_get(len_local);
-                            i32_ge_u;
-                            br_if(1); // break if done → not found
-                            // Load element
-                            i32_const(0);
-                            i32_load(0); // list
-                            i32_const(4);
-                            i32_add;
-                            local_get(idx_local);
-                            i32_const(elem_size as i32);
-                            i32_mul;
-                            i32_add;
-                        });
-                        self.emit_load_at(&elem_ty, 0);
-                        // Load target
-                        wasm!(self.func, { i32_const(8); });
-                        self.emit_load_at(&elem_ty, 0);
-                        // Compare
-                        match &elem_ty {
-                            Ty::Int => { wasm!(self.func, { i64_eq; }); }
-                            Ty::Float => { wasm!(self.func, { f64_eq; }); }
-                            Ty::String => { wasm!(self.func, { call(self.emitter.rt.string.eq); }); }
-                            _ => { wasm!(self.func, { i32_eq; }); }
+                        wasm!(self.func, { local_set(s); });
+                        // Save target to i64 scratch or i32 scratch depending on type
+                        match values::ty_to_valtype(&elem_ty) {
+                            Some(ValType::I64) => {
+                                let t = self.match_i64_base + self.match_depth;
+                                self.emit_expr(&args[1]);
+                                wasm!(self.func, {
+                                    local_set(t); // target in i64 local
+                                    i32_const(0); local_set(s + 1); // idx
+                                    i32_const(0); local_set(s + 2); // result = false
+                                    block_empty; loop_empty;
+                                      local_get(s + 1); local_get(s); i32_load(0); i32_ge_u; br_if(1);
+                                      local_get(s); i32_const(4); i32_add;
+                                      local_get(s + 1); i32_const(elem_size as i32); i32_mul; i32_add;
+                                      i64_load(0);
+                                      local_get(t); i64_eq;
+                                      if_empty;
+                                        i32_const(1); local_set(s + 2); br(2);
+                                      end;
+                                      local_get(s + 1); i32_const(1); i32_add; local_set(s + 1);
+                                      br(0);
+                                    end; end;
+                                    local_get(s + 2);
+                                });
+                            }
+                            _ => {
+                                // i32 types: String, Option, etc.
+                                self.emit_expr(&args[1]);
+                                wasm!(self.func, {
+                                    local_set(s + 3); // target in i32 local
+                                    i32_const(0); local_set(s + 1);
+                                    i32_const(0); local_set(s + 2);
+                                    block_empty; loop_empty;
+                                      local_get(s + 1); local_get(s); i32_load(0); i32_ge_u; br_if(1);
+                                      local_get(s); i32_const(4); i32_add;
+                                      local_get(s + 1); i32_const(elem_size as i32); i32_mul; i32_add;
+                                      i32_load(0);
+                                      local_get(s + 3);
+                                });
+                                match &elem_ty {
+                                    Ty::String => { wasm!(self.func, { call(self.emitter.rt.string.eq); }); }
+                                    _ => { wasm!(self.func, { i32_eq; }); }
+                                }
+                                wasm!(self.func, {
+                                      if_empty;
+                                        i32_const(1); local_set(s + 2); br(2);
+                                      end;
+                                      local_get(s + 1); i32_const(1); i32_add; local_set(s + 1);
+                                      br(0);
+                                    end; end;
+                                    local_get(s + 2);
+                                });
+                            }
                         }
-                        wasm!(self.func, {
-                            if_empty;
-                            i32_const(1);
-                            return_;
-                            end;
-                            local_get(idx_local);
-                            i32_const(1);
-                            i32_add;
-                            local_set(idx_local);
-                            br(0);
-                            end; // loop
-                            end; // block
-                        });
-                        self.depth = saved;
-                        // Not found
-                        wasm!(self.func, { i32_const(0); });
                     }
                     _ if module == "map" => {
                         if !self.emit_map_call(func, args) {
