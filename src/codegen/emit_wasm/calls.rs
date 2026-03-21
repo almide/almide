@@ -1162,7 +1162,7 @@ impl FuncCompiler<'_> {
                         fake_args.extend(args.iter().cloned());
                         let m = method.strip_prefix("result.").unwrap_or(method);
                         if !self.emit_result_call(m, &fake_args) {
-                            self.emit_stub_call(args);
+                            self.emit_ufcs_fallback(object, method, args);
                         }
                     }
                     _ if matches!(&object.ty, Ty::String) => {
@@ -1170,7 +1170,7 @@ impl FuncCompiler<'_> {
                         fake_args.extend(args.iter().cloned());
                         let m = method.strip_prefix("string.").unwrap_or(method);
                         if !self.emit_string_call(m, &fake_args) {
-                            self.emit_stub_call(args);
+                            self.emit_ufcs_fallback(object, method, args);
                         }
                     }
                     _ if matches!(&object.ty, Ty::Int) => {
@@ -1178,7 +1178,7 @@ impl FuncCompiler<'_> {
                         fake_args.extend(args.iter().cloned());
                         let m = method.strip_prefix("int.").unwrap_or(method);
                         if !self.emit_int_call(m, &fake_args) {
-                            self.emit_stub_call(args);
+                            self.emit_ufcs_fallback(object, method, args);
                         }
                     }
                     _ if matches!(&object.ty, Ty::Float) => {
@@ -1186,7 +1186,7 @@ impl FuncCompiler<'_> {
                         fake_args.extend(args.iter().cloned());
                         let m = method.strip_prefix("float.").unwrap_or(method);
                         if !self.emit_float_call(m, &fake_args) {
-                            self.emit_stub_call(args);
+                            self.emit_ufcs_fallback(object, method, args);
                         }
                     }
                     _ if matches!(&object.ty, Ty::Applied(crate::types::constructor::TypeConstructorId::List, _)) => {
@@ -1194,7 +1194,7 @@ impl FuncCompiler<'_> {
                         fake_args.extend(args.iter().cloned());
                         let m = method.strip_prefix("list.").unwrap_or(method);
                         if !self.emit_list_call(m, &fake_args) {
-                            self.emit_stub_call(args);
+                            self.emit_ufcs_fallback(object, method, args);
                         }
                     }
                     _ if matches!(&object.ty, Ty::Applied(crate::types::constructor::TypeConstructorId::Map, _)) => {
@@ -1202,7 +1202,7 @@ impl FuncCompiler<'_> {
                         fake_args.extend(args.iter().cloned());
                         let m = method.strip_prefix("map.").unwrap_or(method);
                         if !self.emit_map_call(m, &fake_args) {
-                            self.emit_stub_call(args);
+                            self.emit_ufcs_fallback(object, method, args);
                         }
                     }
                     _ => {
@@ -1574,6 +1574,31 @@ impl FuncCompiler<'_> {
     }
 
     /// Emit assert_eq(left, right): compare values, trap if not equal.
+    /// UFCS fallback: try func_map lookup for user-defined functions before stubbing.
+    fn emit_ufcs_fallback(&mut self, object: &IrExpr, method: &str, args: &[IrExpr]) {
+        // Try bare method name in func_map (user-defined function)
+        let bare = method.split('.').last().unwrap_or(method);
+        if let Some(&func_idx) = self.emitter.func_map.get(bare) {
+            self.emit_expr(object);
+            for arg in args { self.emit_expr(arg); }
+            wasm!(self.func, { call(func_idx); });
+            return;
+        }
+        // Also try full method name
+        if let Some(&func_idx) = self.emitter.func_map.get(method) {
+            self.emit_expr(object);
+            for arg in args { self.emit_expr(arg); }
+            wasm!(self.func, { call(func_idx); });
+            return;
+        }
+        // Stub
+        self.emit_expr(object);
+        if values::ty_to_valtype(&object.ty).is_some() {
+            wasm!(self.func, { drop; });
+        }
+        self.emit_stub_call(args);
+    }
+
     pub(super) fn emit_assert_eq(&mut self, left: &IrExpr, right: &IrExpr) {
         // Use the same equality logic as BinOp::Eq
         self.emit_eq(left, right, false);
