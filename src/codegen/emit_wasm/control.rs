@@ -78,18 +78,36 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { end; }); // end break block
             }
             _ => {
-                // List (or other collection) for...in
-                // scratch[0] = list ptr, scratch[1] = index counter
+                // Detect Map iterable: layout is [len:i32][key0][val0][key1][val1]...
+                // where entries are stored inline (not as tuple pointers).
+                let is_map = matches!(
+                    &iterable.ty,
+                    Ty::Applied(crate::types::TypeConstructorId::Map, _)
+                );
+
+                // scratch[0] = collection ptr, scratch[1] = index counter
                 let list_scratch = self.match_i32_base + self.match_depth;
                 let idx_scratch = list_scratch + 1;
-                self.match_depth += 2; // Reserve 2 scratch locals for list ptr + index
+                self.match_depth += 2; // Reserve 2 scratch locals for ptr + index
                 let loop_var = self.var_map[&var.0];
 
-                // Determine element type and size
+                // Determine element type and entry stride
                 let elem_ty = self.var_table.get(var).ty.clone();
-                let elem_size = values::byte_size(&elem_ty);
+                let entry_size = if is_map {
+                    // Map entries are inline [key][val], not tuple pointers.
+                    // Compute stride from key + value types.
+                    if let Ty::Applied(_, args) = &iterable.ty {
+                        let key_size = args.first().map(|t| values::byte_size(t)).unwrap_or(4);
+                        let val_size = args.get(1).map(|t| values::byte_size(t)).unwrap_or(4);
+                        key_size + val_size
+                    } else {
+                        values::byte_size(&elem_ty)
+                    }
+                } else {
+                    values::byte_size(&elem_ty)
+                };
 
-                // Evaluate iterable and store list ptr
+                // Evaluate iterable and store ptr
                 self.emit_expr(iterable);
                 wasm!(self.func, { local_set(list_scratch); });
 
@@ -100,7 +118,6 @@ impl FuncCompiler<'_> {
                 });
 
                 // Structure: block $break { loop $loop { check; load; block $continue { body }; i++; br $loop } }
-                // continue → br to $continue end (skips rest of body, runs i++)
                 let break_depth = self.depth;
                 wasm!(self.func, { block_empty; });
                 self.depth += 1;
@@ -118,30 +135,73 @@ impl FuncCompiler<'_> {
                     br_if(self.depth - break_depth - 1);
                 });
 
-                // Load element
-                wasm!(self.func, {
-                    local_get(list_scratch);
-                    i32_const(4);
-                    i32_add;
-                    local_get(idx_scratch);
-                    i32_const(elem_size as i32);
-                    i32_mul;
-                    i32_add;
-                });
-                self.emit_load_at(&elem_ty, 0);
-                wasm!(self.func, { local_set(loop_var); });
+                if is_map {
+                    // Map iteration: entries are inline [key][val].
+                    // Directly destructure into tuple vars (k, v) without loading a tuple ptr.
+                    if let Some(tuple_vars) = var_tuple {
+                        if let Ty::Applied(_, args) = &iterable.ty {
+                            let key_ty = args.first().cloned().unwrap_or(Ty::String);
+                            let val_ty = args.get(1).cloned().unwrap_or(Ty::Int);
+                            let key_size = values::byte_size(&key_ty);
 
-                // Tuple destructure
-                if let Some(tuple_vars) = var_tuple {
-                    if let Ty::Tuple(elem_types) = &elem_ty {
-                        let mut field_offset = 0u32;
-                        for (i, &tv) in tuple_vars.iter().enumerate() {
-                            if let Some(&local_idx) = self.var_map.get(&tv.0) {
-                                let ft = elem_types.get(i).cloned().unwrap_or(Ty::Int);
-                                wasm!(self.func, { local_get(loop_var); });
-                                self.emit_load_at(&ft, field_offset);
-                                wasm!(self.func, { local_set(local_idx); });
-                                field_offset += values::byte_size(&ft);
+                            // Compute base address: list_scratch + 4 + idx * entry_size
+                            // Load key at base + 0
+                            if let Some(&k_local) = tuple_vars.first().and_then(|tv| self.var_map.get(&tv.0)) {
+                                wasm!(self.func, {
+                                    local_get(list_scratch);
+                                    i32_const(4);
+                                    i32_add;
+                                    local_get(idx_scratch);
+                                    i32_const(entry_size as i32);
+                                    i32_mul;
+                                    i32_add;
+                                });
+                                self.emit_load_at(&key_ty, 0);
+                                wasm!(self.func, { local_set(k_local); });
+                            }
+
+                            // Load value at base + key_size
+                            if let Some(&v_local) = tuple_vars.get(1).and_then(|tv| self.var_map.get(&tv.0)) {
+                                wasm!(self.func, {
+                                    local_get(list_scratch);
+                                    i32_const(4);
+                                    i32_add;
+                                    local_get(idx_scratch);
+                                    i32_const(entry_size as i32);
+                                    i32_mul;
+                                    i32_add;
+                                });
+                                self.emit_load_at(&val_ty, key_size);
+                                wasm!(self.func, { local_set(v_local); });
+                            }
+                        }
+                    }
+                } else {
+                    // List iteration: load element directly
+                    wasm!(self.func, {
+                        local_get(list_scratch);
+                        i32_const(4);
+                        i32_add;
+                        local_get(idx_scratch);
+                        i32_const(entry_size as i32);
+                        i32_mul;
+                        i32_add;
+                    });
+                    self.emit_load_at(&elem_ty, 0);
+                    wasm!(self.func, { local_set(loop_var); });
+
+                    // Tuple destructure (for list of tuples)
+                    if let Some(tuple_vars) = var_tuple {
+                        if let Ty::Tuple(elem_types) = &elem_ty {
+                            let mut field_offset = 0u32;
+                            for (i, &tv) in tuple_vars.iter().enumerate() {
+                                if let Some(&local_idx) = self.var_map.get(&tv.0) {
+                                    let ft = elem_types.get(i).cloned().unwrap_or(Ty::Int);
+                                    wasm!(self.func, { local_get(loop_var); });
+                                    self.emit_load_at(&ft, field_offset);
+                                    wasm!(self.func, { local_set(local_idx); });
+                                    field_offset += values::byte_size(&ft);
+                                }
                             }
                         }
                     }

@@ -112,26 +112,44 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { local_set(scratch); });
 
                 // Destructure pattern
-                if let crate::ir::IrPattern::Tuple { elements } = pattern {
-                    let elem_types = if let crate::types::Ty::Tuple(tys) = &value.ty {
-                        tys.clone()
-                    } else { vec![] };
+                match pattern {
+                    crate::ir::IrPattern::Tuple { elements } => {
+                        let elem_types = if let crate::types::Ty::Tuple(tys) = &value.ty {
+                            tys.clone()
+                        } else { vec![] };
 
-                    let mut offset = 0u32;
-                    for (i, elem_pat) in elements.iter().enumerate() {
-                        if let crate::ir::IrPattern::Bind { var, .. } = elem_pat {
-                            if let Some(&local_idx) = self.var_map.get(&var.0) {
+                        let mut offset = 0u32;
+                        for (i, elem_pat) in elements.iter().enumerate() {
+                            if let crate::ir::IrPattern::Bind { var, .. } = elem_pat {
+                                if let Some(&local_idx) = self.var_map.get(&var.0) {
+                                    let elem_ty = elem_types.get(i).cloned().unwrap_or(crate::types::Ty::Int);
+                                    wasm!(self.func, { local_get(scratch); });
+                                    self.emit_load_at(&elem_ty, offset);
+                                    wasm!(self.func, { local_set(local_idx); });
+                                    offset += super::values::byte_size(&elem_ty);
+                                }
+                            } else if let crate::ir::IrPattern::Wildcard = elem_pat {
                                 let elem_ty = elem_types.get(i).cloned().unwrap_or(crate::types::Ty::Int);
-                                wasm!(self.func, { local_get(scratch); });
-                                self.emit_load_at(&elem_ty, offset);
-                                wasm!(self.func, { local_set(local_idx); });
                                 offset += super::values::byte_size(&elem_ty);
                             }
-                        } else if let crate::ir::IrPattern::Wildcard = elem_pat {
-                            let elem_ty = elem_types.get(i).cloned().unwrap_or(crate::types::Ty::Int);
-                            offset += super::values::byte_size(&elem_ty);
                         }
                     }
+                    crate::ir::IrPattern::RecordPattern { fields: pat_fields, .. } => {
+                        // Record destructure: load each field from record ptr at its offset.
+                        // Field order and types come from the value's type.
+                        let record_fields = self.extract_record_fields(&value.ty);
+                        for pf in pat_fields {
+                            if let Some((offset, field_ty)) = super::values::field_offset(&record_fields, &pf.name) {
+                                // find_var_by_field searches var_map by name
+                                if let Some(&local_idx) = self.find_var_by_field(&pf.name, &record_fields) {
+                                    wasm!(self.func, { local_get(scratch); });
+                                    self.emit_load_at(&field_ty, offset);
+                                    wasm!(self.func, { local_set(local_idx); });
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
 
@@ -455,6 +473,37 @@ fn scan_destructure_pattern(pattern: &crate::ir::IrPattern, value_ty: &crate::ty
         crate::ir::IrPattern::Bind { var, .. } => {
             if let Some(val_type) = values::ty_to_valtype(value_ty) {
                 locals.push((*var, val_type));
+            }
+        }
+        crate::ir::IrPattern::RecordPattern { fields, .. } => {
+            // Record destructure: resolve field types from value_ty (authoritative).
+            let record_fields: Vec<(String, crate::types::Ty)> = match value_ty {
+                crate::types::Ty::Record { fields } => fields.clone(),
+                crate::types::Ty::OpenRecord { fields } => fields.clone(),
+                _ => vec![],
+            };
+            let existing_ids: std::collections::HashSet<u32> = locals.iter().map(|(v, _)| v.0).collect();
+            for field in fields {
+                // Resolve field type from the record type (not VarTable -- VarTable may have stale types)
+                let field_ty = record_fields.iter()
+                    .find(|(n, _)| n == &field.name)
+                    .map(|(_, t)| t.clone())
+                    .unwrap_or(crate::types::Ty::Int);
+                if let Some(pat) = &field.pattern {
+                    scan_destructure_pattern(pat, &field_ty, locals, vt);
+                } else {
+                    // Implicit bind: field name = var name. Look up VarId from VarTable.
+                    // Use field_ty from the record type for the WASM local declaration.
+                    for i in (0..vt.len()).rev() {
+                        let info = vt.get(crate::ir::VarId(i as u32));
+                        if info.name == field.name && !existing_ids.contains(&(i as u32)) {
+                            if let Some(val_type) = values::ty_to_valtype(&field_ty) {
+                                locals.push((crate::ir::VarId(i as u32), val_type));
+                            }
+                            break;
+                        }
+                    }
+                }
             }
         }
         _ => {}
