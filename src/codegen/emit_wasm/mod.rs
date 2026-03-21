@@ -376,7 +376,13 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
             .collect();
         let results = values::ret_type(&func.ret_ty);
         let type_idx = emitter.register_type(params, results);
-        let func_idx = emitter.register_func(&func.name, type_idx);
+        // Use prefixed name for test functions to avoid colliding with user functions
+        let reg_name = if func.is_test {
+            format!("__test_{}", func.name)
+        } else {
+            func.name.clone()
+        };
+        let func_idx = emitter.register_func(&reg_name, type_idx);
         user_meta.push(type_idx);
         user_func_indices.push(func_idx);
         if func.is_test {
