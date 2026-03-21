@@ -155,6 +155,8 @@ pub struct WasmEmitter {
     pub record_fields: HashMap<String, Vec<(String, crate::types::Ty)>>,
     // Variant info: variant type name → list of (case_name, tag, fields)
     pub variant_info: HashMap<String, Vec<VariantCase>>,
+    // Default field values: (type_name, field_name) → default IR expr
+    pub default_fields: HashMap<(String, String), crate::ir::IrExpr>,
 
     // Lambda/closure info: sequential index → LambdaInfo
     pub lambdas: Vec<LambdaInfo>,
@@ -228,6 +230,7 @@ impl WasmEmitter {
             func_to_table_idx: HashMap::new(),
             record_fields: HashMap::new(),
             variant_info: HashMap::new(),
+            default_fields: HashMap::new(),
             lambdas: Vec::new(),
             fn_ref_wrappers: HashMap::new(),
             lambda_counter: std::cell::Cell::new(0),
@@ -348,6 +351,35 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
                     });
                 }
                 emitter.variant_info.insert(td.name.clone(), variant_cases);
+            }
+            _ => {}
+        }
+    }
+
+    // Build default_fields from type declarations
+    for td in &program.type_decls {
+        match &td.kind {
+            crate::ir::IrTypeDeclKind::Variant { cases, .. } => {
+                for case in cases {
+                    if let crate::ir::IrVariantKind::Record { fields } = &case.kind {
+                        for f in fields {
+                            if let Some(def) = &f.default {
+                                emitter.default_fields.insert(
+                                    (case.name.clone(), f.name.clone()), def.clone()
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            crate::ir::IrTypeDeclKind::Record { fields } => {
+                for f in fields {
+                    if let Some(def) = &f.default {
+                        emitter.default_fields.insert(
+                            (td.name.clone(), f.name.clone()), def.clone()
+                        );
+                    }
+                }
             }
             _ => {}
         }

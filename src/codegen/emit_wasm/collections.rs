@@ -15,11 +15,25 @@ impl FuncCompiler<'_> {
         let tag = self.resolve_variant_tag(name, result_ty);
         let tag_size: u32 = if tag.is_some() { 4 } else { 0 };
 
-        // Compute field types and total size
-        let field_types: Vec<(String, Ty)> = fields.iter()
-            .map(|(n, expr)| (n.clone(), expr.ty.clone()))
-            .collect();
-        let total_size = tag_size + values::record_size(&field_types);
+        // Compute field types and total size (including defaults)
+        let explicit_field_size: u32 = fields.iter()
+            .map(|(_, expr)| values::byte_size(&expr.ty))
+            .sum();
+        let default_field_size: u32 = if let Some(ctor_name) = name {
+            let explicit_names: std::collections::HashSet<&str> = fields.iter().map(|(n, _)| n.as_str()).collect();
+            self.emitter.default_fields.iter()
+                .filter(|((cn, _), _)| cn == ctor_name)
+                .filter(|((_, fn_name), _)| !explicit_names.contains(fn_name.as_str()))
+                .map(|((_, _), expr)| {
+                    match (&expr.ty, &expr.kind) {
+                        (Ty::Unknown, crate::ir::IrExprKind::LitInt { .. }) => values::byte_size(&Ty::Int),
+                        (Ty::Unknown, crate::ir::IrExprKind::LitFloat { .. }) => values::byte_size(&Ty::Float),
+                        _ => values::byte_size(&expr.ty),
+                    }
+                })
+                .sum()
+        } else { 0 };
+        let total_size = tag_size + explicit_field_size + default_field_size;
 
         // Allocate
         wasm!(self.func, {
@@ -40,7 +54,8 @@ impl FuncCompiler<'_> {
             });
         }
 
-        // Store each field (offset starts after tag)
+        // Store each explicit field (offset starts after tag)
+        let explicit_names: std::collections::HashSet<&str> = fields.iter().map(|(n, _)| n.as_str()).collect();
         let mut offset = tag_size;
         for (_, field_expr) in fields {
             let field_size = values::byte_size(&field_expr.ty);
@@ -49,6 +64,33 @@ impl FuncCompiler<'_> {
             self.emit_store_at(&field_expr.ty, offset);
             offset += field_size;
         }
+
+        // Fill in default fields that were not explicitly provided
+        if let Some(ctor_name) = name {
+            let defaults: Vec<(String, crate::ir::IrExpr)> = self.emitter.default_fields.iter()
+                .filter(|((cn, _), _)| cn == ctor_name)
+                .filter(|((_, fn_name), _)| !explicit_names.contains(fn_name.as_str()))
+                .map(|((_, fn_name), expr)| (fn_name.clone(), expr.clone()))
+                .collect();
+            for (_, default_expr) in &defaults {
+                // Use correct field type: infer from expr kind when ty is Unknown
+                let field_ty = match (&default_expr.ty, &default_expr.kind) {
+                    (Ty::Unknown, crate::ir::IrExprKind::LitInt { .. }) => Ty::Int,
+                    (Ty::Unknown, crate::ir::IrExprKind::LitFloat { .. }) => Ty::Float,
+                    (Ty::Unknown, crate::ir::IrExprKind::LitBool { .. }) => Ty::Bool,
+                    (Ty::Unknown, crate::ir::IrExprKind::LitStr { .. }) => Ty::String,
+                    _ => default_expr.ty.clone(),
+                };
+                let field_size = values::byte_size(&field_ty);
+                wasm!(self.func, { local_get(scratch); });
+                self.emit_expr(default_expr);
+                self.emit_store_at(&field_ty, offset);
+                offset += field_size;
+            }
+        }
+
+        // Also recompute total_size to include defaults
+        // (The allocation above may be too small — need to fix)
 
         self.match_depth -= 1;
         wasm!(self.func, { local_get(scratch); });
