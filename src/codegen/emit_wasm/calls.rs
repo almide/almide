@@ -138,164 +138,30 @@ impl FuncCompiler<'_> {
 
             CallTarget::Module { module, func } => {
                 match (module.as_str(), func.as_str()) {
-                    ("int", "to_string") => {
-                        self.emit_expr(&args[0]);
-                        wasm!(self.func, { call(self.emitter.rt.int_to_string); });
+                    _ if module == "int" => {
+                        if !self.emit_int_call(func, args) {
+                            self.emit_stub_call(args);
+                        }
                     }
-                    ("float", "to_string") => {
-                        self.emit_expr(&args[0]);
-                        wasm!(self.func, {
-                            call(self.emitter.rt.float_to_string);
-                        });
+                    _ if module == "float" => {
+                        if !self.emit_float_call(func, args) {
+                            self.emit_stub_call(args);
+                        }
                     }
-                    ("string", "length") | ("string", "len") => {
-                        self.emit_expr(&args[0]);
-                        wasm!(self.func, {
-                            i32_load(0);
-                            i64_extend_i32_u;
-                        });
+                    _ if module == "string" => {
+                        if !self.emit_string_call(func, args) {
+                            self.emit_stub_call(args);
+                        }
                     }
-                    ("int", "parse") => {
-                        self.emit_expr(&args[0]);
-                        wasm!(self.func, { call(self.emitter.rt.int_parse); });
+                    _ if module == "option" => {
+                        if !self.emit_option_call(func, args) {
+                            self.emit_stub_call(args);
+                        }
                     }
-                    ("string", "contains") => {
-                        // string.contains(haystack, needle) -> bool
-                        self.emit_expr(&args[0]); // haystack ptr
-                        self.emit_expr(&args[1]); // needle ptr
-                        wasm!(self.func, { call(self.emitter.rt.str_contains); });
-                    }
-                    ("string", "trim") => {
-                        self.emit_expr(&args[0]);
-                        wasm!(self.func, { call(self.emitter.rt.str_trim); });
-                    }
-                    ("string", "to_upper") | ("string", "to_lower") => {
-                        let is_upper = func == "to_upper";
-                        self.emit_expr(&args[0]);
-                        self.emit_str_case_convert(is_upper);
-                    }
-                    ("string", "starts_with") => {
-                        // Store s → mem[0], prefix → mem[4]
-                        wasm!(self.func, { i32_const(0); });
-                        self.emit_expr(&args[0]);
-                        wasm!(self.func, {
-                            i32_store(0);
-                            i32_const(4);
-                        });
-                        self.emit_expr(&args[1]);
-                        wasm!(self.func, {
-                            i32_store(0);
-                            // if s.len < prefix.len → false
-                            i32_const(4);
-                            i32_load(0); // prefix
-                            i32_load(0); // prefix.len
-                            i32_const(0);
-                            i32_load(0); // s
-                            i32_load(0); // s.len
-                            i32_gt_u; // prefix.len > s.len
-                            if_i32;
-                            i32_const(0);
-                            else_;
-                            // mem_eq(s+4, prefix+4, prefix.len)
-                            i32_const(0);
-                            i32_load(0);
-                            i32_const(4);
-                            i32_add; // s+4
-                            i32_const(4);
-                            i32_load(0);
-                            i32_const(4);
-                            i32_add; // prefix+4
-                            i32_const(4);
-                            i32_load(0);
-                            i32_load(0); // prefix.len
-                            call(self.emitter.rt.mem_eq);
-                            end;
-                        });
-                    }
-                    ("string", "ends_with") => {
-                        wasm!(self.func, { i32_const(0); });
-                        self.emit_expr(&args[0]);
-                        wasm!(self.func, {
-                            i32_store(0);
-                            i32_const(4);
-                        });
-                        self.emit_expr(&args[1]);
-                        wasm!(self.func, {
-                            i32_store(0);
-                            // if s.len < suffix.len → false
-                            i32_const(4);
-                            i32_load(0);
-                            i32_load(0);
-                            i32_const(0);
-                            i32_load(0);
-                            i32_load(0);
-                            i32_gt_u;
-                            if_i32;
-                            i32_const(0);
-                            else_;
-                            // mem_eq(s+4+(s.len-suffix.len), suffix+4, suffix.len)
-                            i32_const(0);
-                            i32_load(0);
-                            i32_const(4);
-                            i32_add;
-                            i32_const(0);
-                            i32_load(0);
-                            i32_load(0); // s.len
-                            i32_add;
-                            i32_const(4);
-                            i32_load(0);
-                            i32_load(0); // suffix.len
-                            i32_sub; // s+4+s.len-suffix.len
-                            i32_const(4);
-                            i32_load(0);
-                            i32_const(4);
-                            i32_add; // suffix+4
-                            i32_const(4);
-                            i32_load(0);
-                            i32_load(0); // suffix.len
-                            call(self.emitter.rt.mem_eq);
-                            end;
-                        });
-                    }
-                    ("string", "get") => {
-                        // string.get(s, index) -> String (single char)
-                        // Returns 1-char string at byte index
-                        let s = self.match_i32_base + self.match_depth;
-                        wasm!(self.func, { i32_const(0); });
-                        self.emit_expr(&args[0]); // string ptr
-                        wasm!(self.func, { i32_store(0); });
-                        self.emit_expr(&args[1]); // index (i64)
-                        wasm!(self.func, {
-                            i32_wrap_i64;
-                            local_set(s);
-                            // Alloc 5 bytes: [len:4][char:1]
-                            i32_const(5);
-                            call(self.emitter.rt.alloc);
-                            local_set(s + 1);
-                            // Set len = 1
-                            local_get(s + 1);
-                            i32_const(1);
-                            i32_store(0);
-                            // Copy byte: dst[4] = src[4 + index]
-                            local_get(s + 1);
-                            i32_const(0);
-                            i32_load(0); // src
-                            i32_const(4);
-                            i32_add;
-                            local_get(s);
-                            i32_add;
-                            i32_load8_u(0);
-                            i32_store8(4);
-                            local_get(s + 1);
-                        });
-                    }
-                    ("string", "repeat") | ("string", "reverse") | ("string", "replace")
-                    | ("string", "split") | ("string", "join") | ("string", "slice")
-                    | ("string", "count")
-                    | ("string", "index_of")
-                    | ("string", "pad_start") | ("string", "pad_end")
-                    | ("string", "trim_start") | ("string", "trim_end") => {
-                        self.emit_stub_call(args);
+                    _ if module == "result" => {
+                        if !self.emit_result_call(func, args) {
+                            self.emit_stub_call(args);
+                        }
                     }
                     ("list", "map") => {
                         self.emit_list_map(&args[0], &args[1], _ret_ty);
@@ -1116,7 +982,7 @@ impl FuncCompiler<'_> {
                         match &elem_ty {
                             Ty::Int => { wasm!(self.func, { i64_eq; }); }
                             Ty::Float => { wasm!(self.func, { f64_eq; }); }
-                            Ty::String => { wasm!(self.func, { call(self.emitter.rt.str_eq); }); }
+                            Ty::String => { wasm!(self.func, { call(self.emitter.rt.string.eq); }); }
                             _ => { wasm!(self.func, { i32_eq; }); }
                         }
                         wasm!(self.func, {
@@ -1136,13 +1002,6 @@ impl FuncCompiler<'_> {
                         // Not found
                         wasm!(self.func, { i32_const(0); });
                     }
-                    ("list", "find") | ("list", "any") | ("list", "all")
-                    | ("list", "count") | ("list", "sort_by") | ("list", "flat_map")
-                    | ("list", "filter_map") | ("list", "drop")
-                    | ("list", "take") | ("list", "zip")
-                    | ("list", "sort") => {
-                        self.emit_stub_call(args);
-                    }
                     ("map", "len") | ("map", "length") | ("map", "size") => {
                         self.emit_expr(&args[0]);
                         wasm!(self.func, {
@@ -1150,104 +1009,15 @@ impl FuncCompiler<'_> {
                             i64_extend_i32_u;
                         });
                     }
-                    ("list", "len") | ("list", "length") => {
-                        self.emit_expr(&args[0]);
-                        wasm!(self.func, {
-                            i32_load(0);
-                            i64_extend_i32_u;
-                        });
-                    }
-                    ("math", "pi") => {
-                        wasm!(self.func, { f64_const(std::f64::consts::PI); });
-                    }
-                    ("math", "e") => {
-                        wasm!(self.func, { f64_const(std::f64::consts::E); });
-                    }
-                    ("math", "sqrt") => {
-                        self.emit_expr(&args[0]);
-                        if matches!(&args[0].ty, Ty::Int) {
-                            wasm!(self.func, { f64_convert_i64_s; });
-                        }
-                        wasm!(self.func, { f64_sqrt; });
-                    }
-                    ("math", "abs") => {
-                        self.emit_expr(&args[0]);
-                        match &args[0].ty {
-                            Ty::Int => {
-                                // abs(x) = if x < 0 then -x else x
-                                let s = self.match_i64_base + self.match_depth;
-                                wasm!(self.func, {
-                                    local_set(s);
-                                    local_get(s);
-                                    i64_const(0);
-                                    i64_lt_s;
-                                    if_i64;
-                                    i64_const(0);
-                                    local_get(s);
-                                    i64_sub;
-                                    else_;
-                                    local_get(s);
-                                    end;
-                                });
-                            }
-                            Ty::Float => {
-                                wasm!(self.func, { f64_abs; });
-                            }
-                            _ => {}
+                    _ if module == "list" => {
+                        if !self.emit_list_call(func, args) {
+                            self.emit_stub_call(args);
                         }
                     }
-                    ("math", "max") | ("math", "min") => {
-                        self.emit_expr(&args[0]);
-                        self.emit_expr(&args[1]);
-                        match (func.as_str(), &args[0].ty) {
-                            ("max", Ty::Int) => {
-                                let s = self.match_i64_base + self.match_depth;
-                                let s2 = s + 1;
-                                wasm!(self.func, {
-                                    local_set(s);
-                                    local_set(s2);
-                                    local_get(s2);
-                                    local_get(s);
-                                    i64_gt_s;
-                                    if_i64;
-                                    local_get(s2);
-                                    else_;
-                                    local_get(s);
-                                    end;
-                                });
-                            }
-                            ("min", Ty::Int) => {
-                                let s = self.match_i64_base + self.match_depth;
-                                let s2 = s + 1;
-                                wasm!(self.func, {
-                                    local_set(s);
-                                    local_set(s2);
-                                    local_get(s2);
-                                    local_get(s);
-                                    i64_lt_s;
-                                    if_i64;
-                                    local_get(s2);
-                                    else_;
-                                    local_get(s);
-                                    end;
-                                });
-                            }
-                            ("max", _) => { self.func.instruction(&Instruction::F64Max); }
-                            ("min", _) => { self.func.instruction(&Instruction::F64Min); }
-                            _ => {}
+                    _ if module == "math" => {
+                        if !self.emit_math_call(func, args) {
+                            self.emit_stub_call(args);
                         }
-                    }
-                    ("float", "round") => {
-                        self.emit_expr(&args[0]);
-                        wasm!(self.func, { f64_nearest; });
-                    }
-                    ("float", "floor") => {
-                        self.emit_expr(&args[0]);
-                        wasm!(self.func, { f64_floor; });
-                    }
-                    ("float", "ceil") => {
-                        self.emit_expr(&args[0]);
-                        wasm!(self.func, { f64_ceil; });
                     }
                     _ => {
                         self.emit_stub_call(args);
@@ -1302,7 +1072,7 @@ impl FuncCompiler<'_> {
                     }
                     "trim" | "string.trim" if matches!(object.ty, Ty::String) => {
                         self.emit_expr(object);
-                        wasm!(self.func, { call(self.emitter.rt.str_trim); });
+                        wasm!(self.func, { call(self.emitter.rt.string.trim); });
                     }
                     "to_upper" | "string.to_upper" if matches!(object.ty, Ty::String) => {
                         self.emit_expr(object);
@@ -1321,7 +1091,31 @@ impl FuncCompiler<'_> {
                     "contains" | "string.contains" if matches!(object.ty, Ty::String) => {
                         self.emit_expr(object);
                         self.emit_expr(&args[0]);
-                        wasm!(self.func, { call(self.emitter.rt.str_contains); });
+                        wasm!(self.func, { call(self.emitter.rt.string.contains); });
+                    }
+                    _ if matches!(&object.ty, Ty::Applied(crate::types::constructor::TypeConstructorId::Option, _)) => {
+                        let mut fake_args = vec![(**object).clone()];
+                        fake_args.extend(args.iter().cloned());
+                        let m = method.strip_prefix("option.").unwrap_or(method);
+                        if !self.emit_option_call(m, &fake_args) {
+                            self.emit_stub_call(args);
+                        }
+                    }
+                    _ if matches!(&object.ty, Ty::Applied(crate::types::constructor::TypeConstructorId::Result, _)) => {
+                        let mut fake_args = vec![(**object).clone()];
+                        fake_args.extend(args.iter().cloned());
+                        let m = method.strip_prefix("result.").unwrap_or(method);
+                        if !self.emit_result_call(m, &fake_args) {
+                            self.emit_stub_call(args);
+                        }
+                    }
+                    _ if matches!(&object.ty, Ty::String) => {
+                        let mut fake_args = vec![(**object).clone()];
+                        fake_args.extend(args.iter().cloned());
+                        let m = method.strip_prefix("string.").unwrap_or(method);
+                        if !self.emit_string_call(m, &fake_args) {
+                            self.emit_stub_call(args);
+                        }
                     }
                     _ => {
                         // Try to resolve as TypeName.method convention call
@@ -1846,4 +1640,5 @@ impl FuncCompiler<'_> {
             i32_load(0);
         });
     }
+
 }

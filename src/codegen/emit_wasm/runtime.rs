@@ -39,14 +39,6 @@ pub fn register_runtime(emitter: &mut WasmEmitter) {
     let concat_ty = emitter.register_type(vec![ValType::I32, ValType::I32], vec![ValType::I32]);
     emitter.rt.concat_str = emitter.register_func("__concat_str", concat_ty);
 
-    // __str_eq(a: i32, b: i32) -> i32
-    let str_eq_ty = emitter.register_type(vec![ValType::I32, ValType::I32], vec![ValType::I32]);
-    emitter.rt.str_eq = emitter.register_func("__str_eq", str_eq_ty);
-
-    // __str_trim(s: i32) -> i32
-    let str_trim_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
-    emitter.rt.str_trim = emitter.register_func("__str_trim", str_trim_ty);
-
     // __option_eq_i64(a: i32, b: i32) -> i32
     let opt_eq_i64_ty = emitter.register_type(vec![ValType::I32, ValType::I32], vec![ValType::I32]);
     emitter.rt.option_eq_i64 = emitter.register_func("__option_eq_i64", opt_eq_i64_ty);
@@ -54,10 +46,6 @@ pub fn register_runtime(emitter: &mut WasmEmitter) {
     emitter.rt.option_eq_str = emitter.register_func("__option_eq_str", opt_eq_i64_ty);
     // __result_eq_i64_str(a: i32, b: i32) -> i32
     emitter.rt.result_eq_i64_str = emitter.register_func("__result_eq_i64_str", opt_eq_i64_ty);
-
-    // __str_contains(haystack: i32, needle: i32) -> i32
-    let str_contains_ty = emitter.register_type(vec![ValType::I32, ValType::I32], vec![ValType::I32]);
-    emitter.rt.str_contains = emitter.register_func("__str_contains", str_contains_ty);
 
     // __mem_eq(a: i32, b: i32, size: i32) -> i32
     let mem_eq_ty = emitter.register_type(
@@ -81,6 +69,9 @@ pub fn register_runtime(emitter: &mut WasmEmitter) {
     let int_parse_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
     emitter.rt.int_parse = emitter.register_func("__int_parse", int_parse_ty);
 
+    // String stdlib runtime (delegated to rt_string module)
+    super::rt_string::register(emitter);
+
     // Global: __heap_ptr (mutable i32, initialized at assembly time)
     emitter.heap_ptr_global = 0; // first and only global
 }
@@ -93,16 +84,15 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     compile_float_to_string(emitter);
     compile_println_int(emitter);
     compile_concat_str(emitter);
-    compile_str_eq(emitter);
-    compile_str_trim(emitter);
     compile_option_eq_i64(emitter);
     compile_option_eq_str(emitter);
     compile_result_eq_i64_str(emitter);
-    compile_str_contains(emitter);
     compile_mem_eq(emitter);
     compile_list_eq(emitter);
     compile_concat_list(emitter);
     compile_int_parse(emitter);
+    // String stdlib runtime (delegated)
+    super::rt_string::compile(emitter);
 }
 
 /// __alloc(size: i32) -> i32
@@ -539,229 +529,6 @@ fn emit_memcpy_loop(f: &mut Function, dst: u32, src: u32, len: u32, counter: u32
     });
 }
 
-/// __str_eq(a: i32, b: i32) -> i32
-/// Deep string equality: compare lengths then bytes. Returns 1 if equal.
-fn compile_str_eq(emitter: &mut WasmEmitter) {
-    let type_idx = emitter.func_type_indices[&emitter.rt.str_eq];
-    // params: 0=$a, 1=$b. locals: 2=$len_a, 3=$i
-    let mut f = Function::new([
-        (1, ValType::I32), // 2: $len_a
-        (1, ValType::I32), // 3: $i
-    ]);
-
-    // If same pointer, return 1
-    wasm!(f, {
-        local_get(0);
-        local_get(1);
-        i32_eq;
-        if_empty;
-        i32_const(1);
-        return_;
-        end;
-    });
-
-    // Load a.len; if lengths differ return 0
-    wasm!(f, {
-        local_get(0);
-        i32_load(0);
-        local_set(2);
-        local_get(2);
-        local_get(1);
-        i32_load(0);
-        i32_ne;
-        if_empty;
-        i32_const(0);
-        return_;
-        end;
-    });
-
-    // Compare bytes
-    wasm!(f, {
-        i32_const(0);
-        local_set(3);
-        block_empty;
-        loop_empty;
-        local_get(3);
-        local_get(2);
-        i32_ge_u;
-        if_empty;
-        i32_const(1);
-        return_;
-        end;
-    });
-    // if a[4+i] != b[4+i] → return 0
-    wasm!(f, {
-        local_get(0);
-        i32_const(4);
-        i32_add;
-        local_get(3);
-        i32_add;
-        i32_load8_u(0);
-        local_get(1);
-        i32_const(4);
-        i32_add;
-        local_get(3);
-        i32_add;
-        i32_load8_u(0);
-        i32_ne;
-        if_empty;
-        i32_const(0);
-        return_;
-        end;
-        local_get(3);
-        i32_const(1);
-        i32_add;
-        local_set(3);
-        br(0);
-        end;
-        end;
-    });
-
-    wasm!(f, { i32_const(0); end; });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
-}
-
-/// __str_trim(s: i32) -> i32
-/// Strip leading and trailing whitespace (space, tab, newline, CR).
-fn compile_str_trim(emitter: &mut WasmEmitter) {
-    let type_idx = emitter.func_type_indices[&emitter.rt.str_trim];
-    // params: 0=$s. locals: 1=$len, 2=$start, 3=$end
-    let mut f = Function::new([
-        (1, ValType::I32), // 1: len
-        (1, ValType::I32), // 2: start
-        (1, ValType::I32), // 3: end
-    ]);
-
-    wasm!(f, {
-        local_get(0);
-        i32_load(0);
-        local_set(1);
-        i32_const(0);
-        local_set(2);
-    });
-
-    // Skip leading whitespace: while start < len && byte < 33
-    wasm!(f, {
-        block_empty;
-        loop_empty;
-        local_get(2);
-        local_get(1);
-        i32_ge_u;
-        br_if(1);
-        local_get(0);
-        i32_const(4);
-        i32_add;
-        local_get(2);
-        i32_add;
-        i32_load8_u(0);
-        i32_const(33);
-        i32_lt_u;
-        i32_eqz;
-        br_if(1);
-        local_get(2);
-        i32_const(1);
-        i32_add;
-        local_set(2);
-        br(0);
-        end;
-        end;
-    });
-
-    // end = len
-    wasm!(f, {
-        local_get(1);
-        local_set(3);
-    });
-
-    // Skip trailing whitespace
-    wasm!(f, {
-        block_empty;
-        loop_empty;
-        local_get(3);
-        local_get(2);
-        i32_le_u;
-        br_if(1);
-        local_get(0);
-        i32_const(4);
-        i32_add;
-        local_get(3);
-        i32_const(1);
-        i32_sub;
-        i32_add;
-        i32_load8_u(0);
-        i32_const(33);
-        i32_lt_u;
-        i32_eqz;
-        br_if(1);
-        local_get(3);
-        i32_const(1);
-        i32_sub;
-        local_set(3);
-        br(0);
-        end;
-        end;
-    });
-
-    // new_len = end - start. Allocate and copy.
-    wasm!(f, {
-        local_get(3);
-        local_get(2);
-        i32_sub;
-        i32_const(4);
-        i32_add;
-        call(emitter.rt.alloc);
-        local_set(1);
-    });
-
-    // Store new_len at result[0]
-    wasm!(f, {
-        local_get(1);
-        local_get(3);
-        local_get(2);
-        i32_sub;
-        i32_store(0);
-    });
-
-    // Copy bytes: i=0; while i < new_len
-    wasm!(f, {
-        i32_const(0);
-        local_set(3);
-        block_empty;
-        loop_empty;
-        local_get(3);
-        local_get(1);
-        i32_load(0);
-        i32_ge_u;
-        br_if(1);
-        local_get(1);
-        i32_const(4);
-        i32_add;
-        local_get(3);
-        i32_add;
-        local_get(0);
-        i32_const(4);
-        i32_add;
-        local_get(2);
-        i32_add;
-        local_get(3);
-        i32_add;
-        i32_load8_u(0);
-        i32_store8(0);
-        local_get(3);
-        i32_const(1);
-        i32_add;
-        local_set(3);
-        br(0);
-        end;
-        end;
-    });
-
-    wasm!(f, { local_get(1); end; });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
-}
-
-/// __option_eq_i64(a: i32, b: i32) -> i32
-/// Option[Int] equality: none=0, some=ptr to i64.
 fn compile_option_eq_i64(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.option_eq_i64];
     let mut f = Function::new([]);
@@ -834,7 +601,7 @@ fn compile_option_eq_str(emitter: &mut WasmEmitter) {
         i32_load(0);
         local_get(1);
         i32_load(0);
-        call(emitter.rt.str_eq);
+        call(emitter.rt.string.eq);
         end;
     });
 
@@ -879,7 +646,7 @@ fn compile_result_eq_i64_str(emitter: &mut WasmEmitter) {
         i32_load(4);
         local_get(1);
         i32_load(4);
-        call(emitter.rt.str_eq);
+        call(emitter.rt.string.eq);
         end;
     });
 
@@ -888,94 +655,7 @@ fn compile_result_eq_i64_str(emitter: &mut WasmEmitter) {
 
 /// __str_contains(haystack: i32, needle: i32) -> i32 (bool)
 /// O(n*m) substring search.
-fn compile_str_contains(emitter: &mut WasmEmitter) {
-    let type_idx = emitter.func_type_indices[&emitter.rt.str_contains];
-    let mut f = Function::new([
-        (1, ValType::I32), // 2: h_len
-        (1, ValType::I32), // 3: n_len
-        (1, ValType::I32), // 4: i
-        (1, ValType::I32), // 5: j
-        (1, ValType::I32), // 6: match flag
-    ]);
 
-    wasm!(f, {
-        local_get(0);
-        i32_load(0);
-        local_set(2);
-        local_get(1);
-        i32_load(0);
-        local_set(3);
-    });
-
-    // Empty needle → always contains
-    wasm!(f, {
-        local_get(3);
-        i32_eqz;
-        if_empty;
-        i32_const(1);
-        return_;
-        end;
-    });
-
-    // If needle longer than haystack → false
-    wasm!(f, {
-        local_get(3);
-        local_get(2);
-        i32_gt_u;
-        if_empty;
-        i32_const(0);
-        return_;
-        end;
-    });
-
-    // Outer loop
-    wasm!(f, {
-        i32_const(0);
-        local_set(4);
-        block_empty;
-        loop_empty;
-        local_get(4);
-        local_get(2);
-        local_get(3);
-        i32_sub;
-        i32_gt_u;
-        if_empty;
-        i32_const(0);
-        return_;
-        end;
-    });
-
-    // Compare at position i using mem_eq
-    wasm!(f, {
-        local_get(0);
-        i32_const(4);
-        i32_add;
-        local_get(4);
-        i32_add;
-        local_get(1);
-        i32_const(4);
-        i32_add;
-        local_get(3);
-        call(emitter.rt.mem_eq);
-        if_empty;
-        i32_const(1);
-        return_;
-        end;
-        local_get(4);
-        i32_const(1);
-        i32_add;
-        local_set(4);
-        br(0);
-        end;
-        end;
-    });
-
-    wasm!(f, { i32_const(0); end; });
-    emitter.add_compiled(CompiledFunc { type_idx, func: f });
-}
-
-/// __mem_eq(a: i32, b: i32, size: i32) -> i32
-/// Byte-by-byte comparison of two memory regions.
 fn compile_mem_eq(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.mem_eq];
     let mut f = Function::new([(1, ValType::I32)]); // 3: $i

@@ -161,6 +161,9 @@ macro_rules! wasm {
     (@emit $f:expr, i32_gt_u; $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::I32GtU); wasm!(@emit $f, $($rest)*)
     };
+    (@emit $f:expr, i32_lt_s; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I32LtS); wasm!(@emit $f, $($rest)*)
+    };
     (@emit $f:expr, i32_lt_u; $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::I32LtU); wasm!(@emit $f, $($rest)*)
     };
@@ -222,6 +225,21 @@ macro_rules! wasm {
     };
     (@emit $f:expr, i64_ge_u; $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::I64GeU); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, i64_and; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I64And); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, i64_or; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I64Or); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, i64_xor; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I64Xor); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, i64_shl; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I64Shl); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, i64_shr_s; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I64ShrS); wasm!(@emit $f, $($rest)*)
     };
     (@emit $f:expr, i64_extend_i32_u; $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::I64ExtendI32U); wasm!(@emit $f, $($rest)*)

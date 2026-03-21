@@ -645,7 +645,7 @@ impl FuncCompiler<'_> {
             Ty::Int => { wasm!(self.func, { i64_eq; }); }
             Ty::Float => { wasm!(self.func, { f64_eq; }); }
             Ty::Bool => { wasm!(self.func, { i32_eq; }); }
-            Ty::String => { wasm!(self.func, { call(self.emitter.rt.str_eq); }); }
+            Ty::String => { wasm!(self.func, { call(self.emitter.rt.string.eq); }); }
             Ty::Applied(crate::types::constructor::TypeConstructorId::List, args) => {
                 let elem_size = args.first().map(|t| values::byte_size(t)).unwrap_or(8);
                 wasm!(self.func, {

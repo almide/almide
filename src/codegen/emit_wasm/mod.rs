@@ -18,8 +18,13 @@ mod wasm_macro;
 pub mod values;
 mod strings;
 mod runtime;
+mod rt_string;
 mod expressions;
 mod calls;
+mod calls_string;
+mod calls_option;
+mod calls_numeric;
+mod calls_list;
 mod collections;
 mod control;
 pub mod statements;
@@ -45,6 +50,41 @@ pub struct CompiledFunc {
     pub func: Function,
 }
 
+/// String stdlib runtime function indices.
+pub struct StringRuntime {
+    pub eq: u32,
+    pub contains: u32,
+    pub trim: u32,
+    pub slice: u32,
+    pub reverse: u32,
+    pub repeat: u32,
+    pub index_of: u32,
+    pub replace: u32,
+    pub split: u32,
+    pub join: u32,
+    pub count: u32,
+    pub pad_start: u32,
+    pub pad_end: u32,
+    pub trim_start: u32,
+    pub trim_end: u32,
+    pub to_upper: u32,
+    pub to_lower: u32,
+    pub chars: u32,
+    pub lines: u32,
+    pub from_bytes: u32,
+    pub to_bytes: u32,
+    pub replace_first: u32,
+    pub last_index_of: u32,
+    pub strip_prefix: u32,
+    pub strip_suffix: u32,
+    pub is_digit: u32,
+    pub is_alpha: u32,
+    pub is_alnum: u32,
+    pub is_whitespace: u32,
+    pub is_upper: u32,
+    pub is_lower: u32,
+}
+
 /// Indices of built-in runtime functions.
 pub struct RuntimeFuncs {
     pub fd_write: u32,
@@ -53,17 +93,15 @@ pub struct RuntimeFuncs {
     pub int_to_string: u32,
     pub println_int: u32,
     pub concat_str: u32,
-    pub str_eq: u32,
     pub concat_list: u32,
     pub list_eq: u32,
     pub mem_eq: u32,
-    pub str_contains: u32,
-    pub option_eq_i64: u32,   // __option_eq_i64(a, b) → i32
-    pub option_eq_str: u32,   // __option_eq_str(a, b) → i32
+    pub option_eq_i64: u32,
+    pub option_eq_str: u32,
     pub result_eq_i64_str: u32,
-    pub str_trim: u32,
-    pub int_parse: u32,  // __int_parse(s: i32) → i32 (Result[Int, String])
-    pub float_to_string: u32,  // __float_to_string(f: f64) → i32
+    pub int_parse: u32,
+    pub float_to_string: u32,
+    pub string: StringRuntime,
 }
 
 /// Import descriptor for WASM import section.
@@ -154,22 +192,27 @@ impl WasmEmitter {
             // First byte is newline at NEWLINE_OFFSET
             data_bytes: vec![0x0A],
             rt: RuntimeFuncs {
-                fd_write: 0,
-                alloc: 0,
-                println_str: 0,
+                fd_write: 0, alloc: 0,
+                println_str: 0, println_int: 0,
                 int_to_string: 0, float_to_string: 0,
-                println_int: 0,
-                concat_str: 0,
-                str_eq: 0,
-                concat_list: 0,
-                list_eq: 0,
-                mem_eq: 0,
-                str_contains: 0,
-                option_eq_i64: 0,
-                option_eq_str: 0,
-                result_eq_i64_str: 0,
-                str_trim: 0,
-                int_parse: 0,
+                concat_str: 0, concat_list: 0,
+                list_eq: 0, mem_eq: 0,
+                option_eq_i64: 0, option_eq_str: 0,
+                result_eq_i64_str: 0, int_parse: 0,
+                string: StringRuntime {
+                    eq: 0, contains: 0, trim: 0,
+                    slice: 0, reverse: 0, repeat: 0, index_of: 0,
+                    replace: 0, split: 0, join: 0, count: 0,
+                    pad_start: 0, pad_end: 0,
+                    trim_start: 0, trim_end: 0,
+                    to_upper: 0, to_lower: 0,
+                    chars: 0, lines: 0,
+                    from_bytes: 0, to_bytes: 0,
+                    replace_first: 0, last_index_of: 0,
+                    strip_prefix: 0, strip_suffix: 0,
+                    is_digit: 0, is_alpha: 0, is_alnum: 0,
+                    is_whitespace: 0, is_upper: 0, is_lower: 0,
+                },
             },
             heap_ptr_global: 0,
             top_let_globals: HashMap::new(),
