@@ -212,18 +212,18 @@ fn count_scratch_depth(expr: &IrExpr) -> usize {
         }
         IrExprKind::BinOp { op, left, right } => {
             let inner = count_scratch_depth(left).max(count_scratch_depth(right));
-            // PowInt/PowFloat use 2 i64 + 1 i32 scratch
-            if matches!(op, crate::ir::BinOp::PowInt | crate::ir::BinOp::PowFloat) {
-                2 + inner
-            } else {
-                inner
+            match op {
+                crate::ir::BinOp::PowInt | crate::ir::BinOp::PowFloat => 4 + inner,
+                // Eq/Neq: deep equality uses up to 3 scratch locals (list_eq_deep, option_eq_deep, etc.)
+                crate::ir::BinOp::Eq | crate::ir::BinOp::Neq => 3 + inner,
+                _ => inner,
             }
         }
         IrExprKind::UnOp { operand, .. } => count_scratch_depth(operand),
         IrExprKind::Call { args, target, .. } => {
-            // Calls may use scratch: variant constructors (1), stdlib like list.filter/fold (2), computed calls (1)
+            // Calls may use scratch: option/result ops (3), list ops (4), variant constructors (1), computed calls (1)
             let inner = args.iter().map(|a| count_scratch_depth(a)).max().unwrap_or(0);
-            2 + inner
+            4 + inner
         }
         // SpreadRecord needs 2 i32 scratch (result + base ptrs) + 1 i64 scratch (copy counter)
         IrExprKind::SpreadRecord { base, fields, .. } => {
