@@ -506,6 +506,7 @@ impl FuncCompiler<'_> {
                 }
                 wasm!(self.func, {
                     i32_const(0); local_set(s); // i
+                    i32_const(0); local_set(s + 2); // result (default: none)
                     block_empty; loop_empty;
                       local_get(s);
                       i32_const(0); i32_load(0); i32_load(0); // len
@@ -520,10 +521,10 @@ impl FuncCompiler<'_> {
                             i64_load(0);
                             local_get(s64); i64_eq;
                             if_empty;
-                              // Found: return some(i)
+                              // Found: store some(i) and break
                               i32_const(8); call(self.emitter.rt.alloc); local_set(s + 1);
                               local_get(s + 1); local_get(s); i64_extend_i32_u; i64_store(0);
-                              local_get(s + 1); return_;
+                              local_get(s + 1); local_set(s + 2); br(2);
                             end;
                         });
                     }
@@ -544,7 +545,7 @@ impl FuncCompiler<'_> {
                             if_empty;
                               i32_const(8); call(self.emitter.rt.alloc); local_set(s + 1);
                               local_get(s + 1); local_get(s); i64_extend_i32_u; i64_store(0);
-                              local_get(s + 1); return_;
+                              local_get(s + 1); local_set(s + 2); br(2);
                             end;
                         });
                     }
@@ -553,7 +554,7 @@ impl FuncCompiler<'_> {
                       local_get(s); i32_const(1); i32_add; local_set(s);
                       br(0);
                     end; end;
-                    i32_const(0); // none
+                    local_get(s + 2); // result (none if not found)
                 });
             }
             "min" | "max" => {
@@ -877,6 +878,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     i32_store(0); // mem[4]=closure
                     i32_const(0); local_set(s); // i=0
+                    i32_const(0); local_set(s + 2); // result (default: none)
                     block_empty; loop_empty;
                       local_get(s); i32_const(0); i32_load(0); i32_load(0); i32_ge_u; br_if(1);
                       // Call pred(xs[i])
@@ -904,12 +906,12 @@ impl FuncCompiler<'_> {
                 });
                 self.emit_elem_copy(&elem_ty);
                 wasm!(self.func, {
-                        local_get(s + 1); return_;
+                        local_get(s + 1); local_set(s + 2); br(2);
                       end;
                       local_get(s); i32_const(1); i32_add; local_set(s);
                       br(0);
                     end; end;
-                    i32_const(0); // none
+                    local_get(s + 2); // result (none if not found)
                 });
             }
             "find_index" if args.len() == 2 && matches!(&args[1].ty, Ty::Fn { .. }) => {
@@ -924,6 +926,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     i32_store(0);
                     i32_const(0); local_set(s);
+                    i32_const(0); local_set(s + 2); // result (default: none)
                     block_empty; loop_empty;
                       local_get(s); i32_const(0); i32_load(0); i32_load(0); i32_ge_u; br_if(1);
                       i32_const(4); i32_load(0); i32_load(4); // env
@@ -942,12 +945,12 @@ impl FuncCompiler<'_> {
                       if_empty;
                         i32_const(8); call(self.emitter.rt.alloc); local_set(s + 1);
                         local_get(s + 1); local_get(s); i64_extend_i32_u; i64_store(0);
-                        local_get(s + 1); return_;
+                        local_get(s + 1); local_set(s + 2); br(2);
                       end;
                       local_get(s); i32_const(1); i32_add; local_set(s);
                       br(0);
                     end; end;
-                    i32_const(0); // none
+                    local_get(s + 2); // result (none if not found)
                 });
             }
             "any" => {
@@ -962,6 +965,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     i32_store(0);
                     i32_const(0); local_set(s);
+                    i32_const(0); local_set(s + 1); // result (default: false)
                     block_empty; loop_empty;
                       local_get(s); i32_const(0); i32_load(0); i32_load(0); i32_ge_u; br_if(1);
                       i32_const(4); i32_load(0); i32_load(4);
@@ -977,11 +981,11 @@ impl FuncCompiler<'_> {
                     wasm!(self.func, { call_indirect(ti, 0); });
                 }
                 wasm!(self.func, {
-                      if_empty; i32_const(1); return_; end;
+                      if_empty; i32_const(1); local_set(s + 1); br(2); end;
                       local_get(s); i32_const(1); i32_add; local_set(s);
                       br(0);
                     end; end;
-                    i32_const(0); // false
+                    local_get(s + 1); // result
                 });
             }
             "all" => {
@@ -995,6 +999,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     i32_store(0);
                     i32_const(0); local_set(s);
+                    i32_const(1); local_set(s + 1); // result (default: true)
                     block_empty; loop_empty;
                       local_get(s); i32_const(0); i32_load(0); i32_load(0); i32_ge_u; br_if(1);
                       i32_const(4); i32_load(0); i32_load(4);
@@ -1011,11 +1016,11 @@ impl FuncCompiler<'_> {
                 }
                 wasm!(self.func, {
                       i32_eqz;
-                      if_empty; i32_const(0); return_; end;
+                      if_empty; i32_const(0); local_set(s + 1); br(2); end;
                       local_get(s); i32_const(1); i32_add; local_set(s);
                       br(0);
                     end; end;
-                    i32_const(1); // true
+                    local_get(s + 1); // result
                 });
             }
             "each" => {
