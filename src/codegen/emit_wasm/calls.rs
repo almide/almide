@@ -130,7 +130,6 @@ impl FuncCompiler<'_> {
                         if let Some(&func_idx) = self.emitter.func_map.get(name.as_str()) {
                             wasm!(self.func, { call(func_idx); });
                         } else {
-                            eprintln!("[MISSING FN] '{}'", name);
                             wasm!(self.func, { unreachable; });
                         }
                     }
@@ -258,9 +257,41 @@ impl FuncCompiler<'_> {
                             end;
                         });
                     }
+                    ("string", "get") => {
+                        // string.get(s, index) -> String (single char)
+                        // Returns 1-char string at byte index
+                        let s = self.match_i32_base + self.match_depth;
+                        wasm!(self.func, { i32_const(0); });
+                        self.emit_expr(&args[0]); // string ptr
+                        wasm!(self.func, { i32_store(0); });
+                        self.emit_expr(&args[1]); // index (i64)
+                        wasm!(self.func, {
+                            i32_wrap_i64;
+                            local_set(s);
+                            // Alloc 5 bytes: [len:4][char:1]
+                            i32_const(5);
+                            call(self.emitter.rt.alloc);
+                            local_set(s + 1);
+                            // Set len = 1
+                            local_get(s + 1);
+                            i32_const(1);
+                            i32_store(0);
+                            // Copy byte: dst[4] = src[4 + index]
+                            local_get(s + 1);
+                            i32_const(0);
+                            i32_load(0); // src
+                            i32_const(4);
+                            i32_add;
+                            local_get(s);
+                            i32_add;
+                            i32_load8_u(0);
+                            i32_store8(4);
+                            local_get(s + 1);
+                        });
+                    }
                     ("string", "repeat") | ("string", "reverse") | ("string", "replace")
                     | ("string", "split") | ("string", "join") | ("string", "slice")
-                    | ("string", "get") | ("string", "count")
+                    | ("string", "count")
                     | ("string", "index_of")
                     | ("string", "pad_start") | ("string", "pad_end")
                     | ("string", "trim_start") | ("string", "trim_end") => {
