@@ -341,9 +341,12 @@ impl FuncCompiler<'_> {
                 // zip(a, b) → Option[(A,B)]
                 // if a == 0 || b == 0 → 0; else → some((*a, *b))
                 let s = self.match_i32_base + self.match_depth;
+                // Reserve scratch locals so emitting args doesn't collide
+                self.match_depth += 4;
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(s); });
                 self.emit_expr(&args[1]);
+                self.match_depth -= 4;
                 wasm!(self.func, {
                     local_set(s + 1);
                     local_get(s); i32_eqz;

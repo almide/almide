@@ -20,8 +20,9 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { i64_trunc_f64_s; });
             }
             "round" => {
+                // floor(x + 0.5) — standard rounding (half-up), not banker's rounding
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { f64_nearest; });
+                wasm!(self.func, { f64_const(0.5); f64_add; f64_floor; });
             }
             "floor" => {
                 self.emit_expr(&args[0]);
