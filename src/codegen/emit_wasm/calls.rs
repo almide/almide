@@ -1711,34 +1711,31 @@ impl FuncCompiler<'_> {
         let s = self.match_i32_base + self.match_depth;
         let len_local = s;
         let idx_local = s + 1;
+        let src_local = s + 2;
+        let closure_local = s + 3;
 
-        // Store src_ptr → mem[0], fn_closure → mem[4]
-        wasm!(self.func, { i32_const(0); });
+        // Store src_ptr and closure in scratch locals (not mem[]) to survive nested calls
         self.emit_expr(list_arg);
-        wasm!(self.func, {
-            i32_store(0);
-            i32_const(4);
-        });
+        wasm!(self.func, { local_set(src_local); });
         self.emit_expr(fn_arg);
         wasm!(self.func, {
-            i32_store(0);
-            // len = mem[0].len (load src_ptr, load len)
-            i32_const(0);
-            i32_load(0);
+            local_set(closure_local);
+            local_get(src_local);
             i32_load(0);
             local_set(len_local);
-            // Alloc dst: 4 + len * out_size → store to mem[8]
-            i32_const(8);
+            // Alloc dst
             i32_const(4);
             local_get(len_local);
             i32_const(out_size as i32);
             i32_mul;
             i32_add;
             call(self.emitter.rt.alloc);
-            i32_store(0);
-            // dst.len = len
-            i32_const(8);
-            i32_load(0);
+            local_set(s + 4); // dst_local
+        });
+        let dst_local = s + 4;
+        wasm!(self.func, {
+            // Set dst.len
+            local_get(dst_local);
             local_get(len_local);
             i32_store(0);
             // idx = 0
@@ -1752,35 +1749,23 @@ impl FuncCompiler<'_> {
         self.depth += 2;
 
         wasm!(self.func, {
-            // break if idx >= len
             local_get(idx_local);
             local_get(len_local);
             i32_ge_u;
             br_if(1);
-            // ── Compute dst addr FIRST (stays on stack under call result) ──
-            // dst_ptr + 4 + idx * out_size
-            i32_const(8);
-            i32_load(0); // dst
+            // dst addr
+            local_get(dst_local);
             i32_const(4);
             i32_add;
             local_get(idx_local);
             i32_const(out_size as i32);
             i32_mul;
             i32_add;
-            // Stack: [dst_elem_addr]
-            // ── Call fn(element) ──
-            // Load closure from mem[4]
-            i32_const(4);
-            i32_load(0);
-        });
-        // env_ptr = closure[4]
-        wasm!(self.func, { i32_load(4); });
-        // Stack: [dst_elem_addr, env_ptr]
-
-        // Load src element: src_ptr + 4 + idx * in_size
-        wasm!(self.func, {
-            i32_const(0);
-            i32_load(0); // src
+            // env_ptr from closure
+            local_get(closure_local);
+            i32_load(4);
+            // src element
+            local_get(src_local);
             i32_const(4);
             i32_add;
             local_get(idx_local);
@@ -1789,23 +1774,30 @@ impl FuncCompiler<'_> {
             i32_add;
         });
         self.emit_load_at(&in_elem_ty, 0);
-        // Stack: [dst_elem_addr, env_ptr, element]
-
-        // table_idx = closure[0]
+        // table_idx from closure
         wasm!(self.func, {
-            i32_const(4);
-            i32_load(0); // closure
-            i32_load(0); // table_idx
+            local_get(closure_local);
+            i32_load(0);
         });
         // Stack: [dst_elem_addr, env_ptr, element, table_idx]
 
         // call_indirect (env, element) → result
-        // Use concrete element types (not fn_arg.ty which may contain unresolved TypeVars)
+        // Use fn_arg.ty (Fn type) if available for accurate param/ret types,
+        // otherwise fall back to element types
         {
-            let mut ct = vec![ValType::I32]; // env
-            if let Some(vt) = values::ty_to_valtype(&in_elem_ty) { ct.push(vt); }
-            let rt = values::ret_type(&out_elem_ty);
-            let ti = self.emitter.register_type(ct, rt);
+            let ti = if let Ty::Fn { params, ret } = &fn_arg.ty {
+                let mut ct = vec![ValType::I32]; // env
+                for p in params {
+                    if let Some(vt) = values::ty_to_valtype(p) { ct.push(vt); }
+                }
+                let rt = values::ret_type(ret);
+                self.emitter.register_type(ct, rt)
+            } else {
+                let mut ct = vec![ValType::I32];
+                if let Some(vt) = values::ty_to_valtype(&in_elem_ty) { ct.push(vt); }
+                let rt = values::ret_type(&out_elem_ty);
+                self.emitter.register_type(ct, rt)
+            };
             wasm!(self.func, { call_indirect(ti, 0); });
         }
         // Stack: [dst_elem_addr, result]
@@ -1827,9 +1819,7 @@ impl FuncCompiler<'_> {
         wasm!(self.func, {
             end;
             end;
-            // Return dst_ptr from mem[8]
-            i32_const(8);
-            i32_load(0);
+            local_get(dst_local);
         });
     }
 

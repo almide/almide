@@ -690,8 +690,8 @@ fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) {
     for (params, _body, captures) in &lambda_exprs {
         // Closure calling convention: (env: i32, declared_params...) -> ret
         let mut wasm_params = vec![ValType::I32]; // env_ptr
-        for (_, ty) in params {
-            let resolved_ty = resolve_lambda_param_ty(ty, &_body.ty);
+        for (vid, ty) in params {
+            let resolved_ty = resolve_lambda_param_ty(ty, &_body.ty, &program.var_table, *vid);
             if let Some(vt) = values::ty_to_valtype(&resolved_ty) {
                 wasm_params.push(vt);
             }
@@ -1046,11 +1046,18 @@ fn scan_closures_stmt(
 
 /// Resolve a lambda parameter type when it's TypeVar or Unknown.
 /// Scans the body for type-dispatched operators to infer parameter type.
-fn resolve_lambda_param_ty(param_ty: &crate::types::Ty, body_ty: &crate::types::Ty) -> crate::types::Ty {
+fn resolve_lambda_param_ty(param_ty: &crate::types::Ty, _body_ty: &crate::types::Ty, var_table: &crate::ir::VarTable, vid: VarId) -> crate::types::Ty {
     match param_ty {
         crate::types::Ty::TypeVar(_) | crate::types::Ty::Unknown => {
-            // Default to Int (most common lambda param type)
-            // This covers (x) => x * 2, (x) => x > 0, (x) => x + n, etc.
+            // Try VarTable for the resolved type
+            if (vid.0 as usize) < var_table.len() {
+                let info = var_table.get(vid);
+                eprintln!("[RESOLVE_PARAM] vid={} param_ty={:?} vt_ty={:?}", vid.0, param_ty, info.ty);
+                if !matches!(&info.ty, crate::types::Ty::TypeVar(_) | crate::types::Ty::Unknown) {
+                    return info.ty.clone();
+                }
+            }
+            // Default to Int
             crate::types::Ty::Int
         }
         _ => param_ty.clone(),
