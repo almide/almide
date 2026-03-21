@@ -652,11 +652,19 @@ fn compile_chars(emitter: &mut WasmEmitter) {
 fn compile_lines(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.string.lines];
     let mut f = Function::new([(1, ValType::I32)]);
+    // If input string is empty, return empty list (alloc 4 bytes, len=0)
     wasm!(f, {
-        i32_const(5); call(emitter.rt.alloc); local_set(1);
-        local_get(1); i32_const(1); i32_store(0);
-        local_get(1); i32_const(10); i32_store8(4);
-        local_get(0); local_get(1); call(emitter.rt.string.split);
+        local_get(0); i32_load(0); i32_eqz;
+        if_i32;
+          i32_const(4); call(emitter.rt.alloc); local_set(1);
+          local_get(1); i32_const(0); i32_store(0);
+          local_get(1);
+        else_;
+          i32_const(5); call(emitter.rt.alloc); local_set(1);
+          local_get(1); i32_const(1); i32_store(0);
+          local_get(1); i32_const(10); i32_store8(4);
+          local_get(0); local_get(1); call(emitter.rt.string.split);
+        end;
         end;
     });
     emitter.add_compiled(CompiledFunc { type_idx, func: f });

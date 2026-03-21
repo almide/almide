@@ -380,11 +380,27 @@ impl FuncCompiler<'_> {
                 self.func.instruction(&Instruction::F64Max);
             }
             "sin" => {
-                // WASM has no native sin. Stub — needs runtime or JS import.
-                self.emit_stub_call(args);
-                return true;
+                self.emit_expr(&args[0]);
+                if matches!(&args[0].ty, Ty::Int) {
+                    wasm!(self.func, { f64_convert_i64_s; });
+                }
+                wasm!(self.func, { call(self.emitter.rt.math_sin); });
             }
-            "cos" | "tan" | "log" | "exp" | "log10" | "log2" => {
+            "cos" => {
+                self.emit_expr(&args[0]);
+                if matches!(&args[0].ty, Ty::Int) {
+                    wasm!(self.func, { f64_convert_i64_s; });
+                }
+                wasm!(self.func, { call(self.emitter.rt.math_cos); });
+            }
+            "tan" => {
+                self.emit_expr(&args[0]);
+                if matches!(&args[0].ty, Ty::Int) {
+                    wasm!(self.func, { f64_convert_i64_s; });
+                }
+                wasm!(self.func, { call(self.emitter.rt.math_tan); });
+            }
+            "log" | "exp" | "log10" | "log2" => {
                 self.emit_stub_call(args);
                 return true;
             }

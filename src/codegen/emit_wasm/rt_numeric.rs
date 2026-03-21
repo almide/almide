@@ -699,3 +699,152 @@ pub(super) fn compile_float_pow(emitter: &mut WasmEmitter) {
 
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }
+
+/// __math_sin(x: f64) -> f64
+/// Taylor series: sin(x) = x - x^3/3! + x^5/5! - x^7/7! + ...
+/// With range reduction to [-pi, pi] first.
+pub(super) fn compile_math_sin(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.math_sin];
+    // params: 0=f64 x
+    // locals: 1=f64 x_reduced, 2=f64 term, 3=f64 sum, 4=f64 x2
+    let mut f = Function::new([
+        (1, ValType::F64),  // 1: x_reduced
+        (1, ValType::F64),  // 2: term
+        (1, ValType::F64),  // 3: sum
+        (1, ValType::F64),  // 4: x2 (x*x, precomputed)
+    ]);
+
+    const TWO_PI: f64 = std::f64::consts::TAU;
+    const PI: f64 = std::f64::consts::PI;
+
+    // Range reduction: x = x - floor(x / (2*pi)) * (2*pi)
+    wasm!(f, {
+        local_get(0);
+        local_get(0); f64_const(TWO_PI); f64_div; f64_floor; f64_const(TWO_PI); f64_mul;
+        f64_sub;
+        local_set(1);
+    });
+    // If x > pi: x -= 2*pi
+    wasm!(f, {
+        local_get(1); f64_const(PI); f64_gt;
+        if_empty;
+          local_get(1); f64_const(TWO_PI); f64_sub; local_set(1);
+        end;
+    });
+    // If x < -pi: x += 2*pi
+    wasm!(f, {
+        local_get(1); f64_const(-PI); f64_lt;
+        if_empty;
+          local_get(1); f64_const(TWO_PI); f64_add; local_set(1);
+        end;
+    });
+
+    // x2 = x * x
+    wasm!(f, {
+        local_get(1); local_get(1); f64_mul; local_set(4);
+    });
+
+    // term = x, sum = x
+    wasm!(f, {
+        local_get(1); local_set(2);
+        local_get(1); local_set(3);
+    });
+
+    // 8 iterations: term *= -x^2 / ((2k)*(2k+1)), sum += term
+    // k=1: term *= -x2 / (2*3)
+    // k=2: term *= -x2 / (4*5)
+    // ...
+    for k in 1..=8u32 {
+        let denom = ((2 * k) * (2 * k + 1)) as f64;
+        wasm!(f, {
+            local_get(2); local_get(4); f64_mul; f64_neg;
+            f64_const(denom); f64_div; local_set(2);
+            local_get(3); local_get(2); f64_add; local_set(3);
+        });
+    }
+
+    wasm!(f, { local_get(3); end; });
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
+
+/// __math_cos(x: f64) -> f64
+/// Taylor series: cos(x) = 1 - x^2/2! + x^4/4! - x^6/6! + ...
+/// With range reduction to [-pi, pi] first.
+pub(super) fn compile_math_cos(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.math_cos];
+    // params: 0=f64 x
+    // locals: 1=f64 x_reduced, 2=f64 term, 3=f64 sum, 4=f64 x2
+    let mut f = Function::new([
+        (1, ValType::F64),  // 1: x_reduced
+        (1, ValType::F64),  // 2: term
+        (1, ValType::F64),  // 3: sum
+        (1, ValType::F64),  // 4: x2
+    ]);
+
+    const TWO_PI: f64 = std::f64::consts::TAU;
+    const PI: f64 = std::f64::consts::PI;
+
+    // Range reduction: x = x - floor(x / (2*pi)) * (2*pi)
+    wasm!(f, {
+        local_get(0);
+        local_get(0); f64_const(TWO_PI); f64_div; f64_floor; f64_const(TWO_PI); f64_mul;
+        f64_sub;
+        local_set(1);
+    });
+    // If x > pi: x -= 2*pi
+    wasm!(f, {
+        local_get(1); f64_const(PI); f64_gt;
+        if_empty;
+          local_get(1); f64_const(TWO_PI); f64_sub; local_set(1);
+        end;
+    });
+    // If x < -pi: x += 2*pi
+    wasm!(f, {
+        local_get(1); f64_const(-PI); f64_lt;
+        if_empty;
+          local_get(1); f64_const(TWO_PI); f64_add; local_set(1);
+        end;
+    });
+
+    // x2 = x * x
+    wasm!(f, {
+        local_get(1); local_get(1); f64_mul; local_set(4);
+    });
+
+    // term = 1.0, sum = 1.0
+    wasm!(f, {
+        f64_const(1.0); local_set(2);
+        f64_const(1.0); local_set(3);
+    });
+
+    // 8 iterations: term *= -x^2 / ((2k-1)*(2k)), sum += term
+    // k=1: term *= -x2 / (1*2)
+    // k=2: term *= -x2 / (3*4)
+    // ...
+    for k in 1..=8u32 {
+        let denom = ((2 * k - 1) * (2 * k)) as f64;
+        wasm!(f, {
+            local_get(2); local_get(4); f64_mul; f64_neg;
+            f64_const(denom); f64_div; local_set(2);
+            local_get(3); local_get(2); f64_add; local_set(3);
+        });
+    }
+
+    wasm!(f, { local_get(3); end; });
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
+
+/// __math_tan(x: f64) -> f64
+/// tan(x) = sin(x) / cos(x)
+pub(super) fn compile_math_tan(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.math_tan];
+    let mut f = Function::new([]);
+
+    wasm!(f, {
+        local_get(0); call(emitter.rt.math_sin);
+        local_get(0); call(emitter.rt.math_cos);
+        f64_div;
+        end;
+    });
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}

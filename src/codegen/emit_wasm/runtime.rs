@@ -85,6 +85,14 @@ pub fn register_runtime(emitter: &mut WasmEmitter) {
     let float_pow_ty = emitter.register_type(vec![ValType::F64, ValType::F64], vec![ValType::F64]);
     emitter.rt.float_pow = emitter.register_func("__float_pow", float_pow_ty);
 
+    // __math_sin(x: f64) -> f64
+    let f64_f64_ty = emitter.register_type(vec![ValType::F64], vec![ValType::F64]);
+    emitter.rt.math_sin = emitter.register_func("__math_sin", f64_f64_ty);
+    // __math_cos(x: f64) -> f64
+    emitter.rt.math_cos = emitter.register_func("__math_cos", f64_f64_ty);
+    // __math_tan(x: f64) -> f64
+    emitter.rt.math_tan = emitter.register_func("__math_tan", f64_f64_ty);
+
     // String stdlib runtime (delegated to rt_string module)
     super::rt_string::register(emitter);
 
@@ -111,6 +119,9 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     super::rt_numeric::compile_float_parse(emitter);
     super::rt_numeric::compile_float_to_fixed(emitter);
     super::rt_numeric::compile_float_pow(emitter);
+    super::rt_numeric::compile_math_sin(emitter);
+    super::rt_numeric::compile_math_cos(emitter);
+    super::rt_numeric::compile_math_tan(emitter);
     // String stdlib runtime (delegated)
     super::rt_string::compile(emitter);
 }
