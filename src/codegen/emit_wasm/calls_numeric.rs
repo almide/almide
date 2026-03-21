@@ -45,15 +45,16 @@ impl FuncCompiler<'_> {
             }
             "sign" => {
                 // sign(n) → -1.0, 0.0, or 1.0
-                let s = self.match_i64_base + self.match_depth;
+                // Store f64 in mem[0] (as 8 bytes) since no f64 scratch local
+                wasm!(self.func, { i32_const(0); });
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
-                    local_set(s); // f64 local
-                    local_get(s); f64_const(0.0); f64_lt;
+                    f64_store(0);
+                    i32_const(0); f64_load(0); f64_const(0.0); f64_lt;
                     if_f64;
                       f64_const(-1.0);
                     else_;
-                      local_get(s); f64_const(0.0); f64_gt;
+                      i32_const(0); f64_load(0); f64_const(0.0); f64_gt;
                       if_f64;
                         f64_const(1.0);
                       else_;
@@ -81,10 +82,15 @@ impl FuncCompiler<'_> {
                 self.func.instruction(&Instruction::F64Max); // max(lo, min(n, hi))
             }
             "is_nan" => {
-                // NaN != NaN
+                // NaN != NaN. Store in mem to avoid double eval.
+                wasm!(self.func, { i32_const(0); });
                 self.emit_expr(&args[0]);
-                self.emit_expr(&args[0]);
-                wasm!(self.func, { f64_ne; }); // n != n → true iff NaN
+                wasm!(self.func, {
+                    f64_store(0);
+                    i32_const(0); f64_load(0);
+                    i32_const(0); f64_load(0);
+                    f64_ne;
+                });
             }
             "is_infinite" => {
                 self.emit_expr(&args[0]);

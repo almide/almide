@@ -158,28 +158,40 @@ impl FuncCompiler<'_> {
                 });
             }
             "slice" => {
+                // slice(xs, start, end) → List[A]
                 let elem_ty = self.list_elem_ty(&args[0].ty);
-                let elem_size = values::byte_size(&elem_ty);
+                let es = values::byte_size(&elem_ty) as i32;
                 let s = self.match_i32_base + self.match_depth;
-                // xs → mem[0], start, end
+                // mem[0]=xs
                 wasm!(self.func, { i32_const(0); });
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { i32_store(0); });
-                self.emit_expr(&args[1]); // start: i64
-                wasm!(self.func, { i32_wrap_i64; local_set(s); }); // s = start
-                self.emit_expr(&args[2]); // end: i64
+                self.emit_expr(&args[1]); // start
+                wasm!(self.func, { i32_wrap_i64; local_set(s); });
+                self.emit_expr(&args[2]); // end
                 wasm!(self.func, {
-                    i32_wrap_i64; local_set(s + 1); // s+1 = end
-                    // new_len = end - start
-                    local_get(s + 1); local_get(s); i32_sub; local_set(s + 2);
-                    // alloc: 4 + new_len * elem_size
-                    i32_const(4); local_get(s + 2); i32_const(elem_size as i32); i32_mul; i32_add;
+                    i32_wrap_i64; local_set(s + 1);
+                    local_get(s + 1); local_get(s); i32_sub; local_set(s + 2); // new_len
+                    i32_const(4); local_get(s + 2); i32_const(es); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(s + 3);
                     local_get(s + 3); local_get(s + 2); i32_store(0);
+                    // copy loop
+                    i32_const(0); local_set(s + 2); // reuse as i
+                    block_empty; loop_empty;
+                      local_get(s + 2); local_get(s + 1); local_get(s); i32_sub; i32_ge_u; br_if(1);
+                      local_get(s + 3); i32_const(4); i32_add;
+                      local_get(s + 2); i32_const(es); i32_mul; i32_add;
+                      i32_const(0); i32_load(0); i32_const(4); i32_add;
+                      local_get(s); local_get(s + 2); i32_add;
+                      i32_const(es); i32_mul; i32_add;
                 });
-                // memcpy: dst[4..] = src[4 + start*elem_size ..]
-                self.emit_memcpy_loop(s + 4, s + 3, s, elem_size as usize);
-                wasm!(self.func, { local_get(s + 3); });
+                self.emit_elem_copy(&elem_ty);
+                wasm!(self.func, {
+                      local_get(s + 2); i32_const(1); i32_add; local_set(s + 2);
+                      br(0);
+                    end; end;
+                    local_get(s + 3);
+                });
             }
             "reverse" => {
                 let elem_ty = self.list_elem_ty(&args[0].ty);
@@ -641,6 +653,217 @@ impl FuncCompiler<'_> {
                       local_get(s + 1);
                     end;
                 });
+            }
+            "zip" => {
+                // zip(xs, ys) → List[(A, B)]
+                // Each tuple is heap-allocated: [a_value, b_value]
+                let a_ty = self.list_elem_ty(&args[0].ty);
+                let b_ty = self.list_elem_ty(&args[1].ty);
+                let a_size = values::byte_size(&a_ty);
+                let b_size = values::byte_size(&b_ty);
+                let tuple_size = a_size + b_size;
+                let s = self.match_i32_base + self.match_depth;
+                // mem[0]=xs, mem[4]=ys
+                wasm!(self.func, { i32_const(0); });
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { i32_store(0); i32_const(4); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, {
+                    i32_store(0);
+                    // len = min(xs.len, ys.len)
+                    i32_const(0); i32_load(0); i32_load(0);
+                    i32_const(4); i32_load(0); i32_load(0);
+                    i32_lt_u;
+                    if_i32;
+                      i32_const(0); i32_load(0); i32_load(0);
+                    else_;
+                      i32_const(4); i32_load(0); i32_load(0);
+                    end;
+                    local_set(s); // len
+                    // Alloc result: list of ptrs to tuples
+                    i32_const(4); local_get(s); i32_const(4); i32_mul; i32_add;
+                    call(self.emitter.rt.alloc); local_set(s + 1);
+                    local_get(s + 1); local_get(s); i32_store(0);
+                    i32_const(0); local_set(s + 2); // i
+                    block_empty; loop_empty;
+                      local_get(s + 2); local_get(s); i32_ge_u; br_if(1);
+                      // Alloc tuple
+                      i32_const(tuple_size as i32); call(self.emitter.rt.alloc); local_set(s + 3);
+                      // Copy a: tuple[0] = xs[i]
+                      local_get(s + 3);
+                      i32_const(0); i32_load(0); i32_const(4); i32_add;
+                      local_get(s + 2); i32_const(a_size as i32); i32_mul; i32_add;
+                });
+                self.emit_elem_copy(&a_ty);
+                // Copy b: tuple[a_size] = ys[i]
+                wasm!(self.func, {
+                      local_get(s + 3); i32_const(a_size as i32); i32_add;
+                      i32_const(4); i32_load(0); i32_const(4); i32_add;
+                      local_get(s + 2); i32_const(b_size as i32); i32_mul; i32_add;
+                });
+                self.emit_elem_copy(&b_ty);
+                wasm!(self.func, {
+                      // result[i] = tuple_ptr
+                      local_get(s + 1); i32_const(4); i32_add;
+                      local_get(s + 2); i32_const(4); i32_mul; i32_add;
+                      local_get(s + 3); i32_store(0);
+                      local_get(s + 2); i32_const(1); i32_add; local_set(s + 2);
+                      br(0);
+                    end; end;
+                    local_get(s + 1);
+                });
+            }
+            "set" => {
+                // set(xs, i, val) → List[A]: copy + replace element at i
+                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let es = values::byte_size(&elem_ty) as i32;
+                let s = self.match_i32_base + self.match_depth;
+                // mem[0]=xs
+                wasm!(self.func, { i32_const(0); });
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { i32_store(0); });
+                self.emit_expr(&args[1]); // i: i64
+                wasm!(self.func, {
+                    i32_wrap_i64; local_set(s); // s = idx
+                    i32_const(0); i32_load(0); i32_load(0); local_set(s + 1); // len
+                    // Alloc copy
+                    i32_const(4); local_get(s + 1); i32_const(es); i32_mul; i32_add;
+                    call(self.emitter.rt.alloc); local_set(s + 2);
+                    local_get(s + 2); local_get(s + 1); i32_store(0);
+                    // Copy all elements
+                    i32_const(0); local_set(s + 3);
+                    block_empty; loop_empty;
+                      local_get(s + 3); local_get(s + 1); i32_ge_u; br_if(1);
+                      local_get(s + 2); i32_const(4); i32_add;
+                      local_get(s + 3); i32_const(es); i32_mul; i32_add;
+                      i32_const(0); i32_load(0); i32_const(4); i32_add;
+                      local_get(s + 3); i32_const(es); i32_mul; i32_add;
+                });
+                self.emit_elem_copy(&elem_ty);
+                wasm!(self.func, {
+                      local_get(s + 3); i32_const(1); i32_add; local_set(s + 3);
+                      br(0);
+                    end; end;
+                });
+                // Overwrite dst[idx] with val
+                wasm!(self.func, {
+                    local_get(s + 2); i32_const(4); i32_add;
+                    local_get(s); i32_const(es); i32_mul; i32_add;
+                });
+                self.emit_expr(&args[2]);
+                self.emit_elem_store(&elem_ty);
+                wasm!(self.func, { local_get(s + 2); });
+            }
+            "insert" => {
+                // insert(xs, i, val) → List[A]: copy with element inserted at i
+                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let es = values::byte_size(&elem_ty) as i32;
+                let s = self.match_i32_base + self.match_depth;
+                wasm!(self.func, { i32_const(0); });
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { i32_store(0); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, {
+                    i32_wrap_i64; local_set(s); // idx
+                    i32_const(0); i32_load(0); i32_load(0); local_set(s + 1); // old_len
+                    // new_len = old_len + 1
+                    i32_const(4); local_get(s + 1); i32_const(1); i32_add; i32_const(es); i32_mul; i32_add;
+                    call(self.emitter.rt.alloc); local_set(s + 2);
+                    local_get(s + 2); local_get(s + 1); i32_const(1); i32_add; i32_store(0);
+                    // Copy [0..idx)
+                    i32_const(0); local_set(s + 3);
+                    block_empty; loop_empty;
+                      local_get(s + 3); local_get(s); i32_ge_u; br_if(1);
+                      local_get(s + 2); i32_const(4); i32_add;
+                      local_get(s + 3); i32_const(es); i32_mul; i32_add;
+                      i32_const(0); i32_load(0); i32_const(4); i32_add;
+                      local_get(s + 3); i32_const(es); i32_mul; i32_add;
+                });
+                self.emit_elem_copy(&elem_ty);
+                wasm!(self.func, {
+                      local_get(s + 3); i32_const(1); i32_add; local_set(s + 3);
+                      br(0);
+                    end; end;
+                });
+                // Insert val at idx
+                wasm!(self.func, {
+                    local_get(s + 2); i32_const(4); i32_add;
+                    local_get(s); i32_const(es); i32_mul; i32_add;
+                });
+                self.emit_expr(&args[2]);
+                self.emit_elem_store(&elem_ty);
+                // Copy [idx..old_len)
+                wasm!(self.func, {
+                    local_get(s); local_set(s + 3);
+                    block_empty; loop_empty;
+                      local_get(s + 3); local_get(s + 1); i32_ge_u; br_if(1);
+                      local_get(s + 2); i32_const(4); i32_add;
+                      local_get(s + 3); i32_const(1); i32_add; i32_const(es); i32_mul; i32_add;
+                      i32_const(0); i32_load(0); i32_const(4); i32_add;
+                      local_get(s + 3); i32_const(es); i32_mul; i32_add;
+                });
+                self.emit_elem_copy(&elem_ty);
+                wasm!(self.func, {
+                      local_get(s + 3); i32_const(1); i32_add; local_set(s + 3);
+                      br(0);
+                    end; end;
+                    local_get(s + 2);
+                });
+            }
+            "remove_at" => {
+                // remove_at(xs, i) → List[A]
+                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let es = values::byte_size(&elem_ty) as i32;
+                let s = self.match_i32_base + self.match_depth;
+                wasm!(self.func, { i32_const(0); });
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { i32_store(0); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, {
+                    i32_wrap_i64; local_set(s); // idx
+                    i32_const(0); i32_load(0); i32_load(0); local_set(s + 1); // old_len
+                    // new_len = old_len - 1
+                    i32_const(4); local_get(s + 1); i32_const(1); i32_sub; i32_const(es); i32_mul; i32_add;
+                    call(self.emitter.rt.alloc); local_set(s + 2);
+                    local_get(s + 2); local_get(s + 1); i32_const(1); i32_sub; i32_store(0);
+                    // Copy [0..idx)
+                    i32_const(0); local_set(s + 3);
+                    block_empty; loop_empty;
+                      local_get(s + 3); local_get(s); i32_ge_u; br_if(1);
+                      local_get(s + 2); i32_const(4); i32_add;
+                      local_get(s + 3); i32_const(es); i32_mul; i32_add;
+                      i32_const(0); i32_load(0); i32_const(4); i32_add;
+                      local_get(s + 3); i32_const(es); i32_mul; i32_add;
+                });
+                self.emit_elem_copy(&elem_ty);
+                wasm!(self.func, {
+                      local_get(s + 3); i32_const(1); i32_add; local_set(s + 3);
+                      br(0);
+                    end; end;
+                });
+                // Copy [idx+1..old_len)
+                wasm!(self.func, {
+                    local_get(s); i32_const(1); i32_add; local_set(s + 3);
+                    block_empty; loop_empty;
+                      local_get(s + 3); local_get(s + 1); i32_ge_u; br_if(1);
+                      local_get(s + 2); i32_const(4); i32_add;
+                      local_get(s + 3); i32_const(1); i32_sub; i32_const(es); i32_mul; i32_add;
+                      i32_const(0); i32_load(0); i32_const(4); i32_add;
+                      local_get(s + 3); i32_const(es); i32_mul; i32_add;
+                });
+                self.emit_elem_copy(&elem_ty);
+                wasm!(self.func, {
+                      local_get(s + 3); i32_const(1); i32_add; local_set(s + 3);
+                      br(0);
+                    end; end;
+                    local_get(s + 2);
+                });
+            }
+            "unique" => {
+                // unique(xs) → List[A]: O(n²) dedup
+                // For now, stub — needs element equality which is complex
+                self.emit_stub_call(args);
+                return true;
             }
             _ => return false,
         }
