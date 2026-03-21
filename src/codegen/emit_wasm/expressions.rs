@@ -168,11 +168,16 @@ impl FuncCompiler<'_> {
                 if let Some(e) = tail {
                     self.emit_expr(e);
                     if let Some(rl) = result_local {
-                        // Save result to local, break out of loop+block
+                        // Non-unit tail: save result and break out
                         wasm!(self.func, { local_set(rl); });
+                        wasm!(self.func, { br(self.depth - break_depth - 1); });
+                    } else {
+                        // Unit tail (side-effect only): drop value if any, continue looping
+                        if values::ty_to_valtype(&e.ty).is_some() {
+                            wasm!(self.func, { drop; });
+                        }
+                        wasm!(self.func, { br(self.depth - continue_depth - 1); });
                     }
-                    // Break out of block (depth 1 from loop = to block)
-                    wasm!(self.func, { br(self.depth - break_depth - 1); });
                 } else {
                     // No tail: continue looping
                     wasm!(self.func, { br(self.depth - continue_depth - 1); });
