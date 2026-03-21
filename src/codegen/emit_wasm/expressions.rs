@@ -372,11 +372,13 @@ impl FuncCompiler<'_> {
                     local_get(scratch);
                     i32_const(0);
                     i32_store(0);
-                    // value
-                    local_get(scratch);
                 });
-                self.emit_expr(inner);
-                self.emit_store_at(&inner.ty, 4);
+                // Store value (skip for Unit — no value to store)
+                if values::ty_to_valtype(&inner.ty).is_some() {
+                    wasm!(self.func, { local_get(scratch); });
+                    self.emit_expr(inner);
+                    self.emit_store_at(&inner.ty, 4);
+                }
                 wasm!(self.func, { local_get(scratch); });
             }
             IrExprKind::ResultErr { expr: inner } => {
@@ -391,11 +393,12 @@ impl FuncCompiler<'_> {
                     local_get(scratch);
                     i32_const(1);
                     i32_store(0);
-                    // value
-                    local_get(scratch);
                 });
-                self.emit_expr(inner);
-                self.emit_store_at(&inner.ty, 4);
+                if values::ty_to_valtype(&inner.ty).is_some() {
+                    wasm!(self.func, { local_get(scratch); });
+                    self.emit_expr(inner);
+                    self.emit_store_at(&inner.ty, 4);
+                }
                 wasm!(self.func, { local_get(scratch); });
             }
 
