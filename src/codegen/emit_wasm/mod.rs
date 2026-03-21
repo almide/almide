@@ -180,6 +180,7 @@ pub struct LambdaInfo {
     pub table_idx: u32,
     pub closure_type_idx: u32,
     pub captures: Vec<(crate::ir::VarId, crate::types::Ty)>,
+    pub param_ids: Vec<u32>,
 }
 
 impl WasmEmitter {
@@ -716,10 +717,12 @@ fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) {
             })
             .collect();
 
+        let param_ids: Vec<u32> = params.iter().map(|(vid, _)| vid.0).collect();
         emitter.lambdas.push(LambdaInfo {
             table_idx,
             closure_type_idx,
             captures: capture_vars,
+            param_ids,
         });
     }
 

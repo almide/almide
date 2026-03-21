@@ -1321,13 +1321,25 @@ impl FuncCompiler<'_> {
 
     /// Emit a lambda as a closure: allocate env + closure on heap.
     pub(super) fn emit_lambda_closure(&mut self, _params: &[(crate::ir::VarId, Ty)], _body: &IrExpr) {
-        let lambda_idx = self.emitter.lambda_counter.get();
-        self.emitter.lambda_counter.set(lambda_idx + 1);
+        // Match lambda by param VarIds (deterministic, order-independent of scan)
+        let param_key: Vec<u32> = _params.iter().map(|(vid, _)| vid.0).collect();
+        let lambda_idx = self.emitter.lambdas.iter().enumerate()
+            .find(|(_, info)| info.param_ids == param_key)
+            .map(|(i, _)| i);
 
-        if lambda_idx >= self.emitter.lambdas.len() {
-            wasm!(self.func, { unreachable; });
-            return;
-        }
+        let lambda_idx = match lambda_idx {
+            Some(i) => i,
+            None => {
+                // Fallback to counter (for compatibility)
+                let idx = self.emitter.lambda_counter.get();
+                self.emitter.lambda_counter.set(idx + 1);
+                if idx >= self.emitter.lambdas.len() {
+                    wasm!(self.func, { unreachable; });
+                    return;
+                }
+                idx
+            }
+        };
 
         let table_idx = self.emitter.lambdas[lambda_idx].table_idx;
         let captures = self.emitter.lambdas[lambda_idx].captures.clone();
