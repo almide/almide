@@ -1004,12 +1004,10 @@ impl FuncCompiler<'_> {
                         // Not found
                         wasm!(self.func, { i32_const(0); });
                     }
-                    ("map", "len") | ("map", "length") | ("map", "size") => {
-                        self.emit_expr(&args[0]);
-                        wasm!(self.func, {
-                            i32_load(0);
-                            i64_extend_i32_u;
-                        });
+                    _ if module == "map" => {
+                        if !self.emit_map_call(func, args) {
+                            self.emit_stub_call(args);
+                        }
                     }
                     _ if module == "list" => {
                         if !self.emit_list_call(func, args) {
@@ -1175,6 +1173,14 @@ impl FuncCompiler<'_> {
                         fake_args.extend(args.iter().cloned());
                         let m = method.strip_prefix("list.").unwrap_or(method);
                         if !self.emit_list_call(m, &fake_args) {
+                            self.emit_stub_call(args);
+                        }
+                    }
+                    _ if matches!(&object.ty, Ty::Applied(crate::types::constructor::TypeConstructorId::Map, _)) => {
+                        let mut fake_args = vec![(**object).clone()];
+                        fake_args.extend(args.iter().cloned());
+                        let m = method.strip_prefix("map.").unwrap_or(method);
+                        if !self.emit_map_call(m, &fake_args) {
                             self.emit_stub_call(args);
                         }
                     }

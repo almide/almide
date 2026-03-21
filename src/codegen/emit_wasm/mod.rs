@@ -25,6 +25,7 @@ mod calls_string;
 mod calls_option;
 mod calls_numeric;
 mod calls_list;
+mod calls_map;
 mod collections;
 mod control;
 pub mod statements;
