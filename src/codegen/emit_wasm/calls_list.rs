@@ -2339,14 +2339,14 @@ impl FuncCompiler<'_> {
 
     // ── Helpers ──
 
-    fn list_elem_ty(&self, ty: &Ty) -> Ty {
+    pub(super) fn list_elem_ty(&self, ty: &Ty) -> Ty {
         if let Ty::Applied(_, args) = ty {
             args.first().cloned().unwrap_or(Ty::Int)
         } else { Ty::Int }
     }
 
     /// Copy one element from [stack: dst_addr, src_addr] based on type.
-    fn emit_elem_copy(&mut self, ty: &Ty) {
+    pub(super) fn emit_elem_copy(&mut self, ty: &Ty) {
         match values::ty_to_valtype(ty) {
             Some(ValType::I64) => { wasm!(self.func, { i64_load(0); i64_store(0); }); }
             Some(ValType::F64) => { wasm!(self.func, { f64_load(0); f64_store(0); }); }

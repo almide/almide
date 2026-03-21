@@ -1075,6 +1075,11 @@ impl FuncCompiler<'_> {
                         self.emit_expr(&args[1]);
                         wasm!(self.func, { call(self.emitter.rt.concat_str); });
                     }
+                    _ if module == "set" => {
+                        if !self.emit_set_call(func, args) {
+                            self.emit_stub_call(args);
+                        }
+                    }
                     _ => {
                         self.emit_stub_call(args);
                     }
