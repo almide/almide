@@ -659,7 +659,14 @@ impl FuncCompiler<'_> {
     pub(super) fn emit_eq(&mut self, left: &IrExpr, right: &IrExpr, negate: bool) {
         self.emit_expr(left);
         self.emit_expr(right);
-        let cmp_ty = if matches!(&left.ty, Ty::Unknown | Ty::TypeVar(_)) { &right.ty } else { &left.ty };
+        // Use the more specific type for comparison dispatch.
+        let cmp_ty = match (&left.ty, &right.ty) {
+            (Ty::Unknown, _) | (Ty::TypeVar(_), _) => &right.ty,
+            (_, Ty::Unknown) | (_, Ty::TypeVar(_)) => &left.ty,
+            // If left is a primitive but right is a compound type, use right
+            (l, r) if !Self::is_compound_ty(l) && Self::is_compound_ty(r) => r,
+            _ => &left.ty,
+        };
         self.emit_eq_typed(cmp_ty);
         if negate {
             wasm!(self.func, { i32_eqz; });
@@ -739,6 +746,19 @@ impl FuncCompiler<'_> {
                 }
             }
 
+            Ty::Variant { cases, .. } => {
+                // Variant: compare tag (4 bytes) + payload (max payload size)
+                let max_payload: u32 = cases.iter()
+                    .map(|c| match &c.payload {
+                        crate::types::VariantPayload::Unit => 0,
+                        crate::types::VariantPayload::Tuple(ts) => ts.iter().map(|t| values::byte_size(t)).sum(),
+                        crate::types::VariantPayload::Record(fs) => fs.iter().map(|(_, t, _)| values::byte_size(t)).sum(),
+                    })
+                    .max().unwrap_or(0);
+                let size = 4 + max_payload;
+                wasm!(self.func, { i32_const(size as i32); call(self.emitter.rt.mem_eq); });
+            }
+
             _ => { wasm!(self.func, { i32_eq; }); }
         }
     }
@@ -746,6 +766,11 @@ impl FuncCompiler<'_> {
     /// True if type is stored inline (no heap pointers that need deep comparison).
     fn is_value_type(&self, ty: &Ty) -> bool {
         matches!(ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit)
+    }
+
+    fn is_compound_ty(ty: &Ty) -> bool {
+        matches!(ty, Ty::Named(_, _) | Ty::Applied(_, _) | Ty::Variant { .. }
+            | Ty::Record { .. } | Ty::Tuple(_) | Ty::String)
     }
 
     /// Deep list equality: [a_ptr, b_ptr] → i32
