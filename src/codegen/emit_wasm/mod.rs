@@ -39,6 +39,7 @@ use wasm_encoder::{
 };
 
 use crate::ir::IrProgram;
+use crate::types::Ty;
 
 // Memory layout constants
 const SCRATCH_ITOA: u32 = 16;
@@ -283,6 +284,8 @@ pub struct FuncCompiler<'a> {
     pub match_depth: u32,
     // Variable table for name lookups (pattern matching)
     pub var_table: &'a crate::ir::VarTable,
+    // Return type for stub calls (set by emit_call before delegating to handlers)
+    pub stub_ret_ty: Ty,
 }
 
 // ── Public API ──────────────────────────────────────────────────────
@@ -584,6 +587,7 @@ fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
             match_i32_base,
             match_depth: 0,
             var_table: &program.var_table,
+            stub_ret_ty: Ty::Unit,
         };
 
         for tl in &program.top_lets {
@@ -819,6 +823,7 @@ fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitter) {
                 match_i32_base,
                 match_depth: 0,
                 var_table: &program.var_table,
+                stub_ret_ty: Ty::Unit,
             };
             compiler.emit_expr(body);
             compiler.func.instruction(&wasm_encoder::Instruction::End);
