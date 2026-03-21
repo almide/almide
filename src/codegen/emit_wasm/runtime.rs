@@ -347,56 +347,93 @@ fn compile_int_to_string(emitter: &mut WasmEmitter) {
 }
 
 /// __float_to_string(f: f64) -> i32
-/// Converts float to string: integer_part + "." + first decimal digit.
-/// e.g., 10.0 → "10.0", 3.5 → "3.5", -2.7 → "-2.7"
+/// Multi-digit decimal: integer_part + "." + decimal_digits (up to 15, trailing zeros trimmed)
 fn compile_float_to_string(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.float_to_string];
-    // locals: 0=f64 input, 1=i64 int_part, 2=i32 int_str, 3=i32 dot_str, 4=i64 frac, 5=i32 frac_str
-    let mut f = Function::new([(1, ValType::I64), (1, ValType::I32), (1, ValType::I32), (1, ValType::I64), (1, ValType::I32)]);
+    // locals: 0=f64 input | 1=i32 int_str, 2=i32 result, 3=f64 frac, 4=i32 buf, 5=i32 count, 6=i32 digit
+    let mut f = Function::new([
+        (1, ValType::I32), (1, ValType::I32), (1, ValType::F64),
+        (1, ValType::I32), (1, ValType::I32), (1, ValType::I32),
+    ]);
 
+    // int_str = int_to_string(trunc(f))
     wasm!(f, {
-        // int_part = trunc(abs(f))
-        local_get(0);
-        f64_abs;
-        i64_trunc_f64_s;
-        local_set(1);
-
-        // frac = round((abs(f) - int_part) * 10)
-        local_get(0);
-        f64_abs;
-        local_get(1);
-        f64_convert_i64_s;
-        f64_sub;
-        f64_const(10.0);
-        f64_mul;
-        i64_trunc_f64_s;
-        local_set(4);
-
-        // Build: int_to_string(trunc(f)) + "." + int_to_string(frac)
-        // If negative: int_to_string handles the sign via trunc(f)
         local_get(0);
         i64_trunc_f64_s;
         call(emitter.rt.int_to_string);
-        local_set(2);
+        local_set(1);
+        // frac = abs(f) - abs(trunc(f))
+        local_get(0); f64_abs;
+        local_get(0); i64_trunc_f64_s; f64_convert_i64_s; f64_abs;
+        f64_sub;
+        local_set(3);
+        // Alloc scratch buffer for decimal digits (max 20)
+        i32_const(20); call(emitter.rt.alloc); local_set(4);
+        i32_const(0); local_set(5); // count = 0
     });
-
-    // Intern "."
+    // Loop: extract digits while frac > 0 and count < 15
+    wasm!(f, {
+        block_empty; loop_empty;
+          local_get(5); i32_const(15); i32_ge_u; br_if(1);
+          // digit = trunc(frac * 10)
+          local_get(3); f64_const(10.0); f64_mul; local_set(3);
+          local_get(3); i64_trunc_f64_s; i32_wrap_i64; local_set(6);
+          // buf[count] = '0' + digit
+          local_get(4); local_get(5); i32_add;
+          local_get(6); i32_const(48); i32_add;
+          i32_store8(0);
+          // frac = frac - digit
+          local_get(3); local_get(6); i64_extend_i32_u; f64_convert_i64_s; f64_sub; local_set(3);
+          local_get(5); i32_const(1); i32_add; local_set(5);
+          // Stop if frac is essentially 0
+          local_get(3); f64_const(0.000000000000001); f64_lt;
+          br_if(1);
+          br(0);
+        end; end;
+    });
+    // Ensure at least 1 digit (for "X.0")
+    wasm!(f, {
+        local_get(5); i32_eqz;
+        if_empty;
+          local_get(4); i32_const(48); i32_store8(0); // '0'
+          i32_const(1); local_set(5);
+        end;
+    });
+    // Trim trailing zeros (but keep at least 1 digit)
+    wasm!(f, {
+        block_empty; loop_empty;
+          local_get(5); i32_const(1); i32_le_u; br_if(1);
+          local_get(4); local_get(5); i32_const(1); i32_sub; i32_add;
+          i32_load8_u(0);
+          i32_const(48); // '0'
+          i32_ne; br_if(1);
+          local_get(5); i32_const(1); i32_sub; local_set(5);
+          br(0);
+        end; end;
+    });
+    // Build frac string from buf[0..count]
+    wasm!(f, {
+        i32_const(4); local_get(5); i32_add;
+        call(emitter.rt.alloc); local_set(2);
+        local_get(2); local_get(5); i32_store(0);
+        // Copy digits
+        i32_const(0); local_set(6);
+        block_empty; loop_empty;
+          local_get(6); local_get(5); i32_ge_u; br_if(1);
+          local_get(2); i32_const(4); i32_add; local_get(6); i32_add;
+          local_get(4); local_get(6); i32_add; i32_load8_u(0);
+          i32_store8(0);
+          local_get(6); i32_const(1); i32_add; local_set(6);
+          br(0);
+        end; end;
+    });
+    // Result: int_str + "." + frac_str
     let dot = emitter.intern_string(".");
     wasm!(f, {
-        // dot_str
+        local_get(1);
         i32_const(dot as i32);
-        local_set(3);
-
-        // frac_str = int_to_string(frac)
-        local_get(4);
-        call(emitter.rt.int_to_string);
-        local_set(5);
-
-        // concat: int_str + "." + frac_str
-        local_get(2);
-        local_get(3);
         call(emitter.rt.concat_str);
-        local_get(5);
+        local_get(2);
         call(emitter.rt.concat_str);
         end;
     });
