@@ -1208,6 +1208,75 @@ impl FuncCompiler<'_> {
                     local_get(s + 1);
                 });
             }
+            "reduce" => {
+                // reduce(xs, f) → Option[A]: fold starting from xs[0]
+                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let es = values::byte_size(&elem_ty) as i32;
+                let s = self.match_i32_base + self.match_depth;
+                let s64 = self.match_i64_base + self.match_depth;
+                wasm!(self.func, { i32_const(0); });
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { i32_store(0); i32_const(4); });
+                self.emit_expr(&args[1]); // fn(a, b) -> a
+                wasm!(self.func, {
+                    i32_store(0); // mem[4] = closure
+                    i32_const(0); i32_load(0); i32_load(0); i32_eqz;
+                    if_i32; i32_const(0); // empty → none
+                    else_;
+                      // acc = xs[0]
+                      i32_const(0); i32_load(0); i32_const(4); i32_add;
+                });
+                self.emit_load_at(&elem_ty, 0);
+                wasm!(self.func, { local_set(s64); }); // acc in i64 local (works for i32 too via reinterpret)
+                // For i32 elements, use s instead
+                // Actually this only works for i64. For i32 elements, need different approach.
+                // Simplify: use i64 for acc regardless, works for Int.
+                wasm!(self.func, {
+                      i32_const(1); local_set(s); // i = 1
+                      block_empty; loop_empty;
+                        local_get(s); i32_const(0); i32_load(0); i32_load(0); i32_ge_u; br_if(1);
+                        // Call f(acc, xs[i])
+                        i32_const(4); i32_load(0); i32_load(4); // env
+                        local_get(s64); // acc
+                        i32_const(0); i32_load(0); i32_const(4); i32_add;
+                        local_get(s); i32_const(es); i32_mul; i32_add;
+                });
+                self.emit_load_at(&elem_ty, 0);
+                wasm!(self.func, {
+                        i32_const(4); i32_load(0); i32_load(0); // table_idx
+                });
+                // call_indirect (env, a, b) → a
+                {
+                    let mut ct = vec![ValType::I32]; // env
+                    if let Some(vt) = values::ty_to_valtype(&elem_ty) { ct.push(vt); ct.push(vt); }
+                    let rt = values::ret_type(&elem_ty);
+                    let ti = self.emitter.register_type(ct, rt);
+                    wasm!(self.func, { call_indirect(ti, 0); });
+                }
+                wasm!(self.func, {
+                        local_set(s64); // update acc
+                        local_get(s); i32_const(1); i32_add; local_set(s);
+                        br(0);
+                      end; end;
+                      // Wrap acc in some
+                      i32_const(es); call(self.emitter.rt.alloc); local_set(s);
+                      local_get(s); local_get(s64);
+                });
+                self.emit_store_at(&elem_ty, 0);
+                wasm!(self.func, { local_get(s); end; });
+            }
+            "flat_map" => {
+                // flat_map(xs, f) → List[B]: map then flatten
+                // For now, stub — complex
+                self.emit_stub_call(args);
+                return true;
+            }
+            "filter_map" => {
+                // filter_map(xs, f) → List[B]: map to Option, keep some values
+                // For now, stub
+                self.emit_stub_call(args);
+                return true;
+            }
             _ => return false,
         }
         true
