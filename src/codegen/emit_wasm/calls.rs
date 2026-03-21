@@ -39,11 +39,10 @@ impl FuncCompiler<'_> {
                                 });
                             }
                             Ty::Float => {
-                                // Phase 1: print float as int (truncated)
                                 self.emit_expr(arg);
                                 wasm!(self.func, {
-                                    i64_trunc_f64_s;
-                                    call(self.emitter.rt.println_int);
+                                    call(self.emitter.rt.float_to_string);
+                                    call(self.emitter.rt.println_str);
                                 });
                             }
                             _ => {
@@ -144,11 +143,9 @@ impl FuncCompiler<'_> {
                         wasm!(self.func, { call(self.emitter.rt.int_to_string); });
                     }
                     ("float", "to_string") => {
-                        // Phase 1: truncate to int, then int_to_string
                         self.emit_expr(&args[0]);
                         wasm!(self.func, {
-                            i64_trunc_f64_s;
-                            call(self.emitter.rt.int_to_string);
+                            call(self.emitter.rt.float_to_string);
                         });
                     }
                     ("string", "length") | ("string", "len") => {
@@ -1110,8 +1107,7 @@ impl FuncCompiler<'_> {
                     "to_string" | "float.to_string" if matches!(object.ty, Ty::Float) => {
                         self.emit_expr(object);
                         wasm!(self.func, {
-                            i64_trunc_f64_s;
-                            call(self.emitter.rt.int_to_string);
+                            call(self.emitter.rt.float_to_string);
                         });
                     }
                     "sort" | "list.sort" if matches!(&object.ty, Ty::Applied(_, _)) => {
@@ -1529,8 +1525,7 @@ impl FuncCompiler<'_> {
                     Ty::Float => {
                         self.emit_expr(expr);
                         wasm!(self.func, {
-                            i64_trunc_f64_s;
-                            call(self.emitter.rt.int_to_string);
+                            call(self.emitter.rt.float_to_string);
                         });
                     }
                     _ => {

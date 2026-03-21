@@ -27,6 +27,10 @@ pub fn register_runtime(emitter: &mut WasmEmitter) {
     let itoa_ty = emitter.register_type(vec![ValType::I64], vec![ValType::I32]);
     emitter.rt.int_to_string = emitter.register_func("__int_to_string", itoa_ty);
 
+    // __float_to_string(f: f64) -> i32
+    let ftoa_ty = emitter.register_type(vec![ValType::F64], vec![ValType::I32]);
+    emitter.rt.float_to_string = emitter.register_func("__float_to_string", ftoa_ty);
+
     // __println_int(n: i64) -> ()
     let println_int_ty = emitter.register_type(vec![ValType::I64], vec![]);
     emitter.rt.println_int = emitter.register_func("__println_int", println_int_ty);
@@ -86,6 +90,7 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     compile_alloc(emitter);
     compile_println_str(emitter);
     compile_int_to_string(emitter);
+    compile_float_to_string(emitter);
     compile_println_int(emitter);
     compile_concat_str(emitter);
     compile_str_eq(emitter);
@@ -347,6 +352,64 @@ fn compile_int_to_string(emitter: &mut WasmEmitter) {
 
     // return $result
     wasm!(f, { local_get(6); end; });
+
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
+
+/// __float_to_string(f: f64) -> i32
+/// Converts float to string: integer_part + "." + first decimal digit.
+/// e.g., 10.0 → "10.0", 3.5 → "3.5", -2.7 → "-2.7"
+fn compile_float_to_string(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.float_to_string];
+    // locals: 0=f64 input, 1=i64 int_part, 2=i32 int_str, 3=i32 dot_str, 4=i64 frac, 5=i32 frac_str
+    let mut f = Function::new([(1, ValType::I64), (1, ValType::I32), (1, ValType::I32), (1, ValType::I64), (1, ValType::I32)]);
+
+    wasm!(f, {
+        // int_part = trunc(abs(f))
+        local_get(0);
+        f64_abs;
+        i64_trunc_f64_s;
+        local_set(1);
+
+        // frac = round((abs(f) - int_part) * 10)
+        local_get(0);
+        f64_abs;
+        local_get(1);
+        f64_convert_i64_s;
+        f64_sub;
+        f64_const(10.0);
+        f64_mul;
+        i64_trunc_f64_s;
+        local_set(4);
+
+        // Build: int_to_string(trunc(f)) + "." + int_to_string(frac)
+        // If negative: int_to_string handles the sign via trunc(f)
+        local_get(0);
+        i64_trunc_f64_s;
+        call(emitter.rt.int_to_string);
+        local_set(2);
+    });
+
+    // Intern "."
+    let dot = emitter.intern_string(".");
+    wasm!(f, {
+        // dot_str
+        i32_const(dot as i32);
+        local_set(3);
+
+        // frac_str = int_to_string(frac)
+        local_get(4);
+        call(emitter.rt.int_to_string);
+        local_set(5);
+
+        // concat: int_str + "." + frac_str
+        local_get(2);
+        local_get(3);
+        call(emitter.rt.concat_str);
+        local_get(5);
+        call(emitter.rt.concat_str);
+        end;
+    });
 
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }
