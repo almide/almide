@@ -607,8 +607,8 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { i32_store(0); i32_const(4); });
                 self.emit_expr(&args[1]); // sep
+                self.emit_store_at(&elem_ty, 0); // mem[4] = sep (type-aware)
                 wasm!(self.func, {
-                    i32_store(0); // mem[4] = sep (i32 ptr)
                     i32_const(0); i32_load(0); i32_load(0); local_set(s); // len
                     // new_len = max(0, 2*len - 1)
                     local_get(s); i32_eqz;
@@ -641,9 +641,10 @@ impl FuncCompiler<'_> {
                         if_empty;
                           local_get(s + 1); i32_const(4); i32_add;
                           local_get(s + 4); i32_const(elem_size as i32); i32_mul; i32_add;
-                          i32_const(4); i32_load(0); // sep
+                          i32_const(4);
                 });
-                self.emit_elem_store(&elem_ty);
+                self.emit_load_at(&elem_ty, 0); // load sep from mem[4]
+                self.emit_store_at(&elem_ty, 0);
                 wasm!(self.func, {
                           local_get(s + 4); i32_const(1); i32_add; local_set(s + 4);
                         end;
