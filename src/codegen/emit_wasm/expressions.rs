@@ -137,8 +137,21 @@ impl FuncCompiler<'_> {
 
             // ── DoBlock (with guard → loop) ──
             IrExprKind::DoBlock { stmts, expr: tail } => {
-                // do block with guards: block { loop { stmts; br 0 (continue) } }
-                // Guard breaks out of the outer block
+                // do block with guards: block { loop { stmts; tail?; br 0 } }
+                // Guard breaks out via br to outer block.
+                // Tail expr (if any) is stored in a scratch local, then break exits the loop.
+                let has_tail = tail.is_some();
+                let tail_vt = tail.as_ref().and_then(|e| values::ty_to_valtype(&e.ty));
+                let result_local = if has_tail && tail_vt.is_some() {
+                    // Use i64 scratch for i64/f64, i32 scratch for i32
+                    match tail_vt {
+                        Some(ValType::I64) | Some(ValType::F64) =>
+                            Some(self.match_i64_base + self.match_depth),
+                        _ =>
+                            Some(self.match_i32_base + self.match_depth),
+                    }
+                } else { None };
+
                 let break_depth = self.depth;
                 wasm!(self.func, { block_empty; });
                 self.depth += 1;
@@ -154,21 +167,27 @@ impl FuncCompiler<'_> {
                 }
                 if let Some(e) = tail {
                     self.emit_expr(e);
-                    // Tail expr is the return value — exit via return
-                    wasm!(self.func, { return_; });
+                    if let Some(rl) = result_local {
+                        // Save result to local, break out of loop+block
+                        wasm!(self.func, { local_set(rl); });
+                    }
+                    // Break out of block (depth 1 from loop = to block)
+                    wasm!(self.func, { br(self.depth - break_depth - 1); });
+                } else {
+                    // No tail: continue looping
+                    wasm!(self.func, { br(self.depth - continue_depth - 1); });
                 }
-
-                // Fallback: continue (loop back) — only reached if no tail expr
-                wasm!(self.func, { br(self.depth - continue_depth - 1); });
 
                 self.loop_stack.pop();
                 self.depth -= 1;
                 wasm!(self.func, { end; }); // end loop
                 self.depth -= 1;
                 wasm!(self.func, { end; }); // end block
-                // All do-block paths exit via return/guard.
-                // unreachable tells the validator no value is needed here.
-                wasm!(self.func, { unreachable; });
+
+                // After block: load saved result (if any)
+                if let Some(rl) = result_local {
+                    wasm!(self.func, { local_get(rl); });
+                }
             }
 
             // ── While loop ──
