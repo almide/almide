@@ -154,13 +154,11 @@ impl FuncCompiler<'_> {
                 }
                 if let Some(e) = tail {
                     self.emit_expr(e);
-                    // Drop tail value if non-Unit (do blocks in stmt position)
-                    if values::ty_to_valtype(&e.ty).is_some() {
-                        wasm!(self.func, { drop; });
-                    }
+                    // Tail expr is the return value — exit via return
+                    wasm!(self.func, { return_; });
                 }
 
-                // Continue (loop back)
+                // Fallback: continue (loop back) — only reached if no tail expr
                 wasm!(self.func, { br(self.depth - continue_depth - 1); });
 
                 self.loop_stack.pop();
@@ -168,6 +166,9 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { end; }); // end loop
                 self.depth -= 1;
                 wasm!(self.func, { end; }); // end block
+                // All do-block paths exit via return/guard.
+                // unreachable tells the validator no value is needed here.
+                wasm!(self.func, { unreachable; });
             }
 
             // ── While loop ──

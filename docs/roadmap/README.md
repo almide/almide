@@ -48,7 +48,7 @@
 | [Almide Shell](on-hold/almide-shell.md) | AI-native REPL |
 | [LLM Integration](on-hold/llm-integration.md) | `almide forge`, `almide fix` |
 | [LLM → IR Generation](on-hold/llm-ir-generation.md) | Parser bypass |
-| [Self-Hosting](on-hold/self-hosting.md) | |
+| [Self-Hosting](on-hold/self-hosting.md) | 350KB WASM bootstrap compiler → LLM 自律進化ループ |
 
 ## On Hold — Compiler Internals
 
