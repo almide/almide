@@ -1179,8 +1179,8 @@ impl FuncCompiler<'_> {
                 });
             }
             "repeat" => {
-                // repeat(val, n) → List[A]
-                let elem_ty = self.list_elem_ty(&args[0].ty);
+                // repeat(val, n) → List[A] — args[0] IS the element, not a list
+                let elem_ty = args[0].ty.clone();
                 let es = values::byte_size(&elem_ty) as i32;
                 let s = self.match_i32_base + self.match_depth;
                 wasm!(self.func, { i32_const(0); });
