@@ -2023,17 +2023,21 @@ impl FuncCompiler<'_> {
             }
             "update" => {
                 // update(xs, i, f) → List[A]: copy with xs[i] replaced by f(xs[i])
+                // Store all args to mem[] BEFORE closure emit to avoid scratch conflicts
                 let elem_ty = self.list_elem_ty(&args[0].ty);
                 let es = values::byte_size(&elem_ty) as i32;
                 let s = self.match_i32_base + self.match_depth;
-                // mem[0]=xs, mem[4]=closure
+                // mem[0] = xs
                 wasm!(self.func, { i32_const(0); });
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { i32_store(0); });
-                self.emit_expr(&args[1]); // i
-                wasm!(self.func, { i32_wrap_i64; local_set(s); }); // s = idx
+                // mem[4] = idx (i32)
                 wasm!(self.func, { i32_const(4); });
-                self.emit_expr(&args[2]); // closure
+                self.emit_expr(&args[1]);
+                wasm!(self.func, { i32_wrap_i64; i32_store(0); });
+                // mem[8] = closure
+                wasm!(self.func, { i32_const(8); });
+                self.emit_expr(&args[2]);
                 wasm!(self.func, {
                     i32_store(0);
                     i32_const(0); i32_load(0); i32_load(0); local_set(s + 1); // len
@@ -2057,18 +2061,21 @@ impl FuncCompiler<'_> {
                     end; end;
                 });
                 // Now replace dst[idx] with f(dst[idx])
-                // dst addr for store
+                // Use mem[4]=idx, mem[8]=closure
                 wasm!(self.func, {
+                    // dst addr for store
                     local_get(s + 2); i32_const(4); i32_add;
-                    local_get(s); i32_const(es); i32_mul; i32_add;
+                    i32_const(4); i32_load(0); // idx from mem[4]
+                    i32_const(es); i32_mul; i32_add;
                     // Call f(dst[idx])
-                    i32_const(4); i32_load(0); i32_load(4); // env
+                    i32_const(8); i32_load(0); i32_load(4); // env from mem[8]
                     local_get(s + 2); i32_const(4); i32_add;
-                    local_get(s); i32_const(es); i32_mul; i32_add;
+                    i32_const(4); i32_load(0); // idx from mem[4]
+                    i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
                 wasm!(self.func, {
-                    i32_const(4); i32_load(0); i32_load(0); // table_idx
+                    i32_const(8); i32_load(0); i32_load(0); // table_idx from mem[8]
                 });
                 {
                     let mut ct = vec![ValType::I32];
