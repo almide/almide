@@ -1162,6 +1162,30 @@ impl FuncCompiler<'_> {
                         wasm!(self.func, { call(self.emitter.rt.str_contains); });
                     }
                     _ => {
+                        // Try to resolve as TypeName.method convention call
+                        let type_name = match &object.ty {
+                            Ty::Named(n, _) => Some(n.clone()),
+                            Ty::Record { .. } => None,
+                            _ => None,
+                        };
+                        let qualified = type_name.as_ref().map(|tn| format!("{}.{}", tn, method));
+                        if let Some(ref qn) = qualified {
+                            if let Some(&func_idx) = self.emitter.func_map.get(qn.as_str()) {
+                                // Convention/protocol method: call TypeName.method(self, args...)
+                                self.emit_expr(object);
+                                for arg in args { self.emit_expr(arg); }
+                                wasm!(self.func, { call(func_idx); });
+                                return;
+                            }
+                        }
+                        // Also try: method name itself might be fully qualified (e.g., "Pair.to_str")
+                        if let Some(&func_idx) = self.emitter.func_map.get(method.as_str()) {
+                            self.emit_expr(object);
+                            for arg in args { self.emit_expr(arg); }
+                            wasm!(self.func, { call(func_idx); });
+                            return;
+                        }
+                        // Fallback: stub
                         self.emit_expr(object);
                         if values::ty_to_valtype(&object.ty).is_some() {
                             wasm!(self.func, { drop; });
