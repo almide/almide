@@ -1044,6 +1044,20 @@ fn scan_closures_stmt(
             scan_closures_expr(cond, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
             scan_closures_expr(else_, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
         }
+        IrStmtKind::BindDestructure { value, .. } => {
+            scan_closures_expr(value, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+        }
+        IrStmtKind::IndexAssign { index, value, .. } => {
+            scan_closures_expr(index, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+            scan_closures_expr(value, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+        }
+        IrStmtKind::MapInsert { key, value, .. } => {
+            scan_closures_expr(key, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+            scan_closures_expr(value, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+        }
+        IrStmtKind::FieldAssign { value, .. } => {
+            scan_closures_expr(value, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+        }
         _ => {}
     }
 }

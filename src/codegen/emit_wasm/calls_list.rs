@@ -1268,8 +1268,12 @@ impl FuncCompiler<'_> {
             }
             "flat_map" => {
                 // flat_map(xs, f) → List[B]: f returns List[B], flatten results
-                // Strategy: collect results into list of lists, then flatten
                 let elem_ty = self.list_elem_ty(&args[0].ty);
+                // Output element type B: infer from fn return type List[B]
+                let out_elem_ty = if let Ty::Fn { ret, .. } = &args[1].ty {
+                    self.list_elem_ty(ret) // List[B] → B
+                } else { elem_ty.clone() };
+                let out_es = values::byte_size(&out_elem_ty) as i32;
                 let es = values::byte_size(&elem_ty) as i32;
                 let s = self.match_i32_base + self.match_depth;
                 // mem[0]=xs, mem[4]=closure
@@ -1330,8 +1334,8 @@ impl FuncCompiler<'_> {
                       local_get(s + 2); i32_const(1); i32_add; local_set(s + 2);
                       br(0);
                     end; end;
-                    // Alloc result: assume 4 bytes per element (i32 ptrs)
-                    i32_const(4); local_get(s + 1); i32_const(4); i32_mul; i32_add;
+                    // Alloc result
+                    i32_const(4); local_get(s + 1); i32_const(out_es); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(s + 3);
                     local_get(s + 3); local_get(s + 1); i32_store(0);
                 });
@@ -1341,18 +1345,19 @@ impl FuncCompiler<'_> {
                     i32_const(0); local_set(s + 2); // outer i
                     block_empty; loop_empty;
                       local_get(s + 2); local_get(s); i32_load(0); i32_ge_u; br_if(1);
-                      // inner list
                       local_get(s); i32_const(4); i32_add;
                       local_get(s + 2); i32_const(4); i32_mul; i32_add;
-                      i32_load(0); local_set(s + 4); // inner
+                      i32_load(0); local_set(s + 4); // inner list
                       i32_const(0); local_set(s + 5); // j
                       block_empty; loop_empty;
                         local_get(s + 5); local_get(s + 4); i32_load(0); i32_ge_u; br_if(1);
                         local_get(s + 3); i32_const(4); i32_add;
-                        local_get(s + 1); i32_const(4); i32_mul; i32_add;
+                        local_get(s + 1); i32_const(out_es); i32_mul; i32_add;
                         local_get(s + 4); i32_const(4); i32_add;
-                        local_get(s + 5); i32_const(4); i32_mul; i32_add;
-                        i32_load(0); i32_store(0);
+                        local_get(s + 5); i32_const(out_es); i32_mul; i32_add;
+                });
+                self.emit_elem_copy(&out_elem_ty);
+                wasm!(self.func, {
                         local_get(s + 1); i32_const(1); i32_add; local_set(s + 1);
                         local_get(s + 5); i32_const(1); i32_add; local_set(s + 5);
                         br(0);

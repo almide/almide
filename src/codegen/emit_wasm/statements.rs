@@ -107,7 +107,6 @@ impl FuncCompiler<'_> {
             }
 
             IrStmtKind::BindDestructure { pattern, value } => {
-                // Emit value (usually a tuple/record ptr)
                 self.emit_expr(value);
                 let scratch = self.match_i32_base + self.match_depth;
                 wasm!(self.func, { local_set(scratch); });
