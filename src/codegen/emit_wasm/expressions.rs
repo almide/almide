@@ -353,7 +353,6 @@ impl FuncCompiler<'_> {
 
             // ── Option/Result ──
             IrExprKind::OptionSome { expr: inner } => {
-                // Allocate space for the inner value, store it, return pointer
                 let inner_size = values::byte_size(&inner.ty);
                 let scratch = self.match_i32_base + self.match_depth;
                 wasm!(self.func, {
@@ -362,7 +361,10 @@ impl FuncCompiler<'_> {
                     local_set(scratch);
                     local_get(scratch);
                 });
+                // Reserve scratch so inner expr uses different local
+                self.match_depth += 1;
                 self.emit_expr(inner);
+                self.match_depth -= 1;
                 self.emit_store_at(&inner.ty, 0);
                 wasm!(self.func, { local_get(scratch); });
             }
@@ -384,10 +386,11 @@ impl FuncCompiler<'_> {
                     i32_const(0);
                     i32_store(0);
                 });
-                // Store value (skip for Unit — no value to store)
                 if values::ty_to_valtype(&inner.ty).is_some() {
                     wasm!(self.func, { local_get(scratch); });
+                    self.match_depth += 1;
                     self.emit_expr(inner);
+                    self.match_depth -= 1;
                     self.emit_store_at(&inner.ty, 4);
                 }
                 wasm!(self.func, { local_get(scratch); });
@@ -407,7 +410,9 @@ impl FuncCompiler<'_> {
                 });
                 if values::ty_to_valtype(&inner.ty).is_some() {
                     wasm!(self.func, { local_get(scratch); });
+                    self.match_depth += 1;
                     self.emit_expr(inner);
+                    self.match_depth -= 1;
                     self.emit_store_at(&inner.ty, 4);
                 }
                 wasm!(self.func, { local_get(scratch); });
@@ -674,10 +679,15 @@ impl FuncCompiler<'_> {
         self.emit_expr(left);
         self.emit_expr(right);
         // Use the more specific type for comparison dispatch.
+        // Try to infer type from IR expression structure when both sides are Unknown
+        let inferred = self.infer_expr_ty(left).or_else(|| self.infer_expr_ty(right));
         let cmp_ty = match (&left.ty, &right.ty) {
+            (Ty::Unknown, Ty::Unknown) | (Ty::TypeVar(_), Ty::TypeVar(_))
+            | (Ty::Unknown, Ty::TypeVar(_)) | (Ty::TypeVar(_), Ty::Unknown) => {
+                if let Some(ref t) = inferred { t } else { &left.ty }
+            }
             (Ty::Unknown, _) | (Ty::TypeVar(_), _) => &right.ty,
             (_, Ty::Unknown) | (_, Ty::TypeVar(_)) => &left.ty,
-            // If left is a primitive but right is a compound type, use right
             (l, r) if !Self::is_compound_ty(l) && Self::is_compound_ty(r) => r,
             _ => &left.ty,
         };
@@ -785,6 +795,41 @@ impl FuncCompiler<'_> {
     fn is_compound_ty(ty: &Ty) -> bool {
         matches!(ty, Ty::Named(_, _) | Ty::Applied(_, _) | Ty::Variant { .. }
             | Ty::Record { .. } | Ty::Tuple(_) | Ty::String)
+    }
+
+    /// Try to infer a concrete type from an IR expression when expr.ty is Unknown.
+    fn infer_expr_ty(&self, expr: &IrExpr) -> Option<Ty> {
+        use crate::ir::IrExprKind;
+        match &expr.kind {
+            IrExprKind::TupleIndex { object, index } => {
+                // Try to get the tuple type from the object, then extract element type
+                let obj_ty = if matches!(&object.ty, Ty::Unknown | Ty::TypeVar(_)) {
+                    // Try VarTable
+                    if let IrExprKind::Var { id } = &object.kind {
+                        if (id.0 as usize) < self.var_table.len() {
+                            let info = self.var_table.get(*id);
+                            if !matches!(&info.ty, Ty::Unknown | Ty::TypeVar(_)) {
+                                Some(info.ty.clone())
+                            } else { None }
+                        } else { None }
+                    } else { None }
+                } else {
+                    Some(object.ty.clone())
+                };
+                if let Some(Ty::Tuple(elems)) = obj_ty {
+                    elems.get(*index as usize).cloned()
+                } else { None }
+            }
+            IrExprKind::Var { id } => {
+                if (id.0 as usize) < self.var_table.len() {
+                    let info = self.var_table.get(*id);
+                    if !matches!(&info.ty, Ty::Unknown | Ty::TypeVar(_)) {
+                        Some(info.ty.clone())
+                    } else { None }
+                } else { None }
+            }
+            _ => None,
+        }
     }
 
     /// Deep list equality: [a_ptr, b_ptr] → i32

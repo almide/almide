@@ -654,25 +654,69 @@ impl FuncCompiler<'_> {
 
             // Tuple pattern: (a, b) => ...
             IrPattern::Tuple { elements } => {
-                // Tuple always matches (destructure only). Bind each element.
                 if let Ty::Tuple(elem_types) = subject_ty {
+                    let has_literal = elements.iter().any(|p| matches!(p, IrPattern::Literal { .. }));
+
+                    if has_literal && !is_last {
+                        // Build condition: check all literal elements
+                        let mut offset = 0u32;
+                        let mut cond_count = 0;
+                        for (i, elem_pat) in elements.iter().enumerate() {
+                            let ft = elem_types.get(i).cloned().unwrap_or(Ty::Int);
+                            if let IrPattern::Literal { expr: lit_expr } = elem_pat {
+                                wasm!(self.func, { local_get(scratch); });
+                                self.emit_load_at(&ft, offset);
+                                self.emit_expr(lit_expr);
+                                match &ft {
+                                    Ty::Int => { wasm!(self.func, { i64_eq; }); }
+                                    Ty::String => { wasm!(self.func, { call(self.emitter.rt.string.eq); }); }
+                                    _ => { wasm!(self.func, { i32_eq; }); }
+                                }
+                                cond_count += 1;
+                            }
+                            offset += values::byte_size(&ft);
+                        }
+                        for _ in 1..cond_count {
+                            wasm!(self.func, { i32_and; });
+                        }
+                        // if condition: bind + body, else: next arm
+                        let resolved_result = values::ty_to_valtype(result_ty);
+                        match resolved_result {
+                            Some(ValType::I64) => { wasm!(self.func, { if_i64; }); }
+                            Some(ValType::F64) => { wasm!(self.func, { if_f64; }); }
+                            Some(ValType::I32) => { wasm!(self.func, { if_i32; }); }
+                            _ => { wasm!(self.func, { if_i32; }); } // String/ptr results are i32
+                        }
+                        self.depth += 1;
+                    }
+
+                    // Bind elements
                     let mut offset = 0u32;
                     for (i, elem_pat) in elements.iter().enumerate() {
+                        let ft = elem_types.get(i).cloned().unwrap_or(Ty::Int);
                         if let IrPattern::Bind { var, .. } = elem_pat {
                             if let Some(&local_idx) = self.var_map.get(&var.0) {
-                                let ft = elem_types.get(i).cloned().unwrap_or(Ty::Int);
                                 wasm!(self.func, { local_get(scratch); });
                                 self.emit_load_at(&ft, offset);
                                 wasm!(self.func, { local_set(local_idx); });
-                                offset += values::byte_size(&ft);
                             }
-                        } else if let IrPattern::Wildcard = elem_pat {
-                            let ft = elem_types.get(i).cloned().unwrap_or(Ty::Int);
-                            offset += values::byte_size(&ft);
                         }
+                        offset += values::byte_size(&ft);
                     }
+
+                    self.emit_expr(&arm.body);
+
+                    if has_literal && !is_last {
+                        wasm!(self.func, { else_; });
+                        // Emit remaining arms
+                        self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1);
+                        wasm!(self.func, { end; });
+                        self.depth -= 1;
+                        return; // Don't fall through to normal next-arm processing
+                    }
+                } else {
+                    self.emit_expr(&arm.body);
                 }
-                self.emit_expr(&arm.body);
             }
 
             // Catch-all for unsupported patterns

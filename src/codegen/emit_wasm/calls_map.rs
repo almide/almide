@@ -523,8 +523,49 @@ impl FuncCompiler<'_> {
                 });
             }
             "from_list" => {
-                self.emit_stub_call(args);
-                return true;
+                // from_list(pairs: List[(K,V)]) → Map
+                // Infer K,V from pair type: List[(K,V)] → elem = (K,V)
+                let pair_ty = self.list_elem_ty(&args[0].ty);
+                let (ks, vs) = if let Ty::Tuple(elems) = &pair_ty {
+                    let k = elems.first().map(|t| values::byte_size(t)).unwrap_or(4);
+                    let v = elems.get(1).map(|t| values::byte_size(t)).unwrap_or(4);
+                    (k, v)
+                } else { (4u32, 4u32) };
+                let entry = ks + vs;
+                let s = self.match_i32_base + self.match_depth;
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(s); // pairs list
+                    local_get(s); i32_load(0); local_set(s + 1); // len
+                    // Alloc map: 4 + len * entry
+                    i32_const(4); local_get(s + 1); i32_const(entry as i32); i32_mul; i32_add;
+                    call(self.emitter.rt.alloc); local_set(s + 2);
+                    local_get(s + 2); local_get(s + 1); i32_store(0);
+                    // Copy: for each pair, copy key and val into map entry
+                    i32_const(0); local_set(s + 3); // i
+                    block_empty; loop_empty;
+                      local_get(s + 3); local_get(s + 1); i32_ge_u; br_if(1);
+                      // tuple_ptr = pairs[4 + i*4]
+                      local_get(s); i32_const(4); i32_add;
+                      local_get(s + 3); i32_const(4); i32_mul; i32_add;
+                      i32_load(0); local_set(s + 4); // tuple ptr
+                      // Copy key: map[4 + i*entry] = tuple[0]
+                      local_get(s + 2); i32_const(4); i32_add;
+                      local_get(s + 3); i32_const(entry as i32); i32_mul; i32_add;
+                      local_get(s + 4); i32_load(0); i32_store(0);
+                      // Copy val: map[4 + i*entry + ks] = tuple[ks]
+                      local_get(s + 2); i32_const(4); i32_add;
+                      local_get(s + 3); i32_const(entry as i32); i32_mul; i32_add;
+                      i32_const(ks as i32); i32_add;
+                      local_get(s + 4); i32_const(ks as i32); i32_add;
+                });
+                self.emit_elem_copy_sized(vs);
+                wasm!(self.func, {
+                      local_get(s + 3); i32_const(1); i32_add; local_set(s + 3);
+                      br(0);
+                    end; end;
+                    local_get(s + 2);
+                });
             }
             "fold" => {
                 // fold(m, init, f) → A: f(acc, key, val) for each entry

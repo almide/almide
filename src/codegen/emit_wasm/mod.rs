@@ -155,6 +155,8 @@ pub struct WasmEmitter {
     pub record_fields: HashMap<String, Vec<(String, crate::types::Ty)>>,
     // Variant info: variant type name → list of (case_name, tag, fields)
     pub variant_info: HashMap<String, Vec<VariantCase>>,
+    // Default field values: (type_name, field_name) → default IR expr
+    pub default_fields: HashMap<(String, String), crate::ir::IrExpr>,
 
     // Lambda/closure info: sequential index → LambdaInfo
     pub lambdas: Vec<LambdaInfo>,
@@ -180,6 +182,7 @@ pub struct LambdaInfo {
     pub table_idx: u32,
     pub closure_type_idx: u32,
     pub captures: Vec<(crate::ir::VarId, crate::types::Ty)>,
+    pub param_ids: Vec<u32>,
 }
 
 impl WasmEmitter {
@@ -227,6 +230,7 @@ impl WasmEmitter {
             func_to_table_idx: HashMap::new(),
             record_fields: HashMap::new(),
             variant_info: HashMap::new(),
+            default_fields: HashMap::new(),
             lambdas: Vec::new(),
             fn_ref_wrappers: HashMap::new(),
             lambda_counter: std::cell::Cell::new(0),
@@ -347,6 +351,35 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
                     });
                 }
                 emitter.variant_info.insert(td.name.clone(), variant_cases);
+            }
+            _ => {}
+        }
+    }
+
+    // Build default_fields from type declarations
+    for td in &program.type_decls {
+        match &td.kind {
+            crate::ir::IrTypeDeclKind::Variant { cases, .. } => {
+                for case in cases {
+                    if let crate::ir::IrVariantKind::Record { fields } = &case.kind {
+                        for f in fields {
+                            if let Some(def) = &f.default {
+                                emitter.default_fields.insert(
+                                    (case.name.clone(), f.name.clone()), def.clone()
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            crate::ir::IrTypeDeclKind::Record { fields } => {
+                for f in fields {
+                    if let Some(def) = &f.default {
+                        emitter.default_fields.insert(
+                            (td.name.clone(), f.name.clone()), def.clone()
+                        );
+                    }
+                }
             }
             _ => {}
         }
@@ -652,7 +685,7 @@ use std::collections::HashSet;
 /// Register lambda functions and FnRef wrappers in the emitter.
 fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) {
     // Collect all lambdas (in tree-walk order)
-    let mut lambda_exprs: Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, HashSet<u32>)> = Vec::new();
+    let mut lambda_exprs: Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, Vec<u32>)> = Vec::new();
     let mut fn_ref_set: HashSet<String> = HashSet::new();
     let mut fn_ref_names: Vec<String> = Vec::new(); // ordered, deduped
 
@@ -716,10 +749,12 @@ fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) {
             })
             .collect();
 
+        let param_ids: Vec<u32> = params.iter().map(|(vid, _)| vid.0).collect();
         emitter.lambdas.push(LambdaInfo {
             table_idx,
             closure_type_idx,
             captures: capture_vars,
+            param_ids,
         });
     }
 
@@ -750,7 +785,7 @@ fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) {
 /// Compile lambda bodies and FnRef wrappers.
 fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitter) {
     // Re-scan to get lambda bodies (in same order as pre-scan)
-    let mut lambda_exprs: Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, HashSet<u32>)> = Vec::new();
+    let mut lambda_exprs: Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, Vec<u32>)> = Vec::new();
     let mut fn_ref_set: HashSet<String> = HashSet::new();
     let mut mutable_vars: HashSet<u32> = HashSet::new();
 
@@ -931,7 +966,7 @@ fn scan_closures_expr(
     scope_vars: &mut HashSet<u32>,
     mutable_vars: &mut HashSet<u32>,
     var_table: &crate::ir::VarTable,
-    lambdas: &mut Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, HashSet<u32>)>,
+    lambdas: &mut Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, Vec<u32>)>,
     fn_refs: &mut HashSet<String>,
 ) {
     match &expr.kind {
@@ -940,10 +975,11 @@ fn scan_closures_expr(
             let param_ids: HashSet<u32> = params.iter().map(|(vid, _)| vid.0).collect();
             let mut body_vars = HashSet::new();
             collect_var_refs(body, &mut body_vars);
-            let captures: HashSet<u32> = body_vars.difference(&param_ids)
+            let mut captures: Vec<u32> = body_vars.difference(&param_ids)
                 .copied()
                 .filter(|vid| scope_vars.contains(vid))
                 .collect();
+            captures.sort(); // Deterministic order for env layout
 
             let param_list: Vec<(VarId, crate::types::Ty)> = params.iter()
                 .map(|(vid, ty)| (*vid, ty.clone()))
@@ -1019,7 +1055,7 @@ fn scan_closures_stmt(
     scope_vars: &mut HashSet<u32>,
     mutable_vars: &mut HashSet<u32>,
     var_table: &crate::ir::VarTable,
-    lambdas: &mut Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, HashSet<u32>)>,
+    lambdas: &mut Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, Vec<u32>)>,
     fn_refs: &mut HashSet<String>,
 ) {
     match &stmt.kind {
@@ -1039,6 +1075,20 @@ fn scan_closures_stmt(
         IrStmtKind::Guard { cond, else_ } => {
             scan_closures_expr(cond, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
             scan_closures_expr(else_, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+        }
+        IrStmtKind::BindDestructure { value, .. } => {
+            scan_closures_expr(value, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+        }
+        IrStmtKind::IndexAssign { index, value, .. } => {
+            scan_closures_expr(index, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+            scan_closures_expr(value, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+        }
+        IrStmtKind::MapInsert { key, value, .. } => {
+            scan_closures_expr(key, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+            scan_closures_expr(value, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+        }
+        IrStmtKind::FieldAssign { value, .. } => {
+            scan_closures_expr(value, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
         }
         _ => {}
     }

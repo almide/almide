@@ -15,11 +15,26 @@ impl FuncCompiler<'_> {
         let tag = self.resolve_variant_tag(name, result_ty);
         let tag_size: u32 = if tag.is_some() { 4 } else { 0 };
 
-        // Compute field types and total size
-        let field_types: Vec<(String, Ty)> = fields.iter()
-            .map(|(n, expr)| (n.clone(), expr.ty.clone()))
-            .collect();
-        let total_size = tag_size + values::record_size(&field_types);
+        // Compute total size from type definition (includes defaults)
+        let type_field_size: u32 = if let Some(ctor_name) = name {
+            let mut size = 0u32;
+            // Check variant cases
+            for cases in self.emitter.variant_info.values() {
+                for case in cases {
+                    if case.name == ctor_name {
+                        size = case.fields.iter().map(|(_, ty)| values::byte_size(ty)).sum();
+                    }
+                }
+            }
+            if size == 0 {
+                if let Some(rf) = self.emitter.record_fields.get(ctor_name) {
+                    size = rf.iter().map(|(_, ty)| values::byte_size(ty)).sum();
+                }
+            }
+            size
+        } else { 0 };
+        let explicit_size: u32 = fields.iter().map(|(_, e)| values::byte_size(&e.ty)).sum();
+        let total_size = tag_size + if type_field_size > 0 { type_field_size } else { explicit_size };
 
         // Allocate
         wasm!(self.func, {
@@ -40,14 +55,69 @@ impl FuncCompiler<'_> {
             });
         }
 
-        // Store each field (offset starts after tag)
+        // Build merged field list in type-definition order
+        // Explicit fields + defaults, ordered by type definition
+        let explicit_map: std::collections::HashMap<&str, &IrExpr> =
+            fields.iter().map(|(n, e)| (n.as_str(), e)).collect();
+
+        // Get type-definition field order from variant_info or record_fields
+        let type_fields: Vec<(String, Ty)> = if let Some(ctor_name) = name {
+            // Try variant case
+            let mut found = Vec::new();
+            for cases in self.emitter.variant_info.values() {
+                for case in cases {
+                    if case.name == ctor_name {
+                        found = case.fields.clone();
+                    }
+                }
+            }
+            if found.is_empty() {
+                if let Some(rf) = self.emitter.record_fields.get(ctor_name) {
+                    found = rf.clone();
+                }
+            }
+            found
+        } else { vec![] };
+
         let mut offset = tag_size;
-        for (_, field_expr) in fields {
-            let field_size = values::byte_size(&field_expr.ty);
-            wasm!(self.func, { local_get(scratch); });
-            self.emit_expr(field_expr);
-            self.emit_store_at(&field_expr.ty, offset);
-            offset += field_size;
+        if !type_fields.is_empty() {
+            // Emit in type-definition order
+            for (field_name, field_ty) in &type_fields {
+                wasm!(self.func, { local_get(scratch); });
+                if let Some(expr) = explicit_map.get(field_name.as_str()) {
+                    self.emit_expr(expr);
+                    self.emit_store_at(&expr.ty, offset);
+                    offset += values::byte_size(&expr.ty);
+                } else if let Some(ctor_name) = name {
+                    if let Some(default_expr) = self.emitter.default_fields.get(&(ctor_name.to_string(), field_name.clone())) {
+                        let default_expr = default_expr.clone();
+                        let dt = match (&default_expr.ty, &default_expr.kind) {
+                            (Ty::Unknown, crate::ir::IrExprKind::LitInt { .. }) => Ty::Int,
+                            (Ty::Unknown, crate::ir::IrExprKind::LitFloat { .. }) => Ty::Float,
+                            (Ty::Unknown, crate::ir::IrExprKind::LitBool { .. }) => Ty::Bool,
+                            (Ty::Unknown, crate::ir::IrExprKind::LitStr { .. }) => Ty::String,
+                            _ => default_expr.ty.clone(),
+                        };
+                        self.emit_expr(&default_expr);
+                        self.emit_store_at(&dt, offset);
+                        offset += values::byte_size(&dt);
+                    } else {
+                        // No value — zero-fill
+                        offset += values::byte_size(field_ty);
+                    }
+                } else {
+                    offset += values::byte_size(field_ty);
+                }
+            }
+        } else {
+            // No type info: emit explicit fields only
+            for (_, field_expr) in fields {
+                let field_size = values::byte_size(&field_expr.ty);
+                wasm!(self.func, { local_get(scratch); });
+                self.emit_expr(field_expr);
+                self.emit_store_at(&field_expr.ty, offset);
+                offset += field_size;
+            }
         }
 
         self.match_depth -= 1;
