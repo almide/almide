@@ -477,7 +477,7 @@ fn assemble(emitter: &WasmEmitter) -> Vec<u8> {
     // ── Memory section ──
     let mut memory = MemorySection::new();
     memory.memory(MemoryType {
-        minimum: 1,
+        minimum: 16,
         maximum: None,
         memory64: false,
         shared: false,
