@@ -400,9 +400,43 @@ impl FuncCompiler<'_> {
                 }
                 wasm!(self.func, { call(self.emitter.rt.math_tan); });
             }
-            "log" | "exp" | "log10" | "log2" => {
-                self.emit_stub_call(args);
-                return true;
+            "log" => {
+                self.emit_expr(&args[0]);
+                if matches!(&args[0].ty, Ty::Int) {
+                    wasm!(self.func, { f64_convert_i64_s; });
+                }
+                wasm!(self.func, { call(self.emitter.rt.math_log); });
+            }
+            "exp" => {
+                self.emit_expr(&args[0]);
+                if matches!(&args[0].ty, Ty::Int) {
+                    wasm!(self.func, { f64_convert_i64_s; });
+                }
+                wasm!(self.func, { call(self.emitter.rt.math_exp); });
+            }
+            "log10" => {
+                // log10(x) = ln(x) / ln(10)
+                self.emit_expr(&args[0]);
+                if matches!(&args[0].ty, Ty::Int) {
+                    wasm!(self.func, { f64_convert_i64_s; });
+                }
+                wasm!(self.func, {
+                    call(self.emitter.rt.math_log);
+                    f64_const(std::f64::consts::LN_10);
+                    f64_div;
+                });
+            }
+            "log2" => {
+                // log2(x) = ln(x) / ln(2)
+                self.emit_expr(&args[0]);
+                if matches!(&args[0].ty, Ty::Int) {
+                    wasm!(self.func, { f64_convert_i64_s; });
+                }
+                wasm!(self.func, {
+                    call(self.emitter.rt.math_log);
+                    f64_const(std::f64::consts::LN_2);
+                    f64_div;
+                });
             }
             "sign" => {
                 // math.sign(n: Int) → Int (-1, 0, 1)

@@ -122,6 +122,8 @@ pub struct RuntimeFuncs {
     pub math_sin: u32,
     pub math_cos: u32,
     pub math_tan: u32,
+    pub math_log: u32,
+    pub math_exp: u32,
     pub string: StringRuntime,
 }
 
@@ -223,6 +225,7 @@ impl WasmEmitter {
                 int_to_string: 0, float_to_string: 0,
                 float_parse: 0, float_to_fixed: 0, float_pow: 0,
                 math_sin: 0, math_cos: 0, math_tan: 0,
+                math_log: 0, math_exp: 0,
                 concat_str: 0, concat_list: 0,
                 list_eq: 0, mem_eq: 0,
                 option_eq_i64: 0, option_eq_str: 0,

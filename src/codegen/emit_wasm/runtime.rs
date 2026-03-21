@@ -92,6 +92,10 @@ pub fn register_runtime(emitter: &mut WasmEmitter) {
     emitter.rt.math_cos = emitter.register_func("__math_cos", f64_f64_ty);
     // __math_tan(x: f64) -> f64
     emitter.rt.math_tan = emitter.register_func("__math_tan", f64_f64_ty);
+    // __math_log(x: f64) -> f64  (natural logarithm)
+    emitter.rt.math_log = emitter.register_func("__math_log", f64_f64_ty);
+    // __math_exp(x: f64) -> f64  (e^x)
+    emitter.rt.math_exp = emitter.register_func("__math_exp", f64_f64_ty);
 
     // String stdlib runtime (delegated to rt_string module)
     super::rt_string::register(emitter);
@@ -122,6 +126,8 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     super::rt_numeric::compile_math_sin(emitter);
     super::rt_numeric::compile_math_cos(emitter);
     super::rt_numeric::compile_math_tan(emitter);
+    super::rt_numeric::compile_math_log(emitter);
+    super::rt_numeric::compile_math_exp(emitter);
     // String stdlib runtime (delegated)
     super::rt_string::compile(emitter);
 }

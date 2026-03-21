@@ -848,3 +848,185 @@ pub(super) fn compile_math_tan(emitter: &mut WasmEmitter) {
     });
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }
+
+/// __math_log(x: f64) -> f64
+/// Natural logarithm via sqrt reduction + Taylor series.
+/// Reduce x by 12 rounds of sqrt (so x is near 1), compute ln(1+t) via
+/// Taylor series, then multiply by 2^12 = 4096.
+pub(super) fn compile_math_log(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.math_log];
+    // params: 0=f64 x
+    // locals: 1=f64 y (reduced), 2=f64 z (y-1), 3=f64 z^k, 4=f64 sum
+    let mut f = Function::new([
+        (1, ValType::F64),  // 1: y
+        (1, ValType::F64),  // 2: z
+        (1, ValType::F64),  // 3: z^k
+        (1, ValType::F64),  // 4: sum
+    ]);
+
+    // Special case: x <= 0 -> NaN
+    wasm!(f, {
+        local_get(0); f64_const(0.0); f64_le;
+        if_empty;
+          f64_const(f64::NAN); return_;
+        end;
+    });
+
+    // Special case: x == 1.0 -> 0.0
+    wasm!(f, {
+        local_get(0); f64_const(1.0); f64_eq;
+        if_empty;
+          f64_const(0.0); return_;
+        end;
+    });
+
+    // y = x
+    wasm!(f, {
+        local_get(0); local_set(1);
+    });
+
+    // 12 rounds of sqrt: y = sqrt(sqrt(...sqrt(x)))
+    for _ in 0..12 {
+        wasm!(f, {
+            local_get(1); f64_sqrt; local_set(1);
+        });
+    }
+
+    // z = y - 1
+    wasm!(f, {
+        local_get(1); f64_const(1.0); f64_sub; local_set(2);
+        local_get(2); local_set(3);  // z^1
+        local_get(2); local_set(4);  // sum = z
+    });
+
+    // Taylor: ln(1+z) = z - z^2/2 + z^3/3 - z^4/4 + ...
+    // k=2: sum -= z^2/2
+    wasm!(f, { local_get(3); local_get(2); f64_mul; local_set(3); });
+    wasm!(f, { local_get(4); local_get(3); f64_const(2.0); f64_div; f64_sub; local_set(4); });
+    // k=3: sum += z^3/3
+    wasm!(f, { local_get(3); local_get(2); f64_mul; local_set(3); });
+    wasm!(f, { local_get(4); local_get(3); f64_const(3.0); f64_div; f64_add; local_set(4); });
+    // k=4: sum -= z^4/4
+    wasm!(f, { local_get(3); local_get(2); f64_mul; local_set(3); });
+    wasm!(f, { local_get(4); local_get(3); f64_const(4.0); f64_div; f64_sub; local_set(4); });
+    // k=5: sum += z^5/5
+    wasm!(f, { local_get(3); local_get(2); f64_mul; local_set(3); });
+    wasm!(f, { local_get(4); local_get(3); f64_const(5.0); f64_div; f64_add; local_set(4); });
+    // k=6: sum -= z^6/6
+    wasm!(f, { local_get(3); local_get(2); f64_mul; local_set(3); });
+    wasm!(f, { local_get(4); local_get(3); f64_const(6.0); f64_div; f64_sub; local_set(4); });
+    // k=7: sum += z^7/7
+    wasm!(f, { local_get(3); local_get(2); f64_mul; local_set(3); });
+    wasm!(f, { local_get(4); local_get(3); f64_const(7.0); f64_div; f64_add; local_set(4); });
+
+    // ln(x) = 4096 * sum
+    wasm!(f, {
+        local_get(4); f64_const(4096.0); f64_mul;
+        end;
+    });
+
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
+
+/// __math_exp(x: f64) -> f64
+/// e^x via range reduction + Taylor series.
+/// Split x = n + frac where n = floor(x). Then e^x = e^n * e^frac.
+/// e^n via repeated squaring of e, e^frac via Taylor series (15 terms).
+pub(super) fn compile_math_exp(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.math_exp];
+    // params: 0=f64 x
+    // locals: 1=f64 int_part, 2=f64 frac, 3=i64 n, 4=i32 is_neg,
+    //         5=f64 base_pow (e^|n|), 6=f64 term, 7=f64 sum
+    let mut f = Function::new([
+        (1, ValType::F64),  // 1: int_part
+        (1, ValType::F64),  // 2: frac
+        (1, ValType::I64),  // 3: n (absolute)
+        (1, ValType::I32),  // 4: is_neg
+        (1, ValType::F64),  // 5: base_pow
+        (1, ValType::F64),  // 6: term
+        (1, ValType::F64),  // 7: sum
+    ]);
+
+    // Special case: x == 0.0 -> 1.0
+    wasm!(f, {
+        local_get(0); f64_const(0.0); f64_eq;
+        if_empty;
+          f64_const(1.0); return_;
+        end;
+    });
+
+    // int_part = trunc(x)
+    wasm!(f, {
+        local_get(0);
+    });
+    f.instruction(&Instruction::F64Trunc);
+    wasm!(f, {
+        local_set(1);
+    });
+
+    // frac = x - int_part
+    wasm!(f, {
+        local_get(0); local_get(1); f64_sub; local_set(2);
+    });
+
+    // is_neg = int_part < 0
+    wasm!(f, {
+        local_get(1); f64_const(0.0); f64_lt; local_set(4);
+    });
+
+    // n = |int_part| as i64
+    wasm!(f, {
+        local_get(1); f64_abs; i64_trunc_f64_s; local_set(3);
+    });
+
+    // Compute e^|n| via binary exponentiation: base_pow = 1.0, base = e
+    // base_pow local_set(5), reuse local_get(1) as base (e)
+    wasm!(f, {
+        f64_const(1.0); local_set(5);
+        f64_const(std::f64::consts::E); local_set(1); // reuse local 1 as base
+        block_empty; loop_empty;
+          local_get(3); i64_eqz; br_if(1);
+          // if n & 1: base_pow *= base
+          local_get(3); i64_const(1); i64_and; i64_eqz;
+          i32_eqz;
+          if_empty;
+            local_get(5); local_get(1); f64_mul; local_set(5);
+          end;
+          local_get(1); local_get(1); f64_mul; local_set(1);
+          local_get(3); i64_const(1); i64_shr_s; local_set(3);
+          br(0);
+        end; end;
+    });
+
+    // If is_neg: base_pow = 1.0 / base_pow
+    wasm!(f, {
+        local_get(4);
+        if_empty;
+          f64_const(1.0); local_get(5); f64_div; local_set(5);
+        end;
+    });
+
+    // Compute e^frac via Taylor series: sum = 1, term = 1
+    wasm!(f, {
+        f64_const(1.0); local_set(6); // term = 1
+        f64_const(1.0); local_set(7); // sum = 1
+    });
+
+    // 20 terms: term *= frac/k, sum += term
+    for k in 1..=20 {
+        wasm!(f, {
+            local_get(6); local_get(2); f64_mul;
+            f64_const(k as f64); f64_div;
+            local_set(6);
+            local_get(7); local_get(6); f64_add; local_set(7);
+        });
+    }
+
+    // result = base_pow * sum
+    wasm!(f, {
+        local_get(5); local_get(7); f64_mul;
+        end;
+    });
+
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
