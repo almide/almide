@@ -455,12 +455,13 @@ fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, l
                 crate::types::Ty::Named(_, args) if !args.is_empty() => args.clone(),
                 crate::types::Ty::Applied(_, args) if !args.is_empty() => args.clone(),
                 crate::types::Ty::Variant { .. } => {
-                    // For inline Variant types, use VarTable (updated by mono propagate)
-                    // as the source of truth for field types.
+                    // Use pattern.ty (set by mono substitute_pattern_types) — no VarTable
                     for arg in args.iter() {
-                        if let crate::ir::IrPattern::Bind { var, .. } = arg {
-                            let vt_ty = &vt.get(*var).ty;
-                            if let Some(val_type) = values::ty_to_valtype(vt_ty) {
+                        if let crate::ir::IrPattern::Bind { var, ty } = arg {
+                            let effective_ty = if matches!(ty, crate::types::Ty::Unknown | crate::types::Ty::TypeVar(_)) {
+                                &vt.get(*var).ty // fallback only
+                            } else { ty };
+                            if let Some(val_type) = values::ty_to_valtype(effective_ty) {
                                 locals.push((*var, val_type));
                             }
                         }
@@ -470,19 +471,20 @@ fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, l
                 _ => vec![],
             };
             for (i, arg) in args.iter().enumerate() {
-                if let crate::ir::IrPattern::Bind { var, .. } = arg {
-                    let var_ty = vt.get(*var).ty.clone();
-                    if var.0 == 107 || (ctor_name == "Right" && vt.get(*var).name == "v") {
-                        eprintln!("[SCAN RIGHT] {}[{}] var={:?} '{}' vt_ty={:?} subject={:?} type_args={:?}",
-                            ctor_name, i, var, vt.get(*var).name, var_ty, subject_ty, subject_type_args);
-                    }
-                    let resolved = if !subject_type_args.is_empty() {
+                if let crate::ir::IrPattern::Bind { var, ty: pat_ty } = arg {
+                    // Use pattern.ty first (set by mono), fall back to VarTable + substitution
+                    let resolved = if !matches!(pat_ty, crate::types::Ty::Unknown | crate::types::Ty::TypeVar(_))
+                        && !matches!(pat_ty, crate::types::Ty::Named(n, a) if a.is_empty() && n.len() <= 2 && n.chars().next().map_or(false, |c| c.is_uppercase()))
+                    {
+                        pat_ty.clone()
+                    } else if !subject_type_args.is_empty() {
+                        let var_ty = vt.get(*var).ty.clone();
                         let mut gnames = Vec::new();
                         super::expressions::collect_type_param_names(&var_ty, &mut gnames);
                         if gnames.is_empty() { var_ty } else {
                             super::expressions::substitute_type_params(&var_ty, &gnames, &subject_type_args)
                         }
-                    } else { var_ty };
+                    } else { vt.get(*var).ty.clone() };
                     if let Some(val_type) = values::ty_to_valtype(&resolved) {
                         locals.push((*var, val_type));
                     }
