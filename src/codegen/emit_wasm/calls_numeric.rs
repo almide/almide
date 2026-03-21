@@ -249,73 +249,51 @@ impl FuncCompiler<'_> {
             }
             "to_hex" => {
                 // to_hex(n: Int) → String: hex lowercase
-                // Use scratch memory at offset 16..47 (itoa scratch area) for building
+                // Alloc temp buffer (20 bytes max), write digits in reverse, then create result
                 let s = self.match_i32_base + self.match_depth;
                 let s64 = self.match_i64_base + self.match_depth;
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
-                    local_set(s64); // n
-                    // Handle 0 → "0"
+                    local_set(s64);
                     local_get(s64); i64_eqz;
                     if_i32;
                       i32_const(5); call(self.emitter.rt.alloc); local_set(s);
                       local_get(s); i32_const(1); i32_store(0);
-                      local_get(s); i32_const(48); i32_store8(4); // '0'
+                      local_get(s); i32_const(48); i32_store8(4);
                       local_get(s);
                     else_;
-                      // Build hex digits in scratch[16..32], then reverse copy to string
-                      i32_const(0); local_set(s); // digit count
-                      local_get(s64); i64_const(0); i64_lt_s;
-                      local_set(s + 1); // is_neg
-                      // Work with absolute value
-                      local_get(s + 1);
-                      if_empty;
-                        i64_const(0); local_get(s64); i64_sub; local_set(s64);
-                      end;
+                      // Alloc temp buffer for reversed digits
+                      i32_const(20); call(self.emitter.rt.alloc); local_set(s); // buf
+                      i32_const(0); local_set(s + 1); // count
+                });
+                wasm!(self.func, {
                       block_empty; loop_empty;
                         local_get(s64); i64_eqz; br_if(1);
-                        // digit = n % 16
                         local_get(s64); i64_const(16); i64_rem_u; i32_wrap_i64;
-                        local_set(s + 2);
-                        // char = digit < 10 ? '0'+digit : 'a'+digit-10
+                        local_set(s + 2); // digit
                         local_get(s + 2); i32_const(10); i32_lt_u;
-                        if_i32;
-                          local_get(s + 2); i32_const(48); i32_add;
-                        else_;
-                          local_get(s + 2); i32_const(87); i32_add; // 'a'-10=87
-                        end;
-                        // Store at scratch[16 + count]
-                        i32_const(16); local_get(s); i32_add;
-                        local_set(s + 3); // addr
-                        local_get(s + 3);
-                });
-                // Store byte
-                wasm!(self.func, {
-                        i32_store8(0);
-                        local_get(s); i32_const(1); i32_add; local_set(s);
+                        if_i32; local_get(s + 2); i32_const(48); i32_add;
+                        else_; local_get(s + 2); i32_const(87); i32_add; end;
+                        local_set(s + 2); // char
+                        local_get(s); local_get(s + 1); i32_add;
+                        local_get(s + 2); i32_store8(0);
+                        local_get(s + 1); i32_const(1); i32_add; local_set(s + 1);
                         local_get(s64); i64_const(16); i64_div_u; local_set(s64);
                         br(0);
                       end; end;
-                      // Now scratch[16..16+count] has hex digits in reverse
-                      // Alloc string: 4 + count (+ 1 for neg sign)
-                      i32_const(4); local_get(s); i32_add;
-                      local_get(s + 1); i32_add; // +1 if negative
+                });
+                wasm!(self.func, {
+                      // Alloc result string
+                      i32_const(4); local_get(s + 1); i32_add;
                       call(self.emitter.rt.alloc); local_set(s + 2);
-                      local_get(s + 2); local_get(s); local_get(s + 1); i32_add; i32_store(0);
-                      // If negative, write '-'
-                      local_get(s + 1);
-                      if_empty;
-                        local_get(s + 2); i32_const(45); i32_store8(4); // '-'
-                      end;
-                      // Copy digits in reverse
-                      i32_const(0); local_set(s + 3); // i
+                      local_get(s + 2); local_get(s + 1); i32_store(0);
+                      // Copy reversed
+                      i32_const(0); local_set(s + 3);
                       block_empty; loop_empty;
-                        local_get(s + 3); local_get(s); i32_ge_u; br_if(1);
-                        local_get(s + 2); i32_const(4); i32_add;
-                        local_get(s + 1); i32_add; // skip '-' if neg
-                        local_get(s + 3); i32_add;
-                        i32_const(16);
-                        local_get(s); i32_const(1); i32_sub; local_get(s + 3); i32_sub;
+                        local_get(s + 3); local_get(s + 1); i32_ge_u; br_if(1);
+                        local_get(s + 2); i32_const(4); i32_add; local_get(s + 3); i32_add;
+                        local_get(s);
+                        local_get(s + 1); i32_const(1); i32_sub; local_get(s + 3); i32_sub;
                         i32_add; i32_load8_u(0);
                         i32_store8(0);
                         local_get(s + 3); i32_const(1); i32_add; local_set(s + 3);
