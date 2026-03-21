@@ -1367,6 +1367,13 @@ impl FuncCompiler<'_> {
                 // filter_map(xs, f) → List[B]: f returns Option[B], keep some values
                 let elem_ty = self.list_elem_ty(&args[0].ty);
                 let es = values::byte_size(&elem_ty) as i32;
+                // Output element type B: if input is List[Option[B]], unwrap Option to get B
+                let out_elem_ty = if let Ty::Applied(_, inner_args) = &elem_ty {
+                    inner_args.first().cloned().unwrap_or(Ty::Int)
+                } else if let Ty::Fn { ret, .. } = &args[1].ty {
+                    self.list_elem_ty(ret)
+                } else { Ty::Int };
+                let out_es = values::byte_size(&out_elem_ty) as i32;
                 let s = self.match_i32_base + self.match_depth;
                 // mem[0]=xs, mem[4]=closure
                 wasm!(self.func, { i32_const(0); });
@@ -1375,38 +1382,40 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
                     i32_store(0);
-                    i32_const(0); i32_load(0); i32_load(0); local_set(s); // len
-                    // Alloc max-size result (4 bytes per element ptr)
-                    i32_const(4); local_get(s); i32_const(4); i32_mul; i32_add;
+                    i32_const(0); i32_load(0); i32_load(0); local_set(s);
+                    i32_const(4); local_get(s); i32_const(out_es); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(s + 1);
-                    local_get(s + 1); i32_const(0); i32_store(0); // result len = 0
-                    i32_const(0); local_set(s + 2); // i
+                    local_get(s + 1); i32_const(0); i32_store(0);
+                    i32_const(0); local_set(s + 2);
                     block_empty; loop_empty;
                       local_get(s + 2); local_get(s); i32_ge_u; br_if(1);
-                      // Call f(xs[i]) → Option[B]
                       i32_const(4); i32_load(0); i32_load(4); // env
                       i32_const(0); i32_load(0); i32_const(4); i32_add;
                       local_get(s + 2); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
                 wasm!(self.func, {
-                      i32_const(4); i32_load(0); i32_load(0); // table_idx
+                      i32_const(4); i32_load(0); i32_load(0);
                 });
                 {
                     let mut ct = vec![ValType::I32];
                     if let Some(vt) = values::ty_to_valtype(&elem_ty) { ct.push(vt); }
-                    let ti = self.emitter.register_type(ct, vec![ValType::I32]); // returns Option ptr (i32)
+                    let ti = self.emitter.register_type(ct, vec![ValType::I32]);
                     wasm!(self.func, { call_indirect(ti, 0); });
                 }
                 wasm!(self.func, {
                       local_set(s + 3); // option result
-                      // If some (non-zero), append inner value to result
                       local_get(s + 3); i32_const(0); i32_ne;
                       if_empty;
+                        // Append unwrapped value to result
                         local_get(s + 1); i32_const(4); i32_add;
-                        local_get(s + 1); i32_load(0); i32_const(4); i32_mul; i32_add;
-                        local_get(s + 3); i32_load(0); // unwrap some → inner value (ptr)
-                        i32_store(0);
+                        local_get(s + 1); i32_load(0); i32_const(out_es); i32_mul; i32_add;
+                        local_get(s + 3); // some ptr
+                });
+                // Load inner value from some ptr
+                self.emit_load_at(&out_elem_ty, 0);
+                self.emit_store_at(&out_elem_ty, 0);
+                wasm!(self.func, {
                         local_get(s + 1);
                         local_get(s + 1); i32_load(0); i32_const(1); i32_add;
                         i32_store(0);
