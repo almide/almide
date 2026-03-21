@@ -1039,6 +1039,40 @@ impl FuncCompiler<'_> {
                             end;
                         });
                     }
+                    ("error", "context") => {
+                        // error.context(result, msg) → Result[T, String]
+                        // If err: wrap error message with context. If ok: pass through.
+                        let s = self.match_i32_base + self.match_depth;
+                        self.emit_expr(&args[0]);
+                        wasm!(self.func, {
+                            local_set(s);
+                            local_get(s); i32_load(0); i32_eqz; // tag == 0 (ok)?
+                            if_i32;
+                              local_get(s); // pass ok through
+                            else_;
+                              // Build new err with context: "msg: original_err"
+                              local_get(s); i32_load(4); local_set(s + 1); // original err string
+                        });
+                        self.emit_expr(&args[1]); // context msg
+                        wasm!(self.func, {
+                              local_set(s + 2);
+                              // Build ": " separator
+                              i32_const(6); call(self.emitter.rt.alloc); local_set(s + 3);
+                              local_get(s + 3); i32_const(2); i32_store(0);
+                              local_get(s + 3); i32_const(58); i32_store8(4);
+                              local_get(s + 3); i32_const(32); i32_store8(5);
+                              // concat: msg + ": " + original
+                              local_get(s + 2); local_get(s + 3); call(self.emitter.rt.concat_str);
+                              local_get(s + 1); call(self.emitter.rt.concat_str);
+                              local_set(s + 1);
+                              // Build new err Result
+                              i32_const(8); call(self.emitter.rt.alloc); local_set(s);
+                              local_get(s); i32_const(1); i32_store(0);
+                              local_get(s); local_get(s + 1); i32_store(4);
+                              local_get(s);
+                            end;
+                        });
+                    }
                     ("error", "chain") => {
                         // error.chain(outer, cause) → "outer: cause"
                         self.emit_expr(&args[0]);

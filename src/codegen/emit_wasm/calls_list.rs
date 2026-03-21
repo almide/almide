@@ -861,10 +861,111 @@ impl FuncCompiler<'_> {
                 });
             }
             "unique" => {
-                // unique(xs) → List[A]: O(n²) dedup
-                // For now, stub — needs element equality which is complex
                 self.emit_stub_call(args);
                 return true;
+            }
+            "take_end" => {
+                // take_end(xs, n) = drop(xs, max(0, len-n))
+                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let es = values::byte_size(&elem_ty) as i32;
+                let s = self.match_i32_base + self.match_depth;
+                wasm!(self.func, { i32_const(0); });
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { i32_store(0); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, {
+                    i32_wrap_i64; local_set(s); // n
+                    // start = max(0, len - n)
+                    i32_const(0); i32_load(0); i32_load(0); local_get(s); i32_sub;
+                    local_set(s + 1);
+                    local_get(s + 1); i32_const(0); i32_lt_s;
+                    if_empty; i32_const(0); local_set(s + 1); end;
+                    // new_len = len - start
+                    i32_const(0); i32_load(0); i32_load(0); local_get(s + 1); i32_sub;
+                    local_set(s + 2);
+                    i32_const(4); local_get(s + 2); i32_const(es); i32_mul; i32_add;
+                    call(self.emitter.rt.alloc); local_set(s + 3);
+                    local_get(s + 3); local_get(s + 2); i32_store(0);
+                    i32_const(0); local_set(s); // reuse as i
+                    block_empty; loop_empty;
+                      local_get(s); local_get(s + 2); i32_ge_u; br_if(1);
+                      local_get(s + 3); i32_const(4); i32_add;
+                      local_get(s); i32_const(es); i32_mul; i32_add;
+                      i32_const(0); i32_load(0); i32_const(4); i32_add;
+                      local_get(s + 1); local_get(s); i32_add;
+                      i32_const(es); i32_mul; i32_add;
+                });
+                self.emit_elem_copy(&elem_ty);
+                wasm!(self.func, {
+                      local_get(s); i32_const(1); i32_add; local_set(s);
+                      br(0);
+                    end; end;
+                    local_get(s + 3);
+                });
+            }
+            "drop_end" => {
+                // drop_end(xs, n) = take(xs, max(0, len-n))
+                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let es = values::byte_size(&elem_ty) as i32;
+                let s = self.match_i32_base + self.match_depth;
+                wasm!(self.func, { i32_const(0); });
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { i32_store(0); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, {
+                    i32_wrap_i64; local_set(s); // n
+                    i32_const(0); i32_load(0); i32_load(0); local_get(s); i32_sub;
+                    local_set(s + 1); // new_len
+                    local_get(s + 1); i32_const(0); i32_lt_s;
+                    if_empty; i32_const(0); local_set(s + 1); end;
+                    i32_const(4); local_get(s + 1); i32_const(es); i32_mul; i32_add;
+                    call(self.emitter.rt.alloc); local_set(s + 2);
+                    local_get(s + 2); local_get(s + 1); i32_store(0);
+                    i32_const(0); local_set(s); // i
+                    block_empty; loop_empty;
+                      local_get(s); local_get(s + 1); i32_ge_u; br_if(1);
+                      local_get(s + 2); i32_const(4); i32_add;
+                      local_get(s); i32_const(es); i32_mul; i32_add;
+                      i32_const(0); i32_load(0); i32_const(4); i32_add;
+                      local_get(s); i32_const(es); i32_mul; i32_add;
+                });
+                self.emit_elem_copy(&elem_ty);
+                wasm!(self.func, {
+                      local_get(s); i32_const(1); i32_add; local_set(s);
+                      br(0);
+                    end; end;
+                    local_get(s + 2);
+                });
+            }
+            "repeat" => {
+                // repeat(val, n) → List[A]
+                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let es = values::byte_size(&elem_ty) as i32;
+                let s = self.match_i32_base + self.match_depth;
+                wasm!(self.func, { i32_const(0); });
+                self.emit_expr(&args[0]); // val
+                self.emit_store_at(&elem_ty, 0); // mem[0] = val
+                self.emit_expr(&args[1]); // n
+                wasm!(self.func, {
+                    i32_wrap_i64; local_set(s); // n
+                    i32_const(4); local_get(s); i32_const(es); i32_mul; i32_add;
+                    call(self.emitter.rt.alloc); local_set(s + 1);
+                    local_get(s + 1); local_get(s); i32_store(0);
+                    i32_const(0); local_set(s + 2); // i
+                    block_empty; loop_empty;
+                      local_get(s + 2); local_get(s); i32_ge_u; br_if(1);
+                      local_get(s + 1); i32_const(4); i32_add;
+                      local_get(s + 2); i32_const(es); i32_mul; i32_add;
+                      i32_const(0);
+                });
+                self.emit_load_at(&elem_ty, 0);
+                self.emit_store_at(&elem_ty, 0);
+                wasm!(self.func, {
+                      local_get(s + 2); i32_const(1); i32_add; local_set(s + 2);
+                      br(0);
+                    end; end;
+                    local_get(s + 1);
+                });
             }
             _ => return false,
         }
