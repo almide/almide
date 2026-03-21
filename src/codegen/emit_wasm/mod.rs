@@ -63,6 +63,7 @@ pub struct RuntimeFuncs {
     pub result_eq_i64_str: u32,
     pub str_trim: u32,
     pub int_parse: u32,  // __int_parse(s: i32) → i32 (Result[Int, String])
+    pub float_to_string: u32,  // __float_to_string(f: f64) → i32
 }
 
 /// Import descriptor for WASM import section.
@@ -156,7 +157,7 @@ impl WasmEmitter {
                 fd_write: 0,
                 alloc: 0,
                 println_str: 0,
-                int_to_string: 0,
+                int_to_string: 0, float_to_string: 0,
                 println_int: 0,
                 concat_str: 0,
                 str_eq: 0,
