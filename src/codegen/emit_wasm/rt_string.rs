@@ -66,6 +66,9 @@ pub fn register(emitter: &mut WasmEmitter) {
     emitter.rt.string.is_whitespace = emitter.register_func("__str_is_whitespace", ty_i32_i32);
     emitter.rt.string.is_upper = emitter.register_func("__str_is_upper", ty_i32_i32);
     emitter.rt.string.is_lower = emitter.register_func("__str_is_lower", ty_i32_i32);
+
+    // String comparison: (a: i32, b: i32) -> i32 (negative/0/positive)
+    emitter.rt.string.cmp = emitter.register_func("__str_cmp", ty_i32x2_i32);
 }
 
 /// Compile all string runtime function bodies.
@@ -101,6 +104,7 @@ pub fn compile(emitter: &mut WasmEmitter) {
     super::rt_string_extra::compile_is_whitespace(emitter);
     super::rt_string_extra::compile_is_upper(emitter);
     super::rt_string_extra::compile_is_lower(emitter);
+    super::rt_string_extra::compile_cmp(emitter);
 }
 
 // ── Helpers ──

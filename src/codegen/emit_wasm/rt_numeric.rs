@@ -1,0 +1,701 @@
+//! WASM runtime: int.from_hex, float.parse, float.to_fixed, math.fpow.
+//!
+//! Called from `compile_runtime()` in runtime.rs.
+
+use super::{CompiledFunc, WasmEmitter};
+use wasm_encoder::{Function, Instruction, ValType};
+
+/// __int_from_hex(s: i32) -> i32
+/// Parses a hex string (e.g. "ff", "FF", "0xff") to i64, returns Result[Int, String].
+/// Layout: [tag:i32][value:i64] = 12 bytes. tag=0 ok, tag=1 err (str ptr at offset 4).
+pub(super) fn compile_int_from_hex(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.int_from_hex];
+    // params: 0=$s (string ptr: [len:i32][data:u8...])
+    // locals:
+    //   1=i32 len, 2=i32 i, 3=i64 result, 4=i32 byte, 5=i32 alloc_ptr, 6=i32 digit
+    let mut f = Function::new([
+        (1, ValType::I32),  // 1: len
+        (1, ValType::I32),  // 2: i
+        (1, ValType::I64),  // 3: result
+        (1, ValType::I32),  // 4: byte
+        (1, ValType::I32),  // 5: alloc_ptr
+        (1, ValType::I32),  // 6: digit
+    ]);
+
+    let err_str = emitter.intern_string("invalid hex");
+
+    // len = s.len
+    wasm!(f, {
+        local_get(0); i32_load(0); local_set(1);
+    });
+
+    // Empty string -> err
+    wasm!(f, {
+        local_get(1); i32_eqz;
+        if_empty;
+    });
+    emit_int_from_hex_err(&mut f, emitter, err_str);
+    wasm!(f, { end; });
+
+    // i = 0, result = 0
+    wasm!(f, {
+        i32_const(0); local_set(2);
+        i64_const(0); local_set(3);
+    });
+
+    // Skip optional "0x" or "0X" prefix
+    wasm!(f, {
+        local_get(1); i32_const(2); i32_ge_u;
+        if_empty;
+          local_get(0); i32_load8_u(4); // first byte
+          i32_const(48); // '0'
+          i32_eq;
+          if_empty;
+            local_get(0); i32_const(4); i32_add; i32_const(1); i32_add; i32_load8_u(0); // second byte
+            local_set(4);
+            local_get(4); i32_const(120); i32_eq; // 'x'
+            local_get(4); i32_const(88); i32_eq; // 'X'
+            i32_or;
+            if_empty;
+              i32_const(2); local_set(2); // skip "0x"
+            end;
+          end;
+        end;
+    });
+
+    // After skipping prefix, check we still have digits
+    wasm!(f, {
+        local_get(2); local_get(1); i32_ge_u;
+        if_empty;
+    });
+    emit_int_from_hex_err(&mut f, emitter, err_str);
+    wasm!(f, { end; });
+
+    // Main parse loop: while i < len
+    wasm!(f, {
+        block_empty; loop_empty;
+        local_get(2); local_get(1); i32_ge_u; br_if(1);
+    });
+
+    // byte = s[4+i]
+    wasm!(f, {
+        local_get(0); i32_const(4); i32_add;
+        local_get(2); i32_add;
+        i32_load8_u(0); local_set(4);
+    });
+
+    // Skip underscores (common in hex literals)
+    wasm!(f, {
+        local_get(4); i32_const(95); i32_eq; // '_'
+        if_empty;
+          local_get(2); i32_const(1); i32_add; local_set(2);
+          br(1); // continue loop
+        end;
+    });
+
+    // Classify: '0'-'9' -> 0-9, 'a'-'f' -> 10-15, 'A'-'F' -> 10-15, else err
+    // digit = -1 (sentinel for invalid)
+    wasm!(f, {
+        i32_const(-1); local_set(6);
+        // Check '0' <= byte <= '9'
+        local_get(4); i32_const(48); i32_ge_u;
+        local_get(4); i32_const(57); i32_le_u;
+        i32_and;
+        if_empty;
+          local_get(4); i32_const(48); i32_sub; local_set(6);
+        else_;
+          // Check 'a' <= byte <= 'f'
+          local_get(4); i32_const(97); i32_ge_u;
+          local_get(4); i32_const(102); i32_le_u;
+          i32_and;
+          if_empty;
+            local_get(4); i32_const(87); i32_sub; local_set(6); // 'a'-87 = 10
+          else_;
+            // Check 'A' <= byte <= 'F'
+            local_get(4); i32_const(65); i32_ge_u;
+            local_get(4); i32_const(70); i32_le_u;
+            i32_and;
+            if_empty;
+              local_get(4); i32_const(55); i32_sub; local_set(6); // 'A'-55 = 10
+            end;
+          end;
+        end;
+    });
+
+    // If digit == -1 -> err
+    wasm!(f, {
+        local_get(6); i32_const(-1); i32_eq;
+        if_empty;
+    });
+    emit_int_from_hex_err(&mut f, emitter, err_str);
+    wasm!(f, { end; });
+
+    // result = result * 16 + digit
+    wasm!(f, {
+        local_get(3); i64_const(16); i64_mul;
+        local_get(6); i64_extend_i32_u;
+        i64_add; local_set(3);
+    });
+
+    // i++
+    wasm!(f, {
+        local_get(2); i32_const(1); i32_add; local_set(2);
+        br(0);
+        end; end; // end loop, end block
+    });
+
+    // Return ok(result): alloc [tag=0, value=result]
+    wasm!(f, {
+        i32_const(12); call(emitter.rt.alloc); local_set(5);
+        local_get(5); i32_const(0); i32_store(0);   // tag = 0 (ok)
+        local_get(5); local_get(3); i64_store(4);    // value
+        local_get(5);
+        end;
+    });
+
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
+
+/// Emit the err return for int_from_hex: alloc [tag=1][str_ptr] and return.
+fn emit_int_from_hex_err(f: &mut Function, emitter: &WasmEmitter, err_str: u32) {
+    wasm!(f, {
+        i32_const(12); call(emitter.rt.alloc); local_set(5);
+        local_get(5); i32_const(1); i32_store(0);              // tag = 1 (err)
+        local_get(5); i32_const(err_str as i32); i32_store(4); // err string
+        local_get(5);
+        return_;
+    });
+}
+
+/// __float_parse(s: i32) -> i32
+/// Parses a string to f64, returns Result[Float, String].
+/// Layout: [tag:i32][f64 | err_str_ptr:i32] = 12 bytes.
+/// tag=0: ok, f64 at offset 4.  tag=1: err, str ptr at offset 4.
+///
+/// Handles: optional leading sign, integer part, optional decimal part.
+/// Examples: "3.14", "-0.5", "42", "+1.0"
+pub(super) fn compile_float_parse(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.float_parse];
+    // params: 0=$s (string ptr: [len:i32][data:u8...])
+    // locals:
+    //   1=i32 len, 2=i32 i, 3=f64 result, 4=i32 is_neg,
+    //   5=i32 byte, 6=i32 alloc_ptr, 7=f64 frac_mult,
+    //   8=i32 has_dot, 9=i32 digit_count
+    let mut f = Function::new([
+        (1, ValType::I32),  // 1: len
+        (1, ValType::I32),  // 2: i
+        (1, ValType::F64),  // 3: result
+        (1, ValType::I32),  // 4: is_neg
+        (1, ValType::I32),  // 5: byte
+        (1, ValType::I32),  // 6: alloc_ptr
+        (1, ValType::F64),  // 7: frac_mult
+        (1, ValType::I32),  // 8: has_dot
+        (1, ValType::I32),  // 9: digit_count
+    ]);
+
+    let err_str = emitter.intern_string("invalid number");
+
+    // len = s.len
+    wasm!(f, {
+        local_get(0); i32_load(0); local_set(1);
+    });
+
+    // Empty string -> err
+    wasm!(f, {
+        local_get(1); i32_eqz;
+        if_empty;
+    });
+    emit_float_parse_err(&mut f, emitter, err_str);
+    wasm!(f, { end; });
+
+    // Initialize: i=0, result=0.0, is_neg=0, frac_mult=1.0, has_dot=0, digit_count=0
+    wasm!(f, {
+        i32_const(0); local_set(2);
+        f64_const(0.0); local_set(3);
+        i32_const(0); local_set(4);
+        f64_const(1.0); local_set(7);
+        i32_const(0); local_set(8);
+        i32_const(0); local_set(9);
+    });
+
+    // Check leading '-'
+    wasm!(f, {
+        local_get(0); i32_load8_u(4);
+        i32_const(45); // '-'
+        i32_eq;
+        if_empty;
+          i32_const(1); local_set(4);
+          i32_const(1); local_set(2);
+        end;
+    });
+
+    // Check leading '+' (only if not already negative)
+    wasm!(f, {
+        local_get(0); i32_load8_u(4);
+        i32_const(43); // '+'
+        i32_eq;
+        local_get(4); i32_eqz;
+        i32_and;
+        if_empty;
+          i32_const(1); local_set(2);
+        end;
+    });
+
+    // Main parse loop: while i < len
+    wasm!(f, {
+        block_empty; loop_empty;
+        local_get(2); local_get(1); i32_ge_u; br_if(1);
+    });
+
+    // byte = s[4+i]
+    wasm!(f, {
+        local_get(0); i32_const(4); i32_add;
+        local_get(2); i32_add;
+        i32_load8_u(0); local_set(5);
+    });
+
+    // Check for '.'
+    wasm!(f, {
+        local_get(5); i32_const(46); i32_eq; // '.'
+        if_empty;
+          // If we already saw a dot -> err
+          local_get(8);
+          if_empty;
+    });
+    emit_float_parse_err(&mut f, emitter, err_str);
+    wasm!(f, {
+          end;
+          i32_const(1); local_set(8);
+          // advance i and continue
+          local_get(2); i32_const(1); i32_add; local_set(2);
+          br(1); // continue loop
+        end;
+    });
+
+    // Check digit: '0' <= byte <= '9'
+    wasm!(f, {
+        local_get(5); i32_const(48); i32_lt_u;
+        local_get(5); i32_const(57); i32_gt_u;
+        i32_or;
+        if_empty;
+    });
+    // Not a digit -> err
+    emit_float_parse_err(&mut f, emitter, err_str);
+    wasm!(f, { end; });
+
+    // It's a digit. digit_count++
+    wasm!(f, {
+        local_get(9); i32_const(1); i32_add; local_set(9);
+    });
+
+    // If we're past the dot: frac_mult /= 10, result += digit * frac_mult
+    // Else: result = result * 10 + digit
+    wasm!(f, {
+        local_get(8);
+        if_empty;
+          // Fractional part
+          local_get(7); f64_const(10.0); f64_div; local_set(7);
+          local_get(3);
+          local_get(5); i32_const(48); i32_sub; i64_extend_i32_u; f64_convert_i64_s;
+          local_get(7); f64_mul;
+          f64_add; local_set(3);
+        else_;
+          // Integer part
+          local_get(3); f64_const(10.0); f64_mul;
+          local_get(5); i32_const(48); i32_sub; i64_extend_i32_u; f64_convert_i64_s;
+          f64_add; local_set(3);
+        end;
+    });
+
+    // i++, continue
+    wasm!(f, {
+        local_get(2); i32_const(1); i32_add; local_set(2);
+        br(0);
+        end; end; // end loop, end block
+    });
+
+    // Must have at least 1 digit
+    wasm!(f, {
+        local_get(9); i32_eqz;
+        if_empty;
+    });
+    emit_float_parse_err(&mut f, emitter, err_str);
+    wasm!(f, { end; });
+
+    // If is_neg: result = -result
+    wasm!(f, {
+        local_get(4);
+        if_empty;
+          local_get(3); f64_neg; local_set(3);
+        end;
+    });
+
+    // Return ok(result): alloc 12 bytes [tag=0][f64]
+    wasm!(f, {
+        i32_const(12); call(emitter.rt.alloc); local_set(6);
+        local_get(6); i32_const(0); i32_store(0);     // tag = 0 (ok)
+        local_get(6); local_get(3); f64_store(4);      // value
+        local_get(6);
+        end;
+    });
+
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
+
+/// Emit the err return for float_parse: alloc [tag=1][str_ptr] and return.
+fn emit_float_parse_err(f: &mut Function, emitter: &WasmEmitter, err_str: u32) {
+    wasm!(f, {
+        i32_const(12); call(emitter.rt.alloc); local_set(6);
+        local_get(6); i32_const(1); i32_store(0);          // tag = 1 (err)
+        local_get(6); i32_const(err_str as i32); i32_store(4); // err string
+        local_get(6);
+        return_;
+    });
+}
+
+/// __float_to_fixed(f: f64, decimals: i64) -> i32
+/// Format a float with exactly N decimal places. Returns String ptr.
+///
+/// Algorithm: multiply by 10^decimals, round, then format integer part + "." + padded decimal part.
+pub(super) fn compile_float_to_fixed(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.float_to_fixed];
+    // params: 0=f64 f, 1=i64 decimals
+    // locals:
+    //   2=i32 dec_i32,  3=f64 scale,  4=i32 loop_i,
+    //   5=f64 scaled,   6=i64 int_val, 7=i32 int_str,
+    //   8=i32 buf,      9=i32 count,  10=i32 digit,
+    //   11=i32 result,  12=i32 copy_i, 13=i32 is_neg
+    let mut f = Function::new([
+        (1, ValType::I32),  // 2: dec_i32
+        (1, ValType::F64),  // 3: scale
+        (1, ValType::I32),  // 4: loop_i
+        (1, ValType::F64),  // 5: scaled
+        (1, ValType::I64),  // 6: int_val (absolute)
+        (1, ValType::I32),  // 7: int_str
+        (1, ValType::I32),  // 8: buf (scratch for decimal digits)
+        (1, ValType::I32),  // 9: count
+        (1, ValType::I32),  // 10: digit
+        (1, ValType::I32),  // 11: result
+        (1, ValType::I32),  // 12: copy_i
+        (1, ValType::I32),  // 13: is_neg
+    ]);
+
+    // dec_i32 = decimals as i32 (clamped to [0, 20])
+    wasm!(f, {
+        local_get(1); i32_wrap_i64; local_set(2);
+    });
+    // if dec < 0: dec = 0
+    f.instruction(&Instruction::LocalGet(2));
+    f.instruction(&Instruction::I32Const(0));
+    f.instruction(&Instruction::I32LtS);
+    wasm!(f, { if_empty; i32_const(0); local_set(2); end; });
+    // if dec > 20: dec = 20
+    wasm!(f, {
+        local_get(2); i32_const(20); i32_gt_u;
+        if_empty;
+          i32_const(20); local_set(2);
+        end;
+    });
+
+    // If decimals == 0: just return int_to_string(trunc(f))
+    wasm!(f, {
+        local_get(2); i32_eqz;
+        if_empty;
+          local_get(0);
+    });
+    f.instruction(&Instruction::F64Trunc);
+    wasm!(f, {
+          i64_trunc_f64_s;
+          call(emitter.rt.int_to_string);
+          return_;
+        end;
+    });
+
+    // is_neg = f < 0.0
+    wasm!(f, {
+        local_get(0); f64_const(0.0); f64_lt; local_set(13);
+    });
+
+    // Compute scale = 10^decimals via loop
+    wasm!(f, {
+        f64_const(1.0); local_set(3);
+        i32_const(0); local_set(4);
+        block_empty; loop_empty;
+          local_get(4); local_get(2); i32_ge_u; br_if(1);
+          local_get(3); f64_const(10.0); f64_mul; local_set(3);
+          local_get(4); i32_const(1); i32_add; local_set(4);
+          br(0);
+        end; end;
+    });
+
+    // scaled = round(abs(f) * scale)
+    wasm!(f, {
+        local_get(0); f64_abs;
+        local_get(3); f64_mul;
+        f64_nearest;
+        local_set(5);
+    });
+
+    // int_val = scaled as i64
+    wasm!(f, {
+        local_get(5); i64_trunc_f64_s; local_set(6);
+    });
+
+    // Extract decimal digits: we need dec_i32 digits from int_val % scale
+    // Alloc scratch buf for digits (max 20)
+    wasm!(f, {
+        i32_const(20); call(emitter.rt.alloc); local_set(8);
+        local_get(2); local_set(9); // count = dec_i32 (we fill all positions)
+    });
+
+    // Fill digits right-to-left: buf[count-1-i] = (int_val % 10) + '0'
+    // Loop count times
+    wasm!(f, {
+        i32_const(0); local_set(4); // i = 0
+        block_empty; loop_empty;
+          local_get(4); local_get(9); i32_ge_u; br_if(1);
+          // digit = (int_val % 10)
+          local_get(6); i64_const(10); i64_rem_s; i32_wrap_i64;
+          // Ensure non-negative (in case of rounding artifacts)
+          local_set(10);
+          local_get(10); i32_const(0); i32_lt_s;
+          if_empty;
+            i32_const(0); local_get(10); i32_sub; local_set(10);
+          end;
+          // buf[count-1-i] = digit + '0'
+          local_get(8);
+          local_get(9); i32_const(1); i32_sub; local_get(4); i32_sub;
+          i32_add;
+          local_get(10); i32_const(48); i32_add;
+          i32_store8(0);
+          // int_val /= 10
+          local_get(6); i64_const(10); i64_div_s; local_set(6);
+          local_get(4); i32_const(1); i32_add; local_set(4);
+          br(0);
+        end; end;
+    });
+
+    // Now int_val holds the integer part. Build integer string.
+    // If is_neg and original int_val != 0, negate it.
+    // Actually, we want the integer part of abs(f), which is now in int_val (after extracting decimals).
+    // If is_neg, we need to prepend '-'.
+    // The int_to_string handles negative, so let's just pass -(int_val) if is_neg.
+    wasm!(f, {
+        local_get(13);
+        if_empty;
+          i64_const(0); local_get(6); i64_sub; local_set(6);
+        end;
+        local_get(6);
+        call(emitter.rt.int_to_string);
+        local_set(7);
+    });
+
+    // Build result: int_str + "." + decimal_buf
+    // First build decimal string from buf[0..count]
+    let dot = emitter.intern_string(".");
+    wasm!(f, {
+        // Alloc decimal string: 4 + count bytes
+        i32_const(4); local_get(9); i32_add;
+        call(emitter.rt.alloc); local_set(11);
+        local_get(11); local_get(9); i32_store(0); // len
+        // Copy buf[0..count] to result+4
+        i32_const(0); local_set(12);
+        block_empty; loop_empty;
+          local_get(12); local_get(9); i32_ge_u; br_if(1);
+          local_get(11); i32_const(4); i32_add; local_get(12); i32_add;
+          local_get(8); local_get(12); i32_add; i32_load8_u(0);
+          i32_store8(0);
+          local_get(12); i32_const(1); i32_add; local_set(12);
+          br(0);
+        end; end;
+    });
+
+    // Concat: int_str + "." + dec_str
+    wasm!(f, {
+        local_get(7);
+        i32_const(dot as i32);
+        call(emitter.rt.concat_str);
+        local_get(11);
+        call(emitter.rt.concat_str);
+        end;
+    });
+
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
+
+/// __float_pow(base: f64, exp: f64) -> f64
+/// Float exponentiation. Handles:
+/// - exp == 0 -> 1.0
+/// - exp is non-negative integer -> binary exponentiation (exact)
+/// - exp is negative integer -> 1.0 / pow(base, -exp)
+/// - Fractional exp -> exp(exp * ln(base)) via sqrt reduction + Taylor series
+pub(super) fn compile_float_pow(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.float_pow];
+    // params: 0=f64 base, 1=f64 exp
+    // locals (all f64 or i64/i32 as needed — carefully typed):
+    //   2=f64 result/y (shared),  3=i64 n (integer path only),
+    //   4=f64 b/z,  5=f64 frac_check/zk/sum,
+    //   6=i32 is_neg_exp,
+    //   7=f64 ln_sum (fractional path), 8=f64 term (fractional path)
+    let mut f = Function::new([
+        (1, ValType::F64),  // 2: result (int path) / y (frac path)
+        (1, ValType::I64),  // 3: n (integer exponent)
+        (1, ValType::F64),  // 4: b (int path) / z (frac path)
+        (1, ValType::F64),  // 5: frac_check / z^k
+        (1, ValType::I32),  // 6: is_neg_exp
+        (1, ValType::F64),  // 7: ln_sum (frac path) / exp_arg
+        (1, ValType::F64),  // 8: term (frac path) / exp_sum
+    ]);
+
+    // Special case: exp == 0.0 -> 1.0
+    wasm!(f, {
+        local_get(1); f64_const(0.0); f64_eq;
+        if_empty;
+          f64_const(1.0); return_;
+        end;
+    });
+
+    // Special case: base == 1.0 -> 1.0
+    wasm!(f, {
+        local_get(0); f64_const(1.0); f64_eq;
+        if_empty;
+          f64_const(1.0); return_;
+        end;
+    });
+
+    // Special case: base == 0.0 -> 0.0 (for positive exp)
+    wasm!(f, {
+        local_get(0); f64_const(0.0); f64_eq;
+        if_empty;
+          f64_const(0.0); return_;
+        end;
+    });
+
+    // Check if exp is an integer: trunc(exp) == exp
+    wasm!(f, {
+        local_get(1);
+    });
+    f.instruction(&Instruction::F64Trunc);
+    wasm!(f, {
+        local_set(5);
+        local_get(1); local_get(5); f64_eq;
+        if_f64;
+    });
+
+    // --- Integer exponent path: binary exponentiation ---
+    wasm!(f, {
+          local_get(1); f64_const(0.0); f64_lt; local_set(6);
+          local_get(5); f64_abs; i64_trunc_f64_s; local_set(3);
+          f64_const(1.0); local_set(2);
+          local_get(0); local_set(4);
+    });
+
+    // Binary exponentiation loop
+    wasm!(f, {
+          block_empty; loop_empty;
+            local_get(3); i64_eqz; br_if(1);
+            local_get(3); i64_const(1); i64_and; i64_eqz;
+            i32_eqz;
+            if_empty;
+              local_get(2); local_get(4); f64_mul; local_set(2);
+            end;
+            local_get(4); local_get(4); f64_mul; local_set(4);
+            local_get(3); i64_const(1); i64_shr_s; local_set(3);
+            br(0);
+          end; end;
+    });
+
+    // If negative exp: result = 1.0 / result
+    wasm!(f, {
+          local_get(6);
+          if_empty;
+            f64_const(1.0); local_get(2); f64_div; local_set(2);
+          end;
+          local_get(2);
+    });
+
+    // --- Fractional exponent path: exp(exp * ln(base)) ---
+    wasm!(f, {
+        else_;
+    });
+
+    // Compute ln(base) via sqrt reduction + Taylor series.
+    // y = abs(base), apply sqrt 12 times, then ln(y_reduced) via Taylor,
+    // then ln(base) = 4096 * ln(y_reduced).
+
+    // local 2 = y
+    wasm!(f, {
+        local_get(0); f64_abs; local_set(2);
+    });
+
+    // 12 rounds of sqrt
+    for _ in 0..12 {
+        wasm!(f, {
+            local_get(2); f64_sqrt; local_set(2);
+        });
+    }
+
+    // z = y - 1 (local 4)
+    // z^k (local 5), ln_sum (local 7)
+    wasm!(f, {
+        local_get(2); f64_const(1.0); f64_sub; local_set(4);
+        local_get(4); local_set(5);  // z^1
+        local_get(4); local_set(7);  // sum = z
+    });
+
+    // Taylor terms for ln(1+z): sum += (-1)^(k+1) * z^k / k
+    // k=2: sum -= z^2/2
+    wasm!(f, { local_get(5); local_get(4); f64_mul; local_set(5); });
+    wasm!(f, { local_get(7); local_get(5); f64_const(2.0); f64_div; f64_sub; local_set(7); });
+    // k=3: sum += z^3/3
+    wasm!(f, { local_get(5); local_get(4); f64_mul; local_set(5); });
+    wasm!(f, { local_get(7); local_get(5); f64_const(3.0); f64_div; f64_add; local_set(7); });
+    // k=4: sum -= z^4/4
+    wasm!(f, { local_get(5); local_get(4); f64_mul; local_set(5); });
+    wasm!(f, { local_get(7); local_get(5); f64_const(4.0); f64_div; f64_sub; local_set(7); });
+    // k=5: sum += z^5/5
+    wasm!(f, { local_get(5); local_get(4); f64_mul; local_set(5); });
+    wasm!(f, { local_get(7); local_get(5); f64_const(5.0); f64_div; f64_add; local_set(7); });
+    // k=6: sum -= z^6/6
+    wasm!(f, { local_get(5); local_get(4); f64_mul; local_set(5); });
+    wasm!(f, { local_get(7); local_get(5); f64_const(6.0); f64_div; f64_sub; local_set(7); });
+    // k=7: sum += z^7/7
+    wasm!(f, { local_get(5); local_get(4); f64_mul; local_set(5); });
+    wasm!(f, { local_get(7); local_get(5); f64_const(7.0); f64_div; f64_add; local_set(7); });
+
+    // ln(base) = 4096 * sum -> store in local 7
+    wasm!(f, {
+        local_get(7); f64_const(4096.0); f64_mul; local_set(7);
+    });
+
+    // exp_arg = exp * ln(base) -> local 7 (reuse)
+    wasm!(f, {
+        local_get(1); local_get(7); f64_mul; local_set(7);
+    });
+
+    // exp(exp_arg) via Taylor: sum = 1, term = 1
+    // local 8 = term, local 2 = sum (reuse)
+    wasm!(f, {
+        f64_const(1.0); local_set(8); // term = 1
+        f64_const(1.0); local_set(2); // sum = 1
+    });
+
+    // 15 terms: term *= x/k, sum += term
+    for k in 1..=15 {
+        wasm!(f, {
+            local_get(8); local_get(7); f64_mul;
+            f64_const(k as f64); f64_div;
+            local_set(8);
+            local_get(2); local_get(8); f64_add; local_set(2);
+        });
+    }
+
+    wasm!(f, {
+        local_get(2); // result
+        end; // end else (if/else for int vs frac)
+    });
+
+    wasm!(f, { end; }); // end function
+
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}

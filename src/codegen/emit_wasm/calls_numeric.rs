@@ -97,14 +97,15 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { f64_abs; f64_const(f64::INFINITY); f64_eq; });
             }
             "parse" => {
-                // float.parse → Result[Float, String]. Needs runtime. Stub for now.
-                self.emit_stub_call(args);
-                return true;
+                // float.parse(s: String) → Result[Float, String]
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { call(self.emitter.rt.float_parse); });
             }
             "to_fixed" => {
-                // float.to_fixed → String. Needs runtime. Stub for now.
-                self.emit_stub_call(args);
-                return true;
+                // float.to_fixed(n: Float, decimals: Int) → String
+                self.emit_expr(&args[0]);
+                self.emit_expr(&args[1]);
+                wasm!(self.func, { call(self.emitter.rt.float_to_fixed); });
             }
             _ => return false,
         }
@@ -303,7 +304,11 @@ impl FuncCompiler<'_> {
                     end;
                 });
             }
-            "from_hex" | "rotate_right" | "rotate_left" => {
+            "from_hex" => {
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { call(self.emitter.rt.int_from_hex); });
+            }
+            "rotate_right" | "rotate_left" => {
                 self.emit_stub_call(args);
                 return true;
             }
@@ -422,10 +427,9 @@ impl FuncCompiler<'_> {
             }
             "fpow" => {
                 // fpow(base: Float, exp: Float) → Float
-                // WASM has no native pow. Approximate via exp(exp * log(base))
-                // For now, stub — common enough to need a proper implementation later.
-                self.emit_stub_call(args);
-                return true;
+                self.emit_expr(&args[0]);
+                self.emit_expr(&args[1]);
+                wasm!(self.func, { call(self.emitter.rt.float_pow); });
             }
             "factorial" => {
                 // factorial(n) → Int, loop

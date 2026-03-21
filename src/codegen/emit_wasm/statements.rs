@@ -312,6 +312,10 @@ fn count_scratch_depth(expr: &IrExpr) -> usize {
         IrExprKind::Clone { expr } | IrExprKind::Deref { expr } => count_scratch_depth(expr),
         IrExprKind::Member { object, .. } | IrExprKind::IndexAccess { object, .. }
         | IrExprKind::TupleIndex { object, .. } => count_scratch_depth(object),
+        // MapAccess delegates to map.get which uses 2 scratch locals (loop index + result ptr)
+        IrExprKind::MapAccess { object, key } => {
+            2 + count_scratch_depth(object).max(count_scratch_depth(key))
+        }
         _ => 0,
     }
 }
@@ -406,6 +410,10 @@ fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::
         }
         IrExprKind::Member { object, .. } | IrExprKind::IndexAccess { object, .. } => {
             scan_expr(object, locals, vt);
+        }
+        IrExprKind::MapAccess { object, key } => {
+            scan_expr(object, locals, vt);
+            scan_expr(key, locals, vt);
         }
         IrExprKind::Lambda { body, .. } => {
             scan_expr(body, locals, vt);

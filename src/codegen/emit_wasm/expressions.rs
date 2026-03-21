@@ -453,6 +453,12 @@ impl FuncCompiler<'_> {
                 self.emit_load_at(&expr.ty, 4);
             }
 
+            // ── Map index access: m[key] → Option[V] ──
+            IrExprKind::MapAccess { object, key } => {
+                let fake_args = vec![(**object).clone(), (**key).clone()];
+                self.emit_map_call("get", &fake_args);
+            }
+
             // ── Codegen-specific nodes (pass-through or ignore) ──
             IrExprKind::Clone { expr: inner } | IrExprKind::Deref { expr: inner } => {
                 self.emit_expr(inner);
