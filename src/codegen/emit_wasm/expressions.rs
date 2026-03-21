@@ -353,7 +353,6 @@ impl FuncCompiler<'_> {
 
             // ── Option/Result ──
             IrExprKind::OptionSome { expr: inner } => {
-                // Allocate space for the inner value, store it, return pointer
                 let inner_size = values::byte_size(&inner.ty);
                 let scratch = self.match_i32_base + self.match_depth;
                 wasm!(self.func, {
@@ -362,7 +361,10 @@ impl FuncCompiler<'_> {
                     local_set(scratch);
                     local_get(scratch);
                 });
+                // Reserve scratch so inner expr uses different local
+                self.match_depth += 1;
                 self.emit_expr(inner);
+                self.match_depth -= 1;
                 self.emit_store_at(&inner.ty, 0);
                 wasm!(self.func, { local_get(scratch); });
             }
@@ -384,10 +386,11 @@ impl FuncCompiler<'_> {
                     i32_const(0);
                     i32_store(0);
                 });
-                // Store value (skip for Unit — no value to store)
                 if values::ty_to_valtype(&inner.ty).is_some() {
                     wasm!(self.func, { local_get(scratch); });
+                    self.match_depth += 1;
                     self.emit_expr(inner);
+                    self.match_depth -= 1;
                     self.emit_store_at(&inner.ty, 4);
                 }
                 wasm!(self.func, { local_get(scratch); });
@@ -407,7 +410,9 @@ impl FuncCompiler<'_> {
                 });
                 if values::ty_to_valtype(&inner.ty).is_some() {
                     wasm!(self.func, { local_get(scratch); });
+                    self.match_depth += 1;
                     self.emit_expr(inner);
+                    self.match_depth -= 1;
                     self.emit_store_at(&inner.ty, 4);
                 }
                 wasm!(self.func, { local_get(scratch); });
