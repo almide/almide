@@ -68,6 +68,8 @@ impl FuncCompiler<'_> {
                 });
             }
             "get" => {
+                // get(s, i) → Option[String]
+                // OOB → none(0), else → some(1-char string)
                 let s = self.match_i32_base + self.match_depth;
                 wasm!(self.func, { i32_const(0); });
                 self.emit_expr(&args[0]);
@@ -75,13 +77,25 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
                     i32_wrap_i64; local_set(s);
-                    i32_const(5); call(self.emitter.rt.alloc); local_set(s + 1);
-                    local_get(s + 1); i32_const(1); i32_store(0);
-                    local_get(s + 1);
-                    i32_const(0); i32_load(0);
-                    i32_const(4); i32_add; local_get(s); i32_add;
-                    i32_load8_u(0); i32_store8(4);
-                    local_get(s + 1);
+                    // bounds check
+                    local_get(s); i32_const(0); i32_lt_s;
+                    local_get(s); i32_const(0); i32_load(0); i32_load(0); i32_ge_u;
+                    i32_or;
+                    if_i32;
+                      i32_const(0); // none
+                    else_;
+                      // Build 1-char string
+                      i32_const(5); call(self.emitter.rt.alloc); local_set(s + 1);
+                      local_get(s + 1); i32_const(1); i32_store(0);
+                      local_get(s + 1);
+                      i32_const(0); i32_load(0); i32_const(4); i32_add;
+                      local_get(s); i32_add; i32_load8_u(0);
+                      i32_store8(4);
+                      // Wrap in some: alloc ptr, store string ptr
+                      i32_const(4); call(self.emitter.rt.alloc); local_set(s + 2);
+                      local_get(s + 2); local_get(s + 1); i32_store(0);
+                      local_get(s + 2);
+                    end;
                 });
             }
             "reverse" => {
@@ -296,6 +310,46 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[0]);
                 self.emit_expr(&args[1]);
                 wasm!(self.func, { call(self.emitter.rt.string.strip_suffix); });
+            }
+            "first" => {
+                // first(s) → Option[String]: get(s, 0)
+                let s = self.match_i32_base + self.match_depth;
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(s);
+                    local_get(s); i32_load(0); i32_eqz; // empty?
+                    if_i32; i32_const(0); // none
+                    else_;
+                      // alloc 1-char string
+                      i32_const(5); call(self.emitter.rt.alloc); local_set(s + 1);
+                      local_get(s + 1); i32_const(1); i32_store(0);
+                      local_get(s + 1); local_get(s); i32_load8_u(4); i32_store8(4);
+                      // wrap in some: alloc ptr
+                      i32_const(4); call(self.emitter.rt.alloc); local_set(s + 2);
+                      local_get(s + 2); local_get(s + 1); i32_store(0);
+                      local_get(s + 2);
+                    end;
+                });
+            }
+            "last" => {
+                let s = self.match_i32_base + self.match_depth;
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(s);
+                    local_get(s); i32_load(0); i32_eqz;
+                    if_i32; i32_const(0);
+                    else_;
+                      i32_const(5); call(self.emitter.rt.alloc); local_set(s + 1);
+                      local_get(s + 1); i32_const(1); i32_store(0);
+                      local_get(s + 1);
+                      local_get(s); i32_const(4); i32_add;
+                      local_get(s); i32_load(0); i32_const(1); i32_sub; i32_add;
+                      i32_load8_u(0); i32_store8(4);
+                      i32_const(4); call(self.emitter.rt.alloc); local_set(s + 2);
+                      local_get(s + 2); local_get(s + 1); i32_store(0);
+                      local_get(s + 2);
+                    end;
+                });
             }
             _ => return false,
         }

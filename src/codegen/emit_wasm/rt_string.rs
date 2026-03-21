@@ -357,59 +357,65 @@ fn compile_replace(emitter: &mut WasmEmitter) {
     emitter.add_compiled(CompiledFunc { type_idx, func: f });
 }
 
+/// Recursive split using index_of. Supports multi-char delimiter.
+/// Strategy: find first delimiter → [before] ++ split(rest, delim)
+/// Base case: no delimiter found → [s]
 fn compile_split(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.string.split];
+    // params: 0=s, 1=delim | locals: 2=idx(i64), 3=d_len, 4=before, 5=rest, 6=rest_list, 7=result
     let mut f = Function::new([
+        (1, ValType::I64), (1, ValType::I32), (1, ValType::I32),
         (1, ValType::I32), (1, ValType::I32), (1, ValType::I32),
-        (1, ValType::I32), (1, ValType::I32), (1, ValType::I32), (1, ValType::I32),
     ]);
     wasm!(f, {
-        local_get(0); i32_load(0); local_set(2);
-        local_get(1); i32_const(4); i32_add; i32_load8_u(0); local_set(3);
-        // Count segments
-        i32_const(1); local_set(4); // count = 1
-        i32_const(0); local_set(6); // i = 0
-        block_empty; loop_empty;
-          local_get(6); local_get(2); i32_ge_u; br_if(1);
-          local_get(0); i32_const(4); i32_add; local_get(6); i32_add; i32_load8_u(0);
-          local_get(3); i32_eq;
-          if_empty;
-            local_get(4); i32_const(1); i32_add; local_set(4);
-          end;
-          local_get(6); i32_const(1); i32_add; local_set(6);
-          br(0);
-        end; end;
-        // Alloc result list
-        i32_const(4); local_get(4); i32_const(4); i32_mul; i32_add;
-        call(emitter.rt.alloc); local_set(7);
-        local_get(7); local_get(4); i32_store(0);
-        // Fill segments
-        i32_const(0); local_set(5); // start
-        i32_const(0); local_set(6); // i
-        i32_const(0); local_set(8); // seg_idx
-        block_empty; loop_empty;
-          local_get(6); local_get(2); i32_ge_u; br_if(1);
-          local_get(0); i32_const(4); i32_add; local_get(6); i32_add; i32_load8_u(0);
-          local_get(3); i32_eq;
-          if_empty;
-            local_get(7); i32_const(4); i32_add;
-            local_get(8); i32_const(4); i32_mul; i32_add;
-            local_get(0); local_get(5); local_get(6);
-            call(emitter.rt.string.slice);
-            i32_store(0);
-            local_get(8); i32_const(1); i32_add; local_set(8);
-            local_get(6); i32_const(1); i32_add; local_set(5);
-          end;
-          local_get(6); i32_const(1); i32_add; local_set(6);
-          br(0);
-        end; end;
-        // Last segment
-        local_get(7); i32_const(4); i32_add;
-        local_get(8); i32_const(4); i32_mul; i32_add;
-        local_get(0); local_get(5); local_get(2);
-        call(emitter.rt.string.slice);
-        i32_store(0);
-        local_get(7);
+        local_get(1); i32_load(0); local_set(3); // d_len
+        local_get(0); local_get(1); call(emitter.rt.string.index_of); local_set(2);
+        local_get(2); i64_const(-1); i64_eq;
+        if_i32;
+          // No match: return [s]
+          i32_const(8); call(emitter.rt.alloc); local_set(7);
+          local_get(7); i32_const(1); i32_store(0);
+          local_get(7); local_get(0); i32_store(4);
+          local_get(7);
+        else_;
+          // before = slice(s, 0, idx)
+          local_get(0); i32_const(0); local_get(2); i32_wrap_i64;
+          call(emitter.rt.string.slice); local_set(4);
+          // rest = slice(s, idx + d_len, s_len)
+          local_get(0);
+          local_get(2); i32_wrap_i64; local_get(3); i32_add;
+          local_get(0); i32_load(0);
+          call(emitter.rt.string.slice); local_set(5);
+          // rest_list = split(rest, delim) — recursive
+          local_get(5); local_get(1);
+          call(emitter.rt.string.split); local_set(6);
+          // result = [before] ++ rest_list
+          // Alloc: 4 + (1 + rest_list.len) * 4
+          i32_const(4);
+          local_get(6); i32_load(0); i32_const(1); i32_add;
+          i32_const(4); i32_mul; i32_add;
+          call(emitter.rt.alloc); local_set(7);
+          local_get(7);
+          local_get(6); i32_load(0); i32_const(1); i32_add;
+          i32_store(0); // result.len
+          // result[0] = before
+          local_get(7); local_get(4); i32_store(4);
+    });
+    // Copy rest_list elements to result[1..]
+    wasm!(f, {
+          i32_const(0); local_set(3); // reuse as i
+          block_empty; loop_empty;
+            local_get(3); local_get(6); i32_load(0); i32_ge_u; br_if(1);
+            local_get(7); i32_const(8); i32_add; // &result[1]
+            local_get(3); i32_const(4); i32_mul; i32_add;
+            local_get(6); i32_const(4); i32_add;
+            local_get(3); i32_const(4); i32_mul; i32_add;
+            i32_load(0); i32_store(0);
+            local_get(3); i32_const(1); i32_add; local_set(3);
+            br(0);
+          end; end;
+          local_get(7);
+        end;
         end;
     });
     emitter.add_compiled(CompiledFunc { type_idx, func: f });

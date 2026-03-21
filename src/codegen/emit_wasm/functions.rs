@@ -60,6 +60,7 @@ pub fn compile_function(
         match_i32_base,
         match_depth: 0,
         var_table: _var_table,
+        stub_ret_ty: crate::types::Ty::Unit,
     };
 
     if let Some(init_idx) = init_globals_idx {

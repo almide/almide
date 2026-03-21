@@ -10,6 +10,8 @@ use super::wasm_macro::wasm;
 
 impl FuncCompiler<'_> {
     pub(super) fn emit_call(&mut self, target: &CallTarget, args: &[IrExpr], _ret_ty: &Ty) {
+        // Set return type context for stub calls
+        self.stub_ret_ty = _ret_ty.clone();
         match target {
             CallTarget::Named { name } => {
                 match name.as_str() {
@@ -1019,6 +1021,41 @@ impl FuncCompiler<'_> {
                             self.emit_stub_call(args);
                         }
                     }
+                    ("error", "message") => {
+                        // error.message(r: Result[T, String]) → String
+                        // tag==0(ok): empty string, tag==1(err): load string at offset 4
+                        let s = self.match_i32_base + self.match_depth;
+                        self.emit_expr(&args[0]);
+                        wasm!(self.func, {
+                            local_set(s);
+                            local_get(s); i32_load(0); i32_eqz; // tag == 0?
+                            if_i32;
+                              // ok → empty string
+                              i32_const(4); call(self.emitter.rt.alloc); local_set(s + 1);
+                              local_get(s + 1); i32_const(0); i32_store(0);
+                              local_get(s + 1);
+                            else_;
+                              local_get(s); i32_load(4); // err string ptr
+                            end;
+                        });
+                    }
+                    ("error", "chain") => {
+                        // error.chain(outer, cause) → "outer: cause"
+                        self.emit_expr(&args[0]);
+                        // concat outer + ": " + cause
+                        // Build ": " string
+                        let s = self.match_i32_base + self.match_depth;
+                        wasm!(self.func, {
+                            local_set(s);
+                            i32_const(6); call(self.emitter.rt.alloc); local_set(s + 1);
+                            local_get(s + 1); i32_const(2); i32_store(0);
+                            local_get(s + 1); i32_const(58); i32_store8(4); // ':'
+                            local_get(s + 1); i32_const(32); i32_store8(5); // ' '
+                            local_get(s); local_get(s + 1); call(self.emitter.rt.concat_str);
+                        });
+                        self.emit_expr(&args[1]);
+                        wasm!(self.func, { call(self.emitter.rt.concat_str); });
+                    }
                     _ => {
                         self.emit_stub_call(args);
                     }
@@ -1114,6 +1151,30 @@ impl FuncCompiler<'_> {
                         fake_args.extend(args.iter().cloned());
                         let m = method.strip_prefix("string.").unwrap_or(method);
                         if !self.emit_string_call(m, &fake_args) {
+                            self.emit_stub_call(args);
+                        }
+                    }
+                    _ if matches!(&object.ty, Ty::Int) => {
+                        let mut fake_args = vec![(**object).clone()];
+                        fake_args.extend(args.iter().cloned());
+                        let m = method.strip_prefix("int.").unwrap_or(method);
+                        if !self.emit_int_call(m, &fake_args) {
+                            self.emit_stub_call(args);
+                        }
+                    }
+                    _ if matches!(&object.ty, Ty::Float) => {
+                        let mut fake_args = vec![(**object).clone()];
+                        fake_args.extend(args.iter().cloned());
+                        let m = method.strip_prefix("float.").unwrap_or(method);
+                        if !self.emit_float_call(m, &fake_args) {
+                            self.emit_stub_call(args);
+                        }
+                    }
+                    _ if matches!(&object.ty, Ty::Applied(crate::types::constructor::TypeConstructorId::List, _)) => {
+                        let mut fake_args = vec![(**object).clone()];
+                        fake_args.extend(args.iter().cloned());
+                        let m = method.strip_prefix("list.").unwrap_or(method);
+                        if !self.emit_list_call(m, &fake_args) {
                             self.emit_stub_call(args);
                         }
                     }
@@ -1413,14 +1474,76 @@ impl FuncCompiler<'_> {
     }
 
     pub(super) fn emit_stub_call(&mut self, args: &[IrExpr]) {
+        // Evaluate args for side effects, then return typed default instead of trapping.
         for arg in args {
             self.emit_expr(arg);
-            // Only drop if the arg produces a value
             if values::ty_to_valtype(&arg.ty).is_some() {
                 wasm!(self.func, { drop; });
             }
         }
-        wasm!(self.func, { unreachable; });
+        // Return safe typed default based on return type context.
+        let ret_ty = self.stub_ret_ty.clone();
+        self.emit_typed_default(&ret_ty);
+    }
+
+    /// Emit a safe default value for a given type.
+    /// String → empty string, List → empty list, Option → none, Bool → false, etc.
+    pub(super) fn emit_typed_default(&mut self, ty: &Ty) {
+        use crate::types::constructor::TypeConstructorId;
+        match ty {
+            Ty::Int => { wasm!(self.func, { i64_const(0); }); }
+            Ty::Float => { wasm!(self.func, { f64_const(0.0); }); }
+            Ty::Bool => { wasm!(self.func, { i32_const(0); }); }
+            Ty::String => {
+                // Empty string: alloc 4 bytes, len=0
+                wasm!(self.func, {
+                    i32_const(4); call(self.emitter.rt.alloc);
+                    local_set(self.match_i32_base + self.match_depth);
+                    local_get(self.match_i32_base + self.match_depth);
+                    i32_const(0); i32_store(0);
+                    local_get(self.match_i32_base + self.match_depth);
+                });
+            }
+            Ty::Applied(TypeConstructorId::List, _) => {
+                // Empty list: alloc 4 bytes, len=0
+                wasm!(self.func, {
+                    i32_const(4); call(self.emitter.rt.alloc);
+                    local_set(self.match_i32_base + self.match_depth);
+                    local_get(self.match_i32_base + self.match_depth);
+                    i32_const(0); i32_store(0);
+                    local_get(self.match_i32_base + self.match_depth);
+                });
+            }
+            Ty::Applied(TypeConstructorId::Option, _) => {
+                // none
+                wasm!(self.func, { i32_const(0); });
+            }
+            Ty::Applied(TypeConstructorId::Result, _) => {
+                // err("stub") — tag=1, value=empty string
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc);
+                    local_set(self.match_i32_base + self.match_depth);
+                    local_get(self.match_i32_base + self.match_depth);
+                    i32_const(1); i32_store(0); // tag=err
+                    local_get(self.match_i32_base + self.match_depth);
+                    i32_const(4); call(self.emitter.rt.alloc);
+                    i32_store(4); // empty string at offset 4
+                    local_get(self.match_i32_base + self.match_depth);
+                });
+            }
+            Ty::Unit => { /* no value */ }
+            _ => {
+                // Generic pointer type: return 0 (null)
+                // For records/tuples, this may still crash on field access.
+                match values::ty_to_valtype(ty) {
+                    Some(ValType::I64) => { wasm!(self.func, { i64_const(0); }); }
+                    Some(ValType::F64) => { wasm!(self.func, { f64_const(0.0); }); }
+                    Some(ValType::I32) => { wasm!(self.func, { i32_const(0); }); }
+                    None => {}
+                    _ => { wasm!(self.func, { i32_const(0); }); }
+                }
+            }
+        }
     }
 
     /// Emit assert_eq(left, right): compare values, trap if not equal.
