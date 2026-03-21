@@ -3,7 +3,8 @@
 //! All `("string", _)` method call handlers live here.
 
 use super::FuncCompiler;
-use crate::ir::IrExpr;
+use crate::ir::{IrExpr, IrStringPart};
+use crate::types::Ty;
 
 impl FuncCompiler<'_> {
     /// Dispatch a string stdlib method call. Returns true if handled.
@@ -417,5 +418,184 @@ impl FuncCompiler<'_> {
             _ => return false,
         }
         true
+    }
+
+    /// Concatenate two strings on the heap via __concat_str runtime.
+    pub(super) fn emit_concat_str(&mut self, left: &IrExpr, right: &IrExpr) {
+        self.emit_expr(left);
+        self.emit_expr(right);
+        wasm!(self.func, { call(self.emitter.rt.concat_str); });
+    }
+
+    /// String interpolation: convert each part to string, then concat.
+    pub(super) fn emit_string_interp(&mut self, parts: &[IrStringPart]) {
+        if parts.is_empty() {
+            let empty = self.emitter.intern_string("");
+            wasm!(self.func, { i32_const(empty as i32); });
+            return;
+        }
+
+        // Emit first part as a string
+        self.emit_string_part(&parts[0]);
+
+        // For each subsequent part: emit it, then concat with accumulator
+        for part in &parts[1..] {
+            self.emit_string_part(part);
+            wasm!(self.func, { call(self.emitter.rt.concat_str); });
+        }
+    }
+
+    /// Emit a single string interpolation part as a string (i32 pointer).
+    pub(super) fn emit_string_part(&mut self, part: &IrStringPart) {
+        match part {
+            IrStringPart::Lit { value } => {
+                let offset = self.emitter.intern_string(value);
+                wasm!(self.func, { i32_const(offset as i32); });
+            }
+            IrStringPart::Expr { expr } => {
+                match &expr.ty {
+                    Ty::String => self.emit_expr(expr),
+                    Ty::Int => {
+                        self.emit_expr(expr);
+                        wasm!(self.func, { call(self.emitter.rt.int_to_string); });
+                    }
+                    Ty::Bool => {
+                        self.emit_expr(expr);
+                        let t = self.emitter.intern_string("true");
+                        let f = self.emitter.intern_string("false");
+                        wasm!(self.func, {
+                            if_i32;
+                            i32_const(t as i32);
+                            else_;
+                            i32_const(f as i32);
+                            end;
+                        });
+                    }
+                    Ty::Float => {
+                        self.emit_expr(expr);
+                        wasm!(self.func, {
+                            call(self.emitter.rt.float_to_string);
+                        });
+                    }
+                    _ => {
+                        // Fallback: emit the expression (already a string pointer or unsupported)
+                        self.emit_expr(expr);
+                    }
+                }
+            }
+        }
+    }
+
+    /// ASCII case conversion. Expects string ptr on stack. Returns new string ptr.
+    pub(super) fn emit_str_case_convert(&mut self, is_upper: bool) {
+        // String ptr is on stack. Store to mem[0] via scratch.
+        let scratch = self.match_i32_base + self.match_depth;
+        wasm!(self.func, {
+            local_set(scratch);
+            i32_const(0);
+            local_get(scratch);
+            i32_store(0);
+            // Alloc dst with same len → mem[4]
+            i32_const(4);
+            i32_const(4);
+            i32_const(0);
+            i32_load(0);
+            i32_load(0);
+            i32_add;
+            call(self.emitter.rt.alloc);
+            i32_store(0);
+            // Store len in dst
+            i32_const(4);
+            i32_load(0);
+            i32_const(0);
+            i32_load(0);
+            i32_load(0);
+            i32_store(0);
+        });
+        // Loop: convert each byte
+        let s = self.match_i32_base + self.match_depth;
+        wasm!(self.func, {
+            i32_const(0);
+            local_set(s);
+            block_empty;
+            loop_empty;
+        });
+        let saved = self.depth; self.depth += 2;
+        wasm!(self.func, {
+            local_get(s);
+            i32_const(0);
+            i32_load(0);
+            i32_load(0);
+            i32_ge_u;
+            br_if(1);
+            // dst addr
+            i32_const(4);
+            i32_load(0);
+            i32_const(4);
+            i32_add;
+            local_get(s);
+            i32_add;
+            // src byte
+            i32_const(0);
+            i32_load(0);
+            i32_const(4);
+            i32_add;
+            local_get(s);
+            i32_add;
+            i32_load8_u(0);
+            // Convert
+            local_set(s + 1);
+        });
+        if is_upper {
+            wasm!(self.func, {
+                local_get(s + 1);
+                i32_const(97);
+                i32_ge_u;
+                local_get(s + 1);
+                i32_const(122);
+                i32_le_u;
+                i32_and;
+                if_i32;
+                local_get(s + 1);
+                i32_const(32);
+                i32_sub;
+                else_;
+                local_get(s + 1);
+                end;
+            });
+        } else {
+            wasm!(self.func, {
+                local_get(s + 1);
+                i32_const(65);
+                i32_ge_u;
+                local_get(s + 1);
+                i32_const(90);
+                i32_le_u;
+                i32_and;
+                if_i32;
+                local_get(s + 1);
+                i32_const(32);
+                i32_add;
+                else_;
+                local_get(s + 1);
+                end;
+            });
+        }
+        wasm!(self.func, {
+            i32_store8(0);
+            local_get(s);
+            i32_const(1);
+            i32_add;
+            local_set(s);
+            br(0);
+        });
+        self.depth = saved;
+        wasm!(self.func, {
+            end;
+            end;
+            // Return dst
+            i32_const(4);
+            i32_load(0);
+        });
     }
 }
