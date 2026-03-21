@@ -1075,6 +1075,11 @@ impl FuncCompiler<'_> {
                         self.emit_expr(&args[1]);
                         wasm!(self.func, { call(self.emitter.rt.concat_str); });
                     }
+                    _ if module == "set" => {
+                        if !self.emit_set_call(func, args) {
+                            self.emit_stub_call(args);
+                        }
+                    }
                     _ => {
                         self.emit_stub_call(args);
                     }
@@ -1247,16 +1252,22 @@ impl FuncCompiler<'_> {
                 self.emit_expr(callee);
                 wasm!(self.func, { local_set(scratch); });
 
+                // Reserve this scratch so nested calls use different locals
+                self.match_depth += 1;
+
                 // Push env_ptr (first hidden arg)
                 wasm!(self.func, {
                     local_get(scratch);
                     i32_load(4);
                 });
 
-                // Push declared args
+                // Push declared args (may contain nested closure calls)
                 for arg in args {
                     self.emit_expr(arg);
                 }
+
+                // Restore depth
+                self.match_depth -= 1;
 
                 // Push table_idx (on top of stack for call_indirect)
                 wasm!(self.func, {
@@ -1350,18 +1361,24 @@ impl FuncCompiler<'_> {
             // Store each captured variable into env
             for (ci, (vid, ty)) in captures.iter().enumerate() {
                 let offset = (ci as u32) * 8;
+                let is_cell = self.emitter.mutable_captures.contains(&vid.0);
                 wasm!(self.func, { local_get(env_scratch); });
                 if let Some(&local_idx) = self.var_map.get(&vid.0) {
                     wasm!(self.func, { local_get(local_idx); });
+                    if is_cell {
+                        // Mutable capture: local is cell ptr (i32), store as i32
+                        wasm!(self.func, { i32_store(offset); });
+                    } else {
+                        self.emit_store_at(ty, offset);
+                    }
                 } else {
-                    // Variable not in scope — emit typed zero
                     match values::ty_to_valtype(ty) {
                         Some(ValType::I64) => { wasm!(self.func, { i64_const(0); }); }
                         Some(ValType::F64) => { wasm!(self.func, { f64_const(0.0); }); }
                         _ => { wasm!(self.func, { i32_const(0); }); }
                     }
+                    self.emit_store_at(ty, offset);
                 }
-                self.emit_store_at(ty, offset);
             }
 
             // Allocate closure: [table_idx, env_ptr]
@@ -1694,34 +1711,31 @@ impl FuncCompiler<'_> {
         let s = self.match_i32_base + self.match_depth;
         let len_local = s;
         let idx_local = s + 1;
+        let src_local = s + 2;
+        let closure_local = s + 3;
 
-        // Store src_ptr → mem[0], fn_closure → mem[4]
-        wasm!(self.func, { i32_const(0); });
+        // Store src_ptr and closure in scratch locals (not mem[]) to survive nested calls
         self.emit_expr(list_arg);
-        wasm!(self.func, {
-            i32_store(0);
-            i32_const(4);
-        });
+        wasm!(self.func, { local_set(src_local); });
         self.emit_expr(fn_arg);
         wasm!(self.func, {
-            i32_store(0);
-            // len = mem[0].len (load src_ptr, load len)
-            i32_const(0);
-            i32_load(0);
+            local_set(closure_local);
+            local_get(src_local);
             i32_load(0);
             local_set(len_local);
-            // Alloc dst: 4 + len * out_size → store to mem[8]
-            i32_const(8);
+            // Alloc dst
             i32_const(4);
             local_get(len_local);
             i32_const(out_size as i32);
             i32_mul;
             i32_add;
             call(self.emitter.rt.alloc);
-            i32_store(0);
-            // dst.len = len
-            i32_const(8);
-            i32_load(0);
+            local_set(s + 4); // dst_local
+        });
+        let dst_local = s + 4;
+        wasm!(self.func, {
+            // Set dst.len
+            local_get(dst_local);
             local_get(len_local);
             i32_store(0);
             // idx = 0
@@ -1735,35 +1749,23 @@ impl FuncCompiler<'_> {
         self.depth += 2;
 
         wasm!(self.func, {
-            // break if idx >= len
             local_get(idx_local);
             local_get(len_local);
             i32_ge_u;
             br_if(1);
-            // ── Compute dst addr FIRST (stays on stack under call result) ──
-            // dst_ptr + 4 + idx * out_size
-            i32_const(8);
-            i32_load(0); // dst
+            // dst addr
+            local_get(dst_local);
             i32_const(4);
             i32_add;
             local_get(idx_local);
             i32_const(out_size as i32);
             i32_mul;
             i32_add;
-            // Stack: [dst_elem_addr]
-            // ── Call fn(element) ──
-            // Load closure from mem[4]
-            i32_const(4);
-            i32_load(0);
-        });
-        // env_ptr = closure[4]
-        wasm!(self.func, { i32_load(4); });
-        // Stack: [dst_elem_addr, env_ptr]
-
-        // Load src element: src_ptr + 4 + idx * in_size
-        wasm!(self.func, {
-            i32_const(0);
-            i32_load(0); // src
+            // env_ptr from closure
+            local_get(closure_local);
+            i32_load(4);
+            // src element
+            local_get(src_local);
             i32_const(4);
             i32_add;
             local_get(idx_local);
@@ -1772,23 +1774,30 @@ impl FuncCompiler<'_> {
             i32_add;
         });
         self.emit_load_at(&in_elem_ty, 0);
-        // Stack: [dst_elem_addr, env_ptr, element]
-
-        // table_idx = closure[0]
+        // table_idx from closure
         wasm!(self.func, {
-            i32_const(4);
-            i32_load(0); // closure
-            i32_load(0); // table_idx
+            local_get(closure_local);
+            i32_load(0);
         });
         // Stack: [dst_elem_addr, env_ptr, element, table_idx]
 
         // call_indirect (env, element) → result
-        // Use concrete element types (not fn_arg.ty which may contain unresolved TypeVars)
+        // Use fn_arg.ty (Fn type) if available for accurate param/ret types,
+        // otherwise fall back to element types
         {
-            let mut ct = vec![ValType::I32]; // env
-            if let Some(vt) = values::ty_to_valtype(&in_elem_ty) { ct.push(vt); }
-            let rt = values::ret_type(&out_elem_ty);
-            let ti = self.emitter.register_type(ct, rt);
+            let ti = if let Ty::Fn { params, ret } = &fn_arg.ty {
+                let mut ct = vec![ValType::I32]; // env
+                for p in params {
+                    if let Some(vt) = values::ty_to_valtype(p) { ct.push(vt); }
+                }
+                let rt = values::ret_type(ret);
+                self.emitter.register_type(ct, rt)
+            } else {
+                let mut ct = vec![ValType::I32];
+                if let Some(vt) = values::ty_to_valtype(&in_elem_ty) { ct.push(vt); }
+                let rt = values::ret_type(&out_elem_ty);
+                self.emitter.register_type(ct, rt)
+            };
             wasm!(self.func, { call_indirect(ti, 0); });
         }
         // Stack: [dst_elem_addr, result]
@@ -1810,9 +1819,7 @@ impl FuncCompiler<'_> {
         wasm!(self.func, {
             end;
             end;
-            // Return dst_ptr from mem[8]
-            i32_const(8);
-            i32_load(0);
+            local_get(dst_local);
         });
     }
 

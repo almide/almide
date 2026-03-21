@@ -351,6 +351,69 @@ impl FuncCompiler<'_> {
                     end;
                 });
             }
+            "take_end" => {
+                // take_end(s, n) = slice(s, max(0, len-n), len)
+                let s = self.match_i32_base + self.match_depth;
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(s); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, {
+                    i32_wrap_i64; local_set(s + 1);
+                    local_get(s); i32_load(0); local_get(s + 1); i32_sub;
+                    local_set(s + 1);
+                    local_get(s + 1); i32_const(0); i32_lt_s;
+                    if_empty; i32_const(0); local_set(s + 1); end;
+                    local_get(s); local_get(s + 1); local_get(s); i32_load(0);
+                    call(self.emitter.rt.string.slice);
+                });
+            }
+            "drop_end" => {
+                // drop_end(s, n) = slice(s, 0, max(0, len-n))
+                let s = self.match_i32_base + self.match_depth;
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(s); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, {
+                    i32_wrap_i64; local_set(s + 1);
+                    local_get(s); i32_load(0); local_get(s + 1); i32_sub;
+                    local_set(s + 1);
+                    local_get(s + 1); i32_const(0); i32_lt_s;
+                    if_empty; i32_const(0); local_set(s + 1); end;
+                    local_get(s); i32_const(0); local_get(s + 1);
+                    call(self.emitter.rt.string.slice);
+                });
+            }
+            "take" => {
+                // take(s, n) = slice(s, 0, min(n, len))
+                let s = self.match_i32_base + self.match_depth;
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(s); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, {
+                    i32_wrap_i64; local_set(s + 1); // n
+                    // min(n, len)
+                    local_get(s + 1); local_get(s); i32_load(0); i32_lt_u;
+                    if_i32; local_get(s + 1); else_; local_get(s); i32_load(0); end;
+                    local_set(s + 1);
+                    local_get(s); i32_const(0); local_get(s + 1);
+                    call(self.emitter.rt.string.slice);
+                });
+            }
+            "drop" => {
+                // drop(s, n) = slice(s, min(n, len), len)
+                let s = self.match_i32_base + self.match_depth;
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(s); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, {
+                    i32_wrap_i64; local_set(s + 1);
+                    local_get(s + 1); local_get(s); i32_load(0); i32_lt_u;
+                    if_i32; local_get(s + 1); else_; local_get(s); i32_load(0); end;
+                    local_set(s + 1);
+                    local_get(s); local_get(s + 1); local_get(s); i32_load(0);
+                    call(self.emitter.rt.string.slice);
+                });
+            }
             _ => return false,
         }
         true

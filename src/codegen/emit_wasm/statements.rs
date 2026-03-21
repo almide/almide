@@ -11,24 +11,47 @@ impl FuncCompiler<'_> {
     pub fn emit_stmt(&mut self, stmt: &IrStmt) {
         match &stmt.kind {
             IrStmtKind::Bind { var, ty, value, .. } => {
-                self.emit_expr(value);
-                // Use value.ty when it produces a value, even if declared ty differs
+                let is_cell = self.emitter.mutable_captures.contains(&var.0);
                 let effective_ty = if values::ty_to_valtype(ty) != values::ty_to_valtype(&value.ty)
                     && values::ty_to_valtype(&value.ty).is_some() {
                     &value.ty
                 } else {
                     ty
                 };
-                if let Some(_vt) = values::ty_to_valtype(effective_ty) {
+                if is_cell {
+                    // Mutable capture: allocate heap cell, store value, local holds cell ptr
+                    let cell_size = values::byte_size(effective_ty);
                     let local_idx = self.var_map[&var.0];
-                    wasm!(self.func, { local_set(local_idx); });
+                    wasm!(self.func, {
+                        i32_const(cell_size as i32);
+                        call(self.emitter.rt.alloc);
+                        local_set(local_idx);
+                        local_get(local_idx);
+                    });
+                    self.emit_expr(value);
+                    self.emit_store_at(effective_ty, 0);
+                } else {
+                    self.emit_expr(value);
+                    if let Some(_vt) = values::ty_to_valtype(effective_ty) {
+                        let local_idx = self.var_map[&var.0];
+                        wasm!(self.func, { local_set(local_idx); });
+                    }
                 }
             }
 
             IrStmtKind::Assign { var, value } => {
-                self.emit_expr(value);
+                let is_cell = self.emitter.mutable_captures.contains(&var.0);
                 let local_idx = self.var_map[&var.0];
-                wasm!(self.func, { local_set(local_idx); });
+                if is_cell {
+                    // Cell: local holds ptr, store new value into cell
+                    wasm!(self.func, { local_get(local_idx); });
+                    self.emit_expr(value);
+                    let ty = &self.var_table.get(*var).ty;
+                    self.emit_store_at(ty, 0);
+                } else {
+                    self.emit_expr(value);
+                    wasm!(self.func, { local_set(local_idx); });
+                }
             }
 
             IrStmtKind::Expr { expr } => {

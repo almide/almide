@@ -765,20 +765,26 @@ fn compile_last_index_of(emitter: &mut WasmEmitter) {
 
 fn compile_strip_prefix(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.string.strip_prefix];
-    let mut f = Function::new([(1, ValType::I32), (1, ValType::I32)]);
+    // params: 0=s, 1=prefix | locals: 2=s_len, 3=p_len, 4=result_str
+    let mut f = Function::new([(1, ValType::I32), (1, ValType::I32), (1, ValType::I32)]);
     wasm!(f, {
         local_get(0); i32_load(0); local_set(2);
         local_get(1); i32_load(0); local_set(3);
         local_get(3); local_get(2); i32_gt_u;
-        if_i32; i32_const(0);
+        if_i32; i32_const(0); // none
         else_;
           local_get(0); i32_const(4); i32_add;
           local_get(1); i32_const(4); i32_add;
           local_get(3);
           call(emitter.rt.mem_eq);
           if_i32;
+            // some(slice): wrap string ptr in Option (alloc 4 bytes, store ptr)
             local_get(0); local_get(3); local_get(2);
-            call(emitter.rt.string.slice);
+            call(emitter.rt.string.slice); local_set(4);
+            i32_const(4); call(emitter.rt.alloc);
+            local_tee(3); // reuse local 3
+            local_get(4); i32_store(0);
+            local_get(3);
           else_;
             i32_const(0);
           end;
@@ -790,7 +796,8 @@ fn compile_strip_prefix(emitter: &mut WasmEmitter) {
 
 fn compile_strip_suffix(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.string.strip_suffix];
-    let mut f = Function::new([(1, ValType::I32), (1, ValType::I32)]);
+    // params: 0=s, 1=suffix | locals: 2=s_len, 3=p_len, 4=result_str
+    let mut f = Function::new([(1, ValType::I32), (1, ValType::I32), (1, ValType::I32)]);
     wasm!(f, {
         local_get(0); i32_load(0); local_set(2);
         local_get(1); i32_load(0); local_set(3);
@@ -803,7 +810,11 @@ fn compile_strip_suffix(emitter: &mut WasmEmitter) {
           call(emitter.rt.mem_eq);
           if_i32;
             local_get(0); i32_const(0); local_get(2); local_get(3); i32_sub;
-            call(emitter.rt.string.slice);
+            call(emitter.rt.string.slice); local_set(4);
+            i32_const(4); call(emitter.rt.alloc);
+            local_tee(3);
+            local_get(4); i32_store(0);
+            local_get(3);
           else_;
             i32_const(0);
           end;

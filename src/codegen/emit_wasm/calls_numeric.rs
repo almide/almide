@@ -247,8 +247,63 @@ impl FuncCompiler<'_> {
                     i64_and;
                 });
             }
-            "to_hex" | "from_hex" | "rotate_right" | "rotate_left" => {
-                // Need runtime string building. Stub for now.
+            "to_hex" => {
+                // to_hex(n: Int) → String: hex lowercase
+                // Alloc temp buffer (20 bytes max), write digits in reverse, then create result
+                let s = self.match_i32_base + self.match_depth;
+                let s64 = self.match_i64_base + self.match_depth;
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(s64);
+                    local_get(s64); i64_eqz;
+                    if_i32;
+                      i32_const(5); call(self.emitter.rt.alloc); local_set(s);
+                      local_get(s); i32_const(1); i32_store(0);
+                      local_get(s); i32_const(48); i32_store8(4);
+                      local_get(s);
+                    else_;
+                      // Alloc temp buffer for reversed digits
+                      i32_const(20); call(self.emitter.rt.alloc); local_set(s); // buf
+                      i32_const(0); local_set(s + 1); // count
+                });
+                wasm!(self.func, {
+                      block_empty; loop_empty;
+                        local_get(s64); i64_eqz; br_if(1);
+                        local_get(s64); i64_const(16); i64_rem_u; i32_wrap_i64;
+                        local_set(s + 2); // digit
+                        local_get(s + 2); i32_const(10); i32_lt_u;
+                        if_i32; local_get(s + 2); i32_const(48); i32_add;
+                        else_; local_get(s + 2); i32_const(87); i32_add; end;
+                        local_set(s + 2); // char
+                        local_get(s); local_get(s + 1); i32_add;
+                        local_get(s + 2); i32_store8(0);
+                        local_get(s + 1); i32_const(1); i32_add; local_set(s + 1);
+                        local_get(s64); i64_const(16); i64_div_u; local_set(s64);
+                        br(0);
+                      end; end;
+                });
+                wasm!(self.func, {
+                      // Alloc result string
+                      i32_const(4); local_get(s + 1); i32_add;
+                      call(self.emitter.rt.alloc); local_set(s + 2);
+                      local_get(s + 2); local_get(s + 1); i32_store(0);
+                      // Copy reversed
+                      i32_const(0); local_set(s + 3);
+                      block_empty; loop_empty;
+                        local_get(s + 3); local_get(s + 1); i32_ge_u; br_if(1);
+                        local_get(s + 2); i32_const(4); i32_add; local_get(s + 3); i32_add;
+                        local_get(s);
+                        local_get(s + 1); i32_const(1); i32_sub; local_get(s + 3); i32_sub;
+                        i32_add; i32_load8_u(0);
+                        i32_store8(0);
+                        local_get(s + 3); i32_const(1); i32_add; local_set(s + 3);
+                        br(0);
+                      end; end;
+                      local_get(s + 2);
+                    end;
+                });
+            }
+            "from_hex" | "rotate_right" | "rotate_left" => {
                 self.emit_stub_call(args);
                 return true;
             }

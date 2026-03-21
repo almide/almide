@@ -46,7 +46,13 @@ impl FuncCompiler<'_> {
             // ── Variables ──
             IrExprKind::Var { id } => {
                 if let Some(&local_idx) = self.var_map.get(&id.0) {
-                    wasm!(self.func, { local_get(local_idx); });
+                    if self.emitter.mutable_captures.contains(&id.0) {
+                        // Mutable capture: local holds cell ptr, deref to get value
+                        wasm!(self.func, { local_get(local_idx); });
+                        self.emit_load_at(&expr.ty, 0);
+                    } else {
+                        wasm!(self.func, { local_get(local_idx); });
+                    }
                 } else if let Some(&(global_idx, _)) = self.emitter.top_let_globals.get(&id.0) {
                     wasm!(self.func, { global_get(global_idx); });
                 } else {
@@ -168,11 +174,16 @@ impl FuncCompiler<'_> {
                 if let Some(e) = tail {
                     self.emit_expr(e);
                     if let Some(rl) = result_local {
-                        // Save result to local, break out of loop+block
+                        // Non-unit tail: save result and break out
                         wasm!(self.func, { local_set(rl); });
+                        wasm!(self.func, { br(self.depth - break_depth - 1); });
+                    } else {
+                        // Unit tail (side-effect only): drop value if any, continue looping
+                        if values::ty_to_valtype(&e.ty).is_some() {
+                            wasm!(self.func, { drop; });
+                        }
+                        wasm!(self.func, { br(self.depth - continue_depth - 1); });
                     }
-                    // Break out of block (depth 1 from loop = to block)
-                    wasm!(self.func, { br(self.depth - break_depth - 1); });
                 } else {
                     // No tail: continue looping
                     wasm!(self.func, { br(self.depth - continue_depth - 1); });
@@ -372,11 +383,13 @@ impl FuncCompiler<'_> {
                     local_get(scratch);
                     i32_const(0);
                     i32_store(0);
-                    // value
-                    local_get(scratch);
                 });
-                self.emit_expr(inner);
-                self.emit_store_at(&inner.ty, 4);
+                // Store value (skip for Unit — no value to store)
+                if values::ty_to_valtype(&inner.ty).is_some() {
+                    wasm!(self.func, { local_get(scratch); });
+                    self.emit_expr(inner);
+                    self.emit_store_at(&inner.ty, 4);
+                }
                 wasm!(self.func, { local_get(scratch); });
             }
             IrExprKind::ResultErr { expr: inner } => {
@@ -391,11 +404,12 @@ impl FuncCompiler<'_> {
                     local_get(scratch);
                     i32_const(1);
                     i32_store(0);
-                    // value
-                    local_get(scratch);
                 });
-                self.emit_expr(inner);
-                self.emit_store_at(&inner.ty, 4);
+                if values::ty_to_valtype(&inner.ty).is_some() {
+                    wasm!(self.func, { local_get(scratch); });
+                    self.emit_expr(inner);
+                    self.emit_store_at(&inner.ty, 4);
+                }
                 wasm!(self.func, { local_get(scratch); });
             }
 

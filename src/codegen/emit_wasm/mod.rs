@@ -26,6 +26,7 @@ mod calls_option;
 mod calls_numeric;
 mod calls_list;
 mod calls_map;
+mod calls_set;
 mod collections;
 mod control;
 pub mod statements;
@@ -163,6 +164,8 @@ pub struct WasmEmitter {
     pub lambda_counter: std::cell::Cell<usize>,
     // Effect functions: their call returns Result but IR may expect unwrapped type
     pub effect_fns: HashSet<String>,
+    // Mutable variables captured by closures: these must use heap cells instead of locals
+    pub mutable_captures: HashSet<u32>,
 }
 
 /// A single case of a variant type.
@@ -228,6 +231,7 @@ impl WasmEmitter {
             fn_ref_wrappers: HashMap::new(),
             lambda_counter: std::cell::Cell::new(0),
             effect_fns: HashSet::new(),
+            mutable_captures: HashSet::new(),
         }
     }
 
@@ -652,12 +656,32 @@ fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) {
     let mut fn_ref_set: HashSet<String> = HashSet::new();
     let mut fn_ref_names: Vec<String> = Vec::new(); // ordered, deduped
 
+    let mut mutable_vars: HashSet<u32> = HashSet::new();
+
     for func in &program.functions {
         // Include test functions in pre-scan/compile
         let mut scope_vars: HashSet<u32> = func.params.iter().map(|p| p.var.0).collect();
-        scan_closures_expr(&func.body, &mut scope_vars, &program.var_table,
+        scan_closures_expr(&func.body, &mut scope_vars, &mut mutable_vars, &program.var_table,
             &mut lambda_exprs, &mut fn_ref_set);
     }
+    // BFS: scan lambda bodies for nested lambdas (repeat until no new lambdas found)
+    let mut scan_start = 0;
+    loop {
+        let current_len = lambda_exprs.len();
+        if scan_start >= current_len { break; }
+        for i in scan_start..current_len {
+            let body = lambda_exprs[i].1.clone();
+            let params = &lambda_exprs[i].0;
+            let captures = &lambda_exprs[i].2;
+            // Scope includes lambda params + captured vars (so nested lambdas see them as in-scope)
+            let mut inner_scope: HashSet<u32> = params.iter().map(|(vid, _)| vid.0).collect();
+            for &vid in captures { inner_scope.insert(vid); }
+            scan_closures_expr(&body, &mut inner_scope, &mut mutable_vars, &program.var_table,
+                &mut lambda_exprs, &mut fn_ref_set);
+        }
+        scan_start = current_len;
+    }
+
     // Build ordered fn_ref list (sorted for determinism)
     fn_ref_names = fn_ref_set.into_iter().collect();
     fn_ref_names.sort();
@@ -666,8 +690,8 @@ fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) {
     for (params, _body, captures) in &lambda_exprs {
         // Closure calling convention: (env: i32, declared_params...) -> ret
         let mut wasm_params = vec![ValType::I32]; // env_ptr
-        for (_, ty) in params {
-            let resolved_ty = resolve_lambda_param_ty(ty, &_body.ty);
+        for (vid, ty) in params {
+            let resolved_ty = resolve_lambda_param_ty(ty, &_body.ty, &program.var_table, *vid);
             if let Some(vt) = values::ty_to_valtype(&resolved_ty) {
                 wasm_params.push(vt);
             }
@@ -684,6 +708,10 @@ fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) {
         let capture_vars: Vec<(VarId, crate::types::Ty)> = captures.iter()
             .map(|&vid| {
                 let info = &program.var_table.get(VarId(vid));
+                // Track mutable variables that are captured by closures
+                if mutable_vars.contains(&vid) {
+                    emitter.mutable_captures.insert(vid);
+                }
                 (VarId(vid), info.ty.clone())
             })
             .collect();
@@ -724,12 +752,28 @@ fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitter) {
     // Re-scan to get lambda bodies (in same order as pre-scan)
     let mut lambda_exprs: Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, HashSet<u32>)> = Vec::new();
     let mut fn_ref_set: HashSet<String> = HashSet::new();
+    let mut mutable_vars: HashSet<u32> = HashSet::new();
 
     for func in &program.functions {
-        // Include test functions in pre-scan/compile
         let mut scope_vars: HashSet<u32> = func.params.iter().map(|p| p.var.0).collect();
-        scan_closures_expr(&func.body, &mut scope_vars, &program.var_table,
+        scan_closures_expr(&func.body, &mut scope_vars, &mut mutable_vars, &program.var_table,
             &mut lambda_exprs, &mut fn_ref_set);
+    }
+    // BFS: scan lambda bodies for nested lambdas
+    let mut scan_start = 0;
+    loop {
+        let current_len = lambda_exprs.len();
+        if scan_start >= current_len { break; }
+        for i in scan_start..current_len {
+            let body = lambda_exprs[i].1.clone();
+            let params = &lambda_exprs[i].0;
+            let captures = &lambda_exprs[i].2;
+            let mut inner_scope: HashSet<u32> = params.iter().map(|(vid, _)| vid.0).collect();
+            for &vid in captures { inner_scope.insert(vid); }
+            scan_closures_expr(&body, &mut inner_scope, &mut mutable_vars, &program.var_table,
+                &mut lambda_exprs, &mut fn_ref_set);
+        }
+        scan_start = current_len;
     }
     let mut fn_ref_names: Vec<String> = fn_ref_set.into_iter().collect();
     fn_ref_names.sort();
@@ -762,7 +806,13 @@ fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitter) {
 
         // Captured var locals
         for (vid, ty) in &capture_list {
-            if let Some(vt) = values::ty_to_valtype(ty) {
+            let is_cell = emitter.mutable_captures.contains(&vid.0);
+            if is_cell {
+                // Mutable capture: local holds cell ptr (i32)
+                var_map.insert(vid.0, local_idx);
+                local_decls.push((1u32, ValType::I32));
+                local_idx += 1;
+            } else if let Some(vt) = values::ty_to_valtype(ty) {
                 var_map.insert(vid.0, local_idx);
                 local_decls.push((1u32, vt));
                 local_idx += 1;
@@ -793,10 +843,20 @@ fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitter) {
 
         // Load captured vars from env
         for (ci, (vid, ty)) in capture_list.iter().enumerate() {
-            if let Some(vt) = values::ty_to_valtype(ty) {
+            let is_cell = emitter.mutable_captures.contains(&vid.0);
+            if is_cell {
+                // Mutable capture: env stores cell ptr (i32). Load as i32.
                 let cap_local = var_map[&vid.0];
-                let offset = ci as u32 * 8; // each capture slot is 8 bytes (padded)
-                wasm_func.instruction(&wasm_encoder::Instruction::LocalGet(0)); // env_ptr
+                let offset = ci as u32 * 8;
+                wasm_func.instruction(&wasm_encoder::Instruction::LocalGet(0));
+                wasm_func.instruction(&wasm_encoder::Instruction::I32Load(
+                    wasm_encoder::MemArg { offset: offset as u64, align: 2, memory_index: 0 }
+                ));
+                wasm_func.instruction(&wasm_encoder::Instruction::LocalSet(cap_local));
+            } else if let Some(vt) = values::ty_to_valtype(ty) {
+                let cap_local = var_map[&vid.0];
+                let offset = ci as u32 * 8;
+                wasm_func.instruction(&wasm_encoder::Instruction::LocalGet(0));
                 match vt {
                     ValType::I64 => {
                         wasm_func.instruction(&wasm_encoder::Instruction::I64Load(
@@ -869,6 +929,7 @@ fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitter) {
 fn scan_closures_expr(
     expr: &IrExpr,
     scope_vars: &mut HashSet<u32>,
+    mutable_vars: &mut HashSet<u32>,
     var_table: &crate::ir::VarTable,
     lambdas: &mut Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, HashSet<u32>)>,
     fn_refs: &mut HashSet<String>,
@@ -888,68 +949,64 @@ fn scan_closures_expr(
                 .map(|(vid, ty)| (*vid, ty.clone()))
                 .collect();
             lambdas.push((param_list, *body.clone(), captures));
-
-            // Also scan inside the lambda body for nested lambdas
-            let mut inner_scope = scope_vars.clone();
-            for (vid, _) in params {
-                inner_scope.insert(vid.0);
-            }
-            scan_closures_expr(body, &mut inner_scope, var_table, lambdas, fn_refs);
+            // NOTE: Do NOT recurse into lambda body here.
+            // Nested lambdas will be scanned in a second pass (BFS order)
+            // to match emit order (user fn bodies first, then lambda bodies).
         }
         IrExprKind::FnRef { name } => {
             fn_refs.insert(name.clone());
         }
         IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
             for stmt in stmts {
-                scan_closures_stmt(stmt, scope_vars, var_table, lambdas, fn_refs);
+                scan_closures_stmt(stmt, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
             }
-            if let Some(e) = expr { scan_closures_expr(e, scope_vars, var_table, lambdas, fn_refs); }
+            if let Some(e) = expr { scan_closures_expr(e, scope_vars, mutable_vars, var_table, lambdas, fn_refs); }
         }
         IrExprKind::If { cond, then, else_ } => {
-            scan_closures_expr(cond, scope_vars, var_table, lambdas, fn_refs);
-            scan_closures_expr(then, scope_vars, var_table, lambdas, fn_refs);
-            scan_closures_expr(else_, scope_vars, var_table, lambdas, fn_refs);
+            scan_closures_expr(cond, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+            scan_closures_expr(then, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+            scan_closures_expr(else_, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
         }
         IrExprKind::BinOp { left, right, .. } => {
-            scan_closures_expr(left, scope_vars, var_table, lambdas, fn_refs);
-            scan_closures_expr(right, scope_vars, var_table, lambdas, fn_refs);
+            scan_closures_expr(left, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+            scan_closures_expr(right, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
         }
         IrExprKind::UnOp { operand, .. } => {
-            scan_closures_expr(operand, scope_vars, var_table, lambdas, fn_refs);
+            scan_closures_expr(operand, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
         }
         IrExprKind::Call { target, args, .. } => {
             match target {
-                crate::ir::CallTarget::Method { object, .. } => scan_closures_expr(object, scope_vars, var_table, lambdas, fn_refs),
-                crate::ir::CallTarget::Computed { callee } => scan_closures_expr(callee, scope_vars, var_table, lambdas, fn_refs),
+                crate::ir::CallTarget::Method { object, .. } => scan_closures_expr(object, scope_vars, mutable_vars, var_table, lambdas, fn_refs),
+                crate::ir::CallTarget::Computed { callee } => scan_closures_expr(callee, scope_vars, mutable_vars, var_table, lambdas, fn_refs),
                 _ => {}
             }
-            for arg in args { scan_closures_expr(arg, scope_vars, var_table, lambdas, fn_refs); }
+            for arg in args { scan_closures_expr(arg, scope_vars, mutable_vars, var_table, lambdas, fn_refs); }
         }
         IrExprKind::While { cond, body } => {
-            scan_closures_expr(cond, scope_vars, var_table, lambdas, fn_refs);
-            for stmt in body { scan_closures_stmt(stmt, scope_vars, var_table, lambdas, fn_refs); }
+            scan_closures_expr(cond, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+            for stmt in body { scan_closures_stmt(stmt, scope_vars, mutable_vars, var_table, lambdas, fn_refs); }
         }
         IrExprKind::ForIn { iterable, body, .. } => {
-            scan_closures_expr(iterable, scope_vars, var_table, lambdas, fn_refs);
-            for stmt in body { scan_closures_stmt(stmt, scope_vars, var_table, lambdas, fn_refs); }
+            scan_closures_expr(iterable, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+            for stmt in body { scan_closures_stmt(stmt, scope_vars, mutable_vars, var_table, lambdas, fn_refs); }
         }
         IrExprKind::Match { subject, arms } => {
-            scan_closures_expr(subject, scope_vars, var_table, lambdas, fn_refs);
-            for arm in arms { scan_closures_expr(&arm.body, scope_vars, var_table, lambdas, fn_refs); }
+            scan_closures_expr(subject, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+            for arm in arms { scan_closures_expr(&arm.body, scope_vars, mutable_vars, var_table, lambdas, fn_refs); }
         }
         IrExprKind::Record { fields, .. } => {
-            for (_, e) in fields { scan_closures_expr(e, scope_vars, var_table, lambdas, fn_refs); }
+            for (_, e) in fields { scan_closures_expr(e, scope_vars, mutable_vars, var_table, lambdas, fn_refs); }
         }
         IrExprKind::Tuple { elements } | IrExprKind::List { elements } => {
-            for e in elements { scan_closures_expr(e, scope_vars, var_table, lambdas, fn_refs); }
+            for e in elements { scan_closures_expr(e, scope_vars, mutable_vars, var_table, lambdas, fn_refs); }
         }
         IrExprKind::Member { object, .. } | IrExprKind::IndexAccess { object, .. } => {
-            scan_closures_expr(object, scope_vars, var_table, lambdas, fn_refs);
+            scan_closures_expr(object, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
         }
         IrExprKind::StringInterp { parts } => {
             for p in parts {
                 if let crate::ir::IrStringPart::Expr { expr } = p {
-                    scan_closures_expr(expr, scope_vars, var_table, lambdas, fn_refs);
+                    scan_closures_expr(expr, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
                 }
             }
         }
@@ -960,24 +1017,28 @@ fn scan_closures_expr(
 fn scan_closures_stmt(
     stmt: &IrStmt,
     scope_vars: &mut HashSet<u32>,
+    mutable_vars: &mut HashSet<u32>,
     var_table: &crate::ir::VarTable,
     lambdas: &mut Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, HashSet<u32>)>,
     fn_refs: &mut HashSet<String>,
 ) {
     match &stmt.kind {
-        IrStmtKind::Bind { var, value, .. } => {
-            scan_closures_expr(value, scope_vars, var_table, lambdas, fn_refs);
+        IrStmtKind::Bind { var, mutability, value, .. } => {
+            scan_closures_expr(value, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
             scope_vars.insert(var.0);
+            if *mutability == crate::ir::Mutability::Var {
+                mutable_vars.insert(var.0);
+            }
         }
         IrStmtKind::Assign { value, .. } => {
-            scan_closures_expr(value, scope_vars, var_table, lambdas, fn_refs);
+            scan_closures_expr(value, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
         }
         IrStmtKind::Expr { expr } => {
-            scan_closures_expr(expr, scope_vars, var_table, lambdas, fn_refs);
+            scan_closures_expr(expr, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
         }
         IrStmtKind::Guard { cond, else_ } => {
-            scan_closures_expr(cond, scope_vars, var_table, lambdas, fn_refs);
-            scan_closures_expr(else_, scope_vars, var_table, lambdas, fn_refs);
+            scan_closures_expr(cond, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
+            scan_closures_expr(else_, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
         }
         _ => {}
     }
@@ -985,11 +1046,18 @@ fn scan_closures_stmt(
 
 /// Resolve a lambda parameter type when it's TypeVar or Unknown.
 /// Scans the body for type-dispatched operators to infer parameter type.
-fn resolve_lambda_param_ty(param_ty: &crate::types::Ty, body_ty: &crate::types::Ty) -> crate::types::Ty {
+fn resolve_lambda_param_ty(param_ty: &crate::types::Ty, _body_ty: &crate::types::Ty, var_table: &crate::ir::VarTable, vid: VarId) -> crate::types::Ty {
     match param_ty {
         crate::types::Ty::TypeVar(_) | crate::types::Ty::Unknown => {
-            // Default to Int (most common lambda param type)
-            // This covers (x) => x * 2, (x) => x > 0, (x) => x + n, etc.
+            // Try VarTable for the resolved type
+            if (vid.0 as usize) < var_table.len() {
+                let info = var_table.get(vid);
+                eprintln!("[RESOLVE_PARAM] vid={} param_ty={:?} vt_ty={:?}", vid.0, param_ty, info.ty);
+                if !matches!(&info.ty, crate::types::Ty::TypeVar(_) | crate::types::Ty::Unknown) {
+                    return info.ty.clone();
+                }
+            }
+            // Default to Int
             crate::types::Ty::Int
         }
         _ => param_ty.clone(),
