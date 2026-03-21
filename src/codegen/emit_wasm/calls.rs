@@ -1252,16 +1252,22 @@ impl FuncCompiler<'_> {
                 self.emit_expr(callee);
                 wasm!(self.func, { local_set(scratch); });
 
+                // Reserve this scratch so nested calls use different locals
+                self.match_depth += 1;
+
                 // Push env_ptr (first hidden arg)
                 wasm!(self.func, {
                     local_get(scratch);
                     i32_load(4);
                 });
 
-                // Push declared args
+                // Push declared args (may contain nested closure calls)
                 for arg in args {
                     self.emit_expr(arg);
                 }
+
+                // Restore depth
+                self.match_depth -= 1;
 
                 // Push table_idx (on top of stack for call_indirect)
                 wasm!(self.func, {
