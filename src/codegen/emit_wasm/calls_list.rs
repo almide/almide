@@ -355,8 +355,9 @@ impl FuncCompiler<'_> {
             "flatten" => {
                 // flatten(xss: List[List[T]]) → List[T]
                 // Two-pass: count total, then copy
-                let inner_ty = self.list_elem_ty(&args[0].ty);
-                let elem_size = values::byte_size(&inner_ty); // size of inner list elements
+                let inner_list_ty = self.list_elem_ty(&args[0].ty); // List[T]
+                let elem_ty = self.list_elem_ty(&inner_list_ty); // T
+                let elem_size = values::byte_size(&elem_ty); // size of T
                 let s = self.match_i32_base + self.match_depth;
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
@@ -400,7 +401,7 @@ impl FuncCompiler<'_> {
                         local_get(s + 4); i32_const(4); i32_add;
                         local_get(s + 5); i32_const(elem_size as i32); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&inner_ty);
+                self.emit_elem_copy(&elem_ty);
                 wasm!(self.func, {
                         local_get(s + 5); i32_const(1); i32_add; local_set(s + 5);
                         br(0);

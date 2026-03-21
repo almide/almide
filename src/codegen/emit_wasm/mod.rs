@@ -652,7 +652,7 @@ use std::collections::HashSet;
 /// Register lambda functions and FnRef wrappers in the emitter.
 fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) {
     // Collect all lambdas (in tree-walk order)
-    let mut lambda_exprs: Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, HashSet<u32>)> = Vec::new();
+    let mut lambda_exprs: Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, Vec<u32>)> = Vec::new();
     let mut fn_ref_set: HashSet<String> = HashSet::new();
     let mut fn_ref_names: Vec<String> = Vec::new(); // ordered, deduped
 
@@ -750,7 +750,7 @@ fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) {
 /// Compile lambda bodies and FnRef wrappers.
 fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitter) {
     // Re-scan to get lambda bodies (in same order as pre-scan)
-    let mut lambda_exprs: Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, HashSet<u32>)> = Vec::new();
+    let mut lambda_exprs: Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, Vec<u32>)> = Vec::new();
     let mut fn_ref_set: HashSet<String> = HashSet::new();
     let mut mutable_vars: HashSet<u32> = HashSet::new();
 
@@ -931,7 +931,7 @@ fn scan_closures_expr(
     scope_vars: &mut HashSet<u32>,
     mutable_vars: &mut HashSet<u32>,
     var_table: &crate::ir::VarTable,
-    lambdas: &mut Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, HashSet<u32>)>,
+    lambdas: &mut Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, Vec<u32>)>,
     fn_refs: &mut HashSet<String>,
 ) {
     match &expr.kind {
@@ -940,10 +940,11 @@ fn scan_closures_expr(
             let param_ids: HashSet<u32> = params.iter().map(|(vid, _)| vid.0).collect();
             let mut body_vars = HashSet::new();
             collect_var_refs(body, &mut body_vars);
-            let captures: HashSet<u32> = body_vars.difference(&param_ids)
+            let mut captures: Vec<u32> = body_vars.difference(&param_ids)
                 .copied()
                 .filter(|vid| scope_vars.contains(vid))
                 .collect();
+            captures.sort(); // Deterministic order for env layout
 
             let param_list: Vec<(VarId, crate::types::Ty)> = params.iter()
                 .map(|(vid, ty)| (*vid, ty.clone()))
@@ -1019,7 +1020,7 @@ fn scan_closures_stmt(
     scope_vars: &mut HashSet<u32>,
     mutable_vars: &mut HashSet<u32>,
     var_table: &crate::ir::VarTable,
-    lambdas: &mut Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, HashSet<u32>)>,
+    lambdas: &mut Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, Vec<u32>)>,
     fn_refs: &mut HashSet<String>,
 ) {
     match &stmt.kind {
