@@ -1361,18 +1361,24 @@ impl FuncCompiler<'_> {
             // Store each captured variable into env
             for (ci, (vid, ty)) in captures.iter().enumerate() {
                 let offset = (ci as u32) * 8;
+                let is_cell = self.emitter.mutable_captures.contains(&vid.0);
                 wasm!(self.func, { local_get(env_scratch); });
                 if let Some(&local_idx) = self.var_map.get(&vid.0) {
                     wasm!(self.func, { local_get(local_idx); });
+                    if is_cell {
+                        // Mutable capture: local is cell ptr (i32), store as i32
+                        wasm!(self.func, { i32_store(offset); });
+                    } else {
+                        self.emit_store_at(ty, offset);
+                    }
                 } else {
-                    // Variable not in scope — emit typed zero
                     match values::ty_to_valtype(ty) {
                         Some(ValType::I64) => { wasm!(self.func, { i64_const(0); }); }
                         Some(ValType::F64) => { wasm!(self.func, { f64_const(0.0); }); }
                         _ => { wasm!(self.func, { i32_const(0); }); }
                     }
+                    self.emit_store_at(ty, offset);
                 }
-                self.emit_store_at(ty, offset);
             }
 
             // Allocate closure: [table_idx, env_ptr]

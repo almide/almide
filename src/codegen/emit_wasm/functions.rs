@@ -31,7 +31,12 @@ pub fn compile_function(
     for (var_id, val_type) in &scan.binds {
         let idx = param_count + local_decls.len() as u32;
         var_map.insert(var_id.0, idx);
-        local_decls.push((1u32, *val_type));
+        // Mutable captures use i32 cell ptr instead of original type
+        if emitter.mutable_captures.contains(&var_id.0) {
+            local_decls.push((1u32, ValType::I32));
+        } else {
+            local_decls.push((1u32, *val_type));
+        }
     }
 
     // Match scratch locals: one i64 + one i32 per nesting depth level

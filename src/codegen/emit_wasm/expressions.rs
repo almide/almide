@@ -46,7 +46,13 @@ impl FuncCompiler<'_> {
             // ── Variables ──
             IrExprKind::Var { id } => {
                 if let Some(&local_idx) = self.var_map.get(&id.0) {
-                    wasm!(self.func, { local_get(local_idx); });
+                    if self.emitter.mutable_captures.contains(&id.0) {
+                        // Mutable capture: local holds cell ptr, deref to get value
+                        wasm!(self.func, { local_get(local_idx); });
+                        self.emit_load_at(&expr.ty, 0);
+                    } else {
+                        wasm!(self.func, { local_get(local_idx); });
+                    }
                 } else if let Some(&(global_idx, _)) = self.emitter.top_let_globals.get(&id.0) {
                     wasm!(self.func, { global_get(global_idx); });
                 } else {
