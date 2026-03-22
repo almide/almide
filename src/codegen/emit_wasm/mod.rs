@@ -191,6 +191,8 @@ pub struct WasmEmitter {
     pub effect_fns: HashSet<String>,
     // Mutable variables captured by closures: these must use heap cells instead of locals
     pub mutable_captures: HashSet<u32>,
+    // Deep-equality functions per variant type: type_name → func_idx
+    pub eq_funcs: HashMap<String, u32>,
 }
 
 /// A single case of a variant type.
@@ -264,6 +266,7 @@ impl WasmEmitter {
             lambda_counter: std::cell::Cell::new(0),
             effect_fns: HashSet::new(),
             mutable_captures: HashSet::new(),
+            eq_funcs: HashMap::new(),
         }
     }
 
@@ -514,6 +517,9 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
     // Pre-scan for lambdas and FnRefs, register them
     closures::pre_scan_closures(program, &mut emitter);
 
+    // Pre-register variant deep-equality functions (must be before compilation starts)
+    register_variant_eq_funcs(&mut emitter);
+
     // Phase 2: Compile function bodies (order must match registration order)
     runtime::compile_runtime(&mut emitter);
 
@@ -533,6 +539,9 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
 
     // Lambda bodies and FnRef wrappers
     closures::compile_lambda_bodies(program, &mut emitter);
+
+    // Compile variant deep-equality functions (bodies, after all user code)
+    compile_variant_eq_funcs(&mut emitter, &program.var_table);
 
     // Phase 3: Assemble
     assemble(&emitter)
@@ -734,6 +743,130 @@ fn compile_test_runner(emitter: &mut WasmEmitter, tests: &[(u32, String)], init_
 
     f.instruction(&wasm_encoder::Instruction::End);
     emitter.add_compiled(CompiledFunc { type_idx: void_type, func: f });
+}
+
+/// Pre-register variant deep-equality functions for all variant types with pointer fields.
+/// Must be called before Phase 2 (compilation) so func_idx is known at emit time.
+fn register_variant_eq_funcs(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.register_type(
+        vec![ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    // Collect variant names that need deep eq (have pointer fields)
+    let names: Vec<String> = emitter.variant_info.iter()
+        .filter(|(_, cases)| {
+            cases.iter().any(|c| c.fields.iter().any(|(_, ft)| {
+                !matches!(ft, crate::types::Ty::Int | crate::types::Ty::Float | crate::types::Ty::Bool | crate::types::Ty::Unit)
+            }))
+        })
+        .map(|(name, _)| name.clone())
+        .collect();
+    for name in names {
+        let func_idx = emitter.register_func(&format!("__eq_{}", name), type_idx);
+        emitter.eq_funcs.insert(name, func_idx);
+    }
+}
+
+/// Compile variant deep-equality function bodies.
+/// Each function: (a: i32, b: i32) -> i32 — compares tag then dispatches to per-case field comparison.
+fn compile_variant_eq_funcs(emitter: &mut WasmEmitter, var_table: &crate::ir::VarTable) {
+    // Collect eq_funcs entries (name → func_idx) and corresponding cases
+    let eq_entries: Vec<(String, u32)> = emitter.eq_funcs.iter()
+        .map(|(n, &idx)| (n.clone(), idx))
+        .collect();
+
+    for (name, _func_idx) in &eq_entries {
+        let cases = match emitter.variant_info.get(name.as_str()) {
+            Some(c) => c.clone(),
+            None => continue,
+        };
+
+        let type_idx = emitter.register_type(
+            vec![ValType::I32, ValType::I32],
+            vec![ValType::I32],
+        );
+
+        // Build function body with its own FuncCompiler
+        let mut local_decls = Vec::new();
+        let scratch_i32_cap = 16usize;
+        let scratch_i64_cap = 8usize;
+        let scratch_f64_cap = 2usize;
+        let scratch_i32_base = 2u32; // after 2 params
+        for _ in 0..scratch_i32_cap { local_decls.push((1, ValType::I32)); }
+        let scratch_i64_base = scratch_i32_base + scratch_i32_cap as u32;
+        for _ in 0..scratch_i64_cap { local_decls.push((1, ValType::I64)); }
+        let scratch_f64_base = scratch_i64_base + scratch_i64_cap as u32;
+        for _ in 0..scratch_f64_cap { local_decls.push((1, ValType::F64)); }
+
+        let wasm_func = wasm_encoder::Function::new(local_decls);
+        let mut scratch_alloc = scratch::ScratchAllocator::new();
+        scratch_alloc.set_bases_with_capacity(
+            scratch_i32_base, scratch_i32_cap,
+            scratch_i64_base, scratch_i64_cap,
+            scratch_f64_base, scratch_f64_cap,
+        );
+
+        let compiled_func = {
+            let mut compiler = FuncCompiler {
+                emitter: &mut *emitter,
+                func: wasm_func,
+                var_map: std::collections::HashMap::new(),
+                depth: 0,
+                loop_stack: Vec::new(),
+                scratch: scratch_alloc,
+                var_table,
+                stub_ret_ty: crate::types::Ty::Unit,
+            };
+
+            // Compare tags
+            wasm!(compiler.func, {
+                local_get(0); i32_load(0);
+                local_get(1); i32_load(0);
+                i32_ne;
+                if_empty; i32_const(0); return_; end;
+            });
+
+            // Branch on tag for each case
+            let non_empty: Vec<_> = cases.iter().filter(|c| !c.fields.is_empty()).collect();
+            if non_empty.is_empty() {
+                wasm!(compiler.func, { i32_const(1); });
+            } else {
+                for case in &non_empty {
+                    wasm!(compiler.func, {
+                        local_get(0); i32_load(0);
+                        i32_const(case.tag as i32);
+                        i32_eq;
+                        if_i32;
+                    });
+                    // Compare fields (AND results together)
+                    let mut offset = 4u32;
+                    for (fi, (_, field_ty)) in case.fields.iter().enumerate() {
+                        let field_size = values::byte_size(field_ty);
+                        wasm!(compiler.func, { local_get(0); });
+                        compiler.emit_load_at(field_ty, offset);
+                        wasm!(compiler.func, { local_get(1); });
+                        compiler.emit_load_at(field_ty, offset);
+                        let ft = field_ty.clone();
+                        compiler.emit_eq_typed(&ft);
+                        if fi > 0 {
+                            wasm!(compiler.func, { i32_and; });
+                        }
+                        offset += field_size;
+                    }
+                    wasm!(compiler.func, { else_; });
+                }
+                wasm!(compiler.func, { i32_const(1); }); // default: unit case → equal
+                for _ in 0..non_empty.len() {
+                    wasm!(compiler.func, { end; });
+                }
+            }
+
+            compiler.func.instruction(&wasm_encoder::Instruction::End);
+            compiler.func
+        };
+
+        emitter.add_compiled(CompiledFunc { type_idx, func: compiled_func });
+    }
 }
 
 use std::collections::HashSet;
