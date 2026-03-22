@@ -291,6 +291,7 @@ fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
         Expr::TupleIndex { object, index, .. } => { fmt_expr(out, object, depth); w!(out, ".{index}"); }
         Expr::IndexAccess { object, index, .. } => { fmt_expr(out, object, depth); out.push('['); fmt_expr(out, index, depth); out.push(']'); }
         Expr::Pipe { left, right, .. } => { fmt_expr(out, left, depth); out.push_str(" |> "); fmt_expr(out, right, depth); }
+        Expr::Compose { left, right, .. } => { fmt_expr(out, left, depth); out.push_str(" >> "); fmt_expr(out, right, depth); }
         Expr::Binary { op, left, right, .. } => { fmt_expr(out, left, depth); w!(out, " {op} "); fmt_expr(out, right, depth); }
         Expr::Unary { op, operand, .. } => { out.push_str(op); if op == "not" { out.push(' '); } fmt_expr(out, operand, depth); }
         Expr::Break { .. } => out.push_str("break"),

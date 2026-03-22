@@ -41,6 +41,7 @@ pub enum TokenType {
     PlusPlus,  // ++
     Pipe,      // |
     PipeArrow, // |>
+    ComposeArrow, // >>
     Caret,     // ^
     AmpAmp,    // &&
     PipePipe,  // ||
@@ -483,6 +484,7 @@ fn lex_operator(chars: &[char], pos: usize, line: usize, col: usize) -> (Token, 
         ('=', Some('='), _) => (TokenType::EqEq, "==", 2),
         ('!', Some('='), _) => (TokenType::BangEq, "!=", 2),
         ('<', Some('='), _) => (TokenType::LtEq, "<=", 2),
+        ('>', Some('>'), _) => (TokenType::ComposeArrow, ">>", 2),
         ('>', Some('='), _) => (TokenType::GtEq, ">=", 2),
         ('+', Some('+'), _) => (TokenType::PlusPlus, "++", 2),
         ('|', Some('>'), _) => (TokenType::PipeArrow, "|>", 2),
