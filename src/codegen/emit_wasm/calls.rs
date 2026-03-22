@@ -928,7 +928,10 @@ impl FuncCompiler<'_> {
                     // If state == 0, initialize with seed
                     local_get(state); i64_eqz;
                     if_empty;
-                      i64_const(0x2545F4914F6CDD1D); local_set(state);
+                      i32_const(0); i32_const(8); call(self.emitter.rt.random_get); drop;
+                      i32_const(0); i64_load(0); local_set(state);
+                      local_get(state); i64_eqz;
+                      if_empty; i64_const(1); local_set(state); end;
                     end;
                     // xorshift64
                     local_get(state); local_get(state); i64_const(13); i64_shl; i64_xor; local_set(state);
@@ -955,7 +958,12 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     i32_const(0); i64_load(0); local_set(state);
                     local_get(state); i64_eqz;
-                    if_empty; i64_const(0x2545F4914F6CDD1D); local_set(state); end;
+                    if_empty;
+                      i32_const(0); i32_const(8); call(self.emitter.rt.random_get); drop;
+                      i32_const(0); i64_load(0); local_set(state);
+                      local_get(state); i64_eqz;
+                      if_empty; i64_const(1); local_set(state); end;
+                    end;
                     local_get(state); local_get(state); i64_const(13); i64_shl; i64_xor; local_set(state);
                     local_get(state); local_get(state); i64_const(7); i64_shr_u; i64_xor; local_set(state);
                     local_get(state); local_get(state); i64_const(17); i64_shl; i64_xor; local_set(state);
@@ -991,7 +999,12 @@ impl FuncCompiler<'_> {
                       // PRNG to get random index
                       i32_const(0); i64_load(0); local_set(state);
                       local_get(state); i64_eqz;
-                      if_empty; i64_const(0x2545F4914F6CDD1D); local_set(state); end;
+                      if_empty;
+                      i32_const(0); i32_const(8); call(self.emitter.rt.random_get); drop;
+                      i32_const(0); i64_load(0); local_set(state);
+                      local_get(state); i64_eqz;
+                      if_empty; i64_const(1); local_set(state); end;
+                    end;
                       local_get(state); local_get(state); i64_const(13); i64_shl; i64_xor; local_set(state);
                       local_get(state); local_get(state); i64_const(7); i64_shr_u; i64_xor; local_set(state);
                       local_get(state); local_get(state); i64_const(17); i64_shl; i64_xor; local_set(state);
@@ -1054,7 +1067,12 @@ impl FuncCompiler<'_> {
                     local_get(len); i32_const(1); i32_sub; local_set(i);
                     i32_const(0); i64_load(0); local_set(state);
                     local_get(state); i64_eqz;
-                    if_empty; i64_const(0x2545F4914F6CDD1D); local_set(state); end;
+                    if_empty;
+                      i32_const(0); i32_const(8); call(self.emitter.rt.random_get); drop;
+                      i32_const(0); i64_load(0); local_set(state);
+                      local_get(state); i64_eqz;
+                      if_empty; i64_const(1); local_set(state); end;
+                    end;
                     block_empty; loop_empty;
                       local_get(i); i32_const(0); i32_le_s; br_if(1);
                       // xorshift

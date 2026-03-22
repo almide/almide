@@ -22,6 +22,17 @@ pub fn register_runtime(emitter: &mut WasmEmitter) {
     );
     emitter.rt.clock_time_get = emitter.register_import(clock_ty);
 
+    // proc_exit(code: i32) -> !
+    let proc_exit_ty = emitter.register_type(vec![ValType::I32], vec![]);
+    emitter.rt.proc_exit = emitter.register_import(proc_exit_ty);
+
+    // random_get(buf: i32, len: i32) -> i32
+    let random_get_ty = emitter.register_type(
+        vec![ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.rt.random_get = emitter.register_import(random_get_ty);
+
     // __alloc(size: i32) -> i32
     let alloc_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
     emitter.rt.alloc = emitter.register_func("__alloc", alloc_ty);
