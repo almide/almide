@@ -440,9 +440,56 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(map_ptr);
             }
             "entries" => {
-                // entries is complex — stub for now
-                self.emit_stub_call(args);
-                return true;
+                // entries(m) → List[(K, V)] — list of heap-allocated tuple pointers
+                let (ks, vs) = self.map_kv_sizes(&args[0].ty);
+                let entry = ks + vs;
+                let map_ptr = self.scratch.alloc_i32();
+                let len = self.scratch.alloc_i32();
+                let result = self.scratch.alloc_i32();
+                let i = self.scratch.alloc_i32();
+                let tuple_ptr = self.scratch.alloc_i32();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(map_ptr);
+                    local_get(map_ptr); i32_load(0); local_set(len);
+                    // Alloc list of ptrs: [len:4][ptr0:4][ptr1:4]...
+                    i32_const(4); local_get(len); i32_const(4); i32_mul; i32_add;
+                    call(self.emitter.rt.alloc); local_set(result);
+                    local_get(result); local_get(len); i32_store(0);
+                    i32_const(0); local_set(i);
+                    block_empty; loop_empty;
+                      local_get(i); local_get(len); i32_ge_u; br_if(1);
+                      // Alloc tuple: [key:ks][val:vs]
+                      i32_const(entry as i32); call(self.emitter.rt.alloc); local_set(tuple_ptr);
+                      // Copy key
+                      local_get(tuple_ptr);
+                      local_get(map_ptr); i32_const(4); i32_add;
+                      local_get(i); i32_const(entry as i32); i32_mul; i32_add;
+                });
+                self.emit_elem_copy_sized(ks);
+                // Copy val
+                wasm!(self.func, {
+                      local_get(tuple_ptr); i32_const(ks as i32); i32_add;
+                      local_get(map_ptr); i32_const(4); i32_add;
+                      local_get(i); i32_const(entry as i32); i32_mul; i32_add;
+                      i32_const(ks as i32); i32_add;
+                });
+                self.emit_elem_copy_sized(vs);
+                wasm!(self.func, {
+                      // Store tuple ptr in result list
+                      local_get(result); i32_const(4); i32_add;
+                      local_get(i); i32_const(4); i32_mul; i32_add;
+                      local_get(tuple_ptr); i32_store(0);
+                      local_get(i); i32_const(1); i32_add; local_set(i);
+                      br(0);
+                    end; end;
+                    local_get(result);
+                });
+                self.scratch.free_i32(tuple_ptr);
+                self.scratch.free_i32(i);
+                self.scratch.free_i32(result);
+                self.scratch.free_i32(len);
+                self.scratch.free_i32(map_ptr);
             }
             "merge" => {
                 // merge(a, b) → concat a entries then b entries (later values win on get)

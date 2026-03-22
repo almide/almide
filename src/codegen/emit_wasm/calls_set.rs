@@ -176,10 +176,11 @@ impl FuncCompiler<'_> {
             "insert" => {
                 let elem_ty = self.set_elem_ty(&args[0].ty);
                 let es = values::byte_size(&elem_ty) as i32;
+                let vt = values::ty_to_valtype(&elem_ty).unwrap_or(ValType::I32);
                 let s = self.scratch.alloc_i32();
                 let s1 = self.scratch.alloc_i32();
                 let s2 = self.scratch.alloc_i32();
-                let val = self.scratch.alloc_i32();
+                let val = self.scratch.alloc(vt);
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(s); });
                 self.emit_expr(&args[1]);
@@ -226,7 +227,7 @@ impl FuncCompiler<'_> {
                 });
                 self.emit_store_at(&elem_ty, 0);
                 wasm!(self.func, { local_get(s1); end; });
-                self.scratch.free_i32(val);
+                self.scratch.free(val, vt);
                 self.scratch.free_i32(s2);
                 self.scratch.free_i32(s1);
                 self.scratch.free_i32(s);
@@ -234,11 +235,12 @@ impl FuncCompiler<'_> {
             "remove" => {
                 let elem_ty = self.set_elem_ty(&args[0].ty);
                 let es = values::byte_size(&elem_ty) as i32;
+                let vt = values::ty_to_valtype(&elem_ty).unwrap_or(ValType::I32);
                 let s = self.scratch.alloc_i32();
                 let s1 = self.scratch.alloc_i32();
                 let s2 = self.scratch.alloc_i32();
                 let s3 = self.scratch.alloc_i32();
-                let val = self.scratch.alloc_i32();
+                let val = self.scratch.alloc(vt);
                 let orig = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(s); });
@@ -295,7 +297,7 @@ impl FuncCompiler<'_> {
                     end;
                 });
                 self.scratch.free_i32(orig);
-                self.scratch.free_i32(val);
+                self.scratch.free(val, vt);
                 self.scratch.free_i32(s3);
                 self.scratch.free_i32(s2);
                 self.scratch.free_i32(s1);
