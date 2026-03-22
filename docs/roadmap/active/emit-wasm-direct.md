@@ -57,9 +57,10 @@ src/codegen/emit_wasm/
 
 ## Next Steps
 
-1. **fd_read** — stdin for interactive programs
-2. **args_get / environ_get** — CLI args and env vars
-3. **File I/O** — path_open/fd_read/fd_write/fd_close/fd_seek
+1. **StreamFusion対応** — 現在WASM pipelineから除外。emitterがfused IR（map+filter融合等）を処理できるようにすればパフォーマンス向上
+2. **fd_read** — stdin for interactive programs
+3. **args_get / environ_get** — CLI args and env vars
+4. **File I/O** — path_open/fd_read/fd_write/fd_close/fd_seek
 
 ## Done
 
