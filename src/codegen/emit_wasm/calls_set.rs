@@ -304,60 +304,86 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(s);
             }
             "union" => {
+                // union(a, b) → Set[A]: all elements from a, plus elements from b not in a
                 let elem_ty = self.set_elem_ty(&args[0].ty);
                 let es = values::byte_size(&elem_ty) as i32;
-                let s = self.scratch.alloc_i32();
-                let s1 = self.scratch.alloc_i32();
-                let s2 = self.scratch.alloc_i32();
-                let s3 = self.scratch.alloc_i32();
+                let a = self.scratch.alloc_i32();
                 let b = self.scratch.alloc_i32();
+                let result = self.scratch.alloc_i32();
+                let out_count = self.scratch.alloc_i32();
+                let i = self.scratch.alloc_i32();
+                let j = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(s); });
+                wasm!(self.func, { local_set(a); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
-                    local_set(b); // b
-                    local_get(s); i32_load(0); local_set(s1); // a_len
-                    local_get(b); i32_load(0); local_set(s2); // b_len
-                    i32_const(4); local_get(s1); local_get(s2); i32_add;
+                    local_set(b);
+                    // Alloc max size: a.len + b.len
+                    i32_const(4); local_get(a); i32_load(0); local_get(b); i32_load(0); i32_add;
                     i32_const(es); i32_mul; i32_add;
-                    call(self.emitter.rt.alloc); local_set(s3);
-                    local_get(s3); local_get(s1); local_get(s2); i32_add; i32_store(0);
-                    // Copy a
-                    i32_const(0); local_set(s2); // i
+                    call(self.emitter.rt.alloc); local_set(result);
+                    // Copy all of a first
+                    i32_const(0); local_set(i);
                     block_empty; loop_empty;
-                      local_get(s2); local_get(s1); i32_ge_u; br_if(1);
-                      local_get(s3); i32_const(4); i32_add;
-                      local_get(s2); i32_const(es); i32_mul; i32_add;
-                      local_get(s); i32_const(4); i32_add;
-                      local_get(s2); i32_const(es); i32_mul; i32_add;
+                      local_get(i); local_get(a); i32_load(0); i32_ge_u; br_if(1);
+                      local_get(result); i32_const(4); i32_add;
+                      local_get(i); i32_const(es); i32_mul; i32_add;
+                      local_get(a); i32_const(4); i32_add;
+                      local_get(i); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_elem_copy(&elem_ty);
                 wasm!(self.func, {
-                      local_get(s2); i32_const(1); i32_add; local_set(s2);
+                      local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
-                    // Copy b
-                    i32_const(0); local_set(s2);
+                    local_get(a); i32_load(0); local_set(out_count); // out_count = a.len
+                    // Add elements from b that are not in a
+                    i32_const(0); local_set(i);
                     block_empty; loop_empty;
-                      local_get(s2); local_get(b); i32_load(0); i32_ge_u; br_if(1);
-                      local_get(s3); i32_const(4); i32_add;
-                      local_get(s1); local_get(s2); i32_add;
-                      i32_const(es); i32_mul; i32_add;
-                      local_get(b); i32_const(4); i32_add;
-                      local_get(s2); i32_const(es); i32_mul; i32_add;
+                      local_get(i); local_get(b); i32_load(0); i32_ge_u; br_if(1);
+                      // Check if b[i] is in a
+                      i32_const(0); local_set(j);
+                      block_empty; loop_empty;
+                        local_get(j); local_get(a); i32_load(0); i32_ge_u; br_if(1);
+                        local_get(b); i32_const(4); i32_add;
+                        local_get(i); i32_const(es); i32_mul; i32_add;
+                });
+                self.emit_load_at(&elem_ty, 0);
+                wasm!(self.func, {
+                        local_get(a); i32_const(4); i32_add;
+                        local_get(j); i32_const(es); i32_mul; i32_add;
+                });
+                self.emit_load_at(&elem_ty, 0);
+                self.emit_set_elem_eq(&elem_ty);
+                wasm!(self.func, {
+                        br_if(1); // found → break inner loop
+                        local_get(j); i32_const(1); i32_add; local_set(j);
+                        br(0);
+                      end; end;
+                      // j >= a.len means NOT found → add b[i]
+                      local_get(j); local_get(a); i32_load(0); i32_ge_u;
+                      if_empty;
+                        local_get(result); i32_const(4); i32_add;
+                        local_get(out_count); i32_const(es); i32_mul; i32_add;
+                        local_get(b); i32_const(4); i32_add;
+                        local_get(i); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_elem_copy(&elem_ty);
                 wasm!(self.func, {
-                      local_get(s2); i32_const(1); i32_add; local_set(s2);
+                        local_get(out_count); i32_const(1); i32_add; local_set(out_count);
+                      end;
+                      local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
-                    local_get(s3);
+                    local_get(result); local_get(out_count); i32_store(0);
+                    local_get(result);
                 });
+                self.scratch.free_i32(j);
+                self.scratch.free_i32(i);
+                self.scratch.free_i32(out_count);
+                self.scratch.free_i32(result);
                 self.scratch.free_i32(b);
-                self.scratch.free_i32(s3);
-                self.scratch.free_i32(s2);
-                self.scratch.free_i32(s1);
-                self.scratch.free_i32(s);
+                self.scratch.free_i32(a);
             }
             "to_list" => {
                 // Set has same layout as List — just return the ptr

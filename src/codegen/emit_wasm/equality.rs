@@ -87,35 +87,65 @@ impl FuncCompiler<'_> {
                 }
             }
 
-            Ty::Named(name, _) => {
-                if let Some(cases) = self.emitter.variant_info.get(name.as_str()) {
-                    let max_payload = cases.iter()
-                        .map(|c| values::record_size(&c.fields))
-                        .max().unwrap_or(0);
-                    let size = 4 + max_payload;
-                    wasm!(self.func, { i32_const(size as i32); call(self.emitter.rt.mem_eq); });
+            Ty::Named(name, type_args) => {
+                if let Some(cases) = self.emitter.variant_info.get(name.as_str()).cloned() {
+                    let has_pointers = cases.iter().any(|c| c.fields.iter().any(|(_, ft)| !self.is_value_type(ft)));
+                    if has_pointers {
+                        self.emit_variant_eq_deep(&cases, type_args);
+                    } else {
+                        let max_payload = cases.iter()
+                            .map(|c| values::record_size(&c.fields))
+                            .max().unwrap_or(0);
+                        let size = 4 + max_payload;
+                        wasm!(self.func, { i32_const(size as i32); call(self.emitter.rt.mem_eq); });
+                    }
                 } else {
                     let fields = self.emitter.record_fields.get(name.as_str()).cloned().unwrap_or_default();
-                    let size = values::record_size(&fields);
-                    if size > 0 {
-                        wasm!(self.func, { i32_const(size as i32); call(self.emitter.rt.mem_eq); });
+                    if fields.iter().any(|(_, ft)| !self.is_value_type(ft)) {
+                        self.emit_record_eq_deep(&fields);
                     } else {
-                        wasm!(self.func, { i32_eq; });
+                        let size = values::record_size(&fields);
+                        if size > 0 {
+                            wasm!(self.func, { i32_const(size as i32); call(self.emitter.rt.mem_eq); });
+                        } else {
+                            wasm!(self.func, { i32_eq; });
+                        }
                     }
                 }
             }
 
             Ty::Variant { cases, .. } => {
-                // Variant: compare tag (4 bytes) + payload (max payload size)
-                let max_payload: u32 = cases.iter()
-                    .map(|c| match &c.payload {
-                        crate::types::VariantPayload::Unit => 0,
-                        crate::types::VariantPayload::Tuple(ts) => ts.iter().map(|t| values::byte_size(t)).sum(),
-                        crate::types::VariantPayload::Record(fs) => fs.iter().map(|(_, t, _)| values::byte_size(t)).sum(),
-                    })
-                    .max().unwrap_or(0);
-                let size = 4 + max_payload;
-                wasm!(self.func, { i32_const(size as i32); call(self.emitter.rt.mem_eq); });
+                let has_pointers = cases.iter().any(|c| {
+                    match &c.payload {
+                        crate::types::VariantPayload::Tuple(ts) => ts.iter().any(|t| !self.is_value_type(t)),
+                        crate::types::VariantPayload::Record(fs) => fs.iter().any(|(_, t, _)| !self.is_value_type(t)),
+                        _ => false,
+                    }
+                });
+                if has_pointers {
+                    // Convert to VariantCase format for emit_variant_eq_deep
+                    let case_infos: Vec<super::VariantCase> = cases.iter().enumerate().map(|(i, c)| {
+                        let fields: Vec<(String, Ty)> = match &c.payload {
+                            crate::types::VariantPayload::Tuple(ts) =>
+                                ts.iter().enumerate().map(|(j, t)| (format!("_{}", j), t.clone())).collect(),
+                            crate::types::VariantPayload::Record(fs) =>
+                                fs.iter().map(|(n, t, _)| (n.clone(), t.clone())).collect(),
+                            _ => vec![],
+                        };
+                        super::VariantCase { name: c.name.clone(), tag: i as u32, fields }
+                    }).collect();
+                    self.emit_variant_eq_deep(&case_infos, &[]);
+                } else {
+                    let max_payload: u32 = cases.iter()
+                        .map(|c| match &c.payload {
+                            crate::types::VariantPayload::Unit => 0,
+                            crate::types::VariantPayload::Tuple(ts) => ts.iter().map(|t| values::byte_size(t)).sum(),
+                            crate::types::VariantPayload::Record(fs) => fs.iter().map(|(_, t, _)| values::byte_size(t)).sum(),
+                        })
+                        .max().unwrap_or(0);
+                    let size = 4 + max_payload;
+                    wasm!(self.func, { i32_const(size as i32); call(self.emitter.rt.mem_eq); });
+                }
             }
 
             _ => { wasm!(self.func, { i32_eq; }); }
@@ -345,6 +375,57 @@ impl FuncCompiler<'_> {
             }
             offset += field_size;
         }
+        self.scratch.free_i32(b);
+        self.scratch.free_i32(a);
+    }
+
+    /// Deep variant equality: [a_ptr, b_ptr] → i32
+    /// Compares tag, then if tags match, compares payload fields deeply.
+    fn emit_variant_eq_deep(&mut self, cases: &[super::VariantCase], _type_args: &[Ty]) {
+        let a = self.scratch.alloc_i32();
+        let b = self.scratch.alloc_i32();
+        wasm!(self.func, {
+            local_set(b);
+            local_set(a);
+            // Compare tags
+            local_get(a); i32_load(0);
+            local_get(b); i32_load(0);
+            i32_ne;
+            if_empty;
+              i32_const(0); return_; // different tags → not equal
+            end;
+        });
+
+        if cases.is_empty() || cases.iter().all(|c| c.fields.is_empty()) {
+            // All unit variants — tags matched, so equal
+            wasm!(self.func, { i32_const(1); });
+        } else {
+            // Compare payload fields based on tag
+            // For simplicity: compare each field at its offset, starting after tag (offset 4)
+            // Use the max-payload approach but with deep comparison
+            // Build a union of all field types across cases, and compare field-by-field
+            // For correctness, we iterate the longest case and compare each field deeply
+            let max_case = cases.iter().max_by_key(|c| c.fields.len()).cloned();
+            if let Some(case) = max_case {
+                let mut offset = 4u32;
+                for (i, (_, field_ty)) in case.fields.iter().enumerate() {
+                    let field_size = values::byte_size(field_ty);
+                    wasm!(self.func, { local_get(a); });
+                    self.emit_load_at(field_ty, offset);
+                    wasm!(self.func, { local_get(b); });
+                    self.emit_load_at(field_ty, offset);
+                    let ft = field_ty.clone();
+                    self.emit_eq_typed(&ft);
+                    if i < case.fields.len() - 1 {
+                        wasm!(self.func, { i32_eqz; if_empty; i32_const(0); return_; end; });
+                    }
+                    offset += field_size;
+                }
+            } else {
+                wasm!(self.func, { i32_const(1); });
+            }
+        }
+
         self.scratch.free_i32(b);
         self.scratch.free_i32(a);
     }
