@@ -152,9 +152,9 @@ impl FuncCompiler<'_> {
                     // Use i64 scratch for i64/f64, i32 scratch for i32
                     match tail_vt {
                         Some(ValType::I64) | Some(ValType::F64) =>
-                            Some(self.match_i64_base + self.match_depth),
+                            Some(self.scratch.alloc_i64()),
                         _ =>
-                            Some(self.match_i32_base + self.match_depth),
+                            Some(self.scratch.alloc_i32()),
                     }
                 } else { None };
 
@@ -198,6 +198,11 @@ impl FuncCompiler<'_> {
                 // After block: load saved result (if any)
                 if let Some(rl) = result_local {
                     wasm!(self.func, { local_get(rl); });
+                    // Free scratch in reverse order
+                    match tail_vt {
+                        Some(ValType::I64) | Some(ValType::F64) => self.scratch.free_i64(rl),
+                        _ => self.scratch.free_i32(rl),
+                    }
                 }
             }
 
@@ -307,7 +312,7 @@ impl FuncCompiler<'_> {
             // ── Map ──
             IrExprKind::EmptyMap => {
                 // Empty map: just [len=0:i32]
-                let scratch = self.match_i32_base + self.match_depth;
+                let scratch = self.scratch.alloc_i32();
                 wasm!(self.func, {
                     i32_const(4);
                     call(self.emitter.rt.alloc);
@@ -317,6 +322,7 @@ impl FuncCompiler<'_> {
                     i32_store(0);
                     local_get(scratch);
                 });
+                self.scratch.free_i32(scratch);
             }
             IrExprKind::MapLiteral { entries } => {
                 // Map literal: [len:i32][key0][val0][key1][val1]...
@@ -326,7 +332,7 @@ impl FuncCompiler<'_> {
                     values::byte_size(&k.ty) + values::byte_size(&v.ty)
                 } else { 8 };
                 let total = 4 + n * entry_size;
-                let scratch = self.match_i32_base + self.match_depth;
+                let scratch = self.scratch.alloc_i32();
                 wasm!(self.func, {
                     i32_const(total as i32);
                     call(self.emitter.rt.alloc);
@@ -349,24 +355,23 @@ impl FuncCompiler<'_> {
                     offset += values::byte_size(&val.ty);
                 }
                 wasm!(self.func, { local_get(scratch); });
+                self.scratch.free_i32(scratch);
             }
 
             // ── Option/Result ──
             IrExprKind::OptionSome { expr: inner } => {
                 let inner_size = values::byte_size(&inner.ty);
-                let scratch = self.match_i32_base + self.match_depth;
+                let scratch = self.scratch.alloc_i32();
                 wasm!(self.func, {
                     i32_const(inner_size as i32);
                     call(self.emitter.rt.alloc);
                     local_set(scratch);
                     local_get(scratch);
                 });
-                // Reserve scratch so inner expr uses different local
-                self.match_depth += 1;
                 self.emit_expr(inner);
-                self.match_depth -= 1;
                 self.emit_store_at(&inner.ty, 0);
                 wasm!(self.func, { local_get(scratch); });
+                self.scratch.free_i32(scratch);
             }
             IrExprKind::OptionNone => {
                 wasm!(self.func, { i32_const(0); });
@@ -376,7 +381,7 @@ impl FuncCompiler<'_> {
             IrExprKind::ResultOk { expr: inner } => {
                 // ok(x) = [tag:0, value]
                 let inner_size = values::byte_size(&inner.ty);
-                let scratch = self.match_i32_base + self.match_depth;
+                let scratch = self.scratch.alloc_i32();
                 wasm!(self.func, {
                     i32_const((4 + inner_size) as i32);
                     call(self.emitter.rt.alloc);
@@ -388,17 +393,16 @@ impl FuncCompiler<'_> {
                 });
                 if values::ty_to_valtype(&inner.ty).is_some() {
                     wasm!(self.func, { local_get(scratch); });
-                    self.match_depth += 1;
                     self.emit_expr(inner);
-                    self.match_depth -= 1;
                     self.emit_store_at(&inner.ty, 4);
                 }
                 wasm!(self.func, { local_get(scratch); });
+                self.scratch.free_i32(scratch);
             }
             IrExprKind::ResultErr { expr: inner } => {
                 // err(e) = [tag:1, value]
                 let inner_size = values::byte_size(&inner.ty);
-                let scratch = self.match_i32_base + self.match_depth;
+                let scratch = self.scratch.alloc_i32();
                 wasm!(self.func, {
                     i32_const((4 + inner_size) as i32);
                     call(self.emitter.rt.alloc);
@@ -410,12 +414,11 @@ impl FuncCompiler<'_> {
                 });
                 if values::ty_to_valtype(&inner.ty).is_some() {
                     wasm!(self.func, { local_get(scratch); });
-                    self.match_depth += 1;
                     self.emit_expr(inner);
-                    self.match_depth -= 1;
                     self.emit_store_at(&inner.ty, 4);
                 }
                 wasm!(self.func, { local_get(scratch); });
+                self.scratch.free_i32(scratch);
             }
 
             // ── Fan block (sequential fallback — no parallelism in WASM) ──
@@ -434,7 +437,7 @@ impl FuncCompiler<'_> {
                 // If tag == 0 (ok): unwrap → push value
                 // If tag != 0 (err): return the Result as-is
                 self.emit_expr(inner);
-                let scratch = self.match_i32_base + self.match_depth;
+                let scratch = self.scratch.alloc_i32();
                 wasm!(self.func, {
                     local_set(scratch);
                     // Check tag
@@ -451,6 +454,7 @@ impl FuncCompiler<'_> {
                     local_get(scratch);
                 });
                 self.emit_load_at(&expr.ty, 4);
+                self.scratch.free_i32(scratch);
             }
 
             // ── Map index access: m[key] → Option[V] ──
@@ -594,9 +598,9 @@ impl FuncCompiler<'_> {
                 self.emit_expr(left);
                 self.emit_expr(right);
                 // Use i32 scratch for counter, i64 scratch for result/base
-                let base_s = self.match_i64_base + self.match_depth;
-                let result_s = base_s + 1;
-                let counter_s = self.match_i32_base + self.match_depth;
+                let base_s = self.scratch.alloc_i64();
+                let result_s = self.scratch.alloc_i64();
+                let counter_s = self.scratch.alloc_i32();
                 wasm!(self.func, {
                     i32_wrap_i64;
                     local_set(counter_s);
@@ -621,12 +625,15 @@ impl FuncCompiler<'_> {
                     end;
                     local_get(result_s);
                 });
+                self.scratch.free_i32(counter_s);
+                self.scratch.free_i64(result_s);
+                self.scratch.free_i64(base_s);
             }
             BinOp::PowFloat => {
                 // Float power: check if exp == 0.5 → sqrt, else integer loop
-                let base_s = self.match_i64_base + self.match_depth;
-                let result_s = base_s + 1;
-                let counter_s = self.match_i32_base + self.match_depth;
+                let base_s = self.scratch.alloc_i64();
+                let result_s = self.scratch.alloc_i64();
+                let counter_s = self.scratch.alloc_i32();
                 self.emit_expr(left);
                 wasm!(self.func, { i64_reinterpret_f64; local_set(base_s); });
                 self.emit_expr(right);
@@ -672,6 +679,9 @@ impl FuncCompiler<'_> {
                     f64_reinterpret_i64;
                     end;
                 });
+                self.scratch.free_i32(counter_s);
+                self.scratch.free_i64(result_s);
+                self.scratch.free_i64(base_s);
             }
             BinOp::XorInt => {
                 self.emit_expr(left);

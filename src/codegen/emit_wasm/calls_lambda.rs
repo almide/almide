@@ -12,7 +12,7 @@ impl FuncCompiler<'_> {
     pub(super) fn emit_fn_ref_closure(&mut self, name: &str) {
         if let Some(&wrapper_table_idx) = self.emitter.fn_ref_wrappers.get(name) {
             // Allocate closure: [table_idx: i32][env_ptr: i32] = 8 bytes
-            let scratch = self.match_i32_base + self.match_depth;
+            let scratch = self.scratch.alloc_i32();
             wasm!(self.func, {
                 i32_const(8);
                 call(self.emitter.rt.alloc);
@@ -28,6 +28,7 @@ impl FuncCompiler<'_> {
                 // Return closure ptr
                 local_get(scratch);
             });
+            self.scratch.free_i32(scratch);
         } else {
             eprintln!("WARNING: FnRef wrapper not found for '{}', using direct table entry", name);
             wasm!(self.func, { unreachable; });
@@ -59,7 +60,7 @@ impl FuncCompiler<'_> {
         let table_idx = self.emitter.lambdas[lambda_idx].table_idx;
         let captures = self.emitter.lambdas[lambda_idx].captures.clone();
 
-        let scratch = self.match_i32_base + self.match_depth;
+        let scratch = self.scratch.alloc_i32();
 
         if captures.is_empty() {
             // No captures: allocate closure [table_idx, 0]
@@ -75,10 +76,11 @@ impl FuncCompiler<'_> {
                 i32_store(4);
                 local_get(scratch);
             });
+            self.scratch.free_i32(scratch);
         } else {
             // Allocate env: each capture gets 8 bytes (padded for alignment)
             let env_size = (captures.len() as u32) * 8;
-            let env_scratch = scratch; // reuse for env_ptr
+            let env_scratch = scratch;
             wasm!(self.func, {
                 i32_const(env_size as i32);
                 call(self.emitter.rt.alloc);
@@ -109,7 +111,7 @@ impl FuncCompiler<'_> {
             }
 
             // Allocate closure: [table_idx, env_ptr]
-            let closure_scratch = scratch + 1; // second i32 scratch slot
+            let closure_scratch = self.scratch.alloc_i32();
             wasm!(self.func, {
                 i32_const(8);
                 call(self.emitter.rt.alloc);
@@ -122,6 +124,8 @@ impl FuncCompiler<'_> {
                 i32_store(4);
                 local_get(closure_scratch);
             });
+            self.scratch.free_i32(closure_scratch);
+            self.scratch.free_i32(env_scratch);
         }
     }
 }

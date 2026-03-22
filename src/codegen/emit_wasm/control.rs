@@ -85,10 +85,9 @@ impl FuncCompiler<'_> {
                     Ty::Applied(crate::types::TypeConstructorId::Map, _)
                 );
 
-                // scratch[0] = collection ptr, scratch[1] = index counter
-                let list_scratch = self.match_i32_base + self.match_depth;
-                let idx_scratch = list_scratch + 1;
-                self.match_depth += 2; // Reserve 2 scratch locals for ptr + index
+                // scratch locals: collection ptr + index counter
+                let list_scratch = self.scratch.alloc_i32();
+                let idx_scratch = self.scratch.alloc_i32();
                 let loop_var = self.var_map[&var.0];
 
                 // Determine element type and entry stride
@@ -238,7 +237,8 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { end; }); // end loop
                 self.depth -= 1;
                 wasm!(self.func, { end; }); // end break block
-                self.match_depth -= 2; // Release for..in scratch locals
+                self.scratch.free_i32(idx_scratch);
+                self.scratch.free_i32(list_scratch);
             }
         }
     }
@@ -275,17 +275,22 @@ impl FuncCompiler<'_> {
 
         self.emit_expr(subject);
 
-        let scratch = match values::ty_to_valtype(&subject_ty) {
-            Some(ValType::I64) => self.match_i64_base + self.match_depth,
-            _ => self.match_i32_base + self.match_depth,
+        let is_i64 = matches!(values::ty_to_valtype(&subject_ty), Some(ValType::I64));
+        let scratch = if is_i64 {
+            self.scratch.alloc_i64()
+        } else {
+            self.scratch.alloc_i32()
         };
-        self.match_depth += 1;
 
         wasm!(self.func, { local_set(scratch); });
 
         self.emit_match_arms(arms, scratch, &subject_ty, result_ty, 0);
 
-        self.match_depth -= 1;
+        if is_i64 {
+            self.scratch.free_i64(scratch);
+        } else {
+            self.scratch.free_i32(scratch);
+        }
     }
 
     /// Resolve the actual subject type, fixing IR type inference gaps.

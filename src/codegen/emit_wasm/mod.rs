@@ -316,10 +316,6 @@ pub struct FuncCompiler<'a> {
     pub loop_stack: Vec<LoopLabels>,
     // Scratch local allocator
     pub scratch: scratch::ScratchAllocator,
-    // Legacy compatibility — delegates to scratch allocator internally
-    pub match_i64_base: u32,
-    pub match_i32_base: u32,
-    pub match_depth: u32,
     // Variable table for name lookups (pattern matching)
     pub var_table: &'a crate::ir::VarTable,
     // Return type for stub calls (set by emit_call before delegating to handlers)
@@ -633,21 +629,8 @@ fn assemble(emitter: &WasmEmitter) -> Vec<u8> {
 fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
     let void_type = emitter.register_type(vec![], vec![]);
 
-    // We need scratch locals for computing top_let values
-    let scan_depth = program.top_lets.iter()
-        .map(|tl| statements::count_scratch_depth_public(&tl.value))
-        .max().unwrap_or(0).max(1);
-
     let mut local_decls = Vec::new();
-    let match_i64_base = local_decls.len() as u32;
-    for _ in 0..scan_depth {
-        local_decls.push((1, ValType::I64));
-    }
-    let match_i32_base = local_decls.len() as u32;
-    for _ in 0..scan_depth {
-        local_decls.push((1, ValType::I32));
-    }
-    // ScratchAllocator region (separate from legacy)
+    // ScratchAllocator locals
     let scratch_i32_base = local_decls.len() as u32;
     for _ in 0..12 { local_decls.push((1, ValType::I32)); }
     let scratch_i64_base = local_decls.len() as u32;
@@ -666,9 +649,6 @@ fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
             depth: 0,
             loop_stack: Vec::new(),
             scratch: scratch_alloc,
-            match_i64_base,
-            match_i32_base,
-            match_depth: 0,
             var_table: &program.var_table,
             stub_ret_ty: Ty::Unit,
         };

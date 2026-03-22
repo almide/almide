@@ -199,20 +199,7 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
             local_idx += 1;
         }
 
-        // Legacy scratch locals
-        let scratch_depth = scan.scratch_depth.max(1);
-        let match_i64_base = local_idx;
-        for _ in 0..scratch_depth {
-            local_decls.push((1, ValType::I64));
-            local_idx += 1;
-        }
-        let match_i32_base = local_idx;
-        for _ in 0..scratch_depth {
-            local_decls.push((1, ValType::I32));
-            local_idx += 1;
-        }
-
-        // ScratchAllocator locals (separate region)
+        // ScratchAllocator locals
         let scratch_i32_base = local_idx;
         let scratch_extra = 12usize;
         for _ in 0..scratch_extra { local_decls.push((1, ValType::I32)); local_idx += 1; }
@@ -271,9 +258,6 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
                 depth: 0,
                 loop_stack: Vec::new(),
                 scratch: scratch_alloc,
-                match_i64_base,
-                match_i32_base,
-                match_depth: 0,
                 var_table: &program.var_table,
                 stub_ret_ty: Ty::Unit,
             };

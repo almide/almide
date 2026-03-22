@@ -108,7 +108,7 @@ impl FuncCompiler<'_> {
 
             IrStmtKind::BindDestructure { pattern, value } => {
                 self.emit_expr(value);
-                let scratch = self.match_i32_base + self.match_depth;
+                let scratch = self.scratch.alloc_i32();
                 wasm!(self.func, { local_set(scratch); });
 
                 // Destructure pattern
@@ -151,6 +151,7 @@ impl FuncCompiler<'_> {
                     }
                     _ => {}
                 }
+                self.scratch.free_i32(scratch);
             }
 
             IrStmtKind::IndexAssign { target, index, value } => {
@@ -200,8 +201,6 @@ impl FuncCompiler<'_> {
 /// Result of pre-scanning a function body for local variables.
 pub struct LocalScanResult {
     pub binds: Vec<(VarId, ValType)>,
-    /// Max scratch local depth needed (match subjects + record temporaries).
-    pub scratch_depth: usize,
 }
 
 /// Pre-scan a function body to collect all local variable bindings
@@ -209,128 +208,7 @@ pub struct LocalScanResult {
 pub fn collect_locals(body: &IrExpr, var_table: &crate::ir::VarTable) -> LocalScanResult {
     let mut binds = Vec::new();
     scan_expr(body, &mut binds, var_table);
-    // Always at least 1 scratch level (used by record/variant construction)
-    let scratch_depth = count_scratch_depth(body).max(1);
-    LocalScanResult { binds, scratch_depth }
-}
-
-/// Count the maximum scratch local depth needed.
-/// Match expressions and Record constructions each consume 1 level.
-/// Public access to scratch depth counting (used by init_globals compilation).
-pub fn count_scratch_depth_public(expr: &IrExpr) -> usize {
-    count_scratch_depth(expr)
-}
-
-fn count_scratch_depth(expr: &IrExpr) -> usize {
-    match &expr.kind {
-        IrExprKind::Match { subject, arms } => {
-            let inner = arms.iter()
-                .map(|a| count_scratch_depth(&a.body))
-                .max().unwrap_or(0);
-            let subj = count_scratch_depth(subject);
-            1 + inner.max(subj)
-        }
-        IrExprKind::Record { fields, .. } => {
-            let inner = fields.iter()
-                .map(|(_, e)| count_scratch_depth(e))
-                .max().unwrap_or(0);
-            1 + inner
-        }
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
-            let s = stmts.iter().map(|s| count_scratch_depth_stmt(s)).max().unwrap_or(0);
-            let e = expr.as_ref().map(|e| count_scratch_depth(e)).unwrap_or(0);
-            s.max(e)
-        }
-        IrExprKind::If { cond, then, else_ } => {
-            count_scratch_depth(cond)
-                .max(count_scratch_depth(then))
-                .max(count_scratch_depth(else_))
-        }
-        IrExprKind::While { cond, body } => {
-            let b = body.iter().map(|s| count_scratch_depth_stmt(s)).max().unwrap_or(0);
-            count_scratch_depth(cond).max(b)
-        }
-        IrExprKind::BinOp { op, left, right } => {
-            let inner = count_scratch_depth(left).max(count_scratch_depth(right));
-            match op {
-                crate::ir::BinOp::PowInt | crate::ir::BinOp::PowFloat => 4 + inner,
-                // Eq/Neq: deep equality uses up to 3 scratch locals (list_eq_deep, option_eq_deep, etc.)
-                crate::ir::BinOp::Eq | crate::ir::BinOp::Neq => 3 + inner,
-                _ => inner,
-            }
-        }
-        IrExprKind::UnOp { operand, .. } => count_scratch_depth(operand),
-        IrExprKind::Call { args, target, .. } => {
-            // ScratchAllocator: stdlib functions alloc up to 10 i32 scratch locals
-            // (unique_by uses 10). This must be enough to cover the worst case.
-            let inner = args.iter().map(|a| count_scratch_depth(a)).max().unwrap_or(0);
-            10 + inner
-        }
-        // SpreadRecord needs 2 i32 scratch (result + base ptrs) + 1 i64 scratch (copy counter)
-        IrExprKind::SpreadRecord { base, fields, .. } => {
-            let inner = fields.iter().map(|(_, e)| count_scratch_depth(e)).max().unwrap_or(0);
-            2 + count_scratch_depth(base).max(inner)
-        }
-        // Option/Result construction: 1 scratch + inner (scratch held while emitting inner expr)
-        IrExprKind::OptionSome { expr } => 1 + count_scratch_depth(expr),
-        IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr } => 1 + count_scratch_depth(expr),
-        IrExprKind::EmptyMap => 1,
-        IrExprKind::MapLiteral { entries } => {
-            let inner = entries.iter()
-                .flat_map(|(k, v)| [count_scratch_depth(k), count_scratch_depth(v)])
-                .max().unwrap_or(0);
-            1 + inner
-        }
-        IrExprKind::List { elements } => {
-            let inner = elements.iter().map(|e| count_scratch_depth(e)).max().unwrap_or(0);
-            1 + inner
-        }
-        IrExprKind::Tuple { elements } => {
-            let inner = elements.iter().map(|e| count_scratch_depth(e)).max().unwrap_or(0);
-            1 + inner
-        }
-        // FnRef needs 1 scratch, Lambda with captures needs 2 (env + closure ptr)
-        IrExprKind::FnRef { .. } => 1,
-        IrExprKind::Lambda { .. } => 2,
-        IrExprKind::Try { expr } => 1 + count_scratch_depth(expr),
-        IrExprKind::ForIn { iterable, body, .. } => {
-            let b = body.iter().map(|s| count_scratch_depth_stmt(s)).max().unwrap_or(0);
-            // List for...in reserves 2 scratch slots (list ptr + index counter)
-            // via match_depth += 2 BEFORE emitting iterable and body,
-            // so both iterable and body scratch are additive to the 2 reserved slots.
-            let for_in_need = match &iterable.kind {
-                IrExprKind::Range { .. } => 0,
-                _ => 2,
-            };
-            for_in_need + count_scratch_depth(iterable).max(b)
-        }
-        IrExprKind::StringInterp { parts } => {
-            parts.iter().map(|p| match p {
-                crate::ir::IrStringPart::Expr { expr } => count_scratch_depth(expr),
-                _ => 0,
-            }).max().unwrap_or(0)
-        }
-        IrExprKind::Clone { expr } | IrExprKind::Deref { expr } => count_scratch_depth(expr),
-        IrExprKind::Member { object, .. } | IrExprKind::IndexAccess { object, .. }
-        | IrExprKind::TupleIndex { object, .. } => count_scratch_depth(object),
-        // MapAccess delegates to map.get which uses 2 scratch locals (loop index + result ptr)
-        IrExprKind::MapAccess { object, key } => {
-            2 + count_scratch_depth(object).max(count_scratch_depth(key))
-        }
-        _ => 0,
-    }
-}
-
-fn count_scratch_depth_stmt(stmt: &IrStmt) -> usize {
-    match &stmt.kind {
-        IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => count_scratch_depth(value),
-        IrStmtKind::BindDestructure { value, .. } => 1 + count_scratch_depth(value),
-        IrStmtKind::Expr { expr } => count_scratch_depth(expr),
-        IrStmtKind::Guard { cond, else_ } => count_scratch_depth(cond).max(count_scratch_depth(else_)),
-        IrStmtKind::IndexAssign { index, value, .. } => count_scratch_depth(index).max(count_scratch_depth(value)),
-        IrStmtKind::FieldAssign { value, .. } => count_scratch_depth(value),
-        _ => 0,
-    }
+    LocalScanResult { binds }
 }
 
 fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::VarTable) {
