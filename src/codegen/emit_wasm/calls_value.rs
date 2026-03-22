@@ -318,9 +318,9 @@ impl FuncCompiler<'_> {
             local_get(v); i32_load(0); i32_const(2); i32_eq;
             if_i32;
               // tag==2 (int): payload is i64 at offset 4
-              i32_const(16); call(self.emitter.rt.alloc); local_set(result);
-              local_get(result); i32_const(0); i32_store(0); // ok
-              local_get(result); local_get(v); i64_load(4); i64_store(8); // i64 payload at offset 8
+              i32_const(12); call(self.emitter.rt.alloc); local_set(result);
+              local_get(result); i32_const(0); i32_store(0); // ok tag
+              local_get(result); local_get(v); i64_load(4); i64_store(4); // i64 payload at offset 4
               local_get(result);
             else_;
         });
