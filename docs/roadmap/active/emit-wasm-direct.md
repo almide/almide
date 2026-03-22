@@ -1,105 +1,66 @@
 # Direct WASM Emission [ACTIVE]
 
-## Status: Phase 1 complete, WASM test runner needed
+## Status: 129/129 tests passing (100%), WASI imports operational
 
-## Current Architecture
+## Architecture
 
 ```
 src/codegen/emit_wasm/
-├── mod.rs          WasmEmitter, assembly, lambda pre-scan, closures (980 lines)
-├── wasm_macro.rs   wasm! DSL macro for instruction emission (372 lines)
-├── values.rs       Ty → ValType mapping, byte_size, field_offset (61 lines)
-├── strings.rs      String literal interning (35 lines)
-├── runtime.rs      14 runtime functions via wasm! macro (1135 lines)
-├── expressions.rs  emit_expr + operators + helpers (780 lines)
-├── calls.rs        emit_call + stdlib + closures + list.map/filter/fold (1665 lines)
-├── collections.rs  Record/Tuple/List/Map construction (266 lines)
-├── control.rs      for-in/match/do-block (617 lines)
-├── statements.rs   emit_stmt + local scan + scratch depth (442 lines)
-└── functions.rs    IrFunction → WASM function (85 lines)
+├── mod.rs              WasmEmitter, FuncCompiler, DepthGuard, assembly (1200+ lines)
+├── wasm_macro.rs       wasm! DSL macro for instruction emission
+├── values.rs           Ty → ValType mapping, byte_size, field_offset
+├── strings.rs          String literal interning
+├── scratch.rs          ScratchAllocator (bump/reuse locals)
+├── runtime.rs          Runtime function registration + WASI imports
+├── rt_string.rs        String runtime functions (split, join, replace, etc.)
+├── rt_value.rs         Value stringify + JSON parse runtime
+├── rt_regex.rs         Backtracking regex engine (~1400 lines)
+├── expressions.rs      emit_expr + operators + Option/Result
+├── calls.rs            Call dispatch + datetime/random/fan/env/http
+├── calls_value.rs      Value/JSON/Codec helpers (pick, omit, merge, encode/decode)
+├── calls_regex.rs      Regex module dispatch
+├── calls_lambda.rs     Lambda closure emission (lambda_id matching)
+├── calls_option.rs     Option module dispatch
+├── calls_list.rs       List module dispatch
+├── calls_list_helpers.rs  List helper operations
+├── calls_list_closure.rs  List higher-order (map, filter, fold, etc.)
+├── calls_list_closure2.rs Additional list closures (take_while, partition, etc.)
+├── calls_map.rs        Map module dispatch
+├── calls_set.rs        Set module dispatch
+├── calls_numeric.rs    Int/Float module dispatch
+├── collections.rs      Record/Tuple/List/Map construction
+├── control.rs          Match/pattern matching/do-block/for-in
+├── equality.rs         Deep equality (Option, Result, List, Variant)
+├── statements.rs       Statement emission + local scan
+├── closures.rs         Lambda/closure pre-scan and compilation
+└── functions.rs        IrFunction → WASM function
 ```
 
-Total: 6,438 lines
+## Fully Implemented
 
-## Implemented
+- All language features (expressions, control flow, closures, generics, variants, records, tuples)
+- All stdlib modules: string, list, map, set, int, float, math, option, result, value, json, regex, datetime, random, fan, env, http
+- Codec auto-derive (encode/decode for records and variants, Option/List/default fields)
+- Deep equality for all types including variants
+- WASI imports: fd_write, clock_time_get, proc_exit, random_get
+- ScratchAllocator + DepthGuard RAII
+- Lambda identification via lambda_id
 
-- Literals (Int, Float, Bool, String, Unit)
-- Variables (local, global, top-level let)
-- Binary/Unary operators (arithmetic, comparison, logical, string concat, list concat)
-- Control flow (if/else, while, for..in Range, for..in List, break, continue)
-- Match expressions (wildcard, bind, literal, constructor, record pattern, tuple, Some/None, Ok/Err, guards)
-- Functions (user-defined, recursion, closures, FnRef, call_indirect)
-- Records (construction, spread, field access, variant tag)
-- Tuples (construction, index, destructure)
-- Lists (construction, index access, list.map/filter/fold/reverse/sort/get/enumerate)
-- Option/Result (construction, pattern matching, deep equality)
-- String interpolation
-- Effect fn (auto-unwrap via ResultPropagation pass + Try node)
-- Do blocks (with guard → loop structure)
-- Fan blocks (sequential fallback)
-- wasm! macro DSL (96% of instruction emission migrated)
+## WASI Imports
 
-## Remaining: WASM stdlib
+| Import | Status | Usage |
+|--------|--------|-------|
+| `fd_write` | Active | stdout (println) |
+| `clock_time_get` | Active | `datetime.now()` — realtime clock |
+| `random_get` | Active | PRNG seed initialization |
+| `proc_exit` | Imported | Available for future exit(code) |
 
-Functions that need WASM-native implementation (currently stub or missing):
+## Next Steps
 
-### String
-
-| Function | Priority | Notes |
-|----------|----------|-------|
-| `string.split` | High | Needs delimiter search + list construction |
-| `string.join` | High | List of strings → single string |
-| `string.slice` | Medium | Substring extraction |
-| `string.replace` | Medium | Search and replace |
-| `string.repeat` | Medium | String repetition |
-| `string.reverse` | Medium | Byte reversal (ASCII) |
-| `string.index_of` | Low | First occurrence search |
-| `string.pad_start/pad_end` | Low | Padding |
-| `string.trim_start/trim_end` | Low | One-sided trim |
-| `string.get` | Low | Character at index |
-| `string.count` | Low | Substring count |
-
-### Float
-
-| Function | Priority | Notes |
-|----------|----------|-------|
-| `float.to_string` (proper) | High | Currently truncates to int; needs decimal output |
-
-### List
-
-| Function | Priority | Notes |
-|----------|----------|-------|
-| `list.find` | Medium | First matching element |
-| `list.any/all` | Medium | Predicate checks |
-| `list.take/drop` | Medium | Sublist operations |
-| `list.zip` | Medium | Pair two lists |
-| `list.flat_map` | Medium | Map + flatten |
-| `list.contains` | Low | Element search |
-| `list.sort_by` | Low | Custom comparator sort |
-| `list.count` | Low | Predicate count |
-| `list.filter_map` | Low | Filter + map combined |
-
-### Map
-
-| Function | Priority | Notes |
-|----------|----------|-------|
-| `map.get` | High | Key lookup → Option |
-| `map.set` | High | Key insert/update |
-| `map.keys/values` | Medium | Iteration |
-| `map.contains_key` | Medium | Key existence check |
-
-### JSON/Codec
-
-| Function | Priority | Notes |
-|----------|----------|-------|
-| `json.stringify` | Low | Value → JSON string |
-| `json.parse` | Low | JSON string → Value |
-
-### Math
-
-| Function | Priority | Notes |
-|----------|----------|-------|
-| `math.pow` (Int/Float) | Medium | Exponentiation loop |
+1. **Dead Code Elimination (DCE)** — unused runtime functions inflate binary size
+2. **fd_read** — stdin for interactive programs
+3. **args_get / environ_get** — CLI args and env vars
+4. **File I/O** — path_open/fd_read/fd_write/fd_close/fd_seek (set)
 
 ## Binary Size
 
@@ -108,13 +69,5 @@ Functions that need WASM-native implementation (currently stub or missing):
 | Hello World | 1,195 B | 1,717 B | 1.4x |
 | FizzBuzz | 1,296 B | 13,215 B | 10.2x |
 | Fibonacci | 1,253 B | 13,186 B | 10.5x |
-| Closure | 1,297 B | 13,146 B | 10.1x |
-| Variant | 1,392 B | 13,423 B | 9.6x |
 
-After DCE, Hello World should return to ~600B.
-
-## Next Steps
-
-1. WASM test runner (`almide test --target wasm`)
-2. High-priority stdlib (string.split/join, float.to_string, map.get/set)
-3. Dead code elimination for unused runtime functions
+DCE implementation would reduce Hello World from current ~12-15KB (with all runtime) to ~1-2KB.

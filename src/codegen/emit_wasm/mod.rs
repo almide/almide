@@ -46,6 +46,7 @@ mod control;
 pub mod statements;
 mod functions;
 pub mod scratch;
+mod dce;
 
 use std::collections::HashMap;
 use wasm_encoder::{
@@ -591,6 +592,12 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
 
     // Compile variant deep-equality functions (bodies, after all user code)
     compile_variant_eq_funcs(&mut emitter, &program.var_table);
+
+    // Phase 2.5: Dead Code Elimination
+    let dce_count = dce::eliminate_dead_code(&mut emitter);
+    if dce_count > 0 {
+        eprintln!("[DCE] eliminated {} of {} functions", dce_count, emitter.compiled.len());
+    }
 
     // Phase 3: Assemble
     assemble(&emitter)
