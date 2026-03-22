@@ -13,6 +13,7 @@
 | [Performance Research](active/performance-research.md) | Rust との差 2.9%, Phase 0-4 | Research |
 | [Self-Contained Compiler](active/self-contained-compiler.md) | rustc 不要化: Stage 1 (LLVM直接出力) → Stage 2 (セルフホスティング) | Architecture |
 | [Compiler Architecture 10/10](active/compiler-architecture-10.md) | 全領域 10/10 目標: 型チェッカー・mono・nanopass・テスト・ビルド改善 | Compiler Internals |
+| [Codegen Unification](active/codegen-unification.md) | WASM/Rust/TS/JS共通基盤: Target::Wasm追加 + Stdlib dispatch一元化 | Architecture |
 
 ## 1.0 Remaining
 
