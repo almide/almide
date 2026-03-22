@@ -145,8 +145,8 @@ fn transform_children(
             stmts: stmts.into_iter().map(|s| rec_stmt!(s)).collect(),
             expr: tail.map(|e| Box::new(rec!(*e))),
         },
-        IrExprKind::Lambda { params, body } => IrExprKind::Lambda {
-            params, body: Box::new(rec!(*body)),
+        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
+            params, body: Box::new(rec!(*body)), lambda_id,
         },
         IrExprKind::ForIn { var, var_tuple, iterable, body } => IrExprKind::ForIn {
             var, var_tuple,
@@ -420,7 +420,7 @@ fn try_eliminate_identity_map(expr: IrExpr) -> Option<IrExpr> {
 }
 
 fn is_identity_lambda(expr: &IrExpr) -> bool {
-    if let IrExprKind::Lambda { params, body } = &expr.kind {
+    if let IrExprKind::Lambda { params, body, .. } = &expr.kind {
         if params.len() == 1 {
             if let IrExprKind::Var { id } = &body.kind {
                 return *id == params[0].0;
@@ -616,7 +616,7 @@ fn try_fuse_range_fold(expr: IrExpr, count: &mut usize, vt: &mut VarTable) -> Op
                     let init = &args[1];
                     let g = &args[2];
 
-                    if let IrExprKind::Lambda { params: g_params, body: g_body } = &g.kind {
+                    if let IrExprKind::Lambda { params: g_params, body: g_body, .. } = &g.kind {
                         if g_params.len() == 2 {
                             let (g_acc_id, g_acc_ty) = &g_params[0];
                             let (g_elem_id, g_elem_ty) = &g_params[1];
@@ -686,8 +686,8 @@ fn try_fuse_range_fold(expr: IrExpr, count: &mut usize, vt: &mut VarTable) -> Op
 /// Compose two lambdas: f and g → (x) => g(f(x))
 fn compose_lambdas(f: &IrExpr, g: &IrExpr) -> Option<IrExpr> {
     if let (
-        IrExprKind::Lambda { params: f_params, body: f_body },
-        IrExprKind::Lambda { params: g_params, body: g_body },
+        IrExprKind::Lambda { params: f_params, body: f_body, .. },
+        IrExprKind::Lambda { params: g_params, body: g_body, .. },
     ) = (&f.kind, &g.kind) {
         if f_params.len() != 1 || g_params.len() != 1 { return None; }
         let (f_param_id, f_param_ty) = &f_params[0];
@@ -697,6 +697,7 @@ fn compose_lambdas(f: &IrExpr, g: &IrExpr) -> Option<IrExpr> {
             kind: IrExprKind::Lambda {
                 params: vec![(*f_param_id, f_param_ty.clone())],
                 body: Box::new(composed_body),
+                lambda_id: None,
             },
             ty: g.ty.clone(),
             span: f.span,
@@ -708,8 +709,8 @@ fn compose_lambdas(f: &IrExpr, g: &IrExpr) -> Option<IrExpr> {
 /// Compose two predicates: p and q → (x) => p(x) && q(x)
 fn compose_predicates(p: &IrExpr, q: &IrExpr) -> Option<IrExpr> {
     if let (
-        IrExprKind::Lambda { params: p_params, body: p_body },
-        IrExprKind::Lambda { params: q_params, body: q_body },
+        IrExprKind::Lambda { params: p_params, body: p_body, .. },
+        IrExprKind::Lambda { params: q_params, body: q_body, .. },
     ) = (&p.kind, &q.kind) {
         if p_params.len() != 1 || q_params.len() != 1 { return None; }
         let (p_param_id, p_param_ty) = &p_params[0];
@@ -730,6 +731,7 @@ fn compose_predicates(p: &IrExpr, q: &IrExpr) -> Option<IrExpr> {
             kind: IrExprKind::Lambda {
                 params: vec![(*p_param_id, p_param_ty.clone())],
                 body: Box::new(composed_body),
+                lambda_id: None,
             },
             ty: p.ty.clone(), span: p.span,
         });
@@ -740,8 +742,8 @@ fn compose_predicates(p: &IrExpr, q: &IrExpr) -> Option<IrExpr> {
 /// Compose map f into fold reducer g: (acc, x) => g(acc, f(x))
 fn compose_map_into_fold(f: &IrExpr, g: &IrExpr) -> Option<IrExpr> {
     if let (
-        IrExprKind::Lambda { params: f_params, body: f_body },
-        IrExprKind::Lambda { params: g_params, body: g_body },
+        IrExprKind::Lambda { params: f_params, body: f_body, .. },
+        IrExprKind::Lambda { params: g_params, body: g_body, .. },
     ) = (&f.kind, &g.kind) {
         if f_params.len() != 1 || g_params.len() != 2 { return None; }
         let (f_param_id, f_param_ty) = &f_params[0];
@@ -752,6 +754,7 @@ fn compose_map_into_fold(f: &IrExpr, g: &IrExpr) -> Option<IrExpr> {
             kind: IrExprKind::Lambda {
                 params: vec![(*g_acc_id, g_acc_ty.clone()), (*f_param_id, f_param_ty.clone())],
                 body: Box::new(g_body_subst),
+                lambda_id: None,
             },
             ty: g.ty.clone(), span: g.span,
         });
@@ -761,7 +764,7 @@ fn compose_map_into_fold(f: &IrExpr, g: &IrExpr) -> Option<IrExpr> {
 
 /// Compose two flat_map functions: f and g → (x) => flat_map(f(x), g)
 fn compose_flatmaps(f: &IrExpr, g: &IrExpr, target: &CallTarget, type_args: &[Ty]) -> Option<IrExpr> {
-    if let IrExprKind::Lambda { params: f_params, body: f_body } = &f.kind {
+    if let IrExprKind::Lambda { params: f_params, body: f_body, .. } = &f.kind {
         if f_params.len() != 1 { return None; }
         let (f_param_id, f_param_ty) = &f_params[0];
         let inner_call = IrExpr {
@@ -776,6 +779,7 @@ fn compose_flatmaps(f: &IrExpr, g: &IrExpr, target: &CallTarget, type_args: &[Ty
             kind: IrExprKind::Lambda {
                 params: vec![(*f_param_id, f_param_ty.clone())],
                 body: Box::new(inner_call),
+                lambda_id: None,
             },
             ty: f.ty.clone(), span: f.span,
         });
@@ -786,8 +790,8 @@ fn compose_flatmaps(f: &IrExpr, g: &IrExpr, target: &CallTarget, type_args: &[Ty
 /// Compose filter_map lambda and fold reducer into a single match-based reducer.
 fn compose_filter_map_into_fold(fm: &IrExpr, g: &IrExpr, vt: &mut VarTable) -> Option<IrExpr> {
     if let (
-        IrExprKind::Lambda { params: fm_params, body: fm_body },
-        IrExprKind::Lambda { params: g_params, body: g_body },
+        IrExprKind::Lambda { params: fm_params, body: fm_body, .. },
+        IrExprKind::Lambda { params: g_params, body: g_body, .. },
     ) = (&fm.kind, &g.kind) {
         if fm_params.len() != 1 || g_params.len() != 2 { return None; }
         let (fm_param_id, fm_param_ty) = &fm_params[0];
@@ -815,6 +819,7 @@ fn compose_filter_map_into_fold(fm: &IrExpr, g: &IrExpr, vt: &mut VarTable) -> O
             kind: IrExprKind::Lambda {
                 params: vec![(*g_acc_id, g_acc_ty.clone()), (*fm_param_id, fm_param_ty.clone())],
                 body: Box::new(match_expr),
+                lambda_id: None,
             },
             ty: g.ty.clone(), span: g.span,
         });
@@ -825,8 +830,8 @@ fn compose_filter_map_into_fold(fm: &IrExpr, g: &IrExpr, vt: &mut VarTable) -> O
 /// Compose map function f and filter predicate p into a filter_map lambda.
 fn compose_map_filter(f: &IrExpr, p: &IrExpr) -> Option<IrExpr> {
     if let (
-        IrExprKind::Lambda { params: f_params, body: f_body },
-        IrExprKind::Lambda { params: p_params, body: p_body },
+        IrExprKind::Lambda { params: f_params, body: f_body, .. },
+        IrExprKind::Lambda { params: p_params, body: p_body, .. },
     ) = (&f.kind, &p.kind) {
         if f_params.len() != 1 || p_params.len() != 1 { return None; }
         let (f_param_id, f_param_ty) = &f_params[0];
@@ -851,6 +856,7 @@ fn compose_map_filter(f: &IrExpr, p: &IrExpr) -> Option<IrExpr> {
             kind: IrExprKind::Lambda {
                 params: vec![(*f_param_id, f_param_ty.clone())],
                 body: Box::new(composed_body),
+                lambda_id: None,
             },
             ty: f.ty.clone(), span: f.span,
         });

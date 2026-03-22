@@ -155,8 +155,8 @@ fn insert_derefs(expr: IrExpr, deref_ids: &HashSet<VarId>) -> IrExpr {
         IrExprKind::BinOp { op, left, right } => IrExprKind::BinOp {
             op, left: Box::new(insert_derefs(*left, deref_ids)), right: Box::new(insert_derefs(*right, deref_ids)),
         },
-        IrExprKind::Lambda { params, body } => IrExprKind::Lambda {
-            params, body: Box::new(insert_derefs(*body, deref_ids)),
+        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
+            params, body: Box::new(insert_derefs(*body, deref_ids)), lambda_id,
         },
         IrExprKind::List { elements } => IrExprKind::List {
             elements: elements.into_iter().map(|e| insert_derefs(e, deref_ids)).collect(),

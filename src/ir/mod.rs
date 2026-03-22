@@ -234,7 +234,7 @@ pub enum IrExprKind {
     MapAccess { object: Box<IrExpr>, key: Box<IrExpr> },
 
     // ── Functions ──
-    Lambda { params: Vec<(VarId, Ty)>, body: Box<IrExpr> },
+    Lambda { params: Vec<(VarId, Ty)>, body: Box<IrExpr>, lambda_id: Option<u32> },
 
     // ── Strings ──
     StringInterp { parts: Vec<IrStringPart> },

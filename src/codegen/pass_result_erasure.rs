@@ -122,8 +122,8 @@ fn erase_expr(expr: IrExpr) -> IrExpr {
         IrExprKind::UnOp { op, operand } => IrExprKind::UnOp {
             op, operand: Box::new(erase_expr(*operand)),
         },
-        IrExprKind::Lambda { params, body } => IrExprKind::Lambda {
-            params, body: Box::new(erase_expr(*body)),
+        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
+            params, body: Box::new(erase_expr(*body)), lambda_id,
         },
         IrExprKind::List { elements } => IrExprKind::List {
             elements: elements.into_iter().map(erase_expr).collect(),

@@ -17,7 +17,7 @@ use super::statements;
 /// Register lambda functions and FnRef wrappers in the emitter.
 pub(super) fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) {
     // Collect all lambdas (in tree-walk order)
-    let mut lambda_exprs: Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, Vec<u32>)> = Vec::new();
+    let mut lambda_exprs: Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, Vec<u32>, Option<u32>)> = Vec::new();
     let mut fn_ref_set: HashSet<String> = HashSet::new();
     let mut fn_ref_names: Vec<String> = Vec::new(); // ordered, deduped
 
@@ -52,7 +52,7 @@ pub(super) fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) 
     fn_ref_names.sort();
 
     // Register each lambda as a function
-    for (params, _body, captures) in &lambda_exprs {
+    for (params, _body, captures, lid) in &lambda_exprs {
         // Closure calling convention: (env: i32, declared_params...) -> ret
         let mut wasm_params = vec![ValType::I32]; // env_ptr
         for (vid, ty) in params {
@@ -93,6 +93,7 @@ pub(super) fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) 
             closure_type_idx,
             captures: capture_vars,
             param_ids,
+            lambda_id: *lid,
         });
     }
 
@@ -123,7 +124,7 @@ pub(super) fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) 
 /// Compile lambda bodies and FnRef wrappers.
 pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitter) {
     // Re-scan to get lambda bodies (in same order as pre-scan)
-    let mut lambda_exprs: Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, Vec<u32>)> = Vec::new();
+    let mut lambda_exprs: Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, Vec<u32>, Option<u32>)> = Vec::new();
     let mut fn_ref_set: HashSet<String> = HashSet::new();
     let mut mutable_vars: HashSet<u32> = HashSet::new();
 
@@ -152,7 +153,7 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
     fn_ref_names.sort();
 
     // Compile each lambda
-    for (i, (params, body, captures)) in lambda_exprs.iter().enumerate() {
+    for (i, (params, body, captures, _lid)) in lambda_exprs.iter().enumerate() {
         let info = &emitter.lambdas[i];
         let type_idx = info.closure_type_idx;
 
@@ -302,11 +303,11 @@ fn scan_closures_expr(
     scope_vars: &mut HashSet<u32>,
     mutable_vars: &mut HashSet<u32>,
     var_table: &crate::ir::VarTable,
-    lambdas: &mut Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, Vec<u32>)>,
+    lambdas: &mut Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, Vec<u32>, Option<u32>)>,
     fn_refs: &mut HashSet<String>,
 ) {
     match &expr.kind {
-        IrExprKind::Lambda { params, body } => {
+        IrExprKind::Lambda { params, body, lambda_id } => {
             // Compute captures: vars referenced in body but not in params
             let param_ids: HashSet<u32> = params.iter().map(|(vid, _)| vid.0).collect();
             let mut body_vars = HashSet::new();
@@ -320,7 +321,7 @@ fn scan_closures_expr(
             let param_list: Vec<(VarId, crate::types::Ty)> = params.iter()
                 .map(|(vid, ty)| (*vid, ty.clone()))
                 .collect();
-            lambdas.push((param_list, *body.clone(), captures));
+            lambdas.push((param_list, *body.clone(), captures, *lambda_id));
             // NOTE: Do NOT recurse into lambda body here.
             // Nested lambdas will be scanned in a second pass (BFS order)
             // to match emit order (user fn bodies first, then lambda bodies).
@@ -391,7 +392,7 @@ fn scan_closures_stmt(
     scope_vars: &mut HashSet<u32>,
     mutable_vars: &mut HashSet<u32>,
     var_table: &crate::ir::VarTable,
-    lambdas: &mut Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, Vec<u32>)>,
+    lambdas: &mut Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, Vec<u32>, Option<u32>)>,
     fn_refs: &mut HashSet<String>,
 ) {
     match &stmt.kind {

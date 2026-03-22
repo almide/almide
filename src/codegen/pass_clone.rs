@@ -115,8 +115,8 @@ fn insert_clones(expr: IrExpr, clone_ids: &HashSet<VarId>) -> IrExpr {
         IrExprKind::UnOp { op, operand } => IrExprKind::UnOp {
             op, operand: Box::new(insert_clones(*operand, clone_ids)),
         },
-        IrExprKind::Lambda { params, body } => IrExprKind::Lambda {
-            params, body: Box::new(insert_clones(*body, clone_ids)),
+        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
+            params, body: Box::new(insert_clones(*body, clone_ids)), lambda_id,
         },
         IrExprKind::List { elements } => IrExprKind::List {
             elements: elements.into_iter().map(|e| insert_clones(e, clone_ids)).collect(),

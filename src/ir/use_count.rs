@@ -111,7 +111,7 @@ fn count_uses_in_expr(expr: &IrExpr, table: &mut VarTable) {
             for s in body { count_uses_in_stmt(s, table); }
             bump_outer_vars_in_loop(body, &body_locals, table);
         }
-        IrExprKind::Lambda { params, body } => {
+        IrExprKind::Lambda { params, body, .. } => {
             count_uses_in_expr(body, table);
             // Bump outer vars captured by lambda (closure captures move by default)
             let mut lambda_locals: HashSet<u32> = params.iter().map(|(v, _)| v.0).collect();

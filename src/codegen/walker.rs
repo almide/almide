@@ -483,7 +483,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
 
         // ── Lambda ──
-        IrExprKind::Lambda { params, body } => {
+        IrExprKind::Lambda { params, body, .. } => {
             let params_str = params.iter()
                 .map(|(id, _ty)| ctx.var_name(*id).to_string())
                 .collect::<Vec<_>>()

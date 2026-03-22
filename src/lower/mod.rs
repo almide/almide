@@ -46,6 +46,7 @@ pub struct LowerCtx<'a> {
     /// Protocol bounds for generic type parameters in scope: TypeVar name → list of protocol names
     /// Set during function lowering for protocol-bounded generics.
     protocol_bounds: HashMap<String, Vec<String>>,
+    lambda_id_counter: u32,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -58,6 +59,7 @@ impl<'a> LowerCtx<'a> {
             fn_defaults: HashMap::new(),
             type_conventions: HashMap::new(),
             protocol_bounds: HashMap::new(),
+            lambda_id_counter: 0,
         }
     }
 
@@ -82,6 +84,12 @@ impl<'a> LowerCtx<'a> {
             }
         }
         None
+    }
+
+    pub(super) fn next_lambda_id(&mut self) -> u32 {
+        let id = self.lambda_id_counter;
+        self.lambda_id_counter += 1;
+        id
     }
 
     pub(super) fn push_scope(&mut self) { self.scopes.push(HashMap::new()); }

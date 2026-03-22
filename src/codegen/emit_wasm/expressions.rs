@@ -90,8 +90,8 @@ impl FuncCompiler<'_> {
             }
 
             // ── Lambda → closure [table_idx, env_ptr] ──
-            IrExprKind::Lambda { params, body } => {
-                self.emit_lambda_closure(params, body);
+            IrExprKind::Lambda { params, body, lambda_id } => {
+                self.emit_lambda_closure(params, body, *lambda_id);
             }
 
             // ── Binary operators ──

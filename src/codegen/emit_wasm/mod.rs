@@ -217,6 +217,7 @@ pub struct LambdaInfo {
     pub closure_type_idx: u32,
     pub captures: Vec<(crate::ir::VarId, crate::types::Ty)>,
     pub param_ids: Vec<u32>,
+    pub lambda_id: Option<u32>,
 }
 
 impl WasmEmitter {

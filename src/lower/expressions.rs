@@ -294,7 +294,8 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             }).collect();
             let ir_body = lower_expr(ctx, body);
             ctx.pop_scope();
-            ctx.mk(IrExprKind::Lambda { params: ir_params, body: Box::new(ir_body) }, ty, span)
+            let lambda_id = Some(ctx.next_lambda_id());
+            ctx.mk(IrExprKind::Lambda { params: ir_params, body: Box::new(ir_body), lambda_id }, ty, span)
         }
 
         // ── Access ──

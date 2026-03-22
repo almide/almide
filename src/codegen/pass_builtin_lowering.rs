@@ -212,8 +212,8 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
         IrExprKind::UnOp { op, operand } => IrExprKind::UnOp {
             op, operand: Box::new(rewrite_expr(*operand)),
         },
-        IrExprKind::Lambda { params, body } => IrExprKind::Lambda {
-            params, body: Box::new(rewrite_expr(*body)),
+        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
+            params, body: Box::new(rewrite_expr(*body)), lambda_id,
         },
         IrExprKind::List { elements } => IrExprKind::List {
             elements: elements.into_iter().map(rewrite_expr).collect(),

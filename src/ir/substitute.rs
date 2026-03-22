@@ -68,7 +68,7 @@ pub fn substitute_var_in_expr(expr: &IrExpr, var: VarId, replacement: &IrExpr) -
             },
             ty: expr.ty.clone(), span: expr.span,
         },
-        IrExprKind::Lambda { params, body } => {
+        IrExprKind::Lambda { params, body, lambda_id } => {
             if params.iter().any(|(p, _)| *p == var) {
                 expr.clone() // shadowed
             } else {
@@ -76,6 +76,7 @@ pub fn substitute_var_in_expr(expr: &IrExpr, var: VarId, replacement: &IrExpr) -
                     kind: IrExprKind::Lambda {
                         params: params.clone(),
                         body: Box::new(sub(body)),
+                        lambda_id: *lambda_id,
                     },
                     ty: expr.ty.clone(), span: expr.span,
                 }
