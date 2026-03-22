@@ -476,4 +476,8 @@ pub struct IrProgram {
     /// Populated by EffectInferencePass during codegen pipeline.
     #[serde(skip)]
     pub effect_map: crate::codegen::pass_effect_inference::EffectMap,
+    /// Codegen annotations populated by BoxDerefPass (recursive enums, boxed fields, defaults).
+    /// Read by the walker during template rendering.
+    #[serde(skip)]
+    pub codegen_annotations: crate::codegen::annotations::CodegenAnnotations,
 }

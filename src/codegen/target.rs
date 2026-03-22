@@ -13,6 +13,7 @@ use super::pass::{
     BorrowInsertionPass, FanLoweringPass,
     OptionErasurePass, Pipeline, Target, TypeConcretizationPass,
 };
+use super::pass_box_deref::BoxDerefPass;
 use super::pass_clone::CloneInsertionPass;
 use super::pass_builtin_lowering::BuiltinLoweringPass;
 use super::pass_match_lowering::MatchLoweringPass;
@@ -47,6 +48,8 @@ pub fn configure(target: Target) -> TargetConfig {
 fn build_pipeline(target: Target) -> Pipeline {
     match target {
         Target::Rust => Pipeline::new()
+            // BoxDeref: insert Deref IR nodes for Box'd pattern vars (before CloneInsertion)
+            .add(BoxDerefPass)
             // TCO: convert self-recursive tail calls to loops (before any lowering)
             .add(TailCallOptPass)
             // Global passes

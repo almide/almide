@@ -39,7 +39,7 @@ pub mod target;
 pub mod walker;
 pub mod emit_wasm;
 
-use crate::ir::{IrProgram, IrTypeDeclKind, IrVariantKind};
+use crate::ir::IrProgram;
 use pass::Target;
 
 /// Strip `mod tests { ... }` blocks from runtime source (avoid conflicts with user tests)
@@ -73,68 +73,12 @@ fn strip_test_blocks(src: &str) -> String {
 pub fn emit(program: &mut IrProgram, target: Target) -> String {
     let config = target::configure(target);
 
-    // Pre-pipeline: insert Deref IR nodes (must happen before CloneInsertion)
-    let mut ann = annotations::CodegenAnnotations::default();
-    if target == Target::Rust {
-        let (deref_ids, recursive) = pass_box_deref::collect_deref_vars(program);
-        pass_box_deref::insert_deref_nodes(program, &deref_ids);
-        // Process module-level box deref (separate VarId namespace per module)
-        let all_type_decls: Vec<_> = program.type_decls.iter()
-            .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
-            .cloned().collect();
-        for module in &mut program.modules {
-            let mod_deref_ids = pass_box_deref::collect_module_deref_vars(module, &all_type_decls);
-            pass_box_deref::insert_module_deref_nodes(module, &mod_deref_ids);
-        }
-        ann.recursive_enums = recursive.clone();
-        // Build boxed_fields: for each recursive enum, find which variant fields reference the enum
-        ann.boxed_fields = program.type_decls.iter()
-            .filter(|td| recursive.contains(&td.name))
-            .filter_map(|td| match &td.kind {
-                IrTypeDeclKind::Variant { cases, .. } => Some((td, cases)),
-                _ => None,
-            })
-            .flat_map(|(td, cases)| {
-                cases.iter().flat_map(move |c| {
-                    let name = &td.name;
-                    match &c.kind {
-                        IrVariantKind::Record { fields } => fields.iter()
-                            .filter(|f| walker::ty_contains_name(&f.ty, name))
-                            .map(|f| (c.name.clone(), f.name.clone()))
-                            .collect::<Vec<_>>(),
-                        IrVariantKind::Tuple { fields } => fields.iter().enumerate()
-                            .filter(|(_, t)| walker::ty_contains_name(t, name))
-                            .map(|(i, _)| (c.name.clone(), format!("{}", i)))
-                            .collect::<Vec<_>>(),
-                        _ => vec![],
-                    }
-                })
-            })
-            .collect();
-        // Build default_fields: for each variant/record constructor with default field values
-        ann.default_fields = program.type_decls.iter()
-            .flat_map(|td| match &td.kind {
-                IrTypeDeclKind::Variant { cases, .. } => cases.iter()
-                    .filter_map(|c| match &c.kind {
-                        IrVariantKind::Record { fields } => Some(fields.iter()
-                            .filter_map(|f| f.default.as_ref().map(|def| ((c.name.clone(), f.name.clone()), def.clone())))
-                            .collect::<Vec<_>>()),
-                        _ => None,
-                    })
-                    .flatten()
-                    .collect::<Vec<_>>(),
-                IrTypeDeclKind::Record { fields } => fields.iter()
-                    .filter_map(|f| f.default.as_ref().map(|def| ((td.name.clone(), f.name.clone()), def.clone())))
-                    .collect(),
-                _ => vec![],
-            })
-            .collect();
-    }
-
     // Layer 2: Run Nanopass pipeline (semantic rewrites — modifies IR)
+    // BoxDerefPass runs first for Rust target, populating program.codegen_annotations
     config.pipeline.run(program, target);
 
     // Layer 3: Template-driven rendering (walker reads annotations, never checks types)
+    let ann = std::mem::take(&mut program.codegen_annotations);
     let ctx = walker::RenderContext::new(&config.templates, &program.var_table)
         .with_target(target)
         .with_annotations(ann);

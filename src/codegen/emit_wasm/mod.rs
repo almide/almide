@@ -941,6 +941,7 @@ mod tests {
             modules: vec![],
             type_registry: Default::default(),
             effect_map: Default::default(),
+            codegen_annotations: Default::default(),
         };
         let bytes = emit(&program);
         assert_eq!(&bytes[0..4], b"\0asm");

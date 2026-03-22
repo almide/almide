@@ -441,6 +441,7 @@ mod tests {
             modules: vec![],
             type_registry: Default::default(),
             effect_map: Default::default(),
+            codegen_annotations: Default::default(),
         }
     }
 

@@ -7,6 +7,7 @@ use std::collections::HashSet;
 use crate::ir::*;
 use crate::types::Ty;
 use super::pass::{NanoPass, Target};
+use super::walker;
 
 #[derive(Debug)]
 pub struct BoxDerefPass;
@@ -18,8 +19,66 @@ impl NanoPass for BoxDerefPass {
         Some(vec![Target::Rust])
     }
 
-    fn run(&self, _program: &mut IrProgram, _target: Target) {
-        // Populates annotations via collect_deref_vars()
+    fn run(&self, program: &mut IrProgram, _target: Target) {
+        // Step 1: Collect deref vars and insert Deref IR nodes
+        let (deref_ids, recursive) = collect_deref_vars(program);
+        insert_deref_nodes(program, &deref_ids);
+
+        // Step 2: Process module-level box deref (separate VarId namespace per module)
+        let all_type_decls: Vec<_> = program.type_decls.iter()
+            .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
+            .cloned().collect();
+        for module in &mut program.modules {
+            let mod_deref_ids = collect_module_deref_vars(module, &all_type_decls);
+            insert_module_deref_nodes(module, &mod_deref_ids);
+        }
+
+        // Step 3: Populate codegen annotations
+        program.codegen_annotations.recursive_enums = recursive.clone();
+
+        // Build boxed_fields: for each recursive enum, find which variant fields reference the enum
+        program.codegen_annotations.boxed_fields = program.type_decls.iter()
+            .filter(|td| recursive.contains(&td.name))
+            .filter_map(|td| match &td.kind {
+                IrTypeDeclKind::Variant { cases, .. } => Some((td, cases)),
+                _ => None,
+            })
+            .flat_map(|(td, cases)| {
+                cases.iter().flat_map(move |c| {
+                    let name = &td.name;
+                    match &c.kind {
+                        IrVariantKind::Record { fields } => fields.iter()
+                            .filter(|f| walker::ty_contains_name(&f.ty, name))
+                            .map(|f| (c.name.clone(), f.name.clone()))
+                            .collect::<Vec<_>>(),
+                        IrVariantKind::Tuple { fields } => fields.iter().enumerate()
+                            .filter(|(_, t)| walker::ty_contains_name(t, name))
+                            .map(|(i, _)| (c.name.clone(), format!("{}", i)))
+                            .collect::<Vec<_>>(),
+                        _ => vec![],
+                    }
+                })
+            })
+            .collect();
+
+        // Build default_fields: for each variant/record constructor with default field values
+        program.codegen_annotations.default_fields = program.type_decls.iter()
+            .flat_map(|td| match &td.kind {
+                IrTypeDeclKind::Variant { cases, .. } => cases.iter()
+                    .filter_map(|c| match &c.kind {
+                        IrVariantKind::Record { fields } => Some(fields.iter()
+                            .filter_map(|f| f.default.as_ref().map(|def| ((c.name.clone(), f.name.clone()), def.clone())))
+                            .collect::<Vec<_>>()),
+                        _ => None,
+                    })
+                    .flatten()
+                    .collect::<Vec<_>>(),
+                IrTypeDeclKind::Record { fields } => fields.iter()
+                    .filter_map(|f| f.default.as_ref().map(|def| ((td.name.clone(), f.name.clone()), def.clone())))
+                    .collect(),
+                _ => vec![],
+            })
+            .collect();
     }
 }
 
