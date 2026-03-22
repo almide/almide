@@ -279,29 +279,41 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
 
         // ── Compose: desugar `f >> g` → `(x) => g(f(x))` ──
         ast::Expr::Compose { left, right, .. } => {
+            let ir_left = lower_expr(ctx, left);
+            let ir_right = lower_expr(ctx, right);
+            // Extract types: left is Fn[A] -> B, right is Fn[B] -> C
+            let (param_ty, mid_ty) = match &ir_left.ty {
+                Ty::Fn { params, ret } => (
+                    params.first().cloned().unwrap_or(Ty::Unknown),
+                    *ret.clone(),
+                ),
+                _ => (Ty::Unknown, Ty::Unknown),
+            };
+            let ret_ty = match &ir_right.ty {
+                Ty::Fn { ret, .. } => *ret.clone(),
+                _ => Ty::Unknown,
+            };
             ctx.push_scope();
-            let param_ty = Ty::Unknown;
             let param_var = ctx.define_var("__compose_x", param_ty.clone(), Mutability::Let, span.clone());
             let param_ref = ctx.mk(IrExprKind::Var { id: param_var }, param_ty.clone(), span.clone());
             // f(x)
-            let ir_left = lower_expr(ctx, left);
             let f_call = ctx.mk(IrExprKind::Call {
                 target: CallTarget::Computed { callee: Box::new(ir_left) },
                 args: vec![param_ref], type_args: vec![],
-            }, Ty::Unknown, span.clone());
+            }, mid_ty, span.clone());
             // g(f(x))
-            let ir_right = lower_expr(ctx, right);
             let g_call = ctx.mk(IrExprKind::Call {
                 target: CallTarget::Computed { callee: Box::new(ir_right) },
                 args: vec![f_call], type_args: vec![],
-            }, Ty::Unknown, span.clone());
+            }, ret_ty.clone(), span.clone());
             ctx.pop_scope();
             let lambda_id = Some(ctx.next_lambda_id());
+            let lambda_ty = Ty::Fn { params: vec![param_ty.clone()], ret: Box::new(ret_ty) };
             ctx.mk(IrExprKind::Lambda {
                 params: vec![(param_var, param_ty)],
                 body: Box::new(g_call),
                 lambda_id,
-            }, ty, span)
+            }, lambda_ty, span)
         }
 
         // ── Lambda ──
