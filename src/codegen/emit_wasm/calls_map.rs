@@ -1,7 +1,7 @@
 //! Map stdlib call dispatch for WASM codegen.
 //!
 //! Map layout: [len:i32][key0:K][val0:V][key1:K][val1:V]...
-//! Keys are compared with string.eq (Map[String, V] is the common case).
+//! Key comparison is type-aware: string.eq for String, i64_eq for Int, i32_eq for Bool.
 
 use super::FuncCompiler;
 use super::values;
@@ -32,25 +32,33 @@ impl FuncCompiler<'_> {
             "get" => {
                 // get(m, key) → Option[V]
                 let (ks, vs) = self.map_kv_sizes(&args[0].ty);
+                let key_ty = self.map_key_ty(&args[0].ty);
                 let val_ty = self.map_val_ty(&args[0].ty);
                 let entry = ks + vs;
                 let s = self.match_i32_base + self.match_depth;
+                let s64 = self.match_i64_base + self.match_depth;
                 // mem[0]=map
                 wasm!(self.func, { i32_const(0); });
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { i32_store(0); i32_const(4); });
+                wasm!(self.func, { i32_store(0); });
+                // Store search key
+                if !matches!(key_ty, Ty::Int) {
+                    wasm!(self.func, { i32_const(4); });
+                }
                 self.emit_expr(&args[1]); // key
+                self.emit_search_key_store(&key_ty, 4, s64);
                 wasm!(self.func, {
-                    i32_store(0); // mem[4]=key
                     i32_const(0); local_set(s); // i
                     block_empty; loop_empty;
                       local_get(s); i32_const(0); i32_load(0); i32_load(0); i32_ge_u; br_if(1);
                       // Compare map_key[i] with search key
                       i32_const(0); i32_load(0); i32_const(4); i32_add;
                       local_get(s); i32_const(entry as i32); i32_mul; i32_add;
-                      i32_load(0); // key_ptr at entry offset 0
-                      i32_const(4); i32_load(0); // search key
-                      call(self.emitter.rt.string.eq);
+                });
+                self.emit_key_load(&key_ty, 0);
+                self.emit_search_key_load(&key_ty, 4, s64);
+                self.emit_key_eq(&key_ty);
+                wasm!(self.func, {
                       if_empty;
                         // Found: return some(val)
                         i32_const(vs as i32); call(self.emitter.rt.alloc); local_set(s + 1);
@@ -71,24 +79,31 @@ impl FuncCompiler<'_> {
             }
             "get_or" => {
                 let (ks, vs) = self.map_kv_sizes(&args[0].ty);
+                let key_ty = self.map_key_ty(&args[0].ty);
                 let val_ty = self.map_val_ty(&args[0].ty);
                 let entry = ks + vs;
                 let s = self.match_i32_base + self.match_depth;
+                let s64 = self.match_i64_base + self.match_depth;
                 let vt = values::ty_to_valtype(&val_ty).unwrap_or(ValType::I32);
                 wasm!(self.func, { i32_const(0); });
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { i32_store(0); i32_const(4); });
+                wasm!(self.func, { i32_store(0); });
+                if !matches!(key_ty, Ty::Int) {
+                    wasm!(self.func, { i32_const(4); });
+                }
                 self.emit_expr(&args[1]); // key
+                self.emit_search_key_store(&key_ty, 4, s64);
                 wasm!(self.func, {
-                    i32_store(0);
                     i32_const(0); local_set(s);
                     block_empty; loop_empty;
                       local_get(s); i32_const(0); i32_load(0); i32_load(0); i32_ge_u; br_if(1);
                       i32_const(0); i32_load(0); i32_const(4); i32_add;
                       local_get(s); i32_const(entry as i32); i32_mul; i32_add;
-                      i32_load(0);
-                      i32_const(4); i32_load(0);
-                      call(self.emitter.rt.string.eq);
+                });
+                self.emit_key_load(&key_ty, 0);
+                self.emit_search_key_load(&key_ty, 4, s64);
+                self.emit_key_eq(&key_ty);
+                wasm!(self.func, {
                       if_empty;
                         i32_const(0); i32_load(0); i32_const(4); i32_add;
                         local_get(s); i32_const(entry as i32); i32_mul; i32_add;
@@ -107,22 +122,29 @@ impl FuncCompiler<'_> {
             }
             "contains" => {
                 let (ks, vs) = self.map_kv_sizes(&args[0].ty);
+                let key_ty = self.map_key_ty(&args[0].ty);
                 let entry = ks + vs;
                 let s = self.match_i32_base + self.match_depth;
+                let s64 = self.match_i64_base + self.match_depth;
                 wasm!(self.func, { i32_const(0); });
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { i32_store(0); i32_const(4); });
+                wasm!(self.func, { i32_store(0); });
+                if !matches!(key_ty, Ty::Int) {
+                    wasm!(self.func, { i32_const(4); });
+                }
                 self.emit_expr(&args[1]);
+                self.emit_search_key_store(&key_ty, 4, s64);
                 wasm!(self.func, {
-                    i32_store(0);
                     i32_const(0); local_set(s);
                     block_empty; loop_empty;
                       local_get(s); i32_const(0); i32_load(0); i32_load(0); i32_ge_u; br_if(1);
                       i32_const(0); i32_load(0); i32_const(4); i32_add;
                       local_get(s); i32_const(entry as i32); i32_mul; i32_add;
-                      i32_load(0);
-                      i32_const(4); i32_load(0);
-                      call(self.emitter.rt.string.eq);
+                });
+                self.emit_key_load(&key_ty, 0);
+                self.emit_search_key_load(&key_ty, 4, s64);
+                self.emit_key_eq(&key_ty);
+                wasm!(self.func, {
                       if_empty; i32_const(1); return_; end;
                       local_get(s); i32_const(1); i32_add; local_set(s);
                       br(0);
@@ -134,17 +156,24 @@ impl FuncCompiler<'_> {
                 // set(m, key, value) → new Map
                 // Copy existing entries, update if key exists, append if new
                 let (ks, vs) = self.map_kv_sizes(&args[0].ty);
+                let key_ty = self.map_key_ty(&args[0].ty);
                 let val_ty = self.map_val_ty(&args[0].ty);
                 let entry = ks + vs;
                 let s = self.match_i32_base + self.match_depth;
-                // mem[0]=map, mem[4]=key
+                let s64 = self.match_i64_base + self.match_depth;
+                // mem[0]=map
                 wasm!(self.func, { i32_const(0); });
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { i32_store(0); i32_const(4); });
-                self.emit_expr(&args[1]); // key
                 wasm!(self.func, { i32_store(0); });
-                // Store value to mem[8..8+vs]
-                wasm!(self.func, { i32_const(8); });
+                // Store search key
+                if !matches!(key_ty, Ty::Int) {
+                    wasm!(self.func, { i32_const(4); });
+                }
+                self.emit_expr(&args[1]); // key
+                self.emit_search_key_store(&key_ty, 4, s64);
+                // Store value to mem[8..8+vs] (safe: Int key uses i64 local, not mem[4..12])
+                let val_mem_offset = if matches!(key_ty, Ty::Int) { 4u32 } else { 8u32 };
+                wasm!(self.func, { i32_const(val_mem_offset as i32); });
                 self.emit_expr(&args[2]); // value
                 self.emit_store_at(&val_ty, 0);
                 wasm!(self.func, {
@@ -156,9 +185,11 @@ impl FuncCompiler<'_> {
                       local_get(s + 2); local_get(s); i32_ge_u; br_if(1);
                       i32_const(0); i32_load(0); i32_const(4); i32_add;
                       local_get(s + 2); i32_const(entry as i32); i32_mul; i32_add;
-                      i32_load(0);
-                      i32_const(4); i32_load(0);
-                      call(self.emitter.rt.string.eq);
+                });
+                self.emit_key_load(&key_ty, 0);
+                self.emit_search_key_load(&key_ty, 4, s64);
+                self.emit_key_eq(&key_ty);
+                wasm!(self.func, {
                       if_empty;
                         local_get(s + 2); local_set(s + 1); // found
                       end;
@@ -179,16 +210,14 @@ impl FuncCompiler<'_> {
                     i32_const(0); local_set(s + 2); // i
                     block_empty; loop_empty;
                       local_get(s + 2); local_get(s); i32_ge_u; br_if(1);
-                      // dst entry addr
+                      // Copy key: dst entry, src entry
                       local_get(s + 3); i32_const(4); i32_add;
                       local_get(s + 2); i32_const(entry as i32); i32_mul; i32_add;
-                      // src entry addr
                       i32_const(0); i32_load(0); i32_const(4); i32_add;
                       local_get(s + 2); i32_const(entry as i32); i32_mul; i32_add;
-                      // Copy key
-                      i32_load(0); i32_store(0);
                 });
-                // Copy value: if this is the found_idx, use new value from mem[8]
+                self.emit_elem_copy_sized(ks);
+                // Copy value: if this is the found_idx, use new value from mem
                 wasm!(self.func, {
                       local_get(s + 2); local_get(s + 1); i32_eq;
                       if_empty;
@@ -196,7 +225,7 @@ impl FuncCompiler<'_> {
                         local_get(s + 3); i32_const(4); i32_add;
                         local_get(s + 2); i32_const(entry as i32); i32_mul; i32_add;
                         i32_const(ks as i32); i32_add;
-                        i32_const(8);
+                        i32_const(val_mem_offset as i32);
                 });
                 self.emit_elem_copy_sized(vs);
                 wasm!(self.func, {
@@ -220,15 +249,18 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     local_get(s + 1); i32_const(0); i32_lt_s;
                     if_empty;
-                      // Append: dst[old_len] = (key, value)
+                      // Append key: dst[old_len]
                       local_get(s + 3); i32_const(4); i32_add;
                       local_get(s); i32_const(entry as i32); i32_mul; i32_add;
-                      i32_const(4); i32_load(0); // key
-                      i32_store(0);
+                });
+                self.emit_search_key_load(&key_ty, 4, s64);
+                self.emit_key_store(&key_ty, 0);
+                // Append value
+                wasm!(self.func, {
                       local_get(s + 3); i32_const(4); i32_add;
                       local_get(s); i32_const(entry as i32); i32_mul; i32_add;
                       i32_const(ks as i32); i32_add;
-                      i32_const(8);
+                      i32_const(val_mem_offset as i32);
                 });
                 self.emit_elem_copy_sized(vs);
                 wasm!(self.func, {
@@ -238,14 +270,19 @@ impl FuncCompiler<'_> {
             }
             "remove" => {
                 let (ks, vs) = self.map_kv_sizes(&args[0].ty);
+                let key_ty = self.map_key_ty(&args[0].ty);
                 let entry = ks + vs;
                 let s = self.match_i32_base + self.match_depth;
+                let s64 = self.match_i64_base + self.match_depth;
                 wasm!(self.func, { i32_const(0); });
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { i32_store(0); i32_const(4); });
+                wasm!(self.func, { i32_store(0); });
+                if !matches!(key_ty, Ty::Int) {
+                    wasm!(self.func, { i32_const(4); });
+                }
                 self.emit_expr(&args[1]);
+                self.emit_search_key_store(&key_ty, 4, s64);
                 wasm!(self.func, {
-                    i32_store(0);
                     i32_const(0); i32_load(0); i32_load(0); local_set(s); // old_len
                     // Find key index
                     i32_const(-1); local_set(s + 1);
@@ -254,9 +291,11 @@ impl FuncCompiler<'_> {
                       local_get(s + 2); local_get(s); i32_ge_u; br_if(1);
                       i32_const(0); i32_load(0); i32_const(4); i32_add;
                       local_get(s + 2); i32_const(entry as i32); i32_mul; i32_add;
-                      i32_load(0);
-                      i32_const(4); i32_load(0);
-                      call(self.emitter.rt.string.eq);
+                });
+                self.emit_key_load(&key_ty, 0);
+                self.emit_search_key_load(&key_ty, 4, s64);
+                self.emit_key_eq(&key_ty);
+                wasm!(self.func, {
                       if_empty; local_get(s + 2); local_set(s + 1); end;
                       local_get(s + 2); i32_const(1); i32_add; local_set(s + 2);
                       br(0);
@@ -297,23 +336,28 @@ impl FuncCompiler<'_> {
             }
             "keys" => {
                 let (ks, vs) = self.map_kv_sizes(&args[0].ty);
+                let key_ty = self.map_key_ty(&args[0].ty);
                 let entry = ks + vs;
                 let s = self.match_i32_base + self.match_depth;
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
                     local_set(s);
                     local_get(s); i32_load(0); local_set(s + 1); // len
-                    i32_const(4); local_get(s + 1); i32_const(4); i32_mul; i32_add;
+                    i32_const(4); local_get(s + 1); i32_const(ks as i32); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(s + 2);
                     local_get(s + 2); local_get(s + 1); i32_store(0);
                     i32_const(0); local_set(s + 3);
                     block_empty; loop_empty;
                       local_get(s + 3); local_get(s + 1); i32_ge_u; br_if(1);
+                      // dst: result[4 + i*ks]
                       local_get(s + 2); i32_const(4); i32_add;
-                      local_get(s + 3); i32_const(4); i32_mul; i32_add;
+                      local_get(s + 3); i32_const(ks as i32); i32_mul; i32_add;
+                      // src: map[4 + i*entry]
                       local_get(s); i32_const(4); i32_add;
                       local_get(s + 3); i32_const(entry as i32); i32_mul; i32_add;
-                      i32_load(0); i32_store(0); // key ptr
+                });
+                self.emit_elem_copy_sized(ks);
+                wasm!(self.func, {
                       local_get(s + 3); i32_const(1); i32_add; local_set(s + 3);
                       br(0);
                     end; end;
@@ -495,8 +539,8 @@ impl FuncCompiler<'_> {
                       local_get(s + 3); i32_const(entry as i32); i32_mul; i32_add;
                       i32_const(0); i32_load(0); i32_const(4); i32_add;
                       local_get(s + 3); i32_const(entry as i32); i32_mul; i32_add;
-                      i32_load(0); i32_store(0);
                 });
+                self.emit_elem_copy_sized(ks);
                 // Copy val
                 self.emit_merge_copy_val(entry, ks, vs);
                 wasm!(self.func, {
@@ -512,8 +556,8 @@ impl FuncCompiler<'_> {
                       i32_const(entry as i32); i32_mul; i32_add;
                       i32_const(4); i32_load(0); i32_const(4); i32_add;
                       local_get(s + 3); i32_const(entry as i32); i32_mul; i32_add;
-                      i32_load(0); i32_store(0);
                 });
+                self.emit_elem_copy_sized(ks);
                 self.emit_merge_copy_val2(entry, ks, vs);
                 wasm!(self.func, {
                       local_get(s + 3); i32_const(1); i32_add; local_set(s + 3);
@@ -552,7 +596,10 @@ impl FuncCompiler<'_> {
                       // Copy key: map[4 + i*entry] = tuple[0]
                       local_get(s + 2); i32_const(4); i32_add;
                       local_get(s + 3); i32_const(entry as i32); i32_mul; i32_add;
-                      local_get(s + 4); i32_load(0); i32_store(0);
+                      local_get(s + 4);
+                });
+                self.emit_elem_copy_sized(ks);
+                wasm!(self.func, {
                       // Copy val: map[4 + i*entry + ks] = tuple[ks]
                       local_get(s + 2); i32_const(4); i32_add;
                       local_get(s + 3); i32_const(entry as i32); i32_mul; i32_add;
@@ -586,6 +633,75 @@ impl FuncCompiler<'_> {
         if let Ty::Applied(_, args) = ty {
             args.get(1).cloned().unwrap_or(Ty::Int)
         } else { Ty::Int }
+    }
+
+    pub(super) fn map_key_ty(&self, ty: &Ty) -> Ty {
+        if let Ty::Applied(_, args) = ty {
+            args.first().cloned().unwrap_or(Ty::String)
+        } else { Ty::String }
+    }
+
+    /// Load a key from memory at [addr_on_stack + offset].
+    /// For Int keys: i64_load. For String/Bool/other: i32_load.
+    pub(super) fn emit_key_load(&mut self, key_ty: &Ty, offset: u32) {
+        match key_ty {
+            Ty::Int => { wasm!(self.func, { i64_load(offset); }); }
+            _ => { wasm!(self.func, { i32_load(offset); }); }
+        }
+    }
+
+    /// Store a key to memory at [addr_on_stack, val_on_stack].
+    /// For Int keys: i64_store. For String/Bool/other: i32_store.
+    pub(super) fn emit_key_store(&mut self, key_ty: &Ty, offset: u32) {
+        match key_ty {
+            Ty::Int => { wasm!(self.func, { i64_store(offset); }); }
+            _ => { wasm!(self.func, { i32_store(offset); }); }
+        }
+    }
+
+    /// Emit key comparison: consumes [key_a, key_b], produces i32 (1=equal).
+    pub(super) fn emit_key_eq(&mut self, key_ty: &Ty) {
+        match key_ty {
+            Ty::Int => { wasm!(self.func, { i64_eq; }); }
+            Ty::String => { wasm!(self.func, { call(self.emitter.rt.string.eq); }); }
+            Ty::Bool => { wasm!(self.func, { i32_eq; }); }
+            _ => { wasm!(self.func, { i32_eq; }); } // pointer equality for other types
+        }
+    }
+
+    /// Store search key to scratch. For Int keys, stores to i64 scratch local.
+    /// For other keys, stores to mem[mem_offset]. Returns true if an i64 local was used.
+    pub(super) fn emit_search_key_store(&mut self, key_ty: &Ty, mem_offset: u32, scratch_i64: u32) {
+        match key_ty {
+            Ty::Int => {
+                // Store search key in i64 scratch local (8 bytes don't fit in mem[4..8] safely)
+                wasm!(self.func, { local_set(scratch_i64); });
+            }
+            _ => {
+                wasm!(self.func, { i32_store(0); }); // mem[mem_offset] already on stack
+            }
+        }
+    }
+
+    /// Load search key from scratch. For Int keys, loads from i64 scratch local.
+    /// For other keys, loads from mem[mem_offset].
+    pub(super) fn emit_search_key_load(&mut self, key_ty: &Ty, mem_offset: u32, scratch_i64: u32) {
+        match key_ty {
+            Ty::Int => {
+                wasm!(self.func, { local_get(scratch_i64); });
+            }
+            _ => {
+                wasm!(self.func, { i32_const(mem_offset as i32); i32_load(0); });
+            }
+        }
+    }
+
+    /// Key ValType for call_indirect signatures.
+    pub(super) fn key_valtype(key_ty: &Ty) -> ValType {
+        match key_ty {
+            Ty::Int => ValType::I64,
+            _ => ValType::I32,
+        }
     }
 
     fn emit_merge_copy_val(&mut self, entry: u32, ks: u32, vs: u32) {
