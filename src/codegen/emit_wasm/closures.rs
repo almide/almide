@@ -453,7 +453,7 @@ fn resolve_lambda_param_ty(param_ty: &crate::types::Ty, _body_ty: &crate::types:
 /// and record_fields from the emitter for Member accesses.
 /// This is needed because lambda body expressions may have Unknown type from the type
 /// checker when the lambda is inside a generic function.
-fn resolve_expr_ty(expr: &IrExpr, var_table: &crate::ir::VarTable, record_fields: &HashMap<String, Vec<(String, crate::types::Ty)>>) -> crate::types::Ty {
+pub(super) fn resolve_expr_ty(expr: &IrExpr, var_table: &crate::ir::VarTable, record_fields: &HashMap<String, Vec<(String, crate::types::Ty)>>) -> crate::types::Ty {
     use crate::types::Ty;
     // If the expression already has a concrete type, use it
     if !matches!(&expr.ty, Ty::Unknown | Ty::TypeVar(_)) {
@@ -498,6 +498,16 @@ fn resolve_expr_ty(expr: &IrExpr, var_table: &crate::ir::VarTable, record_fields
             expr.ty.clone()
         }
         IrExprKind::If { then, .. } => resolve_expr_ty(then, var_table, record_fields),
+        IrExprKind::Match { arms, .. } => {
+            // Resolve from the first arm's body
+            if let Some(arm) = arms.first() {
+                let resolved = resolve_expr_ty(&arm.body, var_table, record_fields);
+                if !matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {
+                    return resolved;
+                }
+            }
+            expr.ty.clone()
+        }
         IrExprKind::Block { expr: Some(e), .. } | IrExprKind::DoBlock { expr: Some(e), .. } => {
             resolve_expr_ty(e, var_table, record_fields)
         }
