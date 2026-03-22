@@ -314,9 +314,9 @@ pub struct FuncCompiler<'a> {
     pub var_map: HashMap<u32, u32>,
     pub depth: u32,
     pub loop_stack: Vec<LoopLabels>,
-    // Scratch local allocator (replaces match_i32_base/match_i64_base/match_depth)
+    // Scratch local allocator
     pub scratch: scratch::ScratchAllocator,
-    // Legacy scratch (kept during migration — will be removed)
+    // Legacy compatibility — delegates to scratch allocator internally
     pub match_i64_base: u32,
     pub match_i32_base: u32,
     pub match_depth: u32,
@@ -647,11 +647,18 @@ fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
     for _ in 0..scan_depth {
         local_decls.push((1, ValType::I32));
     }
+    // ScratchAllocator region (separate from legacy)
+    let scratch_i32_base = local_decls.len() as u32;
+    for _ in 0..12 { local_decls.push((1, ValType::I32)); }
+    let scratch_i64_base = local_decls.len() as u32;
+    for _ in 0..12 { local_decls.push((1, ValType::I64)); }
+    let scratch_f64_base = local_decls.len() as u32;
+    for _ in 0..2 { local_decls.push((1, ValType::F64)); }
 
     let wasm_func = Function::new(local_decls);
     let compiled_func = {
         let mut scratch_alloc = scratch::ScratchAllocator::new();
-        scratch_alloc.set_bases(match_i32_base, match_i64_base, match_i32_base + scan_depth as u32);
+        scratch_alloc.set_bases(scratch_i32_base, scratch_i64_base, scratch_f64_base);
         let mut compiler = FuncCompiler {
             emitter: &mut *emitter,
             func: wasm_func,

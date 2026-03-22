@@ -39,7 +39,7 @@ pub fn compile_function(
         }
     }
 
-    // Match scratch locals: one i64 + one i32 per nesting depth level
+    // Legacy scratch locals (for unmigrated code)
     let match_i64_base = param_count + local_decls.len() as u32;
     for _ in 0..scan.scratch_depth {
         local_decls.push((1, ValType::I64));
@@ -49,14 +49,27 @@ pub fn compile_function(
         local_decls.push((1, ValType::I32));
     }
 
-    let init_globals_idx: Option<u32> = None; // disabled, using inline init instead
+    // ScratchAllocator locals (separate region, after legacy)
+    let scratch_i32_base = param_count + local_decls.len() as u32;
+    let scratch_extra = 12; // enough for the largest stdlib function (unique_by = 10+)
+    for _ in 0..scratch_extra {
+        local_decls.push((1, ValType::I32));
+    }
+    let scratch_i64_base = param_count + local_decls.len() as u32;
+    for _ in 0..scratch_extra {
+        local_decls.push((1, ValType::I64));
+    }
+    let scratch_f64_base = param_count + local_decls.len() as u32;
+    for _ in 0..2 { // f64 scratch (for float operations)
+        local_decls.push((1, ValType::F64));
+    }
 
-    // Create WASM function with declared locals
+    let init_globals_idx: Option<u32> = None;
+
     let wasm_func = Function::new(local_decls);
 
-    // Compile the body
     let mut scratch_alloc = super::scratch::ScratchAllocator::new();
-    scratch_alloc.set_bases(match_i32_base, match_i64_base, match_i32_base + scan.scratch_depth as u32);
+    scratch_alloc.set_bases(scratch_i32_base, scratch_i64_base, scratch_f64_base);
     let mut compiler = FuncCompiler {
         emitter,
         func: wasm_func,

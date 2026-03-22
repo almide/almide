@@ -199,7 +199,7 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
             local_idx += 1;
         }
 
-        // Scratch locals
+        // Legacy scratch locals
         let scratch_depth = scan.scratch_depth.max(1);
         let match_i64_base = local_idx;
         for _ in 0..scratch_depth {
@@ -211,6 +211,15 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
             local_decls.push((1, ValType::I32));
             local_idx += 1;
         }
+
+        // ScratchAllocator locals (separate region)
+        let scratch_i32_base = local_idx;
+        let scratch_extra = 12usize;
+        for _ in 0..scratch_extra { local_decls.push((1, ValType::I32)); local_idx += 1; }
+        let scratch_i64_base = local_idx;
+        for _ in 0..scratch_extra { local_decls.push((1, ValType::I64)); local_idx += 1; }
+        let scratch_f64_base = local_idx;
+        for _ in 0..2 { local_decls.push((1, ValType::F64)); local_idx += 1; }
 
         let mut wasm_func = wasm_encoder::Function::new(local_decls);
 
@@ -254,7 +263,7 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
         // Compile body
         let compiled_func = {
             let mut scratch_alloc = super::scratch::ScratchAllocator::new();
-            scratch_alloc.set_bases(match_i32_base, match_i64_base, match_i32_base + scratch_depth as u32);
+            scratch_alloc.set_bases(scratch_i32_base, scratch_i64_base, scratch_f64_base);
             let mut compiler = FuncCompiler {
                 emitter: &mut *emitter,
                 func: wasm_func,
