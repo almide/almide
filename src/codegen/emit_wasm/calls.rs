@@ -968,37 +968,49 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i64(state);
             }
             "choice" => {
-                // random.choice(xs: List[T]) → T: pick random element
-                // Emit random.int(0, len-1) then list.get
+                // random.choice(xs: List[T]) → Option[T]: none if empty, some(random elem) if non-empty
                 let xs = self.scratch.alloc_i32();
-                self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(xs); });
-                // Build random.int(0, len-1) args inline
+                let idx = self.scratch.alloc_i32();
+                let option_box = self.scratch.alloc_i32();
                 let state = self.scratch.alloc_i64();
-                wasm!(self.func, {
-                    i32_const(0); i64_load(0); local_set(state);
-                    local_get(state); i64_eqz;
-                    if_empty; i64_const(0x2545F4914F6CDD1D); local_set(state); end;
-                    local_get(state); local_get(state); i64_const(13); i64_shl; i64_xor; local_set(state);
-                    local_get(state); local_get(state); i64_const(7); i64_shr_u; i64_xor; local_set(state);
-                    local_get(state); local_get(state); i64_const(17); i64_shl; i64_xor; local_set(state);
-                    i32_const(0); local_get(state); i64_store(0);
-                    // idx = abs(state) % len
-                    local_get(state); i64_const(0); i64_lt_s;
-                    if_i64; i64_const(0); local_get(state); i64_sub; else_; local_get(state); end;
-                    local_get(xs); i32_load(0); i64_extend_i32_u;
-                    i64_rem_u;
-                    i32_wrap_i64;
-                });
-                // Load xs[idx]
                 let elem_ty = self.list_elem_ty(&args[0].ty);
                 let es = values::byte_size(&elem_ty) as i32;
+
+                self.emit_expr(&args[0]);
                 wasm!(self.func, {
-                    i32_const(es); i32_mul;
-                    local_get(xs); i32_const(4); i32_add; i32_add;
+                    local_set(xs);
+                    local_get(xs); i32_load(0); i32_eqz;
+                    if_i32;
+                      i32_const(0); // none (empty list)
+                    else_;
+                      // PRNG to get random index
+                      i32_const(0); i64_load(0); local_set(state);
+                      local_get(state); i64_eqz;
+                      if_empty; i64_const(0x2545F4914F6CDD1D); local_set(state); end;
+                      local_get(state); local_get(state); i64_const(13); i64_shl; i64_xor; local_set(state);
+                      local_get(state); local_get(state); i64_const(7); i64_shr_u; i64_xor; local_set(state);
+                      local_get(state); local_get(state); i64_const(17); i64_shl; i64_xor; local_set(state);
+                      i32_const(0); local_get(state); i64_store(0);
+                      // idx = abs(state) % len
+                      local_get(state); i64_const(0); i64_lt_s;
+                      if_i64; i64_const(0); local_get(state); i64_sub; else_; local_get(state); end;
+                      local_get(xs); i32_load(0); i64_extend_i32_u;
+                      i64_rem_u; i32_wrap_i64; local_set(idx);
+                      // Alloc option box and load elem into it
+                      i32_const(es); call(self.emitter.rt.alloc); local_set(option_box);
+                      local_get(option_box);
+                      local_get(xs); i32_const(4); i32_add;
+                      local_get(idx); i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0);
+                self.emit_store_at(&elem_ty, 0);
+                wasm!(self.func, {
+                      local_get(option_box);
+                    end;
+                });
                 self.scratch.free_i64(state);
+                self.scratch.free_i32(option_box);
+                self.scratch.free_i32(idx);
                 self.scratch.free_i32(xs);
             }
             "shuffle" => {
