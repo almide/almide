@@ -557,7 +557,7 @@ impl FuncCompiler<'_> {
             block_empty;
             loop_empty;
         });
-        let saved = self.depth; self.depth += 2;
+        let depth_guard = self.depth_push_n(2);
         wasm!(self.func, {
             local_get(s);
             local_get(src);
@@ -623,7 +623,7 @@ impl FuncCompiler<'_> {
             local_set(s);
             br(0);
         });
-        self.depth = saved;
+        self.depth_pop(depth_guard);
         wasm!(self.func, {
             end;
             end;

@@ -27,13 +27,11 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { local_set(loop_var); });
 
                 // block $break { loop $loop { check; block $continue { body }; i++; br $loop } }
-                let break_depth = self.depth;
                 wasm!(self.func, { block_empty; });
-                self.depth += 1;
+                let break_guard = self.depth_push();
 
-                let loop_depth = self.depth;
                 wasm!(self.func, { loop_empty; });
-                self.depth += 1;
+                let loop_guard = self.depth_push();
 
                 // Break condition
                 wasm!(self.func, { local_get(loop_var); });
@@ -43,14 +41,13 @@ impl FuncCompiler<'_> {
                 } else {
                     wasm!(self.func, { i64_ge_s; });
                 }
-                wasm!(self.func, { br_if(self.depth - break_depth - 1); });
+                wasm!(self.func, { br_if(self.depth - break_guard.saved() - 1); });
 
                 // Inner block for continue target
-                let continue_depth = self.depth;
                 wasm!(self.func, { block_empty; });
-                self.depth += 1;
+                let continue_guard = self.depth_push();
 
-                self.loop_stack.push(super::LoopLabels { break_depth, continue_depth });
+                self.loop_stack.push(super::LoopLabels { break_depth: break_guard.saved(), continue_depth: continue_guard.saved() });
 
                 // Body
                 for stmt in body {
@@ -58,7 +55,7 @@ impl FuncCompiler<'_> {
                 }
 
                 self.loop_stack.pop();
-                self.depth -= 1;
+                self.depth_pop(continue_guard);
                 wasm!(self.func, { end; }); // end continue block
 
                 // Increment: var += 1 (always runs, even after continue)
@@ -70,11 +67,11 @@ impl FuncCompiler<'_> {
                 });
 
                 // Loop back
-                wasm!(self.func, { br(self.depth - loop_depth - 1); });
+                wasm!(self.func, { br(self.depth - loop_guard.saved() - 1); });
 
-                self.depth -= 1;
+                self.depth_pop(loop_guard);
                 wasm!(self.func, { end; }); // end loop
-                self.depth -= 1;
+                self.depth_pop(break_guard);
                 wasm!(self.func, { end; }); // end break block
             }
             _ => {
@@ -117,13 +114,11 @@ impl FuncCompiler<'_> {
                 });
 
                 // Structure: block $break { loop $loop { check; load; block $continue { body }; i++; br $loop } }
-                let break_depth = self.depth;
                 wasm!(self.func, { block_empty; });
-                self.depth += 1;
+                let break_guard = self.depth_push();
 
-                let loop_depth = self.depth;
                 wasm!(self.func, { loop_empty; });
-                self.depth += 1;
+                let loop_guard = self.depth_push();
 
                 // Break if index >= len
                 wasm!(self.func, {
@@ -131,7 +126,7 @@ impl FuncCompiler<'_> {
                     local_get(list_scratch);
                     i32_load(0);
                     i32_ge_u;
-                    br_if(self.depth - break_depth - 1);
+                    br_if(self.depth - break_guard.saved() - 1);
                 });
 
                 if is_map {
@@ -207,11 +202,10 @@ impl FuncCompiler<'_> {
                 }
 
                 // Inner block for continue target
-                let continue_depth = self.depth;
                 wasm!(self.func, { block_empty; });
-                self.depth += 1;
+                let continue_guard = self.depth_push();
 
-                self.loop_stack.push(super::LoopLabels { break_depth, continue_depth });
+                self.loop_stack.push(super::LoopLabels { break_depth: break_guard.saved(), continue_depth: continue_guard.saved() });
 
                 // Body
                 for stmt in body {
@@ -219,7 +213,7 @@ impl FuncCompiler<'_> {
                 }
 
                 self.loop_stack.pop();
-                self.depth -= 1;
+                self.depth_pop(continue_guard);
                 wasm!(self.func, { end; }); // end continue block
 
                 // Increment index (always runs, even after continue)
@@ -231,11 +225,11 @@ impl FuncCompiler<'_> {
                 });
 
                 // Loop back
-                wasm!(self.func, { br(self.depth - loop_depth - 1); });
+                wasm!(self.func, { br(self.depth - loop_guard.saved() - 1); });
 
-                self.depth -= 1;
+                self.depth_pop(loop_guard);
                 wasm!(self.func, { end; }); // end loop
-                self.depth -= 1;
+                self.depth_pop(break_guard);
                 wasm!(self.func, { end; }); // end break block
                 self.scratch.free_i32(idx_scratch);
                 self.scratch.free_i32(list_scratch);
@@ -357,7 +351,7 @@ impl FuncCompiler<'_> {
                     self.emit_expr(guard);
                     let bt = values::block_type(result_ty);
                     self.func.instruction(&Instruction::If(bt));
-                    self.depth += 1;
+                    let _g = self.depth_push();
                     self.emit_expr(&arm.body);
                     wasm!(self.func, { else_; });
                     if is_last {
@@ -365,7 +359,7 @@ impl FuncCompiler<'_> {
                     } else {
                         self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1);
                     }
-                    self.depth -= 1;
+                    self.depth_pop(_g);
                     wasm!(self.func, { end; });
                 } else {
                     self.emit_expr(&arm.body);
@@ -392,7 +386,7 @@ impl FuncCompiler<'_> {
 
                 let bt = values::block_type(result_ty);
                 self.func.instruction(&Instruction::If(bt));
-                self.depth += 1;
+                let _g = self.depth_push();
                 self.emit_expr(&arm.body);
                 wasm!(self.func, { else_; });
 
@@ -402,7 +396,7 @@ impl FuncCompiler<'_> {
                     self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1);
                 }
 
-                self.depth -= 1;
+                self.depth_pop(_g);
                 wasm!(self.func, { end; });
             }
 
@@ -420,7 +414,7 @@ impl FuncCompiler<'_> {
 
                     let bt = values::block_type(result_ty);
                     self.func.instruction(&Instruction::If(bt));
-                    self.depth += 1;
+                    let ctor_guard = self.depth_push();
 
                     // Resolve constructor field types from variant info + subject type_args
                     let ctor_fields = self.emitter.record_fields.get(ctor_name).cloned().unwrap_or_default();
@@ -482,12 +476,12 @@ impl FuncCompiler<'_> {
                         self.emit_expr(guard);
                         let bt2 = values::block_type(result_ty);
                         self.func.instruction(&Instruction::If(bt2));
-                        self.depth += 1;
+                        let guard_g = self.depth_push();
                         self.emit_expr(&arm.body);
                         wasm!(self.func, { else_; });
                         if is_last { wasm!(self.func, { unreachable; }); }
                         else { self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1); }
-                        self.depth -= 1;
+                        self.depth_pop(guard_g);
                         wasm!(self.func, { end; });
                     } else {
                         self.emit_expr(&arm.body);
@@ -498,7 +492,7 @@ impl FuncCompiler<'_> {
                     } else {
                         self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1);
                     }
-                    self.depth -= 1;
+                    self.depth_pop(ctor_guard);
                     wasm!(self.func, { end; });
                 } else {
                     eprintln!("[CTOR ELSE] ctor='{}' is_last={} — tag not found, falling through", ctor_name, is_last);
@@ -520,7 +514,7 @@ impl FuncCompiler<'_> {
                 });
                 let bt = values::block_type(result_ty);
                 self.func.instruction(&Instruction::If(bt));
-                self.depth += 1;
+                let some_guard = self.depth_push();
 
                 // Bind the inner value
                 if let IrPattern::Bind { var, .. } = inner.as_ref() {
@@ -539,7 +533,7 @@ impl FuncCompiler<'_> {
                     self.emit_expr(guard);
                     let bt2 = values::block_type(result_ty);
                     self.func.instruction(&Instruction::If(bt2));
-                    self.depth += 1;
+                    let guard_g = self.depth_push();
                     self.emit_expr(&arm.body);
                     wasm!(self.func, { else_; });
                     if is_last {
@@ -547,7 +541,7 @@ impl FuncCompiler<'_> {
                     } else {
                         self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1);
                     }
-                    self.depth -= 1;
+                    self.depth_pop(guard_g);
                     wasm!(self.func, { end; });
                 } else {
                     self.emit_expr(&arm.body);
@@ -559,7 +553,7 @@ impl FuncCompiler<'_> {
                 } else {
                     self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1);
                 }
-                self.depth -= 1;
+                self.depth_pop(some_guard);
                 wasm!(self.func, { end; });
             }
 
@@ -572,7 +566,7 @@ impl FuncCompiler<'_> {
                 });
                 let bt = values::block_type(result_ty);
                 self.func.instruction(&Instruction::If(bt));
-                self.depth += 1;
+                let none_guard = self.depth_push();
                 self.emit_expr(&arm.body);
                 wasm!(self.func, { else_; });
                 if is_last {
@@ -580,7 +574,7 @@ impl FuncCompiler<'_> {
                 } else {
                     self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1);
                 }
-                self.depth -= 1;
+                self.depth_pop(none_guard);
                 wasm!(self.func, { end; });
             }
 
@@ -600,7 +594,7 @@ impl FuncCompiler<'_> {
 
                     let bt = values::block_type(result_ty);
                     self.func.instruction(&Instruction::If(bt));
-                    self.depth += 1;
+                    let rec_guard = self.depth_push();
 
                     // Bind fields: load each field from subject + tag_offset + field_offset
                     let case_fields = self.emitter.record_fields.get(ctor_name).cloned().unwrap_or_default();
@@ -625,7 +619,7 @@ impl FuncCompiler<'_> {
                         self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1);
                     }
 
-                    self.depth -= 1;
+                    self.depth_pop(rec_guard);
                     wasm!(self.func, { end; });
                 } else {
                     // Not a variant — treat as plain record (always matches)
@@ -643,7 +637,7 @@ impl FuncCompiler<'_> {
                 });
                 let bt = values::block_type(result_ty);
                 self.func.instruction(&Instruction::If(bt));
-                self.depth += 1;
+                let ok_guard = self.depth_push();
                 if let IrPattern::Bind { var, .. } = inner.as_ref() {
                     if let Some(&local_idx) = self.var_map.get(&var.0) {
                         let inner_ty = if let Ty::Applied(_, args) = subject_ty {
@@ -658,12 +652,12 @@ impl FuncCompiler<'_> {
                     self.emit_expr(guard);
                     let bt2 = values::block_type(result_ty);
                     self.func.instruction(&Instruction::If(bt2));
-                    self.depth += 1;
+                    let guard_g = self.depth_push();
                     self.emit_expr(&arm.body);
                     wasm!(self.func, { else_; });
                     if is_last { wasm!(self.func, { unreachable; }); }
                     else { self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1); }
-                    self.depth -= 1;
+                    self.depth_pop(guard_g);
                     wasm!(self.func, { end; });
                 } else {
                     self.emit_expr(&arm.body);
@@ -671,7 +665,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { else_; });
                 if is_last { wasm!(self.func, { unreachable; }); }
                 else { self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1); }
-                self.depth -= 1;
+                self.depth_pop(ok_guard);
                 wasm!(self.func, { end; });
             }
 
@@ -685,7 +679,7 @@ impl FuncCompiler<'_> {
                 });
                 let bt = values::block_type(result_ty);
                 self.func.instruction(&Instruction::If(bt));
-                self.depth += 1;
+                let err_guard = self.depth_push();
                 if let IrPattern::Bind { var, .. } = inner.as_ref() {
                     if let Some(&local_idx) = self.var_map.get(&var.0) {
                         let inner_ty = if let Ty::Applied(_, args) = subject_ty {
@@ -700,12 +694,12 @@ impl FuncCompiler<'_> {
                     self.emit_expr(guard);
                     let bt2 = values::block_type(result_ty);
                     self.func.instruction(&Instruction::If(bt2));
-                    self.depth += 1;
+                    let guard_g = self.depth_push();
                     self.emit_expr(&arm.body);
                     wasm!(self.func, { else_; });
                     if is_last { wasm!(self.func, { unreachable; }); }
                     else { self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1); }
-                    self.depth -= 1;
+                    self.depth_pop(guard_g);
                     wasm!(self.func, { end; });
                 } else {
                     self.emit_expr(&arm.body);
@@ -713,7 +707,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { else_; });
                 if is_last { wasm!(self.func, { unreachable; }); }
                 else { self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1); }
-                self.depth -= 1;
+                self.depth_pop(err_guard);
                 wasm!(self.func, { end; });
             }
 
@@ -722,7 +716,7 @@ impl FuncCompiler<'_> {
                 if let Ty::Tuple(elem_types) = subject_ty {
                     let has_literal = elements.iter().any(|p| matches!(p, IrPattern::Literal { .. }));
 
-                    if has_literal && !is_last {
+                    let tuple_guard = if has_literal && !is_last {
                         // Build condition: check all literal elements
                         let mut offset = 0u32;
                         let mut cond_count = 0;
@@ -752,8 +746,10 @@ impl FuncCompiler<'_> {
                             Some(ValType::I32) => { wasm!(self.func, { if_i32; }); }
                             _ => { wasm!(self.func, { if_i32; }); } // String/ptr results are i32
                         }
-                        self.depth += 1;
-                    }
+                        Some(self.depth_push())
+                    } else {
+                        None
+                    };
 
                     // Bind elements
                     let mut offset = 0u32;
@@ -771,12 +767,12 @@ impl FuncCompiler<'_> {
 
                     self.emit_expr(&arm.body);
 
-                    if has_literal && !is_last {
+                    if let Some(tg) = tuple_guard {
                         wasm!(self.func, { else_; });
                         // Emit remaining arms
                         self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1);
                         wasm!(self.func, { end; });
-                        self.depth -= 1;
+                        self.depth_pop(tg);
                         return; // Don't fall through to normal next-arm processing
                     }
                 } else {

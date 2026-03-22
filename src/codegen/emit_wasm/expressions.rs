@@ -123,11 +123,11 @@ impl FuncCompiler<'_> {
                 self.emit_expr(cond);
                 let bt = values::block_type(&expr.ty);
                 self.func.instruction(&Instruction::If(bt));
-                self.depth += 1;
+                let _g0 = self.depth_push();
                 self.emit_expr(then);
                 wasm!(self.func, { else_; });
                 self.emit_expr(else_);
-                self.depth -= 1;
+                self.depth_pop(_g0);
                 wasm!(self.func, { end; });
             }
 
@@ -158,13 +158,13 @@ impl FuncCompiler<'_> {
                     }
                 } else { None };
 
-                let break_depth = self.depth;
                 wasm!(self.func, { block_empty; });
-                self.depth += 1;
+                let _g1 = self.depth_push();
+                let break_depth = _g1.saved();
 
-                let continue_depth = self.depth;
                 wasm!(self.func, { loop_empty; });
-                self.depth += 1;
+                let _g2 = self.depth_push();
+                let continue_depth = _g2.saved();
 
                 self.loop_stack.push(super::LoopLabels { break_depth, continue_depth });
 
@@ -190,9 +190,9 @@ impl FuncCompiler<'_> {
                 }
 
                 self.loop_stack.pop();
-                self.depth -= 1;
+                self.depth_pop(_g2);
                 wasm!(self.func, { end; }); // end loop
-                self.depth -= 1;
+                self.depth_pop(_g1);
                 wasm!(self.func, { end; }); // end block
 
                 // After block: load saved result (if any)
@@ -208,13 +208,13 @@ impl FuncCompiler<'_> {
 
             // ── While loop ──
             IrExprKind::While { cond, body } => {
-                let break_depth = self.depth;
                 wasm!(self.func, { block_empty; });
-                self.depth += 1;
+                let _g3 = self.depth_push();
+                let break_depth = _g3.saved();
 
-                let continue_depth = self.depth;
                 wasm!(self.func, { loop_empty; });
-                self.depth += 1;
+                let _g4 = self.depth_push();
+                let continue_depth = _g4.saved();
 
                 self.loop_stack.push(super::LoopLabels { break_depth, continue_depth });
 
@@ -234,9 +234,9 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { br(self.depth - continue_depth - 1); });
 
                 self.loop_stack.pop();
-                self.depth -= 1;
+                self.depth_pop(_g4);
                 wasm!(self.func, { end; }); // end loop
-                self.depth -= 1;
+                self.depth_pop(_g3);
                 wasm!(self.func, { end; }); // end block
             }
 

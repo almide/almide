@@ -307,6 +307,17 @@ pub struct LoopLabels {
     pub continue_depth: u32,
 }
 
+/// RAII guard for WASM block nesting depth.
+/// Created by `depth_push`/`depth_push_n`, consumed by `depth_pop`.
+/// `#[must_use]` ensures the guard is not silently dropped.
+#[must_use = "call depth_pop() to restore depth"]
+pub struct DepthGuard(u32);
+
+impl DepthGuard {
+    /// The depth value at the point this guard was created (before push).
+    pub fn saved(&self) -> u32 { self.0 }
+}
+
 /// Per-function compilation state.
 pub struct FuncCompiler<'a> {
     pub emitter: &'a mut WasmEmitter,
@@ -320,6 +331,32 @@ pub struct FuncCompiler<'a> {
     pub var_table: &'a crate::ir::VarTable,
     // Return type for stub calls (set by emit_call before delegating to handlers)
     pub stub_ret_ty: Ty,
+}
+
+impl FuncCompiler<'_> {
+    /// Push depth by 1. Returns a guard that must be passed to `depth_pop`.
+    pub fn depth_push(&mut self) -> DepthGuard {
+        let g = DepthGuard(self.depth);
+        self.depth += 1;
+        g
+    }
+
+    /// Push depth by N. Returns a guard that restores to the saved depth.
+    pub fn depth_push_n(&mut self, n: u32) -> DepthGuard {
+        let g = DepthGuard(self.depth);
+        self.depth += n;
+        g
+    }
+
+    /// Restore depth from guard. Debug-asserts that depth hasn't been corrupted.
+    pub fn depth_pop(&mut self, guard: DepthGuard) {
+        debug_assert!(
+            self.depth > guard.0,
+            "depth_pop: depth {} should be > saved {}",
+            self.depth, guard.0,
+        );
+        self.depth = guard.0;
+    }
 }
 
 // ── Public API ──────────────────────────────────────────────────────

@@ -634,7 +634,7 @@ impl FuncCompiler<'_> {
                     i32_const(0); local_set(idx);
                     block_empty; loop_empty;
                 });
-                let saved = self.depth; self.depth += 2;
+                let depth_guard = self.depth_push_n(2);
                 wasm!(self.func, {
                     local_get(idx); local_get(len); i32_ge_u; br_if(1);
                     // Call predicate
@@ -666,7 +666,7 @@ impl FuncCompiler<'_> {
                     local_get(idx); i32_const(1); i32_add; local_set(idx);
                     br(0);
                 });
-                self.depth = saved;
+                self.depth_pop(depth_guard);
                 wasm!(self.func, {
                     end; end;
                     local_get(dst); local_get(out_idx); i32_store(0);
@@ -702,7 +702,7 @@ impl FuncCompiler<'_> {
                     i32_const(0); local_set(idx);
                     block_empty; loop_empty;
                 });
-                let saved = self.depth; self.depth += 2;
+                let depth_guard = self.depth_push_n(2);
                 wasm!(self.func, {
                     local_get(idx); local_get(len); i32_ge_u; br_if(1);
                     local_get(closure); i32_load(4); // env
@@ -726,7 +726,7 @@ impl FuncCompiler<'_> {
                     local_get(idx); i32_const(1); i32_add; local_set(idx);
                     br(0);
                 });
-                self.depth = saved;
+                self.depth_pop(depth_guard);
                 wasm!(self.func, { end; end; local_get(acc); });
                 self.scratch.free(acc, acc_vt);
                 self.scratch.free_i32(idx);
@@ -794,8 +794,7 @@ impl FuncCompiler<'_> {
             i32_const(0); local_set(idx_local);
             block_empty; loop_empty;
         });
-        let saved = self.depth;
-        self.depth += 2;
+        let depth_guard = self.depth_push_n(2);
 
         wasm!(self.func, {
             local_get(idx_local); local_get(len_local); i32_ge_u; br_if(1);
@@ -823,7 +822,7 @@ impl FuncCompiler<'_> {
             local_get(idx_local); i32_const(1); i32_add; local_set(idx_local);
             br(0);
         });
-        self.depth = saved;
+        self.depth_pop(depth_guard);
         wasm!(self.func, { end; end; local_get(dst_local); });
 
         self.scratch.free_i32(dst_local);

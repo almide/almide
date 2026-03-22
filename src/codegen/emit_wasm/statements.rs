@@ -69,7 +69,7 @@ impl FuncCompiler<'_> {
                     i32_eqz;
                     if_empty;
                 });
-                self.depth += 1;
+                let _g = self.depth_push();
 
                 match &else_.kind {
                     // Break/Continue: emit directly (they generate the right br)
@@ -98,7 +98,7 @@ impl FuncCompiler<'_> {
                     }
                 }
 
-                self.depth -= 1;
+                self.depth_pop(_g);
                 wasm!(self.func, { end; });
             }
 
