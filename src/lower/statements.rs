@@ -112,18 +112,20 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
             IrPattern::Constructor { name: name.clone(), args: ir_args }
         }
         ast::Pattern::RecordPattern { name, fields, rest } => {
-            let ir_fields = fields.iter().map(|f| {
+            let ir_fields: Vec<IrFieldPattern> = fields.iter().map(|f| {
                 let field_ty = resolve_record_field_ty(ctx, name, &f.name);
                 IrFieldPattern {
                     name: f.name.clone(),
                     pattern: f.pattern.as_ref().map(|p| lower_pattern(ctx, p, &field_ty)),
                 }
             }).collect();
-            // Bind unmatched fields as variables
-            for f in fields {
+            // Bind shorthand fields as variables and attach Bind pattern
+            let mut ir_fields = ir_fields;
+            for (i, f) in fields.iter().enumerate() {
                 if f.pattern.is_none() {
                     let field_ty = resolve_record_field_ty(ctx, name, &f.name);
-                    ctx.define_var(&f.name, field_ty, Mutability::Let, None);
+                    let var = ctx.define_var(&f.name, field_ty.clone(), Mutability::Let, None);
+                    ir_fields[i].pattern = Some(IrPattern::Bind { var, ty: field_ty });
                 }
             }
             IrPattern::RecordPattern { name: name.clone(), fields: ir_fields, rest: *rest }
