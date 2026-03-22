@@ -1,5 +1,5 @@
 module weather_full
-// wasm:skip
+// wasm:enabled
 
 type Coord: Codec = { lon: Float, lat: Float }
 type Weather: Codec = { id: Int, main: String, description: String, icon: String }

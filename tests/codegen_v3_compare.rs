@@ -34,6 +34,7 @@ fn make_test_program() -> IrProgram {
                 IrExpr {
                     kind: IrExprKind::Lambda {
                         params: vec![(v_p, Ty::String)],
+                        lambda_id: None,
                         body: Box::new(IrExpr {
                             kind: IrExprKind::BinOp {
                                 op: BinOp::Eq,

@@ -140,6 +140,11 @@ impl FuncCompiler<'_> {
                                 return;
                             }
                         }
+                        // Codec helper functions
+                        if name.starts_with("__encode_option_") || name.starts_with("__decode_option_") || name.starts_with("__decode_default_") || name.starts_with("__encode_list_") || name.starts_with("__decode_list_") {
+                            self.emit_codec_helper(name, args);
+                            return;
+                        }
                         // User-defined function call
                         for arg in args {
                             self.emit_expr(arg);
