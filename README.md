@@ -17,6 +17,7 @@
 <p align="center">
   <a href="https://github.com/almide/almide/actions/workflows/ci.yml"><img src="https://github.com/almide/almide/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-blue.svg" alt="License: MIT / Apache-2.0"></a>
+  <a href="https://deepwiki.com/almide/almide"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
 </p>
 
 ## What is Almide?
@@ -193,6 +194,20 @@ Tested with the [MiniGit benchmark](https://github.com/almide/benchmark) — Cla
 | **Almide (with warmup)** | **261.6s** | **$1.03** | **20/20** |
 
 Almide has no training data in any public LLM corpus yet — the generation speed gap is expected to narrow as more Almide code enters training sets. Despite being slower, Almide achieves **100% pass rate** with zero failures across 40 trials (20 no-warmup + 20 warmup). See [full results](https://github.com/almide/benchmark) for all 16 languages.
+
+## WASM Binary Size
+
+Almide emits WASM bytecode directly (no Rust/C intermediary). Each binary is self-contained — allocator, string handling, and runtime are all included. No external GC or host runtime dependency.
+
+| Program | Almide | AssemblyScript | MoonBit (wasm-gc) | Go (TinyGo) |
+|---------|-------:|---------------:|------------------:|------------:|
+| Hello World | **1,028 B** | ~2-5 KB | ~8,500 B | ~10-30 KB |
+| FizzBuzz | **1,286 B** | — | ~8,500 B | — |
+| Fibonacci | **1,361 B** | — | ~8,500 B | — |
+| Closure | **1,443 B** | — | ~8,500 B | — |
+| Variant | **1,777 B** | — | ~8,500 B | — |
+
+Smallest among all high-level languages with a runtime. C/Rust/Zig can produce smaller binaries, but without allocator, string handling, or standard library.
 
 ## Native Performance
 
