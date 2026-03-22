@@ -93,7 +93,14 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
     let default_output = format!("{}.wasm", file.strip_suffix(".almd").unwrap_or("a.out"));
     let output = output.unwrap_or(&default_output);
 
-    let (mut program, source_text, _parse_errors) = parse_file(file);
+    let (mut program, source_text, parse_errors) = parse_file(file);
+
+    if !parse_errors.is_empty() {
+        for e in &parse_errors {
+            eprintln!("{}", e.display_with_source(&source_text));
+        }
+        std::process::exit(1);
+    }
 
     // Resolve dependencies
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
