@@ -178,9 +178,23 @@ impl FuncCompiler<'_> {
                 self.emit_value_call("get", args);
             }
             "parse" => {
-                // json.parse(s: String) -> Result[Value, String]: call runtime
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { call(self.emitter.rt.json_parse); });
+            }
+            "as_string" | "as_int" | "as_bool" | "as_float" | "as_array" => {
+                // json.as_X returns Option[T], not Result
+                self.emit_json_as_typed(func, args);
+            }
+            "get_string" | "get_int" | "get_bool" | "get_float" | "get_array" => {
+                // json.get_X(v, key) → Option[X]: get value, check type
+                self.emit_json_get_typed(func, args);
+            }
+            "keys" => {
+                self.emit_json_keys(args);
+            }
+            "stringify_pretty" => {
+                // For now, same as stringify (no indentation)
+                self.emit_value_call("stringify", args);
             }
             _ => {
                 self.emit_stub_call(args);
@@ -190,6 +204,9 @@ impl FuncCompiler<'_> {
 
     /// value.get(v, key) -> Result[Value, String]
     /// Check tag==6 (object), iterate pairs list for matching key.
+    /// value.get(v, key) -> Option[Value]
+    /// Check tag==6 (object), iterate pairs list for matching key.
+    /// Returns some(value_ptr) or none(0).
     fn emit_value_get(&mut self, args: &[IrExpr]) {
         let v = self.scratch.alloc_i32();
         let key = self.scratch.alloc_i32();
@@ -204,56 +221,33 @@ impl FuncCompiler<'_> {
         self.emit_expr(&args[1]);
         wasm!(self.func, {
             local_set(key);
+            i32_const(0); local_set(result); // none by default
             // Check tag == 6 (object)
-            local_get(v); i32_load(0); i32_const(6); i32_ne;
-            if_i32;
-              // Not an object: return err("expected object")
-        });
-        let err_msg = self.emitter.intern_string("expected object");
-        wasm!(self.func, {
-              i32_const(8); call(self.emitter.rt.alloc); local_set(result);
-              local_get(result); i32_const(1); i32_store(0); // tag = err
-              local_get(result); i32_const(err_msg as i32); i32_store(4);
-              local_get(result);
-            else_;
+            local_get(v); i32_load(0); i32_const(6); i32_eq;
+            if_empty;
               // It's an object: iterate pairs
-              local_get(v); i32_load(4); local_set(list); // list ptr
-              local_get(list); i32_load(0); local_set(len); // pair count
+              local_get(v); i32_load(4); local_set(list);
+              local_get(list); i32_load(0); local_set(len);
               i32_const(0); local_set(i);
-              i32_const(0); local_set(result); // 0 = not found yet
               block_empty; loop_empty;
                 local_get(i); local_get(len); i32_ge_u; br_if(1);
-                // pair_ptr = *(list + 4 + i * 4) — dereference tuple pointer
                 local_get(list); i32_const(4); i32_add;
                 local_get(i); i32_const(4); i32_mul; i32_add;
-                i32_load(0); // dereference to get tuple ptr
-                local_set(pair_ptr);
-                // Compare pair key with target key
-                local_get(pair_ptr); i32_load(0); // pair key string ptr
+                i32_load(0); local_set(pair_ptr);
+                local_get(pair_ptr); i32_load(0);
                 local_get(key);
                 call(self.emitter.rt.string.eq);
                 if_empty;
-                  // Found: build ok(value) result
-                  i32_const(8); call(self.emitter.rt.alloc); local_set(result);
-                  local_get(result); i32_const(0); i32_store(0); // tag = ok
-                  local_get(result); local_get(pair_ptr); i32_load(4); i32_store(4); // value ptr
-                  br(2); // break out of loop
+                  // Found: some(value) — alloc Option box with value ptr
+                  i32_const(4); call(self.emitter.rt.alloc); local_set(result);
+                  local_get(result); local_get(pair_ptr); i32_load(4); i32_store(0);
+                  br(2);
                 end;
                 local_get(i); i32_const(1); i32_add; local_set(i);
-                br(0); // continue loop
+                br(0);
               end; end;
-              // If not found (result == 0), build err
-              local_get(result); i32_eqz;
-              if_empty;
-        });
-        let not_found_msg = self.emitter.intern_string("key not found");
-        wasm!(self.func, {
-                i32_const(8); call(self.emitter.rt.alloc); local_set(result);
-                local_get(result); i32_const(1); i32_store(0); // tag = err
-                local_get(result); i32_const(not_found_msg as i32); i32_store(4);
-              end;
-              local_get(result);
             end;
+            local_get(result); // 0 = none, or some ptr
         });
 
         self.scratch.free_i32(result);
@@ -326,6 +320,189 @@ impl FuncCompiler<'_> {
         });
 
         self.scratch.free_i32(result);
+        self.scratch.free_i32(v);
+    }
+
+    /// json.get_string / get_int / get_bool / get_float / get_array
+    /// Returns Option[T]: get value by key, check type tag, unwrap payload.
+    fn emit_json_get_typed(&mut self, func: &str, args: &[IrExpr]) {
+        let expected_tag: i32 = match func {
+            "get_string" => 4,
+            "get_int" => 2,
+            "get_float" => 3,
+            "get_bool" => 1,
+            "get_array" => 5,
+            _ => 4,
+        };
+
+        // First do json.get(v, key) → Option[Value]
+        // Then check the Value's tag matches expected
+        let v = self.scratch.alloc_i32();
+        let key = self.scratch.alloc_i32();
+        let list = self.scratch.alloc_i32();
+        let len = self.scratch.alloc_i32();
+        let i = self.scratch.alloc_i32();
+        let pair_ptr = self.scratch.alloc_i32();
+        let found_val = self.scratch.alloc_i32();
+
+        self.emit_expr(&args[0]);
+        wasm!(self.func, { local_set(v); });
+        self.emit_expr(&args[1]);
+        wasm!(self.func, {
+            local_set(key);
+            i32_const(0); local_set(found_val);
+            local_get(v); i32_load(0); i32_const(6); i32_eq;
+            if_empty;
+              local_get(v); i32_load(4); local_set(list);
+              local_get(list); i32_load(0); local_set(len);
+              i32_const(0); local_set(i);
+              block_empty; loop_empty;
+                local_get(i); local_get(len); i32_ge_u; br_if(1);
+                local_get(list); i32_const(4); i32_add;
+                local_get(i); i32_const(4); i32_mul; i32_add;
+                i32_load(0); local_set(pair_ptr);
+                local_get(pair_ptr); i32_load(0);
+                local_get(key);
+                call(self.emitter.rt.string.eq);
+                if_empty;
+                  // Found key. Check tag.
+                  local_get(pair_ptr); i32_load(4); local_set(found_val); // value ptr
+                  local_get(found_val); i32_load(0); i32_const(expected_tag); i32_ne;
+                  if_empty;
+                    i32_const(0); local_set(found_val); // wrong type → none
+                  end;
+                  br(2);
+                end;
+                local_get(i); i32_const(1); i32_add; local_set(i);
+                br(0);
+              end; end;
+            end;
+        });
+
+        // found_val is Value ptr (with matching tag) or 0.
+        // Return Option[T]: some = alloc box with payload, none = 0.
+        // For all types, we alloc a box and copy the payload.
+        let payload_size: u32 = match func {
+            "get_int" => 8,    // i64
+            "get_float" => 8,  // f64
+            _ => 4,            // i32 (string ptr, bool, list ptr)
+        };
+        let option_box = self.scratch.alloc_i32();
+        wasm!(self.func, {
+            local_get(found_val); i32_eqz;
+            if_i32; i32_const(0); // none
+            else_;
+              i32_const(payload_size as i32); call(self.emitter.rt.alloc); local_set(option_box);
+              local_get(option_box);
+              local_get(found_val);
+        });
+        // Copy payload from Value offset 4 to option box offset 0
+        match payload_size {
+            8 => { wasm!(self.func, { i64_load(4); i64_store(0); }); }
+            _ => { wasm!(self.func, { i32_load(4); i32_store(0); }); }
+        }
+        wasm!(self.func, {
+              local_get(option_box);
+            end;
+        });
+        self.scratch.free_i32(option_box);
+
+        self.scratch.free_i32(found_val);
+        self.scratch.free_i32(pair_ptr);
+        self.scratch.free_i32(i);
+        self.scratch.free_i32(len);
+        self.scratch.free_i32(list);
+        self.scratch.free_i32(key);
+        self.scratch.free_i32(v);
+    }
+
+    /// json.as_string / as_int / as_bool / as_float / as_array → Option[T]
+    fn emit_json_as_typed(&mut self, func: &str, args: &[IrExpr]) {
+        let expected_tag: i32 = match func {
+            "as_string" => 4,
+            "as_int" => 2,
+            "as_float" => 3,
+            "as_bool" => 1,
+            "as_array" => 5,
+            _ => 4,
+        };
+        let payload_size: u32 = match func {
+            "as_int" => 8,
+            "as_float" => 8,
+            _ => 4,
+        };
+        let v = self.scratch.alloc_i32();
+        let option_box = self.scratch.alloc_i32();
+        self.emit_expr(&args[0]);
+        wasm!(self.func, {
+            local_set(v);
+            local_get(v); i32_load(0); i32_const(expected_tag); i32_eq;
+            if_i32;
+              // Matching tag: alloc option box, copy payload
+              i32_const(payload_size as i32); call(self.emitter.rt.alloc); local_set(option_box);
+              local_get(option_box);
+              local_get(v);
+        });
+        match payload_size {
+            8 => { wasm!(self.func, { i64_load(4); i64_store(0); }); }
+            _ => { wasm!(self.func, { i32_load(4); i32_store(0); }); }
+        }
+        wasm!(self.func, {
+              local_get(option_box);
+            else_;
+              i32_const(0); // none
+            end;
+        });
+        self.scratch.free_i32(option_box);
+        self.scratch.free_i32(v);
+    }
+
+    /// json.keys(v: Value) → List[String]: extract keys from object
+    fn emit_json_keys(&mut self, args: &[IrExpr]) {
+        let v = self.scratch.alloc_i32();
+        let list = self.scratch.alloc_i32();
+        let len = self.scratch.alloc_i32();
+        let result = self.scratch.alloc_i32();
+        let i = self.scratch.alloc_i32();
+
+        self.emit_expr(&args[0]);
+        wasm!(self.func, {
+            local_set(v);
+            local_get(v); i32_load(0); i32_const(6); i32_eq;
+            if_i32;
+              local_get(v); i32_load(4); local_set(list);
+              local_get(list); i32_load(0); local_set(len);
+              // Alloc result list
+              i32_const(4); local_get(len); i32_const(4); i32_mul; i32_add;
+              call(self.emitter.rt.alloc); local_set(result);
+              local_get(result); local_get(len); i32_store(0);
+              i32_const(0); local_set(i);
+              block_empty; loop_empty;
+                local_get(i); local_get(len); i32_ge_u; br_if(1);
+                // result[i] = pair[i].key
+                local_get(result); i32_const(4); i32_add;
+                local_get(i); i32_const(4); i32_mul; i32_add;
+                local_get(list); i32_const(4); i32_add;
+                local_get(i); i32_const(4); i32_mul; i32_add;
+                i32_load(0); // pair ptr
+                i32_load(0); // key string ptr
+                i32_store(0); // store in result
+                local_get(i); i32_const(1); i32_add; local_set(i);
+                br(0);
+              end; end;
+              local_get(result);
+            else_;
+              // Not an object: return empty list
+              i32_const(4); call(self.emitter.rt.alloc); local_set(result);
+              local_get(result); i32_const(0); i32_store(0);
+              local_get(result);
+            end;
+        });
+
+        self.scratch.free_i32(i);
+        self.scratch.free_i32(result);
+        self.scratch.free_i32(len);
+        self.scratch.free_i32(list);
         self.scratch.free_i32(v);
     }
 }
