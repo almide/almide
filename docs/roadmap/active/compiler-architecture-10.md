@@ -2,7 +2,7 @@
 
 **目標**: コンパイラアーキテクチャ全項目 10/10
 **現状**: 80/100 (7つの領域に改善余地)
-**スコープ**: WASM codegen 以外の全コンパイラ基盤
+**スコープ**: WASM codegen を含む全コンパイラ基盤
 
 ---
 
@@ -10,7 +10,7 @@
 
 | 領域 | 現在 | 目標 | 主要改善 |
 |------|------|------|----------|
-| パイプライン設計 | 9 | 10 | パス依存宣言、BoxDeref のパイプライン統合 |
+| パイプライン設計 | 7 | 10 | **Target::Wasm統合**、パス依存宣言、BoxDeref統合 |
 | パーサー | 9 | 10 | (維持 — fuzzing で補強) |
 | 型チェッカー | 7 | 10 | mod.rs 分割、string interning、call resolution 整理 |
 | IR 設計 | 9 | 10 | (維持 — verification の条件付き実行) |
@@ -18,14 +18,45 @@
 | モノモーフィゼーション | 7 | 10 | ファイル分割、COW 特殊化、増分発見、収束検出 |
 | エラー診断 | 9 | 10 | E003 の --explain 追加、エラーコードレジストリ |
 | コード品質 | 7 | 10 | string interning、clone 削減、巨大ファイル分割 |
-| テスト | 8 | 10 | nanopass テスト、スナップショット、fuzzing、ベンチマーク |
+| テスト | 8 | 10 | nanopass テスト、cross-check、fuzzing、ベンチマーク |
 | ビルドシステム | 7 | 10 | build.rs 分割、型パーサー AST 化、生成コード検証 |
+| Codegen統合 | 5 | 10 | **WASM/Rust/TS/JS共通pipeline、stdlib dispatch一元化** |
 
 ---
 
-## Phase 1: 基盤整備 (Quick Wins)
+## Phase 1: パイプライン統合 (全Phaseの前提)
 
-即座に効果があり、後続フェーズの前提になるもの。
+WASM codegen がパイプライン外に存在する現状を解消する。これが後続の全Phaseの前提。
+
+### 1.0 Target::Wasm + Pipeline統合
+
+**問題**: WASMは `Target` enumに存在せず、build.rsで `Target::Rust` をハードコードしてTCO+ResultPropだけ手動実行。新しい言語機能（compose operatorなど）を追加するたびにWASM側で手動対応が必要。StreamFusion、EffectInference、FanLowering等の恩恵をWASMが受けていない。
+
+**変更箇所**:
+
+| ファイル | 変更 |
+|----------|------|
+| `src/codegen/pass.rs` | Target enum に `Wasm` 追加 |
+| `src/codegen/target.rs` | WASM pipeline 定義 |
+| `src/cli/build.rs` | 手動pass呼び出し → `config.pipeline.run()` |
+| `src/cli/commands.rs` | テストランナーも同様 |
+| `src/codegen/mod.rs` | `emit_wasm_binary` をpipeline実行後に統合 |
+
+**WASM pipeline定義**:
+```
+Pipeline::new()
+    .add(TailCallOptPass)
+    .add(EffectInferencePass)
+    .add(StreamFusionPass)
+    .add(ResultPropagationPass)
+    .add(FanLoweringPass)
+```
+
+WASM不要なpass（BorrowInsertion, CloneInsertion, MatchLowering, ResultErasure, ShadowResolve, StdlibLowering, BuiltinLowering）は `targets()` で除外されるため、既存のRust/TS/JS pipelineに変更なし。
+
+**効果**: 新passを追加したとき、WASMも自動的に恩恵を受ける。compose operatorのような新機能追加でWASMだけ壊れる事故を防げる。
+
+**工数**: S (半日)
 
 ### 1.1 パス依存宣言の追加
 
@@ -148,7 +179,7 @@ resolve_type_name を O(n) 線形探索から TypeNameIndex キャッシュで O
 
 ---
 
-## Phase 4: Nanopass + Walker 分割
+## Phase 4: Nanopass + Codegen出口の整理
 
 ### 4.1 pass_stream_fusion.rs の分割 (1,192行 → 5モジュール)
 
@@ -177,9 +208,37 @@ resolve_type_name を O(n) 線形探索から TypeNameIndex キャッシュで O
 
 **工数**: L (8-10時間)
 
+### 4.3 Codegen出口の整理
+
+Pipeline実行後、IRは全ターゲット共通。出口が2つに分岐する:
+
+```
+  IR (pipeline適用済み)
+         ↓
+    ┌────┴────┐
+    ↓         ↓
+  Walker    emit_wasm
+ (text)    (binary)
+```
+
+`codegen/mod.rs` の `emit()` と `emit_wasm_binary()` をターゲット選択で分岐する単一エントリにまとめる:
+
+```rust
+pub fn codegen(program: &mut IrProgram, target: Target) -> CodegenOutput {
+    let config = target::configure(target);
+    config.pipeline.run(program, target);
+    match target {
+        Target::Wasm => CodegenOutput::Binary(emit_wasm::emit(program)),
+        _ => CodegenOutput::Source(walker::render(...)),
+    }
+}
+```
+
+**工数**: S (2-3時間)
+
 ---
 
-## Phase 5: コード品質
+## Phase 5: コード品質 + Stdlib統合
 
 ### 5.1 String Interning
 
@@ -200,7 +259,28 @@ SymId(u32)    — 汎用識別子 (型チェッカー用)
 
 **工数**: M (1-2週間、段階的に適用)
 
-### 5.2 Clone 削減 (Phase 3 の COW と合わせて)
+### 5.2 Stdlib dispatch一元化
+
+**問題**: 381関数のdispatchが2系統に分裂:
+- Rust/TS/JS: `stdlib/defs/*.toml` のテンプレート → Walker
+- WASM: `emit_wasm/calls_*.rs` の手書きmatch文 → FuncCompiler
+
+**修正**: `stdlib/defs/*.toml` にWASMルーティング情報を追加:
+```toml
+[string.contains]
+rust = "{0}.contains({1})"
+ts = "{0}.includes({1})"
+wasm_handler = "emit_string_call"
+wasm_rt = "__str_contains"
+```
+
+build.rsがTOMLからWASM dispatch tableを自動生成。calls.rsの巨大match文が宣言的に。
+
+**効果**: 新stdlib関数の追加がTOMLの1エントリで全ターゲットに伝搬。
+
+**工数**: M (1-2週間)
+
+### 5.3 Clone 削減 (Phase 3 の COW と合わせて)
 
 **主要ターゲット**:
 - ir/substitute.rs: Ty の深いクローンを参照に (150箇所)
@@ -227,13 +307,21 @@ SymId(u32)    — 汎用識別子 (型チェッカー用)
 
 **工数**: M (4-5日)
 
-### 6.2 スナップショットテスト (insta crate)
+### 6.2 Cross-target テスト (`almide test --cross-check`)
+
+各テストファイルをRustとWASMの両方で実行し、stdout出力の一致を検証。テスト通過数と出力内容を比較。
+
+**効果**: ターゲット間のセマンティクス差異を自動検出。新機能追加時にWASMだけ壊れる事故を防止。
+
+**工数**: S (実装済み、調整のみ)
+
+### 6.3 スナップショットテスト (insta crate)
 
 IR の before/after を JSON で golden file 比較。パスの silent breakage を検出。
 
 **工数**: M (2-3日)
 
-### 6.3 モノモーフィゼーションユニットテスト (25テスト)
+### 6.4 モノモーフィゼーションユニットテスト (25テスト)
 
 - インスタンス発見: 単純/複数/推移的/深いチェーン (7テスト)
 - 特殊化: セマンティクス保存/OpenRecord/VarTable 整合 (3テスト)
@@ -242,13 +330,13 @@ IR の before/after を JSON で golden file 比較。パスの silent breakage 
 
 **工数**: M (2-3日)
 
-### 6.4 Parser Fuzzing (proptest)
+### 6.5 Parser Fuzzing (proptest)
 
 proptest で 100k+ 入力を生成し、パーサーがパニックしないことを検証。エラーリカバリの堅牢性確認。
 
 **工数**: M (2-3日)
 
-### 6.5 パフォーマンスベンチマーク (criterion)
+### 6.6 パフォーマンスベンチマーク (criterion)
 
 - パーサー: 100行/200行/500行のファイルのパース速度
 - 型チェッカー: ジェネリクス展開の制約解消速度
@@ -271,7 +359,7 @@ build.rs 単体を xtask クレートまたはサブモジュールに移行:
 | `parser/types.rs` | 型文字列のAST パース (bracket matching 含む) | 300 |
 | `loader/stdlib.rs` | TOML 定義ファイルの読み込み + スキーマ検証 | 250 |
 | `loader/runtime.rs` | ランタイムソースのスキャン (syn crate 使用) | 150 |
-| `codegen/stdlib.rs` | sig + call 生成 | 200 |
+| `codegen/stdlib.rs` | sig + call 生成 (+ WASM dispatch table生成) | 200 |
 | `validate/mod.rs` | 型検証、テンプレート検証、ランタイムカバレッジ検証 | 350 |
 
 **主要改善**:
@@ -279,6 +367,7 @@ build.rs 単体を xtask クレートまたはサブモジュールに移行:
 - 文字列 regex でのランタイムスキャン → syn crate による Rust AST パース
 - 生成コードの syntax 検証 (syn::parse_file で検証)
 - .unwrap() パニック → 集約エラーレポート (file:line 付き)
+- WASM dispatch table の自動生成 (Phase 5.2 と連動)
 
 **工数**: M (5-6日)
 
@@ -287,7 +376,8 @@ build.rs 単体を xtask クレートまたはサブモジュールに移行:
 ## 実行順序
 
 ```
-Phase 1 (1-2日)     ← 即座に効く、後続の前提
+Phase 1 (2-3日)     ← 全Phaseの前提。WASM統合が最優先
+  1.0 Target::Wasm + Pipeline統合 ★
   1.1 パス依存宣言
   1.2 E003 + エラーレジストリ
   1.3 BoxDeref パイプライン統合
@@ -302,24 +392,29 @@ Phase 3 (1-2週間)   ← モノモーフィゼーション
   3.3 増分発見
   3.4 収束検出
 
-Phase 4 (1週間)     ← Nanopass + Walker の可読性
+Phase 4 (1週間)     ← Nanopass + Codegen出口整理
   4.1 stream fusion 分割
   4.2 walker 分割
+  4.3 Codegen出口の統一 ★
 
-Phase 5 (1-2週間)   ← 全体のコード品質
+Phase 5 (2-3週間)   ← コード品質 + ターゲット横断
   5.1 String Interning
-  5.2 Clone 削減
+  5.2 Stdlib dispatch一元化 ★
+  5.3 Clone 削減
 
 Phase 6 (2-3週間)   ← Phase 1-5 と並行可能
   6.1 Nanopass テスト
-  6.2 スナップショットテスト
-  6.3 モノモーフィゼーションテスト
-  6.4 Parser Fuzzing
-  6.5 ベンチマーク
+  6.2 Cross-target テスト ★
+  6.3 スナップショットテスト
+  6.4 モノモーフィゼーションテスト
+  6.5 Parser Fuzzing
+  6.6 ベンチマーク
 
 Phase 7 (1週間)     ← 最後 (他のフェーズに依存しない)
-  7.1 build.rs 分割 + 検証レイヤー
+  7.1 build.rs 分割 + 検証レイヤー + WASM dispatch生成
 ```
 
-**総工数見積もり**: 6-10 週間 (テストは並行実施)
-**完了時スコア**: 100/100
+★ = WASM統合に関する新規項目
+
+**総工数見積もり**: 8-12 週間 (テストは並行実施)
+**完了時スコア**: 110/110 (Codegen統合を含む11領域)
