@@ -355,8 +355,18 @@ impl FuncCompiler<'_> {
         } else {
             object.ty.clone()
         };
-        let fields = self.extract_record_fields(&resolved_ty);
-        let tag_offset = self.variant_tag_offset(&resolved_ty);
+        let mut fields = self.extract_record_fields(&resolved_ty);
+        let mut tag_offset = self.variant_tag_offset(&resolved_ty);
+
+        // If fields are empty and type is Unknown, try searching record_fields for a type that has this field
+        if fields.is_empty() && matches!(&resolved_ty, Ty::Unknown | Ty::TypeVar(_)) {
+            for (name, rf) in &self.emitter.record_fields {
+                if rf.iter().any(|(n, _)| n == field) {
+                    fields = rf.clone();
+                    break;
+                }
+            }
+        }
 
         self.emit_expr(object);
 
