@@ -261,9 +261,10 @@ fn count_scratch_depth(expr: &IrExpr) -> usize {
         }
         IrExprKind::UnOp { operand, .. } => count_scratch_depth(operand),
         IrExprKind::Call { args, target, .. } => {
-            // Calls may use scratch: option/result ops (3), list ops (4), variant constructors (1), computed calls (1)
+            // ScratchAllocator: stdlib functions alloc up to 10 i32 scratch locals
+            // (unique_by uses 10). This must be enough to cover the worst case.
             let inner = args.iter().map(|a| count_scratch_depth(a)).max().unwrap_or(0);
-            4 + inner
+            10 + inner
         }
         // SpreadRecord needs 2 i32 scratch (result + base ptrs) + 1 i64 scratch (copy counter)
         IrExprKind::SpreadRecord { base, fields, .. } => {
