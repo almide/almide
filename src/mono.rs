@@ -573,7 +573,13 @@ fn update_var_table_types(expr: &IrExpr, bindings: &HashMap<String, Ty>, vt: &mu
         }
         IrExprKind::List { elements } | IrExprKind::Tuple { elements } => { for e in elements { update_var_table_types(e, bindings, vt); } }
         IrExprKind::Record { fields, .. } | IrExprKind::SpreadRecord { fields, .. } => { for (_, e) in fields { update_var_table_types(e, bindings, vt); } }
-        IrExprKind::Lambda { body, .. } => update_var_table_types(body, bindings, vt),
+        IrExprKind::Lambda { body, params, .. } => {
+            for (var_id, _) in params {
+                let new_ty = substitute_ty(&vt.get(*var_id).ty, bindings);
+                vt.entries[var_id.0 as usize].ty = new_ty;
+            }
+            update_var_table_types(body, bindings, vt);
+        }
         IrExprKind::OptionSome { expr } | IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
         | IrExprKind::Try { expr } | IrExprKind::Await { expr } | IrExprKind::Clone { expr } | IrExprKind::Deref { expr } => {
             update_var_table_types(expr, bindings, vt);

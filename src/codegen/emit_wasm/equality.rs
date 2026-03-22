@@ -77,7 +77,7 @@ impl FuncCompiler<'_> {
                 }
             }
 
-            Ty::Record { fields } => {
+            Ty::Record { fields } | Ty::OpenRecord { fields } => {
                 if fields.iter().all(|(_, t)| self.is_value_type(t)) {
                     let size = values::record_size(fields);
                     wasm!(self.func, { i32_const(size as i32); call(self.emitter.rt.mem_eq); });
@@ -129,7 +129,7 @@ impl FuncCompiler<'_> {
 
     fn is_compound_ty(ty: &Ty) -> bool {
         matches!(ty, Ty::Named(_, _) | Ty::Applied(_, _) | Ty::Variant { .. }
-            | Ty::Record { .. } | Ty::Tuple(_) | Ty::String)
+            | Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Tuple(_) | Ty::String)
     }
 
     /// Try to infer a concrete type from an IR expression when expr.ty is Unknown.
@@ -377,9 +377,6 @@ impl FuncCompiler<'_> {
 
     /// Emit a load instruction from base_ptr (on stack) + offset.
     pub fn emit_load_at(&mut self, ty: &Ty, offset: u32) {
-        if offset == 4 {
-            eprintln!("[LOAD_AT] ty={:?} valtype={:?} offset={}", ty, values::ty_to_valtype(ty), offset);
-        }
         match values::ty_to_valtype(ty) {
             Some(ValType::I64) => {
                 wasm!(self.func, { i64_load(offset); });
@@ -388,11 +385,6 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { f64_load(offset); });
             }
             Some(ValType::I32) => {
-                if offset == 4 {
-                    let bt = std::backtrace::Backtrace::force_capture();
-                    let frames: String = format!("{}", bt).lines().filter(|l| l.contains("emit_wasm")).take(3).collect::<Vec<_>>().join(" | ");
-                    eprintln!("[I32_LOAD_4] ty={:?} from {}", ty, frames);
-                }
                 wasm!(self.func, { i32_load(offset); });
             }
             _ => {}
@@ -417,7 +409,7 @@ impl FuncCompiler<'_> {
     /// For generic types like Box[Int], substitutes type parameters.
     pub(super) fn extract_record_fields(&self, ty: &Ty) -> Vec<(String, Ty)> {
         match ty {
-            Ty::Record { fields } => fields.clone(),
+            Ty::Record { fields } | Ty::OpenRecord { fields } => fields.clone(),
             Ty::Named(name, type_args) => {
                 if let Some(fields) = self.emitter.record_fields.get(name.as_str()) {
                     if type_args.is_empty() {

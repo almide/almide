@@ -320,8 +320,21 @@ impl FuncCompiler<'_> {
 
     /// Emit a field access: load from record/variant pointer + field offset.
     pub(super) fn emit_member(&mut self, object: &IrExpr, field: &str) {
-        let fields = self.extract_record_fields(&object.ty);
-        let tag_offset = self.variant_tag_offset(&object.ty);
+        // If object is a Var, check VarTable for a more concrete type than the
+        // expression node's type (which may be stale OpenRecord/TypeVar/Unknown
+        // from generic monomorphization).
+        let resolved_ty = if let crate::ir::IrExprKind::Var { id } = &object.kind {
+            let vt_ty = &self.var_table.get(*id).ty;
+            if matches!(&object.ty, Ty::OpenRecord { .. } | Ty::TypeVar(_) | Ty::Unknown) && !matches!(vt_ty, Ty::OpenRecord { .. } | Ty::TypeVar(_) | Ty::Unknown) {
+                vt_ty
+            } else {
+                &object.ty
+            }
+        } else {
+            &object.ty
+        };
+        let fields = self.extract_record_fields(resolved_ty);
+        let tag_offset = self.variant_tag_offset(resolved_ty);
 
         self.emit_expr(object);
 

@@ -61,7 +61,13 @@ pub(super) fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) 
                 wasm_params.push(vt);
             }
         }
-        let ret_types = values::ret_type(&_body.ty);
+        // Resolve body return type: if Unknown, infer from expression tree + VarTable
+        let body_ret_ty = if matches!(&_body.ty, crate::types::Ty::Unknown | crate::types::Ty::TypeVar(_)) {
+            resolve_expr_ty(_body, &program.var_table, &emitter.record_fields)
+        } else {
+            _body.ty.clone()
+        };
+        let ret_types = values::ret_type(&body_ret_ty);
         let closure_type_idx = emitter.register_type(wasm_params, ret_types);
 
         let name = format!("__lambda_{}", emitter.lambdas.len());
@@ -427,22 +433,75 @@ fn scan_closures_stmt(
 }
 
 /// Resolve a lambda parameter type when it's TypeVar or Unknown.
-/// Scans the body for type-dispatched operators to infer parameter type.
 fn resolve_lambda_param_ty(param_ty: &crate::types::Ty, _body_ty: &crate::types::Ty, var_table: &crate::ir::VarTable, vid: VarId) -> crate::types::Ty {
     match param_ty {
-        crate::types::Ty::TypeVar(_) | crate::types::Ty::Unknown => {
+        crate::types::Ty::TypeVar(_) | crate::types::Ty::Unknown | crate::types::Ty::OpenRecord { .. } => {
             // Try VarTable for the resolved type
             if (vid.0 as usize) < var_table.len() {
                 let info = var_table.get(vid);
-                eprintln!("[RESOLVE_PARAM] vid={} param_ty={:?} vt_ty={:?}", vid.0, param_ty, info.ty);
-                if !matches!(&info.ty, crate::types::Ty::TypeVar(_) | crate::types::Ty::Unknown) {
+                if !matches!(&info.ty, crate::types::Ty::TypeVar(_) | crate::types::Ty::Unknown | crate::types::Ty::OpenRecord { .. }) {
                     return info.ty.clone();
                 }
             }
-            // Default to Int
             crate::types::Ty::Int
         }
         _ => param_ty.clone(),
+    }
+}
+
+/// Resolve the effective type of an expression tree, using VarTable for Var references
+/// and record_fields from the emitter for Member accesses.
+/// This is needed because lambda body expressions may have Unknown type from the type
+/// checker when the lambda is inside a generic function.
+fn resolve_expr_ty(expr: &IrExpr, var_table: &crate::ir::VarTable, record_fields: &HashMap<String, Vec<(String, crate::types::Ty)>>) -> crate::types::Ty {
+    use crate::types::Ty;
+    // If the expression already has a concrete type, use it
+    if !matches!(&expr.ty, Ty::Unknown | Ty::TypeVar(_)) {
+        return expr.ty.clone();
+    }
+    match &expr.kind {
+        IrExprKind::Var { id } => {
+            if (id.0 as usize) < var_table.len() {
+                let info = var_table.get(*id);
+                if !matches!(&info.ty, Ty::Unknown | Ty::TypeVar(_)) {
+                    return info.ty.clone();
+                }
+            }
+            expr.ty.clone()
+        }
+        IrExprKind::Member { object, field } => {
+            let obj_ty = resolve_expr_ty(object, var_table, record_fields);
+            match &obj_ty {
+                Ty::Record { fields } | Ty::OpenRecord { fields } => {
+                    if let Some((_, fty)) = fields.iter().find(|(n, _)| n == field) {
+                        return fty.clone();
+                    }
+                }
+                Ty::Named(name, _) => {
+                    if let Some(fields) = record_fields.get(name.as_str()) {
+                        if let Some((_, fty)) = fields.iter().find(|(n, _)| n == field) {
+                            return fty.clone();
+                        }
+                    }
+                }
+                _ => {}
+            }
+            expr.ty.clone()
+        }
+        IrExprKind::TupleIndex { object, index } => {
+            let obj_ty = resolve_expr_ty(object, var_table, record_fields);
+            if let Ty::Tuple(elems) = &obj_ty {
+                if let Some(t) = elems.get(*index as usize) {
+                    return t.clone();
+                }
+            }
+            expr.ty.clone()
+        }
+        IrExprKind::If { then, .. } => resolve_expr_ty(then, var_table, record_fields),
+        IrExprKind::Block { expr: Some(e), .. } | IrExprKind::DoBlock { expr: Some(e), .. } => {
+            resolve_expr_ty(e, var_table, record_fields)
+        }
+        _ => expr.ty.clone(),
     }
 }
 
