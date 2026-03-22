@@ -12,43 +12,61 @@ impl Parser {
 
     fn parse_pipe(&mut self) -> Result<Expr, String> {
         let mut left = self.parse_or()?;
-        while { self.skip_newlines_if_followed_by(TokenType::PipeArrow); self.check(TokenType::PipeArrow) } {
-            let span = Some(self.current_span());
-            self.advance();
-            self.skip_newlines();
-            if self.check(TokenType::Match)
-                && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::LBrace)
-            {
+        loop {
+            self.skip_newlines_if_followed_by(TokenType::PipeArrow);
+            self.skip_newlines_if_followed_by(TokenType::ComposeArrow);
+            if self.check(TokenType::ComposeArrow) {
+                let span = Some(self.current_span());
                 self.advance();
                 self.skip_newlines();
-                self.expect(TokenType::LBrace)?;
-                self.skip_newlines();
-                let mut arms = Vec::new();
-                while !self.check(TokenType::RBrace) {
-                    arms.push(self.parse_match_arm()?);
-                    self.skip_newlines();
-                    if self.check(TokenType::Comma) {
-                        self.advance();
-                        self.skip_newlines();
-                    }
-                }
-                self.expect(TokenType::RBrace)?;
-                left = Expr::Match {
-                    subject: Box::new(left),
-                    arms,
-                    id: self.next_id(),
-                    span,
-                    resolved_type: None,
-                };
-            } else {
                 let right = self.parse_or()?;
-                left = Expr::Pipe {
+                left = Expr::Compose {
                     left: Box::new(left),
                     right: Box::new(right),
                     id: self.next_id(),
                     span,
                     resolved_type: None,
                 };
+            } else if self.check(TokenType::PipeArrow) {
+                let span = Some(self.current_span());
+                self.advance();
+                self.skip_newlines();
+                if self.check(TokenType::Match)
+                    && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::LBrace)
+                {
+                    self.advance();
+                    self.skip_newlines();
+                    self.expect(TokenType::LBrace)?;
+                    self.skip_newlines();
+                    let mut arms = Vec::new();
+                    while !self.check(TokenType::RBrace) {
+                        arms.push(self.parse_match_arm()?);
+                        self.skip_newlines();
+                        if self.check(TokenType::Comma) {
+                            self.advance();
+                            self.skip_newlines();
+                        }
+                    }
+                    self.expect(TokenType::RBrace)?;
+                    left = Expr::Match {
+                        subject: Box::new(left),
+                        arms,
+                        id: self.next_id(),
+                        span,
+                        resolved_type: None,
+                    };
+                } else {
+                    let right = self.parse_or()?;
+                    left = Expr::Pipe {
+                        left: Box::new(left),
+                        right: Box::new(right),
+                        id: self.next_id(),
+                        span,
+                        resolved_type: None,
+                    };
+                }
+            } else {
+                break;
             }
         }
         Ok(left)

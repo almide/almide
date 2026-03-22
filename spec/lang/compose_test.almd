@@ -1,0 +1,14 @@
+test "basic compose" {
+  let double = (x: Int) => x * 2
+  let add_one = (x: Int) => x + 1
+  let double_then_add = double >> add_one
+  assert_eq(double_then_add(5), 11)
+}
+
+test "compose chain" {
+  let add1 = (x: Int) => x + 1
+  let mul3 = (x: Int) => x * 3
+  let sub2 = (x: Int) => x - 2
+  let pipeline = add1 >> mul3 >> sub2
+  assert_eq(pipeline(4), 13)
+}

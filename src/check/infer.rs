@@ -257,6 +257,20 @@ impl Checker {
                 self.infer_pipe(left, right)
             }
 
+            ast::Expr::Compose { left, right, .. } => {
+                let left_ty = self.infer_expr(left);
+                let right_ty = self.infer_expr(right);
+                // If left is Fn[A] -> B and right is Fn[B] -> C, result is Fn[A] -> C
+                let resolved_left = resolve_ty(&left_ty, &self.uf);
+                let resolved_right = resolve_ty(&right_ty, &self.uf);
+                match (&resolved_left, &resolved_right) {
+                    (Ty::Fn { params: a_params, .. }, Ty::Fn { ret: c_ret, .. }) => {
+                        Ty::Fn { params: a_params.clone(), ret: c_ret.clone() }
+                    }
+                    _ => Ty::Unknown,
+                }
+            }
+
             ast::Expr::Lambda { params, body, .. } => {
                 self.env.push_scope();
                 // Lambda has its own return context — don't leak outer function's current_ret
@@ -608,7 +622,7 @@ fn collect_idents(expr: &ast::Expr, out: &mut Vec<String>) {
         }
         ast::Expr::Member { object, .. } | ast::Expr::TupleIndex { object, .. }
         | ast::Expr::IndexAccess { object, .. } => collect_idents(object, out),
-        ast::Expr::Binary { left, right, .. } | ast::Expr::Pipe { left, right, .. } => {
+        ast::Expr::Binary { left, right, .. } | ast::Expr::Pipe { left, right, .. } | ast::Expr::Compose { left, right, .. } => {
             collect_idents(left, out); collect_idents(right, out);
         }
         ast::Expr::Unary { operand, .. } | ast::Expr::Paren { expr: operand, .. }

@@ -145,6 +145,7 @@ pub enum Expr {
     TupleIndex { object: Box<Expr>, index: usize, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     IndexAccess { object: Box<Expr>, index: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Pipe { left: Box<Expr>, right: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Compose { left: Box<Expr>, right: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     If { cond: Box<Expr>, then: Box<Expr>, else_: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Match { subject: Box<Expr>, arms: Vec<MatchArm>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Block { stmts: Vec<Stmt>, expr: Option<Box<Expr>>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
@@ -183,7 +184,7 @@ impl Expr {
             | Expr::List { id, .. } | Expr::MapLiteral { id, .. } | Expr::EmptyMap { id, .. }
             | Expr::Record { id, .. }
             | Expr::SpreadRecord { id, .. } | Expr::Call { id, .. }
-            | Expr::Member { id, .. } | Expr::TupleIndex { id, .. } | Expr::IndexAccess { id, .. } | Expr::Pipe { id, .. }
+            | Expr::Member { id, .. } | Expr::TupleIndex { id, .. } | Expr::IndexAccess { id, .. } | Expr::Pipe { id, .. } | Expr::Compose { id, .. }
             | Expr::If { id, .. } | Expr::Match { id, .. }
             | Expr::Block { id, .. } | Expr::DoBlock { id, .. } | Expr::Fan { id, .. }
             | Expr::ForIn { id, .. } | Expr::While { id, .. } | Expr::Lambda { id, .. }
@@ -208,7 +209,7 @@ impl Expr {
             | Expr::List { span, .. } | Expr::MapLiteral { span, .. } | Expr::EmptyMap { span, .. }
             | Expr::Record { span, .. }
             | Expr::SpreadRecord { span, .. } | Expr::Call { span, .. }
-            | Expr::Member { span, .. } | Expr::TupleIndex { span, .. } | Expr::IndexAccess { span, .. } | Expr::Pipe { span, .. }
+            | Expr::Member { span, .. } | Expr::TupleIndex { span, .. } | Expr::IndexAccess { span, .. } | Expr::Pipe { span, .. } | Expr::Compose { span, .. }
             | Expr::If { span, .. } | Expr::Match { span, .. }
             | Expr::Block { span, .. } | Expr::DoBlock { span, .. } | Expr::Fan { span, .. }
             | Expr::ForIn { span, .. } | Expr::While { span, .. } | Expr::Lambda { span, .. }
@@ -233,7 +234,7 @@ impl Expr {
             | Expr::List { resolved_type, .. } | Expr::MapLiteral { resolved_type, .. } | Expr::EmptyMap { resolved_type, .. }
             | Expr::Record { resolved_type, .. }
             | Expr::SpreadRecord { resolved_type, .. } | Expr::Call { resolved_type, .. }
-            | Expr::Member { resolved_type, .. } | Expr::TupleIndex { resolved_type, .. } | Expr::IndexAccess { resolved_type, .. } | Expr::Pipe { resolved_type, .. }
+            | Expr::Member { resolved_type, .. } | Expr::TupleIndex { resolved_type, .. } | Expr::IndexAccess { resolved_type, .. } | Expr::Pipe { resolved_type, .. } | Expr::Compose { resolved_type, .. }
             | Expr::If { resolved_type, .. } | Expr::Match { resolved_type, .. }
             | Expr::Block { resolved_type, .. } | Expr::DoBlock { resolved_type, .. } | Expr::Fan { resolved_type, .. }
             | Expr::ForIn { resolved_type, .. } | Expr::While { resolved_type, .. } | Expr::Lambda { resolved_type, .. }
@@ -258,7 +259,7 @@ impl Expr {
             | Expr::List { resolved_type, .. } | Expr::MapLiteral { resolved_type, .. } | Expr::EmptyMap { resolved_type, .. }
             | Expr::Record { resolved_type, .. }
             | Expr::SpreadRecord { resolved_type, .. } | Expr::Call { resolved_type, .. }
-            | Expr::Member { resolved_type, .. } | Expr::TupleIndex { resolved_type, .. } | Expr::IndexAccess { resolved_type, .. } | Expr::Pipe { resolved_type, .. }
+            | Expr::Member { resolved_type, .. } | Expr::TupleIndex { resolved_type, .. } | Expr::IndexAccess { resolved_type, .. } | Expr::Pipe { resolved_type, .. } | Expr::Compose { resolved_type, .. }
             | Expr::If { resolved_type, .. } | Expr::Match { resolved_type, .. }
             | Expr::Block { resolved_type, .. } | Expr::DoBlock { resolved_type, .. } | Expr::Fan { resolved_type, .. }
             | Expr::ForIn { resolved_type, .. } | Expr::While { resolved_type, .. } | Expr::Lambda { resolved_type, .. }

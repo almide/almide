@@ -277,6 +277,33 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             }
         }
 
+        // ── Compose: desugar `f >> g` → `(x) => g(f(x))` ──
+        ast::Expr::Compose { left, right, .. } => {
+            ctx.push_scope();
+            let param_ty = Ty::Unknown;
+            let param_var = ctx.define_var("__compose_x", param_ty.clone(), Mutability::Let, span.clone());
+            let param_ref = ctx.mk(IrExprKind::Var { id: param_var }, param_ty.clone(), span.clone());
+            // f(x)
+            let ir_left = lower_expr(ctx, left);
+            let f_call = ctx.mk(IrExprKind::Call {
+                target: CallTarget::Computed { callee: Box::new(ir_left) },
+                args: vec![param_ref], type_args: vec![],
+            }, Ty::Unknown, span.clone());
+            // g(f(x))
+            let ir_right = lower_expr(ctx, right);
+            let g_call = ctx.mk(IrExprKind::Call {
+                target: CallTarget::Computed { callee: Box::new(ir_right) },
+                args: vec![f_call], type_args: vec![],
+            }, Ty::Unknown, span.clone());
+            ctx.pop_scope();
+            let lambda_id = Some(ctx.next_lambda_id());
+            ctx.mk(IrExprKind::Lambda {
+                params: vec![(param_var, param_ty)],
+                body: Box::new(g_call),
+                lambda_id,
+            }, ty, span)
+        }
+
         // ── Lambda ──
         ast::Expr::Lambda { params, body, .. } => {
             ctx.push_scope();
