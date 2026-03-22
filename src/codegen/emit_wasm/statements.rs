@@ -77,10 +77,25 @@ impl FuncCompiler<'_> {
                     crate::ir::IrExprKind::Break | crate::ir::IrExprKind::Continue => {
                         self.emit_expr(else_);
                     }
-                    // ResultOk/ResultErr in guard: return from function (effect fn early return)
-                    crate::ir::IrExprKind::ResultOk { .. } | crate::ir::IrExprKind::ResultErr { .. } => {
-                        self.emit_expr(else_);
-                        wasm!(self.func, { return_; });
+                    // ResultOk/ResultErr in guard
+                    crate::ir::IrExprKind::ResultOk { expr: inner } | crate::ir::IrExprKind::ResultErr { expr: inner } => {
+                        // ok(()) inside do block → break out of loop (not function return)
+                        let is_unit_ok = matches!(&else_.kind, crate::ir::IrExprKind::ResultOk { .. })
+                            && matches!(&inner.ty, crate::types::Ty::Unit);
+                        if is_unit_ok && self.loop_stack.last().is_some() {
+                            // Emit the ok(()) but then break out of the do block loop
+                            self.emit_expr(else_);
+                            if super::values::ty_to_valtype(&else_.ty).is_some() {
+                                wasm!(self.func, { drop; });
+                            }
+                            let labels = self.loop_stack.last().unwrap();
+                            let relative = self.depth - labels.break_depth - 1;
+                            wasm!(self.func, { br(relative); });
+                        } else {
+                            // Non-unit ok/err → return from function
+                            self.emit_expr(else_);
+                            wasm!(self.func, { return_; });
+                        }
                     }
                     // Other expressions
                     _ => {
