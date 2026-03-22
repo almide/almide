@@ -14,11 +14,13 @@ struct TypedSlots {
     hwm: usize,
     /// WASM local index where this type's slots start (set after all bind locals are allocated)
     base: u32,
+    /// Max pre-allocated slots (overflow beyond this corrupts adjacent type regions)
+    capacity: usize,
 }
 
 impl TypedSlots {
     fn new() -> Self {
-        Self { slots: Vec::new(), hwm: 0, base: 0 }
+        Self { slots: Vec::new(), hwm: 0, base: 0, capacity: 0 }
     }
 
     fn alloc(&mut self) -> u32 {
@@ -30,6 +32,11 @@ impl TypedSlots {
         } else {
             // All slots in use — add a new one
             let idx = self.slots.len();
+            assert!(
+                idx < self.capacity,
+                "ScratchAllocator overflow: need {} slots but only {} pre-allocated (base={})",
+                idx + 1, self.capacity, self.base,
+            );
             self.slots.push(true);
             self.update_hwm();
             self.base + idx as u32
@@ -75,6 +82,15 @@ impl ScratchAllocator {
             i64: TypedSlots::new(),
             f64: TypedSlots::new(),
         }
+    }
+
+    pub fn set_bases_with_capacity(&mut self, i32_base: u32, i32_cap: usize, i64_base: u32, i64_cap: usize, f64_base: u32, f64_cap: usize) {
+        self.i32.base = i32_base;
+        self.i32.capacity = i32_cap;
+        self.i64.base = i64_base;
+        self.i64.capacity = i64_cap;
+        self.f64.base = f64_base;
+        self.f64.capacity = f64_cap;
     }
 
     pub fn set_bases(&mut self, i32_base: u32, i64_base: u32, f64_base: u32) {

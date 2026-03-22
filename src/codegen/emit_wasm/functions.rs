@@ -39,27 +39,24 @@ pub fn compile_function(
         }
     }
 
-    // ScratchAllocator locals
+    // ScratchAllocator locals — must be large enough for deepest nested call chain
+    // (e.g. sum(map(filter([...], λ), λ)) needs ~14 simultaneous i32 scratch)
+    let scratch_i32_cap = 32usize;
+    let scratch_i64_cap = 16usize;
+    let scratch_f64_cap = 4usize;
     let scratch_i32_base = param_count + local_decls.len() as u32;
-    let scratch_extra = 12; // enough for the largest stdlib function (unique_by = 10+)
-    for _ in 0..scratch_extra {
-        local_decls.push((1, ValType::I32));
-    }
+    for _ in 0..scratch_i32_cap { local_decls.push((1, ValType::I32)); }
     let scratch_i64_base = param_count + local_decls.len() as u32;
-    for _ in 0..scratch_extra {
-        local_decls.push((1, ValType::I64));
-    }
+    for _ in 0..scratch_i64_cap { local_decls.push((1, ValType::I64)); }
     let scratch_f64_base = param_count + local_decls.len() as u32;
-    for _ in 0..2 { // f64 scratch (for float operations)
-        local_decls.push((1, ValType::F64));
-    }
+    for _ in 0..scratch_f64_cap { local_decls.push((1, ValType::F64)); }
 
     let init_globals_idx: Option<u32> = None;
 
     let wasm_func = Function::new(local_decls);
 
     let mut scratch_alloc = super::scratch::ScratchAllocator::new();
-    scratch_alloc.set_bases(scratch_i32_base, scratch_i64_base, scratch_f64_base);
+    scratch_alloc.set_bases_with_capacity(scratch_i32_base, scratch_i32_cap, scratch_i64_base, scratch_i64_cap, scratch_f64_base, scratch_f64_cap);
     let mut compiler = FuncCompiler {
         emitter,
         func: wasm_func,
