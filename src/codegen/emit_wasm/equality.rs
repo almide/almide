@@ -91,7 +91,13 @@ impl FuncCompiler<'_> {
                 if let Some(cases) = self.emitter.variant_info.get(name.as_str()).cloned() {
                     let has_pointers = cases.iter().any(|c| c.fields.iter().any(|(_, ft)| !self.is_value_type(ft)));
                     if has_pointers {
-                        self.emit_variant_eq_deep(&cases, type_args);
+                        // Use pre-registered eq function (handles recursion safely)
+                        if let Some(&eq_idx) = self.emitter.eq_funcs.get(name.as_str()) {
+                            wasm!(self.func, { call(eq_idx); });
+                        } else {
+                            // Fallback: inline deep comparison (non-recursive types)
+                            self.emit_variant_eq_deep(&cases, type_args);
+                        }
                     } else {
                         let max_payload = cases.iter()
                             .map(|c| values::record_size(&c.fields))
