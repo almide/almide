@@ -757,7 +757,88 @@ impl FuncCompiler<'_> {
                         None
                     };
 
-                    // Bind elements
+                    // Check if any tuple elements have nested patterns (Some, None, Constructor)
+                    let has_nested = elements.iter().any(|p| matches!(p, IrPattern::Some { .. } | IrPattern::None | IrPattern::Constructor { .. }));
+
+                    if has_nested && !is_last {
+                        // Build condition: all nested patterns must match
+                        let mut offset = 0u32;
+                        let mut cond_count = 0;
+                        for (i, elem_pat) in elements.iter().enumerate() {
+                            let ft = elem_types.get(i).cloned().unwrap_or(Ty::Int);
+                            match elem_pat {
+                                IrPattern::Some { .. } => {
+                                    // Option: check ptr != 0
+                                    wasm!(self.func, { local_get(scratch); });
+                                    self.emit_load_at(&ft, offset);
+                                    wasm!(self.func, { i32_const(0); i32_ne; });
+                                    cond_count += 1;
+                                }
+                                IrPattern::None => {
+                                    wasm!(self.func, { local_get(scratch); });
+                                    self.emit_load_at(&ft, offset);
+                                    wasm!(self.func, { i32_eqz; });
+                                    cond_count += 1;
+                                }
+                                _ => {}
+                            }
+                            offset += values::byte_size(&ft);
+                        }
+                        for _ in 1..cond_count {
+                            wasm!(self.func, { i32_and; });
+                        }
+                        let bt = values::block_type(result_ty);
+                        self.func.instruction(&Instruction::If(bt));
+                        let nested_guard = self.depth_push();
+
+                        // Bind elements (including unwrap for Some)
+                        let mut offset2 = 0u32;
+                        for (i, elem_pat) in elements.iter().enumerate() {
+                            let ft = elem_types.get(i).cloned().unwrap_or(Ty::Int);
+                            match elem_pat {
+                                IrPattern::Bind { var, .. } => {
+                                    if let Some(&local_idx) = self.var_map.get(&var.0) {
+                                        wasm!(self.func, { local_get(scratch); });
+                                        self.emit_load_at(&ft, offset2);
+                                        wasm!(self.func, { local_set(local_idx); });
+                                    }
+                                }
+                                IrPattern::Some { inner } => {
+                                    // Load option ptr, then bind inner
+                                    if let IrPattern::Bind { var, .. } = inner.as_ref() {
+                                        if let Some(&local_idx) = self.var_map.get(&var.0) {
+                                            let inner_ty = if let Ty::Applied(_, args) = &ft {
+                                                args.first().cloned().unwrap_or(Ty::Int)
+                                            } else { Ty::Int };
+                                            // Load option ptr from tuple
+                                            let opt_scratch = self.scratch.alloc_i32();
+                                            wasm!(self.func, { local_get(scratch); i32_load(offset2); local_set(opt_scratch); });
+                                            wasm!(self.func, { local_get(opt_scratch); });
+                                            self.emit_load_at(&inner_ty, 0);
+                                            wasm!(self.func, { local_set(local_idx); });
+                                            self.scratch.free_i32(opt_scratch);
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                            offset2 += values::byte_size(&ft);
+                        }
+
+                        self.emit_expr(&arm.body);
+
+                        wasm!(self.func, { else_; });
+                        self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1);
+                        self.depth_pop(nested_guard);
+                        wasm!(self.func, { end; });
+
+                        if let Some(tg) = tuple_guard {
+                            self.depth_pop(tg);
+                        }
+                        return; // Don't fall through to normal processing
+                    }
+
+                    // Simple case: only Bind patterns
                     let mut offset = 0u32;
                     for (i, elem_pat) in elements.iter().enumerate() {
                         let ft = elem_types.get(i).cloned().unwrap_or(Ty::Int);
