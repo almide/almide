@@ -622,13 +622,18 @@ impl FuncCompiler<'_> {
                     // Bind fields: load each field from subject + tag_offset + field_offset
                     let case_fields = self.emitter.record_fields.get(ctor_name).cloned().unwrap_or_default();
                     for pf in pat_fields {
-                        // Find the field in the case's fields
                         if let Some((foff, fty)) = values::field_offset(&case_fields, &pf.name) {
                             let total_offset = 4 + foff; // 4 = tag size
-                            if let Some(&local_idx) = self.find_var_by_field(&pf.name, &case_fields) {
+                            // Use VarId from Bind pattern (populated by lowering) to avoid name collisions
+                            let local_idx = if let Some(crate::ir::IrPattern::Bind { var, .. }) = &pf.pattern {
+                                self.var_map.get(&var.0).copied()
+                            } else {
+                                self.find_var_by_field(&pf.name, &case_fields).copied()
+                            };
+                            if let Some(idx) = local_idx {
                                 wasm!(self.func, { local_get(scratch); });
                                 self.emit_load_at(&fty, total_offset);
-                                wasm!(self.func, { local_set(local_idx); });
+                                wasm!(self.func, { local_set(idx); });
                             }
                         }
                     }
