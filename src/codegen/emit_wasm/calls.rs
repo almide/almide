@@ -270,6 +270,12 @@ impl FuncCompiler<'_> {
                     _ if module == "fan" => {
                         self.emit_fan_call(func, args, _ret_ty);
                     }
+                    _ if module == "value" => {
+                        self.emit_value_call(func, args);
+                    }
+                    _ if module == "json" => {
+                        self.emit_json_call(func, args);
+                    }
                     _ if module == "env" => {
                         self.emit_env_call(func, args);
                     }

@@ -35,6 +35,8 @@ mod calls_lambda;
 mod calls_map;
 mod calls_map_closure;
 mod calls_set;
+mod calls_value;
+mod rt_value;
 mod closures;
 mod equality;
 mod collections;
@@ -128,6 +130,9 @@ pub struct RuntimeFuncs {
     pub math_log2: u32,
     pub math_exp: u32,
     pub string: StringRuntime,
+    pub value_stringify: u32,
+    pub json_parse: u32,
+    pub json_parse_at: u32,
 }
 
 /// Import descriptor for WASM import section.
@@ -251,6 +256,9 @@ impl WasmEmitter {
                     is_whitespace: 0, is_upper: 0, is_lower: 0,
                     cmp: 0,
                 },
+                value_stringify: 0,
+                json_parse: 0,
+                json_parse_at: 0,
             },
             heap_ptr_global: 0,
             top_let_globals: HashMap::new(),
