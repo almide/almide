@@ -107,6 +107,15 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
                     let resolved = ctx.env.module_aliases.get(module).cloned().unwrap_or(module.clone());
                     return CallTarget::Module { module: resolved, func: field.clone() };
                 }
+                // Ident that's not a module: check if Type.method (protocol impl, e.g. Val.double)
+                if ctx.lookup_var(module).is_none() {
+                    let key = format!("{}.{}", module, field);
+                    if ctx.env.functions.contains_key(&key)
+                        || ctx.find_convention_fn(&Ty::Named(module.clone(), vec![]), field).is_some()
+                    {
+                        return CallTarget::Named { name: key };
+                    }
+                }
             }
             // TypeName.method(args) → direct named call (not UFCS, no object prepend)
             if let ast::Expr::TypeName { name: type_name, .. } = object.as_ref() {
