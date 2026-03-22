@@ -141,6 +141,12 @@ impl FuncCompiler<'_> {
                 // value.as_bool(v: Value) -> Result[Bool, String]
                 self.emit_value_as_type(args, 1, "bool");
             }
+            "to_camel_case" => {
+                self.emit_value_key_transform(args, true);
+            }
+            "to_snake_case" => {
+                self.emit_value_key_transform(args, false);
+            }
             _ => {
                 self.emit_stub_call(args);
             }
@@ -624,6 +630,158 @@ impl FuncCompiler<'_> {
         self.scratch.free_i32(result);
         self.scratch.free_i32(pair_ptr);
         self.scratch.free_i32(list);
+        self.scratch.free_i32(v);
+    }
+
+    /// value.to_camel_case / to_snake_case: transform object keys
+    /// to_camel = true: snake_case → camelCase
+    /// to_camel = false: camelCase → snake_case
+    fn emit_value_key_transform(&mut self, args: &[IrExpr], to_camel: bool) {
+        // If not an object, return as-is
+        let v = self.scratch.alloc_i32();
+        let old_list = self.scratch.alloc_i32();
+        let new_list = self.scratch.alloc_i32();
+        let len = self.scratch.alloc_i32();
+        let i = self.scratch.alloc_i32();
+        let old_pair = self.scratch.alloc_i32();
+        let new_pair = self.scratch.alloc_i32();
+        let old_key = self.scratch.alloc_i32();
+        let new_key = self.scratch.alloc_i32();
+        let result = self.scratch.alloc_i32();
+        // String transform locals
+        let src_len = self.scratch.alloc_i32();
+        let j = self.scratch.alloc_i32();
+        let dst_pos = self.scratch.alloc_i32();
+        let ch = self.scratch.alloc_i32();
+        let dst_buf = self.scratch.alloc_i32();
+
+        self.emit_expr(&args[0]);
+        wasm!(self.func, {
+            local_set(v);
+            local_get(v); i32_load(0); i32_const(6); i32_ne;
+            if_i32; local_get(v); // not object → return as-is
+            else_;
+              local_get(v); i32_load(4); local_set(old_list);
+              local_get(old_list); i32_load(0); local_set(len);
+              // Alloc new pairs list
+              i32_const(4); local_get(len); i32_const(4); i32_mul; i32_add;
+              call(self.emitter.rt.alloc); local_set(new_list);
+              local_get(new_list); local_get(len); i32_store(0);
+              i32_const(0); local_set(i);
+              block_empty; loop_empty;
+                local_get(i); local_get(len); i32_ge_u; br_if(1);
+                // Get old pair
+                local_get(old_list); i32_const(4); i32_add;
+                local_get(i); i32_const(4); i32_mul; i32_add;
+                i32_load(0); local_set(old_pair);
+                local_get(old_pair); i32_load(0); local_set(old_key);
+                // Transform key
+                local_get(old_key); i32_load(0); local_set(src_len); // key string len
+                // Alloc dst buffer (max 2x src_len for snake_case expansion)
+                i32_const(4); local_get(src_len); i32_const(2); i32_mul; i32_add;
+                call(self.emitter.rt.alloc); local_set(dst_buf);
+                i32_const(0); local_set(j); // src index
+                i32_const(0); local_set(dst_pos); // dst index
+        });
+
+        if to_camel {
+            // snake_case → camelCase: skip '_', capitalize next
+            wasm!(self.func, {
+                block_empty; loop_empty;
+                  local_get(j); local_get(src_len); i32_ge_u; br_if(1);
+                  local_get(old_key); i32_const(4); i32_add; local_get(j); i32_add; i32_load8_u(0);
+                  local_set(ch);
+                  local_get(ch); i32_const(95); i32_eq; // '_'
+                  if_empty;
+                    // Skip underscore, capitalize next char
+                    local_get(j); i32_const(1); i32_add; local_set(j);
+                    local_get(j); local_get(src_len); i32_lt_u;
+                    if_empty;
+                      local_get(dst_buf); i32_const(4); i32_add; local_get(dst_pos); i32_add;
+                      local_get(old_key); i32_const(4); i32_add; local_get(j); i32_add; i32_load8_u(0);
+                      i32_const(32); i32_sub; // to uppercase
+                      i32_store8(0);
+                      local_get(dst_pos); i32_const(1); i32_add; local_set(dst_pos);
+                    end;
+                  else_;
+                    // Copy char as-is
+                    local_get(dst_buf); i32_const(4); i32_add; local_get(dst_pos); i32_add;
+                    local_get(ch);
+                    i32_store8(0);
+                    local_get(dst_pos); i32_const(1); i32_add; local_set(dst_pos);
+                  end;
+                  local_get(j); i32_const(1); i32_add; local_set(j);
+                  br(0);
+                end; end;
+            });
+        } else {
+            // camelCase → snake_case: insert '_' before uppercase, lowercase
+            wasm!(self.func, {
+                block_empty; loop_empty;
+                  local_get(j); local_get(src_len); i32_ge_u; br_if(1);
+                  local_get(old_key); i32_const(4); i32_add; local_get(j); i32_add; i32_load8_u(0);
+                  local_set(ch);
+                  // Check if uppercase (A=65..Z=90)
+                  local_get(ch); i32_const(65); i32_ge_u;
+                  local_get(ch); i32_const(90); i32_le_u;
+                  i32_and;
+                  if_empty;
+                    // Insert underscore then lowercase char
+                    local_get(dst_buf); i32_const(4); i32_add; local_get(dst_pos); i32_add;
+                    i32_const(95); i32_store8(0); // '_'
+                    local_get(dst_pos); i32_const(1); i32_add; local_set(dst_pos);
+                    local_get(dst_buf); i32_const(4); i32_add; local_get(dst_pos); i32_add;
+                    local_get(ch); i32_const(32); i32_add; // to lowercase
+                    i32_store8(0);
+                    local_get(dst_pos); i32_const(1); i32_add; local_set(dst_pos);
+                  else_;
+                    local_get(dst_buf); i32_const(4); i32_add; local_get(dst_pos); i32_add;
+                    local_get(ch); i32_store8(0);
+                    local_get(dst_pos); i32_const(1); i32_add; local_set(dst_pos);
+                  end;
+                  local_get(j); i32_const(1); i32_add; local_set(j);
+                  br(0);
+                end; end;
+            });
+        }
+
+        wasm!(self.func, {
+                // Set dst string length
+                local_get(dst_buf); local_get(dst_pos); i32_store(0);
+                local_get(dst_buf); local_set(new_key);
+                // Build new pair (new_key, old_value)
+                i32_const(8); call(self.emitter.rt.alloc); local_set(new_pair);
+                local_get(new_pair); local_get(new_key); i32_store(0);
+                local_get(new_pair); local_get(old_pair); i32_load(4); i32_store(4);
+                // Store in new list
+                local_get(new_list); i32_const(4); i32_add;
+                local_get(i); i32_const(4); i32_mul; i32_add;
+                local_get(new_pair); i32_store(0);
+                local_get(i); i32_const(1); i32_add; local_set(i);
+                br(0);
+              end; end;
+              // Build new Value object
+              i32_const(8); call(self.emitter.rt.alloc); local_set(result);
+              local_get(result); i32_const(6); i32_store(0); // tag = object
+              local_get(result); local_get(new_list); i32_store(4);
+              local_get(result);
+            end;
+        });
+
+        self.scratch.free_i32(dst_buf);
+        self.scratch.free_i32(ch);
+        self.scratch.free_i32(dst_pos);
+        self.scratch.free_i32(j);
+        self.scratch.free_i32(src_len);
+        self.scratch.free_i32(result);
+        self.scratch.free_i32(new_key);
+        self.scratch.free_i32(old_key);
+        self.scratch.free_i32(new_pair);
+        self.scratch.free_i32(old_pair);
+        self.scratch.free_i32(i);
+        self.scratch.free_i32(len);
+        self.scratch.free_i32(new_list);
+        self.scratch.free_i32(old_list);
         self.scratch.free_i32(v);
     }
 }
