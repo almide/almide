@@ -71,12 +71,12 @@ src/codegen/emit_wasm/
 
 ## Binary Size (DCE後)
 
-| Program | Almide | MoonBit (wasm-gc) | Ratio |
-|---------|-------:|------------------:|------:|
-| Hello World | 1,028 B | ~8,500 B | 8.3x |
-| FizzBuzz | 1,286 B | ~8,500 B | 6.6x |
-| Fibonacci | 1,361 B | ~8,500 B | 6.2x |
-| Closure | 1,443 B | ~8,500 B | 5.9x |
-| Variant | 1,777 B | ~8,500 B | 4.8x |
+| Program | Binary Size |
+|---------|------------:|
+| Hello World | 1,028 B |
+| FizzBuzz | 1,286 B |
+| Fibonacci | 1,361 B |
+| Closure | 1,443 B |
+| Variant | 1,777 B |
 
-アロケータ・文字列処理・ランタイム全部入りの自己完結バイナリ。外部GCに依存するMoonBit wasm-gcと比較しても5-8倍小さい。
+アロケータ・文字列処理・ランタイム全部入りの自己完結バイナリ。

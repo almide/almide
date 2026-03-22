@@ -199,15 +199,13 @@ Almide has no training data in any public LLM corpus yet — the generation spee
 
 Almide emits WASM bytecode directly (no Rust/C intermediary). Each binary is self-contained — allocator, string handling, and runtime are all included. No external GC or host runtime dependency.
 
-| Program | Almide | AssemblyScript | MoonBit (wasm-gc) | Go (TinyGo) |
-|---------|-------:|---------------:|------------------:|------------:|
-| Hello World | **1,028 B** | ~2-5 KB | ~8,500 B | ~10-30 KB |
-| FizzBuzz | **1,286 B** | — | ~8,500 B | — |
-| Fibonacci | **1,361 B** | — | ~8,500 B | — |
-| Closure | **1,443 B** | — | ~8,500 B | — |
-| Variant | **1,777 B** | — | ~8,500 B | — |
-
-Smallest among all high-level languages with a runtime. C/Rust/Zig can produce smaller binaries, but without allocator, string handling, or standard library.
+| Program | Binary Size |
+|---------|------------:|
+| Hello World | **1,028 B** |
+| FizzBuzz | **1,286 B** |
+| Fibonacci | **1,361 B** |
+| Closure | **1,443 B** |
+| Variant | **1,777 B** |
 
 ## Native Performance
 
