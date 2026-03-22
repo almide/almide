@@ -78,6 +78,11 @@ pub trait NanoPass: std::fmt::Debug {
     /// Return `None` for all targets, or `Some(vec)` for specific ones.
     fn targets(&self) -> Option<Vec<Target>>;
 
+    /// Passes that must have executed before this one.
+    /// Returns pass names (matching `NanoPass::name()`).
+    /// Default: no dependencies.
+    fn depends_on(&self) -> Vec<&'static str> { vec![] }
+
     /// Run the pass. Receives the program and target, returns modified program.
     /// Global passes analyze the whole program.
     /// Local passes walk the IR with scope context.
@@ -102,6 +107,7 @@ impl Pipeline {
     }
 
     pub fn run(&self, program: &mut IrProgram, target: Target) {
+        let mut executed: Vec<&str> = Vec::new();
         for pass in &self.passes {
             // Skip passes not relevant to this target
             if let Some(targets) = pass.targets() {
@@ -109,7 +115,18 @@ impl Pipeline {
                     continue;
                 }
             }
+            // Validate dependencies: every declared dep must have already executed
+            for dep in pass.depends_on() {
+                if !executed.contains(&dep) {
+                    panic!(
+                        "Pass '{}' depends on '{}', but '{}' has not been executed. \
+                         Check pipeline ordering.",
+                        pass.name(), dep, dep
+                    );
+                }
+            }
             pass.run(program, target);
+            executed.push(pass.name());
         }
     }
 }

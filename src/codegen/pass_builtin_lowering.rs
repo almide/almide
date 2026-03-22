@@ -23,6 +23,7 @@ pub struct BuiltinLoweringPass;
 impl NanoPass for BuiltinLoweringPass {
     fn name(&self) -> &str { "BuiltinLowering" }
     fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Rust]) }
+    fn depends_on(&self) -> Vec<&'static str> { vec!["ResultPropagation"] }
     fn run(&self, program: &mut IrProgram, _target: Target) {
         for func in &mut program.functions {
             func.body = rewrite_expr(func.body.clone());

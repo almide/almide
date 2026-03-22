@@ -23,6 +23,7 @@ impl NanoPass for ResultErasurePass {
     fn targets(&self) -> Option<Vec<Target>> {
         Some(vec![Target::TypeScript, Target::JavaScript, Target::Python])
     }
+    fn depends_on(&self) -> Vec<&'static str> { vec!["MatchLowering"] }
     fn run(&self, program: &mut IrProgram, _target: Target) {
         for func in &mut program.functions {
             // Erase Result return type on effect functions
