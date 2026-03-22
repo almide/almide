@@ -240,6 +240,25 @@ fn infer_bind_type(expr: &IrExpr) -> Ty {
                 BinOp::ConcatList => Ty::Unknown,
             }
         }
+        // Try: unwrap inner type
+        IrExprKind::Try { expr: inner } => {
+            infer_bind_type(inner)
+        }
+        // Call: infer return type from module+func name
+        IrExprKind::Call { target, .. } => {
+            match target {
+                crate::ir::CallTarget::Module { module, func } => {
+                    match (module.as_str(), func.as_str()) {
+                        ("random", "int") | ("datetime", _)
+                        | ("env", "unix_timestamp") | ("env", "millis")
+                        | ("list", "len") | ("string", "len") | ("map", "len") => Ty::Int,
+                        ("random", "float") => Ty::Float,
+                        _ => Ty::Unknown,
+                    }
+                }
+                _ => Ty::Unknown,
+            }
+        }
         _ => Ty::Unknown,
     }
 }
@@ -353,8 +372,7 @@ fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::
 fn scan_stmt(stmt: &IrStmt, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::VarTable) {
     match &stmt.kind {
         IrStmtKind::Bind { var, ty, value, .. } => {
-            // Resolve bind type: prefer value.ty, then stmt ty.
-            // If both are Unknown, infer from value's IR structure.
+            // Resolve bind type
             let resolved_ty = if !matches!(&value.ty, Ty::Unknown | Ty::TypeVar(_)) {
                 value.ty.clone()
             } else if !matches!(ty, Ty::Unknown | Ty::TypeVar(_)) {
