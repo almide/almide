@@ -581,6 +581,18 @@ impl Checker {
             if let Some(target) = self.env.module_aliases.get(module.as_str()) {
                 return Some(format!("{}.{}", target, field));
             }
+            // Check if Ident.field is a Type.method (protocol implementation)
+            let key = format!("{}.{}", module, field);
+            if self.env.functions.contains_key(key.as_str()) {
+                return Some(key);
+            }
+        }
+        // TypeName.method (e.g. Val.double in pipe)
+        if let ast::Expr::TypeName { name: type_name, .. } = object {
+            let key = format!("{}.{}", type_name, field);
+            if self.env.functions.contains_key(key.as_str()) {
+                return Some(key);
+            }
         }
         None
     }

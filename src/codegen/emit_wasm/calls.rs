@@ -898,6 +898,112 @@ impl FuncCompiler<'_> {
                 let s = self.emitter.intern_string("/tmp");
                 wasm!(self.func, { i32_const(s as i32); });
             }
+            "set_cookie" => {
+                // http.set_cookie(resp, name, value) → add "Set-Cookie: name=value" header
+                // Reuse set_header logic with key="Set-Cookie", value="name=value"
+                let resp = self.scratch.alloc_i32();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(resp); });
+                let name_s = self.scratch.alloc_i32();
+                let val_s = self.scratch.alloc_i32();
+                self.emit_expr(&args[1]);
+                wasm!(self.func, { local_set(name_s); });
+                self.emit_expr(&args[2]);
+                wasm!(self.func, { local_set(val_s); });
+                // Build "name=value" string
+                let eq_str = self.emitter.intern_string("=");
+                wasm!(self.func, {
+                    local_get(name_s); i32_const(eq_str as i32); call(self.emitter.rt.concat_str);
+                    local_get(val_s); call(self.emitter.rt.concat_str);
+                    local_set(val_s);
+                });
+                // Now emit set_header(resp, "Set-Cookie", cookie_val)
+                let cookie_key = self.emitter.intern_string("Set-Cookie");
+                let fake_args = vec![
+                    crate::ir::IrExpr { kind: crate::ir::IrExprKind::Var { id: crate::ir::VarId(0) }, ty: crate::types::Ty::Unknown, span: None },
+                    crate::ir::IrExpr { kind: crate::ir::IrExprKind::LitStr { value: "Set-Cookie".into() }, ty: crate::types::Ty::String, span: None },
+                    crate::ir::IrExpr { kind: crate::ir::IrExprKind::LitStr { value: "".into() }, ty: crate::types::Ty::String, span: None },
+                ];
+                // Simpler: inline set_header
+                let tuple_ptr = self.scratch.alloc_i32();
+                let new_hdrs = self.scratch.alloc_i32();
+                let old_hdrs = self.scratch.alloc_i32();
+                let new_resp = self.scratch.alloc_i32();
+                wasm!(self.func, {
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(tuple_ptr);
+                    local_get(tuple_ptr); i32_const(cookie_key as i32); i32_store(0);
+                    local_get(tuple_ptr); local_get(val_s); i32_store(4);
+                    local_get(resp); i32_load(12); local_set(old_hdrs);
+                    local_get(old_hdrs); i32_load(0); i32_const(1); i32_add;
+                    local_set(name_s); // reuse as new_len
+                    i32_const(4); local_get(name_s); i32_const(4); i32_mul; i32_add;
+                    call(self.emitter.rt.alloc); local_set(new_hdrs);
+                    local_get(new_hdrs); local_get(name_s); i32_store(0);
+                });
+                // Copy old headers + append new
+                let ci = self.scratch.alloc_i32();
+                wasm!(self.func, {
+                    i32_const(0); local_set(ci);
+                    block_empty; loop_empty;
+                      local_get(ci); local_get(old_hdrs); i32_load(0); i32_ge_u; br_if(1);
+                      local_get(new_hdrs); i32_const(4); i32_add;
+                      local_get(ci); i32_const(4); i32_mul; i32_add;
+                      local_get(old_hdrs); i32_const(4); i32_add;
+                      local_get(ci); i32_const(4); i32_mul; i32_add;
+                      i32_load(0); i32_store(0);
+                      local_get(ci); i32_const(1); i32_add; local_set(ci);
+                      br(0);
+                    end; end;
+                    local_get(new_hdrs); i32_const(4); i32_add;
+                    local_get(old_hdrs); i32_load(0); i32_const(4); i32_mul; i32_add;
+                    local_get(tuple_ptr); i32_store(0);
+                    i32_const(16); call(self.emitter.rt.alloc); local_set(new_resp);
+                    local_get(new_resp); local_get(resp); i64_load(0); i64_store(0);
+                    local_get(new_resp); local_get(resp); i32_load(8); i32_store(8);
+                    local_get(new_resp); local_get(new_hdrs); i32_store(12);
+                    local_get(new_resp);
+                });
+                self.scratch.free_i32(ci);
+                self.scratch.free_i32(new_resp);
+                self.scratch.free_i32(old_hdrs);
+                self.scratch.free_i32(new_hdrs);
+                self.scratch.free_i32(tuple_ptr);
+                self.scratch.free_i32(val_s);
+                self.scratch.free_i32(name_s);
+                self.scratch.free_i32(resp);
+            }
+            "not_found" => {
+                // http.not_found(body) → response(404, body)
+                let s = self.scratch.alloc_i32();
+                wasm!(self.func, { i32_const(16); call(self.emitter.rt.alloc); local_set(s); local_get(s); i64_const(404); i64_store(0); local_get(s); });
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { i32_store(8); });
+                let empty = self.scratch.alloc_i32();
+                wasm!(self.func, { i32_const(4); call(self.emitter.rt.alloc); local_set(empty); local_get(empty); i32_const(0); i32_store(0); local_get(s); local_get(empty); i32_store(12); local_get(s); });
+                self.scratch.free_i32(empty);
+                self.scratch.free_i32(s);
+            }
+            "redirect" => {
+                // http.redirect(url) → response(302) with Location header
+                let s = self.scratch.alloc_i32();
+                let empty_body = self.emitter.intern_string("");
+                wasm!(self.func, { i32_const(16); call(self.emitter.rt.alloc); local_set(s); local_get(s); i64_const(302); i64_store(0); local_get(s); i32_const(empty_body as i32); i32_store(8); });
+                // Add Location header
+                let loc_key = self.emitter.intern_string("Location");
+                let tuple = self.scratch.alloc_i32();
+                let hdrs = self.scratch.alloc_i32();
+                wasm!(self.func, { i32_const(8); call(self.emitter.rt.alloc); local_set(tuple); local_get(tuple); i32_const(loc_key as i32); i32_store(0); local_get(tuple); });
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { i32_store(4); i32_const(8); call(self.emitter.rt.alloc); local_set(hdrs); local_get(hdrs); i32_const(1); i32_store(0); local_get(hdrs); local_get(tuple); i32_store(4); local_get(s); local_get(hdrs); i32_store(12); local_get(s); });
+                self.scratch.free_i32(hdrs);
+                self.scratch.free_i32(tuple);
+                self.scratch.free_i32(s);
+            }
+            "with_headers" => {
+                // http.with_headers(headers_map, body) → response with headers
+                // For now: stub
+                self.emit_stub_call(args);
+            }
             _ => {
                 self.emit_stub_call(args);
             }
