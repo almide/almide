@@ -194,6 +194,7 @@ pub struct WasmEmitter {
 }
 
 /// A single case of a variant type.
+#[derive(Clone)]
 pub struct VariantCase {
     pub name: String,
     pub tag: u32,

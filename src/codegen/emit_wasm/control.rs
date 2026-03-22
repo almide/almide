@@ -445,30 +445,63 @@ impl FuncCompiler<'_> {
                     } else { vec![] };
                     let gnames_refs: Vec<&str> = all_gnames.iter().map(|s| s.as_str()).collect();
 
-                    // Bind constructor args (tuple payload fields)
-                    let mut field_offset = 4u32; // skip tag
-                    for (arg_idx, arg_pat) in args.iter().enumerate() {
-                        let field_ty = ctor_fields.get(arg_idx)
+                    // Check if any args are Literal patterns (need value checks)
+                    let has_literal_args = args.iter().any(|p| matches!(p, IrPattern::Literal { .. }));
+
+                    // Resolve field types
+                    let resolved_fields: Vec<Ty> = (0..args.len()).map(|arg_idx| {
+                        ctor_fields.get(arg_idx)
                             .map(|(_, fty)| {
                                 if !subject_type_args.is_empty() && !gnames_refs.is_empty() {
                                     super::expressions::substitute_type_params(fty, &gnames_refs, subject_type_args)
                                 } else { fty.clone() }
                             })
-                            .unwrap_or_else(|| Ty::Int);
+                            .unwrap_or_else(|| Ty::Int)
+                    }).collect();
+
+                    // If there are literal args, emit value checks as additional condition
+                    let literal_guard = if has_literal_args && !is_last {
+                        let mut field_offset = 4u32;
+                        let mut cond_count = 0;
+                        for (arg_idx, arg_pat) in args.iter().enumerate() {
+                            let field_ty = &resolved_fields[arg_idx];
+                            if let IrPattern::Literal { expr: lit_expr } = arg_pat {
+                                wasm!(self.func, { local_get(scratch); });
+                                self.emit_load_at(field_ty, field_offset);
+                                self.emit_expr(lit_expr);
+                                match field_ty {
+                                    Ty::Int => { wasm!(self.func, { i64_eq; }); }
+                                    Ty::String => { wasm!(self.func, { call(self.emitter.rt.string.eq); }); }
+                                    _ => { wasm!(self.func, { i32_eq; }); }
+                                }
+                                cond_count += 1;
+                            }
+                            field_offset += values::byte_size(field_ty);
+                        }
+                        for _ in 1..cond_count {
+                            wasm!(self.func, { i32_and; });
+                        }
+                        let bt2 = values::block_type(result_ty);
+                        self.func.instruction(&Instruction::If(bt2));
+                        Some(self.depth_push())
+                    } else { None };
+
+                    // Bind constructor args (tuple payload fields)
+                    let mut field_offset = 4u32; // skip tag
+                    for (arg_idx, arg_pat) in args.iter().enumerate() {
+                        let field_ty = &resolved_fields[arg_idx];
 
                         if let IrPattern::Bind { var, ty: pat_ty } = arg_pat {
                             if let Some(&local_idx) = self.var_map.get(&var.0) {
-                                // Use pattern's own type (set by lowering, resolved by mono)
-                                // Fall back to field_ty from variant info only if pattern type is Unknown
                                 let load_ty = if matches!(pat_ty, Ty::Unknown | Ty::TypeVar(_))
                                     || matches!(pat_ty, Ty::Named(n, a) if a.is_empty() && n.len() <= 2)
-                                { &field_ty } else { pat_ty };
+                                { field_ty } else { pat_ty };
                                 wasm!(self.func, { local_get(scratch); });
                                 self.emit_load_at(load_ty, field_offset);
                                 wasm!(self.func, { local_set(local_idx); });
                             }
                         }
-                        field_offset += values::byte_size(&field_ty);
+                        field_offset += values::byte_size(field_ty);
                     }
 
                     // Handle guard on constructor
@@ -485,6 +518,14 @@ impl FuncCompiler<'_> {
                         wasm!(self.func, { end; });
                     } else {
                         self.emit_expr(&arm.body);
+                    }
+
+                    // Close literal guard if present
+                    if let Some(lg) = literal_guard {
+                        wasm!(self.func, { else_; });
+                        self.emit_match_arms(arms, scratch, subject_ty, result_ty, idx + 1);
+                        self.depth_pop(lg);
+                        wasm!(self.func, { end; });
                     }
                     wasm!(self.func, { else_; });
                     if is_last {
