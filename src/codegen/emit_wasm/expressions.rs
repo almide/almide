@@ -836,7 +836,7 @@ impl FuncCompiler<'_> {
     }
 
     /// Best-effort type inference from IR expression structure.
-    fn infer_type_from_expr(&self, expr: &IrExpr) -> Ty {
+    pub(super) fn infer_type_from_expr(&self, expr: &IrExpr) -> Ty {
         if !matches!(expr.ty, Ty::Unknown) {
             return expr.ty.clone();
         }
