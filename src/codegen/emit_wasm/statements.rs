@@ -193,7 +193,18 @@ impl FuncCompiler<'_> {
                     }
                 }
             }
-            IrStmtKind::MapInsert { .. } => {
+            IrStmtKind::MapInsert { target, key, value } => {
+                // m[k] = v  →  target = map.set(target, key, value)
+                if let Some(&local_idx) = self.var_map.get(&target.0) {
+                    // Emit map.set(target, key, value) using the existing map call infrastructure
+                    let set_args = vec![
+                        crate::ir::IrExpr { kind: crate::ir::IrExprKind::Var { id: *target }, ty: self.var_table.get(*target).ty.clone(), span: None },
+                        key.clone(),
+                        value.clone(),
+                    ];
+                    self.emit_map_call("set", &set_args);
+                    wasm!(self.func, { local_set(local_idx); });
+                }
             }
         }
     }
