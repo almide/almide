@@ -107,6 +107,9 @@ pub fn register_runtime(emitter: &mut WasmEmitter) {
     // Value/JSON runtime
     super::rt_value::register(emitter);
 
+    // Regex runtime
+    super::rt_regex::register(emitter);
+
     // Global: __heap_ptr (mutable i32, initialized at assembly time)
     emitter.heap_ptr_global = 0; // first and only global
 }
@@ -141,6 +144,8 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     super::rt_string::compile(emitter);
     // Value/JSON runtime
     super::rt_value::compile(emitter);
+    // Regex runtime
+    super::rt_regex::compile(emitter);
 }
 
 /// __alloc(size: i32) -> i32

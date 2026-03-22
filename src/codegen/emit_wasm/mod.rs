@@ -36,7 +36,9 @@ mod calls_map;
 mod calls_map_closure;
 mod calls_set;
 mod calls_value;
+mod calls_regex;
 mod rt_value;
+pub(crate) mod rt_regex;
 mod closures;
 mod equality;
 mod collections;
@@ -133,6 +135,7 @@ pub struct RuntimeFuncs {
     pub value_stringify: u32,
     pub json_parse: u32,
     pub json_parse_at: u32,
+    pub regex: rt_regex::RegexRuntime,
 }
 
 /// Import descriptor for WASM import section.
@@ -259,6 +262,7 @@ impl WasmEmitter {
                 value_stringify: 0,
                 json_parse: 0,
                 json_parse_at: 0,
+                regex: rt_regex::RegexRuntime::default(),
             },
             heap_ptr_global: 0,
             top_let_globals: HashMap::new(),

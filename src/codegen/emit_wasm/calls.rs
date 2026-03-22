@@ -303,6 +303,9 @@ impl FuncCompiler<'_> {
                     _ if module == "http" => {
                         self.emit_http_call(func, args);
                     }
+                    _ if module == "regex" => {
+                        self.emit_regex_call(func, args);
+                    }
                     _ => {
                         self.emit_stub_call(args);
                     }
