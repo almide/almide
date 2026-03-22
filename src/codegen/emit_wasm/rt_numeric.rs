@@ -397,14 +397,15 @@ pub(super) fn compile_float_to_fixed(emitter: &mut WasmEmitter) {
         end;
     });
 
-    // If decimals == 0: just return int_to_string(trunc(f))
+    // If decimals == 0: return int_to_string(round_half_away_from_zero(f))
+    // f64.nearest uses banker's rounding (half-to-even) which gives -2 for -2.5.
+    // Standard toFixed(0) should give -3 for -2.5 (round half away from zero).
+    // Formula: copysign(floor(abs(f) + 0.5), f)
     wasm!(f, {
         local_get(2); i32_eqz;
         if_empty;
-          local_get(0);
-    });
-    f.instruction(&Instruction::F64Trunc);
-    wasm!(f, {
+          local_get(0); f64_abs; f64_const(0.5); f64_add; f64_floor;
+          local_get(0); f64_copysign;
           i64_trunc_f64_s;
           call(emitter.rt.int_to_string);
           return_;
@@ -428,11 +429,12 @@ pub(super) fn compile_float_to_fixed(emitter: &mut WasmEmitter) {
         end; end;
     });
 
-    // scaled = round(abs(f) * scale)
+    // scaled = round_half_away_from_zero(abs(f) * scale)
+    // Use floor(x + 0.5) instead of f64.nearest (banker's rounding)
     wasm!(f, {
         local_get(0); f64_abs;
         local_get(3); f64_mul;
-        f64_nearest;
+        f64_const(0.5); f64_add; f64_floor;
         local_set(5);
     });
 
@@ -619,53 +621,11 @@ pub(super) fn compile_float_pow(emitter: &mut WasmEmitter) {
         else_;
     });
 
-    // Compute ln(base) via sqrt reduction + Taylor series.
-    // y = abs(base), apply sqrt 12 times, then ln(y_reduced) via Taylor,
-    // then ln(base) = 4096 * ln(y_reduced).
-
-    // local 2 = y
+    // Compute ln(base) via the math_log runtime function -> store in local 7
     wasm!(f, {
-        local_get(0); f64_abs; local_set(2);
-    });
-
-    // 12 rounds of sqrt
-    for _ in 0..12 {
-        wasm!(f, {
-            local_get(2); f64_sqrt; local_set(2);
-        });
-    }
-
-    // z = y - 1 (local 4)
-    // z^k (local 5), ln_sum (local 7)
-    wasm!(f, {
-        local_get(2); f64_const(1.0); f64_sub; local_set(4);
-        local_get(4); local_set(5);  // z^1
-        local_get(4); local_set(7);  // sum = z
-    });
-
-    // Taylor terms for ln(1+z): sum += (-1)^(k+1) * z^k / k
-    // k=2: sum -= z^2/2
-    wasm!(f, { local_get(5); local_get(4); f64_mul; local_set(5); });
-    wasm!(f, { local_get(7); local_get(5); f64_const(2.0); f64_div; f64_sub; local_set(7); });
-    // k=3: sum += z^3/3
-    wasm!(f, { local_get(5); local_get(4); f64_mul; local_set(5); });
-    wasm!(f, { local_get(7); local_get(5); f64_const(3.0); f64_div; f64_add; local_set(7); });
-    // k=4: sum -= z^4/4
-    wasm!(f, { local_get(5); local_get(4); f64_mul; local_set(5); });
-    wasm!(f, { local_get(7); local_get(5); f64_const(4.0); f64_div; f64_sub; local_set(7); });
-    // k=5: sum += z^5/5
-    wasm!(f, { local_get(5); local_get(4); f64_mul; local_set(5); });
-    wasm!(f, { local_get(7); local_get(5); f64_const(5.0); f64_div; f64_add; local_set(7); });
-    // k=6: sum -= z^6/6
-    wasm!(f, { local_get(5); local_get(4); f64_mul; local_set(5); });
-    wasm!(f, { local_get(7); local_get(5); f64_const(6.0); f64_div; f64_sub; local_set(7); });
-    // k=7: sum += z^7/7
-    wasm!(f, { local_get(5); local_get(4); f64_mul; local_set(5); });
-    wasm!(f, { local_get(7); local_get(5); f64_const(7.0); f64_div; f64_add; local_set(7); });
-
-    // ln(base) = 4096 * sum -> store in local 7
-    wasm!(f, {
-        local_get(7); f64_const(4096.0); f64_mul; local_set(7);
+        local_get(0); f64_abs;
+        call(emitter.rt.math_log);
+        local_set(7);
     });
 
     // exp_arg = exp * ln(base) -> local 7 (reuse)
@@ -850,18 +810,27 @@ pub(super) fn compile_math_tan(emitter: &mut WasmEmitter) {
 }
 
 /// __math_log(x: f64) -> f64
-/// Natural logarithm via sqrt reduction + Taylor series.
-/// Reduce x by 12 rounds of sqrt (so x is near 1), compute ln(1+t) via
-/// Taylor series, then multiply by 2^12 = 4096.
+/// Natural logarithm via IEEE 754 exponent extraction + sqrt reduction + Taylor.
+/// Decompose x = m * 2^e (1 <= m < 2), then ln(x) = e*ln(2) + ln(m).
+/// ln(m) computed via 10 rounds of sqrt reduction + 7-term Taylor series.
+/// Since m is in [1,2), sqrt reduction gives values very close to 1, ensuring
+/// fast convergence and full f64 precision without large multiplier amplification.
 pub(super) fn compile_math_log(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.math_log];
     // params: 0=f64 x
-    // locals: 1=f64 y (reduced), 2=f64 z (y-1), 3=f64 z^k, 4=f64 sum
+    // locals:
+    //   1=i64 bits,    2=i64 exp_raw,  3=f64 exp_f64 (e),
+    //   4=f64 m (mantissa), 5=f64 y (reduced m), 6=f64 z (y-1),
+    //   7=f64 z^k,     8=f64 sum
     let mut f = Function::new([
-        (1, ValType::F64),  // 1: y
-        (1, ValType::F64),  // 2: z
-        (1, ValType::F64),  // 3: z^k
-        (1, ValType::F64),  // 4: sum
+        (1, ValType::I64),  // 1: bits
+        (1, ValType::I64),  // 2: exp_raw
+        (1, ValType::F64),  // 3: exp as f64
+        (1, ValType::F64),  // 4: mantissa m
+        (1, ValType::F64),  // 5: y (sqrt-reduced m)
+        (1, ValType::F64),  // 6: z = y - 1
+        (1, ValType::F64),  // 7: z^k
+        (1, ValType::F64),  // 8: sum
     ]);
 
     // Special case: x <= 0 -> NaN
@@ -880,48 +849,175 @@ pub(super) fn compile_math_log(emitter: &mut WasmEmitter) {
         end;
     });
 
-    // y = x
+    // Extract IEEE 754 bits
+    // bits = reinterpret(x)
     wasm!(f, {
-        local_get(0); local_set(1);
+        local_get(0); i64_reinterpret_f64; local_set(1);
     });
 
-    // 12 rounds of sqrt: y = sqrt(sqrt(...sqrt(x)))
-    for _ in 0..12 {
+    // exp_raw = (bits >> 52) & 0x7FF
+    // Using arithmetic shift (i64_shr_s) + mask; mask eliminates sign extension.
+    wasm!(f, {
+        local_get(1); i64_const(52); i64_shr_s;
+        i64_const(0x7FF); i64_and;
+        local_set(2);
+    });
+
+    // e = exp_raw - 1023 (as f64)
+    wasm!(f, {
+        local_get(2); i64_const(1023); i64_sub;
+        f64_convert_i64_s; local_set(3);
+    });
+
+    // m = reinterpret((bits & 0x000FFFFFFFFFFFFF) | (1023 << 52))
+    // This sets exponent to 0 (biased 1023), giving m in [1.0, 2.0)
+    wasm!(f, {
+        local_get(1);
+        i64_const(0x000FFFFFFFFFFFFF_u64 as i64); i64_and;
+        i64_const(0x3FF0000000000000_u64 as i64); i64_or;
+        f64_reinterpret_i64;
+        local_set(4);
+    });
+
+    // If m == 1.0, ln(m) = 0.0, so ln(x) = e * ln(2)
+    wasm!(f, {
+        local_get(4); f64_const(1.0); f64_eq;
+        if_empty;
+          local_get(3); f64_const(std::f64::consts::LN_2); f64_mul;
+          return_;
+        end;
+    });
+
+    // y = m
+    wasm!(f, {
+        local_get(4); local_set(5);
+    });
+
+    // 10 rounds of sqrt: y = sqrt^10(m)
+    // m is in [1, 2), so after 10 sqrts y is extremely close to 1.
+    // Multiplier is 2^10 = 1024.
+    for _ in 0..10 {
         wasm!(f, {
-            local_get(1); f64_sqrt; local_set(1);
+            local_get(5); f64_sqrt; local_set(5);
         });
     }
 
     // z = y - 1
     wasm!(f, {
-        local_get(1); f64_const(1.0); f64_sub; local_set(2);
-        local_get(2); local_set(3);  // z^1
-        local_get(2); local_set(4);  // sum = z
+        local_get(5); f64_const(1.0); f64_sub; local_set(6);
+        local_get(6); local_set(7);  // z^1
+        local_get(6); local_set(8);  // sum = z
     });
 
-    // Taylor: ln(1+z) = z - z^2/2 + z^3/3 - z^4/4 + ...
+    // Taylor: ln(1+z) = z - z^2/2 + z^3/3 - z^4/4 + ... + z^7/7
+    // With m in [1,2) and 10 sqrt rounds, z ~ 10^-4, so 7 terms is overkill.
     // k=2: sum -= z^2/2
-    wasm!(f, { local_get(3); local_get(2); f64_mul; local_set(3); });
-    wasm!(f, { local_get(4); local_get(3); f64_const(2.0); f64_div; f64_sub; local_set(4); });
+    wasm!(f, { local_get(7); local_get(6); f64_mul; local_set(7); });
+    wasm!(f, { local_get(8); local_get(7); f64_const(2.0); f64_div; f64_sub; local_set(8); });
     // k=3: sum += z^3/3
-    wasm!(f, { local_get(3); local_get(2); f64_mul; local_set(3); });
-    wasm!(f, { local_get(4); local_get(3); f64_const(3.0); f64_div; f64_add; local_set(4); });
+    wasm!(f, { local_get(7); local_get(6); f64_mul; local_set(7); });
+    wasm!(f, { local_get(8); local_get(7); f64_const(3.0); f64_div; f64_add; local_set(8); });
     // k=4: sum -= z^4/4
-    wasm!(f, { local_get(3); local_get(2); f64_mul; local_set(3); });
-    wasm!(f, { local_get(4); local_get(3); f64_const(4.0); f64_div; f64_sub; local_set(4); });
+    wasm!(f, { local_get(7); local_get(6); f64_mul; local_set(7); });
+    wasm!(f, { local_get(8); local_get(7); f64_const(4.0); f64_div; f64_sub; local_set(8); });
     // k=5: sum += z^5/5
-    wasm!(f, { local_get(3); local_get(2); f64_mul; local_set(3); });
-    wasm!(f, { local_get(4); local_get(3); f64_const(5.0); f64_div; f64_add; local_set(4); });
+    wasm!(f, { local_get(7); local_get(6); f64_mul; local_set(7); });
+    wasm!(f, { local_get(8); local_get(7); f64_const(5.0); f64_div; f64_add; local_set(8); });
     // k=6: sum -= z^6/6
-    wasm!(f, { local_get(3); local_get(2); f64_mul; local_set(3); });
-    wasm!(f, { local_get(4); local_get(3); f64_const(6.0); f64_div; f64_sub; local_set(4); });
+    wasm!(f, { local_get(7); local_get(6); f64_mul; local_set(7); });
+    wasm!(f, { local_get(8); local_get(7); f64_const(6.0); f64_div; f64_sub; local_set(8); });
     // k=7: sum += z^7/7
-    wasm!(f, { local_get(3); local_get(2); f64_mul; local_set(3); });
-    wasm!(f, { local_get(4); local_get(3); f64_const(7.0); f64_div; f64_add; local_set(4); });
+    wasm!(f, { local_get(7); local_get(6); f64_mul; local_set(7); });
+    wasm!(f, { local_get(8); local_get(7); f64_const(7.0); f64_div; f64_add; local_set(8); });
 
-    // ln(x) = 4096 * sum
+    // ln(m) = 1024 * sum
+    // ln(x) = e * ln(2) + ln(m)
     wasm!(f, {
-        local_get(4); f64_const(4096.0); f64_mul;
+        local_get(3); f64_const(std::f64::consts::LN_2); f64_mul;
+        local_get(8); f64_const(1024.0); f64_mul;
+        f64_add;
+        end;
+    });
+
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
+
+/// __math_log10(x: f64) -> f64
+/// Common logarithm. Computes ln(x) / ln(10), with rounding correction
+/// so that exact powers of 10 return exact integer results.
+pub(super) fn compile_math_log10(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.math_log10];
+    // params: 0=f64 x
+    // locals: 1=f64 result, 2=f64 rounded
+    let mut f = Function::new([
+        (1, ValType::F64),  // 1: result
+        (1, ValType::F64),  // 2: rounded
+    ]);
+
+    // result = ln(x) / ln(10)
+    wasm!(f, {
+        local_get(0);
+        call(emitter.rt.math_log);
+        f64_const(std::f64::consts::LN_10);
+        f64_div;
+        local_set(1);
+    });
+
+    // rounded = nearest(result)
+    wasm!(f, {
+        local_get(1); f64_nearest; local_set(2);
+    });
+
+    // if |result - rounded| < 1e-12: return rounded, else return result
+    wasm!(f, {
+        local_get(1); local_get(2); f64_sub; f64_abs;
+        f64_const(1e-12); f64_lt;
+        if_f64;
+          local_get(2);
+        else_;
+          local_get(1);
+        end;
+        end;
+    });
+
+    emitter.add_compiled(CompiledFunc { type_idx, func: f });
+}
+
+/// __math_log2(x: f64) -> f64
+/// Binary logarithm. Computes ln(x) / ln(2), with rounding correction
+/// so that exact powers of 2 return exact integer results.
+pub(super) fn compile_math_log2(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.math_log2];
+    // params: 0=f64 x
+    // locals: 1=f64 result, 2=f64 rounded
+    let mut f = Function::new([
+        (1, ValType::F64),  // 1: result
+        (1, ValType::F64),  // 2: rounded
+    ]);
+
+    // result = ln(x) / ln(2)
+    wasm!(f, {
+        local_get(0);
+        call(emitter.rt.math_log);
+        f64_const(std::f64::consts::LN_2);
+        f64_div;
+        local_set(1);
+    });
+
+    // rounded = nearest(result)
+    wasm!(f, {
+        local_get(1); f64_nearest; local_set(2);
+    });
+
+    // if |result - rounded| < 1e-12: return rounded, else return result
+    wasm!(f, {
+        local_get(1); local_get(2); f64_sub; f64_abs;
+        f64_const(1e-12); f64_lt;
+        if_f64;
+          local_get(2);
+        else_;
+          local_get(1);
+        end;
         end;
     });
 
