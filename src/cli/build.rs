@@ -136,6 +136,10 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
     // Monomorphize
     almide::mono::monomorphize(&mut ir_program);
 
+    // TCO: convert self-recursive tail calls to loops (before result propagation)
+    almide::codegen::pass_tco::TailCallOptPass
+        .run(&mut ir_program, almide::codegen::pass::Target::Rust);
+
     // Result propagation (auto-unwrap in effect fn) — inserts Try nodes
     almide::codegen::pass_result_propagation::ResultPropagationPass
         .run(&mut ir_program, almide::codegen::pass::Target::Rust);
