@@ -482,7 +482,14 @@ pub(super) fn resolve_expr_ty(expr: &IrExpr, var_table: &crate::ir::VarTable, re
                         }
                     }
                 }
-                _ => {}
+                _ => {
+                    // Unknown object type: search record_fields for a type that has this field
+                    for (_name, fields) in record_fields {
+                        if let Some((_, fty)) = fields.iter().find(|(n, _)| n == field) {
+                            return fty.clone();
+                        }
+                    }
+                }
             }
             expr.ty.clone()
         }
