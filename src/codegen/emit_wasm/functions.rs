@@ -39,17 +39,7 @@ pub fn compile_function(
         }
     }
 
-    // Legacy scratch locals (for unmigrated code)
-    let match_i64_base = param_count + local_decls.len() as u32;
-    for _ in 0..scan.scratch_depth {
-        local_decls.push((1, ValType::I64));
-    }
-    let match_i32_base = param_count + local_decls.len() as u32;
-    for _ in 0..scan.scratch_depth {
-        local_decls.push((1, ValType::I32));
-    }
-
-    // ScratchAllocator locals (separate region, after legacy)
+    // ScratchAllocator locals
     let scratch_i32_base = param_count + local_decls.len() as u32;
     let scratch_extra = 12; // enough for the largest stdlib function (unique_by = 10+)
     for _ in 0..scratch_extra {
@@ -77,9 +67,6 @@ pub fn compile_function(
         depth: 0,
         loop_stack: Vec::new(),
         scratch: scratch_alloc,
-        match_i64_base,
-        match_i32_base,
-        match_depth: 0,
         var_table: _var_table,
         stub_ret_ty: crate::types::Ty::Unit,
     };

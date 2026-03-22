@@ -28,76 +28,85 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { call(self.emitter.rt.string.contains); });
             }
             "starts_with" => {
-                let s = self.match_i32_base + self.match_depth;
-                wasm!(self.func, { i32_const(0); });
+                let s0 = self.scratch.alloc_i32();
+                let s1 = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { i32_store(0); i32_const(4); });
+                wasm!(self.func, { local_set(s0); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
-                    i32_store(0);
-                    i32_const(4); i32_load(0); i32_load(0); // prefix.len
-                    i32_const(0); i32_load(0); i32_load(0); // s.len
+                    local_set(s1);
+                    local_get(s1); i32_load(0); // prefix.len
+                    local_get(s0); i32_load(0); // s.len
                     i32_gt_u;
                     if_i32; i32_const(0);
                     else_;
-                      i32_const(0); i32_load(0); i32_const(4); i32_add;
-                      i32_const(4); i32_load(0); i32_const(4); i32_add;
-                      i32_const(4); i32_load(0); i32_load(0);
+                      local_get(s0); i32_const(4); i32_add;
+                      local_get(s1); i32_const(4); i32_add;
+                      local_get(s1); i32_load(0);
                       call(self.emitter.rt.mem_eq);
                     end;
                 });
+                self.scratch.free_i32(s1);
+                self.scratch.free_i32(s0);
             }
             "ends_with" => {
-                wasm!(self.func, { i32_const(0); });
+                let s0 = self.scratch.alloc_i32();
+                let s1 = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { i32_store(0); i32_const(4); });
+                wasm!(self.func, { local_set(s0); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
-                    i32_store(0);
-                    i32_const(4); i32_load(0); i32_load(0);
-                    i32_const(0); i32_load(0); i32_load(0);
+                    local_set(s1);
+                    local_get(s1); i32_load(0);
+                    local_get(s0); i32_load(0);
                     i32_gt_u;
                     if_i32; i32_const(0);
                     else_;
-                      i32_const(0); i32_load(0); i32_const(4); i32_add;
-                      i32_const(0); i32_load(0); i32_load(0); i32_add;
-                      i32_const(4); i32_load(0); i32_load(0); i32_sub;
-                      i32_const(4); i32_load(0); i32_const(4); i32_add;
-                      i32_const(4); i32_load(0); i32_load(0);
+                      local_get(s0); i32_const(4); i32_add;
+                      local_get(s0); i32_load(0); i32_add;
+                      local_get(s1); i32_load(0); i32_sub;
+                      local_get(s1); i32_const(4); i32_add;
+                      local_get(s1); i32_load(0);
                       call(self.emitter.rt.mem_eq);
                     end;
                 });
+                self.scratch.free_i32(s1);
+                self.scratch.free_i32(s0);
             }
             "get" => {
                 // get(s, i) → Option[String]
                 // OOB → none(0), else → some(1-char string)
-                let s = self.match_i32_base + self.match_depth;
-                wasm!(self.func, { i32_const(0); });
+                let s = self.scratch.alloc_i32();
+                let s1 = self.scratch.alloc_i32();
+                let s2 = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { i32_store(0); });
+                wasm!(self.func, { local_set(s); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
-                    i32_wrap_i64; local_set(s);
+                    i32_wrap_i64; local_set(s1);
                     // bounds check
-                    local_get(s); i32_const(0); i32_lt_s;
-                    local_get(s); i32_const(0); i32_load(0); i32_load(0); i32_ge_u;
+                    local_get(s1); i32_const(0); i32_lt_s;
+                    local_get(s1); local_get(s); i32_load(0); i32_ge_u;
                     i32_or;
                     if_i32;
                       i32_const(0); // none
                     else_;
                       // Build 1-char string
-                      i32_const(5); call(self.emitter.rt.alloc); local_set(s + 1);
-                      local_get(s + 1); i32_const(1); i32_store(0);
-                      local_get(s + 1);
-                      i32_const(0); i32_load(0); i32_const(4); i32_add;
-                      local_get(s); i32_add; i32_load8_u(0);
+                      i32_const(5); call(self.emitter.rt.alloc); local_set(s2);
+                      local_get(s2); i32_const(1); i32_store(0);
+                      local_get(s2);
+                      local_get(s); i32_const(4); i32_add;
+                      local_get(s1); i32_add; i32_load8_u(0);
                       i32_store8(4);
                       // Wrap in some: alloc ptr, store string ptr
-                      i32_const(4); call(self.emitter.rt.alloc); local_set(s + 2);
-                      local_get(s + 2); local_get(s + 1); i32_store(0);
-                      local_get(s + 2);
+                      i32_const(4); call(self.emitter.rt.alloc); local_set(s1);
+                      local_get(s1); local_get(s2); i32_store(0);
+                      local_get(s1);
                     end;
                 });
+                self.scratch.free_i32(s2);
+                self.scratch.free_i32(s1);
+                self.scratch.free_i32(s);
             }
             "reverse" => {
                 self.emit_expr(&args[0]);
@@ -138,8 +147,8 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { call(self.emitter.rt.string.slice); });
             }
             "index_of" => {
-                let s64 = self.match_i64_base + self.match_depth;
-                let s32 = self.match_i32_base + self.match_depth;
+                let s64 = self.scratch.alloc_i64();
+                let s32 = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
@@ -154,10 +163,12 @@ impl FuncCompiler<'_> {
                       local_get(s32);
                     end;
                 });
+                self.scratch.free_i32(s32);
+                self.scratch.free_i64(s64);
             }
             "last_index_of" => {
-                let s64 = self.match_i64_base + self.match_depth;
-                let s32 = self.match_i32_base + self.match_depth;
+                let s64 = self.scratch.alloc_i64();
+                let s32 = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
@@ -172,6 +183,8 @@ impl FuncCompiler<'_> {
                       local_get(s32);
                     end;
                 });
+                self.scratch.free_i32(s32);
+                self.scratch.free_i64(s64);
             }
             "count" => {
                 self.emit_expr(&args[0]);
@@ -209,7 +222,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { call(self.emitter.rt.string.to_lower); });
             }
             "capitalize" => {
-                let s = self.match_i32_base + self.match_depth;
+                let s = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
                     local_set(s);
@@ -224,6 +237,7 @@ impl FuncCompiler<'_> {
                       call(self.emitter.rt.concat_str);
                     end;
                 });
+                self.scratch.free_i32(s);
             }
             "chars" => {
                 self.emit_expr(&args[0]);
@@ -270,31 +284,37 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { call(self.emitter.rt.string.is_lower); });
             }
             "codepoint" => {
-                let s = self.match_i32_base + self.match_depth;
+                let s = self.scratch.alloc_i32();
+                let s1 = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
                     local_set(s);
                     local_get(s); i32_load(0); i32_eqz;
                     if_i32; i32_const(0);
                     else_;
-                      i32_const(8); call(self.emitter.rt.alloc); local_set(s + 1);
-                      local_get(s + 1);
+                      i32_const(8); call(self.emitter.rt.alloc); local_set(s1);
+                      local_get(s1);
                       local_get(s); i32_load8_u(4); i64_extend_i32_u;
                       i64_store(0);
-                      local_get(s + 1);
+                      local_get(s1);
                     end;
                 });
+                self.scratch.free_i32(s1);
+                self.scratch.free_i32(s);
             }
             "from_codepoint" => {
-                let s = self.match_i32_base + self.match_depth;
+                let s = self.scratch.alloc_i32();
+                let s1 = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
                     i32_wrap_i64; local_set(s);
-                    i32_const(5); call(self.emitter.rt.alloc); local_set(s + 1);
-                    local_get(s + 1); i32_const(1); i32_store(0);
-                    local_get(s + 1); local_get(s); i32_store8(4);
-                    local_get(s + 1);
+                    i32_const(5); call(self.emitter.rt.alloc); local_set(s1);
+                    local_get(s1); i32_const(1); i32_store(0);
+                    local_get(s1); local_get(s); i32_store8(4);
+                    local_get(s1);
                 });
+                self.scratch.free_i32(s1);
+                self.scratch.free_i32(s);
             }
             "replace_first" => {
                 self.emit_expr(&args[0]);
@@ -314,7 +334,9 @@ impl FuncCompiler<'_> {
             }
             "first" => {
                 // first(s) → Option[String]: get(s, 0)
-                let s = self.match_i32_base + self.match_depth;
+                let s = self.scratch.alloc_i32();
+                let s1 = self.scratch.alloc_i32();
+                let s2 = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
                     local_set(s);
@@ -322,98 +344,118 @@ impl FuncCompiler<'_> {
                     if_i32; i32_const(0); // none
                     else_;
                       // alloc 1-char string
-                      i32_const(5); call(self.emitter.rt.alloc); local_set(s + 1);
-                      local_get(s + 1); i32_const(1); i32_store(0);
-                      local_get(s + 1); local_get(s); i32_load8_u(4); i32_store8(4);
+                      i32_const(5); call(self.emitter.rt.alloc); local_set(s1);
+                      local_get(s1); i32_const(1); i32_store(0);
+                      local_get(s1); local_get(s); i32_load8_u(4); i32_store8(4);
                       // wrap in some: alloc ptr
-                      i32_const(4); call(self.emitter.rt.alloc); local_set(s + 2);
-                      local_get(s + 2); local_get(s + 1); i32_store(0);
-                      local_get(s + 2);
+                      i32_const(4); call(self.emitter.rt.alloc); local_set(s2);
+                      local_get(s2); local_get(s1); i32_store(0);
+                      local_get(s2);
                     end;
                 });
+                self.scratch.free_i32(s2);
+                self.scratch.free_i32(s1);
+                self.scratch.free_i32(s);
             }
             "last" => {
-                let s = self.match_i32_base + self.match_depth;
+                let s = self.scratch.alloc_i32();
+                let s1 = self.scratch.alloc_i32();
+                let s2 = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
                     local_set(s);
                     local_get(s); i32_load(0); i32_eqz;
                     if_i32; i32_const(0);
                     else_;
-                      i32_const(5); call(self.emitter.rt.alloc); local_set(s + 1);
-                      local_get(s + 1); i32_const(1); i32_store(0);
-                      local_get(s + 1);
+                      i32_const(5); call(self.emitter.rt.alloc); local_set(s1);
+                      local_get(s1); i32_const(1); i32_store(0);
+                      local_get(s1);
                       local_get(s); i32_const(4); i32_add;
                       local_get(s); i32_load(0); i32_const(1); i32_sub; i32_add;
                       i32_load8_u(0); i32_store8(4);
-                      i32_const(4); call(self.emitter.rt.alloc); local_set(s + 2);
-                      local_get(s + 2); local_get(s + 1); i32_store(0);
-                      local_get(s + 2);
+                      i32_const(4); call(self.emitter.rt.alloc); local_set(s2);
+                      local_get(s2); local_get(s1); i32_store(0);
+                      local_get(s2);
                     end;
                 });
+                self.scratch.free_i32(s2);
+                self.scratch.free_i32(s1);
+                self.scratch.free_i32(s);
             }
             "take_end" => {
                 // take_end(s, n) = slice(s, max(0, len-n), len)
-                let s = self.match_i32_base + self.match_depth;
+                let s = self.scratch.alloc_i32();
+                let s1 = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(s); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
-                    i32_wrap_i64; local_set(s + 1);
-                    local_get(s); i32_load(0); local_get(s + 1); i32_sub;
-                    local_set(s + 1);
-                    local_get(s + 1); i32_const(0); i32_lt_s;
-                    if_empty; i32_const(0); local_set(s + 1); end;
-                    local_get(s); local_get(s + 1); local_get(s); i32_load(0);
+                    i32_wrap_i64; local_set(s1);
+                    local_get(s); i32_load(0); local_get(s1); i32_sub;
+                    local_set(s1);
+                    local_get(s1); i32_const(0); i32_lt_s;
+                    if_empty; i32_const(0); local_set(s1); end;
+                    local_get(s); local_get(s1); local_get(s); i32_load(0);
                     call(self.emitter.rt.string.slice);
                 });
+                self.scratch.free_i32(s1);
+                self.scratch.free_i32(s);
             }
             "drop_end" => {
                 // drop_end(s, n) = slice(s, 0, max(0, len-n))
-                let s = self.match_i32_base + self.match_depth;
+                let s = self.scratch.alloc_i32();
+                let s1 = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(s); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
-                    i32_wrap_i64; local_set(s + 1);
-                    local_get(s); i32_load(0); local_get(s + 1); i32_sub;
-                    local_set(s + 1);
-                    local_get(s + 1); i32_const(0); i32_lt_s;
-                    if_empty; i32_const(0); local_set(s + 1); end;
-                    local_get(s); i32_const(0); local_get(s + 1);
+                    i32_wrap_i64; local_set(s1);
+                    local_get(s); i32_load(0); local_get(s1); i32_sub;
+                    local_set(s1);
+                    local_get(s1); i32_const(0); i32_lt_s;
+                    if_empty; i32_const(0); local_set(s1); end;
+                    local_get(s); i32_const(0); local_get(s1);
                     call(self.emitter.rt.string.slice);
                 });
+                self.scratch.free_i32(s1);
+                self.scratch.free_i32(s);
             }
             "take" => {
                 // take(s, n) = slice(s, 0, min(n, len))
-                let s = self.match_i32_base + self.match_depth;
+                let s = self.scratch.alloc_i32();
+                let s1 = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(s); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
-                    i32_wrap_i64; local_set(s + 1); // n
+                    i32_wrap_i64; local_set(s1); // n
                     // min(n, len)
-                    local_get(s + 1); local_get(s); i32_load(0); i32_lt_u;
-                    if_i32; local_get(s + 1); else_; local_get(s); i32_load(0); end;
-                    local_set(s + 1);
-                    local_get(s); i32_const(0); local_get(s + 1);
+                    local_get(s1); local_get(s); i32_load(0); i32_lt_u;
+                    if_i32; local_get(s1); else_; local_get(s); i32_load(0); end;
+                    local_set(s1);
+                    local_get(s); i32_const(0); local_get(s1);
                     call(self.emitter.rt.string.slice);
                 });
+                self.scratch.free_i32(s1);
+                self.scratch.free_i32(s);
             }
             "drop" => {
                 // drop(s, n) = slice(s, min(n, len), len)
-                let s = self.match_i32_base + self.match_depth;
+                let s = self.scratch.alloc_i32();
+                let s1 = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(s); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
-                    i32_wrap_i64; local_set(s + 1);
-                    local_get(s + 1); local_get(s); i32_load(0); i32_lt_u;
-                    if_i32; local_get(s + 1); else_; local_get(s); i32_load(0); end;
-                    local_set(s + 1);
-                    local_get(s); local_get(s + 1); local_get(s); i32_load(0);
+                    i32_wrap_i64; local_set(s1);
+                    local_get(s1); local_get(s); i32_load(0); i32_lt_u;
+                    if_i32; local_get(s1); else_; local_get(s); i32_load(0); end;
+                    local_set(s1);
+                    local_get(s); local_get(s1); local_get(s); i32_load(0);
                     call(self.emitter.rt.string.slice);
                 });
+                self.scratch.free_i32(s1);
+                self.scratch.free_i32(s);
             }
             _ => return false,
         }
@@ -488,96 +530,88 @@ impl FuncCompiler<'_> {
 
     /// ASCII case conversion. Expects string ptr on stack. Returns new string ptr.
     pub(super) fn emit_str_case_convert(&mut self, is_upper: bool) {
-        // String ptr is on stack. Store to mem[0] via scratch.
-        let scratch = self.match_i32_base + self.match_depth;
+        // String ptr is on stack. Store to scratch local.
+        let src = self.scratch.alloc_i32();
+        let dst = self.scratch.alloc_i32();
+        let s = self.scratch.alloc_i32();
+        let s1 = self.scratch.alloc_i32();
         wasm!(self.func, {
-            local_set(scratch);
-            i32_const(0);
-            local_get(scratch);
-            i32_store(0);
-            // Alloc dst with same len → mem[4]
+            local_set(src);
+            // Alloc dst with same len
             i32_const(4);
-            i32_const(4);
-            i32_const(0);
-            i32_load(0);
+            local_get(src);
             i32_load(0);
             i32_add;
             call(self.emitter.rt.alloc);
-            i32_store(0);
+            local_set(dst);
             // Store len in dst
-            i32_const(4);
-            i32_load(0);
-            i32_const(0);
-            i32_load(0);
+            local_get(dst);
+            local_get(src);
             i32_load(0);
             i32_store(0);
         });
         // Loop: convert each byte
-        let s = self.match_i32_base + self.match_depth;
         wasm!(self.func, {
             i32_const(0);
             local_set(s);
             block_empty;
             loop_empty;
         });
-        let saved = self.depth; self.depth += 2;
+        let depth_guard = self.depth_push_n(2);
         wasm!(self.func, {
             local_get(s);
-            i32_const(0);
-            i32_load(0);
+            local_get(src);
             i32_load(0);
             i32_ge_u;
             br_if(1);
             // dst addr
-            i32_const(4);
-            i32_load(0);
+            local_get(dst);
             i32_const(4);
             i32_add;
             local_get(s);
             i32_add;
             // src byte
-            i32_const(0);
-            i32_load(0);
+            local_get(src);
             i32_const(4);
             i32_add;
             local_get(s);
             i32_add;
             i32_load8_u(0);
             // Convert
-            local_set(s + 1);
+            local_set(s1);
         });
         if is_upper {
             wasm!(self.func, {
-                local_get(s + 1);
+                local_get(s1);
                 i32_const(97);
                 i32_ge_u;
-                local_get(s + 1);
+                local_get(s1);
                 i32_const(122);
                 i32_le_u;
                 i32_and;
                 if_i32;
-                local_get(s + 1);
+                local_get(s1);
                 i32_const(32);
                 i32_sub;
                 else_;
-                local_get(s + 1);
+                local_get(s1);
                 end;
             });
         } else {
             wasm!(self.func, {
-                local_get(s + 1);
+                local_get(s1);
                 i32_const(65);
                 i32_ge_u;
-                local_get(s + 1);
+                local_get(s1);
                 i32_const(90);
                 i32_le_u;
                 i32_and;
                 if_i32;
-                local_get(s + 1);
+                local_get(s1);
                 i32_const(32);
                 i32_add;
                 else_;
-                local_get(s + 1);
+                local_get(s1);
                 end;
             });
         }
@@ -589,13 +623,16 @@ impl FuncCompiler<'_> {
             local_set(s);
             br(0);
         });
-        self.depth = saved;
+        self.depth_pop(depth_guard);
         wasm!(self.func, {
             end;
             end;
             // Return dst
-            i32_const(4);
-            i32_load(0);
+            local_get(dst);
         });
+        self.scratch.free_i32(s1);
+        self.scratch.free_i32(s);
+        self.scratch.free_i32(dst);
+        self.scratch.free_i32(src);
     }
 }

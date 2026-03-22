@@ -2,8 +2,6 @@
 
 use crate::ir::IrExpr;
 use crate::types::Ty;
-use wasm_encoder::MemArg;
-
 use super::FuncCompiler;
 use super::values;
 
@@ -42,8 +40,7 @@ impl FuncCompiler<'_> {
             call(self.emitter.rt.alloc);
         });
 
-        let scratch = self.match_i32_base + self.match_depth;
-        self.match_depth += 1;
+        let scratch = self.scratch.alloc_i32();
         wasm!(self.func, { local_set(scratch); });
 
         // Write tag if variant
@@ -120,7 +117,7 @@ impl FuncCompiler<'_> {
             }
         }
 
-        self.match_depth -= 1;
+        self.scratch.free_i32(scratch);
         wasm!(self.func, { local_get(scratch); });
     }
 
@@ -150,16 +147,16 @@ impl FuncCompiler<'_> {
             i32_const(total_size as i32);
             call(self.emitter.rt.alloc);
         });
-        let result_scratch = self.match_i32_base + self.match_depth;
+        let result_scratch = self.scratch.alloc_i32();
         wasm!(self.func, { local_set(result_scratch); });
 
         // Evaluate base and store ptr
         self.emit_expr(base);
-        let base_scratch = result_scratch + 1;
+        let base_scratch = self.scratch.alloc_i32();
         wasm!(self.func, { local_set(base_scratch); });
 
         // Copy all bytes from base to result (including tag if variant)
-        let counter = self.match_i64_base + self.match_depth;
+        let counter = self.scratch.alloc_i64();
         wasm!(self.func, {
             i64_const(0);
             local_set(counter);
@@ -208,6 +205,9 @@ impl FuncCompiler<'_> {
         }
 
         // Return result ptr
+        self.scratch.free_i64(counter);
+        self.scratch.free_i32(base_scratch);
+        self.scratch.free_i32(result_scratch);
         wasm!(self.func, { local_get(result_scratch); });
     }
 
@@ -227,8 +227,7 @@ impl FuncCompiler<'_> {
             call(self.emitter.rt.alloc);
         });
 
-        let scratch = self.match_i32_base + self.match_depth;
-        self.match_depth += 1;
+        let scratch = self.scratch.alloc_i32();
         wasm!(self.func, { local_set(scratch); });
 
         // Store length
@@ -246,7 +245,7 @@ impl FuncCompiler<'_> {
             self.emit_store_at(&elem.ty, offset);
         }
 
-        self.match_depth -= 1;
+        self.scratch.free_i32(scratch);
         wasm!(self.func, { local_get(scratch); });
     }
 
@@ -288,8 +287,7 @@ impl FuncCompiler<'_> {
             call(self.emitter.rt.alloc);
         });
 
-        let scratch = self.match_i32_base + self.match_depth;
-        self.match_depth += 1;
+        let scratch = self.scratch.alloc_i32();
         wasm!(self.func, { local_set(scratch); });
 
         let mut offset = 0u32;
@@ -301,7 +299,7 @@ impl FuncCompiler<'_> {
             offset += size;
         }
 
-        self.match_depth -= 1;
+        self.scratch.free_i32(scratch);
         wasm!(self.func, { local_get(scratch); });
     }
 

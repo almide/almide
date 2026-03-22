@@ -307,6 +307,17 @@ pub struct LoopLabels {
     pub continue_depth: u32,
 }
 
+/// RAII guard for WASM block nesting depth.
+/// Created by `depth_push`/`depth_push_n`, consumed by `depth_pop`.
+/// `#[must_use]` ensures the guard is not silently dropped.
+#[must_use = "call depth_pop() to restore depth"]
+pub struct DepthGuard(u32);
+
+impl DepthGuard {
+    /// The depth value at the point this guard was created (before push).
+    pub fn saved(&self) -> u32 { self.0 }
+}
+
 /// Per-function compilation state.
 pub struct FuncCompiler<'a> {
     pub emitter: &'a mut WasmEmitter,
@@ -316,14 +327,36 @@ pub struct FuncCompiler<'a> {
     pub loop_stack: Vec<LoopLabels>,
     // Scratch local allocator
     pub scratch: scratch::ScratchAllocator,
-    // Legacy compatibility — delegates to scratch allocator internally
-    pub match_i64_base: u32,
-    pub match_i32_base: u32,
-    pub match_depth: u32,
     // Variable table for name lookups (pattern matching)
     pub var_table: &'a crate::ir::VarTable,
     // Return type for stub calls (set by emit_call before delegating to handlers)
     pub stub_ret_ty: Ty,
+}
+
+impl FuncCompiler<'_> {
+    /// Push depth by 1. Returns a guard that must be passed to `depth_pop`.
+    pub fn depth_push(&mut self) -> DepthGuard {
+        let g = DepthGuard(self.depth);
+        self.depth += 1;
+        g
+    }
+
+    /// Push depth by N. Returns a guard that restores to the saved depth.
+    pub fn depth_push_n(&mut self, n: u32) -> DepthGuard {
+        let g = DepthGuard(self.depth);
+        self.depth += n;
+        g
+    }
+
+    /// Restore depth from guard. Debug-asserts that depth hasn't been corrupted.
+    pub fn depth_pop(&mut self, guard: DepthGuard) {
+        debug_assert!(
+            self.depth > guard.0,
+            "depth_pop: depth {} should be > saved {}",
+            self.depth, guard.0,
+        );
+        self.depth = guard.0;
+    }
 }
 
 // ── Public API ──────────────────────────────────────────────────────
@@ -633,21 +666,8 @@ fn assemble(emitter: &WasmEmitter) -> Vec<u8> {
 fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
     let void_type = emitter.register_type(vec![], vec![]);
 
-    // We need scratch locals for computing top_let values
-    let scan_depth = program.top_lets.iter()
-        .map(|tl| statements::count_scratch_depth_public(&tl.value))
-        .max().unwrap_or(0).max(1);
-
     let mut local_decls = Vec::new();
-    let match_i64_base = local_decls.len() as u32;
-    for _ in 0..scan_depth {
-        local_decls.push((1, ValType::I64));
-    }
-    let match_i32_base = local_decls.len() as u32;
-    for _ in 0..scan_depth {
-        local_decls.push((1, ValType::I32));
-    }
-    // ScratchAllocator region (separate from legacy)
+    // ScratchAllocator locals
     let scratch_i32_base = local_decls.len() as u32;
     for _ in 0..12 { local_decls.push((1, ValType::I32)); }
     let scratch_i64_base = local_decls.len() as u32;
@@ -666,9 +686,6 @@ fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
             depth: 0,
             loop_stack: Vec::new(),
             scratch: scratch_alloc,
-            match_i64_base,
-            match_i32_base,
-            match_depth: 0,
             var_table: &program.var_table,
             stub_ret_ty: Ty::Unit,
         };

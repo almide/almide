@@ -86,7 +86,7 @@ impl FuncCompiler<'_> {
                         if let Some((tag, is_unit)) = self.find_variant_ctor_tag(name) {
                             if is_unit && args.is_empty() {
                                 // Unit variant: allocate [tag:i32]
-                                let scratch = self.match_i32_base + self.match_depth;
+                                let scratch = self.scratch.alloc_i32();
                                 wasm!(self.func, {
                                     i32_const(4);
                                     call(self.emitter.rt.alloc);
@@ -96,13 +96,13 @@ impl FuncCompiler<'_> {
                                     i32_store(0);
                                     local_get(scratch);
                                 });
+                                self.scratch.free_i32(scratch);
                                 return;
                             } else if !is_unit {
                                 // Tuple payload variant: [tag:i32][arg0][arg1]...
                                 let mut total_size = 4u32; // tag
                                 for arg in args { total_size += values::byte_size(&arg.ty); }
-                                let scratch = self.match_i32_base + self.match_depth;
-                                self.match_depth += 1;
+                                let scratch = self.scratch.alloc_i32();
                                 wasm!(self.func, {
                                     i32_const(total_size as i32);
                                     call(self.emitter.rt.alloc);
@@ -120,8 +120,8 @@ impl FuncCompiler<'_> {
                                     self.emit_store_at(&arg.ty, offset);
                                     offset += values::byte_size(&arg.ty);
                                 }
-                                self.match_depth -= 1;
                                 wasm!(self.func, { local_get(scratch); });
+                                self.scratch.free_i32(scratch);
                                 return;
                             }
                         }
@@ -183,25 +183,31 @@ impl FuncCompiler<'_> {
                     ("error", "message") => {
                         // error.message(r: Result[T, String]) → String
                         // tag==0(ok): empty string, tag==1(err): load string at offset 4
-                        let s = self.match_i32_base + self.match_depth;
+                        let s = self.scratch.alloc_i32();
+                        let s1 = self.scratch.alloc_i32();
                         self.emit_expr(&args[0]);
                         wasm!(self.func, {
                             local_set(s);
                             local_get(s); i32_load(0); i32_eqz; // tag == 0?
                             if_i32;
                               // ok → empty string
-                              i32_const(4); call(self.emitter.rt.alloc); local_set(s + 1);
-                              local_get(s + 1); i32_const(0); i32_store(0);
-                              local_get(s + 1);
+                              i32_const(4); call(self.emitter.rt.alloc); local_set(s1);
+                              local_get(s1); i32_const(0); i32_store(0);
+                              local_get(s1);
                             else_;
                               local_get(s); i32_load(4); // err string ptr
                             end;
                         });
+                        self.scratch.free_i32(s1);
+                        self.scratch.free_i32(s);
                     }
                     ("error", "context") => {
                         // error.context(result, msg) → Result[T, String]
                         // If err: wrap error message with context. If ok: pass through.
-                        let s = self.match_i32_base + self.match_depth;
+                        let s = self.scratch.alloc_i32();
+                        let s1 = self.scratch.alloc_i32();
+                        let s2 = self.scratch.alloc_i32();
+                        let s3 = self.scratch.alloc_i32();
                         self.emit_expr(&args[0]);
                         wasm!(self.func, {
                             local_set(s);
@@ -210,44 +216,51 @@ impl FuncCompiler<'_> {
                               local_get(s); // pass ok through
                             else_;
                               // Build new err with context: "msg: original_err"
-                              local_get(s); i32_load(4); local_set(s + 1); // original err string
+                              local_get(s); i32_load(4); local_set(s1); // original err string
                         });
                         self.emit_expr(&args[1]); // context msg
                         wasm!(self.func, {
-                              local_set(s + 2);
+                              local_set(s2);
                               // Build ": " separator
-                              i32_const(6); call(self.emitter.rt.alloc); local_set(s + 3);
-                              local_get(s + 3); i32_const(2); i32_store(0);
-                              local_get(s + 3); i32_const(58); i32_store8(4);
-                              local_get(s + 3); i32_const(32); i32_store8(5);
+                              i32_const(6); call(self.emitter.rt.alloc); local_set(s3);
+                              local_get(s3); i32_const(2); i32_store(0);
+                              local_get(s3); i32_const(58); i32_store8(4);
+                              local_get(s3); i32_const(32); i32_store8(5);
                               // concat: msg + ": " + original
-                              local_get(s + 2); local_get(s + 3); call(self.emitter.rt.concat_str);
-                              local_get(s + 1); call(self.emitter.rt.concat_str);
-                              local_set(s + 1);
+                              local_get(s2); local_get(s3); call(self.emitter.rt.concat_str);
+                              local_get(s1); call(self.emitter.rt.concat_str);
+                              local_set(s1);
                               // Build new err Result
                               i32_const(8); call(self.emitter.rt.alloc); local_set(s);
                               local_get(s); i32_const(1); i32_store(0);
-                              local_get(s); local_get(s + 1); i32_store(4);
+                              local_get(s); local_get(s1); i32_store(4);
                               local_get(s);
                             end;
                         });
+                        self.scratch.free_i32(s3);
+                        self.scratch.free_i32(s2);
+                        self.scratch.free_i32(s1);
+                        self.scratch.free_i32(s);
                     }
                     ("error", "chain") => {
                         // error.chain(outer, cause) → "outer: cause"
                         self.emit_expr(&args[0]);
                         // concat outer + ": " + cause
                         // Build ": " string
-                        let s = self.match_i32_base + self.match_depth;
+                        let s = self.scratch.alloc_i32();
+                        let s1 = self.scratch.alloc_i32();
                         wasm!(self.func, {
                             local_set(s);
-                            i32_const(6); call(self.emitter.rt.alloc); local_set(s + 1);
-                            local_get(s + 1); i32_const(2); i32_store(0);
-                            local_get(s + 1); i32_const(58); i32_store8(4); // ':'
-                            local_get(s + 1); i32_const(32); i32_store8(5); // ' '
-                            local_get(s); local_get(s + 1); call(self.emitter.rt.concat_str);
+                            i32_const(6); call(self.emitter.rt.alloc); local_set(s1);
+                            local_get(s1); i32_const(2); i32_store(0);
+                            local_get(s1); i32_const(58); i32_store8(4); // ':'
+                            local_get(s1); i32_const(32); i32_store8(5); // ' '
+                            local_get(s); local_get(s1); call(self.emitter.rt.concat_str);
                         });
                         self.emit_expr(&args[1]);
                         wasm!(self.func, { call(self.emitter.rt.concat_str); });
+                        self.scratch.free_i32(s1);
+                        self.scratch.free_i32(s);
                     }
                     _ if module == "set" => {
                         if !self.emit_set_call(func, args) {
@@ -420,14 +433,11 @@ impl FuncCompiler<'_> {
 
             CallTarget::Computed { callee } => {
                 // Closure call: callee is a closure ptr [table_idx: i32][env_ptr: i32]
-                let scratch = self.match_i32_base + self.match_depth;
+                let scratch = self.scratch.alloc_i32();
 
                 // Evaluate callee → closure ptr
                 self.emit_expr(callee);
                 wasm!(self.func, { local_set(scratch); });
-
-                // Reserve this scratch so nested calls use different locals
-                self.match_depth += 1;
 
                 // Push env_ptr (first hidden arg)
                 wasm!(self.func, {
@@ -439,9 +449,6 @@ impl FuncCompiler<'_> {
                 for arg in args {
                     self.emit_expr(arg);
                 }
-
-                // Restore depth
-                self.match_depth -= 1;
 
                 // Push table_idx (on top of stack for call_indirect)
                 wasm!(self.func, {
@@ -463,6 +470,7 @@ impl FuncCompiler<'_> {
                 } else {
                     wasm!(self.func, { unreachable; });
                 }
+                self.scratch.free_i32(scratch);
             }
         }
     }
@@ -496,23 +504,27 @@ impl FuncCompiler<'_> {
             Ty::Bool => { wasm!(self.func, { i32_const(0); }); }
             Ty::String => {
                 // Empty string: alloc 4 bytes, len=0
+                let tmp = self.scratch.alloc_i32();
                 wasm!(self.func, {
                     i32_const(4); call(self.emitter.rt.alloc);
-                    local_set(self.match_i32_base + self.match_depth);
-                    local_get(self.match_i32_base + self.match_depth);
+                    local_set(tmp);
+                    local_get(tmp);
                     i32_const(0); i32_store(0);
-                    local_get(self.match_i32_base + self.match_depth);
+                    local_get(tmp);
                 });
+                self.scratch.free_i32(tmp);
             }
             Ty::Applied(TypeConstructorId::List, _) => {
                 // Empty list: alloc 4 bytes, len=0
+                let tmp = self.scratch.alloc_i32();
                 wasm!(self.func, {
                     i32_const(4); call(self.emitter.rt.alloc);
-                    local_set(self.match_i32_base + self.match_depth);
-                    local_get(self.match_i32_base + self.match_depth);
+                    local_set(tmp);
+                    local_get(tmp);
                     i32_const(0); i32_store(0);
-                    local_get(self.match_i32_base + self.match_depth);
+                    local_get(tmp);
                 });
+                self.scratch.free_i32(tmp);
             }
             Ty::Applied(TypeConstructorId::Option, _) => {
                 // none
@@ -520,16 +532,18 @@ impl FuncCompiler<'_> {
             }
             Ty::Applied(TypeConstructorId::Result, _) => {
                 // err("stub") — tag=1, value=empty string
+                let tmp = self.scratch.alloc_i32();
                 wasm!(self.func, {
                     i32_const(8); call(self.emitter.rt.alloc);
-                    local_set(self.match_i32_base + self.match_depth);
-                    local_get(self.match_i32_base + self.match_depth);
+                    local_set(tmp);
+                    local_get(tmp);
                     i32_const(1); i32_store(0); // tag=err
-                    local_get(self.match_i32_base + self.match_depth);
+                    local_get(tmp);
                     i32_const(4); call(self.emitter.rt.alloc);
                     i32_store(4); // empty string at offset 4
-                    local_get(self.match_i32_base + self.match_depth);
+                    local_get(tmp);
                 });
+                self.scratch.free_i32(tmp);
             }
             Ty::Unit => { /* no value */ }
             _ => {

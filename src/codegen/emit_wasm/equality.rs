@@ -169,34 +169,36 @@ impl FuncCompiler<'_> {
 
     /// Deep list equality: [a_ptr, b_ptr] → i32
     fn emit_list_eq_deep(&mut self, elem_ty: &Ty) {
-        let s = self.match_i32_base + self.match_depth;
+        let a = self.scratch.alloc_i32();
+        let b = self.scratch.alloc_i32();
+        let i = self.scratch.alloc_i32();
         let elem_size = values::byte_size(elem_ty);
         wasm!(self.func, {
-            local_set(s + 1); // b
-            local_set(s);     // a
+            local_set(b); // b
+            local_set(a); // a
             // Same pointer → true
-            local_get(s); local_get(s + 1); i32_eq;
+            local_get(a); local_get(b); i32_eq;
             if_i32; i32_const(1);
             else_;
               // Different lengths → false
-              local_get(s); i32_load(0);
-              local_get(s + 1); i32_load(0);
+              local_get(a); i32_load(0);
+              local_get(b); i32_load(0);
               i32_ne;
               if_i32; i32_const(0);
               else_;
                 // Compare element by element
-                i32_const(0); local_set(s + 2); // i
+                i32_const(0); local_set(i); // i
                 block_empty; loop_empty;
-                  local_get(s + 2); local_get(s); i32_load(0); i32_ge_u; br_if(1);
+                  local_get(i); local_get(a); i32_load(0); i32_ge_u; br_if(1);
                   // Load a[i]
-                  local_get(s); i32_const(4); i32_add;
-                  local_get(s + 2); i32_const(elem_size as i32); i32_mul; i32_add;
+                  local_get(a); i32_const(4); i32_add;
+                  local_get(i); i32_const(elem_size as i32); i32_mul; i32_add;
         });
         self.emit_load_at(elem_ty, 0);
         // Load b[i]
         wasm!(self.func, {
-                  local_get(s + 1); i32_const(4); i32_add;
-                  local_get(s + 2); i32_const(elem_size as i32); i32_mul; i32_add;
+                  local_get(b); i32_const(4); i32_add;
+                  local_get(i); i32_const(elem_size as i32); i32_mul; i32_add;
         });
         self.emit_load_at(elem_ty, 0);
         // Compare elements (recursive)
@@ -207,7 +209,7 @@ impl FuncCompiler<'_> {
                   if_empty;
                     i32_const(0); return_;
                   end;
-                  local_get(s + 2); i32_const(1); i32_add; local_set(s + 2);
+                  local_get(i); i32_const(1); i32_add; local_set(i);
                   br(0);
                 end; end;
                 // All elements matched
@@ -215,27 +217,31 @@ impl FuncCompiler<'_> {
               end;
             end;
         });
+        self.scratch.free_i32(i);
+        self.scratch.free_i32(b);
+        self.scratch.free_i32(a);
     }
 
     /// Deep option equality: [a_ptr, b_ptr] → i32
     fn emit_option_eq_deep(&mut self, inner_ty: &Ty) {
-        let s = self.match_i32_base + self.match_depth;
+        let a = self.scratch.alloc_i32();
+        let b = self.scratch.alloc_i32();
         wasm!(self.func, {
-            local_set(s + 1); // b
-            local_set(s);     // a
+            local_set(b); // b
+            local_set(a); // a
             // Both none → true
-            local_get(s); i32_eqz; local_get(s + 1); i32_eqz; i32_and;
+            local_get(a); i32_eqz; local_get(b); i32_eqz; i32_and;
             if_i32; i32_const(1);
             else_;
               // One none → false
-              local_get(s); i32_eqz; local_get(s + 1); i32_eqz; i32_or;
+              local_get(a); i32_eqz; local_get(b); i32_eqz; i32_or;
               if_i32; i32_const(0);
               else_;
                 // Both some: compare inner values
-                local_get(s);
+                local_get(a);
         });
         self.emit_load_at(inner_ty, 0);
-        wasm!(self.func, { local_get(s + 1); });
+        wasm!(self.func, { local_get(b); });
         self.emit_load_at(inner_ty, 0);
         let inner_clone = inner_ty.clone();
         self.emit_eq_typed(&inner_clone);
@@ -243,37 +249,40 @@ impl FuncCompiler<'_> {
               end;
             end;
         });
+        self.scratch.free_i32(b);
+        self.scratch.free_i32(a);
     }
 
     /// Deep result equality: [a_ptr, b_ptr] → i32
     fn emit_result_eq_deep(&mut self, ok_ty: &Ty, err_ty: &Ty) {
-        let s = self.match_i32_base + self.match_depth;
+        let a = self.scratch.alloc_i32();
+        let b = self.scratch.alloc_i32();
         wasm!(self.func, {
-            local_set(s + 1); // b
-            local_set(s);     // a
+            local_set(b); // b
+            local_set(a); // a
             // Tags must match
-            local_get(s); i32_load(0);
-            local_get(s + 1); i32_load(0);
+            local_get(a); i32_load(0);
+            local_get(b); i32_load(0);
             i32_ne;
             if_i32; i32_const(0);
             else_;
               // Same tag. If tag==0 (ok): compare ok values
-              local_get(s); i32_load(0); i32_eqz;
+              local_get(a); i32_load(0); i32_eqz;
               if_i32;
-                local_get(s);
+                local_get(a);
         });
         self.emit_load_at(ok_ty, 4);
-        wasm!(self.func, { local_get(s + 1); });
+        wasm!(self.func, { local_get(b); });
         self.emit_load_at(ok_ty, 4);
         let ok_clone = ok_ty.clone();
         self.emit_eq_typed(&ok_clone);
         wasm!(self.func, {
               else_;
                 // tag==1 (err): compare err values
-                local_get(s);
+                local_get(a);
         });
         self.emit_load_at(err_ty, 4);
-        wasm!(self.func, { local_get(s + 1); });
+        wasm!(self.func, { local_get(b); });
         self.emit_load_at(err_ty, 4);
         let err_clone = err_ty.clone();
         self.emit_eq_typed(&err_clone);
@@ -281,22 +290,25 @@ impl FuncCompiler<'_> {
               end;
             end;
         });
+        self.scratch.free_i32(b);
+        self.scratch.free_i32(a);
     }
 
     /// Deep tuple equality: [a_ptr, b_ptr] → i32
     fn emit_tuple_eq_deep(&mut self, elems: &[Ty]) {
-        let s = self.match_i32_base + self.match_depth;
+        let a = self.scratch.alloc_i32();
+        let b = self.scratch.alloc_i32();
         wasm!(self.func, {
-            local_set(s + 1); // b
-            local_set(s);     // a
+            local_set(b); // b
+            local_set(a); // a
         });
         // Compare each field, short-circuit on mismatch
         let mut offset: u32 = 0;
         for (i, elem_ty) in elems.iter().enumerate() {
             let elem_size = values::byte_size(elem_ty);
-            wasm!(self.func, { local_get(s); });
+            wasm!(self.func, { local_get(a); });
             self.emit_load_at(elem_ty, offset);
-            wasm!(self.func, { local_get(s + 1); });
+            wasm!(self.func, { local_get(b); });
             self.emit_load_at(elem_ty, offset);
             let elem_clone = elem_ty.clone();
             self.emit_eq_typed(&elem_clone);
@@ -307,21 +319,24 @@ impl FuncCompiler<'_> {
             offset += elem_size;
         }
         // If we reach here, all fields matched. Last comparison result is on stack.
+        self.scratch.free_i32(b);
+        self.scratch.free_i32(a);
     }
 
     /// Deep record equality: [a_ptr, b_ptr] → i32
     fn emit_record_eq_deep(&mut self, fields: &[(std::string::String, Ty)]) {
-        let s = self.match_i32_base + self.match_depth;
+        let a = self.scratch.alloc_i32();
+        let b = self.scratch.alloc_i32();
         wasm!(self.func, {
-            local_set(s + 1);
-            local_set(s);
+            local_set(b);
+            local_set(a);
         });
         let mut offset: u32 = 0;
         for (i, (_, field_ty)) in fields.iter().enumerate() {
             let field_size = values::byte_size(field_ty);
-            wasm!(self.func, { local_get(s); });
+            wasm!(self.func, { local_get(a); });
             self.emit_load_at(field_ty, offset);
-            wasm!(self.func, { local_get(s + 1); });
+            wasm!(self.func, { local_get(b); });
             self.emit_load_at(field_ty, offset);
             let field_clone = field_ty.clone();
             self.emit_eq_typed(&field_clone);
@@ -330,6 +345,8 @@ impl FuncCompiler<'_> {
             }
             offset += field_size;
         }
+        self.scratch.free_i32(b);
+        self.scratch.free_i32(a);
     }
 
     pub(super) fn emit_cmp_instruction(&mut self, ty: &Ty, kind: CmpKind) {
