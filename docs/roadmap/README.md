@@ -12,7 +12,7 @@
 | [IR Verification](active/ir-verification.md) | 検証25件, CallTarget検証, Constructor型伝搬修正 | Compiler Internals |
 | [Performance Research](active/performance-research.md) | Rust との差 2.9%, Phase 0-4 | Research |
 | [Self-Contained Compiler](active/self-contained-compiler.md) | rustc 不要化: Stage 1 (LLVM直接出力) → Stage 2 (セルフホスティング) | Architecture |
-| [Direct WASM Emission](active/emit-wasm-direct.md) | wasm-gc PoC完了 (77 bytes), Phase 1以降 | Architecture |
+| [Direct WASM Emission](active/emit-wasm-direct.md) | 129/129 ✅, DCE完了, Hello World 1,028B. 残: WASI fd_read/args/file I/O | Architecture |
 | [Compiler Architecture 10/10](active/compiler-architecture-10.md) | 全領域 10/10 目標: 型チェッカー・mono・nanopass・テスト・ビルド改善 | Compiler Internals |
 
 ## 1.0 Remaining
