@@ -57,17 +57,26 @@ src/codegen/emit_wasm/
 
 ## Next Steps
 
-1. **Dead Code Elimination (DCE)** — unused runtime functions inflate binary size
-2. **fd_read** — stdin for interactive programs
-3. **args_get / environ_get** — CLI args and env vars
-4. **File I/O** — path_open/fd_read/fd_write/fd_close/fd_seek (set)
+1. **fd_read** — stdin for interactive programs
+2. **args_get / environ_get** — CLI args and env vars
+3. **File I/O** — path_open/fd_read/fd_write/fd_close/fd_seek
 
-## Binary Size
+## Done
 
-| Program | Almide | MoonBit | Ratio |
-|---------|-------:|--------:|------:|
-| Hello World | 1,195 B | 1,717 B | 1.4x |
-| FizzBuzz | 1,296 B | 13,215 B | 10.2x |
-| Fibonacci | 1,253 B | 13,186 B | 10.5x |
+- [x] 129/129 tests passing (100%)
+- [x] All stdlib modules implemented
+- [x] WASI imports (fd_write, clock_time_get, random_get, proc_exit)
+- [x] Codec auto-derive
+- [x] Dead Code Elimination (DCE)
 
-DCE implementation would reduce Hello World from current ~12-15KB (with all runtime) to ~1-2KB.
+## Binary Size (DCE後)
+
+| Program | Almide | MoonBit (wasm-gc) | Ratio |
+|---------|-------:|------------------:|------:|
+| Hello World | 1,028 B | ~8,500 B | 8.3x |
+| FizzBuzz | 1,286 B | ~8,500 B | 6.6x |
+| Fibonacci | 1,361 B | ~8,500 B | 6.2x |
+| Closure | 1,443 B | ~8,500 B | 5.9x |
+| Variant | 1,777 B | ~8,500 B | 4.8x |
+
+アロケータ・文字列処理・ランタイム全部入りの自己完結バイナリ。外部GCに依存するMoonBit wasm-gcと比較しても5-8倍小さい。
