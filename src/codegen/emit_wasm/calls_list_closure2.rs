@@ -5,7 +5,7 @@
 
 use super::FuncCompiler;
 use super::values;
-use crate::ir::{IrExpr, IrExprKind};
+use crate::ir::IrExpr;
 use crate::types::Ty;
 use wasm_encoder::ValType;
 
@@ -387,10 +387,8 @@ impl FuncCompiler<'_> {
                 let a_size = values::byte_size(&a_ty) as i32;
                 let b_size = values::byte_size(&b_ty) as i32;
                 let s = self.match_i32_base + self.match_depth;
-                // Determine return element type from fn return
-                let ret_elem_ty = if let Ty::Fn { ret, .. } = &args[2].ty {
-                    (**ret).clone()
-                } else { Ty::Int };
+                // Determine return element type from call return type (concrete)
+                let ret_elem_ty = self.list_elem_ty(&self.stub_ret_ty);
                 let out_size = values::byte_size(&ret_elem_ty) as i32;
                 let out_vt = values::ty_to_valtype(&ret_elem_ty).unwrap_or(ValType::I32);
                 // mem[0]=xs, mem[4]=ys, mem[8]=closure
@@ -642,14 +640,10 @@ impl FuncCompiler<'_> {
                     i32_load(0);
                     i32_load(0);
                 });
-                // call_indirect — predicate always returns Bool (i32)
+                // call_indirect: filter predicate signature (env: i32, elem: elem_ty) -> i32 (Bool)
                 {
                     let mut ct = vec![ValType::I32]; // env
-                    if let Ty::Fn { params, .. } = &args[1].ty {
-                        for p in params { if let Some(vt) = values::ty_to_valtype(p) { ct.push(vt); } }
-                    } else {
-                        if let Some(vt) = values::ty_to_valtype(&elem_ty) { ct.push(vt); }
-                    }
+                    if let Some(vt) = values::ty_to_valtype(&elem_ty) { ct.push(vt); }
                     let ti = self.emitter.register_type(ct, vec![ValType::I32]);
                     wasm!(self.func, { call_indirect(ti, 0); });
                 }
@@ -779,18 +773,13 @@ impl FuncCompiler<'_> {
                     i32_load(0);
                     i32_load(0);
                 });
-                // Use fn params for parameter types, but derive the return
-                // type from the init value (args[1]) since fn_arg.ty.ret may
-                // be Ty::Unknown when the lambda wasn't fully inferred.
+                // Build call_indirect type from concrete types (not lambda Fn type which may have Unknown params)
+                // fold signature: (env: i32, acc: acc_ty, elem: elem_ty) -> acc_ty
                 {
                     let acc_ty = &args[1].ty;
                     let mut ct = vec![ValType::I32]; // env
-                    if let Ty::Fn { params, .. } = &args[2].ty {
-                        for p in params { if let Some(vt) = values::ty_to_valtype(p) { ct.push(vt); } }
-                    } else {
-                        if let Some(vt) = values::ty_to_valtype(acc_ty) { ct.push(vt); }
-                        if let Some(vt) = values::ty_to_valtype(&elem_ty) { ct.push(vt); }
-                    }
+                    if let Some(vt) = values::ty_to_valtype(acc_ty) { ct.push(vt); }
+                    if let Some(vt) = values::ty_to_valtype(&elem_ty) { ct.push(vt); }
                     let rt = values::ret_type(acc_ty);
                     let ti = self.emitter.register_type(ct, rt);
                     wasm!(self.func, { call_indirect(ti, 0); });
@@ -828,28 +817,9 @@ impl FuncCompiler<'_> {
         let in_elem_ty = if let Ty::Applied(_, args) = &list_arg.ty {
             args.first().cloned().unwrap_or(Ty::Int)
         } else { Ty::Int };
-        let mut out_elem_ty = if let Ty::Applied(_, args) = ret_ty {
+        let out_elem_ty = if let Ty::Applied(_, args) = ret_ty {
             args.first().cloned().unwrap_or(Ty::Int)
         } else { Ty::Int };
-        // When the return type is unresolved (TypeVar/Unknown), derive the output
-        // element type from the lambda body.  The call-site ret_ty can remain
-        // unresolved when the map result is unused or only used in a type-agnostic
-        // context, but the lambda body always carries the concrete type.
-        if matches!(&out_elem_ty, Ty::TypeVar(_) | Ty::Unknown) {
-            if let IrExprKind::Lambda { body, .. } = &fn_arg.kind {
-                if !matches!(&body.ty, Ty::TypeVar(_) | Ty::Unknown) {
-                    out_elem_ty = body.ty.clone();
-                }
-            }
-            // Also try fn_arg.ty.ret as a secondary source
-            if matches!(&out_elem_ty, Ty::TypeVar(_) | Ty::Unknown) {
-                if let Ty::Fn { ret, .. } = &fn_arg.ty {
-                    if !matches!(ret.as_ref(), Ty::TypeVar(_) | Ty::Unknown) {
-                        out_elem_ty = *ret.clone();
-                    }
-                }
-            }
-        }
         let in_size = values::byte_size(&in_elem_ty);
         let out_size = values::byte_size(&out_elem_ty);
 
@@ -926,20 +896,11 @@ impl FuncCompiler<'_> {
         });
         // Stack: [dst_elem_addr, env_ptr, element, table_idx]
 
-        // call_indirect (env, element) → result
-        // Use fn_arg.ty params for accurate parameter types when available,
-        // but always derive the return type from out_elem_ty (the call-site
-        // return type) because fn_arg.ty.ret can be Ty::Unknown when the
-        // lambda's return type wasn't fully inferred.
+        // call_indirect: map signature (env: i32, elem: in_elem_ty) -> out_elem_ty
+        // Always use concrete types from list/return type, not lambda Fn type (which may have Unknown params)
         {
             let mut ct = vec![ValType::I32]; // env
-            if let Ty::Fn { params, .. } = &fn_arg.ty {
-                for p in params {
-                    if let Some(vt) = values::ty_to_valtype(p) { ct.push(vt); }
-                }
-            } else {
-                if let Some(vt) = values::ty_to_valtype(&in_elem_ty) { ct.push(vt); }
-            }
+            if let Some(vt) = values::ty_to_valtype(&in_elem_ty) { ct.push(vt); }
             let rt = values::ret_type(&out_elem_ty);
             let ti = self.emitter.register_type(ct, rt);
             wasm!(self.func, { call_indirect(ti, 0); });
