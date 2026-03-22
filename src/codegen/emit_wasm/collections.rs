@@ -337,21 +337,26 @@ impl FuncCompiler<'_> {
 
     /// Emit a field access: load from record/variant pointer + field offset.
     pub(super) fn emit_member(&mut self, object: &IrExpr, field: &str) {
-        // If object is a Var, check VarTable for a more concrete type than the
-        // expression node's type (which may be stale OpenRecord/TypeVar/Unknown
-        // from generic monomorphization).
+        // Resolve object type for field offset calculation.
+        // Priority: VarTable (for Var), then object.ty.
+        // For chained member access (e.g. app.config.port), the intermediate
+        // Member expr may have the parent type instead of the field result type.
         let resolved_ty = if let crate::ir::IrExprKind::Var { id } = &object.kind {
             let vt_ty = &self.var_table.get(*id).ty;
             if matches!(&object.ty, Ty::OpenRecord { .. } | Ty::TypeVar(_) | Ty::Unknown) && !matches!(vt_ty, Ty::OpenRecord { .. } | Ty::TypeVar(_) | Ty::Unknown) {
-                vt_ty
+                vt_ty.clone()
             } else {
-                &object.ty
+                object.ty.clone()
             }
+        } else if let crate::ir::IrExprKind::Member { object: inner_obj, field: inner_field } = &object.kind {
+            // Chained member: resolve the intermediate type from the inner object's fields
+            let inner_ty = self.resolve_member_result_type(inner_obj, inner_field);
+            if !matches!(inner_ty, Ty::Unknown) { inner_ty } else { object.ty.clone() }
         } else {
-            &object.ty
+            object.ty.clone()
         };
-        let fields = self.extract_record_fields(resolved_ty);
-        let tag_offset = self.variant_tag_offset(resolved_ty);
+        let fields = self.extract_record_fields(&resolved_ty);
+        let tag_offset = self.variant_tag_offset(&resolved_ty);
 
         self.emit_expr(object);
 
@@ -360,6 +365,24 @@ impl FuncCompiler<'_> {
             self.emit_load_at(&field_ty, total_offset);
         } else {
             wasm!(self.func, { unreachable; });
+        }
+    }
+
+    /// Resolve the result type of a member access (obj.field) for chained access.
+    fn resolve_member_result_type(&self, object: &IrExpr, field: &str) -> Ty {
+        let obj_ty = if let crate::ir::IrExprKind::Var { id } = &object.kind {
+            let vt_ty = &self.var_table.get(*id).ty;
+            if !matches!(vt_ty, Ty::Unknown | Ty::TypeVar(_)) { vt_ty.clone() } else { object.ty.clone() }
+        } else if let crate::ir::IrExprKind::Member { object: inner, field: inner_f } = &object.kind {
+            self.resolve_member_result_type(inner, inner_f)
+        } else {
+            object.ty.clone()
+        };
+        let fields = self.extract_record_fields(&obj_ty);
+        if let Some((_, field_ty)) = values::field_offset(&fields, field) {
+            field_ty
+        } else {
+            Ty::Unknown
         }
     }
 }
