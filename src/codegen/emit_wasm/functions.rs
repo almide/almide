@@ -55,12 +55,15 @@ pub fn compile_function(
     let wasm_func = Function::new(local_decls);
 
     // Compile the body
+    let mut scratch_alloc = super::scratch::ScratchAllocator::new();
+    scratch_alloc.set_bases(match_i32_base, match_i64_base, match_i32_base + scan.scratch_depth as u32);
     let mut compiler = FuncCompiler {
         emitter,
         func: wasm_func,
         var_map,
         depth: 0,
         loop_stack: Vec::new(),
+        scratch: scratch_alloc,
         match_i64_base,
         match_i32_base,
         match_depth: 0,

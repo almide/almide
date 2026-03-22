@@ -253,12 +253,15 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
 
         // Compile body
         let compiled_func = {
+            let mut scratch_alloc = super::scratch::ScratchAllocator::new();
+            scratch_alloc.set_bases(match_i32_base, match_i64_base, match_i32_base + scratch_depth as u32);
             let mut compiler = FuncCompiler {
                 emitter: &mut *emitter,
                 func: wasm_func,
                 var_map,
                 depth: 0,
                 loop_stack: Vec::new(),
+                scratch: scratch_alloc,
                 match_i64_base,
                 match_i32_base,
                 match_depth: 0,

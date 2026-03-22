@@ -41,6 +41,7 @@ mod collections;
 mod control;
 pub mod statements;
 mod functions;
+pub mod scratch;
 
 use std::collections::HashMap;
 use wasm_encoder::{
@@ -313,7 +314,9 @@ pub struct FuncCompiler<'a> {
     pub var_map: HashMap<u32, u32>,
     pub depth: u32,
     pub loop_stack: Vec<LoopLabels>,
-    // Match/record scratch locals (one i64 + one i32 per nesting depth)
+    // Scratch local allocator (replaces match_i32_base/match_i64_base/match_depth)
+    pub scratch: scratch::ScratchAllocator,
+    // Legacy scratch (kept during migration — will be removed)
     pub match_i64_base: u32,
     pub match_i32_base: u32,
     pub match_depth: u32,
@@ -647,12 +650,15 @@ fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
 
     let wasm_func = Function::new(local_decls);
     let compiled_func = {
+        let mut scratch_alloc = scratch::ScratchAllocator::new();
+        scratch_alloc.set_bases(match_i32_base, match_i64_base, match_i32_base + scan_depth as u32);
         let mut compiler = FuncCompiler {
             emitter: &mut *emitter,
             func: wasm_func,
             var_map: HashMap::new(),
             depth: 0,
             loop_stack: Vec::new(),
+            scratch: scratch_alloc,
             match_i64_base,
             match_i32_base,
             match_depth: 0,
