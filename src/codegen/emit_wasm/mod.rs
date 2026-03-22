@@ -136,6 +136,7 @@ pub struct RuntimeFuncs {
     pub json_parse: u32,
     pub json_parse_at: u32,
     pub regex: rt_regex::RegexRuntime,
+    pub clock_time_get: u32,
 }
 
 /// Import descriptor for WASM import section.
@@ -264,6 +265,7 @@ impl WasmEmitter {
                 json_parse: 0,
                 json_parse_at: 0,
                 regex: rt_regex::RegexRuntime::default(),
+                clock_time_get: 0,
             },
             heap_ptr_global: 0,
             top_let_globals: HashMap::new(),
@@ -393,6 +395,17 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
             p == &[ValType::I32, ValType::I32, ValType::I32, ValType::I32]
                 && r == &[ValType::I32]
         }).unwrap() as u32,
+    });
+
+    // Import clock_time_get: (id: i32, precision: i64, time_ptr: i32) -> i32
+    let clock_type_idx = emitter.register_type(
+        vec![ValType::I32, ValType::I64, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "clock_time_get".to_string(),
+        type_idx: clock_type_idx,
     });
 
     // Register type declarations (record and variant field layouts)

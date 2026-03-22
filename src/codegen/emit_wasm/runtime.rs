@@ -15,6 +15,13 @@ pub fn register_runtime(emitter: &mut WasmEmitter) {
     );
     emitter.rt.fd_write = emitter.register_import(fd_write_ty);
 
+    // clock_time_get(id: i32, precision: i64, time_ptr: i32) -> i32
+    let clock_ty = emitter.register_type(
+        vec![ValType::I32, ValType::I64, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.rt.clock_time_get = emitter.register_import(clock_ty);
+
     // __alloc(size: i32) -> i32
     let alloc_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
     emitter.rt.alloc = emitter.register_func("__alloc", alloc_ty);

@@ -1256,7 +1256,23 @@ impl FuncCompiler<'_> {
                 });
             }
             "now" => {
-                wasm!(self.func, { i64_const(1711000000); });
+                // Call WASI clock_time_get(id=0 realtime, precision=0, time_ptr)
+                // Returns nanoseconds as i64 at time_ptr, convert to seconds
+                let time_ptr = self.scratch.alloc_i32();
+                wasm!(self.func, {
+                    // Allocate 8 bytes for the i64 result
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(time_ptr);
+                    // clock_time_get(id=0, precision=0, time_ptr)
+                    i32_const(0); // clock_id: realtime
+                    i64_const(0); // precision
+                    local_get(time_ptr); // output pointer
+                    call(self.emitter.rt.clock_time_get);
+                    drop; // discard error code
+                    // Load i64 nanoseconds, convert to seconds
+                    local_get(time_ptr); i64_load(0);
+                    i64_const(1000000000); i64_div_u;
+                });
+                self.scratch.free_i32(time_ptr);
             }
             "add_days" => {
                 self.emit_expr(&args[0]);
