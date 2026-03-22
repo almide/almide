@@ -244,7 +244,17 @@ impl FuncCompiler<'_> {
             i32_const(0); local_set(pos);
 
             block_empty; loop_empty;
-                local_get(pos); local_get(text_len); i32_gt_u; br_if(1);
+                // Append rest and break if pos >= text_len
+                local_get(pos); local_get(text_len); i32_ge_u;
+                if_empty;
+                    local_get(text); local_get(pos); local_get(text_len);
+                    call(self.emitter.rt.string.slice);
+                    local_set(segment);
+                    local_get(result); local_get(segment);
+                    call(self.emitter.rt.concat_str);
+                    local_set(result);
+                    br(2); // break out of block
+                end;
 
                 local_get(pat); local_get(text); local_get(pos);
                 call(self.emitter.rt.regex.match_search);
@@ -258,7 +268,7 @@ impl FuncCompiler<'_> {
                     local_get(result); local_get(segment);
                     call(self.emitter.rt.concat_str);
                     local_set(result);
-                    br(1);
+                    br(2); // break out of block
                 end;
 
                 global_get(self.emitter.rt.regex.match_start_global);
@@ -381,7 +391,17 @@ impl FuncCompiler<'_> {
             i32_const(0); local_set(pos);
 
             block_empty; loop_empty;
-                local_get(pos); local_get(text_len); i32_gt_u; br_if(1);
+                local_get(pos); local_get(text_len); i32_ge_u;
+                if_empty;
+                    // pos >= text_len: add rest and break
+                    local_get(text); local_get(pos); local_get(text_len);
+                    call(self.emitter.rt.string.slice);
+                    local_set(segment);
+                    local_get(buf); local_get(count); i32_const(4); i32_mul; i32_add;
+                    local_get(segment); i32_store(0);
+                    local_get(count); i32_const(1); i32_add; local_set(count);
+                    br(2);
+                end;
                 local_get(count); i32_const(255); i32_ge_u; br_if(1);
 
                 local_get(pat); local_get(text); local_get(pos);
@@ -396,7 +416,7 @@ impl FuncCompiler<'_> {
                     local_get(buf); local_get(count); i32_const(4); i32_mul; i32_add;
                     local_get(segment); i32_store(0);
                     local_get(count); i32_const(1); i32_add; local_set(count);
-                    br(1);
+                    br(2); // break out of block (0=if, 1=loop, 2=block)
                 end;
 
                 global_get(self.emitter.rt.regex.match_start_global);
