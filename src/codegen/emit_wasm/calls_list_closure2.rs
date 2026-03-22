@@ -604,9 +604,8 @@ impl FuncCompiler<'_> {
                 return true;
             }
             "shuffle" => {
-                // shuffle(xs) → List[A]
-                // Requires randomness source. Stub for now.
-                self.emit_stub_call(args);
+                // shuffle(xs) → List[A]: delegate to random.shuffle implementation
+                self.emit_random_call("shuffle", args);
                 return true;
             }
             "filter" => {

@@ -397,6 +397,28 @@ macro_rules! wasm {
     (@emit $f:expr, nop; $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::Nop); wasm!(@emit $f, $($rest)*)
     };
+    // ── Bitwise (i64) ──
+    (@emit $f:expr, i64_shl; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I64Shl); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, i64_shr_u; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I64ShrU); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, i64_xor; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I64Xor); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, i64_rem_u; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I64RemU); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, i64_eqz; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I64Eqz); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, f64_convert_i64_u; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::F64ConvertI64U); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, f64_const($v:expr); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::F64Const($v)); wasm!(@emit $f, $($rest)*)
+    };
     (@emit $f:expr, memory_grow(0); $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::MemoryGrow(0)); wasm!(@emit $f, $($rest)*)
     };
