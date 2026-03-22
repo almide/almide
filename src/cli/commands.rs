@@ -188,6 +188,8 @@ pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>) {
         let mut ir_program = almide::lower::lower_program(&program, &checker.expr_types, &checker.env);
         almide::optimize::optimize_program(&mut ir_program);
         almide::mono::monomorphize(&mut ir_program);
+        almide::codegen::pass_tco::TailCallOptPass
+            .run(&mut ir_program, almide::codegen::pass::Target::Rust);
         almide::codegen::pass_result_propagation::ResultPropagationPass
             .run(&mut ir_program, almide::codegen::pass::Target::Rust);
 

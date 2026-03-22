@@ -23,6 +23,7 @@ use super::pass_stdlib_lowering::StdlibLoweringPass;
 use super::pass_match_subject::MatchSubjectPass;
 use super::pass_effect_inference::EffectInferencePass;
 use super::pass_stream_fusion::StreamFusionPass;
+use super::pass_tco::TailCallOptPass;
 use super::template::TemplateSet;
 
 /// Full configuration for a codegen target.
@@ -46,6 +47,8 @@ pub fn configure(target: Target) -> TargetConfig {
 fn build_pipeline(target: Target) -> Pipeline {
     match target {
         Target::Rust => Pipeline::new()
+            // TCO: convert self-recursive tail calls to loops (before any lowering)
+            .add(TailCallOptPass)
             // Global passes
             .add(TypeConcretizationPass)
             // Stream fusion BEFORE borrow/clone (decorators break pattern matching)
@@ -67,6 +70,8 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(FanLoweringPass),
 
         Target::TypeScript | Target::JavaScript => Pipeline::new()
+            // TCO: convert self-recursive tail calls to loops
+            .add(TailCallOptPass)
             // Analysis passes
             .add(EffectInferencePass)
             .add(StreamFusionPass)
@@ -80,12 +85,14 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(FanLoweringPass),
 
         Target::Go => Pipeline::new()
+            .add(TailCallOptPass)
             // Go-specific passes will go here
             // .add(ResultToTuplePass)
             // .add(GoroutineLoweringPass)
             .add(FanLoweringPass),
 
         Target::Python => Pipeline::new()
+            .add(TailCallOptPass)
             // Python-specific passes will go here
             .add(OptionErasurePass)
             // .add(ResultToExceptionPass)
