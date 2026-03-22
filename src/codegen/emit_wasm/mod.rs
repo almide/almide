@@ -35,6 +35,10 @@ mod calls_lambda;
 mod calls_map;
 mod calls_map_closure;
 mod calls_set;
+mod calls_value;
+mod calls_regex;
+mod rt_value;
+pub(crate) mod rt_regex;
 mod closures;
 mod equality;
 mod collections;
@@ -128,6 +132,13 @@ pub struct RuntimeFuncs {
     pub math_log2: u32,
     pub math_exp: u32,
     pub string: StringRuntime,
+    pub value_stringify: u32,
+    pub json_parse: u32,
+    pub json_parse_at: u32,
+    pub regex: rt_regex::RegexRuntime,
+    pub clock_time_get: u32,
+    pub proc_exit: u32,
+    pub random_get: u32,
 }
 
 /// Import descriptor for WASM import section.
@@ -209,6 +220,7 @@ pub struct LambdaInfo {
     pub closure_type_idx: u32,
     pub captures: Vec<(crate::ir::VarId, crate::types::Ty)>,
     pub param_ids: Vec<u32>,
+    pub lambda_id: Option<u32>,
 }
 
 impl WasmEmitter {
@@ -251,6 +263,13 @@ impl WasmEmitter {
                     is_whitespace: 0, is_upper: 0, is_lower: 0,
                     cmp: 0,
                 },
+                value_stringify: 0,
+                json_parse: 0,
+                json_parse_at: 0,
+                regex: rt_regex::RegexRuntime::default(),
+                clock_time_get: 0,
+                proc_exit: 0,
+                random_get: 0,
             },
             heap_ptr_global: 0,
             top_let_globals: HashMap::new(),
@@ -380,6 +399,36 @@ pub fn emit(program: &IrProgram) -> Vec<u8> {
             p == &[ValType::I32, ValType::I32, ValType::I32, ValType::I32]
                 && r == &[ValType::I32]
         }).unwrap() as u32,
+    });
+
+    // Import clock_time_get: (id: i32, precision: i64, time_ptr: i32) -> i32
+    let clock_type_idx = emitter.register_type(
+        vec![ValType::I32, ValType::I64, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "clock_time_get".to_string(),
+        type_idx: clock_type_idx,
+    });
+
+    // Import proc_exit: (code: i32) -> ()
+    let proc_exit_type_idx = emitter.register_type(vec![ValType::I32], vec![]);
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "proc_exit".to_string(),
+        type_idx: proc_exit_type_idx,
+    });
+
+    // Import random_get: (buf: i32, len: i32) -> i32
+    let random_get_type_idx = emitter.register_type(
+        vec![ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "random_get".to_string(),
+        type_idx: random_get_type_idx,
     });
 
     // Register type declarations (record and variant field layouts)
@@ -592,7 +641,7 @@ fn assemble(emitter: &WasmEmitter) -> Vec<u8> {
     // ── Memory section ──
     let mut memory = MemorySection::new();
     memory.memory(MemoryType {
-        minimum: 16,
+        minimum: 64, // 4MB
         maximum: None,
         memory64: false,
         shared: false,

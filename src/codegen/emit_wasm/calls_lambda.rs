@@ -36,18 +36,33 @@ impl FuncCompiler<'_> {
     }
 
     /// Emit a lambda as a closure: allocate env + closure on heap.
-    pub(super) fn emit_lambda_closure(&mut self, _params: &[(VarId, Ty)], _body: &crate::ir::IrExpr) {
-        // Match lambda by param VarIds (deterministic, order-independent of scan)
-        let param_key: Vec<u32> = _params.iter().map(|(vid, _)| vid.0).collect();
-        let lambda_idx = self.emitter.lambdas.iter().enumerate()
-            .find(|(_, info)| info.param_ids == param_key)
-            .map(|(i, _)| i);
+    pub(super) fn emit_lambda_closure(&mut self, _params: &[(VarId, Ty)], _body: &crate::ir::IrExpr, lambda_id: Option<u32>) {
+        // Match lambda by lambda_id first (if available), then fall back to param VarIds
+        let counter = self.emitter.lambda_counter.get();
+        let lambda_idx = if let Some(lid) = lambda_id {
+            // Match by lambda_id (unique, no skip needed)
+            self.emitter.lambdas.iter().enumerate()
+                .find(|(_, info)| info.lambda_id == Some(lid))
+                .map(|(i, _)| i)
+        } else {
+            None
+        }.or_else(|| {
+            // Fall back to param VarIds matching (skip counter for ordering)
+            let param_key: Vec<u32> = _params.iter().map(|(vid, _)| vid.0).collect();
+            self.emitter.lambdas.iter().enumerate()
+                .skip(counter)
+                .find(|(_, info)| info.param_ids == param_key)
+                .map(|(i, _)| i)
+        });
 
         let lambda_idx = match lambda_idx {
-            Some(i) => i,
+            Some(i) => {
+                self.emitter.lambda_counter.set(i + 1);
+                i
+            }
             None => {
-                // Fallback to counter (for compatibility)
-                let idx = self.emitter.lambda_counter.get();
+                // Fallback: use counter directly
+                let idx = counter;
                 self.emitter.lambda_counter.set(idx + 1);
                 if idx >= self.emitter.lambdas.len() {
                     wasm!(self.func, { unreachable; });

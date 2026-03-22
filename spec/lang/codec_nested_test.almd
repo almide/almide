@@ -1,5 +1,5 @@
 module weather_test
-// wasm:skip
+// wasm:enabled
 
 type Coord: Codec = { lon: Float, lat: Float }
 type Wind: Codec = { speed: Float, deg: Int }

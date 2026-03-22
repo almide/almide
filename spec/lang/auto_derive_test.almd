@@ -1,5 +1,5 @@
 module auto_derive_test
-// wasm:skip
+// wasm:enabled
 
 // ── Eq derive on records ──
 

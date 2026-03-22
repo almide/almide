@@ -77,10 +77,25 @@ impl FuncCompiler<'_> {
                     crate::ir::IrExprKind::Break | crate::ir::IrExprKind::Continue => {
                         self.emit_expr(else_);
                     }
-                    // ResultOk/ResultErr in guard: return from function (effect fn early return)
-                    crate::ir::IrExprKind::ResultOk { .. } | crate::ir::IrExprKind::ResultErr { .. } => {
-                        self.emit_expr(else_);
-                        wasm!(self.func, { return_; });
+                    // ResultOk/ResultErr in guard
+                    crate::ir::IrExprKind::ResultOk { expr: inner } | crate::ir::IrExprKind::ResultErr { expr: inner } => {
+                        // ok(()) inside do block → break out of loop (not function return)
+                        let is_unit_ok = matches!(&else_.kind, crate::ir::IrExprKind::ResultOk { .. })
+                            && matches!(&inner.ty, crate::types::Ty::Unit);
+                        if is_unit_ok && self.loop_stack.last().is_some() {
+                            // Emit the ok(()) but then break out of the do block loop
+                            self.emit_expr(else_);
+                            if super::values::ty_to_valtype(&else_.ty).is_some() {
+                                wasm!(self.func, { drop; });
+                            }
+                            let labels = self.loop_stack.last().unwrap();
+                            let relative = self.depth - labels.break_depth - 1;
+                            wasm!(self.func, { br(relative); });
+                        } else {
+                            // Non-unit ok/err → return from function
+                            self.emit_expr(else_);
+                            wasm!(self.func, { return_; });
+                        }
                     }
                     // Other expressions
                     _ => {
@@ -193,7 +208,18 @@ impl FuncCompiler<'_> {
                     }
                 }
             }
-            IrStmtKind::MapInsert { .. } => {
+            IrStmtKind::MapInsert { target, key, value } => {
+                // m[k] = v  →  target = map.set(target, key, value)
+                if let Some(&local_idx) = self.var_map.get(&target.0) {
+                    // Emit map.set(target, key, value) using the existing map call infrastructure
+                    let set_args = vec![
+                        crate::ir::IrExpr { kind: crate::ir::IrExprKind::Var { id: *target }, ty: self.var_table.get(*target).ty.clone(), span: None },
+                        key.clone(),
+                        value.clone(),
+                    ];
+                    self.emit_map_call("set", &set_args);
+                    wasm!(self.func, { local_set(local_idx); });
+                }
             }
         }
     }
@@ -227,6 +253,25 @@ fn infer_bind_type(expr: &IrExpr) -> Ty {
                 BinOp::Eq | BinOp::Neq | BinOp::Lt | BinOp::Gt | BinOp::Lte | BinOp::Gte
                 | BinOp::And | BinOp::Or => Ty::Bool,
                 BinOp::ConcatList => Ty::Unknown,
+            }
+        }
+        // Try: unwrap inner type
+        IrExprKind::Try { expr: inner } => {
+            infer_bind_type(inner)
+        }
+        // Call: infer return type from module+func name
+        IrExprKind::Call { target, .. } => {
+            match target {
+                crate::ir::CallTarget::Module { module, func } => {
+                    match (module.as_str(), func.as_str()) {
+                        ("random", "int") | ("datetime", _)
+                        | ("env", "unix_timestamp") | ("env", "millis")
+                        | ("list", "len") | ("string", "len") | ("map", "len") => Ty::Int,
+                        ("random", "float") => Ty::Float,
+                        _ => Ty::Unknown,
+                    }
+                }
+                _ => Ty::Unknown,
             }
         }
         _ => Ty::Unknown,
@@ -342,10 +387,21 @@ fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::
 fn scan_stmt(stmt: &IrStmt, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::VarTable) {
     match &stmt.kind {
         IrStmtKind::Bind { var, ty, value, .. } => {
-            // Resolve bind type: prefer value.ty, then stmt ty.
-            // If both are Unknown, infer from value's IR structure.
-            let resolved_ty = if !matches!(&value.ty, Ty::Unknown | Ty::TypeVar(_)) {
+            // Resolve bind type.
+            // For Try(Call(...)) (effect fn unwrap), use the Result's inner type, not Result itself.
+            let effective_ty = if let IrExprKind::Try { expr: inner } = &value.kind {
+                if let Ty::Applied(crate::types::constructor::TypeConstructorId::Result, args) = &value.ty {
+                    args.first().cloned().unwrap_or(value.ty.clone())
+                } else if let Ty::Applied(crate::types::constructor::TypeConstructorId::Result, args) = &inner.ty {
+                    args.first().cloned().unwrap_or(value.ty.clone())
+                } else {
+                    value.ty.clone()
+                }
+            } else {
                 value.ty.clone()
+            };
+            let resolved_ty = if !matches!(&effective_ty, Ty::Unknown | Ty::TypeVar(_)) {
+                effective_ty
             } else if !matches!(ty, Ty::Unknown | Ty::TypeVar(_)) {
                 ty.clone()
             } else {

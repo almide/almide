@@ -15,6 +15,24 @@ pub fn register_runtime(emitter: &mut WasmEmitter) {
     );
     emitter.rt.fd_write = emitter.register_import(fd_write_ty);
 
+    // clock_time_get(id: i32, precision: i64, time_ptr: i32) -> i32
+    let clock_ty = emitter.register_type(
+        vec![ValType::I32, ValType::I64, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.rt.clock_time_get = emitter.register_import(clock_ty);
+
+    // proc_exit(code: i32) -> !
+    let proc_exit_ty = emitter.register_type(vec![ValType::I32], vec![]);
+    emitter.rt.proc_exit = emitter.register_import(proc_exit_ty);
+
+    // random_get(buf: i32, len: i32) -> i32
+    let random_get_ty = emitter.register_type(
+        vec![ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.rt.random_get = emitter.register_import(random_get_ty);
+
     // __alloc(size: i32) -> i32
     let alloc_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
     emitter.rt.alloc = emitter.register_func("__alloc", alloc_ty);
@@ -104,6 +122,12 @@ pub fn register_runtime(emitter: &mut WasmEmitter) {
     // String stdlib runtime (delegated to rt_string module)
     super::rt_string::register(emitter);
 
+    // Value/JSON runtime
+    super::rt_value::register(emitter);
+
+    // Regex runtime
+    super::rt_regex::register(emitter);
+
     // Global: __heap_ptr (mutable i32, initialized at assembly time)
     emitter.heap_ptr_global = 0; // first and only global
 }
@@ -136,6 +160,10 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     super::rt_numeric::compile_math_exp(emitter);
     // String stdlib runtime (delegated)
     super::rt_string::compile(emitter);
+    // Value/JSON runtime
+    super::rt_value::compile(emitter);
+    // Regex runtime
+    super::rt_regex::compile(emitter);
 }
 
 /// __alloc(size: i32) -> i32

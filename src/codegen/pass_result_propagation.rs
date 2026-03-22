@@ -165,9 +165,10 @@ fn insert_try(expr: IrExpr, in_match_subject: bool) -> IrExpr {
         },
         // Don't recurse into lambdas — they are independent scopes,
         // not part of the effect fn's error propagation chain.
-        IrExprKind::Lambda { params, body } => IrExprKind::Lambda {
+        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
             params,
             body,
+            lambda_id,
         },
         IrExprKind::List { elements } => IrExprKind::List {
             elements: elements.into_iter().map(|e| insert_try(e, false)).collect(),

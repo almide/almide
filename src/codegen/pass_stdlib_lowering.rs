@@ -190,8 +190,8 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
         IrExprKind::UnOp { op, operand } => IrExprKind::UnOp {
             op, operand: Box::new(rewrite_expr(*operand)),
         },
-        IrExprKind::Lambda { params, body } => IrExprKind::Lambda {
-            params, body: Box::new(rewrite_expr(*body)),
+        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
+            params, body: Box::new(rewrite_expr(*body)), lambda_id,
         },
         IrExprKind::List { elements } => IrExprKind::List {
             elements: elements.into_iter().map(|e| rewrite_expr(e)).collect(),
@@ -396,8 +396,8 @@ fn resolve_unresolved_ufcs(expr: IrExpr, siblings: &[String]) -> IrExpr {
             left: Box::new(resolve_unresolved_ufcs(*left, siblings)),
             right: Box::new(resolve_unresolved_ufcs(*right, siblings)),
         },
-        IrExprKind::Lambda { params, body } => IrExprKind::Lambda {
-            params, body: Box::new(resolve_unresolved_ufcs(*body, siblings)),
+        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
+            params, body: Box::new(resolve_unresolved_ufcs(*body, siblings)), lambda_id,
         },
         IrExprKind::List { elements } => IrExprKind::List {
             elements: elements.into_iter().map(|e| resolve_unresolved_ufcs(e, siblings)).collect(),
@@ -492,7 +492,7 @@ fn decorate_arg(arg: IrExpr, transform: ArgTransform) -> IrExpr {
         ArgTransform::LambdaClone => {
             // Lambda: add clone bindings for each param
             match arg.kind {
-                IrExprKind::Lambda { params, body } => {
+                IrExprKind::Lambda { params, body, lambda_id } => {
                     let clone_stmts: Vec<IrStmt> = params.iter()
                         .filter(|(_, t)| !matches!(t, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit))
                         .map(|(id, param_ty)| {
@@ -533,7 +533,7 @@ fn decorate_arg(arg: IrExpr, transform: ArgTransform) -> IrExpr {
                     };
 
                     IrExpr {
-                        kind: IrExprKind::Lambda { params, body: Box::new(wrapped_body) },
+                        kind: IrExprKind::Lambda { params, body: Box::new(wrapped_body), lambda_id },
                         ty, span,
                     }
                 }
@@ -558,7 +558,7 @@ fn decorate_arg(arg: IrExpr, transform: ArgTransform) -> IrExpr {
         ArgTransform::LambdaResultWrap => {
             // Lambda with Ok(body) wrapping: callback body gets wrapped in ResultOk
             match arg.kind {
-                IrExprKind::Lambda { params, body } => {
+                IrExprKind::Lambda { params, body, lambda_id } => {
                     // Clone bindings (same as LambdaClone)
                     let clone_stmts: Vec<IrStmt> = params.iter()
                         .filter(|(_, t)| !matches!(t, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit))
@@ -606,7 +606,7 @@ fn decorate_arg(arg: IrExpr, transform: ArgTransform) -> IrExpr {
                     };
 
                     IrExpr {
-                        kind: IrExprKind::Lambda { params, body: Box::new(wrapped_body) },
+                        kind: IrExprKind::Lambda { params, body: Box::new(wrapped_body), lambda_id },
                         ty, span,
                     }
                 }
@@ -684,8 +684,8 @@ fn prefix_intra_module_calls(expr: IrExpr, mod_name: &str, siblings: &[String]) 
         IrExprKind::UnOp { op, operand } => IrExprKind::UnOp {
             op, operand: Box::new(prefix_intra_module_calls(*operand, mod_name, siblings)),
         },
-        IrExprKind::Lambda { params, body } => IrExprKind::Lambda {
-            params, body: Box::new(prefix_intra_module_calls(*body, mod_name, siblings)),
+        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
+            params, body: Box::new(prefix_intra_module_calls(*body, mod_name, siblings)), lambda_id,
         },
         IrExprKind::List { elements } => IrExprKind::List {
             elements: elements.into_iter().map(|e| prefix_intra_module_calls(e, mod_name, siblings)).collect(),

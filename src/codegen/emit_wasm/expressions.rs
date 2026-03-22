@@ -90,8 +90,8 @@ impl FuncCompiler<'_> {
             }
 
             // ── Lambda → closure [table_idx, env_ptr] ──
-            IrExprKind::Lambda { params, body } => {
-                self.emit_lambda_closure(params, body);
+            IrExprKind::Lambda { params, body, lambda_id } => {
+                self.emit_lambda_closure(params, body, *lambda_id);
             }
 
             // ── Binary operators ──
@@ -439,10 +439,64 @@ impl FuncCompiler<'_> {
             // ── Fan block (sequential fallback — no parallelism in WASM) ──
             IrExprKind::Fan { exprs } => {
                 if exprs.len() == 1 {
+                    // Single expr: emit with auto-unwrap if Result
                     self.emit_expr(&exprs[0]);
+                    if let Ty::Applied(crate::types::constructor::TypeConstructorId::Result, _) = &exprs[0].ty {
+                        let scratch = self.scratch.alloc_i32();
+                        wasm!(self.func, {
+                            local_set(scratch);
+                            local_get(scratch); i32_load(0); i32_const(0); i32_ne;
+                            if_empty; local_get(scratch); return_; end;
+                            local_get(scratch);
+                        });
+                        self.emit_load_at(&expr.ty, 4);
+                        self.scratch.free_i32(scratch);
+                    }
                 } else {
-                    // Fan with multiple exprs → Tuple of results
-                    self.emit_tuple(exprs);
+                    // Fan with multiple exprs → Tuple of unwrapped results
+                    // Each expr returns Result[T, E]. Unwrap each, build tuple of T values.
+                    let elem_types: Vec<Ty> = if let Ty::Tuple(tys) = &expr.ty {
+                        tys.clone()
+                    } else {
+                        exprs.iter().map(|e| e.ty.clone()).collect()
+                    };
+                    let total_size: u32 = elem_types.iter().map(|t| values::byte_size(t)).sum();
+                    let tuple_scratch = self.scratch.alloc_i32();
+                    wasm!(self.func, {
+                        i32_const(total_size as i32);
+                        call(self.emitter.rt.alloc);
+                        local_set(tuple_scratch);
+                    });
+                    let mut offset = 0u32;
+                    for (i, e) in exprs.iter().enumerate() {
+                        let elem_ty = elem_types.get(i).cloned().unwrap_or(Ty::Int);
+                        let elem_size = values::byte_size(&elem_ty);
+                        // Fan exprs are typically effect fn calls → Result[T, E]
+                        // Auto-unwrap: if err, return Result early; if ok, store unwrapped value
+                        let is_result = matches!(&e.ty, Ty::Applied(crate::types::constructor::TypeConstructorId::Result, _));
+                        if is_result {
+                            self.emit_expr(e);
+                            let res_scratch = self.scratch.alloc_i32();
+                            wasm!(self.func, {
+                                local_set(res_scratch);
+                                local_get(res_scratch); i32_load(0); i32_const(0); i32_ne;
+                                if_empty; local_get(res_scratch); return_; end;
+                                local_get(tuple_scratch);
+                                local_get(res_scratch);
+                            });
+                            self.emit_load_at(&elem_ty, 4);
+                            self.emit_store_at(&elem_ty, offset);
+                            self.scratch.free_i32(res_scratch);
+                        } else {
+                            // Non-Result: push tuple_ptr, emit expr, store
+                            wasm!(self.func, { local_get(tuple_scratch); });
+                            self.emit_expr(e);
+                            self.emit_store_at(&elem_ty, offset);
+                        }
+                        offset += elem_size;
+                    }
+                    wasm!(self.func, { local_get(tuple_scratch); });
+                    self.scratch.free_i32(tuple_scratch);
                 }
             }
 
@@ -782,7 +836,7 @@ impl FuncCompiler<'_> {
     }
 
     /// Best-effort type inference from IR expression structure.
-    fn infer_type_from_expr(&self, expr: &IrExpr) -> Ty {
+    pub(super) fn infer_type_from_expr(&self, expr: &IrExpr) -> Ty {
         if !matches!(expr.ty, Ty::Unknown) {
             return expr.ty.clone();
         }

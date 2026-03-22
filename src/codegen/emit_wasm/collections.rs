@@ -83,8 +83,14 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { local_get(scratch); });
                 if let Some(expr) = explicit_map.get(field_name.as_str()) {
                     self.emit_expr(expr);
-                    self.emit_store_at(&expr.ty, offset);
-                    offset += values::byte_size(&expr.ty);
+                    // Use type-definition type when expr.ty is Unknown
+                    let store_ty = if matches!(&expr.ty, Ty::Unknown | Ty::TypeVar(_)) {
+                        field_ty
+                    } else {
+                        &expr.ty
+                    };
+                    self.emit_store_at(store_ty, offset);
+                    offset += values::byte_size(store_ty);
                 } else if let Some(ctor_name) = name {
                     if let Some(default_expr) = self.emitter.default_fields.get(&(ctor_name.to_string(), field_name.clone())) {
                         let default_expr = default_expr.clone();
@@ -278,7 +284,16 @@ impl FuncCompiler<'_> {
     /// Emit a tuple construction: allocate memory, store each element sequentially.
     pub(super) fn emit_tuple(&mut self, elements: &[IrExpr]) {
         let element_types: Vec<(String, Ty)> = elements.iter().enumerate()
-            .map(|(i, e)| (format!("_{}", i), e.ty.clone()))
+            .map(|(i, e)| {
+                let ty = if matches!(&e.ty, Ty::Unknown | Ty::TypeVar(_)) {
+                    if let crate::ir::IrExprKind::Var { id } = &e.kind {
+                        let vt_ty = &self.var_table.get(*id).ty;
+                        if !matches!(vt_ty, Ty::Unknown | Ty::TypeVar(_)) { vt_ty.clone() }
+                        else { e.ty.clone() }
+                    } else { e.ty.clone() }
+                } else { e.ty.clone() };
+                (format!("_{}", i), ty)
+            })
             .collect();
         let total_size = values::record_size(&element_types);
 
@@ -292,10 +307,22 @@ impl FuncCompiler<'_> {
 
         let mut offset = 0u32;
         for elem in elements {
-            let size = values::byte_size(&elem.ty);
+            // Resolve element type: use VarTable for Var refs, infer for Unknown
+            let elem_ty = if matches!(&elem.ty, Ty::Unknown | Ty::TypeVar(_)) {
+                if let crate::ir::IrExprKind::Var { id } = &elem.kind {
+                    let vt_ty = &self.var_table.get(*id).ty;
+                    if !matches!(vt_ty, Ty::Unknown | Ty::TypeVar(_)) { vt_ty.clone() }
+                    else { self.infer_type_from_expr(elem) }
+                } else {
+                    self.infer_type_from_expr(elem)
+                }
+            } else {
+                elem.ty.clone()
+            };
+            let size = values::byte_size(&elem_ty);
             wasm!(self.func, { local_get(scratch); });
             self.emit_expr(elem);
-            self.emit_store_at(&elem.ty, offset);
+            self.emit_store_at(&elem_ty, offset);
             offset += size;
         }
 
@@ -337,21 +364,36 @@ impl FuncCompiler<'_> {
 
     /// Emit a field access: load from record/variant pointer + field offset.
     pub(super) fn emit_member(&mut self, object: &IrExpr, field: &str) {
-        // If object is a Var, check VarTable for a more concrete type than the
-        // expression node's type (which may be stale OpenRecord/TypeVar/Unknown
-        // from generic monomorphization).
+        // Resolve object type for field offset calculation.
+        // Priority: VarTable (for Var), then object.ty.
+        // For chained member access (e.g. app.config.port), the intermediate
+        // Member expr may have the parent type instead of the field result type.
         let resolved_ty = if let crate::ir::IrExprKind::Var { id } = &object.kind {
             let vt_ty = &self.var_table.get(*id).ty;
             if matches!(&object.ty, Ty::OpenRecord { .. } | Ty::TypeVar(_) | Ty::Unknown) && !matches!(vt_ty, Ty::OpenRecord { .. } | Ty::TypeVar(_) | Ty::Unknown) {
-                vt_ty
+                vt_ty.clone()
             } else {
-                &object.ty
+                object.ty.clone()
             }
+        } else if let crate::ir::IrExprKind::Member { object: inner_obj, field: inner_field } = &object.kind {
+            // Chained member: resolve the intermediate type from the inner object's fields
+            let inner_ty = self.resolve_member_result_type(inner_obj, inner_field);
+            if !matches!(inner_ty, Ty::Unknown) { inner_ty } else { object.ty.clone() }
         } else {
-            &object.ty
+            object.ty.clone()
         };
-        let fields = self.extract_record_fields(resolved_ty);
-        let tag_offset = self.variant_tag_offset(resolved_ty);
+        let mut fields = self.extract_record_fields(&resolved_ty);
+        let mut tag_offset = self.variant_tag_offset(&resolved_ty);
+
+        // If fields are empty and type is Unknown, try searching record_fields for a type that has this field
+        if fields.is_empty() && matches!(&resolved_ty, Ty::Unknown | Ty::TypeVar(_)) {
+            for (name, rf) in &self.emitter.record_fields {
+                if rf.iter().any(|(n, _)| n == field) {
+                    fields = rf.clone();
+                    break;
+                }
+            }
+        }
 
         self.emit_expr(object);
 
@@ -360,6 +402,24 @@ impl FuncCompiler<'_> {
             self.emit_load_at(&field_ty, total_offset);
         } else {
             wasm!(self.func, { unreachable; });
+        }
+    }
+
+    /// Resolve the result type of a member access (obj.field) for chained access.
+    fn resolve_member_result_type(&self, object: &IrExpr, field: &str) -> Ty {
+        let obj_ty = if let crate::ir::IrExprKind::Var { id } = &object.kind {
+            let vt_ty = &self.var_table.get(*id).ty;
+            if !matches!(vt_ty, Ty::Unknown | Ty::TypeVar(_)) { vt_ty.clone() } else { object.ty.clone() }
+        } else if let crate::ir::IrExprKind::Member { object: inner, field: inner_f } = &object.kind {
+            self.resolve_member_result_type(inner, inner_f)
+        } else {
+            object.ty.clone()
+        };
+        let fields = self.extract_record_fields(&obj_ty);
+        if let Some((_, field_ty)) = values::field_offset(&fields, field) {
+            field_ty
+        } else {
+            Ty::Unknown
         }
     }
 }

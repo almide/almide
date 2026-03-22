@@ -89,9 +89,10 @@ fn rewrite_expr(expr: IrExpr, vt: &mut VarTable) -> IrExpr {
             args: args.into_iter().map(|a| rewrite_expr(a, vt)).collect(),
             type_args,
         },
-        IrExprKind::Lambda { params, body } => IrExprKind::Lambda {
+        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
             params,
             body: Box::new(rewrite_expr(*body, vt)),
+            lambda_id,
         },
         IrExprKind::OptionSome { expr: inner } => IrExprKind::OptionSome {
             expr: Box::new(rewrite_expr(*inner, vt)),

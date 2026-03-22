@@ -252,7 +252,15 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                     all_args.extend(args.iter().map(|a| lower_expr(ctx, a)));
                     let target = lower_call_target(ctx, callee);
                     let ta = type_args.as_ref().map(|tas| tas.iter().map(|t| resolve_type_expr(t)).collect()).unwrap_or_default();
-                    ctx.mk(IrExprKind::Call { target, args: all_args, type_args: ta }, ty, span)
+                    // If pipe result type is Unknown, try to infer from callee's return type
+                    let resolved_ty = if matches!(ty, Ty::Unknown) {
+                        if let CallTarget::Named { name } = &target {
+                            ctx.env.functions.get(name.as_str())
+                                .map(|f| f.ret.clone())
+                                .unwrap_or(ty)
+                        } else { ty }
+                    } else { ty };
+                    ctx.mk(IrExprKind::Call { target, args: all_args, type_args: ta }, resolved_ty, span)
                 }
                 // Bare function name: `a |> f` → `f(a)`
                 ast::Expr::Ident { .. } | ast::Expr::Member { .. } => {
@@ -286,7 +294,8 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             }).collect();
             let ir_body = lower_expr(ctx, body);
             ctx.pop_scope();
-            ctx.mk(IrExprKind::Lambda { params: ir_params, body: Box::new(ir_body) }, ty, span)
+            let lambda_id = Some(ctx.next_lambda_id());
+            ctx.mk(IrExprKind::Lambda { params: ir_params, body: Box::new(ir_body), lambda_id }, ty, span)
         }
 
         // ── Access ──
