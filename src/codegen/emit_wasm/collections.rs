@@ -305,15 +305,34 @@ impl FuncCompiler<'_> {
 
     /// Emit a tuple index access: load from tuple pointer + element offset.
     pub(super) fn emit_tuple_index(&mut self, object: &IrExpr, index: usize, result_ty: &Ty) {
-        // Compute offset by summing sizes of elements before `index`
-        let offset = if let Ty::Tuple(elem_types) = &object.ty {
-            elem_types.iter().take(index).map(|t| values::byte_size(t)).sum::<u32>()
+        // Resolve object type — try VarTable if object.ty is not Tuple
+        let obj_ty = if let Ty::Tuple(_) = &object.ty {
+            object.ty.clone()
+        } else if let crate::ir::IrExprKind::Var { id } = &object.kind {
+            let vt_ty = &self.var_table.get(*id).ty;
+            if let Ty::Tuple(_) = vt_ty { vt_ty.clone() } else { object.ty.clone() }
         } else {
-            0
+            object.ty.clone()
+        };
+
+        // Compute offset by summing sizes of elements before `index`
+        let (offset, elem_ty) = if let Ty::Tuple(elem_types) = &obj_ty {
+            let off = elem_types.iter().take(index).map(|t| values::byte_size(t)).sum::<u32>();
+            let ty = elem_types.get(index).cloned();
+            (off, ty)
+        } else {
+            (0, None)
+        };
+
+        // Use result_ty if concrete, otherwise fall back to tuple element type
+        let load_ty = if matches!(result_ty, Ty::Unknown | Ty::TypeVar(_)) {
+            elem_ty.as_ref().unwrap_or(result_ty)
+        } else {
+            result_ty
         };
 
         self.emit_expr(object);
-        self.emit_load_at(result_ty, offset);
+        self.emit_load_at(load_ty, offset);
     }
 
     /// Emit a field access: load from record/variant pointer + field offset.

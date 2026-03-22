@@ -360,7 +360,15 @@ impl FuncCompiler<'_> {
 
             // ── Option/Result ──
             IrExprKind::OptionSome { expr: inner } => {
-                let inner_size = values::byte_size(&inner.ty);
+                // Resolve inner type: if Unknown, infer from outer Option type or inner expr
+                let inner_ty = if matches!(inner.ty, Ty::Unknown) {
+                    if let Ty::Applied(crate::types::constructor::TypeConstructorId::Option, args) = &expr.ty {
+                        let candidate = args.first().cloned().unwrap_or(Ty::Unknown);
+                        if !matches!(candidate, Ty::Unknown) { candidate }
+                        else { self.infer_type_from_expr(inner) }
+                    } else { self.infer_type_from_expr(inner) }
+                } else { inner.ty.clone() };
+                let inner_size = values::byte_size(&inner_ty);
                 let scratch = self.scratch.alloc_i32();
                 wasm!(self.func, {
                     i32_const(inner_size as i32);
@@ -369,7 +377,7 @@ impl FuncCompiler<'_> {
                     local_get(scratch);
                 });
                 self.emit_expr(inner);
-                self.emit_store_at(&inner.ty, 0);
+                self.emit_store_at(&inner_ty, 0);
                 wasm!(self.func, { local_get(scratch); });
                 self.scratch.free_i32(scratch);
             }
@@ -380,7 +388,11 @@ impl FuncCompiler<'_> {
             // ── Result ok/err ──
             IrExprKind::ResultOk { expr: inner } => {
                 // ok(x) = [tag:0, value]
-                let inner_size = values::byte_size(&inner.ty);
+                // Resolve inner type: if Unknown, try to infer from the outer Result type or expr
+                let inner_ty = if matches!(inner.ty, Ty::Unknown) {
+                    self.resolve_result_inner_ty(expr, true)
+                } else { inner.ty.clone() };
+                let inner_size = values::byte_size(&inner_ty);
                 let scratch = self.scratch.alloc_i32();
                 wasm!(self.func, {
                     i32_const((4 + inner_size) as i32);
@@ -391,17 +403,20 @@ impl FuncCompiler<'_> {
                     i32_const(0);
                     i32_store(0);
                 });
-                if values::ty_to_valtype(&inner.ty).is_some() {
+                if values::ty_to_valtype(&inner_ty).is_some() {
                     wasm!(self.func, { local_get(scratch); });
                     self.emit_expr(inner);
-                    self.emit_store_at(&inner.ty, 4);
+                    self.emit_store_at(&inner_ty, 4);
                 }
                 wasm!(self.func, { local_get(scratch); });
                 self.scratch.free_i32(scratch);
             }
             IrExprKind::ResultErr { expr: inner } => {
                 // err(e) = [tag:1, value]
-                let inner_size = values::byte_size(&inner.ty);
+                let inner_ty = if matches!(inner.ty, Ty::Unknown) {
+                    self.resolve_result_inner_ty(expr, false)
+                } else { inner.ty.clone() };
+                let inner_size = values::byte_size(&inner_ty);
                 let scratch = self.scratch.alloc_i32();
                 wasm!(self.func, {
                     i32_const((4 + inner_size) as i32);
@@ -412,10 +427,10 @@ impl FuncCompiler<'_> {
                     i32_const(1);
                     i32_store(0);
                 });
-                if values::ty_to_valtype(&inner.ty).is_some() {
+                if values::ty_to_valtype(&inner_ty).is_some() {
                     wasm!(self.func, { local_get(scratch); });
                     self.emit_expr(inner);
-                    self.emit_store_at(&inner.ty, 4);
+                    self.emit_store_at(&inner_ty, 4);
                 }
                 wasm!(self.func, { local_get(scratch); });
                 self.scratch.free_i32(scratch);
@@ -739,5 +754,69 @@ pub(super) fn substitute_type_params(ty: &Ty, generic_names: &[&str], type_args:
         }
         // Recursively substitute in all other type constructors
         _ => ty.map_children(&|child| substitute_type_params(child, generic_names, type_args)),
+    }
+}
+
+impl FuncCompiler<'_> {
+    /// Resolve the inner type of a ResultOk/ResultErr when inner.ty is Unknown.
+    /// Tries: 1) outer expr.ty Result[T,E] args, 2) inner expr IR kind inference.
+    pub(super) fn resolve_result_inner_ty(&self, expr: &IrExpr, is_ok: bool) -> Ty {
+        use crate::types::constructor::TypeConstructorId;
+        // Try from outer Result type
+        if let Ty::Applied(TypeConstructorId::Result, args) = &expr.ty {
+            let candidate = if is_ok {
+                args.first().cloned().unwrap_or(Ty::Unknown)
+            } else {
+                args.get(1).cloned().unwrap_or(Ty::Unknown)
+            };
+            if !matches!(candidate, Ty::Unknown) {
+                return candidate;
+            }
+        }
+        // Fall back to inferring from inner expr
+        let inner = match &expr.kind {
+            IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e } => e,
+            _ => return Ty::Int,
+        };
+        self.infer_type_from_expr(inner)
+    }
+
+    /// Best-effort type inference from IR expression structure.
+    fn infer_type_from_expr(&self, expr: &IrExpr) -> Ty {
+        if !matches!(expr.ty, Ty::Unknown) {
+            return expr.ty.clone();
+        }
+        match &expr.kind {
+            IrExprKind::LitInt { .. } => Ty::Int,
+            IrExprKind::LitFloat { .. } => Ty::Float,
+            IrExprKind::LitBool { .. } => Ty::Bool,
+            IrExprKind::LitStr { .. } => Ty::String,
+            IrExprKind::BinOp { op, left, .. } => {
+                match op {
+                    BinOp::AddInt | BinOp::SubInt | BinOp::MulInt | BinOp::DivInt | BinOp::ModInt
+                    | BinOp::PowInt | BinOp::XorInt => Ty::Int,
+                    BinOp::AddFloat | BinOp::SubFloat | BinOp::MulFloat | BinOp::DivFloat
+                    | BinOp::ModFloat | BinOp::PowFloat => Ty::Float,
+                    BinOp::Eq | BinOp::Neq | BinOp::Lt | BinOp::Gt | BinOp::Lte | BinOp::Gte
+                    | BinOp::And | BinOp::Or => Ty::Bool,
+                    BinOp::ConcatStr => Ty::String,
+                    BinOp::ConcatList => {
+                        let lt = self.infer_type_from_expr(left);
+                        lt
+                    }
+                }
+            }
+            IrExprKind::UnOp { op, .. } => {
+                match op {
+                    UnOp::NegInt => Ty::Int,
+                    UnOp::NegFloat => Ty::Float,
+                    UnOp::Not => Ty::Bool,
+                }
+            }
+            IrExprKind::Var { id } => {
+                self.var_table.get(*id).ty.clone()
+            }
+            _ => Ty::Int, // conservative fallback
+        }
     }
 }
