@@ -5,7 +5,7 @@
 
 use super::FuncCompiler;
 use super::values;
-use crate::ir::IrExpr;
+use crate::ir::{IrExpr, IrExprKind};
 use crate::types::Ty;
 use wasm_encoder::ValType;
 
@@ -817,9 +817,28 @@ impl FuncCompiler<'_> {
         let in_elem_ty = if let Ty::Applied(_, args) = &list_arg.ty {
             args.first().cloned().unwrap_or(Ty::Int)
         } else { Ty::Int };
-        let out_elem_ty = if let Ty::Applied(_, args) = ret_ty {
+        let mut out_elem_ty = if let Ty::Applied(_, args) = ret_ty {
             args.first().cloned().unwrap_or(Ty::Int)
         } else { Ty::Int };
+        // When the return type is unresolved (TypeVar/Unknown), derive the output
+        // element type from the lambda body.  The call-site ret_ty can remain
+        // unresolved when the map result is unused or only used in a type-agnostic
+        // context, but the lambda body always carries the concrete type.
+        if matches!(&out_elem_ty, Ty::TypeVar(_) | Ty::Unknown) {
+            if let IrExprKind::Lambda { body, .. } = &fn_arg.kind {
+                if !matches!(&body.ty, Ty::TypeVar(_) | Ty::Unknown) {
+                    out_elem_ty = body.ty.clone();
+                }
+            }
+            // Also try fn_arg.ty.ret as a secondary source
+            if matches!(&out_elem_ty, Ty::TypeVar(_) | Ty::Unknown) {
+                if let Ty::Fn { ret, .. } = &fn_arg.ty {
+                    if !matches!(ret.as_ref(), Ty::TypeVar(_) | Ty::Unknown) {
+                        out_elem_ty = *ret.clone();
+                    }
+                }
+            }
+        }
         let in_size = values::byte_size(&in_elem_ty);
         let out_size = values::byte_size(&out_elem_ty);
 
