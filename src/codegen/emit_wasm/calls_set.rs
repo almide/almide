@@ -748,7 +748,93 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(s1);
                 self.scratch.free_i32(s);
             }
-            "filter" | "map" | "fold" | "any" | "all" => {
+            "map" => {
+                // set.map = list.map + dedup
+                // 1. Emit list.map (result on stack)
+                self.emit_list_closure_call("map", args);
+                // 2. Dedup the result using set.from_list logic (insert-if-not-exists)
+                // The map result type is the closure return type = element type of the new set
+                // For simplicity: use from_list which already deduplicates
+                let result_elem_ty = self.set_elem_ty(&args[0].ty); // same elem type for now
+                let es = values::byte_size(&result_elem_ty) as i32;
+                let mapped = self.scratch.alloc_i32();
+                let result = self.scratch.alloc_i32();
+                let i = self.scratch.alloc_i32();
+                let j = self.scratch.alloc_i32();
+                let found = self.scratch.alloc_i32();
+                wasm!(self.func, {
+                    local_set(mapped);
+                    // Start with empty set
+                    i32_const(4); call(self.emitter.rt.alloc); local_set(result);
+                    local_get(result); i32_const(0); i32_store(0);
+                    // For each element in mapped, insert if not present
+                    i32_const(0); local_set(i);
+                    block_empty; loop_empty;
+                      local_get(i); local_get(mapped); i32_load(0); i32_ge_u; br_if(1);
+                      // Check if mapped[i] already in result
+                      i32_const(0); local_set(j);
+                      i32_const(0); local_set(found);
+                      block_empty; loop_empty;
+                        local_get(j); local_get(result); i32_load(0); i32_ge_u; br_if(1);
+                        local_get(result); i32_const(4); i32_add;
+                        local_get(j); i32_const(es); i32_mul; i32_add;
+                });
+                self.emit_load_at(&result_elem_ty, 0);
+                wasm!(self.func, {
+                        local_get(mapped); i32_const(4); i32_add;
+                        local_get(i); i32_const(es); i32_mul; i32_add;
+                });
+                self.emit_load_at(&result_elem_ty, 0);
+                self.emit_set_elem_eq(&result_elem_ty);
+                wasm!(self.func, {
+                        if_empty; i32_const(1); local_set(found); br(2); end;
+                        local_get(j); i32_const(1); i32_add; local_set(j);
+                        br(0);
+                      end; end;
+                      local_get(found); i32_eqz;
+                      if_empty;
+                        // Not found: append to result
+                        i32_const(4); local_get(result); i32_load(0); i32_const(1); i32_add;
+                        i32_const(es); i32_mul; i32_add;
+                        call(self.emitter.rt.alloc); local_set(j); // new result
+                        local_get(j); local_get(result); i32_load(0); i32_const(1); i32_add; i32_store(0);
+                        // Copy old elements
+                        i32_const(0); local_set(found);
+                        block_empty; loop_empty;
+                          local_get(found); local_get(result); i32_load(0); i32_ge_u; br_if(1);
+                          local_get(j); i32_const(4); i32_add;
+                          local_get(found); i32_const(es); i32_mul; i32_add;
+                          local_get(result); i32_const(4); i32_add;
+                          local_get(found); i32_const(es); i32_mul; i32_add;
+                });
+                self.emit_elem_copy(&result_elem_ty);
+                wasm!(self.func, {
+                          local_get(found); i32_const(1); i32_add; local_set(found);
+                          br(0);
+                        end; end;
+                        // Copy new element
+                        local_get(j); i32_const(4); i32_add;
+                        local_get(result); i32_load(0); i32_const(es); i32_mul; i32_add;
+                        local_get(mapped); i32_const(4); i32_add;
+                        local_get(i); i32_const(es); i32_mul; i32_add;
+                });
+                self.emit_elem_copy(&result_elem_ty);
+                wasm!(self.func, {
+                        local_get(j); local_set(result);
+                      end;
+                      local_get(i); i32_const(1); i32_add; local_set(i);
+                      br(0);
+                    end; end;
+                    local_get(result);
+                });
+                self.scratch.free_i32(found);
+                self.scratch.free_i32(j);
+                self.scratch.free_i32(i);
+                self.scratch.free_i32(result);
+                self.scratch.free_i32(mapped);
+                return true;
+            }
+            "filter" | "fold" | "any" | "all" => {
                 // Set has the same memory layout as List — delegate to list implementations
                 return self.emit_list_closure_call(method, args);
             }
