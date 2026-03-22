@@ -81,6 +81,21 @@ impl FuncCompiler<'_> {
                             end;
                         });
                     }
+                    // Codec runtime value constructors (auto-derived)
+                    "almide_rt_value_null" => {
+                        self.emit_value_call("null", args);
+                    }
+                    "almide_rt_value_array" => {
+                        self.emit_value_call("array", args);
+                    }
+                    "almide_rt_value_object" => {
+                        self.emit_value_call("object", args);
+                    }
+                    "almide_rt_value_tagged_variant" => {
+                        // tagged_variant(v: Value) → (String, Value): extract tag+payload from object
+                        // Value object expected to have "tag" and "value" keys
+                        self.emit_value_tagged_variant(args);
+                    }
                     _ => {
                         // Check if this is a variant constructor
                         if let Some((tag, is_unit)) = self.find_variant_ctor_tag(name) {

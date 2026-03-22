@@ -122,8 +122,12 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { call(self.emitter.rt.value_stringify); });
             }
             "get" => {
-                // value.get(v: Value, key: String) -> Result[Value, String]
+                // value.get(v: Value, key: String) -> Option[Value] (for json.get compat)
                 self.emit_value_get(args);
+            }
+            "field" => {
+                // value.field(v: Value, key: String) -> Result[Value, String] (for Codec decode)
+                self.emit_value_field_result(args);
             }
             "as_string" => {
                 // value.as_string(v: Value) -> Result[String, String]
@@ -501,6 +505,164 @@ impl FuncCompiler<'_> {
 
         self.scratch.free_i32(i);
         self.scratch.free_i32(result);
+        self.scratch.free_i32(len);
+        self.scratch.free_i32(list);
+        self.scratch.free_i32(v);
+    }
+
+    /// value.field(v, key) -> Result[Value, String]
+    fn emit_value_field_result(&mut self, args: &[IrExpr]) {
+        let v = self.scratch.alloc_i32();
+        let key = self.scratch.alloc_i32();
+        let list = self.scratch.alloc_i32();
+        let len = self.scratch.alloc_i32();
+        let i = self.scratch.alloc_i32();
+        let pair_ptr = self.scratch.alloc_i32();
+        let result = self.scratch.alloc_i32();
+
+        self.emit_expr(&args[0]);
+        wasm!(self.func, { local_set(v); });
+        self.emit_expr(&args[1]);
+        wasm!(self.func, {
+            local_set(key);
+            local_get(v); i32_load(0); i32_const(6); i32_ne;
+            if_i32;
+        });
+        let err_msg = self.emitter.intern_string("expected object");
+        wasm!(self.func, {
+              i32_const(8); call(self.emitter.rt.alloc); local_set(result);
+              local_get(result); i32_const(1); i32_store(0);
+              local_get(result); i32_const(err_msg as i32); i32_store(4);
+              local_get(result);
+            else_;
+              local_get(v); i32_load(4); local_set(list);
+              local_get(list); i32_load(0); local_set(len);
+              i32_const(0); local_set(i);
+              i32_const(0); local_set(result);
+              block_empty; loop_empty;
+                local_get(i); local_get(len); i32_ge_u; br_if(1);
+                local_get(list); i32_const(4); i32_add;
+                local_get(i); i32_const(4); i32_mul; i32_add;
+                i32_load(0); local_set(pair_ptr);
+                local_get(pair_ptr); i32_load(0);
+                local_get(key);
+                call(self.emitter.rt.string.eq);
+                if_empty;
+                  i32_const(8); call(self.emitter.rt.alloc); local_set(result);
+                  local_get(result); i32_const(0); i32_store(0);
+                  local_get(result); local_get(pair_ptr); i32_load(4); i32_store(4);
+                  br(2);
+                end;
+                local_get(i); i32_const(1); i32_add; local_set(i);
+                br(0);
+              end; end;
+              local_get(result); i32_eqz;
+              if_empty;
+        });
+        let nf_msg = self.emitter.intern_string("key not found");
+        wasm!(self.func, {
+                i32_const(8); call(self.emitter.rt.alloc); local_set(result);
+                local_get(result); i32_const(1); i32_store(0);
+                local_get(result); i32_const(nf_msg as i32); i32_store(4);
+              end;
+              local_get(result);
+            end;
+        });
+
+        self.scratch.free_i32(result);
+        self.scratch.free_i32(pair_ptr);
+        self.scratch.free_i32(i);
+        self.scratch.free_i32(len);
+        self.scratch.free_i32(list);
+        self.scratch.free_i32(key);
+        self.scratch.free_i32(v);
+    }
+
+    /// almide_rt_value_tagged_variant(v: Value) → Result[(String, Value), String]
+    /// Extract "tag" (string) and "value" from a Value object.
+    pub(super) fn emit_value_tagged_variant(&mut self, args: &[IrExpr]) {
+        // Get "tag" key → String, get "value" key → Value
+        // Return ok((tag_str, payload_value)) or err("not a tagged variant")
+        let v = self.scratch.alloc_i32();
+        let list = self.scratch.alloc_i32();
+        let len = self.scratch.alloc_i32();
+        let i = self.scratch.alloc_i32();
+        let pair_ptr = self.scratch.alloc_i32();
+        let tag_str = self.scratch.alloc_i32();
+        let payload = self.scratch.alloc_i32();
+        let result = self.scratch.alloc_i32();
+
+        self.emit_expr(&args[0]);
+        wasm!(self.func, {
+            local_set(v);
+            i32_const(0); local_set(tag_str);
+            i32_const(0); local_set(payload);
+            // Must be object (tag 6)
+            local_get(v); i32_load(0); i32_const(6); i32_eq;
+            if_empty;
+              local_get(v); i32_load(4); local_set(list);
+              local_get(list); i32_load(0); local_set(len);
+              i32_const(0); local_set(i);
+              block_empty; loop_empty;
+                local_get(i); local_get(len); i32_ge_u; br_if(1);
+                local_get(list); i32_const(4); i32_add;
+                local_get(i); i32_const(4); i32_mul; i32_add;
+                i32_load(0); local_set(pair_ptr);
+                // Check if key == "tag"
+                local_get(pair_ptr); i32_load(0);
+        });
+        let tag_key = self.emitter.intern_string("tag");
+        wasm!(self.func, {
+                i32_const(tag_key as i32);
+                call(self.emitter.rt.string.eq);
+                if_empty;
+                  // tag_str = value payload (must be string, tag 4)
+                  local_get(pair_ptr); i32_load(4); // Value ptr
+                  i32_load(4); // string payload
+                  local_set(tag_str);
+                end;
+                // Check if key == "value"
+                local_get(pair_ptr); i32_load(0);
+        });
+        let val_key = self.emitter.intern_string("value");
+        wasm!(self.func, {
+                i32_const(val_key as i32);
+                call(self.emitter.rt.string.eq);
+                if_empty;
+                  local_get(pair_ptr); i32_load(4); local_set(payload);
+                end;
+                local_get(i); i32_const(1); i32_add; local_set(i);
+                br(0);
+              end; end;
+            end;
+            // Build Result: ok((tag_str, payload)) or err
+            local_get(tag_str); i32_eqz;
+            if_i32;
+        });
+        let err_msg = self.emitter.intern_string("not a tagged variant");
+        wasm!(self.func, {
+              i32_const(8); call(self.emitter.rt.alloc); local_set(result);
+              local_get(result); i32_const(1); i32_store(0);
+              local_get(result); i32_const(err_msg as i32); i32_store(4);
+              local_get(result);
+            else_;
+              // Build tuple (tag_str, payload)
+              i32_const(8); call(self.emitter.rt.alloc); local_set(pair_ptr); // reuse
+              local_get(pair_ptr); local_get(tag_str); i32_store(0);
+              local_get(pair_ptr); local_get(payload); i32_store(4);
+              // Build ok(tuple)
+              i32_const(8); call(self.emitter.rt.alloc); local_set(result);
+              local_get(result); i32_const(0); i32_store(0); // tag = ok
+              local_get(result); local_get(pair_ptr); i32_store(4);
+              local_get(result);
+            end;
+        });
+
+        self.scratch.free_i32(result);
+        self.scratch.free_i32(payload);
+        self.scratch.free_i32(tag_str);
+        self.scratch.free_i32(pair_ptr);
+        self.scratch.free_i32(i);
         self.scratch.free_i32(len);
         self.scratch.free_i32(list);
         self.scratch.free_i32(v);
