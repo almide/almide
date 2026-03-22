@@ -120,7 +120,7 @@ impl FuncCompiler<'_> {
                 }
             }
 
-            Ty::Variant { cases, .. } => {
+            Ty::Variant { name, cases, .. } => {
                 let has_pointers = cases.iter().any(|c| {
                     match &c.payload {
                         crate::types::VariantPayload::Tuple(ts) => ts.iter().any(|t| !self.is_value_type(t)),
@@ -129,18 +129,23 @@ impl FuncCompiler<'_> {
                     }
                 });
                 if has_pointers {
-                    // Convert to VariantCase format for emit_variant_eq_deep
-                    let case_infos: Vec<super::VariantCase> = cases.iter().enumerate().map(|(i, c)| {
-                        let fields: Vec<(String, Ty)> = match &c.payload {
-                            crate::types::VariantPayload::Tuple(ts) =>
-                                ts.iter().enumerate().map(|(j, t)| (format!("_{}", j), t.clone())).collect(),
-                            crate::types::VariantPayload::Record(fs) =>
-                                fs.iter().map(|(n, t, _)| (n.clone(), t.clone())).collect(),
-                            _ => vec![],
-                        };
-                        super::VariantCase { name: c.name.clone(), tag: i as u32, fields }
-                    }).collect();
-                    self.emit_variant_eq_deep(&case_infos, &[]);
+                    // Use pre-registered eq function if available
+                    if let Some(&eq_idx) = self.emitter.eq_funcs.get(name.as_str()) {
+                        wasm!(self.func, { call(eq_idx); });
+                    } else {
+                        // Fallback: inline (non-recursive types without pre-registration)
+                        let case_infos: Vec<super::VariantCase> = cases.iter().enumerate().map(|(i, c)| {
+                            let fields: Vec<(String, Ty)> = match &c.payload {
+                                crate::types::VariantPayload::Tuple(ts) =>
+                                    ts.iter().enumerate().map(|(j, t)| (format!("_{}", j), t.clone())).collect(),
+                                crate::types::VariantPayload::Record(fs) =>
+                                    fs.iter().map(|(n, t, _)| (n.clone(), t.clone())).collect(),
+                                _ => vec![],
+                            };
+                            super::VariantCase { name: c.name.clone(), tag: i as u32, fields }
+                        }).collect();
+                        self.emit_variant_eq_deep(&case_infos, &[]);
+                    }
                 } else {
                     let max_payload: u32 = cases.iter()
                         .map(|c| match &c.payload {
