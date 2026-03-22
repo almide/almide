@@ -1682,10 +1682,30 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(hdr_list);
                 self.scratch.free_i32(s);
             }
-            "status" => {
-                // http.status(resp) → Int
+            "status" if args.len() == 1 => {
+                // http.status(resp) → Int (getter)
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { i64_load(0); });
+            }
+            "status" if args.len() == 2 => {
+                // http.status(resp, new_status) → Response (setter)
+                let resp = self.scratch.alloc_i32();
+                let new_resp = self.scratch.alloc_i32();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(resp); });
+                wasm!(self.func, {
+                    i32_const(16); call(self.emitter.rt.alloc); local_set(new_resp);
+                    local_get(new_resp);
+                });
+                self.emit_expr(&args[1]); // new status: i64
+                wasm!(self.func, {
+                    i64_store(0);
+                    local_get(new_resp); local_get(resp); i32_load(8); i32_store(8);
+                    local_get(new_resp); local_get(resp); i32_load(12); i32_store(12);
+                    local_get(new_resp);
+                });
+                self.scratch.free_i32(new_resp);
+                self.scratch.free_i32(resp);
             }
             "body" => {
                 // http.body(resp) → String
