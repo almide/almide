@@ -658,8 +658,11 @@ impl FuncCompiler<'_> {
     }
 
     fn set_elem_ty(&self, ty: &Ty) -> Ty {
-        if let Ty::Applied(_, args) = ty {
-            args.first().cloned().unwrap_or(Ty::Int)
-        } else { Ty::Int }
+        match ty {
+            Ty::Applied(_, args) | Ty::Named(_, args) => {
+                args.first().cloned().unwrap_or(Ty::Int)
+            }
+            _ => Ty::Int,
+        }
     }
 }
