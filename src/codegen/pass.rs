@@ -35,6 +35,7 @@ pub enum Target {
     JavaScript,
     Go,
     Python,
+    Wasm,
 }
 
 // ── Target Attributes ──

@@ -107,7 +107,6 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
 
 pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>) {
     use crate::{parse_file, check, diagnostic, resolve, project, project_fetch};
-    use almide::codegen::pass::NanoPass;
 
     let test_files: Vec<String> = if !file.is_empty() {
         let path = std::path::Path::new(file);
@@ -188,10 +187,8 @@ pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>) {
         let mut ir_program = almide::lower::lower_program(&program, &checker.expr_types, &checker.env);
         almide::optimize::optimize_program(&mut ir_program);
         almide::mono::monomorphize(&mut ir_program);
-        almide::codegen::pass_tco::TailCallOptPass
-            .run(&mut ir_program, almide::codegen::pass::Target::Rust);
-        almide::codegen::pass_result_propagation::ResultPropagationPass
-            .run(&mut ir_program, almide::codegen::pass::Target::Rust);
+        let config = almide::codegen::target::configure(almide::codegen::pass::Target::Wasm);
+        config.pipeline.run(&mut ir_program, almide::codegen::pass::Target::Wasm);
 
         let bytes = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             almide::codegen::emit_wasm_binary(&ir_program)

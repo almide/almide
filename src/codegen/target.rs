@@ -97,6 +97,13 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(OptionErasurePass)
             // .add(ResultToExceptionPass)
             .add(FanLoweringPass),
+
+        Target::Wasm => Pipeline::new()
+            .add(TailCallOptPass)
+            .add(EffectInferencePass)
+            // StreamFusion not included: WASM emitter has its own lowering paths
+            .add(ResultPropagationPass)
+            .add(FanLoweringPass),
     }
 }
 
@@ -107,5 +114,6 @@ fn build_templates(target: Target) -> TemplateSet {
         Target::JavaScript => super::template::javascript_templates(),
         Target::Go => TemplateSet::new("go"),
         Target::Python => TemplateSet::new("python"),
+        Target::Wasm => TemplateSet::new("wasm"),
     }
 }
