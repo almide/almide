@@ -1,6 +1,7 @@
 //! IrStmt → WASM instruction emission + local variable pre-scanning.
 
 use crate::ir::{IrExpr, IrExprKind, IrStmt, IrStmtKind, VarId};
+use crate::types::Ty;
 use wasm_encoder::ValType;
 
 use super::FuncCompiler;
@@ -198,6 +199,40 @@ impl FuncCompiler<'_> {
     }
 }
 
+/// Infer the type of a bind value from its IR expression structure.
+/// Used when value.ty and stmt ty are both Unknown.
+fn infer_bind_type(expr: &IrExpr) -> Ty {
+    match &expr.kind {
+        IrExprKind::LitInt { .. } => Ty::Int,
+        IrExprKind::LitFloat { .. } => Ty::Float,
+        IrExprKind::LitBool { .. } => Ty::Bool,
+        IrExprKind::LitStr { .. } => Ty::String,
+        // TupleIndex: infer from parent tuple type
+        IrExprKind::TupleIndex { object, index } => {
+            if let Ty::Tuple(elems) = &object.ty {
+                elems.get(*index).cloned().unwrap_or(Ty::Unknown)
+            } else {
+                Ty::Unknown
+            }
+        }
+        // BinOp: infer from operation kind
+        IrExprKind::BinOp { op, .. } => {
+            use crate::ir::BinOp;
+            match op {
+                BinOp::AddInt | BinOp::SubInt | BinOp::MulInt | BinOp::DivInt
+                | BinOp::ModInt | BinOp::PowInt | BinOp::XorInt => Ty::Int,
+                BinOp::AddFloat | BinOp::SubFloat | BinOp::MulFloat | BinOp::DivFloat
+                | BinOp::ModFloat | BinOp::PowFloat => Ty::Float,
+                BinOp::ConcatStr => Ty::String,
+                BinOp::Eq | BinOp::Neq | BinOp::Lt | BinOp::Gt | BinOp::Lte | BinOp::Gte
+                | BinOp::And | BinOp::Or => Ty::Bool,
+                BinOp::ConcatList => Ty::Unknown,
+            }
+        }
+        _ => Ty::Unknown,
+    }
+}
+
 /// Result of pre-scanning a function body for local variables.
 pub struct LocalScanResult {
     pub binds: Vec<(VarId, ValType)>,
@@ -307,8 +342,16 @@ fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::
 fn scan_stmt(stmt: &IrStmt, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::VarTable) {
     match &stmt.kind {
         IrStmtKind::Bind { var, ty, value, .. } => {
-            let val_type = values::ty_to_valtype(&value.ty)
-                .or_else(|| values::ty_to_valtype(ty));
+            // Resolve bind type: prefer value.ty, then stmt ty.
+            // If both are Unknown, infer from value's IR structure.
+            let resolved_ty = if !matches!(&value.ty, Ty::Unknown | Ty::TypeVar(_)) {
+                value.ty.clone()
+            } else if !matches!(ty, Ty::Unknown | Ty::TypeVar(_)) {
+                ty.clone()
+            } else {
+                infer_bind_type(value)
+            };
+            let val_type = values::ty_to_valtype(&resolved_ty);
             if let Some(vt_wasm) = val_type {
                 locals.push((*var, vt_wasm));
             }
