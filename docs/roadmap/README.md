@@ -50,6 +50,7 @@
 | [LLM Integration](on-hold/llm-integration.md) | `almide forge`, `almide fix` |
 | [LLM → IR Generation](on-hold/llm-ir-generation.md) | Parser bypass |
 | [Self-Hosting](on-hold/self-hosting.md) | 350KB WASM bootstrap compiler → LLM 自律進化ループ |
+| [The Rumbling](on-hold/rumbling.md) | OSS 書き直しキャンペーン: Dogfood → WASM Showcase → Multi-Target → LLM Modification → Platform |
 
 ## On Hold — Compiler Internals
 
