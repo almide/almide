@@ -899,50 +899,40 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { i32_const(s as i32); });
             }
             "set_cookie" => {
-                // http.set_cookie(resp, name, value) → add "Set-Cookie: name=value" header
-                // Reuse set_header logic with key="Set-Cookie", value="name=value"
+                // http.set_cookie(resp, name, value) = http.set_header(resp, "Set-Cookie", "name=value")
                 let resp = self.scratch.alloc_i32();
+                let cookie_val = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(resp); });
-                let name_s = self.scratch.alloc_i32();
-                let val_s = self.scratch.alloc_i32();
-                self.emit_expr(&args[1]);
-                wasm!(self.func, { local_set(name_s); });
-                self.emit_expr(&args[2]);
-                wasm!(self.func, { local_set(val_s); });
-                // Build "name=value" string
+                // Build "name=value"
+                self.emit_expr(&args[1]); // name
                 let eq_str = self.emitter.intern_string("=");
-                wasm!(self.func, {
-                    local_get(name_s); i32_const(eq_str as i32); call(self.emitter.rt.concat_str);
-                    local_get(val_s); call(self.emitter.rt.concat_str);
-                    local_set(val_s);
-                });
-                // Now emit set_header(resp, "Set-Cookie", cookie_val)
+                wasm!(self.func, { i32_const(eq_str as i32); call(self.emitter.rt.concat_str); });
+                self.emit_expr(&args[2]); // value
+                wasm!(self.func, { call(self.emitter.rt.concat_str); local_set(cookie_val); });
+                // Build set_header args and call
                 let cookie_key = self.emitter.intern_string("Set-Cookie");
-                let fake_args = vec![
-                    crate::ir::IrExpr { kind: crate::ir::IrExprKind::Var { id: crate::ir::VarId(0) }, ty: crate::types::Ty::Unknown, span: None },
+                let set_hdr_args = vec![
+                    crate::ir::IrExpr { kind: crate::ir::IrExprKind::LitInt { value: 0 }, ty: crate::types::Ty::Int, span: None }, // placeholder
                     crate::ir::IrExpr { kind: crate::ir::IrExprKind::LitStr { value: "Set-Cookie".into() }, ty: crate::types::Ty::String, span: None },
                     crate::ir::IrExpr { kind: crate::ir::IrExprKind::LitStr { value: "".into() }, ty: crate::types::Ty::String, span: None },
                 ];
-                // Simpler: inline set_header
+                // Inline: same as set_header but with resp from scratch
                 let tuple_ptr = self.scratch.alloc_i32();
                 let new_hdrs = self.scratch.alloc_i32();
                 let old_hdrs = self.scratch.alloc_i32();
                 let new_resp = self.scratch.alloc_i32();
+                let new_len = self.scratch.alloc_i32();
+                let ci = self.scratch.alloc_i32();
                 wasm!(self.func, {
                     i32_const(8); call(self.emitter.rt.alloc); local_set(tuple_ptr);
                     local_get(tuple_ptr); i32_const(cookie_key as i32); i32_store(0);
-                    local_get(tuple_ptr); local_get(val_s); i32_store(4);
+                    local_get(tuple_ptr); local_get(cookie_val); i32_store(4);
                     local_get(resp); i32_load(12); local_set(old_hdrs);
-                    local_get(old_hdrs); i32_load(0); i32_const(1); i32_add;
-                    local_set(name_s); // reuse as new_len
-                    i32_const(4); local_get(name_s); i32_const(4); i32_mul; i32_add;
+                    local_get(old_hdrs); i32_load(0); i32_const(1); i32_add; local_set(new_len);
+                    i32_const(4); local_get(new_len); i32_const(4); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(new_hdrs);
-                    local_get(new_hdrs); local_get(name_s); i32_store(0);
-                });
-                // Copy old headers + append new
-                let ci = self.scratch.alloc_i32();
-                wasm!(self.func, {
+                    local_get(new_hdrs); local_get(new_len); i32_store(0);
                     i32_const(0); local_set(ci);
                     block_empty; loop_empty;
                       local_get(ci); local_get(old_hdrs); i32_load(0); i32_ge_u; br_if(1);
@@ -967,9 +957,9 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(new_resp);
                 self.scratch.free_i32(old_hdrs);
                 self.scratch.free_i32(new_hdrs);
+                self.scratch.free_i32(new_len);
                 self.scratch.free_i32(tuple_ptr);
-                self.scratch.free_i32(val_s);
-                self.scratch.free_i32(name_s);
+                self.scratch.free_i32(cookie_val);
                 self.scratch.free_i32(resp);
             }
             "not_found" => {
