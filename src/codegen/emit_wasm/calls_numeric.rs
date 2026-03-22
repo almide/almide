@@ -20,9 +20,17 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { i64_trunc_f64_s; });
             }
             "round" => {
-                // floor(x + 0.5) — standard rounding (half-up), not banker's rounding
+                // Round half away from zero: copysign(floor(abs(x) + 0.5), x)
+                // Use mem[0..8] as f64 scratch since no f64 local available
+                wasm!(self.func, { i32_const(0); });
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { f64_const(0.5); f64_add; f64_floor; });
+                wasm!(self.func, {
+                    f64_store(0);  // mem[0] = x
+                    i32_const(0); f64_load(0); // x
+                    f64_abs; f64_const(0.5); f64_add; f64_floor; // floor(abs(x)+0.5)
+                    i32_const(0); f64_load(0); // x (for sign)
+                    f64_copysign; // copysign(magnitude, sign)
+                });
             }
             "floor" => {
                 self.emit_expr(&args[0]);
@@ -415,28 +423,18 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { call(self.emitter.rt.math_exp); });
             }
             "log10" => {
-                // log10(x) = ln(x) / ln(10)
                 self.emit_expr(&args[0]);
                 if matches!(&args[0].ty, Ty::Int) {
                     wasm!(self.func, { f64_convert_i64_s; });
                 }
-                wasm!(self.func, {
-                    call(self.emitter.rt.math_log);
-                    f64_const(std::f64::consts::LN_10);
-                    f64_div;
-                });
+                wasm!(self.func, { call(self.emitter.rt.math_log10); });
             }
             "log2" => {
-                // log2(x) = ln(x) / ln(2)
                 self.emit_expr(&args[0]);
                 if matches!(&args[0].ty, Ty::Int) {
                     wasm!(self.func, { f64_convert_i64_s; });
                 }
-                wasm!(self.func, {
-                    call(self.emitter.rt.math_log);
-                    f64_const(std::f64::consts::LN_2);
-                    f64_div;
-                });
+                wasm!(self.func, { call(self.emitter.rt.math_log2); });
             }
             "sign" => {
                 // math.sign(n: Int) → Int (-1, 0, 1)
