@@ -714,8 +714,8 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(list_scratch);
             }
             "any" => {
-                // fan.any(fns) → Result[T, String]: first success wins
-                // Sequential: try each, return first ok
+                // fan.any(fns) → T: first success wins (unwrapped ok value)
+                // Sequential: try each, return first ok value
                 let list_scratch = self.scratch.alloc_i32();
                 let i = self.scratch.alloc_i32();
                 let res = self.scratch.alloc_i32();
@@ -726,11 +726,9 @@ impl FuncCompiler<'_> {
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(list_scratch); i32_load(0); i32_ge_u; br_if(1);
-                      // Get closure[i]
                       local_get(list_scratch); i32_const(4); i32_add;
                       local_get(i); i32_const(4); i32_mul; i32_add;
                       i32_load(0); local_set(closure);
-                      // Call closure
                       local_get(closure); i32_load(4); // env
                       local_get(closure); i32_load(0); // table_idx
                 });
@@ -740,17 +738,21 @@ impl FuncCompiler<'_> {
                 }
                 wasm!(self.func, {
                       local_set(res);
-                      // If ok (tag==0), return it
+                      // If ok (tag==0), unwrap and return value
                       local_get(res); i32_load(0); i32_eqz;
                       if_empty;
-                        local_get(res); return_;
+                        local_get(res);
+                });
+                self.emit_load_at(result_ty, 4);
+                wasm!(self.func, {
+                        return_;
                       end;
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
                 });
-                // All failed: return last error
-                wasm!(self.func, { local_get(res); });
+                // All failed: trap (no success found)
+                wasm!(self.func, { unreachable; });
                 self.scratch.free_i32(closure);
                 self.scratch.free_i32(res);
                 self.scratch.free_i32(i);
@@ -804,6 +806,22 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(result);
                 self.scratch.free_i32(list_scratch);
             }
+            "timeout" => {
+                // fan.timeout(ms, fn) → Result[T, E]: just call fn (no timeout in WASM)
+                // args[0] = ms (Int), args[1] = closure () -> Result[T, E]
+                let closure = self.scratch.alloc_i32();
+                self.emit_expr(&args[1]);
+                wasm!(self.func, {
+                    local_set(closure);
+                    local_get(closure); i32_load(4); // env
+                    local_get(closure); i32_load(0); // table_idx
+                });
+                {
+                    let ti = self.emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
+                    wasm!(self.func, { call_indirect(ti, 0); });
+                }
+                self.scratch.free_i32(closure);
+            }
             _ => {
                 self.emit_stub_call(args);
             }
@@ -824,8 +842,18 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(s);
             }
             "unix_timestamp" => {
-                // env.unix_timestamp() → Int: return 0 for now (WASI clock not implemented)
-                wasm!(self.func, { i64_const(1000000); });
+                wasm!(self.func, { i64_const(1711000000); }); // ~2024-03-21
+            }
+            "millis" => {
+                wasm!(self.func, { i64_const(1711000000000); }); // ms since epoch
+            }
+            "os" => {
+                let s = self.emitter.intern_string("wasi");
+                wasm!(self.func, { i32_const(s as i32); });
+            }
+            "temp_dir" => {
+                let s = self.emitter.intern_string("/tmp");
+                wasm!(self.func, { i32_const(s as i32); });
             }
             _ => {
                 self.emit_stub_call(args);
