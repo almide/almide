@@ -170,7 +170,6 @@ almide fmt app.almd              # Format source code
 almide clean                     # Clear dependency cache
 almide app.almd --target rust    # Emit Rust source
 almide app.almd --target ts      # Emit TypeScript source
-almide app.almd --target js      # Emit JavaScript source
 almide app.almd --emit-ast       # Emit AST as JSON
 almide app.almd --emit-ir        # Emit typed IR as JSON
 ```
