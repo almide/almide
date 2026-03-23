@@ -124,8 +124,6 @@ IMPORT REQUIRED:
   import json    — parse stringify get get_string get_int get_array keys
   import math    — sqrt pow log sin cos pi e
   import random  — int float shuffle
-  import time    — now millis sleep year month day
   import regex   — match? find find_all replace split captures
-  import encoding — base64_encode base64_decode hex_encode hex_decode
   import args    — flag? option option_or positional positional_at
 ```

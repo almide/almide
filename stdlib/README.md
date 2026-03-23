@@ -54,26 +54,18 @@ Runtime status: 230/362 functions implemented (63%). See `docs/STDLIB-SPEC.md` f
 
 | Layer | Modules | Available on |
 |-------|---------|-------------|
-| **core** | string, list, map, int, float, math, json, regex, result, error, testing, log, value | All targets including WASM |
-| **platform** | fs, process, io, env, http, random, datetime, crypto, uuid | Native only |
+| **core** | string, list, map, set, int, float, math, json, regex, result, option, error, testing, log, value | All targets including WASM |
+| **platform** | fs, process, io, env, http, random, datetime | Native only |
+| **lang** | fan | Rust (other targets TBD) |
 
-### Bundled Modules (pure Almide, 11 modules)
+### Bundled Modules (pure Almide, 2 modules)
 
-Written in Almide, embedded via `include_str!` in `src/stdlib.rs`. Compiled as regular Almide code at import time. Both Rust and TypeScript targets work automatically.
+Written in Almide, embedded via `include_str!` in `src/stdlib.rs`. Compiled as regular Almide code at import time.
 
 | Module | Description |
 |--------|-------------|
 | args | Command-line argument parsing |
-| compress | Gzip compression (delegates to system gzip) |
-| csv | CSV parse/stringify |
-| encoding | Base64, hex encoding |
-| hash | SHA-256 |
 | path | Path manipulation |
-| term | Terminal colors (ANSI) |
-| time | Date/time formatting |
-| toml | TOML parse/stringify |
-| url | URL parsing, encode/decode, query params |
-| value | Value type utilities |
 
 ## Runtime Implementation
 

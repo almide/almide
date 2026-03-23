@@ -44,8 +44,6 @@ const MOD_STRING_TS: &str = include_str!("../../runtime/ts/string.ts");
 const MOD_STRING_JS: &str = include_str!("../../runtime/js/string.js");
 const MOD_TESTING_TS: &str = include_str!("../../runtime/ts/testing.ts");
 const MOD_TESTING_JS: &str = include_str!("../../runtime/js/testing.js");
-const MOD_TIME_TS: &str = include_str!("../../runtime/ts/time.ts");
-const MOD_TIME_JS: &str = include_str!("../../runtime/js/time.js");
 const HELPERS_TS: &str = include_str!("../../runtime/ts/helpers.ts");
 const HELPERS_JS: &str = include_str!("../../runtime/js/helpers.js");
 
@@ -84,7 +82,6 @@ pub static ALL_MODULES: &[RuntimeModule] = &[
     RuntimeModule { name: "set", ts_source: MOD_SET_TS, js_source: MOD_SET_JS },
     RuntimeModule { name: "string", ts_source: MOD_STRING_TS, js_source: MOD_STRING_JS },
     RuntimeModule { name: "testing", ts_source: MOD_TESTING_TS, js_source: MOD_TESTING_JS },
-    RuntimeModule { name: "time", ts_source: MOD_TIME_TS, js_source: MOD_TIME_JS },
 ];
 
 pub fn full_runtime(js_mode: bool) -> String {
