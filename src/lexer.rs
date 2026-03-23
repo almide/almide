@@ -69,6 +69,14 @@ pub struct Lexer;
 impl Lexer {
     pub fn tokenize(src: &str) -> Vec<Token> {
         let mut tokens = Vec::new();
+        // Normalize CRLF → LF (Windows compatibility)
+        let normalized;
+        let src = if src.contains('\r') {
+            normalized = src.replace("\r\n", "\n").replace('\r', "\n");
+            &normalized
+        } else {
+            src
+        };
         let chars: Vec<char> = src.chars().collect();
         let mut pos = 0;
         let mut line = 1;
