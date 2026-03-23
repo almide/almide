@@ -11,8 +11,7 @@
 | [User Generics & Protocol](active/user-generics-and-traits.md) | Protocol System 実装中 | Phase 3 |
 | [Effect System](active/effect-system.md) | Phase 3-4 残 | Phase 3 |
 | [Performance Research](active/performance-research.md) | Rust との差 2.9% | Research |
-| [Self-Contained Compiler](active/self-contained-compiler.md) | rustc 不要化 | Architecture |
-| [HTTPS Native](active/https-native.md) | Rust target の HTTPS 対応 | Phase 1 |
+| [HTTPS Native](active/https-native.md) | rustls統合済。almide build対応+WASM残 | Phase 1 |
 | [Compiler Architecture 10/10](active/compiler-architecture-10.md) | 95/110. Phase 5-7 残 | Architecture |
 
 ## 1.0 Remaining
@@ -26,6 +25,7 @@
 
 | 項目 | 説明 | Grand Plan |
 |---|---|---|
+| [Self-Contained Compiler](on-hold/self-contained-compiler.md) | rustc 不要化 | Architecture |
 | [LSP Server](on-hold/lsp.md) | diagnostics → hover → go-to-def | Phase 3 |
 | [Incremental Compilation](on-hold/incremental-compilation.md) | rustc skip when unchanged | Phase 3 |
 | [Package Registry](on-hold/package-registry.md) | 公開パッケージ配布 | Phase 3 |
