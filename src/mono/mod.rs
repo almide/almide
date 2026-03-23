@@ -39,9 +39,10 @@ pub fn monomorphize(program: &mut IrProgram) {
     }
 
     // Fixed-point loop: transitive monomorphization (A → B → C chains)
+    // Converges when no new instances are discovered. Warns if instance count
+    // exceeds 1000 (possible infinite expansion).
     let mut all_instances: HashMap<MonoKey, HashMap<String, Ty>> = HashMap::new();
-    let max_iterations = 10;
-    for _ in 0..max_iterations {
+    loop {
         // Discover new instantiations (includes scanning previously generated specialized functions)
         let instances = discover_instances(program, &bound_fns);
 
@@ -50,6 +51,10 @@ pub fn monomorphize(program: &mut IrProgram) {
             .filter(|(k, _)| !all_instances.contains_key(k))
             .collect();
         if new.is_empty() {
+            break; // convergence: no new instances
+        }
+        if all_instances.len() + new.len() > 1000 {
+            eprintln!("[WARN] monomorphization: {}+ instances, possible infinite expansion", all_instances.len() + new.len());
             break;
         }
 
