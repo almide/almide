@@ -19,6 +19,8 @@ impl NanoPass for CloneInsertionPass {
         Some(vec![Target::Rust])
     }
 
+    fn depends_on(&self) -> Vec<&'static str> { vec!["BorrowInsertion"] }
+
     fn run(&self, program: &mut IrProgram, _target: Target) {
         let clone_ids = collect_clone_ids(&program.var_table);
         for func in &mut program.functions {
