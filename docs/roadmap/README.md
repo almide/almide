@@ -12,6 +12,7 @@
 | [Effect System](active/effect-system.md) | Phase 3-4 残: Dependency制限, 内部型レベル統合 | Phase 3 |
 | [Performance Research](active/performance-research.md) | Rust との差 2.9%, Phase 0-4 | Research |
 | [Self-Contained Compiler](active/self-contained-compiler.md) | rustc 不要化: Stage 1 (LLVM直接出力) → Stage 2 (セルフホスティング) | Architecture |
+| [Record Spread](active/record-spread.md) | `{ ...base, field = value }` でレコード更新 | Phase 1 |
 | [Compiler Architecture 10/10](active/compiler-architecture-10.md) | 全領域 10/10 + WASM統合: Target::Wasm、stdlib dispatch一元化、cross-check | Architecture |
 
 ## 1.0 Remaining
