@@ -6,11 +6,8 @@
 
 | 項目 | 説明 | Grand Plan |
 |---|---|---|
-| [Direct WASM Emission](active/emit-wasm-direct.md) | 130/130 ✅, DCE完了, Hello World 1,028B | Architecture |
-| [Test Coverage](active/test-coverage.md) | 130ファイル. Rust/WASM 100%, TS ~97% | Phase 1 |
 | [User Generics & Protocol](active/user-generics-and-traits.md) | Protocol System 実装中 | Phase 3 |
 | [Effect System](active/effect-system.md) | Phase 3-4 残 | Phase 3 |
-| [Performance Research](active/performance-research.md) | Rust との差 2.9% | Research |
 | [HTTPS Native](active/https-native.md) | rustls統合済。almide build対応+WASM残 | Phase 1 |
 | [Compiler Architecture 10/10](active/compiler-architecture-10.md) | 95/110. Phase 5-7 残 | Architecture |
 
@@ -26,6 +23,7 @@
 | 項目 | 説明 | Grand Plan |
 |---|---|---|
 | [Self-Contained Compiler](on-hold/self-contained-compiler.md) | rustc 不要化 | Architecture |
+| [Performance Research](on-hold/performance-research.md) | Rust との差 2.9% | Research |
 | [LSP Server](on-hold/lsp.md) | diagnostics → hover → go-to-def | Phase 3 |
 | [Incremental Compilation](on-hold/incremental-compilation.md) | rustc skip when unchanged | Phase 3 |
 | [Package Registry](on-hold/package-registry.md) | 公開パッケージ配布 | Phase 3 |
@@ -94,7 +92,8 @@
 - ~~LLM Immutable Sugar~~ → LLM Immutable Patterns 完了
 - ~~Built-in Protocols~~ → Derive Conventions 完了
 - ~~Almide Runtime~~ → Platform Architecture に統合
-- ~~Direct WASM Emission (old tasks)~~ → active に集約
+- ~~Direct WASM Emission~~ → 130/130 pass, DCE完了, Hello World 1,028B
+- ~~Test Coverage~~ → 130ファイル, Rust/WASM 100%, TS ~97%
 - ~~IR Verification~~ → 完了 (Phase 2, 25検証)
 
 ## Done
