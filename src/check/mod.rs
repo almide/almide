@@ -22,6 +22,8 @@
 mod types;
 mod infer;
 pub(crate) mod calls;
+mod builtin_calls;
+mod static_dispatch;
 mod registration;
 mod solving;
 mod diagnostics;
