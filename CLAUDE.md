@@ -35,7 +35,7 @@ lefthook install
 
 ## Project Overview
 
-Almide is a programming language (.almd files) compiled via a pure-Rust compiler with multi-target codegen (Rust, TypeScript, JavaScript, WASM).
+Almide is a programming language (.almd files) compiled via a pure-Rust compiler with multi-target codegen (Rust, TypeScript, WASM).
 
 - **Architecture**: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — compiler pipeline, module map
 - **Language reference**: [docs/CHEATSHEET.md](./docs/CHEATSHEET.md) — syntax, stdlib, idioms (for AI code generation)
@@ -58,7 +58,6 @@ almide fmt app.almd              # Format source
 almide clean                     # Clear dependency cache
 almide app.almd --target rust    # Emit Rust source
 almide app.almd --target ts      # Emit TypeScript source
-almide app.almd --target js      # Emit JavaScript source
 almide app.almd --emit-ast       # Emit AST as JSON
 ```
 
@@ -95,7 +94,7 @@ almide test
 When adding or modifying stdlib functions:
 - Add/edit the definition in `stdlib/defs/<module>.toml` (type sig + codegen templates)
 - Implement the Rust runtime in `runtime/rust/<module>.rs`
-- Implement the TS/JS runtime in `runtime/ts/<module>.ts` and `runtime/js/<module>.js`
+- Implement the TS runtime in `runtime/ts/<module>.ts`
 - `cargo build` auto-generates all codegen dispatch — no manual edits needed
 - Write a test in `spec/stdlib/` (as `*_test.almd` or inline `test` block)
 
@@ -106,11 +105,11 @@ When modifying codegen:
 
 ## Key Design Decisions
 
-- **Multi-target**: Same IR emits to Rust, TypeScript, or JavaScript via `--target rust|ts|js`
+- **Multi-target**: Same IR emits to Rust, TypeScript, or WASM via `--target rust|ts|wasm`
 - **Codegen v3**: Nanopass pipeline (semantic rewrites) + TOML template renderer (syntax)
-- **Result erasure (TS/JS)**: `ok(x)` → `x`, `err(e)` → `throw new Error(e)`
+- **Result erasure (TS)**: `ok(x)` → `x`, `err(e)` → `throw new Error(e)`
 - **Effect fn (Rust)**: `effect fn` → `Result<T, String>`, auto `?` propagation
-- **`==`/`!=`**: Deep equality in TS/JS (`__deep_eq`), `almide_eq!` macro in Rust
+- **`==`/`!=`**: Deep equality in TS (`__deep_eq`), `almide_eq!` macro in Rust
 - **`+`**: Concatenation for strings and lists (overloaded with addition)
 - **`do` block**: With guard → loop. Without guard → auto error propagation block.
 - **Diagnostics**: Every error includes file:line, context, and actionable hint

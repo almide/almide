@@ -126,13 +126,13 @@ src/
 │   │
 │   │── pass_stdlib_lowering.rs    Module/Method → Named + arg decoration
 │   │── pass_result_propagation.rs Insert Try (?) in effect fns (Rust)
-│   │── pass_result_erasure.rs     ok(x)→x, err(e)→throw (TS/JS)
-│   │── pass_match_lowering.rs     match → if/else chains (TS/JS)
+│   │── pass_result_erasure.rs     ok(x)→x, err(e)→throw (TS)
+│   │── pass_match_lowering.rs     match → if/else chains (TS)
 │   │── pass_clone.rs              Clone insertion (Rust borrow analysis)
 │   │── pass_box_deref.rs          Recursive type Box/deref (Rust)
 │   │── pass_builtin_lowering.rs   assert_eq→macro, println→macro (Rust)
 │   │── pass_fan_lowering.rs       Fan block → tokio/Promise.all
-│   └── pass_shadow_resolve.rs     let-rebinding → assignment (TS/JS)
+│   └── pass_shadow_resolve.rs     let-rebinding → assignment (TS)
 │
 ├── optimize/
 │   ├── mod.rs           Optimization pipeline
@@ -153,18 +153,16 @@ src/
     ├── emit_rust_calls.rs   Rust codegen dispatch
     ├── emit_ts_calls.rs     TS codegen dispatch
     ├── rust_runtime.rs      Embedded Rust runtime (include_str)
-    ├── ts_runtime.rs        Embedded TS/JS runtime (include_str)
+    ├── ts_runtime.rs        Embedded TS runtime (include_str from runtime/ts/)
     └── token_table.rs       Keyword → TokenType mapping
 
 codegen/templates/
 ├── rust.toml            Rust syntax templates (~330 rules)
-├── typescript.toml      TypeScript syntax templates
-└── javascript.toml      JavaScript syntax templates
+└── typescript.toml      TypeScript syntax templates
 
 runtime/
-├── rs/src/              Rust runtime: 24 modules (string, list, map, json, fs, ...)
-├── ts/                  TypeScript runtime: 24 modules (Deno + Node compatible)
-└── js/                  JavaScript runtime: 24 modules (plain JS, no type annotations)
+├── rs/src/              Rust runtime: 22 modules (string, list, map, json, fs, ...)
+└── ts/                  TypeScript runtime: 22 modules (Deno + Node --strip-types)
 ```
 
 ## Codegen v3: Three-Layer Architecture
@@ -181,7 +179,7 @@ TypeConcretization → BorrowInsertion → CloneInsertion
   → StdlibLowering → ResultPropagation → BuiltinLowering → FanLowering
 ```
 
-**TypeScript / JavaScript pipeline:**
+**TypeScript pipeline:**
 ```
 MatchLowering → ResultErasure → ShadowResolve → FanLowering
 ```
@@ -190,12 +188,12 @@ MatchLowering → ResultErasure → ShadowResolve → FanLowering
 |------|--------|------|
 | StdlibLowering | Rust | `Module { "list", "map" }` → `Named { "almide_rt_list_map" }` + arg decoration |
 | ResultPropagation | Rust | Insert `Try { expr }` (Rust `?`) on fallible calls in `effect fn` |
-| ResultErasure | TS/JS | `ok(x)` → `x`, `err(e)` → `throw new Error(e)`, `Try` → identity |
-| MatchLowering | TS/JS | `Match { subject, arms }` → `If/ElseIf/Else` chain |
+| ResultErasure | TS | `ok(x)` → `x`, `err(e)` → `throw new Error(e)`, `Try` → identity |
+| MatchLowering | TS | `Match { subject, arms }` → `If/ElseIf/Else` chain |
 | CloneInsertion | Rust | Insert `Clone` nodes based on use-count analysis |
 | BoxDeref | Rust | Insert `Deref` for recursive type access through `Box` |
 | BuiltinLowering | Rust | `assert_eq` → `RustMacro`, `println` → `RustMacro` |
-| ShadowResolve | TS/JS | `let x = 1; let x = 2` → `let x = 1; x = 2` (JS has no shadowing) |
+| ShadowResolve | TS | `let x = 1; let x = 2` → `let x = 1; x = 2` (TS/JS has no shadowing) |
 | FanLowering | All | Strip auto-try from fan spawn closures |
 
 ### Layer 2: Template Renderer

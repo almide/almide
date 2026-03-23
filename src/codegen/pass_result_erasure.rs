@@ -21,7 +21,7 @@ pub struct ResultErasurePass;
 impl NanoPass for ResultErasurePass {
     fn name(&self) -> &str { "ResultErasure" }
     fn targets(&self) -> Option<Vec<Target>> {
-        Some(vec![Target::TypeScript, Target::JavaScript, Target::Python])
+        Some(vec![Target::TypeScript, Target::Python])
     }
     fn depends_on(&self) -> Vec<&'static str> { vec!["MatchLowering"] }
     fn run(&self, program: &mut IrProgram, _target: Target) {
