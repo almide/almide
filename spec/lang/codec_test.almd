@@ -1,4 +1,5 @@
 module codec_test
+// wasm:enabled
 
 type Person: Codec = { name: String, age: Int }
 

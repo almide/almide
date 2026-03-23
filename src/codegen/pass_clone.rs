@@ -19,6 +19,8 @@ impl NanoPass for CloneInsertionPass {
         Some(vec![Target::Rust])
     }
 
+    fn depends_on(&self) -> Vec<&'static str> { vec!["BorrowInsertion"] }
+
     fn run(&self, program: &mut IrProgram, _target: Target) {
         let clone_ids = collect_clone_ids(&program.var_table);
         for func in &mut program.functions {
@@ -53,9 +55,9 @@ fn collect_clone_ids(vt: &VarTable) -> HashSet<VarId> {
 
 fn needs_clone(ty: &Ty) -> bool {
     matches!(ty,
-        Ty::String | Ty::List(_) | Ty::Map(_, _) |
+        Ty::String | Ty::Applied(_, _) |
         Ty::Record { .. } | Ty::OpenRecord { .. } |
-        Ty::Named(_, _) | Ty::Option(_) | Ty::Result(_, _) |
+        Ty::Named(_, _) |
         Ty::Variant { .. } | Ty::Fn { .. }
     )
 }
@@ -115,8 +117,8 @@ fn insert_clones(expr: IrExpr, clone_ids: &HashSet<VarId>) -> IrExpr {
         IrExprKind::UnOp { op, operand } => IrExprKind::UnOp {
             op, operand: Box::new(insert_clones(*operand, clone_ids)),
         },
-        IrExprKind::Lambda { params, body } => IrExprKind::Lambda {
-            params, body: Box::new(insert_clones(*body, clone_ids)),
+        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
+            params, body: Box::new(insert_clones(*body, clone_ids)), lambda_id,
         },
         IrExprKind::List { elements } => IrExprKind::List {
             elements: elements.into_iter().map(|e| insert_clones(e, clone_ids)).collect(),
@@ -155,6 +157,10 @@ fn insert_clones(expr: IrExpr, clone_ids: &HashSet<VarId>) -> IrExpr {
         IrExprKind::IndexAccess { object, index } => IrExprKind::IndexAccess {
             object: Box::new(insert_clones(*object, clone_ids)),
             index: Box::new(insert_clones(*index, clone_ids)),
+        },
+        IrExprKind::MapAccess { object, key } => IrExprKind::MapAccess {
+            object: Box::new(insert_clones(*object, clone_ids)),
+            key: Box::new(insert_clones(*key, clone_ids)),
         },
         IrExprKind::Range { start, end, inclusive } => IrExprKind::Range {
             start: Box::new(insert_clones(*start, clone_ids)),

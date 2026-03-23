@@ -86,8 +86,8 @@ fn rewrite_expr(expr: IrExpr, inside_fan: bool) -> IrExpr {
                 body: rewrite_expr(arm.body, inside_fan),
             }).collect(),
         },
-        IrExprKind::Lambda { params, body } => IrExprKind::Lambda {
-            params, body: Box::new(rewrite_expr(*body, inside_fan)),
+        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
+            params, body: Box::new(rewrite_expr(*body, inside_fan)), lambda_id,
         },
         IrExprKind::Call { target, args, type_args } => IrExprKind::Call {
             target: rewrite_target(target, inside_fan),
@@ -179,10 +179,11 @@ fn rewrite_fan_arg(arg: IrExpr) -> IrExpr {
     let ty = arg.ty.clone();
     let span = arg.span;
     match arg.kind {
-        IrExprKind::Lambda { params, body } => IrExpr {
+        IrExprKind::Lambda { params, body, lambda_id } => IrExpr {
             kind: IrExprKind::Lambda {
                 params,
                 body: Box::new(rewrite_expr(*body, true)),
+                lambda_id,
             },
             ty, span,
         },

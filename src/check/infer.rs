@@ -2,8 +2,8 @@
 /// Walks the AST, assigns Ty to each expression, collects constraints.
 
 use crate::ast;
-use crate::types::{Ty, VariantPayload};
-use super::types::resolve_vars;
+use crate::types::{Ty, TypeConstructorId, VariantPayload};
+use super::types::resolve_ty;
 use super::Checker;
 
 impl Checker {
@@ -33,7 +33,7 @@ impl Checker {
             ast::Expr::Bool { .. } => Ty::Bool,
             ast::Expr::Unit { .. } => Ty::Unit,
 
-            ast::Expr::None { .. } => Ty::Option(Box::new(self.fresh_var())),
+            ast::Expr::None { .. } => Ty::option(self.fresh_var()),
 
             ast::Expr::Ident { name, .. } => {
                 self.env.used_vars.insert(name.clone());
@@ -58,11 +58,11 @@ impl Checker {
             }
 
             ast::Expr::List { elements, .. } => {
-                if elements.is_empty() { Ty::List(Box::new(self.fresh_var())) }
+                if elements.is_empty() { Ty::list(self.fresh_var()) }
                 else {
                     let first = self.infer_expr(&mut elements[0]);
                     for elem in elements.iter_mut().skip(1) { let et = self.infer_expr(elem); self.constrain(first.clone(), et, "list element"); }
-                    Ty::List(Box::new(first))
+                    Ty::list(first)
                 }
             }
 
@@ -79,7 +79,7 @@ impl Checker {
                 }
                 else {
                     let field_tys: Vec<(String, Ty)> = fields.iter().map(|f| {
-                        let ty = self.infer_types.get(&f.value.id()).map(|it| resolve_vars(it, &self.solutions)).unwrap_or(Ty::Unknown);
+                        let ty = self.infer_types.get(&f.value.id()).map(|it| resolve_ty(it, &self.uf)).unwrap_or(Ty::Unknown);
                         (f.name.clone(), ty)
                     }).collect();
                     Ty::Record { fields: field_tys }
@@ -94,7 +94,7 @@ impl Checker {
 
             ast::Expr::Member { object, field, .. } => {
                 let obj_ty = self.infer_expr(object);
-                let concrete = resolve_vars(&obj_ty, &self.solutions);
+                let concrete = resolve_ty(&obj_ty, &self.uf);
                 self.resolve_field_type(&concrete, field)
             }
 
@@ -103,7 +103,7 @@ impl Checker {
                 match &obj_ty {
                     Ty::Tuple(elems) if *index < elems.len() => elems[*index].clone(),
                     _ => {
-                        let concrete = resolve_vars(&obj_ty, &self.solutions);
+                        let concrete = resolve_ty(&obj_ty, &self.uf);
                         match &concrete { Ty::Tuple(elems) if *index < elems.len() => elems[*index].clone(), _ => Ty::Unknown }
                     }
                 }
@@ -112,10 +112,10 @@ impl Checker {
             ast::Expr::IndexAccess { object, index, .. } => {
                 let obj_ty = self.infer_expr(object);
                 self.infer_expr(index);
-                let concrete = resolve_vars(&obj_ty, &self.solutions);
+                let concrete = resolve_ty(&obj_ty, &self.uf);
                 match &concrete {
-                    Ty::List(inner) => inner.as_ref().clone(),
-                    Ty::Map(_, v) => Ty::Option(Box::new(v.as_ref().clone())),
+                    Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => args[0].clone(),
+                    Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => Ty::option(args[1].clone()),
                     _ => Ty::Unknown,
                 }
             }
@@ -125,30 +125,13 @@ impl Checker {
                 let rt = self.infer_expr(right);
                 match op.as_str() {
                     "+" => {
-                        let lc = resolve_vars(&lt, &self.solutions);
-                        let rc = resolve_vars(&rt, &self.solutions);
-                        // + works for: String+String, List+List (concat), numeric+numeric (add)
-                        let l_concat = matches!(&lc, Ty::String | Ty::List(_));
-                        let r_concat = matches!(&rc, Ty::String | Ty::List(_));
-                        let l_unknown = matches!(&lc, Ty::Unknown | Ty::TypeVar(_));
-                        let r_unknown = matches!(&rc, Ty::Unknown | Ty::TypeVar(_));
-                        let is_concat = (l_concat && (r_concat || r_unknown))
-                            || (r_concat && l_unknown);
-                        if is_concat {
-                            lt // concat: return same type
-                        } else {
-                            let is_numeric = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_));
-                            if !is_numeric(&lc) || !is_numeric(&rc) {
-                                self.emit(super::err(
-                                    format!("operator '+' requires numeric, String, or List types but got {} and {}", lc.display(), rc.display()),
-                                    "Use + with numeric types, String, or List", format!("operator +")));
-                            }
-                            if lc == Ty::Float || rc == Ty::Float { Ty::Float } else { lt }
-                        }
+                        let lc = resolve_ty(&lt, &self.uf);
+                        let rc = resolve_ty(&rt, &self.uf);
+                        self.infer_plus_op(&lc, &rc, lt)
                     }
                     "-" | "*" | "/" | "%" => {
-                        let lc = resolve_vars(&lt, &self.solutions);
-                        let rc = resolve_vars(&rt, &self.solutions);
+                        let lc = resolve_ty(&lt, &self.uf);
+                        let rc = resolve_ty(&rt, &self.uf);
                         let is_numeric = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_));
                         if !is_numeric(&lc) || !is_numeric(&rc) {
                             self.emit(super::err(
@@ -165,8 +148,8 @@ impl Checker {
                     }
                     "==" | "!=" | "<" | ">" | "<=" | ">=" => Ty::Bool,
                     "and" | "or" => {
-                        let lc = resolve_vars(&lt, &self.solutions);
-                        let rc = resolve_vars(&rt, &self.solutions);
+                        let lc = resolve_ty(&lt, &self.uf);
+                        let rc = resolve_ty(&rt, &self.uf);
                         let is_bool = |t: &Ty| matches!(t, Ty::Bool | Ty::Unknown | Ty::TypeVar(_));
                         if !is_bool(&lc) {
                             self.emit(super::err(
@@ -200,19 +183,28 @@ impl Checker {
 
             ast::Expr::Match { subject, arms, .. } => {
                 let subject_ty = self.infer_expr(subject);
-                let sc = resolve_vars(&subject_ty, &self.solutions);
+                let sc = resolve_ty(&subject_ty, &self.uf);
                 self.check_match_exhaustiveness(&sc, arms);
-                let result = self.fresh_var();
+                let mut arm_types = Vec::new();
                 for arm in arms.iter_mut() {
                     self.env.push_scope();
-                    let sub_c = resolve_vars(&subject_ty, &self.solutions);
+                    let sub_c = resolve_ty(&subject_ty, &self.uf);
                     self.bind_pattern(&arm.pattern, &sub_c);
                     if let Some(ref mut guard) = arm.guard { self.infer_expr(guard); }
                     let arm_ty = self.infer_expr(&mut arm.body);
-                    self.constrain(result.clone(), arm_ty, "match arm");
+                    arm_types.push(arm_ty);
                     self.env.pop_scope();
                 }
-                result
+                // Unify all arm types with each other (not with a shared result var
+                // that can be contaminated by external constraints)
+                if let Some(first) = arm_types.first().cloned() {
+                    for aty in &arm_types[1..] {
+                        self.constrain(first.clone(), aty.clone(), "match arm");
+                    }
+                    first
+                } else {
+                    Ty::Unit
+                }
             }
 
             ast::Expr::Block { stmts, expr, .. } | ast::Expr::DoBlock { stmts, expr, .. } => {
@@ -231,30 +223,29 @@ impl Checker {
                         "fan block".to_string()).with_code("E007"));
                 }
                 // Check for mutable variable capture
-                for e in exprs.iter() {
+                let mutable_captures: Vec<String> = exprs.iter().flat_map(|e| {
                     let mut idents = Vec::new();
                     collect_idents(e, &mut idents);
-                    for name in &idents {
-                        if self.env.mutable_vars.contains(name) {
-                            self.emit(super::err(
-                                format!("cannot capture mutable variable '{}' inside fan block", name),
-                                "Use a `let` binding instead of `var` for values shared across fan expressions",
-                                "fan block".to_string()).with_code("E008"));
-                        }
-                    }
+                    idents.into_iter().filter(|name| self.env.mutable_vars.contains(name)).collect::<Vec<_>>()
+                }).collect();
+                for name in &mutable_captures {
+                    self.emit(super::err(
+                        format!("cannot capture mutable variable '{}' inside fan block", name),
+                        "Use a `let` binding instead of `var` for values shared across fan expressions",
+                        "fan block".to_string()).with_code("E008"));
                 }
                 let tys: Vec<Ty> = exprs.iter_mut().map(|e| {
                     let ty = self.infer_expr(e);
                     // Auto-unwrap Result: fan unwraps Result<T, E> to T
-                    let concrete = resolve_vars(&ty, &self.solutions);
+                    let concrete = resolve_ty(&ty, &self.uf);
                     match &concrete {
-                        Ty::Result(ok, _) => ok.as_ref().clone(),
+                        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
                         _ => ty,
                     }
                 }).collect();
                 match tys.len() {
                     1 => tys.into_iter().next().unwrap(),
-                    _ => Ty::Tuple(tys.iter().map(|t| resolve_vars(t, &self.solutions)).collect()),
+                    _ => Ty::Tuple(tys.iter().map(|t| resolve_ty(t, &self.uf)).collect()),
                 }
             }
 
@@ -266,15 +257,32 @@ impl Checker {
                 self.infer_pipe(left, right)
             }
 
+            ast::Expr::Compose { left, right, .. } => {
+                let left_ty = self.infer_expr(left);
+                let right_ty = self.infer_expr(right);
+                // If left is Fn[A] -> B and right is Fn[B] -> C, result is Fn[A] -> C
+                let resolved_left = resolve_ty(&left_ty, &self.uf);
+                let resolved_right = resolve_ty(&right_ty, &self.uf);
+                match (&resolved_left, &resolved_right) {
+                    (Ty::Fn { params: a_params, .. }, Ty::Fn { ret: c_ret, .. }) => {
+                        Ty::Fn { params: a_params.clone(), ret: c_ret.clone() }
+                    }
+                    _ => Ty::Unknown,
+                }
+            }
+
             ast::Expr::Lambda { params, body, .. } => {
                 self.env.push_scope();
+                // Lambda has its own return context — don't leak outer function's current_ret
+                let saved_ret = self.env.current_ret.take();
                 let param_tys: Vec<Ty> = params.iter().map(|p| {
                     let ty = p.ty.as_ref().map(|te| self.resolve_type_expr(te)).unwrap_or_else(|| self.fresh_var());
-                    let concrete = resolve_vars(&ty, &self.solutions);
+                    let concrete = resolve_ty(&ty, &self.uf);
                     self.env.define_var(&p.name, concrete);
                     ty
                 }).collect();
                 let ret_ty = self.infer_expr(body);
+                self.env.current_ret = saved_ret;
                 self.env.pop_scope();
                 Ty::Fn { params: param_tys, ret: Box::new(ret_ty) }
             }
@@ -291,29 +299,29 @@ impl Checker {
                 Ty::Unit
             }
 
-            ast::Expr::Range { start, end, .. } => { let st = self.infer_expr(start); self.infer_expr(end); Ty::List(Box::new(st)) }
+            ast::Expr::Range { start, end, .. } => { let st = self.infer_expr(start); self.infer_expr(end); Ty::list(st) }
 
-            ast::Expr::Some { expr, .. } => { let inner = self.infer_expr(expr); Ty::Option(Box::new(inner)) }
+            ast::Expr::Some { expr, .. } => { let inner = self.infer_expr(expr); Ty::option(inner) }
             ast::Expr::Ok { expr, .. } => {
                 let ok_ty = self.infer_expr(expr);
                 let err_ty = match &self.env.current_ret {
-                    Some(Ty::Result(_, e)) => e.as_ref().clone(),
+                    Some(Ty::Applied(TypeConstructorId::Result, args)) if args.len() == 2 => args[1].clone(),
                     _ => self.fresh_var(),
                 };
-                Ty::Result(Box::new(ok_ty), Box::new(err_ty))
+                Ty::result(ok_ty, err_ty)
             }
             ast::Expr::Err { expr, .. } => {
                 let err_ty = self.infer_expr(expr);
                 let ok_ty = match &self.env.current_ret {
-                    Some(Ty::Result(o, _)) => o.as_ref().clone(),
+                    Some(Ty::Applied(TypeConstructorId::Result, args)) if args.len() == 2 => args[0].clone(),
                     _ => self.fresh_var(),
                 };
-                Ty::Result(Box::new(ok_ty), Box::new(err_ty))
+                Ty::result(ok_ty, err_ty)
             }
             ast::Expr::Try { expr, .. } => {
                 let ty = self.infer_expr(expr);
                 match &ty {
-                    Ty::Result(ok, _) => ok.as_ref().clone(),
+                    Ty::Applied(TypeConstructorId::Result, args) if args.len() >= 1 => args[0].clone(),
                     _ => ty,
                 }
             }
@@ -325,15 +333,15 @@ impl Checker {
             ast::Expr::Error { .. } | ast::Expr::Placeholder { .. } => Ty::Unknown,
 
             ast::Expr::MapLiteral { entries, .. } => {
-                if entries.is_empty() { Ty::Map(Box::new(self.fresh_var()), Box::new(self.fresh_var())) }
+                if entries.is_empty() { Ty::map_of(self.fresh_var(), self.fresh_var()) }
                 else {
                     let kt = self.infer_expr(&mut entries[0].0);
                     let vt = self.infer_expr(&mut entries[0].1);
                     for entry in entries.iter_mut().skip(1) { self.infer_expr(&mut entry.0); self.infer_expr(&mut entry.1); }
-                    Ty::Map(Box::new(kt), Box::new(vt))
+                    Ty::map_of(kt, vt)
                 }
             }
-            ast::Expr::EmptyMap { .. } => Ty::Map(Box::new(self.fresh_var()), Box::new(self.fresh_var())),
+            ast::Expr::EmptyMap { .. } => Ty::map_of(self.fresh_var(), self.fresh_var()),
         }
     }
 
@@ -367,15 +375,9 @@ impl Checker {
                 match callee.as_mut() {
                     ast::Expr::Ident { name, .. } => self.check_named_call(name, &all_arg_tys),
                     ast::Expr::Member { object, field, .. } => {
-                        if let ast::Expr::Ident { name: module, .. } = object.as_ref() {
-                            if crate::stdlib::is_stdlib_module(module) || self.env.user_modules.contains(module.as_str()) {
-                                let key = format!("{}.{}", module, field);
-                                return self.check_named_call(&key, &all_arg_tys);
-                            }
-                            if let Some(target) = self.env.module_aliases.get(module.as_str()).cloned() {
-                                let key = format!("{}.{}", target, field);
-                                return self.check_named_call(&key, &all_arg_tys);
-                            }
+                        let module_key = self.resolve_module_call(object, field);
+                        if let Some(key) = module_key {
+                            return self.check_named_call(&key, &all_arg_tys);
                         }
                         let ct = self.infer_expr(callee);
                         let ret = self.fresh_var();
@@ -398,15 +400,8 @@ impl Checker {
             // Pipe RHS is a module-qualified function (e.g. `5 |> int.abs`)
             ast::Expr::Member { object, field, .. } => {
                 let all_arg_tys = vec![left_ty];
-                if let ast::Expr::Ident { name: module, .. } = object.as_ref() {
-                    if crate::stdlib::is_stdlib_module(module) || self.env.user_modules.contains(module.as_str()) {
-                        let key = format!("{}.{}", module, field);
-                        return self.check_named_call(&key, &all_arg_tys);
-                    }
-                    if let Some(target) = self.env.module_aliases.get(module.as_str()).cloned() {
-                        let key = format!("{}.{}", target, field);
-                        return self.check_named_call(&key, &all_arg_tys);
-                    }
+                if let Some(key) = self.resolve_module_call(object, field) {
+                    return self.check_named_call(&key, &all_arg_tys);
                 }
                 let ct = self.infer_expr(right);
                 let ret = self.fresh_var();
@@ -431,10 +426,10 @@ impl Checker {
     ) -> Ty {
         let iter_ty = self.infer_expr(iterable);
         self.env.push_scope();
-        let iter_resolved = resolve_vars(&iter_ty, &self.solutions);
+        let iter_resolved = resolve_ty(&iter_ty, &self.uf);
         let elem_ty = match &iter_resolved {
-            Ty::List(inner) => inner.as_ref().clone(),
-            Ty::Map(k, v) => Ty::Tuple(vec![k.as_ref().clone(), v.as_ref().clone()]),
+            Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => args[0].clone(),
+            Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => Ty::Tuple(vec![args[0].clone(), args[1].clone()]),
             _ => Ty::Unknown,
         };
         if let Some(names) = var_tuple {
@@ -465,10 +460,13 @@ impl Checker {
                     self.constrain(declared.clone(), val_ty, format!("let {}", name));
                     declared
                 } else {
-                    let t = resolve_vars(&val_ty, &self.solutions);
+                    let t = resolve_ty(&val_ty, &self.uf);
                     // Auto-unwrap Result in effect fns (but not in test blocks)
                     if self.env.auto_unwrap {
-                        match t { Ty::Result(ok, _) => *ok, other => other }
+                        match t {
+                            Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args.into_iter().next().unwrap(),
+                            other => other,
+                        }
                     } else { t }
                 };
                 self.env.define_var(name, final_ty);
@@ -480,9 +478,12 @@ impl Checker {
                     self.constrain(declared.clone(), val_ty, format!("let {}", name));
                     declared
                 } else {
-                    let t = resolve_vars(&val_ty, &self.solutions);
+                    let t = resolve_ty(&val_ty, &self.uf);
                     if self.env.auto_unwrap {
-                        match t { Ty::Result(ok, _) => *ok, other => other }
+                        match t {
+                            Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args.into_iter().next().unwrap(),
+                            other => other,
+                        }
                     } else { t }
                 };
                 self.env.define_var(name, final_ty);
@@ -490,7 +491,7 @@ impl Checker {
             }
             ast::Stmt::LetDestructure { pattern, value, .. } => {
                 let val_ty = self.infer_expr(value);
-                let val_resolved = resolve_vars(&val_ty, &self.solutions);
+                let val_resolved = resolve_ty(&val_ty, &self.uf);
                 self.bind_pattern(pattern, &val_resolved);
             }
             ast::Stmt::Assign { name, value, .. } => {
@@ -520,15 +521,36 @@ impl Checker {
         match pattern {
             ast::Pattern::Wildcard => {}
             ast::Pattern::Ident { name } => { self.env.define_var(name, ty.clone()); }
-            ast::Pattern::Constructor { args, .. } => { for arg in args { self.bind_pattern(arg, &Ty::Unknown); } }
-            ast::Pattern::RecordPattern { fields, .. } => {
+            ast::Pattern::Constructor { name, args } => {
+                let resolved = self.env.resolve_named(ty);
+                let payload_tys: Vec<Ty> = match &resolved {
+                    Ty::Variant { cases, .. } => cases.iter()
+                        .find(|c| c.name == *name)
+                        .map(|c| match &c.payload {
+                            VariantPayload::Tuple(tys) => tys.clone(),
+                            _ => vec![],
+                        })
+                        .unwrap_or_default(),
+                    _ => vec![],
+                };
+                for (i, arg) in args.iter().enumerate() {
+                    self.bind_pattern(arg, payload_tys.get(i).unwrap_or(&Ty::Unknown));
+                }
+            }
+            ast::Pattern::RecordPattern { name, fields, .. } => {
                 let resolved = self.env.resolve_named(ty);
                 let field_tys: Vec<(String, Ty)> = match &resolved {
                     Ty::Record { fields } | Ty::OpenRecord { fields } => fields.clone(),
-                    Ty::Variant { cases, .. } => cases.iter().find_map(|c| match &c.payload {
-                        VariantPayload::Record(fs) => Some(fs.iter().map(|(n, t, _)| (n.clone(), t.clone())).collect()),
-                        _ => None,
-                    }).unwrap_or_default(),
+                    Ty::Variant { cases, .. } => {
+                        // Find the specific case matching the pattern name
+                        cases.iter()
+                            .find(|c| c.name == *name)
+                            .and_then(|c| match &c.payload {
+                                VariantPayload::Record(fs) => Some(fs.iter().map(|(n, t, _)| (n.clone(), t.clone())).collect()),
+                                _ => None,
+                            })
+                            .unwrap_or_default()
+                    }
                     _ => vec![],
                 };
                 for f in fields {
@@ -540,11 +562,53 @@ impl Checker {
             ast::Pattern::Tuple { elements } => {
                 if let Ty::Tuple(tys) = ty { for (i, e) in elements.iter().enumerate() { self.bind_pattern(e, tys.get(i).unwrap_or(&Ty::Unknown)); } }
             }
-            ast::Pattern::Some { inner } => { let it = match ty { Ty::Option(t) => *t.clone(), _ => Ty::Unknown }; self.bind_pattern(inner, &it); }
-            ast::Pattern::Ok { inner } => { let it = match ty { Ty::Result(t, _) => *t.clone(), _ => Ty::Unknown }; self.bind_pattern(inner, &it); }
-            ast::Pattern::Err { inner } => { let it = match ty { Ty::Result(_, e) => *e.clone(), _ => Ty::Unknown }; self.bind_pattern(inner, &it); }
+            ast::Pattern::Some { inner } => { let it = match ty { Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args[0].clone(), _ => Ty::Unknown }; self.bind_pattern(inner, &it); }
+            ast::Pattern::Ok { inner } => { let it = match ty { Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(), _ => Ty::Unknown }; self.bind_pattern(inner, &it); }
+            ast::Pattern::Err { inner } => { let it = match ty { Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[1].clone(), _ => Ty::Unknown }; self.bind_pattern(inner, &it); }
             ast::Pattern::None | ast::Pattern::Literal { .. } => {}
         }
+    }
+
+    /// Infer the result type of the + operator (numeric add or string/list concat).
+    fn infer_plus_op(&mut self, lc: &Ty, rc: &Ty, lt: Ty) -> Ty {
+        let is_concat_ty = |t: &Ty| matches!(t, Ty::String | Ty::Applied(TypeConstructorId::List, _));
+        let is_unknown_ty = |t: &Ty| matches!(t, Ty::Unknown | Ty::TypeVar(_));
+        if (is_concat_ty(lc) && (is_concat_ty(rc) || is_unknown_ty(rc)))
+            || (is_concat_ty(rc) && is_unknown_ty(lc)) {
+            return lt; // concat: return same type
+        }
+        let is_numeric = |t: &Ty| matches!(t, Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_));
+        if !is_numeric(lc) || !is_numeric(rc) {
+            self.emit(super::err(
+                format!("operator '+' requires numeric, String, or List types but got {} and {}", lc.display(), rc.display()),
+                "Use + with numeric types, String, or List", format!("operator +")));
+        }
+        if *lc == Ty::Float || *rc == Ty::Float { Ty::Float } else { lt }
+    }
+
+    /// Resolve a module.func Member expression to a qualified call key.
+    fn resolve_module_call(&self, object: &ast::Expr, field: &str) -> Option<String> {
+        if let ast::Expr::Ident { name: module, .. } = object {
+            if crate::stdlib::is_stdlib_module(module) || self.env.user_modules.contains(module.as_str()) {
+                return Some(format!("{}.{}", module, field));
+            }
+            if let Some(target) = self.env.module_aliases.get(module.as_str()) {
+                return Some(format!("{}.{}", target, field));
+            }
+            // Check if Ident.field is a Type.method (protocol implementation)
+            let key = format!("{}.{}", module, field);
+            if self.env.functions.contains_key(key.as_str()) {
+                return Some(key);
+            }
+        }
+        // TypeName.method (e.g. Val.double in pipe)
+        if let ast::Expr::TypeName { name: type_name, .. } = object {
+            let key = format!("{}.{}", type_name, field);
+            if self.env.functions.contains_key(key.as_str()) {
+                return Some(key);
+            }
+        }
+        None
     }
 }
 
@@ -558,7 +622,7 @@ fn collect_idents(expr: &ast::Expr, out: &mut Vec<String>) {
         }
         ast::Expr::Member { object, .. } | ast::Expr::TupleIndex { object, .. }
         | ast::Expr::IndexAccess { object, .. } => collect_idents(object, out),
-        ast::Expr::Binary { left, right, .. } | ast::Expr::Pipe { left, right, .. } => {
+        ast::Expr::Binary { left, right, .. } | ast::Expr::Pipe { left, right, .. } | ast::Expr::Compose { left, right, .. } => {
             collect_idents(left, out); collect_idents(right, out);
         }
         ast::Expr::Unary { operand, .. } | ast::Expr::Paren { expr: operand, .. }

@@ -1,4 +1,5 @@
 module value_utils
+// wasm:enabled
 
 type Person: Codec = { name: String, age: Int, email: String }
 

@@ -2,7 +2,7 @@
 
 use crate::ast;
 use crate::ir::*;
-use crate::types::Ty;
+use crate::types::{Ty, TypeConstructorId};
 use super::LowerCtx;
 use super::expressions::lower_expr;
 use super::types::resolve_type_expr;
@@ -34,7 +34,7 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
                 let parsed = ctx.mk(IrExprKind::Try { expr: Box::new(ctx.mk(IrExprKind::Call {
                     target: CallTarget::Module { module: module.clone(), func: "parse".into() },
                     args: vec![ir_arg], type_args: vec![],
-                }, Ty::Result(Box::new(Ty::Named("Value".into(), vec![])), Box::new(Ty::String)), span)) },
+                }, Ty::result(Ty::Named("Value".into(), vec![]), Ty::String), span)) },
                 Ty::Named("Value".into(), vec![]), span);
                 let decode_fn = format!("{}.decode", type_name);
                 return ctx.mk(IrExprKind::Call {
@@ -57,26 +57,24 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
             .unwrap_or_default();
         let defaults = ctx.fn_defaults.get(name).cloned();
         let positional_count = ir_args.len();
-        for i in positional_count..param_names.len() {
-            let param_name = &param_names[i];
-            if let Some((_, expr)) = named_args.iter().find(|(n, _)| n == param_name) {
-                ir_args.push(lower_expr(ctx, expr));
-            } else if let Some(ref defs) = defaults
-                && let Some(Some(default_expr)) = defs.get(i)
-            {
-                ir_args.push(lower_expr(ctx, default_expr));
-            }
-        }
+        ir_args.extend(param_names[positional_count..].iter().filter_map(|param_name| {
+            named_args.iter()
+                .find(|(n, _)| n == param_name)
+                .map(|(_, expr)| lower_expr(ctx, expr))
+                .or_else(|| defaults.as_ref()
+                    .and_then(|defs| defs.get(positional_count + param_names[positional_count..].iter().position(|p| p == param_name).unwrap_or(0)))
+                    .and_then(|d| d.as_ref())
+                    .map(|default_expr| lower_expr(ctx, default_expr)))
+        }));
     }
 
     // Default args: fill in remaining defaults (for calls without named args)
     if let (true, CallTarget::Named { name }) = (named_args.is_empty(), &target) {
         if let Some(defaults) = ctx.fn_defaults.get(name).cloned() {
-            for i in ir_args.len()..defaults.len() {
-                if let Some(Some(default_expr)) = defaults.get(i) {
-                    ir_args.push(lower_expr(ctx, &default_expr));
-                }
-            }
+            ir_args.extend(
+                defaults.iter().skip(ir_args.len())
+                    .filter_map(|d| d.as_ref().map(|expr| lower_expr(ctx, expr)))
+            );
         }
     }
 
@@ -109,6 +107,15 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
                     let resolved = ctx.env.module_aliases.get(module).cloned().unwrap_or(module.clone());
                     return CallTarget::Module { module: resolved, func: field.clone() };
                 }
+                // Ident that's not a module: check if Type.method (protocol impl, e.g. Val.double)
+                if ctx.lookup_var(module).is_none() {
+                    let key = format!("{}.{}", module, field);
+                    if ctx.env.functions.contains_key(&key)
+                        || ctx.find_convention_fn(&Ty::Named(module.clone(), vec![]), field).is_some()
+                    {
+                        return CallTarget::Named { name: key };
+                    }
+                }
             }
             // TypeName.method(args) → direct named call (not UFCS, no object prepend)
             if let ast::Expr::TypeName { name: type_name, .. } = object.as_ref() {
@@ -122,13 +129,13 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
             // Built-in generic types: xs.len() → list.len(xs) for List, Map, etc.
             let obj_ty = ctx.expr_ty(object);
             let builtin_module = match &obj_ty {
-                Ty::List(_) => Some("list"),
-                Ty::Map(_, _) => Some("map"),
+                Ty::Applied(TypeConstructorId::List, _) => Some("list"),
+                Ty::Applied(TypeConstructorId::Map, _) => Some("map"),
                 Ty::String => Some("string"),
                 Ty::Int => Some("int"),
                 Ty::Float => Some("float"),
-                Ty::Result(_, _) => Some("result"),
-                Ty::Option(_) => Some("option"),
+                Ty::Applied(TypeConstructorId::Result, _) => Some("result"),
+                Ty::Applied(TypeConstructorId::Option, _) => Some("option"),
                 _ => None,
             };
             if let Some(module) = builtin_module {
@@ -159,6 +166,21 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
                 {
                     let ir_obj = lower_expr(ctx, object);
                     return CallTarget::Method { object: Box::new(ir_obj), method: convention_key };
+                }
+            }
+            // Protocol method on TypeVar: item.show() where item: T, T: Showable
+            // Lower as "T.show" convention key — monomorphizer will substitute T → ConcreteType
+            if let Ty::TypeVar(tv) = &obj_ty {
+                if let Some(proto_names) = ctx.protocol_bounds.get(tv).cloned() {
+                    for proto_name in &proto_names {
+                        if let Some(proto_def) = ctx.env.protocols.get(proto_name) {
+                            if proto_def.methods.iter().any(|m| m.name == *field) {
+                                let ir_obj = lower_expr(ctx, object);
+                                let convention_key = format!("{}.{}", tv, field);
+                                return CallTarget::Method { object: Box::new(ir_obj), method: convention_key };
+                            }
+                        }
+                    }
                 }
             }
             // Generic method call: obj.method(args) → UFCS

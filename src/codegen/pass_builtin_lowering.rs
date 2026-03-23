@@ -23,6 +23,7 @@ pub struct BuiltinLoweringPass;
 impl NanoPass for BuiltinLoweringPass {
     fn name(&self) -> &str { "BuiltinLowering" }
     fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Rust]) }
+    fn depends_on(&self) -> Vec<&'static str> { vec!["ResultPropagation"] }
     fn run(&self, program: &mut IrProgram, _target: Target) {
         for func in &mut program.functions {
             func.body = rewrite_expr(func.body.clone());
@@ -101,10 +102,8 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                             }, ty, span };
                         } else {
                             // Custom type: use generic encode/decode
-                            let func_ref = format!("{}_{}",
-                                type_name,
-                                if name.starts_with("__encode") { "encode" } else { "decode" }
-                            );
+                            let codec_op = if name.starts_with("__encode") { "encode" } else { "decode" };
+                            let func_ref = format!("{}_{}", type_name, codec_op);
                             let mut new_args = args;
                             new_args.push(IrExpr {
                                 kind: IrExprKind::FnRef { name: func_ref },
@@ -214,8 +213,8 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
         IrExprKind::UnOp { op, operand } => IrExprKind::UnOp {
             op, operand: Box::new(rewrite_expr(*operand)),
         },
-        IrExprKind::Lambda { params, body } => IrExprKind::Lambda {
-            params, body: Box::new(rewrite_expr(*body)),
+        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
+            params, body: Box::new(rewrite_expr(*body)), lambda_id,
         },
         IrExprKind::List { elements } => IrExprKind::List {
             elements: elements.into_iter().map(rewrite_expr).collect(),
@@ -255,6 +254,10 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
         IrExprKind::IndexAccess { object, index } => IrExprKind::IndexAccess {
             object: Box::new(rewrite_expr(*object)),
             index: Box::new(rewrite_expr(*index)),
+        },
+        IrExprKind::MapAccess { object, key } => IrExprKind::MapAccess {
+            object: Box::new(rewrite_expr(*object)),
+            key: Box::new(rewrite_expr(*key)),
         },
         IrExprKind::TupleIndex { object, index } => IrExprKind::TupleIndex {
             object: Box::new(rewrite_expr(*object)), index,

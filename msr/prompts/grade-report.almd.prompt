@@ -1,0 +1,166 @@
+import string
+import list
+
+// Student grade report processor
+// Input format: "name:score1,score2,score3" (one student per line)
+// Scores are integers 0-100
+
+// Helper: convert a string to an integer, returning Result
+fn str_to_int(s: String) -> Result[Int, String] = todo
+
+// Parse a single student line like "Alice:85,92,78"
+// Errors: empty name, invalid score, score out of range 0-100
+fn parse_student(line: String) -> Result[List[String], String] = todo
+
+// Parse multiple students from newline-separated input
+// Errors: empty input, any parse_student error (include line number in error)
+// Also error on duplicate student names
+fn parse_all(input: String) -> Result[List[List[String]], String] = todo
+
+// Calculate average score for a student record [name, score1, score2, ...]
+// Error if no scores
+fn average(student: List[String]) -> Result[Int, String] = todo
+
+// Convert numeric average to letter grade
+// 90-100: "A", 80-89: "B", 70-79: "C", 60-69: "D", below 60: "F"
+fn letter_grade(avg: Int) -> String = todo
+
+// Find students on honor roll (average >= 85)
+// Returns list of names, sorted alphabetically
+fn honor_roll(students: List[List[String]]) -> Result[List[String], String] = todo
+
+// Calculate class average across all students
+fn class_average(students: List[List[String]]) -> Result[Int, String] = todo
+
+// Format a single student summary: "name: avg (grade)"
+fn format_student(student: List[String]) -> Result[String, String] = todo
+
+// Generate full report as multi-line string
+fn generate_report(input: String) -> Result[String, String] = todo
+
+test "parse single student" {
+  assert_eq(parse_student("Alice:85,92,78"), ok(["Alice", "85", "92", "78"]))
+}
+
+test "parse student with single score" {
+  assert_eq(parse_student("Bob:100"), ok(["Bob", "100"]))
+}
+
+test "parse student empty name" {
+  assert_eq(parse_student(":85,92"), err("empty name"))
+}
+
+test "parse student invalid score" {
+  assert_eq(parse_student("Alice:85,abc,78"), err("invalid score: abc"))
+}
+
+test "parse student score too high" {
+  assert_eq(parse_student("Alice:85,101,78"), err("score out of range: 101"))
+}
+
+test "parse student score negative" {
+  assert_eq(parse_student("Alice:85,-1,78"), err("score out of range: -1"))
+}
+
+test "parse student no scores" {
+  assert_eq(parse_student("Alice:"), err("no scores"))
+}
+
+test "parse student no colon" {
+  assert_eq(parse_student("Alice"), err("invalid format"))
+}
+
+test "parse all basic" {
+  let result = parse_all("Alice:85,92\nBob:70,80")
+  assert_eq(result, ok([["Alice", "85", "92"], ["Bob", "70", "80"]]))
+}
+
+test "parse all empty input" {
+  assert_eq(parse_all(""), err("empty input"))
+}
+
+test "parse all duplicate names" {
+  assert_eq(parse_all("Alice:85\nAlice:90"), err("duplicate name: Alice"))
+}
+
+test "parse all error with line number" {
+  assert_eq(parse_all("Alice:85\n:90"), err("line 2: empty name"))
+}
+
+test "average basic" {
+  assert_eq(average(["Alice", "80", "90", "100"]), ok(90))
+}
+
+test "average single score" {
+  assert_eq(average(["Bob", "75"]), ok(75))
+}
+
+test "average rounds down" {
+  assert_eq(average(["Carol", "80", "81"]), ok(80))
+}
+
+test "letter grade A" {
+  assert_eq(letter_grade(95), "A")
+}
+
+test "letter grade B" {
+  assert_eq(letter_grade(85), "B")
+}
+
+test "letter grade C" {
+  assert_eq(letter_grade(75), "C")
+}
+
+test "letter grade D" {
+  assert_eq(letter_grade(65), "D")
+}
+
+test "letter grade F" {
+  assert_eq(letter_grade(55), "F")
+}
+
+test "letter grade boundary 90" {
+  assert_eq(letter_grade(90), "A")
+}
+
+test "letter grade boundary 80" {
+  assert_eq(letter_grade(80), "B")
+}
+
+test "honor roll basic" {
+  let students = [["Alice", "90", "95"], ["Bob", "70", "80"], ["Carol", "85", "90"]]
+  assert_eq(honor_roll(students), ok(["Alice", "Carol"]))
+}
+
+test "honor roll none qualify" {
+  let students = [["Alice", "70", "75"], ["Bob", "60", "65"]]
+  assert_eq(honor_roll(students), ok([]))
+}
+
+test "honor roll sorted" {
+  let students = [["Zara", "90", "95"], ["Alice", "85", "90"]]
+  assert_eq(honor_roll(students), ok(["Alice", "Zara"]))
+}
+
+test "class average basic" {
+  let students = [["Alice", "80", "90"], ["Bob", "70", "80"]]
+  assert_eq(class_average(students), ok(80))
+}
+
+test "format student" {
+  assert_eq(format_student(["Alice", "85", "92", "78"]), ok("Alice: 85 (B)"))
+}
+
+test "generate report" {
+  let input = "Alice:90,95,100\nBob:70,75,80"
+  let expected = "Alice: 95 (A)\nBob: 75 (C)\nclass average: 85\nhonor roll: Alice"
+  assert_eq(generate_report(input), ok(expected))
+}
+
+test "generate report error propagation" {
+  assert_eq(generate_report("Alice:90\n:bad"), err("line 2: empty name"))
+}
+
+test "generate report empty" {
+  assert_eq(generate_report(""), err("empty input"))
+}

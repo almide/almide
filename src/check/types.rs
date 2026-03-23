@@ -1,7 +1,5 @@
 /// Inference types, type variables, and constraints for the constraint-based checker.
 
-use std::collections::HashMap;
-use std::collections::HashSet;
 use crate::types::Ty;
 
 /// A fresh type variable for constraint-based inference.
@@ -27,63 +25,129 @@ pub fn is_inference_var(ty: &Ty) -> Option<TyVarId> {
     None
 }
 
-/// Resolve inference variables (?N) in a Ty using the solutions map.
-/// Uses a `seen` set to break cycles (e.g. ?0 -> ?1 -> TypeVar("?0")).
-pub fn resolve_vars(ty: &Ty, solutions: &HashMap<TyVarId, Ty>) -> Ty {
-    resolve_inner(ty, solutions, &mut HashSet::new())
+// ── Union-Find for type inference ────────────────────────────────────
+
+/// Disjoint-set (Union-Find) structure for type variable equivalence classes.
+/// Each type variable is a node. `union` merges equivalence classes;
+/// `find` returns the canonical representative. Concrete types are bound
+/// to roots — information never lost on merge.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnionFind {
+    parent: Vec<u32>,
+    rank: Vec<u8>,
+    bound: Vec<Option<Ty>>,
 }
 
-fn resolve_inner(ty: &Ty, solutions: &HashMap<TyVarId, Ty>, seen: &mut HashSet<u32>) -> Ty {
+impl UnionFind {
+    pub fn new() -> Self {
+        UnionFind { parent: Vec::new(), rank: Vec::new(), bound: Vec::new() }
+    }
+
+    /// Allocate a fresh, unbound type variable.
+    pub fn fresh(&mut self) -> u32 {
+        let id = self.parent.len() as u32;
+        self.parent.push(id);
+        self.rank.push(0);
+        self.bound.push(None);
+        id
+    }
+
+    /// Find the root representative of `id`'s equivalence class.
+    /// Uses path halving (every other node points to grandparent) for amortized
+    /// near-constant time without requiring &mut self.
+    pub fn find(&self, mut id: u32) -> u32 {
+        while self.parent[id as usize] != id {
+            id = self.parent[id as usize];
+        }
+        id
+    }
+
+    /// Merge the equivalence classes of `a` and `b`. Union-by-rank keeps
+    /// tree depth logarithmic. If either root carries a concrete type binding,
+    /// it is preserved on the winner.
+    pub fn union(&mut self, a: u32, b: u32) {
+        let ra = self.find(a);
+        let rb = self.find(b);
+        if ra == rb { return; }
+        let (winner, loser) = if self.rank[ra as usize] >= self.rank[rb as usize] { (ra, rb) } else { (rb, ra) };
+        self.parent[loser as usize] = winner;
+        if self.rank[winner as usize] == self.rank[loser as usize] {
+            self.rank[winner as usize] += 1;
+        }
+        // Merge bound types: prefer the one that has a concrete binding
+        let loser_bound = self.bound[loser as usize].take();
+        if self.bound[winner as usize].is_none() {
+            self.bound[winner as usize] = loser_bound;
+        }
+    }
+
+    /// Bind a concrete type to `id`'s root. If the root already has a binding,
+    /// returns the existing binding for the caller to unify structurally.
+    pub fn bind(&mut self, id: u32, ty: Ty) -> Option<Ty> {
+        let root = self.find(id);
+        let existing = self.bound[root as usize].take();
+        self.bound[root as usize] = Some(ty);
+        existing
+    }
+
+    /// Get the concrete type bound to `id`'s root, if any.
+    pub fn resolve(&self, id: u32) -> Option<&Ty> {
+        let root = self.find(id);
+        self.bound[root as usize].as_ref()
+    }
+
+    /// Check whether `var` occurs anywhere inside `ty` (infinite type prevention).
+    pub fn occurs(&self, var: u32, ty: &Ty) -> bool {
+        match ty {
+            Ty::TypeVar(name) if name.starts_with('?') => {
+                if let Ok(id) = name[1..].parse::<u32>() {
+                    self.find(var) == self.find(id)
+                        || self.resolve(id).map_or(false, |s| self.occurs(var, s))
+                } else { false }
+            }
+            Ty::Applied(_, args) => args.iter().any(|a| self.occurs(var, a)),
+            Ty::Tuple(elems) => elems.iter().any(|e| self.occurs(var, e)),
+            Ty::Fn { params, ret } => params.iter().any(|p| self.occurs(var, p)) || self.occurs(var, ret),
+            _ => false,
+        }
+    }
+}
+
+// ── Type resolution ──────────────────────────────────────────────────
+
+/// Resolve all inference variables in `ty` through the Union-Find,
+/// replacing each `?N` with its bound concrete type.
+pub fn resolve_ty(ty: &Ty, uf: &UnionFind) -> Ty {
     match ty {
         Ty::TypeVar(name) if name.starts_with('?') => {
             if let Ok(id) = name[1..].parse::<u32>() {
-                if !seen.insert(id) { return ty.clone(); }
-                // Follow Var chain
-                let mut current = TyVarId(id);
-                let mut chain = HashSet::new();
-                let terminal = loop {
-                    if !chain.insert(current.0) { break None; }
-                    match solutions.get(&current) {
-                        Some(Ty::TypeVar(n)) if n.starts_with('?') => {
-                            if let Ok(next_id) = n[1..].parse::<u32>() {
-                                current = TyVarId(next_id);
-                            } else {
-                                break Some(Ty::TypeVar(n.clone()));
-                            }
-                        }
-                        Some(other) => break Some(other.clone()),
-                        None => break None,
+                match uf.resolve(id) {
+                    Some(bound) => resolve_ty(bound, uf),
+                    None => {
+                        // Point to canonical root (may differ from original id)
+                        let root = uf.find(id);
+                        if root != id { Ty::TypeVar(format!("?{}", root)) } else { ty.clone() }
                     }
-                };
-                let result = if let Some(solved) = terminal {
-                    resolve_inner(&solved, solutions, seen)
-                } else {
-                    ty.clone()
-                };
-                seen.remove(&id);
-                result
+                }
             } else {
                 ty.clone()
             }
         }
-        Ty::List(inner) => Ty::List(Box::new(resolve_inner(inner, solutions, seen))),
-        Ty::Option(inner) => Ty::Option(Box::new(resolve_inner(inner, solutions, seen))),
-        Ty::Result(ok, err) => Ty::Result(
-            Box::new(resolve_inner(ok, solutions, seen)),
-            Box::new(resolve_inner(err, solutions, seen)),
-        ),
-        Ty::Map(k, v) => Ty::Map(
-            Box::new(resolve_inner(k, solutions, seen)),
-            Box::new(resolve_inner(v, solutions, seen)),
-        ),
-        Ty::Tuple(elems) => Ty::Tuple(elems.iter().map(|e| resolve_inner(e, solutions, seen)).collect()),
+        Ty::Applied(id, args) => Ty::Applied(id.clone(), args.iter().map(|a| resolve_ty(a, uf)).collect()),
+        Ty::Tuple(elems) => Ty::Tuple(elems.iter().map(|e| resolve_ty(e, uf)).collect()),
         Ty::Fn { params, ret } => Ty::Fn {
-            params: params.iter().map(|p| resolve_inner(p, solutions, seen)).collect(),
-            ret: Box::new(resolve_inner(ret, solutions, seen)),
+            params: params.iter().map(|p| resolve_ty(p, uf)).collect(),
+            ret: Box::new(resolve_ty(ret, uf)),
         },
         Ty::Named(name, args) if !args.is_empty() => {
-            Ty::Named(name.clone(), args.iter().map(|a| resolve_inner(a, solutions, seen)).collect())
+            Ty::Named(name.clone(), args.iter().map(|a| resolve_ty(a, uf)).collect())
         }
+        Ty::Record { fields } => Ty::Record {
+            fields: fields.iter().map(|(n, t)| (n.clone(), resolve_ty(t, uf))).collect(),
+        },
+        Ty::OpenRecord { fields } => Ty::OpenRecord {
+            fields: fields.iter().map(|(n, t)| (n.clone(), resolve_ty(t, uf))).collect(),
+        },
         _ => ty.clone(),
     }
 }

@@ -2,7 +2,7 @@
 
 use crate::ast;
 use crate::ir::*;
-use crate::types::Ty;
+use crate::types::{Ty, TypeConstructorId};
 use super::LowerCtx;
 use super::calls::{lower_call, lower_call_target};
 use super::statements::lower_stmt;
@@ -35,6 +35,9 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         // ── Variables ──
         ast::Expr::Ident { name, .. } => {
             if let Some(var_id) = ctx.lookup_var(name) {
+                if name == "v" || name == "doubled" {
+                    eprintln!("[LOWER IDENT] '{}' → {:?} ty={:?} vt_ty={:?}", name, var_id, ty, ctx.var_table.get(var_id).ty);
+                }
                 ctx.mk(IrExprKind::Var { id: var_id }, ty, span)
             } else if ctx.env.functions.contains_key(name) {
                 // Function used as a value (e.g., passed to HOF)
@@ -87,7 +90,11 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         ast::Expr::Binary { op, left, right, .. } => {
             let l = lower_expr(ctx, left);
             let r = lower_expr(ctx, right);
-            let left_ty = &l.ty;
+            // Resolve operand types: if expr.ty is Unknown, try VarTable lookup
+            let left_ty = if l.ty == Ty::Unknown {
+                if let IrExprKind::Var { id } = &l.kind { ctx.var_table.get(*id).ty.clone() } else { l.ty.clone() }
+            } else { l.ty.clone() };
+            let left_ty = &left_ty;
             // Operator protocol: dispatch == / != to convention methods if available
             if op == "==" || op == "!=" {
                 if let Some(eq_fn) = ctx.find_convention_fn(left_ty, "eq") {
@@ -101,17 +108,20 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                     return call;
                 }
             }
-            let right_ty = &r.ty;
+            let right_ty = if r.ty == Ty::Unknown {
+                if let IrExprKind::Var { id } = &r.kind { ctx.var_table.get(*id).ty.clone() } else { r.ty.clone() }
+            } else { r.ty.clone() };
+            let right_ty = &right_ty;
             let bin_op = match (op.as_str(), left_ty, right_ty) {
                 ("+", Ty::String, _) | ("+", _, Ty::String) => BinOp::ConcatStr,
-                ("+", Ty::List(_), _) | ("+", _, Ty::List(_)) => BinOp::ConcatList,
+                ("+", Ty::Applied(TypeConstructorId::List, _), _) | ("+", _, Ty::Applied(TypeConstructorId::List, _)) => BinOp::ConcatList,
                 ("+", Ty::Float, _) | ("+", _, Ty::Float) => BinOp::AddFloat,
                 ("+", _, _) => BinOp::AddInt,
                 ("-", Ty::Float, _) | ("-", _, Ty::Float) => BinOp::SubFloat, ("-", _, _) => BinOp::SubInt,
                 ("*", Ty::Float, _) | ("*", _, Ty::Float) => BinOp::MulFloat, ("*", _, _) => BinOp::MulInt,
                 ("/", Ty::Float, _) | ("/", _, Ty::Float) => BinOp::DivFloat, ("/", _, _) => BinOp::DivInt,
                 ("%", Ty::Float, _) | ("%", _, Ty::Float) => BinOp::ModFloat, ("%", _, _) => BinOp::ModInt,
-                ("**", _, _) => BinOp::PowFloat,
+                ("**", Ty::Float, _) | ("**", _, Ty::Float) => BinOp::PowFloat, ("**", _, _) => BinOp::PowInt,
                 ("^", _, _) => BinOp::XorInt,
                 ("++", Ty::String, _) => BinOp::ConcatStr, // legacy
                 ("++", _, _) => BinOp::ConcatList,         // legacy
@@ -142,9 +152,26 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         }
         ast::Expr::Match { subject, arms, .. } => {
             let s = lower_expr(ctx, subject);
+            // Resolve subject type: if the expression type disagrees with VarTable
+            // (e.g., expr_types says Int but VarTable says Result[Int, String]),
+            // prefer VarTable for container types needed by Ok/Err/Some/None patterns.
+            let subject_ty = if let IrExprKind::Var { id } = &s.kind {
+                let vt_ty = &ctx.var_table.get(*id).ty;
+                if matches!(vt_ty, Ty::Applied(_, _)) && !matches!(&s.ty, Ty::Applied(_, _)) {
+                    vt_ty.clone()
+                } else {
+                    s.ty.clone()
+                }
+            } else {
+                s.ty.clone()
+            };
+            // Fix subject Var's type if it was wrong
+            let s = if subject_ty != s.ty {
+                IrExpr { ty: subject_ty.clone(), ..s }
+            } else { s };
             let ir_arms = arms.iter().map(|arm| {
                 ctx.push_scope();
-                let pat = lower_pattern(ctx, &arm.pattern, &s.ty);
+                let pat = lower_pattern(ctx, &arm.pattern, &subject_ty);
                 let guard = arm.guard.as_ref().map(|g| lower_expr(ctx, g));
                 let body = lower_expr(ctx, &arm.body);
                 ctx.pop_scope();
@@ -176,8 +203,8 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             let ir_iter = lower_expr(ctx, iterable);
             ctx.push_scope();
             let elem_ty = match &ir_iter.ty {
-                Ty::List(inner) => *inner.clone(),
-                Ty::Map(k, v) => Ty::Tuple(vec![*k.clone(), *v.clone()]),
+                Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => args[0].clone(),
+                Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => Ty::Tuple(vec![args[0].clone(), args[1].clone()]),
                 _ => Ty::Unknown,
             };
             let var_id = ctx.define_var(var, elem_ty.clone(), Mutability::Let, span.clone());
@@ -225,7 +252,15 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                     all_args.extend(args.iter().map(|a| lower_expr(ctx, a)));
                     let target = lower_call_target(ctx, callee);
                     let ta = type_args.as_ref().map(|tas| tas.iter().map(|t| resolve_type_expr(t)).collect()).unwrap_or_default();
-                    ctx.mk(IrExprKind::Call { target, args: all_args, type_args: ta }, ty, span)
+                    // If pipe result type is Unknown, try to infer from callee's return type
+                    let resolved_ty = if matches!(ty, Ty::Unknown) {
+                        if let CallTarget::Named { name } = &target {
+                            ctx.env.functions.get(name.as_str())
+                                .map(|f| f.ret.clone())
+                                .unwrap_or(ty)
+                        } else { ty }
+                    } else { ty };
+                    ctx.mk(IrExprKind::Call { target, args: all_args, type_args: ta }, resolved_ty, span)
                 }
                 // Bare function name: `a |> f` → `f(a)`
                 ast::Expr::Ident { .. } | ast::Expr::Member { .. } => {
@@ -240,6 +275,45 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                     }, ty, span)
                 }
             }
+        }
+
+        // ── Compose: desugar `f >> g` → `(x) => g(f(x))` ──
+        ast::Expr::Compose { left, right, .. } => {
+            let ir_left = lower_expr(ctx, left);
+            let ir_right = lower_expr(ctx, right);
+            // Extract types: left is Fn[A] -> B, right is Fn[B] -> C
+            let (param_ty, mid_ty) = match &ir_left.ty {
+                Ty::Fn { params, ret } => (
+                    params.first().cloned().unwrap_or(Ty::Unknown),
+                    *ret.clone(),
+                ),
+                _ => (Ty::Unknown, Ty::Unknown),
+            };
+            let ret_ty = match &ir_right.ty {
+                Ty::Fn { ret, .. } => *ret.clone(),
+                _ => Ty::Unknown,
+            };
+            ctx.push_scope();
+            let param_var = ctx.define_var("__compose_x", param_ty.clone(), Mutability::Let, span.clone());
+            let param_ref = ctx.mk(IrExprKind::Var { id: param_var }, param_ty.clone(), span.clone());
+            // f(x)
+            let f_call = ctx.mk(IrExprKind::Call {
+                target: CallTarget::Computed { callee: Box::new(ir_left) },
+                args: vec![param_ref], type_args: vec![],
+            }, mid_ty, span.clone());
+            // g(f(x))
+            let g_call = ctx.mk(IrExprKind::Call {
+                target: CallTarget::Computed { callee: Box::new(ir_right) },
+                args: vec![f_call], type_args: vec![],
+            }, ret_ty.clone(), span.clone());
+            ctx.pop_scope();
+            let lambda_id = Some(ctx.next_lambda_id());
+            let lambda_ty = Ty::Fn { params: vec![param_ty.clone()], ret: Box::new(ret_ty) };
+            ctx.mk(IrExprKind::Lambda {
+                params: vec![(param_var, param_ty)],
+                body: Box::new(g_call),
+                lambda_id,
+            }, lambda_ty, span)
         }
 
         // ── Lambda ──
@@ -259,7 +333,8 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             }).collect();
             let ir_body = lower_expr(ctx, body);
             ctx.pop_scope();
-            ctx.mk(IrExprKind::Lambda { params: ir_params, body: Box::new(ir_body) }, ty, span)
+            let lambda_id = Some(ctx.next_lambda_id());
+            ctx.mk(IrExprKind::Lambda { params: ir_params, body: Box::new(ir_body), lambda_id }, ty, span)
         }
 
         // ── Access ──
@@ -274,7 +349,11 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         ast::Expr::IndexAccess { object, index, .. } => {
             let obj = lower_expr(ctx, object);
             let idx = lower_expr(ctx, index);
-            ctx.mk(IrExprKind::IndexAccess { object: Box::new(obj), index: Box::new(idx) }, ty, span)
+            if obj.ty.is_map() {
+                ctx.mk(IrExprKind::MapAccess { object: Box::new(obj), key: Box::new(idx) }, ty, span)
+            } else {
+                ctx.mk(IrExprKind::IndexAccess { object: Box::new(obj), index: Box::new(idx) }, ty, span)
+            }
         }
 
         // ── String interpolation ──

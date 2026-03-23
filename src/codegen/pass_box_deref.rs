@@ -7,6 +7,7 @@ use std::collections::HashSet;
 use crate::ir::*;
 use crate::types::Ty;
 use super::pass::{NanoPass, Target};
+use super::walker;
 
 #[derive(Debug)]
 pub struct BoxDerefPass;
@@ -18,9 +19,85 @@ impl NanoPass for BoxDerefPass {
         Some(vec![Target::Rust])
     }
 
-    fn run(&self, _program: &mut IrProgram, _target: Target) {
-        // Populates annotations via collect_deref_vars()
+    fn run(&self, program: &mut IrProgram, _target: Target) {
+        // Step 1: Collect deref vars and insert Deref IR nodes
+        let (deref_ids, recursive) = collect_deref_vars(program);
+        insert_deref_nodes(program, &deref_ids);
+
+        // Step 2: Process module-level box deref (separate VarId namespace per module)
+        let all_type_decls: Vec<_> = program.type_decls.iter()
+            .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
+            .cloned().collect();
+        for module in &mut program.modules {
+            let mod_deref_ids = collect_module_deref_vars(module, &all_type_decls);
+            insert_module_deref_nodes(module, &mod_deref_ids);
+        }
+
+        // Step 3: Populate codegen annotations
+        program.codegen_annotations.recursive_enums = recursive.clone();
+
+        // Build boxed_fields: for each recursive enum, find which variant fields reference the enum
+        program.codegen_annotations.boxed_fields = program.type_decls.iter()
+            .filter(|td| recursive.contains(&td.name))
+            .filter_map(|td| match &td.kind {
+                IrTypeDeclKind::Variant { cases, .. } => Some((td, cases)),
+                _ => None,
+            })
+            .flat_map(|(td, cases)| {
+                cases.iter().flat_map(move |c| {
+                    let name = &td.name;
+                    match &c.kind {
+                        IrVariantKind::Record { fields } => fields.iter()
+                            .filter(|f| walker::ty_contains_name(&f.ty, name))
+                            .map(|f| (c.name.clone(), f.name.clone()))
+                            .collect::<Vec<_>>(),
+                        IrVariantKind::Tuple { fields } => fields.iter().enumerate()
+                            .filter(|(_, t)| walker::ty_contains_name(t, name))
+                            .map(|(i, _)| (c.name.clone(), format!("{}", i)))
+                            .collect::<Vec<_>>(),
+                        _ => vec![],
+                    }
+                })
+            })
+            .collect();
+
+        // Build default_fields: for each variant/record constructor with default field values
+        program.codegen_annotations.default_fields = program.type_decls.iter()
+            .flat_map(|td| match &td.kind {
+                IrTypeDeclKind::Variant { cases, .. } => cases.iter()
+                    .filter_map(|c| match &c.kind {
+                        IrVariantKind::Record { fields } => Some(fields.iter()
+                            .filter_map(|f| f.default.as_ref().map(|def| ((c.name.clone(), f.name.clone()), def.clone())))
+                            .collect::<Vec<_>>()),
+                        _ => None,
+                    })
+                    .flatten()
+                    .collect::<Vec<_>>(),
+                IrTypeDeclKind::Record { fields } => fields.iter()
+                    .filter_map(|f| f.default.as_ref().map(|def| ((td.name.clone(), f.name.clone()), def.clone())))
+                    .collect(),
+                _ => vec![],
+            })
+            .collect();
     }
+}
+
+/// Find recursive enums from a set of type declarations.
+fn find_recursive_enums<'a>(type_decls: impl Iterator<Item = &'a IrTypeDecl>) -> HashSet<String> {
+    let mut recursive = HashSet::new();
+    for td in type_decls {
+        if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
+            let is_recursive = cases.iter().any(|case| match &case.kind {
+                IrVariantKind::Tuple { fields } => fields.iter().any(|f| ty_contains_name(f, &td.name)),
+                IrVariantKind::Record { fields } => fields.iter().any(|f| ty_contains_name(&f.ty, &td.name)),
+                _ => false,
+            });
+            if is_recursive {
+                recursive.insert(td.name.clone());
+            }
+        }
+    }
+    recursive
 }
 
 /// Find which enums have recursive variants and collect
@@ -34,59 +111,11 @@ pub fn collect_deref_vars(program: &IrProgram) -> (HashSet<VarId>, HashSet<Strin
         name_to_var.entry(info.name.clone()).or_default().push(id);
     }
     let mut deref_vars = HashSet::new();
-    let mut recursive_enums = HashSet::new();
 
-    // Step 1: Find recursive enums
-    for td in &program.type_decls {
-        if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
-            for case in cases {
-                match &case.kind {
-                    IrVariantKind::Tuple { fields } => {
-                        for f in fields {
-                            if ty_contains_name(f, &td.name) {
-                                recursive_enums.insert(td.name.clone());
-                            }
-                        }
-                    }
-                    IrVariantKind::Record { fields } => {
-                        for f in fields {
-                            if ty_contains_name(&f.ty, &td.name) {
-                                recursive_enums.insert(td.name.clone());
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-
-    // Also check module type_decls for recursive enums
-    for module in &program.modules {
-        for td in &module.type_decls {
-            if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
-                for case in cases {
-                    match &case.kind {
-                        IrVariantKind::Tuple { fields } => {
-                            for f in fields {
-                                if ty_contains_name(f, &td.name) {
-                                    recursive_enums.insert(td.name.clone());
-                                }
-                            }
-                        }
-                        IrVariantKind::Record { fields } => {
-                            for f in fields {
-                                if ty_contains_name(&f.ty, &td.name) {
-                                    recursive_enums.insert(td.name.clone());
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-    }
+    // Step 1: Find recursive enums (type declarations that reference themselves)
+    let recursive_enums = find_recursive_enums(
+        program.type_decls.iter().chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
+    );
 
     // Step 2: Walk all match expressions and find Bind vars in recursive positions
     for func in &program.functions {
@@ -116,30 +145,7 @@ pub fn collect_module_deref_vars(module: &IrModule, all_type_decls: &[IrTypeDecl
         name_to_var.entry(info.name.clone()).or_default().push(id);
     }
     let mut deref_vars = HashSet::new();
-    let mut recursive_enums = HashSet::new();
-    for td in all_type_decls {
-        if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
-            for case in cases {
-                match &case.kind {
-                    IrVariantKind::Tuple { fields } => {
-                        for f in fields {
-                            if ty_contains_name(f, &td.name) {
-                                recursive_enums.insert(td.name.clone());
-                            }
-                        }
-                    }
-                    IrVariantKind::Record { fields } => {
-                        for f in fields {
-                            if ty_contains_name(&f.ty, &td.name) {
-                                recursive_enums.insert(td.name.clone());
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
+    let recursive_enums = find_recursive_enums(all_type_decls.iter());
     for func in &module.functions {
         collect_from_expr(&func.body, &recursive_enums, all_type_decls, &name_to_var, &mut deref_vars);
     }
@@ -208,8 +214,8 @@ fn insert_derefs(expr: IrExpr, deref_ids: &HashSet<VarId>) -> IrExpr {
         IrExprKind::BinOp { op, left, right } => IrExprKind::BinOp {
             op, left: Box::new(insert_derefs(*left, deref_ids)), right: Box::new(insert_derefs(*right, deref_ids)),
         },
-        IrExprKind::Lambda { params, body } => IrExprKind::Lambda {
-            params, body: Box::new(insert_derefs(*body, deref_ids)),
+        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
+            params, body: Box::new(insert_derefs(*body, deref_ids)), lambda_id,
         },
         IrExprKind::List { elements } => IrExprKind::List {
             elements: elements.into_iter().map(|e| insert_derefs(e, deref_ids)).collect(),
@@ -315,51 +321,38 @@ fn collect_from_stmt(stmt: &IrStmt, recursive_enums: &HashSet<String>, type_decl
 }
 
 /// Given a pattern matching a recursive enum, find Bind vars in recursive positions.
+/// Look up a variant case from a type decl by constructor name.
+fn find_variant_case<'a>(td: Option<&'a IrTypeDecl>, ctor_name: &str) -> Option<&'a IrVariantKind> {
+    let td = td?;
+    let cases = match &td.kind {
+        IrTypeDeclKind::Variant { cases, .. } => cases,
+        _ => return None,
+    };
+    cases.iter().find(|c| c.name == ctor_name).map(|c| &c.kind)
+}
+
 fn collect_deref_from_pattern(pattern: &IrPattern, enum_name: &str, td: Option<&IrTypeDecl>, name_to_var: &std::collections::HashMap<String, Vec<VarId>>, deref_vars: &mut HashSet<VarId>) {
     match pattern {
         IrPattern::Constructor { name, args } => {
-            // Find the variant in the type decl
-            if let Some(td) = td {
-                if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
-                    if let Some(case) = cases.iter().find(|c| &c.name == name) {
-                        if let IrVariantKind::Tuple { fields } = &case.kind {
-                            for (i, arg) in args.iter().enumerate() {
-                                if let Some(field_ty) = fields.get(i) {
-                                    if ty_contains_name(field_ty, enum_name) {
-                                        // This field is Box'd — any Bind in this pattern position needs deref
-                                        collect_bind_vars(arg, deref_vars);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            let Some(IrVariantKind::Tuple { fields }) = find_variant_case(td, name) else { return };
+            args.iter().enumerate()
+                .filter(|(i, _)| fields.get(*i).map_or(false, |ft| ty_contains_name(ft, enum_name)))
+                .for_each(|(_, arg)| collect_bind_vars(arg, deref_vars));
         }
         IrPattern::RecordPattern { name, fields, .. } => {
-            if let Some(td) = td {
-                if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
-                    if let Some(case) = cases.iter().find(|c| &c.name == name) {
-                        if let IrVariantKind::Record { fields: case_fields } = &case.kind {
-                            for field_pat in fields {
-                                if let Some(case_field) = case_fields.iter().find(|f| f.name == field_pat.name) {
-                                    if ty_contains_name(&case_field.ty, enum_name) {
-                                        if let Some(ref p) = field_pat.pattern {
-                                            collect_bind_vars(p, deref_vars);
-                                        } else {
-                                            // Shorthand: lookup VarId by name, but only if unambiguous
-                                            if let Some(var_ids) = name_to_var.get(&field_pat.name) {
-                                                if var_ids.len() == 1 {
-                                                    deref_vars.insert(var_ids[0]);
-                                                }
-                                                // If ambiguous (multiple vars with same name), skip —
-                                                // we can't tell which one is the pattern binding
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+            let Some(IrVariantKind::Record { fields: case_fields }) = find_variant_case(td, name) else { return };
+            for field_pat in fields {
+                let is_recursive = case_fields.iter()
+                    .find(|f| f.name == field_pat.name)
+                    .map_or(false, |f| ty_contains_name(&f.ty, enum_name));
+                if !is_recursive { continue; }
+
+                if let Some(ref p) = field_pat.pattern {
+                    collect_bind_vars(p, deref_vars);
+                } else if let Some(var_ids) = name_to_var.get(&field_pat.name) {
+                    // Shorthand: lookup VarId by name, only if unambiguous
+                    if var_ids.len() == 1 {
+                        deref_vars.insert(var_ids[0]);
                     }
                 }
             }
@@ -370,7 +363,7 @@ fn collect_deref_from_pattern(pattern: &IrPattern, enum_name: &str, td: Option<&
 
 fn collect_bind_vars(pattern: &IrPattern, deref_vars: &mut HashSet<VarId>) {
     match pattern {
-        IrPattern::Bind { var } => { deref_vars.insert(*var); }
+        IrPattern::Bind { var, .. } => { deref_vars.insert(*var); }
         IrPattern::Constructor { args, .. } => {
             for a in args { collect_bind_vars(a, deref_vars); }
         }
@@ -382,8 +375,7 @@ fn ty_contains_name(ty: &Ty, name: &str) -> bool {
     match ty {
         Ty::Named(n, args) => n == name || args.iter().any(|a| ty_contains_name(a, name)),
         Ty::Variant { name: vn, .. } => vn == name,
-        Ty::List(inner) | Ty::Option(inner) => ty_contains_name(inner, name),
-        Ty::Result(a, b) | Ty::Map(a, b) => ty_contains_name(a, name) || ty_contains_name(b, name),
+        Ty::Applied(_, args) => args.iter().any(|a| ty_contains_name(a, name)),
         Ty::Tuple(elems) => elems.iter().any(|e| ty_contains_name(e, name)),
         _ => false,
     }

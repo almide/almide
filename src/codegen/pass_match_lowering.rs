@@ -12,7 +12,7 @@
 //! - wildcard / bind  → else { body }
 
 use crate::ir::*;
-use crate::types::Ty;
+use crate::types::{Ty, TypeConstructorId};
 use super::pass::{NanoPass, Target};
 
 #[derive(Debug)]
@@ -22,7 +22,7 @@ impl NanoPass for MatchLoweringPass {
     fn name(&self) -> &str { "MatchLowering" }
 
     fn targets(&self) -> Option<Vec<Target>> {
-        Some(vec![Target::TypeScript, Target::JavaScript, Target::Python, Target::Go])
+        Some(vec![Target::TypeScript, Target::Python, Target::Go])
     }
 
     fn run(&self, program: &mut IrProgram, _target: Target) {
@@ -89,9 +89,10 @@ fn rewrite_expr(expr: IrExpr, vt: &mut VarTable) -> IrExpr {
             args: args.into_iter().map(|a| rewrite_expr(a, vt)).collect(),
             type_args,
         },
-        IrExprKind::Lambda { params, body } => IrExprKind::Lambda {
+        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
             params,
             body: Box::new(rewrite_expr(*body, vt)),
+            lambda_id,
         },
         IrExprKind::OptionSome { expr: inner } => IrExprKind::OptionSome {
             expr: Box::new(rewrite_expr(*inner, vt)),
@@ -223,7 +224,7 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                 arm.body.clone()
             }
         }
-        IrPattern::Bind { var } => {
+        IrPattern::Bind { var, .. } => {
             // let var = subject; body (with optional guard)
             let bind_stmt = IrStmt {
                 kind: IrStmtKind::Bind {
@@ -447,7 +448,7 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
             // Bind tuple args from subject.value array
             let mut bind_stmts = Vec::new();
             for (i, arg) in args.iter().enumerate() {
-                if let IrPattern::Bind { var } = arg {
+                if let IrPattern::Bind { var, .. } = arg {
                     let val_expr = IrExpr {
                         kind: IrExprKind::IndexAccess {
                             object: Box::new(IrExpr {
@@ -538,7 +539,7 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                         },
                         span: None,
                     });
-                } else if let Some(IrPattern::Bind { var }) = &fp.pattern {
+                } else if let Some(IrPattern::Bind { var, .. }) = &fp.pattern {
                     let val_expr = IrExpr {
                         kind: IrExprKind::Member {
                             object: Box::new(subject.clone()),
@@ -590,7 +591,7 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
 /// Bind pattern variable to a value, then evaluate body.
 fn build_pattern_bind(value: &IrExpr, pattern: &IrPattern, body: &IrExpr, result_ty: &Ty) -> IrExpr {
     match pattern {
-        IrPattern::Bind { var } => {
+        IrPattern::Bind { var, .. } => {
             IrExpr {
                 kind: IrExprKind::Block {
                     stmts: vec![IrStmt {
@@ -615,14 +616,14 @@ fn build_pattern_bind(value: &IrExpr, pattern: &IrPattern, body: &IrExpr, result
 
 fn unwrap_result_ok(ty: &Ty) -> Ty {
     match ty {
-        Ty::Result(ok, _) => ok.as_ref().clone(),
+        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
         _ => Ty::Unknown,
     }
 }
 
 fn unwrap_result_err(ty: &Ty) -> Ty {
     match ty {
-        Ty::Result(_, err) => err.as_ref().clone(),
+        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[1].clone(),
         _ => Ty::Unknown,
     }
 }

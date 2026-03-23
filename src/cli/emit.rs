@@ -113,22 +113,15 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
             .unwrap_or_else(|e| { eprintln!("JSON serialize error: {}", e); std::process::exit(1); });
         println!("{}", json);
     } else {
-        let code = match target {
-            // v3 codegen (default)
-            "rust" | "rs" => {
-                let ir = ir_program.as_mut().expect("IR required for codegen");
-                codegen::emit(ir, codegen::pass::Target::Rust)
-            }
-            "ts" | "typescript" => {
-                let ir = ir_program.as_mut().expect("IR required for codegen");
-                codegen::emit(ir, codegen::pass::Target::TypeScript)
-            }
-            "js" | "javascript" => {
-                let ir = ir_program.as_mut().expect("IR required for codegen");
-                codegen::emit(ir, codegen::pass::Target::JavaScript)
-            }
-            other => { eprintln!("Unknown target: {}. Use rust, ts, js.", other); std::process::exit(1); }
+        let t = match target {
+            "rust" | "rs" => codegen::pass::Target::Rust,
+            "ts" | "typescript" => codegen::pass::Target::TypeScript,
+            other => { eprintln!("Unknown target: {}. Use rust, ts.", other); std::process::exit(1); }
         };
-        print!("{}", code);
+        let ir = ir_program.as_mut().expect("IR required for codegen");
+        match codegen::codegen(ir, t) {
+            codegen::CodegenOutput::Source(code) => print!("{}", code),
+            codegen::CodegenOutput::Binary(_) => unreachable!(),
+        }
     }
 }

@@ -67,8 +67,10 @@ impl Parser {
             && {
                 let mut j = i + 1;
                 while self.peek_at(j).map(|t| &t.token_type) == Some(&TokenType::Newline) { j += 1; }
-                self.peek_at(j).map(|t| &t.token_type) == Some(&TokenType::Ident)
-                    && self.peek_at(j + 1).map(|t| &t.token_type) == Some(&TokenType::Colon)
+                // { ident: ... } or { ...spread }
+                (self.peek_at(j).map(|t| &t.token_type) == Some(&TokenType::Ident)
+                    && self.peek_at(j + 1).map(|t| &t.token_type) == Some(&TokenType::Colon))
+                || self.peek_at(j).map(|t| &t.token_type) == Some(&TokenType::DotDotDot)
             }
     }
 
@@ -281,6 +283,18 @@ impl Parser {
         }
         if !self.check(tt) {
             self.pos = saved; // restore — the newlines are significant
+        }
+    }
+
+    /// Skip newlines if the next non-newline token matches any of the given types.
+    /// Enables multiline expression continuation when a line starts with a binary operator.
+    pub(crate) fn skip_newlines_if_followed_by_any(&mut self, tts: &[TokenType]) {
+        let saved = self.pos;
+        while self.check(TokenType::Newline) || self.check(TokenType::Comment) {
+            self.advance();
+        }
+        if !tts.iter().any(|tt| self.check(tt.clone())) {
+            self.pos = saved;
         }
     }
 

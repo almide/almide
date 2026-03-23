@@ -1,0 +1,13 @@
+{
+  "date": "2026-03-20",
+  "language": "almide",
+  "target": "rust",
+  "model": "haiku",
+  "exercises": 1,
+  "passed": 0,
+  "failed": 1,
+  "check_failures": 1,
+  "test_failures": 0,
+  "msr": 0,
+  "results": [{"name":"collatz","passed":false,"error":"type_check"}]
+}

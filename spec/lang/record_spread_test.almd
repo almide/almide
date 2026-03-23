@@ -1,0 +1,69 @@
+// record_spread_test — Record creation, field access, spread
+
+type Config = { host: String, port: Int, debug: Bool }
+
+test "record creation and field access" {
+  let c = Config { host: "localhost", port: 8080, debug: false }
+  assert_eq(c.host, "localhost")
+  assert_eq(c.port, 8080)
+  assert_eq(c.debug, false)
+}
+
+test "record spread update single field" {
+  let base = Config { host: "localhost", port: 8080, debug: false }
+  let dev = Config { ...base, debug: true }
+  assert_eq(dev.host, "localhost")
+  assert_eq(dev.port, 8080)
+  assert_eq(dev.debug, true)
+}
+
+test "record spread update multiple fields" {
+  let base = Config { host: "localhost", port: 8080, debug: false }
+  let prod = Config { ...base, host: "prod.com", port: 443 }
+  assert_eq(prod.host, "prod.com")
+  assert_eq(prod.port, 443)
+  assert_eq(prod.debug, false)
+}
+
+test "record field in expression" {
+  let c = Config { host: "localhost", port: 8080, debug: true }
+  let url = "${c.host}:${c.port}"
+  assert_eq(url, "localhost:8080")
+}
+
+test "record equality" {
+  let a = Config { host: "x", port: 1, debug: true }
+  let b = Config { host: "x", port: 1, debug: true }
+  assert_eq(a == b, true)
+}
+
+test "record in list" {
+  let configs = [
+    Config { host: "a", port: 1, debug: false },
+    Config { host: "b", port: 2, debug: true },
+  ]
+  assert_eq(configs.len(), 2)
+}
+
+test "record field used in condition" {
+  let c = Config { host: "localhost", port: 8080, debug: true }
+  let mode = if c.debug then "debug" else "release"
+  assert_eq(mode, "debug")
+}
+
+type Pair = { first: Int, second: Int }
+
+test "record with computed fields" {
+  let x = 10
+  let p = Pair { first: x, second: x * 2 }
+  assert_eq(p.first, 10)
+  assert_eq(p.second, 20)
+}
+
+test "record spread preserves original" {
+  let base = Pair { first: 1, second: 2 }
+  let updated = Pair { ...base, first: 99 }
+  assert_eq(base.first, 1)
+  assert_eq(updated.first, 99)
+  assert_eq(updated.second, 2)
+}

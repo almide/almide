@@ -235,11 +235,6 @@ pub fn typescript_templates() -> TemplateSet {
     load_from_toml("typescript", include_str!("../../codegen/templates/typescript.toml"))
 }
 
-/// Load JavaScript templates from embedded TOML
-pub fn javascript_templates() -> TemplateSet {
-    load_from_toml("javascript", include_str!("../../codegen/templates/javascript.toml"))
-}
-
 /// Load built-in Rust templates (inline fallback — kept for reference)
 pub fn rust_templates_inline() -> TemplateSet {
     let mut ts = TemplateSet::new("rust");

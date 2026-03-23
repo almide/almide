@@ -1,0 +1,197 @@
+// string completeness tests — functions not covered elsewhere
+
+test "string.reverse basic" {
+  assert_eq(string.reverse("hello"), "olleh")
+}
+
+test "string.reverse empty" {
+  assert_eq(string.reverse(""), "")
+}
+
+test "string.reverse single char" {
+  assert_eq(string.reverse("a"), "a")
+}
+
+test "string.count occurrences" {
+  assert_eq(string.count("banana", "an"), 2)
+}
+
+test "string.count no match" {
+  assert_eq(string.count("hello", "xyz"), 0)
+}
+
+test "string.count empty substring" {
+  let n = string.count("abc", "")
+  assert(n >= 0)
+}
+
+test "string.replace_first only first" {
+  assert_eq(string.replace_first("aabaa", "a", "X"), "Xabaa")
+}
+
+test "string.replace_first no match" {
+  assert_eq(string.replace_first("hello", "xyz", "!"), "hello")
+}
+
+test "string.last_index_of found" {
+  assert_eq(string.last_index_of("abcabc", "bc"), some(4))
+}
+
+test "string.last_index_of not found" {
+  assert_eq(string.last_index_of("hello", "xyz"), none)
+}
+
+test "string.first on non-empty" {
+  assert_eq(string.first("hello"), some("h"))
+}
+
+test "string.first on empty" {
+  assert_eq(string.first(""), none)
+}
+
+test "string.last on non-empty" {
+  assert_eq(string.last("hello"), some("o"))
+}
+
+test "string.last on empty" {
+  assert_eq(string.last(""), none)
+}
+
+test "string.take basic" {
+  assert_eq(string.take("hello", 3), "hel")
+}
+
+test "string.take more than length" {
+  assert_eq(string.take("hi", 10), "hi")
+}
+
+test "string.take zero" {
+  assert_eq(string.take("hello", 0), "")
+}
+
+test "string.take_end basic" {
+  assert_eq(string.take_end("hello", 3), "llo")
+}
+
+test "string.take_end more than length" {
+  assert_eq(string.take_end("hi", 10), "hi")
+}
+
+test "string.drop basic" {
+  assert_eq(string.drop("hello", 2), "llo")
+}
+
+test "string.drop all" {
+  assert_eq(string.drop("hello", 5), "")
+}
+
+test "string.drop zero" {
+  assert_eq(string.drop("hello", 0), "hello")
+}
+
+test "string.drop_end basic" {
+  assert_eq(string.drop_end("hello", 2), "hel")
+}
+
+test "string.drop_end all" {
+  assert_eq(string.drop_end("hello", 5), "")
+}
+
+test "string.is_digit true" {
+  assert(string.is_digit("12345"))
+}
+
+test "string.is_digit false" {
+  assert(not string.is_digit("12a45"))
+}
+
+test "string.is_alpha true" {
+  assert(string.is_alpha("abcXYZ"))
+}
+
+test "string.is_alpha false" {
+  assert(not string.is_alpha("abc123"))
+}
+
+test "string.is_alphanumeric true" {
+  assert(string.is_alphanumeric("abc123"))
+}
+
+test "string.is_alphanumeric false" {
+  assert(not string.is_alphanumeric("abc 123"))
+}
+
+test "string.is_whitespace true" {
+  assert(string.is_whitespace("  \t\n"))
+}
+
+test "string.is_whitespace false" {
+  assert(not string.is_whitespace("  x  "))
+}
+
+test "string.is_upper true" {
+  assert(string.is_upper("ABC"))
+}
+
+test "string.is_upper false" {
+  assert(not string.is_upper("ABc"))
+}
+
+test "string.is_lower true" {
+  assert(string.is_lower("abc"))
+}
+
+test "string.is_lower false" {
+  assert(not string.is_lower("Abc"))
+}
+
+test "string.codepoint on A" {
+  assert_eq(string.codepoint("A"), some(65))
+}
+
+test "string.codepoint on empty" {
+  assert_eq(string.codepoint(""), none)
+}
+
+test "string.from_codepoint 65" {
+  assert_eq(string.from_codepoint(65), "A")
+}
+
+test "string.to_bytes and from_bytes roundtrip" {
+  let bytes = string.to_bytes("Hi")
+  assert_eq(string.from_bytes(bytes), "Hi")
+}
+
+test "string.to_bytes known values" {
+  let bytes = string.to_bytes("AB")
+  assert_eq(list.len(bytes), 2)
+  assert_eq(list.get(bytes, 0), some(65))
+  assert_eq(list.get(bytes, 1), some(66))
+}
+
+test "string.lines splits on newline" {
+  let lines = string.lines("a\nb\nc")
+  assert_eq(list.len(lines), 3)
+  assert_eq(list.get(lines, 0), some("a"))
+  assert_eq(list.get(lines, 2), some("c"))
+}
+
+test "string.capitalize basic" {
+  assert_eq(string.capitalize("hello"), "Hello")
+}
+
+test "string.capitalize empty" {
+  assert_eq(string.capitalize(""), "")
+}
+
+test "string.capitalize already capitalized" {
+  assert_eq(string.capitalize("Hello"), "Hello")
+}
+
+test "string.get in bounds" {
+  assert_eq(string.get("hello", 1), some("e"))
+}
+
+test "string.get out of bounds" {
+  assert_eq(string.get("hello", 10), none)
+}

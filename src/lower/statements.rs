@@ -2,7 +2,7 @@
 
 use crate::ast;
 use crate::ir::*;
-use crate::types::Ty;
+use crate::types::{Ty, TypeConstructorId};
 use super::LowerCtx;
 use super::expressions::lower_expr;
 
@@ -43,7 +43,12 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
             let var = ctx.lookup_var(target).unwrap_or(VarId(0));
             let ir_idx = lower_expr(ctx, index);
             let ir_val = lower_expr(ctx, value);
-            IrStmtKind::IndexAssign { target: var, index: ir_idx, value: ir_val }
+            let var_ty = &ctx.var_table.get(var).ty;
+            if var_ty.is_map() {
+                IrStmtKind::MapInsert { target: var, key: ir_idx, value: ir_val }
+            } else {
+                IrStmtKind::IndexAssign { target: var, index: ir_idx, value: ir_val }
+            }
         }
         ast::Stmt::FieldAssign { target, field, value, .. } => {
             let var = ctx.lookup_var(target).unwrap_or(VarId(0));
@@ -73,7 +78,7 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
         ast::Pattern::Wildcard => IrPattern::Wildcard,
         ast::Pattern::Ident { name } => {
             let var = ctx.define_var(name, ty.clone(), Mutability::Let, None);
-            IrPattern::Bind { var }
+            IrPattern::Bind { var, ty: ty.clone() }
         }
         ast::Pattern::Literal { value } => {
             // Pattern literals may not have expr_types entries (they're patterns,
@@ -95,26 +100,32 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
             IrPattern::Literal { expr: ir_expr }
         }
         ast::Pattern::Constructor { name, args } => {
-            let payload_tys = get_constructor_payload_tys(ctx, name);
+            let payload_tys = get_constructor_payload_tys_from_subject(ctx, name, ty);
             let ir_args = args.iter().enumerate().map(|(i, a)| {
                 let arg_ty = payload_tys.get(i).cloned().unwrap_or(Ty::Unknown);
-                lower_pattern(ctx, a, &arg_ty)
+                let p = lower_pattern(ctx, a, &arg_ty);
+                if let IrPattern::Bind { var, .. } = &p {
+                    eprintln!("[LOWER CTOR] {}[{}] var={:?} '{}' ty={:?} pat_ty={:?}", name, i, var, ctx.var_table.get(*var).name, ctx.var_table.get(*var).ty, arg_ty);
+                }
+                p
             }).collect();
             IrPattern::Constructor { name: name.clone(), args: ir_args }
         }
         ast::Pattern::RecordPattern { name, fields, rest } => {
-            let ir_fields = fields.iter().map(|f| {
+            let ir_fields: Vec<IrFieldPattern> = fields.iter().map(|f| {
                 let field_ty = resolve_record_field_ty(ctx, name, &f.name);
                 IrFieldPattern {
                     name: f.name.clone(),
                     pattern: f.pattern.as_ref().map(|p| lower_pattern(ctx, p, &field_ty)),
                 }
             }).collect();
-            // Bind unmatched fields as variables
-            for f in fields {
+            // Bind shorthand fields as variables and attach Bind pattern
+            let mut ir_fields = ir_fields;
+            for (i, f) in fields.iter().enumerate() {
                 if f.pattern.is_none() {
                     let field_ty = resolve_record_field_ty(ctx, name, &f.name);
-                    ctx.define_var(&f.name, field_ty, Mutability::Let, None);
+                    let var = ctx.define_var(&f.name, field_ty.clone(), Mutability::Let, None);
+                    ir_fields[i].pattern = Some(IrPattern::Bind { var, ty: field_ty });
                 }
             }
             IrPattern::RecordPattern { name: name.clone(), fields: ir_fields, rest: *rest }
@@ -130,22 +141,36 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
             IrPattern::Tuple { elements: ir_elems }
         }
         ast::Pattern::Some { inner } => {
-            let inner_ty = match ty { Ty::Option(t) => *t.clone(), _ => Ty::Unknown };
+            let inner_ty = match ty { Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args[0].clone(), _ => Ty::Unknown };
             IrPattern::Some { inner: Box::new(lower_pattern(ctx, inner, &inner_ty)) }
         }
         ast::Pattern::None => IrPattern::None,
         ast::Pattern::Ok { inner } => {
-            let inner_ty = match ty { Ty::Result(t, _) => *t.clone(), _ => Ty::Unknown };
+            let inner_ty = match ty { Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(), _ => Ty::Unknown };
             IrPattern::Ok { inner: Box::new(lower_pattern(ctx, inner, &inner_ty)) }
         }
         ast::Pattern::Err { inner } => {
-            let inner_ty = match ty { Ty::Result(_, e) => *e.clone(), _ => Ty::Unknown };
+            let inner_ty = match ty { Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[1].clone(), _ => Ty::Unknown };
             IrPattern::Err { inner: Box::new(lower_pattern(ctx, inner, &inner_ty)) }
         }
     }
 }
 
-fn get_constructor_payload_tys(ctx: &LowerCtx, ctor_name: &str) -> Vec<Ty> {
+/// Extract constructor payload types from the subject type first (instantiated types),
+/// falling back to the constructor registry (template types) if the subject type doesn't match.
+fn get_constructor_payload_tys_from_subject(ctx: &LowerCtx, ctor_name: &str, subject_ty: &Ty) -> Vec<Ty> {
+    // Try to extract from the subject type (has instantiated generics)
+    let resolved = ctx.env.resolve_named(subject_ty);
+    if let Ty::Variant { cases, .. } = &resolved {
+        if let Some(case) = cases.iter().find(|c| c.name == ctor_name) {
+            return match &case.payload {
+                crate::types::VariantPayload::Tuple(tys) => tys.clone(),
+                crate::types::VariantPayload::Record(fs) => fs.iter().map(|(_, t, _)| t.clone()).collect(),
+                crate::types::VariantPayload::Unit => vec![],
+            };
+        }
+    }
+    // Fallback: constructor registry (may have uninstantiated generic types)
     if let Some((_, case)) = ctx.env.constructors.get(ctor_name) {
         match &case.payload {
             crate::types::VariantPayload::Tuple(tys) => tys.clone(),

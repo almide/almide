@@ -1,0 +1,5 @@
+fn fibonacci(n: Int) -> Int = todo
+
+fn fizzbuzz(n: Int) -> String = todo
+
+effect fn main() -> Result[Unit, String] = todo

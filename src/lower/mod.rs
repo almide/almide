@@ -43,6 +43,10 @@ pub struct LowerCtx<'a> {
     fn_defaults: HashMap<String, Vec<Option<ast::Expr>>>,
     /// Type names that derive each convention: convention_name → set of type names
     type_conventions: HashMap<String, std::collections::HashSet<String>>,
+    /// Protocol bounds for generic type parameters in scope: TypeVar name → list of protocol names
+    /// Set during function lowering for protocol-bounded generics.
+    protocol_bounds: HashMap<String, Vec<String>>,
+    lambda_id_counter: u32,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -54,6 +58,8 @@ impl<'a> LowerCtx<'a> {
             env,
             fn_defaults: HashMap::new(),
             type_conventions: HashMap::new(),
+            protocol_bounds: HashMap::new(),
+            lambda_id_counter: 0,
         }
     }
 
@@ -78,6 +84,12 @@ impl<'a> LowerCtx<'a> {
             }
         }
         None
+    }
+
+    pub(super) fn next_lambda_id(&mut self) -> u32 {
+        let id = self.lambda_id_counter;
+        self.lambda_id_counter += 1;
+        id
     }
 
     pub(super) fn push_scope(&mut self) { self.scopes.push(HashMap::new()); }
@@ -157,36 +169,36 @@ impl<'a> LowerCtx<'a> {
                 "join" => Ty::String,
                 "len" | "count" => Ty::Int,
                 "any" | "all" | "contains" | "is_empty" => Ty::Bool,
-                "find" | "first" | "last" => Ty::Option(Box::new(Ty::Unknown)),
-                "find_index" | "index_of" => Ty::Option(Box::new(Ty::Int)),
+                "find" | "first" | "last" => Ty::option(Ty::Unknown),
+                "find_index" | "index_of" => Ty::option(Ty::Int),
                 "fold" | "reduce" | "sum" | "product" => Ty::Unknown,
-                _ => Ty::List(Box::new(Ty::Unknown)),
+                _ => Ty::list(Ty::Unknown),
             },
             "string" => match method {
                 "len" | "count" => Ty::Int,
                 "contains" | "starts_with" | "ends_with" | "is_empty"
                     | "is_digit" | "is_alpha" | "is_alphanumeric"
                     | "is_whitespace" | "is_upper" | "is_lower" => Ty::Bool,
-                "split" | "lines" | "chars" | "to_bytes" => Ty::List(Box::new(Ty::String)),
-                "index_of" | "last_index_of" => Ty::Option(Box::new(Ty::Int)),
+                "split" | "lines" | "chars" | "to_bytes" => Ty::list(Ty::String),
+                "index_of" | "last_index_of" => Ty::option(Ty::Int),
                 "codepoint" => Ty::Int,
                 _ => Ty::String,
             },
             "map" => match method {
                 "len" | "count" => Ty::Int,
                 "contains" | "is_empty" => Ty::Bool,
-                "keys" | "values" => Ty::List(Box::new(Ty::Unknown)),
-                "entries" => Ty::List(Box::new(Ty::Tuple(vec![Ty::Unknown, Ty::Unknown]))),
-                _ => Ty::Map(Box::new(Ty::Unknown), Box::new(Ty::Unknown)),
+                "keys" | "values" => Ty::list(Ty::Unknown),
+                "entries" => Ty::list(Ty::Tuple(vec![Ty::Unknown, Ty::Unknown])),
+                _ => Ty::map_of(Ty::Unknown, Ty::Unknown),
             },
             "option" => match method {
                 "is_some" | "is_none" => Ty::Bool,
-                "to_list" => Ty::List(Box::new(Ty::Unknown)),
-                _ => Ty::Option(Box::new(Ty::Unknown)),
+                "to_list" => Ty::list(Ty::Unknown),
+                _ => Ty::option(Ty::Unknown),
             },
             "result" => match method {
                 "is_ok" | "is_err" => Ty::Bool,
-                _ => Ty::Result(Box::new(Ty::Unknown), Box::new(Ty::Unknown)),
+                _ => Ty::result(Ty::Unknown, Ty::Unknown),
             },
             "int" => Ty::String, // to_string, to_hex
             "float" => match method {
@@ -295,7 +307,14 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprI
     let auto_derived = generate_auto_derives(&mut ctx, &type_decls, &functions);
     functions.extend(auto_derived);
 
-    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, modules: Vec::new() };
+    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_map: Default::default(), codegen_annotations: Default::default() };
+
+    // Register user-defined types in the type constructor registry (HKT foundation)
+    for td in &program.type_decls {
+        let arity = td.generics.as_ref().map_or(0, |g| g.len());
+        program.type_registry.register_user_type(&td.name, arity);
+    }
+
     compute_use_counts(&mut program); // After auto-derive so derived functions get correct use_counts
     demote_unused_mut(&mut program);
     program
@@ -329,6 +348,19 @@ fn lower_fn(
     visibility: &ast::Visibility, _module_prefix: Option<&str>,
 ) -> IrFunction {
     ctx.push_scope();
+
+    // Set up protocol bounds for this function's generics
+    let saved_pb = std::mem::take(&mut ctx.protocol_bounds);
+    if let Some(gs) = generics {
+        for g in gs {
+            if let Some(bounds) = &g.bounds {
+                if !bounds.is_empty() {
+                    ctx.protocol_bounds.insert(g.name.clone(), bounds.clone());
+                }
+            }
+        }
+    }
+
     let mut ir_params = Vec::new();
     for p in params {
         let ty = resolve_type_expr(&p.ty);
@@ -347,6 +379,7 @@ fn lower_fn(
     };
 
     let ir_body = lower_expr(ctx, body);
+    ctx.protocol_bounds = saved_pb;
     ctx.pop_scope();
 
     let is_effect = effect.unwrap_or(false);

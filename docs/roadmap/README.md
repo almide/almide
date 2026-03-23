@@ -4,7 +4,16 @@
 
 ## Active
 
-なし。1.0 リリース準備完了。
+| 項目 | 説明 | Grand Plan |
+|---|---|---|
+| [Direct WASM Emission](active/emit-wasm-direct.md) | 129/129 ✅, DCE完了, Hello World 1,028B. 残: WASI fd_read/args/file I/O | Architecture |
+| [Test Coverage](active/test-coverage.md) | 129ファイル, 2,042テストブロック. Rust/WASM両方100%. 残: TS/JS cross-target | Phase 1 |
+| [User Generics & Protocol](active/user-generics-and-traits.md) | Protocol System 実装中 (Phase 1完了, Phase 2-3進行中) | Phase 3 |
+| [Effect System](active/effect-system.md) | Phase 3-4 残: Dependency制限, 内部型レベル統合 | Phase 3 |
+| [Performance Research](active/performance-research.md) | Rust との差 2.9%, Phase 0-4 | Research |
+| [Self-Contained Compiler](active/self-contained-compiler.md) | rustc 不要化: Stage 1 (LLVM直接出力) → Stage 2 (セルフホスティング) | Architecture |
+| [Record Spread](active/record-spread.md) | `{ ...base, field = value }` でレコード更新 | Phase 1 |
+| [Compiler Architecture 10/10](active/compiler-architecture-10.md) | 全領域 10/10 + WASM統合: Target::Wasm、stdlib dispatch一元化、cross-check | Architecture |
 
 ## 1.0 Remaining
 
@@ -22,7 +31,9 @@
 | [Package Registry](on-hold/package-registry.md) | 公開パッケージ配布 | Phase 3 |
 | [Go Target](on-hold/go-target.md) | TOML + 2-3 pass | Phase 3 |
 | [Platform Architecture](on-hold/platform-architecture.md) | 5層 app runtime ビジョン | Phase 3-5 |
-| [Security Model](on-hold/security-model.md) | Layer 2-5, capability | Phase 3 |
+| [Security Model](on-hold/security-model.md) | Layer 3-5, capability | Phase 3 |
+| [Effect Type Integration](on-hold/effect-type-integration.md) | FnType に EffectSet を持たせる (構文変更なし) | Phase 3 |
+| ~~Trait System~~ | → Protocol System (active) に統合 | — |
 | [Secure by Design](on-hold/secure-by-design.md) | | Phase 3 |
 | [Async Backend](on-hold/async-backend.md) | tokio opt-in runtime | Phase 3 |
 | [Supervision & Actors](on-hold/supervision-and-actors.md) | | Phase 3 |
@@ -38,14 +49,14 @@
 | [Almide Shell](on-hold/almide-shell.md) | AI-native REPL |
 | [LLM Integration](on-hold/llm-integration.md) | `almide forge`, `almide fix` |
 | [LLM → IR Generation](on-hold/llm-ir-generation.md) | Parser bypass |
-| [Self-Hosting](on-hold/self-hosting.md) | |
+| [Self-Hosting](on-hold/self-hosting.md) | 350KB WASM bootstrap compiler → LLM 自律進化ループ |
+| [The Rumbling](on-hold/rumbling.md) | OSS 書き直しキャンペーン: Dogfood → WASM Showcase → Multi-Target → LLM Modification → Platform |
 
 ## On Hold — Compiler Internals
 
 | 項目 | 説明 | 状態 |
 |---|---|---|
 | [build.rs syn Scanner](on-hold/buildrs-syn-scanner.md) | runtime scanner堅牢化 | 壊れたらやる |
-| [Direct WASM Emission](on-hold/emit-wasm-direct.md) | rustc bypass | 実験的 |
 | [IR Interpreter](on-hold/ir-interpreter.md) | rustc不要で即実行 | 実験的 |
 
 ## On Hold — Research / Misc
@@ -82,6 +93,8 @@
 - ~~LLM Immutable Sugar~~ → LLM Immutable Patterns 完了
 - ~~Built-in Protocols~~ → Derive Conventions 完了
 - ~~Almide Runtime~~ → Platform Architecture に統合
+- ~~Direct WASM Emission (old tasks)~~ → active に集約
+- ~~IR Verification~~ → 完了 (Phase 2, 25検証)
 
 ## Done
 
@@ -126,6 +139,7 @@
 - [`import self`](done/import-self-entry.md)
 - [IR Optimization Passes](done/ir-optimization-passes.md)
 - [IR Optimization (Tier 1)](done/ir-optimization.md)
+- [IR Verification](done/ir-verification.md) — Phase 2完了, 25検証, IrVisitor trait
 - [JSON Builder API](done/json-builder-api.md)
 - [Lambda Type Inference](done/lambda-type-inference.md)
 - [Language Test Suite](done/language-test-suite.md)
@@ -158,7 +172,7 @@
 - [Structured Concurrency (Phase 1)](done/structured-concurrency.md)
 - [Syntax Sugar](done/syntax-sugar.md)
 - [Tail Call Optimization](done/tail-call-optimization.md)
-- [Test Coverage](done/test-coverage.md)
+- [Test Coverage (Phase 1-2)](done/test-coverage.md)
 - [Test Directory Structure](done/test-directory-structure.md)
 - [Top-Level Let](done/top-level-let.md)
 - [Trailing Lambda / Builder DSL](done/trailing-lambda-builder.md)
@@ -170,6 +184,12 @@
 - [UFCS Type Resolution](done/ufcs-type-resolution.md)
 - [Unused Variable Warnings](done/unused-variable-warnings.md)
 - [Variant Record Fields](done/variant-record-fields.md)
+- [WASM Compile Errors](done/wasm-compile-errors.md) — 全解消, 129/129
+- [WASM Local Allocation](done/wasm-local-allocation.md) — ScratchAllocator + DepthGuard
+- [WASM Remaining 3](done/wasm-remaining-3.md) — lambda_id導入で全解消
+- [WASM Runtime Traps](done/wasm-runtime-traps.md) — 全44 trap解消
+- [WASM TCO](done/wasm-tco.md) — TailCallOptPass
+- [WASM Validation Fixes](done/wasm-validation-fixes.md) — Union-Find汚染回避
 - [Borrow/Clone Gaps](done/borrow-clone-gaps.md) — Case 1-9 全 FIXED
 - [Quality Improvements](done/quality-improvements.md) — エラー行番号、heredoc 行追跡
 - [Cross-Target CI](done/cross-target-ci.md) — 106/106 (100%), is_rust()=0, codegen v3 完全移行
@@ -189,3 +209,8 @@
 - [Design Debt](done/design-debt.md) — gen_generated_call排除、emit_rust/emit_ts削除
 - [Test Infrastructure](done/test-infrastructure.md) — 110/110 全通過、__test_almd_ prefix、strip_tail_try
 - [Test Architecture Redesign](done/test-architecture-redesign.md) — in_effect → can_call_effect + auto_unwrap 分離、in_test 除去
+- [HKT Foundation](done/hkt-foundation-phase1.md) — Phase 1-4 完了。Ty::Applied 統一、Stream Fusion 全6法則、TypeConstructor/Kind/AlgebraicLaw
+- [Effect System Phase 1-2](done/effect-system-phase1-2.md) — Effect推論, almide check --effects, Security Layer 2 ([permissions])
+- [Compiler Bugs v0.8.4](done/compiler-bugs.md) — 12バグ全修正、400+ テスト追加
+- [Stdlib Scope Reduction](done/stdlib-scope-reduction.md) — uuid/crypto削除、toml/compress/term除外、22モジュール381関数に確定
+- [Stdlib Additions](done/stdlib-additions.md) — set モジュール 11→20関数 (symmetric_difference, is_subset, is_disjoint, filter, map, fold, each, any, all)

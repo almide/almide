@@ -12,7 +12,7 @@
 //! while this pass strips Result/Option wrappers entirely.
 
 use crate::ir::*;
-use crate::types::Ty;
+use crate::types::{Ty, TypeConstructorId};
 use super::pass::{NanoPass, Target};
 
 #[derive(Debug)]
@@ -21,8 +21,9 @@ pub struct ResultErasurePass;
 impl NanoPass for ResultErasurePass {
     fn name(&self) -> &str { "ResultErasure" }
     fn targets(&self) -> Option<Vec<Target>> {
-        Some(vec![Target::TypeScript, Target::JavaScript, Target::Python])
+        Some(vec![Target::TypeScript, Target::Python])
     }
+    fn depends_on(&self) -> Vec<&'static str> { vec!["MatchLowering"] }
     fn run(&self, program: &mut IrProgram, _target: Target) {
         for func in &mut program.functions {
             // Erase Result return type on effect functions
@@ -51,8 +52,8 @@ impl NanoPass for ResultErasurePass {
 /// Erase Result<T, E> → T, Option<T> → T
 fn erase_result_ty(ty: Ty) -> Ty {
     match ty {
-        Ty::Result(ok, _) => *ok,
-        Ty::Option(inner) => *inner,
+        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args.into_iter().next().unwrap(),
+        Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args.into_iter().next().unwrap(),
         other => other,
     }
 }
@@ -122,8 +123,8 @@ fn erase_expr(expr: IrExpr) -> IrExpr {
         IrExprKind::UnOp { op, operand } => IrExprKind::UnOp {
             op, operand: Box::new(erase_expr(*operand)),
         },
-        IrExprKind::Lambda { params, body } => IrExprKind::Lambda {
-            params, body: Box::new(erase_expr(*body)),
+        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
+            params, body: Box::new(erase_expr(*body)), lambda_id,
         },
         IrExprKind::List { elements } => IrExprKind::List {
             elements: elements.into_iter().map(erase_expr).collect(),
@@ -160,6 +161,10 @@ fn erase_expr(expr: IrExpr) -> IrExpr {
         IrExprKind::IndexAccess { object, index } => IrExprKind::IndexAccess {
             object: Box::new(erase_expr(*object)),
             index: Box::new(erase_expr(*index)),
+        },
+        IrExprKind::MapAccess { object, key } => IrExprKind::MapAccess {
+            object: Box::new(erase_expr(*object)),
+            key: Box::new(erase_expr(*key)),
         },
         IrExprKind::Range { start, end, inclusive } => IrExprKind::Range {
             start: Box::new(erase_expr(*start)),

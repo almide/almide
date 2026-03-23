@@ -76,8 +76,8 @@ impl Parser {
         if self.check(TokenType::Type) {
             return self.parse_type_decl();
         }
-        if self.check(TokenType::Trait) {
-            return self.parse_trait_decl();
+        if self.check(TokenType::Protocol) {
+            return self.parse_protocol_decl();
         }
         if self.check(TokenType::Impl) {
             return self.parse_impl_decl();
@@ -86,7 +86,7 @@ impl Parser {
             return self.parse_top_let(Visibility::Public);
         }
         if self.check(TokenType::Fn) || self.check(TokenType::Pub)
-            || self.check(TokenType::Effect) || self.check(TokenType::Async)
+            || self.check(TokenType::Effect)
             || self.check(TokenType::Local) || self.check(TokenType::Mod)
         {
             if self.check(TokenType::Pub)
@@ -223,26 +223,24 @@ impl Parser {
         Ok(Decl::Type { name, ty, deriving, visibility, generics, span: Some(span) })
     }
 
-    fn parse_trait_decl(&mut self) -> Result<Decl, String> {
+    fn parse_protocol_decl(&mut self) -> Result<Decl, String> {
         let span = self.current_span();
-        self.expect(TokenType::Trait)?;
+        self.expect(TokenType::Protocol)?;
         let name = self.expect_type_name()?;
         let generics = self.try_parse_generic_params()?;
         let open = self.current().clone();
         self.expect(TokenType::LBrace)?;
         self.skip_newlines();
-        let mut methods: Vec<serde_json::Value> = Vec::new();
+        let mut methods: Vec<ProtocolMethod> = Vec::new();
         while !self.check(TokenType::RBrace) {
-            methods.push(self.parse_trait_method()?);
+            methods.push(self.parse_protocol_method()?);
             self.skip_newlines();
         }
-        self.expect_closing(TokenType::RBrace, open.line, open.col, "trait body")?;
-        Ok(Decl::Trait { name, generics, methods, span: Some(span) })
+        self.expect_closing(TokenType::RBrace, open.line, open.col, "protocol body")?;
+        Ok(Decl::Protocol { name, generics, methods, span: Some(span) })
     }
 
-    fn parse_trait_method(&mut self) -> Result<serde_json::Value, String> {
-        let mut async_ = false;
-        if self.check(TokenType::Async) { self.advance(); async_ = true; }
+    fn parse_protocol_method(&mut self) -> Result<ProtocolMethod, String> {
         let mut effect = false;
         if self.check(TokenType::Effect) { self.advance(); effect = true; }
         self.expect(TokenType::Fn)?;
@@ -251,27 +249,10 @@ impl Parser {
         let open_tm = self.current().clone();
         self.expect(TokenType::LParen)?;
         let params = self.parse_param_list()?;
-        self.expect_closing(TokenType::RParen, open_tm.line, open_tm.col, "trait method parameters")?;
+        self.expect_closing(TokenType::RParen, open_tm.line, open_tm.col, "protocol method parameters")?;
         self.expect(TokenType::Arrow)?;
         let return_type = self.parse_type_expr()?;
-
-        let mut map = serde_json::Map::new();
-        map.insert("name".to_string(), serde_json::Value::String(name));
-        if async_ { map.insert("async".to_string(), serde_json::Value::Bool(true)); }
-        if effect { map.insert("effect".to_string(), serde_json::Value::Bool(true)); }
-        let params_json: Vec<serde_json::Value> = params.iter().map(|p| {
-            let mut pm = serde_json::Map::new();
-            pm.insert("name".to_string(), serde_json::Value::String(p.name.clone()));
-            if let std::result::Result::Ok(ty_json) = serde_json::to_value(&p.ty) {
-                pm.insert("type".to_string(), ty_json);
-            }
-            serde_json::Value::Object(pm)
-        }).collect();
-        map.insert("params".to_string(), serde_json::Value::Array(params_json));
-        if let std::result::Result::Ok(rt_json) = serde_json::to_value(&return_type) {
-            map.insert("returnType".to_string(), rt_json);
-        }
-        Ok(serde_json::Value::Object(map))
+        Ok(ProtocolMethod { name, params, return_type, effect })
     }
 
     fn parse_impl_decl(&mut self) -> Result<Decl, String> {
@@ -301,8 +282,7 @@ impl Parser {
         let span = self.current_span();
         if self.check(TokenType::Pub) { self.advance(); }
         let visibility = self.parse_visibility();
-        let mut async_ = false;
-        if self.check(TokenType::Async) { self.advance(); async_ = true; }
+        let async_ = false;
         let mut effect = false;
         if self.check(TokenType::Effect) { self.advance(); effect = true; }
         self.expect(TokenType::Fn)?;
@@ -440,6 +420,8 @@ impl Parser {
 
         let mut has_default = false;
         while !self.check(TokenType::RParen) {
+            self.skip_newlines();
+            if self.check(TokenType::RParen) { break; }
             let param_name = self.expect_any_param_name()?;
             self.expect(TokenType::Colon)?;
             let param_type = self.parse_type_expr()?;
@@ -454,8 +436,12 @@ impl Parser {
                 None
             };
             params.push(Param { name: param_name, ty: param_type, default });
-            if self.check(TokenType::Comma) { self.advance(); } else { break; }
+            if self.check(TokenType::Comma) {
+                self.advance();
+                self.skip_newlines();
+            } else { break; }
         }
+        self.skip_newlines();
         Ok(params)
     }
 }

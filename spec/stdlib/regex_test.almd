@@ -1,0 +1,95 @@
+// Comprehensive regex module tests
+
+import regex
+
+// ── is_match ──
+
+test "regex.is_match" {
+  assert_eq(regex.is_match("[0-9]+", "abc123"), true)
+  assert_eq(regex.is_match("hello", "say hello world"), true)
+  assert_eq(regex.is_match("[0-9]+", "hello"), false)
+  assert_eq(regex.is_match("^hello", "say hello"), false)
+}
+
+test "regex.is_match anchored" {
+  assert_eq(regex.is_match("^hello", "hello world"), true)
+  assert_eq(regex.is_match("world$", "hello world"), true)
+}
+
+// ── full_match ──
+
+test "regex.full_match" {
+  assert_eq(regex.full_match("[0-9]+", "123"), true)
+  assert_eq(regex.full_match("[0-9]+", "abc123"), false)
+  assert_eq(regex.full_match("", ""), true)
+}
+
+// ── find ──
+
+test "regex.find match" {
+  assert_eq(regex.find("[0-9]+", "abc123def456"), some("123"))
+  assert_eq(regex.find("[a-z]+", "123abc456"), some("abc"))
+}
+
+test "regex.find no match" {
+  assert_eq(regex.find("[0-9]+", "hello"), none)
+}
+
+// ── find_all ──
+
+test "regex.find_all multiple" {
+  assert_eq(regex.find_all("[0-9]+", "a1b2c3"), ["1", "2", "3"])
+}
+
+test "regex.find_all no matches" {
+  assert_eq(regex.find_all("[0-9]+", "abc"), [])
+}
+
+test "regex.find_all words" {
+  let words = regex.find_all("[a-z]+", "hello world foo")
+  assert_eq(list.len(words), 3)
+  assert_eq(list.get_or(words, 0, ""), "hello")
+}
+
+// ── replace ──
+
+test "regex.replace all" {
+  assert_eq(regex.replace("[0-9]+", "a1b2c3", "X"), "aXbXcX")
+  assert_eq(regex.replace("[0-9]+", "hello", "X"), "hello")
+}
+
+test "regex.replace with empty string" {
+  assert_eq(regex.replace("[0-9]", "a1b2c3", ""), "abc")
+}
+
+// ── replace_first ──
+
+test "regex.replace_first" {
+  assert_eq(regex.replace_first("[0-9]+", "a1b2c3", "X"), "aXb2c3")
+  assert_eq(regex.replace_first("[0-9]+", "hello", "X"), "hello")
+}
+
+// ── split ──
+
+test "regex.split by pattern" {
+  assert_eq(regex.split("[,;]", "a,b;c"), ["a", "b", "c"])
+  assert_eq(regex.split(",", "hello"), ["hello"])
+}
+
+test "regex.split by whitespace" {
+  let parts = regex.split("\\s+", "hello   world  foo")
+  assert_eq(parts, ["hello", "world", "foo"])
+}
+
+// ── captures ──
+
+test "regex.captures with groups" {
+  let cap = regex.captures("(\\w+)@(\\w+)", "user@host")
+  assert_eq(option.is_some(cap), true)
+  assert_eq(regex.captures("(\\d+)-(\\d+)", "hello"), none)
+}
+
+test "regex.captures returns some for match" {
+  let cap = regex.captures("(\\d+)-(\\d+)", "abc-123-456")
+  assert_eq(cap.is_some(), true)
+}

@@ -79,6 +79,9 @@ enum Commands {
         /// Output test results as JSON (one per line)
         #[arg(long)]
         json: bool,
+        /// Target: wasm to run tests via direct WASM emit + wasmtime
+        #[arg(long)]
+        target: Option<String>,
     },
     /// Type check only
     Check {
@@ -93,6 +96,9 @@ enum Commands {
         /// Explain an error code (e.g., --explain E001)
         #[arg(long)]
         explain: Option<String>,
+        /// Show effect/capability analysis for each function
+        #[arg(long)]
+        effects: bool,
     },
     /// Format source files
     Fmt {
@@ -278,6 +284,20 @@ fn try_compile_with_ir(file: &str, no_check: bool) -> Result<(String, Option<alm
     // Optimize IR: constant folding + dead code elimination
     if let Some(ref mut ir) = ir_program {
         almide::optimize::optimize_program(ir);
+        // Reclassify top-level lets after optimization (cross-reference const detection)
+        almide::ir::reclassify_top_lets(ir);
+    }
+
+    // Verify IR integrity (debug builds only)
+    #[cfg(debug_assertions)]
+    if let Some(ref ir) = ir_program {
+        let verify_errors = almide::ir::verify_program(ir);
+        if !verify_errors.is_empty() {
+            for e in &verify_errors {
+                eprintln!("internal compiler error: {}", e);
+            }
+            return Err(format!("{} IR verification error(s)", verify_errors.len()));
+        }
     }
 
     // Monomorphize row-polymorphic functions (Rust target only)
@@ -287,7 +307,10 @@ fn try_compile_with_ir(file: &str, no_check: bool) -> Result<(String, Option<alm
 
     // Codegen v3: three-layer pipeline (Nanopass + Templates)
     let ir = ir_program.as_mut().expect("IR required for codegen");
-    let code = codegen::emit(ir, codegen::pass::Target::Rust);
+    let code = match codegen::codegen(ir, codegen::pass::Target::Rust) {
+        codegen::CodegenOutput::Source(s) => s,
+        codegen::CodegenOutput::Binary(_) => unreachable!(),
+    };
     Ok((code, ir_program))
 }
 
@@ -327,6 +350,7 @@ fn print_error_explanation(code: &str) {
     let explanation = match code {
         "E001" => "E001: Type mismatch\n\n  The expression's type does not match what was expected.\n\n  Example:\n    fn f() -> Int = \"hello\"  // error: expected Int but got String\n\n  Fix: Change the expression to match the expected type, or use a\n  conversion function like int.to_string() or int.parse().",
         "E002" => "E002: Undefined function\n\n  The function name was not found in the current scope, stdlib, or imports.\n\n  Example:\n    fn f() -> Int = nonexistent()  // error: undefined function\n\n  Fix: Check the function name for typos, or import the module that defines it.",
+        "E003" => "E003: Undefined variable\n\n  The variable name was not found in the current scope.\n\n  Example:\n    fn f() -> Int = x + 1  // error: undefined variable 'x'\n\n  Fix: Check the variable name for typos, or declare it with `let` or `var`\n  before use. If it's a function parameter, ensure it's in the parameter list.",
         "E004" => "E004: Wrong argument count\n\n  The function was called with the wrong number of arguments.\n\n  Example:\n    fn add(a: Int, b: Int) -> Int = a + b\n    let x = add(1)  // error: expects 2 arguments but got 1\n\n  Fix: Provide the correct number of arguments.",
         "E005" => "E005: Argument type mismatch\n\n  A function argument's type does not match the parameter type.\n\n  Example:\n    fn greet(name: String) -> String = name\n    greet(42)  // error: expects String but got Int\n\n  Fix: Pass the correct type, or use a conversion function.",
         "E006" => "E006: Effect isolation violation\n\n  A pure function (fn) is calling an effect function (effect fn).\n  This violates Almide's security model — pure functions cannot perform I/O.\n\n  Example:\n    fn f() -> String = fs.read_text(\"file.txt\")  // error\n\n  Fix: Mark the calling function as `effect fn`.",
@@ -372,21 +396,25 @@ fn dispatch(cli: Cli) {
             let file = resolve_file(file);
             cli::cmd_build(&file, o.as_deref(), target.as_deref(), release || fast, fast, unchecked_index, no_check);
         }
-        Commands::Test { file, run, no_check, json } => {
+        Commands::Test { file, run, no_check, json, target } => {
             let file_str = file.as_deref().unwrap_or("");
-            if json {
+            if target.as_deref() == Some("wasm") {
+                cli::cmd_test_wasm(file_str, run.as_deref());
+            } else if json {
                 cli::cmd_test_json(file_str, run.as_deref());
             } else {
                 cli::cmd_test(file_str, no_check, run.as_deref());
             }
         }
-        Commands::Check { file, deny_warnings, json, explain } => {
+        Commands::Check { file, deny_warnings, json, explain, effects } => {
             if let Some(code) = explain {
                 print_error_explanation(&code);
                 return;
             }
             let file = resolve_file(file);
-            if json {
+            if effects {
+                cli::cmd_check_effects(&file);
+            } else if json {
                 cli::cmd_check_json(&file);
             } else {
                 cli::cmd_check(&file, deny_warnings);

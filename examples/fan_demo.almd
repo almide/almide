@@ -11,7 +11,7 @@ effect fn main() -> Result[Unit, String] = {
     slow_add(3, 4)
     slow_mul(3, 4)
   }
-  println("sum = " ++ int.to_string(sum))
-  println("product = " ++ int.to_string(product))
+  println("sum = " + int.to_string(sum))
+  println("product = " + int.to_string(product))
   ok(())
 }

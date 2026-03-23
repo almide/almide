@@ -1,0 +1,177 @@
+// match_edge_test — Match edge cases beyond pattern_test
+
+// ── Match on Int ranges ──
+
+fn classify_int(n: Int) -> String = match n {
+  0 => "zero",
+  1 => "one",
+  _ => "other",
+}
+
+test "match int zero" {
+  assert_eq(classify_int(0), "zero")
+}
+
+test "match int one" {
+  assert_eq(classify_int(1), "one")
+}
+
+test "match int wildcard" {
+  assert_eq(classify_int(999), "other")
+  assert_eq(classify_int(-5), "other")
+}
+
+// ── Match on String ──
+
+fn string_match(s: String) -> Int = match s {
+  "alpha" => 1,
+  "beta" => 2,
+  "gamma" => 3,
+  _ => 0,
+}
+
+test "match string exact" {
+  assert_eq(string_match("alpha"), 1)
+  assert_eq(string_match("beta"), 2)
+  assert_eq(string_match("gamma"), 3)
+}
+
+test "match string wildcard" {
+  assert_eq(string_match("delta"), 0)
+  assert_eq(string_match(""), 0)
+}
+
+// ── Match with guard clauses ──
+
+fn grade(score: Int) -> String = match score {
+  s if s >= 90 => "A",
+  s if s >= 80 => "B",
+  s if s >= 70 => "C",
+  s if s >= 60 => "D",
+  _ => "F",
+}
+
+test "match guard A" {
+  assert_eq(grade(95), "A")
+  assert_eq(grade(90), "A")
+}
+
+test "match guard B and C" {
+  assert_eq(grade(85), "B")
+  assert_eq(grade(75), "C")
+}
+
+test "match guard F" {
+  assert_eq(grade(50), "F")
+  assert_eq(grade(0), "F")
+}
+
+// ── Match on Option ──
+
+fn option_label(x: Option[Int]) -> String = match x {
+  some(n) if n > 100 => "big some",
+  some(n) if n > 0 => "positive some",
+  some(0) => "zero some",
+  some(_) => "negative some",
+  none => "nothing",
+}
+
+test "match option some positive" {
+  assert_eq(option_label(some(50)), "positive some")
+}
+
+test "match option some big" {
+  assert_eq(option_label(some(200)), "big some")
+}
+
+test "match option none" {
+  assert_eq(option_label(none), "nothing")
+}
+
+// ── Match on Result ──
+
+fn result_label(r: Result[Int, String]) -> String = match r {
+  ok(v) if v > 0 => "positive ok",
+  ok(0) => "zero ok",
+  ok(_) => "negative ok",
+  err(e) if string.len(e) > 5 => "long error",
+  err(_) => "short error",
+}
+
+test "match result ok positive" {
+  assert_eq(result_label(ok(10)), "positive ok")
+}
+
+test "match result ok zero" {
+  assert_eq(result_label(ok(0)), "zero ok")
+}
+
+test "match result err short" {
+  assert_eq(result_label(err("bad")), "short error")
+}
+
+test "match result err long" {
+  assert_eq(result_label(err("something went wrong")), "long error")
+}
+
+// ── Match returning complex values ──
+
+type Token =
+  | Num(Int)
+  | Word(String)
+  | Punct(String)
+
+fn describe_token(t: Token) -> String = match t {
+  Num(n) if n < 0 => "negative number",
+  Num(n) => "number: ${int.to_string(n)}",
+  Word(w) => "word: ${w}",
+  Punct(p) => "punct: ${p}",
+}
+
+test "match variant with guard on payload" {
+  assert_eq(describe_token(Num(42)), "number: 42")
+  assert_eq(describe_token(Num(-1)), "negative number")
+  assert_eq(describe_token(Word("hello")), "word: hello")
+  assert_eq(describe_token(Punct(";")), "punct: ;")
+}
+
+// ── Match with binding and computation ──
+
+test "match block arm" {
+  let x = some(7)
+  let result = match x {
+    some(n) => {
+      let a = n * n
+      let b = a + 1
+      b
+    },
+    none => 0,
+  }
+  assert_eq(result, 50)
+}
+
+// ── Nested option ──
+
+test "match nested option" {
+  let x = some(some(42))
+  let result = match x {
+    some(some(v)) => v,
+    some(none) => -1,
+    none => -2,
+  }
+  assert_eq(result, 42)
+}
+
+// ── Match on computed expression ──
+
+test "match on expression" {
+  let xs = [10, 20, 30]
+  let label = match list.len(xs) {
+    0 => "empty",
+    1 => "single",
+    2 => "pair",
+    3 => "triple",
+    _ => "many",
+  }
+  assert_eq(label, "triple")
+}

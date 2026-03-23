@@ -19,10 +19,10 @@ pub enum TokenType {
     // Identifiers
     Ident, TypeName, IdentQ,
     // Keywords
-    Module, Import, Type, Trait, Impl, For, In, Fn, Let, Var,
-    If, Then, Else, Match, Ok, Err, Some, None, Try, Do, Todo, Unsafe,
+    Module, Import, Type, Protocol, Impl, For, In, Fn, Let, Var,
+    If, Then, Else, Match, Ok, Err, Some, None, Do, Todo,
     True, False, Not, And, Or,
-    Strict, Pub, Effect, Deriving, Test, Async, Await,
+    Strict, Pub, Effect, Test,
     Guard, Break, Continue, While, Local, Mod, Newtype, Fan,
     // Delimiters
     LParen, RParen, LBrace, RBrace, LBracket, RBracket,
@@ -41,6 +41,7 @@ pub enum TokenType {
     PlusPlus,  // ++
     Pipe,      // |
     PipeArrow, // |>
+    ComposeArrow, // >>
     Caret,     // ^
     AmpAmp,    // &&
     PipePipe,  // ||
@@ -68,6 +69,14 @@ pub struct Lexer;
 impl Lexer {
     pub fn tokenize(src: &str) -> Vec<Token> {
         let mut tokens = Vec::new();
+        // Normalize CRLF → LF (Windows compatibility)
+        let normalized;
+        let src = if src.contains('\r') {
+            normalized = src.replace("\r\n", "\n").replace('\r', "\n");
+            &normalized
+        } else {
+            src
+        };
         let chars: Vec<char> = src.chars().collect();
         let mut pos = 0;
         let mut line = 1;
@@ -442,7 +451,7 @@ fn lex_ident(chars: &[char], start: usize, line: usize, col: usize) -> (Token, u
 fn keyword(s: &str) -> Option<TokenType> {
     match s {
         "module" => Some(TokenType::Module), "import" => Some(TokenType::Import),
-        "type" => Some(TokenType::Type), "trait" => Some(TokenType::Trait),
+        "type" => Some(TokenType::Type), "protocol" => Some(TokenType::Protocol),
         "impl" => Some(TokenType::Impl), "for" => Some(TokenType::For),
         "in" => Some(TokenType::In), "fn" => Some(TokenType::Fn),
         "let" => Some(TokenType::Let), "var" => Some(TokenType::Var),
@@ -450,14 +459,13 @@ fn keyword(s: &str) -> Option<TokenType> {
         "else" => Some(TokenType::Else), "match" => Some(TokenType::Match),
         "ok" => Some(TokenType::Ok), "err" => Some(TokenType::Err),
         "some" => Some(TokenType::Some), "none" => Some(TokenType::None),
-        "try" => Some(TokenType::Try), "do" => Some(TokenType::Do),
-        "todo" => Some(TokenType::Todo), "unsafe" => Some(TokenType::Unsafe),
+        "do" => Some(TokenType::Do),
+        "todo" => Some(TokenType::Todo),
         "true" => Some(TokenType::True), "false" => Some(TokenType::False),
         "not" => Some(TokenType::Not), "and" => Some(TokenType::And),
         "or" => Some(TokenType::Or), "strict" => Some(TokenType::Strict),
         "pub" => Some(TokenType::Pub), "effect" => Some(TokenType::Effect),
-        "deriving" => Some(TokenType::Deriving), "test" => Some(TokenType::Test),
-        "async" => Some(TokenType::Async), "await" => Some(TokenType::Await),
+        "test" => Some(TokenType::Test),
         "guard" => Some(TokenType::Guard), "break" => Some(TokenType::Break),
         "continue" => Some(TokenType::Continue), "while" => Some(TokenType::While),
         "local" => Some(TokenType::Local), "mod" => Some(TokenType::Mod),
@@ -484,6 +492,7 @@ fn lex_operator(chars: &[char], pos: usize, line: usize, col: usize) -> (Token, 
         ('=', Some('='), _) => (TokenType::EqEq, "==", 2),
         ('!', Some('='), _) => (TokenType::BangEq, "!=", 2),
         ('<', Some('='), _) => (TokenType::LtEq, "<=", 2),
+        ('>', Some('>'), _) => (TokenType::ComposeArrow, ">>", 2),
         ('>', Some('='), _) => (TokenType::GtEq, ">=", 2),
         ('+', Some('+'), _) => (TokenType::PlusPlus, "++", 2),
         ('|', Some('>'), _) => (TokenType::PipeArrow, "|>", 2),

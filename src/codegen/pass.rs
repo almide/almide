@@ -32,9 +32,9 @@ pub struct ScopeContext {
 pub enum Target {
     Rust,
     TypeScript,
-    JavaScript,
     Go,
     Python,
+    Wasm,
 }
 
 // ── Target Attributes ──
@@ -77,6 +77,11 @@ pub trait NanoPass: std::fmt::Debug {
     /// Return `None` for all targets, or `Some(vec)` for specific ones.
     fn targets(&self) -> Option<Vec<Target>>;
 
+    /// Passes that must have executed before this one.
+    /// Returns pass names (matching `NanoPass::name()`).
+    /// Default: no dependencies.
+    fn depends_on(&self) -> Vec<&'static str> { vec![] }
+
     /// Run the pass. Receives the program and target, returns modified program.
     /// Global passes analyze the whole program.
     /// Local passes walk the IR with scope context.
@@ -101,6 +106,7 @@ impl Pipeline {
     }
 
     pub fn run(&self, program: &mut IrProgram, target: Target) {
+        let mut executed: Vec<&str> = Vec::new();
         for pass in &self.passes {
             // Skip passes not relevant to this target
             if let Some(targets) = pass.targets() {
@@ -108,7 +114,18 @@ impl Pipeline {
                     continue;
                 }
             }
+            // Validate dependencies: every declared dep must have already executed
+            for dep in pass.depends_on() {
+                if !executed.contains(&dep) {
+                    panic!(
+                        "Pass '{}' depends on '{}', but '{}' has not been executed. \
+                         Check pipeline ordering.",
+                        pass.name(), dep, dep
+                    );
+                }
+            }
             pass.run(program, target);
+            executed.push(pass.name());
         }
     }
 }
@@ -122,7 +139,7 @@ pub struct OptionErasurePass;
 impl NanoPass for OptionErasurePass {
     fn name(&self) -> &str { "OptionErasure" }
     fn targets(&self) -> Option<Vec<Target>> {
-        Some(vec![Target::TypeScript, Target::JavaScript, Target::Python])
+        Some(vec![Target::TypeScript, Target::Python])
     }
     fn run(&self, _program: &mut IrProgram, _target: Target) {
         // TS/Python: some(x) → x, none → null/None
@@ -202,12 +219,24 @@ impl NanoPass for TypeConcretizationPass {
 
 // ── Default Pipeline ──
 
+#[derive(Debug)]
+pub struct StreamFusionPass;
+impl NanoPass for StreamFusionPass {
+    fn name(&self) -> &str { "StreamFusion" }
+    fn targets(&self) -> Option<Vec<Target>> { None }
+    fn run(&self, program: &mut IrProgram, _target: Target) {
+        super::pass_stream_fusion::StreamFusionPass.run(program, _target);
+    }
+}
+
 pub fn default_pipeline() -> Pipeline {
     Pipeline::new()
         // Global passes first (need whole-program analysis)
         .add(TypeConcretizationPass)
         .add(BorrowInsertionPass)
         .add(CloneInsertionPass)
+        // Optimization passes (analysis only in Phase 1)
+        .add(StreamFusionPass)
         // Local passes (scope-dependent)
         .add(OptionErasurePass)
         .add(ResultPropagationPass)

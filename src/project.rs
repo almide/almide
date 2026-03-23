@@ -67,6 +67,10 @@ pub struct Dependency {
 pub struct Project {
     pub package: Package,
     pub dependencies: Vec<Dependency>,
+    /// Allowed effect capabilities for this package (Security Layer 2).
+    /// If empty, all capabilities are allowed (backwards compatible).
+    /// e.g., ["IO", "Net", "Log"]
+    pub permissions: Vec<String>,
 }
 
 /// Parse almide.toml (simple line-based, no toml crate)
@@ -78,6 +82,7 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
     let mut version = "0.1.0".to_string();
     let mut edition = "2026".to_string();
     let mut deps: Vec<Dependency> = Vec::new();
+    let mut permissions: Vec<String> = Vec::new();
     let mut section = "";
 
     for line in content.lines() {
@@ -90,6 +95,8 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
                 "package"
             } else if line == "[dependencies]" {
                 "dependencies"
+            } else if line == "[permissions]" {
+                "permissions"
             } else {
                 ""
             };
@@ -111,6 +118,16 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
                     deps.push(dep);
                 }
             }
+            "permissions" => {
+                if let Some(("allow", val)) = parse_kv(line) {
+                    permissions.extend(
+                        val.trim_matches(|c| c == '[' || c == ']')
+                            .split(',')
+                            .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
+                            .filter(|s| !s.is_empty())
+                    );
+                }
+            }
             _ => {}
         }
     }
@@ -118,6 +135,7 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
     Ok(Project {
         package: Package { name, version, edition },
         dependencies: deps,
+        permissions,
     })
 }
 

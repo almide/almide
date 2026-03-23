@@ -1,4 +1,5 @@
 module codec_list_test
+// wasm:enabled
 
 type Item: Codec = { id: Int, value: String }
 type Container: Codec = { name: String, items: List[Item], tags: List[String] }

@@ -45,22 +45,6 @@ return = "Response"
 rust = "almide_rt_http_redirect(&*{url})"
 ts = "__almd_http.redirect({url})"
 
-[redirect_permanent]
-description = "Create a 301 permanent redirect response"
-example = 'http.redirect_permanent("/new-path")'
-params = [{ name = "url", type = "String" }]
-return = "Response"
-rust = "almide_http_redirect(&*{url}, 301)"
-ts = "__almd_http.redirect_permanent({url})"
-
-[not_found]
-description = "Create a 404 Not Found response"
-example = 'http.not_found("Page not found")'
-params = [{ name = "body", type = "String" }]
-return = "Response"
-rust = "almide_rt_http_not_found({body})"
-ts = "__almd_http.not_found({body})"
-
 # ── Response accessors/mutators ──
 
 [status]
@@ -94,14 +78,6 @@ params = [{ name = "resp", type = "Response" }, { name = "key", type = "String" 
 return = "Option[String]"
 rust = "almide_http_get_header(&{resp}, &{key})"
 ts = "__almd_http.get_header({resp}, {key})"
-
-[set_cookie]
-description = "Set a cookie on a response"
-example = 'http.set_cookie(resp, "session", "abc123")'
-params = [{ name = "resp", type = "Response" }, { name = "name", type = "String" }, { name = "value", type = "String" }]
-return = "Response"
-rust = "almide_http_set_cookie({resp}, &{name}, &{value})"
-ts = "__almd_http.set_cookie({resp}, {name}, {value})"
 
 # ── Request accessors (pure) ──
 
@@ -156,15 +132,6 @@ effect = true
 rust = "almide_http_get(&{url})?"
 ts = "await __almd_http.get({url})"
 
-[get_json]
-description = "Send a GET request and parse the response as JSON"
-example = 'let data = http.get_json("https://api.example.com/users")'
-params = [{ name = "url", type = "String" }]
-return = "Result[Value, String]"
-effect = true
-rust = "{ let __body = almide_http_get(&{url})?; almide_rt_json_parse(__body)? }"
-ts = "JSON.parse(await __almd_http.get({url}))"
-
 [post]
 description = "Send an HTTP POST request with a body string"
 example = 'let resp = http.post("https://api.example.com", body)'
@@ -173,15 +140,6 @@ return = "Result[String, String]"
 effect = true
 rust = "almide_http_post(&{url}, &{body})?"
 ts = "await __almd_http.post({url}, {body})"
-
-[post_json]
-description = "Send a POST request and parse the response as JSON"
-example = 'let result = http.post_json(url, json.stringify(payload))'
-params = [{ name = "url", type = "String" }, { name = "body", type = "String" }]
-return = "Result[Value, String]"
-effect = true
-rust = "{ let __body = almide_http_post(&{url}, &{body})?; almide_rt_json_parse(__body)? }"
-ts = "JSON.parse(await __almd_http.post({url}, {body}))"
 
 [put]
 description = "Send an HTTP PUT request"
@@ -209,15 +167,6 @@ return = "Result[String, String]"
 effect = true
 rust = "almide_http_delete(&{url})?"
 ts = "await __almd_http.request('DELETE', {url}, '', {})"
-
-[get_with_headers]
-description = "Send a GET request with custom headers"
-example = 'let resp = http.get_with_headers(url, {"Authorization": "Bearer token"})'
-params = [{ name = "url", type = "String" }, { name = "headers", type = "Map[String, String]" }]
-return = "Result[String, String]"
-effect = true
-rust = "almide_http_get_with_headers(&{url}, &{headers})?"
-ts = "await __almd_http.get_with_headers({url}, {headers})"
 
 [request]
 description = "Send a custom HTTP request with method, URL, body, and headers"

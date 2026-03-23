@@ -12,43 +12,61 @@ impl Parser {
 
     fn parse_pipe(&mut self) -> Result<Expr, String> {
         let mut left = self.parse_or()?;
-        while { self.skip_newlines_if_followed_by(TokenType::PipeArrow); self.check(TokenType::PipeArrow) } {
-            let span = Some(self.current_span());
-            self.advance();
-            self.skip_newlines();
-            if self.check(TokenType::Match)
-                && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::LBrace)
-            {
+        loop {
+            self.skip_newlines_if_followed_by(TokenType::PipeArrow);
+            self.skip_newlines_if_followed_by(TokenType::ComposeArrow);
+            if self.check(TokenType::ComposeArrow) {
+                let span = Some(self.current_span());
                 self.advance();
                 self.skip_newlines();
-                self.expect(TokenType::LBrace)?;
-                self.skip_newlines();
-                let mut arms = Vec::new();
-                while !self.check(TokenType::RBrace) {
-                    arms.push(self.parse_match_arm()?);
-                    self.skip_newlines();
-                    if self.check(TokenType::Comma) {
-                        self.advance();
-                        self.skip_newlines();
-                    }
-                }
-                self.expect(TokenType::RBrace)?;
-                left = Expr::Match {
-                    subject: Box::new(left),
-                    arms,
-                    id: self.next_id(),
-                    span,
-                    resolved_type: None,
-                };
-            } else {
                 let right = self.parse_or()?;
-                left = Expr::Pipe {
+                left = Expr::Compose {
                     left: Box::new(left),
                     right: Box::new(right),
                     id: self.next_id(),
                     span,
                     resolved_type: None,
                 };
+            } else if self.check(TokenType::PipeArrow) {
+                let span = Some(self.current_span());
+                self.advance();
+                self.skip_newlines();
+                if self.check(TokenType::Match)
+                    && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::LBrace)
+                {
+                    self.advance();
+                    self.skip_newlines();
+                    self.expect(TokenType::LBrace)?;
+                    self.skip_newlines();
+                    let mut arms = Vec::new();
+                    while !self.check(TokenType::RBrace) {
+                        arms.push(self.parse_match_arm()?);
+                        self.skip_newlines();
+                        if self.check(TokenType::Comma) {
+                            self.advance();
+                            self.skip_newlines();
+                        }
+                    }
+                    self.expect(TokenType::RBrace)?;
+                    left = Expr::Match {
+                        subject: Box::new(left),
+                        arms,
+                        id: self.next_id(),
+                        span,
+                        resolved_type: None,
+                    };
+                } else {
+                    let right = self.parse_or()?;
+                    left = Expr::Pipe {
+                        left: Box::new(left),
+                        right: Box::new(right),
+                        id: self.next_id(),
+                        span,
+                        resolved_type: None,
+                    };
+                }
+            } else {
+                break;
             }
         }
         Ok(left)
@@ -56,7 +74,9 @@ impl Parser {
 
     pub(crate) fn parse_or(&mut self) -> Result<Expr, String> {
         let mut left = self.parse_and()?;
-        while self.check(TokenType::Or) || self.check(TokenType::PipePipe) {
+        loop {
+            self.skip_newlines_if_followed_by_any(&[TokenType::Or]);
+            if !(self.check(TokenType::Or) || self.check(TokenType::PipePipe)) { break; }
             if self.check(TokenType::PipePipe) {
                 return Err(self.check_hint_or_err(
                     None, super::hints::HintScope::Expression,
@@ -81,7 +101,9 @@ impl Parser {
 
     fn parse_and(&mut self) -> Result<Expr, String> {
         let mut left = self.parse_comparison()?;
-        while self.check(TokenType::And) || self.check(TokenType::AmpAmp) {
+        loop {
+            self.skip_newlines_if_followed_by_any(&[TokenType::And]);
+            if !(self.check(TokenType::And) || self.check(TokenType::AmpAmp)) { break; }
             if self.check(TokenType::AmpAmp) {
                 return Err(self.check_hint_or_err(
                     None, super::hints::HintScope::Expression,
@@ -106,13 +128,14 @@ impl Parser {
 
     fn parse_comparison(&mut self) -> Result<Expr, String> {
         let mut left = self.parse_range()?;
-        while self.check(TokenType::EqEq)
-            || self.check(TokenType::BangEq)
-            || self.check(TokenType::LAngle)
-            || self.check(TokenType::RAngle)
-            || self.check(TokenType::LtEq)
-            || self.check(TokenType::GtEq)
-        {
+        loop {
+            self.skip_newlines_if_followed_by_any(&[TokenType::EqEq, TokenType::BangEq, TokenType::LtEq, TokenType::GtEq]);
+            if !(self.check(TokenType::EqEq)
+                || self.check(TokenType::BangEq)
+                || self.check(TokenType::LAngle)
+                || self.check(TokenType::RAngle)
+                || self.check(TokenType::LtEq)
+                || self.check(TokenType::GtEq)) { break; }
             let span = Some(self.current_span());
             let op = self.current().value.clone();
             self.advance();
@@ -153,9 +176,10 @@ impl Parser {
 
     fn parse_add_sub(&mut self) -> Result<Expr, String> {
         let mut left = self.parse_mul_div()?;
-        while self.check(TokenType::Plus) || self.check(TokenType::Minus)
-            || self.check(TokenType::PlusPlus)
-        {
+        loop {
+            self.skip_newlines_if_followed_by_any(&[TokenType::Plus, TokenType::Minus, TokenType::PlusPlus]);
+            if !(self.check(TokenType::Plus) || self.check(TokenType::Minus)
+                || self.check(TokenType::PlusPlus)) { break; }
             let span = Some(self.current_span());
             let op = self.current().value.clone();
             self.advance();
@@ -171,9 +195,10 @@ impl Parser {
 
     fn parse_mul_div(&mut self) -> Result<Expr, String> {
         let mut left = self.parse_power()?;
-        while self.check(TokenType::Star) || self.check(TokenType::Slash)
-            || self.check(TokenType::Percent) || self.check(TokenType::Caret)
-        {
+        loop {
+            self.skip_newlines_if_followed_by_any(&[TokenType::Star, TokenType::Slash, TokenType::Percent, TokenType::Caret]);
+            if !(self.check(TokenType::Star) || self.check(TokenType::Slash)
+                || self.check(TokenType::Percent) || self.check(TokenType::Caret)) { break; }
             let span = Some(self.current_span());
             let op = self.current().value.clone();
             self.advance();

@@ -71,6 +71,35 @@
 
 **却下理由**: Haskell の orphan instances、Scala の implicit resolution — グローバル検索が必要で、LLM のローカル推論と相性が悪い。
 
+### `trait` / `interface` キーワード
+
+**却下理由**: Almide は `protocol` キーワードを採用。理由:
+- `trait` は Rust 固有の語彙。associated types、trait objects、orphan rules を連想させ、LLM が Rust のパターンを持ち込む
+- `interface` は Go/Java/TS で広く使われるが、Go の暗黙的満足と Java の明示的 `implements` で意味が分裂している
+- `protocol` は Swift/Python (PEP 544) の語彙。Almide の既存 `: Convention` 構文（`type Dog: Eq`）と Swift の `: Protocol` 構文が一致する
+- 2024-2026年の新しい言語が選ぶ傾向にある語彙
+
+### `impl` ブロック
+
+**却下理由**: Almide は convention methods (`fn Type.method()`) でプロトコル実装する。`impl Protocol for Type { ... }` ブロックは不要:
+- convention methods はトップレベル関数 — フラット、ネストなし
+- LLM が正確に生成しやすい（インデント深度が増えない）
+- 既存の convention method システムと完全に一貫
+
+### 暗黙的プロトコル満足 (Go 式 structural interfaces)
+
+**却下理由**: Go ではメソッドがあれば暗黙的にインターフェースを満たす。Almide は `type Foo: Protocol` の明示的宣言を要求:
+- LLM がコードを読むだけで実装関係がわかる
+- コンパイラが「メソッド不足」を正確に報告できる
+- 既存の `: Eq, Repr` 構文と一貫
+
+### dynamic dispatch / protocol objects
+
+**却下理由**: Almide のプロトコルはモノモーフィゼーションで解決。vtable や dynamic dispatch は不要:
+- コンパイル時に全て具体型に展開される
+- ランタイムオーバーヘッドゼロ
+- Go の interface 値のような boxing が不要
+
 ---
 
 ## ランタイム・並行処理

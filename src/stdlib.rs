@@ -5,7 +5,7 @@
 use crate::types::FnSig;
 
 /// All built-in stdlib module names (hardcoded in the compiler).
-pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "http", "process", "math", "random", "regex", "io", "result", "option", "error", "datetime", "testing", "log", "value", "set", "set"];
+pub const STDLIB_MODULES: &[&str] = &["string", "list", "int", "float", "fs", "env", "map", "json", "http", "process", "math", "random", "regex", "io", "result", "option", "error", "datetime", "testing", "log", "value", "set"];
 
 /// Prelude modules: automatically available without explicit `import`.
 /// These are core modules that virtually every program needs.
@@ -29,12 +29,6 @@ pub fn get_bundled_source(name: &str) -> Option<&'static str> {
     match name {
         "args" => Some(include_str!("../stdlib/args.almd")),
         "path" => Some(include_str!("../stdlib/path.almd")),
-        "time" => Some(include_str!("../stdlib/time.almd")),
-        "encoding" => Some(include_str!("../stdlib/encoding.almd")),
-        "hash" => Some(include_str!("../stdlib/hash.almd")),
-        "url" => Some(include_str!("../stdlib/url.almd")),
-        "csv" => Some(include_str!("../stdlib/csv.almd")),
-        "value" => Some(include_str!("../stdlib/value.almd")),
         _ => None,
     }
 }

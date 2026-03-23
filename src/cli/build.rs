@@ -1,13 +1,20 @@
 use std::process::Command;
-use crate::{compile_with_ir, parse_file, find_rustc, check, diagnostic, resolve, project, project_fetch};
+use crate::{compile_with_ir, parse_file, check, diagnostic, resolve, project, project_fetch};
 
 pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release: bool, fast: bool, _unchecked_index: bool, no_check: bool) {
     let is_npm = matches!(target, Some("npm"));
     let is_wasm = matches!(target, Some("wasm" | "wasm32" | "wasi"));
+    let is_wasm_direct = matches!(target, Some("wasm"));
 
     if is_npm {
         let out_dir = output.unwrap_or("dist");
         cmd_build_npm(file, out_dir, no_check);
+        return;
+    }
+
+    // Direct WASM emit: .almd → IR → WASM binary (no rustc)
+    if is_wasm_direct {
+        cmd_build_wasm_direct(file, output, no_check);
         return;
     }
 
@@ -36,37 +43,49 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
 
     let (rs_code, _ir) = compile_with_ir(file, no_check);
 
-    let stem = output.strip_suffix(".wasm")
-        .or_else(|| output.strip_suffix(".exe"))
-        .unwrap_or(&output);
+    // WASI target: use bare rustc (no external crate deps needed for WASM)
+    if is_wasm {
+        cmd_build_wasi_rustc(&rs_code, &output);
+        return;
+    }
+
+    // Native target: use cargo to resolve rustls/webpki-roots for HTTPS support
+    let use_release = release || fast;
+    let project_dir = std::env::temp_dir().join("almide-build");
+    match super::cargo_build_generated(&rs_code, &project_dir, use_release) {
+        Ok(bin_path) => {
+            // Copy the built binary to the desired output location
+            if let Err(e) = std::fs::copy(&bin_path, &output) {
+                eprintln!("Failed to copy binary to {}: {}", output, e);
+                std::process::exit(1);
+            }
+            eprintln!("Built {}", output);
+        }
+        Err(e) => {
+            eprintln!("Compile error:\n{}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Build for WASI target using bare rustc (no external crate deps).
+fn cmd_build_wasi_rustc(rs_code: &str, output: &str) {
+    let stem = output.strip_suffix(".wasm").unwrap_or(output);
     let tmp_rs = format!("{}.rs", stem);
-    if let Err(e) = std::fs::write(&tmp_rs, &rs_code) {
+    if let Err(e) = std::fs::write(&tmp_rs, rs_code) {
         eprintln!("Failed to write {}: {}", tmp_rs, e);
         std::process::exit(1);
     }
 
-    let mut rustc_cmd = Command::new(&find_rustc());
-    rustc_cmd.arg(&tmp_rs)
-        .arg("-o")
-        .arg(&output)
+    let rustc = Command::new(&crate::find_rustc())
+        .arg(&tmp_rs)
+        .arg("-o").arg(output)
         .arg("-C").arg("overflow-checks=no")
-        .arg("--edition").arg("2021");
-
-    if is_wasm {
-        rustc_cmd.arg("--target").arg("wasm32-wasip1")
-            .arg("-C").arg("opt-level=s")
-            .arg("-C").arg("lto=yes");
-    } else if fast {
-        rustc_cmd.arg("-C").arg("opt-level=3")
-            .arg("-C").arg("target-cpu=native")
-            .arg("-C").arg("llvm-args=-fp-contract=fast")
-            .arg("-C").arg("lto=thin")
-            .arg("-C").arg("codegen-units=1");
-    } else if release {
-        rustc_cmd.arg("-C").arg("opt-level=2");
-    }
-
-    let rustc = rustc_cmd.output()
+        .arg("--edition").arg("2021")
+        .arg("--target").arg("wasm32-wasip1")
+        .arg("-C").arg("opt-level=s")
+        .arg("-C").arg("lto=yes")
+        .output()
         .unwrap_or_else(|e| { eprintln!("Failed to run rustc: {}", e); std::process::exit(1); });
 
     let _ = std::fs::remove_file(&tmp_rs);
@@ -78,6 +97,75 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
     }
 
     eprintln!("Built {}", output);
+}
+
+/// Direct WASM emit: parse → check → lower → optimize → monomorphize → emit WASM binary.
+fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
+    let default_output = format!("{}.wasm", file.strip_suffix(".almd").unwrap_or("a.out"));
+    let output = output.unwrap_or(&default_output);
+
+    let (mut program, source_text, parse_errors) = parse_file(file);
+
+    if !parse_errors.is_empty() {
+        for e in &parse_errors {
+            eprintln!("{}", e.display_with_source(&source_text));
+        }
+        std::process::exit(1);
+    }
+
+    // Resolve dependencies
+    let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
+        if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
+            project_fetch::fetch_all_deps(&proj)
+                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); })
+                .into_iter()
+                .map(|fd| (fd.pkg_id, fd.source_dir))
+                .collect()
+        } else {
+            vec![]
+        }
+    } else {
+        vec![]
+    };
+
+    let resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
+        .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+
+    // Type check
+    let mut checker = check::Checker::new();
+    checker.set_source(file, &source_text);
+    for (name, mod_prog, pkg_id, is_self) in &resolved.modules {
+        checker.register_module(name, mod_prog, pkg_id.as_ref(), *is_self);
+    }
+    let diagnostics = checker.check_program(&mut program);
+    if diagnostics.iter().any(|d| d.level == diagnostic::Level::Error) {
+        for d in &diagnostics {
+            eprintln!("{}", d.display_with_source(&source_text));
+        }
+        std::process::exit(1);
+    }
+
+    // Lower to IR
+    let mut ir_program = almide::lower::lower_program(&program, &checker.expr_types, &checker.env);
+
+    // Optimize
+    almide::optimize::optimize_program(&mut ir_program);
+
+    // Monomorphize
+    almide::mono::monomorphize(&mut ir_program);
+
+    // Codegen (nanopass pipeline + WASM binary emit)
+    let bytes = match almide::codegen::codegen(&mut ir_program, almide::codegen::pass::Target::Wasm) {
+        almide::codegen::CodegenOutput::Binary(b) => b,
+        almide::codegen::CodegenOutput::Source(_) => unreachable!(),
+    };
+
+    if let Err(e) = std::fs::write(output, &bytes) {
+        eprintln!("Failed to write {}: {}", output, e);
+        std::process::exit(1);
+    }
+
+    eprintln!("Built {} ({} bytes)", output, bytes.len());
 }
 
 fn cmd_build_npm(file: &str, out_dir: &str, _no_check: bool) {
@@ -138,7 +226,10 @@ fn cmd_build_npm(file: &str, out_dir: &str, _no_check: bool) {
 
     // Generate JS via v3 codegen
     almide::mono::monomorphize(&mut ir_program);
-    let js_code = almide::codegen::emit(&mut ir_program, almide::codegen::pass::Target::TypeScript);
+    let js_code = match almide::codegen::codegen(&mut ir_program, almide::codegen::pass::Target::TypeScript) {
+        almide::codegen::CodegenOutput::Source(s) => s,
+        almide::codegen::CodegenOutput::Binary(_) => unreachable!(),
+    };
 
     let package_json = format!(
         r#"{{"name":"{}","version":"{}","main":"index.js","type":"module"}}"#,

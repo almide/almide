@@ -1,4 +1,4 @@
-use super::{Ty, VariantCase, VariantPayload, substitute};
+use super::{Ty, VariantCase, substitute, ProtocolDef};
 
 pub struct TypeEnv {
     /// User-defined type declarations: name -> Ty
@@ -43,8 +43,14 @@ pub struct TypeEnv {
     pub eq_types: std::collections::HashSet<std::string::String>,
     /// Structural bounds for generic type parameters: TypeVar name → OpenRecord constraint
     pub structural_bounds: std::collections::HashMap<std::string::String, Ty>,
+    /// Protocol bounds for generic type parameters in scope: TypeVar name → list of protocol names
+    pub generic_protocol_bounds: std::collections::HashMap<std::string::String, Vec<std::string::String>>,
     /// Minimum required arguments for functions with default params: fn key -> min count
     pub fn_min_params: std::collections::HashMap<std::string::String, usize>,
+    /// Protocol definitions: protocol name → ProtocolDef
+    pub protocols: std::collections::HashMap<std::string::String, ProtocolDef>,
+    /// Types' declared protocol conformances: type name → set of protocol names
+    pub type_protocols: std::collections::HashMap<std::string::String, std::collections::HashSet<std::string::String>>,
 }
 
 impl TypeEnv {
@@ -71,7 +77,10 @@ impl TypeEnv {
             top_lets: std::collections::HashMap::new(),
             eq_types: std::collections::HashSet::new(),
             structural_bounds: std::collections::HashMap::new(),
+            generic_protocol_bounds: std::collections::HashMap::new(),
             fn_min_params: std::collections::HashMap::new(),
+            protocols: std::collections::HashMap::new(),
+            type_protocols: std::collections::HashMap::new(),
         }
     }
 
@@ -87,25 +96,18 @@ impl TypeEnv {
 
     fn is_eq_inner(&self, ty: &Ty, seen: &mut std::collections::HashSet<std::string::String>) -> bool {
         match ty {
-            Ty::Int | Ty::Float | Ty::String | Ty::Bool | Ty::Unit => true,
-            Ty::List(inner) | Ty::Option(inner) => self.is_eq_inner(inner, seen),
-            Ty::Result(ok, err) => self.is_eq_inner(ok, seen) && self.is_eq_inner(err, seen),
-            Ty::Map(k, v) => self.is_eq_inner(k, seen) && self.is_eq_inner(v, seen),
-            Ty::Tuple(tys) => tys.iter().all(|t| self.is_eq_inner(t, seen)),
-            Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().all(|(_, t)| self.is_eq_inner(t, seen)),
-            Ty::Variant { name, cases, .. } => {
+            // Fn types are never Eq
+            Ty::Fn { .. } => false,
+            // Named/Variant need cycle detection via `seen`
+            Ty::Variant { name, .. } => {
                 if !seen.insert(name.clone()) {
                     return true; // Recursive type — assume Eq to break cycle
                 }
-                cases.iter().all(|c| match &c.payload {
-                    VariantPayload::Unit => true,
-                    VariantPayload::Tuple(tys) => tys.iter().all(|t| self.is_eq_inner(t, seen)),
-                    VariantPayload::Record(fs) => fs.iter().all(|(_, t, _)| self.is_eq_inner(t, seen)),
-                })
+                ty.children().iter().all(|child| self.is_eq_inner(child, seen))
             }
             Ty::Named(name, _) => {
                 if !seen.insert(name.clone()) {
-                    return true; // Recursive type
+                    return true;
                 }
                 if let Some(resolved) = self.types.get(name) {
                     self.is_eq_inner(resolved, seen)
@@ -113,10 +115,8 @@ impl TypeEnv {
                     true
                 }
             }
-            Ty::Union(members) => members.iter().all(|m| self.is_eq_inner(m, seen)),
-            Ty::Fn { .. } => false,
-            Ty::TypeVar(_) => true,
-            Ty::Unknown => true,
+            // All other types: Eq if all children are Eq
+            _ => ty.children().iter().all(|child| self.is_eq_inner(child, seen)),
         }
     }
 
@@ -129,22 +129,15 @@ impl TypeEnv {
 
     fn is_hash_inner(&self, ty: &Ty, seen: &mut std::collections::HashSet<std::string::String>) -> bool {
         match ty {
-            Ty::Int | Ty::String | Ty::Bool | Ty::Unit => true,
-            Ty::Float => false,
-            Ty::List(inner) | Ty::Option(inner) => self.is_hash_inner(inner, seen),
-            Ty::Result(ok, err) => self.is_hash_inner(ok, seen) && self.is_hash_inner(err, seen),
-            Ty::Map(_, _) => false, // Maps themselves are not hashable
-            Ty::Tuple(tys) => tys.iter().all(|t| self.is_hash_inner(t, seen)),
-            Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().all(|(_, t)| self.is_hash_inner(t, seen)),
-            Ty::Variant { name, cases, .. } => {
+            // Float, Fn, Map are never hashable
+            Ty::Float | Ty::Fn { .. } => false,
+            Ty::Applied(super::TypeConstructorId::Map, _) => false,
+            // Named/Variant need cycle detection via `seen`
+            Ty::Variant { name, .. } => {
                 if !seen.insert(name.clone()) {
                     return true;
                 }
-                cases.iter().all(|c| match &c.payload {
-                    VariantPayload::Unit => true,
-                    VariantPayload::Tuple(tys) => tys.iter().all(|t| self.is_hash_inner(t, seen)),
-                    VariantPayload::Record(fs) => fs.iter().all(|(_, t, _)| self.is_hash_inner(t, seen)),
-                })
+                ty.children().iter().all(|child| self.is_hash_inner(child, seen))
             }
             Ty::Named(name, _) => {
                 if !seen.insert(name.clone()) {
@@ -156,10 +149,8 @@ impl TypeEnv {
                     true
                 }
             }
-            Ty::Union(members) => members.iter().all(|m| self.is_hash_inner(m, seen)),
-            Ty::Fn { .. } => false,
-            Ty::TypeVar(_) => true,
-            Ty::Unknown => true,
+            // All other types: hashable if all children are hashable
+            _ => ty.children().iter().all(|child| self.is_hash_inner(child, seen)),
         }
     }
 
@@ -214,17 +205,11 @@ impl TypeEnv {
                         // Extract generic param names from the resolved type's TypeVars
                         let mut param_names = Vec::new();
                         Self::collect_typevars(resolved, &mut param_names);
-                        let mut bindings = std::collections::HashMap::new();
-                        for (i, arg) in args.iter().enumerate() {
-                            if let Some(name) = param_names.get(i) {
-                                bindings.insert(name.clone(), arg.clone());
-                            }
-                        }
-                        if bindings.is_empty() {
-                            resolved.clone()
-                        } else {
-                            substitute(resolved, &bindings)
-                        }
+                        let bindings: std::collections::HashMap<_, _> = param_names.iter()
+                            .zip(args.iter())
+                            .map(|(name, arg)| (name.clone(), arg.clone()))
+                            .collect();
+                        if bindings.is_empty() { resolved.clone() } else { substitute(resolved, &bindings) }
                     }
                 } else {
                     ty.clone()
@@ -234,45 +219,17 @@ impl TypeEnv {
         }
     }
 
-    /// Collect unique TypeVar names from a type in the order they first appear
+    /// Collect unique TypeVar names from a type in the order they first appear.
+    /// Uses Ty::children() for uniform traversal.
     pub fn collect_typevars(ty: &Ty, out: &mut Vec<std::string::String>) {
-        match ty {
-            Ty::TypeVar(name) => {
-                if !out.contains(name) {
-                    out.push(name.clone());
-                }
+        if let Ty::TypeVar(name) = ty {
+            if !out.contains(name) {
+                out.push(name.clone());
             }
-            Ty::List(inner) | Ty::Option(inner) => Self::collect_typevars(inner, out),
-            Ty::Result(a, b) | Ty::Map(a, b) => {
-                Self::collect_typevars(a, out);
-                Self::collect_typevars(b, out);
-            }
-            Ty::Record { fields } | Ty::OpenRecord { fields } => {
-                for (_, t) in fields {
-                    Self::collect_typevars(t, out);
-                }
-            }
-            Ty::Variant { cases, .. } => {
-                for c in cases {
-                    match &c.payload {
-                        VariantPayload::Tuple(tys) => {
-                            for t in tys { Self::collect_typevars(t, out); }
-                        }
-                        VariantPayload::Record(fs) => {
-                            for (_, t, _) in fs { Self::collect_typevars(t, out); }
-                        }
-                        VariantPayload::Unit => {}
-                    }
-                }
-            }
-            Ty::Fn { params, ret } => {
-                for p in params { Self::collect_typevars(p, out); }
-                Self::collect_typevars(ret, out);
-            }
-            Ty::Tuple(tys) => {
-                for t in tys { Self::collect_typevars(t, out); }
-            }
-            _ => {}
+            return;
+        }
+        for child in ty.children() {
+            Self::collect_typevars(child, out);
         }
     }
 }

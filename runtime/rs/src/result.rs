@@ -16,8 +16,8 @@ pub fn almide_rt_result_unwrap_or<T: Clone, E>(r: Result<T, E>, default: T) -> T
     r.unwrap_or(default)
 }
 
-pub fn almide_rt_result_is_ok<T, E>(r: &Result<T, E>) -> bool { r.is_ok() }
-pub fn almide_rt_result_is_err<T, E>(r: &Result<T, E>) -> bool { r.is_err() }
+pub fn almide_rt_result_is_ok<T, E>(r: Result<T, E>) -> bool { r.is_ok() }
+pub fn almide_rt_result_is_err<T, E>(r: Result<T, E>) -> bool { r.is_err() }
 
 pub fn almide_rt_result_ok<T: Clone, E>(r: &Result<T, E>) -> Option<T> {
     r.as_ref().ok().cloned()
@@ -25,6 +25,22 @@ pub fn almide_rt_result_ok<T: Clone, E>(r: &Result<T, E>) -> Option<T> {
 
 pub fn almide_rt_result_err<T, E: Clone>(r: &Result<T, E>) -> Option<E> {
     r.as_ref().err().cloned()
+}
+
+pub fn almide_rt_result_flat_map<T: Clone, U, E: Clone>(r: Result<T, E>, f: impl Fn(T) -> Result<U, E>) -> Result<U, E> {
+    r.and_then(f)
+}
+
+pub fn almide_rt_result_unwrap_or_else<T, E>(r: Result<T, E>, f: impl Fn(E) -> T) -> T {
+    r.unwrap_or_else(f)
+}
+
+pub fn almide_rt_result_to_option<T: Clone, E>(r: Result<T, E>) -> Option<T> {
+    r.ok()
+}
+
+pub fn almide_rt_result_to_err_option<T, E: Clone>(r: Result<T, E>) -> Option<E> {
+    r.err()
 }
 
 pub fn almide_rt_result_flatten<T, E>(r: Result<Result<T, E>, E>) -> Result<T, E> {

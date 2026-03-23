@@ -21,4 +21,5 @@ pub fn almide_rt_float_sign(n: f64) -> f64 { n.signum() }
 pub fn almide_rt_float_to_int(n: f64) -> i64 { n as i64 }
 pub fn almide_rt_float_from_int(n: i64) -> f64 { n as f64 }
 pub fn almide_rt_float_to_fixed(n: f64, decimals: i64) -> String { format!("{:.1$}", n, decimals as usize) }
-// math functions moved to math.rs
+pub fn almide_rt_float_is_nan(n: f64) -> bool { n.is_nan() }
+pub fn almide_rt_float_is_infinite(n: f64) -> bool { n.is_infinite() }

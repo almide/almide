@@ -1,0 +1,40 @@
+// visibility_test — pub, local, mod visibility modifiers
+
+pub fn add_pub(a: Int, b: Int) -> Int = a + b
+fn add_default(a: Int, b: Int) -> Int = a + b
+local fn add_local(a: Int, b: Int) -> Int = a + b
+
+test "pub fn" {
+  assert_eq(add_pub(1, 2), 3)
+}
+
+test "default visibility fn" {
+  assert_eq(add_default(3, 4), 7)
+}
+
+test "local fn" {
+  assert_eq(add_local(5, 6), 11)
+}
+
+pub fn greet_pub(name: String) -> String = "Hello, ${name}!"
+
+test "pub fn with string" {
+  assert_eq(greet_pub("world"), "Hello, world!")
+}
+
+// NOTE: pub on type declarations is not supported (pub only applies to fn)
+
+// Multiple visibility levels coexist
+pub fn api_fn() -> Int = internal_fn() * 2
+fn internal_fn() -> Int = 21
+
+test "pub fn calls private fn" {
+  assert_eq(api_fn(), 42)
+}
+
+// Effect fn with visibility
+pub effect fn pub_effect() -> Result[Int, String] = ok(100)
+
+test "pub effect fn" {
+  assert_eq(pub_effect(), ok(100))
+}

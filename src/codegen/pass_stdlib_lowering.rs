@@ -6,7 +6,7 @@
 //! NO string rendering. All decisions are structural IR transformations.
 
 use crate::ir::*;
-use crate::types::Ty;
+use crate::types::{Ty, TypeConstructorId};
 use crate::generated::arg_transforms::{self, ArgTransform};
 use super::pass::{NanoPass, Target};
 
@@ -16,6 +16,7 @@ pub struct StdlibLoweringPass;
 impl NanoPass for StdlibLoweringPass {
     fn name(&self) -> &str { "StdlibLowering" }
     fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Rust]) }
+    fn depends_on(&self) -> Vec<&'static str> { vec!["EffectInference"] }
     fn run(&self, program: &mut IrProgram, _target: Target) {
         for func in &mut program.functions {
             func.body = rewrite_expr(func.body.clone());
@@ -80,7 +81,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
             while args.len() < total_params {
                 args.push(IrExpr {
                     kind: IrExprKind::OptionNone,
-                    ty: Ty::Option(Box::new(Ty::Unknown)),
+                    ty: Ty::option(Ty::Unknown),
                     span: None,
                 });
             }
@@ -133,29 +134,26 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                     // UFCS: "module.func" method → convert to Module call and process
                     // Only if the module.func exists in stdlib (arg_transforms table)
                     if method.contains('.') && !method.ends_with(".encode") && !method.ends_with(".decode") {
-                        if let Some(dot_pos) = method.find('.') {
-                            let mod_name = &method[..dot_pos];
-                            let func_name = &method[dot_pos+1..];
-                            // Check if this is a real stdlib function
-                            if arg_transforms::lookup(mod_name, func_name).is_none() {
+                        let dot_pos = method.find('.').unwrap();
+                        let (mod_name, func_name) = (&method[..dot_pos], &method[dot_pos+1..]);
+                        // Check if this is a real stdlib function
+                        if arg_transforms::lookup(mod_name, func_name).is_none() {
                                 // Not a stdlib function — leave as Method call for BuiltinLoweringPass
                                 return IrExpr { kind: IrExprKind::Call {
                                     target: CallTarget::Method { object, method },
                                     args, type_args,
                                 }, ty, span };
                             }
-                            let mut call_args = vec![*object];
-                            call_args.extend(args);
-                            // Recursively process as Module call
-                            let module_call = IrExpr {
-                                kind: IrExprKind::Call {
-                                    target: CallTarget::Module { module: mod_name.to_string(), func: func_name.to_string() },
-                                    args: call_args, type_args,
-                                },
-                                ty: ty.clone(), span,
-                            };
-                            return rewrite_expr(module_call);
-                        }
+                        let mut call_args = vec![*object];
+                        call_args.extend(args);
+                        let module_call = IrExpr {
+                            kind: IrExprKind::Call {
+                                target: CallTarget::Module { module: mod_name.to_string(), func: func_name.to_string() },
+                                args: call_args, type_args,
+                            },
+                            ty: ty.clone(), span,
+                        };
+                        return rewrite_expr(module_call);
                     }
                     CallTarget::Method { object, method }
                 }
@@ -193,8 +191,8 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
         IrExprKind::UnOp { op, operand } => IrExprKind::UnOp {
             op, operand: Box::new(rewrite_expr(*operand)),
         },
-        IrExprKind::Lambda { params, body } => IrExprKind::Lambda {
-            params, body: Box::new(rewrite_expr(*body)),
+        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
+            params, body: Box::new(rewrite_expr(*body)), lambda_id,
         },
         IrExprKind::List { elements } => IrExprKind::List {
             elements: elements.into_iter().map(|e| rewrite_expr(e)).collect(),
@@ -243,6 +241,10 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
             object: Box::new(rewrite_expr(*object)),
             index: Box::new(rewrite_expr(*index)),
         },
+        IrExprKind::MapAccess { object, key } => IrExprKind::MapAccess {
+            object: Box::new(rewrite_expr(*object)),
+            key: Box::new(rewrite_expr(*key)),
+        },
         IrExprKind::Fan { exprs } => IrExprKind::Fan {
             // FanLoweringPass will strip auto-try from these later
             exprs: exprs.into_iter().map(|e| rewrite_expr(e)).collect(),
@@ -259,13 +261,13 @@ fn resolve_module_from_ty(ty: &Ty, method: &str) -> Option<&'static str> {
     let candidates = crate::stdlib::resolve_ufcs_candidates(method);
     if candidates.is_empty() { return None; }
     let module = match ty {
-        Ty::List(_) => Some("list"),
-        Ty::Map(_, _) => Some("map"),
+        Ty::Applied(TypeConstructorId::List, _) => Some("list"),
+        Ty::Applied(TypeConstructorId::Map, _) => Some("map"),
         Ty::String => Some("string"),
         Ty::Int => Some("int"),
         Ty::Float => Some("float"),
-        Ty::Option(_) => Some("option"),
-        Ty::Result(_, _) => Some("result"),
+        Ty::Applied(TypeConstructorId::Option, _) => Some("option"),
+        Ty::Applied(TypeConstructorId::Result, _) => Some("result"),
         _ => None,
     };
     if let Some(m) = module {
@@ -395,8 +397,8 @@ fn resolve_unresolved_ufcs(expr: IrExpr, siblings: &[String]) -> IrExpr {
             left: Box::new(resolve_unresolved_ufcs(*left, siblings)),
             right: Box::new(resolve_unresolved_ufcs(*right, siblings)),
         },
-        IrExprKind::Lambda { params, body } => IrExprKind::Lambda {
-            params, body: Box::new(resolve_unresolved_ufcs(*body, siblings)),
+        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
+            params, body: Box::new(resolve_unresolved_ufcs(*body, siblings)), lambda_id,
         },
         IrExprKind::List { elements } => IrExprKind::List {
             elements: elements.into_iter().map(|e| resolve_unresolved_ufcs(e, siblings)).collect(),
@@ -491,7 +493,7 @@ fn decorate_arg(arg: IrExpr, transform: ArgTransform) -> IrExpr {
         ArgTransform::LambdaClone => {
             // Lambda: add clone bindings for each param
             match arg.kind {
-                IrExprKind::Lambda { params, body } => {
+                IrExprKind::Lambda { params, body, lambda_id } => {
                     let clone_stmts: Vec<IrStmt> = params.iter()
                         .filter(|(_, t)| !matches!(t, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit))
                         .map(|(id, param_ty)| {
@@ -532,7 +534,7 @@ fn decorate_arg(arg: IrExpr, transform: ArgTransform) -> IrExpr {
                     };
 
                     IrExpr {
-                        kind: IrExprKind::Lambda { params, body: Box::new(wrapped_body) },
+                        kind: IrExprKind::Lambda { params, body: Box::new(wrapped_body), lambda_id },
                         ty, span,
                     }
                 }
@@ -548,7 +550,7 @@ fn decorate_arg(arg: IrExpr, transform: ArgTransform) -> IrExpr {
             } else {
                 IrExpr {
                     kind: IrExprKind::OptionSome { expr: Box::new(arg) },
-                    ty: Ty::Option(Box::new(ty)),
+                    ty: Ty::option(ty),
                     span,
                 }
             }
@@ -557,7 +559,7 @@ fn decorate_arg(arg: IrExpr, transform: ArgTransform) -> IrExpr {
         ArgTransform::LambdaResultWrap => {
             // Lambda with Ok(body) wrapping: callback body gets wrapped in ResultOk
             match arg.kind {
-                IrExprKind::Lambda { params, body } => {
+                IrExprKind::Lambda { params, body, lambda_id } => {
                     // Clone bindings (same as LambdaClone)
                     let clone_stmts: Vec<IrStmt> = params.iter()
                         .filter(|(_, t)| !matches!(t, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit))
@@ -587,7 +589,7 @@ fn decorate_arg(arg: IrExpr, transform: ArgTransform) -> IrExpr {
                     let body_ty = body.ty.clone();
                     let ok_body = IrExpr {
                         kind: IrExprKind::ResultOk { expr: body },
-                        ty: Ty::Result(Box::new(body_ty.clone()), Box::new(Ty::String)),
+                        ty: Ty::result(body_ty.clone(), Ty::String),
                         span: None,
                     };
 
@@ -599,13 +601,13 @@ fn decorate_arg(arg: IrExpr, transform: ArgTransform) -> IrExpr {
                                 stmts: clone_stmts,
                                 expr: Some(Box::new(ok_body)),
                             },
-                            ty: Ty::Result(Box::new(body_ty), Box::new(Ty::String)),
+                            ty: Ty::result(body_ty, Ty::String),
                             span: None,
                         }
                     };
 
                     IrExpr {
-                        kind: IrExprKind::Lambda { params, body: Box::new(wrapped_body) },
+                        kind: IrExprKind::Lambda { params, body: Box::new(wrapped_body), lambda_id },
                         ty, span,
                     }
                 }
@@ -683,8 +685,8 @@ fn prefix_intra_module_calls(expr: IrExpr, mod_name: &str, siblings: &[String]) 
         IrExprKind::UnOp { op, operand } => IrExprKind::UnOp {
             op, operand: Box::new(prefix_intra_module_calls(*operand, mod_name, siblings)),
         },
-        IrExprKind::Lambda { params, body } => IrExprKind::Lambda {
-            params, body: Box::new(prefix_intra_module_calls(*body, mod_name, siblings)),
+        IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
+            params, body: Box::new(prefix_intra_module_calls(*body, mod_name, siblings)), lambda_id,
         },
         IrExprKind::List { elements } => IrExprKind::List {
             elements: elements.into_iter().map(|e| prefix_intra_module_calls(e, mod_name, siblings)).collect(),

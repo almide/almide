@@ -63,8 +63,25 @@ let same = color_a == color_b  // just works
 // From: opt-in for error conversions
 type AppError = | Io(IoError) | Parse(ParseError) deriving From
 ```
-<!-- Note: trait/impl syntax exists in the parser but is being superseded by
-     row polymorphism and container protocols. See docs/roadmap/active/type-system.md -->
+### Protocols (user-defined conventions)
+```
+// Define a protocol
+protocol Action {
+  fn name(a: Self) -> String
+  fn execute(a: Self, ctx: Context) -> Result[String, String]
+}
+
+// Satisfy via convention methods
+type GreetAction: Action = { greeting: String }
+fn GreetAction.name(a: GreetAction) -> String = "greet"
+fn GreetAction.execute(a: GreetAction, ctx: Context) -> Result[String, String] =
+  ok(a.greeting)
+
+// Use as generic bound
+fn run_action[T: Action](action: T, ctx: Context) -> Result[String, String] =
+  action.execute(ctx)
+```
+Built-in conventions (Eq, Repr, Ord, Hash, Codec) are protocols too.
 
 ## Expressions
 
@@ -119,7 +136,7 @@ for x in xs {
 }
 
 for (k, v) in config {
-  println(k + " = " ++ v)
+  println(k + " = " + v)
 }
 
 for key in m {
@@ -351,12 +368,6 @@ The runtime calls `main(args)` where `args` includes the program name at index 0
 
 ### regex (requires `import regex`)
 `regex.match?(pat, s)`, `regex.full_match?(pat, s)`, `regex.find(pat, s)` → `Option[String]`, `regex.find_all(pat, s)`, `regex.replace(pat, s, rep)`, `regex.replace_first(pat, s, rep)`, `regex.split(pat, s)`, `regex.captures(pat, s)` → `Option[List[String]]`
-
-### time (requires `import time`)
-`time.now()` → `Int` (unix seconds), `time.millis()` → `Int`, `time.sleep(ms)` (effect), `time.year(ts)`, `time.month(ts)` (1-12), `time.day(ts)` (1-31), `time.hour(ts)` (0-23), `time.minute(ts)` (0-59), `time.second(ts)` (0-59), `time.weekday(ts)` (0=Mon, 6=Sun), `time.to_iso(ts)`, `time.from_parts(y, m, d, h, min, s)` → `Int`
-
-### encoding (requires `import encoding`)
-`encoding.hex_encode(bytes)`, `encoding.hex_decode(s)` → `Result[List[Int], String]`, `encoding.base64_encode(bytes)`, `encoding.base64_decode(s)` → `Result[List[Int], String]`
 
 ### args (requires `import args`)
 `args.flag?(name)` → `Bool`, `args.option(name)` → `Option[String]`, `args.option_or(name, fallback)` → `String`, `args.positional()` → `List[String]`

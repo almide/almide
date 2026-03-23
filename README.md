@@ -17,6 +17,7 @@
 <p align="center">
   <a href="https://github.com/almide/almide/actions/workflows/ci.yml"><img src="https://github.com/almide/almide/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-blue.svg" alt="License: MIT / Apache-2.0"></a>
+  <a href="https://deepwiki.com/almide/almide"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
 </p>
 
 ## What is Almide?
@@ -57,7 +58,7 @@ Verify the installation:
 
 ```bash
 almide --version
-# almide 0.8.3
+# almide 0.9.0
 ```
 
 ### Hello World
@@ -169,7 +170,6 @@ almide fmt app.almd              # Format source code
 almide clean                     # Clear dependency cache
 almide app.almd --target rust    # Emit Rust source
 almide app.almd --target ts      # Emit TypeScript source
-almide app.almd --target js      # Emit JavaScript source
 almide app.almd --emit-ast       # Emit AST as JSON
 almide app.almd --emit-ir        # Emit typed IR as JSON
 ```
@@ -193,6 +193,18 @@ Tested with the [MiniGit benchmark](https://github.com/almide/benchmark) — Cla
 | **Almide (with warmup)** | **261.6s** | **$1.03** | **20/20** |
 
 Almide has no training data in any public LLM corpus yet — the generation speed gap is expected to narrow as more Almide code enters training sets. Despite being slower, Almide achieves **100% pass rate** with zero failures across 40 trials (20 no-warmup + 20 warmup). See [full results](https://github.com/almide/benchmark) for all 16 languages.
+
+## WASM Binary Size
+
+Almide emits WASM bytecode directly (no Rust/C intermediary). Each binary is self-contained — allocator, string handling, and runtime are all included. No external GC or host runtime dependency.
+
+| Program | Binary Size |
+|---------|------------:|
+| Hello World | **1,028 B** |
+| FizzBuzz | **1,286 B** |
+| Fibonacci | **1,361 B** |
+| Closure | **1,443 B** |
+| Variant | **1,777 B** |
 
 ## Native Performance
 
@@ -239,11 +251,22 @@ almide_grammar.precedence_table()  // 8 levels, pipe → unary
 
 The compiler itself uses `almide-grammar`'s TOML files (`tokens.toml`, `precedence.toml`) at build time to generate its lexer keyword table — ensuring the compiler and all tooling stay in sync.
 
-### Editor Support — [almide-editors](https://github.com/almide/almide-editors)
+### Editor Support
 
-VS Code extension with syntax highlighting, bracket matching, comment toggling, and code folding for `.almd` files. The TextMate grammar is generated from `almide-grammar`.
+- **VS Code** — [vscode-almide](https://github.com/almide/vscode-almide) — Syntax highlighting, bracket matching, comment toggling, code folding
+- **Tree-sitter** — [tree-sitter-almide](https://github.com/almide/tree-sitter-almide) — Tree-sitter grammar for editors that support it (Neovim, Helix, Zed)
 
-- **VS Code** — Download `.vsix` from [Releases](https://github.com/almide/almide-editors/releases), then `code --install-extension almide-lang-*.vsix`
+### Playground — [playground](https://github.com/almide/playground)
+
+Browser-based compiler and runner. The Almide compiler runs as WASM — no server, no installation. Try it at [almide.github.io/playground](https://almide.github.io/playground/).
+
+### Benchmark — [benchmark](https://github.com/almide/benchmark)
+
+MiniGit benchmark suite comparing Almide against 15 languages for LLM code generation speed and reliability.
+
+### MCP Server — [mcp-server](https://github.com/almide/mcp-server)
+
+Model Context Protocol server for Almide — enables AI assistants to compile, check, and run Almide code.
 
 ## Documentation
 

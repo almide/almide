@@ -1,0 +1,38 @@
+// pipe_test — Pipe operator edge cases
+
+test "basic pipe" {
+  let result = "hello" |> string.len
+  assert_eq(result, 5)
+}
+
+test "multi-pipe chain" {
+  let result = "  hello  "
+    |> string.trim
+    |> string.to_upper
+    |> string.len
+  assert_eq(result, 5)
+}
+
+fn double(x: Int) -> Int = x * 2
+
+test "pipe with function" {
+  let result = 5 |> double
+  assert_eq(result, 10)
+}
+
+test "pipe into list function" {
+  let result = [3, 1, 4, 1, 5]
+    |> list.sort
+    |> list.unique
+  assert_eq(result, [1, 3, 4, 5])
+}
+
+test "pipe preserves left to right order" {
+  let result = "abc" |> string.to_upper |> string.reverse
+  assert_eq(result, "CBA")
+}
+
+test "pipe with int conversion" {
+  let result = 42 |> int.to_string |> string.len
+  assert_eq(result, 2)
+}
