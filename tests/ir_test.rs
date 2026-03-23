@@ -356,6 +356,7 @@ fn ir_program_construction() {
         modules: vec![],
         type_registry: Default::default(),
         effect_map: Default::default(),
+        codegen_annotations: Default::default(),
     };
     assert!(prog.functions.is_empty());
     assert!(prog.top_lets.is_empty());
@@ -528,6 +529,7 @@ fn make_program_with_vars(vars: Vec<(&str, Option<Span>, bool)>) -> IrProgram {
         modules: vec![],
         type_registry: Default::default(),
         effect_map: Default::default(),
+        codegen_annotations: Default::default(),
     }
 }
 
@@ -600,6 +602,7 @@ fn unused_var_warning_used_var_no_warning() {
         modules: vec![],
         type_registry: Default::default(),
         effect_map: Default::default(),
+        codegen_annotations: Default::default(),
     };
     compute_use_counts(&mut prog);
     let warnings = collect_unused_var_warnings(&prog, "test.almd");

@@ -8,6 +8,7 @@ fn test_wasm_empty_program_valid() {
         modules: vec![],
         type_registry: almide::types::TypeConstructorRegistry::new(),
         effect_map: Default::default(),
+        codegen_annotations: Default::default(),
     };
     let bytes = almide::codegen::emit_wasm::emit(&empty_ir);
 
