@@ -25,13 +25,17 @@ use crate::ir::*;
 use crate::types::Ty;
 
 use utils::{MonoKey, BoundedParam, has_typevar, ty_contains_typevar};
-use discovery::discover_instances;
+use discovery::{discover_instances, discover_instances_in_frontier};
 use specialization::{specialize_function, substitute_ty, update_var_table_types};
 use rewrite::rewrite_calls;
 use propagation::propagate_concrete_types;
 
 /// Run the monomorphization pass on an IR program.
 /// Specialize generic functions for concrete type arguments at each call site.
+///
+/// Uses frontier-based incremental discovery: after the first round scans all
+/// functions, subsequent rounds only scan newly created specializations.
+/// This reduces transitive discovery from O(N × total_functions) to O(N × new_functions).
 pub fn monomorphize(program: &mut IrProgram) {
     let bound_fns = find_structurally_bounded_fns(&program.functions, &program.type_decls);
     if bound_fns.is_empty() {
@@ -42,9 +46,19 @@ pub fn monomorphize(program: &mut IrProgram) {
     // Converges when no new instances are discovered. Warns if instance count
     // exceeds 1000 (possible infinite expansion).
     let mut all_instances: HashMap<MonoKey, HashMap<String, Ty>> = HashMap::new();
+    let mut frontier_start: Option<usize> = None; // None = first round (scan all)
+
     loop {
-        // Discover new instantiations (includes scanning previously generated specialized functions)
-        let instances = discover_instances(program, &bound_fns);
+        // Discovery: first round scans all functions + top_lets,
+        // subsequent rounds only scan the frontier (newly added specializations)
+        let instances = match frontier_start {
+            None => discover_instances(program, &bound_fns),
+            Some(start) => discover_instances_in_frontier(
+                &program.functions[start..],
+                &bound_fns,
+                &program.functions,
+            ),
+        };
 
         // Filter to only new instances
         let new: HashMap<MonoKey, HashMap<String, Ty>> = instances.into_iter()
@@ -58,12 +72,11 @@ pub fn monomorphize(program: &mut IrProgram) {
             break;
         }
 
-        // Clone and specialize new functions
+        // Specialize new functions
         let mut new_functions = Vec::new();
         for ((fn_name, suffix), bindings) in &new {
-                if let Some(orig) = program.functions.iter().find(|f| f.name == *fn_name) {
-                let specialized = specialize_function(orig, suffix, bindings);
-                new_functions.push(specialized);
+            if let Some(orig) = program.functions.iter().find(|f| f.name == *fn_name) {
+                new_functions.push(specialize_function(orig, suffix, bindings));
             }
         }
 
@@ -81,7 +94,8 @@ pub fn monomorphize(program: &mut IrProgram) {
         all_instances.extend(new);
         rewrite_calls(program, &bound_fns, &all_instances);
 
-        // Add specialized functions so next round can discover transitive calls in them
+        // Track frontier: next round only scans these new functions
+        frontier_start = Some(program.functions.len());
         program.functions.extend(new_functions);
     }
 

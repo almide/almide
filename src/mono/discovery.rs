@@ -22,6 +22,7 @@ pub(super) fn collect_mono_bindings(
 }
 
 /// Discover all concrete instantiations of structurally-bounded functions.
+/// Scans all functions and top-level lets.
 pub(super) fn discover_instances(
     program: &IrProgram,
     bound_fns: &HashMap<String, Vec<BoundedParam>>,
@@ -36,6 +37,20 @@ pub(super) fn discover_instances(
         discover_in_expr(&tl.value, bound_fns, fns, &mut instances);
     }
 
+    instances
+}
+
+/// Discover instances only in the given frontier functions (newly added specializations).
+/// Uses all_fns for looking up original function signatures.
+pub(super) fn discover_instances_in_frontier(
+    frontier: &[IrFunction],
+    bound_fns: &HashMap<String, Vec<BoundedParam>>,
+    all_fns: &[IrFunction],
+) -> HashMap<MonoKey, HashMap<String, Ty>> {
+    let mut instances: HashMap<MonoKey, HashMap<String, Ty>> = HashMap::new();
+    for func in frontier {
+        discover_in_expr(&func.body, bound_fns, all_fns, &mut instances);
+    }
     instances
 }
 
