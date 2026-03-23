@@ -1,4 +1,4 @@
-// json extra tests — get, get_string, get_int, get_bool, get_float, get_array, keys, as_*, null, stringify_pretty, path API
+// json extra tests — get, keys, as_*, null, stringify_pretty, path API
 
 test "json.get existing key" {
   let obj = json.object([("name", json.from_string("Alice"))])
@@ -10,74 +10,6 @@ test "json.get missing key" {
   let obj = json.object([("name", json.from_string("Alice"))])
   let v = json.get(obj, "age")
   assert_eq(option.is_none(v), true)
-}
-
-test "json.get_string existing" {
-  let obj = json.object([("name", json.from_string("Bob"))])
-  assert_eq(json.get_string(obj, "name"), some("Bob"))
-}
-
-test "json.get_string missing" {
-  let obj = json.object([("x", json.from_int(1))])
-  assert_eq(json.get_string(obj, "y"), none)
-}
-
-test "json.get_string wrong type" {
-  let obj = json.object([("val", json.from_int(42))])
-  assert_eq(json.get_string(obj, "val"), none)
-}
-
-test "json.get_int existing" {
-  let obj = json.object([("age", json.from_int(25))])
-  assert_eq(json.get_int(obj, "age"), some(25))
-}
-
-test "json.get_int missing" {
-  let obj = json.object([("name", json.from_string("A"))])
-  assert_eq(json.get_int(obj, "age"), none)
-}
-
-test "json.get_int wrong type" {
-  let obj = json.object([("age", json.from_string("25"))])
-  assert_eq(json.get_int(obj, "age"), none)
-}
-
-test "json.get_bool existing true" {
-  let obj = json.object([("active", json.from_bool(true))])
-  assert_eq(json.get_bool(obj, "active"), some(true))
-}
-
-test "json.get_bool existing false" {
-  let obj = json.object([("active", json.from_bool(false))])
-  assert_eq(json.get_bool(obj, "active"), some(false))
-}
-
-test "json.get_bool missing" {
-  let obj = json.object([("x", json.from_int(1))])
-  assert_eq(json.get_bool(obj, "active"), none)
-}
-
-test "json.get_float existing" {
-  let obj = json.object([("score", json.from_float(9.5))])
-  let r = json.get_float(obj, "score")
-  assert_eq(option.is_some(r), true)
-}
-
-test "json.get_float missing" {
-  let obj = json.object([("x", json.from_int(1))])
-  assert_eq(json.get_float(obj, "score"), none)
-}
-
-test "json.get_array existing" {
-  let arr = json.array([json.from_int(1), json.from_int(2)])
-  let obj = json.object([("items", arr)])
-  let r = json.get_array(obj, "items")
-  assert_eq(option.is_some(r), true)
-}
-
-test "json.get_array missing" {
-  let obj = json.object([("x", json.from_int(1))])
-  assert_eq(json.get_array(obj, "items"), none)
 }
 
 test "json.keys of object" {
@@ -172,15 +104,6 @@ test "json.parse roundtrip array" {
       assert_eq(option.is_some(items), true)
     }
     err(_) => assert(false, "roundtrip failed")
-  }
-}
-
-test "json.get_array then iterate" {
-  let arr = json.array([json.from_int(10), json.from_int(20)])
-  let obj = json.object([("nums", arr)])
-  match json.get_array(obj, "nums") {
-    some(items) => assert_eq(list.len(items), 2),
-    none => assert(false, "should find array"),
   }
 }
 

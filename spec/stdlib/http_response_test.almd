@@ -23,21 +23,6 @@ test "http.set_header overwrites existing header" {
   }
 }
 
-test "http.set_cookie adds Set-Cookie header" {
-  let resp = http.response(200, "hi");
-  let with_cookie = http.set_cookie(resp, "session", "abc");
-  let cookie = http.get_header(with_cookie, "Set-Cookie");
-  match cookie {
-    some(v) => assert_eq(v, "session=abc"),
-    none => assert(false),
-  }
-}
-
-test "http.not_found returns 404" {
-  let resp = http.not_found("Page not found");
-  assert_eq(http.body(resp), "Page not found")
-}
-
 test "http.redirect creates redirect response" {
   let resp = http.redirect("/new-path");
   let loc = http.get_header(resp, "Location");

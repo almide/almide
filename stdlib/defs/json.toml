@@ -22,38 +22,6 @@ return = "Option[Value]"
 rust = "almide_json_get(&{j}, &{key})"
 ts = "__almd_json.get({j}, {key})"
 
-[get_string]
-description = "Get a string value by key. Returns none if key missing or not a string."
-example = 'json.get_string(j, "name")'
-params = [{ name = "j", type = "Value" }, { name = "key", type = "String" }]
-return = "Option[String]"
-rust = "almide_json_get_string(&{j}, &{key})"
-ts = "__almd_json.get_string({j}, {key})"
-
-[get_int]
-description = "Get an integer value by key. Returns none if key missing or not an integer."
-example = 'json.get_int(j, "age")'
-params = [{ name = "j", type = "Value" }, { name = "key", type = "String" }]
-return = "Option[Int]"
-rust = "almide_json_get_int(&{j}, &{key})"
-ts = "__almd_json.get_int({j}, {key})"
-
-[get_bool]
-description = "Get a boolean value by key. Returns none if key missing or not a boolean."
-example = 'json.get_bool(j, "active")'
-params = [{ name = "j", type = "Value" }, { name = "key", type = "String" }]
-return = "Option[Bool]"
-rust = "almide_json_get_bool(&{j}, &{key})"
-ts = "__almd_json.get_bool({j}, {key})"
-
-[get_array]
-description = "Get an array value by key. Returns none if key missing or not an array."
-example = 'json.get_array(j, "items")'
-params = [{ name = "j", type = "Value" }, { name = "key", type = "String" }]
-return = "Option[List[Value]]"
-rust = "almide_json_get_array(&{j}, &{key})"
-ts = "__almd_json.get_array({j}, {key})"
-
 [keys]
 description = "Get all keys of a JSON object as a list of strings."
 example = 'json.keys(j)'
@@ -101,22 +69,6 @@ params = [{ name = "items", type = "List[Value]" }]
 return = "Value"
 rust = "Value::Array({items})"
 ts = "__almd_json.array({items})"
-
-[from_map]
-description = "Create a Json object from a Map[String, Value]."
-example = 'json.from_map(map.set(map.new(), "key", json.s("val")))'
-params = [{ name = "m", type = "Map[String, Value]" }]
-return = "Value"
-rust = "Value::Object({m}.into_iter().collect())"
-ts = "__almd_json.from_map({m})"
-
-[get_float]
-description = "Get a float value by key. Returns none if key missing or not a number."
-example = 'json.get_float(j, "score")'
-params = [{ name = "j", type = "Value" }, { name = "key", type = "String" }]
-return = "Option[Float]"
-rust = "almide_json_get_float(&{j}, &{key})"
-ts = "__almd_json.get_float({j}, {key})"
 
 [from_float]
 description = "Create a Json float value."
@@ -227,14 +179,6 @@ params = [{ name = "j", type = "Value" }, { name = "path", type = "JsonPath" }, 
 return = "Result[Value, String]"
 rust = "almide_json_set_path(&{j}, &{path}, {value})?"
 ts = "__almd_json.set_path({j}, {path}, {value})"
-
-[upsert_path]
-description = "Set a value at a JSON path, creating intermediate objects as needed."
-example = 'json.upsert_path(j, json.field(json.root(), "name"), json.s("Bob"))'
-params = [{ name = "j", type = "Value" }, { name = "path", type = "JsonPath" }, { name = "value", type = "Value" }]
-return = "Value"
-rust = "almide_json_upsert_path(&{j}, &{path}, {value})"
-ts = "__almd_json.upsert_path({j}, {path}, {value})"
 
 [remove_path]
 description = "Remove a value at a JSON path. Returns the Json with the value removed."
