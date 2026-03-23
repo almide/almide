@@ -8,10 +8,9 @@
 |---|---|---|---|---|
 | Rust | OK | **NG** | `TcpStream` 直叩き | TLS 未実装。`parse_url` が `https://` を剥いで port 80 に平文接続 |
 | TS (Deno) | OK | OK | `fetch` ネイティブ | なし |
-| JS (Node) | OK | OK | `require("https")` 自動切り替え | なし |
 | WASM | NG | NG | WASI にソケット API なし | ネットワーク自体が不可 |
 
-**修正が必要なのは Rust ターゲットのみ。** TS/JS は既に動く。
+**修正が必要なのは Rust ターゲットのみ。** TS は既に動く。
 
 ## Rust ターゲットの問題箇所
 

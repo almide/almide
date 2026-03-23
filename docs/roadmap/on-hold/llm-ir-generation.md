@@ -1,4 +1,4 @@
-# LLM → IR Direct Generation [ACTIVE]
+# LLM → IR Direct Generation [ON HOLD]
 
 LLM がテキストではなく型付き IR (JSON) を直接生成し、パーサーエラーをゼロにする。
 

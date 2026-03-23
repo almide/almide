@@ -6,14 +6,14 @@
 
 | 項目 | 説明 | Grand Plan |
 |---|---|---|
-| [Direct WASM Emission](active/emit-wasm-direct.md) | 129/129 ✅, DCE完了, Hello World 1,028B. 残: WASI fd_read/args/file I/O | Architecture |
-| [Test Coverage](active/test-coverage.md) | 129ファイル, 2,042テストブロック. Rust/WASM両方100%. 残: TS/JS cross-target | Phase 1 |
-| [User Generics & Protocol](active/user-generics-and-traits.md) | Protocol System 実装中 (Phase 1完了, Phase 2-3進行中) | Phase 3 |
-| [Effect System](active/effect-system.md) | Phase 3-4 残: Dependency制限, 内部型レベル統合 | Phase 3 |
-| [Performance Research](active/performance-research.md) | Rust との差 2.9%, Phase 0-4 | Research |
-| [Self-Contained Compiler](active/self-contained-compiler.md) | rustc 不要化: Stage 1 (LLVM直接出力) → Stage 2 (セルフホスティング) | Architecture |
-| [Record Spread](active/record-spread.md) | `{ ...base, field = value }` でレコード更新 | Phase 1 |
-| [Compiler Architecture 10/10](active/compiler-architecture-10.md) | 全領域 10/10 + WASM統合: Target::Wasm、stdlib dispatch一元化、cross-check | Architecture |
+| [Direct WASM Emission](active/emit-wasm-direct.md) | 130/130 ✅, DCE完了, Hello World 1,028B | Architecture |
+| [Test Coverage](active/test-coverage.md) | 130ファイル. Rust/WASM 100%, TS ~97% | Phase 1 |
+| [User Generics & Protocol](active/user-generics-and-traits.md) | Protocol System 実装中 | Phase 3 |
+| [Effect System](active/effect-system.md) | Phase 3-4 残 | Phase 3 |
+| [Performance Research](active/performance-research.md) | Rust との差 2.9% | Research |
+| [Self-Contained Compiler](active/self-contained-compiler.md) | rustc 不要化 | Architecture |
+| [HTTPS Native](active/https-native.md) | Rust target の HTTPS 対応 | Phase 1 |
+| [Compiler Architecture 10/10](active/compiler-architecture-10.md) | 95/110. Phase 5-7 残 | Architecture |
 
 ## 1.0 Remaining
 
@@ -79,7 +79,8 @@
 - ~~Checker InferTy/Ty統一~~ → 完了 (InferTy廃止)
 - ~~Polish (Immediate)~~ → 完了
 - ~~Production Ready (old)~~ → PRODUCTION_READY.md に統合
-- ~~Stdlib Strategy~~ → Verb Reform完了、387関数で凍結
+- ~~Stdlib Strategy~~ → Stdlib v2: 21 native + 2 bundled, http 20関数, json 23関数
+- ~~JS Target~~ → v0.9.0 で廃止。TS に統一 (Node --strip-types)
 - ~~Template~~ → codegen v3 TOML templates に統合
 - ~~UFCS External~~ → stdlib UFCS で対応済み
 - ~~Concat Operator Reform~~ → 完了 (++ → +)
