@@ -154,12 +154,11 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
     // Monomorphize
     almide::mono::monomorphize(&mut ir_program);
 
-    // Run nanopass pipeline (TCO, effect inference, stream fusion, result propagation, fan lowering)
-    let config = almide::codegen::target::configure(almide::codegen::pass::Target::Wasm);
-    config.pipeline.run(&mut ir_program, almide::codegen::pass::Target::Wasm);
-
-    // Emit WASM binary
-    let bytes = almide::codegen::emit_wasm_binary(&ir_program);
+    // Codegen (nanopass pipeline + WASM binary emit)
+    let bytes = match almide::codegen::codegen(&mut ir_program, almide::codegen::pass::Target::Wasm) {
+        almide::codegen::CodegenOutput::Binary(b) => b,
+        almide::codegen::CodegenOutput::Source(_) => unreachable!(),
+    };
 
     if let Err(e) = std::fs::write(output, &bytes) {
         eprintln!("Failed to write {}: {}", output, e);
@@ -227,7 +226,10 @@ fn cmd_build_npm(file: &str, out_dir: &str, _no_check: bool) {
 
     // Generate JS via v3 codegen
     almide::mono::monomorphize(&mut ir_program);
-    let js_code = almide::codegen::emit(&mut ir_program, almide::codegen::pass::Target::TypeScript);
+    let js_code = match almide::codegen::codegen(&mut ir_program, almide::codegen::pass::Target::TypeScript) {
+        almide::codegen::CodegenOutput::Source(s) => s,
+        almide::codegen::CodegenOutput::Binary(_) => unreachable!(),
+    };
 
     let package_json = format!(
         r#"{{"name":"{}","version":"{}","main":"index.js","type":"module"}}"#,

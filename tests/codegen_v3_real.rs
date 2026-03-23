@@ -99,14 +99,17 @@ fn test_real_ir_diff_summary() {
     eprintln!("List type — Rust Vec: {}, TS []: {}", rust_has_vec, ts_has_array);
 }
 
-/// End-to-end: codegen::emit() — full pipeline in one call
+/// End-to-end: codegen::codegen() — full pipeline in one call
 #[test]
 fn test_emit_end_to_end_rust() {
     let mut program: IrProgram = serde_json::from_str(IR_JSON)
         .expect("failed to parse IR JSON");
 
-    let output = codegen::emit(&mut program, Target::Rust);
-    eprintln!("=== codegen::emit Rust ===\n{}", output);
+    let output = match codegen::codegen(&mut program, Target::Rust) {
+        codegen::CodegenOutput::Source(s) => s,
+        codegen::CodegenOutput::Binary(_) => unreachable!(),
+    };
+    eprintln!("=== codegen::codegen Rust ===\n{}", output);
 
     assert!(output.contains("pub fn find_price"), "should have pub fn");
     assert!(output.contains("almide_rt_list_find"), "should have stdlib call");
@@ -119,8 +122,11 @@ fn test_emit_end_to_end_ts() {
     let mut program: IrProgram = serde_json::from_str(IR_JSON)
         .expect("failed to parse IR JSON");
 
-    let output = codegen::emit(&mut program, Target::TypeScript);
-    eprintln!("=== codegen::emit TS ===\n{}", output);
+    let output = match codegen::codegen(&mut program, Target::TypeScript) {
+        codegen::CodegenOutput::Source(s) => s,
+        codegen::CodegenOutput::Binary(_) => unreachable!(),
+    };
+    eprintln!("=== codegen::codegen TS ===\n{}", output);
 
     assert!(output.contains("function find_price"), "should have function");
     assert!(output.contains("__almd_list.fold"), "should have stdlib call (fold)");

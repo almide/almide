@@ -7,10 +7,12 @@
 //!     ↓
 //! Layer 2: Semantic Rewrite (target-specific Nanopass pipeline)
 //!     ↓
-//! Layer 3: Template Renderer (TOML-driven syntax output)
-//!     ↓
-//! Target source code (Rust / TypeScript / Go / Python)
+//! Layer 3: Emit (target-specific output)
+//!     Rust/TS/JS → Template Renderer (TOML-driven syntax) → source code
+//!     WASM       → Direct binary emit → .wasm bytes
 //! ```
+//!
+//! Single entry point: `codegen(program, target) → CodegenOutput`
 //!
 //! Design references:
 //! - MLIR progressive lowering (dialect conversion)
@@ -42,6 +44,12 @@ pub mod emit_wasm;
 use crate::ir::IrProgram;
 use pass::Target;
 
+/// Codegen output: source code for text targets, binary for WASM.
+pub enum CodegenOutput {
+    Source(String),
+    Binary(Vec<u8>),
+}
+
 /// Strip `mod tests { ... }` blocks from runtime source (avoid conflicts with user tests)
 fn strip_test_blocks(src: &str) -> String {
     let mut out = String::new();
@@ -69,15 +77,27 @@ fn strip_test_blocks(src: &str) -> String {
     out
 }
 
-/// Full codegen v3 pipeline: IR → Nanopass → Annotations → Walker → source code.
-pub fn emit(program: &mut IrProgram, target: Target) -> String {
+/// Unified codegen entry point: IR → Nanopass pipeline → target output.
+///
+/// Handles all targets through a single path:
+/// - Rust/TS/JS: Nanopass → Walker (template renderer) → source code
+/// - WASM: Nanopass → direct binary emit → .wasm bytes
+pub fn codegen(program: &mut IrProgram, target: Target) -> CodegenOutput {
     let config = target::configure(target);
 
     // Layer 2: Run Nanopass pipeline (semantic rewrites — modifies IR)
-    // BoxDerefPass runs first for Rust target, populating program.codegen_annotations
     config.pipeline.run(program, target);
 
-    // Layer 3: Template-driven rendering (walker reads annotations, never checks types)
+    // Layer 3: Target-specific emit
+    match target {
+        Target::Wasm => CodegenOutput::Binary(emit_wasm::emit(program)),
+        _ => CodegenOutput::Source(emit_source(program, target, &config)),
+    }
+}
+
+/// Emit source code for text targets (Rust, TypeScript, JavaScript).
+fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetConfig) -> String {
+    // Template-driven rendering (walker reads annotations, never checks types)
     let ann = std::mem::take(&mut program.codegen_annotations);
     let ctx = walker::RenderContext::new(&config.templates, &program.var_table)
         .with_target(target)
@@ -90,7 +110,6 @@ pub fn emit(program: &mut IrProgram, target: Target) -> String {
         Target::Rust => {
             output.push_str("#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use)]\n\n");
             output.push_str("use std::collections::HashMap;\nuse std::collections::HashSet;\n");
-            // Core traits and macros (same as lower_rust.rs)
             output.push_str("trait AlmideConcat<Rhs> { type Output; fn concat(self, rhs: Rhs) -> Self::Output; }\n");
             output.push_str("impl AlmideConcat<String> for String { type Output = String; #[inline(always)] fn concat(self, rhs: String) -> String { format!(\"{}{}\", self, rhs) } }\n");
             output.push_str("impl AlmideConcat<&str> for String { type Output = String; #[inline(always)] fn concat(self, rhs: &str) -> String { format!(\"{}{}\", self, rhs) } }\n");
@@ -99,7 +118,6 @@ pub fn emit(program: &mut IrProgram, target: Target) -> String {
             output.push_str("impl<T: Clone> AlmideConcat<Vec<T>> for Vec<T> { type Output = Vec<T>; #[inline(always)] fn concat(self, rhs: Vec<T>) -> Vec<T> { let mut r = self; r.extend(rhs); r } }\n");
             output.push_str("macro_rules! almide_eq { ($a:expr, $b:expr) => { ($a) == ($b) }; }\n");
             output.push_str("macro_rules! almide_ne { ($a:expr, $b:expr) => { ($a) != ($b) }; }\n");
-            // Embed the full Rust runtime (stdlib functions), strip test blocks
             for (_name, source) in crate::generated::rust_runtime::RUST_RUNTIME_MODULES {
                 output.push_str(&strip_test_blocks(source));
                 output.push('\n');
@@ -107,12 +125,10 @@ pub fn emit(program: &mut IrProgram, target: Target) -> String {
             output.push('\n');
         }
         Target::TypeScript => {
-            // Embed the full TS runtime (Deno mode)
             output.push_str(&crate::emit_ts_runtime::full_runtime(false));
             output.push('\n');
         }
         Target::JavaScript => {
-            // Embed the JS runtime (no type annotations)
             output.push_str(&crate::emit_ts_runtime::full_runtime(true));
             output.push('\n');
         }
@@ -120,9 +136,4 @@ pub fn emit(program: &mut IrProgram, target: Target) -> String {
     }
     output.push_str(&user_code);
     output
-}
-
-/// Emit WASM binary directly from IR (no rustc intermediary).
-pub fn emit_wasm_binary(program: &IrProgram) -> Vec<u8> {
-    emit_wasm::emit(program)
 }
