@@ -187,11 +187,11 @@ pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>) {
         let mut ir_program = almide::lower::lower_program(&program, &checker.expr_types, &checker.env);
         almide::optimize::optimize_program(&mut ir_program);
         almide::mono::monomorphize(&mut ir_program);
-        let config = almide::codegen::target::configure(almide::codegen::pass::Target::Wasm);
-        config.pipeline.run(&mut ir_program, almide::codegen::pass::Target::Wasm);
-
         let bytes = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            almide::codegen::emit_wasm_binary(&ir_program)
+            match almide::codegen::codegen(&mut ir_program, almide::codegen::pass::Target::Wasm) {
+                almide::codegen::CodegenOutput::Binary(b) => b,
+                almide::codegen::CodegenOutput::Source(_) => unreachable!(),
+            }
         }));
         let bytes = match bytes {
             Ok(b) => b,

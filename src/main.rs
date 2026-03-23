@@ -307,7 +307,10 @@ fn try_compile_with_ir(file: &str, no_check: bool) -> Result<(String, Option<alm
 
     // Codegen v3: three-layer pipeline (Nanopass + Templates)
     let ir = ir_program.as_mut().expect("IR required for codegen");
-    let code = codegen::emit(ir, codegen::pass::Target::Rust);
+    let code = match codegen::codegen(ir, codegen::pass::Target::Rust) {
+        codegen::CodegenOutput::Source(s) => s,
+        codegen::CodegenOutput::Binary(_) => unreachable!(),
+    };
     Ok((code, ir_program))
 }
 
