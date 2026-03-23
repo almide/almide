@@ -1,5 +1,5 @@
 use std::process::Command;
-use crate::{compile_with_ir, parse_file, find_rustc, check, diagnostic, resolve, project, project_fetch};
+use crate::{compile_with_ir, parse_file, check, diagnostic, resolve, project, project_fetch};
 
 pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release: bool, fast: bool, _unchecked_index: bool, no_check: bool) {
     let is_npm = matches!(target, Some("npm"));
@@ -43,37 +43,49 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
 
     let (rs_code, _ir) = compile_with_ir(file, no_check);
 
-    let stem = output.strip_suffix(".wasm")
-        .or_else(|| output.strip_suffix(".exe"))
-        .unwrap_or(&output);
+    // WASI target: use bare rustc (no external crate deps needed for WASM)
+    if is_wasm {
+        cmd_build_wasi_rustc(&rs_code, &output);
+        return;
+    }
+
+    // Native target: use cargo to resolve rustls/webpki-roots for HTTPS support
+    let use_release = release || fast;
+    let project_dir = std::env::temp_dir().join("almide-build");
+    match super::cargo_build_generated(&rs_code, &project_dir, use_release) {
+        Ok(bin_path) => {
+            // Copy the built binary to the desired output location
+            if let Err(e) = std::fs::copy(&bin_path, &output) {
+                eprintln!("Failed to copy binary to {}: {}", output, e);
+                std::process::exit(1);
+            }
+            eprintln!("Built {}", output);
+        }
+        Err(e) => {
+            eprintln!("Compile error:\n{}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Build for WASI target using bare rustc (no external crate deps).
+fn cmd_build_wasi_rustc(rs_code: &str, output: &str) {
+    let stem = output.strip_suffix(".wasm").unwrap_or(output);
     let tmp_rs = format!("{}.rs", stem);
-    if let Err(e) = std::fs::write(&tmp_rs, &rs_code) {
+    if let Err(e) = std::fs::write(&tmp_rs, rs_code) {
         eprintln!("Failed to write {}: {}", tmp_rs, e);
         std::process::exit(1);
     }
 
-    let mut rustc_cmd = Command::new(&find_rustc());
-    rustc_cmd.arg(&tmp_rs)
-        .arg("-o")
-        .arg(&output)
+    let rustc = Command::new(&crate::find_rustc())
+        .arg(&tmp_rs)
+        .arg("-o").arg(output)
         .arg("-C").arg("overflow-checks=no")
-        .arg("--edition").arg("2021");
-
-    if is_wasm {
-        rustc_cmd.arg("--target").arg("wasm32-wasip1")
-            .arg("-C").arg("opt-level=s")
-            .arg("-C").arg("lto=yes");
-    } else if fast {
-        rustc_cmd.arg("-C").arg("opt-level=3")
-            .arg("-C").arg("target-cpu=native")
-            .arg("-C").arg("llvm-args=-fp-contract=fast")
-            .arg("-C").arg("lto=thin")
-            .arg("-C").arg("codegen-units=1");
-    } else if release {
-        rustc_cmd.arg("-C").arg("opt-level=3");
-    }
-
-    let rustc = rustc_cmd.output()
+        .arg("--edition").arg("2021")
+        .arg("--target").arg("wasm32-wasip1")
+        .arg("-C").arg("opt-level=s")
+        .arg("-C").arg("lto=yes")
+        .output()
         .unwrap_or_else(|e| { eprintln!("Failed to run rustc: {}", e); std::process::exit(1); });
 
     let _ = std::fs::remove_file(&tmp_rs);
