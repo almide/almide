@@ -72,7 +72,7 @@ fn build_pipeline(target: Target) -> Pipeline {
             // Shared passes
             .add(FanLoweringPass),
 
-        Target::TypeScript | Target::JavaScript => Pipeline::new()
+        Target::TypeScript => Pipeline::new()
             // TCO: convert self-recursive tail calls to loops
             .add(TailCallOptPass)
             // Analysis passes
@@ -114,7 +114,6 @@ fn build_templates(target: Target) -> TemplateSet {
     match target {
         Target::Rust => super::template::rust_templates(),
         Target::TypeScript => super::template::typescript_templates(),
-        Target::JavaScript => super::template::javascript_templates(),
         Target::Go => TemplateSet::new("go"),
         Target::Python => TemplateSet::new("python"),
         Target::Wasm => TemplateSet::new("wasm"),

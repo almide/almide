@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, develop, feat/stdlib-cleanup]
+    branches: [main, develop]
     paths-ignore:
       - 'docs/**'
       - '*.md'
@@ -106,7 +106,6 @@ jobs:
           passed=0; failed=0; skipped=0; errors=""
 
           for f in $(find spec/ -name '*.almd' -type f | sort); do
-            # Emit TS
             ts_code=$($ALMIDE "$f" --target ts 2>/dev/null) || { skipped=$((skipped + 1)); continue; }
             [ -z "$ts_code" ] && { skipped=$((skipped + 1)); continue; }
 
@@ -126,52 +125,6 @@ jobs:
           # Allow up to 3 known failures (cross-target differences)
           if [ $failed -gt 3 ]; then
             echo "::error::TS target regressions: $failed failures (max 3)"
-            exit 1
-          fi
-
-  test-js:
-    name: Test JS/Node
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: almide-linux
-          path: /tmp/almide-bin
-
-      - name: Setup
-        run: chmod +x /tmp/almide-bin/almide
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Almide spec tests (JS target)
-        run: |
-          ALMIDE=/tmp/almide-bin/almide
-          passed=0; failed=0; skipped=0; errors=""
-
-          for f in $(find spec/ -name '*.almd' -type f | sort); do
-            js_code=$($ALMIDE "$f" --target js 2>/dev/null) || { skipped=$((skipped + 1)); continue; }
-            [ -z "$js_code" ] && { skipped=$((skipped + 1)); continue; }
-
-            echo "$js_code" > /tmp/test_js.js
-            if node /tmp/test_js.js > /dev/null 2>&1; then
-              passed=$((passed + 1))
-            else
-              failed=$((failed + 1))
-              errors="$errors\n  FAIL: $f"
-            fi
-          done
-
-          echo "=== JS Target Results ==="
-          echo "Pass: $passed | Fail: $failed | Skip: $skipped"
-          if [ -n "$errors" ]; then echo -e "\nFailures:$errors"; fi
-
-          if [ $failed -gt 3 ]; then
-            echo "::error::JS target regressions: $failed failures (max 3)"
             exit 1
           fi
 
@@ -222,14 +175,13 @@ jobs:
       - name: Setup
         run: chmod +x /tmp/almide-bin/almide
 
-      - name: Smoke test - all emit targets
+      - name: Smoke test - emit targets
         run: |
           ALMIDE=/tmp/almide-bin/almide
           f=$(find spec/lang -name '*_test.almd' | head -1)
           [ -z "$f" ] && echo "No spec files found" && exit 0
           $ALMIDE "$f" --target rust > /dev/null && echo "Rust emit OK"
           $ALMIDE "$f" --target ts   > /dev/null && echo "TS emit OK"
-          $ALMIDE "$f" --target js   > /dev/null && echo "JS emit OK"
           $ALMIDE "$f" --emit-ast    > /dev/null && echo "AST emit OK"
 
   # ═══════════════════════════════════════════════

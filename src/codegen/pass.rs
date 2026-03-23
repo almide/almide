@@ -32,7 +32,6 @@ pub struct ScopeContext {
 pub enum Target {
     Rust,
     TypeScript,
-    JavaScript,
     Go,
     Python,
     Wasm,
@@ -140,7 +139,7 @@ pub struct OptionErasurePass;
 impl NanoPass for OptionErasurePass {
     fn name(&self) -> &str { "OptionErasure" }
     fn targets(&self) -> Option<Vec<Target>> {
-        Some(vec![Target::TypeScript, Target::JavaScript, Target::Python])
+        Some(vec![Target::TypeScript, Target::Python])
     }
     fn run(&self, _program: &mut IrProgram, _target: Target) {
         // TS/Python: some(x) → x, none → null/None

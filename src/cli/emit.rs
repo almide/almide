@@ -116,8 +116,7 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
         let t = match target {
             "rust" | "rs" => codegen::pass::Target::Rust,
             "ts" | "typescript" => codegen::pass::Target::TypeScript,
-            "js" | "javascript" => codegen::pass::Target::JavaScript,
-            other => { eprintln!("Unknown target: {}. Use rust, ts, js.", other); std::process::exit(1); }
+            other => { eprintln!("Unknown target: {}. Use rust, ts.", other); std::process::exit(1); }
         };
         let ir = ir_program.as_mut().expect("IR required for codegen");
         match codegen::codegen(ir, t) {

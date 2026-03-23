@@ -125,11 +125,7 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
             output.push('\n');
         }
         Target::TypeScript => {
-            output.push_str(&crate::emit_ts_runtime::full_runtime(false));
-            output.push('\n');
-        }
-        Target::JavaScript => {
-            output.push_str(&crate::emit_ts_runtime::full_runtime(true));
+            output.push_str(&crate::emit_ts_runtime::full_runtime());
             output.push('\n');
         }
         _ => {}
