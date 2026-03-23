@@ -3,35 +3,41 @@ use crate::ir::*;
 use crate::types::Ty;
 use super::utils::ty_to_name;
 
-/// Clone and specialize a function for concrete types.
+/// Specialize a function for concrete types.
+/// Builds the specialized function directly without cloning the entire original,
+/// avoiding redundant allocation of fields we immediately overwrite (generics, name).
 pub(super) fn specialize_function(
     orig: &IrFunction,
     suffix: &str,
     bindings: &HashMap<String, Ty>,
 ) -> IrFunction {
-    let mut func = orig.clone();
-    func.name = format!("{}__{}", orig.name, suffix);
-
-    // Remove structural bounds from generics (specialized function is concrete)
-    func.generics = None;
-
-    // Substitute type variables in parameter types
-    for param in &mut func.params {
-        // OpenRecord パラメータ (直接 or エイリアス) → 具体型に直接置換
-        let param_pos = orig.params.iter().position(|p| p.var == param.var).unwrap_or(0);
-        let open_key = format!("__open_{}", param_pos);
-        if bindings.contains_key(&open_key) {
-            if let Some(concrete) = bindings.get(&open_key) {
-                param.ty = concrete.clone();
-            }
+    // Build specialized params: substitute type variables
+    let params: Vec<IrParam> = orig.params.iter().enumerate().map(|(i, param)| {
+        let open_key = format!("__open_{}", i);
+        let new_ty = if let Some(concrete) = bindings.get(&open_key) {
+            concrete.clone()
         } else {
-            param.ty = substitute_ty(&param.ty, bindings);
-        }
-    }
-    func.ret_ty = substitute_ty(&func.ret_ty, bindings);
-    substitute_expr_types(&mut func.body, bindings);
+            substitute_ty(&param.ty, bindings)
+        };
+        IrParam { ty: new_ty, ..param.clone() }
+    }).collect();
 
-    func
+    // Build specialized body: clone + substitute in one step
+    let mut body = orig.body.clone();
+    substitute_expr_types(&mut body, bindings);
+
+    IrFunction {
+        name: format!("{}__{}", orig.name, suffix),
+        params,
+        ret_ty: substitute_ty(&orig.ret_ty, bindings),
+        body,
+        generics: None, // specialized function is concrete
+        is_effect: orig.is_effect,
+        is_async: orig.is_async,
+        is_test: orig.is_test,
+        extern_attrs: orig.extern_attrs.clone(),
+        visibility: orig.visibility.clone(),
+    }
 }
 
 /// Substitute TypeVars with concrete types.
