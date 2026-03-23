@@ -1,9 +1,15 @@
-// http extern — Rust native HTTP client/server (platform layer, no external crate)
+// http extern — Rust native HTTP client/server (platform layer)
 // Uses std::net::TcpStream for client and TcpListener for server.
+// HTTPS via rustls (pure-Rust TLS).
 
 // HashMap already imported by prelude
 use std::io::{Read, Write, BufRead, BufReader};
 use std::net::{TcpStream, TcpListener};
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
+use rustls::{ClientConfig, ClientConnection, StreamOwned, RootCertStore};
 
 // ── Response type ──
 pub type Response = AlmideHttpResponse;
@@ -139,12 +145,30 @@ pub fn almide_http_get_with_headers(url: &str, headers: &HashMap<String, String>
 }
 
 pub fn almide_http_request(method: &str, url: &str, body: &str, headers: &HashMap<String, String>) -> Result<String, String> {
-    let (host, port, path) = parse_url(url)?;
+    let (is_https, host, port, path) = parse_url(url)?;
 
-    let mut stream = TcpStream::connect(format!("{}:{}", host, port))
+    let stream = TcpStream::connect(format!("{}:{}", host, port))
         .map_err(|e| format!("connection failed: {}", e))?;
     stream.set_read_timeout(Some(std::time::Duration::from_secs(30))).ok();
 
+    if is_https {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let mut tls_stream = make_tls_stream(&host, stream)?;
+            http_exchange(&mut tls_stream, method, &host, &path, body, headers)
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            Err("HTTPS is not supported on WASM target".to_string())
+        }
+    } else {
+        let mut stream = stream;
+        http_exchange(&mut stream, method, &host, &path, body, headers)
+    }
+}
+
+/// Perform HTTP request/response exchange over any Read+Write stream.
+fn http_exchange(stream: &mut (impl Read + Write), method: &str, host: &str, path: &str, body: &str, headers: &HashMap<String, String>) -> Result<String, String> {
     let mut req = format!("{} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n", method, path, host);
     if !body.is_empty() {
         req.push_str(&format!("Content-Length: {}\r\n", body.len()));
@@ -177,6 +201,23 @@ pub fn almide_http_request(method: &str, url: &str, body: &str, headers: &HashMa
     }
 }
 
+// ── TLS ──
+
+#[cfg(not(target_arch = "wasm32"))]
+fn make_tls_stream(host: &str, stream: TcpStream) -> Result<StreamOwned<ClientConnection, TcpStream>, String> {
+    let mut root_store = RootCertStore::empty();
+    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let config = Arc::new(
+        ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_no_client_auth()
+    );
+    let server_name = rustls::pki_types::ServerName::try_from(host.to_string())
+        .map_err(|e| format!("invalid DNS name: {}", e))?;
+    let conn = ClientConnection::new(config, server_name).map_err(|e| format!("TLS error: {}", e))?;
+    Ok(StreamOwned::new(conn, stream))
+}
+
 // ── HTTP Server ──
 
 pub fn almide_http_serve(port: i64, handler: impl Fn(AlmideHttpRequest) -> Result<AlmideHttpResponse, String>) -> Result<(), String> {
@@ -197,17 +238,24 @@ pub fn almide_http_serve(port: i64, handler: impl Fn(AlmideHttpRequest) -> Resul
 
 // ── Helpers ──
 
-fn parse_url(url: &str) -> Result<(String, u16, String), String> {
-    let url = url.strip_prefix("http://").unwrap_or(url);
+fn parse_url(url: &str) -> Result<(bool, String, u16, String), String> {
+    let (is_https, url) = if let Some(rest) = url.strip_prefix("https://") {
+        (true, rest)
+    } else if let Some(rest) = url.strip_prefix("http://") {
+        (false, rest)
+    } else {
+        (false, url)
+    };
+    let default_port: u16 = if is_https { 443 } else { 80 };
     let (host_port, path) = match url.find('/') {
         Some(i) => (&url[..i], &url[i..]),
         None => (url, "/"),
     };
     let (host, port) = match host_port.find(':') {
-        Some(i) => (&host_port[..i], host_port[i+1..].parse::<u16>().unwrap_or(80)),
-        None => (host_port, 80),
+        Some(i) => (&host_port[..i], host_port[i+1..].parse::<u16>().unwrap_or(default_port)),
+        None => (host_port, default_port),
     };
-    Ok((host.to_string(), port, path.to_string()))
+    Ok((is_https, host.to_string(), port, path.to_string()))
 }
 
 fn decode_chunked(body: &str) -> String {
@@ -273,4 +321,3 @@ fn write_response(stream: &mut TcpStream, resp: &AlmideHttpResponse) -> Result<(
     out.push_str(&resp.body);
     stream.write_all(out.as_bytes()).map_err(|e| e.to_string())
 }
-

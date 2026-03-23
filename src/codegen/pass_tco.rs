@@ -22,6 +22,7 @@
 
 use crate::ir::*;
 use crate::types::Ty;
+use crate::types::constructor::TypeConstructorId;
 use super::pass::{NanoPass, Target};
 
 #[derive(Debug)]
@@ -381,7 +382,16 @@ fn scan_non_tail_stmt(stmt: &IrStmt, fn_name: &str) -> (bool, bool) {
 /// Rewrite a TCO-eligible function body from recursive form to a loop.
 fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) {
     let fn_name = func.name.clone();
-    let ret_ty = func.ret_ty.clone();
+    // For effect fns returning Result[T, E], the TCO result variable should hold T
+    // because the Rust codegen auto-unwraps Result via `?` operator.
+    let ret_ty = if func.is_effect {
+        match &func.ret_ty {
+            Ty::Applied(TypeConstructorId::Result, args) if !args.is_empty() => args[0].clone(),
+            _ => func.ret_ty.clone(),
+        }
+    } else {
+        func.ret_ty.clone()
+    };
 
     // Mark all param VarIds as mutable (they'll be reassigned in the loop)
     for param in &func.params {
@@ -414,7 +424,8 @@ fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) {
 
     // Rewrite the body expression
     let old_body = func.body.clone();
-    let rewritten = rewrite_tail_expr(old_body, &fn_name, &params, &temps, result_var);
+    let is_effect = func.is_effect;
+    let rewritten = rewrite_tail_expr(old_body, &fn_name, &params, &temps, result_var, is_effect);
 
     // Build the default value for the result variable
     let default_val = default_for_type(&ret_ty);
@@ -460,12 +471,23 @@ fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) {
         span: None,
     };
 
+    // For effect fns, wrap the result in Ok() since the function returns Result
+    let tail_expr = if func.is_effect {
+        IrExpr {
+            kind: IrExprKind::ResultOk { expr: Box::new(tail_var) },
+            ty: func.ret_ty.clone(),
+            span: None,
+        }
+    } else {
+        tail_var
+    };
+
     func.body = IrExpr {
         kind: IrExprKind::Block {
             stmts: vec![bind_result, while_stmt],
-            expr: Some(Box::new(tail_var)),
+            expr: Some(Box::new(tail_expr)),
         },
-        ty: ret_ty,
+        ty: func.ret_ty.clone(),
         span: func.body.span,
     };
 }
@@ -481,6 +503,7 @@ fn rewrite_tail_expr(
     params: &[(VarId, Ty)],
     temps: &[(VarId, Ty)],
     result_var: VarId,
+    is_effect: bool,
 ) -> IrExpr {
     match expr.kind {
         // Self-recursive call in tail position -> reassign params and continue
@@ -488,10 +511,15 @@ fn rewrite_tail_expr(
             emit_tail_call_replacement(args, params, temps, result_var)
         }
 
+        // Effect fn: unwrap ok(expr) in tail position — assign the inner value
+        IrExprKind::ResultOk { expr: inner } if is_effect => {
+            emit_base_case(*inner, result_var)
+        }
+
         // If: recurse into both branches
         IrExprKind::If { cond, then, else_ } => {
-            let new_then = rewrite_tail_expr(*then, fn_name, params, temps, result_var);
-            let new_else = rewrite_tail_expr(*else_, fn_name, params, temps, result_var);
+            let new_then = rewrite_tail_expr(*then, fn_name, params, temps, result_var, is_effect);
+            let new_else = rewrite_tail_expr(*else_, fn_name, params, temps, result_var, is_effect);
             IrExpr {
                 kind: IrExprKind::If {
                     cond,
@@ -509,7 +537,7 @@ fn rewrite_tail_expr(
                 IrMatchArm {
                     pattern: arm.pattern,
                     guard: arm.guard,
-                    body: rewrite_tail_expr(arm.body, fn_name, params, temps, result_var),
+                    body: rewrite_tail_expr(arm.body, fn_name, params, temps, result_var, is_effect),
                 }
             }).collect();
             IrExpr {
@@ -521,7 +549,7 @@ fn rewrite_tail_expr(
 
         // Block: recurse into trailing expr
         IrExprKind::Block { stmts, expr: Some(tail) } => {
-            let new_tail = rewrite_tail_expr(*tail, fn_name, params, temps, result_var);
+            let new_tail = rewrite_tail_expr(*tail, fn_name, params, temps, result_var, is_effect);
             IrExpr {
                 kind: IrExprKind::Block {
                     stmts,
@@ -534,7 +562,7 @@ fn rewrite_tail_expr(
 
         // DoBlock: same as Block
         IrExprKind::DoBlock { stmts, expr: Some(tail) } => {
-            let new_tail = rewrite_tail_expr(*tail, fn_name, params, temps, result_var);
+            let new_tail = rewrite_tail_expr(*tail, fn_name, params, temps, result_var, is_effect);
             IrExpr {
                 kind: IrExprKind::DoBlock {
                     stmts,
@@ -653,10 +681,19 @@ fn default_for_type(ty: &Ty) -> IrExpr {
         Ty::Bool => IrExprKind::LitBool { value: false },
         Ty::String => IrExprKind::LitStr { value: String::new() },
         Ty::Unit => IrExprKind::Unit,
-        // For complex types, use Unit as placeholder -- the result var is always
+        Ty::Applied(TypeConstructorId::Result, _) => {
+            IrExprKind::ResultOk { expr: Box::new(IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None }) }
+        }
+        Ty::Applied(TypeConstructorId::Option, _) => {
+            IrExprKind::OptionNone
+        }
+        Ty::Applied(TypeConstructorId::List, _) => {
+            IrExprKind::List { elements: vec![] }
+        }
+        // For other complex types, use Unit as placeholder -- the result var is always
         // assigned before it is read (every control path ends in assign+break or
         // assign params+continue).
-        _ => IrExprKind::LitInt { value: 0 },
+        _ => IrExprKind::Unit,
     };
     IrExpr {
         kind,

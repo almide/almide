@@ -651,6 +651,7 @@ mod tests {
             }],
             type_registry: Default::default(),
             effect_map: Default::default(),
+            codegen_annotations: Default::default(),
         };
         let errors = verify_program(&prog);
         assert_eq!(errors.len(), 1);
@@ -700,6 +701,7 @@ mod tests {
             modules: vec![],
             type_registry: Default::default(),
             effect_map: Default::default(),
+            codegen_annotations: Default::default(),
         };
         let errors = verify_program(&prog);
         assert_eq!(errors.len(), 1);
@@ -731,6 +733,7 @@ mod tests {
             modules: vec![],
             type_registry: Default::default(),
             effect_map: Default::default(),
+            codegen_annotations: Default::default(),
         };
         let errors = verify_program(&prog);
         assert_eq!(errors.len(), 1);
@@ -897,6 +900,7 @@ mod tests {
             }],
             type_registry: Default::default(),
             effect_map: Default::default(),
+            codegen_annotations: Default::default(),
         };
         let errors = verify_program(&prog);
         assert_eq!(errors.len(), 1);
@@ -931,6 +935,7 @@ mod tests {
             }],
             type_registry: Default::default(),
             effect_map: Default::default(),
+            codegen_annotations: Default::default(),
         };
         assert!(verify_program(&prog).is_empty());
     }
