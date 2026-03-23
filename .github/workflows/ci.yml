@@ -20,8 +20,7 @@ env:
 
 jobs:
   # ═══════════════════════════════════════════════
-  # Fast CI — runs on every push to develop
-  # Build (Linux) + Rust target test + checks
+  # Build — shared by all jobs
   # ═══════════════════════════════════════════════
 
   build:
@@ -51,8 +50,12 @@ jobs:
           path: target/release/almide
           retention-days: 1
 
+  # ═══════════════════════════════════════════════
+  # Target tests — all run on every develop/main PR
+  # ═══════════════════════════════════════════════
+
   test-rust:
-    name: Test (Linux)
+    name: Test Rust
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -73,10 +76,136 @@ jobs:
       - name: Cargo tests
         run: cargo test
 
-      - name: Almide spec tests
+      - name: Almide spec tests (Rust target)
         run: |
           ALMIDE=/tmp/almide-bin/almide
           $ALMIDE test spec/
+
+  test-ts:
+    name: Test TS/Deno
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: almide-linux
+          path: /tmp/almide-bin
+
+      - name: Setup
+        run: chmod +x /tmp/almide-bin/almide
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Almide spec tests (TS target)
+        run: |
+          ALMIDE=/tmp/almide-bin/almide
+          passed=0; failed=0; skipped=0; errors=""
+
+          for f in $(find spec/ -name '*.almd' -type f | sort); do
+            # Emit TS
+            ts_code=$($ALMIDE "$f" --target ts 2>/dev/null) || { skipped=$((skipped + 1)); continue; }
+            [ -z "$ts_code" ] && { skipped=$((skipped + 1)); continue; }
+
+            echo "$ts_code" > /tmp/test_ts.ts
+            if deno run --allow-all --no-check /tmp/test_ts.ts > /dev/null 2>&1; then
+              passed=$((passed + 1))
+            else
+              failed=$((failed + 1))
+              errors="$errors\n  FAIL: $f"
+            fi
+          done
+
+          echo "=== TS Target Results ==="
+          echo "Pass: $passed | Fail: $failed | Skip: $skipped"
+          if [ -n "$errors" ]; then echo -e "\nFailures:$errors"; fi
+
+          # Allow up to 3 known failures (cross-target differences)
+          if [ $failed -gt 3 ]; then
+            echo "::error::TS target regressions: $failed failures (max 3)"
+            exit 1
+          fi
+
+  test-js:
+    name: Test JS/Node
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: almide-linux
+          path: /tmp/almide-bin
+
+      - name: Setup
+        run: chmod +x /tmp/almide-bin/almide
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Almide spec tests (JS target)
+        run: |
+          ALMIDE=/tmp/almide-bin/almide
+          passed=0; failed=0; skipped=0; errors=""
+
+          for f in $(find spec/ -name '*.almd' -type f | sort); do
+            js_code=$($ALMIDE "$f" --target js 2>/dev/null) || { skipped=$((skipped + 1)); continue; }
+            [ -z "$js_code" ] && { skipped=$((skipped + 1)); continue; }
+
+            echo "$js_code" > /tmp/test_js.js
+            if node /tmp/test_js.js > /dev/null 2>&1; then
+              passed=$((passed + 1))
+            else
+              failed=$((failed + 1))
+              errors="$errors\n  FAIL: $f"
+            fi
+          done
+
+          echo "=== JS Target Results ==="
+          echo "Pass: $passed | Fail: $failed | Skip: $skipped"
+          if [ -n "$errors" ]; then echo -e "\nFailures:$errors"; fi
+
+          if [ $failed -gt 3 ]; then
+            echo "::error::JS target regressions: $failed failures (max 3)"
+            exit 1
+          fi
+
+  test-wasm:
+    name: Test WASM
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: almide-linux
+          path: /tmp/almide-bin
+
+      - name: Setup almide
+        run: chmod +x /tmp/almide-bin/almide
+
+      - name: Install wasmtime
+        run: |
+          VERSION=$(curl -s https://api.github.com/repos/bytecodealliance/wasmtime/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+          curl -LO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          tar -xf wasmtime-*.tar.xz
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
+
+      - name: Almide spec tests (WASM target)
+        run: |
+          ALMIDE=/tmp/almide-bin/almide
+          $ALMIDE test spec/ --target wasm
+
+  # ═══════════════════════════════════════════════
+  # Checks
+  # ═══════════════════════════════════════════════
 
   checks:
     name: Emit & Format
@@ -104,8 +233,7 @@ jobs:
           $ALMIDE "$f" --emit-ast    > /dev/null && echo "AST emit OK"
 
   # ═══════════════════════════════════════════════
-  # Full CI — runs on PRs to main only
-  # Cross-platform builds, TS/JS targets, WASM
+  # Full CI — cross-platform (PRs to main only)
   # ═══════════════════════════════════════════════
 
   build-cross:
@@ -175,144 +303,11 @@ jobs:
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      - name: Run all exercises (Rust target)
-        continue-on-error: true  # exercises need v0.6.0 rewrite
+      - name: Almide spec tests (Rust target)
         shell: bash
         run: |
           ALMIDE=${{ matrix.binary }}
-          failed=0; passed=0
-          for f in exercises/*/*.almd; do
-            case "$f" in *_error_test.almd) continue;; esac
-            if $ALMIDE run "$f" 2>&1; then
-              passed=$((passed + 1))
-            else
-              echo "FAIL: $f"
-              failed=$((failed + 1))
-            fi
-          done
-          echo "Rust target: $passed passed, $failed failed"
-          [ $failed -eq 0 ]
-
-  test-ts:
-    name: Test TS/Deno
-    if: github.event_name == 'pull_request' && github.base_ref == 'main'
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: almide-linux
-          path: /tmp/almide-bin
-
-      - name: Setup
-        run: chmod +x /tmp/almide-bin/almide
-
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-
-      - name: Run all exercises (TS target)
-        continue-on-error: true  # exercises need v0.6.0 rewrite
-        run: |
-          ALMIDE=/tmp/almide-bin/almide
-          failed=0; passed=0
-          for f in exercises/*/*.almd; do
-            case "$f" in *_error_test.almd) continue;; esac
-            $ALMIDE "$f" --target ts > /tmp/test_out.ts 2>/dev/null || continue
-            if deno run --allow-all --no-check /tmp/test_out.ts 2>&1; then
-              passed=$((passed + 1))
-            else
-              echo "FAIL: $f"
-              failed=$((failed + 1))
-            fi
-          done
-          echo "TS target: $passed passed, $failed failed"
-          [ $failed -eq 0 ]
-
-  test-js:
-    name: Test JS/Node
-    if: github.event_name == 'pull_request' && github.base_ref == 'main'
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: almide-linux
-          path: /tmp/almide-bin
-
-      - name: Setup
-        run: chmod +x /tmp/almide-bin/almide
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Run exercises (JS target)
-        continue-on-error: true  # exercises need v0.6.0 rewrite
-        run: |
-          ALMIDE=/tmp/almide-bin/almide
-          failed=0; passed=0
-          for f in exercises/*/*.almd; do
-            case "$f" in *_error_test.almd) continue;; esac
-            $ALMIDE "$f" --target js > /tmp/test_out.js 2>/dev/null || continue
-            if node /tmp/test_out.js 2>&1; then
-              passed=$((passed + 1))
-            else
-              echo "FAIL: $f"
-              failed=$((failed + 1))
-            fi
-          done
-          echo "JS target: $passed passed, $failed failed"
-          [ $failed -eq 0 ]
-
-  wasm:
-    name: WASM
-    if: github.event_name == 'pull_request' && github.base_ref == 'main'
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: almide-linux
-          path: /tmp/almide-bin
-
-      - name: Setup almide
-        run: chmod +x /tmp/almide-bin/almide
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-          targets: wasm32-wasip1
-
-      - name: Install wasmtime
-        run: |
-          VERSION=$(curl -s https://api.github.com/repos/bytecodealliance/wasmtime/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
-          curl -LO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/wasmtime-${VERSION}-x86_64-linux.tar.xz"
-          tar -xf wasmtime-*.tar.xz
-          sudo mv wasmtime-*/wasmtime /usr/local/bin/
-          wasmtime --version
-
-      - name: WASM smoke test
-        continue-on-error: true  # exercises need v0.6.0 rewrite
-        run: |
-          ALMIDE=/tmp/almide-bin/almide
-          $ALMIDE build exercises/wasm-smoke/wasm-smoke.almd --target wasm -o /tmp/wasm-smoke.wasm
-          wasmtime /tmp/wasm-smoke.wasm
-
-      - name: WASM emit check
-        run: |
-          ALMIDE=/tmp/almide-bin/almide
-          for dir in pangram raindrops roman-numerals; do
-            f=$(ls exercises/$dir/*.almd 2>/dev/null | head -1)
-            [ -z "$f" ] && continue
-            $ALMIDE "$f" --target rust > /dev/null 2>&1 && echo "EMIT OK: $dir"
-          done
+          $ALMIDE test spec/
 
   # ═══════════════════════════════════════════════
   # Post-merge — trigger playground deploy
