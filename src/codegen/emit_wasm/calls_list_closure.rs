@@ -41,12 +41,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                       local_get(closure); i32_load(0); // table_idx
                 });
-                {
-                    let mut ct = vec![ValType::I32];
-                    if let Some(vt) = values::ty_to_valtype(&elem_ty) { ct.push(vt); }
-                    let ti = self.emitter.register_type(ct, vec![ValType::I32]);
-                    wasm!(self.func, { call_indirect(ti, 0); });
-                }
+                self.emit_closure_call(&elem_ty, &Ty::Bool);
                 wasm!(self.func, {
                       if_empty;
                         // Found: alloc some(xs[i])
@@ -94,12 +89,7 @@ impl FuncCompiler<'_> {
                 });
                 self.emit_load_at(&elem_ty, 0);
                 wasm!(self.func, { local_get(closure); i32_load(0); });
-                {
-                    let mut ct = vec![ValType::I32];
-                    if let Some(vt) = values::ty_to_valtype(&elem_ty) { ct.push(vt); }
-                    let ti = self.emitter.register_type(ct, vec![ValType::I32]);
-                    wasm!(self.func, { call_indirect(ti, 0); });
-                }
+                self.emit_closure_call(&elem_ty, &Ty::Bool);
                 wasm!(self.func, {
                       if_empty;
                         i32_const(8); call(self.emitter.rt.alloc); local_set(tmp);
@@ -140,12 +130,7 @@ impl FuncCompiler<'_> {
                 });
                 self.emit_load_at(&elem_ty, 0);
                 wasm!(self.func, { local_get(closure); i32_load(0); });
-                {
-                    let mut ct = vec![ValType::I32];
-                    if let Some(vt) = values::ty_to_valtype(&elem_ty) { ct.push(vt); }
-                    let ti = self.emitter.register_type(ct, vec![ValType::I32]);
-                    wasm!(self.func, { call_indirect(ti, 0); });
-                }
+                self.emit_closure_call(&elem_ty, &Ty::Bool);
                 wasm!(self.func, {
                       if_empty; i32_const(1); local_set(result); br(2); end;
                       local_get(i); i32_const(1); i32_add; local_set(i);
@@ -180,12 +165,7 @@ impl FuncCompiler<'_> {
                 });
                 self.emit_load_at(&elem_ty, 0);
                 wasm!(self.func, { local_get(closure); i32_load(0); });
-                {
-                    let mut ct = vec![ValType::I32];
-                    if let Some(vt) = values::ty_to_valtype(&elem_ty) { ct.push(vt); }
-                    let ti = self.emitter.register_type(ct, vec![ValType::I32]);
-                    wasm!(self.func, { call_indirect(ti, 0); });
-                }
+                self.emit_closure_call(&elem_ty, &Ty::Bool);
                 wasm!(self.func, {
                       i32_eqz;
                       if_empty; i32_const(0); local_set(result); br(2); end;
@@ -219,12 +199,7 @@ impl FuncCompiler<'_> {
                 });
                 self.emit_load_at(&elem_ty, 0);
                 wasm!(self.func, { local_get(closure); i32_load(0); });
-                {
-                    let mut ct = vec![ValType::I32];
-                    if let Some(vt) = values::ty_to_valtype(&elem_ty) { ct.push(vt); }
-                    let ti = self.emitter.register_type(ct, vec![]);
-                    wasm!(self.func, { call_indirect(ti, 0); });
-                }
+                self.emit_closure_call(&elem_ty, &Ty::Unit);
                 wasm!(self.func, {
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
@@ -402,9 +377,7 @@ impl FuncCompiler<'_> {
                 {
                     let mut ct = vec![ValType::I32]; // env
                     if let Some(vt) = values::ty_to_valtype(&elem_ty) { ct.push(vt); ct.push(vt); }
-                    let rt = values::ret_type(&elem_ty);
-                    let ti = self.emitter.register_type(ct, rt);
-                    wasm!(self.func, { call_indirect(ti, 0); });
+                    self.emit_call_indirect(ct, values::ret_type(&elem_ty));
                 }
                 wasm!(self.func, {
                         local_set(acc); // update acc
@@ -465,12 +438,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                       local_get(closure); i32_load(0); // table_idx
                 });
-                {
-                    let mut ct = vec![ValType::I32];
-                    if let Some(vt) = values::ty_to_valtype(&elem_ty) { ct.push(vt); }
-                    let ti = self.emitter.register_type(ct, vec![ValType::I32]); // returns List ptr
-                    wasm!(self.func, { call_indirect(ti, 0); });
-                }
+                self.emit_closure_call(&elem_ty, &Ty::Unknown); // returns List ptr (i32)
                 wasm!(self.func, {
                       i32_store(0); // store result list ptr
                       local_get(i); i32_const(1); i32_add; local_set(i);
@@ -571,12 +539,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                       local_get(closure); i32_load(0);
                 });
-                {
-                    let mut ct = vec![ValType::I32];
-                    if let Some(vt) = values::ty_to_valtype(&elem_ty) { ct.push(vt); }
-                    let ti = self.emitter.register_type(ct, vec![ValType::I32]);
-                    wasm!(self.func, { call_indirect(ti, 0); });
-                }
+                self.emit_closure_call(&elem_ty, &Ty::Unknown); // returns Option ptr (i32)
                 wasm!(self.func, {
                       local_set(opt); // option result
                       local_get(opt); i32_const(0); i32_ne;
@@ -948,12 +911,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                       local_get(closure); i32_load(0); // table_idx
                 });
-                {
-                    let mut ct = vec![ValType::I32];
-                    if let Some(vt) = values::ty_to_valtype(&elem_ty) { ct.push(vt); }
-                    let ti = self.emitter.register_type(ct, vec![ValType::I64]);
-                    wasm!(self.func, { call_indirect(ti, 0); });
-                }
+                self.emit_closure_call(&elem_ty, &Ty::Int); // key fn returns Int (i64)
                 wasm!(self.func, {
                       local_set(tmp_key);
                       local_get(keys);

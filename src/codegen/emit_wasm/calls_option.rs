@@ -450,27 +450,21 @@ impl FuncCompiler<'_> {
                 let ok_ty = self.result_ok_ty(&args[0].ty);
                 let result = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
-                let s = self.scratch.alloc_i32();
                 // Store result
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(result); });
                 // Store closure
                 self.emit_expr(&args[1]);
+                wasm!(self.func, { local_set(closure); });
+                self.emit_result_branch_err(result);
                 wasm!(self.func, {
-                    local_set(closure);
-                    // Check tag
-                    local_get(result); // result_ptr
-                    i32_load(0); i32_const(0); i32_ne; // tag != 0 (err?)
                     if_i32;
                       local_get(result); // return err as-is
                     else_;
                 });
                 let out_ty = self.fn_ret_ty(&args[1].ty);
-                let out_size = values::byte_size(&out_ty);
-                let result_size = 4 + out_size;
+                let s = self.emit_result_alloc_ok(&out_ty);
                 wasm!(self.func, {
-                    i32_const(result_size as i32); call(self.emitter.rt.alloc); local_set(s);
-                    local_get(s); i32_const(0); i32_store(0); // tag=0
                     local_get(s);
                     // env
                     local_get(closure); i32_load(4);
@@ -492,25 +486,21 @@ impl FuncCompiler<'_> {
                 let err_ty = self.result_err_ty(&args[0].ty);
                 let result = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
-                let s = self.scratch.alloc_i32();
                 // Store result
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(result); });
                 // Store closure
                 self.emit_expr(&args[1]);
+                wasm!(self.func, { local_set(closure); });
+                self.emit_result_branch_ok(result);
                 wasm!(self.func, {
-                    local_set(closure);
-                    local_get(result); // result_ptr
-                    i32_load(0); i32_eqz; // tag==0 (ok?)
                     if_i32;
                       local_get(result); // return ok as-is
                     else_;
                 });
                 let out_ty = self.fn_ret_ty(&args[1].ty);
-                let out_size = values::byte_size(&out_ty);
+                let s = self.emit_result_alloc_err(&out_ty);
                 wasm!(self.func, {
-                    i32_const((4 + out_size) as i32); call(self.emitter.rt.alloc); local_set(s);
-                    local_get(s); i32_const(1); i32_store(0); // tag=1 (err)
                     local_get(s);
                     local_get(closure); i32_load(4); // env
                 });
@@ -534,10 +524,9 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { local_set(result); });
                 // Store closure
                 self.emit_expr(&args[1]);
+                wasm!(self.func, { local_set(closure); });
+                self.emit_result_branch_err(result);
                 wasm!(self.func, {
-                    local_set(closure);
-                    local_get(result); // result_ptr
-                    i32_load(0); i32_const(0); i32_ne; // tag != 0 (err?)
                     if_i32;
                       local_get(result); // return err as-is
                     else_;
@@ -631,7 +620,6 @@ impl FuncCompiler<'_> {
             }
             "collect" => {
                 // collect(rs: List[Result[T, E]]) -> Result[List[T], List[E]]
-                // Each list element is an i32 pointer to a Result: [tag:i32][value]
                 let inner_result_ty = self.list_elem_ty(&args[0].ty);
                 let ok_ty = self.result_ok_ty(&inner_result_ty);
                 let err_ty = self.result_err_ty(&inner_result_ty);
@@ -645,7 +633,7 @@ impl FuncCompiler<'_> {
                 let err_list = self.scratch.alloc_i32();
                 let ok_cnt = self.scratch.alloc_i32();
                 let err_cnt = self.scratch.alloc_i32();
-                let elem = self.scratch.alloc_i32(); // pointer to Result
+                let elem = self.scratch.alloc_i32();
                 let out = self.scratch.alloc_i32();
 
                 self.emit_expr(&args[0]);
@@ -661,29 +649,15 @@ impl FuncCompiler<'_> {
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
-                      // elem = *(rs + 4 + i*4) — load the Result pointer from list
                       local_get(rs); i32_const(4); i32_add;
                       local_get(i); i32_const(4); i32_mul; i32_add;
                       i32_load(0); local_set(elem);
-                      // Check tag
-                      local_get(elem); i32_load(0); i32_eqz;
-                      if_empty; // tag==0 → ok
-                        local_get(ok_list); i32_const(4); i32_add;
-                        local_get(ok_cnt); i32_const(ok_size); i32_mul; i32_add;
-                        local_get(elem); i32_const(4); i32_add;
                 });
-                self.emit_elem_copy(&ok_ty);
+                self.emit_result_sort_into_lists(
+                    &ok_ty, &err_ty, ok_size, err_size,
+                    ok_list, err_list, ok_cnt, err_cnt, elem,
+                );
                 wasm!(self.func, {
-                        local_get(ok_cnt); i32_const(1); i32_add; local_set(ok_cnt);
-                      else_;
-                        local_get(err_list); i32_const(4); i32_add;
-                        local_get(err_cnt); i32_const(err_size); i32_mul; i32_add;
-                        local_get(elem); i32_const(4); i32_add;
-                });
-                self.emit_elem_copy(&err_ty);
-                wasm!(self.func, {
-                        local_get(err_cnt); i32_const(1); i32_add; local_set(err_cnt);
-                      end;
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
@@ -713,7 +687,6 @@ impl FuncCompiler<'_> {
             }
             "partition" => {
                 // partition(rs: List[Result[T, E]]) -> (List[T], List[E])
-                // Each list element is an i32 pointer to a Result
                 let inner_result_ty = self.list_elem_ty(&args[0].ty);
                 let ok_ty = self.result_ok_ty(&inner_result_ty);
                 let err_ty = self.result_err_ty(&inner_result_ty);
@@ -743,28 +716,15 @@ impl FuncCompiler<'_> {
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
-                      // Load Result pointer from list
                       local_get(rs); i32_const(4); i32_add;
                       local_get(i); i32_const(4); i32_mul; i32_add;
                       i32_load(0); local_set(elem);
-                      local_get(elem); i32_load(0); i32_eqz;
-                      if_empty;
-                        local_get(ok_list); i32_const(4); i32_add;
-                        local_get(ok_cnt); i32_const(ok_size); i32_mul; i32_add;
-                        local_get(elem); i32_const(4); i32_add;
                 });
-                self.emit_elem_copy(&ok_ty);
+                self.emit_result_sort_into_lists(
+                    &ok_ty, &err_ty, ok_size, err_size,
+                    ok_list, err_list, ok_cnt, err_cnt, elem,
+                );
                 wasm!(self.func, {
-                        local_get(ok_cnt); i32_const(1); i32_add; local_set(ok_cnt);
-                      else_;
-                        local_get(err_list); i32_const(4); i32_add;
-                        local_get(err_cnt); i32_const(err_size); i32_mul; i32_add;
-                        local_get(elem); i32_const(4); i32_add;
-                });
-                self.emit_elem_copy(&err_ty);
-                wasm!(self.func, {
-                        local_get(err_cnt); i32_const(1); i32_add; local_set(err_cnt);
-                      end;
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
@@ -841,24 +801,12 @@ impl FuncCompiler<'_> {
                 }
                 wasm!(self.func, {
                       local_set(res_ptr);
-                      local_get(res_ptr); i32_load(0); i32_eqz;
-                      if_empty; // ok
-                        local_get(ok_list); i32_const(4); i32_add;
-                        local_get(ok_cnt); i32_const(ok_size); i32_mul; i32_add;
-                        local_get(res_ptr); i32_const(4); i32_add;
                 });
-                self.emit_elem_copy(&ok_ty);
+                self.emit_result_sort_into_lists(
+                    &ok_ty, &err_ty, ok_size, err_size,
+                    ok_list, err_list, ok_cnt, err_cnt, res_ptr,
+                );
                 wasm!(self.func, {
-                        local_get(ok_cnt); i32_const(1); i32_add; local_set(ok_cnt);
-                      else_; // err
-                        local_get(err_list); i32_const(4); i32_add;
-                        local_get(err_cnt); i32_const(err_size); i32_mul; i32_add;
-                        local_get(res_ptr); i32_const(4); i32_add;
-                });
-                self.emit_elem_copy(&err_ty);
-                wasm!(self.func, {
-                        local_get(err_cnt); i32_const(1); i32_add; local_set(err_cnt);
-                      end;
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
@@ -892,7 +840,93 @@ impl FuncCompiler<'_> {
         true
     }
 
-    // ── Helpers ──
+    // ── Result codegen helpers ──
+
+    /// Allocate a new Result with tag=0 (ok). Stores tag, leaves value slot empty.
+    /// Returns the scratch local holding the result pointer.
+    /// Caller must store the ok value at offset 4 and free the local when done.
+    fn emit_result_alloc_ok(&mut self, ok_ty: &Ty) -> u32 {
+        let size = 4 + values::byte_size(ok_ty);
+        let s = self.scratch.alloc_i32();
+        wasm!(self.func, {
+            i32_const(size as i32); call(self.emitter.rt.alloc); local_set(s);
+            local_get(s); i32_const(0); i32_store(0); // tag=0
+        });
+        s
+    }
+
+    /// Allocate a new Result with tag=1 (err). Stores tag, leaves value slot empty.
+    /// Returns the scratch local holding the result pointer.
+    /// Caller must store the err value at offset 4 and free the local when done.
+    fn emit_result_alloc_err(&mut self, err_ty: &Ty) -> u32 {
+        let size = 4 + values::byte_size(err_ty);
+        let s = self.scratch.alloc_i32();
+        wasm!(self.func, {
+            i32_const(size as i32); call(self.emitter.rt.alloc); local_set(s);
+            local_get(s); i32_const(1); i32_store(0); // tag=1
+        });
+        s
+    }
+
+    /// Load the tag from a Result pointer in `result_local` and push `tag == 0` (i.e. is_ok).
+    /// After this, the caller can emit `if_i32` / `if_empty` to branch on ok vs err.
+    /// The "then" branch is the ok path; the "else" branch is the err path.
+    fn emit_result_branch_ok(&mut self, result_local: u32) {
+        wasm!(self.func, {
+            local_get(result_local); i32_load(0); i32_eqz;
+        });
+    }
+
+    /// Like `emit_result_branch_ok` but pushes `tag != 0` (i.e. is_err).
+    /// The "then" branch is the err path; the "else" branch is the ok path.
+    fn emit_result_branch_err(&mut self, result_local: u32) {
+        wasm!(self.func, {
+            local_get(result_local); i32_load(0); i32_const(0); i32_ne;
+        });
+    }
+
+    /// Emit the inner loop body shared by `collect`, `partition`, and `collect_map`.
+    ///
+    /// Expects `elem` local to hold a Result ptr. Sorts the value at offset 4 into
+    /// either ok_list or err_list, incrementing the corresponding counter.
+    ///
+    /// Locals: ok_list, err_list, ok_cnt, err_cnt, elem.
+    /// ok_size/err_size are the byte sizes of the ok/err value types.
+    fn emit_result_sort_into_lists(
+        &mut self,
+        ok_ty: &Ty,
+        err_ty: &Ty,
+        ok_size: i32,
+        err_size: i32,
+        ok_list: u32,
+        err_list: u32,
+        ok_cnt: u32,
+        err_cnt: u32,
+        elem: u32,
+    ) {
+        self.emit_result_branch_ok(elem);
+        wasm!(self.func, {
+            if_empty; // tag==0 → ok
+              local_get(ok_list); i32_const(4); i32_add;
+              local_get(ok_cnt); i32_const(ok_size); i32_mul; i32_add;
+              local_get(elem); i32_const(4); i32_add;
+        });
+        self.emit_elem_copy(ok_ty);
+        wasm!(self.func, {
+              local_get(ok_cnt); i32_const(1); i32_add; local_set(ok_cnt);
+            else_;
+              local_get(err_list); i32_const(4); i32_add;
+              local_get(err_cnt); i32_const(err_size); i32_mul; i32_add;
+              local_get(elem); i32_const(4); i32_add;
+        });
+        self.emit_elem_copy(err_ty);
+        wasm!(self.func, {
+              local_get(err_cnt); i32_const(1); i32_add; local_set(err_cnt);
+            end;
+        });
+    }
+
+    // ── Type extraction helpers ──
 
     fn option_inner_ty(&self, ty: &Ty) -> Ty {
         if let Ty::Applied(_, args) = ty {
@@ -925,18 +959,4 @@ impl FuncCompiler<'_> {
         self.option_inner_ty(&ret)
     }
 
-    fn emit_closure_call(&mut self, param_ty: &Ty, ret_ty: &Ty) {
-        let mut ct = vec![ValType::I32]; // env
-        if let Some(vt) = values::ty_to_valtype(param_ty) {
-            ct.push(vt);
-        }
-        let rt = if ret_ty == &Ty::Unknown || ret_ty == &Ty::Bool {
-            // Unknown: return i32 (ptr). Bool: i32.
-            vec![ValType::I32]
-        } else {
-            values::ret_type(ret_ty)
-        };
-        let ti = self.emitter.register_type(ct, rt);
-        wasm!(self.func, { call_indirect(ti, 0); });
-    }
 }

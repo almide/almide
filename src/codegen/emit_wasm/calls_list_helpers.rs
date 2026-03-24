@@ -34,6 +34,37 @@ impl FuncCompiler<'_> {
         }
     }
 
+    /// Register a `call_indirect` type and emit the instruction.
+    ///
+    /// `param_types` includes env (I32) as the first element.
+    /// `ret_types` is the WASM return type list (empty for void, single element otherwise).
+    ///
+    /// This is the canonical helper for all closure `call_indirect` patterns.
+    /// Higher-level wrappers like `emit_closure_call` delegate here.
+    pub(super) fn emit_call_indirect(&mut self, param_types: Vec<ValType>, ret_types: Vec<ValType>) {
+        let ti = self.emitter.register_type(param_types, ret_types);
+        wasm!(self.func, { call_indirect(ti, 0); });
+    }
+
+    /// Emit `call_indirect` for a simple closure call: `(env [, param]) → ret`.
+    ///
+    /// Builds param types as `[I32]` + optional `ty_to_valtype(param_ty)`.
+    /// Return type is derived from `ret_ty` via `values::ret_type`, except
+    /// `Ty::Unknown` and `Ty::Bool` are forced to `vec![I32]`.
+    pub(super) fn emit_closure_call(&mut self, param_ty: &Ty, ret_ty: &Ty) {
+        let mut ct = vec![ValType::I32]; // env
+        if let Some(vt) = values::ty_to_valtype(param_ty) {
+            ct.push(vt);
+        }
+        let rt = if ret_ty == &Ty::Unknown || ret_ty == &Ty::Bool {
+            // Unknown: return i32 (ptr). Bool: i32.
+            vec![ValType::I32]
+        } else {
+            values::ret_type(ret_ty)
+        };
+        self.emit_call_indirect(ct, rt);
+    }
+
     /// Emit take/drop as list slice. For take: start=0,end=n. For drop: start=n,end=len.
     #[allow(dead_code)]
     fn emit_list_slice_impl(
