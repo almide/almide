@@ -13,7 +13,7 @@
 
 use crate::ir::*;
 use crate::types::{Ty, TypeConstructorId};
-use super::pass::{NanoPass, Target};
+use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
 pub struct MatchLoweringPass;
@@ -25,7 +25,7 @@ impl NanoPass for MatchLoweringPass {
         Some(vec![Target::TypeScript, Target::Python, Target::Go])
     }
 
-    fn run(&self, program: &mut IrProgram, _target: Target) {
+    fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         // Rewrite all functions
         for func in &mut program.functions {
             func.body = rewrite_expr(std::mem::take(&mut func.body), &mut program.var_table);
@@ -43,6 +43,7 @@ impl NanoPass for MatchLoweringPass {
                 tl.value = rewrite_expr(std::mem::take(&mut tl.value), &mut module.var_table);
             }
         }
+        PassResult { program, changed: true }
     }
 }
 

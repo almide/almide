@@ -15,7 +15,7 @@
 
 use std::collections::{HashMap, HashSet};
 use crate::ir::*;
-use super::pass::{NanoPass, Target};
+use super::pass::{NanoPass, PassResult, Target};
 
 /// Effect categories — mapped from stdlib module usage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -113,7 +113,7 @@ impl NanoPass for EffectInferencePass {
     fn name(&self) -> &str { "EffectInference" }
     fn targets(&self) -> Option<Vec<Target>> { None } // All targets
 
-    fn run(&self, program: &mut IrProgram, _target: Target) {
+    fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut effect_map = EffectMap::default();
 
         // Step 1: Collect direct effects for each function
@@ -142,7 +142,7 @@ impl NanoPass for EffectInferencePass {
         }
 
         // Step 2: Build call graph
-        let call_graph = build_call_graph(program);
+        let call_graph = build_call_graph(&program);
 
         // Step 3: Transitive closure (fixpoint iteration)
         let max_iterations = 20;
@@ -191,6 +191,8 @@ impl NanoPass for EffectInferencePass {
         }
 
         program.effect_map = effect_map;
+
+        PassResult { program, changed: true }
     }
 }
 

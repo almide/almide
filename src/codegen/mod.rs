@@ -85,8 +85,10 @@ fn strip_test_blocks(src: &str) -> String {
 pub fn codegen(program: &mut IrProgram, target: Target) -> CodegenOutput {
     let config = target::configure(target);
 
-    // Layer 2: Run Nanopass pipeline (semantic rewrites — modifies IR)
-    config.pipeline.run(program, target);
+    // Layer 2: Run Nanopass pipeline (semantic rewrites — takes ownership, returns modified)
+    let owned = std::mem::take(program);
+    let transformed = config.pipeline.run(owned, target);
+    *program = transformed;
 
     // Layer 3: Target-specific emit
     match target {

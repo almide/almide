@@ -23,7 +23,7 @@
 use crate::ir::*;
 use crate::types::Ty;
 use crate::types::constructor::TypeConstructorId;
-use super::pass::{NanoPass, Target};
+use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
 pub struct TailCallOptPass;
@@ -35,11 +35,12 @@ impl NanoPass for TailCallOptPass {
         None // All targets benefit from TCO
     }
 
-    fn run(&self, program: &mut IrProgram, _target: Target) {
+    fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         run_tco(&mut program.functions, &mut program.var_table);
         for module in &mut program.modules {
             run_tco(&mut module.functions, &mut module.var_table);
         }
+        PassResult { program, changed: true }
     }
 }
 

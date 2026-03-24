@@ -15,7 +15,7 @@
 
 use crate::ir::*;
 use crate::types::Ty;
-use super::pass::{NanoPass, Target};
+use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
 pub struct BuiltinLoweringPass;
@@ -24,7 +24,7 @@ impl NanoPass for BuiltinLoweringPass {
     fn name(&self) -> &str { "BuiltinLowering" }
     fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Rust]) }
     fn depends_on(&self) -> Vec<&'static str> { vec!["ResultPropagation"] }
-    fn run(&self, program: &mut IrProgram, _target: Target) {
+    fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         for func in &mut program.functions {
             func.body = rewrite_expr(std::mem::take(&mut func.body));
         }
@@ -39,6 +39,7 @@ impl NanoPass for BuiltinLoweringPass {
                 tl.value = rewrite_expr(std::mem::take(&mut tl.value));
             }
         }
+        PassResult { program, changed: true }
     }
 }
 

@@ -8,7 +8,7 @@
 use crate::ir::*;
 use crate::types::{Ty, TypeConstructorId};
 use crate::generated::arg_transforms::{self, ArgTransform};
-use super::pass::{NanoPass, Target};
+use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
 pub struct StdlibLoweringPass;
@@ -17,7 +17,7 @@ impl NanoPass for StdlibLoweringPass {
     fn name(&self) -> &str { "StdlibLowering" }
     fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Rust]) }
     fn depends_on(&self) -> Vec<&'static str> { vec!["EffectInference"] }
-    fn run(&self, program: &mut IrProgram, _target: Target) {
+    fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         for func in &mut program.functions {
             func.body = rewrite_expr(std::mem::take(&mut func.body));
         }
@@ -58,6 +58,7 @@ impl NanoPass for StdlibLoweringPass {
                 tl.value = prefix_intra_module_calls(std::mem::take(&mut tl.value), &mod_name, &sibling_names);
             }
         }
+        PassResult { program, changed: true }
     }
 }
 

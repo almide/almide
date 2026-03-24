@@ -19,7 +19,7 @@ mod ir_transform;
 mod lambda_composition;
 
 use crate::ir::*;
-use super::pass::{NanoPass, Target};
+use super::pass::{NanoPass, PassResult, Target};
 
 pub use chain_detection::{PipeChain, PipeOp};
 
@@ -36,7 +36,7 @@ impl NanoPass for StreamFusionPass {
     fn name(&self) -> &str { "StreamFusion" }
     fn targets(&self) -> Option<Vec<Target>> { None }
 
-    fn run(&self, program: &mut IrProgram, _target: Target) {
+    fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         // Pre-pass: inline single-use collection lets to expose nested call patterns
         for func in &mut program.functions {
             inline_single_use_collection_lets(&mut func.body, &program.var_table);
@@ -82,6 +82,8 @@ impl NanoPass for StreamFusionPass {
                 eprintln!("[StreamFusion] fused: {}", totals.summary());
             }
         }
+
+        PassResult { program, changed: totals.total() > 0 }
     }
 }
 

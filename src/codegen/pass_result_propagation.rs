@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use crate::ir::*;
 use crate::types::{Ty, TypeConstructorId};
-use super::pass::{NanoPass, Target};
+use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
 pub struct ResultPropagationPass;
@@ -20,7 +20,7 @@ impl NanoPass for ResultPropagationPass {
         None // Run for all targets
     }
 
-    fn run(&self, program: &mut IrProgram, _target: Target) {
+    fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut retyped_vars: HashMap<u32, Ty> = HashMap::new();
         for func in &mut program.functions {
             if func.is_effect && !func.is_test {
@@ -52,6 +52,8 @@ impl NanoPass for ResultPropagationPass {
                 }
             }
         }
+
+        PassResult { program, changed: true }
     }
 }
 

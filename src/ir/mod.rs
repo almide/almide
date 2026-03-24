@@ -469,7 +469,7 @@ pub struct IrModule {
     pub var_table: VarTable,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct IrProgram {
     pub functions: Vec<IrFunction>,
     pub top_lets: Vec<IrTopLet>,

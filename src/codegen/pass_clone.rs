@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 use crate::ir::*;
 use crate::types::Ty;
-use super::pass::{NanoPass, Target};
+use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
 pub struct CloneInsertionPass;
@@ -21,7 +21,7 @@ impl NanoPass for CloneInsertionPass {
 
     fn depends_on(&self) -> Vec<&'static str> { vec!["BorrowInsertion"] }
 
-    fn run(&self, program: &mut IrProgram, _target: Target) {
+    fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let clone_ids = collect_clone_ids(&program.var_table);
         for func in &mut program.functions {
             func.body = insert_clones(std::mem::take(&mut func.body), &clone_ids);
@@ -39,6 +39,7 @@ impl NanoPass for CloneInsertionPass {
                 tl.value = insert_clones(std::mem::take(&mut tl.value), &module_clone_ids);
             }
         }
+        PassResult { program, changed: true }
     }
 }
 

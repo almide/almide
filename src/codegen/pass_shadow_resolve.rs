@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use crate::ir::*;
-use super::pass::{NanoPass, Target};
+use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
 pub struct ShadowResolvePass;
@@ -18,7 +18,7 @@ impl NanoPass for ShadowResolvePass {
     fn targets(&self) -> Option<Vec<Target>> {
         Some(vec![Target::TypeScript, Target::Python])
     }
-    fn run(&self, program: &mut IrProgram, _target: Target) {
+    fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         for func in &mut program.functions {
             let mut seen: HashMap<String, VarId> = HashMap::new();
             resolve_stmts_block(&mut func.body, &program.var_table, &mut seen);
@@ -29,6 +29,7 @@ impl NanoPass for ShadowResolvePass {
                 resolve_stmts_block(&mut func.body, &module.var_table, &mut seen);
             }
         }
+        PassResult { program, changed: true }
     }
 }
 

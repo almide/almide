@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 use crate::ir::*;
 use crate::types::Ty;
-use super::pass::{NanoPass, Target};
+use super::pass::{NanoPass, PassResult, Target};
 use super::walker;
 
 #[derive(Debug)]
@@ -19,10 +19,10 @@ impl NanoPass for BoxDerefPass {
         Some(vec![Target::Rust])
     }
 
-    fn run(&self, program: &mut IrProgram, _target: Target) {
+    fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         // Step 1: Collect deref vars and insert Deref IR nodes
-        let (deref_ids, recursive) = collect_deref_vars(program);
-        insert_deref_nodes(program, &deref_ids);
+        let (deref_ids, recursive) = collect_deref_vars(&program);
+        insert_deref_nodes(&mut program, &deref_ids);
 
         // Step 2: Process module-level box deref (separate VarId namespace per module)
         let all_type_decls: Vec<_> = program.type_decls.iter()
@@ -79,6 +79,8 @@ impl NanoPass for BoxDerefPass {
                 _ => vec![],
             })
             .collect();
+
+        PassResult { program, changed: true }
     }
 }
 
