@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use crate::intern::Sym;
 
 // Almide AST types — mirrors src/ast.ts
 
@@ -48,8 +49,8 @@ pub enum ResolvedType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TypeExpr {
-    Simple { name: String },
-    Generic { name: String, args: Vec<TypeExpr> },
+    Simple { name: Sym },
+    Generic { name: Sym, args: Vec<TypeExpr> },
     Record { fields: Vec<FieldType> },
     OpenRecord { fields: Vec<FieldType> },
     Fn { params: Vec<TypeExpr>, ret: Box<TypeExpr> },
@@ -62,26 +63,26 @@ pub enum TypeExpr {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum VariantCase {
-    Unit { name: String },
-    Tuple { name: String, fields: Vec<TypeExpr> },
-    Record { name: String, fields: Vec<FieldType> },
+    Unit { name: Sym },
+    Tuple { name: Sym, fields: Vec<TypeExpr> },
+    Record { name: Sym, fields: Vec<FieldType> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FieldType {
-    pub name: String,
+    pub name: Sym,
     #[serde(rename = "type")]
     pub ty: TypeExpr,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<Expr>,
     /// Serialization alias: `name as "external_key": Type`
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub alias: Option<String>,
+    pub alias: Option<Sym>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProtocolMethod {
-    pub name: String,
+    pub name: Sym,
     pub params: Vec<Param>,
     pub return_type: TypeExpr,
     #[serde(default)]
@@ -90,8 +91,8 @@ pub struct ProtocolMethod {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenericParam {
-    pub name: String,
-    pub bounds: Option<Vec<String>>,
+    pub name: Sym,
+    pub bounds: Option<Vec<Sym>>,
     /// Structural type constraint (e.g., `T: { name: String, .. }`)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub structural_bound: Option<TypeExpr>,
@@ -101,10 +102,10 @@ pub struct GenericParam {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Pattern {
     Wildcard,
-    Ident { name: String },
+    Ident { name: Sym },
     Literal { value: Box<Expr> },
-    Constructor { name: String, args: Vec<Pattern> },
-    RecordPattern { name: String, fields: Vec<FieldPattern>, rest: bool },
+    Constructor { name: Sym, args: Vec<Pattern> },
+    RecordPattern { name: Sym, fields: Vec<FieldPattern>, rest: bool },
     Tuple { elements: Vec<Pattern> },
     Some { inner: Box<Pattern> },
     None,
@@ -114,7 +115,7 @@ pub enum Pattern {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FieldPattern {
-    pub name: String,
+    pub name: Sym,
     pub pattern: Option<Pattern>,
 }
 
@@ -133,15 +134,15 @@ pub enum Expr {
     String { value: String, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     InterpolatedString { parts: Vec<StringPart>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Bool { value: bool, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Ident { name: String, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    TypeName { name: String, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Ident { name: Sym, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    TypeName { name: Sym, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     List { elements: Vec<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     MapLiteral { entries: Vec<(Expr, Expr)>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     EmptyMap { #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Record { name: Option<String>, fields: Vec<FieldInit>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Record { name: Option<Sym>, fields: Vec<FieldInit>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     SpreadRecord { base: Box<Expr>, fields: Vec<FieldInit>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Call { callee: Box<Expr>, args: Vec<Expr>, #[serde(default, skip_serializing_if = "Vec::is_empty")] named_args: Vec<(String, Expr)>, #[serde(default)] type_args: Option<Vec<TypeExpr>>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Member { object: Box<Expr>, field: String, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Call { callee: Box<Expr>, args: Vec<Expr>, #[serde(default, skip_serializing_if = "Vec::is_empty")] named_args: Vec<(Sym, Expr)>, #[serde(default)] type_args: Option<Vec<TypeExpr>>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Member { object: Box<Expr>, field: Sym, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     TupleIndex { object: Box<Expr>, index: usize, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     IndexAccess { object: Box<Expr>, index: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Pipe { left: Box<Expr>, right: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
@@ -150,15 +151,15 @@ pub enum Expr {
     Match { subject: Box<Expr>, arms: Vec<MatchArm>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Block { stmts: Vec<Stmt>, expr: Option<Box<Expr>>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Fan { exprs: Vec<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    ForIn { var: String, var_tuple: Option<Vec<String>>, iterable: Box<Expr>, body: Vec<Stmt>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    ForIn { var: Sym, var_tuple: Option<Vec<Sym>>, iterable: Box<Expr>, body: Vec<Stmt>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     While { cond: Box<Expr>, body: Vec<Stmt>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Lambda { params: Vec<LambdaParam>, body: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Hole { #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Todo { message: String, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Try { expr: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Await { expr: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Binary { op: String, left: Box<Expr>, right: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    Unary { op: String, operand: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Binary { op: Sym, left: Box<Expr>, right: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
+    Unary { op: Sym, operand: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Paren { expr: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Tuple { elements: Vec<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Range { start: Box<Expr>, end: Box<Expr>, inclusive: bool, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
@@ -278,7 +279,7 @@ impl Expr {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FieldInit {
-    pub name: String,
+    pub name: Sym,
     pub value: Expr,
 }
 
@@ -294,9 +295,9 @@ pub struct MatchArm {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LambdaParam {
-    pub name: String,
+    pub name: Sym,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tuple_names: Option<Vec<String>>,
+    pub tuple_names: Option<Vec<Sym>>,
     #[serde(rename = "type")]
     pub ty: Option<TypeExpr>,
 }
@@ -304,12 +305,12 @@ pub struct LambdaParam {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Stmt {
-    Let { name: String, #[serde(rename = "type")] ty: Option<TypeExpr>, value: Expr, #[serde(skip)] span: Option<Span> },
+    Let { name: Sym, #[serde(rename = "type")] ty: Option<TypeExpr>, value: Expr, #[serde(skip)] span: Option<Span> },
     LetDestructure { pattern: Pattern, value: Expr, #[serde(skip)] span: Option<Span> },
-    Var { name: String, #[serde(rename = "type")] ty: Option<TypeExpr>, value: Expr, #[serde(skip)] span: Option<Span> },
-    Assign { name: String, value: Expr, #[serde(skip)] span: Option<Span> },
-    IndexAssign { target: String, index: Box<Expr>, value: Expr, #[serde(skip)] span: Option<Span> },
-    FieldAssign { target: String, field: String, value: Expr, #[serde(skip)] span: Option<Span> },
+    Var { name: Sym, #[serde(rename = "type")] ty: Option<TypeExpr>, value: Expr, #[serde(skip)] span: Option<Span> },
+    Assign { name: Sym, value: Expr, #[serde(skip)] span: Option<Span> },
+    IndexAssign { target: Sym, index: Box<Expr>, value: Expr, #[serde(skip)] span: Option<Span> },
+    FieldAssign { target: Sym, field: Sym, value: Expr, #[serde(skip)] span: Option<Span> },
     Guard { cond: Expr, else_: Expr, #[serde(skip)] span: Option<Span> },
     Expr { expr: Expr, #[serde(skip)] span: Option<Span> },
     Comment { text: String },
@@ -319,7 +320,7 @@ pub enum Stmt {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Param {
-    pub name: String,
+    pub name: Sym,
     #[serde(rename = "type")]
     pub ty: TypeExpr,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -337,9 +338,9 @@ pub enum Visibility {
 /// @extern(target, "module", "function") annotation for FFI declarations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExternAttr {
-    pub target: String,     // "rust" or "ts"
-    pub module: String,     // e.g., "fast_lib"
-    pub function: String,   // e.g., "reverse"
+    pub target: Sym,     // "rust" or "ts"
+    pub module: Sym,     // e.g., "fast_lib"
+    pub function: Sym,   // e.g., "reverse"
 }
 
 impl Default for Visibility {
@@ -349,11 +350,11 @@ impl Default for Visibility {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Decl {
-    Module { path: Vec<String>, #[serde(skip)] span: Option<Span> },
-    Import { path: Vec<String>, names: Option<Vec<String>>, alias: Option<String>, #[serde(skip)] span: Option<Span> },
-    Type { name: String, #[serde(rename = "type")] ty: TypeExpr, deriving: Option<Vec<String>>, #[serde(default)] visibility: Visibility, #[serde(default)] generics: Option<Vec<GenericParam>>, #[serde(skip)] span: Option<Span> },
+    Module { path: Vec<Sym>, #[serde(skip)] span: Option<Span> },
+    Import { path: Vec<Sym>, names: Option<Vec<Sym>>, alias: Option<Sym>, #[serde(skip)] span: Option<Span> },
+    Type { name: Sym, #[serde(rename = "type")] ty: TypeExpr, deriving: Option<Vec<Sym>>, #[serde(default)] visibility: Visibility, #[serde(default)] generics: Option<Vec<GenericParam>>, #[serde(skip)] span: Option<Span> },
     Fn {
-        name: String,
+        name: Sym,
         #[serde(default)] effect: Option<bool>,
         #[serde(default)] r#async: Option<bool>,
         #[serde(default)] visibility: Visibility,
@@ -364,9 +365,9 @@ pub enum Decl {
         body: Option<Expr>,
         #[serde(skip)] span: Option<Span>,
     },
-    TopLet { name: String, #[serde(rename = "type")] ty: Option<TypeExpr>, value: Expr, #[serde(default)] visibility: Visibility, #[serde(skip)] span: Option<Span> },
-    Protocol { name: String, #[serde(default)] generics: Option<Vec<GenericParam>>, methods: Vec<ProtocolMethod>, #[serde(skip)] span: Option<Span> },
-    Impl { trait_: String, for_: String, #[serde(default)] generics: Option<Vec<GenericParam>>, methods: Vec<Decl>, #[serde(skip)] span: Option<Span> },
+    TopLet { name: Sym, #[serde(rename = "type")] ty: Option<TypeExpr>, value: Expr, #[serde(default)] visibility: Visibility, #[serde(skip)] span: Option<Span> },
+    Protocol { name: Sym, #[serde(default)] generics: Option<Vec<GenericParam>>, methods: Vec<ProtocolMethod>, #[serde(skip)] span: Option<Span> },
+    Impl { trait_: Sym, for_: Sym, #[serde(default)] generics: Option<Vec<GenericParam>>, methods: Vec<Decl>, #[serde(skip)] span: Option<Span> },
     Strict { mode: String, #[serde(skip)] span: Option<Span> },
     Test { name: String, body: Expr, #[serde(skip)] span: Option<Span> },
 }

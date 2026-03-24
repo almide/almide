@@ -446,7 +446,7 @@ impl Checker {
     fn collect_covered(&self, pat: &ast::Pattern, covered: &mut std::collections::HashSet<String>, wildcard: &mut bool) {
         match pat {
             ast::Pattern::Wildcard | ast::Pattern::Ident { .. } => *wildcard = true,
-            ast::Pattern::Constructor { name, .. } | ast::Pattern::RecordPattern { name, .. } => { covered.insert(name.clone()); }
+            ast::Pattern::Constructor { name, .. } | ast::Pattern::RecordPattern { name, .. } => { covered.insert(name.to_string()); }
             ast::Pattern::Some { .. } => { covered.insert("some".into()); }
             ast::Pattern::None => { covered.insert("none".into()); }
             ast::Pattern::Ok { .. } => { covered.insert("ok".into()); }

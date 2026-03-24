@@ -54,7 +54,7 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
         ast::Stmt::FieldAssign { target, field, value, .. } => {
             let var = ctx.lookup_var(target).unwrap_or(VarId(0));
             let ir_val = lower_expr(ctx, value);
-            IrStmtKind::FieldAssign { target: var, field: sym(field), value: ir_val }
+            IrStmtKind::FieldAssign { target: var, field: *field, value: ir_val }
         }
         ast::Stmt::Guard { cond, else_, .. } => {
             let ir_cond = lower_expr(ctx, cond);
@@ -107,13 +107,13 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
                 let p = lower_pattern(ctx, a, &arg_ty);
                 p
             }).collect();
-            IrPattern::Constructor { name: name.clone(), args: ir_args }
+            IrPattern::Constructor { name: name.to_string(), args: ir_args }
         }
         ast::Pattern::RecordPattern { name, fields, rest } => {
             let ir_fields: Vec<IrFieldPattern> = fields.iter().map(|f| {
                 let field_ty = resolve_record_field_ty(ctx, name, &f.name);
                 IrFieldPattern {
-                    name: f.name.clone(),
+                    name: f.name.to_string(),
                     pattern: f.pattern.as_ref().map(|p| lower_pattern(ctx, p, &field_ty)),
                 }
             }).collect();
@@ -126,7 +126,7 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
                     ir_fields[i].pattern = Some(IrPattern::Bind { var, ty: field_ty });
                 }
             }
-            IrPattern::RecordPattern { name: name.clone(), fields: ir_fields, rest: *rest }
+            IrPattern::RecordPattern { name: name.to_string(), fields: ir_fields, rest: *rest }
         }
         ast::Pattern::Tuple { elements } => {
             let elem_tys = match ty {

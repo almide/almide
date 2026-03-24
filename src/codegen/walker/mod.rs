@@ -168,7 +168,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         } else {
             let params = generics.iter().map(|g| {
                 ctx.templates.render_with("generic_bound_full", None, &[], &[("name", g.name.as_str())])
-                    .unwrap_or_else(|| g.name.clone())
+                    .unwrap_or_else(|| g.name.to_string())
             }).collect::<Vec<_>>().join(", ");
             format!("<{}>", params)
         }

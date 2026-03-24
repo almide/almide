@@ -1,5 +1,6 @@
 use crate::lexer::TokenType;
 use crate::ast::*;
+use crate::intern::sym;
 use super::Parser;
 
 impl Parser {
@@ -70,7 +71,7 @@ impl Parser {
             return self.parse_constructor_pattern();
         }
         if self.check(TokenType::Ident) {
-            let name = self.current().value.clone();
+            let name = sym(&self.current().value);
             self.advance();
             return Ok(Pattern::Ident { name });
         }
@@ -87,7 +88,7 @@ impl Parser {
     }
 
     fn parse_constructor_pattern(&mut self) -> Result<Pattern, String> {
-        let name = self.current().value.clone();
+        let name = sym(&self.current().value);
         self.advance();
         if self.check(TokenType::LParen) {
             self.advance();

@@ -28,20 +28,20 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, no_chec
                 // not the dotted path, because resolved.modules stores canonical names
                 let is_self_import = path.first().map(|s| s.as_str()) == Some("self");
                 let target = if is_self_import && path.len() >= 2 {
-                    path.last().cloned().unwrap_or_default()
+                    path.last().map(|s| s.to_string()).unwrap_or_default()
                 } else if is_self_import {
                     // import self as alias → target is the package name (loaded from resolved modules)
                     resolved.modules.iter()
                         .find(|(_, _, _, is_self)| *is_self)
                         .map(|(name, _, _, _)| name.clone())
-                        .unwrap_or_else(|| path.join("."))
+                        .unwrap_or_else(|| path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."))
                 } else {
-                    path.join(".")
+                    path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")
                 };
-                Some((a.clone(), target))
+                Some((a.to_string(), target))
             } else if path.len() > 1 && path.first().map(|s| s.as_str()) != Some("self") {
-                let last = path.last().expect("path.len() > 1 checked above").clone();
-                Some((last, path.join(".")))
+                let last = path.last().expect("path.len() > 1 checked above").to_string();
+                Some((last, path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")))
             } else {
                 None
             }

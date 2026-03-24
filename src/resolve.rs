@@ -72,7 +72,7 @@ pub fn resolve_imports_with_deps(
                     };
                     if !loaded_names.contains(mod_name) {
                         let src_dir = root.join("src");
-                        let mod_path = vec!["mod".to_string()];
+                        let mod_path = vec![crate::intern::sym("mod")];
                         load_self_module(mod_name, &mod_path, &src_dir, base_dir, dep_paths, &mut loaded, &mut loaded_names, &mut loading)?;
                     }
                 } else {
@@ -80,7 +80,7 @@ pub fn resolve_imports_with_deps(
                     let mod_path = &path[1..]; // skip "self"
                     // Always use the canonical name (last path segment) — aliases are handled by import_aliases
                     let mod_name = mod_path.last().expect("guarded by path.len() >= 2").as_str();
-                    let display_name = mod_path.join(".");
+                    let display_name = mod_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
 
                     if loaded_names.contains(mod_name) {
                         continue;
@@ -113,7 +113,7 @@ pub fn resolve_imports_with_deps(
                 }
                 let sub_path = &path[1..];
                 // Internal name is always the dotted path (e.g. "nomod_lib.parser")
-                let dotted_name = path.join(".");
+                let dotted_name = path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
                 if loaded_names.contains(&dotted_name) {
                     continue;
                 }
@@ -169,7 +169,7 @@ fn load_bundled_module(
 /// Load a self-import module (import self.xxx).
 fn load_self_module(
     mod_name: &str,
-    mod_path: &[String],
+    mod_path: &[crate::intern::Sym],
     src_dir: &Path,
     base_dir: &Path,
     dep_paths: &[(project::PkgId, PathBuf)],
@@ -181,20 +181,20 @@ fn load_self_module(
         return Ok(());
     }
     if loading.contains(mod_name) {
-        return Err(format!("circular import detected: self.{}", mod_path.join(".")));
+        return Err(format!("circular import detected: self.{}", mod_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")));
     }
     loading.insert(mod_name.to_string());
 
     let file_path = find_self_module_file(mod_path, src_dir)?;
     let source = std::fs::read_to_string(&file_path)
-        .map_err(|e| format!("error reading module 'self.{}': {}", mod_path.join("."), e))?;
+        .map_err(|e| format!("error reading module 'self.{}': {}", mod_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."), e))?;
 
     let tokens = lexer::Lexer::tokenize(&source);
     let mut parser = parser::Parser::new(tokens);
     let program = parser.parse()
-        .map_err(|e| format!("parse error in module 'self.{}': {}", mod_path.join("."), e))?;
+        .map_err(|e| format!("parse error in module 'self.{}': {}", mod_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."), e))?;
     if !parser.errors.is_empty() {
-        return Err(format!("parse error in module 'self.{}': {}", mod_path.join("."), parser.errors.iter().map(|d| d.display()).collect::<Vec<_>>().join("\n")));
+        return Err(format!("parse error in module 'self.{}': {}", mod_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."), parser.errors.iter().map(|d| d.display()).collect::<Vec<_>>().join("\n")));
     }
 
     // Recursively resolve this module's imports
@@ -223,17 +223,17 @@ fn load_self_module(
 }
 
 /// Resolve self.xxx path segments to a file under src/.
-fn find_self_module_file(mod_path: &[String], src_dir: &Path) -> Result<PathBuf, String> {
+fn find_self_module_file(mod_path: &[crate::intern::Sym], src_dir: &Path) -> Result<PathBuf, String> {
     // Build path: src/a/b/c.almd or src/a/b/c/mod.almd
     let mut dir = src_dir.to_path_buf();
     for segment in &mod_path[..mod_path.len() - 1] {
-        dir = dir.join(segment);
+        dir = dir.join(segment.as_str());
     }
     let last = &mod_path[mod_path.len() - 1];
 
     let candidates = [
         dir.join(format!("{}.almd", last)),
-        dir.join(last).join("mod.almd"),
+        dir.join(last.as_str()).join("mod.almd"),
     ];
 
     for path in &candidates {
@@ -244,7 +244,7 @@ fn find_self_module_file(mod_path: &[String], src_dir: &Path) -> Result<PathBuf,
 
     Err(format!(
         "module 'self.{}' not found\n  searched: {}\n  hint: Create {} in your src/ directory",
-        mod_path.join("."),
+        mod_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."),
         candidates.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "),
         candidates[0].display(),
     ))
@@ -413,7 +413,7 @@ fn load_sub_namespaces(
 /// Load a specific sub-module from a package (import pkg.submodule).
 fn load_submodule(
     pkg_name: &str,
-    sub_path: &[String],
+    sub_path: &[crate::intern::Sym],
     mod_name: &str,
     base_dir: &Path,
     dep_paths: &[(project::PkgId, PathBuf)],
@@ -430,30 +430,30 @@ fn load_submodule(
     // Build file path from sub_path segments
     let mut dir = src_dir.clone();
     for segment in &sub_path[..sub_path.len() - 1] {
-        dir = dir.join(segment);
+        dir = dir.join(segment.as_str());
     }
     let last = &sub_path[sub_path.len() - 1];
     let candidates = [
         dir.join(format!("{}.almd", last)),
-        dir.join(last).join("mod.almd"),
+        dir.join(last.as_str()).join("mod.almd"),
     ];
 
     let file_path = candidates.iter().find(|p| p.exists())
         .ok_or_else(|| format!(
             "sub-module '{}.{}' not found\n  searched: {}\n  hint: Create {} in the package's src/ directory",
-            pkg_name, sub_path.join("."),
+            pkg_name, sub_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."),
             candidates.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "),
             candidates[0].display(),
         ))?;
 
     let source = std::fs::read_to_string(file_path)
-        .map_err(|e| format!("error reading sub-module '{}.{}': {}", pkg_name, sub_path.join("."), e))?;
+        .map_err(|e| format!("error reading sub-module '{}.{}': {}", pkg_name, sub_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."), e))?;
     let tokens = lexer::Lexer::tokenize(&source);
     let mut parser = parser::Parser::new(tokens);
     let program = parser.parse()
-        .map_err(|e| format!("parse error in sub-module '{}.{}': {}", pkg_name, sub_path.join("."), e))?;
+        .map_err(|e| format!("parse error in sub-module '{}.{}': {}", pkg_name, sub_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."), e))?;
     if !parser.errors.is_empty() {
-        return Err(format!("parse error in sub-module '{}.{}': {}", pkg_name, sub_path.join("."), parser.errors.iter().map(|d| d.display()).collect::<Vec<_>>().join("\n")));
+        return Err(format!("parse error in sub-module '{}.{}': {}", pkg_name, sub_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."), parser.errors.iter().map(|d| d.display()).collect::<Vec<_>>().join("\n")));
     }
 
     loaded_names.insert(mod_name.to_string());

@@ -1,6 +1,7 @@
 /// Token helpers: position tracking, lookahead, expect, advance, newline/comment skipping.
 
 use crate::lexer::{Token, TokenType};
+use crate::intern::{Sym, sym};
 use crate::ast::{Span, Stmt};
 use super::Parser;
 
@@ -122,6 +123,12 @@ impl Parser {
         val
     }
 
+    pub(crate) fn advance_and_get_sym(&mut self) -> Sym {
+        let val = sym(&self.current().value);
+        self.advance();
+        val
+    }
+
     pub(crate) fn expect(&mut self, token_type: TokenType) -> Result<&Token, String> {
         if !self.check(token_type.clone()) {
             let tok = self.current();
@@ -146,9 +153,9 @@ impl Parser {
         }
     }
 
-    pub(crate) fn expect_ident(&mut self) -> Result<String, String> {
+    pub(crate) fn expect_ident(&mut self) -> Result<Sym, String> {
         if self.check(TokenType::Ident) {
-            return Ok(self.advance_and_get_value());
+            return Ok(self.advance_and_get_sym());
         }
         let tok = self.current();
         let hint = match (&tok.token_type, tok.value.as_str()) {
@@ -162,9 +169,9 @@ impl Parser {
         ))
     }
 
-    pub(crate) fn expect_type_name(&mut self) -> Result<String, String> {
+    pub(crate) fn expect_type_name(&mut self) -> Result<Sym, String> {
         if self.check(TokenType::TypeName) {
-            return Ok(self.advance_and_get_value());
+            return Ok(self.advance_and_get_sym());
         }
         let tok = self.current();
         let hint = if tok.token_type == TokenType::Ident {
@@ -178,9 +185,9 @@ impl Parser {
         ))
     }
 
-    pub(crate) fn expect_any_name(&mut self) -> Result<String, String> {
+    pub(crate) fn expect_any_name(&mut self) -> Result<Sym, String> {
         if self.check(TokenType::Ident) || self.check(TokenType::IdentQ) || self.check(TokenType::TypeName) {
-            return Ok(self.advance_and_get_value());
+            return Ok(self.advance_and_get_sym());
         }
         let tok = self.current();
         let hint = match &tok.token_type {
@@ -198,7 +205,7 @@ impl Parser {
         ))
     }
 
-    pub(crate) fn expect_any_fn_name(&mut self) -> Result<String, String> {
+    pub(crate) fn expect_any_fn_name(&mut self) -> Result<Sym, String> {
         // Convention method: fn Dog.eq(...) → name = "Dog.eq"
         if self.check(TokenType::TypeName)
             && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Dot)
@@ -211,10 +218,10 @@ impl Parser {
                 let tok = self.current();
                 return Err(format!("Expected method name after '{}.', got {:?} at line {}:{}", type_name, tok.token_type, tok.line, tok.col));
             };
-            return Ok(format!("{}.{}", type_name, method));
+            return Ok(sym(&format!("{}.{}", type_name, method)));
         }
         if self.check(TokenType::Ident) || self.check(TokenType::IdentQ) {
-            return Ok(self.advance_and_get_value());
+            return Ok(self.advance_and_get_sym());
         }
         let tok = self.current();
         let hint = if tok.token_type == TokenType::TypeName {
@@ -228,9 +235,9 @@ impl Parser {
         ))
     }
 
-    pub(crate) fn expect_any_param_name(&mut self) -> Result<String, String> {
+    pub(crate) fn expect_any_param_name(&mut self) -> Result<Sym, String> {
         if self.check(TokenType::Ident) || self.check(TokenType::Var) {
-            return Ok(self.advance_and_get_value());
+            return Ok(self.advance_and_get_sym());
         }
         let tok = self.current();
         let hint = if tok.token_type == TokenType::TypeName {

@@ -186,7 +186,7 @@ fn find_structurally_bounded_fns(functions: &[IrFunction], type_decls: &[IrTypeD
                         seen_tvars.insert(g.name.clone());
                         func.params.iter().enumerate()
                             .filter(|(_, param)| ty_contains_typevar(&param.ty, &g.name))
-                            .map(|(i, _)| BoundedParam { param_idx: i, type_var: g.name.clone() })
+                            .map(|(i, _)| BoundedParam { param_idx: i, type_var: g.name.to_string() })
                     })
             );
         }
@@ -197,7 +197,7 @@ fn find_structurally_bounded_fns(functions: &[IrFunction], type_decls: &[IrTypeD
                     if !bounds.is_empty() && !seen_tvars.contains(&g.name) {
                         for (i, param) in func.params.iter().enumerate() {
                             if ty_contains_typevar(&param.ty, &g.name) {
-                                bounded.push(BoundedParam { param_idx: i, type_var: g.name.clone() });
+                                bounded.push(BoundedParam { param_idx: i, type_var: g.name.to_string() });
                             }
                         }
                     }

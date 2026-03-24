@@ -1,5 +1,6 @@
 use crate::lexer::TokenType;
 use crate::ast::*;
+use crate::intern::sym;
 use super::Parser;
 
 impl Parser {
@@ -116,7 +117,7 @@ impl Parser {
                 // Treat `fan` as an identifier for member access
                 let span = Some(self.current_span());
                 self.advance();
-                return Ok(Expr::Ident { name: "fan".to_string(), id: self.next_id(), span, resolved_type: None });
+                return Ok(Expr::Ident { name: sym("fan"), id: self.next_id(), span, resolved_type: None });
             }
             self.advance();
             return self.parse_fan_block();
@@ -139,7 +140,7 @@ impl Parser {
             return Err(format!("{} at line {}:{}\n  Hint: {}", msg, tok.line, tok.col, result.hint));
         }
         if self.check(TokenType::Ident) || self.check(TokenType::IdentQ) {
-            let name = tok.value.clone();
+            let name = sym(&tok.value);
             self.advance();
             return Ok(Expr::Ident { name, id: self.next_id(), span, resolved_type: None });
         }
@@ -179,7 +180,7 @@ impl Parser {
     fn parse_type_name_expr(&mut self) -> Result<Expr, String> {
         let tok = self.current().clone();
         let span = Some(Span { line: tok.line, col: tok.col });
-        let name = tok.value.clone();
+        let name = sym(&tok.value);
         self.advance();
 
         if self.check(TokenType::LBracket) {
@@ -298,10 +299,10 @@ impl Parser {
                 names.push(self.expect_ident()?);
             }
             self.expect(TokenType::RParen)?;
-            (names[0].clone(), Some(names))
+            (names[0], Some(names))
         } else if self.check(TokenType::Underscore) {
             self.advance();
-            ("_".to_string(), None)
+            (sym("_"), None)
         } else {
             (self.expect_ident()?, None)
         };

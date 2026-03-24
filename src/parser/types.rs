@@ -1,5 +1,6 @@
 use crate::lexer::TokenType;
 use crate::ast::*;
+use crate::intern::{Sym, sym};
 use super::Parser;
 impl Parser {
     pub(crate) fn parse_type_expr(&mut self) -> Result<TypeExpr, String> {
@@ -57,7 +58,7 @@ impl Parser {
                 let ret = self.parse_type_expr()?;
                 return Ok(TypeExpr::Fn { params: vec![], ret: Box::new(ret) });
             }
-            return Ok(TypeExpr::Simple { name: "Unit".to_string() });
+            return Ok(TypeExpr::Simple { name: sym("Unit") });
         }
         let first = self.parse_type_expr()?;
         if self.check(TokenType::RParen) {
@@ -114,7 +115,7 @@ impl Parser {
         }
         Ok(TypeExpr::Variant { cases })
     }
-    fn try_parse_inline_variant(&mut self, first_name: String, first_args: Vec<TypeExpr>) -> Result<TypeExpr, String> {
+    fn try_parse_inline_variant(&mut self, first_name: Sym, first_args: Vec<TypeExpr>) -> Result<TypeExpr, String> {
         let mut cases = Vec::new();
         let mut all_simple = first_args.is_empty();
         if !first_args.is_empty() {
@@ -213,11 +214,11 @@ impl Parser {
         Ok(fields)
     }
     /// Parse optional `as "alias"` after field name.
-    fn parse_field_alias(&mut self) -> Result<Option<String>, String> {
+    fn parse_field_alias(&mut self) -> Result<Option<Sym>, String> {
         if self.check_ident("as") {
             self.advance();
             if self.check(TokenType::String) {
-                let alias = self.advance_and_get_value();
+                let alias = self.advance_and_get_sym();
                 Ok(Some(alias))
             } else {
                 let tok = self.current();
