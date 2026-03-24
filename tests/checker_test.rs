@@ -700,7 +700,7 @@ fn effect_isolation_fan_var_capture_error() {
 #[test]
 fn effect_isolation_stdlib_effect_fn() {
     let errs = errors(
-        "fn f(path: String) -> String = fs.read_text(path)"
+        "import fs\nfn f(path: String) -> String = fs.read_text(path)"
     );
     assert!(!errs.is_empty(), "pure fn calling stdlib effect fn should error");
     assert!(errs[0].contains("effect"), "error should mention effect, got: {}", errs[0]);
