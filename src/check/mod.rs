@@ -350,18 +350,19 @@ impl Checker {
             }
         }
         let ret_ty = self.resolve_type_expr(return_type);
-        let prev = (self.env.current_ret.take(), self.env.can_call_effect, self.env.auto_unwrap);
+        let prev = (self.env.current_ret.take(), self.env.can_call_effect, self.env.auto_unwrap, self.env.lambda_depth);
         let is_effect = effect.unwrap_or(false);
         self.env.current_ret = Some(ret_ty.clone());
         self.env.can_call_effect = is_effect;
         self.env.auto_unwrap = is_effect;
+        self.env.lambda_depth = 0;
         let body_ity = self.infer_expr(body);
         if effect.unwrap_or(false) {
             self.constrain_effect_body(name, &ret_ty, body_ity);
         } else {
             self.constrain(ret_ty, body_ity, format!("fn '{}'", name));
         }
-        self.env.current_ret = prev.0; self.env.can_call_effect = prev.1; self.env.auto_unwrap = prev.2;
+        self.env.current_ret = prev.0; self.env.can_call_effect = prev.1; self.env.auto_unwrap = prev.2; self.env.lambda_depth = prev.3;
         self.exit_generics(generics);
         self.env.pop_scope();
     }

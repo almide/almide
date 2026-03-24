@@ -275,6 +275,7 @@ impl Checker {
                 self.env.push_scope();
                 // Lambda has its own return context — don't leak outer function's current_ret
                 let saved_ret = self.env.current_ret.take();
+                self.env.lambda_depth += 1;
                 let param_tys: Vec<Ty> = params.iter().map(|p| {
                     let ty = p.ty.as_ref().map(|te| self.resolve_type_expr(te)).unwrap_or_else(|| self.fresh_var());
                     let concrete = resolve_ty(&ty, &self.uf);
@@ -282,6 +283,7 @@ impl Checker {
                     ty
                 }).collect();
                 let ret_ty = self.infer_expr(body);
+                self.env.lambda_depth -= 1;
                 self.env.current_ret = saved_ret;
                 self.env.pop_scope();
                 Ty::Fn { params: param_tys, ret: Box::new(ret_ty) }
@@ -488,6 +490,7 @@ impl Checker {
                 };
                 self.env.define_var(name, final_ty);
                 self.env.mutable_vars.insert(name.clone());
+                self.env.var_lambda_depth.insert(name.clone(), self.env.lambda_depth);
             }
             ast::Stmt::LetDestructure { pattern, value, .. } => {
                 let val_ty = self.infer_expr(value);
@@ -505,6 +508,17 @@ impl Checker {
                     self.emit(super::err(
                         format!("cannot reassign immutable binding '{}'", name),
                         hint, format!("{} = ...", name)).with_code("E009"));
+                }
+                // Escape analysis: block var mutation inside closures in pure fns
+                if self.env.mutable_vars.contains(name.as_str()) && !self.env.can_call_effect {
+                    if let Some(&decl_depth) = self.env.var_lambda_depth.get(name.as_str()) {
+                        if self.env.lambda_depth > decl_depth {
+                            self.emit(super::err(
+                                format!("mutable variable '{}' is mutated inside a closure in a pure function — use effect fn instead", name),
+                                "Move the mutation out of the closure, or mark the enclosing function as `effect fn`",
+                                format!("{} = ...", name)).with_code("E011"));
+                        }
+                    }
                 }
             }
             ast::Stmt::IndexAssign { index, value, .. } => { self.infer_expr(index); self.infer_expr(value); }
