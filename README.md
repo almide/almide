@@ -22,7 +22,7 @@
 
 ## What is Almide?
 
-Almide is a statically-typed language optimized for AI-generated code. It compiles to Rust, TypeScript, JavaScript, and WebAssembly.
+Almide is a statically-typed language optimized for AI-generated code. It compiles to Rust, TypeScript, and WebAssembly.
 
 The core metric is **modification survival rate** — how often code still compiles and passes tests after a series of AI-driven modifications. The language achieves this through unambiguous syntax, actionable compiler diagnostics, and a standard library that covers common patterns out of the box.
 
@@ -75,7 +75,7 @@ almide run hello.almd
 
 ## Features
 
-- **Multi-target** — Same source compiles to Rust (native binary), TypeScript, JavaScript, or WebAssembly
+- **Multi-target** — Same source compiles to Rust (native binary), TypeScript, or WebAssembly
 - **Generics** — Functions (`fn id[T](x: T) -> T`), records, variant types, recursive variants with auto Box wrapping
 - **Pattern matching** — Exhaustive match with variant destructuring
 - **Effect functions** — `effect fn` for explicit error propagation (`Result` auto-wrapping)
@@ -115,23 +115,14 @@ fn tree_sum(t: Tree[Int]) -> Int =
     Node(left, right) => tree_sum(left) + tree_sum(right)
   }
 
-type AppError =
-  | NotFound(String)
-  | Io(IoError)
-  deriving From
-
-effect fn greet(name: String) -> Result[Unit, AppError] = {
-  guard name.len() > 0 else err(NotFound("empty name"))
+effect fn greet(name: String) -> Result[Unit, String] = {
+  guard string.len(name) > 0 else err("empty name")
   println("Hello, ${name}!")
   ok(())
 }
 
-effect fn main(args: List[String]) -> Result[Unit, AppError] = {
-  let name = match list.get(args, 1) {
-    some(n) => n
-    none => "world"
-  }
-  greet(name)
+effect fn main() -> Result[Unit, String] = {
+  greet("world")
 }
 
 test "greet succeeds" {
@@ -150,17 +141,17 @@ Almide source (`.almd`) is compiled by a pure-Rust compiler through a three-laye
                                                             ↓
                                               Template Renderer (TOML-driven)
                                                             ↓
-                                                    .rs / .ts / .js / .wasm
+                                                    .rs / .ts / .wasm
 ```
 
-The Nanopass pipeline applies target-specific transformations: `ResultPropagation` (Rust `?`), `ResultErasure` (TS/JS `throw`), `MatchLowering` (TS/JS if-else chains), `CloneInsertion` (Rust borrow analysis). The Template Renderer is purely syntactic — all semantic decisions are already encoded in the IR.
+The Nanopass pipeline applies target-specific transformations: `ResultPropagation` (Rust `?`), `ResultErasure` (TS `throw`), `MatchLowering` (TS if-else chains), `CloneInsertion` (Rust borrow analysis). The Template Renderer is purely syntactic — all semantic decisions are already encoded in the IR.
 
 ```bash
 almide run app.almd              # Compile + execute (Rust target)
 almide run app.almd -- arg1      # With arguments
 almide build app.almd -o app     # Build standalone binary
 almide build app.almd --target wasm  # Build WebAssembly (WASI)
-almide build app.almd --target npm   # Build npm package (JS)
+almide build app.almd --target ts    # Emit TypeScript + run with Deno
 almide test                      # Find and run all test blocks (recursive)
 almide test spec/lang/           # Run tests in a directory
 almide test --run "pattern"      # Filter tests by name
