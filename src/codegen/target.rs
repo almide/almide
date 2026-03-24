@@ -13,6 +13,7 @@ use super::pass::{
     BorrowInsertionPass, FanLoweringPass,
     OptionErasurePass, Pipeline, Target, TypeConcretizationPass,
 };
+use super::pass_auto_parallel::AutoParallelPass;
 use super::pass_box_deref::BoxDerefPass;
 use super::pass_clone::CloneInsertionPass;
 use super::pass_builtin_lowering::BuiltinLoweringPass;
@@ -68,7 +69,9 @@ fn build_pipeline(target: Target) -> Pipeline {
             // Semantic lowering (order matters!)
             // 1. Stdlib first: Module calls → Named calls with arg decoration
             .add(StdlibLoweringPass)
-            // 2. ResultPropagation: insert Try (?) for effect fn calls
+            // 2. AutoParallel: rewrite pure list ops to parallel variants
+            .add(AutoParallelPass)
+            // 3. ResultPropagation: insert Try (?) for effect fn calls
             .add(ResultPropagationPass)
             // 3. Builtin last: Named calls (assert_eq, println, etc.) → RustMacro
             .add(BuiltinLoweringPass)
