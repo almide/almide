@@ -61,13 +61,7 @@ pub fn substitute_var_in_expr(expr: &IrExpr, var: VarId, replacement: &IrExpr) -
             },
             ty: expr.ty.clone(), span: expr.span,
         },
-        IrExprKind::DoBlock { stmts, expr: tail } => IrExpr {
-            kind: IrExprKind::DoBlock {
-                stmts: stmts.iter().map(sub_stmt).collect(),
-                expr: tail.as_ref().map(|e| Box::new(sub(e))),
-            },
-            ty: expr.ty.clone(), span: expr.span,
-        },
+
         IrExprKind::Lambda { params, body, lambda_id } => {
             if params.iter().any(|(p, _)| *p == var) {
                 expr.clone() // shadowed

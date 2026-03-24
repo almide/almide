@@ -106,8 +106,9 @@ impl Parser {
             return self.parse_for_expr();
         }
         if self.check(TokenType::Do) {
+            let span = self.current_span();
             self.advance();
-            return self.parse_do_block();
+            return Err(format!("`do` blocks have been removed — use `while` for loops or remove `do` from effect fn bodies (line {})", span.line));
         }
         if self.check(TokenType::Fan) {
             // fan { ... } = fan block; fan.map/fan.race = module-like call

@@ -109,7 +109,7 @@ fn rewrite_expr_calls(
                 rewrite_expr_calls(&mut arm.body, bound_fns, instances, fn_param_types, fn_generics, fn_ret_types);
             }
         }
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             for s in stmts { rewrite_stmt_calls(s, bound_fns, instances, fn_param_types, fn_generics, fn_ret_types); }
             if let Some(e) = expr { rewrite_expr_calls(e, bound_fns, instances, fn_param_types, fn_generics, fn_ret_types); }
         }

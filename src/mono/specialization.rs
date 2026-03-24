@@ -85,7 +85,7 @@ pub(super) fn update_var_table_types(expr: &IrExpr, bindings: &HashMap<String, T
                 update_var_table_types(&arm.body, bindings, vt);
             }
         }
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             for s in stmts { update_stmt_var_types(s, bindings, vt); }
             if let Some(e) = expr { update_var_table_types(e, bindings, vt); }
         }
@@ -182,7 +182,7 @@ pub(super) fn substitute_expr_types(expr: &mut IrExpr, bindings: &HashMap<String
                 substitute_expr_types(&mut arm.body, bindings);
             }
         }
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             for s in stmts { substitute_stmt_types(s, bindings); }
             if let Some(e) = expr { substitute_expr_types(e, bindings); }
         }

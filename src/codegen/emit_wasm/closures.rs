@@ -328,7 +328,7 @@ fn scan_closures_expr(
         IrExprKind::FnRef { name } => {
             fn_refs.insert(name.to_string());
         }
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             for stmt in stmts {
                 scan_closures_stmt(stmt, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
             }
@@ -513,7 +513,7 @@ pub(super) fn resolve_expr_ty(expr: &IrExpr, var_table: &crate::ir::VarTable, re
             }
             expr.ty.clone()
         }
-        IrExprKind::Block { expr: Some(e), .. } | IrExprKind::DoBlock { expr: Some(e), .. } => {
+        IrExprKind::Block { expr: Some(e), .. } => {
             resolve_expr_ty(e, var_table, record_fields)
         }
         _ => expr.ty.clone(),
@@ -524,7 +524,7 @@ pub(super) fn resolve_expr_ty(expr: &IrExpr, var_table: &crate::ir::VarTable, re
 pub(super) fn collect_var_refs(expr: &IrExpr, vars: &mut HashSet<u32>) {
     match &expr.kind {
         IrExprKind::Var { id } => { vars.insert(id.0); }
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             for stmt in stmts {
                 match &stmt.kind {
                     IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => collect_var_refs(value, vars),

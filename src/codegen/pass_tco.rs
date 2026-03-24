@@ -112,8 +112,8 @@ fn all_self_calls_in_tail_pos(expr: &IrExpr, fn_name: &str) -> (bool, bool) {
         }
 
         // Block: stmts are NOT tail, only the trailing expr is tail
-        // DoBlock: same as Block
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+
+        IrExprKind::Block { stmts, expr } => {
             let (has, all) = stmts.iter().fold((false, true), |(has, all), stmt| {
                 let (s_has, s_all) = scan_non_tail_stmt(stmt, fn_name);
                 (has || s_has, all && (!s_has || s_all))
@@ -176,7 +176,7 @@ fn scan_non_tail(expr: &IrExpr, fn_name: &str) -> (bool, bool) {
             });
             (has, !has)
         }
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             let has = stmts.iter().fold(false, |has, stmt| has || scan_non_tail_stmt(stmt, fn_name).0);
             let has = expr.as_ref().map_or(has, |e| has || scan_non_tail(e, fn_name).0);
             (has, !has)
@@ -461,19 +461,6 @@ fn rewrite_tail_expr(
             let new_tail = rewrite_tail_expr(*tail, fn_name, params, temps, result_var, is_effect);
             IrExpr {
                 kind: IrExprKind::Block {
-                    stmts,
-                    expr: Some(Box::new(new_tail)),
-                },
-                ty: Ty::Unit,
-                span: expr.span,
-            }
-        }
-
-        // DoBlock: same as Block
-        IrExprKind::DoBlock { stmts, expr: Some(tail) } => {
-            let new_tail = rewrite_tail_expr(*tail, fn_name, params, temps, result_var, is_effect);
-            IrExpr {
-                kind: IrExprKind::DoBlock {
                     stmts,
                     expr: Some(Box::new(new_tail)),
                 },

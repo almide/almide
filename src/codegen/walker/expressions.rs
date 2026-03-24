@@ -90,30 +90,6 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .unwrap_or(fallback)
         }
 
-        IrExprKind::DoBlock { stmts, expr } => {
-            // DoBlock with guard → loop { body }
-            let mut parts: Vec<String> = stmts.iter()
-                .map(|s| {
-                    let rendered = render_stmt(ctx, s);
-                    terminate_stmt(ctx, rendered)
-                })
-                .collect();
-            if let Some(e) = expr {
-                let rendered = render_expr(ctx, e);
-                // In a loop (DoBlock), non-Unit final expressions need `return` to exit
-                let needs_return = !matches!(&e.ty, Ty::Unit)
-                    && !matches!(&e.kind, IrExprKind::Unit | IrExprKind::Break | IrExprKind::Continue);
-                if needs_return && !rendered.starts_with("break") && !rendered.starts_with("continue") {
-                    parts.push(format!("return {}", rendered));
-                } else {
-                    parts.push(rendered);
-                }
-            }
-            let body_s = parts.join("\n");
-            ctx.templates.render_with("loop_block", None, &[], &[("body", body_s.as_str())])
-                .unwrap_or_else(|| format!("loop {{ ... }}"))
-        }
-
         IrExprKind::Block { stmts, expr } => {
             let mut parts: Vec<String> = stmts.iter()
                 .map(|s| terminate_stmt(ctx, render_stmt(ctx, s)))

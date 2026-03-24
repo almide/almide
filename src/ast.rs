@@ -149,7 +149,6 @@ pub enum Expr {
     If { cond: Box<Expr>, then: Box<Expr>, else_: Box<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Match { subject: Box<Expr>, arms: Vec<MatchArm>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Block { stmts: Vec<Stmt>, expr: Option<Box<Expr>>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
-    DoBlock { stmts: Vec<Stmt>, expr: Option<Box<Expr>>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     Fan { exprs: Vec<Expr>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     ForIn { var: String, var_tuple: Option<Vec<String>>, iterable: Box<Expr>, body: Vec<Stmt>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
     While { cond: Box<Expr>, body: Vec<Stmt>, #[serde(skip)] id: ExprId, #[serde(skip)] span: Option<Span>, #[serde(skip)] resolved_type: Option<ResolvedType> },
@@ -186,7 +185,7 @@ impl Expr {
             | Expr::SpreadRecord { id, .. } | Expr::Call { id, .. }
             | Expr::Member { id, .. } | Expr::TupleIndex { id, .. } | Expr::IndexAccess { id, .. } | Expr::Pipe { id, .. } | Expr::Compose { id, .. }
             | Expr::If { id, .. } | Expr::Match { id, .. }
-            | Expr::Block { id, .. } | Expr::DoBlock { id, .. } | Expr::Fan { id, .. }
+            | Expr::Block { id, .. } | Expr::Fan { id, .. }
             | Expr::ForIn { id, .. } | Expr::While { id, .. } | Expr::Lambda { id, .. }
             | Expr::Hole { id, .. } | Expr::Todo { id, .. }
             | Expr::Try { id, .. } | Expr::Await { id, .. }
@@ -211,7 +210,7 @@ impl Expr {
             | Expr::SpreadRecord { span, .. } | Expr::Call { span, .. }
             | Expr::Member { span, .. } | Expr::TupleIndex { span, .. } | Expr::IndexAccess { span, .. } | Expr::Pipe { span, .. } | Expr::Compose { span, .. }
             | Expr::If { span, .. } | Expr::Match { span, .. }
-            | Expr::Block { span, .. } | Expr::DoBlock { span, .. } | Expr::Fan { span, .. }
+            | Expr::Block { span, .. } | Expr::Fan { span, .. }
             | Expr::ForIn { span, .. } | Expr::While { span, .. } | Expr::Lambda { span, .. }
             | Expr::Hole { span, .. } | Expr::Todo { span, .. }
             | Expr::Try { span, .. } | Expr::Await { span, .. }
@@ -236,7 +235,7 @@ impl Expr {
             | Expr::SpreadRecord { resolved_type, .. } | Expr::Call { resolved_type, .. }
             | Expr::Member { resolved_type, .. } | Expr::TupleIndex { resolved_type, .. } | Expr::IndexAccess { resolved_type, .. } | Expr::Pipe { resolved_type, .. } | Expr::Compose { resolved_type, .. }
             | Expr::If { resolved_type, .. } | Expr::Match { resolved_type, .. }
-            | Expr::Block { resolved_type, .. } | Expr::DoBlock { resolved_type, .. } | Expr::Fan { resolved_type, .. }
+            | Expr::Block { resolved_type, .. } | Expr::Fan { resolved_type, .. }
             | Expr::ForIn { resolved_type, .. } | Expr::While { resolved_type, .. } | Expr::Lambda { resolved_type, .. }
             | Expr::Hole { resolved_type, .. } | Expr::Todo { resolved_type, .. }
             | Expr::Try { resolved_type, .. } | Expr::Await { resolved_type, .. }
@@ -261,7 +260,7 @@ impl Expr {
             | Expr::SpreadRecord { resolved_type, .. } | Expr::Call { resolved_type, .. }
             | Expr::Member { resolved_type, .. } | Expr::TupleIndex { resolved_type, .. } | Expr::IndexAccess { resolved_type, .. } | Expr::Pipe { resolved_type, .. } | Expr::Compose { resolved_type, .. }
             | Expr::If { resolved_type, .. } | Expr::Match { resolved_type, .. }
-            | Expr::Block { resolved_type, .. } | Expr::DoBlock { resolved_type, .. } | Expr::Fan { resolved_type, .. }
+            | Expr::Block { resolved_type, .. } | Expr::Fan { resolved_type, .. }
             | Expr::ForIn { resolved_type, .. } | Expr::While { resolved_type, .. } | Expr::Lambda { resolved_type, .. }
             | Expr::Hole { resolved_type, .. } | Expr::Todo { resolved_type, .. }
             | Expr::Try { resolved_type, .. } | Expr::Await { resolved_type, .. }

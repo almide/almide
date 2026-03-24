@@ -155,10 +155,7 @@ fn update_call_types(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
             stmts: stmts.into_iter().map(|s| update_call_types_stmt(s, lifted)).collect(),
             expr: e.map(|e| Box::new(update_call_types(*e, lifted))),
         },
-        IrExprKind::DoBlock { stmts, expr: e } => IrExprKind::DoBlock {
-            stmts: stmts.into_iter().map(|s| update_call_types_stmt(s, lifted)).collect(),
-            expr: e.map(|e| Box::new(update_call_types(*e, lifted))),
-        },
+
         IrExprKind::If { cond, then, else_ } => IrExprKind::If {
             cond: Box::new(update_call_types(*cond, lifted)),
             then: Box::new(update_call_types(*then, lifted)),
@@ -280,11 +277,7 @@ fn insert_try_for_lifted(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
             let tail = tail.map(|e| Box::new(insert_try_for_lifted(*e, lifted)));
             IrExpr { kind: IrExprKind::Block { stmts, expr: tail }, ty, span }
         }
-        IrExprKind::DoBlock { stmts, expr: tail } => {
-            let stmts = stmts.into_iter().map(|s| insert_try_for_lifted_stmt(s, lifted)).collect();
-            let tail = tail.map(|e| Box::new(insert_try_for_lifted(*e, lifted)));
-            IrExpr { kind: IrExprKind::DoBlock { stmts, expr: tail }, ty, span }
-        }
+
         IrExprKind::If { cond, then, else_ } => IrExpr {
             kind: IrExprKind::If {
                 cond: Box::new(insert_try_for_lifted(*cond, lifted)),
@@ -395,10 +388,7 @@ fn insert_try(expr: IrExpr, in_match_subject: bool) -> IrExpr {
             stmts: stmts.into_iter().map(|s| insert_try_stmt(s)).collect(),
             expr: e.map(|e| Box::new(insert_try(*e, false))),
         },
-        IrExprKind::DoBlock { stmts, expr: e } => IrExprKind::DoBlock {
-            stmts: stmts.into_iter().map(|s| insert_try_stmt(s)).collect(),
-            expr: e.map(|e| Box::new(insert_try(*e, false))),
-        },
+
         IrExprKind::If { cond, then, else_ } => IrExprKind::If {
             cond: Box::new(insert_try(*cond, false)),
             then: Box::new(insert_try(*then, false)),
@@ -586,7 +576,7 @@ fn is_result_value(expr: &IrExpr) -> bool {
 /// Collect VarId→unwrapped type mappings from bindings whose values are Try-wrapped.
 fn collect_retyped_vars(expr: &IrExpr, map: &mut HashMap<u32, Ty>) {
     match &expr.kind {
-        IrExprKind::Block { stmts, expr: tail } | IrExprKind::DoBlock { stmts, expr: tail } => {
+        IrExprKind::Block { stmts, expr: tail } => {
             for s in stmts { collect_retyped_vars_stmt(s, map); }
             if let Some(e) = tail { collect_retyped_vars(e, map); }
         }
@@ -644,10 +634,7 @@ fn fix_var_types(expr: IrExpr, map: &HashMap<u32, Ty>) -> IrExpr {
             stmts: stmts.into_iter().map(|s| fix_var_types_stmt(s, map)).collect(),
             expr: e.map(|e| Box::new(fix_var_types(*e, map))),
         },
-        IrExprKind::DoBlock { stmts, expr: e } => IrExprKind::DoBlock {
-            stmts: stmts.into_iter().map(|s| fix_var_types_stmt(s, map)).collect(),
-            expr: e.map(|e| Box::new(fix_var_types(*e, map))),
-        },
+
         IrExprKind::If { cond, then, else_ } => IrExprKind::If {
             cond: Box::new(fix_var_types(*cond, map)),
             then: Box::new(fix_var_types(*then, map)),
@@ -818,10 +805,7 @@ fn insert_try_in_fan(expr: IrExpr) -> IrExpr {
             cond: Box::new(insert_try_in_fan(*cond)),
             body: body.into_iter().map(insert_try_in_fan_stmt).collect(),
         },
-        IrExprKind::DoBlock { stmts, expr: e } => IrExprKind::DoBlock {
-            stmts: stmts.into_iter().map(insert_try_in_fan_stmt).collect(),
-            expr: e.map(|e| Box::new(insert_try_in_fan(*e))),
-        },
+
         other => other,
     };
     IrExpr { kind, ty, span }

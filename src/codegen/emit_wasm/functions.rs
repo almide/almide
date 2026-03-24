@@ -74,7 +74,7 @@ pub fn compile_function(
 
     compiler.emit_expr(&func.body);
 
-    // If function returns a value but body produces Unit (e.g., do block with guard returns),
+    // If function returns a value but body produces Unit (e.g., while loop with guard returns),
     // insert Unreachable to satisfy the validator (the code is unreachable in practice).
     let body_produces = super::values::ty_to_valtype(&func.body.ty);
     let func_expects = super::values::ty_to_valtype(&func.ret_ty);

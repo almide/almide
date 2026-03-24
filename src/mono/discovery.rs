@@ -140,7 +140,7 @@ pub(super) fn discover_in_expr(
                 discover_in_expr(&arm.body, bound_fns, program_functions, instances);
             }
         }
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             for s in stmts { discover_in_stmt(s, bound_fns, program_functions, instances); }
             if let Some(e) = expr { discover_in_expr(e, bound_fns, program_functions, instances); }
         }

@@ -65,28 +65,7 @@ fn hoist_loops(expr: &mut IrExpr, vt: &mut VarTable, efns: &HashSet<Sym>) -> boo
                 }
             }
         }
-        IrExprKind::DoBlock { stmts, expr: tail } => {
-            let mut new_stmts: Vec<IrStmt> = Vec::new();
-            for mut stmt in std::mem::take(stmts) {
-                if hoist_loops_stmt(&mut stmt, vt, efns) {
-                    changed = true;
-                }
-                if let IrStmtKind::Expr { expr: ref mut loop_expr } = stmt.kind {
-                    let hoisted = try_hoist_from_loop(loop_expr, vt, efns);
-                    if !hoisted.is_empty() {
-                        changed = true;
-                        new_stmts.extend(hoisted);
-                    }
-                }
-                new_stmts.push(stmt);
-            }
-            *stmts = new_stmts;
-            if let Some(e) = tail {
-                if hoist_loops(e, vt, efns) {
-                    changed = true;
-                }
-            }
-        }
+
         IrExprKind::If { cond, then, else_ } => {
             if hoist_loops(cond, vt, efns) { changed = true; }
             if hoist_loops(then, vt, efns) { changed = true; }
@@ -204,7 +183,7 @@ fn collect_defined_vars_stmts(stmts: &[IrStmt], defined: &mut HashSet<VarId>) {
 
 fn collect_defined_vars_expr(expr: &IrExpr, defined: &mut HashSet<VarId>) {
     match &expr.kind {
-        IrExprKind::Block { stmts, expr: tail } | IrExprKind::DoBlock { stmts, expr: tail } => {
+        IrExprKind::Block { stmts, expr: tail } => {
             collect_defined_vars_stmts(stmts, defined);
             if let Some(e) = tail { collect_defined_vars_expr(e, defined); }
         }
@@ -387,7 +366,7 @@ fn is_hoistable(expr: &IrExpr, loop_defined: &HashSet<VarId>, efns: &HashSet<Sym
 /// Assignments are side effects that must not be hoisted out of loops.
 fn has_assignment(expr: &IrExpr) -> bool {
     match &expr.kind {
-        IrExprKind::Block { stmts, expr: tail } | IrExprKind::DoBlock { stmts, expr: tail } => {
+        IrExprKind::Block { stmts, expr: tail } => {
             stmts.iter().any(|s| matches!(&s.kind, IrStmtKind::Assign { .. } | IrStmtKind::FieldAssign { .. } | IrStmtKind::IndexAssign { .. }) || has_assignment_stmt(s))
                 || tail.as_ref().map_or(false, |e| has_assignment(e))
         }
@@ -427,7 +406,7 @@ fn has_control_flow(expr: &IrExpr) -> bool {
         IrExprKind::If { cond, then, else_ } => {
             has_control_flow(cond) || has_control_flow(then) || has_control_flow(else_)
         }
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             stmts.iter().any(|s| has_control_flow_stmt(s))
                 || expr.as_ref().is_some_and(|e| has_control_flow(e))
         }
@@ -494,7 +473,7 @@ fn has_effect_call(expr: &IrExpr, efns: &HashSet<Sym>) -> bool {
         IrExprKind::If { cond, then, else_ } => {
             has_effect_call(cond, efns) || has_effect_call(then, efns) || has_effect_call(else_, efns)
         }
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             stmts.iter().any(|s| has_effect_call_stmt(s, efns))
                 || expr.as_ref().is_some_and(|e| has_effect_call(e, efns))
         }
@@ -590,7 +569,7 @@ fn refs_are_outside_loop(expr: &IrExpr, loop_defined: &HashSet<VarId>) -> bool {
                 && refs_are_outside_loop(then, loop_defined)
                 && refs_are_outside_loop(else_, loop_defined)
         }
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             stmts.iter().all(|s| refs_are_outside_loop_stmt(s, loop_defined))
                 && expr.as_ref().map_or(true, |e| refs_are_outside_loop(e, loop_defined))
         }

@@ -251,7 +251,7 @@ fn collect_effects_inner(expr: &IrExpr, effects: &mut HashSet<Effect>) {
             }
         }
 
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             for stmt in stmts {
                 collect_effects_from_stmt(stmt, effects);
             }
@@ -419,7 +419,7 @@ fn collect_callees(expr: &IrExpr, callees: &mut HashSet<String>) {
                 collect_callees(arg, callees);
             }
         }
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             for stmt in stmts {
                 match &stmt.kind {
                     IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => collect_callees(value, callees),

@@ -22,8 +22,7 @@ pub struct TypeEnv {
     pub user_modules: std::collections::HashSet<Sym>,
     /// Stdlib modules available in scope (Tier 1 implicit + explicitly imported)
     pub imported_stdlib: std::collections::HashSet<Sym>,
-    /// Whether we're inside a do block (for auto-unwrapping Result in let bindings)
-    pub in_do_block: bool,
+
     /// Track used variables (for unused variable warnings)
     pub used_vars: std::collections::HashSet<Sym>,
     /// Track used modules (for unused import warnings)
@@ -82,7 +81,7 @@ impl TypeEnv {
                 }
                 s
             },
-            in_do_block: false,
+
             used_vars: std::collections::HashSet::new(),
             used_modules: std::collections::HashSet::new(),
             module_aliases: std::collections::HashMap::new(),

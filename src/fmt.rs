@@ -322,7 +322,7 @@ fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
             if stmts.is_empty() { if let Some(e) = expr { if is_short(e) && depth > 0 { out.push_str("{ "); fmt_expr(out, e, depth); out.push_str(" }"); return; } } }
             fmt_block(out, stmts, expr, depth);
         }
-        Expr::DoBlock { stmts, expr, .. } => { out.push_str("do "); fmt_block(out, stmts, expr, depth); }
+
         Expr::Fan { exprs, .. } => {
             out.push_str("fan {\n");
             for e in exprs {

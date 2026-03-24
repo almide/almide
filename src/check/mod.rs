@@ -307,7 +307,7 @@ impl Checker {
     /// Effect fns accept: Unit body (control-flow returns), unwrapped T, or full Result[T, E].
     fn constrain_effect_body(&mut self, name: &str, ret_ty: &Ty, body_ty: Ty) {
         let body_resolved = resolve_ty(&body_ty, &self.uf);
-        if body_resolved == Ty::Unit { return; } // do blocks, while loops, guard patterns return via control flow
+        if body_resolved == Ty::Unit { return; } // while loops, guard patterns return via control flow
         if let Ty::Applied(crate::types::TypeConstructorId::Result, args) = ret_ty {
             // ret_ty is Result[T, E]: body can be Result[T, E] or unwrapped T
             if args.len() >= 1 {

@@ -25,10 +25,7 @@ fn fold_expr(expr: &mut IrExpr) {
             for s in stmts { fold_stmt(s); }
             if let Some(t) = tail { fold_expr(t); }
         }
-        IrExprKind::DoBlock { stmts, expr: tail } => {
-            for s in stmts { fold_stmt(s); }
-            if let Some(t) = tail { fold_expr(t); }
-        }
+
         IrExprKind::If { cond, then, else_ } => {
             fold_expr(cond);
             fold_expr(then);

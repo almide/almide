@@ -175,7 +175,7 @@ fn is_pure_expr(
                 is_pure_expr(&arm.body, &arm_vars, effect_fns, mutable_vars)
             })
         }
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             let mut block_vars = local_vars.clone();
             for stmt in stmts {
                 if !is_pure_stmt(stmt, &block_vars, effect_fns, mutable_vars) {
@@ -405,10 +405,7 @@ fn rewrite_expr(
             stmts: rewrite_stmts(stmts, effect_fns, mutable_vars),
             expr: expr.map(|e| Box::new(rewrite_expr(*e, effect_fns, mutable_vars))),
         },
-        IrExprKind::DoBlock { stmts, expr } => IrExprKind::DoBlock {
-            stmts: rewrite_stmts(stmts, effect_fns, mutable_vars),
-            expr: expr.map(|e| Box::new(rewrite_expr(*e, effect_fns, mutable_vars))),
-        },
+
         IrExprKind::Match { subject, arms } => IrExprKind::Match {
             subject: Box::new(rewrite_expr(*subject, effect_fns, mutable_vars)),
             arms: arms.into_iter().map(|arm| IrMatchArm {

@@ -201,10 +201,7 @@ fn insert_derefs(expr: IrExpr, deref_ids: &HashSet<VarId>) -> IrExpr {
             stmts: insert_deref_stmts(stmts, deref_ids),
             expr: expr.map(|e| Box::new(insert_derefs(*e, deref_ids))),
         },
-        IrExprKind::DoBlock { stmts, expr } => IrExprKind::DoBlock {
-            stmts: insert_deref_stmts(stmts, deref_ids),
-            expr: expr.map(|e| Box::new(insert_derefs(*e, deref_ids))),
-        },
+
         IrExprKind::Match { subject, arms } => IrExprKind::Match {
             subject: Box::new(insert_derefs(*subject, deref_ids)),
             arms: arms.into_iter().map(|arm| IrMatchArm {
@@ -291,7 +288,7 @@ fn collect_from_expr(expr: &IrExpr, recursive_enums: &HashSet<String>, type_decl
             }
             collect_from_expr(subject, recursive_enums, type_decls, name_to_var, deref_vars);
         }
-        IrExprKind::Block { stmts, expr: e } | IrExprKind::DoBlock { stmts, expr: e } => {
+        IrExprKind::Block { stmts, expr: e } => {
             for s in stmts { collect_from_stmt(s, recursive_enums, type_decls, name_to_var, deref_vars); }
             if let Some(e) = e { collect_from_expr(e, recursive_enums, type_decls, name_to_var, deref_vars); }
         }

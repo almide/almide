@@ -106,10 +106,7 @@ fn erase_expr(expr: IrExpr) -> IrExpr {
             stmts: erase_stmts(stmts),
             expr: expr.map(|e| Box::new(erase_expr(*e))),
         },
-        IrExprKind::DoBlock { stmts, expr } => IrExprKind::DoBlock {
-            stmts: erase_stmts(stmts),
-            expr: expr.map(|e| Box::new(erase_expr(*e))),
-        },
+
         IrExprKind::Match { subject, arms } => IrExprKind::Match {
             subject: Box::new(erase_expr(*subject)),
             arms: arms.into_iter().map(|arm| IrMatchArm {

@@ -100,10 +100,7 @@ fn insert_clones(expr: IrExpr, clone_ids: &HashSet<VarId>) -> IrExpr {
             stmts: insert_clone_stmts(stmts, clone_ids),
             expr: expr.map(|e| Box::new(insert_clones(*e, clone_ids))),
         },
-        IrExprKind::DoBlock { stmts, expr } => IrExprKind::DoBlock {
-            stmts: insert_clone_stmts(stmts, clone_ids),
-            expr: expr.map(|e| Box::new(insert_clones(*e, clone_ids))),
-        },
+
         IrExprKind::Match { subject, arms } => IrExprKind::Match {
             subject: Box::new(insert_clones(*subject, clone_ids)),
             arms: arms.into_iter().map(|arm| IrMatchArm {

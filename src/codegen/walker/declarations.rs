@@ -165,7 +165,7 @@ pub fn collect_anon_records(program: &IrProgram, named: &HashMap<Vec<String>, St
 fn collect_anon_from_expr(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
     collect_anon_from_ty(&expr.ty, named, seen);
     match &expr.kind {
-        IrExprKind::Block { stmts, expr: e } | IrExprKind::DoBlock { stmts, expr: e } => {
+        IrExprKind::Block { stmts, expr: e } => {
             for s in stmts { collect_anon_from_stmt(s, named, seen); }
             if let Some(e) = e { collect_anon_from_expr(e, named, seen); }
         }

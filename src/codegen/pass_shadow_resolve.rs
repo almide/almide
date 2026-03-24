@@ -41,12 +41,7 @@ fn resolve_stmts_block(expr: &mut IrExpr, vt: &VarTable, seen: &mut HashMap<Stri
                 resolve_stmts_block(e, vt, seen);
             }
         }
-        IrExprKind::DoBlock { stmts, expr: tail } => {
-            resolve_stmts(stmts, vt, seen);
-            if let Some(e) = tail {
-                resolve_stmts_block(e, vt, seen);
-            }
-        }
+
         IrExprKind::If { cond, then, else_ } => {
             resolve_stmts_block(cond, vt, seen);
             let mut then_seen = seen.clone();

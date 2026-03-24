@@ -79,11 +79,11 @@ impl FuncCompiler<'_> {
                     }
                     // ResultOk/ResultErr in guard
                     crate::ir::IrExprKind::ResultOk { expr: inner } | crate::ir::IrExprKind::ResultErr { expr: inner } => {
-                        // ok(()) inside do block → break out of loop (not function return)
+                        // ok(()) inside loop → break out of loop (not function return)
                         let is_unit_ok = matches!(&else_.kind, crate::ir::IrExprKind::ResultOk { .. })
                             && matches!(&inner.ty, crate::types::Ty::Unit);
                         if is_unit_ok && self.loop_stack.last().is_some() {
-                            // Emit the ok(()) but then break out of the do block loop
+                            // Emit the ok(()) but then break out of the loop
                             self.emit_expr(else_);
                             if super::values::ty_to_valtype(&else_.ty).is_some() {
                                 wasm!(self.func, { drop; });
@@ -101,7 +101,7 @@ impl FuncCompiler<'_> {
                     _ => {
                         self.emit_expr(else_);
                         if let Some(labels) = self.loop_stack.last() {
-                            // Inside a loop/do block: drop value and break
+                            // Inside a loop: drop value and break
                             if super::values::ty_to_valtype(&else_.ty).is_some() {
                                 wasm!(self.func, { drop; });
                             }
@@ -293,7 +293,7 @@ pub fn collect_locals(body: &IrExpr, var_table: &crate::ir::VarTable) -> LocalSc
 
 fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::VarTable) {
     match &expr.kind {
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             for stmt in stmts { scan_stmt(stmt, locals, vt); }
             if let Some(e) = expr { scan_expr(e, locals, vt); }
         }

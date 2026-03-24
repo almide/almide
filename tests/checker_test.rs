@@ -442,9 +442,9 @@ fn check_underscore_prefix_no_warning() {
 // ---- Do blocks ----
 
 #[test]
-fn check_do_block() {
+fn check_effect_block() {
     has_no_errors(
-        "effect fn read() -> Result[String, String] = ok(\"data\")\neffect fn main(_a: List[String]) -> Result[Unit, String] = do {\n  let data = read()\n  println(data)\n  ok(())\n}"
+        "effect fn read() -> Result[String, String] = ok(\"data\")\neffect fn main(_a: List[String]) -> Result[Unit, String] = {\n  let data = read()\n  println(data)\n  ok(())\n}"
     );
 }
 

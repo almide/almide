@@ -47,7 +47,7 @@ fn rewrite_expr(expr: &mut IrExpr) {
         IrExprKind::BinOp { left, right, .. } => { rewrite_expr(left); rewrite_expr(right); }
         IrExprKind::UnOp { operand, .. } => rewrite_expr(operand),
         IrExprKind::If { cond, then, else_ } => { rewrite_expr(cond); rewrite_expr(then); rewrite_expr(else_); }
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             for s in stmts { rewrite_stmt(s); }
             if let Some(e) = expr { rewrite_expr(e); }
         }

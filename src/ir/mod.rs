@@ -211,7 +211,6 @@ pub enum IrExprKind {
     If { cond: Box<IrExpr>, then: Box<IrExpr>, else_: Box<IrExpr> },
     Match { subject: Box<IrExpr>, arms: Vec<IrMatchArm> },
     Block { stmts: Vec<IrStmt>, expr: Option<Box<IrExpr>> },
-    DoBlock { stmts: Vec<IrStmt>, expr: Option<Box<IrExpr>> },
     Fan { exprs: Vec<IrExpr> },
 
     // ── Loops ──

@@ -135,7 +135,7 @@ fn audit_expr(expr: &IrExpr, fn_name: &str, vt: &VarTable) {
             audit_expr(subject, fn_name, vt);
             for arm in arms { audit_expr(&arm.body, fn_name, vt); }
         }
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             for s in stmts { audit_stmt(s, fn_name, vt); }
             if let Some(e) = expr { audit_expr(e, fn_name, vt); }
         }

@@ -15,7 +15,7 @@ pub(super) fn eliminate_dead_code(program: &mut IrProgram) {
 
 fn dce_expr(expr: &mut IrExpr, var_table: &VarTable) {
     match &mut expr.kind {
-        IrExprKind::Block { stmts, expr: tail } | IrExprKind::DoBlock { stmts, expr: tail } => {
+        IrExprKind::Block { stmts, expr: tail } => {
             for s in stmts.iter_mut() { dce_stmt(s, var_table); }
             dce_stmts(stmts, var_table);
             if let Some(t) = tail { dce_expr(t, var_table); }

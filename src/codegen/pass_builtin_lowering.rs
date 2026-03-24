@@ -196,10 +196,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
             stmts: rewrite_stmts(stmts),
             expr: expr.map(|e| Box::new(rewrite_expr(*e))),
         },
-        IrExprKind::DoBlock { stmts, expr } => IrExprKind::DoBlock {
-            stmts: rewrite_stmts(stmts),
-            expr: expr.map(|e| Box::new(rewrite_expr(*e))),
-        },
+
         IrExprKind::Match { subject, arms } => IrExprKind::Match {
             subject: Box::new(rewrite_expr(*subject)),
             arms: arms.into_iter().map(|arm| IrMatchArm {

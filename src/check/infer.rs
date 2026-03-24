@@ -208,7 +208,7 @@ impl Checker {
                 }
             }
 
-            ast::Expr::Block { stmts, expr, .. } | ast::Expr::DoBlock { stmts, expr, .. } => {
+            ast::Expr::Block { stmts, expr, .. } => {
                 self.env.push_scope();
                 for stmt in stmts.iter_mut() { self.check_stmt(stmt); }
                 let ty = if let Some(e) = expr { self.infer_expr(e) } else { Ty::Unit };

@@ -69,10 +69,7 @@ fn rewrite_expr(expr: IrExpr, inside_fan: bool) -> IrExpr {
             stmts: rewrite_stmts(stmts, inside_fan),
             expr: expr.map(|e| Box::new(rewrite_expr(*e, inside_fan))),
         },
-        IrExprKind::DoBlock { stmts, expr } => IrExprKind::DoBlock {
-            stmts: rewrite_stmts(stmts, inside_fan),
-            expr: expr.map(|e| Box::new(rewrite_expr(*e, inside_fan))),
-        },
+
         IrExprKind::If { cond, then, else_ } => IrExprKind::If {
             cond: Box::new(rewrite_expr(*cond, inside_fan)),
             then: Box::new(rewrite_expr(*then, inside_fan)),

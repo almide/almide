@@ -29,7 +29,7 @@ fn collect_constants(expr: &IrExpr) -> HashMap<VarId, IrExpr> {
 
 fn collect_constants_inner(expr: &IrExpr, out: &mut HashMap<VarId, IrExpr>) {
     match &expr.kind {
-        IrExprKind::Block { stmts, expr: tail } | IrExprKind::DoBlock { stmts, expr: tail } => {
+        IrExprKind::Block { stmts, expr: tail } => {
             for s in stmts {
                 if let IrStmtKind::Bind { var, value, mutability, .. } = &s.kind {
                     if matches!(mutability, Mutability::Let) && is_propagatable(value) {
@@ -68,7 +68,7 @@ fn propagate_expr(expr: &mut IrExpr, constants: &HashMap<VarId, IrExpr>) {
             propagate_expr(right, constants);
         }
         IrExprKind::UnOp { operand, .. } => propagate_expr(operand, constants),
-        IrExprKind::Block { stmts, expr: tail } | IrExprKind::DoBlock { stmts, expr: tail } => {
+        IrExprKind::Block { stmts, expr: tail } => {
             for s in stmts { propagate_stmt(s, constants); }
             if let Some(t) = tail { propagate_expr(t, constants); }
         }

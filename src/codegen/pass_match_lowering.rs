@@ -72,10 +72,7 @@ fn rewrite_expr(expr: IrExpr, vt: &mut VarTable) -> IrExpr {
             stmts: rewrite_stmts(stmts, vt),
             expr: e.map(|e| Box::new(rewrite_expr(*e, vt))),
         },
-        IrExprKind::DoBlock { stmts, expr: e } => IrExprKind::DoBlock {
-            stmts: rewrite_stmts(stmts, vt),
-            expr: e.map(|e| Box::new(rewrite_expr(*e, vt))),
-        },
+
         IrExprKind::BinOp { op, left, right } => IrExprKind::BinOp {
             op,
             left: Box::new(rewrite_expr(*left, vt)),

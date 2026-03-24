@@ -65,7 +65,7 @@ fn fold_expr(expr: &mut IrExpr) {
             fold_expr(right);
         }
         IrExprKind::UnOp { operand, .. } => fold_expr(operand),
-        IrExprKind::Block { stmts, expr: tail } | IrExprKind::DoBlock { stmts, expr: tail } => {
+        IrExprKind::Block { stmts, expr: tail } => {
             for s in stmts { fold_stmt(s); }
             if let Some(t) = tail { fold_expr(t); }
         }

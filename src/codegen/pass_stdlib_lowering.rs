@@ -174,10 +174,6 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
             stmts: rewrite_stmts(stmts),
             expr: expr.map(|e| Box::new(rewrite_expr(*e))),
         },
-        IrExprKind::DoBlock { stmts, expr } => IrExprKind::DoBlock {
-            stmts: rewrite_stmts(stmts),
-            expr: expr.map(|e| Box::new(rewrite_expr(*e))),
-        },
         IrExprKind::Match { subject, arms } => IrExprKind::Match {
             subject: Box::new(rewrite_expr(*subject)),
             arms: arms.into_iter().map(|arm| IrMatchArm {
@@ -378,10 +374,6 @@ fn resolve_unresolved_ufcs(expr: IrExpr, siblings: &[String]) -> IrExpr {
             else_: Box::new(resolve_unresolved_ufcs(*else_, siblings)),
         },
         IrExprKind::Block { stmts, expr } => IrExprKind::Block {
-            stmts: resolve_ufcs_stmts(stmts, siblings),
-            expr: expr.map(|e| Box::new(resolve_unresolved_ufcs(*e, siblings))),
-        },
-        IrExprKind::DoBlock { stmts, expr } => IrExprKind::DoBlock {
             stmts: resolve_ufcs_stmts(stmts, siblings),
             expr: expr.map(|e| Box::new(resolve_unresolved_ufcs(*e, siblings))),
         },
@@ -663,10 +655,6 @@ fn prefix_intra_module_calls(expr: IrExpr, mod_name: &str, siblings: &[String]) 
             else_: Box::new(prefix_intra_module_calls(*else_, mod_name, siblings)),
         },
         IrExprKind::Block { stmts, expr } => IrExprKind::Block {
-            stmts: prefix_stmts(stmts, mod_name, siblings),
-            expr: expr.map(|e| Box::new(prefix_intra_module_calls(*e, mod_name, siblings))),
-        },
-        IrExprKind::DoBlock { stmts, expr } => IrExprKind::DoBlock {
             stmts: prefix_stmts(stmts, mod_name, siblings),
             expr: expr.map(|e| Box::new(prefix_intra_module_calls(*e, mod_name, siblings))),
         },

@@ -115,15 +115,6 @@ impl<'a> IrVisitor for Verifier<'a> {
                 return;
             }
 
-            // ── DoBlock with guards acts as a loop (break is valid) ──
-            IrExprKind::DoBlock { .. } => {
-                let prev = self.in_loop;
-                self.in_loop = true;
-                walk_expr(self, expr);
-                self.in_loop = prev;
-                return;
-            }
-
             // ── Lambda: check param VarIds before walking body ──
             IrExprKind::Lambda { params, .. } => {
                 for (var, _) in params {
@@ -767,27 +758,6 @@ mod tests {
         let errors = verify_program(&prog);
         assert_eq!(errors.len(), 1);
         assert!(errors[0].message.contains("duplicate parameter VarId"));
-    }
-
-    #[test]
-    fn allows_break_inside_do_block() {
-        let vt = VarTable::new();
-        let body = IrExpr {
-            kind: IrExprKind::DoBlock {
-                stmts: vec![IrStmt {
-                    kind: IrStmtKind::Expr {
-                        expr: IrExpr { kind: IrExprKind::Break, ty: Ty::Unit, span: None },
-                    },
-                    span: None,
-                }],
-                expr: None,
-            },
-            ty: Ty::Unit,
-            span: None,
-        };
-        let prog = make_program(vec![make_fn("main", body)], vt);
-        let errors = verify_program(&prog);
-        assert!(errors.is_empty());
     }
 
     #[test]
