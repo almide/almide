@@ -10,6 +10,9 @@
 | [Effect System](active/effect-system.md) | Phase 3-4 残 | Phase 3 |
 | [HTTPS Native](active/https-native.md) | rustls統合済。almide build対応+WASM残 | Phase 1 |
 | [Compiler Architecture 10/10](active/compiler-architecture-10.md) | 95/110. Phase 5-7 残 | Architecture |
+| [Cross-Target Parity Matrix](active/cross-target-parity-matrix.md) | Rust/TS/WASM 3ターゲットの挙動差異を体系検証 | Phase 2 |
+| [IR Optimization Tier 2](active/ir-optimization-tier2.md) | LICM, CSE, Inlining — 全ターゲットに効く IR 最適化 | Architecture |
+| [Emit Readability](active/emit-readability.md) | 生成コードの可読性向上 (空行・コメント保持) | Phase 1 |
 
 ## 1.0 Remaining
 
