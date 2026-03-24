@@ -1,7 +1,7 @@
 # Compiler Architecture: All 10s [ACTIVE]
 
 **目標**: コンパイラアーキテクチャ全項目 10/10
-**現状**: 99/110 → Phase 4 完了、今日: LICM/ResultPropagation/Checker/Import制御
+**現状**: 101/110 → Phase 4 完了、build.rs分割完了
 **スコープ**: WASM codegen を含む全コンパイラ基盤
 
 ---
@@ -19,10 +19,10 @@
 | エラー診断 | 9 | **10** | 10 | ✅ E003 --explain 既に登録済 |
 | コード品質 | 7 | **9** | 10 | ✅ 巨大ファイル全分割、ホワイトリスト廃止。残: string interning、clone 削減 |
 | テスト | 8 | 8 | 10 | 未着手。nanopass テスト、fuzzing、ベンチマーク |
-| ビルドシステム | 7 | 7 | 10 | 未着手。build.rs 分割 |
+| ビルドシステム | 7 | **9** | 10 | ✅ build.rs分割 (1237行→3モジュール)。残: build cache最適化 |
 | Codegen統合 | 5 | **9** | 10 | ✅ Target::Wasm pipeline統合済、✅ codegen()統一 (PR#92)。残: stdlib dispatch一元化 |
 
-**合計: 64/100 → 99/110 (Codegen統合を追加した11領域)**
+**合計: 64/100 → 101/110 (Codegen統合を追加した11領域)**
 
 ---
 
