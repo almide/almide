@@ -298,6 +298,7 @@ impl Checker {
         let body_resolved = resolve_ty(&body_ty, &self.uf);
         if body_resolved == Ty::Unit { return; } // do blocks, while loops, guard patterns return via control flow
         if let Ty::Applied(crate::types::TypeConstructorId::Result, args) = ret_ty {
+            // ret_ty is Result[T, E]: body can be Result[T, E] or unwrapped T
             if args.len() >= 1 {
                 let ok = &args[0];
                 if body_resolved.is_result() {
@@ -305,6 +306,13 @@ impl Checker {
                 } else {
                     self.constrain(ok.clone(), body_ty, format!("fn '{}'", name));
                 }
+                return;
+            }
+        }
+        // ret_ty is non-Result (e.g. String): body can be T or Result[T, E] (auto-unwrapped)
+        if let Ty::Applied(crate::types::TypeConstructorId::Result, ref args) = body_resolved {
+            if args.len() >= 1 {
+                self.constrain(ret_ty.clone(), args[0].clone(), format!("fn '{}'", name));
                 return;
             }
         }
