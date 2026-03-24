@@ -3,23 +3,19 @@
 
 {
   "name": "keyword.control.almide",
-  "match": "\\b(if|then|else|match|for|in|while|do|guard)\\b"
+  "match": "\\b(if|then|else|match|for|in|while|guard)\\b"
 },
 {
   "name": "keyword.declaration.almide",
-  "match": "\\b(fn|type|trait|impl|let|var|test|import|module|newtype)\\b"
+  "match": "\\b(fn|type|protocol|impl|let|var|test|import|module|newtype)\\b"
 },
 {
   "name": "keyword.control.flow.almide",
-  "match": "\\b(try|await|break|continue)\\b"
+  "match": "\\b(break|continue|fan)\\b"
 },
 {
   "name": "storage.modifier.almide",
-  "match": "\\b(pub|local|mod|effect|async|strict|deriving)\\b"
-},
-{
-  "name": "keyword.other.almide",
-  "match": "\\b(unsafe)\\b"
+  "match": "\\b(pub|local|mod|effect|strict)\\b"
 },
 {
   "name": "constant.language.almide",
