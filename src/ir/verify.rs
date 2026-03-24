@@ -67,6 +67,10 @@ impl<'a> Verifier<'a> {
     }
 
     fn check_var_defined(&mut self, id: VarId, span: Option<Span>) {
+        // Skip if already out of bounds (reported by check_var_id)
+        if (id.0 as usize) >= self.var_table.len() {
+            return;
+        }
         if !self.defined_vars.contains(&id.0) {
             self.err(
                 format!("VarId({}) used but never defined (no Bind/param/pattern)", id.0),
