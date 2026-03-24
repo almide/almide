@@ -28,19 +28,19 @@ impl NanoPass for MatchLoweringPass {
     fn run(&self, program: &mut IrProgram, _target: Target) {
         // Rewrite all functions
         for func in &mut program.functions {
-            func.body = rewrite_expr(func.body.clone(), &mut program.var_table);
+            func.body = rewrite_expr(std::mem::take(&mut func.body), &mut program.var_table);
         }
         // Rewrite top-level lets
         for tl in &mut program.top_lets {
-            tl.value = rewrite_expr(tl.value.clone(), &mut program.var_table);
+            tl.value = rewrite_expr(std::mem::take(&mut tl.value), &mut program.var_table);
         }
         // Rewrite module functions and top_lets (each module has its own var_table)
         for module in &mut program.modules {
             for func in &mut module.functions {
-                func.body = rewrite_expr(func.body.clone(), &mut module.var_table);
+                func.body = rewrite_expr(std::mem::take(&mut func.body), &mut module.var_table);
             }
             for tl in &mut module.top_lets {
-                tl.value = rewrite_expr(tl.value.clone(), &mut module.var_table);
+                tl.value = rewrite_expr(std::mem::take(&mut tl.value), &mut module.var_table);
             }
         }
     }

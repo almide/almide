@@ -129,10 +129,10 @@ pub fn collect_deref_vars(program: &IrProgram) -> (HashSet<VarId>, HashSet<Strin
 pub fn insert_deref_nodes(program: &mut IrProgram, deref_ids: &HashSet<VarId>) {
     if deref_ids.is_empty() { return; }
     for func in &mut program.functions {
-        func.body = insert_derefs(func.body.clone(), deref_ids);
+        func.body = insert_derefs(std::mem::take(&mut func.body), deref_ids);
     }
     for tl in &mut program.top_lets {
-        tl.value = insert_derefs(tl.value.clone(), deref_ids);
+        tl.value = insert_derefs(std::mem::take(&mut tl.value), deref_ids);
     }
 }
 
@@ -156,10 +156,10 @@ pub fn collect_module_deref_vars(module: &IrModule, all_type_decls: &[IrTypeDecl
 pub fn insert_module_deref_nodes(module: &mut IrModule, deref_ids: &HashSet<VarId>) {
     if deref_ids.is_empty() { return; }
     for func in &mut module.functions {
-        func.body = insert_derefs(func.body.clone(), deref_ids);
+        func.body = insert_derefs(std::mem::take(&mut func.body), deref_ids);
     }
     for tl in &mut module.top_lets {
-        tl.value = insert_derefs(tl.value.clone(), deref_ids);
+        tl.value = insert_derefs(std::mem::take(&mut tl.value), deref_ids);
     }
 }
 

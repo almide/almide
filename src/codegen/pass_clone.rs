@@ -24,19 +24,19 @@ impl NanoPass for CloneInsertionPass {
     fn run(&self, program: &mut IrProgram, _target: Target) {
         let clone_ids = collect_clone_ids(&program.var_table);
         for func in &mut program.functions {
-            func.body = insert_clones(func.body.clone(), &clone_ids);
+            func.body = insert_clones(std::mem::take(&mut func.body), &clone_ids);
         }
         for tl in &mut program.top_lets {
-            tl.value = insert_clones(tl.value.clone(), &clone_ids);
+            tl.value = insert_clones(std::mem::take(&mut tl.value), &clone_ids);
         }
         // Process module functions (each module has its own var_table)
         for module in &mut program.modules {
             let module_clone_ids = collect_clone_ids(&module.var_table);
             for func in &mut module.functions {
-                func.body = insert_clones(func.body.clone(), &module_clone_ids);
+                func.body = insert_clones(std::mem::take(&mut func.body), &module_clone_ids);
             }
             for tl in &mut module.top_lets {
-                tl.value = insert_clones(tl.value.clone(), &module_clone_ids);
+                tl.value = insert_clones(std::mem::take(&mut tl.value), &module_clone_ids);
             }
         }
     }

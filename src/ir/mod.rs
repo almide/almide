@@ -177,6 +177,16 @@ pub struct IrExpr {
     pub span: Option<Span>,
 }
 
+impl Default for IrExpr {
+    fn default() -> Self {
+        IrExpr {
+            kind: IrExprKind::Unit,
+            ty: Ty::Unit,
+            span: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum IrExprKind {

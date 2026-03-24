@@ -26,17 +26,17 @@ impl NanoPass for BuiltinLoweringPass {
     fn depends_on(&self) -> Vec<&'static str> { vec!["ResultPropagation"] }
     fn run(&self, program: &mut IrProgram, _target: Target) {
         for func in &mut program.functions {
-            func.body = rewrite_expr(func.body.clone());
+            func.body = rewrite_expr(std::mem::take(&mut func.body));
         }
         for tl in &mut program.top_lets {
-            tl.value = rewrite_expr(tl.value.clone());
+            tl.value = rewrite_expr(std::mem::take(&mut tl.value));
         }
         for module in &mut program.modules {
             for func in &mut module.functions {
-                func.body = rewrite_expr(func.body.clone());
+                func.body = rewrite_expr(std::mem::take(&mut func.body));
             }
             for tl in &mut module.top_lets {
-                tl.value = rewrite_expr(tl.value.clone());
+                tl.value = rewrite_expr(std::mem::take(&mut tl.value));
             }
         }
     }

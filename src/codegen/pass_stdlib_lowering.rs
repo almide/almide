@@ -19,18 +19,18 @@ impl NanoPass for StdlibLoweringPass {
     fn depends_on(&self) -> Vec<&'static str> { vec!["EffectInference"] }
     fn run(&self, program: &mut IrProgram, _target: Target) {
         for func in &mut program.functions {
-            func.body = rewrite_expr(func.body.clone());
+            func.body = rewrite_expr(std::mem::take(&mut func.body));
         }
         for tl in &mut program.top_lets {
-            tl.value = rewrite_expr(tl.value.clone());
+            tl.value = rewrite_expr(std::mem::take(&mut tl.value));
         }
         // Process module functions and top_lets
         for module in &mut program.modules {
             for func in &mut module.functions {
-                func.body = rewrite_expr(func.body.clone());
+                func.body = rewrite_expr(std::mem::take(&mut func.body));
             }
             for tl in &mut module.top_lets {
-                tl.value = rewrite_expr(tl.value.clone());
+                tl.value = rewrite_expr(std::mem::take(&mut tl.value));
             }
         }
         // Resolve remaining bare UFCS calls in module bodies (checker doesn't fully type them)
@@ -39,10 +39,10 @@ impl NanoPass for StdlibLoweringPass {
                 .map(|f| f.name.clone())
                 .collect();
             for func in &mut module.functions {
-                func.body = resolve_unresolved_ufcs(func.body.clone(), &sibling_names);
+                func.body = resolve_unresolved_ufcs(std::mem::take(&mut func.body), &sibling_names);
             }
             for tl in &mut module.top_lets {
-                tl.value = resolve_unresolved_ufcs(tl.value.clone(), &sibling_names);
+                tl.value = resolve_unresolved_ufcs(std::mem::take(&mut tl.value), &sibling_names);
             }
         }
         // Prefix intra-module Named calls to match renamed definitions
@@ -52,10 +52,10 @@ impl NanoPass for StdlibLoweringPass {
                 .collect();
             let mod_name = module.name.clone();
             for func in &mut module.functions {
-                func.body = prefix_intra_module_calls(func.body.clone(), &mod_name, &sibling_names);
+                func.body = prefix_intra_module_calls(std::mem::take(&mut func.body), &mod_name, &sibling_names);
             }
             for tl in &mut module.top_lets {
-                tl.value = prefix_intra_module_calls(tl.value.clone(), &mod_name, &sibling_names);
+                tl.value = prefix_intra_module_calls(std::mem::take(&mut tl.value), &mod_name, &sibling_names);
             }
         }
     }

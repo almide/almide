@@ -26,27 +26,27 @@ impl NanoPass for ResultPropagationPass {
             if func.is_effect && !func.is_test {
                 // Effect fns: insert Try around Result-returning calls
                 let returns_result = func.ret_ty.is_result();
-                func.body = insert_try_body(func.body.clone(), returns_result);
+                func.body = insert_try_body(std::mem::take(&mut func.body), returns_result);
                 // Collect VarId→unwrapped type mappings from Try-wrapped bindings
                 collect_retyped_vars(&func.body, &mut retyped_vars);
                 // Fix Var reference types throughout the function body
                 if !retyped_vars.is_empty() {
-                    func.body = fix_var_types(func.body.clone(), &retyped_vars);
+                    func.body = fix_var_types(std::mem::take(&mut func.body), &retyped_vars);
                     retyped_vars.clear();
                 }
             } else if func.is_test {
                 // Test fns: insert Try only inside fan blocks (fan auto-unwraps Results)
-                func.body = insert_try_in_fan(func.body.clone());
+                func.body = insert_try_in_fan(std::mem::take(&mut func.body));
             }
         }
         for module in &mut program.modules {
             for func in &mut module.functions {
                 if func.is_effect && !func.is_test {
                     let returns_result = func.ret_ty.is_result();
-                    func.body = insert_try_body(func.body.clone(), returns_result);
+                    func.body = insert_try_body(std::mem::take(&mut func.body), returns_result);
                     collect_retyped_vars(&func.body, &mut retyped_vars);
                     if !retyped_vars.is_empty() {
-                        func.body = fix_var_types(func.body.clone(), &retyped_vars);
+                        func.body = fix_var_types(std::mem::take(&mut func.body), &retyped_vars);
                         retyped_vars.clear();
                     }
                 }

@@ -331,7 +331,7 @@ fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) {
         .collect();
 
     // Rewrite the body expression
-    let old_body = func.body.clone();
+    let old_body = std::mem::take(&mut func.body);
     let is_effect = func.is_effect;
     let rewritten = rewrite_tail_expr(old_body, &fn_name, &params, &temps, result_var, is_effect);
 

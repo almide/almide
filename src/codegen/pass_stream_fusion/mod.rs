@@ -112,7 +112,7 @@ fn fuse_all(func: &mut IrFunction, var_table: &mut VarTable) -> FusionCounts {
     // FilterMapFoldFusion: fold(filter_map(x, fm), init, g) → single-pass fold
     {
         let mut count = 0;
-        func.body = recursive_transform(func.body.clone(), &mut |e| {
+        func.body = recursive_transform(std::mem::take(&mut func.body), &mut |e| {
             try_fuse_filter_map_fold(e, &mut count, var_table)
         });
         counts.filter_map_fold = count;
@@ -121,7 +121,7 @@ fn fuse_all(func: &mut IrFunction, var_table: &mut VarTable) -> FusionCounts {
     // RangeFoldFusion: fold(range(start, end), init, g) → for loop
     {
         let mut count = 0;
-        func.body = recursive_transform(func.body.clone(), &mut |e| {
+        func.body = recursive_transform(std::mem::take(&mut func.body), &mut |e| {
             try_fuse_range_fold(e, &mut count, var_table)
         });
         counts.range_fold = count;
@@ -136,7 +136,7 @@ fn fuse_counting(
     try_transform: fn(IrExpr) -> Option<IrExpr>,
 ) -> usize {
     let mut count = 0usize;
-    *body = recursive_transform(body.clone(), &mut |e| {
+    *body = recursive_transform(std::mem::take(body), &mut |e| {
         if let Some(fused) = try_transform(e) {
             count += 1;
             Some(fused)
