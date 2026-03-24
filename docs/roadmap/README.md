@@ -6,7 +6,6 @@
 
 | 項目 | 説明 | Grand Plan |
 |---|---|---|
-| [User Generics & Protocol](active/user-generics-and-traits.md) | Protocol System 実装中 | Phase 3 |
 | [Effect System](active/effect-system.md) | Phase 3-4 残 | Phase 3 |
 | [HTTPS Native](active/https-native.md) | rustls統合済。almide build対応+WASM残 | Phase 1 |
 | [Compiler Architecture 10/10](active/compiler-architecture-10.md) | 95/110. Phase 5-7 残 | Architecture |
@@ -34,7 +33,7 @@
 | [Platform Architecture](on-hold/platform-architecture.md) | 5層 app runtime ビジョン | Phase 3-5 |
 | [Security Model](on-hold/security-model.md) | Layer 3-5, capability | Phase 3 |
 | [Effect Type Integration](on-hold/effect-type-integration.md) | FnType に EffectSet を持たせる (構文変更なし) | Phase 3 |
-| ~~Trait System~~ | → Protocol System (active) に統合 | — |
+| ~~Trait System~~ | → Protocol System (done) に統合 | — |
 | [Secure by Design](on-hold/secure-by-design.md) | | Phase 3 |
 | [Async Backend](on-hold/async-backend.md) | tokio opt-in runtime | Phase 3 |
 | [Supervision & Actors](on-hold/supervision-and-actors.md) | | Phase 3 |
@@ -217,3 +216,4 @@
 - [Compiler Bugs v0.8.4](done/compiler-bugs.md) — 12バグ全修正、400+ テスト追加
 - [Stdlib Scope Reduction](done/stdlib-scope-reduction.md) — uuid/crypto削除、toml/compress/term除外、22モジュール381関数に確定
 - [Stdlib Additions](done/stdlib-additions.md) — set モジュール 11→20関数 (symmetric_difference, is_subset, is_disjoint, filter, map, fold, each, any, all)
+- [User Generics & Protocol](done/user-generics-and-traits.md) — ユーザー定義 generics, protocol 定義/満足検証, impl ブロック, generic bounds [T: P1 + P2], モノモーフィゼーション
