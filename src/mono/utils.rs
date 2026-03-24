@@ -39,7 +39,7 @@ pub(super) fn mangle_ty(ty: &Ty) -> String {
         Ty::Bool => "Bool".into(),
         Ty::Applied(crate::types::TypeConstructorId::List, args) if args.len() == 1 => format!("List_{}", mangle_ty(&args[0])),
         Ty::Applied(id, args) => {
-            let name = format!("{:?}", id);
+            let name = id.to_string();
             if args.is_empty() { name } else {
                 let arg_strs: Vec<String> = args.iter().map(mangle_ty).collect();
                 format!("{}_{}", name, arg_strs.join("_"))

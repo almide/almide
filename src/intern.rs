@@ -45,7 +45,7 @@ impl Sym {
 
 impl fmt::Debug for Sym {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Sym({})", resolve(*self))
+        write!(f, "{}", resolve(*self))
     }
 }
 

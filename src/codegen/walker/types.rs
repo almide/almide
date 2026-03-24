@@ -78,7 +78,7 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
         Ty::Applied(id, args) => {
             let name = match id {
                 TypeConstructorId::UserDefined(n) => n.as_str(),
-                _ => return format!("{:?}", id),
+                _ => return id.to_string(),
             };
             if args.is_empty() {
                 name.to_string()

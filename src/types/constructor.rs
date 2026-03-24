@@ -271,6 +271,24 @@ impl TypeConstructorRegistry {
     }
 }
 
+impl std::fmt::Display for TypeConstructorId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TypeConstructorId::Int => write!(f, "Int"),
+            TypeConstructorId::Float => write!(f, "Float"),
+            TypeConstructorId::String => write!(f, "String"),
+            TypeConstructorId::Bool => write!(f, "Bool"),
+            TypeConstructorId::Unit => write!(f, "Unit"),
+            TypeConstructorId::List => write!(f, "List"),
+            TypeConstructorId::Option => write!(f, "Option"),
+            TypeConstructorId::Result => write!(f, "Result"),
+            TypeConstructorId::Map => write!(f, "Map"),
+            TypeConstructorId::Tuple => write!(f, "Tuple"),
+            TypeConstructorId::UserDefined(name) => write!(f, "{}", name),
+        }
+    }
+}
+
 impl Default for TypeConstructorRegistry {
     fn default() -> Self {
         Self::new()
