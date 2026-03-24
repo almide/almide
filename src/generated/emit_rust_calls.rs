@@ -399,6 +399,11 @@ pub fn gen_generated_call(
             ("regex", "replace") => format!("almide_regex_replace(&{}, &{}, &{})", args_str[0], args_str[1], args_str[2]),
             ("regex", "replace_first") => format!("almide_regex_replace_first(&{}, &{}, &{})", args_str[0], args_str[1], args_str[2]),
             ("regex", "split") => format!("almide_regex_split(&{}, &{})", args_str[0], args_str[1]),
+            ("result", "collect") => format!("almide_rt_result_collect(({}).to_vec())", args_str[0]),
+            ("result", "collect_map") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
+                format!("almide_rt_result_collect_map(({}).to_vec(), |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
+            },
             ("result", "flat_map") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
                 format!("({}).and_then(|{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body)
@@ -413,6 +418,7 @@ pub fn gen_generated_call(
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
                 format!("({}).map_err(|{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body)
             },
+            ("result", "partition") => format!("almide_rt_result_partition(({}).to_vec())", args_str[0]),
             ("result", "to_err_option") => format!("({}).err()", args_str[0]),
             ("result", "to_option") => format!("({}).ok()", args_str[0]),
             ("result", "unwrap_or") => format!("({}).unwrap_or({})", args_str[0], args_str[1]),

@@ -90,3 +90,33 @@ params = [{ name = "r", type = "Result[A, E]" }]
 return = "Option[E]"
 rust = "({r}).err()"
 ts = "__almd_result_to_err_option({r})"
+
+[collect]
+description = "Collect a list of Results. All ok → ok(values), any err → err(all_errors)."
+example = 'result.collect([ok(1), ok(2), ok(3)]) // => ok([1, 2, 3])'
+type_params = ["T", "E"]
+params = [{ name = "rs", type = "List[Result[T, E]]" }]
+return = "Result[List[T], List[E]]"
+rust = "almide_rt_result_collect(({rs}).to_vec())"
+ts = "__almd_result_collect({rs})"
+
+[partition]
+description = "Partition a list of Results into ok values and err values."
+example = 'result.partition([ok(1), err("x"), ok(2)]) // => ([1, 2], ["x"])'
+type_params = ["T", "E"]
+params = [{ name = "rs", type = "List[Result[T, E]]" }]
+return = "(List[T], List[E])"
+rust = "almide_rt_result_partition(({rs}).to_vec())"
+ts = "__almd_result_partition({rs})"
+
+[collect_map]
+description = "Map a function over a list and collect Results. All ok → ok(values), any err → err(all_errors)."
+example = 'result.collect_map([1, 2, 3], fn(x) => if x > 0 then ok(x) else err("neg"))'
+type_params = ["T", "U", "E"]
+params = [
+    { name = "xs", type = "List[T]" },
+    { name = "f", type = "Fn[T] -> Result[U, E]" },
+]
+return = "Result[List[U], List[E]]"
+rust = "almide_rt_result_collect_map(({xs}).to_vec(), |{f.args}| {{ {f.clone_bindings}{f.body} }})"
+ts = "__almd_result_collect_map({xs}, {f.args} => {f.body})"

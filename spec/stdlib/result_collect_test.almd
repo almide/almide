@@ -1,0 +1,99 @@
+// result collect/partition/collect_map tests
+
+// ── result.collect ──
+
+test "result.collect all ok" {
+  let rs: List[Result[Int, String]] = [ok(1), ok(2), ok(3)]
+  let collected = result.collect(rs)
+  assert_eq(collected, ok([1, 2, 3]))
+}
+
+test "result.collect all err" {
+  let rs: List[Result[Int, String]] = [err("a"), err("b")]
+  let collected = result.collect(rs)
+  assert_eq(collected, err(["a", "b"]))
+}
+
+test "result.collect mixed" {
+  let rs: List[Result[Int, String]] = [ok(1), err("x"), ok(3), err("y")]
+  let collected = result.collect(rs)
+  assert_eq(collected, err(["x", "y"]))
+}
+
+test "result.collect empty" {
+  let rs: List[Result[Int, String]] = []
+  let collected = result.collect(rs)
+  assert_eq(collected, ok([]))
+}
+
+test "result.collect single ok" {
+  let rs: List[Result[Int, String]] = [ok(42)]
+  assert_eq(result.collect(rs), ok([42]))
+}
+
+test "result.collect single err" {
+  let rs: List[Result[Int, String]] = [err("fail")]
+  assert_eq(result.collect(rs), err(["fail"]))
+}
+
+// ── result.partition ──
+
+test "result.partition mixed" {
+  let rs: List[Result[Int, String]] = [ok(1), err("x"), ok(2), err("y")]
+  let (oks, errs) = result.partition(rs)
+  assert_eq(oks, [1, 2])
+  assert_eq(errs, ["x", "y"])
+}
+
+test "result.partition all ok" {
+  let rs: List[Result[Int, String]] = [ok(1), ok(2), ok(3)]
+  let (oks, errs) = result.partition(rs)
+  assert_eq(oks, [1, 2, 3])
+  assert_eq(errs, [])
+}
+
+test "result.partition all err" {
+  let rs: List[Result[Int, String]] = [err("a"), err("b")]
+  let (oks, errs) = result.partition(rs)
+  assert_eq(oks, [])
+  assert_eq(errs, ["a", "b"])
+}
+
+test "result.partition empty" {
+  let rs: List[Result[Int, String]] = []
+  let (oks, errs) = result.partition(rs)
+  assert_eq(oks, [])
+  assert_eq(errs, [])
+}
+
+// ── result.collect_map ──
+
+test "result.collect_map all ok" {
+  let xs = [1, 2, 3]
+  let collected: Result[List[Int], List[String]] = result.collect_map(xs, (x) => ok(x * 10))
+  assert_eq(collected, ok([10, 20, 30]))
+}
+
+test "result.collect_map some err" {
+  let xs = [1, -2, 3, -4]
+  let collected = result.collect_map(xs, (x) => if x > 0 then ok(x) else err("negative"))
+  assert_eq(collected, err(["negative", "negative"]))
+}
+
+test "result.collect_map all err" {
+  let xs = [-1, -2]
+  let collected = result.collect_map(xs, (x) => if x > 0 then ok(x) else err("neg"))
+  assert_eq(collected, err(["neg", "neg"]))
+}
+
+test "result.collect_map empty" {
+  let xs: List[Int] = []
+  let collected: Result[List[Int], List[String]] = result.collect_map(xs, (x) => ok(x))
+  assert_eq(collected, ok([]))
+}
+
+test "result.collect_map transform" {
+  let xs = ["1", "2", "3"]
+  let collected: Result[List[Int], List[String]] = result.collect_map(xs, (s) => ok(string.len(s)))
+  assert_eq(collected, ok([1, 1, 1]))
+}
