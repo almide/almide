@@ -180,11 +180,17 @@ fn try_hoist_from_loop(expr: &mut IrExpr, vt: &mut VarTable) -> Vec<IrStmt> {
     hoisted
 }
 
-/// Collect all VarIds that are bound (defined) within a list of statements.
+/// Collect all VarIds that are bound OR assigned within a list of statements.
+/// This includes `let` bindings AND `var` reassignments — any variable modified
+/// inside the loop is NOT loop-invariant.
 fn collect_defined_vars_stmts(stmts: &[IrStmt], defined: &mut HashSet<VarId>) {
     for stmt in stmts {
         match &stmt.kind {
             IrStmtKind::Bind { var, .. } => { defined.insert(*var); }
+            IrStmtKind::Assign { var, .. } => {
+                // `var x` assigned inside the loop — x is loop-modified
+                defined.insert(*var);
+            }
             IrStmtKind::Expr { expr } => collect_defined_vars_expr(expr, defined),
             IrStmtKind::Guard { cond, else_ } => {
                 collect_defined_vars_expr(cond, defined);
@@ -247,8 +253,13 @@ fn extract_invariants_from_stmt(
         IrStmtKind::Expr { expr } => {
             try_hoist_expr(expr, loop_defined, vt, hoisted);
         }
-        IrStmtKind::Assign { value, .. } => {
-            try_hoist_expr(value, loop_defined, vt, hoisted);
+        // Don't hoist the whole RHS of assignments — the assignment itself
+        // is a side effect (mutates a var). Only recurse into sub-expressions
+        // if the RHS is complex enough to have hoistable sub-parts.
+        IrStmtKind::Assign { .. } => {
+            // Skip: assignment targets are loop-modified vars.
+            // The RHS often references the target var (e.g., count = count + 1)
+            // which is in loop_defined, so hoisting would be wrong anyway.
         }
         IrStmtKind::Guard { cond, else_ } => {
             try_hoist_expr(cond, loop_defined, vt, hoisted);
@@ -352,6 +363,7 @@ fn try_hoist_expr(
 /// 1. All referenced variables are defined OUTSIDE the loop (not in `loop_defined`)
 /// 2. It contains no calls to effect functions (side effects)
 /// 3. It is not trivially cheap (skip Var, Lit*, Unit)
+/// 4. It contains no control flow (loops, continue, break, return)
 fn is_hoistable(expr: &IrExpr, loop_defined: &HashSet<VarId>) -> bool {
     if is_trivial(expr) {
         return false;
@@ -359,7 +371,57 @@ fn is_hoistable(expr: &IrExpr, loop_defined: &HashSet<VarId>) -> bool {
     if has_effect_call(expr) {
         return false;
     }
+    if has_control_flow(expr) {
+        return false;
+    }
     refs_are_outside_loop(expr, loop_defined)
+}
+
+/// Returns true if the expression contains loops, continue, break, or return.
+/// These must never be hoisted out of their enclosing scope.
+fn has_control_flow(expr: &IrExpr) -> bool {
+    match &expr.kind {
+        IrExprKind::ForIn { .. } | IrExprKind::While { .. } => true,
+        IrExprKind::Continue | IrExprKind::Break => true,
+        IrExprKind::BinOp { left, right, .. } => {
+            has_control_flow(left) || has_control_flow(right)
+        }
+        IrExprKind::UnOp { operand, .. } => has_control_flow(operand),
+        IrExprKind::Call { target, args, .. } => {
+            let target_cf = match target {
+                CallTarget::Method { object, .. } => has_control_flow(object),
+                CallTarget::Computed { callee } => has_control_flow(callee),
+                _ => false,
+            };
+            target_cf || args.iter().any(|a| has_control_flow(a))
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            has_control_flow(cond) || has_control_flow(then) || has_control_flow(else_)
+        }
+        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+            stmts.iter().any(|s| has_control_flow_stmt(s))
+                || expr.as_ref().is_some_and(|e| has_control_flow(e))
+        }
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
+            elements.iter().any(|e| has_control_flow(e))
+        }
+        IrExprKind::OptionSome { expr: e } | IrExprKind::ResultOk { expr: e }
+        | IrExprKind::ResultErr { expr: e } | IrExprKind::Try { expr: e }
+        | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e } => {
+            has_control_flow(e)
+        }
+        _ => false,
+    }
+}
+
+fn has_control_flow_stmt(stmt: &IrStmt) -> bool {
+    match &stmt.kind {
+        IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. }
+        | IrStmtKind::FieldAssign { value, .. } => has_control_flow(value),
+        IrStmtKind::Expr { expr } => has_control_flow(expr),
+        IrStmtKind::Guard { cond, else_ } => has_control_flow(cond) || has_control_flow(else_),
+        _ => false,
+    }
 }
 
 /// Returns true if the expression is trivially cheap (not worth hoisting).
