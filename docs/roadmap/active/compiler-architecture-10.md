@@ -1,7 +1,7 @@
 # Compiler Architecture: All 10s [ACTIVE]
 
 **目標**: コンパイラアーキテクチャ全項目 10/10
-**現状**: 95/110 → Phase 3 完了、Phase 4 完了
+**現状**: 99/110 → Phase 4 完了、今日: LICM/ResultPropagation/Checker/Import制御
 **スコープ**: WASM codegen を含む全コンパイラ基盤
 
 ---
@@ -12,17 +12,17 @@
 |------|--------|------|------|------|
 | パイプライン設計 | 7 | **10** | 10 | ✅ Target::Wasm統合済、パス依存宣言済、BoxDeref統合済 |
 | パーサー | 9 | 9 | 10 | fuzzing で補強 (Phase 6) |
-| 型チェッカー | 7 | **9** | 10 | ✅ mod.rs分割 (850→485行)、calls.rs分割 (588→305行) |
-| IR 設計 | 9 | 9 | 10 | 維持 |
-| Nanopass | 8 | **10** | 10 | ✅ stream_fusion分割 (1199→5モジュール)、walker分割 (1667→6モジュール) |
+| 型チェッカー | 7 | **10** | 10 | ✅ mod.rs分割、calls.rs分割、impl block統合、effect fn auto-unwrap、stdlib import 3層制御 |
+| IR 設計 | 9 | **10** | 10 | ✅ IrProgram.effect_fn_names追加 (TypeEnv由来、LICM等が参照) |
+| Nanopass | 8 | **10** | 10 | ✅ stream_fusion分割、walker分割、LICM effect判定ホワイトリスト廃止、ResultPropagation 2-pass設計 |
 | モノモーフィゼーション | 7 | **10** | 10 | ✅ mono.rs分割、✅ 収束検出 (PR#91)、✅ 増分発見+直接構築 (PR#93) |
 | エラー診断 | 9 | **10** | 10 | ✅ E003 --explain 既に登録済 |
-| コード品質 | 7 | **8** | 10 | ✅ 巨大ファイル全分割。残: string interning、clone 削減 |
+| コード品質 | 7 | **9** | 10 | ✅ 巨大ファイル全分割、ホワイトリスト廃止。残: string interning、clone 削減 |
 | テスト | 8 | 8 | 10 | 未着手。nanopass テスト、fuzzing、ベンチマーク |
 | ビルドシステム | 7 | 7 | 10 | 未着手。build.rs 分割 |
 | Codegen統合 | 5 | **9** | 10 | ✅ Target::Wasm pipeline統合済、✅ codegen()統一 (PR#92)。残: stdlib dispatch一元化 |
 
-**合計: 64/100 → 95/110 (Codegen統合を追加した11領域)**
+**合計: 64/100 → 99/110 (Codegen統合を追加した11領域)**
 
 ---
 
