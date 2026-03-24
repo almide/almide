@@ -23,6 +23,7 @@
 
 pub mod annotations;
 pub mod pass;
+pub mod pass_auto_parallel;
 pub mod pass_box_deref;
 pub mod pass_builtin_lowering;
 pub mod pass_clone;
