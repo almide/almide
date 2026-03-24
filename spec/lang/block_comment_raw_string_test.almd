@@ -1,6 +1,4 @@
 
-module syntax_test
-
 fn main() -> Unit = {
   let x = 42;
   let path = "C:\\Users\\test\\file.txt";

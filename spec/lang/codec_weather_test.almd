@@ -1,7 +1,5 @@
 import json
 
-module weather_full
-
 // wasm:enabled
 type Coord: Codec = { lon: Float, lat: Float }
 

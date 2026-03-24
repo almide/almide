@@ -1,7 +1,5 @@
 import json
 
-module auto_derive_test
-
 // wasm:enabled
 // ── Eq derive on records ──
 type Point: Eq, Repr = { x: Int, y: Int }

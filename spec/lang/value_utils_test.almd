@@ -2,8 +2,6 @@ import value
 import json
 
 // wasm:enabled
-module value_utils
-
 type Person: Codec = { name: String, age: Int, email: String }
 
 test "value.pick" {

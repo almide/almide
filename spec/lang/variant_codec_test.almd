@@ -1,7 +1,5 @@
 import json
 
-module variant_codec
-
 type Color: Codec = | Red | Green | Blue
 
 type Shape: Codec = | Circle(Float) | Rect { w: Float, h: Float }

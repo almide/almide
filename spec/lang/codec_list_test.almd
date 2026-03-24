@@ -1,7 +1,5 @@
 import json
 
-module codec_list_test
-
 // wasm:enabled
 type Item: Codec = { id: Int, value: String }
 

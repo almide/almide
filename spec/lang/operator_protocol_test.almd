@@ -1,6 +1,4 @@
 
-module operator_protocol_test
-
 type Color: Eq, Repr = | Red | Green | Blue
 
 fn Color.eq(a: Color, b: Color) -> Bool = match a {

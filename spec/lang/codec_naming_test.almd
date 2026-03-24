@@ -1,8 +1,6 @@
 import value
 import jsontype
 
-module naming_test
-
 test "naming strategy via composition" {
   let r = ApiResponse { user_name: "Alice", created_at: "2024-01-15" };
   let v = r.encode();

@@ -1,7 +1,5 @@
 import json
 
-module variant_decode
-
 type Color: Codec = | Red | Green | Blue
 
 fn encode_color(c: Color) -> String = json.stringify(c.encode())

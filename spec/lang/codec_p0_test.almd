@@ -1,7 +1,5 @@
 import json
 
-module codec_p0_test
-
 // wasm:enabled
 type Basic: Codec = { id: Int, name: String }
 
