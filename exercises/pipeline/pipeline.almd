@@ -11,8 +11,8 @@ effect fn parse_pairs(input: String) -> Result[List[(String, String)], String] =
 }
 
 effect fn validate_keys(pairs: List[(String, String)]) -> Result[List[(String, String)], String] = {
-  let invalid_count = list.len(list.filter(pairs, (p) => string.len(p.0) == 0))
-  guard invalid_count == 0 else err("empty key found")
+  let invalid = list.filter(pairs, (p) => string.len(p.0) == 0)
+  guard list.len(invalid) == 0 else err("empty key found")
   ok(pairs)
 }
 

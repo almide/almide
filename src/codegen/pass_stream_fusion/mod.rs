@@ -187,6 +187,11 @@ fn inline_single_use_collection_lets(body: &mut IrExpr, var_table: &VarTable) {
                     match &mut s.kind {
                         IrStmtKind::Bind { value: v, .. } => *v = substitute_var_in_expr(v, var, &value),
                         IrStmtKind::Expr { expr: e } => *e = substitute_var_in_expr(e, var, &value),
+                        IrStmtKind::Assign { value: v, .. } => *v = substitute_var_in_expr(v, var, &value),
+                        IrStmtKind::Guard { cond: c, else_: el } => {
+                            *c = substitute_var_in_expr(c, var, &value);
+                            *el = substitute_var_in_expr(el, var, &value);
+                        }
                         _ => {}
                     }
                 }

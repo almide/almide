@@ -83,24 +83,22 @@ test "effect fn chain err from second" {
   }
 }
 
-// ── do block with guard ──
-test "do guard loop counts" {
-  var count = 0;
-  do {
-    guard count < 3 else ok(());
-    count = count + 1;
-  };
+// ── while loop with guard ──
+test "while loop counts" {
+  var count = 0
+  while count < 3 {
+    count = count + 1
+  }
   assert_eq(count, 3)
 }
 
-test "do guard with accumulator" {
-  var total = 0;
-  var i = 1;
-  do {
-    guard i <= 5 else ok(());
-    total = total + i;
-    i = i + 1;
-  };
+test "while with accumulator" {
+  var total = 0
+  var i = 1
+  while i <= 5 {
+    total = total + i
+    i = i + 1
+  }
   assert_eq(total, 15)
 }
 
@@ -284,16 +282,15 @@ test "effect fn calling other effect fn" {
   assert_eq(validate_string("this is a very long string"), err("too long"))
 }
 
-test "do guard with var and result" {
-  var sum = 0;
-  var i = 1;
-  do {
-    guard i <= 10 else ok(());
+test "guard with var in while" {
+  var sum = 0
+  var i = 1
+  while i <= 10 {
     if i % 2 == 0 then {
-      sum = sum + i;
-    } else { () };
-    i = i + 1;
-  };
+      sum = sum + i
+    } else { () }
+    i = i + 1
+  }
   assert_eq(sum, 30)
 }
 
@@ -311,14 +308,13 @@ test "effect fn with loop" {
 }
 
 test "guard with complex boolean condition" {
-  var count = 0;
-  var x = 1;
-  do {
-    guard x < 100 and count < 10 else break;
-    x = x * 2;
-    count = count + 1;
-  };
-  assert_eq(x, 128);
+  var count = 0
+  var x = 1
+  while x < 100 and count < 10 {
+    x = x * 2
+    count = count + 1
+  }
+  assert_eq(x, 128)
   assert_eq(count, 7)
 }
 

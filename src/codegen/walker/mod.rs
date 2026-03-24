@@ -130,7 +130,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         .collect::<Vec<_>>()
         .join(", ");
 
-    // Function body: render Block/DoBlock contents directly (no IIFE wrapper)
+    // Function body: render Block contents directly (no IIFE wrapper)
     let body_str = match &func.body.kind {
         IrExprKind::Block { stmts, expr } => {
             let mut parts: Vec<String> = stmts.iter()
