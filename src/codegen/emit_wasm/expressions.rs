@@ -8,6 +8,7 @@ use super::FuncCompiler;
 use super::values;
 use super::wasm_macro::wasm;
 
+#[allow(dead_code)]
 pub(super) fn mem(offset: u64) -> MemArg {
     MemArg { offset, align: 2, memory_index: 0 }
 }

@@ -8,7 +8,6 @@
 
 use std::collections::HashSet;
 use crate::ir::*;
-use crate::types::Ty;
 use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]

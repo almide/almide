@@ -12,15 +12,15 @@ pub fn register(emitter: &mut WasmEmitter) {
     let ty_i32x2_i32 = emitter.register_type(vec![ValType::I32, ValType::I32], vec![ValType::I32]);
     let ty_i32_i32 = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
     let ty_i32x2_i64 = emitter.register_type(vec![ValType::I32, ValType::I32], vec![ValType::I64]);
-    let ty_i32_i64 = emitter.register_type(vec![ValType::I32], vec![ValType::I64]);
+    let _ty_i32_i64 = emitter.register_type(vec![ValType::I32], vec![ValType::I64]);
 
     let s = &mut emitter.rt.string;
     // Will be set after register_func calls — need to go through emitter
-    drop(s);
+    let _ = s;
 
     let rt = &mut emitter.rt;
     // Can't borrow emitter and rt.string simultaneously. Use a different approach.
-    drop(rt);
+    let _ = rt;
 
     // Core string ops
     emitter.rt.string.eq = emitter.register_func("__str_eq", ty_i32x2_i32);
@@ -110,6 +110,7 @@ pub fn compile(emitter: &mut WasmEmitter) {
 // ── Helpers ──
 
 /// Shorthand to access StringRuntime indices.
+#[allow(dead_code)]
 fn s(emitter: &WasmEmitter) -> &StringRuntime {
     &emitter.rt.string
 }

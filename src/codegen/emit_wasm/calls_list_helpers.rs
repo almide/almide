@@ -35,6 +35,7 @@ impl FuncCompiler<'_> {
     }
 
     /// Emit take/drop as list slice. For take: start=0,end=n. For drop: start=n,end=len.
+    #[allow(dead_code)]
     fn emit_list_slice_impl(
         &mut self, xs: &IrExpr, start_arg: Option<&IrExpr>, end_arg: Option<&IrExpr>,
         elem_size: usize, is_take: bool,
@@ -95,7 +96,7 @@ impl FuncCompiler<'_> {
               i32_const(elem_size as i32); i32_mul; i32_add;
         });
         // Copy one element
-        let elem_ty = if is_take {
+        let _elem_ty = if is_take {
             self.list_elem_ty(&end_arg.unwrap().ty)
         } else {
             self.list_elem_ty(&start_arg.unwrap().ty)
@@ -118,6 +119,7 @@ impl FuncCompiler<'_> {
         self.scratch.free_i32(xs_ptr);
     }
 
+    #[allow(dead_code)]
     fn emit_memcpy_loop(&mut self, _i_local: u32, _dst_local: u32, _start_local: u32, _elem_size: usize) {
         // Generic memcpy for list.slice — complex, use inline for now
         // This is a placeholder; slice uses the same pattern as take/drop

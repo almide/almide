@@ -34,7 +34,7 @@ impl FuncCompiler<'_> {
                 // get(m, key) → Option[V]
                 let (ks, vs) = self.map_kv_sizes(&args[0].ty);
                 let key_ty = self.map_key_ty(&args[0].ty);
-                let val_ty = self.map_val_ty(&args[0].ty);
+                let _val_ty = self.map_val_ty(&args[0].ty);
                 let entry = ks + vs;
                 let map_ptr = self.scratch.alloc_i32();
                 let sk_i32 = self.scratch.alloc_i32();
@@ -89,7 +89,7 @@ impl FuncCompiler<'_> {
                 let sk_i32 = self.scratch.alloc_i32();
                 let sk_i64 = self.scratch.alloc_i64();
                 let i = self.scratch.alloc_i32();
-                let vt = values::ty_to_valtype(&val_ty).unwrap_or(ValType::I32);
+                let _vt = values::ty_to_valtype(&val_ty).unwrap_or(ValType::I32);
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(map_ptr); });
                 self.emit_expr(&args[1]); // key
@@ -368,7 +368,7 @@ impl FuncCompiler<'_> {
             }
             "keys" => {
                 let (ks, vs) = self.map_kv_sizes(&args[0].ty);
-                let key_ty = self.map_key_ty(&args[0].ty);
+                let _key_ty = self.map_key_ty(&args[0].ty);
                 let entry = ks + vs;
                 let map_ptr = self.scratch.alloc_i32();
                 let len = self.scratch.alloc_i32();
@@ -405,7 +405,7 @@ impl FuncCompiler<'_> {
             }
             "values" => {
                 let (ks, vs) = self.map_kv_sizes(&args[0].ty);
-                let val_ty = self.map_val_ty(&args[0].ty);
+                let _val_ty = self.map_val_ty(&args[0].ty);
                 let entry = ks + vs;
                 let map_ptr = self.scratch.alloc_i32();
                 let len = self.scratch.alloc_i32();

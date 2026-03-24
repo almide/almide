@@ -19,7 +19,6 @@ pub(super) fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) 
     // Collect all lambdas (in tree-walk order)
     let mut lambda_exprs: Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, Vec<u32>, Option<u32>)> = Vec::new();
     let mut fn_ref_set: HashSet<String> = HashSet::new();
-    let mut fn_ref_names: Vec<String> = Vec::new(); // ordered, deduped
 
     let mut mutable_vars: HashSet<u32> = HashSet::new();
 
@@ -48,7 +47,7 @@ pub(super) fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) 
     }
 
     // Build ordered fn_ref list (sorted for determinism)
-    fn_ref_names = fn_ref_set.into_iter().collect();
+    let mut fn_ref_names: Vec<String> = fn_ref_set.into_iter().collect();
     fn_ref_names.sort();
 
     // Register each lambda as a function

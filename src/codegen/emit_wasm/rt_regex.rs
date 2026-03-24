@@ -652,7 +652,7 @@ fn compile_captures_inner(emitter: &mut WasmEmitter) {
     let captures_fn = emitter.rt.regex.captures_inner;
     let match_atom_fn = emitter.rt.regex.match_atom;
     let atom_len_fn = emitter.rt.regex.atom_len;
-    let skip_group_fn = emitter.rt.regex.skip_group;
+    let _skip_group_fn = emitter.rt.regex.skip_group;
 
     wasm!(f, { local_get(0); i32_load(0); local_set(6); });
     wasm!(f, { local_get(1); i32_load(0); local_set(7); });
@@ -795,7 +795,7 @@ fn compile_captures_search(emitter: &mut WasmEmitter) {
 
     let captures_fn = emitter.rt.regex.captures_inner;
     let alloc = emitter.rt.alloc;
-    let slice_fn = emitter.rt.string.slice;
+    let _slice_fn = emitter.rt.string.slice;
 
     wasm!(f, { local_get(1); i32_load(0); local_set(3); });
     wasm!(f, { local_get(0); i32_load(0); local_set(14); });

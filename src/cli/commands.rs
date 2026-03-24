@@ -151,7 +151,7 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
     eprintln!("\nAll {} test file(s) passed", test_files.len());
 }
 
-pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>) {
+pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
     use crate::{parse_file, check, diagnostic, resolve, project, project_fetch};
 
     let test_files: Vec<String> = if !file.is_empty() {

@@ -795,7 +795,7 @@ impl FuncCompiler<'_> {
                 let err_ty = self.result_err_ty(&ret_ty);
                 let ok_size = values::byte_size(&ok_ty) as i32;
                 let err_size = values::byte_size(&err_ty) as i32;
-                let ret_size = values::byte_size(&ret_ty) as i32;
+                let _ret_size = values::byte_size(&ret_ty) as i32;
 
                 let xs = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
@@ -918,6 +918,7 @@ impl FuncCompiler<'_> {
         } else { Ty::Int }
     }
 
+    #[allow(dead_code)]
     fn fn_ret_inner_ty(&self, ty: &Ty) -> Ty {
         // For flat_map: f returns Option[T], extract T
         let ret = self.fn_ret_ty(ty);
