@@ -629,6 +629,264 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(closure);
                 self.scratch.free_i32(result);
             }
+            "collect" => {
+                // collect(rs: List[Result[T, E]]) -> Result[List[T], List[E]]
+                // Each list element is an i32 pointer to a Result: [tag:i32][value]
+                let inner_result_ty = self.list_elem_ty(&args[0].ty);
+                let ok_ty = self.result_ok_ty(&inner_result_ty);
+                let err_ty = self.result_err_ty(&inner_result_ty);
+                let ok_size = values::byte_size(&ok_ty) as i32;
+                let err_size = values::byte_size(&err_ty) as i32;
+
+                let rs = self.scratch.alloc_i32();
+                let len = self.scratch.alloc_i32();
+                let i = self.scratch.alloc_i32();
+                let ok_list = self.scratch.alloc_i32();
+                let err_list = self.scratch.alloc_i32();
+                let ok_cnt = self.scratch.alloc_i32();
+                let err_cnt = self.scratch.alloc_i32();
+                let elem = self.scratch.alloc_i32(); // pointer to Result
+                let out = self.scratch.alloc_i32();
+
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(rs);
+                    local_get(rs); i32_load(0); local_set(len);
+                    i32_const(4); local_get(len); i32_const(ok_size); i32_mul; i32_add;
+                    call(self.emitter.rt.alloc); local_set(ok_list);
+                    i32_const(4); local_get(len); i32_const(err_size); i32_mul; i32_add;
+                    call(self.emitter.rt.alloc); local_set(err_list);
+                    i32_const(0); local_set(ok_cnt);
+                    i32_const(0); local_set(err_cnt);
+                    i32_const(0); local_set(i);
+                    block_empty; loop_empty;
+                      local_get(i); local_get(len); i32_ge_u; br_if(1);
+                      // elem = *(rs + 4 + i*4) — load the Result pointer from list
+                      local_get(rs); i32_const(4); i32_add;
+                      local_get(i); i32_const(4); i32_mul; i32_add;
+                      i32_load(0); local_set(elem);
+                      // Check tag
+                      local_get(elem); i32_load(0); i32_eqz;
+                      if_empty; // tag==0 → ok
+                        local_get(ok_list); i32_const(4); i32_add;
+                        local_get(ok_cnt); i32_const(ok_size); i32_mul; i32_add;
+                        local_get(elem); i32_const(4); i32_add;
+                });
+                self.emit_elem_copy(&ok_ty);
+                wasm!(self.func, {
+                        local_get(ok_cnt); i32_const(1); i32_add; local_set(ok_cnt);
+                      else_;
+                        local_get(err_list); i32_const(4); i32_add;
+                        local_get(err_cnt); i32_const(err_size); i32_mul; i32_add;
+                        local_get(elem); i32_const(4); i32_add;
+                });
+                self.emit_elem_copy(&err_ty);
+                wasm!(self.func, {
+                        local_get(err_cnt); i32_const(1); i32_add; local_set(err_cnt);
+                      end;
+                      local_get(i); i32_const(1); i32_add; local_set(i);
+                      br(0);
+                    end; end;
+                    local_get(ok_list); local_get(ok_cnt); i32_store(0);
+                    local_get(err_list); local_get(err_cnt); i32_store(0);
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(out);
+                    local_get(err_cnt); i32_eqz;
+                    if_empty;
+                      local_get(out); i32_const(0); i32_store(0);
+                      local_get(out); local_get(ok_list); i32_store(4);
+                    else_;
+                      local_get(out); i32_const(1); i32_store(0);
+                      local_get(out); local_get(err_list); i32_store(4);
+                    end;
+                    local_get(out);
+                });
+
+                self.scratch.free_i32(out);
+                self.scratch.free_i32(elem);
+                self.scratch.free_i32(err_cnt);
+                self.scratch.free_i32(ok_cnt);
+                self.scratch.free_i32(err_list);
+                self.scratch.free_i32(ok_list);
+                self.scratch.free_i32(i);
+                self.scratch.free_i32(len);
+                self.scratch.free_i32(rs);
+            }
+            "partition" => {
+                // partition(rs: List[Result[T, E]]) -> (List[T], List[E])
+                // Each list element is an i32 pointer to a Result
+                let inner_result_ty = self.list_elem_ty(&args[0].ty);
+                let ok_ty = self.result_ok_ty(&inner_result_ty);
+                let err_ty = self.result_err_ty(&inner_result_ty);
+                let ok_size = values::byte_size(&ok_ty) as i32;
+                let err_size = values::byte_size(&err_ty) as i32;
+
+                let rs = self.scratch.alloc_i32();
+                let len = self.scratch.alloc_i32();
+                let i = self.scratch.alloc_i32();
+                let ok_list = self.scratch.alloc_i32();
+                let err_list = self.scratch.alloc_i32();
+                let ok_cnt = self.scratch.alloc_i32();
+                let err_cnt = self.scratch.alloc_i32();
+                let elem = self.scratch.alloc_i32();
+                let tuple_ptr = self.scratch.alloc_i32();
+
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    local_set(rs);
+                    local_get(rs); i32_load(0); local_set(len);
+                    i32_const(4); local_get(len); i32_const(ok_size); i32_mul; i32_add;
+                    call(self.emitter.rt.alloc); local_set(ok_list);
+                    i32_const(4); local_get(len); i32_const(err_size); i32_mul; i32_add;
+                    call(self.emitter.rt.alloc); local_set(err_list);
+                    i32_const(0); local_set(ok_cnt);
+                    i32_const(0); local_set(err_cnt);
+                    i32_const(0); local_set(i);
+                    block_empty; loop_empty;
+                      local_get(i); local_get(len); i32_ge_u; br_if(1);
+                      // Load Result pointer from list
+                      local_get(rs); i32_const(4); i32_add;
+                      local_get(i); i32_const(4); i32_mul; i32_add;
+                      i32_load(0); local_set(elem);
+                      local_get(elem); i32_load(0); i32_eqz;
+                      if_empty;
+                        local_get(ok_list); i32_const(4); i32_add;
+                        local_get(ok_cnt); i32_const(ok_size); i32_mul; i32_add;
+                        local_get(elem); i32_const(4); i32_add;
+                });
+                self.emit_elem_copy(&ok_ty);
+                wasm!(self.func, {
+                        local_get(ok_cnt); i32_const(1); i32_add; local_set(ok_cnt);
+                      else_;
+                        local_get(err_list); i32_const(4); i32_add;
+                        local_get(err_cnt); i32_const(err_size); i32_mul; i32_add;
+                        local_get(elem); i32_const(4); i32_add;
+                });
+                self.emit_elem_copy(&err_ty);
+                wasm!(self.func, {
+                        local_get(err_cnt); i32_const(1); i32_add; local_set(err_cnt);
+                      end;
+                      local_get(i); i32_const(1); i32_add; local_set(i);
+                      br(0);
+                    end; end;
+                    local_get(ok_list); local_get(ok_cnt); i32_store(0);
+                    local_get(err_list); local_get(err_cnt); i32_store(0);
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(tuple_ptr);
+                    local_get(tuple_ptr); local_get(ok_list); i32_store(0);
+                    local_get(tuple_ptr); local_get(err_list); i32_store(4);
+                    local_get(tuple_ptr);
+                });
+
+                self.scratch.free_i32(tuple_ptr);
+                self.scratch.free_i32(elem);
+                self.scratch.free_i32(err_cnt);
+                self.scratch.free_i32(ok_cnt);
+                self.scratch.free_i32(err_list);
+                self.scratch.free_i32(ok_list);
+                self.scratch.free_i32(i);
+                self.scratch.free_i32(len);
+                self.scratch.free_i32(rs);
+            }
+            "collect_map" => {
+                // collect_map(xs: List[T], f: Fn[T] -> Result[U, E]) -> Result[List[U], List[E]]
+                let elem_ty = self.list_elem_ty(&args[0].ty);
+                let es = values::byte_size(&elem_ty) as i32;
+                let ret_ty = self.fn_ret_ty(&args[1].ty);
+                let ok_ty = self.result_ok_ty(&ret_ty);
+                let err_ty = self.result_err_ty(&ret_ty);
+                let ok_size = values::byte_size(&ok_ty) as i32;
+                let err_size = values::byte_size(&err_ty) as i32;
+                let ret_size = values::byte_size(&ret_ty) as i32;
+
+                let xs = self.scratch.alloc_i32();
+                let closure = self.scratch.alloc_i32();
+                let len = self.scratch.alloc_i32();
+                let i = self.scratch.alloc_i32();
+                let ok_list = self.scratch.alloc_i32();
+                let err_list = self.scratch.alloc_i32();
+                let ok_cnt = self.scratch.alloc_i32();
+                let err_cnt = self.scratch.alloc_i32();
+                let res_ptr = self.scratch.alloc_i32();
+                let out = self.scratch.alloc_i32();
+
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(xs); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, {
+                    local_set(closure);
+                    local_get(xs); i32_load(0); local_set(len);
+                    i32_const(4); local_get(len); i32_const(ok_size); i32_mul; i32_add;
+                    call(self.emitter.rt.alloc); local_set(ok_list);
+                    i32_const(4); local_get(len); i32_const(err_size); i32_mul; i32_add;
+                    call(self.emitter.rt.alloc); local_set(err_list);
+                    i32_const(0); local_set(ok_cnt);
+                    i32_const(0); local_set(err_cnt);
+                    i32_const(0); local_set(i);
+                    block_empty; loop_empty;
+                      local_get(i); local_get(len); i32_ge_u; br_if(1);
+                      // Call closure with xs[i]
+                      local_get(closure); i32_load(4); // env
+                      local_get(xs); i32_const(4); i32_add;
+                      local_get(i); i32_const(es); i32_mul; i32_add;
+                });
+                self.emit_load_at(&elem_ty, 0);
+                wasm!(self.func, {
+                      local_get(closure); i32_load(0); // table_idx
+                });
+                // call_indirect: (env, elem) -> Result ptr (i32)
+                {
+                    let mut ct = vec![ValType::I32]; // env
+                    if let Some(vt) = values::ty_to_valtype(&elem_ty) { ct.push(vt); }
+                    let ti = self.emitter.register_type(ct, vec![ValType::I32]);
+                    wasm!(self.func, { call_indirect(ti, 0); });
+                }
+                wasm!(self.func, {
+                      local_set(res_ptr);
+                      local_get(res_ptr); i32_load(0); i32_eqz;
+                      if_empty; // ok
+                        local_get(ok_list); i32_const(4); i32_add;
+                        local_get(ok_cnt); i32_const(ok_size); i32_mul; i32_add;
+                        local_get(res_ptr); i32_const(4); i32_add;
+                });
+                self.emit_elem_copy(&ok_ty);
+                wasm!(self.func, {
+                        local_get(ok_cnt); i32_const(1); i32_add; local_set(ok_cnt);
+                      else_; // err
+                        local_get(err_list); i32_const(4); i32_add;
+                        local_get(err_cnt); i32_const(err_size); i32_mul; i32_add;
+                        local_get(res_ptr); i32_const(4); i32_add;
+                });
+                self.emit_elem_copy(&err_ty);
+                wasm!(self.func, {
+                        local_get(err_cnt); i32_const(1); i32_add; local_set(err_cnt);
+                      end;
+                      local_get(i); i32_const(1); i32_add; local_set(i);
+                      br(0);
+                    end; end;
+                    local_get(ok_list); local_get(ok_cnt); i32_store(0);
+                    local_get(err_list); local_get(err_cnt); i32_store(0);
+                    i32_const(8); call(self.emitter.rt.alloc); local_set(out);
+                    local_get(err_cnt); i32_eqz;
+                    if_empty;
+                      local_get(out); i32_const(0); i32_store(0);
+                      local_get(out); local_get(ok_list); i32_store(4);
+                    else_;
+                      local_get(out); i32_const(1); i32_store(0);
+                      local_get(out); local_get(err_list); i32_store(4);
+                    end;
+                    local_get(out);
+                });
+
+                self.scratch.free_i32(out);
+                self.scratch.free_i32(res_ptr);
+                self.scratch.free_i32(err_cnt);
+                self.scratch.free_i32(ok_cnt);
+                self.scratch.free_i32(err_list);
+                self.scratch.free_i32(ok_list);
+                self.scratch.free_i32(i);
+                self.scratch.free_i32(len);
+                self.scratch.free_i32(closure);
+                self.scratch.free_i32(xs);
+            }
             _ => return false,
         }
         true
