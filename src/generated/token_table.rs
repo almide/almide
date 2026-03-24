@@ -14,7 +14,6 @@ pub fn build_keyword_map_generated() -> HashMap<&'static str, TokenType> {
         m.insert("and", TokenType::And);
         m.insert("break", TokenType::Break);
         m.insert("continue", TokenType::Continue);
-        m.insert("do", TokenType::Do);
         m.insert("effect", TokenType::Effect);
         m.insert("else", TokenType::Else);
         m.insert("err", TokenType::Err);
@@ -37,13 +36,13 @@ pub fn build_keyword_map_generated() -> HashMap<&'static str, TokenType> {
         m.insert("not", TokenType::Not);
         m.insert("ok", TokenType::Ok);
         m.insert("or", TokenType::Or);
+        m.insert("protocol", TokenType::Protocol);
         m.insert("pub", TokenType::Pub);
         m.insert("some", TokenType::Some);
         m.insert("strict", TokenType::Strict);
         m.insert("test", TokenType::Test);
         m.insert("then", TokenType::Then);
         m.insert("todo", TokenType::Todo);
-        m.insert("protocol", TokenType::Protocol);
         m.insert("true", TokenType::True);
         m.insert("type", TokenType::Type);
         m.insert("var", TokenType::Var);
@@ -56,16 +55,16 @@ pub fn build_keyword_map_generated() -> HashMap<&'static str, TokenType> {
 }
 
 /// All keywords as a flat list (for validation, tree-sitter, TextMate generation)
-pub const ALL_KEYWORDS: &[&str] = &["and", "break", "continue", "do", "effect", "else", "err", "false", "fan", "fn", "for", "guard", "if", "impl", "import", "in", "let", "local", "match", "mod", "module", "newtype", "none", "not", "ok", "or", "pub", "some", "strict", "test", "then", "todo", "protocol", "true", "type", "var", "while"];
+pub const ALL_KEYWORDS: &[&str] = &["and", "break", "continue", "effect", "else", "err", "false", "fan", "fn", "for", "guard", "if", "impl", "import", "in", "let", "local", "match", "mod", "module", "newtype", "none", "not", "ok", "or", "protocol", "pub", "some", "strict", "test", "then", "todo", "true", "type", "var", "while"];
 
 /*
 ── Tree-sitter keyword list ──────────────────────────────────────────
     // control
-    "if", "then", "else", "match", "for", "in", "while", "do", "guard", "fan",
+    "if", "then", "else", "match", "for", "in", "while", "guard",
     // declaration
     "fn", "type", "protocol", "impl", "let", "var", "test", "import", "module", "newtype",
     // flow
-    "break", "continue",
+    "break", "continue", "fan",
     // modifier
     "pub", "local", "mod", "effect", "strict",
     // value
@@ -75,11 +74,11 @@ pub const ALL_KEYWORDS: &[&str] = &["and", "break", "continue", "do", "effect", 
 
 ── TextMate grammar scopes ───────────────────────────────────────────
     // scope: keyword.control.almide
-    // pattern: \\b(if|then|else|match|for|in|while|do|guard|fan)\\b
+    // pattern: \\b(if|then|else|match|for|in|while|guard)\\b
     // scope: keyword.declaration.almide
-    // pattern: \\b(fn|type|trait|impl|let|var|test|import|module|newtype)\\b
+    // pattern: \\b(fn|type|protocol|impl|let|var|test|import|module|newtype)\\b
     // scope: keyword.control.flow.almide
-    // pattern: \\b(break|continue)\\b
+    // pattern: \\b(break|continue|fan)\\b
     // scope: storage.modifier.almide
     // pattern: \\b(pub|local|mod|effect|strict)\\b
     // scope: constant.language.almide

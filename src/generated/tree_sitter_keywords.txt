@@ -9,13 +9,12 @@
     for_keyword: $ => 'for',
     in_keyword: $ => 'in',
     while_keyword: $ => 'while',
-    do_keyword: $ => 'do',
     guard_keyword: $ => 'guard',
 
     // declaration keywords
     fn_keyword: $ => 'fn',
     type_keyword: $ => 'type',
-    trait_keyword: $ => 'trait',
+    protocol_keyword: $ => 'protocol',
     impl_keyword: $ => 'impl',
     let_keyword: $ => 'let',
     var_keyword: $ => 'var',
@@ -25,22 +24,16 @@
     newtype_keyword: $ => 'newtype',
 
     // flow keywords
-    try_keyword: $ => 'try',
-    await_keyword: $ => 'await',
     break_keyword: $ => 'break',
     continue_keyword: $ => 'continue',
+    fan_keyword: $ => 'fan',
 
     // modifier keywords
     pub_keyword: $ => 'pub',
     local_keyword: $ => 'local',
     mod_keyword: $ => 'mod',
     effect_keyword: $ => 'effect',
-    async_keyword: $ => 'async',
     strict_keyword: $ => 'strict',
-    deriving_keyword: $ => 'deriving',
-
-    // other keywords
-    unsafe_keyword: $ => 'unsafe',
 
     // value keywords
     true_keyword: $ => 'true',
@@ -62,16 +55,13 @@
     // keyword() list for tree-sitter word rule:
     // keyword: $ => choice(
     //   $.and_keyword,
-    //   $.async_keyword,
-    //   $.await_keyword,
     //   $.break_keyword,
     //   $.continue_keyword,
-    //   $.deriving_keyword,
-    //   $.do_keyword,
     //   $.effect_keyword,
     //   $.else_keyword,
     //   $.err_keyword,
     //   $.false_keyword,
+    //   $.fan_keyword,
     //   $.fn_keyword,
     //   $.for_keyword,
     //   $.guard_keyword,
@@ -89,17 +79,15 @@
     //   $.not_keyword,
     //   $.ok_keyword,
     //   $.or_keyword,
+    //   $.protocol_keyword,
     //   $.pub_keyword,
     //   $.some_keyword,
     //   $.strict_keyword,
     //   $.test_keyword,
     //   $.then_keyword,
     //   $.todo_keyword,
-    //   $.trait_keyword,
     //   $.true_keyword,
-    //   $.try_keyword,
     //   $.type_keyword,
-    //   $.unsafe_keyword,
     //   $.var_keyword,
     //   $.while_keyword,
     // ),
