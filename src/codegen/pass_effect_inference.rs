@@ -15,7 +15,7 @@
 
 use std::collections::{HashMap, HashSet};
 use crate::ir::*;
-use super::pass::{NanoPass, Target};
+use super::pass::{NanoPass, PassResult, Target};
 
 /// Effect categories — mapped from stdlib module usage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -113,14 +113,14 @@ impl NanoPass for EffectInferencePass {
     fn name(&self) -> &str { "EffectInference" }
     fn targets(&self) -> Option<Vec<Target>> { None } // All targets
 
-    fn run(&self, program: &mut IrProgram, _target: Target) {
+    fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut effect_map = EffectMap::default();
 
         // Step 1: Collect direct effects for each function
         for func in &program.functions {
             let direct = collect_direct_effects(&func.body);
             let is_effect = func.is_effect;
-            effect_map.functions.insert(func.name.clone(), FunctionEffects {
+            effect_map.functions.insert(func.name.to_string(), FunctionEffects {
                 direct: direct.clone(),
                 transitive: direct,
                 is_effect,
@@ -142,7 +142,7 @@ impl NanoPass for EffectInferencePass {
         }
 
         // Step 2: Build call graph
-        let call_graph = build_call_graph(program);
+        let call_graph = build_call_graph(&program);
 
         // Step 3: Transitive closure (fixpoint iteration)
         let max_iterations = 20;
@@ -191,6 +191,8 @@ impl NanoPass for EffectInferencePass {
         }
 
         program.effect_map = effect_map;
+
+        PassResult { program, changed: true }
     }
 }
 
@@ -249,7 +251,7 @@ fn collect_effects_inner(expr: &IrExpr, effects: &mut HashSet<Effect>) {
             }
         }
 
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             for stmt in stmts {
                 collect_effects_from_stmt(stmt, effects);
             }
@@ -385,7 +387,7 @@ fn build_call_graph(program: &IrProgram) -> HashMap<String, HashSet<String>> {
     for func in &program.functions {
         let mut callees = HashSet::new();
         collect_callees(&func.body, &mut callees);
-        graph.insert(func.name.clone(), callees);
+        graph.insert(func.name.to_string(), callees);
     }
 
     for module in &program.modules {
@@ -405,7 +407,7 @@ fn collect_callees(expr: &IrExpr, callees: &mut HashSet<String>) {
         IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
             // Skip runtime functions — they're stdlib, not user functions
             if !name.starts_with("almide_rt_") {
-                callees.insert(name.clone());
+                callees.insert(name.to_string());
             }
             for arg in args {
                 collect_callees(arg, callees);
@@ -417,7 +419,7 @@ fn collect_callees(expr: &IrExpr, callees: &mut HashSet<String>) {
                 collect_callees(arg, callees);
             }
         }
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             for stmt in stmts {
                 match &stmt.kind {
                     IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => collect_callees(value, callees),

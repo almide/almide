@@ -59,14 +59,23 @@ impl<'a> RenderContext<'a> {
 
     pub(crate) fn var_name(&self, id: VarId) -> String {
         let name = &self.var_table.get(id).name;
-        let kw = ["default", "switch", "case", "class", "new", "delete",
-            "typeof", "void", "with", "yield", "export", "import",
-            "try", "catch", "finally", "throw", "eval", "arguments"];
+        let kw = [
+            "as", "async", "await", "break", "const", "continue", "crate",
+            "dyn", "else", "enum", "extern", "false", "fn", "for", "if",
+            "impl", "in", "let", "loop", "match", "mod", "move", "mut",
+            "pub", "ref", "return", "self", "Self", "static", "struct",
+            "super", "trait", "true", "type", "unsafe", "use", "where", "while",
+            "abstract", "become", "box", "do", "final", "macro", "override",
+            "priv", "try", "typeof", "unsized", "virtual", "yield",
+            "default", "switch", "case", "class", "new", "delete", "void",
+            "with", "export", "import", "catch", "finally", "throw",
+            "eval", "arguments", "extends",
+        ];
         if kw.contains(&name.as_str()) {
             self.templates.render_with("keyword_escape", None, &[], &[("name", name.as_str())])
-                .unwrap_or_else(|| name.clone())
+                .unwrap_or_else(|| name.to_string())
         } else {
-            name.clone()
+            name.to_string()
         }
     }
 }
@@ -101,7 +110,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
 
     let params_str = func.params.iter()
         .map(|p| {
-            let mut param_name = p.name.clone();
+            let mut param_name = p.name.to_string();
             // Escape target-specific keywords in param names
             let kw_list = ["default", "switch", "case", "class", "new", "delete",
                 "typeof", "void", "with", "yield", "export", "import",
@@ -121,7 +130,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         .collect::<Vec<_>>()
         .join(", ");
 
-    // Function body: render Block/DoBlock contents directly (no IIFE wrapper)
+    // Function body: render Block contents directly (no IIFE wrapper)
     let body_str = match &func.body.kind {
         IrExprKind::Block { stmts, expr } => {
             let mut parts: Vec<String> = stmts.iter()
@@ -172,7 +181,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     let raw_name = if func.is_test {
         format!("__test_almd_{}", func.name)
     } else {
-        func.name.clone()
+        func.name.to_string()
     };
     let mut safe_name = raw_name.replace(' ', "_").replace('-', "_").replace('.', "_")
         .replace('+', "_plus_").replace('/', "_div_").replace('*', "_mul_")
@@ -220,7 +229,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
     for td in &program.type_decls {
         if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
             for c in cases {
-                ctx.ann.ctor_to_enum.insert(c.name.clone(), td.name.clone());
+                ctx.ann.ctor_to_enum.insert(c.name.to_string(), td.name.to_string());
             }
         }
     }

@@ -2,7 +2,8 @@
 
 use std::collections::HashMap;
 use crate::ast;
-use crate::types::{Ty, TypeConstructorId};
+use crate::intern::{Sym, sym};
+use crate::types::Ty;
 use super::types::resolve_ty;
 use super::Checker;
 pub(crate) use super::builtin_calls::{builtin_module_for_type, types_mismatch};
@@ -21,12 +22,12 @@ impl Checker {
                 self.check_named_call_with_type_args(&name, &arg_tys, type_args)
             }
             ast::Expr::TypeName { name, .. } => {
-                if let Some((type_name, case)) = self.env.constructors.get(name).cloned() {
+                if let Some((type_name, case)) = self.env.constructors.get(&sym(name)).cloned() {
                     self.check_constructor_args(name, &case, &arg_tys);
                     // Instantiate parent type's generics with fresh inference vars
-                    let generic_args = self.instantiate_type_generics(&type_name);
+                    let generic_args = self.instantiate_type_generics(type_name.as_str());
                     Ty::Named(type_name, generic_args)
-                } else { Ty::Named(name.clone(), vec![]) }
+                } else { Ty::Named(sym(name), vec![]) }
             }
             // Module call: string.trim(s), list.map(xs, f), etc.
             ast::Expr::Member { object, field, .. } => {
@@ -41,7 +42,7 @@ impl Checker {
                 let builtin_module = builtin_module_for_type(&obj_concrete);
                 if let Some(module) = builtin_module {
                     let key = format!("{}.{}", module, field);
-                    if self.env.functions.contains_key(&key)
+                    if self.env.functions.contains_key(&sym(&key))
                         || crate::stdlib::resolve_ufcs_candidates(field).contains(&module)
                     {
                         let mut all_args = vec![obj_ty];
@@ -53,7 +54,7 @@ impl Checker {
                 let type_name_opt = self.resolve_type_name(&obj_concrete);
                 if let Some(type_name) = type_name_opt {
                     let convention_key = format!("{}.{}", type_name, field);
-                    if self.env.functions.contains_key(&convention_key) {
+                    if self.env.functions.contains_key(&sym(&convention_key)) {
                         let mut all_args = vec![obj_ty];
                         all_args.extend(arg_tys.iter().cloned());
                         return self.check_named_call(&convention_key, &all_args);
@@ -74,7 +75,7 @@ impl Checker {
                     }
                 }
                 // UFCS: user-defined function obj.func(args) -> func(obj, args)
-                if self.env.functions.contains_key(field) {
+                if self.env.functions.contains_key(&sym(field)) {
                     let mut all_args = vec![obj_ty];
                     all_args.extend(arg_tys.iter().cloned());
                     return self.check_named_call(field, &all_args);
@@ -95,10 +96,10 @@ impl Checker {
     /// Resolve a concrete type to its declared type name.
     fn resolve_type_name(&self, ty: &Ty) -> Option<String> {
         match ty {
-            Ty::Named(name, _) => Some(name.clone()),
+            Ty::Named(name, _) => Some(name.to_string()),
             Ty::Record { .. } | Ty::Variant { .. } => {
                 self.env.types.iter().find_map(|(name, def)| {
-                    (def == ty && name.starts_with(|c: char| c.is_uppercase())).then(|| name.clone())
+                    (def == ty && name.starts_with(|c: char| c.is_uppercase())).then(|| name.to_string())
                 })
             }
             _ => None,
@@ -108,12 +109,12 @@ impl Checker {
     /// Resolve a type to its name for protocol checking purposes.
     /// Handles Named types, Records/Variants (by looking up type definitions),
     /// and TypeVars (which are not concrete — returns None to skip checking).
-    fn resolve_type_name_for_protocol(&self, ty: &Ty) -> Option<String> {
+    fn resolve_type_name_for_protocol(&self, ty: &Ty) -> Option<Sym> {
         match ty {
-            Ty::Named(name, _) => Some(name.clone()),
+            Ty::Named(name, _) => Some(*name),
             Ty::Record { .. } | Ty::Variant { .. } => {
                 self.env.types.iter().find_map(|(name, def)| {
-                    (def == ty && name.starts_with(|c: char| c.is_uppercase())).then(|| name.clone())
+                    (def == ty && name.starts_with(|c: char| c.is_uppercase())).then(|| *name)
                 })
             }
             // TypeVars and inference vars are not concrete — skip protocol checking
@@ -133,16 +134,16 @@ impl Checker {
         }
 
         // Try stdlib lookup for module-qualified calls (e.g. "string.trim")
-        let sig = self.env.functions.get(name).cloned().or_else(|| {
+        let sig = self.env.functions.get(&sym(name)).cloned().or_else(|| {
             let (module, func) = name.split_once('.')?;
             crate::stdlib::lookup_sig(module, func)
         });
 
         let Some(sig) = sig else {
             // No function signature found — try constructor, variable, or report error
-            if let Some((type_name, case)) = self.env.constructors.get(name).cloned() {
+            if let Some((type_name, case)) = self.env.constructors.get(&sym(name)).cloned() {
                 self.check_constructor_args(name, &case, arg_tys);
-                let generic_args = self.instantiate_type_generics(&type_name);
+                let generic_args = self.instantiate_type_generics(type_name.as_str());
                 return Ty::Named(type_name, generic_args);
             }
             if let Some(ty) = self.env.lookup_var(name).cloned() {
@@ -169,7 +170,7 @@ impl Checker {
         // Validate argument count
         let min_params = match name.split_once('.') {
             Some((module, func)) => crate::stdlib::min_params(module, func).unwrap_or(sig.params.len()),
-            None => self.env.fn_min_params.get(name).copied().unwrap_or(sig.params.len()),
+            None => self.env.fn_min_params.get(&sym(name)).copied().unwrap_or(sig.params.len()),
         };
         if arg_tys.len() < min_params || arg_tys.len() > sig.params.len() {
             self.emit(super::err(
@@ -177,10 +178,10 @@ impl Checker {
                 "Check the number of arguments", format!("call to {}()", name)).with_code("E004"));
         }
         // Validate argument types and infer generics
-        let mut bindings = HashMap::new();
+        let mut bindings: HashMap<Sym, Ty> = HashMap::new();
         if let Some(ta) = type_args {
             for (gname, gty) in sig.generics.iter().zip(ta.iter()) {
-                bindings.insert(gname.clone(), gty.clone());
+                bindings.insert(*gname, gty.clone());
             }
         }
         let concrete_args: Vec<Ty> = arg_tys.iter().map(|a| resolve_ty(a, &self.uf)).collect();
@@ -217,11 +218,8 @@ impl Checker {
         let mut final_bindings = bindings.clone();
         for g in &sig.generics {
             if !final_bindings.contains_key(g) {
-                final_bindings.insert(g.clone(), self.fresh_var());
+                final_bindings.insert(*g, self.fresh_var());
             }
-        }
-        if name.contains("either_map_right") || name.contains("map_right") {
-            eprintln!("[CHECKER CALL] {} bindings={:?} final_bindings={:?}", name, bindings, final_bindings);
         }
         let ret = if final_bindings.is_empty() { sig.ret.clone() } else { crate::types::substitute(&sig.ret, &final_bindings) };
         ret
@@ -230,7 +228,7 @@ impl Checker {
     /// Create fresh inference variables for a type's generic parameters.
     fn instantiate_type_generics(&mut self, type_name: &str) -> Vec<Ty> {
         // Count generics by finding TypeVars in the type definition
-        if let Some(ty_def) = self.env.types.get(type_name).cloned() {
+        if let Some(ty_def) = self.env.types.get(&sym(type_name)).cloned() {
             let mut type_vars = Vec::new();
             crate::types::TypeEnv::collect_typevars(&ty_def, &mut type_vars);
             type_vars.iter().map(|_| {
@@ -262,16 +260,16 @@ impl Checker {
     /// Unify a single call argument against its parameter type, updating bindings.
     /// Reports diagnostics for structural bound violations and type mismatches.
     fn unify_call_arg(
-        &mut self, fn_name: &str, param_name: &str,
+        &mut self, fn_name: &str, param_name: &Sym,
         param_ty: &Ty, arg_ty: &Ty,
-        structural_bounds: &HashMap<String, Ty>,
-        bindings: &mut HashMap<String, Ty>,
+        structural_bounds: &HashMap<Sym, Ty>,
+        bindings: &mut HashMap<Sym, Ty>,
     ) {
         if let Ty::TypeVar(tv) = param_ty {
             if let Some(bound) = structural_bounds.get(tv) {
                 let resolved = self.env.resolve_named(arg_ty);
                 if bound.compatible(&resolved) || bound.compatible(arg_ty) {
-                    bindings.insert(tv.clone(), arg_ty.clone());
+                    bindings.insert(*tv, arg_ty.clone());
                 } else {
                     self.emit(super::err(
                         format!("argument '{}' does not satisfy bound {}: got {}", param_name, bound.display(), arg_ty.display()),

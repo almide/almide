@@ -1,7 +1,7 @@
-// error_test — Error handling patterns (no error module UFCS due to codegen gaps)
 
+// error_test — Error handling patterns (no error module UFCS due to codegen gaps)
 effect fn safe_divide(a: Int, b: Int) -> Result[Int, String] = {
-  guard b != 0 else err("division by zero")
+  guard b != 0 else err("division by zero");
   ok(a / b)
 }
 
@@ -14,7 +14,7 @@ test "effect fn returns err" {
 }
 
 effect fn chain_ops(x: Int) -> Result[String, String] = {
-  let n = safe_divide(x, 2)
+  let n = safe_divide(x, 2);
   ok(int.to_string(n))
 }
 
@@ -27,29 +27,35 @@ test "chained effect fn err propagation" {
 }
 
 test "err string content" {
-  let r = safe_divide(1, 0)
+  let r = safe_divide(1, 0);
   let msg = match r {
-    ok(_) => "no error"
-    err(e) => e
-  }
+    ok(_) => "no error",
+    err(e) => e,
+  };
   assert_eq(msg, "division by zero")
 }
 
 test "guard else err pattern" {
-  let r = safe_divide(7, 0)
-  let is_err = match r { ok(_) => false err(_) => true }
+  let r = safe_divide(7, 0);
+  let is_err = match r {
+    ok(_) => false,
+    err(_) => true,
+  };
   assert_eq(is_err, true)
 }
 
 test "guard else ok pattern" {
-  let r = safe_divide(7, 1)
-  let is_ok = match r { ok(_) => true err(_) => false }
+  let r = safe_divide(7, 1);
+  let is_ok = match r {
+    ok(_) => true,
+    err(_) => false,
+  };
   assert_eq(is_ok, true)
 }
 
 effect fn parse_positive(s: String) -> Result[Int, String] = {
-  let v = int.parse(s)
-  guard v > 0 else err("not positive")
+  let v = int.parse(s);
+  guard v > 0 else err("not positive");
   ok(v)
 }
 

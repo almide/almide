@@ -8,6 +8,7 @@ use super::FuncCompiler;
 use super::values;
 use super::wasm_macro::wasm;
 
+#[allow(dead_code)]
 fn has_typevar_in_ty(ty: &Ty) -> bool {
     ty.any_child_recursive(&|t| {
         matches!(t, Ty::TypeVar(_))
@@ -325,7 +326,6 @@ impl FuncCompiler<'_> {
         let arm = &arms[idx];
         let is_last = idx + 1 >= arms.len();
 
-        eprintln!("[EMIT ARM] fn idx={} pattern={:?} subject_ty={:?} result_ty={:?}", idx, std::mem::discriminant(&arm.pattern), subject_ty, result_ty);
         match &arm.pattern {
             // Wildcard: always matches, emit body directly
             IrPattern::Wildcard => {
@@ -403,7 +403,6 @@ impl FuncCompiler<'_> {
             // Constructor pattern (e.g., Circle(r), Red)
             IrPattern::Constructor { name: ctor_name, args } => {
                 let tag_result = self.find_variant_tag_by_ctor(ctor_name, subject_ty);
-                eprintln!("[CTOR HANDLER] ctor='{}' tag={:?} subject_ty={:?} idx={} result_ty={:?}", ctor_name, tag_result, subject_ty, idx, result_ty);
                 if let Some(tag_val) = tag_result {
                     wasm!(self.func, {
                         local_get(scratch);
@@ -536,7 +535,6 @@ impl FuncCompiler<'_> {
                     self.depth_pop(ctor_guard);
                     wasm!(self.func, { end; });
                 } else {
-                    eprintln!("[CTOR ELSE] ctor='{}' is_last={} — tag not found, falling through", ctor_name, is_last);
                     if is_last {
                         self.emit_expr(&arm.body);
                     } else {
@@ -864,15 +862,6 @@ impl FuncCompiler<'_> {
                     }
                 } else {
                     self.emit_expr(&arm.body);
-                }
-            }
-
-            // Catch-all for unsupported patterns
-            _ => {
-                if is_last {
-                    self.emit_expr(&arm.body);
-                } else {
-                    wasm!(self.func, { unreachable; });
                 }
             }
         }

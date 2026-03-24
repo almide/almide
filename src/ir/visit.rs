@@ -52,7 +52,7 @@ pub fn walk_expr<V: IrVisitor>(v: &mut V, expr: &IrExpr) {
                 v.visit_expr(&arm.body);
             }
         }
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             for s in stmts { v.visit_stmt(s); }
             if let Some(e) = expr { v.visit_expr(e); }
         }

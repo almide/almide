@@ -79,11 +79,11 @@ impl FuncCompiler<'_> {
                     }
                     // ResultOk/ResultErr in guard
                     crate::ir::IrExprKind::ResultOk { expr: inner } | crate::ir::IrExprKind::ResultErr { expr: inner } => {
-                        // ok(()) inside do block → break out of loop (not function return)
+                        // ok(()) inside loop → break out of loop (not function return)
                         let is_unit_ok = matches!(&else_.kind, crate::ir::IrExprKind::ResultOk { .. })
                             && matches!(&inner.ty, crate::types::Ty::Unit);
                         if is_unit_ok && self.loop_stack.last().is_some() {
-                            // Emit the ok(()) but then break out of the do block loop
+                            // Emit the ok(()) but then break out of the loop
                             self.emit_expr(else_);
                             if super::values::ty_to_valtype(&else_.ty).is_some() {
                                 wasm!(self.func, { drop; });
@@ -101,7 +101,7 @@ impl FuncCompiler<'_> {
                     _ => {
                         self.emit_expr(else_);
                         if let Some(labels) = self.loop_stack.last() {
-                            // Inside a loop/do block: drop value and break
+                            // Inside a loop: drop value and break
                             if super::values::ty_to_valtype(&else_.ty).is_some() {
                                 wasm!(self.func, { drop; });
                             }
@@ -293,7 +293,7 @@ pub fn collect_locals(body: &IrExpr, var_table: &crate::ir::VarTable) -> LocalSc
 
 fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::VarTable) {
     match &expr.kind {
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             for stmt in stmts { scan_stmt(stmt, locals, vt); }
             if let Some(e) = expr { scan_expr(e, locals, vt); }
         }
@@ -340,11 +340,6 @@ fn scan_expr(expr: &IrExpr, locals: &mut Vec<(VarId, ValType)>, vt: &crate::ir::
         IrExprKind::Match { subject, arms } => {
             scan_expr(subject, locals, vt);
             let resolved_ty = resolve_scan_subject_ty(subject, arms, vt);
-            // Log: find the match with Right/Left constructors
-            let has_either = arms.iter().any(|a| matches!(&a.pattern, crate::ir::IrPattern::Constructor { name, .. } if name == "Right" || name == "Left"));
-            if has_either {
-                eprintln!("[SCAN MATCH EITHER] subject.ty={:?} resolved_ty={:?}", subject.ty, resolved_ty);
-            }
             for arm in arms {
                 scan_pattern(&arm.pattern, &resolved_ty, locals, vt);
                 scan_expr(&arm.body, locals, vt);
@@ -464,8 +459,8 @@ fn scan_destructure_pattern(pattern: &crate::ir::IrPattern, value_ty: &crate::ty
         crate::ir::IrPattern::RecordPattern { fields, .. } => {
             // Record destructure: resolve field types from value_ty (authoritative).
             let record_fields: Vec<(String, crate::types::Ty)> = match value_ty {
-                crate::types::Ty::Record { fields } => fields.clone(),
-                crate::types::Ty::OpenRecord { fields } => fields.clone(),
+                crate::types::Ty::Record { fields } => fields.iter().map(|(n, t)| (n.to_string(), t.clone())).collect(),
+                crate::types::Ty::OpenRecord { fields } => fields.iter().map(|(n, t)| (n.to_string(), t.clone())).collect(),
                 _ => vec![],
             };
             let existing_ids: std::collections::HashSet<u32> = locals.iter().map(|(v, _)| v.0).collect();
@@ -506,7 +501,7 @@ fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, l
                 locals.push((*var, val_type));
             }
         }
-        crate::ir::IrPattern::Constructor { name: ctor_name, args } => {
+        crate::ir::IrPattern::Constructor { name: _ctor_name, args } => {
             // Resolve field types from subject_ty's type_args for generic variants
             let subject_type_args: Vec<crate::types::Ty> = match subject_ty {
                 crate::types::Ty::Named(_, args) if !args.is_empty() => args.clone(),
@@ -527,7 +522,7 @@ fn scan_pattern(pattern: &crate::ir::IrPattern, subject_ty: &crate::types::Ty, l
                 }
                 _ => vec![],
             };
-            for (i, arg) in args.iter().enumerate() {
+            for (_i, arg) in args.iter().enumerate() {
                 if let crate::ir::IrPattern::Bind { var, ty: pat_ty } = arg {
                     // Use pattern.ty first (set by mono), fall back to VarTable + substitution
                     let resolved = if !matches!(pat_ty, crate::types::Ty::Unknown | crate::types::Ty::TypeVar(_))

@@ -52,7 +52,7 @@ fn count_uses_in_expr(expr: &IrExpr, table: &mut VarTable) {
                 count_uses_in_expr(&arm.body, table);
             }
         }
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             for s in stmts { count_uses_in_stmt(s, table); }
             if let Some(e) = expr { count_uses_in_expr(e, table); }
         }
@@ -212,7 +212,7 @@ fn bump_vars_in_expr(expr: &IrExpr, locals: &HashSet<u32>, table: &mut VarTable)
         }
         // Recurse into sub-expressions but don't double-count nested loops
         // (they'll handle their own bumping)
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             for s in stmts { bump_vars_in_stmt(s, locals, table); }
             if let Some(e) = expr { bump_vars_in_expr(e, locals, table); }
         }
@@ -296,7 +296,7 @@ pub fn demote_unused_mut(program: &mut IrProgram) {
 
 fn collect_assigned_vars(expr: &IrExpr, assigned: &mut HashSet<u32>) {
     match &expr.kind {
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             for s in stmts { collect_assigned_vars_stmt(s, assigned); }
             if let Some(e) = expr { collect_assigned_vars(e, assigned); }
         }

@@ -1,6 +1,7 @@
 /// Inference types, type variables, and constraints for the constraint-based checker.
 
 use crate::types::Ty;
+use crate::intern::sym;
 
 /// A fresh type variable for constraint-based inference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -126,7 +127,7 @@ pub fn resolve_ty(ty: &Ty, uf: &UnionFind) -> Ty {
                     None => {
                         // Point to canonical root (may differ from original id)
                         let root = uf.find(id);
-                        if root != id { Ty::TypeVar(format!("?{}", root)) } else { ty.clone() }
+                        if root != id { Ty::TypeVar(sym(&format!("?{}", root))) } else { ty.clone() }
                     }
                 }
             } else {

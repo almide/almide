@@ -1,4 +1,4 @@
-# IR Interpreter [ACTIVE]
+# IR Interpreter [ON HOLD]
 
 IR を直接実行するインタプリタ。codegen → rustc を経由せずに即時実行。
 

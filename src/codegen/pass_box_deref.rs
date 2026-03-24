@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 use crate::ir::*;
 use crate::types::Ty;
-use super::pass::{NanoPass, Target};
+use super::pass::{NanoPass, PassResult, Target};
 use super::walker;
 
 #[derive(Debug)]
@@ -19,10 +19,10 @@ impl NanoPass for BoxDerefPass {
         Some(vec![Target::Rust])
     }
 
-    fn run(&self, program: &mut IrProgram, _target: Target) {
+    fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         // Step 1: Collect deref vars and insert Deref IR nodes
-        let (deref_ids, recursive) = collect_deref_vars(program);
-        insert_deref_nodes(program, &deref_ids);
+        let (deref_ids, recursive) = collect_deref_vars(&program);
+        insert_deref_nodes(&mut program, &deref_ids);
 
         // Step 2: Process module-level box deref (separate VarId namespace per module)
         let all_type_decls: Vec<_> = program.type_decls.iter()
@@ -38,7 +38,7 @@ impl NanoPass for BoxDerefPass {
 
         // Build boxed_fields: for each recursive enum, find which variant fields reference the enum
         program.codegen_annotations.boxed_fields = program.type_decls.iter()
-            .filter(|td| recursive.contains(&td.name))
+            .filter(|td| recursive.contains(&*td.name))
             .filter_map(|td| match &td.kind {
                 IrTypeDeclKind::Variant { cases, .. } => Some((td, cases)),
                 _ => None,
@@ -49,11 +49,11 @@ impl NanoPass for BoxDerefPass {
                     match &c.kind {
                         IrVariantKind::Record { fields } => fields.iter()
                             .filter(|f| walker::ty_contains_name(&f.ty, name))
-                            .map(|f| (c.name.clone(), f.name.clone()))
+                            .map(|f| (c.name.to_string(), f.name.to_string()))
                             .collect::<Vec<_>>(),
                         IrVariantKind::Tuple { fields } => fields.iter().enumerate()
                             .filter(|(_, t)| walker::ty_contains_name(t, name))
-                            .map(|(i, _)| (c.name.clone(), format!("{}", i)))
+                            .map(|(i, _)| (c.name.to_string(), format!("{}", i)))
                             .collect::<Vec<_>>(),
                         _ => vec![],
                     }
@@ -67,18 +67,20 @@ impl NanoPass for BoxDerefPass {
                 IrTypeDeclKind::Variant { cases, .. } => cases.iter()
                     .filter_map(|c| match &c.kind {
                         IrVariantKind::Record { fields } => Some(fields.iter()
-                            .filter_map(|f| f.default.as_ref().map(|def| ((c.name.clone(), f.name.clone()), def.clone())))
+                            .filter_map(|f| f.default.as_ref().map(|def| ((c.name.to_string(), f.name.to_string()), def.clone())))
                             .collect::<Vec<_>>()),
                         _ => None,
                     })
                     .flatten()
                     .collect::<Vec<_>>(),
                 IrTypeDeclKind::Record { fields } => fields.iter()
-                    .filter_map(|f| f.default.as_ref().map(|def| ((td.name.clone(), f.name.clone()), def.clone())))
+                    .filter_map(|f| f.default.as_ref().map(|def| ((td.name.to_string(), f.name.to_string()), def.clone())))
                     .collect(),
                 _ => vec![],
             })
             .collect();
+
+        PassResult { program, changed: true }
     }
 }
 
@@ -93,7 +95,7 @@ fn find_recursive_enums<'a>(type_decls: impl Iterator<Item = &'a IrTypeDecl>) ->
                 _ => false,
             });
             if is_recursive {
-                recursive.insert(td.name.clone());
+                recursive.insert(td.name.to_string());
             }
         }
     }
@@ -108,7 +110,7 @@ pub fn collect_deref_vars(program: &IrProgram) -> (HashSet<VarId>, HashSet<Strin
     for i in 0..program.var_table.len() {
         let id = VarId(i as u32);
         let info = program.var_table.get(id);
-        name_to_var.entry(info.name.clone()).or_default().push(id);
+        name_to_var.entry(info.name.to_string()).or_default().push(id);
     }
     let mut deref_vars = HashSet::new();
 
@@ -129,10 +131,10 @@ pub fn collect_deref_vars(program: &IrProgram) -> (HashSet<VarId>, HashSet<Strin
 pub fn insert_deref_nodes(program: &mut IrProgram, deref_ids: &HashSet<VarId>) {
     if deref_ids.is_empty() { return; }
     for func in &mut program.functions {
-        func.body = insert_derefs(func.body.clone(), deref_ids);
+        func.body = insert_derefs(std::mem::take(&mut func.body), deref_ids);
     }
     for tl in &mut program.top_lets {
-        tl.value = insert_derefs(tl.value.clone(), deref_ids);
+        tl.value = insert_derefs(std::mem::take(&mut tl.value), deref_ids);
     }
 }
 
@@ -142,7 +144,7 @@ pub fn collect_module_deref_vars(module: &IrModule, all_type_decls: &[IrTypeDecl
     for i in 0..module.var_table.len() {
         let id = VarId(i as u32);
         let info = module.var_table.get(id);
-        name_to_var.entry(info.name.clone()).or_default().push(id);
+        name_to_var.entry(info.name.to_string()).or_default().push(id);
     }
     let mut deref_vars = HashSet::new();
     let recursive_enums = find_recursive_enums(all_type_decls.iter());
@@ -156,10 +158,10 @@ pub fn collect_module_deref_vars(module: &IrModule, all_type_decls: &[IrTypeDecl
 pub fn insert_module_deref_nodes(module: &mut IrModule, deref_ids: &HashSet<VarId>) {
     if deref_ids.is_empty() { return; }
     for func in &mut module.functions {
-        func.body = insert_derefs(func.body.clone(), deref_ids);
+        func.body = insert_derefs(std::mem::take(&mut func.body), deref_ids);
     }
     for tl in &mut module.top_lets {
-        tl.value = insert_derefs(tl.value.clone(), deref_ids);
+        tl.value = insert_derefs(std::mem::take(&mut tl.value), deref_ids);
     }
 }
 
@@ -199,10 +201,7 @@ fn insert_derefs(expr: IrExpr, deref_ids: &HashSet<VarId>) -> IrExpr {
             stmts: insert_deref_stmts(stmts, deref_ids),
             expr: expr.map(|e| Box::new(insert_derefs(*e, deref_ids))),
         },
-        IrExprKind::DoBlock { stmts, expr } => IrExprKind::DoBlock {
-            stmts: insert_deref_stmts(stmts, deref_ids),
-            expr: expr.map(|e| Box::new(insert_derefs(*e, deref_ids))),
-        },
+
         IrExprKind::Match { subject, arms } => IrExprKind::Match {
             subject: Box::new(insert_derefs(*subject, deref_ids)),
             arms: arms.into_iter().map(|arm| IrMatchArm {
@@ -270,9 +269,9 @@ fn collect_from_expr(expr: &IrExpr, recursive_enums: &HashSet<String>, type_decl
             };
 
             if let Some(ref ename) = enum_name {
-                if recursive_enums.contains(ename) {
+                if recursive_enums.contains(ename.as_str()) {
                     // Find the type decl to know which fields are recursive
-                    let td = type_decls.iter().find(|td| &td.name == ename);
+                    let td = type_decls.iter().find(|td| *ename == td.name);
                     for arm in arms {
                         collect_deref_from_pattern(&arm.pattern, ename, td, name_to_var, deref_vars);
                         collect_from_expr(&arm.body, recursive_enums, type_decls, name_to_var, deref_vars);
@@ -289,7 +288,7 @@ fn collect_from_expr(expr: &IrExpr, recursive_enums: &HashSet<String>, type_decl
             }
             collect_from_expr(subject, recursive_enums, type_decls, name_to_var, deref_vars);
         }
-        IrExprKind::Block { stmts, expr: e } | IrExprKind::DoBlock { stmts, expr: e } => {
+        IrExprKind::Block { stmts, expr: e } => {
             for s in stmts { collect_from_stmt(s, recursive_enums, type_decls, name_to_var, deref_vars); }
             if let Some(e) = e { collect_from_expr(e, recursive_enums, type_decls, name_to_var, deref_vars); }
         }

@@ -13,7 +13,7 @@
 
 use crate::ir::*;
 use crate::types::{Ty, TypeConstructorId};
-use super::pass::{NanoPass, Target};
+use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
 pub struct ResultErasurePass;
@@ -24,28 +24,29 @@ impl NanoPass for ResultErasurePass {
         Some(vec![Target::TypeScript, Target::Python])
     }
     fn depends_on(&self) -> Vec<&'static str> { vec!["MatchLowering"] }
-    fn run(&self, program: &mut IrProgram, _target: Target) {
+    fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         for func in &mut program.functions {
             // Erase Result return type on effect functions
             if func.is_effect {
                 func.ret_ty = erase_result_ty(func.ret_ty.clone());
             }
-            func.body = erase_expr(func.body.clone());
+            func.body = erase_expr(std::mem::take(&mut func.body));
         }
         for tl in &mut program.top_lets {
-            tl.value = erase_expr(tl.value.clone());
+            tl.value = erase_expr(std::mem::take(&mut tl.value));
         }
         for module in &mut program.modules {
             for func in &mut module.functions {
                 if func.is_effect {
                     func.ret_ty = erase_result_ty(func.ret_ty.clone());
                 }
-                func.body = erase_expr(func.body.clone());
+                func.body = erase_expr(std::mem::take(&mut func.body));
             }
             for tl in &mut module.top_lets {
-                tl.value = erase_expr(tl.value.clone());
+                tl.value = erase_expr(std::mem::take(&mut tl.value));
             }
         }
+        PassResult { program, changed: true }
     }
 }
 
@@ -105,10 +106,7 @@ fn erase_expr(expr: IrExpr) -> IrExpr {
             stmts: erase_stmts(stmts),
             expr: expr.map(|e| Box::new(erase_expr(*e))),
         },
-        IrExprKind::DoBlock { stmts, expr } => IrExprKind::DoBlock {
-            stmts: erase_stmts(stmts),
-            expr: expr.map(|e| Box::new(erase_expr(*e))),
-        },
+
         IrExprKind::Match { subject, arms } => IrExprKind::Match {
             subject: Box::new(erase_expr(*subject)),
             arms: arms.into_iter().map(|arm| IrMatchArm {

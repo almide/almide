@@ -7,6 +7,7 @@ fn test_wasm_empty_program_valid() {
         var_table: almide::ir::VarTable::new(),
         modules: vec![],
         type_registry: almide::types::TypeConstructorRegistry::new(),
+        effect_fn_names: Default::default(),
         effect_map: Default::default(),
         codegen_annotations: Default::default(),
     };

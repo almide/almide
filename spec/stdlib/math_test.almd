@@ -1,104 +1,95 @@
+import math
+
 // Comprehensive math module tests
-
 // ── abs ──
-
 test "math.abs" {
-  assert_eq(math.abs(-5), 5)
-  assert_eq(math.abs(0), 0)
+  assert_eq(math.abs(-5), 5);
+  assert_eq(math.abs(0), 0);
   assert_eq(math.abs(42), 42)
 }
 
 // ── min / max ──
-
 test "math.min and max" {
-  assert_eq(math.min(3, 7), 3)
-  assert_eq(math.max(3, 7), 7)
-  assert_eq(math.min(5, 5), 5)
+  assert_eq(math.min(3, 7), 3);
+  assert_eq(math.max(3, 7), 7);
+  assert_eq(math.min(5, 5), 5);
   assert_eq(math.max(-10, -3), -3)
 }
 
 // ── pow ──
-
 test "math.pow int" {
-  assert_eq(math.pow(2, 10), 1024)
-  assert_eq(math.pow(5, 0), 1)
+  assert_eq(math.pow(2, 10), 1024);
+  assert_eq(math.pow(5, 0), 1);
   assert_eq(math.pow(3, 3), 27)
 }
 
 test "math.fpow float" {
-  assert_eq(math.fpow(2.0, 10.0), 1024.0)
-  assert_eq(math.fpow(5.0, 0.0), 1.0)
+  assert_eq(math.fpow(2.0, 10.0), 1024.0);
+  assert_eq(math.fpow(5.0, 0.0), 1.0);
   assert_eq(math.fpow(9.0, 0.5) > 2.99, true)
 }
 
 // ── pi / e ──
-
 test "math.pi and e" {
-  let pi = math.pi()
-  assert(pi > 3.14159 and pi < 3.14160)
-  let e = math.e()
+  let pi = math.pi();
+  assert(pi > 3.14159 and pi < 3.1416);
+  let e = math.e();
   assert(e > 2.71828 and e < 2.71829)
 }
 
 // ── sqrt ──
-
 test "math.sqrt" {
-  assert_eq(math.sqrt(16.0), 4.0)
-  assert_eq(math.sqrt(0.0), 0.0)
-  let s = math.sqrt(2.0)
+  assert_eq(math.sqrt(16.0), 4.0);
+  assert_eq(math.sqrt(0.0), 0.0);
+  let s = math.sqrt(2.0);
   assert(s > 1.414 and s < 1.415)
 }
 
 // ── sin / cos / tan ──
-
 test "math.sin cos tan at zero" {
-  assert_eq(math.sin(0.0), 0.0)
-  assert_eq(math.cos(0.0), 1.0)
+  assert_eq(math.sin(0.0), 0.0);
+  assert_eq(math.cos(0.0), 1.0);
   assert_eq(math.tan(0.0), 0.0)
 }
 
 test "math.sin cos pythagorean identity" {
-  let x = 1.0
-  let s = math.sin(x)
-  let c = math.cos(x)
-  let sum = s * s + c * c
+  let x = 1.0;
+  let s = math.sin(x);
+  let c = math.cos(x);
+  let sum = s * s + c * c;
   assert(sum > 0.999 and sum < 1.001)
 }
 
 // ── log / log10 / log2 ──
-
 test "math.log log10 log2" {
-  assert_eq(math.log(1.0), 0.0)
-  assert_eq(math.log10(100.0), 2.0)
+  assert_eq(math.log(1.0), 0.0);
+  assert_eq(math.log10(100.0), 2.0);
   assert_eq(math.log2(8.0), 3.0)
 }
 
 // ── exp ──
-
 test "math.exp" {
-  assert_eq(math.exp(0.0), 1.0)
-  let r = math.exp(1.0)
+  assert_eq(math.exp(0.0), 1.0);
+  let r = math.exp(1.0);
   assert(r > 2.718 and r < 2.719)
 }
 
 // ── sign ──
-
 test "math.sign" {
-  assert_eq(math.sign(42), 1)
-  assert_eq(math.sign(-7), -1)
+  assert_eq(math.sign(42), 1);
+  assert_eq(math.sign(-7), -1);
   assert_eq(math.sign(0), 0)
 }
 
 // ── fmin / fmax / fpow ──
-
 test "math.fmin and fmax" {
-  assert_eq(math.fmin(1.5, 2.5), 1.5)
+  assert_eq(math.fmin(1.5, 2.5), 1.5);
   assert_eq(math.fmax(1.5, 2.5), 2.5)
 }
 
 test "math.fmin negative" {
-  let a = 0.0 - 1.0
-  let b = 0.0 - 2.0
+  let a = 0.0 - 1.0;
+  let b = 0.0 - 2.0;
   assert_eq(math.fmin(a, b), b)
 }
 
@@ -107,13 +98,12 @@ test "math.fpow exact" {
 }
 
 // ── factorial / choose ──
-
 test "math.factorial" {
-  assert_eq(math.factorial(0), 1)
+  assert_eq(math.factorial(0), 1);
   assert_eq(math.factorial(5), 120)
 }
 
 test "math.choose" {
-  assert_eq(math.choose(5, 2), 10)
+  assert_eq(math.choose(5, 2), 10);
   assert_eq(math.choose(10, 0), 1)
 }

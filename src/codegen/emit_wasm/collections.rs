@@ -8,7 +8,7 @@ use super::values;
 impl FuncCompiler<'_> {
     /// Emit a record/variant construction: allocate memory, store fields.
     /// For variants (detected via name + type), prepends a tag i32 before fields.
-    pub(super) fn emit_record(&mut self, name: Option<&str>, fields: &[(String, IrExpr)], result_ty: &Ty) {
+    pub(super) fn emit_record(&mut self, name: Option<&str>, fields: &[(crate::intern::Sym, IrExpr)], result_ty: &Ty) {
         // Check if this is a variant constructor
         let tag = self.resolve_variant_tag(name, result_ty);
         let tag_size: u32 = if tag.is_some() { 4 } else { 0 };
@@ -143,7 +143,7 @@ impl FuncCompiler<'_> {
     }
 
     /// Emit spread record: copy base, then overwrite specified fields.
-    pub(super) fn emit_spread_record(&mut self, base: &IrExpr, overrides: &[(String, IrExpr)], result_ty: &Ty) {
+    pub(super) fn emit_spread_record(&mut self, base: &IrExpr, overrides: &[(crate::intern::Sym, IrExpr)], result_ty: &Ty) {
         let all_fields = self.extract_record_fields(result_ty);
         let tag_offset = self.variant_tag_offset(result_ty);
         let total_size = tag_offset + values::record_size(&all_fields);
@@ -383,11 +383,11 @@ impl FuncCompiler<'_> {
             object.ty.clone()
         };
         let mut fields = self.extract_record_fields(&resolved_ty);
-        let mut tag_offset = self.variant_tag_offset(&resolved_ty);
+        let tag_offset = self.variant_tag_offset(&resolved_ty);
 
         // If fields are empty and type is Unknown, try searching record_fields for a type that has this field
         if fields.is_empty() && matches!(&resolved_ty, Ty::Unknown | Ty::TypeVar(_)) {
-            for (name, rf) in &self.emitter.record_fields {
+            for (_name, rf) in &self.emitter.record_fields {
                 if rf.iter().any(|(n, _)| n == field) {
                     fields = rf.clone();
                     break;

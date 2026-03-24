@@ -46,3 +46,39 @@ pub fn almide_rt_result_to_err_option<T, E: Clone>(r: Result<T, E>) -> Option<E>
 pub fn almide_rt_result_flatten<T, E>(r: Result<Result<T, E>, E>) -> Result<T, E> {
     match r { Ok(inner) => inner, Err(e) => Err(e) }
 }
+
+pub fn almide_rt_result_collect<T, E>(rs: Vec<Result<T, E>>) -> Result<Vec<T>, Vec<E>> {
+    let mut oks = Vec::new();
+    let mut errs = Vec::new();
+    for r in rs {
+        match r {
+            Ok(v) => oks.push(v),
+            Err(e) => errs.push(e),
+        }
+    }
+    if errs.is_empty() { Ok(oks) } else { Err(errs) }
+}
+
+pub fn almide_rt_result_partition<T, E>(rs: Vec<Result<T, E>>) -> (Vec<T>, Vec<E>) {
+    let mut oks = Vec::new();
+    let mut errs = Vec::new();
+    for r in rs {
+        match r {
+            Ok(v) => oks.push(v),
+            Err(e) => errs.push(e),
+        }
+    }
+    (oks, errs)
+}
+
+pub fn almide_rt_result_collect_map<T, U, E>(xs: Vec<T>, mut f: impl FnMut(T) -> Result<U, E>) -> Result<Vec<U>, Vec<E>> {
+    let mut oks = Vec::new();
+    let mut errs = Vec::new();
+    for x in xs {
+        match f(x) {
+            Ok(v) => oks.push(v),
+            Err(e) => errs.push(e),
+        }
+    }
+    if errs.is_empty() { Ok(oks) } else { Err(errs) }
+}

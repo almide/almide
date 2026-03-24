@@ -1,10 +1,9 @@
 //! Float, Int, and Math stdlib call dispatch for WASM codegen.
 
 use super::FuncCompiler;
-use super::values;
 use crate::ir::IrExpr;
 use crate::types::Ty;
-use wasm_encoder::{Instruction, ValType};
+use wasm_encoder::Instruction;
 
 impl FuncCompiler<'_> {
     /// Dispatch a float stdlib method call. Returns true if handled.

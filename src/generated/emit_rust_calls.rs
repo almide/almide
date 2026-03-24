@@ -140,7 +140,12 @@ pub fn gen_generated_call(
             ("json", "from_int") => format!("Value::Int({})", args_str[0]),
             ("json", "from_string") => format!("Value::Str({})", args_str[0]),
             ("json", "get") => format!("almide_json_get(&{}, &{})", args_str[0], args_str[1]),
+            ("json", "get_array") => format!("almide_json_get_array(&{}, &{})", args_str[0], args_str[1]),
+            ("json", "get_bool") => format!("almide_json_get_bool(&{}, &{})", args_str[0], args_str[1]),
+            ("json", "get_float") => format!("almide_json_get_float(&{}, &{})", args_str[0], args_str[1]),
+            ("json", "get_int") => format!("almide_json_get_int(&{}, &{})", args_str[0], args_str[1]),
             ("json", "get_path") => format!("almide_json_get_path(&{}, &{})", args_str[0], args_str[1]),
+            ("json", "get_string") => format!("almide_json_get_string(&{}, &{})", args_str[0], args_str[1]),
             ("json", "index") => format!("AlmideJsonPath::JpIndex(Box::new({}), {})", args_str[0], args_str[1]),
             ("json", "keys") => format!("almide_json_keys(&{})", args_str[0]),
             ("json", "null") => "almide_rt_value_null()".to_string(),
@@ -382,10 +387,10 @@ pub fn gen_generated_call(
             ("process", "exec_with_stdin") => if auto_unwrap { format!("almide_rt_process_exec_with_stdin(&*{}, &{{ let __a: Vec<String> = {}; __a }}, &*{})?", args_str[0], args_str[1], args_str[2]) } else { format!("almide_rt_process_exec_with_stdin(&*{}, &{{ let __a: Vec<String> = {}; __a }}, &*{})", args_str[0], args_str[1], args_str[2]) },
             ("process", "exit") => format!("almide_rt_process_exit({})", args_str[0]),
             ("process", "stdin_lines") => if auto_unwrap { "almide_rt_process_stdin_lines()?".to_string() } else { "almide_rt_process_stdin_lines()".to_string() },
-            ("random", "choice") => if auto_unwrap { format!("almide_rt_random_choice(&{})?", args_str[0]) } else { format!("almide_rt_random_choice(&{})", args_str[0]) },
-            ("random", "float") => if auto_unwrap { "almide_rt_random_float()?".to_string() } else { "almide_rt_random_float()".to_string() },
-            ("random", "int") => if auto_unwrap { format!("almide_rt_random_int({}, {})?", args_str[0], args_str[1]) } else { format!("almide_rt_random_int({}, {})", args_str[0], args_str[1]) },
-            ("random", "shuffle") => if auto_unwrap { format!("almide_rt_random_shuffle(({}).to_vec())?", args_str[0]) } else { format!("almide_rt_random_shuffle(({}).to_vec())", args_str[0]) },
+            ("random", "choice") => format!("almide_rt_random_choice(&{})", args_str[0]),
+            ("random", "float") => "almide_rt_random_float()".to_string(),
+            ("random", "int") => format!("almide_rt_random_int({}, {})", args_str[0], args_str[1]),
+            ("random", "shuffle") => format!("almide_rt_random_shuffle(({}).to_vec())", args_str[0]),
             ("regex", "captures") => format!("almide_regex_captures(&{}, &{})", args_str[0], args_str[1]),
             ("regex", "find") => format!("almide_regex_find(&{}, &{})", args_str[0], args_str[1]),
             ("regex", "find_all") => format!("almide_regex_find_all(&{}, &{})", args_str[0], args_str[1]),
@@ -394,6 +399,11 @@ pub fn gen_generated_call(
             ("regex", "replace") => format!("almide_regex_replace(&{}, &{}, &{})", args_str[0], args_str[1], args_str[2]),
             ("regex", "replace_first") => format!("almide_regex_replace_first(&{}, &{}, &{})", args_str[0], args_str[1], args_str[2]),
             ("regex", "split") => format!("almide_regex_split(&{}, &{})", args_str[0], args_str[1]),
+            ("result", "collect") => format!("almide_rt_result_collect(({}).to_vec())", args_str[0]),
+            ("result", "collect_map") => {
+                let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
+                format!("almide_rt_result_collect_map(({}).to_vec(), |{}| {{{{ {}{} }}}})", args_str[0], __cl_f_names.join(", "), format!("let {} = {}.clone(); ", __cl_f_names[0], __cl_f_names[0]), __cl_f_body)
+            },
             ("result", "flat_map") => {
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
                 format!("({}).and_then(|{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body)
@@ -408,6 +418,7 @@ pub fn gen_generated_call(
                 let (__cl_f_names, __cl_f_body) = inline_lambda(1, 1);
                 format!("({}).map_err(|{}| {{{{ {} }}}})", args_str[0], __cl_f_names.join(", "), __cl_f_body)
             },
+            ("result", "partition") => format!("almide_rt_result_partition(({}).to_vec())", args_str[0]),
             ("result", "to_err_option") => format!("({}).err()", args_str[0]),
             ("result", "to_option") => format!("({}).ok()", args_str[0]),
             ("result", "unwrap_or") => format!("({}).unwrap_or({})", args_str[0], args_str[1]),

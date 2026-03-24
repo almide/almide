@@ -1,4 +1,3 @@
-module stdlib_e2e
 
 test "string.to_upper" {
   assert_eq(string.to_upper("hello"), "HELLO")

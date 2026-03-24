@@ -1,19 +1,20 @@
-// fan.race — first to complete wins
 
+// fan.race — first to complete wins
 effect fn fast() -> Result[String, String] = ok("fast")
+
 effect fn slow() -> Result[String, String] = ok("slow")
 
 test "fan.race basic" {
   let winner = fan.race([
     () => fast(),
-    () => slow(),
-  ])
+    () => slow()
+  ]);
   assert(winner == "fast" or winner == "slow")
 }
 
 test "fan.race single thunk" {
   let result = fan.race([
-    () => fast(),
-  ])
+    () => fast()
+  ]);
   assert_eq(result, "fast")
 }

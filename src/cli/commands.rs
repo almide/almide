@@ -86,15 +86,61 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
 
     let mut program_args: Vec<String> = Vec::new();
     if let Some(filter) = run_filter {
-        // Pass filter to rustc test binary
         program_args.push(filter.to_string());
     }
 
-    let mut failed = 0;
+    // Phase 1: Compile all test files sequentially (shared cargo workspace)
+    let mut compiled: Vec<(String, Result<std::path::PathBuf, String>)> = Vec::new();
     for test_file in &test_files {
-        eprintln!("Running {}", test_file);
-        let code = super::cmd_run_inner(test_file, &program_args, no_check, true);
-        if code != 0 {
+        eprintln!("Compiling {}", test_file);
+        let result = super::run::compile_to_binary(test_file, no_check, true);
+        compiled.push((test_file.clone(), result));
+    }
+
+    // Phase 2: Execute test binaries in parallel (bounded by CPU count)
+    let program_args = std::sync::Arc::new(program_args);
+    let results: Vec<(String, i32)> = {
+        let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+        // Channel-based semaphore: pre-fill with `cpus` tokens
+        let (sem_tx, sem_rx) = std::sync::mpsc::sync_channel::<()>(cpus);
+        for _ in 0..cpus { let _ = sem_tx.send(()); }
+        let sem_tx = std::sync::Arc::new(sem_tx);
+        let sem_rx = std::sync::Arc::new(std::sync::Mutex::new(sem_rx));
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut handles = Vec::new();
+
+        for (file, compile_result) in compiled {
+            let tx = tx.clone();
+            let args = program_args.clone();
+            let sem_rx = sem_rx.clone();
+            let sem_tx = sem_tx.clone();
+            handles.push(std::thread::spawn(move || {
+                // Acquire semaphore token
+                let _ = sem_rx.lock().unwrap().recv();
+                let code = match compile_result {
+                    Ok(bin) => super::run::run_binary(&bin, &args),
+                    Err(e) => {
+                        eprintln!("Compile error for {}:\n{}", file, e);
+                        1
+                    }
+                };
+                // Release semaphore token
+                let _ = sem_tx.send(());
+                let _ = tx.send((file, code));
+            }));
+        }
+        drop(tx);
+        let mut results: Vec<(String, i32)> = rx.iter().collect();
+        for h in handles { let _ = h.join(); }
+        results.sort_by(|a, b| a.0.cmp(&b.0));
+        results
+    };
+
+    let mut failed = 0;
+    for (file, code) in &results {
+        if *code != 0 {
+            eprintln!("FAILED: {}", file);
             failed += 1;
         }
     }
@@ -105,7 +151,7 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
     eprintln!("\nAll {} test file(s) passed", test_files.len());
 }
 
-pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>) {
+pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
     use crate::{parse_file, check, diagnostic, resolve, project, project_fetch};
 
     let test_files: Vec<String> = if !file.is_empty() {

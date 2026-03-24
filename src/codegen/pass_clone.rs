@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 use crate::ir::*;
 use crate::types::Ty;
-use super::pass::{NanoPass, Target};
+use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
 pub struct CloneInsertionPass;
@@ -21,24 +21,25 @@ impl NanoPass for CloneInsertionPass {
 
     fn depends_on(&self) -> Vec<&'static str> { vec!["BorrowInsertion"] }
 
-    fn run(&self, program: &mut IrProgram, _target: Target) {
+    fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let clone_ids = collect_clone_ids(&program.var_table);
         for func in &mut program.functions {
-            func.body = insert_clones(func.body.clone(), &clone_ids);
+            func.body = insert_clones(std::mem::take(&mut func.body), &clone_ids);
         }
         for tl in &mut program.top_lets {
-            tl.value = insert_clones(tl.value.clone(), &clone_ids);
+            tl.value = insert_clones(std::mem::take(&mut tl.value), &clone_ids);
         }
         // Process module functions (each module has its own var_table)
         for module in &mut program.modules {
             let module_clone_ids = collect_clone_ids(&module.var_table);
             for func in &mut module.functions {
-                func.body = insert_clones(func.body.clone(), &module_clone_ids);
+                func.body = insert_clones(std::mem::take(&mut func.body), &module_clone_ids);
             }
             for tl in &mut module.top_lets {
-                tl.value = insert_clones(tl.value.clone(), &module_clone_ids);
+                tl.value = insert_clones(std::mem::take(&mut tl.value), &module_clone_ids);
             }
         }
+        PassResult { program, changed: true }
     }
 }
 
@@ -99,10 +100,7 @@ fn insert_clones(expr: IrExpr, clone_ids: &HashSet<VarId>) -> IrExpr {
             stmts: insert_clone_stmts(stmts, clone_ids),
             expr: expr.map(|e| Box::new(insert_clones(*e, clone_ids))),
         },
-        IrExprKind::DoBlock { stmts, expr } => IrExprKind::DoBlock {
-            stmts: insert_clone_stmts(stmts, clone_ids),
-            expr: expr.map(|e| Box::new(insert_clones(*e, clone_ids))),
-        },
+
         IrExprKind::Match { subject, arms } => IrExprKind::Match {
             subject: Box::new(insert_clones(*subject, clone_ids)),
             arms: arms.into_iter().map(|arm| IrMatchArm {

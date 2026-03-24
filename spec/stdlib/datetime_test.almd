@@ -1,143 +1,144 @@
-// datetime module tests — pure functions with runtime implementations only
+import datetime
 
+// datetime module tests — pure functions with runtime implementations only
 test "datetime.from_parts basic" {
-  let ts = datetime.from_parts(2024, 1, 15, 12, 0, 0)
-  assert_eq(datetime.year(ts), 2024)
-  assert_eq(datetime.month(ts), 1)
+  let ts = datetime.from_parts(2024, 1, 15, 12, 0, 0);
+  assert_eq(datetime.year(ts), 2024);
+  assert_eq(datetime.month(ts), 1);
   assert_eq(datetime.day(ts), 15)
 }
 
 test "datetime.from_parts midnight" {
-  let ts = datetime.from_parts(2024, 6, 1, 0, 0, 0)
-  assert_eq(datetime.hour(ts), 0)
-  assert_eq(datetime.minute(ts), 0)
+  let ts = datetime.from_parts(2024, 6, 1, 0, 0, 0);
+  assert_eq(datetime.hour(ts), 0);
+  assert_eq(datetime.minute(ts), 0);
   assert_eq(datetime.second(ts), 0)
 }
 
 test "datetime.from_parts end of day" {
-  let ts = datetime.from_parts(2024, 12, 31, 23, 59, 59)
-  assert_eq(datetime.hour(ts), 23)
-  assert_eq(datetime.minute(ts), 59)
+  let ts = datetime.from_parts(2024, 12, 31, 23, 59, 59);
+  assert_eq(datetime.hour(ts), 23);
+  assert_eq(datetime.minute(ts), 59);
   assert_eq(datetime.second(ts), 59)
 }
 
 test "datetime.year 2000" {
-  let ts = datetime.from_parts(2000, 1, 1, 0, 0, 0)
+  let ts = datetime.from_parts(2000, 1, 1, 0, 0, 0);
   assert_eq(datetime.year(ts), 2000)
 }
 
 test "datetime.month extraction" {
-  let ts = datetime.from_parts(2024, 7, 15, 12, 0, 0)
+  let ts = datetime.from_parts(2024, 7, 15, 12, 0, 0);
   assert_eq(datetime.month(ts), 7)
 }
 
 test "datetime.day extraction" {
-  let ts = datetime.from_parts(2024, 3, 25, 12, 0, 0)
+  let ts = datetime.from_parts(2024, 3, 25, 12, 0, 0);
   assert_eq(datetime.day(ts), 25)
 }
 
 test "datetime.hour extraction" {
-  let ts = datetime.from_parts(2024, 1, 1, 15, 30, 0)
+  let ts = datetime.from_parts(2024, 1, 1, 15, 30, 0);
   assert_eq(datetime.hour(ts), 15)
 }
 
 test "datetime.minute extraction" {
-  let ts = datetime.from_parts(2024, 1, 1, 0, 45, 0)
+  let ts = datetime.from_parts(2024, 1, 1, 0, 45, 0);
   assert_eq(datetime.minute(ts), 45)
 }
 
 test "datetime.second extraction" {
-  let ts = datetime.from_parts(2024, 1, 1, 0, 0, 33)
+  let ts = datetime.from_parts(2024, 1, 1, 0, 0, 33);
   assert_eq(datetime.second(ts), 33)
 }
 
 test "datetime.to_iso roundtrip" {
-  let ts = datetime.from_parts(2024, 1, 15, 12, 0, 0)
-  let iso = datetime.to_iso(ts)
-  assert_eq(string.contains(iso, "2024"), true)
+  let ts = datetime.from_parts(2024, 1, 15, 12, 0, 0);
+  let iso = datetime.to_iso(ts);
+  assert_eq(string.contains(iso, "2024"), true);
   assert_eq(string.contains(iso, "15"), true)
 }
 
 test "datetime.format returns a string" {
-  let ts = datetime.from_parts(2024, 3, 5, 0, 0, 0)
-  let formatted = datetime.format(ts, "%Y-%m-%d")
+  let ts = datetime.from_parts(2024, 3, 5, 0, 0, 0);
+  let formatted = datetime.format(ts, "%Y-%m-%d");
   assert(string.len(formatted) > 0)
 }
 
 test "datetime.weekday returns string" {
-  let ts = datetime.from_parts(2024, 1, 15, 0, 0, 0)
-  let wd = datetime.weekday(ts)
+  let ts = datetime.from_parts(2024, 1, 15, 0, 0, 0);
+  let wd = datetime.weekday(ts);
   assert_eq(string.len(wd) > 0, true)
 }
 
 test "datetime.weekday Monday" {
-  let ts = datetime.from_parts(2024, 1, 15, 0, 0, 0)
+  let ts = datetime.from_parts(2024, 1, 15, 0, 0, 0);
   assert_eq(datetime.weekday(ts), "Monday")
 }
 
 test "datetime.parse_iso valid" {
   match datetime.parse_iso("2024-01-15T12:00:00Z") {
     ok(ts) => {
-      assert_eq(datetime.year(ts), 2024)
-      assert_eq(datetime.month(ts), 1)
+      assert_eq(datetime.year(ts), 2024);
+      assert_eq(datetime.month(ts), 1);
       assert_eq(datetime.day(ts), 15)
-    }
-    err(_) => assert(false, "should parse")
+    },
+    err(_) => assert(false, "should parse"),
   }
 }
 
 test "datetime.parse_iso invalid" {
   match datetime.parse_iso("not-a-date") {
-    ok(_) => assert(false, "should fail")
-    err(e) => assert(string.len(e) > 0)
+    ok(_) => assert(false, "should fail"),
+    err(e) => assert(string.len(e) > 0),
   }
 }
 
 test "datetime.parse_iso then format" {
   match datetime.parse_iso("2024-06-01T08:30:00Z") {
     ok(ts) => {
-      assert_eq(datetime.year(ts), 2024)
-      assert_eq(datetime.month(ts), 6)
-      assert_eq(datetime.hour(ts), 8)
+      assert_eq(datetime.year(ts), 2024);
+      assert_eq(datetime.month(ts), 6);
+      assert_eq(datetime.hour(ts), 8);
       assert_eq(datetime.minute(ts), 30)
-    }
-    err(_) => assert(false, "should parse")
+    },
+    err(_) => assert(false, "should parse"),
   }
 }
 
 test "datetime.year on epoch" {
-  let ts = datetime.from_parts(1970, 1, 1, 0, 0, 0)
+  let ts = datetime.from_parts(1970, 1, 1, 0, 0, 0);
   assert_eq(datetime.year(ts), 1970)
 }
 
 test "datetime.from_parts february" {
-  let ts = datetime.from_parts(2024, 2, 29, 12, 0, 0)
-  assert_eq(datetime.month(ts), 2)
+  let ts = datetime.from_parts(2024, 2, 29, 12, 0, 0);
+  assert_eq(datetime.month(ts), 2);
   assert_eq(datetime.day(ts), 29)
 }
 
 test "datetime.to_iso format check" {
-  let ts = datetime.from_parts(2024, 1, 1, 0, 0, 0)
-  let iso = datetime.to_iso(ts)
+  let ts = datetime.from_parts(2024, 1, 1, 0, 0, 0);
+  let iso = datetime.to_iso(ts);
   assert_eq(string.contains(iso, "T"), true)
 }
 
 test "datetime.from_parts all months" {
-  let jan = datetime.from_parts(2024, 1, 1, 0, 0, 0)
-  let dec = datetime.from_parts(2024, 12, 1, 0, 0, 0)
-  assert_eq(datetime.month(jan), 1)
+  let jan = datetime.from_parts(2024, 1, 1, 0, 0, 0);
+  let dec = datetime.from_parts(2024, 12, 1, 0, 0, 0);
+  assert_eq(datetime.month(jan), 1);
   assert_eq(datetime.month(dec), 12)
 }
 
 test "datetime.from_parts different years" {
-  let ts1 = datetime.from_parts(2020, 6, 15, 0, 0, 0)
-  let ts2 = datetime.from_parts(2025, 6, 15, 0, 0, 0)
-  assert_eq(datetime.year(ts1), 2020)
+  let ts1 = datetime.from_parts(2020, 6, 15, 0, 0, 0);
+  let ts2 = datetime.from_parts(2025, 6, 15, 0, 0, 0);
+  assert_eq(datetime.year(ts1), 2020);
   assert_eq(datetime.year(ts2), 2025)
 }
 
 test "datetime.to_iso contains Z" {
-  let ts = datetime.from_parts(2024, 6, 15, 12, 0, 0)
-  let iso = datetime.to_iso(ts)
+  let ts = datetime.from_parts(2024, 6, 15, 12, 0, 0);
+  let iso = datetime.to_iso(ts);
   assert_eq(string.contains(iso, "Z"), true)
 }

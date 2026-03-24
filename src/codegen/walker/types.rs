@@ -38,14 +38,14 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
                     .unwrap_or_else(|| format!("Set<{}>", inner));
             }
             if args.is_empty() {
-                name.clone()
+                name.to_string()
             } else {
                 let args_str = args.iter().map(|a| render_type(ctx, a)).collect::<Vec<_>>().join(", ");
                 format!("{}<{}>", name, args_str)
             }
         }
         Ty::Record { fields } | Ty::OpenRecord { fields } => {
-            let mut names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
+            let mut names: Vec<String> = fields.iter().map(|(n, _)| n.to_string()).collect();
             names.sort();
             // Check named records first (user-defined types)
             if let Some(n) = ctx.ann.named_records.get(&names) {
@@ -78,7 +78,7 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
         Ty::Applied(id, args) => {
             let name = match id {
                 TypeConstructorId::UserDefined(n) => n.as_str(),
-                _ => return format!("{:?}", id),
+                _ => return id.to_string(),
             };
             if args.is_empty() {
                 name.to_string()
@@ -107,13 +107,13 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
             if n.starts_with('?') {
                 template_or(ctx, "typevar_infer", &[], "_")
             } else {
-                n.clone()
+                n.to_string()
             }
         }
         Ty::Unknown | Ty::Union(_) => {
             template_or(ctx, "unknown_type", &[], "_")
         }
-        Ty::Variant { name, .. } => name.clone(),
+        Ty::Variant { name, .. } => name.to_string(),
         // Fallback
         #[allow(unreachable_patterns)]
         _ => format!("{}", ty.display()),

@@ -65,10 +65,7 @@ fn transform_children(
             stmts: stmts.into_iter().map(|s| rec_stmt!(s)).collect(),
             expr: tail.map(|e| Box::new(rec!(*e))),
         },
-        IrExprKind::DoBlock { stmts, expr: tail } => IrExprKind::DoBlock {
-            stmts: stmts.into_iter().map(|s| rec_stmt!(s)).collect(),
-            expr: tail.map(|e| Box::new(rec!(*e))),
-        },
+
         IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
             params, body: Box::new(rec!(*body)), lambda_id,
         },

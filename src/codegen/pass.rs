@@ -11,6 +11,14 @@
 use crate::ir::IrProgram;
 use crate::types::Ty;
 
+// ── Pass Result ──
+// Returned by each pass: the transformed program + whether anything changed.
+
+pub struct PassResult {
+    pub program: IrProgram,
+    pub changed: bool,
+}
+
 // ── Scope Context ──
 // Tracks where we are in the program during IR traversal.
 
@@ -82,10 +90,9 @@ pub trait NanoPass: std::fmt::Debug {
     /// Default: no dependencies.
     fn depends_on(&self) -> Vec<&'static str> { vec![] }
 
-    /// Run the pass. Receives the program and target, returns modified program.
-    /// Global passes analyze the whole program.
-    /// Local passes walk the IR with scope context.
-    fn run(&self, program: &mut IrProgram, target: Target);
+    /// Run the pass. Takes ownership of the program, returns modified program
+    /// and whether any changes were made.
+    fn run(&self, program: IrProgram, target: Target) -> PassResult;
 }
 
 // ── Pass Pipeline ──
@@ -105,7 +112,8 @@ impl Pipeline {
         self
     }
 
-    pub fn run(&self, program: &mut IrProgram, target: Target) {
+    pub fn run(&self, program: IrProgram, target: Target) -> IrProgram {
+        let mut program = program;
         let mut executed: Vec<&str> = Vec::new();
         for pass in &self.passes {
             // Skip passes not relevant to this target
@@ -124,9 +132,11 @@ impl Pipeline {
                     );
                 }
             }
-            pass.run(program, target);
+            let result = pass.run(program, target);
+            program = result.program;
             executed.push(pass.name());
         }
+        program
     }
 }
 
@@ -141,10 +151,11 @@ impl NanoPass for OptionErasurePass {
     fn targets(&self) -> Option<Vec<Target>> {
         Some(vec![Target::TypeScript, Target::Python])
     }
-    fn run(&self, _program: &mut IrProgram, _target: Target) {
+    fn run(&self, program: IrProgram, _target: Target) -> PassResult {
         // TS/Python: some(x) → x, none → null/None
         // Walks IR and sets `option_erased = true` on relevant nodes
         // TODO: implement during Phase 2 migration
+        PassResult { program, changed: false }
     }
 }
 
@@ -156,9 +167,10 @@ impl NanoPass for ResultPropagationPass {
     fn targets(&self) -> Option<Vec<Target>> {
         Some(vec![Target::Rust])
     }
-    fn run(&self, _program: &mut IrProgram, _target: Target) {
+    fn run(&self, program: IrProgram, _target: Target) -> PassResult {
         // Rust: insert `?` on Result-returning calls inside effect fn
         // TODO: implement during Phase 2 migration
+        PassResult { program, changed: false }
     }
 }
 
@@ -170,9 +182,10 @@ impl NanoPass for BorrowInsertionPass {
     fn targets(&self) -> Option<Vec<Target>> {
         Some(vec![Target::Rust])
     }
-    fn run(&self, _program: &mut IrProgram, _target: Target) {
+    fn run(&self, program: IrProgram, _target: Target) -> PassResult {
         // Rust: analyze parameter usage, mark &T vs T
         // TODO: implement during Phase 2 migration (move from borrow.rs)
+        PassResult { program, changed: false }
     }
 }
 
@@ -184,9 +197,10 @@ impl NanoPass for CloneInsertionPass {
     fn targets(&self) -> Option<Vec<Target>> {
         Some(vec![Target::Rust])
     }
-    fn run(&self, _program: &mut IrProgram, _target: Target) {
+    fn run(&self, program: IrProgram, _target: Target) -> PassResult {
         // Rust: use-count analysis, insert .clone() where needed
         // TODO: implement during Phase 2 migration
+        PassResult { program, changed: false }
     }
 }
 
@@ -198,8 +212,9 @@ impl NanoPass for FanLoweringPass {
     fn targets(&self) -> Option<Vec<Target>> {
         None // All targets need this
     }
-    fn run(&self, program: &mut IrProgram, _target: Target) {
-        super::pass_fan_lowering::strip_fan_auto_try(program);
+    fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
+        super::pass_fan_lowering::strip_fan_auto_try(&mut program);
+        PassResult { program, changed: true }
     }
 }
 
@@ -211,9 +226,10 @@ impl NanoPass for TypeConcretizationPass {
     fn targets(&self) -> Option<Vec<Target>> {
         Some(vec![Target::Rust])
     }
-    fn run(&self, _program: &mut IrProgram, _target: Target) {
+    fn run(&self, program: IrProgram, _target: Target) -> PassResult {
         // Rust: Box recursive types, generate AnonRecord structs
         // TODO: implement during Phase 2 migration
+        PassResult { program, changed: false }
     }
 }
 
@@ -224,8 +240,8 @@ pub struct StreamFusionPass;
 impl NanoPass for StreamFusionPass {
     fn name(&self) -> &str { "StreamFusion" }
     fn targets(&self) -> Option<Vec<Target>> { None }
-    fn run(&self, program: &mut IrProgram, _target: Target) {
-        super::pass_stream_fusion::StreamFusionPass.run(program, _target);
+    fn run(&self, program: IrProgram, _target: Target) -> PassResult {
+        super::pass_stream_fusion::StreamFusionPass.run(program, _target)
     }
 }
 

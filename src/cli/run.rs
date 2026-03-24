@@ -2,70 +2,70 @@ use std::process::Command;
 use crate::try_compile;
 use super::{hash64, cargo_build_generated, cargo_build_test};
 
-pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool, test_mode: bool) -> i32 {
-    let rs_code = match try_compile(file, no_check) {
-        Ok(code) => code,
-        Err(_) => return 1,
-    };
+/// Compile an .almd file to a native binary, returning the path to the executable.
+/// Uses incremental caching: if the generated Rust code hasn't changed, skips cargo build.
+pub fn compile_to_binary(file: &str, no_check: bool, test_mode: bool) -> Result<std::path::PathBuf, String> {
+    let rs_code = try_compile(file, no_check).map_err(|_| "compile failed".to_string())?;
 
     let project_dir = std::env::temp_dir().join("almide-run");
-    if let Err(e) = std::fs::create_dir_all(&project_dir) {
-        eprintln!("Failed to create temp directory {}: {}", project_dir.display(), e);
-        std::process::exit(1);
-    }
+    std::fs::create_dir_all(&project_dir)
+        .map_err(|e| format!("Failed to create temp directory: {}", e))?;
 
-    // test_mode: always use --test. Otherwise detect test-only files (no main function).
     let use_test_harness = test_mode || (!rs_code.contains("\nfn almide_main(") && !rs_code.contains("\nfn main(") && !rs_code.contains("\npub fn main("));
 
-    // Incremental: hash generated Rust code + test mode, skip cargo if unchanged
     let hash_input = format!("{}:test={}", &rs_code, use_test_harness);
     let code_hash = format!("{:016x}", hash64(hash_input.as_bytes()));
     let cache = super::incremental_cache_dir();
     let hash_file = cache.join(format!("{}.hash", file.replace('/', "_").replace('.', "_")));
 
-    // Determine expected binary path
-    let bin_path = if use_test_harness {
-        // For test mode, the binary path is determined by cargo
-        // Check cache first; if hit, re-derive path from previous build
-        project_dir.join("target").join("debug").join("almide-out")
-    } else {
-        project_dir.join("target").join("debug").join("almide-out")
-    };
+    // Per-file binary: use file hash as name to avoid collisions during parallel test runs
+    let bin_name = format!("almide-{}", &code_hash[..12]);
+    let bin_path = project_dir.join("target").join("debug").join(&bin_name);
 
     let cache_hit = hash_file.exists()
         && bin_path.exists()
         && std::fs::read_to_string(&hash_file).ok().as_deref() == Some(&code_hash);
 
-    let actual_bin = if cache_hit {
-        bin_path
-    } else {
-        let result = if use_test_harness {
-            cargo_build_test(&rs_code, &project_dir)
-        } else {
-            cargo_build_generated(&rs_code, &project_dir, false)
-        };
+    if cache_hit {
+        return Ok(bin_path);
+    }
 
-        match result {
-            Ok(p) => {
-                // Save hash on successful compile
-                let _ = std::fs::create_dir_all(&cache);
-                let _ = std::fs::write(&hash_file, &code_hash);
-                p
-            }
-            Err(e) => {
-                eprintln!("Compile error:\n{}", e);
-                return 1;
-            }
-        }
+    let result = if use_test_harness {
+        cargo_build_test(&rs_code, &project_dir)
+    } else {
+        cargo_build_generated(&rs_code, &project_dir, false)
     };
 
-    let status = Command::new(&actual_bin)
+    match result {
+        Ok(built_path) => {
+            // Copy built binary to per-file cached path
+            let _ = std::fs::copy(&built_path, &bin_path);
+            let _ = std::fs::create_dir_all(&cache);
+            let _ = std::fs::write(&hash_file, &code_hash);
+            Ok(bin_path)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Run a compiled binary with the given args, returning exit code.
+pub fn run_binary(bin: &std::path::Path, program_args: &[String]) -> i32 {
+    let status = Command::new(bin)
         .env("RUST_MIN_STACK", "8388608")
         .args(program_args)
         .status()
         .unwrap_or_else(|e| { eprintln!("Failed to execute: {}", e); std::process::exit(1); });
-
     status.code().unwrap_or(1)
+}
+
+pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool, test_mode: bool) -> i32 {
+    match compile_to_binary(file, no_check, test_mode) {
+        Ok(bin) => run_binary(&bin, program_args),
+        Err(e) => {
+            eprintln!("Compile error:\n{}", e);
+            1
+        }
+    }
 }
 
 pub fn cmd_run(file: &str, program_args: &[String], no_check: bool) {

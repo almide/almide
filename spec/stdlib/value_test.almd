@@ -1,59 +1,60 @@
-// value_test — Value type construction and stringify
+import value
 
+// value_test — Value type construction and stringify
 test "value.int" {
-  let v = value.int(42)
-  let s = value.stringify(v)
+  let v = value.int(42);
+  let s = value.stringify(v);
   assert_eq(s, "42")
 }
 
 test "value.str" {
-  let v = value.str("hello")
-  let s = value.stringify(v)
+  let v = value.str("hello");
+  let s = value.stringify(v);
   assert_eq(s.contains("hello"), true)
 }
 
 test "value.bool true" {
-  let v = value.bool(true)
+  let v = value.bool(true);
   assert_eq(value.stringify(v), "true")
 }
 
 test "value.bool false" {
-  let v = value.bool(false)
+  let v = value.bool(false);
   assert_eq(value.stringify(v), "false")
 }
 
 test "value.float" {
-  let v = value.float(3.14)
-  let s = value.stringify(v)
+  let v = value.float(3.14);
+  let s = value.stringify(v);
   assert_eq(s.contains("3.14"), true)
 }
 
 test "value.null" {
-  let v = value.null()
+  let v = value.null();
   assert_eq(value.stringify(v), "null")
 }
 
 test "value.array" {
-  let v = value.array([value.int(1), value.int(2)])
-  let s = value.stringify(v)
-  assert_eq(s.contains("1"), true)
+  let v = value.array([value.int(1), value.int(2)]);
+  let s = value.stringify(v);
+  assert_eq(s.contains("1"), true);
   assert_eq(s.contains("2"), true)
 }
 
 test "value.object" {
-  let v = value.object([("name", value.str("Alice"))])
-  let s = value.stringify(v)
+  let v = value.object([("name", value.str("Alice"))]);
+  let s = value.stringify(v);
   assert_eq(s.contains("Alice"), true)
 }
 
 test "value.object nested" {
-  let inner = value.object([("x", value.int(1))])
-  let outer = value.object([("point", inner)])
-  let s = value.stringify(outer)
+  let inner = value.object([("x", value.int(1))]);
+  let outer = value.object([("point", inner)]);
+  let s = value.stringify(outer);
   assert_eq(s.contains("point"), true)
 }
 
 test "value.stringify empty array" {
-  let v = value.array([])
+  let v = value.array([]);
   assert_eq(value.stringify(v), "[]")
 }

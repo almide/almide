@@ -23,7 +23,7 @@
 use crate::ir::*;
 use crate::types::Ty;
 use crate::types::constructor::TypeConstructorId;
-use super::pass::{NanoPass, Target};
+use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
 pub struct TailCallOptPass;
@@ -35,11 +35,12 @@ impl NanoPass for TailCallOptPass {
         None // All targets benefit from TCO
     }
 
-    fn run(&self, program: &mut IrProgram, _target: Target) {
+    fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         run_tco(&mut program.functions, &mut program.var_table);
         for module in &mut program.modules {
             run_tco(&mut module.functions, &mut module.var_table);
         }
+        PassResult { program, changed: true }
     }
 }
 
@@ -102,59 +103,38 @@ fn all_self_calls_in_tail_pos(expr: &IrExpr, fn_name: &str) -> (bool, bool) {
             if subj_has && !subj_all {
                 return (true, false);
             }
-            let mut has = subj_has;
-            let mut all = !subj_has || subj_all;
-            for arm in arms {
+            let (has, all) = arms.iter().fold((subj_has, !subj_has || subj_all), |(has, all), arm| {
                 let (arm_has, arm_all) = all_self_calls_in_tail_pos(&arm.body, fn_name);
-                has = has || arm_has;
-                all = all && (!arm_has || arm_all);
-                // Guards are NOT tail
-                if let Some(guard) = &arm.guard {
-                    let (g_has, g_all) = scan_non_tail(guard, fn_name);
-                    has = has || g_has;
-                    all = all && (!g_has || g_all);
-                }
-            }
+                let (g_has, g_all) = arm.guard.as_ref().map_or((false, true), |g| scan_non_tail(g, fn_name));
+                (has || arm_has || g_has, all && (!arm_has || arm_all) && (!g_has || g_all))
+            });
             (has, all)
         }
 
         // Block: stmts are NOT tail, only the trailing expr is tail
-        IrExprKind::Block { stmts, expr } => {
-            let mut has = false;
-            let mut all = true;
-            for stmt in stmts {
-                let (s_has, s_all) = scan_non_tail_stmt(stmt, fn_name);
-                has = has || s_has;
-                all = all && (!s_has || s_all);
-            }
-            if let Some(tail) = expr {
-                let (t_has, t_all) = all_self_calls_in_tail_pos(tail, fn_name);
-                has = has || t_has;
-                all = all && (!t_has || t_all);
-            }
-            (has, all)
-        }
 
-        // DoBlock: same as Block
-        IrExprKind::DoBlock { stmts, expr } => {
-            let mut has = false;
-            let mut all = true;
-            for stmt in stmts {
+        IrExprKind::Block { stmts, expr } => {
+            let (has, all) = stmts.iter().fold((false, true), |(has, all), stmt| {
                 let (s_has, s_all) = scan_non_tail_stmt(stmt, fn_name);
-                has = has || s_has;
-                all = all && (!s_has || s_all);
-            }
-            if let Some(tail) = expr {
+                (has || s_has, all && (!s_has || s_all))
+            });
+            let (has, all) = expr.as_ref().map_or((has, all), |tail| {
                 let (t_has, t_all) = all_self_calls_in_tail_pos(tail, fn_name);
-                has = has || t_has;
-                all = all && (!t_has || t_all);
-            }
+                (has || t_has, all && (!t_has || t_all))
+            });
             (has, all)
         }
 
         // Anything else: scan for non-tail self-calls
         _ => scan_non_tail(expr, fn_name),
     }
+}
+
+/// Check whether any expression in an iterator contains a self-call (non-tail).
+/// Returns `(has_any, !has_any)` — the `all` component is simply the negation of `has`.
+fn any_has_self_call<'a>(exprs: impl Iterator<Item = &'a IrExpr>, fn_name: &str) -> (bool, bool) {
+    let has = exprs.fold(false, |has, e| has || scan_non_tail(e, fn_name).0);
+    (has, !has)
 }
 
 /// Scan an expression that is NOT in tail position. Any self-call found here
@@ -164,89 +144,48 @@ fn scan_non_tail(expr: &IrExpr, fn_name: &str) -> (bool, bool) {
         IrExprKind::Call { target: CallTarget::Named { name }, args, .. } if name == fn_name => {
             // Self-call in non-tail position: disqualify
             // But also scan args for additional self-calls
-            let mut has = true;
-            for arg in args {
-                let (a_has, _) = scan_non_tail(arg, fn_name);
-                has = has || a_has;
-            }
+            let has = args.iter().fold(true, |has, arg| has || scan_non_tail(arg, fn_name).0);
             (has, false)
         }
         IrExprKind::Call { target, args, .. } => {
-            let mut has = false;
-            // Scan target if Computed or Method
-            match target {
-                CallTarget::Computed { callee } => {
-                    let (c_has, _) = scan_non_tail(callee, fn_name);
-                    has = has || c_has;
-                }
-                CallTarget::Method { object, .. } => {
-                    let (o_has, _) = scan_non_tail(object, fn_name);
-                    has = has || o_has;
-                }
-                _ => {}
-            }
-            for arg in args {
-                let (a_has, _) = scan_non_tail(arg, fn_name);
-                has = has || a_has;
-            }
-            (has, !has) // all=true only if no self-calls found
+            let target_has = match target {
+                CallTarget::Computed { callee } => scan_non_tail(callee, fn_name).0,
+                CallTarget::Method { object, .. } => scan_non_tail(object, fn_name).0,
+                _ => false,
+            };
+            let has = args.iter().fold(target_has, |has, arg| has || scan_non_tail(arg, fn_name).0);
+            (has, !has)
         }
         IrExprKind::BinOp { left, right, .. } => {
-            let (l_has, _) = scan_non_tail(left, fn_name);
-            let (r_has, _) = scan_non_tail(right, fn_name);
-            let has = l_has || r_has;
+            let has = scan_non_tail(left, fn_name).0 || scan_non_tail(right, fn_name).0;
             (has, !has)
         }
         IrExprKind::UnOp { operand, .. } => {
             scan_non_tail(operand, fn_name)
         }
         IrExprKind::If { cond, then, else_ } => {
-            let (c_has, _) = scan_non_tail(cond, fn_name);
-            let (t_has, _) = scan_non_tail(then, fn_name);
-            let (e_has, _) = scan_non_tail(else_, fn_name);
-            let has = c_has || t_has || e_has;
+            let has = scan_non_tail(cond, fn_name).0
+                || scan_non_tail(then, fn_name).0
+                || scan_non_tail(else_, fn_name).0;
             (has, !has)
         }
         IrExprKind::Match { subject, arms } => {
-            let (s_has, _) = scan_non_tail(subject, fn_name);
-            let mut has = s_has;
-            for arm in arms {
-                let (a_has, _) = scan_non_tail(&arm.body, fn_name);
-                has = has || a_has;
-                if let Some(guard) = &arm.guard {
-                    let (g_has, _) = scan_non_tail(guard, fn_name);
-                    has = has || g_has;
-                }
-            }
+            let has = arms.iter().fold(scan_non_tail(subject, fn_name).0, |has, arm| {
+                let g_has = arm.guard.as_ref().map_or(false, |g| scan_non_tail(g, fn_name).0);
+                has || scan_non_tail(&arm.body, fn_name).0 || g_has
+            });
             (has, !has)
         }
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
-            let mut has = false;
-            for stmt in stmts {
-                let (s_has, _) = scan_non_tail_stmt(stmt, fn_name);
-                has = has || s_has;
-            }
-            if let Some(e) = expr {
-                let (e_has, _) = scan_non_tail(e, fn_name);
-                has = has || e_has;
-            }
+        IrExprKind::Block { stmts, expr } => {
+            let has = stmts.iter().fold(false, |has, stmt| has || scan_non_tail_stmt(stmt, fn_name).0);
+            let has = expr.as_ref().map_or(has, |e| has || scan_non_tail(e, fn_name).0);
             (has, !has)
         }
         IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
-            let mut has = false;
-            for e in elements {
-                let (e_has, _) = scan_non_tail(e, fn_name);
-                has = has || e_has;
-            }
-            (has, !has)
+            any_has_self_call(elements.iter(), fn_name)
         }
         IrExprKind::Record { fields, .. } => {
-            let mut has = false;
-            for (_, v) in fields {
-                let (v_has, _) = scan_non_tail(v, fn_name);
-                has = has || v_has;
-            }
-            (has, !has)
+            any_has_self_call(fields.iter().map(|(_, v)| v), fn_name)
         }
         IrExprKind::Lambda { body, .. } => {
             // Lambdas are independent scopes; a self-call in a lambda
@@ -265,78 +204,48 @@ fn scan_non_tail(expr: &IrExpr, fn_name: &str) -> (bool, bool) {
             scan_non_tail(object, fn_name)
         }
         IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
-            let (o_has, _) = scan_non_tail(object, fn_name);
-            let (i_has, _) = scan_non_tail(index, fn_name);
-            let has = o_has || i_has;
+            let has = scan_non_tail(object, fn_name).0 || scan_non_tail(index, fn_name).0;
             (has, !has)
         }
         IrExprKind::SpreadRecord { base, fields } => {
-            let (b_has, _) = scan_non_tail(base, fn_name);
-            let mut has = b_has;
-            for (_, v) in fields {
-                let (v_has, _) = scan_non_tail(v, fn_name);
-                has = has || v_has;
-            }
+            let has = fields.iter().fold(scan_non_tail(base, fn_name).0, |has, (_, v)| {
+                has || scan_non_tail(v, fn_name).0
+            });
             (has, !has)
         }
         IrExprKind::StringInterp { parts } => {
-            let mut has = false;
-            for p in parts {
-                if let IrStringPart::Expr { expr } = p {
-                    let (e_has, _) = scan_non_tail(expr, fn_name);
-                    has = has || e_has;
-                }
-            }
+            let has = parts.iter().fold(false, |has, p| {
+                if let IrStringPart::Expr { expr } = p { has || scan_non_tail(expr, fn_name).0 } else { has }
+            });
             (has, !has)
         }
         IrExprKind::MapLiteral { entries } => {
-            let mut has = false;
-            for (k, v) in entries {
-                let (k_has, _) = scan_non_tail(k, fn_name);
-                let (v_has, _) = scan_non_tail(v, fn_name);
-                has = has || k_has || v_has;
-            }
+            let has = entries.iter().fold(false, |has, (k, v)| {
+                has || scan_non_tail(k, fn_name).0 || scan_non_tail(v, fn_name).0
+            });
             (has, !has)
         }
         IrExprKind::Range { start, end, .. } => {
-            let (s_has, _) = scan_non_tail(start, fn_name);
-            let (e_has, _) = scan_non_tail(end, fn_name);
-            let has = s_has || e_has;
+            let has = scan_non_tail(start, fn_name).0 || scan_non_tail(end, fn_name).0;
             (has, !has)
         }
         IrExprKind::ForIn { iterable, body, .. } => {
-            let (i_has, _) = scan_non_tail(iterable, fn_name);
-            let mut has = i_has;
-            for stmt in body {
-                let (s_has, _) = scan_non_tail_stmt(stmt, fn_name);
-                has = has || s_has;
-            }
+            let has = body.iter().fold(scan_non_tail(iterable, fn_name).0, |has, stmt| {
+                has || scan_non_tail_stmt(stmt, fn_name).0
+            });
             (has, !has)
         }
         IrExprKind::While { cond, body } => {
-            let (c_has, _) = scan_non_tail(cond, fn_name);
-            let mut has = c_has;
-            for stmt in body {
-                let (s_has, _) = scan_non_tail_stmt(stmt, fn_name);
-                has = has || s_has;
-            }
+            let has = body.iter().fold(scan_non_tail(cond, fn_name).0, |has, stmt| {
+                has || scan_non_tail_stmt(stmt, fn_name).0
+            });
             (has, !has)
         }
         IrExprKind::Fan { exprs } => {
-            let mut has = false;
-            for e in exprs {
-                let (e_has, _) = scan_non_tail(e, fn_name);
-                has = has || e_has;
-            }
-            (has, !has)
+            any_has_self_call(exprs.iter(), fn_name)
         }
         IrExprKind::RustMacro { args, .. } => {
-            let mut has = false;
-            for a in args {
-                let (a_has, _) = scan_non_tail(a, fn_name);
-                has = has || a_has;
-            }
-            (has, !has)
+            any_has_self_call(args.iter(), fn_name)
         }
         // Leaf nodes: no self-calls
         _ => (false, true),
@@ -400,7 +309,7 @@ fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) {
 
     // Allocate a result variable
     let result_var = var_table.alloc(
-        "__tco_result".to_string(),
+        "__tco_result".into(),
         ret_ty.clone(),
         Mutability::Var,
         None,
@@ -409,7 +318,7 @@ fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) {
     // Allocate temporaries for each param (to avoid order-dependent assignment)
     let temps: Vec<(VarId, Ty)> = func.params.iter().map(|p| {
         let tmp = var_table.alloc(
-            format!("__tco_tmp_{}", p.name),
+            format!("__tco_tmp_{}", p.name).into(),
             p.ty.clone(),
             Mutability::Let,
             None,
@@ -423,7 +332,7 @@ fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) {
         .collect();
 
     // Rewrite the body expression
-    let old_body = func.body.clone();
+    let old_body = std::mem::take(&mut func.body);
     let is_effect = func.is_effect;
     let rewritten = rewrite_tail_expr(old_body, &fn_name, &params, &temps, result_var, is_effect);
 
@@ -552,19 +461,6 @@ fn rewrite_tail_expr(
             let new_tail = rewrite_tail_expr(*tail, fn_name, params, temps, result_var, is_effect);
             IrExpr {
                 kind: IrExprKind::Block {
-                    stmts,
-                    expr: Some(Box::new(new_tail)),
-                },
-                ty: Ty::Unit,
-                span: expr.span,
-            }
-        }
-
-        // DoBlock: same as Block
-        IrExprKind::DoBlock { stmts, expr: Some(tail) } => {
-            let new_tail = rewrite_tail_expr(*tail, fn_name, params, temps, result_var, is_effect);
-            IrExpr {
-                kind: IrExprKind::DoBlock {
                     stmts,
                     expr: Some(Box::new(new_tail)),
                 },

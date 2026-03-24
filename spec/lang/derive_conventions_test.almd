@@ -1,16 +1,14 @@
+
 type Dog: Eq, Repr = { name: String, breed: String }
 
-fn Dog.eq(a: Dog, b: Dog) -> Bool =
-  a.name == b.name
+fn Dog.eq(a: Dog, b: Dog) -> Bool = a.name == b.name
 
-fn Dog.repr(d: Dog) -> String =
-  "${d.name} (${d.breed})"
+fn Dog.repr(d: Dog) -> String = "${d.name} (${d.breed})"
 
 test "convention method resolution" {
-  let d1 = Dog { name: "Max", breed: "Husky" }
-  let d2 = Dog { name: "Max", breed: "Poodle" }
-  assert(d1.eq(d2))
-
-  let d3 = Dog { name: "Rex", breed: "Labrador" }
+  let d1 = Dog { name: "Max", breed: "Husky" };
+  let d2 = Dog { name: "Max", breed: "Poodle" };
+  assert(d1.eq(d2));
+  let d3 = Dog { name: "Rex", breed: "Labrador" };
   assert_eq(d3.repr(), "Rex (Labrador)")
 }

@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use crate::ir::*;
 use crate::types::Ty;
 
-use utils::{MonoKey, BoundedParam, has_typevar, ty_contains_typevar};
+use utils::{MonoKey, BoundedParam, ty_contains_typevar};
 use discovery::{discover_instances, discover_instances_in_frontier};
 use specialization::{specialize_function, substitute_ty, update_var_table_types};
 use rewrite::rewrite_calls;
@@ -103,7 +103,7 @@ pub fn monomorphize(program: &mut IrProgram) {
     // those with no call sites (unused generics still carry TypeVars)
     let mono_fn_names: std::collections::HashSet<String> = all_instances.keys().map(|(name, _)| name.clone()).collect();
     program.functions.retain(|f| {
-        if mono_fn_names.contains(&f.name) { return false; } // replaced by specialized
+        if mono_fn_names.contains::<str>(&f.name) { return false; } // replaced by specialized
         // Also remove generic functions with no instances (unused)
         if f.generics.as_ref().map_or(false, |g| !g.is_empty()) && !f.is_test {
             return false;
@@ -121,30 +121,11 @@ pub fn monomorphize(program: &mut IrProgram) {
 fn audit_remaining_typevars(program: &IrProgram) {
     for func in &program.functions {
         audit_expr(&func.body, &func.name, &program.var_table);
-        for param in &func.params {
-            if has_typevar(&param.ty) {
-                eprintln!("[AUDIT] fn {} param '{}' ty={:?}", func.name, param.name, param.ty);
-            }
-        }
-        if has_typevar(&func.ret_ty) {
-            eprintln!("[AUDIT] fn {} ret_ty={:?}", func.name, func.ret_ty);
-        }
     }
 }
 
 #[allow(dead_code)]
 fn audit_expr(expr: &IrExpr, fn_name: &str, vt: &VarTable) {
-    if has_typevar(&expr.ty) {
-        let kind_name = match &expr.kind {
-            IrExprKind::Var { id } => format!("Var({}:'{}')", id.0, vt.get(*id).name),
-            IrExprKind::Call { target, type_args, .. } => format!("Call({:?}, type_args={:?})", target, type_args),
-            IrExprKind::Match { .. } => "Match".to_string(),
-            IrExprKind::LitInt { .. } => "LitInt".to_string(),
-            IrExprKind::Block { .. } => "Block".to_string(),
-            _ => format!("{:?}", std::mem::discriminant(&expr.kind)),
-        };
-        eprintln!("[AUDIT] fn {} expr {} ty={:?}", fn_name, kind_name, expr.ty);
-    }
     // Recurse
     match &expr.kind {
         IrExprKind::BinOp { left, right, .. } => { audit_expr(left, fn_name, vt); audit_expr(right, fn_name, vt); }
@@ -154,7 +135,7 @@ fn audit_expr(expr: &IrExpr, fn_name: &str, vt: &VarTable) {
             audit_expr(subject, fn_name, vt);
             for arm in arms { audit_expr(&arm.body, fn_name, vt); }
         }
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             for s in stmts { audit_stmt(s, fn_name, vt); }
             if let Some(e) = expr { audit_expr(e, fn_name, vt); }
         }
@@ -178,10 +159,7 @@ fn audit_expr(expr: &IrExpr, fn_name: &str, vt: &VarTable) {
 #[allow(dead_code)]
 fn audit_stmt(stmt: &IrStmt, fn_name: &str, vt: &VarTable) {
     match &stmt.kind {
-        IrStmtKind::Bind { var, ty, value, .. } => {
-            if has_typevar(ty) {
-                eprintln!("[AUDIT] fn {} Bind {:?} '{}' ty={:?} value.ty={:?}", fn_name, var, vt.get(*var).name, ty, value.ty);
-            }
+        IrStmtKind::Bind { value, .. } => {
             audit_expr(value, fn_name, vt);
         }
         IrStmtKind::BindDestructure { value, .. } | IrStmtKind::Assign { value, .. } => audit_expr(value, fn_name, vt),
@@ -244,7 +222,7 @@ fn find_structurally_bounded_fns(functions: &[IrFunction], type_decls: &[IrTypeD
         // Include all generic functions, even those with no param-based TypeVars
         // (e.g., stack_new[T]() — no params, but has generics and type_args at call site)
         if !bounded.is_empty() || func.generics.as_ref().map_or(false, |g| !g.is_empty()) {
-            result.insert(func.name.clone(), bounded);
+            result.insert(func.name.to_string(), bounded);
         }
     }
     result

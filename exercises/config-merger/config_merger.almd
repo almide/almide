@@ -1,3 +1,4 @@
+import env
 import fs
 import string
 import list
@@ -108,8 +109,7 @@ effect fn save_config(path: String, pairs: List[List[String]]) -> Result[Unit, S
 effect fn merge_files(paths: List[String]) -> Result[List[List[String]], String] = {
   var result = []
   var i = 0
-  do {
-    guard i < list.len(paths) else break
+  while i < list.len(paths) {
     let path = match list.get(paths, i) { some(p) => p, none => "" }
     let overlay = load_config(path)
     result = merge_configs(result, overlay)

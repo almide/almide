@@ -6,14 +6,13 @@
 
 | Target | Files | Pass | Fail | Skip |
 |--------|------:|-----:|-----:|-----:|
-| Rust   | 129   | 129  | 0    | 0    |
-| WASM   | 129   | 129  | 0    | 0    |
-| TS     | —     | —    | —    | —    |
-| JS     | —     | —    | —    | —    |
+| Rust   | 130   | 130  | 0    | 0    |
+| WASM   | 130   | 130  | 0    | 0    |
+| TS     | 130   | ~127 | ~3   | 0    |
 
 ## Remaining
 
-- Cross-target parity tests (TS/JS targets)
+- Cross-target parity tests (TS target)
 - Deeper cross-cutting tests (match inside for inside do, pipe with fan)
 - Boundary value tests (Int max/min, deeply nested structures)
 - Error message quality tests

@@ -14,6 +14,7 @@
 use std::collections::HashSet;
 use serde::{Serialize, Deserialize};
 use crate::ast::Span;
+use crate::intern::Sym;
 use crate::types::Ty;
 
 mod unknown;
@@ -70,7 +71,7 @@ pub enum Mutability { Let, Var }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VarInfo {
-    pub name: String,
+    pub name: Sym,
     pub ty: Ty,
     pub mutability: Mutability,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -89,7 +90,7 @@ pub struct VarTable {
 impl VarTable {
     pub fn new() -> Self { VarTable { entries: Vec::new() } }
 
-    pub fn alloc(&mut self, name: String, ty: Ty, mutability: Mutability, span: Option<Span>) -> VarId {
+    pub fn alloc(&mut self, name: Sym, ty: Ty, mutability: Mutability, span: Option<Span>) -> VarId {
         debug_assert!(self.entries.len() < u32::MAX as usize, "too many variables");
         let id = VarId(self.entries.len() as u32);
         self.entries.push(VarInfo { name, ty, mutability, span, use_count: 0 });
@@ -157,11 +158,11 @@ pub struct IrMatchArm {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CallTarget {
     /// Free function: `foo(x)`, `println(x)`, variant constructor `Some(x)`
-    Named { name: String },
+    Named { name: Sym },
     /// Resolved module function: stdlib `string.trim(s)` or UFCS `s.trim()`
-    Module { module: String, func: String },
+    Module { module: Sym, func: Sym },
     /// Unresolved method call: `obj.method(args)` — emitter decides UFCS vs method
-    Method { object: Box<IrExpr>, method: String },
+    Method { object: Box<IrExpr>, method: Sym },
     /// Computed callee: `(fn_expr)(args)`
     Computed { callee: Box<IrExpr> },
 }
@@ -177,6 +178,16 @@ pub struct IrExpr {
     pub span: Option<Span>,
 }
 
+impl Default for IrExpr {
+    fn default() -> Self {
+        IrExpr {
+            kind: IrExprKind::Unit,
+            ty: Ty::Unit,
+            span: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum IrExprKind {
@@ -190,7 +201,7 @@ pub enum IrExprKind {
     // ── Variables ──
     Var { id: VarId },
     /// Reference to a named function used as a value (e.g., `list.map(xs, double)`)
-    FnRef { name: String },
+    FnRef { name: Sym },
 
     // ── Operators (type-dispatched) ──
     BinOp { op: BinOp, left: Box<IrExpr>, right: Box<IrExpr> },
@@ -200,7 +211,6 @@ pub enum IrExprKind {
     If { cond: Box<IrExpr>, then: Box<IrExpr>, else_: Box<IrExpr> },
     Match { subject: Box<IrExpr>, arms: Vec<IrMatchArm> },
     Block { stmts: Vec<IrStmt>, expr: Option<Box<IrExpr>> },
-    DoBlock { stmts: Vec<IrStmt>, expr: Option<Box<IrExpr>> },
     Fan { exprs: Vec<IrExpr> },
 
     // ── Loops ──
@@ -221,13 +231,13 @@ pub enum IrExprKind {
     List { elements: Vec<IrExpr> },
     MapLiteral { entries: Vec<(IrExpr, IrExpr)> },
     EmptyMap,
-    Record { name: Option<String>, fields: Vec<(String, IrExpr)> },
-    SpreadRecord { base: Box<IrExpr>, fields: Vec<(String, IrExpr)> },
+    Record { name: Option<Sym>, fields: Vec<(Sym, IrExpr)> },
+    SpreadRecord { base: Box<IrExpr>, fields: Vec<(Sym, IrExpr)> },
     Tuple { elements: Vec<IrExpr> },
     Range { start: Box<IrExpr>, end: Box<IrExpr>, inclusive: bool },
 
     // ── Access ──
-    Member { object: Box<IrExpr>, field: String },
+    Member { object: Box<IrExpr>, field: Sym },
     TupleIndex { object: Box<IrExpr>, index: usize },
     IndexAccess { object: Box<IrExpr>, index: Box<IrExpr> },
     /// Map key lookup: `map[key]` → returns Option<V>. Distinct from IndexAccess (list).
@@ -257,7 +267,7 @@ pub enum IrExprKind {
     /// Box wrapping: `Box::new(expr)`
     BoxNew { expr: Box<IrExpr> },
     /// Macro invocation: `name!(args)` (Rust assert_eq!, println!, etc.)
-    RustMacro { name: String, args: Vec<IrExpr> },
+    RustMacro { name: Sym, args: Vec<IrExpr> },
     /// ToVec: `(expr).to_vec()`
     ToVec { expr: Box<IrExpr> },
 
@@ -289,7 +299,7 @@ pub enum IrStmtKind {
     IndexAssign { target: VarId, index: IrExpr, value: IrExpr },
     /// Map key insertion: `map[key] = value`. Distinct from IndexAssign (list).
     MapInsert { target: VarId, key: IrExpr, value: IrExpr },
-    FieldAssign { target: VarId, field: String, value: IrExpr },
+    FieldAssign { target: VarId, field: Sym, value: IrExpr },
     Guard { cond: IrExpr, else_: IrExpr },
     Expr { expr: IrExpr },
     Comment { text: String },
@@ -310,12 +320,12 @@ fn default_ir_visibility() -> IrVisibility { IrVisibility::Public }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IrFieldDecl {
-    pub name: String,
+    pub name: Sym,
     pub ty: Ty,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default: Option<IrExpr>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub alias: Option<String>,
+    pub alias: Option<Sym>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -328,7 +338,7 @@ pub enum IrVariantKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IrVariantDecl {
-    pub name: String,
+    pub name: Sym,
     pub kind: IrVariantKind,
 }
 
@@ -349,10 +359,10 @@ pub enum IrTypeDeclKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IrTypeDecl {
-    pub name: String,
+    pub name: Sym,
     pub kind: IrTypeDeclKind,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub deriving: Option<Vec<String>>,
+    pub deriving: Option<Vec<Sym>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub generics: Option<Vec<crate::ast::GenericParam>>,
     pub visibility: IrVisibility,
@@ -377,14 +387,14 @@ pub enum ParamBorrow {
 /// Info about an open record field (destructured from a record param).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenFieldInfo {
-    pub name: String,
+    pub name: Sym,
     pub ty: Ty,
 }
 
 /// Info about an open record parameter (destructured struct fields as params).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenRecordInfo {
-    pub struct_name: String,
+    pub struct_name: Sym,
     pub fields: Vec<OpenFieldInfo>,
 }
 
@@ -393,7 +403,7 @@ pub struct OpenRecordInfo {
 pub struct IrParam {
     pub var: VarId,
     pub ty: Ty,
-    pub name: String,
+    pub name: Sym,
     pub borrow: ParamBorrow,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub open_record: Option<OpenRecordInfo>,
@@ -405,7 +415,7 @@ pub struct IrParam {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IrFunction {
-    pub name: String,
+    pub name: Sym,
     pub params: Vec<IrParam>,
     pub ret_ty: Ty,
     pub body: IrExpr,
@@ -445,10 +455,10 @@ fn default_top_let_kind() -> TopLetKind { TopLetKind::Lazy }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IrModule {
     /// Module name (e.g., "mylib" or "mylib.parser")
-    pub name: String,
+    pub name: Sym,
     /// Versioned name for diamond dependency aliases (PkgId.mod_name()), if any
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub versioned_name: Option<String>,
+    pub versioned_name: Option<Sym>,
     /// Type declarations in this module
     pub type_decls: Vec<IrTypeDecl>,
     /// Functions in this module
@@ -459,7 +469,7 @@ pub struct IrModule {
     pub var_table: VarTable,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct IrProgram {
     pub functions: Vec<IrFunction>,
     pub top_lets: Vec<IrTopLet>,
@@ -472,6 +482,10 @@ pub struct IrProgram {
     /// Populated during lowering with user-defined types.
     #[serde(skip)]
     pub type_registry: crate::types::TypeConstructorRegistry,
+    /// Names of all effect functions (user-defined + stdlib).
+    /// Populated during lowering from TypeEnv. Used by LICM to avoid hoisting effect calls.
+    #[serde(skip)]
+    pub effect_fn_names: std::collections::HashSet<Sym>,
     /// Effect inference results: per-function capability analysis.
     /// Populated by EffectInferencePass during codegen pipeline.
     #[serde(skip)]

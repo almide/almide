@@ -442,9 +442,9 @@ fn check_underscore_prefix_no_warning() {
 // ---- Do blocks ----
 
 #[test]
-fn check_do_block() {
+fn check_effect_block() {
     has_no_errors(
-        "effect fn read() -> Result[String, String] = ok(\"data\")\neffect fn main(_a: List[String]) -> Result[Unit, String] = do {\n  let data = read()\n  println(data)\n  ok(())\n}"
+        "effect fn read() -> Result[String, String] = ok(\"data\")\neffect fn main(_a: List[String]) -> Result[Unit, String] = {\n  let data = read()\n  println(data)\n  ok(())\n}"
     );
 }
 
@@ -700,8 +700,69 @@ fn effect_isolation_fan_var_capture_error() {
 #[test]
 fn effect_isolation_stdlib_effect_fn() {
     let errs = errors(
-        "fn f(path: String) -> String = fs.read_text(path)"
+        "import fs\nfn f(path: String) -> String = fs.read_text(path)"
     );
     assert!(!errs.is_empty(), "pure fn calling stdlib effect fn should error");
     assert!(errs[0].contains("effect"), "error should mention effect, got: {}", errs[0]);
+}
+
+// ---- Escape analysis: var mutation in lambdas ----
+
+#[test]
+fn escape_var_local_no_lambda() {
+    // var local to function, mutated in same scope (no lambda) — OK
+    has_no_errors("fn sum(xs: List[Int]) -> Int = { var total = 0; for x in xs { total = total + x }; total }");
+}
+
+#[test]
+fn escape_var_read_only_in_lambda() {
+    // var read (not mutated) in lambda — OK
+    has_no_errors("fn offset_all(xs: List[Int]) -> List[Int] = { var base = 10; list.map(xs, (x) => x + base) }");
+}
+
+#[test]
+fn escape_var_mutated_in_lambda_pure_fn() {
+    // var mutated inside lambda in pure fn — ERROR
+    let errs = errors(
+        "fn bad() -> fn() -> Unit = { var count = 0; () => { count = count + 1 } }"
+    );
+    assert!(!errs.is_empty(), "should error on var mutation in lambda inside pure fn");
+    assert!(errs.iter().any(|e| e.contains("mutated inside a closure")),
+        "error should mention closure mutation, got: {:?}", errs);
+}
+
+#[test]
+fn escape_var_mutated_in_lambda_effect_fn() {
+    // var mutated inside lambda in effect fn — OK
+    has_no_errors(
+        "effect fn counter() -> Result[Int, String] = { var count = 0; let inc = () => { count = count + 1 }; inc(); ok(count) }"
+    );
+}
+
+#[test]
+fn escape_var_declared_inside_lambda() {
+    // var declared AND mutated inside same lambda — OK (same scope)
+    has_no_errors(
+        "fn transform(xs: List[Int]) -> List[Int] = list.map(xs, (x) => { var temp = x * 2; temp = temp + 1; temp })"
+    );
+}
+
+#[test]
+fn escape_nested_lambda_mutation() {
+    // var from outer scope mutated in deeply nested lambda — ERROR
+    let errs = errors(
+        "fn bad() -> fn() -> fn() -> Unit = { var x = 0; () => { () => { x = x + 1 } } }"
+    );
+    assert!(!errs.is_empty(), "should error on var mutation in nested lambda inside pure fn");
+    assert!(errs.iter().any(|e| e.contains("mutated inside a closure")),
+        "error should mention closure mutation, got: {:?}", errs);
+}
+
+#[test]
+fn escape_multiple_vars_mutated() {
+    // Multiple vars mutated in lambda — should report errors for each
+    let errs = errors(
+        "fn bad() -> fn() -> Unit = { var a = 0; var b = 0; () => { a = 1; b = 2 } }"
+    );
+    assert!(errs.len() >= 2, "should report errors for both vars, got: {:?}", errs);
 }

@@ -1,96 +1,96 @@
-// while_test — while loop edge cases
 
+// while_test — while loop edge cases
 test "basic while" {
-  var x = 0
+  var x = 0;
   while x < 5 {
-    x = x + 1
-  }
+    x = x + 1;
+  };
   assert_eq(x, 5)
 }
 
 test "while false never executes" {
-  var ran = false
+  var ran = false;
   while false {
-    ran = true
-  }
+    ran = true;
+  };
   assert_eq(ran, false)
 }
 
 test "while with complex condition" {
-  var x = 100
+  var x = 100;
   while x > 1 and x != 42 {
-    x = x - 1
-  }
+    x = x - 1;
+  };
   assert_eq(x, 42)
 }
 
 test "while accumulator" {
-  var sum = 0
-  var i = 1
+  var sum = 0;
+  var i = 1;
   while i <= 10 {
-    sum = sum + i
-    i = i + 1
-  }
+    sum = sum + i;
+    i = i + 1;
+  };
   assert_eq(sum, 55)
 }
 
 test "while building a list" {
-  var result: List[Int] = []
-  var i = 0
+  var result: List[Int] = [];
+  var i = 0;
   while i < 5 {
-    result = result + [i * i]
-    i = i + 1
-  }
+    result = result + [i * i];
+    i = i + 1;
+  };
   assert_eq(result, [0, 1, 4, 9, 16])
 }
 
 test "while with string accumulation" {
-  var s = ""
-  var i = 0
+  var s = "";
+  var i = 0;
   while i < 3 {
-    s = s + "x"
-    i = i + 1
-  }
+    s = s + "x";
+    i = i + 1;
+  };
   assert_eq(s, "xxx")
 }
 
 test "nested while" {
-  var total = 0
-  var i = 0
+  var total = 0;
+  var i = 0;
   while i < 3 {
-    var j = 0
+    var j = 0;
     while j < 3 {
-      total = total + 1
-      j = j + 1
-    }
-    i = i + 1
-  }
+      total = total + 1;
+      j = j + 1;
+    };
+    i = i + 1;
+  };
   assert_eq(total, 9)
 }
 
 test "while with break" {
-  var x = 0
+  var x = 0;
   while true {
-    x = x + 1
-    guard x < 10 else break
-  }
+    x = x + 1;
+    guard x < 10 else break;
+  };
   assert_eq(x, 10)
 }
 
 test "while single iteration" {
-  var count = 0
-  var flag = true
+  var count = 0;
+  var flag = true;
   while flag {
-    count = count + 1
-    flag = false
-  }
+    count = count + 1;
+    flag = false;
+  };
   assert_eq(count, 1)
 }
 
 test "while modifying condition variable" {
-  var n = 1
+  var n = 1;
   while n < 1000 {
-    n = n * 2
-  }
+    n = n * 2;
+  };
   assert_eq(n, 1024)
 }

@@ -96,6 +96,48 @@ return = "Value"
 rust = "Value::Object({entries})"
 ts = "__almd_json.object({entries})"
 
+# ── Key-based typed extraction ────────────────────────────────────
+
+[get_string]
+description = "Get a string value by key. Returns none if key doesn't exist or value is not a string."
+example = 'json.get_string(j, "name")'
+params = [{ name = "j", type = "Value" }, { name = "key", type = "String" }]
+return = "Option[String]"
+rust = "almide_json_get_string(&{j}, &{key})"
+ts = "__almd_json.get_string({j}, {key})"
+
+[get_int]
+description = "Get an integer value by key. Returns none if key doesn't exist or value is not an integer."
+example = 'json.get_int(j, "age")'
+params = [{ name = "j", type = "Value" }, { name = "key", type = "String" }]
+return = "Option[Int]"
+rust = "almide_json_get_int(&{j}, &{key})"
+ts = "__almd_json.get_int({j}, {key})"
+
+[get_float]
+description = "Get a float value by key. Returns none if key doesn't exist or value is not a number."
+example = 'json.get_float(j, "price")'
+params = [{ name = "j", type = "Value" }, { name = "key", type = "String" }]
+return = "Option[Float]"
+rust = "almide_json_get_float(&{j}, &{key})"
+ts = "__almd_json.get_float({j}, {key})"
+
+[get_bool]
+description = "Get a boolean value by key. Returns none if key doesn't exist or value is not a boolean."
+example = 'json.get_bool(j, "active")'
+params = [{ name = "j", type = "Value" }, { name = "key", type = "String" }]
+return = "Option[Bool]"
+rust = "almide_json_get_bool(&{j}, &{key})"
+ts = "__almd_json.get_bool({j}, {key})"
+
+[get_array]
+description = "Get an array value by key. Returns none if key doesn't exist or value is not an array."
+example = 'json.get_array(j, "items")'
+params = [{ name = "j", type = "Value" }, { name = "key", type = "String" }]
+return = "Option[List[Value]]"
+rust = "almide_json_get_array(&{j}, &{key})"
+ts = "__almd_json.get_array({j}, {key})"
+
 # ── Value extraction (keyless, on Json value itself) ───────────────
 
 [as_string]

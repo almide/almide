@@ -152,7 +152,6 @@ impl FuncCompiler<'_> {
                         if let Some(&func_idx) = self.emitter.func_map.get(name.as_str()) {
                             wasm!(self.func, { call(func_idx); });
                         } else {
-                            eprintln!("[CALL MISS] name='{}' not in func_map", name);
                             wasm!(self.func, { unreachable; });
                         }
                     }
@@ -315,7 +314,6 @@ impl FuncCompiler<'_> {
                     _ => {
                         // Try Type.method dispatch (protocol implementations, e.g. Val.double)
                         let qualified = format!("{}.{}", module, func);
-                        eprintln!("[MODULE DEFAULT] module='{}' func='{}' qualified='{}' found={}", module, func, qualified, self.emitter.func_map.contains_key(qualified.as_str()));
                         if let Some(&func_idx) = self.emitter.func_map.get(qualified.as_str()) {
                             for arg in args { self.emit_expr(arg); }
                             wasm!(self.func, { call(func_idx); });
@@ -327,7 +325,6 @@ impl FuncCompiler<'_> {
             }
 
             CallTarget::Method { object, method } => {
-                eprintln!("[METHOD] method='{}' obj_ty={:?}", method, object.ty);
                 // UFCS method calls: obj.method(args)
                 match method.as_str() {
                     "to_string" | "int.to_string" if matches!(object.ty, Ty::Int) => {
@@ -530,8 +527,8 @@ impl FuncCompiler<'_> {
     }
 
     /// Emit a stub for an unimplemented call: evaluate args (for side effects), drop values, unreachable.
-    pub(super) fn emit_stub_call_logged(&mut self, args: &[IrExpr], context: &str) {
-        eprintln!("[STUB] {}", context);
+    #[allow(dead_code)]
+    pub(super) fn emit_stub_call_logged(&mut self, args: &[IrExpr], _context: &str) {
         self.emit_stub_call(args);
     }
 

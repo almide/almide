@@ -6,14 +6,13 @@
 
 | 項目 | 説明 | Grand Plan |
 |---|---|---|
-| [Direct WASM Emission](active/emit-wasm-direct.md) | 129/129 ✅, DCE完了, Hello World 1,028B. 残: WASI fd_read/args/file I/O | Architecture |
-| [Test Coverage](active/test-coverage.md) | 129ファイル, 2,042テストブロック. Rust/WASM両方100%. 残: TS/JS cross-target | Phase 1 |
-| [User Generics & Protocol](active/user-generics-and-traits.md) | Protocol System 実装中 (Phase 1完了, Phase 2-3進行中) | Phase 3 |
-| [Effect System](active/effect-system.md) | Phase 3-4 残: Dependency制限, 内部型レベル統合 | Phase 3 |
-| [Performance Research](active/performance-research.md) | Rust との差 2.9%, Phase 0-4 | Research |
-| [Self-Contained Compiler](active/self-contained-compiler.md) | rustc 不要化: Stage 1 (LLVM直接出力) → Stage 2 (セルフホスティング) | Architecture |
-| [Record Spread](active/record-spread.md) | `{ ...base, field = value }` でレコード更新 | Phase 1 |
-| [Compiler Architecture 10/10](active/compiler-architecture-10.md) | 全領域 10/10 + WASM統合: Target::Wasm、stdlib dispatch一元化、cross-check | Architecture |
+| [Effect System](active/effect-system.md) | Phase 3-4 残 | Phase 3 |
+| [HTTPS Native](active/https-native.md) | rustls統合済、almide build動作確認済。WASM残 | Phase 1 |
+| [Remove `do` Block](active/remove-do-block.md) | do 廃止 → while + try に統一。Canonicity 回復 | Phase 1 |
+| [Compiler Architecture 10/10](active/compiler-architecture-10.md) | 99/110. Phase 5-7 残 | Architecture |
+| [Cross-Target Parity Matrix](active/cross-target-parity-matrix.md) | Rust/TS/WASM 3ターゲットの挙動差異を体系検証 | Phase 2 |
+| [IR Optimization Tier 2](active/ir-optimization-tier2.md) | LICM, CSE, Inlining — 全ターゲットに効く IR 最適化 | Architecture |
+| [Emit Readability](active/emit-readability.md) | 生成コードの可読性向上 (空行・コメント保持) | Phase 1 |
 
 ## 1.0 Remaining
 
@@ -26,6 +25,8 @@
 
 | 項目 | 説明 | Grand Plan |
 |---|---|---|
+| [Self-Contained Compiler](on-hold/self-contained-compiler.md) | rustc 不要化 | Architecture |
+| [Performance Research](on-hold/performance-research.md) | Rust との差 2.9% | Research |
 | [LSP Server](on-hold/lsp.md) | diagnostics → hover → go-to-def | Phase 3 |
 | [Incremental Compilation](on-hold/incremental-compilation.md) | rustc skip when unchanged | Phase 3 |
 | [Package Registry](on-hold/package-registry.md) | 公開パッケージ配布 | Phase 3 |
@@ -33,7 +34,7 @@
 | [Platform Architecture](on-hold/platform-architecture.md) | 5層 app runtime ビジョン | Phase 3-5 |
 | [Security Model](on-hold/security-model.md) | Layer 3-5, capability | Phase 3 |
 | [Effect Type Integration](on-hold/effect-type-integration.md) | FnType に EffectSet を持たせる (構文変更なし) | Phase 3 |
-| ~~Trait System~~ | → Protocol System (active) に統合 | — |
+| ~~Trait System~~ | → Protocol System (done) に統合 | — |
 | [Secure by Design](on-hold/secure-by-design.md) | | Phase 3 |
 | [Async Backend](on-hold/async-backend.md) | tokio opt-in runtime | Phase 3 |
 | [Supervision & Actors](on-hold/supervision-and-actors.md) | | Phase 3 |
@@ -79,7 +80,8 @@
 - ~~Checker InferTy/Ty統一~~ → 完了 (InferTy廃止)
 - ~~Polish (Immediate)~~ → 完了
 - ~~Production Ready (old)~~ → PRODUCTION_READY.md に統合
-- ~~Stdlib Strategy~~ → Verb Reform完了、387関数で凍結
+- ~~Stdlib Strategy~~ → Stdlib v2: 21 native + 2 bundled, http 20関数, json 23関数
+- ~~JS Target~~ → v0.9.0 で廃止。TS に統一 (Node --strip-types)
 - ~~Template~~ → codegen v3 TOML templates に統合
 - ~~UFCS External~~ → stdlib UFCS で対応済み
 - ~~Concat Operator Reform~~ → 完了 (++ → +)
@@ -93,7 +95,8 @@
 - ~~LLM Immutable Sugar~~ → LLM Immutable Patterns 完了
 - ~~Built-in Protocols~~ → Derive Conventions 完了
 - ~~Almide Runtime~~ → Platform Architecture に統合
-- ~~Direct WASM Emission (old tasks)~~ → active に集約
+- ~~Direct WASM Emission~~ → 130/130 pass, DCE完了, Hello World 1,028B
+- ~~Test Coverage~~ → 130ファイル, Rust/WASM 100%, TS ~97%
 - ~~IR Verification~~ → 完了 (Phase 2, 25検証)
 
 ## Done
@@ -214,3 +217,6 @@
 - [Compiler Bugs v0.8.4](done/compiler-bugs.md) — 12バグ全修正、400+ テスト追加
 - [Stdlib Scope Reduction](done/stdlib-scope-reduction.md) — uuid/crypto削除、toml/compress/term除外、22モジュール381関数に確定
 - [Stdlib Additions](done/stdlib-additions.md) — set モジュール 11→20関数 (symmetric_difference, is_subset, is_disjoint, filter, map, fold, each, any, all)
+- [User Generics & Protocol](done/user-generics-and-traits.md) — ユーザー定義 generics, protocol 定義/満足検証, impl ブロック, generic bounds [T: P1 + P2], モノモーフィゼーション
+- [Effect fn Result Wrapping](done/effect-fn-result-wrapping.md) — Rust codegen: effect fn の非Result戻り値をResult化, LICM effect判定をTypeEnv由来に, チェッカーauto-unwrap
+- [Stdlib Import Control](done/stdlib-import-control.md) — 3層制御: Tier 1 暗黙 (string/int/float/list/map/set/option/result), Tier 2 明示 import, Tier 3 組込

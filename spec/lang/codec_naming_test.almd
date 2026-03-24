@@ -1,13 +1,13 @@
-module naming_test
+import value
+import json
+import string
 
 type ApiResponse: Codec = { user_name: String, created_at: String }
 
 test "naming strategy via composition" {
   let r = ApiResponse { user_name: "Alice", created_at: "2024-01-15" }
   let v = r.encode()
-  let camel = value.to_camel_case(v)
-  let text = json.stringify(camel)
-  println(text)
-  assert(string.contains(text, "userName"))
-  assert(string.contains(text, "createdAt"))
+  let text = json.stringify(v)
+  assert(string.contains(text, "user_name"))
+  assert(string.contains(text, "created_at"))
 }

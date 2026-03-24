@@ -1,4 +1,4 @@
-# LSP Server [ACTIVE]
+# LSP Server [ON HOLD]
 
 Language Server Protocol implementation for editor integration. Split from [tooling.md](../on-hold/tooling.md) as highest-priority tooling item.
 

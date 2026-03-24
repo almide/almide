@@ -1,129 +1,130 @@
+
 test "set.from_list and contains" {
-  let s = set.from_list([1, 2, 3])
-  assert_eq(set.contains(s, 1), true)
+  let s = set.from_list([1, 2, 3]);
+  assert_eq(set.contains(s, 1), true);
   assert_eq(set.contains(s, 4), false)
 }
 
 test "set.insert and len" {
-  let s = set.from_list([1, 2])
-  let s2 = set.insert(s, 3)
-  assert_eq(set.len(s2), 3)
+  let s = set.from_list([1, 2]);
+  let s2 = set.insert(s, 3);
+  assert_eq(set.len(s2), 3);
   assert_eq(set.contains(s2, 3), true)
 }
 
 test "set.remove" {
-  let s = set.from_list([1, 2, 3])
-  let s2 = set.remove(s, 2)
-  assert_eq(set.len(s2), 2)
+  let s = set.from_list([1, 2, 3]);
+  let s2 = set.remove(s, 2);
+  assert_eq(set.len(s2), 2);
   assert_eq(set.contains(s2, 2), false)
 }
 
 test "set.union" {
-  let a = set.from_list([1, 2, 3])
-  let b = set.from_list([3, 4, 5])
-  let c = set.union(a, b)
+  let a = set.from_list([1, 2, 3]);
+  let b = set.from_list([3, 4, 5]);
+  let c = set.union(a, b);
   assert_eq(set.len(c), 5)
 }
 
 test "set.intersection" {
-  let a = set.from_list([1, 2, 3])
-  let b = set.from_list([2, 3, 4])
-  let c = set.intersection(a, b)
+  let a = set.from_list([1, 2, 3]);
+  let b = set.from_list([2, 3, 4]);
+  let c = set.intersection(a, b);
   assert_eq(set.len(c), 2)
 }
 
 test "set.difference" {
-  let a = set.from_list([1, 2, 3])
-  let b = set.from_list([2, 3, 4])
-  let c = set.difference(a, b)
-  assert_eq(set.len(c), 1)
+  let a = set.from_list([1, 2, 3]);
+  let b = set.from_list([2, 3, 4]);
+  let c = set.difference(a, b);
+  assert_eq(set.len(c), 1);
   assert_eq(set.contains(c, 1), true)
 }
 
 test "set.is_empty" {
-  let empty: Set[Int] = set.new()
-  assert_eq(set.is_empty(empty), true)
+  let empty: Set[Int] = set.new();
+  assert_eq(set.is_empty(empty), true);
   assert_eq(set.is_empty(set.from_list([1])), false)
 }
 
 test "set.to_list" {
-  let s = set.from_list([1, 2, 3])
-  let xs = set.to_list(s)
+  let s = set.from_list([1, 2, 3]);
+  let xs = set.to_list(s);
   assert_eq(list.len(xs), 3)
 }
 
 test "set.symmetric_difference" {
-  let a = set.from_list([1, 2, 3])
-  let b = set.from_list([2, 3, 4, 5])
-  let c = set.symmetric_difference(a, b)
-  assert_eq(set.len(c), 3)
-  assert_eq(set.contains(c, 1), true)
-  assert_eq(set.contains(c, 4), true)
-  assert_eq(set.contains(c, 5), true)
+  let a = set.from_list([1, 2, 3]);
+  let b = set.from_list([2, 3, 4, 5]);
+  let c = set.symmetric_difference(a, b);
+  assert_eq(set.len(c), 3);
+  assert_eq(set.contains(c, 1), true);
+  assert_eq(set.contains(c, 4), true);
+  assert_eq(set.contains(c, 5), true);
   assert_eq(set.contains(c, 2), false)
 }
 
 test "set.is_subset" {
-  let a = set.from_list([1, 2])
-  let b = set.from_list([1, 2, 3, 4])
-  assert_eq(set.is_subset(a, b), true)
-  assert_eq(set.is_subset(b, a), false)
-  let empty: Set[Int] = set.new()
-  assert_eq(set.is_subset(empty, a), true)
+  let a = set.from_list([1, 2]);
+  let b = set.from_list([1, 2, 3, 4]);
+  assert_eq(set.is_subset(a, b), true);
+  assert_eq(set.is_subset(b, a), false);
+  let empty: Set[Int] = set.new();
+  assert_eq(set.is_subset(empty, a), true);
   assert_eq(set.is_subset(a, a), true)
 }
 
 test "set.is_disjoint" {
-  let a = set.from_list([1, 2])
-  let b = set.from_list([3, 4])
-  let c = set.from_list([2, 3])
-  assert_eq(set.is_disjoint(a, b), true)
+  let a = set.from_list([1, 2]);
+  let b = set.from_list([3, 4]);
+  let c = set.from_list([2, 3]);
+  assert_eq(set.is_disjoint(a, b), true);
   assert_eq(set.is_disjoint(a, c), false)
 }
 
 test "set.filter" {
-  let s = set.from_list([1, 2, 3, 4, 5])
-  let evens = set.filter(s, (x) => x % 2 == 0)
-  assert_eq(set.len(evens), 2)
-  assert_eq(set.contains(evens, 2), true)
+  let s = set.from_list([1, 2, 3, 4, 5]);
+  let evens = set.filter(s, (x) => x % 2 == 0);
+  assert_eq(set.len(evens), 2);
+  assert_eq(set.contains(evens, 2), true);
   assert_eq(set.contains(evens, 4), true)
 }
 
 test "set.map" {
-  let s = set.from_list([1, 2, 3])
-  let doubled = set.map(s, (x) => x * 2)
-  assert_eq(set.len(doubled), 3)
-  assert_eq(set.contains(doubled, 2), true)
-  assert_eq(set.contains(doubled, 4), true)
+  let s = set.from_list([1, 2, 3]);
+  let doubled = set.map(s, (x) => x * 2);
+  assert_eq(set.len(doubled), 3);
+  assert_eq(set.contains(doubled, 2), true);
+  assert_eq(set.contains(doubled, 4), true);
   assert_eq(set.contains(doubled, 6), true)
 }
 
 test "set.fold" {
-  let s = set.from_list([1, 2, 3])
-  let sum = set.fold(s, 0, (acc, x) => acc + x)
+  let s = set.from_list([1, 2, 3]);
+  let sum = set.fold(s, 0, (acc, x) => acc + x);
   assert_eq(sum, 6)
 }
 
 test "set.any" {
-  let s = set.from_list([1, 2, 3])
-  assert_eq(set.any(s, (x) => x > 2), true)
+  let s = set.from_list([1, 2, 3]);
+  assert_eq(set.any(s, (x) => x > 2), true);
   assert_eq(set.any(s, (x) => x > 10), false)
 }
 
 test "set.all" {
-  let s = set.from_list([2, 4, 6])
-  assert_eq(set.all(s, (x) => x % 2 == 0), true)
+  let s = set.from_list([2, 4, 6]);
+  assert_eq(set.all(s, (x) => x % 2 == 0), true);
   assert_eq(set.all(s, (x) => x > 3), false)
 }
 
 test "set.insert duplicate" {
-  let s = set.from_list([1, 2, 3])
-  let s2 = set.insert(s, 2)
+  let s = set.from_list([1, 2, 3]);
+  let s2 = set.insert(s, 2);
   assert_eq(set.len(s2), 3)
 }
 
 test "set.each side effect" {
-  let s = set.from_list([1, 2, 3])
-  let result = set.fold(s, 0, (acc, x) => acc + 1)
+  let s = set.from_list([1, 2, 3]);
+  let result = set.fold(s, 0, (acc, x) => acc + 1);
   assert_eq(result, 3)
 }

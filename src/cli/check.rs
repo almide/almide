@@ -73,10 +73,10 @@ pub fn cmd_check(file: &str, deny_warnings: bool) {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
             if !proj.permissions.is_empty() {
                 let ir = almide::lower::lower_program(&program, &checker.expr_types, &checker.env);
-                let mut ir_mut = ir;
                 use almide::codegen::pass_effect_inference::{EffectInferencePass, Effect};
                 use almide::codegen::pass::NanoPass;
-                EffectInferencePass.run(&mut ir_mut, almide::codegen::pass::Target::Rust);
+                let result = EffectInferencePass.run(ir, almide::codegen::pass::Target::Rust);
+                let ir_mut = result.program;
 
                 let allowed: std::collections::HashSet<Effect> = proj.permissions.iter()
                     .filter_map(|s| match s.as_str() {
@@ -207,12 +207,13 @@ pub fn cmd_check_effects(file: &str) {
     }
 
     // Lower to IR
-    let mut ir = almide::lower::lower_program(&program, &checker.expr_types, &checker.env);
+    let ir = almide::lower::lower_program(&program, &checker.expr_types, &checker.env);
 
     // Run effect inference
     use almide::codegen::pass_effect_inference::{EffectInferencePass, EffectMap};
     use almide::codegen::pass::NanoPass;
-    EffectInferencePass.run(&mut ir, almide::codegen::pass::Target::Rust);
+    let result = EffectInferencePass.run(ir, almide::codegen::pass::Target::Rust);
+    let ir = result.program;
 
     // Display results
     eprintln!("{}:\n", file);

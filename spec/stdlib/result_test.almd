@@ -1,89 +1,89 @@
-// result_test — Result type operations
 
+// result_test — Result type operations
 test "result.is_ok UFCS" {
-  let r: Result[Int, String] = ok(42)
-  assert_eq(r.is_ok(), true)
+  let r: Result[Int, String] = ok(42);
+  assert_eq(r.is_ok(), true);
   assert_eq(r.is_err(), false)
 }
 
 test "result.is_err UFCS" {
-  let r: Result[Int, String] = err("fail")
-  assert_eq(r.is_ok(), false)
+  let r: Result[Int, String] = err("fail");
+  assert_eq(r.is_ok(), false);
   assert_eq(r.is_err(), true)
 }
 
 test "ok construction and match" {
-  let r: Result[Int, String] = ok(42)
+  let r: Result[Int, String] = ok(42);
   let v = match r {
-    ok(n) => n
-    err(_) => 0
-  }
+    ok(n) => n,
+    err(_) => 0,
+  };
   assert_eq(v, 42)
 }
 
 test "err construction and match" {
-  let r: Result[Int, String] = err("fail")
+  let r: Result[Int, String] = err("fail");
   let v = match r {
-    ok(n) => n
-    err(_) => -1
-  }
+    ok(n) => n,
+    err(_) => -1,
+  };
   assert_eq(v, -1)
 }
 
 test "ok equality" {
-  let a: Result[Int, String] = ok(5)
-  let b: Result[Int, String] = ok(5)
+  let a: Result[Int, String] = ok(5);
+  let b: Result[Int, String] = ok(5);
   assert_eq(a, b)
 }
 
 test "err equality" {
-  let a: Result[Int, String] = err("x")
-  let b: Result[Int, String] = err("x")
+  let a: Result[Int, String] = err("x");
+  let b: Result[Int, String] = err("x");
   assert_eq(a, b)
 }
 
 test "ok != err" {
-  let a: Result[Int, String] = ok(1)
-  let b: Result[Int, String] = err("x")
+  let a: Result[Int, String] = ok(1);
+  let b: Result[Int, String] = err("x");
   assert_eq(a == b, false)
 }
 
 test "result.unwrap_or on ok" {
-  let r: Result[Int, String] = ok(42)
+  let r: Result[Int, String] = ok(42);
   assert_eq(r.unwrap_or(0), 42)
 }
 
 test "result.unwrap_or on err" {
-  let r: Result[Int, String] = err("fail")
+  let r: Result[Int, String] = err("fail");
   assert_eq(r.unwrap_or(0), 0)
 }
 
 test "result.map on ok" {
-  let r: Result[Int, String] = ok(5)
-  let mapped = r.map((x) => x * 2)
+  let r: Result[Int, String] = ok(5);
+  let mapped = r.map((x) => x * 2);
   assert_eq(mapped.unwrap_or(0), 10)
 }
 
 test "result.map on err" {
-  let r: Result[Int, String] = err("fail")
-  let mapped = r.map((x) => x * 2)
+  let r: Result[Int, String] = err("fail");
+  let mapped = r.map((x) => x * 2);
   assert_eq(mapped.unwrap_or(0), 0)
 }
 
 test "result in if expression" {
-  let r: Result[Int, String] = ok(10)
+  let r: Result[Int, String] = ok(10);
   let label = match r {
-    ok(n) => if n > 5 then "big" else "small"
-    err(_) => "error"
-  }
+    ok(n) => if n > 5 then "big" else "small",
+    err(_) => "error",
+  };
   assert_eq(label, "big")
 }
 
 test "nested result match" {
-  let outer: Result[Int, String] = ok(42)
+  let outer: Result[Int, String] = ok(42);
   let inner: Result[String, String] = match outer {
-    ok(n) => ok(int.to_string(n))
-    err(e) => err(e)
-  }
+    ok(n) => ok(int.to_string(n)),
+    err(e) => err(e),
+  };
   assert_eq(inner, ok("42"))
 }

@@ -5,9 +5,7 @@
 test "do block with multiple sequential guards" {
   var x = 0
   var y = 0
-  do {
-    guard x < 10 else break
-    guard y < 100 else break
+  while x < 10 and y < 100 {
     x = x + 1
     y = y + x * x
   }
@@ -21,8 +19,7 @@ test "do block fibonacci until threshold" {
   var a = 0
   var b = 1
   var count = 0
-  do {
-    guard b < 100 else break
+  while b < 100 {
     let next = a + b
     a = b
     b = next
@@ -38,8 +35,7 @@ effect fn find_factor(n: Int) -> Result[Int, String] = {
   guard n > 1 else err("n must be > 1")
   var i = 2
   var result = n
-  do {
-    guard i * i <= n else break
+  while i * i <= n {
     if n % i == 0 then {
       result = i
       break
@@ -74,8 +70,7 @@ test "for with guard continue filtering" {
 test "do block containing for with guard" {
   var batch = 0
   var total = 0
-  do {
-    guard batch < 3 else break
+  while batch < 3 {
     var batch_sum = 0
     for i in 1..=5 {
       guard i != 3 else continue
@@ -91,9 +86,9 @@ test "do block containing for with guard" {
 
 test "do block repeat until condition" {
   var n = 1
-  do {
+  while true {
     n = n * 2
-    guard n < 1024 else break
+    if not (n < 1024) then break else ()
   }
   assert_eq(n, 1024)
 }
@@ -104,8 +99,7 @@ test "do block building string char by char" {
   var result = ""
   var i = 0
   let chars = ["h", "e", "l", "l", "o"]
-  do {
-    guard i < list.len(chars) else break
+  while i < list.len(chars) {
     let ch = match list.get(chars, i) {
       some(c) => c,
       none => "",

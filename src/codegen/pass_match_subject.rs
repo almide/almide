@@ -10,7 +10,7 @@
 
 use crate::ir::*;
 use crate::types::{Ty, TypeConstructorId};
-use super::pass::{NanoPass, Target};
+use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
 pub struct MatchSubjectPass;
@@ -22,7 +22,7 @@ impl NanoPass for MatchSubjectPass {
         Some(vec![Target::Rust])
     }
 
-    fn run(&self, program: &mut IrProgram, _target: Target) {
+    fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         for func in &mut program.functions {
             rewrite_expr(&mut func.body);
         }
@@ -37,6 +37,7 @@ impl NanoPass for MatchSubjectPass {
                 rewrite_expr(&mut tl.value);
             }
         }
+        PassResult { program, changed: true }
     }
 }
 
@@ -46,7 +47,7 @@ fn rewrite_expr(expr: &mut IrExpr) {
         IrExprKind::BinOp { left, right, .. } => { rewrite_expr(left); rewrite_expr(right); }
         IrExprKind::UnOp { operand, .. } => rewrite_expr(operand),
         IrExprKind::If { cond, then, else_ } => { rewrite_expr(cond); rewrite_expr(then); rewrite_expr(else_); }
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             for s in stmts { rewrite_stmt(s); }
             if let Some(e) = expr { rewrite_expr(e); }
         }

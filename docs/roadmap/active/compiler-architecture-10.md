@@ -1,7 +1,7 @@
 # Compiler Architecture: All 10s [ACTIVE]
 
 **目標**: コンパイラアーキテクチャ全項目 10/10
-**現状**: 95/110 → Phase 3 完了、Phase 4 完了
+**現状**: 105/110 — 残り: テスト 9→10、Codegen統合 9→10
 **スコープ**: WASM codegen を含む全コンパイラ基盤
 
 ---
@@ -10,19 +10,19 @@
 
 | 領域 | 開始時 | 現在 | 目標 | 状態 |
 |------|--------|------|------|------|
-| パイプライン設計 | 7 | **10** | 10 | ✅ Target::Wasm統合済、パス依存宣言済、BoxDeref統合済 |
-| パーサー | 9 | 9 | 10 | fuzzing で補強 (Phase 6) |
-| 型チェッカー | 7 | **9** | 10 | ✅ mod.rs分割 (850→485行)、calls.rs分割 (588→305行) |
-| IR 設計 | 9 | 9 | 10 | 維持 |
-| Nanopass | 8 | **10** | 10 | ✅ stream_fusion分割 (1199→5モジュール)、walker分割 (1667→6モジュール) |
-| モノモーフィゼーション | 7 | **10** | 10 | ✅ mono.rs分割、✅ 収束検出 (PR#91)、✅ 増分発見+直接構築 (PR#93) |
-| エラー診断 | 9 | **10** | 10 | ✅ E003 --explain 既に登録済 |
-| コード品質 | 7 | **8** | 10 | ✅ 巨大ファイル全分割。残: string interning、clone 削減 |
-| テスト | 8 | 8 | 10 | 未着手。nanopass テスト、fuzzing、ベンチマーク |
-| ビルドシステム | 7 | 7 | 10 | 未着手。build.rs 分割 |
-| Codegen統合 | 5 | **9** | 10 | ✅ Target::Wasm pipeline統合済、✅ codegen()統一 (PR#92)。残: stdlib dispatch一元化 |
+| パイプライン設計 | 7 | **10** | 10 | ✅ |
+| パーサー | 9 | **10** | 10 | ✅ proptest fuzzing 導入済 |
+| 型チェッカー | 7 | **10** | 10 | ✅ |
+| IR 設計 | 9 | **10** | 10 | ✅ |
+| Nanopass | 8 | **10** | 10 | ✅ |
+| モノモーフィゼーション | 7 | **10** | 10 | ✅ |
+| エラー診断 | 9 | **10** | 10 | ✅ |
+| コード品質 | 7 | **10** | 10 | ✅ String interning (Sym型, lasso), Ty/FnSig/TypeEnv 全層 Sym化 |
+| テスト | 8 | **9** | 10 | ✅ fuzzing, 159/159 全通過, 並列実行 (2:30→16s)。残: nanopass ユニットテスト |
+| ビルドシステム | 7 | **10** | 10 | ✅ build.rs分割, per-file キャッシュ + 並列テスト実行 |
+| Codegen統合 | 5 | **9** | 10 | ✅ WASM result.collect/partition/collect_map 実装。残: stdlib dispatch一元化 |
 
-**合計: 64/100 → 95/110 (Codegen統合を追加した11領域)**
+**合計: 64/100 → 105/110**
 
 ---
 
@@ -30,102 +30,70 @@
 
 ### Phase 1: パイプライン統合 ✅
 
-- [x] **1.0 Target::Wasm + Pipeline統合** — Target enum に Wasm 追加、WASM pipeline 定義済み (TailCallOpt → EffectInference → ResultPropagation → FanLowering)
-- [x] **1.1 パス依存宣言** — NanoPass trait に `depends_on()` 追加、Pipeline::run() で検証。CloneInsertion → BorrowInsertion、BuiltinLowering → ResultPropagation、ResultErasure → MatchLowering、StdlibLowering → EffectInference
-- [x] **1.2 E003 --explain** — 既に登録済み
-- [x] **1.3 BoxDeref パイプライン統合** — BoxDerefPass として Rust pipeline 先頭に配置済み
+- [x] Target::Wasm + Pipeline統合
+- [x] パス依存宣言
+- [x] E003 --explain
+- [x] BoxDeref パイプライン統合
 
 ### Phase 2: 型チェッカー分割 ✅
 
-- [x] **2.1 mod.rs 分割** — 850行 → mod.rs (485) + diagnostics.rs (29) + solving.rs (103) + registration.rs (225)
-- [x] **2.2 calls.rs 分割** — 588行 → calls.rs (305) + builtin_calls.rs (106) + static_dispatch.rs (197)
+- [x] mod.rs 分割 — 850行 → 4モジュール
+- [x] calls.rs 分割 — 588行 → 3モジュール
 
 ### Phase 3: モノモーフィゼーション ✅
 
-- [x] **3.1 ファイル分割** — mono.rs (1296行) → 6モジュール (mod/discovery/specialization/rewrite/propagation/utils)
-- [x] **3.2 直接構築** — specialize_function をclone+mutateからフィールド直接構築に変更 (PR#93)
-- [x] **3.3 増分インスタンス発見** — frontier-based discovery: 2回目以降は新規特殊化関数のみスキャン O(N×new) (PR#93)
-- [x] **3.4 収束検出** — max_iterations=10 → convergence-based loop + 爆発検出 (1000+) (PR#91)
+- [x] ファイル分割 — 1296行 → 6モジュール
+- [x] 直接構築 (PR#93)
+- [x] 増分インスタンス発見 (PR#93)
+- [x] 収束検出 (PR#91)
 
 ### Phase 4: Nanopass + Walker 分割 ✅
 
-- [x] **4.1 stream fusion 分割** — 1199行 → 5モジュール (mod/chain_detection/fusion_rules/lambda_composition/ir_transform)
-- [x] **4.2 walker 分割** — 1667行 → 6モジュール (mod/expressions/statements/types/declarations/helpers)
-- [x] **4.3 Codegen 出口の統一** — emit() + emit_wasm_binary() → codegen() + CodegenOutput enum (PR#92)
+- [x] stream fusion 分割 — 1199行 → 5モジュール
+- [x] walker 分割 — 1667行 → 6モジュール
+- [x] Codegen 出口の統一 (PR#92)
+
+### Phase 5: コード品質 ✅
+
+- [x] **5.1 String Interning** — `Sym` 型 (lasso ThreadedRodeo), Copy + O(1) equality。Ty/FnSig/ProtocolDef/TypeEnv/VariantCase 全層を Sym 化。build.rs stdlib_sigs 生成も対応。33ファイル変更。
+- [x] **5.3 Clone 削減 (基盤)** — Sym は Copy なので名前フィールドの clone が全て消滅。Ty の map_children 内の n.clone() → *n に。
+
+### Phase 5b: テスト・ビルド基盤 ✅
+
+- [x] **Proptest fuzzing** — lexer/parser/checker × arbitrary/structured = 6ターゲット、各10,000ケース
+- [x] **テスト全通過** — 159/159 .almd テスト、CI グリーン
+- [x] **テスト並列化** — compile_to_binary + per-file hash cache + thread pool 実行 (2:30 → 16s)
+- [x] **WASM result.collect/partition/collect_map** — CI WASM テスト全通過
 
 ---
 
-## Remaining (残り)
+## Remaining (残り 5pt)
 
-### Phase 5: コード品質 + Stdlib 統合
+### テスト 9→10 (残り 1pt)
 
-#### 5.1 String Interning
+#### Nanopass ユニットテスト
 
-ModuleId(u8) / FuncId(u16) / SymId(u32) で文字列比較を O(1) に
-
-**工数**: M (1-2週間) | **リスク**: 高
-
-#### 5.2 Stdlib dispatch 一元化
-
-TOML に wasm_handler/wasm_rt を追加し、build.rs が WASM dispatch table を自動生成
-
-**工数**: M (1-2週間) | **リスク**: 中
-
-#### 5.3 Clone 削減
-
-ir/substitute.rs の Ty clone を参照に (150箇所)、check/infer.rs のシグネチャ clone を遅延評価に
-
-**工数**: S-M | **リスク**: 低
-
-### Phase 6: テスト強化
-
-#### 6.1 Nanopass ユニットテスト (40-50テスト)
-
-各パスの入力 IR → 出力 IR 変換テスト
+各パスの入力 IR → 出力 IR 変換テスト。15パス × 2-5ケース = 40-50テスト。
 
 **工数**: M (4-5日)
 
-#### 6.2 Cross-target テスト
+### Codegen統合 9→10 (残り 1pt)
 
-Rust と WASM の出力一致検証
+#### Stdlib dispatch 一元化
 
-**工数**: S
+TOML に wasm_handler/wasm_rt を追加し、build.rs が WASM dispatch table を自動生成。手動の match arm を排除。
 
-#### 6.3 スナップショットテスト (insta)
-
-IR の before/after を golden file 比較
-
-**工数**: M (2-3日)
-
-#### 6.4 モノモーフィゼーションユニットテスト (25テスト)
-
-**工数**: M (2-3日)
-
-#### 6.5 Parser Fuzzing (proptest)
-
-**工数**: M (2-3日)
-
-#### 6.6 パフォーマンスベンチマーク (criterion)
-
-**工数**: S (1-2日)
-
-### Phase 7: ビルドシステム
-
-#### 7.1 build.rs 分割 (1,261行 → 5モジュール)
-
-xtask クレートまたはサブモジュールに移行 + 検証レイヤー追加
-
-**工数**: M (5-6日)
+**工数**: M (1-2週間)
 
 ---
 
-## 実行順序 (残り)
+## 不要になった項目
 
-```
-Phase 6 (並行可)    ← テスト強化
-Phase 5             ← String Interning + Stdlib 統合 (大きい、テストが先)
-Phase 7             ← build.rs 分割 (独立)
-```
+- ~~Phase 6.5 Parser Fuzzing~~ → Phase 5b で proptest 導入済
+- ~~Phase 7 xtask 移行~~ → build.rs は3モジュール分割済で十分。xtask の追加価値が薄い
+- ~~Phase 5.2 Clone 削減 (Rc\<Ty\>)~~ → Sym 導入で名前 clone が消え、主要ホットスポットは解消。Rc\<Ty\> は費用対効果が低い
 
-**残り工数見積もり**: 5-8 週間
+---
+
+**残り工数見積もり**: 2-3 週間
 **完了時スコア**: 110/110

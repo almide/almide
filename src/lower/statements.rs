@@ -1,6 +1,7 @@
 // ── Statement lowering ──────────────────────────────────────────
 
 use crate::ast;
+use crate::intern::sym;
 use crate::ir::*;
 use crate::types::{Ty, TypeConstructorId};
 use super::LowerCtx;
@@ -53,7 +54,7 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
         ast::Stmt::FieldAssign { target, field, value, .. } => {
             let var = ctx.lookup_var(target).unwrap_or(VarId(0));
             let ir_val = lower_expr(ctx, value);
-            IrStmtKind::FieldAssign { target: var, field: field.clone(), value: ir_val }
+            IrStmtKind::FieldAssign { target: var, field: sym(field), value: ir_val }
         }
         ast::Stmt::Guard { cond, else_, .. } => {
             let ir_cond = lower_expr(ctx, cond);
@@ -104,9 +105,6 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
             let ir_args = args.iter().enumerate().map(|(i, a)| {
                 let arg_ty = payload_tys.get(i).cloned().unwrap_or(Ty::Unknown);
                 let p = lower_pattern(ctx, a, &arg_ty);
-                if let IrPattern::Bind { var, .. } = &p {
-                    eprintln!("[LOWER CTOR] {}[{}] var={:?} '{}' ty={:?} pat_ty={:?}", name, i, var, ctx.var_table.get(*var).name, ctx.var_table.get(*var).ty, arg_ty);
-                }
                 p
             }).collect();
             IrPattern::Constructor { name: name.clone(), args: ir_args }
@@ -171,7 +169,7 @@ fn get_constructor_payload_tys_from_subject(ctx: &LowerCtx, ctor_name: &str, sub
         }
     }
     // Fallback: constructor registry (may have uninstantiated generic types)
-    if let Some((_, case)) = ctx.env.constructors.get(ctor_name) {
+    if let Some((_, case)) = ctx.env.constructors.get(&sym(ctor_name)) {
         match &case.payload {
             crate::types::VariantPayload::Tuple(tys) => tys.clone(),
             crate::types::VariantPayload::Record(fs) => fs.iter().map(|(_, t, _)| t.clone()).collect(),
@@ -183,9 +181,9 @@ fn get_constructor_payload_tys_from_subject(ctx: &LowerCtx, ctor_name: &str, sub
 }
 
 fn resolve_record_field_ty(ctx: &LowerCtx, record_name: &str, field_name: &str) -> Ty {
-    if let Some(type_def) = ctx.env.types.get(record_name) {
+    if let Some(type_def) = ctx.env.types.get(&sym(record_name)) {
         ctx.resolve_field_ty(type_def, field_name)
-    } else if let Some((_, case)) = ctx.env.constructors.get(record_name) {
+    } else if let Some((_, case)) = ctx.env.constructors.get(&sym(record_name)) {
         if let crate::types::VariantPayload::Record(fs) = &case.payload {
             fs.iter().find(|(n, _, _)| n == field_name).map(|(_, t, _)| t.clone()).unwrap_or(Ty::Unknown)
         } else { Ty::Unknown }

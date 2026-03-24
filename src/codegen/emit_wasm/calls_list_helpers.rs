@@ -34,7 +34,39 @@ impl FuncCompiler<'_> {
         }
     }
 
+    /// Register a `call_indirect` type and emit the instruction.
+    ///
+    /// `param_types` includes env (I32) as the first element.
+    /// `ret_types` is the WASM return type list (empty for void, single element otherwise).
+    ///
+    /// This is the canonical helper for all closure `call_indirect` patterns.
+    /// Higher-level wrappers like `emit_closure_call` delegate here.
+    pub(super) fn emit_call_indirect(&mut self, param_types: Vec<ValType>, ret_types: Vec<ValType>) {
+        let ti = self.emitter.register_type(param_types, ret_types);
+        wasm!(self.func, { call_indirect(ti, 0); });
+    }
+
+    /// Emit `call_indirect` for a simple closure call: `(env [, param]) → ret`.
+    ///
+    /// Builds param types as `[I32]` + optional `ty_to_valtype(param_ty)`.
+    /// Return type is derived from `ret_ty` via `values::ret_type`, except
+    /// `Ty::Unknown` and `Ty::Bool` are forced to `vec![I32]`.
+    pub(super) fn emit_closure_call(&mut self, param_ty: &Ty, ret_ty: &Ty) {
+        let mut ct = vec![ValType::I32]; // env
+        if let Some(vt) = values::ty_to_valtype(param_ty) {
+            ct.push(vt);
+        }
+        let rt = if ret_ty == &Ty::Unknown || ret_ty == &Ty::Bool {
+            // Unknown: return i32 (ptr). Bool: i32.
+            vec![ValType::I32]
+        } else {
+            values::ret_type(ret_ty)
+        };
+        self.emit_call_indirect(ct, rt);
+    }
+
     /// Emit take/drop as list slice. For take: start=0,end=n. For drop: start=n,end=len.
+    #[allow(dead_code)]
     fn emit_list_slice_impl(
         &mut self, xs: &IrExpr, start_arg: Option<&IrExpr>, end_arg: Option<&IrExpr>,
         elem_size: usize, is_take: bool,
@@ -95,7 +127,7 @@ impl FuncCompiler<'_> {
               i32_const(elem_size as i32); i32_mul; i32_add;
         });
         // Copy one element
-        let elem_ty = if is_take {
+        let _elem_ty = if is_take {
             self.list_elem_ty(&end_arg.unwrap().ty)
         } else {
             self.list_elem_ty(&start_arg.unwrap().ty)
@@ -118,6 +150,7 @@ impl FuncCompiler<'_> {
         self.scratch.free_i32(xs_ptr);
     }
 
+    #[allow(dead_code)]
     fn emit_memcpy_loop(&mut self, _i_local: u32, _dst_local: u32, _start_local: u32, _elem_size: usize) {
         // Generic memcpy for list.slice — complex, use inline for now
         // This is a placeholder; slice uses the same pattern as take/drop

@@ -31,7 +31,7 @@ fn fix_body_match_ty(body: &mut IrExpr, ret_ty: &Ty) {
                 }
             }
         }
-        IrExprKind::Block { expr: Some(tail), .. } | IrExprKind::DoBlock { expr: Some(tail), .. } => {
+        IrExprKind::Block { expr: Some(tail), .. } => {
             fix_body_match_ty(tail, ret_ty);
             if crate::codegen::emit_wasm::values::ty_to_valtype(&body.ty) != crate::codegen::emit_wasm::values::ty_to_valtype(ret_ty)
                 && !matches!(ret_ty, Ty::Unit | Ty::Unknown) {
@@ -44,7 +44,7 @@ fn fix_body_match_ty(body: &mut IrExpr, ret_ty: &Ty) {
 
 fn propagate_expr(expr: &mut IrExpr, vt: &mut VarTable) {
     match &mut expr.kind {
-        IrExprKind::Block { stmts, expr: tail } | IrExprKind::DoBlock { stmts, expr: tail } => {
+        IrExprKind::Block { stmts, expr: tail } => {
             for s in stmts.iter_mut() { propagate_stmt(s, vt); }
             if let Some(e) = tail { propagate_expr(e, vt); }
             // Block type = tail type

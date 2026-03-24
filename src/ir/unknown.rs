@@ -53,7 +53,7 @@ pub fn collect_unknown_warnings(program: &IrProgram) -> Vec<UnknownTypeWarning> 
     let mut warnings = Vec::new();
     for f in &program.functions {
         let mut checker = UnknownChecker {
-            fn_name: f.name.clone(),
+            fn_name: f.name.to_string(),
             warnings: Vec::new(),
         };
         checker.visit_expr(&f.body);
@@ -62,7 +62,7 @@ pub fn collect_unknown_warnings(program: &IrProgram) -> Vec<UnknownTypeWarning> 
         for p in &f.params {
             if p.ty.contains_unknown() {
                 warnings.push(UnknownTypeWarning {
-                    fn_name: f.name.clone(),
+                    fn_name: f.name.to_string(),
                     span: None,
                     ty: p.ty.clone(),
                     context: "function parameter",
@@ -71,7 +71,7 @@ pub fn collect_unknown_warnings(program: &IrProgram) -> Vec<UnknownTypeWarning> 
         }
         if f.ret_ty.contains_unknown() {
             warnings.push(UnknownTypeWarning {
-                fn_name: f.name.clone(),
+                fn_name: f.name.to_string(),
                 span: None,
                 ty: f.ret_ty.clone(),
                 context: "function return type",

@@ -1,27 +1,32 @@
-module variant_decode
+import json
 
-type Color: Codec = Red | Green | Blue
+type Color: Codec = | Red | Green | Blue
 
 fn encode_color(c: Color) -> String = json.stringify(c.encode())
 
-fn decode_color(text: String) -> Result[Color, String] =
-  match json.parse(text) {
-    ok(v) => Color.decode(v)
-    err(e) => err(e)
-  }
+fn decode_color(text: String) -> Result[Color, String] = match json.parse(text) {
+  ok(v) => Color.decode(v),
+  err(e) => err(e),
+}
 
 test "variant roundtrip" {
-  let text = encode_color(Red)
-  println(text)
+  let text = encode_color(Red);
+  println(text);
   match decode_color(text) {
-    ok(c) => assert_eq(encode_color(c), encode_color(Red))
-    err(e) => { println(e); assert(false) }
+    ok(c) => assert_eq(encode_color(c), encode_color(Red)),
+    err(e) => {
+      println(e);
+      assert(false)
+    },
   }
 }
 
 test "variant decode all" {
-  match decode_color(r"""{"Green": null}""") {
-    ok(c) => assert_eq(encode_color(c), encode_color(Green))
-    err(e) => { println(e); assert(false) }
+  match decode_color('{"Green": null}') {
+    ok(c) => assert_eq(encode_color(c), encode_color(Green)),
+    err(e) => {
+      println(e);
+      assert(false)
+    },
   }
 }

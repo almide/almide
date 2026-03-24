@@ -1,3 +1,5 @@
+import env
+import json
 
 test "parse and get string" {
   let j = json.parse('{"name": "Alice", "age": 30}');

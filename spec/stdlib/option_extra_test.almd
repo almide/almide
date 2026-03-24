@@ -1,16 +1,16 @@
-// option extra tests — deeper coverage of option module
 
+// option extra tests — deeper coverage of option module
 test "option.map with string transform" {
   assert_eq(option.map(some("hello"), (s) => string.to_upper(s)), some("HELLO"))
 }
 
 test "option.map none stays none" {
-  let n: Option[String] = none
+  let n: Option[String] = none;
   assert_eq(option.map(n, (s) => string.to_upper(s)), none)
 }
 
 test "option.flat_map returns none on none input" {
-  let n: Option[Int] = none
+  let n: Option[Int] = none;
   assert_eq(option.flat_map(n, (x) => some(x * 2)), none)
 }
 
@@ -19,7 +19,7 @@ test "option.flat_map returns none from function" {
 }
 
 test "option.flat_map chains successfully" {
-  let r = option.flat_map(some(10), (x) => some(x + 5))
+  let r = option.flat_map(some(10), (x) => some(x + 5));
   assert_eq(r, some(15))
 }
 
@@ -28,7 +28,7 @@ test "option.unwrap_or on some returns value" {
 }
 
 test "option.unwrap_or on none returns default" {
-  let n: Option[String] = none
+  let n: Option[String] = none;
   assert_eq(option.unwrap_or(n, "default"), "default")
 }
 
@@ -37,7 +37,7 @@ test "option.is_some on some" {
 }
 
 test "option.is_none on none" {
-  let n: Option[Int] = none
+  let n: Option[Int] = none;
   assert_eq(option.is_none(n), true)
 }
 
@@ -50,7 +50,7 @@ test "option.filter removes value when predicate false" {
 }
 
 test "option.filter on none returns none" {
-  let n: Option[Int] = none
+  let n: Option[Int] = none;
   assert_eq(option.filter(n, (x) => x > 0), none)
 }
 
@@ -59,11 +59,11 @@ test "option.to_list on some" {
 }
 
 test "option.to_list on none" {
-  let n: Option[Int] = none
+  let n: Option[Int] = none;
   assert_eq(option.to_list(n), [])
 }
 
 test "option.zip both some returns some tuple" {
-  let r = option.zip(some(1), some("a"))
+  let r = option.zip(some(1), some("a"));
   assert_eq(option.is_some(r), true)
 }

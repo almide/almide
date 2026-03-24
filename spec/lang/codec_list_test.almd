@@ -1,22 +1,28 @@
-module codec_list_test
-// wasm:enabled
+import json
 
+// wasm:enabled
 type Item: Codec = { id: Int, value: String }
+
 type Container: Codec = { name: String, items: List[Item], tags: List[String] }
 
-fn decode_container(v: Value) -> Container =
-  match Container.decode(v) { ok(c) => c, err(_) => Container { name: "", items: [], tags: [] } }
+fn decode_container(v: Value) -> Container = match Container.decode(v) {
+  ok(c) => c,
+  err(_) => Container { name: "", items: [], tags: [] },
+}
 
 test "list encode-decode roundtrip" {
-  let c = Container { name: "box", items: [Item { id: 1, value: "a" }, Item { id: 2, value: "b" }], tags: ["x", "y"] }
-  let text = json.stringify(c.encode())
-  println(text)
+  let c = Container { name: "box", items: [
+    Item { id: 1, value: "a" },
+    Item { id: 2, value: "b" }
+  ], tags: ["x", "y"] };
+  let text = json.stringify(c.encode());
+  println(text);
   match json.parse(text) {
     ok(v) => {
-      let c2 = decode_container(v)
-      assert_eq(c2.name, "box")
+      let c2 = decode_container(v);
+      assert_eq(c2.name, "box");
       assert_eq(c2.tags, ["x", "y"])
-    }
-    err(_) => assert(false)
+    },
+    err(_) => assert(false),
   }
 }

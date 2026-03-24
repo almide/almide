@@ -15,7 +15,7 @@ pub fn is_ir_result_expr(e: &IrExpr) -> bool {
         IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. } => true,
         IrExprKind::If { then, else_, .. } => is_ir_result_expr(then) && is_ir_result_expr(else_),
         IrExprKind::Match { arms, .. } => !arms.is_empty() && arms.iter().all(|a| is_ir_result_expr(&a.body)),
-        IrExprKind::Block { expr: Some(tail), .. } | IrExprKind::DoBlock { expr: Some(tail), .. } => is_ir_result_expr(tail),
+        IrExprKind::Block { expr: Some(tail), .. } => is_ir_result_expr(tail),
         // Try unwraps Result to T — NOT Result-producing
         IrExprKind::Try { .. } => false,
         _ => false,

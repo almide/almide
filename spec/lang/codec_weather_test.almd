@@ -1,29 +1,40 @@
-module weather_full
-// wasm:enabled
+import json
 
+// wasm:enabled
 type Coord: Codec = { lon: Float, lat: Float }
+
 type Weather: Codec = { id: Int, main: String, description: String, icon: String }
+
 type MainWeather: Codec = { temp: Float, humidity: Int }
+
 type Wind: Codec = { speed: Float, deg: Int }
-type Sys: Codec = { type_ as "type": Int, country: String, sunrise: Int, sunset: Int }
+
+type Sys: Codec = { type_: Int, country: String, sunrise: Int, sunset: Int }
 
 type WeatherResponse: Codec = { coord: Coord, weather: List[Weather], name: String, visibility: Int, wind: Wind, dt: Int, sys: Sys, cod: Int }
 
-fn decode_response(v: Value) -> WeatherResponse =
-  match WeatherResponse.decode(v) { ok(r) => r, err(e) => { println(e); WeatherResponse { coord: Coord { lon: 0.0, lat: 0.0 }, weather: [], name: "", visibility: 0, wind: Wind { speed: 0.0, deg: 0 }, dt: 0, sys: Sys { type_: 0, country: "", sunrise: 0, sunset: 0 }, cod: 0 } } }
+fn decode_response(v: Value) -> WeatherResponse = match WeatherResponse.decode(v) {
+  ok(r) => r,
+  err(e) => {
+    println(e);
+    WeatherResponse { coord: Coord { lon: 0.0, lat: 0.0 }, weather: [], name: "", visibility: 0, wind: Wind { speed: 0.0, deg: 0 }, dt: 0, sys: Sys { type_: 0, country: "", sunrise: 0, sunset: 0 }, cod: 0 }
+  },
+}
 
 test "weather response roundtrip" {
-  let r = WeatherResponse { coord: Coord { lon: 139.69, lat: 35.69 }, weather: [Weather { id: 800, main: "Clear", description: "clear sky", icon: "01d" }], name: "Tokyo", visibility: 10000, wind: Wind { speed: 3.6, deg: 350 }, dt: 1710000000, sys: Sys { type_: 2, country: "JP", sunrise: 1709900000, sunset: 1709940000 }, cod: 200 }
-  let text = json.stringify(r.encode())
-  println(text)
+  let r = WeatherResponse { coord: Coord { lon: 139.69, lat: 35.69 }, weather: [
+    Weather { id: 800, main: "Clear", description: "clear sky", icon: "01d" }
+  ], name: "Tokyo", visibility: 10000, wind: Wind { speed: 3.6, deg: 350 }, dt: 1710000000, sys: Sys { type_: 2, country: "JP", sunrise: 1709900000, sunset: 1709940000 }, cod: 200 };
+  let text = json.stringify(r.encode());
+  println(text);
   match json.parse(text) {
     ok(v) => {
-      let r2 = decode_response(v)
-      assert_eq(r2.name, "Tokyo")
-      assert_eq(r2.cod, 200)
-      assert_eq(r2.sys.country, "JP")
+      let r2 = decode_response(v);
+      assert_eq(r2.name, "Tokyo");
+      assert_eq(r2.cod, 200);
+      assert_eq(r2.sys.country, "JP");
       assert_eq(r2.wind.deg, 350)
-    }
-    err(_) => assert(false)
+    },
+    err(_) => assert(false),
   }
 }

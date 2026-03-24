@@ -1,4 +1,4 @@
-# REPL [ACTIVE]
+# REPL [ON HOLD]
 
 Interactive Read-Eval-Print Loop for Almide. Split from [tooling.md](../on-hold/tooling.md).
 

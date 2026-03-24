@@ -1,12 +1,13 @@
 use super::{Ty, VariantCase, substitute, ProtocolDef};
+use crate::intern::{Sym, sym};
 
 pub struct TypeEnv {
     /// User-defined type declarations: name -> Ty
-    pub types: std::collections::HashMap<std::string::String, Ty>,
+    pub types: std::collections::HashMap<Sym, Ty>,
     /// Function signatures: name -> FnSig
-    pub functions: std::collections::HashMap<std::string::String, super::FnSig>,
+    pub functions: std::collections::HashMap<Sym, super::FnSig>,
     /// Local variable scopes (stack of scopes)
-    pub scopes: Vec<std::collections::HashMap<std::string::String, Ty>>,
+    pub scopes: Vec<std::collections::HashMap<Sym, Ty>>,
     /// Current function's return type
     pub current_ret: Option<Ty>,
     /// Whether auto-unwrapping of Result is enabled (effect fn bodies)
@@ -14,43 +15,50 @@ pub struct TypeEnv {
     /// Whether effect functions may be called from this context
     pub can_call_effect: bool,
     /// Set of effect function names
-    pub effect_fns: std::collections::HashSet<std::string::String>,
+    pub effect_fns: std::collections::HashSet<Sym>,
     /// Variant constructor name -> (variant type name, case info)
-    pub constructors: std::collections::HashMap<std::string::String, (std::string::String, VariantCase)>,
+    pub constructors: std::collections::HashMap<Sym, (Sym, VariantCase)>,
     /// User-defined module names (for distinguishing from stdlib in module calls)
-    pub user_modules: std::collections::HashSet<std::string::String>,
-    /// Whether we're inside a do block (for auto-unwrapping Result in let bindings)
-    pub in_do_block: bool,
+    pub user_modules: std::collections::HashSet<Sym>,
+    /// Stdlib modules available in scope (Tier 1 implicit + explicitly imported)
+    pub imported_stdlib: std::collections::HashSet<Sym>,
+
     /// Track used variables (for unused variable warnings)
-    pub used_vars: std::collections::HashSet<std::string::String>,
+    pub used_vars: std::collections::HashSet<Sym>,
     /// Track used modules (for unused import warnings)
-    pub used_modules: std::collections::HashSet<std::string::String>,
+    pub used_modules: std::collections::HashSet<Sym>,
     /// Maps import name ("json") to qualified name ("json_v2") for versioned deps
-    pub module_aliases: std::collections::HashMap<std::string::String, std::string::String>,
+    pub module_aliases: std::collections::HashMap<Sym, Sym>,
     /// Symbols that are local (file-private) in their module: "module.func" -> true
-    pub local_symbols: std::collections::HashSet<std::string::String>,
+    pub local_symbols: std::collections::HashSet<Sym>,
     /// Temporarily suppress auto-unwrap of Result (for match on ok/err)
     pub skip_auto_unwrap: bool,
     /// Variables declared with `var` (mutable). Parameters and `let` are immutable.
-    pub mutable_vars: std::collections::HashSet<std::string::String>,
+    pub mutable_vars: std::collections::HashSet<Sym>,
+    /// Escape analysis: current lambda nesting depth (0 = not in lambda).
+    pub lambda_depth: usize,
+    /// Escape analysis: the lambda depth at which each `var` was declared.
+    pub var_lambda_depth: std::collections::HashMap<Sym, usize>,
     /// Variables that are function parameters (for better error messages).
-    pub param_vars: std::collections::HashSet<std::string::String>,
+    pub param_vars: std::collections::HashSet<Sym>,
     /// Declaration locations: variable name -> (line, col)
-    pub var_decl_locs: std::collections::HashMap<std::string::String, (usize, usize)>,
+    pub var_decl_locs: std::collections::HashMap<Sym, (usize, usize)>,
     /// Top-level `let` constants: name -> type
-    pub top_lets: std::collections::HashMap<std::string::String, Ty>,
+    pub top_lets: std::collections::HashMap<Sym, Ty>,
     /// Types that implement the Eq protocol (via `deriving Eq`)
-    pub eq_types: std::collections::HashSet<std::string::String>,
+    pub eq_types: std::collections::HashSet<Sym>,
     /// Structural bounds for generic type parameters: TypeVar name → OpenRecord constraint
-    pub structural_bounds: std::collections::HashMap<std::string::String, Ty>,
+    pub structural_bounds: std::collections::HashMap<Sym, Ty>,
     /// Protocol bounds for generic type parameters in scope: TypeVar name → list of protocol names
-    pub generic_protocol_bounds: std::collections::HashMap<std::string::String, Vec<std::string::String>>,
+    pub generic_protocol_bounds: std::collections::HashMap<Sym, Vec<Sym>>,
     /// Minimum required arguments for functions with default params: fn key -> min count
-    pub fn_min_params: std::collections::HashMap<std::string::String, usize>,
+    pub fn_min_params: std::collections::HashMap<Sym, usize>,
     /// Protocol definitions: protocol name → ProtocolDef
-    pub protocols: std::collections::HashMap<std::string::String, ProtocolDef>,
+    pub protocols: std::collections::HashMap<Sym, ProtocolDef>,
     /// Types' declared protocol conformances: type name → set of protocol names
-    pub type_protocols: std::collections::HashMap<std::string::String, std::collections::HashSet<std::string::String>>,
+    pub type_protocols: std::collections::HashMap<Sym, std::collections::HashSet<Sym>>,
+    /// Protocol conformances already validated via `impl` blocks (skip re-validation)
+    pub impl_validated: std::collections::HashSet<(Sym, Sym)>,
 }
 
 impl TypeEnv {
@@ -65,13 +73,23 @@ impl TypeEnv {
             effect_fns: std::collections::HashSet::new(),
             constructors: std::collections::HashMap::new(),
             user_modules: std::collections::HashSet::new(),
-            in_do_block: false,
+            imported_stdlib: {
+                let mut s = std::collections::HashSet::new();
+                // Tier 1: implicit imports (core type modules)
+                for m in &["string", "int", "float", "list", "map", "set", "option", "result"] {
+                    s.insert(sym(m));
+                }
+                s
+            },
+
             used_vars: std::collections::HashSet::new(),
             used_modules: std::collections::HashSet::new(),
             module_aliases: std::collections::HashMap::new(),
             local_symbols: std::collections::HashSet::new(),
             skip_auto_unwrap: false,
             mutable_vars: std::collections::HashSet::new(),
+            lambda_depth: 0,
+            var_lambda_depth: std::collections::HashMap::new(),
             param_vars: std::collections::HashSet::new(),
             var_decl_locs: std::collections::HashMap::new(),
             top_lets: std::collections::HashMap::new(),
@@ -81,6 +99,7 @@ impl TypeEnv {
             fn_min_params: std::collections::HashMap::new(),
             protocols: std::collections::HashMap::new(),
             type_protocols: std::collections::HashMap::new(),
+            impl_validated: std::collections::HashSet::new(),
         }
     }
 
@@ -94,19 +113,19 @@ impl TypeEnv {
         self.is_eq_inner(ty, &mut seen)
     }
 
-    fn is_eq_inner(&self, ty: &Ty, seen: &mut std::collections::HashSet<std::string::String>) -> bool {
+    fn is_eq_inner(&self, ty: &Ty, seen: &mut std::collections::HashSet<Sym>) -> bool {
         match ty {
             // Fn types are never Eq
             Ty::Fn { .. } => false,
             // Named/Variant need cycle detection via `seen`
             Ty::Variant { name, .. } => {
-                if !seen.insert(name.clone()) {
+                if !seen.insert(*name) {
                     return true; // Recursive type — assume Eq to break cycle
                 }
                 ty.children().iter().all(|child| self.is_eq_inner(child, seen))
             }
             Ty::Named(name, _) => {
-                if !seen.insert(name.clone()) {
+                if !seen.insert(*name) {
                     return true;
                 }
                 if let Some(resolved) = self.types.get(name) {
@@ -127,20 +146,20 @@ impl TypeEnv {
         self.is_hash_inner(ty, &mut seen)
     }
 
-    fn is_hash_inner(&self, ty: &Ty, seen: &mut std::collections::HashSet<std::string::String>) -> bool {
+    fn is_hash_inner(&self, ty: &Ty, seen: &mut std::collections::HashSet<Sym>) -> bool {
         match ty {
             // Float, Fn, Map are never hashable
             Ty::Float | Ty::Fn { .. } => false,
             Ty::Applied(super::TypeConstructorId::Map, _) => false,
             // Named/Variant need cycle detection via `seen`
             Ty::Variant { name, .. } => {
-                if !seen.insert(name.clone()) {
+                if !seen.insert(*name) {
                     return true;
                 }
                 ty.children().iter().all(|child| self.is_hash_inner(child, seen))
             }
             Ty::Named(name, _) => {
-                if !seen.insert(name.clone()) {
+                if !seen.insert(*name) {
                     return true;
                 }
                 if let Some(resolved) = self.types.get(name) {
@@ -164,22 +183,22 @@ impl TypeEnv {
 
     pub fn define_var(&mut self, name: &str, ty: Ty) {
         if let Some(scope) = self.scopes.last_mut() {
-            scope.insert(name.to_string(), ty);
+            scope.insert(sym(name), ty);
         }
     }
 
     pub fn define_var_at(&mut self, name: &str, ty: Ty, line: usize, col: usize) {
         self.define_var(name, ty);
-        self.var_decl_locs.insert(name.to_string(), (line, col));
+        self.var_decl_locs.insert(sym(name), (line, col));
     }
 
     pub fn var_decl_loc(&self, name: &str) -> Option<(usize, usize)> {
-        self.var_decl_locs.get(name).copied()
+        self.var_decl_locs.get(&sym(name)).copied()
     }
 
     pub fn lookup_var(&self, name: &str) -> Option<&Ty> {
         for scope in self.scopes.iter().rev() {
-            if let Some(ty) = scope.get(name) {
+            if let Some(ty) = scope.get(&sym(name)) {
                 return Some(ty);
             }
         }
@@ -190,11 +209,11 @@ impl TypeEnv {
         self.resolve_named_with_seen(ty, &mut std::collections::HashSet::new())
     }
 
-    fn resolve_named_with_seen(&self, ty: &Ty, seen: &mut std::collections::HashSet<std::string::String>) -> Ty {
+    fn resolve_named_with_seen(&self, ty: &Ty, seen: &mut std::collections::HashSet<Sym>) -> Ty {
         match ty {
             Ty::Named(name, args) => {
                 // Cycle detection: prevent infinite recursion on recursive type aliases
-                if !seen.insert(name.clone()) {
+                if !seen.insert(*name) {
                     return ty.clone();
                 }
                 if let Some(resolved) = self.types.get(name) {
@@ -207,7 +226,7 @@ impl TypeEnv {
                         Self::collect_typevars(resolved, &mut param_names);
                         let bindings: std::collections::HashMap<_, _> = param_names.iter()
                             .zip(args.iter())
-                            .map(|(name, arg)| (name.clone(), arg.clone()))
+                            .map(|(name, arg)| (*name, arg.clone()))
                             .collect();
                         if bindings.is_empty() { resolved.clone() } else { substitute(resolved, &bindings) }
                     }
@@ -221,10 +240,10 @@ impl TypeEnv {
 
     /// Collect unique TypeVar names from a type in the order they first appear.
     /// Uses Ty::children() for uniform traversal.
-    pub fn collect_typevars(ty: &Ty, out: &mut Vec<std::string::String>) {
+    pub fn collect_typevars(ty: &Ty, out: &mut Vec<Sym>) {
         if let Ty::TypeVar(name) = ty {
             if !out.contains(name) {
-                out.push(name.clone());
+                out.push(*name);
             }
             return;
         }

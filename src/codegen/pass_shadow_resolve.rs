@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use crate::ir::*;
-use super::pass::{NanoPass, Target};
+use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
 pub struct ShadowResolvePass;
@@ -18,7 +18,7 @@ impl NanoPass for ShadowResolvePass {
     fn targets(&self) -> Option<Vec<Target>> {
         Some(vec![Target::TypeScript, Target::Python])
     }
-    fn run(&self, program: &mut IrProgram, _target: Target) {
+    fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         for func in &mut program.functions {
             let mut seen: HashMap<String, VarId> = HashMap::new();
             resolve_stmts_block(&mut func.body, &program.var_table, &mut seen);
@@ -29,6 +29,7 @@ impl NanoPass for ShadowResolvePass {
                 resolve_stmts_block(&mut func.body, &module.var_table, &mut seen);
             }
         }
+        PassResult { program, changed: true }
     }
 }
 
@@ -40,12 +41,7 @@ fn resolve_stmts_block(expr: &mut IrExpr, vt: &VarTable, seen: &mut HashMap<Stri
                 resolve_stmts_block(e, vt, seen);
             }
         }
-        IrExprKind::DoBlock { stmts, expr: tail } => {
-            resolve_stmts(stmts, vt, seen);
-            if let Some(e) = tail {
-                resolve_stmts_block(e, vt, seen);
-            }
-        }
+
         IrExprKind::If { cond, then, else_ } => {
             resolve_stmts_block(cond, vt, seen);
             let mut then_seen = seen.clone();
@@ -82,7 +78,7 @@ fn resolve_stmts(stmts: &mut Vec<IrStmt>, vt: &VarTable, seen: &mut HashMap<Stri
                 // Recurse into value first
                 resolve_stmts_block(value, vt, seen);
 
-                let name = vt.get(*var).name.clone();
+                let name = vt.get(*var).name.to_string();
                 if seen.contains_key(&name) {
                     // Shadow: convert Bind → Assign (reuse existing variable)
                     let prev_var = seen[&name];

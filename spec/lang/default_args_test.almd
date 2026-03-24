@@ -1,17 +1,15 @@
-fn greet(name: String, greeting: String = "Hello") -> String =
-  "${greeting}, ${name}!"
 
-fn add(a: Int, b: Int = 0, c: Int = 0) -> Int =
-  a + b + c
+fn greet(name: String, greeting: String = "Hello") -> String = "${greeting}, ${name}!"
+
+fn add(a: Int, b: Int = 0, c: Int = 0) -> Int = a + b + c
 
 test "default arguments" {
   // Full args
-  assert_eq(greet("Alice", "Hi"), "Hi, Alice!")
+  assert_eq(greet("Alice", "Hi"), "Hi, Alice!");
   // Default used
-  assert_eq(greet("Bob"), "Hello, Bob!")
-
+  assert_eq(greet("Bob"), "Hello, Bob!");
   // Multiple defaults
-  assert_eq(add(1, 2, 3), 6)
-  assert_eq(add(1, 2), 3)
+  assert_eq(add(1, 2, 3), 6);
+  assert_eq(add(1, 2), 3);
   assert_eq(add(1), 1)
 }

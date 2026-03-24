@@ -52,7 +52,7 @@ test "string in interpolation then function" {
   assert_eq(upper, "ALICE")
 }
 
-effect fn validated(s: String) -> Result[String, String] = do {
+effect fn validated(s: String) -> Result[String, String] = {
   guard string.len(s) > 0 else err("empty")
   ok(string.to_upper(s))
 }
@@ -64,7 +64,7 @@ test "guard then ok in effect fn" {
   }
 }
 
-fn safe_div(a: Int, b: Int) -> Result[Int, String] = do {
+fn safe_div(a: Int, b: Int) -> Result[Int, String] = {
   guard b != 0 else err("div/0")
   ok(a / b)
 }

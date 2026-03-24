@@ -439,9 +439,13 @@ fn parse_while_loop() {
 // ---- Expressions: do block ----
 
 #[test]
-fn parse_do_block() {
-    let prog = parse("effect fn f() -> Result[Int, String] = do {\n  let x = ok(1)\n  ok(x)\n}");
-    assert_eq!(prog.decls.len(), 1);
+fn parse_do_block_is_removed() {
+    // `do` blocks have been removed — parser should produce an error
+    let tokens = Lexer::tokenize("effect fn f() -> Result[Int, String] = do {\n  let x = ok(1)\n  ok(x)\n}");
+    let mut parser = Parser::new(tokens).with_file("test.almd");
+    let result = parser.parse();
+    let has_error = result.is_err() || !parser.errors.is_empty();
+    assert!(has_error, "should have parse error for removed `do` keyword");
 }
 
 // ---- Expressions: try ----
@@ -846,14 +850,14 @@ fn error_recovery_multiple_bad_decls() {
 }
 
 #[test]
-fn error_recovery_do_block() {
-    // Error inside do block — missing identifier after `let`
-    let input = "effect fn f() -> Result[Int, String] = do {\n  let = 1\n  let y = 2\n  ok(y)\n}";
+fn error_recovery_do_block_removed() {
+    // `do` keyword is removed — should produce a parse error and recover
+    let input = "effect fn f() -> Result[Int, String] = do {\n  let y = 2\n  ok(y)\n}";
     let tokens = Lexer::tokenize(input);
     let mut parser = Parser::new(tokens).with_file("test.almd");
-    let prog = parser.parse().expect("should return Ok with partial AST");
-    assert_eq!(prog.decls.len(), 1, "should parse the fn declaration");
-    assert!(!parser.errors.is_empty(), "should have parse errors from do block");
+    let result = parser.parse();
+    let has_error = result.is_err() || !parser.errors.is_empty();
+    assert!(has_error, "should have parse error for removed `do` keyword");
 }
 
 #[test]

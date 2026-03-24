@@ -49,6 +49,7 @@ test "member access on open record parameter" {
 }
 
 fn chain_b(x: { name: String, .. }) -> String = x.name
+
 fn chain_a(x: { name: String, breed: String, .. }) -> String = chain_b(x)
 
 test "open record chain calling" {
@@ -88,8 +89,7 @@ test "structural bound accepts anonymous record" {
 }
 
 // Monomorphization: return type preserves concrete type via T
-fn set_name[T: { name: String, .. }](x: T, n: String) -> T =
-  { ...x, name: n }
+fn set_name[T: { name: String, .. }](x: T, n: String) -> T = { ...x, name: n }
 
 test "monomorphize: rename Dog preserves breed" {
   let d = Dog { name: "Rex", breed: "Lab" };

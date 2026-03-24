@@ -1,4 +1,4 @@
-effect fn steps(n: Int) -> Result[Int, String] = do {
+effect fn steps(n: Int) -> Result[Int, String] = {
   guard n > 0 else err("Only positive integers are allowed")
   var current = n
   var count = 0

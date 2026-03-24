@@ -1,153 +1,154 @@
-// json extra tests — get, keys, as_*, null, stringify_pretty, path API
+import json
 
+// json extra tests — get, keys, as_*, null, stringify_pretty, path API
 test "json.get existing key" {
-  let obj = json.object([("name", json.from_string("Alice"))])
-  let v = json.get(obj, "name")
+  let obj = json.object([("name", json.from_string("Alice"))]);
+  let v = json.get(obj, "name");
   assert_eq(option.is_some(v), true)
 }
 
 test "json.get missing key" {
-  let obj = json.object([("name", json.from_string("Alice"))])
-  let v = json.get(obj, "age")
+  let obj = json.object([("name", json.from_string("Alice"))]);
+  let v = json.get(obj, "age");
   assert_eq(option.is_none(v), true)
 }
 
 test "json.keys of object" {
-  let obj = json.object([("a", json.from_int(1)), ("b", json.from_int(2))])
-  let ks = json.keys(obj)
-  assert_eq(list.len(ks), 2)
-  assert_eq(list.contains(ks, "a"), true)
+  let obj = json.object([("a", json.from_int(1)), ("b", json.from_int(2))]);
+  let ks = json.keys(obj);
+  assert_eq(list.len(ks), 2);
+  assert_eq(list.contains(ks, "a"), true);
   assert_eq(list.contains(ks, "b"), true)
 }
 
 test "json.keys of empty object" {
-  let obj = json.object([])
-  let ks = json.keys(obj)
+  let obj = json.object([]);
+  let ks = json.keys(obj);
   assert_eq(list.len(ks), 0)
 }
 
 test "json.as_string on string value" {
-  let v = json.from_string("hello")
+  let v = json.from_string("hello");
   assert_eq(json.as_string(v), some("hello"))
 }
 
 test "json.as_string on non-string" {
-  let v = json.from_int(42)
+  let v = json.from_int(42);
   assert_eq(json.as_string(v), none)
 }
 
 test "json.as_int on int value" {
-  let v = json.from_int(99)
+  let v = json.from_int(99);
   assert_eq(json.as_int(v), some(99))
 }
 
 test "json.as_int on non-int" {
-  let v = json.from_string("99")
+  let v = json.from_string("99");
   assert_eq(json.as_int(v), none)
 }
 
 test "json.as_bool on bool value" {
-  let v = json.from_bool(true)
+  let v = json.from_bool(true);
   assert_eq(json.as_bool(v), some(true))
 }
 
 test "json.as_bool on non-bool" {
-  let v = json.from_int(1)
+  let v = json.from_int(1);
   assert_eq(json.as_bool(v), none)
 }
 
 test "json.as_float on float value" {
-  let v = json.from_float(2.71)
-  let r = json.as_float(v)
+  let v = json.from_float(2.71);
+  let r = json.as_float(v);
   assert_eq(option.is_some(r), true)
 }
 
 test "json.as_float on non-float" {
-  let v = json.from_string("2.71")
+  let v = json.from_string("2.71");
   assert_eq(json.as_float(v), none)
 }
 
 test "json.as_array on array value" {
-  let v = json.array([json.from_int(1), json.from_int(2)])
-  let r = json.as_array(v)
+  let v = json.array([json.from_int(1), json.from_int(2)]);
+  let r = json.as_array(v);
   assert_eq(option.is_some(r), true)
 }
 
 test "json.as_array on non-array" {
-  let v = json.from_int(42)
+  let v = json.from_int(42);
   assert_eq(json.as_array(v), none)
 }
 
 test "json.null creates null value" {
-  let v = json.null()
+  let v = json.null();
   assert_eq(json.stringify(v), "null")
 }
 
 test "json.stringify_pretty formats" {
-  let obj = json.object([("key", json.from_int(1))])
-  let s = json.stringify_pretty(obj)
-  assert_eq(string.contains(s, "key"), true)
+  let obj = json.object([("key", json.from_int(1))]);
+  let s = json.stringify_pretty(obj);
+  assert_eq(string.contains(s, "key"), true);
   assert_eq(string.contains(s, "1"), true)
 }
 
 test "json.object empty" {
-  let obj = json.object([])
+  let obj = json.object([]);
   assert_eq(json.stringify(obj), "{}")
 }
 
 test "json.parse roundtrip array" {
-  let arr = json.array([json.from_string("a"), json.from_string("b")])
-  let text = json.stringify(arr)
+  let arr = json.array([json.from_string("a"), json.from_string("b")]);
+  let text = json.stringify(arr);
   match json.parse(text) {
     ok(v) => {
-      let items = json.as_array(v)
+      let items = json.as_array(v);
       assert_eq(option.is_some(items), true)
-    }
-    err(_) => assert(false, "roundtrip failed")
+    },
+    err(_) => assert(false, "roundtrip failed"),
   }
 }
 
 test "json.parse nested object" {
-  match json.parse(r"""{"user": {"name": "Alice", "age": 30}}""") {
+  match json.parse('{"user": {"name": "Alice", "age": 30}}') {
     ok(v) => {
-      let user = json.get(v, "user")
+      let user = json.get(v, "user");
       assert_eq(option.is_some(user), true)
-    }
-    err(_) => assert(false, "should parse")
+    },
+    err(_) => assert(false, "should parse"),
   }
 }
 
 test "json.parse array of objects" {
-  match json.parse(r"""[{"id": 1}, {"id": 2}]""") {
+  match json.parse('[{"id": 1}, {"id": 2}]') {
     ok(v) => {
-      let items = json.as_array(v)
+      let items = json.as_array(v);
       assert_eq(option.is_some(items), true)
-    }
-    err(_) => assert(false, "should parse")
+    },
+    err(_) => assert(false, "should parse"),
   }
 }
 
 test "json.stringify_pretty on nested" {
-  let inner = json.object([("x", json.from_int(1))])
-  let outer = json.object([("data", inner)])
-  let s = json.stringify_pretty(outer)
-  assert_eq(string.contains(s, "data"), true)
+  let inner = json.object([("x", json.from_int(1))]);
+  let outer = json.object([("data", inner)]);
+  let s = json.stringify_pretty(outer);
+  assert_eq(string.contains(s, "data"), true);
   assert_eq(string.contains(s, "x"), true)
 }
 
 test "json.from_string empty" {
-  let v = json.from_string("")
-  let s = json.stringify(v)
-  assert_eq(s, "\"\"")
+  let v = json.from_string("");
+  let s = json.stringify(v);
+  assert_eq(s, '""')
 }
 
 test "json.from_int zero" {
-  let v = json.from_int(0)
+  let v = json.from_int(0);
   assert_eq(json.stringify(v), "0")
 }
 
 test "json.from_int negative" {
-  let v = json.from_int(-42)
-  let s = json.stringify(v)
+  let v = json.from_int(-42);
+  let s = json.stringify(v);
   assert_eq(string.contains(s, "-42"), true)
 }

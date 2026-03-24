@@ -1,40 +1,38 @@
-// fan.any, fan.settle, fan.timeout
 
+// fan.any, fan.settle, fan.timeout
 effect fn succeed(x: Int) -> Result[Int, String] = ok(x)
+
 effect fn fail(msg: String) -> Result[Int, String] = err(msg)
 
 // ── fan.any — first success wins ──
-
 test "fan.any first success" {
   let result = fan.any([
     () => succeed(42),
-    () => succeed(99),
-  ])
+    () => succeed(99)
+  ]);
   assert(result == 42 or result == 99)
 }
 
 test "fan.any skips failures" {
   let result = fan.any([
     () => fail("nope"),
-    () => succeed(7),
-  ])
+    () => succeed(7)
+  ]);
   assert_eq(result, 7)
 }
 
 // ── fan.settle — collect all results ──
-
 test "fan.settle collects all" {
   let results = fan.settle([
     () => succeed(1),
     () => fail("bad"),
-    () => succeed(3),
-  ])
+    () => succeed(3)
+  ]);
   assert_eq(list.len(results), 3)
 }
 
 // ── fan.timeout — deadline ──
-
 test "fan.timeout succeeds within time" {
-  let result: Result[Int, String] = fan.timeout(5000, () => succeed(42))
+  let result: Result[Int, String] = fan.timeout(5000, () => succeed(42));
   assert_eq(result, ok(42))
 }

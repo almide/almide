@@ -1,62 +1,57 @@
+
 // equality_test — Deep equality == and != for all types
-
 // ── Int equality ──
-
 test "int equality" {
-  assert_eq(1 == 1, true)
-  assert_eq(1 == 2, false)
-  assert_eq(0 == 0, true)
+  assert_eq(1 == 1, true);
+  assert_eq(1 == 2, false);
+  assert_eq(0 == 0, true);
   assert_eq(-1 == -1, true)
 }
 
 test "int inequality" {
-  assert_eq(1 != 2, true)
-  assert_eq(1 != 1, false)
+  assert_eq(1 != 2, true);
+  assert_eq(1 != 1, false);
   assert_eq(0 != -1, true)
 }
 
 // ── Float equality ──
-
 test "float equality" {
-  assert_eq(1.0 == 1.0, true)
-  assert_eq(1.5 == 1.5, true)
+  assert_eq(1.0 == 1.0, true);
+  assert_eq(1.5 == 1.5, true);
   assert_eq(1.0 == 2.0, false)
 }
 
 test "float inequality" {
-  assert_eq(1.0 != 2.0, true)
+  assert_eq(1.0 != 2.0, true);
   assert_eq(1.0 != 1.0, false)
 }
 
 // ── String equality ──
-
 test "string equality" {
-  assert_eq("hello" == "hello", true)
-  assert_eq("hello" == "world", false)
+  assert_eq("hello" == "hello", true);
+  assert_eq("hello" == "world", false);
   assert_eq("" == "", true)
 }
 
 test "string inequality" {
-  assert_eq("a" != "b", true)
-  assert_eq("a" != "a", false)
+  assert_eq("a" != "b", true);
+  assert_eq("a" != "a", false);
   assert_eq("" != " ", true)
 }
 
 // ── Bool equality ──
-
 test "bool equality" {
-  assert_eq(true == true, true)
-  assert_eq(false == false, true)
+  assert_eq(true == true, true);
+  assert_eq(false == false, true);
   assert_eq(true == false, false)
 }
 
 test "bool inequality" {
-  assert_eq(true != false, true)
+  assert_eq(true != false, true);
   assert_eq(true != true, false)
 }
 
 // ── List equality ──
-
 test "list equality same elements" {
   assert_eq([1, 2, 3] == [1, 2, 3], true)
 }
@@ -70,52 +65,49 @@ test "list equality different lengths" {
 }
 
 test "list equality empty" {
-  let a: List[Int] = []
-  let b: List[Int] = []
+  let a: List[Int] = [];
+  let b: List[Int] = [];
   assert_eq(a == b, true)
 }
 
 // ── Option equality ──
-
 test "option some equality" {
-  assert_eq(some(1) == some(1), true)
+  assert_eq(some(1) == some(1), true);
   assert_eq(some(1) == some(2), false)
 }
 
 test "option none equality" {
-  let a: Option[Int] = none
-  let b: Option[Int] = none
-  assert_eq(a == b, true)
+  let a: Option[Int] = none;
+  let b: Option[Int] = none;
+  assert_eq(a == b, true);
   assert_eq(some(1) == a, false)
 }
 
 // ── Result equality ──
-
 test "result ok equality" {
-  let a: Result[Int, String] = ok(42)
-  let b: Result[Int, String] = ok(42)
-  let c: Result[Int, String] = ok(99)
-  assert_eq(a == b, true)
+  let a: Result[Int, String] = ok(42);
+  let b: Result[Int, String] = ok(42);
+  let c: Result[Int, String] = ok(99);
+  assert_eq(a == b, true);
   assert_eq(a == c, false)
 }
 
 test "result err equality" {
-  let a: Result[Int, String] = err("x")
-  let b: Result[Int, String] = err("x")
-  let c: Result[Int, String] = err("y")
-  assert_eq(a == b, true)
+  let a: Result[Int, String] = err("x");
+  let b: Result[Int, String] = err("x");
+  let c: Result[Int, String] = err("y");
+  assert_eq(a == b, true);
   assert_eq(a == c, false)
 }
 
 test "result ok vs err" {
-  let a: Result[Int, String] = ok(1)
-  let b: Result[Int, String] = err("x")
-  assert_eq(a == b, false)
+  let a: Result[Int, String] = ok(1);
+  let b: Result[Int, String] = err("x");
+  assert_eq(a == b, false);
   assert_eq(a != b, true)
 }
 
 // ── Record equality ──
-
 test "record equality same" {
   assert_eq({ x: 1, y: 2 } == { x: 1, y: 2 }, true)
 }
@@ -125,32 +117,39 @@ test "record equality different" {
 }
 
 // ── Variant equality ──
-
-type Shape =
-  | Circle(Float)
-  | Square(Float)
+type Shape = | Circle(Float) | Square(Float)
 
 test "variant equality same constructor" {
-  assert_eq(Circle(1.0) == Circle(1.0), true)
+  assert_eq(Circle(1.0) == Circle(1.0), true);
   assert_eq(Circle(1.0) != Circle(2.0), true)
 }
 
 test "variant equality different constructor" {
-  assert_eq(Circle(1.0) == Square(1.0), false)
+  assert_eq(Circle(1.0) == Square(1.0), false);
   assert_eq(Circle(1.0) != Square(1.0), true)
 }
 
 // ── Nested structural equality ──
-
 test "nested list equality" {
-  assert_eq([[1, 2], [3, 4]] == [[1, 2], [3, 4]], true)
-  assert_eq([[1, 2], [3, 4]] == [[1, 2], [3, 5]], false)
+  assert_eq([
+    [1, 2],
+    [3, 4]
+  ] == [
+    [1, 2],
+    [3, 4]
+  ], true);
+  assert_eq([
+    [1, 2],
+    [3, 4]
+  ] == [
+    [1, 2],
+    [3, 5]
+  ], false)
 }
 
 // ── Tuple equality ──
-
 test "tuple equality" {
-  assert_eq((1, "a") == (1, "a"), true)
-  assert_eq((1, "a") != (2, "a"), true)
+  assert_eq((1, "a") == (1, "a"), true);
+  assert_eq((1, "a") != (2, "a"), true);
   assert_eq((1, "a") != (1, "b"), true)
 }

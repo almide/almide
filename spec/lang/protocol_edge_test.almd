@@ -1,7 +1,7 @@
+import math
+
 // protocol_edge_test — Edge cases inspired by common protocol/interface problems in other languages
-
 // ── Diamond problem: two protocols require same method name ──
-
 protocol HasLabel {
   fn label(a: Self) -> String
 }
@@ -12,83 +12,79 @@ protocol HasTitle {
 
 // Same method satisfies both protocols — no conflict (Go-style)
 type Widget: HasLabel, HasTitle = { text: String }
+
 fn Widget.label(w: Widget) -> String = w.text
 
 test "diamond: same method satisfies two protocols" {
-  let w = Widget { text: "button" }
+  let w = Widget { text: "button" };
   assert_eq(w.label(), "button")
 }
 
 // ── Recursive Self usage ──
-
 protocol Splittable {
   fn split(a: Self) -> (Self, Self)
   fn merge(a: Self, b: Self) -> Self
 }
 
 type Range: Splittable = { lo: Int, hi: Int }
+
 fn Range.split(r: Range) -> (Range, Range) = {
-  let mid = (r.lo + r.hi) / 2
+  let mid = (r.lo + r.hi) / 2;
   (Range { lo: r.lo, hi: mid }, Range { lo: mid, hi: r.hi })
 }
-fn Range.merge(a: Range, b: Range) -> Range =
-  Range { lo: math.min(a.lo, b.lo), hi: math.max(a.hi, b.hi) }
+
+fn Range.merge(a: Range, b: Range) -> Range = Range { lo: math.min(a.lo, b.lo), hi: math.max(a.hi, b.hi) }
 
 test "recursive Self in split and merge" {
-  let r = Range { lo: 0, hi: 100 }
-  let (left, right) = Range.split(r)
-  assert_eq(left.lo, 0)
-  assert_eq(left.hi, 50)
-  assert_eq(right.lo, 50)
-  assert_eq(right.hi, 100)
-  let merged = Range.merge(left, right)
-  assert_eq(merged.lo, 0)
+  let r = Range { lo: 0, hi: 100 };
+  let (left, right) = Range.split(r);
+  assert_eq(left.lo, 0);
+  assert_eq(left.hi, 50);
+  assert_eq(right.lo, 50);
+  assert_eq(right.hi, 100);
+  let merged = Range.merge(left, right);
+  assert_eq(merged.lo, 0);
   assert_eq(merged.hi, 100)
 }
 
 // ── Protocol method name collides with stdlib ──
-
 protocol Sizable {
   fn len(a: Self) -> Int
   fn contains(a: Self, item: String) -> Bool
 }
 
 type Bag: Sizable = { items: List[String] }
+
 fn Bag.len(b: Bag) -> Int = list.len(b.items)
+
 fn Bag.contains(b: Bag, item: String) -> Bool = list.contains(b.items, item)
 
 test "protocol methods with stdlib-colliding names" {
-  let b = Bag { items: ["a", "b", "c"] }
-  assert_eq(Bag.len(b), 3)
-  assert_eq(Bag.contains(b, "b"), true)
+  let b = Bag { items: ["a", "b", "c"] };
+  assert_eq(Bag.len(b), 3);
+  assert_eq(Bag.contains(b, "b"), true);
   assert_eq(Bag.contains(b, "d"), false)
 }
 
 // ── Protocol on variant type with complex match ──
-
 protocol Evaluable {
   fn eval(a: Self) -> Int
 }
 
-type Expr: Evaluable =
-  | Lit(Int)
-  | Add(Expr, Expr)
-  | Neg(Expr)
+type Expr: Evaluable = | Lit(Int) | Add(Expr, Expr) | Neg(Expr)
 
-fn Expr.eval(e: Expr) -> Int =
-  match e {
-    Lit(n) => n
-    Add(a, b) => Expr.eval(a) + Expr.eval(b)
-    Neg(inner) => 0 - Expr.eval(inner)
-  }
+fn Expr.eval(e: Expr) -> Int = match e {
+  Lit(n) => n,
+  Add(a, b) => Expr.eval(a) + Expr.eval(b),
+  Neg(inner) => 0 - Expr.eval(inner),
+}
 
 test "protocol on recursive variant type" {
-  let e = Add(Lit(3), Neg(Lit(1)))
+  let e = Add(Lit(3), Neg(Lit(1)));
   assert_eq(Expr.eval(e), 2)
 }
 
 // ── Protocol method calling another protocol method ──
-
 protocol Bounded {
   fn lower(a: Self) -> Int
   fn upper(a: Self) -> Int
@@ -99,116 +95,123 @@ protocol Sized {
 }
 
 type Interval: Bounded, Sized = { start: Int, end: Int }
+
 fn Interval.lower(i: Interval) -> Int = i.start
+
 fn Interval.upper(i: Interval) -> Int = i.end
+
 fn Interval.extent(i: Interval) -> Int = Interval.upper(i) - Interval.lower(i)
 
 test "protocol method calls another protocol method" {
-  let i = Interval { start: 10, end: 30 }
-  assert_eq(i.lower(), 10)
-  assert_eq(i.upper(), 30)
+  let i = Interval { start: 10, end: 30 };
+  assert_eq(i.lower(), 10);
+  assert_eq(i.upper(), 30);
   assert_eq(i.extent(), 20)
 }
 
 // ── Protocol on type with default fields ──
-
 protocol Configurable {
   fn is_enabled(a: Self) -> Bool
 }
 
 type Settings: Configurable = { verbose: Bool, retries: Int }
+
 fn Settings.is_enabled(s: Settings) -> Bool = s.verbose
 
 test "protocol on type with fields" {
-  let s = Settings { verbose: false, retries: 3 }
-  assert_eq(s.is_enabled(), false)
-  let s2 = Settings { verbose: true, retries: 1 }
+  let s = Settings { verbose: false, retries: 3 };
+  assert_eq(s.is_enabled(), false);
+  let s2 = Settings { verbose: true, retries: 1 };
   assert_eq(s2.is_enabled(), true)
 }
 
 // ── Multiple types satisfying same protocol, used in list ──
-
 protocol Scorable {
   fn score(a: Self) -> Int
 }
 
 type Player: Scorable = { points: Int }
+
 fn Player.score(p: Player) -> Int = p.points
 
 type Team: Scorable = { total: Int }
+
 fn Team.score(t: Team) -> Int = t.total
 
 test "different types satisfying same protocol independently" {
-  let p = Player { points: 42 }
-  let t = Team { total: 100 }
-  assert_eq(p.score(), 42)
+  let p = Player { points: 42 };
+  let t = Team { total: 100 };
+  assert_eq(p.score(), 42);
   assert_eq(t.score(), 100)
 }
 
 // ── Protocol with method returning Option ──
-
 protocol Findable {
   fn find_by_id(a: Self, id: Int) -> Option[String]
 }
 
 type Registry: Findable = { names: List[String] }
-fn Registry.find_by_id(r: Registry, id: Int) -> Option[String] =
-  list.get(r.names, id)
+
+fn Registry.find_by_id(r: Registry, id: Int) -> Option[String] = list.get(r.names, id)
 
 test "protocol method returning Option" {
-  let reg = Registry { names: ["alice", "bob"] }
-  assert_eq(reg.find_by_id(0), some("alice"))
+  let reg = Registry { names: ["alice", "bob"] };
+  assert_eq(reg.find_by_id(0), some("alice"));
   assert_eq(reg.find_by_id(99), none)
 }
 
 // ── Protocol with effect fn ──
-
 protocol Loggable {
   effect fn log_info(a: Self) -> String
 }
 
 type Event: Loggable = { message: String }
+
 effect fn Event.log_info(e: Event) -> String = e.message
 
 test "protocol with effect fn" {
-  let e = Event { message: "started" }
+  let e = Event { message: "started" };
   assert_eq(e.log_info(), "started")
 }
 
 // ── Protocol method that returns Bool (predicate pattern) ──
-
 protocol Validatable {
   fn is_valid(a: Self) -> Bool
   fn error_message(a: Self) -> String
 }
 
 type Email: Validatable = { address: String }
+
 fn Email.is_valid(e: Email) -> Bool = string.contains(e.address, "@")
-fn Email.error_message(e: Email) -> String =
-  if Email.is_valid(e) then "" else "invalid email: " + e.address
+
+fn Email.error_message(e: Email) -> String = if Email.is_valid(e) then ""
+else "invalid email: " + e.address
 
 test "protocol for validation pattern" {
-  let good = Email { address: "a@b.com" }
-  let bad = Email { address: "nope" }
-  assert_eq(good.is_valid(), true)
-  assert_eq(good.error_message(), "")
-  assert_eq(bad.is_valid(), false)
+  let good = Email { address: "a@b.com" };
+  let bad = Email { address: "nope" };
+  assert_eq(good.is_valid(), true);
+  assert_eq(good.error_message(), "");
+  assert_eq(bad.is_valid(), false);
   assert_eq(bad.error_message(), "invalid email: nope")
 }
 
 // ── Protocol with Int return used in computation ──
-
 protocol Weighted {
   fn weight(a: Self) -> Int
 }
 
 type Package: Weighted = { grams: Int }
+
 fn Package.weight(p: Package) -> Int = p.grams
 
-fn total_weight(packages: List[Package]) -> Int =
-  list.fold(packages, 0, (acc, p) => acc + Package.weight(p))
+fn total_weight(packages: List[Package]) -> Int = list.fold(packages, 0, (acc, p) => acc + Package.weight(p))
 
 test "protocol method used in higher-order function" {
-  let pkgs = [Package { grams: 100 }, Package { grams: 250 }, Package { grams: 50 }]
+  let pkgs = [
+    Package { grams: 100 },
+    Package { grams: 250 },
+    Package { grams: 50 }
+  ];
   assert_eq(total_weight(pkgs), 400)
 }

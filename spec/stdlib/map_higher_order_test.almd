@@ -1,227 +1,227 @@
-// map higher-order function tests — fold, any, all, count, find, update, entries, merge, from_list, keys, values
 
+// map higher-order function tests — fold, any, all, count, find, update, entries, merge, from_list, keys, values
 test "map.fold sums all values" {
-  let m = ["a": 10, "b": 20, "c": 30]
-  let total = map.fold(m, 0, (acc, k, v) => acc + v)
+  let m = ["a": 10, "b": 20, "c": 30];
+  let total = map.fold(m, 0, (acc, k, v) => acc + v);
   assert_eq(total, 60)
 }
 
 test "map.fold on empty map" {
-  let m: Map[String, Int] = [:]
-  let result = map.fold(m, 42, (acc, k, v) => acc + v)
+  let m: Map[String, Int] = [:];
+  let result = map.fold(m, 42, (acc, k, v) => acc + v);
   assert_eq(result, 42)
 }
 
 test "map.fold multiplies values" {
-  let m = ["x": 2, "y": 3, "z": 5]
-  let product = map.fold(m, 1, (acc, k, v) => acc * v)
+  let m = ["x": 2, "y": 3, "z": 5];
+  let product = map.fold(m, 1, (acc, k, v) => acc * v);
   assert_eq(product, 30)
 }
 
 test "map.fold counts entries" {
-  let m = ["a": 1, "b": 2]
-  let count = map.fold(m, 0, (acc, k, v) => acc + 1)
+  let m = ["a": 1, "b": 2];
+  let count = map.fold(m, 0, (acc, k, v) => acc + 1);
   assert_eq(count, 2)
 }
 
 test "map.any on empty map" {
-  let m: Map[String, Int] = [:]
+  let m: Map[String, Int] = [:];
   assert_eq(map.any(m, (k, v) => v > 0), false)
 }
 
 test "map.any checks by key" {
-  let m = ["admin": 1, "user": 2]
-  assert_eq(map.any(m, (k, v) => k == "admin"), true)
+  let m = ["admin": 1, "user": 2];
+  assert_eq(map.any(m, (k, v) => k == "admin"), true);
   assert_eq(map.any(m, (k, v) => k == "root"), false)
 }
 
 test "map.any positive" {
-  let m = ["a": 1, "b": 100]
+  let m = ["a": 1, "b": 100];
   assert_eq(map.any(m, (k, v) => v >= 100), true)
 }
 
 test "map.any negative" {
-  let m = ["a": 1, "b": 2]
+  let m = ["a": 1, "b": 2];
   assert_eq(map.any(m, (k, v) => v > 50), false)
 }
 
 test "map.all on empty map" {
-  let m: Map[String, Int] = [:]
+  let m: Map[String, Int] = [:];
   assert_eq(map.all(m, (k, v) => v > 0), true)
 }
 
 test "map.all all match" {
-  let m = ["a": 5, "b": 10]
+  let m = ["a": 5, "b": 10];
   assert_eq(map.all(m, (k, v) => v > 0), true)
 }
 
 test "map.all not all match" {
-  let m = ["a": 5, "b": 0]
+  let m = ["a": 5, "b": 0];
   assert_eq(map.all(m, (k, v) => v > 0), false)
 }
 
 test "map.count on empty map" {
-  let m: Map[String, Int] = [:]
+  let m: Map[String, Int] = [:];
   assert_eq(map.count(m, (k, v) => v > 0), 0)
 }
 
 test "map.count all match" {
-  let m = ["a": 1, "b": 2, "c": 3]
+  let m = ["a": 1, "b": 2, "c": 3];
   assert_eq(map.count(m, (k, v) => v > 0), 3)
 }
 
 test "map.count none match" {
-  let m = ["a": 1, "b": 2]
+  let m = ["a": 1, "b": 2];
   assert_eq(map.count(m, (k, v) => v > 10), 0)
 }
 
 test "map.count some match" {
-  let m = ["a": 1, "b": 5, "c": 10]
+  let m = ["a": 1, "b": 5, "c": 10];
   assert_eq(map.count(m, (k, v) => v >= 5), 2)
 }
 
 test "map.find on empty map" {
-  let m: Map[String, Int] = [:]
-  let found = map.find(m, (k, v) => v > 0)
+  let m: Map[String, Int] = [:];
+  let found = map.find(m, (k, v) => v > 0);
   assert_eq(option.is_none(found), true)
 }
 
 test "map.find no match" {
-  let m = ["a": 1, "b": 2]
-  let found = map.find(m, (k, v) => v > 100)
+  let m = ["a": 1, "b": 2];
+  let found = map.find(m, (k, v) => v > 100);
   assert_eq(option.is_none(found), true)
 }
 
 test "map.find match exists" {
-  let m = ["a": 1, "b": 50, "c": 100]
-  let found = map.find(m, (k, v) => v >= 50)
+  let m = ["a": 1, "b": 50, "c": 100];
+  let found = map.find(m, (k, v) => v >= 50);
   assert_eq(option.is_some(found), true)
 }
 
 test "map.update existing key" {
-  let m = ["score": 100]
-  let m2 = map.update(m, "score", (v) => v + 50)
+  let m = ["score": 100];
+  let m2 = map.update(m, "score", (v) => v + 50);
   assert_eq(map.get(m2, "score"), some(150))
 }
 
 test "map.update multiply" {
-  let m = ["x": 3]
-  let m2 = map.update(m, "x", (v) => v * 10)
+  let m = ["x": 3];
+  let m2 = map.update(m, "x", (v) => v * 10);
   assert_eq(map.get(m2, "x"), some(30))
 }
 
 test "map.entries returns pairs" {
-  let m = ["b": 2, "a": 1, "c": 3]
-  let es = map.entries(m)
+  let m = ["b": 2, "a": 1, "c": 3];
+  let es = map.entries(m);
   assert_eq(list.len(es), 3)
 }
 
 test "map.entries on empty" {
-  let m: Map[String, Int] = [:]
-  let es = map.entries(m)
+  let m: Map[String, Int] = [:];
+  let es = map.entries(m);
   assert_eq(list.len(es), 0)
 }
 
 test "map.merge overlapping keys" {
-  let a = ["x": 1, "y": 2]
-  let b = ["y": 20, "z": 30]
-  let c = map.merge(a, b)
-  assert_eq(map.get(c, "x"), some(1))
-  assert_eq(map.get(c, "y"), some(20))
-  assert_eq(map.get(c, "z"), some(30))
+  let a = ["x": 1, "y": 2];
+  let b = ["y": 20, "z": 30];
+  let c = map.merge(a, b);
+  assert_eq(map.get(c, "x"), some(1));
+  assert_eq(map.get(c, "y"), some(20));
+  assert_eq(map.get(c, "z"), some(30));
   assert_eq(map.len(c), 3)
 }
 
 test "map.merge with empty" {
-  let a = ["a": 1]
-  let b: Map[String, Int] = [:]
-  assert_eq(map.len(map.merge(a, b)), 1)
+  let a = ["a": 1];
+  let b: Map[String, Int] = [:];
+  assert_eq(map.len(map.merge(a, b)), 1);
   assert_eq(map.len(map.merge(b, a)), 1)
 }
 
 test "map.merge both empty" {
-  let a: Map[String, Int] = [:]
-  let b: Map[String, Int] = [:]
+  let a: Map[String, Int] = [:];
+  let b: Map[String, Int] = [:];
   assert_eq(map.len(map.merge(a, b)), 0)
 }
 
 test "map.from_list duplicates last wins" {
-  let m = map.from_list([("a", 1), ("a", 2)])
+  let m = map.from_list([("a", 1), ("a", 2)]);
   assert_eq(map.get(m, "a"), some(2))
 }
 
 test "map.from_list basic" {
-  let m = map.from_list([("x", 10), ("y", 20)])
-  assert_eq(map.get(m, "x"), some(10))
+  let m = map.from_list([("x", 10), ("y", 20)]);
+  assert_eq(map.get(m, "x"), some(10));
   assert_eq(map.get(m, "y"), some(20))
 }
 
 test "map.keys returns all keys" {
-  let m = ["x": 10, "y": 20, "z": 30]
-  let ks = map.keys(m)
-  assert_eq(list.len(ks), 3)
-  assert_eq(list.contains(ks, "x"), true)
-  assert_eq(list.contains(ks, "y"), true)
+  let m = ["x": 10, "y": 20, "z": 30];
+  let ks = map.keys(m);
+  assert_eq(list.len(ks), 3);
+  assert_eq(list.contains(ks, "x"), true);
+  assert_eq(list.contains(ks, "y"), true);
   assert_eq(list.contains(ks, "z"), true)
 }
 
 test "map.keys on empty" {
-  let m: Map[String, Int] = [:]
+  let m: Map[String, Int] = [:];
   assert_eq(list.len(map.keys(m)), 0)
 }
 
 test "map.values returns all values" {
-  let m = ["a": 10, "b": 20]
-  let vs = map.values(m)
-  assert_eq(list.len(vs), 2)
-  assert_eq(list.contains(vs, 10), true)
+  let m = ["a": 10, "b": 20];
+  let vs = map.values(m);
+  assert_eq(list.len(vs), 2);
+  assert_eq(list.contains(vs, 10), true);
   assert_eq(list.contains(vs, 20), true)
 }
 
 test "map.values on empty" {
-  let m: Map[String, Int] = [:]
+  let m: Map[String, Int] = [:];
   assert_eq(list.len(map.values(m)), 0)
 }
 
 test "map.is_empty on empty" {
-  let m: Map[String, Int] = [:]
+  let m: Map[String, Int] = [:];
   assert_eq(map.is_empty(m), true)
 }
 
 test "map.is_empty on non-empty" {
-  let m = ["a": 1]
+  let m = ["a": 1];
   assert_eq(map.is_empty(m), false)
 }
 
 test "map.contains existing" {
-  let m = ["a": 1, "b": 2]
+  let m = ["a": 1, "b": 2];
   assert_eq(map.contains(m, "a"), true)
 }
 
 test "map.contains missing" {
-  let m = ["a": 1]
+  let m = ["a": 1];
   assert_eq(map.contains(m, "z"), false)
 }
 
 test "map.remove existing key" {
-  let m = ["a": 1, "b": 2]
-  let m2 = map.remove(m, "a")
-  assert_eq(map.len(m2), 1)
+  let m = ["a": 1, "b": 2];
+  let m2 = map.remove(m, "a");
+  assert_eq(map.len(m2), 1);
   assert_eq(map.contains(m2, "a"), false)
 }
 
 test "map.remove non-existent key" {
-  let m = ["a": 1]
-  let m2 = map.remove(m, "z")
+  let m = ["a": 1];
+  let m2 = map.remove(m, "z");
   assert_eq(map.len(m2), 1)
 }
 
 test "map.get_or existing" {
-  let m = ["a": 10]
+  let m = ["a": 10];
   assert_eq(map.get_or(m, "a", 0), 10)
 }
 
 test "map.get_or missing" {
-  let m = ["a": 10]
+  let m = ["a": 10];
   assert_eq(map.get_or(m, "z", 99), 99)
 }

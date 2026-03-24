@@ -1,4 +1,4 @@
-# LLM Integration [ACTIVE]
+# LLM Integration [ON HOLD]
 
 ## Thesis
 

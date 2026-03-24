@@ -1,26 +1,28 @@
-// fan.map — dynamic fan-out/fan-in
 
+// fan.map — dynamic fan-out/fan-in
 effect fn double(x: Int) -> Result[Int, String] = ok(x * 2)
+
 effect fn to_label(x: Int) -> Result[String, String] = ok("item-" + int.to_string(x))
+
 effect fn add_offset(x: Int, n: Int) -> Result[Int, String] = ok(x + n)
 
 test "fan.map basic" {
-  let results = fan.map([1, 2, 3, 4, 5], (x) => double(x))
+  let results = fan.map([1, 2, 3, 4, 5], (x) => double(x));
   assert_eq(results, [2, 4, 6, 8, 10])
 }
 
 test "fan.map preserves order" {
-  let labels = fan.map([10, 20, 30], (x) => to_label(x))
+  let labels = fan.map([10, 20, 30], (x) => to_label(x));
   assert_eq(labels, ["item-10", "item-20", "item-30"])
 }
 
 test "fan.map empty list" {
-  let results = fan.map([], (x: Int) => double(x))
+  let results = fan.map([], (x: Int) => double(x));
   assert_eq(results, [])
 }
 
 test "fan.map with capture" {
-  let offset = 100
-  let results = fan.map([1, 2, 3], (x) => add_offset(x, offset))
+  let offset = 100;
+  let results = fan.map([1, 2, 3], (x) => add_offset(x, offset));
   assert_eq(results, [101, 102, 103])
 }

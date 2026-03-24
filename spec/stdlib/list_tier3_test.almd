@@ -1,38 +1,52 @@
+
 test "list.update" {
-  let xs = [10, 20, 30]
-  assert_eq(list.update(xs, 1, (x) => x * 2), [10, 40, 30])
+  let xs = [10, 20, 30];
+  assert_eq(list.update(xs, 1, (x) => x * 2), [10, 40, 30]);
   assert_eq(xs.update(0, (x) => x + 1), [11, 20, 30])
 }
 
 test "list.repeat" {
-  assert_eq(list.repeat(0, 3), [0, 0, 0])
-  assert_eq(list.repeat("x", 4), ["x", "x", "x", "x"])
+  assert_eq(list.repeat(0, 3), [0, 0, 0]);
+  assert_eq(list.repeat("x", 4), ["x", "x", "x", "x"]);
   assert_eq(list.repeat(1, 0), [])
 }
 
-
 test "list.intersperse" {
-  assert_eq(list.intersperse([1, 2, 3], 0), [1, 0, 2, 0, 3])
-  assert_eq(list.intersperse([1], 0), [1])
+  assert_eq(list.intersperse([1, 2, 3], 0), [1, 0, 2, 0, 3]);
+  assert_eq(list.intersperse([1], 0), [1]);
   assert_eq(list.intersperse([], 0), [])
 }
 
 test "list.windows" {
-  assert_eq(list.windows([1, 2, 3, 4], 2), [[1, 2], [2, 3], [3, 4]])
-  assert_eq(list.windows([1, 2, 3], 3), [[1, 2, 3]])
+  assert_eq(list.windows([1, 2, 3, 4], 2), [
+    [1, 2],
+    [2, 3],
+    [3, 4]
+  ]);
+  assert_eq(list.windows([1, 2, 3], 3), [
+    [1, 2, 3]
+  ]);
   assert_eq(list.windows([1, 2], 3), [])
 }
 
 test "list.dedup" {
-  assert_eq(list.dedup([1, 1, 2, 2, 3, 1, 1]), [1, 2, 3, 1])
-  assert_eq(list.dedup([1, 2, 3]), [1, 2, 3])
-  let empty: List[Int] = []
+  assert_eq(list.dedup([
+    1,
+    1,
+    2,
+    2,
+    3,
+    1,
+    1
+  ]), [1, 2, 3, 1]);
+  assert_eq(list.dedup([1, 2, 3]), [1, 2, 3]);
+  let empty: List[Int] = [];
   assert_eq(list.dedup(empty), [])
 }
 
 test "list.zip_with" {
-  let xs = [1, 2, 3]
-  let ys = [10, 20, 30]
-  assert_eq(list.zip_with(xs, ys, (a, b) => a + b), [11, 22, 33])
+  let xs = [1, 2, 3];
+  let ys = [10, 20, 30];
+  assert_eq(list.zip_with(xs, ys, (a, b) => a + b), [11, 22, 33]);
   assert_eq(list.zip_with([1, 2], [10], (a, b) => a * b), [10])
 }

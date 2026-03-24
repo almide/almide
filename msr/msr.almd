@@ -16,7 +16,7 @@ fn find_arg(raw_args: List[String], name: String, fallback: String) -> String = 
   }
 }
 
-effect fn main() -> Result[Unit, String] = do {
+effect fn main() -> Result[Unit, String] = {
   let raw_args = env.args()
   let model = find_arg(raw_args, "model", "haiku")
   let exercise_raw = find_arg(raw_args, "exercise", "")

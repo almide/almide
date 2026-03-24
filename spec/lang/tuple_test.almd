@@ -1,68 +1,68 @@
-// tuple_test — Tuple creation, access, destructuring, patterns
 
+// tuple_test — Tuple creation, access, destructuring, patterns
 test "tuple creation and index" {
-  let t = (1, "hello", true)
-  assert_eq(t.0, 1)
-  assert_eq(t.1, "hello")
+  let t = (1, "hello", true);
+  assert_eq(t.0, 1);
+  assert_eq(t.1, "hello");
   assert_eq(t.2, true)
 }
 
 test "pair tuple" {
-  let p = (42, "answer")
-  assert_eq(p.0, 42)
+  let p = (42, "answer");
+  assert_eq(p.0, 42);
   assert_eq(p.1, "answer")
 }
 
 test "tuple destructure in let" {
-  let (a, b) = (10, 20)
-  assert_eq(a, 10)
+  let (a, b) = (10, 20);
+  assert_eq(a, 10);
   assert_eq(b, 20)
 }
 
 test "tuple destructure 3 elements" {
-  let (x, y, z) = (1, 2, 3)
+  let (x, y, z) = (1, 2, 3);
   assert_eq(x + y + z, 6)
 }
 
 fn swap(a: Int, b: Int) -> (Int, Int) = (b, a)
 
 test "tuple in function return" {
-  let (x, y) = swap(1, 2)
-  assert_eq(x, 2)
+  let (x, y) = swap(1, 2);
+  assert_eq(x, 2);
   assert_eq(y, 1)
 }
 
 test "tuple of same type" {
-  let t = (1, 2, 3)
+  let t = (1, 2, 3);
   assert_eq(t.0 + t.1 + t.2, 6)
 }
 
 test "nested tuple" {
-  let t = ((1, 2), (3, 4))
-  let (inner1, inner2) = t
-  assert_eq(inner1.0, 1)
+  let t = ((1, 2), (3, 4));
+  let (inner1, inner2) = t;
+  assert_eq(inner1.0, 1);
   assert_eq(inner2.1, 4)
 }
 
 test "tuple with string interpolation" {
-  let p = ("Alice", 30)
-  let s = "${p.0} is ${p.1}"
+  let p = ("Alice", 30);
+  let s = "${p.0} is ${p.1}";
   assert_eq(s, "Alice is 30")
 }
 
 test "tuple in match" {
-  let t = (1, 2)
+  let t = (1, 2);
   let sum = match t {
     (a, b) => a + b
-  }
+  };
   assert_eq(sum, 3)
 }
 
 test "tuple in for loop" {
-  let pairs = [(1, "a"), (2, "b"), (3, "c")]
-  var sum = 0
+  let pairs = [(1, "a"), (2, "b"), (3, "c")];
+  var sum = 0;
   for (n, _) in pairs {
-    sum = sum + n
-  }
+    sum = sum + n;
+  };
   assert_eq(sum, 6)
 }

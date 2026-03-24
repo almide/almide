@@ -100,3 +100,107 @@ pub fn almide_rt_list_shuffle<T>(mut xs: Vec<T>) -> Vec<T> {
 pub fn almide_rt_list_window<T: Clone>(xs: Vec<T>, n: i64) -> Vec<Vec<T>> {
     xs.windows(n as usize).map(|w| w.to_vec()).collect()
 }
+
+// ── Parallel variants (auto-parallelization for pure lambdas) ──
+// Uses std::thread::scope for work-stealing parallelism.
+// Falls back to sequential below PARALLEL_THRESHOLD elements.
+
+const PARALLEL_THRESHOLD: usize = 1024;
+
+pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send + Sync>(xs: Vec<A>, f: impl Fn(A) -> B + Send + Sync) -> Vec<B> {
+    if xs.len() < PARALLEL_THRESHOLD {
+        return xs.into_iter().map(&f).collect();
+    }
+    let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    let chunk_size = (xs.len() + cpus - 1) / cpus;
+    let chunks: Vec<Vec<A>> = xs.chunks(chunk_size).map(|c| c.to_vec()).collect();
+    let mut results: Vec<Option<Vec<B>>> = (0..chunks.len()).map(|_| None).collect();
+    std::thread::scope(|s| {
+        let mut handles = Vec::new();
+        for chunk in &chunks {
+            let f = &f;
+            handles.push(s.spawn(move || {
+                chunk.iter().map(|x| f(x.clone())).collect::<Vec<B>>()
+            }));
+        }
+        for (i, handle) in handles.into_iter().enumerate() {
+            results[i] = Some(handle.join().unwrap());
+        }
+    });
+    results.into_iter().flatten().flatten().collect()
+}
+
+pub fn almide_rt_list_par_filter<A: Send + Sync + Clone>(xs: Vec<A>, f: impl Fn(A) -> bool + Send + Sync) -> Vec<A> {
+    if xs.len() < PARALLEL_THRESHOLD {
+        return xs.into_iter().filter(|x| f(x.clone())).collect();
+    }
+    let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    let chunk_size = (xs.len() + cpus - 1) / cpus;
+    let chunks: Vec<Vec<A>> = xs.chunks(chunk_size).map(|c| c.to_vec()).collect();
+    let mut results: Vec<Option<Vec<A>>> = (0..chunks.len()).map(|_| None).collect();
+    std::thread::scope(|s| {
+        let mut handles = Vec::new();
+        for chunk in &chunks {
+            let f = &f;
+            handles.push(s.spawn(move || {
+                chunk.iter().filter(|x| f((*x).clone())).cloned().collect::<Vec<A>>()
+            }));
+        }
+        for (i, handle) in handles.into_iter().enumerate() {
+            results[i] = Some(handle.join().unwrap());
+        }
+    });
+    results.into_iter().flatten().flatten().collect()
+}
+
+pub fn almide_rt_list_par_any<A: Send + Sync + Clone>(xs: &Vec<A>, f: impl Fn(A) -> bool + Send + Sync) -> bool {
+    if xs.len() < PARALLEL_THRESHOLD {
+        return xs.iter().any(|x| f(x.clone()));
+    }
+    let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    let chunk_size = (xs.len() + cpus - 1) / cpus;
+    let chunks: Vec<&[A]> = xs.chunks(chunk_size).collect();
+    let found = std::sync::atomic::AtomicBool::new(false);
+    std::thread::scope(|s| {
+        for chunk in &chunks {
+            let f = &f;
+            let found = &found;
+            s.spawn(move || {
+                for x in *chunk {
+                    if found.load(std::sync::atomic::Ordering::Relaxed) { return; }
+                    if f(x.clone()) {
+                        found.store(true, std::sync::atomic::Ordering::Relaxed);
+                        return;
+                    }
+                }
+            });
+        }
+    });
+    found.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn almide_rt_list_par_all<A: Send + Sync + Clone>(xs: &Vec<A>, f: impl Fn(A) -> bool + Send + Sync) -> bool {
+    if xs.len() < PARALLEL_THRESHOLD {
+        return xs.iter().all(|x| f(x.clone()));
+    }
+    let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    let chunk_size = (xs.len() + cpus - 1) / cpus;
+    let chunks: Vec<&[A]> = xs.chunks(chunk_size).collect();
+    let failed = std::sync::atomic::AtomicBool::new(false);
+    std::thread::scope(|s| {
+        for chunk in &chunks {
+            let f = &f;
+            let failed = &failed;
+            s.spawn(move || {
+                for x in *chunk {
+                    if failed.load(std::sync::atomic::Ordering::Relaxed) { return; }
+                    if !f(x.clone()) {
+                        failed.store(true, std::sync::atomic::Ordering::Relaxed);
+                        return;
+                    }
+                }
+            });
+        }
+    });
+    !failed.load(std::sync::atomic::Ordering::Relaxed)
+}

@@ -13,17 +13,18 @@
 //! - FilterMapFoldFusion: `fold(filter_map(x, fm), init, g)` → single-pass fold
 //! - RangeFoldFusion: `fold(range(s, e), init, g)` → for loop (no allocation)
 
+#[allow(dead_code)]
 mod chain_detection;
 mod fusion_rules;
 mod ir_transform;
 mod lambda_composition;
 
 use crate::ir::*;
-use super::pass::{NanoPass, Target};
+use super::pass::{NanoPass, PassResult, Target};
 
 pub use chain_detection::{PipeChain, PipeOp};
 
-use chain_detection::{detect_pipe_chains, classify_stdlib_op};
+use chain_detection::classify_stdlib_op;
 use fusion_rules::*;
 use ir_transform::recursive_transform;
 
@@ -36,7 +37,7 @@ impl NanoPass for StreamFusionPass {
     fn name(&self) -> &str { "StreamFusion" }
     fn targets(&self) -> Option<Vec<Target>> { None }
 
-    fn run(&self, program: &mut IrProgram, _target: Target) {
+    fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         // Pre-pass: inline single-use collection lets to expose nested call patterns
         for func in &mut program.functions {
             inline_single_use_collection_lets(&mut func.body, &program.var_table);
@@ -47,15 +48,6 @@ impl NanoPass for StreamFusionPass {
             }
         }
 
-        let debug = std::env::var("ALMIDE_DEBUG_FUSION").is_ok();
-
-        // Debug: dump IR after inlining
-        if debug {
-            for func in &program.functions {
-                dump_calls(&func.body, &func.name);
-            }
-        }
-
         // Phase 2: fuse chains using algebraic laws
         let mut totals = FusionCounts::default();
         for func in &mut program.functions {
@@ -63,25 +55,7 @@ impl NanoPass for StreamFusionPass {
             totals.add(&c);
         }
 
-        // Debug output
-        if debug {
-            let registry = &program.type_registry;
-            for func in &program.functions {
-                let chains = detect_pipe_chains(&func.body, registry);
-                for chain in &chains {
-                    eprintln!(
-                        "[StreamFusion] {}: {} ({} fusible, container={:?})",
-                        func.name,
-                        chain.ops.iter().map(|o| format!("{:?}", o)).collect::<Vec<_>>().join(" → "),
-                        chain.fusible_pairs,
-                        chain.container_name,
-                    );
-                }
-            }
-            if totals.total() > 0 {
-                eprintln!("[StreamFusion] fused: {}", totals.summary());
-            }
-        }
+        PassResult { program, changed: totals.total() > 0 }
     }
 }
 
@@ -112,7 +86,7 @@ fn fuse_all(func: &mut IrFunction, var_table: &mut VarTable) -> FusionCounts {
     // FilterMapFoldFusion: fold(filter_map(x, fm), init, g) → single-pass fold
     {
         let mut count = 0;
-        func.body = recursive_transform(func.body.clone(), &mut |e| {
+        func.body = recursive_transform(std::mem::take(&mut func.body), &mut |e| {
             try_fuse_filter_map_fold(e, &mut count, var_table)
         });
         counts.filter_map_fold = count;
@@ -121,7 +95,7 @@ fn fuse_all(func: &mut IrFunction, var_table: &mut VarTable) -> FusionCounts {
     // RangeFoldFusion: fold(range(start, end), init, g) → for loop
     {
         let mut count = 0;
-        func.body = recursive_transform(func.body.clone(), &mut |e| {
+        func.body = recursive_transform(std::mem::take(&mut func.body), &mut |e| {
             try_fuse_range_fold(e, &mut count, var_table)
         });
         counts.range_fold = count;
@@ -136,7 +110,7 @@ fn fuse_counting(
     try_transform: fn(IrExpr) -> Option<IrExpr>,
 ) -> usize {
     let mut count = 0usize;
-    *body = recursive_transform(body.clone(), &mut |e| {
+    *body = recursive_transform(std::mem::take(body), &mut |e| {
         if let Some(fused) = try_transform(e) {
             count += 1;
             Some(fused)
@@ -176,6 +150,7 @@ impl FusionCounts {
         self.range_fold += other.range_fold;
     }
 
+    #[allow(dead_code)]
     fn summary(&self) -> String {
         let mut parts = Vec::new();
         if self.identity > 0 { parts.push(format!("{} identity-map", self.identity)); }
@@ -212,6 +187,11 @@ fn inline_single_use_collection_lets(body: &mut IrExpr, var_table: &VarTable) {
                     match &mut s.kind {
                         IrStmtKind::Bind { value: v, .. } => *v = substitute_var_in_expr(v, var, &value),
                         IrStmtKind::Expr { expr: e } => *e = substitute_var_in_expr(e, var, &value),
+                        IrStmtKind::Assign { value: v, .. } => *v = substitute_var_in_expr(v, var, &value),
+                        IrStmtKind::Guard { cond: c, else_: el } => {
+                            *c = substitute_var_in_expr(c, var, &value);
+                            *el = substitute_var_in_expr(el, var, &value);
+                        }
                         _ => {}
                     }
                 }
@@ -235,36 +215,6 @@ fn inline_single_use_collection_lets(body: &mut IrExpr, var_table: &VarTable) {
             }
         }
         if let Some(e) = expr { inline_single_use_collection_lets(e, var_table); }
-    }
-}
-
-// ── Debug helpers ────────────────────────────────────────────────
-
-fn dump_calls(expr: &IrExpr, ctx: &str) {
-    match &expr.kind {
-        IrExprKind::Call { target, args, .. } => {
-            let name = match target {
-                CallTarget::Module { module, func } => format!("Module({}.{})", module, func),
-                CallTarget::Named { name } => format!("Named({})", name),
-                _ => "Other".to_string(),
-            };
-            eprintln!("[Fusion-IR] {}: {} with {} args", ctx, name, args.len());
-            for a in args { dump_calls(a, ctx); }
-        }
-        IrExprKind::Block { stmts, expr } => {
-            for s in stmts {
-                match &s.kind {
-                    IrStmtKind::Bind { var, value, .. } => {
-                        eprintln!("[Fusion-IR] {}: Bind var={}", ctx, var.0);
-                        dump_calls(value, ctx);
-                    }
-                    IrStmtKind::Expr { expr } => dump_calls(expr, ctx),
-                    _ => {}
-                }
-            }
-            if let Some(e) = expr { dump_calls(e, ctx); }
-        }
-        _ => {}
     }
 }
 

@@ -10,11 +10,11 @@ use crate::ir::*;
 /// Strip Try nodes from inside Fan expressions and fan.* call arguments.
 pub fn strip_fan_auto_try(program: &mut IrProgram) {
     for func in &mut program.functions {
-        func.body = rewrite_expr(func.body.clone(), false);
+        func.body = rewrite_expr(std::mem::take(&mut func.body), false);
     }
     for module in &mut program.modules {
         for func in &mut module.functions {
-            func.body = rewrite_expr(func.body.clone(), false);
+            func.body = rewrite_expr(std::mem::take(&mut func.body), false);
         }
     }
 }
@@ -69,10 +69,7 @@ fn rewrite_expr(expr: IrExpr, inside_fan: bool) -> IrExpr {
             stmts: rewrite_stmts(stmts, inside_fan),
             expr: expr.map(|e| Box::new(rewrite_expr(*e, inside_fan))),
         },
-        IrExprKind::DoBlock { stmts, expr } => IrExprKind::DoBlock {
-            stmts: rewrite_stmts(stmts, inside_fan),
-            expr: expr.map(|e| Box::new(rewrite_expr(*e, inside_fan))),
-        },
+
         IrExprKind::If { cond, then, else_ } => IrExprKind::If {
             cond: Box::new(rewrite_expr(*cond, inside_fan)),
             then: Box::new(rewrite_expr(*then, inside_fan)),

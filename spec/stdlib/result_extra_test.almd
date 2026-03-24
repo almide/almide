@@ -1,95 +1,95 @@
-// result extra tests — map_err, flat_map, unwrap_or_else, to_option, to_err_option
 
+// result extra tests — map_err, flat_map, unwrap_or_else, to_option, to_err_option
 test "result.map_err on err" {
-  let r: Result[Int, String] = err("fail")
-  let mapped = result.map_err(r, (e) => "wrapped: " + e)
+  let r: Result[Int, String] = err("fail");
+  let mapped = result.map_err(r, (e) => "wrapped: " + e);
   assert_eq(mapped.is_err(), true)
 }
 
 test "result.map_err on ok" {
-  let r: Result[Int, String] = ok(42)
-  let mapped = result.map_err(r, (e) => "wrapped: " + e)
+  let r: Result[Int, String] = ok(42);
+  let mapped = result.map_err(r, (e) => "wrapped: " + e);
   assert_eq(mapped.unwrap_or(0), 42)
 }
 
 test "result.flat_map on ok" {
-  let r: Result[Int, String] = ok(10)
-  let chained = result.flat_map(r, (x) => if x > 5 then ok(x * 2) else err("too small"))
+  let r: Result[Int, String] = ok(10);
+  let chained = result.flat_map(r, (x) => if x > 5 then ok(x * 2) else err("too small"));
   assert_eq(chained.unwrap_or(0), 20)
 }
 
 test "result.flat_map on ok returns err" {
-  let r: Result[Int, String] = ok(3)
-  let chained = result.flat_map(r, (x) => if x > 5 then ok(x * 2) else err("too small"))
+  let r: Result[Int, String] = ok(3);
+  let chained = result.flat_map(r, (x) => if x > 5 then ok(x * 2) else err("too small"));
   assert_eq(chained.is_err(), true)
 }
 
 test "result.flat_map on err" {
-  let r: Result[Int, String] = err("fail")
-  let chained = result.flat_map(r, (x) => ok(x * 2))
+  let r: Result[Int, String] = err("fail");
+  let chained = result.flat_map(r, (x) => ok(x * 2));
   assert_eq(chained.is_err(), true)
 }
 
 test "result.unwrap_or_else on ok" {
-  let r: Result[Int, String] = ok(42)
+  let r: Result[Int, String] = ok(42);
   assert_eq(result.unwrap_or_else(r, (e) => string.len(e)), 42)
 }
 
 test "result.unwrap_or_else on err" {
-  let r: Result[Int, String] = err("hello")
+  let r: Result[Int, String] = err("hello");
   assert_eq(result.unwrap_or_else(r, (e) => string.len(e)), 5)
 }
 
 test "result.to_option on ok" {
-  let r: Result[Int, String] = ok(42)
+  let r: Result[Int, String] = ok(42);
   assert_eq(result.to_option(r), some(42))
 }
 
 test "result.to_option on err" {
-  let r: Result[Int, String] = err("fail")
+  let r: Result[Int, String] = err("fail");
   assert_eq(result.to_option(r), none)
 }
 
 test "result.to_err_option on err" {
-  let r: Result[Int, String] = err("fail")
+  let r: Result[Int, String] = err("fail");
   assert_eq(result.to_err_option(r), some("fail"))
 }
 
 test "result.to_err_option on ok" {
-  let r: Result[Int, String] = ok(42)
-  let v: Option[String] = result.to_err_option(r)
+  let r: Result[Int, String] = ok(42);
+  let v: Option[String] = result.to_err_option(r);
   assert_eq(option.is_none(v), true)
 }
 
 test "result.is_ok on ok" {
-  let r: Result[Int, String] = ok(1)
+  let r: Result[Int, String] = ok(1);
   assert_eq(result.is_ok(r), true)
 }
 
 test "result.is_ok on err" {
-  let r: Result[Int, String] = err("x")
+  let r: Result[Int, String] = err("x");
   assert_eq(result.is_ok(r), false)
 }
 
 test "result.is_err on err" {
-  let r: Result[Int, String] = err("x")
+  let r: Result[Int, String] = err("x");
   assert_eq(result.is_err(r), true)
 }
 
 test "result.is_err on ok" {
-  let r: Result[Int, String] = ok(1)
+  let r: Result[Int, String] = ok(1);
   assert_eq(result.is_err(r), false)
 }
 
 test "result.map then unwrap_or" {
-  let r: Result[Int, String] = ok(5)
-  let v = result.map(r, (x) => x + 10).unwrap_or(0)
+  let r: Result[Int, String] = ok(5);
+  let v = result.map(r, (x) => x + 10).unwrap_or(0);
   assert_eq(v, 15)
 }
 
 test "result.flat_map chain" {
-  let r: Result[Int, String] = ok(10)
-  let r2 = result.flat_map(r, (x) => ok(x + 5))
-  let r3 = result.flat_map(r2, (x) => ok(x * 2))
+  let r: Result[Int, String] = ok(10);
+  let r2 = result.flat_map(r, (x) => ok(x + 5));
+  let r3 = result.flat_map(r2, (x) => ok(x * 2));
   assert_eq(r3.unwrap_or(0), 30)
 }

@@ -28,7 +28,7 @@ fn char_to_num(c: String) -> Int = {
 fn num_to_char(n: Int) -> String =
   list.get_or(string.chars("abcdefghijklmnopqrstuvwxyz"), ((n % 26) + 26) % 26, "?")
 
-effect fn encode(a: Int, b: Int, text: String) -> Result[String, String] = do {
+effect fn encode(a: Int, b: Int, text: String) -> Result[String, String] = {
   guard gcd(a, 26) == 1 else err("a and m must be coprime")
   let chars = string.chars(string.to_lower(text))
   var encoded: List[String] = []
@@ -57,7 +57,7 @@ effect fn encode(a: Int, b: Int, text: String) -> Result[String, String] = do {
   ok(string.join(groups, " "))
 }
 
-effect fn decode(a: Int, b: Int, text: String) -> Result[String, String] = do {
+effect fn decode(a: Int, b: Int, text: String) -> Result[String, String] = {
   guard gcd(a, 26) == 1 else err("a and m must be coprime")
   let mmi = mod_inverse(a, 26)
   let chars = string.chars(string.to_lower(text)) |> list.filter((c) => c != " ")

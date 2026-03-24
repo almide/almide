@@ -8,6 +8,7 @@ pub use almide::lexer;
 pub use almide::parser;
 pub use almide::stdlib;
 pub use almide::types;
+pub use almide::intern;
 
 // CLI-only modules
 mod check;

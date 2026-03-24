@@ -23,6 +23,7 @@
 
 pub mod annotations;
 pub mod pass;
+pub mod pass_auto_parallel;
 pub mod pass_box_deref;
 pub mod pass_builtin_lowering;
 pub mod pass_clone;
@@ -36,6 +37,7 @@ pub mod pass_stdlib_lowering;
 pub mod pass_effect_inference;
 pub mod pass_stream_fusion;
 pub mod pass_tco;
+pub mod pass_licm;
 pub mod template;
 pub mod target;
 pub mod walker;
@@ -85,8 +87,10 @@ fn strip_test_blocks(src: &str) -> String {
 pub fn codegen(program: &mut IrProgram, target: Target) -> CodegenOutput {
     let config = target::configure(target);
 
-    // Layer 2: Run Nanopass pipeline (semantic rewrites — modifies IR)
-    config.pipeline.run(program, target);
+    // Layer 2: Run Nanopass pipeline (semantic rewrites — takes ownership, returns modified)
+    let owned = std::mem::take(program);
+    let transformed = config.pipeline.run(owned, target);
+    *program = transformed;
 
     // Layer 3: Target-specific emit
     match target {

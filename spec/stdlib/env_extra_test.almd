@@ -2,27 +2,27 @@ import env
 import string
 
 test "env.args returns a list" {
-  let args = env.args()
+  let args = env.args();
   // args should be a list (at least the binary name)
   assert(list.len(args) >= 0)
 }
 
 test "env.unix_timestamp returns positive int" {
-  let ts = env.unix_timestamp()
+  let ts = env.unix_timestamp();
   assert(ts > 1700000000)
 }
 
 test "env.millis returns positive int" {
-  let ms = env.millis()
+  let ms = env.millis();
   assert(ms > 0)
 }
 
 test "env.os returns known value" {
-  let os = env.os()
+  let os = env.os();
   assert(string.len(os) > 0)
 }
 
 test "env.temp_dir returns a path" {
-  let dir = env.temp_dir()
+  let dir = env.temp_dir();
   assert(string.len(dir) > 0)
 }

@@ -19,7 +19,6 @@ pub(super) fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) 
     // Collect all lambdas (in tree-walk order)
     let mut lambda_exprs: Vec<(Vec<(VarId, crate::types::Ty)>, IrExpr, Vec<u32>, Option<u32>)> = Vec::new();
     let mut fn_ref_set: HashSet<String> = HashSet::new();
-    let mut fn_ref_names: Vec<String> = Vec::new(); // ordered, deduped
 
     let mut mutable_vars: HashSet<u32> = HashSet::new();
 
@@ -48,7 +47,7 @@ pub(super) fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) 
     }
 
     // Build ordered fn_ref list (sorted for determinism)
-    fn_ref_names = fn_ref_set.into_iter().collect();
+    let mut fn_ref_names: Vec<String> = fn_ref_set.into_iter().collect();
     fn_ref_names.sort();
 
     // Register each lambda as a function
@@ -327,9 +326,9 @@ fn scan_closures_expr(
             // to match emit order (user fn bodies first, then lambda bodies).
         }
         IrExprKind::FnRef { name } => {
-            fn_refs.insert(name.clone());
+            fn_refs.insert(name.to_string());
         }
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             for stmt in stmts {
                 scan_closures_stmt(stmt, scope_vars, mutable_vars, var_table, lambdas, fn_refs);
             }
@@ -514,7 +513,7 @@ pub(super) fn resolve_expr_ty(expr: &IrExpr, var_table: &crate::ir::VarTable, re
             }
             expr.ty.clone()
         }
-        IrExprKind::Block { expr: Some(e), .. } | IrExprKind::DoBlock { expr: Some(e), .. } => {
+        IrExprKind::Block { expr: Some(e), .. } => {
             resolve_expr_ty(e, var_table, record_fields)
         }
         _ => expr.ty.clone(),
@@ -525,7 +524,7 @@ pub(super) fn resolve_expr_ty(expr: &IrExpr, var_table: &crate::ir::VarTable, re
 pub(super) fn collect_var_refs(expr: &IrExpr, vars: &mut HashSet<u32>) {
     match &expr.kind {
         IrExprKind::Var { id } => { vars.insert(id.0); }
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             for stmt in stmts {
                 match &stmt.kind {
                     IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => collect_var_refs(value, vars),

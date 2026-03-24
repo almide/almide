@@ -1,28 +1,29 @@
+
 test "option.map transforms some" {
   assert_eq(option.map(some(2), (x) => x * 10), some(20))
 }
 
 test "option.map passes through none" {
-  let r: Option[Int] = option.map(none, (x: Int) => x * 10)
+  let r: Option[Int] = option.map(none, (x: Int) => x * 10);
   assert_eq(r, none)
 }
 
 test "option.flat_map chains" {
-  let safe_div = (x: Int) => if x != 0 then some(100 / x) else none
-  assert_eq(option.flat_map(some(5), safe_div), some(20))
+  let safe_div = (x: Int) => if x != 0 then some(100 / x) else none;
+  assert_eq(option.flat_map(some(5), safe_div), some(20));
   assert_eq(option.flat_map(some(0), safe_div), none)
 }
 
 test "option.unwrap_or" {
-  assert_eq(option.unwrap_or(some(42), 0), 42)
+  assert_eq(option.unwrap_or(some(42), 0), 42);
   assert_eq(option.unwrap_or(none, 0), 0)
 }
 
 test "option.is_some and is_none" {
-  assert_eq(option.is_some(some(1)), true)
-  assert_eq(option.is_none(some(1)), false)
-  let n: Option[Int] = none
-  assert_eq(option.is_some(n), false)
+  assert_eq(option.is_some(some(1)), true);
+  assert_eq(option.is_none(some(1)), false);
+  let n: Option[Int] = none;
+  assert_eq(option.is_some(n), false);
   assert_eq(option.is_none(n), true)
 }
 
@@ -31,12 +32,12 @@ test "option.to_result some" {
 }
 
 test "option.to_result none" {
-  let n: Option[Int] = none
+  let n: Option[Int] = none;
   assert_eq(option.to_result(n, "missing"), err("missing"))
 }
 
 test "option.filter keeps matching" {
-  assert_eq(option.filter(some(5), (x) => x > 3), some(5))
+  assert_eq(option.filter(some(5), (x) => x > 3), some(5));
   assert_eq(option.filter(some(1), (x) => x > 3), none)
 }
 
@@ -45,6 +46,6 @@ test "option.flatten" {
 }
 
 test "option.zip both some" {
-  let r = option.zip(some(1), some("a"))
+  let r = option.zip(some(1), some("a"));
   assert_eq(option.is_some(r), true)
 }

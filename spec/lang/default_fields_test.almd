@@ -1,83 +1,85 @@
-type Shape =
-  | Circle { radius: Float }
-  | Rect { width: Float, height: Float, color: String = "", filled: Bool = false }
-  | Group { label: String, items: List[Shape] = [] }
+
+type Shape = | Circle { radius: Float } | Rect { width: Float, height: Float, color: String = "", filled: Bool = false } | Group { label: String, items: List[Shape] = [] }
 
 fn describe(s: Shape) -> String = match s {
-  Circle { radius } => "circle r=" + float.to_string(radius)
+  Circle { radius } => "circle r=" + float.to_string(radius),
   Rect { width, height, color, filled } => {
-    let base = "rect " + float.to_string(width) + "x" + float.to_string(height)
-    let base = if color != "" then base + " color=" + color else base
+    let base = "rect " + float.to_string(width) + "x" + float.to_string(height);
+    let base = if color != "" then base + " color=" + color else base;
     if filled then base + " filled" else base
-  }
+  },
   Group { label, items } => {
-    let count = list.len(items)
+    let count = list.len(items);
     label + " (" + int.to_string(count) + " items)"
-  }
+  },
 }
 
 test "default fields - omit all defaults" {
-  let r = Rect { width: 10.0, height: 20.0 }
+  let r = Rect { width: 10.0, height: 20.0 };
   assert_eq(describe(r), "rect 10.0x20.0")
 }
 
 test "default fields - override one default" {
-  let r = Rect { width: 5.0, height: 3.0, color: "red" }
+  let r = Rect { width: 5.0, height: 3.0, color: "red" };
   assert_eq(describe(r), "rect 5.0x3.0 color=red")
 }
 
 test "default fields - override all defaults" {
-  let r = Rect { width: 1.0, height: 1.0, color: "blue", filled: true }
+  let r = Rect { width: 1.0, height: 1.0, color: "blue", filled: true };
   assert_eq(describe(r), "rect 1.0x1.0 color=blue filled")
 }
 
 test "default fields - empty list default" {
-  let g = Group { label: "empty" }
+  let g = Group { label: "empty" };
   assert_eq(describe(g), "empty (0 items)")
 }
 
 test "default fields - list with items" {
-  let g = Group { label: "shapes", items: [Circle { radius: 1.0 }, Circle { radius: 2.0 }] }
+  let g = Group { label: "shapes", items: [
+    Circle { radius: 1.0 },
+    Circle { radius: 2.0 }
+  ] };
   assert_eq(describe(g), "shapes (2 items)")
 }
 
 test "default fields - nested with defaults" {
-  let g = Group { label: "nested", items: [Rect { width: 10.0, height: 20.0 }] }
+  let g = Group { label: "nested", items: [
+    Rect { width: 10.0, height: 20.0 }
+  ] };
   assert_eq(describe(g), "nested (1 items)")
 }
 
 // ── Additional default fields tests ──
-
 test "default fields - circle no defaults" {
-  let c = Circle { radius: 5.0 }
+  let c = Circle { radius: 5.0 };
   assert_eq(describe(c), "circle r=5.0")
 }
 
 test "default fields - override only bool default" {
-  let r = Rect { width: 2.0, height: 3.0, filled: true }
+  let r = Rect { width: 2.0, height: 3.0, filled: true };
   assert_eq(describe(r), "rect 2.0x3.0 filled")
 }
 
 test "default fields - empty group with empty label" {
-  let g = Group { label: "" }
+  let g = Group { label: "" };
   assert_eq(describe(g), " (0 items)")
 }
 
 test "default fields - match on circle" {
-  let s = Circle { radius: 7.0 }
+  let s = Circle { radius: 7.0 };
   let result = match s {
     Circle { radius } => radius,
     _ => 0.0,
-  }
+  };
   assert_eq(result, 7.0)
 }
 
 test "default fields - match on rect with defaults" {
-  let s = Rect { width: 4.0, height: 5.0 }
+  let s = Rect { width: 4.0, height: 5.0 };
   let result = match s {
     Rect { width, height, .. } => width * height,
     _ => 0.0,
-  }
+  };
   assert_eq(result, 20.0)
 }
 
@@ -85,11 +87,11 @@ test "default fields - list of shapes with defaults" {
   let shapes = [
     Circle { radius: 1.0 },
     Rect { width: 2.0, height: 3.0 },
-    Group { label: "g" },
-  ]
-  let descriptions = list.map(shapes, (s) => describe(s))
-  assert_eq(list.len(descriptions), 3)
-  assert_eq(list.get(descriptions, 0), some("circle r=1.0"))
+    Group { label: "g" }
+  ];
+  let descriptions = list.map(shapes, (s) => describe(s));
+  assert_eq(list.len(descriptions), 3);
+  assert_eq(list.get(descriptions, 0), some("circle r=1.0"));
   assert_eq(list.get(descriptions, 2), some("g (0 items)"))
 }
 
@@ -98,24 +100,24 @@ test "default fields - group with many items" {
     Circle { radius: 1.0 },
     Circle { radius: 2.0 },
     Circle { radius: 3.0 },
-    Circle { radius: 4.0 },
-  ]
-  let g = Group { label: "circles", items: items }
+    Circle { radius: 4.0 }
+  ];
+  let g = Group { label: "circles", items: items };
   assert_eq(describe(g), "circles (4 items)")
 }
 
 test "default fields - rect all fields explicit" {
-  let r = Rect { width: 10.0, height: 20.0, color: "green", filled: false }
+  let r = Rect { width: 10.0, height: 20.0, color: "green", filled: false };
   assert_eq(describe(r), "rect 10.0x20.0 color=green")
 }
 
 test "default fields - rect with only color" {
-  let r = Rect { width: 1.0, height: 1.0, color: "yellow" }
+  let r = Rect { width: 1.0, height: 1.0, color: "yellow" };
   assert_eq(describe(r), "rect 1.0x1.0 color=yellow")
 }
 
 test "default fields - equality on shapes" {
-  let a = Circle { radius: 5.0 }
-  let b = Circle { radius: 5.0 }
+  let a = Circle { radius: 5.0 };
+  let b = Circle { radius: 5.0 };
   assert_eq(a == b, true)
 }

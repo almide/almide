@@ -13,7 +13,7 @@
 
 use crate::ir::*;
 use crate::types::{Ty, TypeConstructorId};
-use super::pass::{NanoPass, Target};
+use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
 pub struct MatchLoweringPass;
@@ -25,24 +25,25 @@ impl NanoPass for MatchLoweringPass {
         Some(vec![Target::TypeScript, Target::Python, Target::Go])
     }
 
-    fn run(&self, program: &mut IrProgram, _target: Target) {
+    fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         // Rewrite all functions
         for func in &mut program.functions {
-            func.body = rewrite_expr(func.body.clone(), &mut program.var_table);
+            func.body = rewrite_expr(std::mem::take(&mut func.body), &mut program.var_table);
         }
         // Rewrite top-level lets
         for tl in &mut program.top_lets {
-            tl.value = rewrite_expr(tl.value.clone(), &mut program.var_table);
+            tl.value = rewrite_expr(std::mem::take(&mut tl.value), &mut program.var_table);
         }
         // Rewrite module functions and top_lets (each module has its own var_table)
         for module in &mut program.modules {
             for func in &mut module.functions {
-                func.body = rewrite_expr(func.body.clone(), &mut module.var_table);
+                func.body = rewrite_expr(std::mem::take(&mut func.body), &mut module.var_table);
             }
             for tl in &mut module.top_lets {
-                tl.value = rewrite_expr(tl.value.clone(), &mut module.var_table);
+                tl.value = rewrite_expr(std::mem::take(&mut tl.value), &mut module.var_table);
             }
         }
+        PassResult { program, changed: true }
     }
 }
 
@@ -71,10 +72,7 @@ fn rewrite_expr(expr: IrExpr, vt: &mut VarTable) -> IrExpr {
             stmts: rewrite_stmts(stmts, vt),
             expr: e.map(|e| Box::new(rewrite_expr(*e, vt))),
         },
-        IrExprKind::DoBlock { stmts, expr: e } => IrExprKind::DoBlock {
-            stmts: rewrite_stmts(stmts, vt),
-            expr: e.map(|e| Box::new(rewrite_expr(*e, vt))),
-        },
+
         IrExprKind::BinOp { op, left, right } => IrExprKind::BinOp {
             op,
             left: Box::new(rewrite_expr(*left, vt)),
@@ -521,11 +519,11 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
             for fp in fields {
                 if fp.pattern.is_none() {
                     // Shorthand: field name = var name
-                    let field_var = vt.alloc(fp.name.clone(), Ty::Unknown, Mutability::Let, None);
+                    let field_var = vt.alloc(fp.name.clone().into(), Ty::Unknown, Mutability::Let, None);
                     let val_expr = IrExpr {
                         kind: IrExprKind::Member {
                             object: Box::new(subject.clone()),
-                            field: fp.name.clone(),
+                            field: fp.name.clone().into(),
                         },
                         ty: Ty::Unknown,
                         span: None,
@@ -543,7 +541,7 @@ fn build_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mu
                     let val_expr = IrExpr {
                         kind: IrExprKind::Member {
                             object: Box::new(subject.clone()),
-                            field: fp.name.clone(),
+                            field: fp.name.clone().into(),
                         },
                         ty: Ty::Unknown,
                         span: None,

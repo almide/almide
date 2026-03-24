@@ -27,7 +27,7 @@ pub(super) fn specialize_function(
     substitute_expr_types(&mut body, bindings);
 
     IrFunction {
-        name: format!("{}__{}", orig.name, suffix),
+        name: format!("{}__{}", orig.name, suffix).into(),
         params,
         ret_ty: substitute_ty(&orig.ret_ty, bindings),
         body,
@@ -44,10 +44,10 @@ pub(super) fn specialize_function(
 /// Uses Ty::map_children for uniform recursive traversal.
 pub(super) fn substitute_ty(ty: &Ty, bindings: &HashMap<String, Ty>) -> Ty {
     match ty {
-        Ty::TypeVar(name) => bindings.get(name).cloned().unwrap_or_else(|| ty.clone()),
+        Ty::TypeVar(name) => bindings.get(name.as_str()).cloned().unwrap_or_else(|| ty.clone()),
         // In IR, TypeVar("T") may appear as Named("T", [])
-        Ty::Named(name, args) if args.is_empty() && bindings.contains_key(name) => {
-            bindings[name].clone()
+        Ty::Named(name, args) if args.is_empty() && bindings.contains_key(name.as_str()) => {
+            bindings[name.as_str()].clone()
         }
         Ty::OpenRecord { .. } => {
             // OpenRecord パラメータを具体型に置換（__open_N → 具体型）
@@ -85,7 +85,7 @@ pub(super) fn update_var_table_types(expr: &IrExpr, bindings: &HashMap<String, T
                 update_var_table_types(&arm.body, bindings, vt);
             }
         }
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             for s in stmts { update_stmt_var_types(s, bindings, vt); }
             if let Some(e) = expr { update_var_table_types(e, bindings, vt); }
         }
@@ -182,7 +182,7 @@ pub(super) fn substitute_expr_types(expr: &mut IrExpr, bindings: &HashMap<String
                 substitute_expr_types(&mut arm.body, bindings);
             }
         }
-        IrExprKind::Block { stmts, expr } | IrExprKind::DoBlock { stmts, expr } => {
+        IrExprKind::Block { stmts, expr } => {
             for s in stmts { substitute_stmt_types(s, bindings); }
             if let Some(e) = expr { substitute_expr_types(e, bindings); }
         }
@@ -196,7 +196,7 @@ pub(super) fn substitute_expr_types(expr: &mut IrExpr, bindings: &HashMap<String
                         if let Some(concrete_ty) = bindings.get(tv_name) {
                             if let Some(concrete_name) = ty_to_name(concrete_ty) {
                                 let method_name = &method[dot_pos+1..];
-                                *method = format!("{}.{}", concrete_name, method_name);
+                                *method = format!("{}.{}", concrete_name, method_name).into();
                             }
                         }
                     }
