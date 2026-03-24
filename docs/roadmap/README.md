@@ -6,9 +6,8 @@
 
 | 項目 | 説明 | Grand Plan |
 |---|---|---|
-| [Stdlib Import Control](active/stdlib-import-control.md) | 暗黙/明示 import の3層制御 | Phase 1 |
 | [Effect System](active/effect-system.md) | Phase 3-4 残 | Phase 3 |
-| [HTTPS Native](active/https-native.md) | rustls統合済。almide build対応+WASM残 | Phase 1 |
+| [HTTPS Native](active/https-native.md) | rustls統合済、almide build動作確認済。WASM残 | Phase 1 |
 | [Remove `do` Block](active/remove-do-block.md) | do 廃止 → while + try に統一。Canonicity 回復 | Phase 1 |
 | [Compiler Architecture 10/10](active/compiler-architecture-10.md) | 99/110. Phase 5-7 残 | Architecture |
 | [Cross-Target Parity Matrix](active/cross-target-parity-matrix.md) | Rust/TS/WASM 3ターゲットの挙動差異を体系検証 | Phase 2 |
@@ -220,3 +219,4 @@
 - [Stdlib Additions](done/stdlib-additions.md) — set モジュール 11→20関数 (symmetric_difference, is_subset, is_disjoint, filter, map, fold, each, any, all)
 - [User Generics & Protocol](done/user-generics-and-traits.md) — ユーザー定義 generics, protocol 定義/満足検証, impl ブロック, generic bounds [T: P1 + P2], モノモーフィゼーション
 - [Effect fn Result Wrapping](done/effect-fn-result-wrapping.md) — Rust codegen: effect fn の非Result戻り値をResult化, LICM effect判定をTypeEnv由来に, チェッカーauto-unwrap
+- [Stdlib Import Control](done/stdlib-import-control.md) — 3層制御: Tier 1 暗黙 (string/int/float/list/map/set/option/result), Tier 2 明示 import, Tier 3 組込

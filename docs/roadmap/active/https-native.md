@@ -16,11 +16,9 @@
 - [x] **Phase 1: rustls 統合** — `runtime/rs/src/http.rs` に rustls + webpki-roots を統合。`parse_url` が scheme を認識し、https なら `ClientConnection` + `StreamOwned` で TLS 接続。
 - [x] **CLI 動作確認** — `almide run` 経由で `https://` URL へのリクエストが成功
 
+- [x] **`almide build` での HTTPS 対応** — Effect fn Result wrapping 修正により `effect fn main() -> Unit` + `http.get("https://...")` → `almide build` → 実行成功を確認。rustls は `runtime/rs/Cargo.toml` 経由で自動リンク。
+
 ## Remaining
-
-### `almide build` での HTTPS 対応
-
-`almide build` で生成されるスタンドアロンバイナリに rustls が含まれるか未検証。`cli/build.rs` の cargo build 設定で rustls crate が依存に入る必要がある。
 
 ### WASM ターゲット (将来)
 

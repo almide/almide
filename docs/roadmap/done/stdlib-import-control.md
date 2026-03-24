@@ -1,4 +1,4 @@
-# Stdlib Import Control [ACTIVE]
+# Stdlib Import Control [DONE]
 
 **優先度:** 1.0
 **前提:** なし
@@ -76,8 +76,8 @@ Swift の Foundation / UIKit モデルを参考に、3層の可視性:
 
 | Phase | 内容 | 状態 |
 |---|---|---|
-| Phase 1 | Tier 分類の確定 | 未着手 |
-| Phase 2 | imported_stdlib + Tier 1 暗黙登録 | 未着手 |
-| Phase 3 | resolve_module_call で import ゲート | 未着手 |
-| Phase 4 | 既存テスト全通過確認 | 未着手 |
+| Phase 1 | Tier 分類の確定 (Swift モデル採用) | ✅ 完了 |
+| Phase 2 | imported_stdlib + Tier 1 暗黙登録 | ✅ 完了 |
+| Phase 3 | resolve_module_call + static_dispatch で import ゲート | ✅ 完了 |
+| Phase 4 | 既存テスト全通過 (19ファイルに import 追加) | ✅ 完了 |
 | Phase 5 | エラーメッセージ改善（"did you mean: import math?"） | 未着手 |
