@@ -1,9 +1,8 @@
+
 // effect_fn_test — Effect function patterns
-
 // ── Basic effect fn returning ok/err ──
-
 effect fn safe_div(a: Int, b: Int) -> Result[Int, String] = {
-  guard b != 0 else err("division by zero")
+  guard b != 0 else err("division by zero");
   ok(a / b)
 }
 
@@ -16,15 +15,14 @@ test "effect fn err path" {
 }
 
 // ── Auto-? propagation ──
-
 effect fn parse_num(s: String) -> Result[Int, String] = {
-  let n = int.parse(s)
+  let n = int.parse(s);
   ok(n)
 }
 
 effect fn add_strings(a: String, b: String) -> Result[Int, String] = {
-  let x = parse_num(a)
-  let y = parse_num(b)
+  let x = parse_num(a);
+  let y = parse_num(b);
   ok(x + y)
 }
 
@@ -40,9 +38,8 @@ test "effect fn auto unwrap chain err propagates" {
 }
 
 // ── Guard else err ──
-
 effect fn require_positive(n: Int) -> Result[Int, String] = {
-  guard n > 0 else err("not positive")
+  guard n > 0 else err("not positive");
   ok(n)
 }
 
@@ -55,10 +52,9 @@ test "guard else err fails" {
 }
 
 // ── Multiple guards ──
-
 effect fn validate_age(age: Int) -> Result[Int, String] = {
-  guard age >= 0 else err("negative age")
-  guard age <= 150 else err("unrealistic age")
+  guard age >= 0 else err("negative age");
+  guard age <= 150 else err("unrealistic age");
   ok(age)
 }
 
@@ -75,10 +71,9 @@ test "multiple guards all pass" {
 }
 
 // ── Effect fn calling effect fn (auto unwrap) ──
-
 effect fn double_parsed(s: String) -> Result[Int, String] = {
-  let n = parse_num(s)
-  let valid = require_positive(n)
+  let n = parse_num(s);
+  let valid = require_positive(n);
   ok(valid * 2)
 }
 
@@ -98,13 +93,12 @@ test "effect fn chain validation error" {
 }
 
 // ── Effect fn with loop ──
-
 effect fn sum_strs(strs: List[String]) -> Result[Int, String] = {
-  var total = 0
+  var total = 0;
   for s in strs {
-    let n = parse_num(s)
-    total = total + n
-  }
+    let n = parse_num(s);
+    total = total + n;
+  };
   ok(total)
 }
 
@@ -113,13 +107,11 @@ test "effect fn with for loop ok" {
 }
 
 // ── Effect fn with conditional logic ──
-
 effect fn classify_str(s: String) -> Result[String, String] = {
-  let n = parse_num(s)
-  let pos = require_positive(n)
+  let n = parse_num(s);
+  let pos = require_positive(n);
   let label = if pos > 100 then "big"
-    else if pos > 10 then "medium"
-    else "small"
+  else if pos > 10 then "medium" else "small";
   ok(label)
 }
 

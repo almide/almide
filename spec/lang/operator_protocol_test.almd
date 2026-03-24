@@ -1,32 +1,39 @@
+
 module operator_protocol_test
 
-type Color: Eq, Repr = Red | Green | Blue
+type Color: Eq, Repr = | Red | Green | Blue
 
-fn Color.eq(a: Color, b: Color) -> Bool =
-  match a {
-    Red => match b { Red => true, _ => false }
-    Green => match b { Green => true, _ => false }
-    Blue => match b { Blue => true, _ => false }
-  }
+fn Color.eq(a: Color, b: Color) -> Bool = match a {
+  Red => match b {
+    Red => true,
+    _ => false,
+  },
+  Green => match b {
+    Green => true,
+    _ => false,
+  },
+  Blue => match b {
+    Blue => true,
+    _ => false,
+  },
+}
 
-fn Color.repr(c: Color) -> String =
-  match c {
-    Red => "Red"
-    Green => "Green"
-    Blue => "Blue"
-  }
+fn Color.repr(c: Color) -> String = match c {
+  Red => "Red",
+  Green => "Green",
+  Blue => "Blue",
+}
 
 test "operator protocol: == dispatch" {
   // == dispatches to Color.eq
-  assert(Red == Red)
-  assert(not (Red == Blue))
-
+  assert(Red == Red);
+  assert(not (Red == Blue));
   // != dispatches to not(Color.eq)
   assert(Red != Blue)
 }
 
 test "operator protocol: string interpolation dispatch" {
   // "${c}" dispatches to Color.repr
-  let c = Green
+  let c = Green;
   assert_eq("color: ${c}", "color: Green")
 }

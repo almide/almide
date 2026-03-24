@@ -1,7 +1,6 @@
+
 // function_test — Functions, lambdas, closures, UFCS
-
 // ── Basic functions ──
-
 fn add(a: Int, b: Int) -> Int = a + b
 
 fn greet(name: String) -> String = "hello ${name}"
@@ -11,12 +10,12 @@ fn unit_() -> Unit = ()
 fn constant() -> Int = 42
 
 test "simple function call" {
-  assert_eq(add(1, 2), 3)
+  assert_eq(add(1, 2), 3);
   assert_eq(greet("world"), "hello world")
 }
 
 test "multiple arguments" {
-  assert_eq(add(10, 20), 30)
+  assert_eq(add(10, 20), 30);
   assert_eq(add(-1, 1), 0)
 }
 
@@ -25,346 +24,338 @@ test "no-arg function" {
 }
 
 // ── Recursion ──
+fn factorial(n: Int) -> Int = if n <= 1 then 1 else n * factorial(n - 1)
 
-fn factorial(n: Int) -> Int =
-  if n <= 1 then 1 else n * factorial(n - 1)
-
-fn fib(n: Int) -> Int =
-  if n <= 1 then n else fib(n - 1) + fib(n - 2)
+fn fib(n: Int) -> Int = if n <= 1 then n else fib(n - 1) + fib(n - 2)
 
 test "recursion factorial" {
-  assert_eq(factorial(0), 1)
-  assert_eq(factorial(1), 1)
-  assert_eq(factorial(5), 120)
+  assert_eq(factorial(0), 1);
+  assert_eq(factorial(1), 1);
+  assert_eq(factorial(5), 120);
   assert_eq(factorial(10), 3628800)
 }
 
 test "recursion fibonacci" {
-  assert_eq(fib(0), 0)
-  assert_eq(fib(1), 1)
+  assert_eq(fib(0), 0);
+  assert_eq(fib(1), 1);
   assert_eq(fib(10), 55)
 }
 
 // ── Mutual recursion ──
+fn is_even(n: Int) -> Bool = if n == 0 then true else is_odd(n - 1)
 
-fn is_even(n: Int) -> Bool =
-  if n == 0 then true else is_odd(n - 1)
-
-fn is_odd(n: Int) -> Bool =
-  if n == 0 then false else is_even(n - 1)
+fn is_odd(n: Int) -> Bool = if n == 0 then false else is_even(n - 1)
 
 test "mutual recursion" {
-  assert_eq(is_even(0), true)
-  assert_eq(is_even(4), true)
-  assert_eq(is_even(5), false)
-  assert_eq(is_odd(3), true)
+  assert_eq(is_even(0), true);
+  assert_eq(is_even(4), true);
+  assert_eq(is_even(5), false);
+  assert_eq(is_odd(3), true);
   assert_eq(is_odd(4), false)
 }
 
 // ── Higher-order functions ──
+fn apply(f: fn(Int) -> Int, x: Int) -> Int = f(x)
 
-fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)
-
-fn twice(f: (Int) -> Int, x: Int) -> Int = f(f(x))
+fn twice(f: fn(Int) -> Int, x: Int) -> Int = f(f(x))
 
 test "higher-order function" {
-  let double = (x) => x * 2
-  assert_eq(apply(double, 5), 10)
+  let double = (x) => x * 2;
+  assert_eq(apply(double, 5), 10);
   assert_eq(twice(double, 3), 12)
 }
 
 // ── Function returning function ──
-
-fn adder(n: Int) -> (Int) -> Int = (x) => x + n
+fn adder(n: Int) -> fn(Int) -> Int = (x) => x + n
 
 test "function returning function" {
-  let add5 = adder(5)
-  assert_eq(add5(10), 15)
+  let add5 = adder(5);
+  assert_eq(add5(10), 15);
   assert_eq(add5(0), 5)
 }
 
 // ── Lambda ──
-
 test "lambda expression" {
-  let square = (x) => x * x
-  assert_eq(square(4), 16)
+  let square = (x) => x * x;
+  assert_eq(square(4), 16);
   assert_eq(square(0), 0)
 }
 
 test "lambda with two args" {
-  let mul = (a, b) => a * b
+  let mul = (a, b) => a * b;
   assert_eq(mul(3, 4), 12)
 }
 
 test "lambda with block body" {
   let compute = (x) => {
-    let doubled = x * 2
-    let incremented = doubled + 1
+    let doubled = x * 2;
+    let incremented = doubled + 1;
     incremented
-  }
+  };
   assert_eq(compute(5), 11)
 }
 
 test "lambda in map filter fold" {
-  let xs = [1, 2, 3, 4, 5]
-  let doubled = list.map(xs, (x) => x * 2)
-  assert_eq(doubled, [2, 4, 6, 8, 10])
-
-  let evens = list.filter(xs, (x) => x % 2 == 0)
-  assert_eq(evens, [2, 4])
-
-  let sum = list.fold(xs, 0, (acc, x) => acc + x)
+  let xs = [1, 2, 3, 4, 5];
+  let doubled = list.map(xs, (x) => x * 2);
+  assert_eq(doubled, [2, 4, 6, 8, 10]);
+  let evens = list.filter(xs, (x) => x % 2 == 0);
+  assert_eq(evens, [2, 4]);
+  let sum = list.fold(xs, 0, (acc, x) => acc + x);
   assert_eq(sum, 15)
 }
 
 // ── Closure ──
-
 test "closure captures outer variable" {
-  let base = 100
-  let add_base = (x) => x + base
-  assert_eq(add_base(5), 105)
+  let base = 100;
+  let add_base = (x) => x + base;
+  assert_eq(add_base(5), 105);
   assert_eq(add_base(0), 100)
 }
 
 test "closure captures multiple variables" {
-  let a = 10
-  let b = 20
-  let sum_with = (x) => x + a + b
+  let a = 10;
+  let b = 20;
+  let sum_with = (x) => x + a + b;
   assert_eq(sum_with(5), 35)
 }
 
 // ── UFCS ──
-
 fn double(x: Int) -> Int = x * 2
 
 fn exclaim(s: String) -> String = s + "!"
 
 test "UFCS basic" {
-  assert_eq(3.double(), 6)
+  assert_eq(3.double(), 6);
   assert_eq("hello".exclaim(), "hello!")
 }
 
 test "UFCS chain" {
-  assert_eq(3.double().double(), 12)
+  assert_eq(3.double().double(), 12);
   assert_eq("hi".exclaim().exclaim(), "hi!!")
 }
 
 test "UFCS with stdlib" {
-  let xs = [3, 1, 2]
-  assert_eq(xs.sort(), [1, 2, 3])
+  let xs = [3, 1, 2];
+  assert_eq(xs.sort(), [1, 2, 3]);
   assert_eq("hello".len(), 5)
 }
 
 // ── Additional function tests ──
-
 fn multiply(a: Int, b: Int, c: Int) -> Int = a * b * c
 
 test "three-param function" {
-  assert_eq(multiply(2, 3, 4), 24)
-  assert_eq(multiply(1, 1, 1), 1)
+  assert_eq(multiply(2, 3, 4), 24);
+  assert_eq(multiply(1, 1, 1), 1);
   assert_eq(multiply(0, 100, 200), 0)
 }
 
 test "multi-param lambda" {
-  let f = (a, b, c) => a + b + c
-  assert_eq(f(1, 2, 3), 6)
+  let f = (a, b, c) => a + b + c;
+  assert_eq(f(1, 2, 3), 6);
   assert_eq(f(10, 20, 30), 60)
 }
 
 test "nested function calls" {
-  assert_eq(add(add(1, 2), add(3, 4)), 10)
+  assert_eq(add(add(1, 2), add(3, 4)), 10);
   assert_eq(double(double(double(1))), 8)
 }
 
-fn compose(f: (Int) -> Int, g: (Int) -> Int) -> (Int) -> Int =
-  (x) => f(g(x))
+fn compose(f: fn(Int) -> Int, g: fn(Int) -> Int) -> fn(Int) -> Int = (x) => f(g(x))
 
 test "function composition" {
-  let double_then_inc = compose((x) => x + 1, (x) => x * 2)
-  assert_eq(double_then_inc(5), 11)
-  let inc_then_double = compose((x) => x * 2, (x) => x + 1)
+  let double_then_inc = compose((x) => x + 1, (x) => x * 2);
+  assert_eq(double_then_inc(5), 11);
+  let inc_then_double = compose((x) => x * 2, (x) => x + 1);
   assert_eq(inc_then_double(5), 12)
 }
 
 test "lambda returning lambda" {
-  let make_multiplier = (factor) => (x) => x * factor
-  let triple = make_multiplier(3)
-  assert_eq(triple(4), 12)
+  let make_multiplier = (factor) => (x) => x * factor;
+  let triple = make_multiplier(3);
+  assert_eq(triple(4), 12);
   assert_eq(triple(0), 0)
 }
 
-fn gcd(a: Int, b: Int) -> Int =
-  if b == 0 then a else gcd(b, a % b)
+fn gcd(a: Int, b: Int) -> Int = if b == 0 then a else gcd(b, a % b)
 
 test "recursion gcd" {
-  assert_eq(gcd(12, 8), 4)
-  assert_eq(gcd(100, 25), 25)
-  assert_eq(gcd(7, 3), 1)
+  assert_eq(gcd(12, 8), 4);
+  assert_eq(gcd(100, 25), 25);
+  assert_eq(gcd(7, 3), 1);
   assert_eq(gcd(0, 5), 5)
 }
 
-fn sum_acc(xs: List[Int], acc: Int) -> Int =
-  if list.len(xs) == 0 then acc
-  else {
-    let head = match list.get(xs, 0) {
-      some(v) => v,
-      none => 0,
-    }
-    sum_acc(list.drop(xs, 1), acc + head)
-  }
+fn sum_acc(xs: List[Int], acc: Int) -> Int = if list.len(xs) == 0 then acc
+else {
+  let head = match list.get(xs, 0) {
+    some(v) => v,
+    none => 0,
+  };
+  sum_acc(list.drop(xs, 1), acc + head)
+}
 
 test "recursion with accumulator" {
-  assert_eq(sum_acc([1, 2, 3, 4, 5], 0), 15)
-  assert_eq(sum_acc([], 0), 0)
+  assert_eq(sum_acc([1, 2, 3, 4, 5], 0), 15);
+  assert_eq(sum_acc([], 0), 0);
   assert_eq(sum_acc([10], 5), 15)
 }
 
 fn negate(x: Int) -> Int = -x
 
 test "UFCS chain with user functions" {
-  assert_eq(5.double().negate(), -10)
+  assert_eq(5.double().negate(), -10);
   assert_eq(3.add_one().double(), 8)
 }
 
 fn add_one(x: Int) -> Int = x + 1
 
 test "pipe with lambda" {
-  let result = 10 |> (x) => x + 5
+  let result = 10 |> (x) => x + 5;
   assert_eq(result, 15)
 }
 
 test "closure captures in higher-order" {
-  let offset = 100
-  let xs = [1, 2, 3]
-  let result = list.map(xs, (x) => x + offset)
+  let offset = 100;
+  let xs = [1, 2, 3];
+  let result = list.map(xs, (x) => x + offset);
   assert_eq(result, [101, 102, 103])
 }
 
 fn identity_val[T](x: T) -> T = x
 
 test "generic function with various types" {
-  assert_eq(identity_val(42), 42)
-  assert_eq(identity_val("hello"), "hello")
-  assert_eq(identity_val(true), true)
+  assert_eq(identity_val(42), 42);
+  assert_eq(identity_val("hello"), "hello");
+  assert_eq(identity_val(true), true);
   assert_eq(identity_val([1, 2]), [1, 2])
 }
 
-fn map_option[A, B](opt: Option[A], f: (A) -> B) -> Option[B] =
-  match opt {
-    some(v) => some(f(v)),
-    none => none,
-  }
+fn map_option[A, B](opt: Option[A], f: fn(A) -> B) -> Option[B] = match opt {
+  some(v) => some(f(v)),
+  none => none,
+}
 
 test "generic function with callback" {
-  assert_eq(map_option(some(5), (x) => x * 2), some(10))
+  assert_eq(map_option(some(5), (x) => x * 2), some(10));
   assert_eq(map_option[Int, Int](none, (x) => x * 2), none)
 }
 
 test "lambda as list.fold callback" {
-  let words = ["hello", "world", "foo"]
-  let total_len = list.fold(words, 0, (acc, w) => acc + string.len(w))
+  let words = ["hello", "world", "foo"];
+  let total_len = list.fold(words, 0, (acc, w) => acc + string.len(w));
   assert_eq(total_len, 13)
 }
 
 test "lambda as list.find callback" {
-  let xs = [1, 2, 3, 4, 5]
-  let found = list.find(xs, (x) => x > 3)
-  assert_eq(found, some(4))
-  let not_found = list.find(xs, (x) => x > 10)
+  let xs = [1, 2, 3, 4, 5];
+  let found = list.find(xs, (x) => x > 3);
+  assert_eq(found, some(4));
+  let not_found = list.find(xs, (x) => x > 10);
   assert_eq(not_found, none)
 }
 
 test "lambda as list.any and list.all" {
-  let xs = [2, 4, 6, 8]
-  assert_eq(list.all(xs, (x) => x % 2 == 0), true)
-  assert_eq(list.any(xs, (x) => x > 5), true)
+  let xs = [2, 4, 6, 8];
+  assert_eq(list.all(xs, (x) => x % 2 == 0), true);
+  assert_eq(list.any(xs, (x) => x > 5), true);
   assert_eq(list.any(xs, (x) => x > 10), false)
 }
 
 test "function call in if condition" {
-  let result = if add(1, 2) == 3 then "yes" else "no"
+  let result = if add(1, 2) == 3 then "yes" else "no";
   assert_eq(result, "yes")
 }
 
-fn repeat_(f: (Int) -> Int, n: Int, x: Int) -> Int = {
-  var result = x
+fn repeat_(f: fn(Int) -> Int, n: Int, x: Int) -> Int = {
+  var result = x;
   for _i in 0..n {
-    result = f(result)
-  }
+    result = f(result);
+  };
   result
 }
 
 test "function applied n times" {
-  assert_eq(repeat_((x) => x + 1, 5, 0), 5)
+  assert_eq(repeat_((x) => x + 1, 5, 0), 5);
   assert_eq(repeat_((x) => x * 2, 4, 1), 16)
 }
 
-fn flip(f: (Int, Int) -> Int) -> (Int, Int) -> Int =
-  (a, b) => f(b, a)
+fn flip(f: fn(Int, Int) -> Int) -> fn(Int, Int) -> Int = (a, b) => f(b, a)
 
 test "flip arguments" {
-  let sub = (a, b) => a - b
-  let flipped = flip(sub)
-  assert_eq(sub(10, 3), 7)
+  let sub = (a, b) => a - b;
+  let flipped = flip(sub);
+  assert_eq(sub(10, 3), 7);
   assert_eq(flipped(10, 3), -7)
 }
 
 fn is_positive(x: Int) -> Bool = x > 0
 
 test "function returning bool" {
-  assert_eq(is_positive(5), true)
-  assert_eq(is_positive(-1), false)
+  assert_eq(is_positive(5), true);
+  assert_eq(is_positive(-1), false);
   assert_eq(is_positive(0), false)
 }
 
 fn string_length(s: String) -> Int = string.len(s)
 
 test "function wrapping stdlib" {
-  assert_eq(string_length("hello"), 5)
+  assert_eq(string_length("hello"), 5);
   assert_eq(string_length(""), 0)
 }
 
-fn max3(a: Int, b: Int, c: Int) -> Int =
-  if a >= b and a >= c then a
-  else if b >= c then b
-  else c
+fn max3(a: Int, b: Int, c: Int) -> Int = if a >= b and a >= c then a
+else if b >= c then b else c
 
 test "function with complex logic" {
-  assert_eq(max3(1, 2, 3), 3)
-  assert_eq(max3(3, 2, 1), 3)
-  assert_eq(max3(1, 3, 2), 3)
+  assert_eq(max3(1, 2, 3), 3);
+  assert_eq(max3(3, 2, 1), 3);
+  assert_eq(max3(1, 3, 2), 3);
   assert_eq(max3(5, 5, 5), 5)
 }
 
 test "lambda as sort_by key" {
-  let xs = ["banana", "a", "cherry", "do"]
-  let sorted = list.sort_by(xs, (s) => string.len(s))
+  let xs = ["banana", "a", "cherry", "do"];
+  let sorted = list.sort_by(xs, (s) => string.len(s));
   assert_eq(sorted, ["a", "do", "banana", "cherry"])
 }
 
 test "lambda with list.flat_map" {
-  let xs = [1, 2, 3]
-  let result = list.flat_map(xs, (x) => [x, -x])
-  assert_eq(result, [1, -1, 2, -2, 3, -3])
+  let xs = [1, 2, 3];
+  let result = list.flat_map(xs, (x) => [x, -x]);
+  assert_eq(result, [
+    1,
+    -1,
+    2,
+    -2,
+    3,
+    -3
+  ])
 }
 
 test "lambda with list.filter_map" {
-  let xs = [1, 2, 3, 4, 5]
-  let result = list.filter_map(xs, (x) => if x % 2 == 0 then some(x * 10) else none)
+  let xs = [1, 2, 3, 4, 5];
+  let result = list.filter_map(xs, (x) => if x % 2 == 0 then some(x * 10) else none);
   assert_eq(result, [20, 40])
 }
 
 test "function in list.count" {
-  let xs = [1, 2, 3, 4, 5, 6]
-  assert_eq(list.count(xs, (x) => x > 3), 3)
+  let xs = [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ];
+  assert_eq(list.count(xs, (x) => x > 3), 3);
   assert_eq(list.count(xs, (x) => x % 2 == 0), 3)
 }
 
-fn sum_list(xs: List[Int]) -> Int =
-  list.fold(xs, 0, (acc, x) => acc + x)
+fn sum_list(xs: List[Int]) -> Int = list.fold(xs, 0, (acc, x) => acc + x)
 
 test "function using fold" {
-  assert_eq(sum_list([1, 2, 3, 4, 5]), 15)
-  assert_eq(sum_list([]), 0)
+  assert_eq(sum_list([1, 2, 3, 4, 5]), 15);
+  assert_eq(sum_list([]), 0);
   assert_eq(sum_list([100]), 100)
 }

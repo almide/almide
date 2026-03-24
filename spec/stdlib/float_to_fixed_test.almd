@@ -1,11 +1,12 @@
+
 test "float.to_fixed" {
-  assert_eq(float.to_fixed(3.14159, 2), "3.14")
-  assert_eq(float.to_fixed(1.0, 3), "1.000")
-  assert_eq(float.to_fixed(0.1 + 0.2, 1), "0.3")
+  assert_eq(float.to_fixed(3.14159, 2), "3.14");
+  assert_eq(float.to_fixed(1.0, 3), "1.000");
+  assert_eq(float.to_fixed(0.1 + 0.2, 1), "0.3");
   assert_eq(float.to_fixed(42.0, 0), "42")
 }
 
 test "UFCS to_fixed" {
-  let pi = 3.14159
+  let pi = 3.14159;
   assert_eq(pi.to_fixed(2), "3.14")
 }

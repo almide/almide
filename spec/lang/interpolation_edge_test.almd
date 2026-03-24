@@ -1,42 +1,46 @@
+
 test "escaped dollar-brace is not interpolation" {
-  let x = 42
-  let s = "literal \${x} here"
+  let x = 42;
+  let s = "literal \${x} here";
   assert_eq(s, "literal \${x} here")
 }
 
 test "interpolation with conditional expression" {
-  let x = 1
-  let s = "value: ${if x > 0 then "positive" else "negative"}"
+  let x = 1;
+  let s = "value: ${if x > 0 then "positive" else "negative"}";
   assert_eq(s, "value: positive")
 }
 
 test "interpolation with block expression" {
-  let s = "result: ${int.to_string({ let x = 10; x * 2 })}"
+  let s = "result: ${int.to_string({
+    let x = 10;
+    x * 2
+  })}";
   assert_eq(s, "result: 20")
 }
 
 test "interpolation with lambda in call" {
-  let s = "count: ${int.to_string(list.len([1, 2, 3, 4].filter((x) => x > 2)))}"
+  let s = "count: ${int.to_string(list.len([1, 2, 3, 4].filter((x) => x > 2)))}";
   assert_eq(s, "count: 2")
 }
 
 test "interpolation adjacent to text" {
-  let n = 5
+  let n = 5;
   assert_eq("x${int.to_string(n)}y", "x5y")
 }
 
 test "interpolation only" {
-  let s = "hello"
+  let s = "hello";
   assert_eq("${s}", "hello")
 }
 
 test "multiple escaped dollars" {
-  let s = "\${a} and \${b}"
+  let s = "\${a} and \${b}";
   assert_eq(s, "\${a} and \${b}")
 }
 
 test "interpolation with nested braces" {
-  let xs = [1, 2, 3]
-  let s = "len=${int.to_string(list.len(xs.filter((x) => { x > 1 })))}"
+  let xs = [1, 2, 3];
+  let s = "len=${int.to_string(list.len(xs.filter((x) => { x > 1 })))}";
   assert_eq(s, "len=2")
 }

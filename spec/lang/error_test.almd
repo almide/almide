@@ -1,42 +1,40 @@
+
 // error_test — Error handling (Result, effect fn, auto-?, do block)
-
 // ── ok / err construction ──
-
 test "ok and err values" {
-  let x: Result[Int, String] = ok(42)
-  let y: Result[Int, String] = err("fail")
-  assert_eq(x, ok(42))
+  let x: Result[Int, String] = ok(42);
+  let y: Result[Int, String] = err("fail");
+  assert_eq(x, ok(42));
   assert_eq(y, err("fail"))
 }
 
 test "match on ok" {
-  let x: Result[Int, String] = ok(10)
+  let x: Result[Int, String] = ok(10);
   let result = match x {
     ok(v) => v * 2,
     err(_) => 0,
-  }
+  };
   assert_eq(result, 20)
 }
 
 test "match on err" {
-  let x: Result[Int, String] = err("oops")
+  let x: Result[Int, String] = err("oops");
   let result = match x {
     ok(_) => "",
     err(e) => e,
-  }
+  };
   assert_eq(result, "oops")
 }
 
 // ── effect fn with auto-? ──
-
 effect fn parse_int(s: String) -> Result[Int, String] = {
-  let n = int.parse(s)
+  let n = int.parse(s);
   ok(n)
 }
 
 effect fn add_parsed(a: String, b: String) -> Result[Int, String] = {
-  let x = parse_int(a)
-  let y = parse_int(b)
+  let x = parse_int(a);
+  let y = parse_int(b);
   ok(x + y)
 }
 
@@ -48,7 +46,7 @@ test "effect fn auto unwrap ok" {
 }
 
 test "effect fn propagates err" {
-  let result = parse_int("not_a_number")
+  let result = parse_int("not_a_number");
   match result {
     ok(_) => assert(false, "should be err"),
     err(e) => assert(string.len(e) > 0),
@@ -56,15 +54,13 @@ test "effect fn propagates err" {
 }
 
 // ── effect fn chain ──
-
 effect fn validate_positive(n: Int) -> Result[Int, String] = {
-  if n > 0 then ok(n)
-  else err("must be positive")
+  if n > 0 then ok(n) else err("must be positive")
 }
 
 effect fn double_positive(s: String) -> Result[Int, String] = {
-  let n = parse_int(s)
-  let valid = validate_positive(n)
+  let n = parse_int(s);
+  let valid = validate_positive(n);
   ok(valid * 2)
 }
 
@@ -73,7 +69,7 @@ test "effect fn chain success" {
 }
 
 test "effect fn chain err from first" {
-  let result = double_positive("abc")
+  let result = double_positive("abc");
   match result {
     ok(_) => assert(false, "should be err"),
     err(_) => assert(true),
@@ -88,55 +84,55 @@ test "effect fn chain err from second" {
 }
 
 // ── do block with guard ──
-
 test "do guard loop counts" {
-  var count = 0
+  var count = 0;
   do {
-    guard count < 3 else ok(())
-    count = count + 1
-  }
+    guard count < 3 else ok(());
+    count = count + 1;
+  };
   assert_eq(count, 3)
 }
 
 test "do guard with accumulator" {
-  var total = 0
-  var i = 1
+  var total = 0;
+  var i = 1;
   do {
-    guard i <= 5 else ok(())
-    total = total + i
-    i = i + 1
-  }
+    guard i <= 5 else ok(());
+    total = total + i;
+    i = i + 1;
+  };
   assert_eq(total, 15)
 }
 
 // ── do block guard with non-unit ok value ──
-
 effect fn hamming_distance(a: String, b: String) -> Result[Int, String] = {
-  guard string.len(a) == string.len(b) else err("strands must be same length")
-  let chars_a = string.chars(a)
-  let chars_b = string.chars(b)
-  let len = list.len(chars_a)
-  var count = 0
-  var i = 0
+  guard string.len(a) == string.len(b) else err("strands must be same length");
+  let chars_a = string.chars(a);
+  let chars_b = string.chars(b);
+  let len = list.len(chars_a);
+  var count = 0;
+  var i = 0;
   do {
-    guard i < len else ok(count)
+    guard i < len else ok(count);
     let ca = match list.get(chars_a, i) {
       some(c) => c,
       none => "",
-    }
+    };
     let cb = match list.get(chars_b, i) {
       some(c) => c,
       none => "",
-    }
-    if ca != cb then { count = count + 1 } else { () }
-    i = i + 1
+    };
+    if ca != cb then {
+      count = count + 1;
+    } else { () };
+    i = i + 1;
   }
 }
 
 test "do guard ok with hamming distance" {
-  assert_eq(hamming_distance("GAGCCTACTAACGGGAT", "CATCGTAATGACGGCCT"), ok(7))
-  assert_eq(hamming_distance("", ""), ok(0))
-  assert_eq(hamming_distance("A", "A"), ok(0))
+  assert_eq(hamming_distance("GAGCCTACTAACGGGAT", "CATCGTAATGACGGCCT"), ok(7));
+  assert_eq(hamming_distance("", ""), ok(0));
+  assert_eq(hamming_distance("A", "A"), ok(0));
   assert_eq(hamming_distance("AB", "BA"), ok(2))
 }
 
@@ -145,59 +141,62 @@ test "do guard ok hamming error on different lengths" {
 }
 
 effect fn binary_search(xs: List[Int], target: Int) -> Result[Int, String] = {
-  var lo = 0
-  var hi = list.len(xs) - 1
+  var lo = 0;
+  var hi = list.len(xs) - 1;
   do {
-    guard lo <= hi else err("not found")
-    let mid = (lo + hi) / 2
+    guard lo <= hi else err("not found");
+    let mid = (lo + hi) / 2;
     let v = match list.get(xs, mid) {
       some(x) => x,
       none => 0,
+    };
+    guard v != target else ok(mid);
+    if v < target then {
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
     }
-    guard v != target else ok(mid)
-    if v < target then { lo = mid + 1 } else { hi = mid - 1 }
   }
 }
 
 test "do guard ok with binary search" {
-  assert_eq(binary_search([1, 3, 5, 7, 9], 5), ok(2))
-  assert_eq(binary_search([1, 3, 5, 7, 9], 1), ok(0))
-  assert_eq(binary_search([1, 3, 5, 7, 9], 9), ok(4))
+  assert_eq(binary_search([1, 3, 5, 7, 9], 5), ok(2));
+  assert_eq(binary_search([1, 3, 5, 7, 9], 1), ok(0));
+  assert_eq(binary_search([1, 3, 5, 7, 9], 9), ok(4));
   assert_eq(binary_search([1, 3, 5, 7, 9], 4), err("not found"))
 }
 
 effect fn first_duplicate(xs: List[Int]) -> Result[Int, String] = {
-  var i = 0
+  var i = 0;
   do {
-    guard i < list.len(xs) else err("no duplicates")
+    guard i < list.len(xs) else err("no duplicates");
     let a = match list.get(xs, i) {
       some(x) => x,
       none => 0,
-    }
-    var j = i + 1
+    };
+    var j = i + 1;
     do {
-      guard j < list.len(xs) else ok(())
+      guard j < list.len(xs) else ok(());
       let b = match list.get(xs, j) {
         some(x) => x,
         none => 0,
-      }
-      guard a != b else ok(a)
-      j = j + 1
-    }
-    i = i + 1
+      };
+      guard a != b else ok(a);
+      j = j + 1;
+    };
+    i = i + 1;
   }
 }
 
 test "do guard ok nested do blocks" {
-  assert_eq(first_duplicate([1, 2, 3, 2, 4]), ok(2))
-  assert_eq(first_duplicate([5, 1, 5]), ok(5))
+  assert_eq(first_duplicate([1, 2, 3, 2, 4]), ok(2));
+  assert_eq(first_duplicate([5, 1, 5]), ok(5));
   assert_eq(first_duplicate([1, 2, 3]), err("no duplicates"))
 }
 
 // ── guard else err ──
-
 effect fn require_nonempty(s: String) -> Result[String, String] = {
-  guard string.len(s) > 0 else err("empty string")
+  guard string.len(s) > 0 else err("empty string");
   ok(s)
 }
 
@@ -210,100 +209,101 @@ test "guard else err failure" {
 }
 
 // ── Additional error tests ──
-
 effect fn safe_divide(a: Int, b: Int) -> Result[Int, String] = {
-  guard b != 0 else err("division by zero")
+  guard b != 0 else err("division by zero");
   ok(a / b)
 }
 
 test "guard else err division" {
-  assert_eq(safe_divide(10, 2), ok(5))
+  assert_eq(safe_divide(10, 2), ok(5));
   assert_eq(safe_divide(10, 0), err("division by zero"))
 }
 
 effect fn chain_divide(a: Int, b: Int, c: Int) -> Result[Int, String] = {
-  let x = safe_divide(a, b)
-  let y = safe_divide(x, c)
+  let x = safe_divide(a, b);
+  let y = safe_divide(x, c);
   ok(y)
 }
 
 test "chained effect fn calls" {
-  assert_eq(chain_divide(100, 5, 2), ok(10))
-  assert_eq(chain_divide(100, 0, 2), err("division by zero"))
+  assert_eq(chain_divide(100, 5, 2), ok(10));
+  assert_eq(chain_divide(100, 0, 2), err("division by zero"));
   assert_eq(chain_divide(100, 5, 0), err("division by zero"))
 }
 
 effect fn validate_range(n: Int, lo: Int, hi: Int) -> Result[Int, String] = {
-  guard n >= lo else err("too low")
-  guard n <= hi else err("too high")
+  guard n >= lo else err("too low");
+  guard n <= hi else err("too high");
   ok(n)
 }
 
 test "multiple guards in sequence" {
-  assert_eq(validate_range(5, 1, 10), ok(5))
-  assert_eq(validate_range(0, 1, 10), err("too low"))
+  assert_eq(validate_range(5, 1, 10), ok(5));
+  assert_eq(validate_range(0, 1, 10), err("too low"));
   assert_eq(validate_range(11, 1, 10), err("too high"))
 }
 
 effect fn parse_and_validate(s: String) -> Result[Int, String] = {
-  let n = parse_int(s)
-  let valid = validate_positive(n)
-  let ranged = validate_range(valid, 1, 100)
+  let n = parse_int(s);
+  let valid = validate_positive(n);
+  let ranged = validate_range(valid, 1, 100);
   ok(ranged)
 }
 
 test "nested effect fn chain" {
-  assert_eq(parse_and_validate("50"), ok(50))
-  assert_eq(parse_and_validate("-5"), err("must be positive"))
+  assert_eq(parse_and_validate("50"), ok(50));
+  assert_eq(parse_and_validate("-5"), err("must be positive"));
   assert_eq(parse_and_validate("200"), err("too high"))
 }
 
 test "match on result in let" {
-  let r: Result[Int, String] = ok(42)
+  let r: Result[Int, String] = ok(42);
   let value = match r {
     ok(v) => v,
     err(_) => 0,
-  }
+  };
   assert_eq(value, 42)
 }
 
 test "result equality" {
-  let a: Result[Int, String] = ok(1)
-  let b: Result[Int, String] = ok(1)
-  let c: Result[Int, String] = ok(2)
-  assert_eq(a == b, true)
+  let a: Result[Int, String] = ok(1);
+  let b: Result[Int, String] = ok(1);
+  let c: Result[Int, String] = ok(2);
+  assert_eq(a == b, true);
   assert_eq(a != c, true)
 }
 
 effect fn validate_string(s: String) -> Result[String, String] = {
-  let nonempty = require_nonempty(s)
-  guard string.len(nonempty) <= 10 else err("too long")
+  let nonempty = require_nonempty(s);
+  guard string.len(nonempty) <= 10 else err("too long");
   ok(nonempty)
 }
 
 test "effect fn calling other effect fn" {
-  assert_eq(validate_string("hello"), ok("hello"))
-  assert_eq(validate_string(""), err("empty string"))
+  assert_eq(validate_string("hello"), ok("hello"));
+  assert_eq(validate_string(""), err("empty string"));
   assert_eq(validate_string("this is a very long string"), err("too long"))
 }
 
 test "do guard with var and result" {
-  var sum = 0
-  var i = 1
+  var sum = 0;
+  var i = 1;
   do {
-    guard i <= 10 else ok(())
-    if i % 2 == 0 then { sum = sum + i } else { () }
-    i = i + 1
-  }
+    guard i <= 10 else ok(());
+    if i % 2 == 0 then {
+      sum = sum + i;
+    } else { () };
+    i = i + 1;
+  };
   assert_eq(sum, 30)
 }
 
 effect fn try_parse_list(strs: List[String]) -> Result[List[Int], String] = {
-  var result: List[Int] = []
+  var result: List[Int] = [];
   for s in strs {
-    let n = parse_int(s)
-    result = result + [n]
-  }
+    let n = parse_int(s);
+    result = result + [n];
+  };
   ok(result)
 }
 
@@ -312,48 +312,47 @@ test "effect fn with loop" {
 }
 
 test "guard with complex boolean condition" {
-  var count = 0
-  var x = 1
+  var count = 0;
+  var x = 1;
   do {
-    guard x < 100 and count < 10 else break
-    x = x * 2
-    count = count + 1
-  }
-  assert_eq(x, 128)
+    guard x < 100 and count < 10 else break;
+    x = x * 2;
+    count = count + 1;
+  };
+  assert_eq(x, 128);
   assert_eq(count, 7)
 }
 
 effect fn classify(n: Int) -> Result[String, String] = {
-  let valid = validate_positive(n)
+  let valid = validate_positive(n);
   let result = if valid > 100 then "big"
-    else if valid > 10 then "medium"
-    else "small"
+  else if valid > 10 then "medium" else "small";
   ok(result)
 }
 
 test "effect fn with conditional return" {
-  assert_eq(classify(5), ok("small"))
-  assert_eq(classify(50), ok("medium"))
-  assert_eq(classify(200), ok("big"))
+  assert_eq(classify(5), ok("small"));
+  assert_eq(classify(50), ok("medium"));
+  assert_eq(classify(200), ok("big"));
   assert_eq(classify(-1), err("must be positive"))
 }
 
 effect fn require_length(s: String, min: Int) -> Result[String, String] = {
-  guard string.len(s) >= min else err("too short: min ${int.to_string(min)}")
+  guard string.len(s) >= min else err("too short: min ${int.to_string(min)}");
   ok(s)
 }
 
 test "guard with interpolated error message" {
-  assert_eq(require_length("hi", 2), ok("hi"))
+  assert_eq(require_length("hi", 2), ok("hi"));
   assert_eq(require_length("hi", 5), err("too short: min 5"))
 }
 
 effect fn sum_parsed(strs: List[String]) -> Result[Int, String] = {
-  var total = 0
+  var total = 0;
   for s in strs {
-    let n = parse_int(s)
-    total = total + n
-  }
+    let n = parse_int(s);
+    total = total + n;
+  };
   ok(total)
 }
 
@@ -362,14 +361,14 @@ test "effect fn with loop accumulation" {
 }
 
 test "result match in for loop" {
-  var results: List[String] = []
-  let items: List[Result[Int, String]] = [ok(1), err("bad"), ok(3)]
+  var results: List[String] = [];
+  let items: List[Result[Int, String]] = [ok(1), err("bad"), ok(3)];
   for item in items {
     let label = match item {
       ok(v) => "ok:" + int.to_string(v),
       err(e) => "err:" + e,
-    }
-    results = results + [label]
-  }
+    };
+    results = results + [label];
+  };
   assert_eq(results, ["ok:1", "err:bad", "ok:3"])
 }

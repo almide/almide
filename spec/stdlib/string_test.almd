@@ -1,7 +1,6 @@
+
 // Comprehensive string module tests
-
 // ── trim ──
-
 test "string.trim whitespace only" {
   assert_eq(string.trim("   "), "")
 }
@@ -19,7 +18,6 @@ test "string.trim mixed" {
 }
 
 // ── split ──
-
 test "string.split single char" {
   assert_eq(string.split("a-b-c", "-"), ["a", "b", "c"])
 }
@@ -37,7 +35,6 @@ test "string.split empty parts" {
 }
 
 // ── join ──
-
 test "string.join single element" {
   assert_eq(string.join(["hello"], ", "), "hello")
 }
@@ -47,7 +44,6 @@ test "string.join multi char separator" {
 }
 
 // ── len ──
-
 test "string.len unicode" {
   assert_eq(string.len("abc"), 3)
 }
@@ -57,7 +53,6 @@ test "string.len spaces" {
 }
 
 // ── contains ──
-
 test "string.contains substring at start" {
   assert(string.contains("hello world", "hello"))
 }
@@ -75,7 +70,6 @@ test "string.contains self" {
 }
 
 // ── starts_with / ends_with ──
-
 test "string.starts_with empty prefix" {
   assert(string.starts_with("hello", ""))
 }
@@ -101,7 +95,6 @@ test "string.ends_with false" {
 }
 
 // ── slice ──
-
 test "string.slice with start and end" {
   assert_eq(string.slice("hello world", 0, 5), "hello")
 }
@@ -119,7 +112,6 @@ test "string.slice empty result" {
 }
 
 // ── pad_left / pad_right ──
-
 test "string.pad_start shorter string" {
   assert_eq(string.pad_start("42", 5, "0"), "00042")
 }
@@ -137,7 +129,6 @@ test "string.pad_end exact length" {
 }
 
 // ── to_upper / to_lower ──
-
 test "string.to_upper mixed case" {
   assert_eq(string.to_upper("Hello World"), "HELLO WORLD")
 }
@@ -159,7 +150,6 @@ test "string.to_upper empty" {
 }
 
 // ── replace ──
-
 test "string.replace multiple occurrences" {
   assert_eq(string.replace("aaa", "a", "bb"), "bbbbbb")
 }
@@ -173,7 +163,6 @@ test "string.replace with empty" {
 }
 
 // ── char_at ──
-
 test "string.get middle" {
   assert_eq(string.get("hello", 2), some("l"))
 }
@@ -187,11 +176,10 @@ test "string.get negative index" {
 }
 
 // ── lines ──
-
 test "string.lines multiline" {
-  let ls = string.lines("line1\nline2\nline3")
-  assert_eq(list.len(ls), 3)
-  assert_eq(list.get_or(ls, 0, ""), "line1")
+  let ls = string.lines("line1\nline2\nline3");
+  assert_eq(list.len(ls), 3);
+  assert_eq(list.get_or(ls, 0, ""), "line1");
   assert_eq(list.get_or(ls, 2, ""), "line3")
 }
 
@@ -200,7 +188,6 @@ test "string.lines single line" {
 }
 
 // ── chars ──
-
 test "string.chars multiple" {
   assert_eq(string.chars("hello"), ["h", "e", "l", "l", "o"])
 }
@@ -210,7 +197,6 @@ test "string.chars single char" {
 }
 
 // ── index_of ──
-
 test "string.index_of middle" {
   assert_eq(string.index_of("hello world", "o"), some(4))
 }
@@ -220,7 +206,6 @@ test "string.index_of returns first occurrence" {
 }
 
 // ── repeat ──
-
 test "string.repeat multiple" {
   assert_eq(string.repeat("ha", 3), "hahaha")
 }
@@ -230,13 +215,11 @@ test "string.repeat empty string" {
 }
 
 // ── from_bytes ──
-
 test "string.from_bytes single byte" {
   assert_eq(string.from_bytes([72]), "H")
 }
 
 // ── is_digit ──
-
 test "string.is_digit all digits" {
   assert(string.is_digit("12345"))
 }
@@ -246,7 +229,6 @@ test "string.is_digit mixed" {
 }
 
 // ── is_alpha ──
-
 test "string.is_alpha lower" {
   assert(string.is_alpha("abc"))
 }
@@ -260,7 +242,6 @@ test "string.is_alpha with space" {
 }
 
 // ── is_alphanumeric ──
-
 test "string.is_alphanumeric mixed" {
   assert(string.is_alphanumeric("abc123"))
 }
@@ -270,7 +251,6 @@ test "string.is_alphanumeric with underscore" {
 }
 
 // ── is_whitespace ──
-
 test "string.is_whitespace newline" {
   assert(string.is_whitespace("\n"))
 }
@@ -280,7 +260,6 @@ test "string.is_whitespace mixed ws" {
 }
 
 // ── trim_start / trim_end ──
-
 test "string.trim_start only leading" {
   assert_eq(string.trim_start("   hello"), "hello")
 }
@@ -298,7 +277,6 @@ test "string.trim_end no whitespace" {
 }
 
 // ── count ──
-
 test "string.count multiple matches" {
   assert_eq(string.count("banana", "a"), 3)
 }
@@ -309,18 +287,16 @@ test "string.count no matches" {
 
 test "string.count empty substring" {
   // empty substring: count is len+1
-  let c = string.count("abc", "")
+  let c = string.count("abc", "");
   assert(c >= 0)
 }
 
 // ── is_empty ──
-
 test "string.is_empty on whitespace" {
   assert(not string.is_empty(" "))
 }
 
 // ── reverse ──
-
 test "string.reverse palindrome" {
   assert_eq(string.reverse("racecar"), "racecar")
 }
@@ -330,7 +306,6 @@ test "string.reverse single char" {
 }
 
 // ── strip_prefix / strip_suffix ──
-
 test "string.strip_prefix empty prefix" {
   assert_eq(string.strip_prefix("hello", ""), some("hello"))
 }
@@ -348,7 +323,6 @@ test "string.strip_suffix full match" {
 }
 
 // ── replace_first ──
-
 test "string.replace_first basic" {
   assert_eq(string.replace_first("aaa", "a", "b"), "baa")
 }
@@ -358,7 +332,6 @@ test "string.replace_first no match" {
 }
 
 // ── last_index_of ──
-
 test "string.last_index_of basic" {
   assert_eq(string.last_index_of("hello", "l"), some(3))
 }
@@ -372,7 +345,6 @@ test "string.last_index_of at start" {
 }
 
 // ── UFCS ──
-
 test "string UFCS trim" {
   assert_eq("  hi  ".trim(), "hi")
 }
@@ -410,6 +382,6 @@ test "string UFCS repeat" {
 }
 
 test "string.is_empty via module" {
-  assert(string.is_empty(""))
+  assert(string.is_empty(""));
   assert(not string.is_empty("x"))
 }

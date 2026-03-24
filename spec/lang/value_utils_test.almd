@@ -1,52 +1,54 @@
-module value_utils
 import value
-// wasm:enabled
 import json
+
+// wasm:enabled
+module value_utils
+
 type Person: Codec = { name: String, age: Int, email: String }
 
 test "value.pick" {
-  let p = Person { name: "Alice", age: 30, email: "alice@example.com" }
-  let v = p.encode()
-  let picked = value.pick(v, ["name", "age"])
-  let text = json.stringify(picked)
-  println(text)
-  assert(string.contains(text, "name"))
-  assert(string.contains(text, "age"))
+  let p = Person { name: "Alice", age: 30, email: "alice@example.com" };
+  let v = p.encode();
+  let picked = value.pick(v, ["name", "age"]);
+  let text = json.stringify(picked);
+  println(text);
+  assert(string.contains(text, "name"));
+  assert(string.contains(text, "age"));
   assert(not string.contains(text, "email"))
 }
 
 test "value.omit" {
-  let p = Person { name: "Alice", age: 30, email: "alice@example.com" }
-  let v = p.encode()
-  let omitted = value.omit(v, ["email"])
-  let text = json.stringify(omitted)
-  assert(not string.contains(text, "email"))
+  let p = Person { name: "Alice", age: 30, email: "alice@example.com" };
+  let v = p.encode();
+  let omitted = value.omit(v, ["email"]);
+  let text = json.stringify(omitted);
+  assert(not string.contains(text, "email"));
   assert(string.contains(text, "name"))
 }
 
 test "value.merge" {
-  let a = value.object([("x", value.int(1))])
-  let b = value.object([("y", value.int(2))])
-  let merged = value.merge(a, b)
-  let text = json.stringify(merged)
-  assert(string.contains(text, "x"))
+  let a = value.object([("x", value.int(1))]);
+  let b = value.object([("y", value.int(2))]);
+  let merged = value.merge(a, b);
+  let text = json.stringify(merged);
+  assert(string.contains(text, "x"));
   assert(string.contains(text, "y"))
 }
 
 test "value.to_camel_case" {
-  let v = value.object([("user_name", value.str("Alice")), ("created_at", value.str("2024"))])
-  let camel = value.to_camel_case(v)
-  let text = json.stringify(camel)
-  println(text)
-  assert(string.contains(text, "userName"))
+  let v = value.object([("user_name", value.str("Alice")), ("created_at", value.str("2024"))]);
+  let camel = value.to_camel_case(v);
+  let text = json.stringify(camel);
+  println(text);
+  assert(string.contains(text, "userName"));
   assert(string.contains(text, "createdAt"))
 }
 
 test "value.to_snake_case" {
-  let v = value.object([("userName", value.str("Alice")), ("createdAt", value.str("2024"))])
-  let snake = value.to_snake_case(v)
-  let text = json.stringify(snake)
-  println(text)
-  assert(string.contains(text, "user_name"))
+  let v = value.object([("userName", value.str("Alice")), ("createdAt", value.str("2024"))]);
+  let snake = value.to_snake_case(v);
+  let text = json.stringify(snake);
+  println(text);
+  assert(string.contains(text, "user_name"));
   assert(string.contains(text, "created_at"))
 }

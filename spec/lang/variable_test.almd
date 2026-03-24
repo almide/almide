@@ -1,265 +1,260 @@
+
 // variable_test — Variables and bindings
-
 // ── let (immutable) ──
-
 test "let binding" {
-  let x = 42
+  let x = 42;
   assert_eq(x, 42)
 }
 
 test "let with type annotation" {
-  let x: Int = 10
-  let s: String = "hello"
-  let b: Bool = true
-  assert_eq(x, 10)
-  assert_eq(s, "hello")
+  let x: Int = 10;
+  let s: String = "hello";
+  let b: Bool = true;
+  assert_eq(x, 10);
+  assert_eq(s, "hello");
   assert_eq(b, true)
 }
 
 test "let with complex type annotation" {
-  let xs: List[Int] = [1, 2, 3]
-  let m: Map[String, Int] = [:]
-  assert_eq(list.len(xs), 3)
+  let xs: List[Int] = [1, 2, 3];
+  let m: Map[String, Int] = [:];
+  assert_eq(list.len(xs), 3);
   assert_eq(map.len(m), 0)
 }
 
 // ── var (mutable) ──
-
 test "var and reassignment" {
-  var x = 0
-  assert_eq(x, 0)
-  x = 10
-  assert_eq(x, 10)
-  x = x + 5
+  var x = 0;
+  assert_eq(x, 0);
+  x = 10;
+  assert_eq(x, 10);
+  x = x + 5;
   assert_eq(x, 15)
 }
 
 test "var string reassignment" {
-  var s = "hello"
-  s = s + " world"
+  var s = "hello";
+  s = s + " world";
   assert_eq(s, "hello world")
 }
 
 // ── index assign ──
-
 test "list index assign" {
-  var xs = [10, 20, 30]
-  xs[1] = 99
-  assert_eq(list.get(xs, 1), some(99))
-  assert_eq(list.get(xs, 0), some(10))
+  var xs = [10, 20, 30];
+  xs[1] = 99;
+  assert_eq(list.get(xs, 1), some(99));
+  assert_eq(list.get(xs, 0), some(10));
   assert_eq(list.get(xs, 2), some(30))
 }
 
 test "list index assign with expression" {
-  var xs = [1, 2, 3, 4]
-  let i = 2
-  xs[i] = 100
+  var xs = [1, 2, 3, 4];
+  let i = 2;
+  xs[i] = 100;
   assert_eq(list.get(xs, 2), some(100))
 }
 
 // ── field assign ──
-
 test "record field assign" {
-  var user = { name: "alice", age: 30 }
-  user.age = 31
-  assert_eq(user.age, 31)
+  var user = { name: "alice", age: 30 };
+  user.age = 31;
+  assert_eq(user.age, 31);
   assert_eq(user.name, "alice")
 }
 
 test "record field assign string" {
-  var config = { host: "localhost", port: 8080 }
-  config.host = "0.0.0.0"
-  assert_eq(config.host, "0.0.0.0")
+  var config = { host: "localhost", port: 8080 };
+  config.host = "0.0.0.0";
+  assert_eq(config.host, "0.0.0.0");
   assert_eq(config.port, 8080)
 }
 
 // ── var in for loop ──
-
 test "var accumulation in for" {
-  var sum = 0
+  var sum = 0;
   for x in [1, 2, 3, 4, 5] {
-    sum = sum + x
-  }
+    sum = sum + x;
+  };
   assert_eq(sum, 15)
 }
 
 test "var list accumulation in for" {
-  var result: List[Int] = []
+  var result: List[Int] = [];
   for x in [1, 2, 3] {
-    result = result + [x * x]
-  }
+    result = result + [x * x];
+  };
   assert_eq(result, [1, 4, 9])
 }
 
 // ── let shadowing ──
-
 test "let shadowing same name" {
-  let x = 1
-  assert_eq(x, 1)
-  let x = 2
-  assert_eq(x, 2)
-  let x = "now a string"
+  let x = 1;
+  assert_eq(x, 1);
+  let x = 2;
+  assert_eq(x, 2);
+  let x = "now a string";
   assert_eq(x, "now a string")
 }
 
 test "let shadowing in block" {
-  let x = 10
+  let x = 10;
   let y = {
-    let x = 20
+    let x = 20;
     x + 1
-  }
-  assert_eq(x, 10)
+  };
+  assert_eq(x, 10);
   assert_eq(y, 21)
 }
 
 // ── Additional variable tests ──
-
 test "var in do guard loop" {
-  var x = 1
+  var x = 1;
   do {
-    guard x < 100 else break
-    x = x * 2
-  }
+    guard x < 100 else break;
+    x = x * 2;
+  };
   assert_eq(x, 128)
 }
 
 test "multiple vars" {
-  var a = 0
-  var b = 0
-  var c = 0
+  var a = 0;
+  var b = 0;
+  var c = 0;
   for i in 1..=10 {
-    a = a + 1
-    b = b + i
-    c = c + i * i
-  }
-  assert_eq(a, 10)
-  assert_eq(b, 55)
+    a = a + 1;
+    b = b + i;
+    c = c + i * i;
+  };
+  assert_eq(a, 10);
+  assert_eq(b, 55);
   assert_eq(c, 385)
 }
 
 test "let with record value" {
-  let user = { name: "alice", age: 30, active: true }
-  assert_eq(user.name, "alice")
-  assert_eq(user.age, 30)
+  let user = { name: "alice", age: 30, active: true };
+  assert_eq(user.name, "alice");
+  assert_eq(user.age, 30);
   assert_eq(user.active, true)
 }
 
 test "let record destructure" {
-  let point = { x: 10, y: 20 }
-  let { x, y } = point
-  assert_eq(x, 10)
+  let point = { x: 10, y: 20 };
+  let { x, y } = point;
+  assert_eq(x, 10);
   assert_eq(y, 20)
 }
 
 test "var list build in for" {
-  var xs: List[String] = []
+  var xs: List[String] = [];
   for i in 0..5 {
-    xs = xs + [int.to_string(i)]
-  }
+    xs = xs + [int.to_string(i)];
+  };
   assert_eq(xs, ["0", "1", "2", "3", "4"])
 }
 
 test "nested field assign" {
-  var data = { inner: { value: 0 } }
-  data.inner = { value: 42 }
+  var data = { inner: { value: 0 } };
+  data.inner = { value: 42 };
   assert_eq(data.inner.value, 42)
 }
 
 test "var boolean toggle" {
-  var flag = false
-  flag = not flag
-  assert_eq(flag, true)
-  flag = not flag
+  var flag = false;
+  flag = not flag;
+  assert_eq(flag, true);
+  flag = not flag;
   assert_eq(flag, false)
 }
 
 test "let in for loop body" {
-  var sum = 0
+  var sum = 0;
   for x in [10, 20, 30] {
-    let doubled = x * 2
-    sum = sum + doubled
-  }
+    let doubled = x * 2;
+    sum = sum + doubled;
+  };
   assert_eq(sum, 120)
 }
 
 test "var swap pattern" {
-  var a = 1
-  var b = 2
-  let temp = a
-  a = b
-  b = temp
-  assert_eq(a, 2)
+  var a = 1;
+  var b = 2;
+  let temp = a;
+  a = b;
+  b = temp;
+  assert_eq(a, 2);
   assert_eq(b, 1)
 }
 
 test "var string building" {
-  var result = ""
+  var result = "";
   for i in 1..=5 {
-    if i > 1 then { result = result + ", " } else { () }
-    result = result + int.to_string(i)
-  }
+    if i > 1 then {
+      result = result + ", ";
+    } else { () };
+    result = result + int.to_string(i);
+  };
   assert_eq(result, "1, 2, 3, 4, 5")
 }
 
 test "var index assign multiple" {
-  var xs = [0, 0, 0, 0, 0]
+  var xs = [0, 0, 0, 0, 0];
   for i in 0..5 {
-    xs[i] = i * 10
-  }
+    xs[i] = i * 10;
+  };
   assert_eq(xs, [0, 10, 20, 30, 40])
 }
 
 test "let with option value" {
-  let x: Option[Int] = some(42)
-  let y: Option[Int] = none
-  assert_eq(x, some(42))
+  let x: Option[Int] = some(42);
+  let y: Option[Int] = none;
+  assert_eq(x, some(42));
   assert_eq(y, none)
 }
 
 test "let with list type" {
-  let nums: List[Int] = [1, 2, 3]
-  let strs: List[String] = ["a", "b"]
-  assert_eq(list.len(nums), 3)
+  let nums: List[Int] = [1, 2, 3];
+  let strs: List[String] = ["a", "b"];
+  assert_eq(list.len(nums), 3);
   assert_eq(list.len(strs), 2)
 }
 
 test "var counter decrement" {
-  var n = 10
+  var n = 10;
   do {
-    guard n > 0 else break
-    n = n - 1
-  }
+    guard n > 0 else break;
+    n = n - 1;
+  };
   assert_eq(n, 0)
 }
 
 test "let shadowing with computation" {
-  let x = 10
-  let x = x * x
-  let x = x + 1
+  let x = 10;
+  let x = x * x;
+  let x = x + 1;
   assert_eq(x, 101)
 }
 
 test "var with map" {
-  var m: Map[String, Int] = [:]
-  m = map.set(m, "a", 1)
-  m = map.set(m, "b", 2)
-  assert_eq(map.len(m), 2)
+  var m: Map[String, Int] = [:];
+  m = map.set(m, "a", 1);
+  m = map.set(m, "b", 2);
+  assert_eq(map.len(m), 2);
   assert_eq(map.get(m, "a"), some(1))
 }
 
 test "let with float" {
-  let x: Float = 3.14
-  assert_eq(x > 3.0, true)
+  let x: Float = 3.14;
+  assert_eq(x > 3.0, true);
   assert_eq(x < 4.0, true)
 }
 
 test "var accumulate string in do" {
-  var result = ""
-  var i = 0
+  var result = "";
+  var i = 0;
   do {
-    guard i < 3 else break
-    result = result + int.to_string(i)
-    i = i + 1
-  }
+    guard i < 3 else break;
+    result = result + int.to_string(i);
+    i = i + 1;
+  };
   assert_eq(result, "012")
 }

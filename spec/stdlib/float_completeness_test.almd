@@ -1,5 +1,5 @@
-// float completeness tests — functions not covered elsewhere
 
+// float completeness tests — functions not covered elsewhere
 test "float.round up" {
   assert_eq(float.round(3.6), 4.0)
 }

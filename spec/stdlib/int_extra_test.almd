@@ -1,5 +1,5 @@
-// int extra tests — deeper coverage of int module
 
+// int extra tests — deeper coverage of int module
 test "int.parse valid positive" {
   assert_eq(int.parse("42"), ok(42))
 }
@@ -9,11 +9,11 @@ test "int.parse valid negative" {
 }
 
 test "int.parse invalid string" {
-  let r = int.parse("abc")
+  let r = int.parse("abc");
   let is_err = match r {
-    ok(_) => false
-    err(_) => true
-  }
+    ok(_) => false,
+    err(_) => true,
+  };
   assert(is_err)
 }
 
@@ -22,24 +22,24 @@ test "int.abs large negative" {
 }
 
 test "int.min picks smaller" {
-  assert_eq(int.min(3, 7), 3)
+  assert_eq(int.min(3, 7), 3);
   assert_eq(int.min(7, 3), 3)
 }
 
 test "int.max picks larger" {
-  assert_eq(int.max(3, 7), 7)
+  assert_eq(int.max(3, 7), 7);
   assert_eq(int.max(7, 3), 7)
 }
 
 test "int.clamp squeezes into range" {
-  assert_eq(int.clamp(-100, 0, 50), 0)
-  assert_eq(int.clamp(200, 0, 50), 50)
+  assert_eq(int.clamp(-100, 0, 50), 0);
+  assert_eq(int.clamp(200, 0, 50), 50);
   assert_eq(int.clamp(25, 0, 50), 25)
 }
 
 test "int.to_hex roundtrip" {
-  let hex = int.to_hex(255)
-  assert_eq(hex, "ff")
+  let hex = int.to_hex(255);
+  assert_eq(hex, "ff");
   assert_eq(int.from_hex(hex), ok(255))
 }
 
@@ -48,6 +48,6 @@ test "int.from_hex mixed case" {
 }
 
 test "int.to_string roundtrip with parse" {
-  let s = int.to_string(12345)
+  let s = int.to_string(12345);
   assert_eq(int.parse(s), ok(12345))
 }

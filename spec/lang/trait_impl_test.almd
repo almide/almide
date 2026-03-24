@@ -1,70 +1,71 @@
 import math
+
 // trait_impl_test — Convention methods and protocols
-
 // ── Convention methods (fn Type.method) ──
-
 type Color = | Red | Green | Blue
 
-fn Color.name(c: Color) -> String =
-  match c { Red => "red" Green => "green" Blue => "blue" }
+fn Color.name(c: Color) -> String = match c {
+  Red => "red",
+  Green => "green",
+  Blue => "blue",
+}
 
-fn Color.is_warm(c: Color) -> Bool =
-  match c { Red => true Green => false Blue => false }
+fn Color.is_warm(c: Color) -> Bool = match c {
+  Red => true,
+  Green => false,
+  Blue => false,
+}
 
 test "convention method via Type.method" {
-  assert_eq(Color.name(Red), "red")
+  assert_eq(Color.name(Red), "red");
   assert_eq(Color.name(Blue), "blue")
 }
 
 test "convention method via UFCS" {
-  let c = Green
-  assert_eq(c.name(), "green")
+  let c = Green;
+  assert_eq(c.name(), "green");
   assert_eq(c.is_warm(), false)
 }
 
 test "convention method on all variant cases" {
-  assert_eq(Red.is_warm(), true)
-  assert_eq(Green.is_warm(), false)
+  assert_eq(Red.is_warm(), true);
+  assert_eq(Green.is_warm(), false);
   assert_eq(Blue.is_warm(), false)
 }
 
 // ── Convention methods on record types ──
-
 type Point = { x: Int, y: Int }
 
-fn Point.manhattan(p: Point) -> Int =
-  math.abs(p.x) + math.abs(p.y)
+fn Point.manhattan(p: Point) -> Int = math.abs(p.x) + math.abs(p.y)
 
-fn Point.scale(p: Point, factor: Int) -> Point =
-  Point { x: p.x * factor, y: p.y * factor }
+fn Point.scale(p: Point, factor: Int) -> Point = Point { x: p.x * factor, y: p.y * factor }
 
 fn Point.origin() -> Point = Point { x: 0, y: 0 }
 
 test "record convention method" {
-  let p = Point { x: 3, y: -4 }
+  let p = Point { x: 3, y: -4 };
   assert_eq(p.manhattan(), 7)
 }
 
 test "convention method returns same type" {
-  let p = Point { x: 2, y: 3 }
-  let s = p.scale(10)
-  assert_eq(s.x, 20)
+  let p = Point { x: 2, y: 3 };
+  let s = p.scale(10);
+  assert_eq(s.x, 20);
   assert_eq(s.y, 30)
 }
 
 test "static convention method (no self)" {
-  let o = Point.origin()
-  assert_eq(o.x, 0)
+  let o = Point.origin();
+  assert_eq(o.x, 0);
   assert_eq(o.y, 0)
 }
 
 test "convention method with two args via Type.method" {
-  let p = Point { x: 5, y: -3 }
+  let p = Point { x: 5, y: -3 };
   assert_eq(Point.manhattan(p), 8)
 }
 
 // ── Protocol declarations (Type: Protocol) ──
-
 type Dog: Eq, Repr = { name: String, breed: String }
 
 fn Dog.eq(a: Dog, b: Dog) -> Bool = a.name == b.name
@@ -72,51 +73,49 @@ fn Dog.eq(a: Dog, b: Dog) -> Bool = a.name == b.name
 fn Dog.repr(d: Dog) -> String = "${d.name} (${d.breed})"
 
 test "Eq protocol" {
-  let d1 = Dog { name: "Max", breed: "Husky" }
-  let d2 = Dog { name: "Max", breed: "Poodle" }
+  let d1 = Dog { name: "Max", breed: "Husky" };
+  let d2 = Dog { name: "Max", breed: "Poodle" };
   assert(d1.eq(d2))
 }
 
 test "Eq protocol negative" {
-  let d1 = Dog { name: "Max", breed: "Husky" }
-  let d2 = Dog { name: "Rex", breed: "Husky" }
+  let d1 = Dog { name: "Max", breed: "Husky" };
+  let d2 = Dog { name: "Rex", breed: "Husky" };
   assert_eq(d1.eq(d2), false)
 }
 
 test "Repr protocol" {
-  let d = Dog { name: "Rex", breed: "Lab" }
+  let d = Dog { name: "Rex", breed: "Lab" };
   assert_eq(d.repr(), "Rex (Lab)")
 }
 
 // ── Convention method on variant with payload ──
+type Shape = | Circle(Float) | Rect(Float, Float)
 
-type Shape =
-  | Circle(Float)
-  | Rect(Float, Float)
+fn Shape.area(s: Shape) -> Float = match s {
+  Circle(r) => 3.14159 * r * r,
+  Rect(w, h) => w * h,
+}
 
-fn Shape.area(s: Shape) -> Float =
-  match s {
-    Circle(r) => 3.14159 * r * r
-    Rect(w, h) => w * h
-  }
-
-fn Shape.is_circle(s: Shape) -> Bool =
-  match s { Circle(_) => true Rect(_, _) => false }
+fn Shape.is_circle(s: Shape) -> Bool = match s {
+  Circle(_) => true,
+  Rect(_, _) => false,
+}
 
 test "convention method on variant" {
-  let c = Circle(5.0)
+  let c = Circle(5.0);
   assert_eq(c.area() > 78.0, true)
 }
 
 test "convention method on different variant cases" {
-  let r = Rect(3.0, 4.0)
-  assert_eq(r.area(), 12.0)
-  assert_eq(r.is_circle(), false)
+  let r = Rect(3.0, 4.0);
+  assert_eq(r.area(), 12.0);
+  assert_eq(r.is_circle(), false);
   assert_eq(Circle(1.0).is_circle(), true)
 }
 
 test "convention method called in list context" {
-  let shapes = [Circle(1.0), Rect(2.0, 3.0)]
-  let areas = shapes.map((s) => Shape.area(s))
+  let shapes = [Circle(1.0), Rect(2.0, 3.0)];
+  let areas = shapes.map((s) => Shape.area(s));
   assert_eq(areas.len(), 2)
 }

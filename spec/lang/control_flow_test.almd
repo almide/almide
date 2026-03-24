@@ -1,223 +1,216 @@
+
 // control_flow_test — Control flow constructs
-
 // ── if/then/else ──
-
 test "if then else returns value" {
-  let x = if true then 1 else 2
-  assert_eq(x, 1)
-  let y = if false then 1 else 2
+  let x = if true then 1 else 2;
+  assert_eq(x, 1);
+  let y = if false then 1 else 2;
   assert_eq(y, 2)
 }
 
 test "if with comparison" {
-  let x = 10
-  let result = if x > 5 then "big" else "small"
+  let x = 10;
+  let result = if x > 5 then "big" else "small";
   assert_eq(result, "big")
 }
 
 test "nested if" {
-  let x = 5
+  let x = 5;
   let result = if x > 10 then "large"
-    else if x > 3 then "medium"
-    else "small"
+  else if x > 3 then "medium" else "small";
   assert_eq(result, "medium")
 }
 
 test "if with block body" {
   let result = if true then {
-    let a = 1
-    let b = 2
+    let a = 1;
+    let b = 2;
     a + b
-  } else {
-    0
-  }
+  } else { 0 };
   assert_eq(result, 3)
 }
 
 // ── match ──
-
 test "match int literal" {
-  let x = 2
+  let x = 2;
   let result = match x {
     1 => "one",
     2 => "two",
     3 => "three",
     _ => "other",
-  }
+  };
   assert_eq(result, "two")
 }
 
 test "match string literal" {
-  let cmd = "run"
+  let cmd = "run";
   let result = match cmd {
     "run" => 1,
     "build" => 2,
     _ => 0,
-  }
+  };
   assert_eq(result, 1)
 }
 
 test "match bool" {
-  let flag = true
+  let flag = true;
   let result = match flag {
     true => "yes",
     false => "no",
-  }
+  };
   assert_eq(result, "yes")
 }
 
 test "match Option some" {
-  let x = some(42)
+  let x = some(42);
   let result = match x {
     some(v) => v,
     none => 0,
-  }
+  };
   assert_eq(result, 42)
 }
 
 test "match Option none" {
-  let x: Option[Int] = none
+  let x: Option[Int] = none;
   let result = match x {
     some(v) => v,
     none => -1,
-  }
+  };
   assert_eq(result, -1)
 }
 
 test "match Result" {
-  let x: Result[Int, String] = ok(10)
+  let x: Result[Int, String] = ok(10);
   let r1 = match x {
     ok(v) => v,
     err(_e) => 0,
-  }
-  assert_eq(r1, 10)
-
-  let y: Result[Int, String] = err("fail")
+  };
+  assert_eq(r1, 10);
+  let y: Result[Int, String] = err("fail");
   let r2 = match y {
     ok(v) => v,
     err(_e) => -1,
-  }
+  };
   assert_eq(r2, -1)
 }
 
 test "match wildcard" {
-  let x = 99
+  let x = 99;
   let result = match x {
     1 => "one",
     _ => "other",
-  }
+  };
   assert_eq(result, "other")
 }
 
 test "match with guard" {
-  let x = 15
+  let x = 15;
   let result = match x {
     n if n > 10 => "big",
     n if n > 5 => "medium",
     _ => "small",
-  }
+  };
   assert_eq(result, "big")
 }
 
 // ── for...in ──
-
 test "for in list" {
-  var sum = 0
+  var sum = 0;
   for x in [1, 2, 3, 4, 5] {
-    sum = sum + x
-  }
+    sum = sum + x;
+  };
   assert_eq(sum, 15)
 }
 
 test "for in range" {
-  var sum = 0
+  var sum = 0;
   for i in 0..5 {
-    sum = sum + i
-  }
+    sum = sum + i;
+  };
   assert_eq(sum, 10)
 }
 
 test "for in inclusive range" {
-  var sum = 0
+  var sum = 0;
   for i in 1..=5 {
-    sum = sum + i
-  }
+    sum = sum + i;
+  };
   assert_eq(sum, 15)
 }
 
 test "for with var accumulation" {
-  var result = ""
+  var result = "";
   for x in ["a", "b", "c"] {
-    result = result + x
-  }
+    result = result + x;
+  };
   assert_eq(result, "abc")
 }
 
 test "for with enumerate" {
-  var sum = 0
+  var sum = 0;
   for (i, _v) in list.enumerate([10, 20, 30]) {
-    sum = sum + i
-  }
+    sum = sum + i;
+  };
   assert_eq(sum, 3)
 }
 
 test "for with zip" {
-  var result: List[String] = []
+  var result: List[String] = [];
   for (a, b) in list.zip(["x", "y"], [1, 2]) {
-    result = result + ["${a}${int.to_string(b)}"]
-  }
+    result = result + [
+      "${a}${int.to_string(b)}"
+    ];
+  };
   assert_eq(result, ["x1", "y2"])
 }
 
 test "nested for" {
-  var sum = 0
+  var sum = 0;
   for i in 0..3 {
     for j in 0..3 {
-      sum = sum + 1
-    }
-  }
+      sum = sum + 1;
+    };
+  };
   assert_eq(sum, 9)
 }
 
 // ── do block with guard ──
-
 test "do guard loop" {
-  var count = 0
+  var count = 0;
   do {
-    guard count < 5 else ok(())
-    count = count + 1
-  }
+    guard count < 5 else ok(());
+    count = count + 1;
+  };
   assert_eq(count, 5)
 }
 
 test "do guard with accumulation" {
-  var xs = [1, 2, 3, 4, 5]
-  var sum = 0
-  var i = 0
+  var xs = [1, 2, 3, 4, 5];
+  var sum = 0;
+  var i = 0;
   do {
-    guard i < list.len(xs) else ok(())
+    guard i < list.len(xs) else ok(());
     let v = match list.get(xs, i) {
       some(x) => x,
       none => 0,
-    }
-    sum = sum + v
-    i = i + 1
-  }
+    };
+    sum = sum + v;
+    i = i + 1;
+  };
   assert_eq(sum, 15)
 }
 
 // ── do block with guard returning non-unit value ──
-
 effect fn find_first_negative(xs: List[Int]) -> Result[Int, String] = {
-  var i = 0
+  var i = 0;
   do {
-    guard i < list.len(xs) else err("no negative found")
+    guard i < list.len(xs) else err("no negative found");
     let v = match list.get(xs, i) {
       some(x) => x,
       none => 0,
-    }
-    guard v >= 0 else ok(v)
-    i = i + 1
+    };
+    guard v >= 0 else ok(v);
+    i = i + 1;
   }
 }
 
@@ -236,351 +229,358 @@ test "do guard else err when not found" {
 }
 
 effect fn count_until(limit: Int) -> Result[Int, String] = {
-  guard limit > 0 else err("limit must be positive")
-  var count = 0
+  guard limit > 0 else err("limit must be positive");
+  var count = 0;
   do {
-    guard count < limit else ok(count)
-    count = count + 1
+    guard count < limit else ok(count);
+    count = count + 1;
   }
 }
 
 test "do guard else ok returns accumulated count" {
-  assert_eq(count_until(5), ok(5))
-  assert_eq(count_until(1), ok(1))
+  assert_eq(count_until(5), ok(5));
+  assert_eq(count_until(1), ok(1));
   assert_eq(count_until(0), err("limit must be positive"))
 }
 
 effect fn sum_until_threshold(xs: List[Int], threshold: Int) -> Result[Int, String] = {
-  var sum = 0
-  var i = 0
+  var sum = 0;
+  var i = 0;
   do {
-    guard i < list.len(xs) else ok(sum)
+    guard i < list.len(xs) else ok(sum);
     let v = match list.get(xs, i) {
       some(x) => x,
       none => 0,
-    }
-    sum = sum + v
-    guard sum <= threshold else ok(sum)
-    i = i + 1
+    };
+    sum = sum + v;
+    guard sum <= threshold else ok(sum);
+    i = i + 1;
   }
 }
 
 test "do guard ok returns sum at threshold" {
-  assert_eq(sum_until_threshold([1, 2, 3, 4, 5], 6), ok(10))
-  assert_eq(sum_until_threshold([1, 2, 3, 4, 5], 100), ok(15))
+  assert_eq(sum_until_threshold([1, 2, 3, 4, 5], 6), ok(10));
+  assert_eq(sum_until_threshold([1, 2, 3, 4, 5], 100), ok(15));
   assert_eq(sum_until_threshold([1, 2, 3, 4, 5], 3), ok(6))
 }
 
 effect fn collatz_steps(n: Int) -> Result[Int, String] = {
-  guard n > 0 else err("only positive integers")
-  var current = n
-  var count = 0
+  guard n > 0 else err("only positive integers");
+  var current = n;
+  var count = 0;
   do {
-    guard current != 1 else ok(count)
-    current = if current % 2 == 0 then current / 2 else current * 3 + 1
-    count = count + 1
+    guard current != 1 else ok(count);
+    current = if current % 2 == 0 then current / 2 else current * 3 + 1;
+    count = count + 1;
   }
 }
 
 test "do guard ok with collatz sequence" {
-  assert_eq(collatz_steps(1), ok(0))
-  assert_eq(collatz_steps(16), ok(4))
+  assert_eq(collatz_steps(1), ok(0));
+  assert_eq(collatz_steps(16), ok(4));
   assert_eq(collatz_steps(-1), err("only positive integers"))
 }
 
 effect fn find_index_of(xs: List[String], target: String) -> Result[Int, String] = {
-  var i = 0
+  var i = 0;
   do {
-    guard i < list.len(xs) else err("not found: " + target)
+    guard i < list.len(xs) else err("not found: " + target);
     let v = match list.get(xs, i) {
       some(x) => x,
       none => "",
-    }
-    guard v != target else ok(i)
-    i = i + 1
+    };
+    guard v != target else ok(i);
+    i = i + 1;
   }
 }
 
 test "do guard ok returns index" {
-  assert_eq(find_index_of(["a", "b", "c"], "b"), ok(1))
-  assert_eq(find_index_of(["a", "b", "c"], "c"), ok(2))
+  assert_eq(find_index_of(["a", "b", "c"], "b"), ok(1));
+  assert_eq(find_index_of(["a", "b", "c"], "c"), ok(2));
   assert_eq(find_index_of(["a", "b", "c"], "d"), err("not found: d"))
 }
 
 // ── do block with guard else break/continue ──
-
 test "do guard else break" {
-  var count = 0
+  var count = 0;
   do {
-    guard count < 5 else break
-    count = count + 1
-  }
+    guard count < 5 else break;
+    count = count + 1;
+  };
   assert_eq(count, 5)
 }
 
 test "do guard else break with accumulation" {
-  var i = 0
-  var sum = 0
+  var i = 0;
+  var sum = 0;
   do {
-    guard i < 10 else break
-    sum = sum + i
-    i = i + 1
-  }
+    guard i < 10 else break;
+    sum = sum + i;
+    i = i + 1;
+  };
   assert_eq(sum, 45)
 }
 
 test "for guard else continue" {
-  var result = ""
+  var result = "";
   for ch in ["a", " ", "b", " ", "c"] {
-    guard ch != " " else continue
-    result = result + ch
-  }
+    guard ch != " " else continue;
+    result = result + ch;
+  };
   assert_eq(result, "abc")
 }
 
 test "for guard else break" {
-  var result = ""
+  var result = "";
   for ch in ["a", "b", "!", "c", "d"] {
-    guard ch != "!" else break
-    result = result + ch
-  }
+    guard ch != "!" else break;
+    result = result + ch;
+  };
   assert_eq(result, "ab")
 }
 
 // ── Additional control flow tests ──
-
 test "deeply nested if-else" {
-  let x = 42
+  let x = 42;
   let result = if x < 0 then "negative"
-    else if x == 0 then "zero"
-    else if x < 10 then "small"
-    else if x < 50 then "medium"
-    else if x < 100 then "large"
-    else "huge"
+  else if x == 0 then "zero"
+  else if x < 10 then "small"
+  else if x < 50 then "medium"
+  else if x < 100 then "large" else "huge";
   assert_eq(result, "medium")
 }
 
 test "if-else as expression in let" {
-  let items = [1, 2, 3]
-  let msg = if list.len(items) == 0 then "empty" else "non-empty"
+  let items = [1, 2, 3];
+  let msg = if list.len(items) == 0 then "empty" else "non-empty";
   assert_eq(msg, "non-empty")
 }
 
 test "match on tuple" {
-  let p = (1, "a")
+  let p = (1, "a");
   let result = match p {
     (1, s) => "one-" + s,
     (2, s) => "two-" + s,
     _ => "other",
-  }
+  };
   assert_eq(result, "one-a")
 }
 
 test "match on tuple with wildcard" {
-  let p = (99, "x")
+  let p = (99, "x");
   let result = match p {
     (1, _) => "one",
     (_, s) => s,
-  }
+  };
   assert_eq(result, "x")
 }
 
 test "nested match" {
-  let x: Option[Result[Int, String]] = some(ok(42))
+  let x: Option[Result[Int, String]] = some(ok(42));
   let result = match x {
     some(inner) => match inner {
       ok(v) => v,
       err(_) => -1,
     },
     none => 0,
-  }
+  };
   assert_eq(result, 42)
 }
 
 test "match with block body" {
-  let x = 3
+  let x = 3;
   let result = match x {
     1 => "one",
     2 => "two",
     n => {
-      let s = int.to_string(n)
+      let s = int.to_string(n);
       "number: " + s
     },
-  }
+  };
   assert_eq(result, "number: 3")
 }
 
 test "for with index counter var" {
-  var idx = 0
-  var sum = 0
+  var idx = 0;
+  var sum = 0;
   for x in [10, 20, 30] {
-    sum = sum + x * idx
-    idx = idx + 1
-  }
+    sum = sum + x * idx;
+    idx = idx + 1;
+  };
   assert_eq(sum, 0 + 20 + 60)
 }
 
 test "for in large range" {
-  var sum = 0
+  var sum = 0;
   for i in 0..100 {
-    sum = sum + 1
-  }
+    sum = sum + 1;
+  };
   assert_eq(sum, 100)
 }
 
 test "for nested with accumulation" {
-  var pairs: List[String] = []
+  var pairs: List[String] = [];
   for i in 0..3 {
     for j in 0..3 {
-      pairs = pairs + ["${int.to_string(i)}${int.to_string(j)}"]
-    }
-  }
-  assert_eq(list.len(pairs), 9)
-  assert_eq(list.get(pairs, 0), some("00"))
+      pairs = pairs + [
+        "${int.to_string(i)}${int.to_string(j)}"
+      ];
+    };
+  };
+  assert_eq(list.len(pairs), 9);
+  assert_eq(list.get(pairs, 0), some("00"));
   assert_eq(list.get(pairs, 8), some("22"))
 }
 
 test "do guard countdown" {
-  var n = 10
-  var steps = 0
+  var n = 10;
+  var steps = 0;
   do {
-    guard n > 0 else break
-    n = n - 1
-    steps = steps + 1
-  }
-  assert_eq(steps, 10)
+    guard n > 0 else break;
+    n = n - 1;
+    steps = steps + 1;
+  };
+  assert_eq(steps, 10);
   assert_eq(n, 0)
 }
 
 test "do guard with complex condition" {
-  var x = 1
-  var iterations = 0
+  var x = 1;
+  var iterations = 0;
   do {
-    guard x < 1000 and iterations < 20 else break
-    x = x * 2
-    iterations = iterations + 1
-  }
-  assert_eq(x, 1024)
+    guard x < 1000 and iterations < 20 else break;
+    x = x * 2;
+    iterations = iterations + 1;
+  };
+  assert_eq(x, 1024);
   assert_eq(iterations, 10)
 }
 
 test "for guard continue skip odds" {
-  var evens: List[Int] = []
+  var evens: List[Int] = [];
   for x in 1..=10 {
-    guard x % 2 == 0 else continue
-    evens = evens + [x]
-  }
+    guard x % 2 == 0 else continue;
+    evens = evens + [x];
+  };
   assert_eq(evens, [2, 4, 6, 8, 10])
 }
 
 test "for guard continue skip negatives" {
-  var positives: List[Int] = []
-  for x in [-3, -1, 0, 2, 5, -4, 7] {
-    guard x > 0 else continue
-    positives = positives + [x]
-  }
+  var positives: List[Int] = [];
+  for x in [
+    -3,
+    -1,
+    0,
+    2,
+    5,
+    -4,
+    7
+  ] {
+    guard x > 0 else continue;
+    positives = positives + [x];
+  };
   assert_eq(positives, [2, 5, 7])
 }
 
 test "match returning record" {
-  let x = 1
+  let x = 1;
   let result = match x {
     1 => { label: "one", value: 1 },
     _ => { label: "other", value: 0 },
-  }
-  assert_eq(result.label, "one")
+  };
+  assert_eq(result.label, "one");
   assert_eq(result.value, 1)
 }
 
 test "match returning list" {
-  let x = true
+  let x = true;
   let result = match x {
     true => [1, 2, 3],
     false => [],
-  }
+  };
   assert_eq(result, [1, 2, 3])
 }
 
 test "if else with block bodies" {
-  let x = 10
+  let x = 10;
   let result = if x > 5 then {
-    let a = x * 2
-    let b = a + 1
+    let a = x * 2;
+    let b = a + 1;
     b
-  } else {
-    0
-  }
+  } else { 0 };
   assert_eq(result, 21)
 }
 
 test "for in with list.enumerate" {
-  var result: List[String] = []
+  var result: List[String] = [];
   for (i, v) in list.enumerate(["a", "b", "c"]) {
-    result = result + ["${int.to_string(i)}:${v}"]
-  }
+    result = result + [
+      "${int.to_string(i)}:${v}"
+    ];
+  };
   assert_eq(result, ["0:a", "1:b", "2:c"])
 }
 
 test "do guard building list" {
-  var xs: List[Int] = []
-  var i = 0
+  var xs: List[Int] = [];
+  var i = 0;
   do {
-    guard i < 5 else break
-    xs = xs + [i * i]
-    i = i + 1
-  }
+    guard i < 5 else break;
+    xs = xs + [i * i];
+    i = i + 1;
+  };
   assert_eq(xs, [0, 1, 4, 9, 16])
 }
 
 test "match guard with multiple conditions" {
-  let x = 15
+  let x = 15;
   let result = match x {
     n if n % 3 == 0 and n % 5 == 0 => "fizzbuzz",
     n if n % 3 == 0 => "fizz",
     n if n % 5 == 0 => "buzz",
     _ => "number",
-  }
+  };
   assert_eq(result, "fizzbuzz")
 }
 
 test "for in empty list" {
-  var count = 0
-  let empty: List[Int] = []
+  var count = 0;
+  let empty: List[Int] = [];
   for x in empty {
-    count = count + 1
-  }
+    count = count + 1;
+  };
   assert_eq(count, 0)
 }
 
 test "for in single element" {
-  var sum = 0
+  var sum = 0;
   for x in [42] {
-    sum = sum + x
-  }
+    sum = sum + x;
+  };
   assert_eq(sum, 42)
 }
 
 test "match on negative int" {
-  let x = -5
+  let x = -5;
   let result = match x {
     n if n < 0 => "negative",
     0 => "zero",
     _ => "positive",
-  }
+  };
   assert_eq(result, "negative")
 }
 
 test "if with not" {
-  let x = false
-  let result = if not x then "yes" else "no"
+  let x = false;
+  let result = if not x then "yes" else "no";
   assert_eq(result, "yes")
 }
 
 test "match with string guard" {
-  let s = "hello world"
+  let s = "hello world";
   let result = match s {
     x if string.contains(x, "world") => "has world",
     _ => "no world",
-  }
+  };
   assert_eq(result, "has world")
 }

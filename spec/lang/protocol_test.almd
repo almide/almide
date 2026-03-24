@@ -1,63 +1,65 @@
+
 // protocol_test — Protocol definition, satisfaction, and edge cases
-
 // ── Basic protocol definition and satisfaction ──
-
 protocol Greetable {
   fn greet(a: Self) -> String
 }
 
 type Person: Greetable = { name: String, age: Int }
+
 fn Person.greet(p: Person) -> String = "Hello, " + p.name
 
 type Robot: Greetable = { id: Int }
+
 fn Robot.greet(r: Robot) -> String = "I am unit " + int.to_string(r.id)
 
 test "basic protocol satisfaction" {
-  let p = Person { name: "Alice", age: 30 }
+  let p = Person { name: "Alice", age: 30 };
   assert_eq(p.greet(), "Hello, Alice")
 }
 
 test "protocol satisfied by different types" {
-  let r = Robot { id: 42 }
+  let r = Robot { id: 42 };
   assert_eq(r.greet(), "I am unit 42")
 }
 
 // ── Protocol with multiple methods ──
-
 protocol Describable {
   fn name(a: Self) -> String
   fn description(a: Self) -> String
 }
 
 type Tool: Describable = { tool_name: String, version: String }
+
 fn Tool.name(t: Tool) -> String = t.tool_name
+
 fn Tool.description(t: Tool) -> String = t.tool_name + " v" + t.version
 
 test "protocol with multiple methods" {
-  let t = Tool { tool_name: "hammer", version: "2.0" }
-  assert_eq(t.name(), "hammer")
+  let t = Tool { tool_name: "hammer", version: "2.0" };
+  assert_eq(t.name(), "hammer");
   assert_eq(t.description(), "hammer v2.0")
 }
 
 // ── Protocol combined with built-in conventions ──
-
 protocol Labelable {
   fn label(a: Self) -> String
 }
 
 type Tag: Eq, Labelable = { key: String, value: String }
+
 fn Tag.eq(a: Tag, b: Tag) -> Bool = a.key == b.key
+
 fn Tag.label(t: Tag) -> String = t.key + "=" + t.value
 
 test "protocol combined with built-in Eq" {
-  let a = Tag { key: "env", value: "prod" }
-  let b = Tag { key: "env", value: "dev" }
-  assert_eq(a == b, true)
+  let a = Tag { key: "env", value: "prod" };
+  let b = Tag { key: "env", value: "dev" };
+  assert_eq(a == b, true);
   assert_eq(a.label(), "env=prod")
 }
 
 // ── Multiple protocols on one type ──
-
 protocol HasName {
   fn get_name(a: Self) -> String
 }
@@ -67,127 +69,125 @@ protocol HasAge {
 }
 
 type Employee: HasName, HasAge = { emp_name: String, emp_age: Int }
+
 fn Employee.get_name(e: Employee) -> String = e.emp_name
+
 fn Employee.get_age(e: Employee) -> Int = e.emp_age
 
 test "type satisfying multiple protocols" {
-  let e = Employee { emp_name: "Bob", emp_age: 25 }
-  assert_eq(e.get_name(), "Bob")
+  let e = Employee { emp_name: "Bob", emp_age: 25 };
+  assert_eq(e.get_name(), "Bob");
   assert_eq(e.get_age(), 25)
 }
 
 // ── Protocol with variant types ──
-
 protocol Printable {
   fn to_str(a: Self) -> String
 }
 
 type Status: Printable = | Active | Inactive | Pending(String)
-fn Status.to_str(s: Status) -> String =
-  match s {
-    Active => "active"
-    Inactive => "inactive"
-    Pending(reason) => "pending: " + reason
-  }
+
+fn Status.to_str(s: Status) -> String = match s {
+  Active => "active",
+  Inactive => "inactive",
+  Pending(reason) => "pending: " + reason,
+}
 
 test "protocol on variant type" {
-  assert_eq(Status.to_str(Active), "active")
+  assert_eq(Status.to_str(Active), "active");
   assert_eq(Pending("review").to_str(), "pending: review")
 }
 
 // ── Protocol method with multiple params ──
-
 protocol Combinable {
   fn combine(a: Self, b: Self) -> Self
 }
 
 type Score: Combinable = { points: Int }
-fn Score.combine(a: Score, b: Score) -> Score =
-  Score { points: a.points + b.points }
+
+fn Score.combine(a: Score, b: Score) -> Score = Score { points: a.points + b.points }
 
 test "protocol method with Self in multiple positions" {
-  let a = Score { points: 10 }
-  let b = Score { points: 20 }
-  let c = Score.combine(a, b)
+  let a = Score { points: 10 };
+  let b = Score { points: 20 };
+  let c = Score.combine(a, b);
   assert_eq(c.points, 30)
 }
 
 // ── Protocol with non-Self params ──
-
 protocol Searchable {
   fn contains_text(a: Self, query: String) -> Bool
 }
 
 type Document: Searchable = { title: String, body: String }
-fn Document.contains_text(d: Document, query: String) -> Bool =
-  string.contains(d.body, query)
+
+fn Document.contains_text(d: Document, query: String) -> Bool = string.contains(d.body, query)
 
 test "protocol method with mixed Self and non-Self params" {
-  let doc = Document { title: "readme", body: "hello world" }
-  assert_eq(doc.contains_text("world"), true)
+  let doc = Document { title: "readme", body: "hello world" };
+  assert_eq(doc.contains_text("world"), true);
   assert_eq(doc.contains_text("missing"), false)
 }
 
 // ── Protocol + derive coexistence ──
-
 protocol Summarizable {
   fn summary(a: Self) -> String
 }
 
 type Config: Eq, Summarizable = { debug: Bool, level: Int }
-fn Config.summary(c: Config) -> String =
-  "level=" + int.to_string(c.level)
+
+fn Config.summary(c: Config) -> String = "level=" + int.to_string(c.level)
 
 test "protocol with auto-derive Eq coexistence" {
-  let a = Config { debug: true, level: 3 }
-  let b = Config { debug: true, level: 3 }
-  assert_eq(a == b, true)
+  let a = Config { debug: true, level: 3 };
+  let b = Config { debug: true, level: 3 };
+  assert_eq(a == b, true);
   assert_eq(a.summary(), "level=3")
 }
 
 // ── Convention method called both ways ──
-
 protocol Hashable {
   fn hash_code(a: Self) -> Int
 }
 
 type Item: Hashable = { id: Int, label: String }
+
 fn Item.hash_code(i: Item) -> Int = i.id * 31
 
 test "protocol method via direct call and UFCS" {
-  let item = Item { id: 7, label: "test" }
-  assert_eq(Item.hash_code(item), 217)
+  let item = Item { id: 7, label: "test" };
+  assert_eq(Item.hash_code(item), 217);
   assert_eq(item.hash_code(), 217)
 }
 
 // ── Empty protocol (marker) ──
-
 protocol Serializable {
 }
 
 type Marker: Serializable = { tag: String }
 
 test "empty protocol as marker" {
-  let m = Marker { tag: "ok" }
+  let m = Marker { tag: "ok" };
   assert_eq(m.tag, "ok")
 }
 
 // ── Protocol method returning non-Self type ──
-
 protocol Measurable {
   fn size(a: Self) -> Int
   fn is_large(a: Self) -> Bool
 }
 
 type Box: Measurable = { width: Int, height: Int }
+
 fn Box.size(b: Box) -> Int = b.width * b.height
+
 fn Box.is_large(b: Box) -> Bool = Box.size(b) > 100
 
 test "protocol methods with different return types" {
-  let small = Box { width: 5, height: 5 }
-  let big = Box { width: 20, height: 10 }
-  assert_eq(small.size(), 25)
-  assert_eq(small.is_large(), false)
-  assert_eq(big.size(), 200)
+  let small = Box { width: 5, height: 5 };
+  let big = Box { width: 20, height: 10 };
+  assert_eq(small.size(), 25);
+  assert_eq(small.is_large(), false);
+  assert_eq(big.size(), 200);
   assert_eq(big.is_large(), true)
 }

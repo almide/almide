@@ -1,35 +1,35 @@
 import error
-// error module tests
 
+// error module tests
 test "error.message on err" {
-  let r: Result[Int, String] = err("something went wrong")
+  let r: Result[Int, String] = err("something went wrong");
   assert_eq(error.message(r), "something went wrong")
 }
 
 test "error.message on ok" {
-  let r: Result[Int, String] = ok(42)
+  let r: Result[Int, String] = ok(42);
   assert_eq(error.message(r), "")
 }
 
 test "error.chain combines messages" {
-  let result = error.chain("load failed", "file not found")
-  assert_eq(string.contains(result, "load failed"), true)
+  let result = error.chain("load failed", "file not found");
+  assert_eq(string.contains(result, "load failed"), true);
   assert_eq(string.contains(result, "file not found"), true)
 }
 
 test "error.chain with empty cause" {
-  let result = error.chain("outer", "")
+  let result = error.chain("outer", "");
   assert_eq(string.contains(result, "outer"), true)
 }
 
 test "error.context on err" {
-  let r: Result[Int, String] = err("original")
-  let r2 = error.context(r, "loading config")
+  let r: Result[Int, String] = err("original");
+  let r2 = error.context(r, "loading config");
   assert_eq(r2.is_err(), true)
 }
 
 test "error.context on ok" {
-  let r: Result[Int, String] = ok(42)
-  let r2 = error.context(r, "loading config")
+  let r: Result[Int, String] = ok(42);
+  let r2 = error.context(r, "loading config");
   assert_eq(r2.unwrap_or(0), 42)
 }

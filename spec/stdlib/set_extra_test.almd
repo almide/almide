@@ -1,111 +1,118 @@
-// set extra tests — edge cases and composition
 
+// set extra tests — edge cases and composition
 test "set.new is empty" {
-  let s: Set[Int] = set.new()
-  assert_eq(set.is_empty(s), true)
+  let s: Set[Int] = set.new();
+  assert_eq(set.is_empty(s), true);
   assert_eq(set.len(s), 0)
 }
 
 test "set.from_list deduplicates" {
-  let s = set.from_list([1, 2, 2, 3, 3, 3])
+  let s = set.from_list([
+    1,
+    2,
+    2,
+    3,
+    3,
+    3
+  ]);
   assert_eq(set.len(s), 3)
 }
 
 test "set.union with empty" {
-  let s = set.from_list([1, 2])
-  let empty: Set[Int] = set.new()
-  assert_eq(set.len(set.union(s, empty)), 2)
+  let s = set.from_list([1, 2]);
+  let empty: Set[Int] = set.new();
+  assert_eq(set.len(set.union(s, empty)), 2);
   assert_eq(set.len(set.union(empty, s)), 2)
 }
 
 test "set.intersection with empty" {
-  let s = set.from_list([1, 2, 3])
-  let empty: Set[Int] = set.new()
+  let s = set.from_list([1, 2, 3]);
+  let empty: Set[Int] = set.new();
   assert_eq(set.len(set.intersection(s, empty)), 0)
 }
 
 test "set.difference with self" {
-  let s = set.from_list([1, 2, 3])
+  let s = set.from_list([1, 2, 3]);
   assert_eq(set.len(set.difference(s, s)), 0)
 }
 
 test "set.symmetric_difference with self" {
-  let s = set.from_list([1, 2, 3])
+  let s = set.from_list([1, 2, 3]);
   assert_eq(set.len(set.symmetric_difference(s, s)), 0)
 }
 
 test "set.is_disjoint with self" {
-  let s = set.from_list([1, 2])
+  let s = set.from_list([1, 2]);
   assert_eq(set.is_disjoint(s, s), false)
 }
 
 test "set.is_disjoint both empty" {
-  let a: Set[Int] = set.new()
-  let b: Set[Int] = set.new()
+  let a: Set[Int] = set.new();
+  let b: Set[Int] = set.new();
   assert_eq(set.is_disjoint(a, b), true)
 }
 
 test "set.filter keeps none" {
-  let s = set.from_list([1, 2, 3])
-  let result = set.filter(s, (x) => x > 10)
+  let s = set.from_list([1, 2, 3]);
+  let result = set.filter(s, (x) => x > 10);
   assert_eq(set.len(result), 0)
 }
 
 test "set.filter keeps all" {
-  let s = set.from_list([1, 2, 3])
-  let result = set.filter(s, (x) => x > 0)
+  let s = set.from_list([1, 2, 3]);
+  let result = set.filter(s, (x) => x > 0);
   assert_eq(set.len(result), 3)
 }
 
 test "set.map with collisions" {
-  let s = set.from_list([1, 2, 3, 4])
-  let result = set.map(s, (x) => x % 2)
-  assert_eq(set.len(result), 2)
-  assert_eq(set.contains(result, 0), true)
+  let s = set.from_list([1, 2, 3, 4]);
+  let result = set.map(s, (x) => x % 2);
+  assert_eq(set.len(result), 2);
+  assert_eq(set.contains(result, 0), true);
   assert_eq(set.contains(result, 1), true)
 }
 
 test "set.fold with string concatenation" {
-  let s = set.from_list([1, 2, 3])
-  let result = set.fold(s, 0, (acc, x) => acc + x)
+  let s = set.from_list([1, 2, 3]);
+  let result = set.fold(s, 0, (acc, x) => acc + x);
   assert_eq(result, 6)
 }
 
 test "set.any on empty" {
-  let s: Set[Int] = set.new()
+  let s: Set[Int] = set.new();
   assert_eq(set.any(s, (x) => x > 0), false)
 }
 
 test "set.all on empty" {
-  let s: Set[Int] = set.new()
+  let s: Set[Int] = set.new();
   assert_eq(set.all(s, (x) => x > 0), true)
 }
 
 test "set.remove non-existent" {
-  let s = set.from_list([1, 2, 3])
-  let s2 = set.remove(s, 99)
+  let s = set.from_list([1, 2, 3]);
+  let s2 = set.remove(s, 99);
   assert_eq(set.len(s2), 3)
 }
 
 test "set string values" {
-  let s = set.from_list(["hello", "world", "hello"])
-  assert_eq(set.len(s), 2)
-  assert_eq(set.contains(s, "hello"), true)
+  let s = set.from_list(["hello", "world", "hello"]);
+  assert_eq(set.len(s), 2);
+  assert_eq(set.contains(s, "hello"), true);
   assert_eq(set.contains(s, "world"), true)
 }
 
 test "set.to_list preserves elements" {
-  let s = set.from_list([10, 20, 30])
-  let xs = set.to_list(s)
-  assert_eq(list.len(xs), 3)
-  assert_eq(list.contains(xs, 10), true)
-  assert_eq(list.contains(xs, 20), true)
+  let s = set.from_list([10, 20, 30]);
+  let xs = set.to_list(s);
+  assert_eq(list.len(xs), 3);
+  assert_eq(list.contains(xs, 10), true);
+  assert_eq(list.contains(xs, 20), true);
   assert_eq(list.contains(xs, 30), true)
 }
 
 test "set.is_subset empty is subset of anything" {
-  let empty: Set[Int] = set.new()
-  let s = set.from_list([1, 2, 3])
-  assert_eq(set.is_subset(empty, s), true)
+  let empty: Set[Int] = set.new();
+  let s = set.from_list([1, 2, 3]);
+  assert_eq(set.is_subset(empty, s), true);
   assert_eq(set.is_subset(empty, empty), true)
 }

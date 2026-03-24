@@ -1,95 +1,95 @@
-// do_guard_test — do block and guard statement edge cases
 
+// do_guard_test — do block and guard statement edge cases
 test "do block with guard break" {
-  var i = 0
+  var i = 0;
   do {
-    guard i < 5 else break
-    i = i + 1
-  }
+    guard i < 5 else break;
+    i = i + 1;
+  };
   assert_eq(i, 5)
 }
 
 test "do block single iteration" {
-  var count = 0
+  var count = 0;
   do {
-    count = count + 1
-    guard false else break
-  }
+    count = count + 1;
+    guard false else break;
+  };
   assert_eq(count, 1)
 }
 
 test "do block accumulator" {
-  var sum = 0
-  var i = 1
+  var sum = 0;
+  var i = 1;
   do {
-    guard i <= 10 else break
-    sum = sum + i
-    i = i + 1
-  }
+    guard i <= 10 else break;
+    sum = sum + i;
+    i = i + 1;
+  };
   assert_eq(sum, 55)
 }
 
 test "do block with complex guard" {
-  var x = 0
+  var x = 0;
   do {
-    x = x + 1
-    guard x < 100 and x % 7 != 0 else break
-  }
+    x = x + 1;
+    guard x < 100 and x % 7 != 0 else break;
+  };
   assert_eq(x, 7)
 }
 
 test "do block string building" {
-  var s = ""
-  var i = 0
+  var s = "";
+  var i = 0;
   do {
-    guard i < 4 else break
-    s = s + int.to_string(i)
-    i = i + 1
-  }
+    guard i < 4 else break;
+    s = s + int.to_string(i);
+    i = i + 1;
+  };
   assert_eq(s, "0123")
 }
 
 test "nested do blocks" {
-  var total = 0
-  var i = 0
+  var total = 0;
+  var i = 0;
   do {
-    guard i < 3 else break
-    var j = 0
+    guard i < 3 else break;
+    var j = 0;
     do {
-      guard j < 3 else break
-      total = total + 1
-      j = j + 1
-    }
-    i = i + 1
-  }
+      guard j < 3 else break;
+      total = total + 1;
+      j = j + 1;
+    };
+    i = i + 1;
+  };
   assert_eq(total, 9)
 }
 
 test "guard with continue in for" {
-  var sum = 0
+  var sum = 0;
   for i in 0..10 {
-    guard i % 2 == 0 else continue
-    sum = sum + i
-  }
+    guard i % 2 == 0 else continue;
+    sum = sum + i;
+  };
   assert_eq(sum, 20)
 }
 
 test "do block never enters on false guard" {
-  var count = 0
+  var count = 0;
   do {
-    guard false else break
-    count = count + 1
-  }
+    guard false else break;
+    count = count + 1;
+  };
   assert_eq(count, 0)
 }
 
 test "guard in while" {
-  var result: List[Int] = []
-  var i = 0
+  var result: List[Int] = [];
+  var i = 0;
   while i < 10 {
-    i = i + 1
-    guard i % 3 == 0 else continue
-    result = result + [i]
-  }
+    i = i + 1;
+    guard i % 3 == 0 else continue;
+    result = result + [i];
+  };
   assert_eq(result, [3, 6, 9])
 }

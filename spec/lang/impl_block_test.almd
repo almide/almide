@@ -1,7 +1,6 @@
+
 // impl_block_test — impl Protocol for Type { ... } block syntax
-
 // ── Basic impl block ──
-
 protocol Showable {
   fn show(a: Self) -> String
 }
@@ -13,12 +12,11 @@ impl Showable for Dog {
 }
 
 test "basic impl block" {
-  let d = Dog { name: "Rex" }
+  let d = Dog { name: "Rex" };
   assert_eq(d.show(), "Dog: Rex")
 }
 
 // ── impl block with multiple methods ──
-
 protocol Describable {
   fn label(a: Self) -> String
   fn detail(a: Self) -> String
@@ -32,13 +30,12 @@ impl Describable for Book {
 }
 
 test "impl block with multiple methods" {
-  let b = Book { title: "1984", author: "Orwell" }
-  assert_eq(b.label(), "1984")
+  let b = Book { title: "1984", author: "Orwell" };
+  assert_eq(b.label(), "1984");
   assert_eq(b.detail(), "1984 by Orwell")
 }
 
 // ── impl block used in generic function ──
-
 fn display[T: Showable](item: T) -> String = item.show()
 
 type Cat = { name: String }
@@ -48,12 +45,11 @@ impl Showable for Cat {
 }
 
 test "impl block with generic bounds" {
-  assert_eq(display(Dog { name: "Max" }), "Dog: Max")
+  assert_eq(display(Dog { name: "Max" }), "Dog: Max");
   assert_eq(display(Cat { name: "Mimi" }), "Cat: Mimi")
 }
 
 // ── impl block with Self in return type ──
-
 protocol Combinable {
   fn combine(a: Self, b: Self) -> Self
 }
@@ -61,19 +57,17 @@ protocol Combinable {
 type Score = { points: Int }
 
 impl Combinable for Score {
-  fn combine(a: Score, b: Score) -> Score =
-    Score { points: a.points + b.points }
+  fn combine(a: Score, b: Score) -> Score = Score { points: a.points + b.points }
 }
 
 test "impl block with Self in multiple positions" {
-  let a = Score { points: 10 }
-  let b = Score { points: 20 }
-  let c = Score.combine(a, b)
+  let a = Score { points: 10 };
+  let b = Score { points: 20 };
+  let c = Score.combine(a, b);
   assert_eq(c.points, 30)
 }
 
 // ── impl block on variant type ──
-
 protocol Printable {
   fn to_str(a: Self) -> String
 }
@@ -81,21 +75,19 @@ protocol Printable {
 type Status = | Active | Inactive | Pending(String)
 
 impl Printable for Status {
-  fn to_str(s: Status) -> String =
-    match s {
-      Active => "active"
-      Inactive => "inactive"
-      Pending(reason) => "pending: " + reason
-    }
+  fn to_str(s: Status) -> String = match s {
+    Active => "active",
+    Inactive => "inactive",
+    Pending(reason) => "pending: " + reason,
+  }
 }
 
 test "impl block on variant type" {
-  assert_eq(Active.to_str(), "active")
+  assert_eq(Active.to_str(), "active");
   assert_eq(Pending("review").to_str(), "pending: review")
 }
 
 // ── impl block coexisting with built-in conventions ──
-
 protocol Labelable {
   fn label_text(a: Self) -> String
 }
@@ -107,14 +99,13 @@ impl Labelable for Tag {
 }
 
 test "impl block with built-in derive" {
-  let a = Tag { key: "env", value: "prod" }
-  let b = Tag { key: "env", value: "prod" }
-  assert_eq(a == b, true)
+  let a = Tag { key: "env", value: "prod" };
+  let b = Tag { key: "env", value: "prod" };
+  assert_eq(a == b, true);
   assert_eq(a.label_text(), "env=prod")
 }
 
 // ── Multiple impl blocks for same type ──
-
 protocol HasName {
   fn get_name(a: Self) -> String
 }
@@ -134,20 +125,18 @@ impl HasAge for Employee {
 }
 
 test "multiple impl blocks for one type" {
-  let e = Employee { emp_name: "Bob", emp_age: 25 }
-  assert_eq(e.get_name(), "Bob")
+  let e = Employee { emp_name: "Bob", emp_age: 25 };
+  assert_eq(e.get_name(), "Bob");
   assert_eq(e.get_age(), 25)
 }
 
 // ── impl block method called as Type.method ──
-
 test "impl method via Type.method syntax" {
-  let d = Dog { name: "Buddy" }
+  let d = Dog { name: "Buddy" };
   assert_eq(Dog.show(d), "Dog: Buddy")
 }
 
 // ── impl block with non-Self params ──
-
 protocol Searchable {
   fn contains_text(a: Self, query: String) -> Bool
 }
@@ -155,12 +144,11 @@ protocol Searchable {
 type Document = { title: String, body: String }
 
 impl Searchable for Document {
-  fn contains_text(d: Document, query: String) -> Bool =
-    string.contains(d.body, query)
+  fn contains_text(d: Document, query: String) -> Bool = string.contains(d.body, query)
 }
 
 test "impl block with mixed Self and non-Self params" {
-  let doc = Document { title: "readme", body: "hello world" }
-  assert_eq(doc.contains_text("world"), true)
+  let doc = Document { title: "readme", body: "hello world" };
+  assert_eq(doc.contains_text("world"), true);
   assert_eq(doc.contains_text("missing"), false)
 }

@@ -1,5 +1,5 @@
-// list completeness tests — functions not covered elsewhere
 
+// list completeness tests — functions not covered elsewhere
 test "list.get_or in bounds" {
   assert_eq(list.get_or([10, 20, 30], 1, 0), 20)
 }
@@ -29,7 +29,7 @@ test "list.sort already sorted" {
 }
 
 test "list.sort empty" {
-  let xs: List[Int] = []
+  let xs: List[Int] = [];
   assert_eq(list.sort(xs), [])
 }
 
@@ -38,7 +38,7 @@ test "list.reverse basic" {
 }
 
 test "list.reverse empty" {
-  let xs: List[Int] = []
+  let xs: List[Int] = [];
   assert_eq(list.reverse(xs), [])
 }
 
@@ -47,35 +47,46 @@ test "list.reverse single" {
 }
 
 test "list.enumerate basic" {
-  let result = list.enumerate(["a", "b", "c"])
+  let result = list.enumerate(["a", "b", "c"]);
   assert_eq(list.len(result), 3)
 }
 
 test "list.enumerate empty" {
-  let xs: List[String] = []
+  let xs: List[String] = [];
   assert_eq(list.len(list.enumerate(xs)), 0)
 }
 
 test "list.zip basic" {
-  let result = list.zip([1, 2], ["a", "b"])
+  let result = list.zip([1, 2], ["a", "b"]);
   assert_eq(list.len(result), 2)
 }
 
 test "list.zip different lengths" {
-  let result = list.zip([1, 2, 3], ["a", "b"])
+  let result = list.zip([1, 2, 3], ["a", "b"]);
   assert_eq(list.len(result), 2)
 }
 
 test "list.flatten basic" {
-  assert_eq(list.flatten([[1, 2], [3], [4, 5]]), [1, 2, 3, 4, 5])
+  assert_eq(list.flatten([
+    [1, 2],
+    [3],
+    [4, 5]
+  ]), [1, 2, 3, 4, 5])
 }
 
 test "list.flatten empty inner" {
-  assert_eq(list.flatten([[1], [], [2]]), [1, 2])
+  assert_eq(list.flatten([
+    [1],
+    [],
+    [2]
+  ]), [1, 2])
 }
 
 test "list.flatten all empty" {
-  let xs: List[List[Int]] = [[], []]
+  let xs: List[List[Int]] = [
+    [],
+    []
+  ];
   assert_eq(list.flatten(xs), [])
 }
 
@@ -120,19 +131,19 @@ test "list.last non-empty" {
 }
 
 test "list.last empty" {
-  let xs: List[Int] = []
+  let xs: List[Int] = [];
   assert_eq(list.last(xs), none)
 }
 
 test "list.chunk basic" {
-  let chunks = list.chunk([1, 2, 3, 4, 5], 2)
-  assert_eq(list.len(chunks), 3)
-  assert_eq(list.get(chunks, 0), some([1, 2]))
+  let chunks = list.chunk([1, 2, 3, 4, 5], 2);
+  assert_eq(list.len(chunks), 3);
+  assert_eq(list.get(chunks, 0), some([1, 2]));
   assert_eq(list.get(chunks, 2), some([5]))
 }
 
 test "list.chunk size bigger than list" {
-  let chunks = list.chunk([1, 2], 5)
+  let chunks = list.chunk([1, 2], 5);
   assert_eq(list.len(chunks), 1)
 }
 
@@ -157,12 +168,12 @@ test "list.first non-empty" {
 }
 
 test "list.first empty" {
-  let xs: List[Int] = []
+  let xs: List[Int] = [];
   assert_eq(list.first(xs), none)
 }
 
 test "list.is_empty true" {
-  let xs: List[Int] = []
+  let xs: List[Int] = [];
   assert(list.is_empty(xs))
 }
 
@@ -175,7 +186,7 @@ test "list.min basic" {
 }
 
 test "list.min empty" {
-  let xs: List[Int] = []
+  let xs: List[Int] = [];
   assert_eq(list.min(xs), none)
 }
 
@@ -184,7 +195,7 @@ test "list.max basic" {
 }
 
 test "list.max empty" {
-  let xs: List[Int] = []
+  let xs: List[Int] = [];
   assert_eq(list.max(xs), none)
 }
 
@@ -201,22 +212,30 @@ test "list.join empty" {
 }
 
 test "list.sort_by key function" {
-  let sorted = list.sort_by(["bb", "a", "ccc"], (s) => string.len(s))
-  assert_eq(list.get(sorted, 0), some("a"))
+  let sorted = list.sort_by(["bb", "a", "ccc"], (s) => string.len(s));
+  assert_eq(list.get(sorted, 0), some("a"));
   assert_eq(list.get(sorted, 2), some("ccc"))
 }
 
 test "list.flat_map basic" {
-  assert_eq(list.flat_map([1, 2, 3], (x) => [x, x * 10]), [1, 10, 2, 20, 3, 30])
+  assert_eq(list.flat_map([1, 2, 3], (x) => [x, x * 10]), [
+    1,
+    10,
+    2,
+    20,
+    3,
+    30
+  ])
 }
 
 test "list.flat_map to empty" {
-  let result = list.flat_map([1, 2, 3], (x) => if x > 1 then [x] else [])
+  let result = list.flat_map([1, 2, 3], (x) => if x > 1 then [x]
+  else []);
   assert_eq(result, [2, 3])
 }
 
 test "list.filter_map basic" {
-  let result = list.filter_map([1, 2, 3, 4], (x) => if x % 2 == 0 then some(x * 10) else none)
+  let result = list.filter_map([1, 2, 3, 4], (x) => if x % 2 == 0 then some(x * 10) else none);
   assert_eq(result, [20, 40])
 }
 
@@ -245,8 +264,8 @@ test "list.count none match" {
 }
 
 test "list.partition basic" {
-  let (evens, odds) = list.partition([1, 2, 3, 4, 5], (x) => x % 2 == 0)
-  assert_eq(evens, [2, 4])
+  let (evens, odds) = list.partition([1, 2, 3, 4, 5], (x) => x % 2 == 0);
+  assert_eq(evens, [2, 4]);
   assert_eq(odds, [1, 3, 5])
 }
 
@@ -255,7 +274,7 @@ test "list.reduce basic" {
 }
 
 test "list.reduce empty" {
-  let xs: List[Int] = []
+  let xs: List[Int] = [];
   assert_eq(list.reduce(xs, (a, b) => a + b), none)
 }
 
@@ -324,7 +343,7 @@ test "list.intersperse single" {
 }
 
 test "list.intersperse empty" {
-  let xs: List[Int] = []
+  let xs: List[Int] = [];
   assert_eq(list.intersperse(xs, 0), [])
 }
 
@@ -357,8 +376,8 @@ test "list.drop_end more than length" {
 }
 
 test "list.windows basic" {
-  let ws = list.windows([1, 2, 3, 4], 2)
-  assert_eq(list.len(ws), 3)
-  assert_eq(list.get(ws, 0), some([1, 2]))
+  let ws = list.windows([1, 2, 3, 4], 2);
+  assert_eq(list.len(ws), 3);
+  assert_eq(list.get(ws, 0), some([1, 2]));
   assert_eq(list.get(ws, 2), some([3, 4]))
 }

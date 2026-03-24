@@ -1,29 +1,24 @@
+
 // protocol_advanced_test — Advanced protocol patterns from real-world usage
-
 // ── Builder pattern via protocol ──
-
 protocol Builder {
   fn add_field(a: Self, key: String, value: String) -> Self
   fn build(a: Self) -> String
 }
 
 type HtmlBuilder: Builder = { parts: List[String] }
-fn HtmlBuilder.add_field(b: HtmlBuilder, key: String, value: String) -> HtmlBuilder =
-  HtmlBuilder { parts: b.parts + [key + "=" + value] }
-fn HtmlBuilder.build(b: HtmlBuilder) -> String =
-  string.join(b.parts, " ")
+
+fn HtmlBuilder.add_field(b: HtmlBuilder, key: String, value: String) -> HtmlBuilder = HtmlBuilder { parts: b.parts + [key + "=" + value] }
+
+fn HtmlBuilder.build(b: HtmlBuilder) -> String = string.join(b.parts, " ")
 
 test "builder pattern via protocol" {
-  let html = HtmlBuilder { parts: [] }
-  let result = html
-    |> HtmlBuilder.add_field("class", "main")
-    |> HtmlBuilder.add_field("id", "app")
-    |> HtmlBuilder.build()
+  let html = HtmlBuilder { parts: [] };
+  let result = html |> HtmlBuilder.add_field("class", "main") |> HtmlBuilder.add_field("id", "app") |> HtmlBuilder.build();
   assert_eq(result, "class=main id=app")
 }
 
 // ── State machine via protocol ──
-
 protocol StateMachine {
   fn next(a: Self) -> Self
   fn is_final(a: Self) -> Bool
@@ -32,93 +27,92 @@ protocol StateMachine {
 
 type TrafficLight: StateMachine = | RedLight | YellowLight | GreenLight
 
-fn TrafficLight.next(t: TrafficLight) -> TrafficLight =
-  match t {
-    RedLight => GreenLight
-    GreenLight => YellowLight
-    YellowLight => RedLight
-  }
+fn TrafficLight.next(t: TrafficLight) -> TrafficLight = match t {
+  RedLight => GreenLight,
+  GreenLight => YellowLight,
+  YellowLight => RedLight,
+}
 
 fn TrafficLight.is_final(t: TrafficLight) -> Bool = false
 
-fn TrafficLight.state_name(t: TrafficLight) -> String =
-  match t {
-    RedLight => "red"
-    YellowLight => "yellow"
-    GreenLight => "green"
-  }
+fn TrafficLight.state_name(t: TrafficLight) -> String = match t {
+  RedLight => "red",
+  YellowLight => "yellow",
+  GreenLight => "green",
+}
 
 test "state machine via protocol" {
-  let light = RedLight
-  assert_eq(TrafficLight.state_name(light), "red")
-  let next1 = TrafficLight.next(light)
-  assert_eq(TrafficLight.state_name(next1), "green")
-  let next2 = TrafficLight.next(next1)
-  assert_eq(TrafficLight.state_name(next2), "yellow")
-  let next3 = TrafficLight.next(next2)
+  let light = RedLight;
+  assert_eq(TrafficLight.state_name(light), "red");
+  let next1 = TrafficLight.next(light);
+  assert_eq(TrafficLight.state_name(next1), "green");
+  let next2 = TrafficLight.next(next1);
+  assert_eq(TrafficLight.state_name(next2), "yellow");
+  let next3 = TrafficLight.next(next2);
   assert_eq(TrafficLight.state_name(next3), "red")
 }
 
 test "state machine cycle via fold" {
-  let start = RedLight
+  let start = RedLight;
   // Red → Green → Yellow → Red (3 steps = full cycle)
-  let result = list.fold([1, 2, 3], start, (state, _) => TrafficLight.next(state))
+  let result = list.fold([1, 2, 3], start, (state, _) => TrafficLight.next(state));
   assert_eq(TrafficLight.state_name(result), "red")
 }
 
 // ── Comparison protocol (Ord-like) ──
-
 protocol Comparable {
   fn compare(a: Self, b: Self) -> Int
 }
 
 type Priority: Comparable = { level: Int, label: String }
+
 fn Priority.compare(a: Priority, b: Priority) -> Int = a.level - b.level
 
 fn is_higher(a: Priority, b: Priority) -> Bool = Priority.compare(a, b) > 0
 
 test "comparison protocol" {
-  let high = Priority { level: 10, label: "critical" }
-  let low = Priority { level: 1, label: "minor" }
-  assert_eq(Priority.compare(high, low) > 0, true)
-  assert_eq(Priority.compare(low, high) < 0, true)
-  assert_eq(is_higher(high, low), true)
+  let high = Priority { level: 10, label: "critical" };
+  let low = Priority { level: 1, label: "minor" };
+  assert_eq(Priority.compare(high, low) > 0, true);
+  assert_eq(Priority.compare(low, high) < 0, true);
+  assert_eq(is_higher(high, low), true);
   assert_eq(is_higher(low, high), false)
 }
 
 // ── Serialization protocol (real SDK pattern) ──
-
 protocol Serializable {
   fn to_string_repr(a: Self) -> String
   fn field_count(a: Self) -> Int
 }
 
 type UserProfile: Serializable = { username: String, email: String, age: Int }
-fn UserProfile.to_string_repr(u: UserProfile) -> String =
-  u.username + "<" + u.email + ">"
+
+fn UserProfile.to_string_repr(u: UserProfile) -> String = u.username + "<" + u.email + ">"
+
 fn UserProfile.field_count(u: UserProfile) -> Int = 3
 
 type BotProfile: Serializable = { bot_id: String }
-fn BotProfile.to_string_repr(b: BotProfile) -> String =
-  "bot:" + b.bot_id
+
+fn BotProfile.to_string_repr(b: BotProfile) -> String = "bot:" + b.bot_id
+
 fn BotProfile.field_count(b: BotProfile) -> Int = 1
 
 test "serialization protocol with multiple implementors" {
-  let user = UserProfile { username: "alice", email: "a@b.com", age: 30 }
-  let bot = BotProfile { bot_id: "gpt-4" }
-  assert_eq(user.to_string_repr(), "alice<a@b.com>")
-  assert_eq(bot.to_string_repr(), "bot:gpt-4")
-  assert_eq(user.field_count(), 3)
+  let user = UserProfile { username: "alice", email: "a@b.com", age: 30 };
+  let bot = BotProfile { bot_id: "gpt-4" };
+  assert_eq(user.to_string_repr(), "alice<a@b.com>");
+  assert_eq(bot.to_string_repr(), "bot:gpt-4");
+  assert_eq(user.field_count(), 3);
   assert_eq(bot.field_count(), 1)
 }
 
 // ── Protocol method used as sort key ──
-
 protocol Sortable {
   fn sort_key(a: Self) -> Int
 }
 
 type Job: Sortable = { priority: Int, name: String }
+
 fn Job.sort_key(j: Job) -> Int = j.priority
 
 test "protocol method as sort key" {
@@ -126,108 +120,111 @@ test "protocol method as sort key" {
     Job { priority: 3, name: "low" },
     Job { priority: 1, name: "high" },
     Job { priority: 2, name: "mid" }
-  ]
-  let sorted = list.sort_by(jobs, (j) => Job.sort_key(j))
+  ];
+  let sorted = list.sort_by(jobs, (j) => Job.sort_key(j));
   assert_eq(list.map(sorted, (j) => j.name), ["high", "mid", "low"])
 }
 
 // ── Protocol method in do block ──
-
 protocol Parseable {
   fn parse_value(a: Self) -> Result[Int, String]
 }
 
 type RawInput: Parseable = { text: String }
-fn RawInput.parse_value(r: RawInput) -> Result[Int, String] =
-  int.parse(r.text)
+
+fn RawInput.parse_value(r: RawInput) -> Result[Int, String] = int.parse(r.text)
 
 test "protocol method in result chain" {
-  let good = RawInput { text: "42" }
-  let bad = RawInput { text: "abc" }
-  assert_eq(RawInput.parse_value(good), ok(42))
+  let good = RawInput { text: "42" };
+  let bad = RawInput { text: "abc" };
+  assert_eq(RawInput.parse_value(good), ok(42));
   assert_eq(result.is_err(RawInput.parse_value(bad)), true)
 }
 
 // ── Protocol with List[Self] return ──
-
 protocol Replicable {
   fn replicate(a: Self, n: Int) -> List[String]
 }
 
 type Stamp: Replicable = { mark: String }
+
 fn Stamp.replicate(s: Stamp, n: Int) -> List[String] = {
-  var result: List[String] = []
+  var result: List[String] = [];
   for _ in 0..n {
-    result = result + [s.mark]
-  }
+    result = result + [
+      s.mark
+    ];
+  };
   result
 }
 
 test "protocol method returning List" {
-  let s = Stamp { mark: "X" }
-  let copies = Stamp.replicate(s, 3)
-  assert_eq(list.len(copies), 3)
+  let s = Stamp { mark: "X" };
+  let copies = Stamp.replicate(s, 3);
+  assert_eq(list.len(copies), 3);
   assert_eq(copies, ["X", "X", "X"])
 }
 
 // ── Convention method UFCS in complex expression ──
-
 protocol Measurable {
   fn measure(a: Self) -> Int
 }
 
 type Rope: Measurable = { length: Int }
+
 fn Rope.measure(r: Rope) -> Int = r.length
 
 test "UFCS protocol method in complex expression" {
-  let ropes = [Rope { length: 10 }, Rope { length: 20 }, Rope { length: 30 }]
-  let total = list.fold(ropes, 0, (acc, r) => acc + Rope.measure(r))
-  assert_eq(total, 60)
-  let longest = list.fold(ropes, 0, (max, r) =>
-    if Rope.measure(r) > max then Rope.measure(r) else max
-  )
+  let ropes = [
+    Rope { length: 10 },
+    Rope { length: 20 },
+    Rope { length: 30 }
+  ];
+  let total = list.fold(ropes, 0, (acc, r) => acc + Rope.measure(r));
+  assert_eq(total, 60);
+  let longest = list.fold(ropes, 0, (max, r) => if Rope.measure(r) > max then Rope.measure(r) else max);
   assert_eq(longest, 30)
 }
 
 // ── Protocol on type with single field (newtype-like) ──
-
 protocol Unwrappable {
   fn unwrap_value(a: Self) -> Int
 }
 
 type Celsius: Unwrappable = { degrees: Int }
+
 fn Celsius.unwrap_value(c: Celsius) -> Int = c.degrees
+
 fn Celsius.to_fahrenheit(c: Celsius) -> Int = c.degrees * 9 / 5 + 32
 
 type Fahrenheit: Unwrappable = { degrees: Int }
+
 fn Fahrenheit.unwrap_value(f: Fahrenheit) -> Int = f.degrees
 
 test "newtype-like protocol for unit conversion" {
-  let boiling = Celsius { degrees: 100 }
-  let f_degrees = Celsius.to_fahrenheit(boiling)
-  assert_eq(f_degrees, 212)
-  let f = Fahrenheit { degrees: f_degrees }
+  let boiling = Celsius { degrees: 100 };
+  let f_degrees = Celsius.to_fahrenheit(boiling);
+  assert_eq(f_degrees, 212);
+  let f = Fahrenheit { degrees: f_degrees };
   assert_eq(Fahrenheit.unwrap_value(f), 212)
 }
 
 // ── Protocol method with string processing ──
-
 protocol Normalizable {
   fn normalize(a: Self) -> Self
 }
 
 type Tag: Normalizable = { raw: String }
-fn Tag.normalize(t: Tag) -> Tag =
-  Tag { raw: string.trim(string.to_lower(t.raw)) }
+
+fn Tag.normalize(t: Tag) -> Tag = Tag { raw: string.trim(string.to_lower(t.raw)) }
 
 test "protocol method with string processing chain" {
-  let t = Tag { raw: "  Hello World  " }
-  let n = Tag.normalize(t)
+  let t = Tag { raw: "  Hello World  " };
+  let n = Tag.normalize(t);
   assert_eq(n.raw, "hello world")
 }
 
 // ── Protocol methods interacting with each other ──
-
 protocol Pageable {
   fn page_count(a: Self) -> Int
   fn current_page(a: Self) -> Int
@@ -236,26 +233,28 @@ protocol Pageable {
 }
 
 type Book: Pageable = { total: Int, current: Int }
+
 fn Book.page_count(b: Book) -> Int = b.total
+
 fn Book.current_page(b: Book) -> Int = b.current
+
 fn Book.has_next(b: Book) -> Bool = b.current < b.total
-fn Book.next_page(b: Book) -> Book =
-  if Book.has_next(b) then Book { total: b.total, current: b.current + 1 }
-  else b
+
+fn Book.next_page(b: Book) -> Book = if Book.has_next(b) then Book { total: b.total, current: b.current + 1 } else b
 
 test "protocol methods calling each other" {
-  let b = Book { total: 5, current: 1 }
-  assert_eq(b.has_next(), true)
-  let b2 = Book.next_page(b)
-  assert_eq(b2.current_page(), 2)
-  let b_end = Book { total: 5, current: 5 }
-  assert_eq(b_end.has_next(), false)
-  let b_same = Book.next_page(b_end)
+  let b = Book { total: 5, current: 1 };
+  assert_eq(b.has_next(), true);
+  let b2 = Book.next_page(b);
+  assert_eq(b2.current_page(), 2);
+  let b_end = Book { total: 5, current: 5 };
+  assert_eq(b_end.has_next(), false);
+  let b_same = Book.next_page(b_end);
   assert_eq(b_same.current_page(), 5)
 }
 
 test "protocol iteration via fold" {
-  let book = Book { total: 3, current: 1 }
-  let final_book = list.fold([1, 2], book, (b, _) => Book.next_page(b))
+  let book = Book { total: 3, current: 1 };
+  let final_book = list.fold([1, 2], book, (b, _) => Book.next_page(b));
   assert_eq(final_book.current_page(), 3)
 }

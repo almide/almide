@@ -38,7 +38,6 @@ test "top-level let usage in expressions" {
 }
 
 // ── Additional top-level let tests ──
-
 let DOUBLE_MAX = MAX_COUNT * 2
 
 let HALF_COUNT = MAX_COUNT / 2
@@ -60,17 +59,17 @@ test "top-level let used in function" {
 let ZERO = 0
 
 test "top-level zero" {
-  assert_eq(ZERO, 0)
+  assert_eq(ZERO, 0);
   assert_eq(ZERO + 1, 1)
 }
 
 test "top-level let in arithmetic" {
-  let result = MAX_COUNT * 2 + 50
+  let result = MAX_COUNT * 2 + 50;
   assert_eq(result, 250)
 }
 
 test "top-level let in conditional" {
-  let label = if IS_DEBUG then "debug" else "release"
+  let label = if IS_DEBUG then "debug" else "release";
   assert_eq(label, "release")
 }
 
@@ -78,12 +77,12 @@ test "top-level let in match" {
   let result = match MAX_COUNT {
     100 => "century",
     _ => "other",
-  }
+  };
   assert_eq(result, "century")
 }
 
 test "top-level let in comparison" {
-  assert_eq(MAX_COUNT > 50, true)
-  assert_eq(MAX_COUNT < 200, true)
+  assert_eq(MAX_COUNT > 50, true);
+  assert_eq(MAX_COUNT < 200, true);
   assert_eq(ZERO == 0, true)
 }

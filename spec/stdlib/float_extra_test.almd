@@ -1,7 +1,6 @@
+
 // float_extra_test — Additional float module coverage
-
 // ── float.sign ──
-
 test "float.sign positive" {
   assert_eq(float.sign(5.0), 1.0)
 }
@@ -12,28 +11,25 @@ test "float.sign negative" {
 
 test "float.sign zero" {
   // Rust signum(0.0) may return 0.0 or handle differently
-  let s = float.sign(0.0)
+  let s = float.sign(0.0);
   assert(s >= 0.0)
 }
 
 // NOTE: float.is_nan and float.is_infinite have no runtime — skipped
-
 // ── float.to_string ──
-
 test "float.to_string" {
-  let s = float.to_string(3.14)
+  let s = float.to_string(3.14);
   assert_eq(s.contains("3.14"), true)
 }
 
 test "float.to_string zero" {
-  let s = float.to_string(0.0)
+  let s = float.to_string(0.0);
   assert_eq(s.contains("0"), true)
 }
 
 // ── float.parse ──
-
 effect fn parse_float(s: String) -> Result[Float, String] = {
-  let n = float.parse(s)
+  let n = float.parse(s);
   ok(n)
 }
 
@@ -46,21 +42,19 @@ test "float.parse integer string" {
 }
 
 // ── float.abs combined with arithmetic ──
-
 test "float.abs of subtraction" {
-  let a = 3.0
-  let b = 7.0
+  let a = 3.0;
+  let b = 7.0;
   assert_eq(float.abs(a - b), 4.0)
 }
 
 // ── float.clamp edge cases ──
-
 test "float.clamp at exact boundary" {
-  assert_eq(float.clamp(0.0, 0.0, 1.0), 0.0)
+  assert_eq(float.clamp(0.0, 0.0, 1.0), 0.0);
   assert_eq(float.clamp(1.0, 0.0, 1.0), 1.0)
 }
 
 test "float.clamp below and above" {
-  assert_eq(float.clamp(-100.0, 0.0, 10.0), 0.0)
+  assert_eq(float.clamp(-100.0, 0.0, 10.0), 0.0);
   assert_eq(float.clamp(100.0, 0.0, 10.0), 10.0)
 }

@@ -1,28 +1,28 @@
-// for_tuple_test — ForIn with tuple destructuring
 
+// for_tuple_test — ForIn with tuple destructuring
 test "for with map tuple destructure" {
-  let m = ["x": 10, "y": 20]
-  var sum = 0
+  let m = ["x": 10, "y": 20];
+  var sum = 0;
   for (k, v) in m {
-    sum = sum + v
-  }
+    sum = sum + v;
+  };
   assert_eq(sum, 30)
 }
 
 test "for map key access" {
-  let m = ["a": 1, "b": 2]
-  var keys: List[String] = []
+  let m = ["a": 1, "b": 2];
+  var keys: List[String] = [];
   for (k, v) in m {
-    keys = keys + [k]
-  }
+    keys = keys + [k];
+  };
   assert_eq(list.len(keys), 2)
 }
 
 test "for map with interpolation" {
-  let m = ["name": "Alice"]
-  var result = ""
+  let m = ["name": "Alice"];
+  var result = "";
   for (k, v) in m {
-    result = "${k}=${v}"
-  }
+    result = "${k}=${v}";
+  };
   assert_eq(result, "name=Alice")
 }

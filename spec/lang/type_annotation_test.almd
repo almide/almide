@@ -1,68 +1,64 @@
+
 // type_annotation_test — Explicit type annotations
-
 // ── Scalar type annotations ──
-
 test "let int annotation" {
-  let x: Int = 42
+  let x: Int = 42;
   assert_eq(x, 42)
 }
 
 test "let float annotation" {
-  let x: Float = 3.14
+  let x: Float = 3.14;
   assert_eq(x > 3.0, true)
 }
 
 test "let string annotation" {
-  let x: String = "hello"
+  let x: String = "hello";
   assert_eq(x, "hello")
 }
 
 test "let bool annotation" {
-  let x: Bool = true
+  let x: Bool = true;
   assert_eq(x, true)
 }
 
 // ── Collection type annotations ──
-
 test "empty list with type annotation" {
-  let xs: List[Int] = []
-  assert_eq(list.len(xs), 0)
+  let xs: List[Int] = [];
+  assert_eq(list.len(xs), 0);
   assert_eq(xs + [1], [1])
 }
 
 test "empty string list annotation" {
-  let xs: List[String] = []
+  let xs: List[String] = [];
   assert_eq(list.len(xs), 0)
 }
 
 test "map type annotation" {
-  let m: Map[String, Int] = [:]
+  let m: Map[String, Int] = [:];
   assert_eq(map.len(m), 0)
 }
 
 // ── Generic type application ──
-
 test "list of int annotation" {
-  let xs: List[Int] = [1, 2, 3]
+  let xs: List[Int] = [1, 2, 3];
   assert_eq(list.len(xs), 3)
 }
 
 test "option string annotation" {
-  let x: Option[String] = some("hi")
-  assert_eq(x, some("hi"))
-  let y: Option[String] = none
+  let x: Option[String] = some("hi");
+  assert_eq(x, some("hi"));
+  let y: Option[String] = none;
   assert_eq(y, none)
 }
 
 test "result annotation" {
-  let r: Result[Int, String] = ok(42)
-  assert_eq(r, ok(42))
-  let e: Result[Int, String] = err("fail")
+  let r: Result[Int, String] = ok(42);
+  assert_eq(r, ok(42));
+  let e: Result[Int, String] = err("fail");
   assert_eq(e, err("fail"))
 }
 
 // ── Function param and return types ──
-
 fn add_typed(a: Int, b: Int) -> Int = a + b
 
 fn concat_typed(a: String, b: String) -> String = a + b
@@ -82,8 +78,7 @@ test "typed function bool" {
 }
 
 // ── Function type as parameter ──
-
-fn apply_fn(f: (Int) -> Int, x: Int) -> Int = f(x)
+fn apply_fn(f: fn(Int) -> Int, x: Int) -> Int = f(x)
 
 test "fn type as param" {
   assert_eq(apply_fn((x) => x * 3, 5), 15)

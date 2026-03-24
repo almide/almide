@@ -1,5 +1,5 @@
-// string extra tests — deeper coverage of string module
 
+// string extra tests — deeper coverage of string module
 test "string.pad_start with spaces" {
   assert_eq(string.pad_start("hi", 6, " "), "    hi")
 }
@@ -37,22 +37,22 @@ test "string.chars empty string" {
 }
 
 test "string.is_empty true and false" {
-  assert(string.is_empty(""))
+  assert(string.is_empty(""));
   assert(not string.is_empty("x"))
 }
 
 test "string.starts_with match" {
-  assert(string.starts_with("hello world", "hello"))
+  assert(string.starts_with("hello world", "hello"));
   assert(not string.starts_with("hello world", "world"))
 }
 
 test "string.ends_with match" {
-  assert(string.ends_with("hello world", "world"))
+  assert(string.ends_with("hello world", "world"));
   assert(not string.ends_with("hello world", "hello"))
 }
 
 test "string.index_of found and not found" {
-  assert_eq(string.index_of("hello", "ell"), some(1))
+  assert_eq(string.index_of("hello", "ell"), some(1));
   assert_eq(string.index_of("hello", "xyz"), none)
 }
 

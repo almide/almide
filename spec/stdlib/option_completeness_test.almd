@@ -1,11 +1,11 @@
-// option completeness tests — to_list, to_result, filter, zip edge cases, flatten
 
+// option completeness tests — to_list, to_result, filter, zip edge cases, flatten
 test "option.to_list on some with string" {
   assert_eq(option.to_list(some("hello")), ["hello"])
 }
 
 test "option.to_list on none typed" {
-  let n: Option[String] = none
+  let n: Option[String] = none;
   assert_eq(option.to_list(n), [])
 }
 
@@ -14,13 +14,13 @@ test "option.to_list on some int" {
 }
 
 test "option.to_result on some returns ok" {
-  let r = option.to_result(some("value"), "error")
+  let r = option.to_result(some("value"), "error");
   assert_eq(r, ok("value"))
 }
 
 test "option.to_result on none returns err" {
-  let n: Option[String] = none
-  let r = option.to_result(n, "not found")
+  let n: Option[String] = none;
+  let r = option.to_result(n, "not found");
   assert_eq(r, err("not found"))
 }
 
@@ -29,7 +29,7 @@ test "option.to_result on some int" {
 }
 
 test "option.filter on none stays none" {
-  let n: Option[Int] = none
+  let n: Option[Int] = none;
   assert_eq(option.filter(n, (x) => x > 0), none)
 }
 
@@ -42,31 +42,31 @@ test "option.filter predicate false" {
 }
 
 test "option.filter with string predicate" {
-  assert_eq(option.filter(some("hello"), (s) => string.len(s) > 3), some("hello"))
+  assert_eq(option.filter(some("hello"), (s) => string.len(s) > 3), some("hello"));
   assert_eq(option.filter(some("hi"), (s) => string.len(s) > 3), none)
 }
 
 test "option.zip first none" {
-  let n: Option[Int] = none
-  let r = option.zip(n, some("a"))
+  let n: Option[Int] = none;
+  let r = option.zip(n, some("a"));
   assert_eq(option.is_none(r), true)
 }
 
 test "option.zip second none" {
-  let n: Option[String] = none
-  let r = option.zip(some(1), n)
+  let n: Option[String] = none;
+  let r = option.zip(some(1), n);
   assert_eq(option.is_none(r), true)
 }
 
 test "option.zip both none" {
-  let a: Option[Int] = none
-  let b: Option[String] = none
-  let r = option.zip(a, b)
+  let a: Option[Int] = none;
+  let b: Option[String] = none;
+  let r = option.zip(a, b);
   assert_eq(option.is_none(r), true)
 }
 
 test "option.zip both some" {
-  let r = option.zip(some(1), some("a"))
+  let r = option.zip(some(1), some("a"));
   assert_eq(option.is_some(r), true)
 }
 
@@ -75,14 +75,14 @@ test "option.flatten some(some(x))" {
 }
 
 test "option.flatten some(none)" {
-  let v: Option[Option[Int]] = some(none)
-  let r = option.flatten(v)
+  let v: Option[Option[Int]] = some(none);
+  let r = option.flatten(v);
   assert_eq(option.is_none(r), true)
 }
 
 test "option.flatten none" {
-  let v: Option[Option[Int]] = none
-  let r = option.flatten(v)
+  let v: Option[Option[Int]] = none;
+  let r = option.flatten(v);
   assert_eq(option.is_none(r), true)
 }
 
@@ -91,35 +91,35 @@ test "option.flatten some(some(string))" {
 }
 
 test "option.map then filter" {
-  let mapped = option.map(some(3), (x) => x * 2)
-  let r = option.filter(mapped, (x) => x > 5)
+  let mapped = option.map(some(3), (x) => x * 2);
+  let r = option.filter(mapped, (x) => x > 5);
   assert_eq(r, some(6))
 }
 
 test "option.map then filter rejects" {
-  let mapped = option.map(some(2), (x) => x * 2)
-  let r = option.filter(mapped, (x) => x > 5)
+  let mapped = option.map(some(2), (x) => x * 2);
+  let r = option.filter(mapped, (x) => x > 5);
   assert_eq(option.is_none(r), true)
 }
 
 test "option.map with type change" {
-  let r = option.map(some(42), (x) => int.to_string(x))
+  let r = option.map(some(42), (x) => int.to_string(x));
   assert_eq(r, some("42"))
 }
 
 test "option.flat_map returns some" {
-  let r = option.flat_map(some(10), (x) => if x > 5 then some(x * 2) else none)
+  let r = option.flat_map(some(10), (x) => if x > 5 then some(x * 2) else none);
   assert_eq(r, some(20))
 }
 
 test "option.flat_map returns none from predicate" {
-  let r = option.flat_map(some(3), (x) => if x > 5 then some(x * 2) else none)
+  let r = option.flat_map(some(3), (x) => if x > 5 then some(x * 2) else none);
   assert_eq(option.is_none(r), true)
 }
 
 test "option.flat_map on none" {
-  let n: Option[Int] = none
-  let r = option.flat_map(n, (x) => some(x + 1))
+  let n: Option[Int] = none;
+  let r = option.flat_map(n, (x) => some(x + 1));
   assert_eq(option.is_none(r), true)
 }
 
@@ -128,7 +128,7 @@ test "option.is_some on some string" {
 }
 
 test "option.is_none on none string" {
-  let n: Option[String] = none
+  let n: Option[String] = none;
   assert_eq(option.is_none(n), true)
 }
 
@@ -137,6 +137,6 @@ test "option.unwrap_or with string" {
 }
 
 test "option.unwrap_or none with string default" {
-  let n: Option[String] = none
+  let n: Option[String] = none;
   assert_eq(option.unwrap_or(n, "default"), "default")
 }

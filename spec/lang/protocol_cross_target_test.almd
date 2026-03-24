@@ -1,60 +1,61 @@
+
 // protocol_cross_target_test — Protocol tests designed for cross-target verification (Rust + TS/JS)
-
 // ── Core protocol operations that must match across targets ──
-
 protocol Stringify {
   fn to_str(a: Self) -> String
 }
 
 type Pair: Stringify = { first: String, second: String }
+
 fn Pair.to_str(p: Pair) -> String = p.first + ":" + p.second
 
 test "basic protocol method" {
-  let p = Pair { first: "a", second: "b" }
-  assert_eq(p.to_str(), "a:b")
+  let p = Pair { first: "a", second: "b" };
+  assert_eq(p.to_str(), "a:b");
   assert_eq(Pair.to_str(p), "a:b")
 }
 
 // ── Protocol with Int arithmetic ──
-
 protocol Calculator {
   fn compute(a: Self) -> Int
 }
 
 type Sum: Calculator = { x: Int, y: Int }
+
 fn Sum.compute(s: Sum) -> Int = s.x + s.y
 
 type Product: Calculator = { x: Int, y: Int }
+
 fn Product.compute(p: Product) -> Int = p.x * p.y
 
 test "protocol arithmetic across types" {
-  assert_eq(Sum.compute(Sum { x: 3, y: 4 }), 7)
+  assert_eq(Sum.compute(Sum { x: 3, y: 4 }), 7);
   assert_eq(Product.compute(Product { x: 3, y: 4 }), 12)
 }
 
 // ── Protocol with Bool logic ──
-
 protocol Predicate {
   fn test_value(a: Self, n: Int) -> Bool
 }
 
 type EvenCheck: Predicate = { label: String }
+
 fn EvenCheck.test_value(e: EvenCheck, n: Int) -> Bool = n % 2 == 0
 
 type PositiveCheck: Predicate = { label: String }
+
 fn PositiveCheck.test_value(p: PositiveCheck, n: Int) -> Bool = n > 0
 
 test "protocol with bool return" {
-  let even = EvenCheck { label: "even" }
-  let pos = PositiveCheck { label: "pos" }
-  assert_eq(even.test_value(4), true)
-  assert_eq(even.test_value(3), false)
-  assert_eq(pos.test_value(1), true)
+  let even = EvenCheck { label: "even" };
+  let pos = PositiveCheck { label: "pos" };
+  assert_eq(even.test_value(4), true);
+  assert_eq(even.test_value(3), false);
+  assert_eq(pos.test_value(1), true);
   assert_eq(pos.test_value(-1), false)
 }
 
 // ── Protocol with List operations ──
-
 protocol Container {
   fn items(a: Self) -> List[Int]
   fn size(a: Self) -> Int
@@ -62,97 +63,94 @@ protocol Container {
 }
 
 type Bag: Container = { data: List[Int] }
+
 fn Bag.items(b: Bag) -> List[Int] = b.data
+
 fn Bag.size(b: Bag) -> Int = list.len(b.data)
+
 fn Bag.has_item(b: Bag, item: Int) -> Bool = list.contains(b.data, item)
 
 test "protocol with list operations" {
-  let b = Bag { data: [10, 20, 30] }
-  assert_eq(b.items(), [10, 20, 30])
-  assert_eq(b.size(), 3)
-  assert_eq(b.has_item(20), true)
+  let b = Bag { data: [10, 20, 30] };
+  assert_eq(b.items(), [10, 20, 30]);
+  assert_eq(b.size(), 3);
+  assert_eq(b.has_item(20), true);
   assert_eq(b.has_item(99), false)
 }
 
 // ── Protocol with string manipulation ──
-
 protocol Formatter {
   fn format_upper(a: Self) -> String
   fn format_reversed(a: Self) -> String
 }
 
 type Label: Formatter = { text: String }
+
 fn Label.format_upper(l: Label) -> String = string.to_upper(l.text)
+
 fn Label.format_reversed(l: Label) -> String = string.reverse(l.text)
 
 test "protocol with string stdlib calls" {
-  let l = Label { text: "hello" }
-  assert_eq(l.format_upper(), "HELLO")
+  let l = Label { text: "hello" };
+  assert_eq(l.format_upper(), "HELLO");
   assert_eq(l.format_reversed(), "olleh")
 }
 
 // ── Protocol with Option return ──
-
 protocol Lookup {
   fn find(a: Self, key: String) -> Option[String]
 }
 
 type Dict: Lookup = { entries: List[(String, String)] }
-fn Dict.find(d: Dict, key: String) -> Option[String] =
-  list.find(d.entries, (e) => e.0 == key)
-    |> option.map((e) => e.1)
+
+fn Dict.find(d: Dict, key: String) -> Option[String] = list.find(d.entries, (e) => e.0 == key) |> option.map((e) => e.1)
 
 test "protocol returning Option" {
-  let d = Dict { entries: [("name", "alice"), ("age", "30")] }
-  assert_eq(d.find("name"), some("alice"))
+  let d = Dict { entries: [("name", "alice"), ("age", "30")] };
+  assert_eq(d.find("name"), some("alice"));
   assert_eq(d.find("missing"), none)
 }
 
 // ── Protocol with Result return ──
-
 protocol Parser {
   fn parse_int(a: Self) -> Result[Int, String]
 }
 
 type Input: Parser = { raw: String }
+
 fn Input.parse_int(i: Input) -> Result[Int, String] = int.parse(i.raw)
 
 test "protocol returning Result" {
-  let good = Input { raw: "42" }
+  let good = Input { raw: "42" };
   assert_eq(good.parse_int(), ok(42))
 }
 
 // ── Protocol on variant type ──
-
 protocol Eval {
   fn eval(a: Self) -> Int
 }
 
-type MathExpr: Eval =
-  | Num(Int)
-  | Add(MathExpr, MathExpr)
-  | Mul(MathExpr, MathExpr)
+type MathExpr: Eval = | Num(Int) | Add(MathExpr, MathExpr) | Mul(MathExpr, MathExpr)
 
-fn MathExpr.eval(e: MathExpr) -> Int =
-  match e {
-    Num(n) => n
-    Add(a, b) => MathExpr.eval(a) + MathExpr.eval(b)
-    Mul(a, b) => MathExpr.eval(a) * MathExpr.eval(b)
-  }
+fn MathExpr.eval(e: MathExpr) -> Int = match e {
+  Num(n) => n,
+  Add(a, b) => MathExpr.eval(a) + MathExpr.eval(b),
+  Mul(a, b) => MathExpr.eval(a) * MathExpr.eval(b),
+}
 
 test "protocol on recursive variant" {
   // (2 + 3) * 4 = 20
-  let expr = Mul(Add(Num(2), Num(3)), Num(4))
+  let expr = Mul(Add(Num(2), Num(3)), Num(4));
   assert_eq(MathExpr.eval(expr), 20)
 }
 
 // ── Protocol method used in fold ──
-
 protocol Scorable {
   fn score(a: Self) -> Int
 }
 
 type Player: Scorable = { name: String, points: Int }
+
 fn Player.score(p: Player) -> Int = p.points
 
 test "protocol in fold accumulation" {
@@ -160,17 +158,14 @@ test "protocol in fold accumulation" {
     Player { name: "a", points: 10 },
     Player { name: "b", points: 25 },
     Player { name: "c", points: 15 }
-  ]
-  let total = list.fold(players, 0, (acc, p) => acc + Player.score(p))
-  assert_eq(total, 50)
-  let max_score = list.fold(players, 0, (best, p) =>
-    if Player.score(p) > best then Player.score(p) else best
-  )
+  ];
+  let total = list.fold(players, 0, (acc, p) => acc + Player.score(p));
+  assert_eq(total, 50);
+  let max_score = list.fold(players, 0, (best, p) => if Player.score(p) > best then Player.score(p) else best);
   assert_eq(max_score, 25)
 }
 
 // ── Protocol method in pipe chain ──
-
 protocol Transform {
   fn double(a: Self) -> Self
   fn add_one(a: Self) -> Self
@@ -178,80 +173,76 @@ protocol Transform {
 }
 
 type NumBox: Transform = { v: Int }
+
 fn NumBox.double(n: NumBox) -> NumBox = NumBox { v: n.v * 2 }
+
 fn NumBox.add_one(n: NumBox) -> NumBox = NumBox { v: n.v + 1 }
+
 fn NumBox.get_value(n: NumBox) -> Int = n.v
 
 test "protocol pipe chain" {
   // (3 * 2 + 1) * 2 + 1 = 15
-  let result = NumBox { v: 3 }
-    |> NumBox.double()
-    |> NumBox.add_one()
-    |> NumBox.double()
-    |> NumBox.add_one()
-    |> NumBox.get_value()
+  let result = NumBox { v: 3 } |> NumBox.double() |> NumBox.add_one() |> NumBox.double() |> NumBox.add_one() |> NumBox.get_value();
   assert_eq(result, 15)
 }
 
 // ── Protocol with equality check on results ──
-
 protocol Identifiable {
   fn id(a: Self) -> String
 }
 
 type User: Eq, Identifiable = { uid: String, name: String }
+
 fn User.eq(a: User, b: User) -> Bool = a.uid == b.uid
+
 fn User.id(u: User) -> String = u.uid
 
 test "protocol combined with Eq" {
-  let a = User { uid: "u1", name: "Alice" }
-  let b = User { uid: "u1", name: "Alice (updated)" }
-  let c = User { uid: "u2", name: "Bob" }
-  assert_eq(a == b, true)
-  assert_eq(a == c, false)
+  let a = User { uid: "u1", name: "Alice" };
+  let b = User { uid: "u1", name: "Alice (updated)" };
+  let c = User { uid: "u2", name: "Bob" };
+  assert_eq(a == b, true);
+  assert_eq(a == c, false);
   assert_eq(a.id(), "u1")
 }
 
 // ── Protocol with multiple string concat ──
-
 protocol Joinable {
   fn join_with(a: Self, sep: String) -> String
 }
 
 type Triple: Joinable = { a: String, b: String, c: String }
-fn Triple.join_with(t: Triple, sep: String) -> String =
-  t.a + sep + t.b + sep + t.c
+
+fn Triple.join_with(t: Triple, sep: String) -> String = t.a + sep + t.b + sep + t.c
 
 test "protocol with string concat and separator" {
-  let t = Triple { a: "x", b: "y", c: "z" }
-  assert_eq(t.join_with("-"), "x-y-z")
-  assert_eq(t.join_with(", "), "x, y, z")
+  let t = Triple { a: "x", b: "y", c: "z" };
+  assert_eq(t.join_with("-"), "x-y-z");
+  assert_eq(t.join_with(", "), "x, y, z");
   assert_eq(t.join_with(""), "xyz")
 }
 
 // ── Protocol method in match arms ──
-
 protocol Weighable {
   fn weight(a: Self) -> Int
 }
 
 type Package: Weighable = | Light | Medium | Heavy
-fn Package.weight(p: Package) -> Int =
-  match p {
-    Light => 1
-    Medium => 5
-    Heavy => 20
-  }
 
-fn shipping_label(p: Package) -> String =
-  match Package.weight(p) {
-    w if w <= 1 => "envelope"
-    w if w <= 10 => "box"
-    _ => "freight"
-  }
+fn Package.weight(p: Package) -> Int = match p {
+  Light => 1,
+  Medium => 5,
+  Heavy => 20,
+}
+
+fn shipping_label(p: Package) -> String = match Package.weight(p) {
+  w if w <= 1 => "envelope",
+  w if w <= 10 => "box",
+  _ => "freight",
+}
 
 test "protocol result used in another match" {
-  assert_eq(shipping_label(Light), "envelope")
-  assert_eq(shipping_label(Medium), "box")
+  assert_eq(shipping_label(Light), "envelope");
+  assert_eq(shipping_label(Medium), "box");
   assert_eq(shipping_label(Heavy), "freight")
 }

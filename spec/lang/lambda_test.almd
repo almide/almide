@@ -1,64 +1,65 @@
-// lambda_test — Lambda edge cases
 
+// lambda_test — Lambda edge cases
 fn apply(f: fn(Int) -> Int, x: Int) -> Int = f(x)
+
 fn apply_str(f: fn(String) -> String, s: String) -> String = f(s)
 
 test "lambda as argument" {
-  let result = apply((x) => x * 2, 5)
+  let result = apply((x) => x * 2, 5);
   assert_eq(result, 10)
 }
 
 test "lambda captures let binding" {
-  let factor = 3
-  let result = apply((x) => x * factor, 10)
+  let factor = 3;
+  let result = apply((x) => x * factor, 10);
   assert_eq(result, 30)
 }
 
 test "lambda in map" {
-  let xs = [1, 2, 3].map((x) => x + 10)
+  let xs = [1, 2, 3].map((x) => x + 10);
   assert_eq(xs, [11, 12, 13])
 }
 
 test "lambda in filter" {
-  let evens = [1, 2, 3, 4, 5].filter((x) => x % 2 == 0)
+  let evens = [1, 2, 3, 4, 5].filter((x) => x % 2 == 0);
   assert_eq(evens, [2, 4])
 }
 
 test "lambda returning string" {
-  let result = apply_str((s) => s + "!", "hello")
+  let result = apply_str((s) => s + "!", "hello");
   assert_eq(result, "hello!")
 }
 
 test "lambda with block body" {
   let result = apply((x) => {
-    let doubled = x * 2
-    let added = doubled + 1
+    let doubled = x * 2;
+    let added = doubled + 1;
     added
-  }, 5)
+  }, 5);
   assert_eq(result, 11)
 }
 
 test "lambda in fold" {
-  let sum = [1, 2, 3, 4].fold(0, (acc, x) => acc + x)
+  let sum = [1, 2, 3, 4].fold(0, (acc, x) => acc + x);
   assert_eq(sum, 10)
 }
 
 test "lambda chained map filter" {
-  let squared = [1, 2, 3, 4, 5].map((x) => x * x)
-  let result = squared.filter((x) => x > 5)
+  let squared = [1, 2, 3, 4, 5].map((x) => x * x);
+  let result = squared.filter((x) => x > 5);
   assert_eq(result, [9, 16, 25])
 }
 
 test "nested lambda capture" {
-  let base = 10
+  let base = 10;
   let xs = [1, 2, 3].map((x) => {
-    let offset = base + x
+    let offset = base + x;
     offset * 2
-  })
+  });
   assert_eq(xs, [22, 24, 26])
 }
 
 test "lambda identity" {
-  let result = apply((x) => x, 42)
+  let result = apply((x) => x, 42);
   assert_eq(result, 42)
 }

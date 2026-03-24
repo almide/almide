@@ -1,7 +1,6 @@
+
 // Comprehensive int module tests
-
 // ── to_string ──
-
 test "int.to_string positive" {
   assert_eq(int.to_string(123), "123")
 }
@@ -19,7 +18,6 @@ test "int.to_string large" {
 }
 
 // ── to_hex ──
-
 test "int.to_hex small" {
   assert_eq(int.to_hex(10), "a")
 }
@@ -37,7 +35,6 @@ test "int.to_hex zero" {
 }
 
 // ── parse ──
-
 test "int.parse positive" {
   assert_eq(int.parse("100"), ok(100))
 }
@@ -51,17 +48,16 @@ test "int.parse zero" {
 }
 
 test "int.parse empty string fails" {
-  let result = int.parse("")
+  let result = int.parse("");
   assert(result != ok(0))
 }
 
 test "int.parse float string fails" {
-  let result = int.parse("3.14")
+  let result = int.parse("3.14");
   assert(result != ok(3))
 }
 
 // ── parse_hex ──
-
 test "int.from_hex lowercase" {
   assert_eq(int.from_hex("a"), ok(10))
 }
@@ -79,7 +75,6 @@ test "int.from_hex large" {
 }
 
 // ── abs ──
-
 test "int.abs negative" {
   assert_eq(int.abs(-100), 100)
 }
@@ -93,7 +88,6 @@ test "int.abs zero" {
 }
 
 // ── min / max ──
-
 test "int.min equal" {
   assert_eq(int.min(5, 5), 5)
 }
@@ -119,7 +113,6 @@ test "int.max large numbers" {
 }
 
 // ── clamp ──
-
 test "int.clamp within range" {
   assert_eq(int.clamp(5, 0, 10), 5)
 }
@@ -145,7 +138,6 @@ test "int.clamp negative range" {
 }
 
 // ── UFCS ──
-
 test "int UFCS to_string" {
   assert_eq(42.to_string(), "42")
 }

@@ -1,5 +1,5 @@
-// list extra tests — deeper coverage of list module
 
+// list extra tests — deeper coverage of list module
 test "list.take basic" {
   assert_eq(list.take([1, 2, 3, 4, 5], 3), [1, 2, 3])
 }
@@ -17,23 +17,23 @@ test "list.drop more than length" {
 }
 
 test "list.enumerate preserves length" {
-  let result = list.enumerate(["a", "b", "c"])
+  let result = list.enumerate(["a", "b", "c"]);
   assert_eq(list.len(result), 3)
 }
 
 test "list.enumerate empty list" {
-  let empty: List[Int] = []
-  let result = list.enumerate(empty)
+  let empty: List[Int] = [];
+  let result = list.enumerate(empty);
   assert_eq(list.len(result), 0)
 }
 
 test "list.zip basic" {
-  let result = list.zip([1, 2, 3], ["a", "b", "c"])
+  let result = list.zip([1, 2, 3], ["a", "b", "c"]);
   assert_eq(list.len(result), 3)
 }
 
 test "list.zip truncates to shorter" {
-  let result = list.zip([1, 2], ["a", "b", "c"])
+  let result = list.zip([1, 2], ["a", "b", "c"]);
   assert_eq(list.len(result), 2)
 }
 
@@ -70,19 +70,37 @@ test "list.reduce on non-empty" {
 }
 
 test "list.first and last" {
-  assert_eq(list.first([10, 20, 30]), some(10))
-  assert_eq(list.last([10, 20, 30]), some(30))
-  let empty: List[Int] = []
-  assert_eq(list.first(empty), none)
+  assert_eq(list.first([10, 20, 30]), some(10));
+  assert_eq(list.last([10, 20, 30]), some(30));
+  let empty: List[Int] = [];
+  assert_eq(list.first(empty), none);
   assert_eq(list.last(empty), none)
 }
 
 test "list.unique removes duplicates" {
-  assert_eq(list.unique([1, 2, 2, 3, 1, 3]), [1, 2, 3])
+  assert_eq(list.unique([
+    1,
+    2,
+    2,
+    3,
+    1,
+    3
+  ]), [1, 2, 3])
 }
 
 test "list.chunk even split" {
-  assert_eq(list.chunk([1, 2, 3, 4, 5, 6], 2), [[1, 2], [3, 4], [5, 6]])
+  assert_eq(list.chunk([
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ], 2), [
+    [1, 2],
+    [3, 4],
+    [5, 6]
+  ])
 }
 
 test "list.scan running sum" {

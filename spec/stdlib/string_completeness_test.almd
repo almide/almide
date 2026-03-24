@@ -1,5 +1,5 @@
-// string completeness tests — functions not covered elsewhere
 
+// string completeness tests — functions not covered elsewhere
 test "string.reverse basic" {
   assert_eq(string.reverse("hello"), "olleh")
 }
@@ -21,7 +21,7 @@ test "string.count no match" {
 }
 
 test "string.count empty substring" {
-  let n = string.count("abc", "")
+  let n = string.count("abc", "");
   assert(n >= 0)
 }
 
@@ -158,21 +158,21 @@ test "string.from_codepoint 65" {
 }
 
 test "string.to_bytes and from_bytes roundtrip" {
-  let bytes = string.to_bytes("Hi")
+  let bytes = string.to_bytes("Hi");
   assert_eq(string.from_bytes(bytes), "Hi")
 }
 
 test "string.to_bytes known values" {
-  let bytes = string.to_bytes("AB")
-  assert_eq(list.len(bytes), 2)
-  assert_eq(list.get(bytes, 0), some(65))
+  let bytes = string.to_bytes("AB");
+  assert_eq(list.len(bytes), 2);
+  assert_eq(list.get(bytes, 0), some(65));
   assert_eq(list.get(bytes, 1), some(66))
 }
 
 test "string.lines splits on newline" {
-  let lines = string.lines("a\nb\nc")
-  assert_eq(list.len(lines), 3)
-  assert_eq(list.get(lines, 0), some("a"))
+  let lines = string.lines("a\nb\nc");
+  assert_eq(list.len(lines), 3);
+  assert_eq(list.get(lines, 0), some("a"));
   assert_eq(list.get(lines, 2), some("c"))
 }
 
