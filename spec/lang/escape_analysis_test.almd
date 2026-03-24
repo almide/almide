@@ -1,0 +1,87 @@
+
+// escape_analysis_test — var mutation in closures (pure fn vs effect fn)
+// ── var local, no lambda capture — OK ──
+fn sum(xs: List[Int]) -> Int = {
+  var total = 0;
+  for x in xs {
+    total = total + x;
+  };
+  total
+}
+
+test "var local mutation without lambda" {
+  assert_eq(sum([1, 2, 3, 4, 5]), 15)
+}
+
+// ── var read-only in lambda — OK ──
+fn offset_all(xs: List[Int]) -> List[Int] = {
+  var base = 10;
+  list.map(xs, (x) => x + base)
+}
+
+test "var read in lambda is allowed" {
+  assert_eq(offset_all([1, 2, 3]), [11, 12, 13])
+}
+
+// ── var declared inside lambda — OK (same scope) ──
+fn transform(xs: List[Int]) -> List[Int] = {
+  list.map(xs, (x) => {
+    var temp = x * 2;
+    temp = temp + 1;
+    temp
+  })
+}
+
+test "var declared inside lambda is allowed" {
+  assert_eq(transform([1, 2, 3]), [3, 5, 7])
+}
+
+// ── effect fn allows var mutation in lambda — compiles OK ──
+// (Runtime capture semantics are separate; this test verifies no compile error)
+effect fn counter() -> Result[Int, String] = {
+  var count = 0;
+  let inc = () => {
+    count = count + 1;
+  };
+  inc();
+  ok(count)
+}
+
+test "effect fn allows var mutation in lambda (compiles)" {
+  // Verify the function can be called without compile error
+  let result = counter();
+  match result {
+    ok(_) => assert(true),
+    err(_) => assert(false, "should not error"),
+  }
+}
+
+// ── var mutation in for loop (no lambda) — OK ──
+fn count_positive(xs: List[Int]) -> Int = {
+  var count = 0;
+  for x in xs {
+    if x > 0 then {
+      count = count + 1;
+    } else { () };
+  };
+  count
+}
+
+test "var mutation in for loop without lambda" {
+  assert_eq(count_positive([1, -2, 3, -4, 5]), 3)
+}
+
+// ── var mutation in while loop (no lambda) — OK ──
+fn countdown(n: Int) -> Int = {
+  var x = n;
+  var steps = 0;
+  while x > 0 {
+    x = x - 1;
+    steps = steps + 1;
+  };
+  steps
+}
+
+test "var mutation in while loop without lambda" {
+  assert_eq(countdown(5), 5)
+}

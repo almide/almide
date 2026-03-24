@@ -35,6 +35,10 @@ pub struct TypeEnv {
     pub skip_auto_unwrap: bool,
     /// Variables declared with `var` (mutable). Parameters and `let` are immutable.
     pub mutable_vars: std::collections::HashSet<std::string::String>,
+    /// Escape analysis: current lambda nesting depth (0 = not in lambda).
+    pub lambda_depth: usize,
+    /// Escape analysis: the lambda depth at which each `var` was declared.
+    pub var_lambda_depth: std::collections::HashMap<std::string::String, usize>,
     /// Variables that are function parameters (for better error messages).
     pub param_vars: std::collections::HashSet<std::string::String>,
     /// Declaration locations: variable name -> (line, col)
@@ -84,6 +88,8 @@ impl TypeEnv {
             local_symbols: std::collections::HashSet::new(),
             skip_auto_unwrap: false,
             mutable_vars: std::collections::HashSet::new(),
+            lambda_depth: 0,
+            var_lambda_depth: std::collections::HashMap::new(),
             param_vars: std::collections::HashSet::new(),
             var_decl_locs: std::collections::HashMap::new(),
             top_lets: std::collections::HashMap::new(),
