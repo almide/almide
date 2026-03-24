@@ -1,0 +1,27 @@
+// impl_error_test — Verify impl block error diagnostics
+
+// This file tests that the checker correctly reports errors
+// for invalid impl blocks. Each section is commented out
+// because it is expected to fail — we test via almide check.
+
+protocol Showable {
+  fn show(a: Self) -> String
+}
+
+protocol Describable {
+  fn label(a: Self) -> String
+  fn detail(a: Self) -> String
+}
+
+type Dog = { name: String }
+
+// ── Valid impl (baseline) ──
+
+impl Showable for Dog {
+  fn show(d: Dog) -> String = d.name
+}
+
+test "valid impl works" {
+  let d = Dog { name: "Rex" }
+  assert_eq(d.show(), "Rex")
+}

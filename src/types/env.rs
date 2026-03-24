@@ -51,6 +51,8 @@ pub struct TypeEnv {
     pub protocols: std::collections::HashMap<std::string::String, ProtocolDef>,
     /// Types' declared protocol conformances: type name → set of protocol names
     pub type_protocols: std::collections::HashMap<std::string::String, std::collections::HashSet<std::string::String>>,
+    /// Protocol conformances already validated via `impl` blocks (skip re-validation)
+    pub impl_validated: std::collections::HashSet<(std::string::String, std::string::String)>,
 }
 
 impl TypeEnv {
@@ -81,6 +83,7 @@ impl TypeEnv {
             fn_min_params: std::collections::HashMap::new(),
             protocols: std::collections::HashMap::new(),
             type_protocols: std::collections::HashMap::new(),
+            impl_validated: std::collections::HashSet::new(),
         }
     }
 

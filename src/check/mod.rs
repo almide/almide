@@ -368,6 +368,11 @@ impl Checker {
                     self.env.top_lets.insert(name.clone(), resolved);
                 }
             }
+            ast::Decl::Impl { methods, .. } => {
+                for m in methods.iter_mut() {
+                    self.check_decl(m);
+                }
+            }
             ast::Decl::Type { ty, .. } => {
                 // Infer types for default value expressions in variant record fields
                 infer_default_exprs(self, ty);

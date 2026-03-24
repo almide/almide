@@ -154,6 +154,10 @@ impl Checker {
 
         for (type_name, protocol_names) in &type_protocols {
             for proto_name in protocol_names {
+                // Skip if already validated via impl block
+                if self.env.impl_validated.contains(&(type_name.clone(), proto_name.clone())) {
+                    continue;
+                }
                 let proto_def = match self.env.protocols.get(proto_name) {
                     Some(p) => p.clone(),
                     None => continue, // Unknown protocol — already reported by validate_protocols
@@ -197,6 +201,134 @@ impl Checker {
                     }
                 }
             }
+        }
+    }
+
+    /// Register an `impl Protocol for Type { ... }` block:
+    /// 1. Validate that the protocol exists
+    /// 2. Register each method as `Type.method` in env.functions
+    /// 3. Validate method signatures match the protocol definition
+    /// 4. Track the conformance in type_protocols
+    pub(super) fn register_impl_decl(&mut self, trait_name: &str, for_type: &str, methods: &[ast::Decl]) {
+        // 1. Validate protocol exists
+        let proto_def = match self.env.protocols.get(trait_name) {
+            Some(p) => p.clone(),
+            None => {
+                let valid: Vec<&str> = self.env.protocols.keys().map(|s| s.as_str()).collect();
+                self.emit(err(
+                    format!("unknown protocol '{}' in impl block", trait_name),
+                    format!("Known protocols: {}", {
+                        let mut sorted = valid; sorted.sort(); sorted.join(", ")
+                    }),
+                    format!("impl {} for {}", trait_name, for_type),
+                ));
+                // Still register methods as convention functions so downstream doesn't break
+                for m in methods {
+                    if let ast::Decl::Fn { name, params, return_type, effect, r#async, generics, .. } = m {
+                        self.register_fn_sig(name, params, return_type, effect, r#async, generics, Some(for_type));
+                    }
+                }
+                return;
+            }
+        };
+
+        // 2. Register each method as Type.method and validate signature
+        let type_ty = Ty::Named(for_type.to_string(), vec![]);
+        let mut impl_methods: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        for m in methods {
+            if let ast::Decl::Fn { name, params, return_type, effect, r#async, generics, .. } = m {
+                // Register as convention function: Type.method
+                self.register_fn_sig(name, params, return_type, effect, r#async, generics, Some(for_type));
+                impl_methods.insert(name.clone());
+
+                // 3. Validate signature matches protocol definition
+                if let Some(proto_method) = proto_def.methods.iter().find(|pm| pm.name == *name) {
+                    // Resolve the impl method's types for comparison
+                    let gnames: Vec<String> = generics.as_ref().map(|gs| gs.iter().map(|g| g.name.clone()).collect()).unwrap_or_default();
+                    for gn in &gnames { self.env.types.insert(gn.clone(), Ty::TypeVar(gn.clone())); }
+                    let impl_params: Vec<Ty> = params.iter().map(|p| self.resolve_type_expr(&p.ty)).collect();
+                    let impl_ret = self.resolve_type_expr(return_type);
+                    for gn in &gnames { self.env.types.remove(gn); }
+
+                    // Substitute Self → Type in protocol method signature,
+                    // then resolve Named types to structural types for comparison
+                    let expected_params: Vec<Ty> = proto_method.params.iter()
+                        .map(|(_, ty)| {
+                            let substituted = self.substitute_self(ty, &type_ty);
+                            self.env.resolve_named(&substituted)
+                        })
+                        .collect();
+                    let expected_ret = self.env.resolve_named(&self.substitute_self(&proto_method.ret, &type_ty));
+
+                    // Compare param count
+                    if impl_params.len() != expected_params.len() {
+                        self.emit(err(
+                            format!("method '{}' in impl {} for {} has {} parameter(s), expected {}",
+                                name, trait_name, for_type, impl_params.len(), expected_params.len()),
+                            format!("Protocol '{}' defines: fn {}({})", trait_name, name,
+                                proto_method.params.iter().map(|(n, t)| {
+                                    let display_ty = self.substitute_self(t, &type_ty).display();
+                                    format!("{}: {}", n, display_ty)
+                                }).collect::<Vec<_>>().join(", ")),
+                            format!("impl {} for {}", trait_name, for_type),
+                        ));
+                    } else {
+                        // Compare param types (both sides already resolved to structural types)
+                        for (i, (impl_ty, expected_ty)) in impl_params.iter().zip(expected_params.iter()).enumerate() {
+                            if impl_ty != expected_ty && *expected_ty != Ty::Unknown && *impl_ty != Ty::Unknown {
+                                let param_name = &params[i].name;
+                                self.emit(err(
+                                    format!("method '{}.{}' parameter '{}' has type '{}', expected '{}'",
+                                        for_type, name, param_name, impl_ty.display(), expected_ty.display()),
+                                    format!("Change type to '{}'", expected_ty.display()),
+                                    format!("impl {} for {}", trait_name, for_type),
+                                ));
+                            }
+                        }
+                        // Compare return type
+                        if impl_ret != expected_ret && expected_ret != Ty::Unknown && impl_ret != Ty::Unknown {
+                            self.emit(err(
+                                format!("method '{}.{}' returns '{}', expected '{}'",
+                                    for_type, name, impl_ret.display(), expected_ret.display()),
+                                format!("Change return type to '{}'", expected_ret.display()),
+                                format!("impl {} for {}", trait_name, for_type),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Check all required methods are present
+        for proto_method in &proto_def.methods {
+            if !impl_methods.contains(&proto_method.name) {
+                self.emit(err(
+                    format!("impl {} for {} is missing method '{}'", trait_name, for_type, proto_method.name),
+                    format!("Add: fn {}({}) -> {}", proto_method.name,
+                        proto_method.params.iter().map(|(n, t)| {
+                            let display_ty = self.substitute_self(t, &type_ty).display();
+                            format!("{}: {}", n, display_ty)
+                        }).collect::<Vec<_>>().join(", "),
+                        self.substitute_self(&proto_method.ret, &type_ty).display()),
+                    format!("impl {} for {}", trait_name, for_type),
+                ));
+            }
+        }
+
+        // 5. Track protocol conformance + mark as impl-validated
+        self.env.type_protocols
+            .entry(for_type.to_string())
+            .or_insert_with(std::collections::HashSet::new)
+            .insert(trait_name.to_string());
+        self.env.impl_validated.insert((for_type.to_string(), trait_name.to_string()));
+    }
+
+    /// Substitute Self → concrete type in a protocol method type.
+    fn substitute_self(&self, ty: &Ty, replacement: &Ty) -> Ty {
+        match ty {
+            Ty::TypeVar(name) if name == "Self" => replacement.clone(),
+            _ => ty.map_children(&|child| self.substitute_self(child, replacement)),
         }
     }
 
@@ -247,6 +379,9 @@ impl Checker {
                 }
                 ast::Decl::Protocol { name, generics, methods, .. } => {
                     self.register_protocol_decl(name, generics, methods);
+                }
+                ast::Decl::Impl { trait_, for_, methods, .. } => {
+                    self.register_impl_decl(trait_, for_, methods);
                 }
                 ast::Decl::TopLet { name, ty, value, .. } => {
                     let rt = ty.as_ref().map(|te| self.resolve_type_expr(te)).unwrap_or_else(|| self.infer_literal_type(value));

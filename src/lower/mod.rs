@@ -291,10 +291,12 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprI
                 let test_fn = lower_test(&mut ctx, name, body);
                 functions.push(test_fn);
             }
-            ast::Decl::Impl { methods, .. } => {
+            ast::Decl::Impl { for_, methods, .. } => {
                 for m in methods {
                     if let ast::Decl::Fn { name, params, body: Some(body), effect, r#async, span, generics, extern_attrs, visibility, .. } = m {
-                        let f = lower_fn(&mut ctx, name, params, body, effect, r#async, span, generics, extern_attrs, visibility, None);
+                        // Prefix method name with type name: "show" → "Dog.show"
+                        let convention_name = format!("{}.{}", for_, name);
+                        let f = lower_fn(&mut ctx, &convention_name, params, body, effect, r#async, span, generics, extern_attrs, visibility, None);
                         functions.push(f);
                     }
                 }
