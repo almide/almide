@@ -60,6 +60,9 @@ impl NanoPass for ResultPropagationPass {
                     retyped_vars.clear();
                 }
             } else if func.is_test {
+                if !lifted_fns.is_empty() {
+                    func.body = insert_try_for_lifted(std::mem::take(&mut func.body), &lifted_fns);
+                }
                 func.body = insert_try_in_fan(std::mem::take(&mut func.body));
             }
         }
@@ -138,6 +141,8 @@ fn update_call_types(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
         IrExprKind::Call { target, args, type_args } => {
             let fn_name = match &target {
                 CallTarget::Named { name } => Some(name.clone()),
+                CallTarget::Module { module, func } => Some(format!("{}.{}", module, func)),
+                CallTarget::Method { method, .. } => Some(method.clone()),
                 _ => None,
             };
             let args = args.into_iter().map(|a| update_call_types(a, lifted)).collect();
@@ -220,6 +225,85 @@ fn update_call_types_stmt(stmt: IrStmt, lifted: &HashMap<String, Ty>) -> IrStmt 
             IrStmtKind::Assign { var, value: update_call_types(value, lifted) },
         IrStmtKind::Guard { cond, else_ } =>
             IrStmtKind::Guard { cond: update_call_types(cond, lifted), else_: update_call_types(else_, lifted) },
+        other => other,
+    };
+    IrStmt { kind, span: stmt.span }
+}
+
+/// Insert Try around calls to lifted effect fns in test functions.
+/// Test functions don't go through insert_try_body, but they still need to
+/// unwrap Result values from lifted effect fn calls.
+fn insert_try_for_lifted(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
+    let ty = expr.ty.clone();
+    let span = expr.span;
+    match expr.kind {
+        IrExprKind::Call { ref target, ref args, .. } => {
+            let lifted_ty = match target {
+                CallTarget::Named { name } => lifted.get(name),
+                CallTarget::Module { module, func } => lifted.get(&format!("{}.{}", module, func)),
+                CallTarget::Method { method, .. } => lifted.get(method),
+                _ => None,
+            };
+            if let Some(result_ty) = lifted_ty {
+                let inner_ty = match result_ty {
+                    Ty::Applied(TypeConstructorId::Result, args) if args.len() >= 1 => args[0].clone(),
+                    _ => ty.clone(),
+                };
+                let call_with_result_ty = IrExpr { kind: expr.kind, ty: result_ty.clone(), span };
+                return IrExpr {
+                    kind: IrExprKind::Try { expr: Box::new(call_with_result_ty) },
+                    ty: inner_ty, span,
+                };
+            }
+            // Recurse into args to find nested lifted calls
+            let _ = args; // avoid unused warning from ref above
+            match expr.kind {
+                IrExprKind::Call { target, args, type_args } => {
+                    let args = args.into_iter().map(|a| insert_try_for_lifted(a, lifted)).collect();
+                    IrExpr { kind: IrExprKind::Call { target, args, type_args }, ty, span }
+                }
+                _ => unreachable!()
+            }
+        }
+        IrExprKind::Block { stmts, expr: tail } => {
+            let stmts = stmts.into_iter().map(|s| insert_try_for_lifted_stmt(s, lifted)).collect();
+            let tail = tail.map(|e| Box::new(insert_try_for_lifted(*e, lifted)));
+            IrExpr { kind: IrExprKind::Block { stmts, expr: tail }, ty, span }
+        }
+        IrExprKind::DoBlock { stmts, expr: tail } => {
+            let stmts = stmts.into_iter().map(|s| insert_try_for_lifted_stmt(s, lifted)).collect();
+            let tail = tail.map(|e| Box::new(insert_try_for_lifted(*e, lifted)));
+            IrExpr { kind: IrExprKind::DoBlock { stmts, expr: tail }, ty, span }
+        }
+        IrExprKind::If { cond, then, else_ } => IrExpr {
+            kind: IrExprKind::If {
+                cond: Box::new(insert_try_for_lifted(*cond, lifted)),
+                then: Box::new(insert_try_for_lifted(*then, lifted)),
+                else_: Box::new(insert_try_for_lifted(*else_, lifted)),
+            }, ty, span,
+        },
+        IrExprKind::Match { subject, arms } => IrExpr {
+            kind: IrExprKind::Match {
+                subject: Box::new(insert_try_for_lifted(*subject, lifted)),
+                arms: arms.into_iter().map(|a| IrMatchArm {
+                    pattern: a.pattern, guard: a.guard,
+                    body: insert_try_for_lifted(a.body, lifted),
+                }).collect(),
+            }, ty, span,
+        },
+        _ => expr,
+    }
+}
+
+fn insert_try_for_lifted_stmt(stmt: IrStmt, lifted: &HashMap<String, Ty>) -> IrStmt {
+    let kind = match stmt.kind {
+        IrStmtKind::Bind { var, mutability, ty, value } => {
+            let new_value = insert_try_for_lifted(value, lifted);
+            let new_ty = if matches!(&new_value.kind, IrExprKind::Try { .. }) { new_value.ty.clone() } else { ty };
+            IrStmtKind::Bind { var, mutability, ty: new_ty, value: new_value }
+        }
+        IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: insert_try_for_lifted(expr, lifted) },
+        IrStmtKind::Assign { var, value } => IrStmtKind::Assign { var, value: insert_try_for_lifted(value, lifted) },
         other => other,
     };
     IrStmt { kind, span: stmt.span }
