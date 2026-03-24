@@ -59,9 +59,18 @@ impl<'a> RenderContext<'a> {
 
     pub(crate) fn var_name(&self, id: VarId) -> String {
         let name = &self.var_table.get(id).name;
-        let kw = ["default", "switch", "case", "class", "new", "delete",
-            "typeof", "void", "with", "yield", "export", "import",
-            "try", "catch", "finally", "throw", "eval", "arguments"];
+        let kw = [
+            "as", "async", "await", "break", "const", "continue", "crate",
+            "dyn", "else", "enum", "extern", "false", "fn", "for", "if",
+            "impl", "in", "let", "loop", "match", "mod", "move", "mut",
+            "pub", "ref", "return", "self", "Self", "static", "struct",
+            "super", "trait", "true", "type", "unsafe", "use", "where", "while",
+            "abstract", "become", "box", "do", "final", "macro", "override",
+            "priv", "try", "typeof", "unsized", "virtual", "yield",
+            "default", "switch", "case", "class", "new", "delete", "void",
+            "with", "export", "import", "catch", "finally", "throw",
+            "eval", "arguments", "extends",
+        ];
         if kw.contains(&name.as_str()) {
             self.templates.render_with("keyword_escape", None, &[], &[("name", name.as_str())])
                 .unwrap_or_else(|| name.clone())

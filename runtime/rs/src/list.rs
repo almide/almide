@@ -113,8 +113,8 @@ pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send + Sync>(xs: Vec<A>
     }
     let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
     let chunk_size = (xs.len() + cpus - 1) / cpus;
-    let chunks: Vec<&[A]> = xs.chunks(chunk_size).collect();
-    let mut results: Vec<Vec<B>> = vec![Vec::new(); chunks.len()];
+    let chunks: Vec<Vec<A>> = xs.chunks(chunk_size).map(|c| c.to_vec()).collect();
+    let mut results: Vec<Option<Vec<B>>> = (0..chunks.len()).map(|_| None).collect();
     std::thread::scope(|s| {
         let mut handles = Vec::new();
         for chunk in &chunks {
@@ -124,10 +124,10 @@ pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send + Sync>(xs: Vec<A>
             }));
         }
         for (i, handle) in handles.into_iter().enumerate() {
-            results[i] = handle.join().unwrap();
+            results[i] = Some(handle.join().unwrap());
         }
     });
-    results.into_iter().flatten().collect()
+    results.into_iter().flatten().flatten().collect()
 }
 
 pub fn almide_rt_list_par_filter<A: Send + Sync + Clone>(xs: Vec<A>, f: impl Fn(A) -> bool + Send + Sync) -> Vec<A> {
@@ -137,20 +137,20 @@ pub fn almide_rt_list_par_filter<A: Send + Sync + Clone>(xs: Vec<A>, f: impl Fn(
     let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
     let chunk_size = (xs.len() + cpus - 1) / cpus;
     let chunks: Vec<Vec<A>> = xs.chunks(chunk_size).map(|c| c.to_vec()).collect();
-    let mut results: Vec<Vec<A>> = vec![Vec::new(); chunks.len()];
+    let mut results: Vec<Option<Vec<A>>> = (0..chunks.len()).map(|_| None).collect();
     std::thread::scope(|s| {
         let mut handles = Vec::new();
         for chunk in &chunks {
             let f = &f;
             handles.push(s.spawn(move || {
-                chunk.iter().filter(|x| f(x.clone())).cloned().collect::<Vec<A>>()
+                chunk.iter().filter(|x| f((*x).clone())).cloned().collect::<Vec<A>>()
             }));
         }
         for (i, handle) in handles.into_iter().enumerate() {
-            results[i] = handle.join().unwrap();
+            results[i] = Some(handle.join().unwrap());
         }
     });
-    results.into_iter().flatten().collect()
+    results.into_iter().flatten().flatten().collect()
 }
 
 pub fn almide_rt_list_par_any<A: Send + Sync + Clone>(xs: &Vec<A>, f: impl Fn(A) -> bool + Send + Sync) -> bool {
