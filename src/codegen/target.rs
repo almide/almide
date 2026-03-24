@@ -25,6 +25,7 @@ use super::pass_match_subject::MatchSubjectPass;
 use super::pass_effect_inference::EffectInferencePass;
 use super::pass_stream_fusion::StreamFusionPass;
 use super::pass_tco::TailCallOptPass;
+use super::pass_licm::LICMPass;
 use super::template::TemplateSet;
 
 /// Full configuration for a codegen target.
@@ -52,6 +53,8 @@ fn build_pipeline(target: Target) -> Pipeline {
             .add(BoxDerefPass)
             // TCO: convert self-recursive tail calls to loops (before any lowering)
             .add(TailCallOptPass)
+            // LICM: hoist loop-invariant expressions before loops
+            .add(LICMPass)
             // Global passes
             .add(TypeConcretizationPass)
             // Stream fusion BEFORE borrow/clone (decorators break pattern matching)
@@ -75,6 +78,8 @@ fn build_pipeline(target: Target) -> Pipeline {
         Target::TypeScript => Pipeline::new()
             // TCO: convert self-recursive tail calls to loops
             .add(TailCallOptPass)
+            // LICM: hoist loop-invariant expressions before loops
+            .add(LICMPass)
             // Analysis passes
             .add(EffectInferencePass)
             .add(StreamFusionPass)
@@ -89,6 +94,7 @@ fn build_pipeline(target: Target) -> Pipeline {
 
         Target::Go => Pipeline::new()
             .add(TailCallOptPass)
+            .add(LICMPass)
             // Go-specific passes will go here
             // .add(ResultToTuplePass)
             // .add(GoroutineLoweringPass)
@@ -96,6 +102,7 @@ fn build_pipeline(target: Target) -> Pipeline {
 
         Target::Python => Pipeline::new()
             .add(TailCallOptPass)
+            .add(LICMPass)
             // Python-specific passes will go here
             .add(OptionErasurePass)
             // .add(ResultToExceptionPass)
@@ -103,6 +110,7 @@ fn build_pipeline(target: Target) -> Pipeline {
 
         Target::Wasm => Pipeline::new()
             .add(TailCallOptPass)
+            .add(LICMPass)
             .add(EffectInferencePass)
             // StreamFusion not included: WASM emitter has its own lowering paths
             .add(ResultPropagationPass)

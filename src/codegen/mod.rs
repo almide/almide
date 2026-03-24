@@ -36,6 +36,7 @@ pub mod pass_stdlib_lowering;
 pub mod pass_effect_inference;
 pub mod pass_stream_fusion;
 pub mod pass_tco;
+pub mod pass_licm;
 pub mod template;
 pub mod target;
 pub mod walker;
