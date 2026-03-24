@@ -10,7 +10,6 @@
 | [HTTPS Native](active/https-native.md) | rustls統合済、almide build動作確認済。WASM残 | Phase 1 |
 | [Compiler Architecture 10/10](active/compiler-architecture-10.md) | 105/110. 残: テスト 9→10、Codegen統合 9→10 | Architecture |
 | [Cross-Target Parity Matrix](active/cross-target-parity-matrix.md) | Rust/TS/WASM 3ターゲットの挙動差異を体系検証 | Phase 2 |
-| [IR Optimization Tier 2](active/ir-optimization-tier2.md) | LICM, CSE, Inlining — 全ターゲットに効く IR 最適化 | Architecture |
 | [Emit Readability](active/emit-readability.md) | 生成コードの可読性向上 (空行・コメント保持) | Phase 1 |
 
 ## Self-Hosting 前提の言語機能
@@ -70,6 +69,7 @@
 
 | 項目 | 説明 | 状態 |
 |---|---|---|
+| [IR Optimization Tier 2](on-hold/ir-optimization-tier2.md) | CSE, Inlining — WASM向けのみ有効。LICM/StreamFusion/AutoParallel は完了済み | Rust/TSには不要 |
 | [build.rs syn Scanner](on-hold/buildrs-syn-scanner.md) | runtime scanner堅牢化 | 壊れたらやる |
 | [IR Interpreter](on-hold/ir-interpreter.md) | rustc不要で即実行 | 実験的 |
 

@@ -1,4 +1,4 @@
-# IR Optimization Tier 2 [ACTIVE]
+# IR Optimization Tier 2 [ON HOLD]
 
 **優先度:** Medium — 全ターゲットに自動適用される最適化
 **前提:** Tier 1 (constant folding, DCE) 完了済み、nanopass パイプライン確立済み
