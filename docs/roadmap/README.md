@@ -8,11 +8,24 @@
 |---|---|---|
 | [Effect System](active/effect-system.md) | Phase 3-4 残 | Phase 3 |
 | [HTTPS Native](active/https-native.md) | rustls統合済、almide build動作確認済。WASM残 | Phase 1 |
-| [Remove `do` Block](active/remove-do-block.md) | do 廃止 → while + try に統一。Canonicity 回復 | Phase 1 |
-| [Compiler Architecture 10/10](active/compiler-architecture-10.md) | 99/110. Phase 5-7 残 | Architecture |
+| [Compiler Architecture 10/10](active/compiler-architecture-10.md) | 105/110. 残: テスト 9→10、Codegen統合 9→10 | Architecture |
 | [Cross-Target Parity Matrix](active/cross-target-parity-matrix.md) | Rust/TS/WASM 3ターゲットの挙動差異を体系検証 | Phase 2 |
 | [IR Optimization Tier 2](active/ir-optimization-tier2.md) | LICM, CSE, Inlining — 全ターゲットに効く IR 最適化 | Architecture |
 | [Emit Readability](active/emit-readability.md) | 生成コードの可読性向上 (空行・コメント保持) | Phase 1 |
+
+## Self-Hosting 前提の言語機能
+
+> 詳細: [Self-Hosting](on-hold/self-hosting.md)
+
+| 機能 | 状態 | 備考 |
+|------|------|------|
+| 効率的な HashMap/BTreeMap | ❌ | シンボルテーブル、型環境に必須 |
+| Trait / typeclass | ❌ | Display, Eq, Hash の抽象化 |
+| char 単位の文字列操作 | ❌ | レキサーに必須 |
+| バイト列操作 | ❌ | WASM バイナリ生成に必須 |
+| StringBuilder | ❌ | コード生成の効率的な文字列組み立て |
+| ディレクトリ走査 | ❌ | 複数ファイルコンパイルに必要 |
+| パニック / 回復不能エラー | ❌ | ICE ハンドリング |
 
 ## 1.0 Remaining
 
@@ -50,7 +63,7 @@
 | [Almide Shell](on-hold/almide-shell.md) | AI-native REPL |
 | [LLM Integration](on-hold/llm-integration.md) | `almide forge`, `almide fix` |
 | [LLM → IR Generation](on-hold/llm-ir-generation.md) | Parser bypass |
-| [Self-Hosting](on-hold/self-hosting.md) | 350KB WASM bootstrap compiler → LLM 自律進化ループ |
+| [Self-Hosting](on-hold/self-hosting.md) | 350KB WASM bootstrap compiler → LLM 自律進化ループ。前提: HashMap, trait, char操作, バイナリ操作, ディレクトリ走査 |
 | [The Rumbling](on-hold/rumbling.md) | OSS 書き直しキャンペーン: Dogfood → WASM Showcase → Multi-Target → LLM Modification → Platform |
 
 ## On Hold — Compiler Internals
