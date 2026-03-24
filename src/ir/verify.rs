@@ -40,6 +40,8 @@ struct Verifier<'a> {
     known_functions: &'a std::collections::HashSet<String>,
     /// Known module→function mappings for CallTarget::Module validation
     known_module_functions: &'a std::collections::HashMap<String, std::collections::HashSet<String>>,
+    /// VarIds that have been defined (by Bind, param, pattern, lambda, for-in)
+    defined_vars: std::collections::HashSet<u32>,
 }
 
 impl<'a> Verifier<'a> {
@@ -60,6 +62,19 @@ impl<'a> Verifier<'a> {
         }
     }
 
+    fn define_var(&mut self, id: VarId) {
+        self.defined_vars.insert(id.0);
+    }
+
+    fn check_var_defined(&mut self, id: VarId, span: Option<Span>) {
+        if !self.defined_vars.contains(&id.0) {
+            self.err(
+                format!("VarId({}) used but never defined (no Bind/param/pattern)", id.0),
+                span,
+            );
+        }
+    }
+
     // Note: mutability checking is intentionally omitted here.
     // The optimizer's `demote_unused_mut` pass may have already
     // demoted `Var` to `Let` for variables that are assigned but
@@ -73,6 +88,7 @@ impl<'a> IrVisitor for Verifier<'a> {
             // ── Variables ──
             IrExprKind::Var { id } => {
                 self.check_var_id(*id, expr.span);
+                self.check_var_defined(*id, expr.span);
             }
 
             // ── Operators: check type consistency ──
@@ -91,12 +107,14 @@ impl<'a> IrVisitor for Verifier<'a> {
                 }
             }
 
-            // ── ForIn: check var ids, then walk with in_loop=true ──
+            // ── ForIn: check var ids, define vars, then walk with in_loop=true ──
             IrExprKind::ForIn { var, var_tuple, .. } => {
                 self.check_var_id(*var, expr.span);
+                self.define_var(*var);
                 if let Some(tuple_vars) = var_tuple {
                     for v in tuple_vars {
                         self.check_var_id(*v, expr.span);
+                        self.define_var(*v);
                     }
                 }
                 let prev = self.in_loop;
@@ -115,10 +133,11 @@ impl<'a> IrVisitor for Verifier<'a> {
                 return;
             }
 
-            // ── Lambda: check param VarIds before walking body ──
+            // ── Lambda: check param VarIds, define them, before walking body ──
             IrExprKind::Lambda { params, .. } => {
                 for (var, _) in params {
                     self.check_var_id(*var, expr.span);
+                    self.define_var(*var);
                 }
             }
 
@@ -176,6 +195,7 @@ impl<'a> IrVisitor for Verifier<'a> {
         match &stmt.kind {
             IrStmtKind::Bind { var, .. } => {
                 self.check_var_id(*var, stmt.span);
+                self.define_var(*var);
             }
             IrStmtKind::Assign { var, .. } => {
                 self.check_var_id(*var, stmt.span);
@@ -199,10 +219,10 @@ impl<'a> IrVisitor for Verifier<'a> {
         match pat {
             IrPattern::Bind { var, .. } => {
                 self.check_var_id(*var, None);
+                self.define_var(*var);
             }
             _ => {}
         }
-
         walk_pattern(self, pat);
     }
 }
@@ -244,6 +264,7 @@ pub fn verify_program(program: &IrProgram) -> Vec<IrVerifyError> {
             errors: Vec::new(),
             known_functions: &known_functions,
             known_module_functions: &known_module_functions,
+            defined_vars: (0..program.var_table.len() as u32).collect(),
         };
         v.check_var_id(tl.var, None);
         v.visit_expr(&tl.value);
@@ -265,6 +286,7 @@ pub fn verify_program(program: &IrProgram) -> Vec<IrVerifyError> {
                 errors: Vec::new(),
                 known_functions: &known_functions,
                 known_module_functions: &known_module_functions,
+                defined_vars: (0..m.var_table.len() as u32).collect(),
             };
             v.check_var_id(tl.var, None);
             v.visit_expr(&tl.value);
@@ -290,7 +312,15 @@ fn verify_function(
         errors: Vec::new(),
         known_functions,
         known_module_functions,
+        defined_vars: std::collections::HashSet::new(),
     };
+
+    // Pre-populate defined_vars with all VarIds in VarTable.
+    // Some vars are introduced implicitly (open record fields, monomorphization)
+    // without explicit Bind stmts, so we trust the VarTable as the source of truth.
+    for i in 0..var_table.len() {
+        v.defined_vars.insert(i as u32);
+    }
 
     // Check parameter VarIds are valid and unique
     let mut seen_param_ids = std::collections::HashSet::new();
