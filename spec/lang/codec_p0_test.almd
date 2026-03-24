@@ -5,7 +5,7 @@ type Basic: Codec = { id: Int, name: String }
 
 type WithOpt: Codec = { id: Int, nickname: Option[String] }
 
-type WithDef: Codec = { id: Int, name: String, active: Bool }
+type WithDef: Codec = { id: Int, name: String = "anonymous", active: Bool = true }
 
 type Inner: Codec = { x: Int, y: Int }
 

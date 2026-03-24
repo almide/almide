@@ -46,7 +46,7 @@ test "let f = fn ref" {
   assert_eq(f(21), 42)
 }
 
-fn running_sum(xs: List[Int]) -> List[Int] = {
+effect fn running_sum(xs: List[Int]) -> List[Int] = {
   var acc = 0
   list.map(xs, (x) => { acc = acc + x; acc })
 }
