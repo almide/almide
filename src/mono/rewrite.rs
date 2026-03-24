@@ -17,7 +17,7 @@ pub(super) fn rewrite_calls(
         .collect();
     let fn_generics: HashMap<String, Vec<String>> = program.functions.iter()
         .filter(|f| bound_fns.contains_key::<str>(&f.name))
-        .filter_map(|f| f.generics.as_ref().map(|gs| (f.name.to_string(), gs.iter().map(|g| g.name.clone()).collect())))
+        .filter_map(|f| f.generics.as_ref().map(|gs| (f.name.to_string(), gs.iter().map(|g| g.name.to_string()).collect())))
         .collect();
     let fn_ret_types: HashMap<String, Ty> = program.functions.iter()
         .filter(|f| bound_fns.contains_key::<str>(&f.name))

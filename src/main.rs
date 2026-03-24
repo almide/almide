@@ -208,19 +208,19 @@ fn try_compile_with_ir(file: &str, no_check: bool) -> Result<(String, Option<alm
             if let Some(a) = alias {
                 let is_self_import = path.first().map(|s| s.as_str()) == Some("self");
                 let target = if is_self_import && path.len() >= 2 {
-                    path.last().cloned().unwrap_or_default()
+                    path.last().map(|s| s.to_string()).unwrap_or_default()
                 } else if is_self_import {
                     resolved.modules.iter()
                         .find(|(_, _, _, is_self)| *is_self)
                         .map(|(name, _, _, _)| name.clone())
-                        .unwrap_or_else(|| path.join("."))
+                        .unwrap_or_else(|| path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."))
                 } else {
-                    path.join(".")
+                    path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")
                 };
-                Some((a.clone(), target))
+                Some((a.to_string(), target))
             } else if path.len() > 1 && path.first().map(|s| s.as_str()) != Some("self") {
-                let last = path.last().expect("path.len() > 1 checked above").clone();
-                Some((last, path.join(".")))
+                let last = path.last().expect("path.len() > 1 checked above").to_string();
+                Some((last, path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")))
             } else {
                 None
             }

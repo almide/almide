@@ -75,12 +75,12 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
 
         // ── Records ──
         ast::Expr::Record { name, fields, .. } => {
-            let fs = fields.iter().map(|f| (sym(&f.name), lower_expr(ctx, &f.value))).collect();
-            ctx.mk(IrExprKind::Record { name: name.as_ref().map(|n| sym(n)), fields: fs }, ty, span)
+            let fs = fields.iter().map(|f| (f.name, lower_expr(ctx, &f.value))).collect();
+            ctx.mk(IrExprKind::Record { name: *name, fields: fs }, ty, span)
         }
         ast::Expr::SpreadRecord { base, fields, .. } => {
             let ir_base = lower_expr(ctx, base);
-            let fs = fields.iter().map(|f| (sym(&f.name), lower_expr(ctx, &f.value))).collect();
+            let fs = fields.iter().map(|f| (f.name, lower_expr(ctx, &f.value))).collect();
             ctx.mk(IrExprKind::SpreadRecord { base: Box::new(ir_base), fields: fs }, ty, span)
         }
 
@@ -97,7 +97,7 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             if op == "==" || op == "!=" {
                 if let Some(eq_fn) = ctx.find_convention_fn(left_ty, "eq") {
                     let call = ctx.mk(IrExprKind::Call {
-                        target: CallTarget::Named { name: sym(&eq_fn) },
+                        target: CallTarget::Named { name: eq_fn },
                         args: vec![l, r], type_args: vec![],
                     }, Ty::Bool, span);
                     if op == "!=" {
@@ -332,7 +332,7 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         // ── Access ──
         ast::Expr::Member { object, field, .. } => {
             let obj = lower_expr(ctx, object);
-            ctx.mk(IrExprKind::Member { object: Box::new(obj), field: sym(field) }, ty, span)
+            ctx.mk(IrExprKind::Member { object: Box::new(obj), field: *field }, ty, span)
         }
         ast::Expr::TupleIndex { object, index, .. } => {
             let obj = lower_expr(ctx, object);
@@ -357,7 +357,7 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                     // Operator protocol: dispatch to Repr convention if available
                     if let Some(repr_fn) = ctx.find_convention_fn(&ir_expr.ty, "repr") {
                         ir_expr = ctx.mk(IrExprKind::Call {
-                            target: CallTarget::Named { name: sym(&repr_fn) },
+                            target: CallTarget::Named { name: repr_fn },
                             args: vec![ir_expr], type_args: vec![],
                         }, Ty::String, None);
                     }

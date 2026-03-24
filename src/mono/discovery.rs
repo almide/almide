@@ -77,8 +77,8 @@ pub(super) fn discover_in_expr(
                         if let Some(func) = orig_fn {
                             if let Some(ref generics) = func.generics {
                                 for (g, ta) in generics.iter().zip(type_args.iter()) {
-                                    if !bindings.contains_key(&g.name) {
-                                        bindings.insert(g.name.clone(), ta.clone());
+                                    if !bindings.contains_key(&*g.name) {
+                                        bindings.insert(g.name.to_string(), ta.clone());
                                     }
                                 }
                             }
@@ -93,10 +93,10 @@ pub(super) fn discover_in_expr(
                                 // Try to infer from call expr.ty vs function ret_ty
                                 let ret_ty = &func.ret_ty;
                                 for g in generics {
-                                    if !bindings.contains_key(&g.name) || matches!(bindings.get(&g.name), Some(Ty::Unknown)) {
+                                    if !bindings.contains_key(&*g.name) || matches!(bindings.get(&*g.name), Some(Ty::Unknown)) {
                                         let extracted = extract_typevar_binding(ret_ty, &expr.ty, &g.name);
                                         if !matches!(extracted, Ty::Unknown) {
-                                            bindings.insert(g.name.clone(), extracted);
+                                            bindings.insert(g.name.to_string(), extracted);
                                         }
                                     }
                                 }

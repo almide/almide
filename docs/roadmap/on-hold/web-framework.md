@@ -223,6 +223,66 @@ let app = web.new()
   })
 ```
 
+## merjs (Zig) から学ぶべきパターン
+
+[merjs](https://github.com/justrach/merjs) は Next.js 相当をZig単一バイナリ（260KB）で実現。以下のパターンはAlmideに取り込む価値がある:
+
+### ファイルベースルーティング
+
+ディレクトリ構造からルートテーブルを自動生成。
+
+```
+app/
+  index.almd          → /
+  about.almd          → /about
+  users/
+    index.almd        → /users
+    [id].almd         → /users/:id
+api/
+  users.almd          → /api/users (JSON API)
+```
+
+Almideではコンパイラ拡張として実現可能 — `almide build --web app/` がディレクトリを走査してルートテーブルをIRレベルで生成。別途codegenバイナリ不要。
+
+### HTML DSL
+
+```almide
+fn page(user: User) -> Html =
+  html.div({class: "card"}, [
+    html.h1({}, [html.text(user.name)]),
+    html.p({}, [html.text(user.email)]),
+  ])
+```
+
+Props を型チェック時に検証。`Html` 型をレスポンスに直接返せる。
+
+### ストリーミングSSR
+
+```almide
+effect fn render_stream(req: Request, w: Writer) -> Result[Unit, String] = {
+  w.write(shell_head(meta))
+  w.flush()
+  let data = fetch_data(req.param("id"))  // 非同期データ取得中にシェルを先行送信
+  w.write(render_body(data))
+  w.write(shell_tail())
+  ok(())
+}
+```
+
+chunked transfer encoding でシェルを先行送信、データ到着後に本体を流す。
+
+### マルチターゲットデプロイ
+
+Almideの既存3ターゲットと対応:
+
+| デプロイ先 | ターゲット | 備考 |
+|-----------|-----------|------|
+| VPS / コンテナ | `--target rust` | スタンドアロンバイナリ |
+| Cloudflare Workers | `--target wasm` | WASI + edge deploy |
+| Deno Deploy / Bun | `--target ts` | Node互換ランタイム |
+
+同一の `.almd` ソースから3つのデプロイ形態を出し分ける。これはmerjs（native + WASM の2ターゲット）より優位。
+
 ## Depends On
 
 - `http` stdlib (done)
@@ -230,16 +290,22 @@ let app = web.new()
 - `deriving Codec` (active — for `web.json` with typed records)
 - UFCS for external libs (active — for `req.param`)
 - Package system (on-hold — for distribution as external lib)
+- ディレクトリ走査 (self-hosting roadmap と共通)
+- Writer 抽象 / trait (ストリーミングSSRに必須)
+- セッション / HMAC (crypto stdlib 追加)
 
 ## Implementation Order
 
 1. **Phase 1**: Routing + Response builders + `web.serve` (http.serve の wrapper)
 2. **Phase 2**: Middleware (`web.use`) + route groups (`web.mount`)
-3. **Phase 3**: Template integration (`web.html`)
+3. **Phase 3**: Template integration (`web.html`) + HTML DSL
 4. **Phase 4**: Codec integration (`req.body_json[T]`, `web.json(record)`)
+5. **Phase 5**: ファイルベースルーティング (コンパイラ拡張)
+6. **Phase 6**: ストリーミングSSR + マルチターゲットデプロイ
 
 ## Position
 
 - **Not stdlib** — framework の opinions は stdlib に入れない
 - **First-party external lib** — Almide が公式で出す
 - Go の `net/http` (stdlib) に対する Echo/Gin (外部) と同じ関係
+- **Self-hosting roadmap と前提機能を共有** — Web framework 開発が言語機能を鍛える dogfooding になる

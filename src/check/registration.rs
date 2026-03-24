@@ -59,7 +59,7 @@ impl Checker {
         }
     }
 
-    pub(super) fn validate_protocols(&mut self, derives: &[String], type_name: &str) {
+    pub(super) fn validate_protocols(&mut self, derives: &[crate::intern::Sym], type_name: &str) {
         for d in derives {
             if !self.env.protocols.contains_key(&sym(d)) {
                 let valid: Vec<&str> = self.env.protocols.keys().map(|s| s.as_str()).collect();
@@ -74,7 +74,7 @@ impl Checker {
         }
     }
 
-    pub(super) fn register_derive_sigs(&mut self, derives: &[String], type_name: &str) {
+    pub(super) fn register_derive_sigs(&mut self, derives: &[crate::intern::Sym], type_name: &str) {
         let type_ty = Ty::Named(sym(type_name), vec![]);
         let value_ty = Ty::Named(sym("Value"), vec![]);
         let empty_sb: HashMap<Sym, Ty> = HashMap::new();
@@ -241,7 +241,7 @@ impl Checker {
             if let ast::Decl::Fn { name, params, return_type, effect, r#async, generics, .. } = m {
                 // Register as convention function: Type.method
                 self.register_fn_sig(name, params, return_type, effect, r#async, generics, Some(for_type));
-                impl_methods.insert(name.clone());
+                impl_methods.insert(name.to_string());
 
                 // 3. Validate signature matches protocol definition
                 if let Some(proto_method) = proto_def.methods.iter().find(|pm| pm.name == *name) {
@@ -333,7 +333,7 @@ impl Checker {
         }
     }
 
-    pub(super) fn register_type_decl(&mut self, name: &str, ty: &ast::TypeExpr, deriving: &Option<Vec<String>>,
+    pub(super) fn register_type_decl(&mut self, name: &str, ty: &ast::TypeExpr, deriving: &Option<Vec<crate::intern::Sym>>,
                            generics: &Option<Vec<ast::GenericParam>>, prefix: Option<&str>) {
         if let Some(derives) = deriving {
             self.validate_protocols(derives, name);

@@ -3,16 +3,16 @@
 use crate::ast;
 use crate::ir::*;
 use crate::types::Ty;
-use crate::intern::sym;
+use crate::intern::{Sym, sym};
 use super::LowerCtx;
 use super::expressions::lower_expr;
 
-pub(super) fn lower_type_decl(ctx: &mut LowerCtx, name: &str, ty: &ast::TypeExpr, deriving: &Option<Vec<String>>, visibility: &ast::Visibility, generics: Option<&Vec<ast::GenericParam>>) -> IrTypeDecl {
+pub(super) fn lower_type_decl(ctx: &mut LowerCtx, name: &str, ty: &ast::TypeExpr, deriving: &Option<Vec<Sym>>, visibility: &ast::Visibility, generics: Option<&Vec<ast::GenericParam>>) -> IrTypeDecl {
     let kind = match ty {
         ast::TypeExpr::Record { fields } => {
             let fs = fields.iter().map(|f| {
                 let default = f.default.as_ref().map(|d| lower_expr(ctx, d));
-                IrFieldDecl { name: sym(&f.name), ty: resolve_type_expr(&f.ty), default, alias: f.alias.as_ref().map(|a| sym(a)) }
+                IrFieldDecl { name: f.name, ty: resolve_type_expr(&f.ty), default, alias: f.alias }
             }).collect();
             IrTypeDeclKind::Record { fields: fs }
         }
@@ -32,22 +32,22 @@ pub(super) fn lower_type_decl(ctx: &mut LowerCtx, name: &str, ty: &ast::TypeExpr
         ast::Visibility::Mod => IrVisibility::Mod,
         ast::Visibility::Local => IrVisibility::Private,
     };
-    IrTypeDecl { name: sym(name), kind, deriving: deriving.as_ref().map(|d| d.iter().map(|s| sym(s)).collect()), generics: generics.cloned(), visibility: vis }
+    IrTypeDecl { name: sym(name), kind, deriving: deriving.as_ref().map(|d| d.iter().copied().collect()), generics: generics.cloned(), visibility: vis }
 }
 
 fn lower_variant_case(ctx: &mut LowerCtx, case: &ast::VariantCase, _parent: &str) -> IrVariantDecl {
     match case {
-        ast::VariantCase::Unit { name } => IrVariantDecl { name: sym(name), kind: IrVariantKind::Unit },
+        ast::VariantCase::Unit { name } => IrVariantDecl { name: *name, kind: IrVariantKind::Unit },
         ast::VariantCase::Tuple { name, fields } => {
             let tys = fields.iter().map(|f| resolve_type_expr(f)).collect();
-            IrVariantDecl { name: sym(name), kind: IrVariantKind::Tuple { fields: tys } }
+            IrVariantDecl { name: *name, kind: IrVariantKind::Tuple { fields: tys } }
         }
         ast::VariantCase::Record { name, fields } => {
             let fs = fields.iter().map(|f| {
                 let default = f.default.as_ref().map(|d| lower_expr(ctx, d));
-                IrFieldDecl { name: sym(&f.name), ty: resolve_type_expr(&f.ty), default, alias: f.alias.as_ref().map(|a| sym(a)) }
+                IrFieldDecl { name: f.name, ty: resolve_type_expr(&f.ty), default, alias: f.alias }
             }).collect();
-            IrVariantDecl { name: sym(name), kind: IrVariantKind::Record { fields: fs } }
+            IrVariantDecl { name: *name, kind: IrVariantKind::Record { fields: fs } }
         }
     }
 }
@@ -59,7 +59,7 @@ pub(super) fn resolve_type_expr(te: &ast::TypeExpr) -> Ty {
         ast::TypeExpr::Simple { name } => match name.as_str() {
             "Int" => Ty::Int, "Float" => Ty::Float, "String" => Ty::String,
             "Bool" => Ty::Bool, "Unit" => Ty::Unit, "Path" => Ty::String,
-            other => Ty::Named(sym(other), vec![]),
+            _ => Ty::Named(*name, vec![]),
         },
         ast::TypeExpr::Generic { name, args } => {
             let ra: Vec<Ty> = args.iter().map(resolve_type_expr).collect();
@@ -74,14 +74,14 @@ pub(super) fn resolve_type_expr(te: &ast::TypeExpr) -> Ty {
                 })),
                 "Result" if ra.len() >= 2 => Ty::result(ra[0].clone(), ra[1].clone()),
                 "Map" if ra.len() >= 2 => Ty::map_of(ra[0].clone(), ra[1].clone()),
-                _ => Ty::Named(sym(name), ra),
+                _ => Ty::Named(*name, ra),
             }
         },
         ast::TypeExpr::Record { fields } => Ty::Record {
-            fields: fields.iter().map(|f| (sym(&f.name), resolve_type_expr(&f.ty))).collect(),
+            fields: fields.iter().map(|f| (f.name, resolve_type_expr(&f.ty))).collect(),
         },
         ast::TypeExpr::OpenRecord { fields } => Ty::OpenRecord {
-            fields: fields.iter().map(|f| (sym(&f.name), resolve_type_expr(&f.ty))).collect(),
+            fields: fields.iter().map(|f| (f.name, resolve_type_expr(&f.ty))).collect(),
         },
         ast::TypeExpr::Fn { params, ret } => Ty::Fn {
             params: params.iter().map(resolve_type_expr).collect(),
@@ -90,14 +90,14 @@ pub(super) fn resolve_type_expr(te: &ast::TypeExpr) -> Ty {
         ast::TypeExpr::Tuple { elements } => Ty::Tuple(elements.iter().map(resolve_type_expr).collect()),
         ast::TypeExpr::Variant { cases } => {
             let cs = cases.iter().map(|c| match c {
-                ast::VariantCase::Unit { name } => crate::types::VariantCase { name: sym(name), payload: crate::types::VariantPayload::Unit },
+                ast::VariantCase::Unit { name } => crate::types::VariantCase { name: *name, payload: crate::types::VariantPayload::Unit },
                 ast::VariantCase::Tuple { name, fields } => crate::types::VariantCase {
                     name: sym(name),
                     payload: crate::types::VariantPayload::Tuple(fields.iter().map(resolve_type_expr).collect()),
                 },
                 ast::VariantCase::Record { name, fields } => crate::types::VariantCase {
                     name: sym(name),
-                    payload: crate::types::VariantPayload::Record(fields.iter().map(|f| (sym(&f.name), resolve_type_expr(&f.ty), f.default.clone())).collect()),
+                    payload: crate::types::VariantPayload::Record(fields.iter().map(|f| (f.name, resolve_type_expr(&f.ty), f.default.clone())).collect()),
                 },
             }).collect();
             Ty::Variant { name: sym(""), cases: cs }

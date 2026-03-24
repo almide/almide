@@ -134,6 +134,19 @@ impl Pipeline {
             }
             let result = pass.run(program, target);
             program = result.program;
+
+            // Inter-pass IR verification (opt-in via ALMIDE_VERIFY_IR=1)
+            if std::env::var("ALMIDE_VERIFY_IR").is_ok() {
+                let errors = crate::ir::verify_program(&program);
+                if !errors.is_empty() {
+                    eprintln!("[IR VERIFY] {} error(s) after pass '{}':", errors.len(), pass.name());
+                    for e in &errors {
+                        eprintln!("  {}", e);
+                    }
+                    panic!("IR verification failed after pass '{}'", pass.name());
+                }
+            }
+
             executed.push(pass.name());
         }
         program

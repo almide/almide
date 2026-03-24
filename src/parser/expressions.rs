@@ -1,5 +1,6 @@
 use crate::lexer::TokenType;
 use crate::ast::*;
+use crate::intern::{Sym, sym};
 use super::Parser;
 
 impl Parser {
@@ -88,7 +89,7 @@ impl Parser {
             self.skip_newlines();
             let right = self.parse_and()?;
             left = Expr::Binary {
-                op: "or".to_string(),
+                op: sym("or"),
                 left: Box::new(left),
                 right: Box::new(right),
                 id: self.next_id(),
@@ -115,7 +116,7 @@ impl Parser {
             self.skip_newlines();
             let right = self.parse_comparison()?;
             left = Expr::Binary {
-                op: "and".to_string(),
+                op: sym("and"),
                 left: Box::new(left),
                 right: Box::new(right),
                 id: self.next_id(),
@@ -137,7 +138,7 @@ impl Parser {
                 || self.check(TokenType::LtEq)
                 || self.check(TokenType::GtEq)) { break; }
             let span = Some(self.current_span());
-            let op = self.current().value.clone();
+            let op = sym(&self.current().value);
             self.advance();
             self.skip_newlines();
             let right = self.parse_add_sub()?;
@@ -181,7 +182,7 @@ impl Parser {
             if !(self.check(TokenType::Plus) || self.check(TokenType::Minus)
                 || self.check(TokenType::PlusPlus)) { break; }
             let span = Some(self.current_span());
-            let op = self.current().value.clone();
+            let op = sym(&self.current().value);
             self.advance();
             self.skip_newlines();
             let right = self.parse_mul_div()?;
@@ -200,7 +201,7 @@ impl Parser {
             if !(self.check(TokenType::Star) || self.check(TokenType::Slash)
                 || self.check(TokenType::Percent) || self.check(TokenType::Caret)) { break; }
             let span = Some(self.current_span());
-            let op = self.current().value.clone();
+            let op = sym(&self.current().value);
             self.advance();
             self.skip_newlines();
             let right = self.parse_power()?;
@@ -221,7 +222,7 @@ impl Parser {
             self.skip_newlines();
             let right = self.parse_power()?;
             left = Expr::Binary {
-                op: "**".to_string(), left: Box::new(left), right: Box::new(right),
+                op: sym("**"), left: Box::new(left), right: Box::new(right),
                 id: self.next_id(), span, resolved_type: None,
             };
         }
@@ -234,7 +235,7 @@ impl Parser {
             self.advance();
             let operand = self.parse_unary()?;
             return Ok(Expr::Unary {
-                op: "-".to_string(), operand: Box::new(operand),
+                op: sym("-"), operand: Box::new(operand),
                 id: self.next_id(), span, resolved_type: None,
             });
         }
@@ -243,7 +244,7 @@ impl Parser {
             self.advance();
             let operand = self.parse_unary()?;
             return Ok(Expr::Unary {
-                op: "not".to_string(), operand: Box::new(operand),
+                op: sym("not"), operand: Box::new(operand),
                 id: self.next_id(), span, resolved_type: None,
             });
         }
@@ -310,7 +311,7 @@ impl Parser {
         Ok(expr)
     }
 
-    pub(crate) fn parse_call_args(&mut self) -> Result<(Vec<Expr>, Vec<(String, Expr)>), String> {
+    pub(crate) fn parse_call_args(&mut self) -> Result<(Vec<Expr>, Vec<(Sym, Expr)>), String> {
         let mut args = Vec::new();
         let mut named_args = Vec::new();
         self.skip_newlines();
@@ -333,7 +334,7 @@ impl Parser {
         Ok((args, named_args))
     }
 
-    fn parse_one_call_arg(&mut self, args: &mut Vec<Expr>, named_args: &mut Vec<(String, Expr)>) -> Result<(), String> {
+    fn parse_one_call_arg(&mut self, args: &mut Vec<Expr>, named_args: &mut Vec<(Sym, Expr)>) -> Result<(), String> {
         if self.check(TokenType::Underscore) {
             let span = Some(self.current_span());
             self.advance();
@@ -345,7 +346,7 @@ impl Parser {
             && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Colon)
             && self.peek_at(2).map(|t| &t.token_type) != Some(&TokenType::Colon) // not ::
         {
-            let name = self.advance_and_get_value();
+            let name = self.advance_and_get_sym();
             self.advance(); // skip :
             self.skip_newlines();
             let value = self.parse_expr()?;

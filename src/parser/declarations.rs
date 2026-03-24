@@ -1,5 +1,6 @@
 use crate::lexer::TokenType;
 use crate::ast::*;
+use crate::intern::{Sym, sym};
 use super::Parser;
 
 impl Parser {
@@ -54,7 +55,7 @@ impl Parser {
         Ok(Decl::Import { path, names: None, alias, span: Some(span) })
     }
 
-    fn parse_module_path(&mut self) -> Result<Vec<String>, String> {
+    fn parse_module_path(&mut self) -> Result<Vec<Sym>, String> {
         let mut parts = Vec::new();
         parts.push(self.expect_ident()?);
         while self.check(TokenType::Dot)
@@ -157,7 +158,7 @@ impl Parser {
                 if tok.token_type != TokenType::String {
                     return Err(format!("Expected string literal for extern module at line {}:{}", tok.line, tok.col));
                 }
-                let val = tok.value.clone();
+                let val = sym(&tok.value);
                 self.advance();
                 val
             };
@@ -167,7 +168,7 @@ impl Parser {
                 if tok.token_type != TokenType::String {
                     return Err(format!("Expected string literal for extern function at line {}:{}", tok.line, tok.col));
                 }
-                let val = tok.value.clone();
+                let val = sym(&tok.value);
                 self.advance();
                 val
             };
@@ -385,7 +386,7 @@ impl Parser {
     fn parse_strict_decl(&mut self) -> Result<Decl, String> {
         let span = self.current_span();
         self.expect(TokenType::Strict)?;
-        let mode = self.expect_ident()?;
+        let mode = self.expect_ident()?.to_string();
         Ok(Decl::Strict { mode, span: Some(span) })
     }
 
@@ -410,8 +411,8 @@ impl Parser {
 
         if self.check_ident("self") {
             params.push(Param {
-                name: "self".to_string(),
-                ty: TypeExpr::Simple { name: "Self".to_string() },
+                name: sym("self"),
+                ty: TypeExpr::Simple { name: sym("Self") },
                 default: None,
             });
             self.advance();

@@ -5,6 +5,11 @@
 
 use std::fmt::Write;
 use crate::ast::*;
+use crate::intern::Sym;
+
+fn join_syms(syms: &[Sym], sep: &str) -> String {
+    syms.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(sep)
+}
 
 /// Infallible write to String — suppresses unwrap() on write!/writeln!
 macro_rules! w {
@@ -89,7 +94,7 @@ fn fmt_generics(out: &mut String, params: &[GenericParam]) {
         if let Some(ref sb) = gp.structural_bound {
             out.push_str(": "); fmt_type(out, sb, 0);
         } else if let Some(ref bounds) = gp.bounds {
-            if !bounds.is_empty() { w!(out, ": {}", bounds.join(" + ")); }
+            if !bounds.is_empty() { w!(out, ": {}", join_syms(bounds, " + ")); }
         }
     });
     out.push(']');
@@ -102,10 +107,10 @@ fn maybe_generics(out: &mut String, generics: &Option<Vec<GenericParam>>) {
 fn fmt_decl(out: &mut String, decl: &Decl, depth: usize) {
     let i = ind(depth);
     match decl {
-        Decl::Module { path, .. } => { w!(out, "{i}module {}", path.join(".")); }
+        Decl::Module { path, .. } => { w!(out, "{i}module {}", join_syms(path, ".")); }
         Decl::Import { path, names, alias, .. } => {
-            w!(out, "{i}import {}", path.join("."));
-            if let Some(n) = names { w!(out, " ({})", n.join(", ")); }
+            w!(out, "{i}import {}", join_syms(path, "."));
+            if let Some(n) = names { w!(out, " ({})", join_syms(n, ", ")); }
             if let Some(a) = alias { w!(out, " as {a}"); }
         }
         Decl::Strict { mode, .. } => w!(out, "{i}strict \"{mode}\""),
@@ -113,7 +118,7 @@ fn fmt_decl(out: &mut String, decl: &Decl, depth: usize) {
             out.push_str(&i); fmt_vis(out, visibility);
             w!(out, "type {name}");
             maybe_generics(out, generics);
-            if let Some(d) = deriving { if !d.is_empty() { w!(out, ": {}", d.join(", ")); } }
+            if let Some(d) = deriving { if !d.is_empty() { w!(out, ": {}", join_syms(d, ", ")); } }
             out.push_str(" = "); fmt_type(out, ty, depth);
         }
         Decl::TopLet { name, ty, value, visibility, .. } => {
@@ -333,7 +338,7 @@ fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
         Expr::Range { start, end, inclusive, .. } => { fmt_expr(out, start, depth); out.push_str(if *inclusive { "..=" } else { ".." }); fmt_expr(out, end, depth); }
         Expr::ForIn { var, var_tuple, iterable, body, .. } => {
             out.push_str("for ");
-            if let Some(n) = var_tuple { w!(out, "({})", n.join(", ")); } else { out.push_str(var); }
+            if let Some(n) = var_tuple { w!(out, "({})", join_syms(n, ", ")); } else { out.push_str(var); }
             out.push_str(" in "); fmt_expr(out, iterable, depth); out.push_str(" {\n");
             for s in body { fmt_stmt(out, s, depth + 1); }
             w!(out, "{}}}", ind(depth));
@@ -346,7 +351,7 @@ fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
         Expr::Lambda { params, body, .. } => {
             out.push('(');
             comma_sep(out, params, |out, p| {
-                if let Some(n) = &p.tuple_names { w!(out, "({})", n.join(", ")); } else { out.push_str(&p.name); }
+                if let Some(n) = &p.tuple_names { w!(out, "({})", join_syms(n, ", ")); } else { out.push_str(&p.name); }
                 if let Some(ref ty) = p.ty { out.push_str(": "); fmt_type(out, ty, depth); }
             });
             out.push_str(") => "); fmt_expr(out, body, depth);

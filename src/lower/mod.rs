@@ -18,7 +18,7 @@
 
 use std::collections::HashMap;
 use crate::ast;
-use crate::intern::sym;
+use crate::intern::{Sym, sym};
 use crate::ir::*;
 use crate::types::{Ty, TypeEnv};
 
@@ -37,16 +37,16 @@ use derive::generate_auto_derives;
 
 pub struct LowerCtx<'a> {
     pub var_table: VarTable,
-    scopes: Vec<HashMap<String, VarId>>,
+    scopes: Vec<HashMap<Sym, VarId>>,
     expr_types: &'a HashMap<crate::ast::ExprId, Ty>,
     env: &'a TypeEnv,
     /// Default argument expressions for functions: fn_name → vec of defaults (index-aligned with params, None for required)
-    fn_defaults: HashMap<String, Vec<Option<ast::Expr>>>,
+    fn_defaults: HashMap<Sym, Vec<Option<ast::Expr>>>,
     /// Type names that derive each convention: convention_name → set of type names
-    type_conventions: HashMap<String, std::collections::HashSet<String>>,
+    type_conventions: HashMap<Sym, std::collections::HashSet<Sym>>,
     /// Protocol bounds for generic type parameters in scope: TypeVar name → list of protocol names
     /// Set during function lowering for protocol-bounded generics.
-    protocol_bounds: HashMap<String, Vec<String>>,
+    protocol_bounds: HashMap<Sym, Vec<Sym>>,
     lambda_id_counter: u32,
 }
 
@@ -68,11 +68,11 @@ impl<'a> LowerCtx<'a> {
     /// Returns the fully qualified function name if:
     /// - The function is explicitly defined in env.functions, OR
     /// - The type declares `deriving <Convention>` (auto-derive will generate the function)
-    pub(super) fn find_convention_fn(&self, ty: &Ty, convention: &str) -> Option<String> {
+    pub(super) fn find_convention_fn(&self, ty: &Ty, convention: &str) -> Option<Sym> {
         if let Ty::Named(type_name, _) = ty {
-            let fn_name = format!("{}.{}", type_name, convention);
+            let fn_name = sym(&format!("{}.{}", type_name, convention));
             // Check explicit definition
-            if self.env.functions.contains_key(&sym(&fn_name)) {
+            if self.env.functions.contains_key(&fn_name) {
                 return Some(fn_name);
             }
             // Check if auto-derive will generate it
@@ -80,7 +80,7 @@ impl<'a> LowerCtx<'a> {
                 "eq" => "Eq", "repr" => "Repr", "ord" => "Ord", "hash" => "Hash",
                 _ => return None,
             };
-            if self.type_conventions.get(conv_upper).map_or(false, |types| types.contains(type_name.as_str())) {
+            if self.type_conventions.get(&sym(conv_upper)).map_or(false, |types| types.contains(type_name)) {
                 return Some(fn_name);
             }
         }
@@ -100,16 +100,18 @@ impl<'a> LowerCtx<'a> {
     }
 
     pub(super) fn define_var(&mut self, name: &str, ty: Ty, mutability: Mutability, span: Option<ast::Span>) -> VarId {
-        let id = self.var_table.alloc(sym(name), ty, mutability, span);
+        let s = sym(name);
+        let id = self.var_table.alloc(s, ty, mutability, span);
         if let Some(scope) = self.scopes.last_mut() {
-            scope.insert(name.to_string(), id);
+            scope.insert(s, id);
         }
         id
     }
 
     pub(super) fn lookup_var(&self, name: &str) -> Option<VarId> {
+        let s = sym(name);
         for scope in self.scopes.iter().rev() {
-            if let Some(&id) = scope.get(name) {
+            if let Some(&id) = scope.get(&s) {
                 return Some(id);
             }
         }
@@ -245,7 +247,7 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprI
     for decl in &prog.decls {
         if let ast::Decl::Type { name, deriving: Some(derives), .. } = decl {
             for conv in derives {
-                ctx.type_conventions.entry(conv.clone()).or_default().insert(name.clone());
+                ctx.type_conventions.entry(*conv).or_default().insert(*name);
             }
         }
     }
@@ -257,7 +259,7 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprI
                 let defaults: Vec<Option<ast::Expr>> = params.iter()
                     .map(|p| p.default.as_ref().map(|d| *d.clone()))
                     .collect();
-                ctx.fn_defaults.insert(name.clone(), defaults);
+                ctx.fn_defaults.insert(*name, defaults);
             }
         }
     }
@@ -282,7 +284,7 @@ pub fn lower_program(prog: &ast::Program, expr_types: &HashMap<crate::ast::ExprI
                 type_decls.push(types::lower_type_decl(&mut ctx, name, ty, deriving, visibility, generics.as_ref()));
             }
             ast::Decl::TopLet { name, ty: _, value, .. } => {
-                let val_ty = ctx.env.top_lets.get(&sym(name)).cloned().unwrap_or_else(|| ctx.expr_ty(value));
+                let val_ty = ctx.env.top_lets.get(name).cloned().unwrap_or_else(|| ctx.expr_ty(value));
                 let var = ctx.define_var(name, val_ty.clone(), Mutability::Let, None);
                 let ir_value = lower_expr(&mut ctx, value);
                 let kind = classify_top_let_kind(&ir_value);
@@ -364,7 +366,7 @@ fn lower_fn(
         for g in gs {
             if let Some(bounds) = &g.bounds {
                 if !bounds.is_empty() {
-                    ctx.protocol_bounds.insert(g.name.clone(), bounds.clone());
+                    ctx.protocol_bounds.insert(g.name, bounds.clone());
                 }
             }
         }
@@ -376,7 +378,7 @@ fn lower_fn(
         let var = ctx.define_var(&p.name, ty.clone(), Mutability::Let, span.clone());
         let default = p.default.as_ref().map(|d| Box::new(lower_expr(ctx, d)));
         ir_params.push(IrParam {
-            var, ty: ty.clone(), name: sym(&p.name),
+            var, ty: ty.clone(), name: p.name,
             borrow: ParamBorrow::Own, open_record: None, default,
         });
     }

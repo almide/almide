@@ -1,5 +1,6 @@
 use crate::lexer::TokenType;
 use crate::ast::*;
+use crate::intern::sym;
 use super::Parser;
 
 impl Parser {
@@ -31,7 +32,7 @@ impl Parser {
             && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Eq)
         {
             let span = Some(self.current_span());
-            let name = self.advance_and_get_value();
+            let name = self.advance_and_get_sym();
             self.advance(); // skip =
             self.skip_newlines();
             let value = self.parse_expr()?;
@@ -118,7 +119,7 @@ impl Parser {
                 if self.check(TokenType::Comma) { self.advance(); }
             }
             self.expect(TokenType::RParen)?;
-            let first = names.first().cloned().unwrap_or_default();
+            let first = names.first().copied().unwrap_or_else(|| sym(""));
             return Ok(LambdaParam { name: first, tuple_names: Some(names), ty: None });
         }
         let name = self.expect_ident()?;

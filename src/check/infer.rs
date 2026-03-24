@@ -354,7 +354,7 @@ impl Checker {
         &mut self,
         callee: &mut Box<ast::Expr>,
         args: &mut Vec<ast::Expr>,
-        named_args: &mut Vec<(String, ast::Expr)>,
+        named_args: &mut Vec<(crate::intern::Sym, ast::Expr)>,
         type_args: &Option<Vec<ast::TypeExpr>>,
     ) -> Ty {
         // Combine positional + named args for type checking
@@ -423,7 +423,7 @@ impl Checker {
     fn infer_for_in(
         &mut self,
         var: &str,
-        var_tuple: &Option<Vec<String>>,
+        var_tuple: &Option<Vec<crate::intern::Sym>>,
         iterable: &mut Box<ast::Expr>,
         body: &mut Vec<ast::Stmt>,
     ) -> Ty {
@@ -630,7 +630,7 @@ impl Checker {
 /// Collect all Ident names referenced in an expression (shallow, for var capture check).
 fn collect_idents(expr: &ast::Expr, out: &mut Vec<String>) {
     match expr {
-        ast::Expr::Ident { name, .. } => out.push(name.clone()),
+        ast::Expr::Ident { name, .. } => out.push(name.to_string()),
         ast::Expr::Call { callee, args, .. } => {
             collect_idents(callee, out);
             for a in args { collect_idents(a, out); }

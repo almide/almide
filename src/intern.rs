@@ -140,6 +140,11 @@ impl PartialEq<Sym> for String {
     }
 }
 
+impl Default for Sym {
+    fn default() -> Self {
+        sym("")
+    }
+}
 impl PartialOrd for Sym {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))

@@ -1,5 +1,6 @@
 use crate::lexer::TokenType;
 use crate::ast::*;
+use crate::intern::sym;
 use super::Parser;
 
 impl Parser {
@@ -60,7 +61,7 @@ impl Parser {
                 .map(|n| FieldPattern { name: n, pattern: None })
                 .collect();
             return Ok(Stmt::LetDestructure {
-                pattern: Pattern::RecordPattern { name: String::new(), fields, rest: false },
+                pattern: Pattern::RecordPattern { name: sym(""), fields, rest: false },
                 value, span: Some(span),
             });
         }
@@ -85,7 +86,7 @@ impl Parser {
         // Allow `let _ = expr`
         let name = if self.check(TokenType::Underscore) {
             self.advance();
-            "_".to_string()
+            sym("_")
         } else {
             self.expect_ident()?
         };
@@ -129,7 +130,7 @@ impl Parser {
 
     fn parse_assign_stmt(&mut self) -> Result<Stmt, String> {
         let span = self.current_span();
-        let name = self.current().value.clone();
+        let name = sym(&self.current().value);
         self.advance();
         self.expect(TokenType::Eq)?;
         self.skip_newlines();
@@ -140,7 +141,7 @@ impl Parser {
     fn try_parse_index_assign(&mut self) -> Result<Option<Stmt>, String> {
         let saved = self.pos;
         let span = self.current_span();
-        let target = self.current().value.clone();
+        let target = sym(&self.current().value);
         self.advance();
         self.expect(TokenType::LBracket)?;
         let index = self.parse_expr()?;
@@ -160,7 +161,7 @@ impl Parser {
 
     fn parse_field_assign_stmt(&mut self) -> Result<Stmt, String> {
         let span = self.current_span();
-        let target = self.current().value.clone();
+        let target = sym(&self.current().value);
         self.advance(); // ident
         self.advance(); // .
         let field = self.expect_ident()?;
