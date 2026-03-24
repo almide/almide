@@ -1,4 +1,4 @@
-# Performance Research: Path to World #1 [ACTIVE]
+# Performance Research: Path to World #1 [ON-HOLD]
 
 **Research thesis**: High-level semantic information preserved through the compilation pipeline enables optimizations impossible in traditional low-level compilers. A language designed for LLM accuracy is simultaneously optimized for compiler analysis — both benefit from explicit semantics, clear data flow, and minimal aliasing.
 
