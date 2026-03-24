@@ -374,7 +374,33 @@ fn is_hoistable(expr: &IrExpr, loop_defined: &HashSet<VarId>) -> bool {
     if has_control_flow(expr) {
         return false;
     }
+    if has_assignment(expr) {
+        return false;
+    }
     refs_are_outside_loop(expr, loop_defined)
+}
+
+/// Returns true if the expression contains variable assignments.
+/// Assignments are side effects that must not be hoisted out of loops.
+fn has_assignment(expr: &IrExpr) -> bool {
+    match &expr.kind {
+        IrExprKind::Block { stmts, expr: tail } | IrExprKind::DoBlock { stmts, expr: tail } => {
+            stmts.iter().any(|s| matches!(&s.kind, IrStmtKind::Assign { .. } | IrStmtKind::FieldAssign { .. } | IrStmtKind::IndexAssign { .. }) || has_assignment_stmt(s))
+                || tail.as_ref().map_or(false, |e| has_assignment(e))
+        }
+        IrExprKind::If { cond, then, else_ } => has_assignment(cond) || has_assignment(then) || has_assignment(else_),
+        IrExprKind::Match { subject, arms } => has_assignment(subject) || arms.iter().any(|a| has_assignment(&a.body)),
+        _ => false,
+    }
+}
+
+fn has_assignment_stmt(stmt: &IrStmt) -> bool {
+    match &stmt.kind {
+        IrStmtKind::Assign { .. } | IrStmtKind::FieldAssign { .. } | IrStmtKind::IndexAssign { .. } => true,
+        IrStmtKind::Expr { expr } => has_assignment(expr),
+        IrStmtKind::Bind { value, .. } => has_assignment(value),
+        _ => false,
+    }
 }
 
 /// Returns true if the expression contains loops, continue, break, or return.
@@ -449,7 +475,7 @@ fn has_effect_call(expr: &IrExpr) -> bool {
                 // Module calls to known effectful modules
                 CallTarget::Module { module, .. } => {
                     matches!(module.as_str(), "fs" | "path" | "http" | "url" | "env"
-                        | "process" | "time" | "datetime" | "fan" | "log")
+                        | "process" | "time" | "datetime" | "fan" | "log" | "random")
                 }
                 // Named calls to runtime effect functions
                 CallTarget::Named { name } => {
@@ -460,6 +486,7 @@ fn has_effect_call(expr: &IrExpr) -> bool {
                     || name.starts_with("almide_rt_log_")
                     || name.starts_with("almide_rt_fan_")
                     || name.starts_with("almide_rt_process_")
+                    || name.starts_with("almide_rt_random_")
                     || name == "println"
                 }
                 // Method/Computed calls are conservatively considered effectful
